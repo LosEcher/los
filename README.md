@@ -22,6 +22,14 @@ Run the gateway in the background:
 pnpm start
 ```
 
+Run the client CLI:
+
+```bash
+pnpm run cli -- chat --provider deepseek "inspect the current workspace"
+pnpm run cli -- sessions
+pnpm run cli -- tasks
+```
+
 If `SERVER_PORT` is already occupied by a gateway from this same checkout,
 `pnpm start` adopts that process into `.los-runtime/gateway.pid` instead of
 starting a second server. `pnpm run status` shows this as `managed=true`.

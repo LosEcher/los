@@ -28,6 +28,7 @@ const log = getLogger('agent');
 export interface AgentConfig {
   sessionId?: string;
   provider?: string;
+  initialMessages?: Message[];
   maxLoops?: number;
   systemPrompt?: string;
   workspaceRoot?: string;
@@ -39,6 +40,7 @@ export interface AgentConfig {
     maxDelayMs?: number;
   };
   signal?: AbortSignal;
+  onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void;
   onToolCall?: (tool: string, args: Record<string, unknown>) => void;
 }
@@ -100,14 +102,11 @@ export async function runAgent(
 
   const toolDefs = tools.getDefinitions();
   const toolNames = tools.list();
-  const emitEvent = createEventEmitter(config.sessionId);
+  const emitEvent = createEventEmitter(config.sessionId, config.onSessionEvent);
   const signal = config.signal;
 
   // Build initial messages
-  const messages: Message[] = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: prompt },
-  ];
+  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages);
 
   const turns: TurnSummary[] = [];
   let totalPromptTokens = 0;
@@ -370,17 +369,41 @@ export async function runAgent(
   };
 }
 
-function createEventEmitter(sessionId: string | undefined) {
+function createEventEmitter(
+  sessionId: string | undefined,
+  onSessionEvent: AgentConfig['onSessionEvent'],
+) {
   return async (event: Omit<SessionEventWrite, 'sessionId'>): Promise<SessionEventRecord | null> => {
     if (!sessionId) return null;
     try {
       await ensureSessionEventStore();
-      return await appendSessionEvent({ sessionId, ...event });
+      const written = await appendSessionEvent({ sessionId, ...event });
+      try {
+        await onSessionEvent?.(written);
+      } catch (err: any) {
+        log.warn(`Session event callback failed: ${err.message ?? String(err)}`);
+      }
+      return written;
     } catch (err: any) {
       log.warn(`Session event write failed: ${err.message ?? String(err)}`);
       return null;
     }
   };
+}
+
+function buildInitialMessages(
+  prompt: string,
+  systemPrompt: string,
+  initialMessages: Message[] | undefined,
+): Message[] {
+  const messages = initialMessages?.length
+    ? initialMessages.map(message => ({ ...message }))
+    : [{ role: 'system' as const, content: systemPrompt }];
+  if (!messages.some(message => message.role === 'system')) {
+    messages.unshift({ role: 'system', content: systemPrompt });
+  }
+  messages.push({ role: 'user', content: prompt });
+  return messages;
 }
 
 function normalizeUsage(usage: {

@@ -2,6 +2,9 @@
   "name": "los",
   "private": true,
   "description": "Lightweight Agent Execution + Memory Management Platform",
+  "bin": {
+    "los": "./bin/los"
+  },
   "scripts": {
     "help": "./tools/los.sh help",
     "status": "./tools/los.sh status",
@@ -9,6 +12,7 @@
     "stop": "./tools/los.sh stop",
     "restart": "./tools/los.sh restart",
     "doctor": "./tools/los.sh doctor",
+    "cli": "./bin/los",
     "dev": "turbo dev",
     "build": "turbo build",
     "check": "turbo check && ./tools/check-structure.sh",

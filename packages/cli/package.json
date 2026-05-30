@@ -1,0 +1,21 @@
+{
+  "name": "@los/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "los": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc && chmod +x dist/index.js",
+    "check": "tsc --noEmit",
+    "test": "node --test --experimental-test-coverage src/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

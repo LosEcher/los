@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ -f "$ROOT/packages/cli/src/index.ts" ]; then
+  exec pnpm --dir "$ROOT" --filter @los/cli exec tsx src/index.ts "$@"
+fi
+
+exec node "$ROOT/packages/cli/dist/index.js" "$@"

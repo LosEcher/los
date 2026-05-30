@@ -152,6 +152,15 @@ export async function createServer() {
     let sentSession = false;
 
     try {
+      const resumedSession = sessionId ? await loadSession(sid) : null;
+      if (resumedSession) {
+        send('session.resumed', {
+          sessionId: sid,
+          messageCount: resumedSession.messages.length,
+          turnCount: resumedSession.turns.length,
+        });
+      }
+
       const scheduled = await runScheduledAgentTask({
         prompt,
         sessionId: sid,
@@ -159,6 +168,7 @@ export async function createServer() {
         systemPrompt,
         workspaceRoot,
         toolMode,
+        initialMessages: resumedSession?.messages,
         allowedTools,
         maxLoops,
         traceId,
@@ -208,6 +218,20 @@ export async function createServer() {
         onToolCall: (tool, args) => {
           send('tool_call', { tool, args: JSON.stringify(args).slice(0, 200) });
         },
+        onSessionEvent: (event) => {
+          send(event.type, {
+            id: event.id,
+            turn: event.turn,
+            source: event.source,
+            model: event.model ?? null,
+            toolName: event.toolName ?? null,
+            cacheKey: event.cacheKey ?? null,
+            cacheHit: event.cacheHit ?? null,
+            usage: event.usage ?? null,
+            payload: event.payload,
+            createdAt: event.createdAt,
+          });
+        },
       });
 
       if (scheduled.status === 'deduplicated') {
@@ -254,11 +278,12 @@ export async function createServer() {
       await ensureSessionStore();
       await saveSession({
         id: sid,
-        createdAt: new Date().toISOString(),
+        createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         messages: result.messages,
-        turns: result.turns,
+        turns: resumedSession ? [...resumedSession.turns, ...result.turns] : result.turns,
         metadata: {
+          ...(resumedSession?.metadata ?? {}),
           provider: provider ?? config.agent.defaultProvider,
           workspaceRoot,
           toolMode,
@@ -272,6 +297,8 @@ export async function createServer() {
           tenantId: context.tenantId,
           projectId: context.projectId,
           dedupeKey: scheduled.taskRun.dedupeKey ?? null,
+          resumed: Boolean(resumedSession),
+          resumeMessageCount: resumedSession?.messages.length ?? 0,
         },
       });
 

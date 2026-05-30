@@ -142,9 +142,11 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       systemPrompt: input.systemPrompt,
       workspaceRoot,
       toolMode,
+      initialMessages: input.initialMessages,
       allowedTools: input.allowedTools,
       toolRetry: input.toolRetry,
       signal: controller.signal,
+      onSessionEvent: input.onSessionEvent,
       onTurn: input.onTurn,
       onToolCall: input.onToolCall,
     });
