@@ -7,6 +7,10 @@ RUNTIME_DIR="${LOS_RUNTIME_DIR:-$ROOT/.los-runtime}"
 PID_FILE="$RUNTIME_DIR/gateway.pid"
 LOG_FILE="$RUNTIME_DIR/gateway.log"
 
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 read_env_value() {
   local key="$1"
   local file="$ROOT/.env"
@@ -73,6 +77,68 @@ write_pid_file() {
   printf '%s\n' "$1" > "$PID_FILE"
 }
 
+launch_label() {
+  local suffix
+  suffix="$(printf '%s' "$ROOT" | cksum | awk '{print $1}')"
+  printf 'com.los.gateway.%s.%s' "$(id -u)" "$suffix"
+}
+
+launch_remove() {
+  command -v launchctl >/dev/null 2>&1 || return 0
+  launchctl remove "$(launch_label)" >/dev/null 2>&1 || true
+}
+
+node_bin() {
+  command -v node
+}
+
+tsx_dist() {
+  local candidate
+  for candidate in \
+    "$ROOT"/node_modules/.pnpm/tsx@*/node_modules/tsx/dist \
+    "$ROOT"/packages/gateway/node_modules/.pnpm/tsx@*/node_modules/tsx/dist
+  do
+    if [ -d "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+gateway_launch_command() {
+  local node tsx
+  node="$(node_bin)"
+  tsx="$(tsx_dist)"
+  printf 'cd %s && exec %s --require %s --import %s %s' \
+    "$(shell_quote "$ROOT")" \
+    "$(shell_quote "$node")" \
+    "$(shell_quote "$tsx/preflight.cjs")" \
+    "$(shell_quote "file://$tsx/loader.mjs")" \
+    "$(shell_quote "$ROOT/packages/gateway/src/server.ts")"
+}
+
+start_gateway_process() {
+  mkdir -p "$RUNTIME_DIR"
+  : > "$LOG_FILE"
+
+  local command
+  command="$(gateway_launch_command)"
+
+  if command -v launchctl >/dev/null 2>&1; then
+    launch_remove
+    launchctl submit \
+      -l "$(launch_label)" \
+      -o "$LOG_FILE" \
+      -e "$LOG_FILE" \
+      -- /bin/bash -lc "$command"
+    return 0
+  fi
+
+  nohup /bin/bash -lc "$command" </dev/null >"$LOG_FILE" 2>&1 &
+  printf '%s' "$!"
+}
+
 show_help() {
   cat <<EOF
 los local process helper
@@ -136,13 +202,13 @@ status_cmd() {
 }
 
 wait_for_health() {
-  local pid="$1"
+  local pid="${1:-}"
   local deadline=$((SECONDS + 25))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if health_check; then
       return 0
     fi
-    if ! is_running "$pid"; then
+    if [ -n "$pid" ] && ! is_running "$pid"; then
       return 1
     fi
     sleep 1
@@ -177,14 +243,17 @@ start_cmd() {
   fi
 
   echo "starting los gateway at $(server_url)"
-  (
-    cd "$ROOT"
-    exec nohup pnpm --filter @los/gateway exec tsx src/server.ts
-  ) >"$LOG_FILE" 2>&1 &
-  pid="$!"
-  write_pid_file "$pid"
+  pid="$(start_gateway_process)"
+  if [ -n "$pid" ]; then
+    write_pid_file "$pid"
+  fi
 
   if wait_for_health "$pid"; then
+    owner="$(port_owner)"
+    if is_los_gateway_pid "$owner"; then
+      pid="$owner"
+      write_pid_file "$pid"
+    fi
     echo "started pid=$pid"
     echo "log: $LOG_FILE"
     return 0
@@ -218,6 +287,7 @@ stop_cmd() {
   fi
 
   echo "stopping los gateway pid=$pid"
+  launch_remove
   kill "$pid" >/dev/null 2>&1 || true
 
   local deadline=$((SECONDS + 15))
