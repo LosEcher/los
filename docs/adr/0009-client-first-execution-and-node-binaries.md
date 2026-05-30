@@ -144,6 +144,13 @@ Proposed.
 4. Extended `/chat` so a provided `sessionId` can resume prior session messages.
 5. Exposed agent `session_events` through the live SSE stream so CLI/web clients can observe model and tool progress while a run is active.
 
+2026-05-30 started Stage 2:
+
+1. Split deterministic edit support into `preview_patch`, `apply_patch`, and `edit_file`.
+2. Moved workspace path validation into `safeWorkspacePath()` so file tools share one boundary check.
+3. Added a constrained `spawn_agent` tool that re-enters `runAgent()` but only exposes read-only or project-write child tool sets, with shell and recursive spawn kept out of the child registry.
+4. Included `sessionId` on streamed session events so nested child runs can still be distinguished in the live stream.
+
 ## Verification
 
 后续应验证：

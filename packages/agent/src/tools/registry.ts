@@ -7,10 +7,12 @@
 
 import { getLogger } from '@los/infra/logger';
 import type { ToolDef } from '../providers/index.js';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { safeWorkspacePath } from './path-safety.js';
+import { registerPatchTools } from './patch-tools.js';
 import { registerTodoTools } from './todo-tools.js';
 
 const log = getLogger('agent');
@@ -183,21 +185,12 @@ export function setWorkspaceRoot(_root: string): never {
   throw new Error('setWorkspaceRoot is no longer supported. Pass workspaceRoot to runAgent() or registerBuiltinTools().');
 }
 
-function safePath(workspaceRoot: string, userPath: string): string {
-  const resolved = resolve(workspaceRoot, userPath.replace(/^\/+/, ''));
-  const rel = relative(workspaceRoot, resolved);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`Path traversal denied: ${userPath}`);
-  }
-  return resolved;
-}
-
 export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToolOptions = {}): void {
   const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
 
   // read_file
   registry.register('read_file', async (args) => {
-    const path = safePath(workspaceRoot, String(args.path ?? ''));
+    const path = safeWorkspacePath(workspaceRoot, String(args.path ?? ''));
     const range = args.range as string | undefined;
     const head = args.head as number | undefined;
 
@@ -240,7 +233,7 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
 
   // write_file
   registry.register('write_file', async (args) => {
-    const path = safePath(workspaceRoot, String(args.path ?? ''));
+    const path = safeWorkspacePath(workspaceRoot, String(args.path ?? ''));
     const content = String(args.content ?? '');
     writeFileSync(path, content, 'utf-8');
     return { content: `Wrote ${content.split('\n').length} lines to ${path}` };
@@ -272,7 +265,7 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
   // run_shell
   registry.register('run_shell', async (args) => {
     const command = String(args.command ?? '');
-    const cwd = args.cwd ? safePath(workspaceRoot, String(args.cwd)) : workspaceRoot;
+    const cwd = args.cwd ? safeWorkspacePath(workspaceRoot, String(args.cwd)) : workspaceRoot;
     const requestedTimeout = Number(args.timeoutSec ?? 30);
     const timeout = Math.max(1, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 30, 300));
 
@@ -318,7 +311,7 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
 
   // list_directory
   registry.register('list_directory', async (args) => {
-    const path = safePath(workspaceRoot, String(args.path ?? '.'));
+    const path = safeWorkspacePath(workspaceRoot, String(args.path ?? '.'));
     const entries = readdirSync(path, { withFileTypes: true });
     const lines = entries.map(e => {
       const suffix = e.isDirectory() ? '/' : '';
@@ -353,6 +346,7 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
     tags: ['io', 'read'],
   });
 
+  registerPatchTools(registry, { workspaceRoot });
   registerTodoTools(registry);
 }
 

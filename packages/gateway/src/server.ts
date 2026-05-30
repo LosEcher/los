@@ -221,6 +221,7 @@ export async function createServer() {
         onSessionEvent: (event) => {
           send(event.type, {
             id: event.id,
+            sessionId: event.sessionId,
             turn: event.turn,
             source: event.source,
             model: event.model ?? null,

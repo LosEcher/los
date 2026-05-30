@@ -13,6 +13,7 @@ import {
   READ_ONLY_BUILTIN_TOOLS,
   type ToolRegistry,
 } from './tools/registry.js';
+import { createSpawnAgentRunner, registerSpawnAgentTool } from './tools/agent-tools.js';
 import {
   appendSessionEvent,
   ensureSessionEventStore,
@@ -63,11 +64,12 @@ export interface AgentResult {
 
 // ── System Prompt ───────────────────────────────────────
 
-const DEFAULT_SYSTEM = `You are a helpful coding assistant with access to tools for reading, writing, and executing code.
-You can: read files (read_file), write files (write_file), list directories (list_directory), and run shell commands (run_shell).
+const DEFAULT_SYSTEM = `You are a helpful coding assistant with access to tools for reading, writing, patching, spawning child agents, and executing code.
+You can: read files (read_file), write files (write_file), patch files (preview_patch, apply_patch, edit_file), list directories (list_directory), spawn constrained child agents (spawn_agent), and run shell commands (run_shell).
 
 Rules:
 - Read files before editing them
+- Prefer preview_patch/apply_patch/edit_file for focused changes instead of whole-file overwrites
 - Use absolute or relative paths within the workspace
 - For shell commands, be specific — use exact paths
 - When you're done, provide a clear summary
@@ -95,15 +97,24 @@ export async function runAgent(
   const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(toolMode);
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
   const policy = resolveToolPolicy(toolMode, config.toolRetry);
+  const signal = config.signal;
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });
   registerBuiltinTools(tools, { workspaceRoot: config.workspaceRoot });
+  registerSpawnAgentTool(tools, createSpawnAgentRunner({
+    runAgent,
+    sessionId: config.sessionId,
+    provider: config.provider,
+    workspaceRoot: config.workspaceRoot,
+    toolRetry: config.toolRetry,
+    signal,
+    onSessionEvent: config.onSessionEvent,
+  }));
 
   const toolDefs = tools.getDefinitions();
   const toolNames = tools.list();
   const emitEvent = createEventEmitter(config.sessionId, config.onSessionEvent);
-  const signal = config.signal;
 
   // Build initial messages
   const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages);

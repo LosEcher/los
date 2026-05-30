@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -9,6 +9,7 @@ import {
   registerBuiltinTools,
   READ_ONLY_BUILTIN_TOOLS,
 } from './registry.js';
+import { registerSpawnAgentTool } from './agent-tools.js';
 
 test('read-only tool mode excludes write and shell tools', async () => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-readonly-'));
@@ -133,6 +134,96 @@ test('project-write mode allows writes but still blocks shell execution', async 
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
+});
+
+test('project-write mode exposes patch tools and applies unique replacements only', async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-patch-'));
+  try {
+    const filePath = join(workspaceRoot, 'note.txt');
+    writeFileSync(filePath, 'alpha\nbeta\ngamma\n', 'utf-8');
+
+    const registry = createToolRegistry({
+      policy: {
+        maxRiskLevel: 'L1',
+        allowWrites: true,
+        sandboxAvailable: false,
+      },
+    });
+    registerBuiltinTools(registry, { workspaceRoot });
+
+    assert.ok(registry.list().includes('preview_patch'));
+    assert.ok(registry.list().includes('apply_patch'));
+    assert.ok(registry.list().includes('edit_file'));
+
+    const previewResult = await registry.execute({
+      name: 'preview_patch',
+      arguments: {
+        path: 'note.txt',
+        search: 'beta',
+        replace: 'BETA',
+      },
+    });
+    assert.equal(previewResult.error, undefined);
+    assert.match(previewResult.content, /Status: preview/);
+    assert.match(previewResult.content, /Match line: 2/);
+
+    const unchanged = readFileSync(filePath, 'utf-8');
+    assert.equal(unchanged, 'alpha\nbeta\ngamma\n');
+
+    const applyResult = await registry.execute({
+      name: 'apply_patch',
+      arguments: {
+        path: 'note.txt',
+        search: 'beta',
+        replace: 'BETA',
+      },
+    });
+    assert.equal(applyResult.error, undefined);
+    assert.match(applyResult.content, /Status: applied/);
+
+    const updated = readFileSync(filePath, 'utf-8');
+    assert.equal(updated, 'alpha\nBETA\ngamma\n');
+
+    const duplicateResult = await registry.execute({
+      name: 'edit_file',
+      arguments: {
+        path: 'note.txt',
+        search: 'a',
+        replace: 'A',
+      },
+    });
+    assert.equal(duplicateResult.content, '');
+    assert.match(duplicateResult.error ?? '', /search text is not unique/);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('spawn_agent defaults to read-only and forwards runner inputs', async () => {
+  const registry = createToolRegistry();
+  let seen: any;
+
+  registerSpawnAgentTool(registry, async (request) => {
+    seen = request;
+    return { content: JSON.stringify(request) };
+  });
+
+  const result = await registry.execute({
+    name: 'spawn_agent',
+    arguments: {
+      prompt: 'inspect the workspace',
+      provider: 'deepseek',
+      maxLoops: 4,
+    },
+  });
+
+  assert.equal(result.error, undefined);
+  assert.ok(seen);
+  assert.equal(seen.prompt, 'inspect the workspace');
+  assert.equal(seen.provider, 'deepseek');
+  assert.equal(seen.toolMode, undefined);
+  assert.equal(seen.maxLoops, 4);
+  assert.equal(JSON.parse(result.content).prompt, 'inspect the workspace');
 });
 
 test('tool capability timeout is enforced during execution', async () => {

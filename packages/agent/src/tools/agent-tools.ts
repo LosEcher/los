@@ -1,0 +1,124 @@
+import { randomUUID } from 'node:crypto';
+import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
+import type { AgentConfig, AgentResult } from '../loop.js';
+import type { ToolRegistry, ToolResult } from './registry.js';
+
+export interface SpawnAgentRequest {
+  prompt: string;
+  provider?: string;
+  toolMode?: 'read-only' | 'project-write';
+  maxLoops?: number;
+}
+
+export type SpawnAgentRunner = (request: SpawnAgentRequest) => Promise<ToolResult>;
+export type ChildAgentRunner = (prompt: string, config: AgentConfig) => Promise<AgentResult>;
+
+export interface SpawnAgentRunnerOptions {
+  runAgent: ChildAgentRunner;
+  sessionId?: string;
+  provider?: string;
+  workspaceRoot?: string;
+  toolRetry?: {
+    maxAttempts?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+  };
+  signal?: AbortSignal;
+  onSessionEvent?: (event: import('../session-events.js').SessionEventRecord) => void | Promise<void>;
+}
+
+const SUBAGENT_PROJECT_WRITE_TOOLS = [
+  'read_file',
+  'write_file',
+  'preview_patch',
+  'apply_patch',
+  'edit_file',
+  'list_directory',
+] as const;
+
+export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgentRunner): void {
+  registry.register('spawn_agent', async (args) => {
+    const prompt = normalizeString(args.prompt);
+    if (!prompt) return { content: '', error: 'prompt is required' };
+
+    return runner({
+      prompt,
+      provider: normalizeString(args.provider),
+      toolMode: normalizeToolMode(args.toolMode),
+      maxLoops: normalizeInteger(args.maxLoops),
+    });
+  }, {
+    type: 'function',
+    function: {
+      name: 'spawn_agent',
+      description: 'Run a constrained child coding agent for focused investigation or project-write edits. The child cannot spawn further agents or run shell commands.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Focused task for the child agent' },
+          provider: { type: 'string', description: 'Optional provider override' },
+          toolMode: { type: 'string', enum: ['read-only', 'project-write'], description: 'Child tool mode. Defaults to read-only.' },
+          maxLoops: { type: 'number', description: 'Child loop budget, clamped by the parent runtime' },
+        },
+        required: ['prompt'],
+      },
+    },
+  }, {
+    riskLevel: 'L1',
+    permissions: ['agent:spawn'],
+    timeoutMs: 600_000,
+    retryable: false,
+    idempotent: false,
+    costLevel: 'high',
+    sideEffect: true,
+    tags: ['agent', 'subagent'],
+  });
+}
+
+export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnAgentRunner {
+  return async (request) => {
+    const childToolMode = request.toolMode ?? 'read-only';
+    const childMaxLoops = Math.max(1, Math.min(request.maxLoops ?? 8, 12));
+    const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : undefined;
+    const childResult = await options.runAgent(request.prompt, {
+      sessionId: childSessionId,
+      provider: request.provider ?? options.provider,
+      maxLoops: childMaxLoops,
+      workspaceRoot: options.workspaceRoot,
+      toolMode: childToolMode,
+      allowedTools: childToolMode === 'read-only'
+        ? READ_ONLY_BUILTIN_TOOLS
+        : SUBAGENT_PROJECT_WRITE_TOOLS,
+      toolRetry: options.toolRetry,
+      signal: options.signal,
+      onSessionEvent: options.onSessionEvent,
+    });
+
+    return {
+      content: JSON.stringify({
+        childSessionId: childSessionId ?? null,
+        provider: request.provider ?? options.provider ?? null,
+        toolMode: childToolMode,
+        loopCount: childResult.loopCount,
+        totalTokens: childResult.totalTokens,
+        text: childResult.text,
+      }, null, 2),
+    };
+  };
+}
+
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeToolMode(value: unknown): SpawnAgentRequest['toolMode'] | undefined {
+  if (value === 'project-write' || value === 'read-only') return value;
+  return undefined;
+}
+
+function normalizeInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.floor(value);
+}
