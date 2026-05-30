@@ -101,7 +101,7 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
           name: 'openai',
           apiKey: auth.OPENAI_API_KEY,
           baseUrl: 'https://api.openai.com/v1',
-          defaultModel: 'gpt-4o',
+          defaultModel: 'gpt-5.5',
           available: true,
           source: 'codex/auth.json',
           sourceTool: 'codex',
@@ -114,7 +114,7 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
           name: 'openai',
           apiKey: auth.tokens.access_token,
           baseUrl: 'https://api.openai.com/v1',
-          defaultModel: 'gpt-4o',
+          defaultModel: 'gpt-5.5',
           available: true,
           source: 'codex/auth.json (ChatGPT OAuth)',
           sourceTool: 'codex',
@@ -339,20 +339,22 @@ function scanHermes(): { tool: DiscoveredTool; providers: DiscoveredProvider[] }
         const value = match[2].trim().replace(/^["']|["']$/g, '');
 
         // Map env key to provider name
-        const keyMap: Record<string, string> = {
-          'OPENROUTER_API_KEY': 'openrouter',
-          'DEEPSEEK_API_KEY': 'deepseek',
-          'OPENAI_API_KEY': 'openai',
-          'ANTHROPIC_API_KEY': 'anthropic',
-          'HF_TOKEN': 'huggingface',
-          'GROQ_API_KEY': 'groq',
+        const keyMap: Record<string, { name: string; baseUrl?: string; model?: string }> = {
+          'OPENROUTER_API_KEY': { name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o' },
+          'DEEPSEEK_API_KEY': { name: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
+          'OPENAI_API_KEY': { name: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5' },
+          'ANTHROPIC_API_KEY': { name: 'anthropic', baseUrl: 'https://api.anthropic.com' },
+          'HF_TOKEN': { name: 'huggingface' },
+          'GROQ_API_KEY': { name: 'groq', baseUrl: 'https://api.groq.com/openai/v1' },
         };
 
-        const name = keyMap[envKey];
-        if (name) {
+        const mapped = keyMap[envKey];
+        if (mapped) {
           providers.push({
-            name,
+            name: mapped.name,
             apiKey: value,
+            baseUrl: mapped.baseUrl,
+            defaultModel: mapped.model,
             available: true,
             source: `hermes/.env (${envKey})`,
             sourceTool: 'hermes',
@@ -387,8 +389,8 @@ function scanEnvKeys(): DiscoveredProvider[] {
   const providers: DiscoveredProvider[] = [];
 
   const keyMap: Record<string, { name: string; baseUrl: string; model: string }> = {
-    'DEEPSEEK_API_KEY':     { name: 'deepseek',   baseUrl: 'https://api.deepseek.com',              model: 'deepseek-chat' },
-    'OPENAI_API_KEY':       { name: 'openai',     baseUrl: 'https://api.openai.com/v1',             model: 'gpt-4o' },
+    'DEEPSEEK_API_KEY':     { name: 'deepseek',   baseUrl: 'https://api.deepseek.com',              model: 'deepseek-v4-flash' },
+    'OPENAI_API_KEY':       { name: 'openai',     baseUrl: 'https://api.openai.com/v1',             model: 'gpt-5.5' },
     'ANTHROPIC_API_KEY':    { name: 'anthropic',  baseUrl: 'https://api.anthropic.com',              model: 'claude-sonnet-4-20250514' },
     'MINIMAX_API_KEY':      { name: 'minimax',    baseUrl: 'https://api.minimax.chat/v1',            model: 'abab7-chat' },
     'MOONSHOT_API_KEY':     { name: 'moonshot',   baseUrl: 'https://api.moonshot.cn/v1',              model: 'moonshot-v1-8k' },

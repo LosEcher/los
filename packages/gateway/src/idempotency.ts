@@ -51,27 +51,19 @@ export async function runIdempotentJson<T>(
   options: IdempotentRequestOptions,
   handler: () => Promise<T>,
 ): Promise<T | void> {
-  const idempotencyKey = normalizeHeader(req.headers['idempotency-key'])
-    ?? normalizeHeader(req.headers['x-idempotency-key']);
-  if (!idempotencyKey) {
+  const reservation = await reserveIdempotentRequest(req, options);
+  if (!reservation) {
     return await handler();
   }
 
-  await ensureIdempotencyStore();
-  const reservation = await reserveIdempotencyKey({
-    ...options,
-    idempotencyKey,
-    bodyHash: hashBody(options.body),
-  });
-
-  reply.header('x-idempotency-key', idempotencyKey);
+  reply.header('x-idempotency-key', reservation.idempotencyKey);
   reply.header('x-idempotency-status', reservation.status);
 
   if (reservation.status === 'body_mismatch') {
     return reply.status(409).send({
       error: 'idempotency key body mismatch',
       requestId: options.context.requestId,
-      idempotencyKey,
+      idempotencyKey: reservation.idempotencyKey,
     });
   }
 
@@ -79,7 +71,7 @@ export async function runIdempotentJson<T>(
     return reply.status(409).send({
       error: 'idempotency key is already processing',
       requestId: options.context.requestId,
-      idempotencyKey,
+      idempotencyKey: reservation.idempotencyKey,
     });
   }
 
@@ -97,15 +89,16 @@ export async function runIdempotentJson<T>(
   }
 }
 
-type ReservationStatus = 'reserved' | 'replayed' | 'processing' | 'body_mismatch';
+export type ReservationStatus = 'reserved' | 'replayed' | 'processing' | 'body_mismatch';
 
 interface ReserveInput extends IdempotentRequestOptions {
   idempotencyKey: string;
   bodyHash: string;
 }
 
-interface Reservation {
+export interface Reservation {
   id: string;
+  idempotencyKey: string;
   status: ReservationStatus;
   responseStatus?: number;
   responseJson?: unknown;
@@ -118,6 +111,26 @@ type IdempotencyRow = {
   response_status: number | null;
   response_json: unknown;
 };
+
+export async function reserveIdempotentRequest(
+  req: FastifyRequest,
+  options: IdempotentRequestOptions,
+): Promise<Reservation | null> {
+  const idempotencyKey = getIdempotencyKey(req);
+  if (!idempotencyKey) return null;
+
+  await ensureIdempotencyStore();
+  return await reserveIdempotencyKey({
+    ...options,
+    idempotencyKey,
+    bodyHash: hashBody(options.body),
+  });
+}
+
+export function getIdempotencyKey(req: FastifyRequest): string | undefined {
+  return normalizeHeader(req.headers['idempotency-key'])
+    ?? normalizeHeader(req.headers['x-idempotency-key']);
+}
 
 async function reserveIdempotencyKey(input: ReserveInput): Promise<Reservation> {
   return await withDbClient(async (client) => {
@@ -148,7 +161,7 @@ async function reserveIdempotencyKey(input: ReserveInput): Promise<Reservation> 
 
       if (inserted.rows[0]) {
         await client.query('COMMIT');
-        return { id: inserted.rows[0].id, status: 'reserved' };
+        return { id: inserted.rows[0].id, idempotencyKey: input.idempotencyKey, status: 'reserved' };
       }
 
       const existing = await client.query<IdempotencyRow>(
@@ -173,17 +186,20 @@ async function reserveIdempotencyKey(input: ReserveInput): Promise<Reservation> 
       await client.query('COMMIT');
 
       const row = existing.rows[0];
-      if (!row) return { id: '', status: 'processing' };
-      if (row.body_hash !== input.bodyHash) return { id: row.id, status: 'body_mismatch' };
+      if (!row) return { id: '', idempotencyKey: input.idempotencyKey, status: 'processing' };
+      if (row.body_hash !== input.bodyHash) {
+        return { id: row.id, idempotencyKey: input.idempotencyKey, status: 'body_mismatch' };
+      }
       if (row.status === 'completed' || row.status === 'failed') {
         return {
           id: row.id,
+          idempotencyKey: input.idempotencyKey,
           status: 'replayed',
           responseStatus: row.response_status ?? 200,
           responseJson: row.response_json,
         };
       }
-      return { id: row.id, status: 'processing' };
+      return { id: row.id, idempotencyKey: input.idempotencyKey, status: 'processing' };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -191,7 +207,7 @@ async function reserveIdempotencyKey(input: ReserveInput): Promise<Reservation> 
   });
 }
 
-async function completeIdempotencyKey(id: string, status: number, response: unknown): Promise<void> {
+export async function completeIdempotencyKey(id: string, status: number, response: unknown): Promise<void> {
   const db = getDb();
   await db.query(
     `
@@ -206,7 +222,7 @@ async function completeIdempotencyKey(id: string, status: number, response: unkn
   );
 }
 
-async function failIdempotencyKey(id: string, error: unknown): Promise<void> {
+export async function failIdempotencyKey(id: string, error: unknown): Promise<void> {
   const db = getDb();
   const message = error instanceof Error ? error.message : String(error);
   await db.query(

@@ -6,6 +6,7 @@ export interface RequestContext {
   traceId: string;
   tenantId: string;
   projectId: string;
+  userId: string;
 }
 
 declare module 'fastify' {
@@ -20,18 +21,21 @@ export function registerRequestContext(app: FastifyInstance): void {
     const traceId = normalizeHeader(req.headers['x-trace-id']) ?? requestId;
     const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
     const projectId = normalizeHeader(req.headers['x-project-id']) ?? 'los';
+    const userId = normalizeHeader(req.headers['x-user-id']) ?? 'local-user';
 
     req.requestContext = {
       requestId,
       traceId,
       tenantId,
       projectId,
+      userId,
     };
 
     reply.header('x-request-id', requestId);
     reply.header('x-trace-id', traceId);
     reply.header('x-tenant-id', tenantId);
     reply.header('x-project-id', projectId);
+    reply.header('x-user-id', userId);
   });
 }
 
@@ -42,6 +46,7 @@ export function getRequestContext(req: FastifyRequest): RequestContext {
     traceId: requestId,
     tenantId: 'local',
     projectId: 'los',
+    userId: 'local-user',
   };
 }
 

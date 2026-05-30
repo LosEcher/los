@@ -13,20 +13,25 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb } from '@los/infra/db';
-import { printOnboardingReport, discoverAll } from '@los/infra/discovery';
+import { printOnboardingReport, discoverAll, type DiscoveredProvider } from '@los/infra/discovery';
 import { getLogger } from '@los/infra/logger';
+import { createProvider } from '@los/agent';
 import { registerLogRoutes } from './log-routes.js';
+import { registerNodeRoutes } from './node-routes.js';
 import { registerTodoRoutes } from './todo-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
+import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
-import { cancelScheduledTask, runScheduledAgentTask } from '@los/agent/scheduler';
-import { ensureSessionStore, saveSession, loadSession, listSessions } from '@los/agent/session';
+import { cancelScheduledTask } from '@los/agent/scheduler';
+import { ensureSessionStore, loadSession, listSessions } from '@los/agent/session';
 import {
   ensureTaskRunStore,
   loadTaskRun,
   listTaskRuns,
+  recoverExpiredTaskRuns,
   updateTaskRun,
 } from '@los/agent/task-runs';
+import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
 import {
   ensureTodoStore,
   seedLosPlanningTodos,
@@ -52,28 +57,6 @@ const LEGACY_INDEX_PATH = resolve(__dirname, '../src/index.html');
 const RUNTIME_LOG_DIR = join(WORKSPACE_ROOT, '.los-runtime');
 const RUNTIME_LOG_PATH = join(RUNTIME_LOG_DIR, 'gateway.log');
 
-type ToolMode = 'all' | 'project-write' | 'read-only';
-
-interface ChatRequestBody {
-  prompt: string;
-  sessionId?: string;
-  systemPrompt?: string;
-  provider?: string;
-  model?: string;
-  workspaceRoot?: string;
-  toolMode?: ToolMode;
-  allowedTools?: string[];
-  maxLoops?: number;
-  traceId?: string;
-  dedupeKey?: string;
-  timeoutMs?: number;
-  toolRetry?: {
-    maxAttempts?: number;
-    baseDelayMs?: number;
-    maxDelayMs?: number;
-  };
-}
-
 export async function createServer() {
   const config = getConfig();
   const app = Fastify({ logger: false });
@@ -98,7 +81,61 @@ export async function createServer() {
   // ── Onboarding ──────────────────────────────────────
 
   app.get('/onboarding', async () => {
-    return await discoverAll();
+    const report = await discoverAll();
+    return {
+      ...report,
+      providers: report.providers.map(sanitizeProviderDiscovery),
+    };
+  });
+
+  app.get('/providers/models', async (req) => {
+    const query = req.query as { provider?: string };
+    const requestedProvider = normalizeOptionalString(query.provider);
+    const providerNames = requestedProvider
+      ? [requestedProvider]
+      : selectAgentModelProviders(config);
+
+    const providers = await Promise.all(providerNames.map(async (providerName) => {
+      try {
+        const provider = createProvider(providerName);
+        if (!provider.listModels) {
+          return {
+            provider: providerName,
+            ok: false,
+            model: provider.profile.model,
+            baseUrl: provider.profile.baseUrl,
+            profile: provider.profile,
+            models: [],
+            error: 'provider does not expose a model list API',
+          };
+        }
+
+        const models = await provider.listModels();
+        return {
+          provider: providerName,
+          ok: true,
+          model: provider.profile.model,
+          baseUrl: provider.profile.baseUrl,
+          profile: provider.profile,
+          count: models.length,
+          models,
+        };
+      } catch (err: any) {
+        return {
+          provider: providerName,
+          ok: false,
+          count: 0,
+          models: [],
+          error: sanitizeErrorMessage(err?.message ?? String(err)),
+        };
+      }
+    }));
+
+    return {
+      provider: requestedProvider ?? null,
+      count: providers.length,
+      providers,
+    };
   });
 
   // ── Health ───────────────────────────────────────────
@@ -114,238 +151,9 @@ export async function createServer() {
     runtimeLogPath: RUNTIME_LOG_PATH,
   });
   registerTodoRoutes(app);
+  registerNodeRoutes(app);
 
-  // ── Chat (SSE streaming) ─────────────────────────────
-
-  app.post('/chat', async (req, reply) => {
-    const body = req.body as ChatRequestBody;
-    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-    const sessionId = normalizeOptionalString(body.sessionId);
-    const systemPrompt = normalizeOptionalString(body.systemPrompt);
-    const provider = normalizeOptionalString(body.provider);
-    const model = normalizeOptionalString(body.model);
-    const workspaceRoot = normalizeWorkspaceRoot(body.workspaceRoot);
-    const toolMode = normalizeToolMode(body.toolMode);
-    const allowedTools = normalizeAllowedTools(body.allowedTools);
-    const maxLoops = normalizePositiveInteger(body.maxLoops);
-    const context = getRequestContext(req);
-    const traceId = normalizeOptionalString(body.traceId) ?? context.traceId;
-    const dedupeKey = normalizeOptionalString(body.dedupeKey);
-    const timeoutMs = normalizePositiveInteger(body.timeoutMs);
-    const toolRetry = normalizeToolRetry(body.toolRetry);
-
-    if (!prompt) {
-      return reply.status(400).send({ error: 'prompt is required' });
-    }
-
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-
-    const send = (event: string, data: unknown) => {
-      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
-
-    const sid = sessionId ?? `session-${Date.now()}`;
-    let activeTaskRunId: string | undefined;
-    let sentSession = false;
-
-    try {
-      const resumedSession = sessionId ? await loadSession(sid) : null;
-      if (resumedSession) {
-        send('session.resumed', {
-          sessionId: sid,
-          messageCount: resumedSession.messages.length,
-          turnCount: resumedSession.turns.length,
-        });
-      }
-
-      const scheduled = await runScheduledAgentTask({
-        prompt,
-        sessionId: sid,
-        provider,
-        model,
-        systemPrompt,
-        workspaceRoot,
-        toolMode,
-        initialMessages: resumedSession?.messages,
-        allowedTools,
-        maxLoops,
-        traceId,
-        dedupeKey,
-        timeoutMs,
-        toolRetry,
-        metadata: {
-          maxLoops: maxLoops ?? config.agent.maxLoops,
-          model,
-          allowedTools,
-          timeoutMs,
-          toolRetry,
-          requestId: context.requestId,
-          tenantId: context.tenantId,
-          projectId: context.projectId,
-        },
-        onTaskEvent: (event) => {
-          activeTaskRunId = event.taskRun.id;
-          if (!sentSession && event.type !== 'task.deduplicated') {
-            sentSession = true;
-            send('session', {
-              sessionId: event.taskRun.sessionId,
-              taskRunId: event.taskRun.id,
-              traceId: event.taskRun.traceId,
-              requestId: context.requestId,
-              dedupeKey: event.taskRun.dedupeKey ?? null,
-              model: event.taskRun.model ?? null,
-            });
-          }
-          send('task', {
-            type: event.type,
-            taskRunId: event.taskRun.id,
-            sessionId: event.taskRun.sessionId,
-            traceId: event.taskRun.traceId,
-            requestId: context.requestId,
-            dedupeKey: event.taskRun.dedupeKey ?? null,
-            status: event.taskRun.status,
-            model: event.taskRun.model ?? null,
-          });
-        },
-        onTurn: (turn) => {
-          send('turn', {
-            loopCount: turn.loopCount,
-            text: turn.text.slice(0, 200),
-            toolCallCount: turn.toolCalls.length,
-            toolNames: turn.toolCalls.map(tc => tc.function.name),
-            reasoning: turn.reasoningContent?.slice(0, 200),
-          });
-        },
-        onToolCall: (tool, args) => {
-          send('tool_call', { tool, args: JSON.stringify(args).slice(0, 200) });
-        },
-        onSessionEvent: (event) => {
-          send(event.type, {
-            id: event.id,
-            sessionId: event.sessionId,
-            turn: event.turn,
-            source: event.source,
-            model: event.model ?? null,
-            toolName: event.toolName ?? null,
-            cacheKey: event.cacheKey ?? null,
-            cacheHit: event.cacheHit ?? null,
-            usage: event.usage ?? null,
-            payload: event.payload,
-            createdAt: event.createdAt,
-          });
-        },
-      });
-
-      if (scheduled.status === 'deduplicated') {
-        send('deduplicated', {
-          sessionId: scheduled.sessionId,
-          taskRunId: scheduled.taskRun.id,
-          traceId: scheduled.taskRun.traceId,
-          requestId: context.requestId,
-          dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-          status: scheduled.taskRun.status,
-        });
-        send('done', {
-          deduplicated: true,
-          sessionId: scheduled.sessionId,
-          taskRunId: scheduled.taskRun.id,
-        });
-        reply.raw.end();
-        return;
-      }
-
-      if (scheduled.status === 'cancelled') {
-        send('cancelled', {
-          sessionId: scheduled.sessionId,
-          taskRunId: scheduled.taskRun.id,
-          traceId: scheduled.taskRun.traceId,
-          requestId: context.requestId,
-          dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-          reason: scheduled.reason,
-        });
-        send('done', {
-          cancelled: true,
-          sessionId: scheduled.sessionId,
-          taskRunId: scheduled.taskRun.id,
-          reason: scheduled.reason,
-        });
-        reply.raw.end();
-        return;
-      }
-
-      const result = scheduled.result;
-      const taskRunId = scheduled.taskRun.id;
-
-      // Save session
-      await ensureSessionStore();
-      await saveSession({
-        id: sid,
-        createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: result.messages,
-        turns: resumedSession ? [...resumedSession.turns, ...result.turns] : result.turns,
-        metadata: {
-          ...(resumedSession?.metadata ?? {}),
-          provider: provider ?? config.agent.defaultProvider,
-          workspaceRoot,
-          toolMode,
-          allowedTools,
-          maxLoops: maxLoops ?? config.agent.maxLoops,
-          timeoutMs,
-          toolRetry,
-          taskRunId,
-          traceId: scheduled.taskRun.traceId,
-          requestId: context.requestId,
-          tenantId: context.tenantId,
-          projectId: context.projectId,
-          dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-          resumed: Boolean(resumedSession),
-          resumeMessageCount: resumedSession?.messages.length ?? 0,
-        },
-      });
-
-      // Save observation to memory
-      await ensureMemoryStore();
-      await addObservation({
-        title: `Chat session ${sid.slice(0, 12)}`,
-        summary: `Prompt: ${prompt.slice(0, 200)} — ${result.text.slice(0, 200)}`,
-        kind: 'note',
-        tags: ['chat', 'session'],
-        source: 'agent',
-        sessionId: sid,
-      });
-
-      send('done', {
-        text: result.text,
-          turns: result.loopCount,
-          tokens: result.totalTokens,
-          sessionId: sid,
-          taskRunId,
-          traceId: scheduled.taskRun.traceId,
-          requestId: context.requestId,
-        });
-    } catch (err: any) {
-      await ensureSessionEventStore().catch(() => undefined);
-      await appendSessionEvent({
-        sessionId: sid,
-        type: 'session.error',
-        turn: 0,
-        payload: {
-          message: err?.message ?? String(err),
-          taskRunId: activeTaskRunId ?? null,
-          requestId: context.requestId,
-        },
-      }).catch(() => undefined);
-      send('error', { message: err?.message ?? String(err) });
-    }
-
-    reply.raw.end();
-  });
+  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT);
 
   // ── Memory ────────────────────────────────────────────
 
@@ -361,8 +169,21 @@ export async function createServer() {
 
   app.post('/memory', async (req) => {
     const { title, summary, kind, tags, content, source } = req.body as any;
+    const context = getRequestContext(req);
     await ensureMemoryStore();
-    const obs = await addObservation({ title, summary, kind, tags, content, source });
+    const obs = await addObservation({
+      title,
+      summary,
+      kind,
+      tags,
+      content,
+      source,
+      tenantId: context.tenantId,
+      projectId: context.projectId,
+      userId: context.userId,
+      requestId: context.requestId,
+      traceId: context.traceId,
+    });
     return obs;
   });
 
@@ -440,13 +261,14 @@ export async function createServer() {
 
     const live = cancelScheduledTask(id, reason);
     if (live) {
-      return {
-        ok: true,
-        live: true,
-        taskRunId: id,
-        status: taskRun.status,
-        reason,
-      };
+      await updateTaskRun(id, {
+        status: 'cancelled',
+        metadata: {
+          ...taskRun.metadata,
+          cancelReason: reason,
+        },
+      }).catch(() => undefined);
+      return { ok: true, live: true, taskRunId: id, status: 'cancelled', reason };
     }
 
     if (taskRun.status === 'queued' || taskRun.status === 'running') {
@@ -460,6 +282,12 @@ export async function createServer() {
       const finalTask = cancelled ?? taskRun;
       await appendSessionEvent({
         sessionId: finalTask.sessionId,
+        tenantId: finalTask.tenantId,
+        projectId: finalTask.projectId,
+        userId: finalTask.userId,
+        nodeId: finalTask.nodeId,
+        requestId: finalTask.requestId,
+        traceId: finalTask.traceId,
         type: 'task.cancelled',
         payload: {
           taskRunId: finalTask.id,
@@ -505,6 +333,27 @@ export async function startServer(port?: number, host?: string) {
   await initDb(config.databaseUrl);
   await ensureTodoStore();
   await ensureIdempotencyStore();
+  await ensureExecutorNodeStore();
+  await ensureTaskRunStore();
+  const recoveredTasks = await recoverExpiredTaskRuns('gateway_startup_recovery');
+  for (const task of recoveredTasks) {
+    await appendSessionEvent({
+      sessionId: task.sessionId,
+      tenantId: task.tenantId,
+      projectId: task.projectId,
+      userId: task.userId,
+      nodeId: task.nodeId,
+      requestId: task.requestId,
+      traceId: task.traceId,
+      type: 'task.failed',
+      payload: {
+        taskRunId: task.id,
+        traceId: task.traceId,
+        nodeId: task.nodeId ?? null,
+        reason: 'gateway_startup_recovery',
+      },
+    }).catch(() => undefined);
+  }
   await seedLosPlanningTodos();
   console.log(await printOnboardingReport());
   console.log(printConfigDiagnostics(config));
@@ -531,61 +380,29 @@ if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.
     });
 }
 
-function normalizeWorkspaceRoot(value: unknown): string {
-  if (typeof value !== 'string') return DEFAULT_WORKSPACE_ROOT;
-  const trimmed = value.trim();
-  return trimmed ? resolve(trimmed) : DEFAULT_WORKSPACE_ROOT;
-}
-
 function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
 }
 
-function normalizeToolMode(value: unknown): ToolMode {
-  if (value === 'read-only' || value === 'project-write' || value === 'all') return value;
-  return 'project-write';
-}
-
-function normalizeAllowedTools(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tools = value
-    .map(item => typeof item === 'string' ? item.trim() : '')
-    .filter(Boolean);
-  return tools.length > 0 ? [...new Set(tools)] : undefined;
-}
-
-function normalizePositiveInteger(value: unknown): number | undefined {
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return undefined;
-    const int = Math.floor(parsed);
-    return int > 0 ? int : undefined;
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  const int = Math.floor(value);
-  return int > 0 ? int : undefined;
-}
-
-function normalizeToolRetry(value: unknown): ChatRequestBody['toolRetry'] | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const raw = value as Record<string, unknown>;
+function sanitizeProviderDiscovery(provider: DiscoveredProvider): Record<string, unknown> {
+  const { apiKey, ...rest } = provider;
   return {
-    maxAttempts: normalizePositiveInteger(raw.maxAttempts),
-    baseDelayMs: normalizeNonNegativeInteger(raw.baseDelayMs),
-    maxDelayMs: normalizeNonNegativeInteger(raw.maxDelayMs),
+    ...rest,
+    hasApiKey: typeof apiKey === 'string' && apiKey.length > 0,
   };
 }
 
-function normalizeNonNegativeInteger(value: unknown): number | undefined {
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return undefined;
-    const int = Math.floor(parsed);
-    return int >= 0 ? int : undefined;
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  const int = Math.floor(value);
-  return int >= 0 ? int : undefined;
+function sanitizeErrorMessage(message: string): string {
+  return message.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-REDACTED');
+}
+
+function selectAgentModelProviders(config: ReturnType<typeof getConfig>): string[] {
+  const core = new Set(['deepseek', 'openai', 'codex', 'packycode']);
+  const configured = Object.entries(config.providers)
+    .filter(([name, provider]) => core.has(name) && provider.enabled)
+    .map(([name]) => name);
+  if (configured.length > 0) return configured;
+  return [config.agent.defaultProvider];
 }

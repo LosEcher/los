@@ -39,7 +39,7 @@ export const ConfigSchema = z.object({
   // Agent
   agent: z.object({
     defaultProvider: z.string().default('deepseek'),
-    defaultModel: z.string().default('deepseek-chat'),
+    defaultModel: z.string().default('deepseek-v4-flash'),
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
     systemPrompt: z.string().optional(),
@@ -64,6 +64,8 @@ export const ConfigSchema = z.object({
   executor: z.object({
     enabled: z.coerce.boolean().default(false),
     agentKey: z.string().optional(),
+    nodeId: z.string().optional(),
+    nodeUrl: z.string().optional(),
     meshNodes: z.array(z.string()).default([]),
   }),
 
@@ -87,6 +89,8 @@ const ENV_MAP: [string, string][] = [
   ['MEMORY_FTS_ENABLED', 'memory.ftsEnabled'],
   ['EXECUTOR_ENABLED', 'executor.enabled'],
   ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
+  ['EXECUTOR_NODE_ID', 'executor.nodeId'],
+  ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],
   ['EXECUTOR_MESH_NODES', 'executor.meshNodes'],
   ['LOS_PROFILE', 'profile'],
 ];
@@ -239,7 +243,7 @@ export async function loadConfig(opts?: {
   // Layer 1: Built-in defaults (ensure all schema keys exist)
   let merged: Record<string, unknown> = {
     server: { port: 8080, host: '127.0.0.1' },
-    agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-chat', maxLoops: 20, sandboxMode: 'workspace-write' },
+    agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write' },
     memory: { ftsEnabled: true, maxObservations: 10000 },
     executor: { enabled: false, meshNodes: [] },
     providers: {},

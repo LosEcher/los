@@ -10,6 +10,7 @@
     "dev": "tsx src/server.ts",
     "build": "tsc",
     "check": "tsc --noEmit",
+    "test": "node --import tsx --test --experimental-test-coverage src/*.test.ts src/**/*.test.ts",
     "start": "node dist/server.js",
     "clean": "rm -rf dist"
   },

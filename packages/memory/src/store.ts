@@ -20,6 +20,12 @@ export interface Observation {
   metadata: Record<string, unknown>;
   source: string;
   sessionId?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,6 +47,12 @@ CREATE TABLE IF NOT EXISTS observations (
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   source TEXT NOT NULL DEFAULT 'user',
   session_id TEXT,
+  tenant_id TEXT,
+  project_id TEXT,
+  user_id TEXT,
+  node_id TEXT,
+  request_id TEXT,
+  trace_id TEXT,
   search_vector tsvector GENERATED ALWAYS AS (
     to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(content, '') || ' ' || coalesce(tags_json::text, ''))
   ) STORED,
@@ -48,9 +60,19 @@ CREATE TABLE IF NOT EXISTS observations (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS node_id TEXT;
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS request_id TEXT;
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS trace_id TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_obs_kind ON observations(kind);
 CREATE INDEX IF NOT EXISTS idx_obs_source ON observations(source);
 CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id);
+CREATE INDEX IF NOT EXISTS idx_obs_tenant_project ON observations(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_obs_request ON observations(request_id);
+CREATE INDEX IF NOT EXISTS idx_obs_trace ON observations(trace_id);
 CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_obs_search ON observations USING GIN (search_vector);
 
@@ -88,6 +110,12 @@ export async function addObservation(obs: {
   metadata?: Record<string, unknown>;
   source?: string;
   sessionId?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
 }): Promise<Observation> {
   await ensureMemoryStore();
   const db = getDb();
@@ -100,10 +128,19 @@ export async function addObservation(obs: {
     JSON.stringify(obs.metadata ?? {}),
     obs.source ?? 'user',
     obs.sessionId ?? null,
+    obs.tenantId ?? null,
+    obs.projectId ?? null,
+    obs.userId ?? null,
+    obs.nodeId ?? null,
+    obs.requestId ?? null,
+    obs.traceId ?? null,
   ];
   const rows = await db.query<ObservationRow>(`
-    INSERT INTO observations (title, summary, kind, tags_json, content, metadata_json, source, session_id)
-    VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8)
+    INSERT INTO observations (
+      title, summary, kind, tags_json, content, metadata_json, source, session_id,
+      tenant_id, project_id, user_id, node_id, request_id, trace_id
+    )
+    VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING *
   `, params);
   return rowToObservation(rows.rows[0]);
@@ -160,6 +197,10 @@ export async function searchObservations(query: string, opts?: {
   kind?: string;
   source?: string;
   sessionId?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  requestId?: string;
 }): Promise<Observation[]> {
   await ensureMemoryStore();
   const db = getDb();
@@ -183,6 +224,22 @@ export async function searchObservations(query: string, opts?: {
   if (opts?.sessionId) {
     params.push(opts.sessionId);
     clauses.push(`session_id = $${params.length}`);
+  }
+  if (opts?.tenantId) {
+    params.push(opts.tenantId);
+    clauses.push(`tenant_id = $${params.length}`);
+  }
+  if (opts?.projectId) {
+    params.push(opts.projectId);
+    clauses.push(`project_id = $${params.length}`);
+  }
+  if (opts?.userId) {
+    params.push(opts.userId);
+    clauses.push(`user_id = $${params.length}`);
+  }
+  if (opts?.requestId) {
+    params.push(opts.requestId);
+    clauses.push(`request_id = $${params.length}`);
   }
 
   params.push(limit);
@@ -222,6 +279,12 @@ type ObservationRow = {
   metadata_json: unknown;
   source: string;
   session_id: string | null;
+  tenant_id: string | null;
+  project_id: string | null;
+  user_id: string | null;
+  node_id: string | null;
+  request_id: string | null;
+  trace_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -237,6 +300,12 @@ function rowToObservation(row: ObservationRow): Observation {
     metadata: normalizeJsonObject(row.metadata_json),
     source: row.source,
     sessionId: row.session_id ?? undefined,
+    tenantId: row.tenant_id ?? undefined,
+    projectId: row.project_id ?? undefined,
+    userId: row.user_id ?? undefined,
+    nodeId: row.node_id ?? undefined,
+    requestId: row.request_id ?? undefined,
+    traceId: row.trace_id ?? undefined,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
