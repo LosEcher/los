@@ -377,3 +377,32 @@ Result:
 1. checks passed.
 2. `task-runs` persistence test passed.
 3. full check passed with the existing `packages/infra/src/discovery.ts` size warning.
+
+## Implementation Note: 2026-05-30 Provider Abort And Tool Timeout
+
+Implemented:
+
+1. `Provider.chat()` now accepts `ChatOptions.signal`.
+2. OpenAI-compatible and Anthropic provider adapters pass that signal to `fetch()`.
+3. `runAgent()` forwards the scheduler's abort signal into provider calls.
+4. `ToolRegistry.execute()` enforces `ToolCapability.timeoutMs` around async handlers.
+5. `run_shell` clamps its internal timeout to the declared capability ceiling.
+6. `packages/agent/src/tools/registry.test.ts` now covers timeout enforcement.
+
+Why this matters:
+
+1. scheduler cancellation now reaches the network layer instead of only returning early in the caller;
+2. tool capability metadata now constrains execution, not just documentation;
+3. timeout behavior is visible in tests before adding retries.
+
+Verification:
+
+```bash
+pnpm --filter @los/agent test
+pnpm check
+```
+
+Result:
+
+1. agent tests passed: 4 tests.
+2. full check passed with the existing `packages/infra/src/discovery.ts` size warning.

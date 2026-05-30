@@ -52,9 +52,13 @@ export interface ProviderResponse {
   model: string;
 }
 
+export interface ChatOptions {
+  signal?: AbortSignal;
+}
+
 export interface Provider {
   name: string;
-  chat(messages: Message[], tools?: ToolDef[]): Promise<ProviderResponse>;
+  chat(messages: Message[], tools?: ToolDef[], options?: ChatOptions): Promise<ProviderResponse>;
 }
 
 export interface ToolDef {
@@ -134,7 +138,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
   return {
     name,
 
-    async chat(messages: Message[], tools?: ToolDef[]): Promise<ProviderResponse> {
+    async chat(messages: Message[], tools?: ToolDef[], options: ChatOptions = {}): Promise<ProviderResponse> {
       const body: Record<string, unknown> = {
         model,
         messages,
@@ -157,6 +161,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
+        signal: options.signal,
       });
 
       if (!res.ok) {
@@ -234,7 +239,7 @@ function createAnthropicProvider(cfg: AnthropicConfig): Provider {
   return {
     name,
 
-    async chat(messages: Message[], tools?: ToolDef[]): Promise<ProviderResponse> {
+    async chat(messages: Message[], tools?: ToolDef[], options: ChatOptions = {}): Promise<ProviderResponse> {
       // Convert OpenAI-format messages → Anthropic format
       const systemMessages: string[] = [];
       const anthropicMessages: any[] = [];
@@ -304,6 +309,7 @@ function createAnthropicProvider(cfg: AnthropicConfig): Provider {
           'anthropic-version': API_VERSION,
         },
         body: JSON.stringify(body),
+        signal: options.signal,
       });
 
       if (!res.ok) {

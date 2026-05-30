@@ -147,7 +147,7 @@ export async function runAgent(
 
     const modelStartedAt = Date.now();
     const res = await withAbort(
-      provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined),
+      provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined, { signal }),
       signal,
     );
     const modelDurationMs = Date.now() - modelStartedAt;
@@ -336,7 +336,7 @@ export async function runAgent(
   });
 
   assertNotAborted(signal);
-  const finalRes = await withAbort(provider.chat(messages), signal);
+  const finalRes = await withAbort(provider.chat(messages, undefined, { signal }), signal);
   totalPromptTokens += finalRes.usage.promptTokens;
   totalCompletionTokens += finalRes.usage.completionTokens;
 

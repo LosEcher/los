@@ -127,7 +127,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
         return { content: '', error: `Unknown tool: ${input.name}` };
       }
       try {
-        return await handler(input.arguments);
+        return await withTimeout(handler(input.arguments), decision.capability.timeoutMs, input.name);
       } catch (err: any) {
         return { content: '', error: err.message ?? String(err) };
       }
@@ -266,7 +266,8 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
   registry.register('run_shell', async (args) => {
     const command = String(args.command ?? '');
     const cwd = args.cwd ? safePath(workspaceRoot, String(args.cwd)) : workspaceRoot;
-    const timeout = (args.timeoutSec as number) ?? 30;
+    const requestedTimeout = Number(args.timeoutSec ?? 30);
+    const timeout = Math.max(1, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 30, 300));
 
     try {
       const stdout = execSync(command, {
@@ -411,4 +412,24 @@ function riskRank(riskLevel: ToolRiskLevel): number {
   if (riskLevel === 'L0') return 0;
   if (riskLevel === 'L1') return 1;
   return 2;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, toolName: string): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Tool timed out after ${timeoutMs}ms: ${toolName}`));
+    }, timeoutMs);
+    promise.then(
+      value => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      err => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
 }

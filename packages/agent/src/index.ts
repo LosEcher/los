@@ -11,7 +11,7 @@ export {
   type ScheduledTaskEvent,
   type ScheduledTaskEventType,
 } from './scheduler.js';
-export { createProvider, createDeepSeekProvider, createOpenAIProvider, type Provider, type Message, type ToolCall, type ProviderResponse } from './providers/index.js';
+export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type Message, type ToolCall, type ProviderResponse } from './providers/index.js';
 export {
   createToolRegistry,
   registerBuiltinTools,

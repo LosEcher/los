@@ -127,3 +127,36 @@ test('project-write mode allows writes but still blocks shell execution', async 
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test('tool capability timeout is enforced during execution', async () => {
+  const registry = createToolRegistry();
+  registry.register(
+    'slow_tool',
+    async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return { content: 'late' };
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'slow_tool',
+        description: 'Slow test tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    {
+      riskLevel: 'L0',
+      timeoutMs: 5,
+      retryable: true,
+      idempotent: true,
+    },
+  );
+
+  const result = await registry.execute({
+    name: 'slow_tool',
+    arguments: {},
+  });
+
+  assert.equal(result.content, '');
+  assert.match(result.error ?? '', /Tool timed out after 5ms: slow_tool/);
+});
