@@ -8,13 +8,17 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb } from '@los/infra/db';
 import { printOnboardingReport, discoverAll } from '@los/infra/discovery';
 import { getLogger } from '@los/infra/logger';
+import { registerLogRoutes } from './log-routes.js';
+import { registerTodoRoutes } from './todo-routes.js';
+import { ensureIdempotencyStore } from './idempotency.js';
+import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask, runScheduledAgentTask } from '@los/agent/scheduler';
 import { ensureSessionStore, saveSession, loadSession, listSessions } from '@los/agent/session';
 import {
@@ -23,6 +27,10 @@ import {
   listTaskRuns,
   updateTaskRun,
 } from '@los/agent/task-runs';
+import {
+  ensureTodoStore,
+  seedLosPlanningTodos,
+} from '@los/agent/todos';
 import {
   ensureSessionEventStore,
   appendSessionEvent,
@@ -37,6 +45,12 @@ import {
 const log = getLogger('gateway');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_WORKSPACE_ROOT = resolve(__dirname, '../../..');
+const WORKSPACE_ROOT = resolve(__dirname, '../../..');
+const WEB_DIST_ROOT = resolve(__dirname, '../../web/dist');
+const WEB_INDEX_PATH = join(WEB_DIST_ROOT, 'index.html');
+const LEGACY_INDEX_PATH = resolve(__dirname, '../src/index.html');
+const RUNTIME_LOG_DIR = join(WORKSPACE_ROOT, '.los-runtime');
+const RUNTIME_LOG_PATH = join(RUNTIME_LOG_DIR, 'gateway.log');
 
 type ToolMode = 'all' | 'project-write' | 'read-only';
 
@@ -64,19 +78,20 @@ export async function createServer() {
   const app = Fastify({ logger: false });
 
   await app.register(cors, { origin: true });
+  registerRequestContext(app);
 
   // ── Static HTML ──────────────────────────────────────
 
+  const webIndexExists = existsSync(WEB_INDEX_PATH);
   await app.register(fastifyStatic, {
-    root: join(__dirname),
+    root: webIndexExists ? WEB_DIST_ROOT : __dirname,
     prefix: '/',
   });
 
   // Index page
   app.get('/', async (_req, reply) => {
-    return reply.type('text/html').send(
-      readFileSync(join(__dirname, 'index.html'), 'utf-8')
-    );
+    const indexPath = webIndexExists ? WEB_INDEX_PATH : LEGACY_INDEX_PATH;
+    return reply.type('text/html').send(readFileSync(indexPath, 'utf-8'));
   });
 
   // ── Onboarding ──────────────────────────────────────
@@ -91,6 +106,14 @@ export async function createServer() {
     return { status: 'ok', uptime: process.uptime() };
   });
 
+  // ── Logs ─────────────────────────────────────────────
+
+  registerLogRoutes(app, {
+    runtimeLogDir: RUNTIME_LOG_DIR,
+    runtimeLogPath: RUNTIME_LOG_PATH,
+  });
+  registerTodoRoutes(app);
+
   // ── Chat (SSE streaming) ─────────────────────────────
 
   app.post('/chat', async (req, reply) => {
@@ -103,7 +126,8 @@ export async function createServer() {
     const toolMode = normalizeToolMode(body.toolMode);
     const allowedTools = normalizeAllowedTools(body.allowedTools);
     const maxLoops = normalizePositiveInteger(body.maxLoops);
-    const traceId = normalizeOptionalString(body.traceId);
+    const context = getRequestContext(req);
+    const traceId = normalizeOptionalString(body.traceId) ?? context.traceId;
     const dedupeKey = normalizeOptionalString(body.dedupeKey);
     const timeoutMs = normalizePositiveInteger(body.timeoutMs);
     const toolRetry = normalizeToolRetry(body.toolRetry);
@@ -146,6 +170,9 @@ export async function createServer() {
           allowedTools,
           timeoutMs,
           toolRetry,
+          requestId: context.requestId,
+          tenantId: context.tenantId,
+          projectId: context.projectId,
         },
         onTaskEvent: (event) => {
           activeTaskRunId = event.taskRun.id;
@@ -155,6 +182,7 @@ export async function createServer() {
               sessionId: event.taskRun.sessionId,
               taskRunId: event.taskRun.id,
               traceId: event.taskRun.traceId,
+              requestId: context.requestId,
               dedupeKey: event.taskRun.dedupeKey ?? null,
             });
           }
@@ -163,6 +191,7 @@ export async function createServer() {
             taskRunId: event.taskRun.id,
             sessionId: event.taskRun.sessionId,
             traceId: event.taskRun.traceId,
+            requestId: context.requestId,
             dedupeKey: event.taskRun.dedupeKey ?? null,
             status: event.taskRun.status,
           });
@@ -186,6 +215,7 @@ export async function createServer() {
           sessionId: scheduled.sessionId,
           taskRunId: scheduled.taskRun.id,
           traceId: scheduled.taskRun.traceId,
+          requestId: context.requestId,
           dedupeKey: scheduled.taskRun.dedupeKey ?? null,
           status: scheduled.taskRun.status,
         });
@@ -203,6 +233,7 @@ export async function createServer() {
           sessionId: scheduled.sessionId,
           taskRunId: scheduled.taskRun.id,
           traceId: scheduled.taskRun.traceId,
+          requestId: context.requestId,
           dedupeKey: scheduled.taskRun.dedupeKey ?? null,
           reason: scheduled.reason,
         });
@@ -237,6 +268,9 @@ export async function createServer() {
           toolRetry,
           taskRunId,
           traceId: scheduled.taskRun.traceId,
+          requestId: context.requestId,
+          tenantId: context.tenantId,
+          projectId: context.projectId,
           dedupeKey: scheduled.taskRun.dedupeKey ?? null,
         },
       });
@@ -254,11 +288,13 @@ export async function createServer() {
 
       send('done', {
         text: result.text,
-        turns: result.loopCount,
-        tokens: result.totalTokens,
-        sessionId: sid,
-        taskRunId,
-      });
+          turns: result.loopCount,
+          tokens: result.totalTokens,
+          sessionId: sid,
+          taskRunId,
+          traceId: scheduled.taskRun.traceId,
+          requestId: context.requestId,
+        });
     } catch (err: any) {
       await ensureSessionEventStore().catch(() => undefined);
       await appendSessionEvent({
@@ -268,6 +304,7 @@ export async function createServer() {
         payload: {
           message: err?.message ?? String(err),
           taskRunId: activeTaskRunId ?? null,
+          requestId: context.requestId,
         },
       }).catch(() => undefined);
       send('error', { message: err?.message ?? String(err) });
@@ -432,6 +469,9 @@ export async function startServer(port?: number, host?: string) {
   // Bootstrap: load config → init DB → start server
   const config = await loadConfig();
   await initDb(config.databaseUrl);
+  await ensureTodoStore();
+  await ensureIdempotencyStore();
+  await seedLosPlanningTodos();
   console.log(await printOnboardingReport());
   console.log(printConfigDiagnostics(config));
 
@@ -448,7 +488,13 @@ export async function startServer(port?: number, host?: string) {
 
 // Allow direct execution
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
-  startServer();
+  void startServer()
+    .catch((error) => {
+      log.error('Gateway failed to start', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      process.exitCode = 1;
+    });
 }
 
 function normalizeWorkspaceRoot(value: unknown): string {
@@ -477,6 +523,12 @@ function normalizeAllowedTools(value: unknown): string[] | undefined {
 }
 
 function normalizePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return undefined;
+    const int = Math.floor(parsed);
+    return int > 0 ? int : undefined;
+  }
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const int = Math.floor(value);
   return int > 0 ? int : undefined;
@@ -493,6 +545,12 @@ function normalizeToolRetry(value: unknown): ChatRequestBody['toolRetry'] | unde
 }
 
 function normalizeNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return undefined;
+    const int = Math.floor(parsed);
+    return int >= 0 ? int : undefined;
+  }
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const int = Math.floor(value);
   return int >= 0 ? int : undefined;

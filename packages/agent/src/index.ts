@@ -13,6 +13,16 @@ export {
 } from './scheduler.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type Message, type ToolCall, type ProviderResponse } from './providers/index.js';
 export {
+  MODEL_PROFILES,
+  resolveModelProfile,
+  type ApiShape,
+  type CachePolicy,
+  type ModelProfile,
+  type ProviderProtocol,
+  type ResolveModelProfileOptions,
+  type ToolCallRepairMode,
+} from './model-profiles.js';
+export {
   createToolRegistry,
   registerBuiltinTools,
   READ_ONLY_BUILTIN_TOOLS,
@@ -55,3 +65,22 @@ export {
   type SessionEventWrite,
   type SessionObservability,
 } from './session-events.js';
+export {
+  ensureTodoStore,
+  archiveTodo,
+  createTodo,
+  updateTodo,
+  loadTodo,
+  listTodos,
+  reopenTodo,
+  seedLosPlanningTodos,
+  unarchiveTodo,
+  type CreateTodoInput,
+  type ListTodosOptions,
+  type TodoKind,
+  type TodoPriority,
+  type TodoRecord,
+  type TodoStatus,
+  type UpdateTodoInput,
+  type SeedLosPlanningTodosOptions,
+} from './todos.js';

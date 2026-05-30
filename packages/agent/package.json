@@ -10,12 +10,14 @@
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
     "./task-runs": "./src/task-runs.ts",
+    "./model-profiles": "./src/model-profiles.ts",
+    "./todos": "./src/todos.ts",
     "./tools": "./src/tools/registry.ts"
   },
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts",
+    "test": "node --import tsx --test --experimental-test-coverage src/*.test.ts src/**/*.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {

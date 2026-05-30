@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { registerTodoTools } from './todo-tools.js';
 
 const log = getLogger('agent');
 
@@ -105,7 +106,7 @@ export interface ToolRegistry {
 
 // ── Registry ─────────────────────────────────────────────
 
-export const READ_ONLY_BUILTIN_TOOLS = ['read_file', 'list_directory'] as const;
+export const READ_ONLY_BUILTIN_TOOLS = ['read_file', 'list_directory', 'todo_list'] as const;
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const handlers = new Map<string, ToolHandler>();
@@ -351,6 +352,8 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
     sideEffect: false,
     tags: ['io', 'read'],
   });
+
+  registerTodoTools(registry);
 }
 
 function normalizeCapability(name: string, capability: Partial<ToolCapability> = {}): ToolCapability {

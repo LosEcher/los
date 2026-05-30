@@ -1,0 +1,151 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  Activity,
+  BookOpen,
+  Boxes,
+  Brain,
+  ClipboardList,
+  ListChecks,
+  MemoryStick,
+  MessageSquare,
+  Network,
+  Settings,
+  Shield,
+  TerminalSquare,
+  Zap,
+} from 'lucide-react';
+import { getJson, type Health } from './api';
+import {
+  ChatPage,
+  MemoryPage,
+  ProvidersPage,
+  SessionsPage,
+  TasksPage,
+} from './pages';
+import { TodosPage } from './todo-page';
+import { LogsPage, ReservedPage, SettingsPage } from './secondary-pages';
+import { formatDuration, StatusPill, type StatusState } from './ui';
+
+type PageId =
+  | 'chat'
+  | 'sessions'
+  | 'todos'
+  | 'tasks'
+  | 'memory'
+  | 'providers'
+  | 'skills'
+  | 'rules'
+  | 'nodes'
+  | 'logs'
+  | 'settings';
+
+type NavItem = {
+  id: PageId;
+  label: string;
+  icon: typeof MessageSquare;
+  status: StatusState;
+};
+
+const NAV: NavItem[] = [
+  { id: 'chat', label: 'Chat', icon: MessageSquare, status: 'live' },
+  { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live' },
+  { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live' },
+  { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live' },
+  { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live' },
+  { id: 'providers', label: 'Providers', icon: Brain, status: 'partial' },
+  { id: 'skills', label: 'Skills', icon: Zap, status: 'reserved' },
+  { id: 'rules', label: 'Rules', icon: Shield, status: 'reserved' },
+  { id: 'nodes', label: 'Nodes', icon: Network, status: 'reserved' },
+  { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live' },
+  { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
+];
+
+export function App() {
+  const [page, setPage] = useState<PageId>('chat');
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: () => getJson<Health>('/health'),
+    refetchInterval: 10_000,
+  });
+
+  const active = NAV.find(item => item.id === page) ?? NAV[0]!;
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-block">
+          <div className="brand-mark"><Boxes size={18} /></div>
+          <div>
+            <div className="brand-title">los console</div>
+            <div className="brand-subtitle">agent runtime control</div>
+          </div>
+        </div>
+
+        <nav className="nav-list" aria-label="Primary">
+          {NAV.map(item => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className="nav-item"
+                data-active={page === item.id}
+                onClick={() => setPage(item.id)}
+              >
+                <Icon size={16} />
+                <span>{item.label}</span>
+                <StatusPill status={item.status} />
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="side-foot">
+          <div className="mini-label">Gateway</div>
+          <div className="health-row">
+            <span className={`health-dot ${health.data?.status === 'ok' ? 'ok' : ''}`} />
+            <span>{health.data?.status ?? 'checking'}</span>
+          </div>
+          <code>127.0.0.1:8080</code>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        <header className="topbar">
+          <div>
+            <div className="eyebrow">Workspace</div>
+            <h1>{active.label}</h1>
+          </div>
+          <div className="topbar-metrics">
+            <Metric label="health" value={health.data?.status ?? 'unknown'} tone={health.data?.status === 'ok' ? 'ok' : 'warn'} />
+            <Metric label="uptime" value={formatDuration(health.data?.uptime ?? 0)} />
+            <Metric label="mode" value="local mesh" />
+          </div>
+        </header>
+
+        {page === 'chat' && <ChatPage onSessionSelect={setSelectedSessionId} />}
+        {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} />}
+        {page === 'todos' && <TodosPage />}
+        {page === 'tasks' && <TasksPage onSelectSession={setSelectedSessionId} />}
+        {page === 'memory' && <MemoryPage />}
+        {page === 'providers' && <ProvidersPage />}
+        {page === 'skills' && <ReservedPage kind="Skills" icon={<BookOpen size={18} />} description="Read-only surface for reusable agent instruction bundles. API wiring is not present yet." fields={['name', 'category', 'run mode', 'source path/url', 'version hash', 'usage count', 'last used']} />}
+        {page === 'rules' && <ReservedPage kind="Rules" icon={<Shield size={18} />} description="Read-only policy view until rule storage and evaluation contracts are explicit." fields={['name', 'scope', 'severity', 'enforcement mode', 'status', 'last changed', 'attached sessions/tasks']} />}
+        {page === 'nodes' && <ReservedPage kind="Executor Nodes" icon={<Network size={18} />} description="Nodes means mesh executor nodes only. Provider routes are provider endpoints, not nodes." fields={['node id', 'host label', 'role', 'status', 'queue depth', 'active tasks', 'mesh links', 'last heartbeat']} />}
+        {page === 'logs' && <LogsPage />}
+        {page === 'settings' && <SettingsPage />}
+      </main>
+    </div>
+  );
+}
+
+function Metric({ label, value, tone }: { label: string; value: string; tone?: 'ok' | 'warn' }) {
+  return (
+    <div className={`metric ${tone ?? ''}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}

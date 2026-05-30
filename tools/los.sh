@@ -179,7 +179,7 @@ start_cmd() {
   echo "starting los gateway at $(server_url)"
   (
     cd "$ROOT"
-    pnpm --filter @los/gateway dev
+    exec nohup pnpm --filter @los/gateway exec tsx src/server.ts
   ) >"$LOG_FILE" 2>&1 &
   pid="$!"
   write_pid_file "$pid"

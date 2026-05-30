@@ -17,6 +17,7 @@
 
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
+import { resolveModelProfile, type ModelProfile } from '../model-profiles.js';
 
 const log = getLogger('agent');
 
@@ -58,6 +59,7 @@ export interface ChatOptions {
 
 export interface Provider {
   name: string;
+  profile: ModelProfile;
   chat(messages: Message[], tools?: ToolDef[], options?: ChatOptions): Promise<ProviderResponse>;
 }
 
@@ -128,15 +130,16 @@ function repairJson(content: string): string | null {
 interface OpenAIConfig {
   name: string;
   apiKey: string;
-  baseUrl: string;
-  model: string;
+  profile: ModelProfile;
 }
 
 function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
-  const { name, apiKey, baseUrl, model } = cfg;
+  const { name, apiKey, profile } = cfg;
+  const { baseUrl, model } = profile;
 
   return {
     name,
+    profile,
 
     async chat(messages: Message[], tools?: ToolDef[], options: ChatOptions = {}): Promise<ProviderResponse> {
       const body: Record<string, unknown> = {
@@ -220,8 +223,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
 interface AnthropicConfig {
   name: string;
   apiKey: string;
-  baseUrl: string;
-  model: string;
+  profile: ModelProfile;
 }
 
 /**
@@ -232,12 +234,14 @@ interface AnthropicConfig {
  * From lsclaw's `callAnthropic()` and pi's `streamAnthropic()`.
  */
 function createAnthropicProvider(cfg: AnthropicConfig): Provider {
-  const { name, apiKey, baseUrl, model } = cfg;
+  const { name, apiKey, profile } = cfg;
+  const { baseUrl, model } = profile;
   const API_VERSION = '2023-06-01';
   const MAX_TOKENS = 8192;
 
   return {
     name,
+    profile,
 
     async chat(messages: Message[], tools?: ToolDef[], options: ChatOptions = {}): Promise<ProviderResponse> {
       // Convert OpenAI-format messages → Anthropic format
@@ -362,56 +366,29 @@ function createAnthropicProvider(cfg: AnthropicConfig): Provider {
 
 // ── Provider Registry ────────────────────────────────────
 
-const PROVIDER_PROTOCOLS: Record<string, 'openai' | 'anthropic'> = {
-  deepseek: 'openai',
-  openai: 'openai',
-  groq: 'openai',
-  together: 'openai',
-  openrouter: 'openai',
-  moonshot: 'openai',
-  zhipu: 'openai',
-  qwen: 'openai',
-  ollama: 'openai',
-  lmstudio: 'openai',
-  vllm: 'openai',
-  anthropic: 'anthropic',
-  claude: 'anthropic',
-  minimax: 'anthropic',
-};
-
-const OPENAI_COMPAT_DEFAULTS: Record<string, { baseUrl: string; model?: string }> = {
-  deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
-  openai: { baseUrl: 'https://api.openai.com/v1' },
-  groq: { baseUrl: 'https://api.groq.com/openai/v1' },
-  together: { baseUrl: 'https://api.together.xyz/v1' },
-  openrouter: { baseUrl: 'https://openrouter.ai/api/v1' },
-  moonshot: { baseUrl: 'https://api.moonshot.cn/v1' },
-  zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
-  qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-};
-
 export function createProvider(name?: string): Provider {
   const config = getConfig();
   const providerName = name ?? config.agent.defaultProvider;
 
   const p = getProviderConfig(providerName);
-  const protocol = PROVIDER_PROTOCOLS[providerName] ?? 'openai';
+  const profile = resolveModelProfile(providerName, {
+    baseUrl: p.baseUrl,
+    model: p.model,
+    defaultModel: config.agent.defaultModel,
+  });
 
-  if (protocol === 'anthropic') {
+  if (profile.protocol === 'anthropic') {
     return createAnthropicProvider({
       name: providerName,
       apiKey: p.apiKey!,
-      baseUrl: p.baseUrl ?? 'https://api.anthropic.com',
-      model: p.model ?? config.agent.defaultModel,
+      profile,
     });
   }
 
-  const defaults = OPENAI_COMPAT_DEFAULTS[providerName] ?? { baseUrl: 'https://api.openai.com/v1' };
   return createOpenAICompatProvider({
     name: providerName,
     apiKey: p.apiKey!,
-    baseUrl: p.baseUrl ?? defaults.baseUrl,
-    model: p.model ?? defaults.model ?? config.agent.defaultModel,
+    profile,
   });
 }
 
@@ -419,22 +396,30 @@ export function createProvider(name?: string): Provider {
 
 export function createDeepSeekProvider(): Provider {
   const p = getProviderConfig('deepseek');
+  const profile = resolveModelProfile('deepseek', {
+    baseUrl: p.baseUrl,
+    model: p.model,
+    defaultModel: getConfig().agent.defaultModel,
+  });
   return createOpenAICompatProvider({
     name: 'deepseek',
     apiKey: p.apiKey!,
-    baseUrl: p.baseUrl ?? 'https://api.deepseek.com',
-    model: p.model ?? getConfig().agent.defaultModel,
+    profile,
   });
 }
 
 export function createOpenAIProvider(): Provider | null {
   try {
     const p = getProviderConfig('openai');
+    const profile = resolveModelProfile('openai', {
+      baseUrl: p.baseUrl,
+      model: p.model,
+      defaultModel: getConfig().agent.defaultModel,
+    });
     return createOpenAICompatProvider({
       name: 'openai',
       apiKey: p.apiKey!,
-      baseUrl: p.baseUrl ?? 'https://api.openai.com/v1',
-      model: p.model ?? getConfig().agent.defaultModel,
+      profile,
     });
   } catch { return null; }
 }

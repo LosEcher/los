@@ -18,7 +18,7 @@ test('read-only tool mode excludes write and shell tools', async () => {
     const registry = createToolRegistry({ allowedTools: READ_ONLY_BUILTIN_TOOLS });
     registerBuiltinTools(registry, { workspaceRoot });
 
-    assert.deepEqual(registry.list().sort(), ['list_directory', 'read_file']);
+    assert.deepEqual(registry.list().sort(), ['list_directory', 'read_file', 'todo_list']);
 
     const readResult = await registry.execute({
       name: 'read_file',
@@ -40,6 +40,13 @@ test('read-only tool mode excludes write and shell tools', async () => {
     });
     assert.equal(shellResult.content, '');
     assert.equal(shellResult.error, 'Tool not allowed: run_shell');
+
+    const todoWriteResult = await registry.execute({
+      name: 'todo_create',
+      arguments: { title: 'should not write' },
+    });
+    assert.equal(todoWriteResult.content, '');
+    assert.equal(todoWriteResult.error, 'Tool not allowed: todo_create');
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
