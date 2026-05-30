@@ -1,58 +1,37 @@
-# Executor — Go Agent for Mesh Nodes
+# Executor Node
 
-The executor is extracted from `vpsagentweb/apps/agent/` (a production-verified Go agent).
+`@los/executor` is a real los node process. It runs the agent loop outside the
+gateway process, heartbeats into PostgreSQL, and renews task leases while it
+executes assigned work.
 
-## What it does
+## Run
 
-- Connects to the Gateway via WebSocket
-- Executes shell commands on the node
-- Reports health (CPU, memory, disk)
-- Supports sandboxing: seccomp BPF, rlimit, WASM wazero, Docker
+```bash
+EXECUTOR_PORT=8090 \
+EXECUTOR_NODE_ID=local-node-1 \
+EXECUTOR_NODE_URL=http://127.0.0.1:8090 \
+pnpm --filter @los/executor dev
+```
 
-## How to reuse
+Point the gateway at the node:
 
-The vpsagentweb agent is already working. To integrate:
+```bash
+EXECUTOR_ENABLED=true
+EXECUTOR_MESH_NODES=http://127.0.0.1:8090
+```
 
-1. **Copy the agent source**:
-   ```bash
-   cp -r ../vpsagentweb/apps/agent/cmd/ cmd/agent/
-   cp -r ../vpsagentweb/apps/agent/internal/ internal/
-   cp ../vpsagentweb/apps/agent/go.mod go.mod
-   cp ../vpsagentweb/apps/agent/go.sum go.sum
-   ```
+Optional shared-key auth:
 
-2. **Adjust the Gateway URL** in config to point to your los Gateway:
-   ```yaml
-   # agent-config.yaml
-   server_urls:
-     - http://your-gateway:8080
-   agent_key: your-shared-key
-   ```
+```bash
+EXECUTOR_AGENT_KEY=shared-secret
+```
 
-3. **Build and deploy to mesh nodes**:
-   ```bash
-   GOOS=linux GOARCH=amd64 go build -o agent cmd/agent/main.go
-   scp agent root@mesh-node:/usr/local/bin/los-agent
-   ssh root@mesh-node "los-agent -config /etc/los/agent-config.yaml"
-   ```
+## HTTP Contract
 
-4. **Enable executor in los Gateway** (in .env):
-   ```env
-   EXECUTOR_ENABLED=true
-   EXECUTOR_AGENT_KEY=your-shared-key
-   EXECUTOR_MESH_NODES=node1:8080,node2:8080
-   ```
+- `GET /health` returns node identity and liveness.
+- `POST /v1/tasks/run-agent` runs one assigned agent task and returns the
+  persisted session events plus the final `AgentResult`.
 
-## Current status
-
-The Go agent from vpsagentweb supports:
-- ✅ SSH execution with tmux
-- ✅ WebSocket heartbeat + reconnection
-- ✅ seccomp BPF sandbox (90 syscall whitelist)
-- ✅ rlimit (RLIMIT_AS/NOFILE/NPROC)
-- ✅ WASM wazero sandbox
-- ✅ Docker container isolation
-- ✅ Multi-upstream failover
-- ✅ Health sampling (CPU, memory, disk via /proc)
-
-For MVP, copy directly and configure the Gateway URL.
+The gateway remains responsible for creating and completing `task_runs`. The
+executor owns node heartbeat and per-task lease renewal while the task is
+running.
