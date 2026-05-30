@@ -1,0 +1,358 @@
+/**
+ * @los/agent/session-events — Internal append-only session event ledger.
+ *
+ * Stores raw execution evidence for los-owned runs:
+ * - user/model/tool transitions
+ * - cache/model/tool metadata
+ * - compact projections for observability
+ *
+ * This is the durable base layer for later JS/SQL query surfaces.
+ */
+
+import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
+
+const log = getLogger('agent');
+
+export interface SessionEventUsage {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  totalTokens: number;
+}
+
+export interface SessionEventRecord {
+  id: number;
+  sessionId: string;
+  turn: number;
+  type: string;
+  source: string;
+  model?: string;
+  toolName?: string;
+  cacheKey?: string;
+  cacheHit?: boolean;
+  usage?: SessionEventUsage;
+  parentEventId?: number;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SessionEventWrite {
+  sessionId: string;
+  turn?: number;
+  type: string;
+  source?: string;
+  model?: string;
+  toolName?: string;
+  cacheKey?: string;
+  cacheHit?: boolean;
+  usage?: Partial<SessionEventUsage>;
+  parentEventId?: number;
+  payload?: Record<string, unknown>;
+}
+
+export interface SessionObservability {
+  sessionId: string;
+  eventCount: number;
+  turnCount: number;
+  firstEventAt: string | null;
+  lastEventAt: string | null;
+  totalUsage: SessionEventUsage;
+  cache: {
+    status: 'observed' | 'reserved';
+    eventCount: number;
+    hitCount: number;
+    missCount: number;
+    hitRate: number;
+    keys: string[];
+  };
+  tools: {
+    status: 'observed' | 'reserved';
+    count: number;
+    names: string[];
+  };
+  models: {
+    status: 'observed' | 'reserved';
+    count: number;
+    names: string[];
+  };
+  projections: {
+    externalSources: { status: 'reserved'; adapters: string[] };
+    cacheArtifacts: { status: 'reserved'; notes: string };
+    modelPolicy: { status: 'reserved'; notes: string };
+    toolPolicy: { status: 'reserved'; notes: string };
+  };
+}
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS session_events (
+  id BIGSERIAL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  turn INTEGER NOT NULL DEFAULT 0,
+  type TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'los',
+  model TEXT,
+  tool_name TEXT,
+  cache_key TEXT,
+  cache_hit BOOLEAN,
+  usage_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  parent_event_id BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_session_turn ON session_events(session_id, turn, id);
+CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(type);
+CREATE INDEX IF NOT EXISTS idx_session_events_source ON session_events(source);
+CREATE INDEX IF NOT EXISTS idx_session_events_model ON session_events(model);
+CREATE INDEX IF NOT EXISTS idx_session_events_tool_name ON session_events(tool_name);
+CREATE INDEX IF NOT EXISTS idx_session_events_cache_key ON session_events(cache_key);
+CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at DESC);
+`;
+
+let _initialized = false;
+
+export async function ensureSessionEventStore(): Promise<void> {
+  if (_initialized) return;
+  const db = getDb();
+  await db.exec(SCHEMA);
+  _initialized = true;
+}
+
+export async function appendSessionEvent(input: SessionEventWrite): Promise<SessionEventRecord> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<SessionEventRow>(
+    `
+    INSERT INTO session_events (
+      session_id, turn, type, source, model, tool_name, cache_key, cache_hit,
+      usage_json, payload_json, parent_event_id
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11)
+    RETURNING *
+  `,
+    [
+      input.sessionId,
+      input.turn ?? 0,
+      input.type,
+      input.source ?? 'los',
+      input.model ?? null,
+      input.toolName ?? null,
+      input.cacheKey ?? null,
+      input.cacheHit ?? null,
+      JSON.stringify(normalizeUsage(input.usage)),
+      JSON.stringify(redactValue(input.payload ?? {})),
+      input.parentEventId ?? null,
+    ],
+  );
+  const row = rows.rows[0];
+  if (!row) {
+    throw new Error('Failed to append session event');
+  }
+  return rowToSessionEvent(row);
+}
+
+export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<SessionEventRecord[]> {
+  const out: SessionEventRecord[] = [];
+  for (const input of inputs) {
+    out.push(await appendSessionEvent(input));
+  }
+  return out;
+}
+
+export async function listSessionEvents(sessionId: string, limit = 200): Promise<SessionEventRecord[]> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<SessionEventRow>(
+    'SELECT * FROM session_events WHERE session_id = $1 ORDER BY id ASC LIMIT $2',
+    [sessionId, limit],
+  );
+  return rows.rows.map(rowToSessionEvent);
+}
+
+export async function getSessionObservability(sessionId: string): Promise<SessionObservability> {
+  const events = await listSessionEvents(sessionId, 10000);
+  return projectSessionObservability(sessionId, events);
+}
+
+export function projectSessionObservability(
+  sessionId: string,
+  events: SessionEventRecord[],
+): SessionObservability {
+  const toolNames = new Set<string>();
+  const modelNames = new Set<string>();
+  const cacheKeys = new Set<string>();
+  const turnSet = new Set<number>();
+  const usage = emptyUsage();
+  let firstEventAt: string | null = null;
+  let lastEventAt: string | null = null;
+  let cacheEventCount = 0;
+  let cacheHitCount = 0;
+  let cacheMissCount = 0;
+
+  for (const event of events) {
+    if (event.turn > 0) turnSet.add(event.turn);
+    if (firstEventAt === null || event.createdAt < firstEventAt) firstEventAt = event.createdAt;
+    if (lastEventAt === null || event.createdAt > lastEventAt) lastEventAt = event.createdAt;
+    if (event.model) modelNames.add(event.model);
+    if (event.toolName) toolNames.add(event.toolName);
+    if (event.cacheKey) cacheKeys.add(event.cacheKey);
+
+    if (event.type === 'model.response' || event.type === 'model.turn.started') {
+      if (event.usage) {
+        usage.promptTokens += event.usage.promptTokens ?? 0;
+        usage.completionTokens += event.usage.completionTokens ?? 0;
+        usage.cacheHitTokens += event.usage.cacheHitTokens ?? 0;
+        usage.cacheMissTokens += event.usage.cacheMissTokens ?? 0;
+        usage.totalTokens += event.usage.totalTokens ?? 0;
+      }
+      if (event.type === 'model.response') {
+        if (event.cacheKey) cacheKeys.add(event.cacheKey);
+      }
+    }
+    if (event.cacheKey) {
+      cacheEventCount += 1;
+      if (event.cacheHit === true) cacheHitCount += 1;
+      if (event.cacheHit === false) cacheMissCount += 1;
+    }
+  }
+
+  const cacheObserved = cacheEventCount > 0 || usage.cacheHitTokens > 0 || usage.cacheMissTokens > 0;
+  return {
+    sessionId,
+    eventCount: events.length,
+    turnCount: turnSet.size,
+    firstEventAt,
+    lastEventAt,
+    totalUsage: usage,
+    cache: {
+      status: cacheObserved ? 'observed' : 'reserved',
+      eventCount: cacheEventCount,
+      hitCount: cacheHitCount,
+      missCount: cacheMissCount,
+      hitRate: cacheHitCount + cacheMissCount > 0 ? cacheHitCount / (cacheHitCount + cacheMissCount) : 0,
+      keys: [...cacheKeys].sort(),
+    },
+    tools: {
+      status: toolNames.size > 0 ? 'observed' : 'reserved',
+      count: toolNames.size,
+      names: [...toolNames].sort(),
+    },
+    models: {
+      status: modelNames.size > 0 ? 'observed' : 'reserved',
+      count: modelNames.size,
+      names: [...modelNames].sort(),
+    },
+    projections: {
+      externalSources: {
+        status: 'reserved',
+        adapters: ['codex-jsonl', 'claude-jsonl', 'other-jsonl'],
+      },
+      cacheArtifacts: {
+        status: 'reserved',
+        notes: 'cache keys and hit/miss counters are recorded now; blob/cache artifact materialization stays for a later adapter layer.',
+      },
+      modelPolicy: {
+        status: 'reserved',
+        notes: 'model routing and model-specific optimization hooks are surfaced as event metadata for later policy projection.',
+      },
+      toolPolicy: {
+        status: 'reserved',
+        notes: 'tool selection, tool names, and tool result summaries are preserved for later ranking and audit layers.',
+      },
+    },
+  };
+}
+
+type SessionEventRow = {
+  id: number | string;
+  session_id: string;
+  turn: number | string;
+  type: string;
+  source: string;
+  model: string | null;
+  tool_name: string | null;
+  cache_key: string | null;
+  cache_hit: boolean | null;
+  usage_json: unknown;
+  payload_json: unknown;
+  parent_event_id: number | string | null;
+  created_at: Date | string;
+};
+
+function rowToSessionEvent(row: SessionEventRow): SessionEventRecord {
+  return {
+    id: Number(row.id),
+    sessionId: row.session_id,
+    turn: Number(row.turn),
+    type: row.type,
+    source: row.source,
+    model: row.model ?? undefined,
+    toolName: row.tool_name ?? undefined,
+    cacheKey: row.cache_key ?? undefined,
+    cacheHit: row.cache_hit ?? undefined,
+    usage: normalizeUsage(row.usage_json),
+    parentEventId: row.parent_event_id == null ? undefined : Number(row.parent_event_id),
+    payload: normalizeJsonObject(row.payload_json),
+    createdAt: toIsoString(row.created_at),
+  };
+}
+
+function normalizeUsage(value: unknown): SessionEventUsage {
+  const src = normalizeJsonObject(value);
+  return {
+    promptTokens: Number(src.promptTokens ?? src.prompt_tokens ?? 0),
+    completionTokens: Number(src.completionTokens ?? src.completion_tokens ?? 0),
+    cacheHitTokens: Number(src.cacheHitTokens ?? src.cache_hit_tokens ?? 0),
+    cacheMissTokens: Number(src.cacheMissTokens ?? src.cache_miss_tokens ?? 0),
+    totalTokens: Number(src.totalTokens ?? src.total_tokens ?? 0),
+  };
+}
+
+function normalizeJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function emptyUsage(): SessionEventUsage {
+  return {
+    promptTokens: 0,
+    completionTokens: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function toIsoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+const SECRET_KEY_RE = /(secret|token|password|passphrase|api[-_]?key|authorization|cookie|credential|passwd|pwd)/i;
+
+function redactValue(value: unknown, key: string | null = null): unknown {
+  if (Array.isArray(value)) return value.map(item => redactValue(item));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [childKey, childValue] of Object.entries(value)) {
+      out[childKey] = redactValue(childValue, childKey);
+    }
+    return out;
+  }
+  if (typeof value === 'string') {
+    if ((key && SECRET_KEY_RE.test(key)) || /^Bearer\s+/i.test(value)) return '[redacted]';
+  }
+  return value;
+}

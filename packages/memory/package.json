@@ -1,0 +1,21 @@
+{
+  "name": "@los/memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "node --test --experimental-test-coverage src/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@los/infra": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
