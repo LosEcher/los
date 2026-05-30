@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { compatCommand } from './compat.js';
+import { resolveClientPath } from './client-path.js';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonRecord = Record<string, unknown>;
@@ -65,11 +66,12 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
   const sessionId = stringFlag(parsed, 'session')
     ?? stringFlag(parsed, 'resume')
     ?? stringFlag(parsed, 's');
+  const workspaceRoot = stringFlag(parsed, 'workspace-root') ?? stringFlag(parsed, 'workspace') ?? stringFlag(parsed, 'w');
   const payload: JsonRecord = {
     prompt,
     provider: stringFlag(parsed, 'provider') ?? stringFlag(parsed, 'p'),
     model: stringFlag(parsed, 'model'),
-    workspaceRoot: stringFlag(parsed, 'workspace-root') ?? stringFlag(parsed, 'workspace') ?? stringFlag(parsed, 'w'),
+    workspaceRoot: workspaceRoot ? resolveClientPath(workspaceRoot) : undefined,
     toolMode: stringFlag(parsed, 'tool-mode') ?? 'project-write',
     maxLoops: numberFlag(parsed, 'max-loops'),
     timeoutMs: numberFlag(parsed, 'timeout-ms'),

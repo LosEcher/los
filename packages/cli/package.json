@@ -10,7 +10,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc && chmod +x dist/index.js",
     "check": "tsc --noEmit",
-    "test": "node --test --experimental-test-coverage src/*.test.ts",
+    "test": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {

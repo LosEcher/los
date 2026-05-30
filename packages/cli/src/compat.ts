@@ -7,6 +7,7 @@ import {
   type CompatibilityRunSummary,
   type CompatibilitySseEvent,
 } from '@los/agent/compat-harness';
+import { resolveClientPath } from './client-path.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -34,10 +35,11 @@ export async function compatCommand(globalArgs: string[], argv: string[]): Promi
   ];
   const targets = parseCompatibilityTargets(targetValues);
   const probes = selectCompatibilityProbes(probeValues);
+  const workspaceRoot = stringFlag(parsed, 'workspace-root') ?? stringFlag(parsed, 'workspace') ?? stringFlag(parsed, 'w');
   const specs = createCompatibilityRunSpecs({
     targets,
     probes,
-    workspaceRoot: stringFlag(parsed, 'workspace-root') ?? stringFlag(parsed, 'workspace') ?? stringFlag(parsed, 'w'),
+    workspaceRoot: workspaceRoot ? resolveClientPath(workspaceRoot) : undefined,
     tracePrefix: stringFlag(parsed, 'trace-prefix'),
     dedupePrefix: stringFlag(parsed, 'dedupe-prefix'),
     maxLoops: numberFlag(parsed, 'max-loops'),
@@ -95,7 +97,29 @@ async function executeCompatibilitySpec(
     events.push({ event, data });
   });
 
-  return summarizeCompatibilityEvents(spec, events);
+  const liveSummary = summarizeCompatibilityEvents(spec, events);
+  if (!liveSummary.sessionId) return liveSummary;
+
+  const ledgerEvents = await fetchSessionEvents(gateway, liveSummary.sessionId);
+  return ledgerEvents.length > 0
+    ? summarizeCompatibilityEvents(spec, ledgerEvents)
+    : liveSummary;
+}
+
+async function fetchSessionEvents(gateway: string, sessionId: string): Promise<CompatibilitySseEvent[]> {
+  const response = await fetch(`${gateway}/sessions/${encodeURIComponent(sessionId)}/events?limit=1000`);
+  if (!response.ok) return [];
+
+  const body = await response.json() as unknown;
+  const record = asRecord(body);
+  const events = Array.isArray(record.events) ? record.events : [];
+  return events
+    .map(item => asRecord(item))
+    .filter(item => typeof item.type === 'string')
+    .map(item => ({
+      event: String(item.type),
+      data: item,
+    }));
 }
 
 function renderCompatibilityPlan(specs: CompatibilityRunSpec[], json: boolean): void {
