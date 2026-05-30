@@ -9,11 +9,11 @@ import { getLogger } from '@los/infra/logger';
 import type { ToolDef } from '../providers/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { safeWorkspacePath } from './path-safety.js';
 import { registerPatchTools } from './patch-tools.js';
 import { registerTodoTools } from './todo-tools.js';
+import { runSandboxedShell } from './shell-sandbox.js';
 
 const log = getLogger('agent');
 
@@ -269,18 +269,14 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
     const requestedTimeout = Number(args.timeoutSec ?? 30);
     const timeout = Math.max(1, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 30, 300));
 
-    try {
-      const stdout = execSync(command, {
-        cwd,
-        timeout: timeout * 1000,
-        maxBuffer: 1024 * 1024,
-        encoding: 'utf-8',
-        shell: '/bin/bash',
-      });
-      return { content: stdout };
-    } catch (err: any) {
-      return { content: err.stdout ?? '', error: err.stderr ?? err.message };
-    }
+    const result = await runSandboxedShell({
+      command,
+      cwd,
+      timeoutMs: timeout * 1000,
+    });
+    return result.error
+      ? { content: result.content, error: result.error }
+      : { content: result.content };
   }, {
     type: 'function',
     function: {

@@ -25,6 +25,12 @@ export interface SessionEventUsage {
 export interface SessionEventRecord {
   id: number;
   sessionId: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
   turn: number;
   type: string;
   source: string;
@@ -40,6 +46,12 @@ export interface SessionEventRecord {
 
 export interface SessionEventWrite {
   sessionId: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
   turn?: number;
   type: string;
   source?: string;
@@ -89,6 +101,12 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS session_events (
   id BIGSERIAL PRIMARY KEY,
   session_id TEXT NOT NULL,
+  tenant_id TEXT,
+  project_id TEXT,
+  user_id TEXT,
+  node_id TEXT,
+  request_id TEXT,
+  trace_id TEXT,
   turn INTEGER NOT NULL DEFAULT 0,
   type TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'los',
@@ -102,7 +120,18 @@ CREATE TABLE IF NOT EXISTS session_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS node_id TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS request_id TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS trace_id TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_tenant_project ON session_events(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_node_id ON session_events(node_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_request_id ON session_events(request_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_trace_id ON session_events(trace_id);
 CREATE INDEX IF NOT EXISTS idx_session_events_session_turn ON session_events(session_id, turn, id);
 CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(type);
 CREATE INDEX IF NOT EXISTS idx_session_events_source ON session_events(source);
@@ -127,14 +156,21 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
   const rows = await db.query<SessionEventRow>(
     `
     INSERT INTO session_events (
-      session_id, turn, type, source, model, tool_name, cache_key, cache_hit,
+      session_id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
+      turn, type, source, model, tool_name, cache_key, cache_hit,
       usage_json, payload_json, parent_event_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17)
     RETURNING *
   `,
     [
       input.sessionId,
+      input.tenantId ?? null,
+      input.projectId ?? null,
+      input.userId ?? null,
+      input.nodeId ?? null,
+      input.requestId ?? null,
+      input.traceId ?? null,
       input.turn ?? 0,
       input.type,
       input.source ?? 'los',
@@ -170,6 +206,22 @@ export async function listSessionEvents(sessionId: string, limit = 200): Promise
     [sessionId, limit],
   );
   return rows.rows.map(rowToSessionEvent);
+}
+
+export async function listRecentSessionEvents(sessionId: string, limit = 50): Promise<SessionEventRecord[]> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<SessionEventRow>(
+    `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1
+    ORDER BY id DESC
+    LIMIT $2
+  `,
+    [sessionId, limit],
+  );
+  return rows.rows.reverse().map(rowToSessionEvent);
 }
 
 export async function getSessionObservability(sessionId: string): Promise<SessionObservability> {
@@ -269,6 +321,12 @@ export function projectSessionObservability(
 type SessionEventRow = {
   id: number | string;
   session_id: string;
+  tenant_id: string | null;
+  project_id: string | null;
+  user_id: string | null;
+  node_id: string | null;
+  request_id: string | null;
+  trace_id: string | null;
   turn: number | string;
   type: string;
   source: string;
@@ -286,6 +344,12 @@ function rowToSessionEvent(row: SessionEventRow): SessionEventRecord {
   return {
     id: Number(row.id),
     sessionId: row.session_id,
+    tenantId: row.tenant_id ?? undefined,
+    projectId: row.project_id ?? undefined,
+    userId: row.user_id ?? undefined,
+    nodeId: row.node_id ?? undefined,
+    requestId: row.request_id ?? undefined,
+    traceId: row.trace_id ?? undefined,
     turn: Number(row.turn),
     type: row.type,
     source: row.source,

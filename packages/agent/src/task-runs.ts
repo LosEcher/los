@@ -14,6 +14,11 @@ export interface TaskRunRecord {
   sessionId: string;
   traceId: string;
   dedupeKey?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
   workspaceRoot: string;
   toolMode: string;
   provider?: string;
@@ -26,6 +31,8 @@ export interface TaskRunRecord {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  heartbeatAt?: string;
+  leaseExpiresAt?: string;
 }
 
 export interface CreateTaskRunInput {
@@ -33,6 +40,11 @@ export interface CreateTaskRunInput {
   sessionId: string;
   traceId?: string;
   dedupeKey?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
   workspaceRoot: string;
   toolMode: string;
   provider?: string;
@@ -46,6 +58,9 @@ export interface CreateTaskRunInput {
 export interface UpdateTaskRunInput {
   status?: TaskRunStatus;
   metadata?: Record<string, unknown>;
+  nodeId?: string | null;
+  heartbeatAt?: Date | string | null;
+  leaseExpiresAt?: Date | string | null;
 }
 
 const SCHEMA = `
@@ -54,6 +69,11 @@ CREATE TABLE IF NOT EXISTS task_runs (
   session_id TEXT NOT NULL,
   trace_id TEXT,
   dedupe_key TEXT,
+  tenant_id TEXT,
+  project_id TEXT,
+  user_id TEXT,
+  node_id TEXT,
+  request_id TEXT,
   workspace_root TEXT NOT NULL,
   tool_mode TEXT NOT NULL,
   provider TEXT,
@@ -65,19 +85,32 @@ CREATE TABLE IF NOT EXISTS task_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_at TIMESTAMPTZ,
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  heartbeat_at TIMESTAMPTZ,
+  lease_expires_at TIMESTAMPTZ
 );
 
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS trace_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS node_id TEXT;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS request_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_task_runs_session_id ON task_runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_trace_id ON task_runs(trace_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_dedupe_key ON task_runs(dedupe_key);
+CREATE INDEX IF NOT EXISTS idx_task_runs_tenant_project ON task_runs(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_task_runs_node_id ON task_runs(node_id);
+CREATE INDEX IF NOT EXISTS idx_task_runs_request_id ON task_runs(request_id);
+CREATE INDEX IF NOT EXISTS idx_task_runs_lease ON task_runs(status, lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_active_dedupe
@@ -100,11 +133,12 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
   const rows = await db.query<TaskRunRow>(
     `
     INSERT INTO task_runs (
-      id, session_id, trace_id, dedupe_key, workspace_root, tool_mode, provider, model,
+      id, session_id, trace_id, dedupe_key, tenant_id, project_id, user_id, node_id, request_id,
+      workspace_root, tool_mode, provider, model,
       status,
       attempt, prompt_preview, metadata_json, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, now())
     RETURNING *
   `,
     [
@@ -112,6 +146,11 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
       input.sessionId,
       input.traceId ?? input.id,
       input.dedupeKey ?? null,
+      input.tenantId ?? null,
+      input.projectId ?? null,
+      input.userId ?? null,
+      input.nodeId ?? null,
+      input.requestId ?? null,
       input.workspaceRoot,
       input.toolMode,
       input.provider ?? null,
@@ -133,12 +172,21 @@ export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Pr
 
   const status = updates.status ?? existing.status;
   const metadata = updates.metadata ?? existing.metadata;
+  const nodeId = updates.nodeId === undefined ? null : updates.nodeId;
+  const heartbeatAt = updates.heartbeatAt === undefined ? null : updates.heartbeatAt;
+  const leaseExpiresAt = updates.leaseExpiresAt === undefined ? null : updates.leaseExpiresAt;
 
   const rows = await db.query<TaskRunRow>(
     `
     UPDATE task_runs
     SET status = $2,
         metadata_json = $3::jsonb,
+        node_id = COALESCE($4, node_id),
+        heartbeat_at = COALESCE($5::timestamptz, heartbeat_at),
+        lease_expires_at = CASE
+          WHEN $6::timestamptz IS NULL AND $2 IN ('succeeded', 'failed', 'cancelled') THEN NULL
+          ELSE COALESCE($6::timestamptz, lease_expires_at)
+        END,
         updated_at = now(),
         started_at = CASE
           WHEN $2 = 'running' AND started_at IS NULL THEN now()
@@ -151,9 +199,53 @@ export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Pr
     WHERE id = $1
     RETURNING *
   `,
-    [id, status, JSON.stringify(metadata)],
+    [id, status, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt],
   );
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
+}
+
+export async function heartbeatTaskRun(
+  id: string,
+  input: { nodeId?: string; leaseMs?: number } = {},
+): Promise<TaskRunRecord | null> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const leaseMs = normalizeLeaseMs(input.leaseMs);
+  const rows = await db.query<TaskRunRow>(
+    `
+    UPDATE task_runs
+    SET node_id = COALESCE($2, node_id),
+        heartbeat_at = now(),
+        lease_expires_at = now() + ($3::text || ' milliseconds')::interval,
+        updated_at = now()
+    WHERE id = $1
+      AND status IN ('queued', 'running')
+    RETURNING *
+  `,
+    [id, input.nodeId ?? null, leaseMs],
+  );
+  return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
+}
+
+export async function recoverExpiredTaskRuns(reason = 'lease_expired'): Promise<TaskRunRecord[]> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    `
+    UPDATE task_runs
+    SET status = 'failed',
+        metadata_json = metadata_json || $1::jsonb,
+        completed_at = now(),
+        lease_expires_at = NULL,
+        updated_at = now()
+    WHERE status IN ('queued', 'running')
+      AND lease_expires_at IS NOT NULL
+      AND lease_expires_at < now()
+    RETURNING *
+  `,
+    [JSON.stringify({ recoveryReason: reason })],
+  );
+  return rows.rows.map(rowToTaskRun);
 }
 
 export async function loadTaskRun(id: string): Promise<TaskRunRecord | null> {
@@ -193,11 +285,32 @@ export async function listTaskRuns(limit = 50): Promise<TaskRunRecord[]> {
   return rows.rows.map(rowToTaskRun);
 }
 
+export async function listTaskRunsForSession(sessionId: string, limit = 20): Promise<TaskRunRecord[]> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    `
+    SELECT *
+    FROM task_runs
+    WHERE session_id = $1
+    ORDER BY updated_at DESC
+    LIMIT $2
+  `,
+    [sessionId, limit],
+  );
+  return rows.rows.map(rowToTaskRun);
+}
+
 type TaskRunRow = {
   id: string;
   session_id: string;
   trace_id: string | null;
   dedupe_key: string | null;
+  tenant_id: string | null;
+  project_id: string | null;
+  user_id: string | null;
+  node_id: string | null;
+  request_id: string | null;
   workspace_root: string;
   tool_mode: string;
   provider: string | null;
@@ -210,6 +323,8 @@ type TaskRunRow = {
   updated_at: Date | string;
   started_at: Date | string | null;
   completed_at: Date | string | null;
+  heartbeat_at: Date | string | null;
+  lease_expires_at: Date | string | null;
 };
 
 function rowToTaskRun(row: TaskRunRow): TaskRunRecord {
@@ -218,6 +333,11 @@ function rowToTaskRun(row: TaskRunRow): TaskRunRecord {
     sessionId: row.session_id,
     traceId: row.trace_id ?? row.id,
     dedupeKey: row.dedupe_key ?? undefined,
+    tenantId: row.tenant_id ?? undefined,
+    projectId: row.project_id ?? undefined,
+    userId: row.user_id ?? undefined,
+    nodeId: row.node_id ?? undefined,
+    requestId: row.request_id ?? undefined,
     workspaceRoot: row.workspace_root,
     toolMode: row.tool_mode,
     provider: row.provider ?? undefined,
@@ -230,7 +350,15 @@ function rowToTaskRun(row: TaskRunRow): TaskRunRecord {
     updatedAt: toIsoString(row.updated_at),
     startedAt: row.started_at ? toIsoString(row.started_at) : undefined,
     completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
+    heartbeatAt: row.heartbeat_at ? toIsoString(row.heartbeat_at) : undefined,
+    leaseExpiresAt: row.lease_expires_at ? toIsoString(row.lease_expires_at) : undefined,
   };
+}
+
+function normalizeLeaseMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 30_000;
+  const int = Math.floor(value);
+  return Math.max(1_000, Math.min(int, 10 * 60_000));
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> {

@@ -68,8 +68,10 @@ export interface CompatibilityRunSummary {
 }
 
 export const DEFAULT_COMPATIBILITY_TARGETS: ProviderModelTarget[] = [
-  target('deepseek'),
-  target('openai'),
+  target('deepseek', 'deepseek-v4-flash'),
+  target('deepseek', 'deepseek-v4-pro'),
+  target('codex', 'gpt-5.5'),
+  target('codex', 'gpt-5.4'),
 ];
 
 export const DEFAULT_COMPATIBILITY_PROBES: CompatibilityProbe[] = [

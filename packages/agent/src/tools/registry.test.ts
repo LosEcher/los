@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -196,6 +196,35 @@ test('project-write mode exposes patch tools and applies unique replacements onl
     assert.match(duplicateResult.error ?? '', /search text is not unique/);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('all mode executes shell commands through the OS sandbox', { skip: !existsSync('/usr/bin/sandbox-exec') }, async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-shell-sandbox-'));
+  const outsidePath = join(tmpdir(), `los-agent-outside-${Date.now()}.txt`);
+  try {
+    const registry = createToolRegistry({
+      policy: {
+        maxRiskLevel: 'L2',
+        allowWrites: true,
+        sandboxAvailable: true,
+      },
+    });
+    registerBuiltinTools(registry, { workspaceRoot });
+
+    const shellResult = await registry.execute({
+      name: 'run_shell',
+      arguments: {
+        command: `echo ok > inside.txt; echo bad > ${outsidePath}`,
+      },
+    });
+
+    assert.match(shellResult.error ?? '', /Operation not permitted|Permission denied/);
+    assert.equal(readFileSync(join(workspaceRoot, 'inside.txt'), 'utf-8').trim(), 'ok');
+    assert.equal(existsSync(outsidePath), false);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+    rmSync(outsidePath, { force: true });
   }
 });
 

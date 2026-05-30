@@ -55,12 +55,27 @@ export interface ProviderResponse {
 
 export interface ChatOptions {
   signal?: AbortSignal;
+  onDelta?: (delta: ProviderDelta) => void | Promise<void>;
+}
+
+export interface ProviderDelta {
+  textDelta?: string;
+  reasoningDelta?: string;
+  model?: string;
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  object?: string;
+  ownedBy?: string;
+  raw?: Record<string, unknown>;
 }
 
 export interface Provider {
   name: string;
   profile: ModelProfile;
   chat(messages: Message[], tools?: ToolDef[], options?: ChatOptions): Promise<ProviderResponse>;
+  listModels?(options?: { signal?: AbortSignal }): Promise<ProviderModelInfo[]>;
 }
 
 export interface ToolDef {
@@ -150,17 +165,24 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
       const body: Record<string, unknown> = {
         model,
         messages,
-        stream: false,
+        stream: Boolean(options.onDelta),
       };
+      if (options.onDelta) {
+        body.stream_options = { include_usage: true };
+      }
 
       if (tools?.length) {
         body.tools = tools;
         body.tool_choice = 'auto';
       }
 
-      const chatUrl = baseUrl.endsWith('/v1') ? `${baseUrl}/chat/completions`
-        : baseUrl.endsWith('/') ? `${baseUrl}chat/completions`
-        : `${baseUrl}/v1/chat/completions`;
+      const chatUrl = profile.provider === 'deepseek'
+        ? buildProviderUrl(baseUrl, '/chat/completions')
+        : baseUrl.endsWith('/v1')
+          ? `${baseUrl}/chat/completions`
+          : baseUrl.endsWith('/')
+            ? `${baseUrl}chat/completions`
+            : `${baseUrl}/v1/chat/completions`;
 
       const res = await fetch(chatUrl, {
         method: 'POST',
@@ -175,6 +197,10 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
       if (!res.ok) {
         const err = await res.text();
         throw new Error(`${name} API error ${res.status}: ${err.slice(0, 300)}`);
+      }
+
+      if (options.onDelta) {
+        return await readOpenAIStreamResponse(res, model, name, options.onDelta);
       }
 
       const data = await res.json() as any;
@@ -220,6 +246,166 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         model: data.model ?? model,
       };
     },
+
+    async listModels(options: { signal?: AbortSignal } = {}): Promise<ProviderModelInfo[]> {
+      const res = await fetch(
+        profile.provider === 'deepseek' ? buildProviderUrl(baseUrl, '/models') : buildOpenAICompatUrl(baseUrl, '/models'),
+        {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        signal: options.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`${name} models API error ${res.status}: ${err.slice(0, 300)}`);
+      }
+
+      const data = await res.json() as any;
+      const items: ProviderModelInfo[] = Array.isArray(data?.data)
+        ? data.data
+            .map((item: any): ProviderModelInfo | null => {
+              const id = typeof item?.id === 'string' ? item.id.trim() : '';
+              if (!id) return null;
+              return {
+                id,
+                object: typeof item?.object === 'string' ? item.object : undefined,
+                ownedBy: typeof item?.owned_by === 'string' ? item.owned_by : undefined,
+                raw: item && typeof item === 'object' ? item as Record<string, unknown> : undefined,
+              };
+            })
+            .filter((item: ProviderModelInfo | null): item is ProviderModelInfo => Boolean(item))
+        : [];
+      return items
+        .sort((a: ProviderModelInfo, b: ProviderModelInfo) => a.id.localeCompare(b.id));
+    },
+  };
+}
+
+function buildOpenAICompatUrl(baseUrl: string, path: string): string {
+  if (baseUrl.endsWith('/')) {
+    return `${baseUrl.slice(0, -1)}${path}`;
+  }
+  return `${baseUrl}${path}`;
+}
+
+function buildProviderUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+async function readOpenAIStreamResponse(
+  res: Response,
+  fallbackModel: string,
+  providerName: string,
+  onDelta: (delta: ProviderDelta) => void | Promise<void>,
+): Promise<ProviderResponse> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error(`${providerName} API returned no stream body`);
+
+  const decoder = new TextDecoder();
+  const toolCalls = new Map<number, ToolCall>();
+  let buffer = '';
+  let text = '';
+  let reasoningContent = '';
+  let responseModel = fallbackModel;
+  let usage: ProviderResponse['usage'] = { promptTokens: 0, completionTokens: 0 };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+      const parsed = drainSseBuffer(buffer);
+      buffer = parsed.rest;
+      for (const payload of parsed.payloads) {
+        if (payload === '[DONE]') continue;
+        const chunk = JSON.parse(payload);
+        responseModel = chunk.model ?? responseModel;
+        usage = normalizeOpenAIUsage(chunk.usage, usage);
+        const delta = chunk.choices?.[0]?.delta ?? {};
+        const textDelta = delta.content ?? '';
+        const reasoningDelta = delta.reasoning_content ?? '';
+        if (textDelta) {
+          text += textDelta;
+          await onDelta({ textDelta, model: responseModel });
+        }
+        if (reasoningDelta) {
+          reasoningContent += reasoningDelta;
+          await onDelta({ reasoningDelta, model: responseModel });
+        }
+        mergeToolCallDeltas(toolCalls, delta.tool_calls ?? []);
+      }
+    }
+    if (done) break;
+  }
+
+  return {
+    text,
+    toolCalls: [...toolCalls.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, toolCall]) => repairToolCallArguments(toolCall, providerName)),
+    reasoningContent: reasoningContent || undefined,
+    usage,
+    model: responseModel,
+  };
+}
+
+function drainSseBuffer(buffer: string): { payloads: string[]; rest: string } {
+  const parts = buffer.split(/\n\n|\r\n\r\n/);
+  const rest = parts.pop() ?? '';
+  const payloads = parts.flatMap((part) => {
+    const lines = part.split(/\r?\n/).filter(line => line.startsWith('data:'));
+    const payload = lines.map(line => line.slice(5).trimStart()).join('\n').trim();
+    return payload ? [payload] : [];
+  });
+  return { payloads, rest };
+}
+
+function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): void {
+  for (const delta of deltas) {
+    const index = Number.isInteger(delta.index) ? delta.index : toolCalls.size;
+    const existing = toolCalls.get(index) ?? {
+      id: delta.id ?? `call_${index}`,
+      type: 'function' as const,
+      function: { name: '', arguments: '' },
+    };
+    toolCalls.set(index, {
+      ...existing,
+      id: delta.id ?? existing.id,
+      type: 'function',
+      function: {
+        name: existing.function.name + (delta.function?.name ?? ''),
+        arguments: existing.function.arguments + (delta.function?.arguments ?? ''),
+      },
+    });
+  }
+}
+
+function repairToolCallArguments(toolCall: ToolCall, providerName: string): ToolCall {
+  try {
+    JSON.parse(toolCall.function.arguments);
+    return toolCall;
+  } catch {
+    const repaired = repairJson(toolCall.function.arguments);
+    if (repaired) {
+      log.debug(`[${providerName}] Repaired streamed tool call args for ${toolCall.function.name}`);
+      return { ...toolCall, function: { ...toolCall.function, arguments: repaired } };
+    }
+    log.warn(`[${providerName}] Could not repair streamed tool call args for ${toolCall.function.name}`);
+    return toolCall;
+  }
+}
+
+function normalizeOpenAIUsage(raw: any, fallback: ProviderResponse['usage']): ProviderResponse['usage'] {
+  if (!raw) return fallback;
+  return {
+    promptTokens: raw.prompt_tokens ?? raw.input_tokens ?? fallback.promptTokens,
+    completionTokens: raw.completion_tokens ?? raw.output_tokens ?? fallback.completionTokens,
+    cacheHitTokens: raw.prompt_cache_hit_tokens ?? raw.cache_read_input_tokens ?? fallback.cacheHitTokens ?? 0,
+    cacheMissTokens: raw.prompt_cache_miss_tokens ?? raw.cache_creation_input_tokens ?? fallback.cacheMissTokens ?? 0,
+    totalTokens: raw.total_tokens ?? fallback.totalTokens,
   };
 }
 

@@ -2,7 +2,7 @@
  * @los/agent — Public API.
  */
 
-export { runAgent, type AgentConfig, type AgentResult, type TurnSummary } from './loop.js';
+export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type TurnSummary } from './loop.js';
 export {
   cancelScheduledTask,
   runScheduledAgentTask,
@@ -11,7 +11,7 @@ export {
   type ScheduledTaskEvent,
   type ScheduledTaskEventType,
 } from './scheduler.js';
-export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions } from './providers/index.js';
+export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export {
   MODEL_PROFILES,
   resolveModelProfile,
@@ -65,18 +65,37 @@ export {
   createTaskRun,
   findActiveTaskRunByDedupeKey,
   updateTaskRun,
+  heartbeatTaskRun,
+  recoverExpiredTaskRuns,
   loadTaskRun,
   listTaskRuns,
+  listTaskRunsForSession,
   type CreateTaskRunInput,
   type TaskRunRecord,
   type TaskRunStatus,
   type UpdateTaskRunInput,
 } from './task-runs.js';
 export {
+  ensureExecutorNodeStore,
+  loadExecutorNode,
+  listExecutorNodes,
+  recordExecutorNodeProbe,
+  upsertExecutorNode,
+  upsertExecutorNodeHeartbeat,
+  type ExecutorNodeHeartbeatInput,
+  type ExecutorNodeConnectMode,
+  type ExecutorNodeKind,
+  type ExecutorNodeProbeInput,
+  type ExecutorNodeRecord,
+  type ExecutorNodeStatus,
+  type ExecutorNodeUpsertInput,
+} from './executor-nodes.js';
+export {
   ensureSessionEventStore,
   appendSessionEvent,
   appendSessionEvents,
   listSessionEvents,
+  listRecentSessionEvents,
   getSessionObservability,
   projectSessionObservability,
   type SessionEventRecord,

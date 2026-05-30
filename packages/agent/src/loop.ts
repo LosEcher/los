@@ -6,7 +6,7 @@
  */
 
 import { getLogger } from '@los/infra/logger';
-import { createProvider, type Provider, type Message, type ToolCall } from './providers/index.js';
+import { createProvider, type Provider, type Message, type ProviderDelta, type ToolCall } from './providers/index.js';
 import { summarizeModelProfile } from './model-profiles.js';
 import {
   createToolRegistry,
@@ -16,12 +16,11 @@ import {
 } from './tools/registry.js';
 import { createSpawnAgentRunner, registerSpawnAgentTool } from './tools/agent-tools.js';
 import {
-  appendSessionEvent,
-  ensureSessionEventStore,
   type SessionEventRecord,
   type SessionEventUsage,
   type SessionEventWrite,
 } from './session-events.js';
+import { createEventEmitter } from './event-emitter.js';
 
 const log = getLogger('agent');
 
@@ -35,6 +34,12 @@ export interface AgentConfig {
   maxLoops?: number;
   systemPrompt?: string;
   workspaceRoot?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
   toolMode?: 'all' | 'project-write' | 'read-only';
   allowedTools?: readonly string[];
   toolRetry?: {
@@ -46,6 +51,12 @@ export interface AgentConfig {
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void;
   onToolCall?: (tool: string, args: Record<string, unknown>) => void;
+  onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
+}
+
+export interface AgentModelDelta extends ProviderDelta {
+  turn: number;
+  provider: string;
 }
 
 export interface TurnSummary {
@@ -118,7 +129,7 @@ export async function runAgent(
 
   const toolDefs = tools.getDefinitions();
   const toolNames = tools.list();
-  const emitEvent = createEventEmitter(config.sessionId, config.onSessionEvent);
+  const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
 
   // Build initial messages
   const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages);
@@ -170,7 +181,14 @@ export async function runAgent(
 
     const modelStartedAt = Date.now();
     const res = await withAbort(
-      provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined, { signal }),
+      provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined, {
+        signal,
+        onDelta: config.onModelDelta
+          ? async (delta) => {
+              await config.onModelDelta?.({ ...delta, turn: i + 1, provider: provider.name });
+            }
+          : undefined,
+      }),
       signal,
     );
     const modelDurationMs = Date.now() - modelStartedAt;
@@ -363,7 +381,14 @@ export async function runAgent(
   });
 
   assertNotAborted(signal);
-  const finalRes = await withAbort(provider.chat(messages, undefined, { signal }), signal);
+  const finalRes = await withAbort(provider.chat(messages, undefined, {
+    signal,
+    onDelta: config.onModelDelta
+      ? async (delta) => {
+          await config.onModelDelta?.({ ...delta, turn: maxLoops + 1, provider: provider.name });
+        }
+      : undefined,
+  }), signal);
   totalPromptTokens += finalRes.usage.promptTokens;
   totalCompletionTokens += finalRes.usage.completionTokens;
 
@@ -386,28 +411,6 @@ export async function runAgent(
     loopCount: maxLoops + 1,
     totalTokens: { prompt: totalPromptTokens, completion: totalCompletionTokens },
     messages,
-  };
-}
-
-function createEventEmitter(
-  sessionId: string | undefined,
-  onSessionEvent: AgentConfig['onSessionEvent'],
-) {
-  return async (event: Omit<SessionEventWrite, 'sessionId'>): Promise<SessionEventRecord | null> => {
-    if (!sessionId) return null;
-    try {
-      await ensureSessionEventStore();
-      const written = await appendSessionEvent({ sessionId, ...event });
-      try {
-        await onSessionEvent?.(written);
-      } catch (err: any) {
-        log.warn(`Session event callback failed: ${err.message ?? String(err)}`);
-      }
-      return written;
-    } catch (err: any) {
-      log.warn(`Session event write failed: ${err.message ?? String(err)}`);
-      return null;
-    }
   };
 }
 

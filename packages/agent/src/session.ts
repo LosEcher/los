@@ -11,6 +11,12 @@ import type { TurnSummary } from './loop.js';
 
 export interface SessionRecord {
   id: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
   createdAt: string;
   updatedAt: string;
   messages: Message[];
@@ -21,12 +27,27 @@ export interface SessionRecord {
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
+  tenant_id TEXT,
+  project_id TEXT,
+  user_id TEXT,
+  node_id TEXT,
+  request_id TEXT,
+  trace_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   messages_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   turns_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS node_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS request_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS trace_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_sessions_tenant_project ON sessions(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_request_id ON sessions(request_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_trace_id ON sessions(trace_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
 `;
 
@@ -43,15 +64,30 @@ export async function saveSession(session: SessionRecord): Promise<void> {
   await ensureSessionStore();
   const db = getDb();
   await db.query(`
-    INSERT INTO sessions (id, messages_json, turns_json, metadata_json, updated_at)
-    VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, now())
+    INSERT INTO sessions (
+      id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
+      messages_json, turns_json, metadata_json, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
+      tenant_id = COALESCE(EXCLUDED.tenant_id, sessions.tenant_id),
+      project_id = COALESCE(EXCLUDED.project_id, sessions.project_id),
+      user_id = COALESCE(EXCLUDED.user_id, sessions.user_id),
+      node_id = COALESCE(EXCLUDED.node_id, sessions.node_id),
+      request_id = COALESCE(EXCLUDED.request_id, sessions.request_id),
+      trace_id = COALESCE(EXCLUDED.trace_id, sessions.trace_id),
       messages_json = EXCLUDED.messages_json,
       turns_json = EXCLUDED.turns_json,
       metadata_json = EXCLUDED.metadata_json,
       updated_at = now()
   `, [
     session.id,
+    session.tenantId ?? null,
+    session.projectId ?? null,
+    session.userId ?? null,
+    session.nodeId ?? null,
+    session.requestId ?? null,
+    session.traceId ?? null,
     JSON.stringify(session.messages),
     JSON.stringify(session.turns),
     JSON.stringify(session.metadata),
@@ -71,7 +107,7 @@ export async function listSessions(limit = 20): Promise<Pick<SessionRecord, 'id'
   await ensureSessionStore();
   const db = getDb();
   const rows = await db.query<SessionRow>(
-    'SELECT id, created_at, updated_at, metadata_json, messages_json, turns_json FROM sessions ORDER BY updated_at DESC LIMIT $1',
+    'SELECT * FROM sessions ORDER BY updated_at DESC LIMIT $1',
     [limit],
   );
   return rows.rows.map(row => ({
@@ -91,6 +127,12 @@ export async function deleteSession(id: string): Promise<boolean> {
 
 type SessionRow = {
   id: string;
+  tenant_id: string | null;
+  project_id: string | null;
+  user_id: string | null;
+  node_id: string | null;
+  request_id: string | null;
+  trace_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
   messages_json: unknown;
@@ -101,6 +143,12 @@ type SessionRow = {
 function rowToSession(row: SessionRow): SessionRecord {
   return {
     id: row.id,
+    tenantId: row.tenant_id ?? undefined,
+    projectId: row.project_id ?? undefined,
+    userId: row.user_id ?? undefined,
+    nodeId: row.node_id ?? undefined,
+    requestId: row.request_id ?? undefined,
+    traceId: row.trace_id ?? undefined,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
     messages: normalizeJsonArray(row.messages_json) as Message[],
