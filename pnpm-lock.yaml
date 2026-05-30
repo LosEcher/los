@@ -29,6 +29,10 @@ importers:
         version: 5.9.3
 
   packages/cli:
+    dependencies:
+      '@los/agent':
+        specifier: workspace:*
+        version: link:../agent
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

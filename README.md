@@ -26,8 +26,17 @@ Run the client CLI:
 
 ```bash
 pnpm run cli -- chat --provider deepseek "inspect the current workspace"
+pnpm run cli -- chat --provider deepseek --model deepseek-reasoner "inspect the current workspace"
+pnpm run cli -- compat deepseek:deepseek-reasoner openai:gpt-4o
 pnpm run cli -- sessions
 pnpm run cli -- tasks
+```
+
+`los compat` is dry-run by default. Add `--execute` to run the compatibility
+probes through the gateway:
+
+```bash
+pnpm run cli -- compat --execute --workspace . deepseek:deepseek-reasoner
 ```
 
 If `SERVER_PORT` is already occupied by a gateway from this same checkout,

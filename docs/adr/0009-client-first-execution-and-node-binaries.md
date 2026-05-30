@@ -157,6 +157,12 @@ Proposed.
 2. Added runtime model profile summaries to `session.started` / `model.response` event payloads so DeepSeek/OpenAI/Anthropic capability differences are visible while a run is active.
 3. Persisted `task_runs.model` so task lists and lifecycle records can show the effective model instead of only the provider.
 
+2026-05-30 started Stage 4:
+
+1. Added `packages/agent/src/compat-harness.ts` with provider/model targets, reusable probes, run-spec generation, and SSE summary projection.
+2. Added `los compat` as a client command. It dry-runs by default and only calls `/chat` when `--execute` is provided.
+3. Added built-in probes for read-only workspace inspection and non-writing patch preview, so DeepSeek/GPT/PackyCode-style routes can be compared on the same tool surface.
+
 ## Verification
 
 后续应验证：

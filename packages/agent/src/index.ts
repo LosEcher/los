@@ -25,6 +25,23 @@ export {
   type ToolCallRepairMode,
 } from './model-profiles.js';
 export {
+  DEFAULT_COMPATIBILITY_PROBES,
+  DEFAULT_COMPATIBILITY_TARGETS,
+  createCompatibilityRunSpecs,
+  parseCompatibilityTarget,
+  parseCompatibilityTargets,
+  selectCompatibilityProbes,
+  summarizeCompatibilityEvents,
+  target,
+  type CompatibilityHarnessOptions,
+  type CompatibilityProbe,
+  type CompatibilityRunSpec,
+  type CompatibilityRunSummary,
+  type CompatibilitySseEvent,
+  type CompatibilityToolMode,
+  type ProviderModelTarget,
+} from './compat-harness.js';
+export {
   createToolRegistry,
   registerBuiltinTools,
   READ_ONLY_BUILTIN_TOOLS,

@@ -11,6 +11,7 @@
     "./session-events": "./src/session-events.ts",
     "./task-runs": "./src/task-runs.ts",
     "./model-profiles": "./src/model-profiles.ts",
+    "./compat-harness": "./src/compat-harness.ts",
     "./todos": "./src/todos.ts",
     "./tools": "./src/tools/registry.ts"
   },

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { compatCommand } from './compat.js';
+
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonRecord = Record<string, unknown>;
 
@@ -32,6 +34,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'tasks') {
     await listCommand(globalArgs, commandArgs, '/tasks', renderTasks);
+    return;
+  }
+  if (command === 'compat') {
+    await compatCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'health') {
@@ -268,6 +274,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     s: 'session',
     w: 'workspace',
   };
+  const booleanFlags = new Set(['help', 'h', 'json', 'execute', 'version', 'v']);
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -281,6 +288,10 @@ function parseArgs(argv: string[]): ParsedArgs {
         flags[rawKey] = inlineValue;
         continue;
       }
+      if (booleanFlags.has(rawKey)) {
+        flags[rawKey] = true;
+        continue;
+      }
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('-')) {
         flags[rawKey] = next;
@@ -292,6 +303,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (/^-[a-zA-Z]$/.test(token)) {
       const key = aliases[token.slice(1)] ?? token.slice(1);
+      if (booleanFlags.has(key)) {
+        flags[key] = true;
+        continue;
+      }
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('-')) {
         flags[key] = next;
@@ -426,6 +441,7 @@ function printHelp(): void {
 Usage:
   los chat [options] <prompt>
   los run [options] <prompt>
+  los compat [options] [provider[:model]...]
   los sessions [--gateway URL] [--json]
   los tasks [--gateway URL] [--json]
   los health [--gateway URL] [--json]
@@ -445,6 +461,13 @@ Chat:
   --timeout-ms N          Task timeout
   --trace-id ID           Trace id
   --dedupe-key KEY        Active task dedupe key
+
+Compat:
+  --target NAME[:MODEL]   Target provider/model, repeat with comma or positional args
+  --probe ID              Probe id, default all built-in probes
+  --execute               Execute probes through the gateway; default is dry-run
+  --trace-prefix ID       Prefix for per-run trace ids
+  --dedupe-prefix KEY     Prefix for per-run dedupe keys
 `);
 }
 
