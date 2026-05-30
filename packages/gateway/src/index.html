@@ -49,8 +49,8 @@
     <input id="max-loops" type="number" min="1" max="50" value="20" title="Max loops">
   </div>
   <div id="input-area">
-    <textarea id="prompt" rows="2" placeholder="Ask the agent to do something..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
-    <button id="send-btn" onclick="send()">Send</button>
+    <textarea id="prompt" rows="2" placeholder="Ask the agent to do something..."></textarea>
+    <button id="send-btn" type="button">Send</button>
   </div>
 
   <script>
@@ -85,7 +85,7 @@
         prompt,
         toolMode: toolModeEl.value,
         maxLoops: Number.isFinite(maxLoops) && maxLoops > 0 ? maxLoops : undefined,
-      } as Record<string, unknown>;
+      };
       if (workspaceRoot) payload.workspaceRoot = workspaceRoot;
 
       try {
@@ -138,6 +138,14 @@
       sendBtn.disabled = false;
       promptEl.focus();
     }
+
+    sendBtn.addEventListener('click', send);
+    promptEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        send();
+      }
+    });
   </script>
 </body>
 </html>
