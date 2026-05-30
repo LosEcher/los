@@ -133,6 +133,11 @@ interface OpenAIConfig {
   profile: ModelProfile;
 }
 
+export interface CreateProviderOptions {
+  model?: string;
+  baseUrl?: string;
+}
+
 function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
   const { name, apiKey, profile } = cfg;
   const { baseUrl, model } = profile;
@@ -366,14 +371,14 @@ function createAnthropicProvider(cfg: AnthropicConfig): Provider {
 
 // ── Provider Registry ────────────────────────────────────
 
-export function createProvider(name?: string): Provider {
+export function createProvider(name?: string, options: CreateProviderOptions = {}): Provider {
   const config = getConfig();
   const providerName = name ?? config.agent.defaultProvider;
 
   const p = getProviderConfig(providerName);
   const profile = resolveModelProfile(providerName, {
-    baseUrl: p.baseUrl,
-    model: p.model,
+    baseUrl: options.baseUrl ?? p.baseUrl,
+    model: options.model ?? p.model,
     defaultModel: config.agent.defaultModel,
   });
 

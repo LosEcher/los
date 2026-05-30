@@ -31,6 +31,22 @@ export interface ModelProfile {
   knownFailurePatterns: string[];
 }
 
+export interface ModelExecutionSummary {
+  provider: string;
+  protocol: ProviderProtocol;
+  apiShape: ApiShape;
+  model: string;
+  supportsTools: boolean;
+  supportsParallelToolCalls: boolean;
+  supportsReasoning: boolean;
+  reasoningParam?: string;
+  cachePolicy: CachePolicy;
+  toolCallRepair: ToolCallRepairMode;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  defaultTemperature?: number;
+}
+
 export interface ResolveModelProfileOptions {
   baseUrl?: string;
   model?: string;
@@ -127,6 +143,24 @@ export function resolveModelProfile(
     ...base,
     baseUrl: options.baseUrl ?? base.baseUrl,
     model: options.model ?? base.model ?? options.defaultModel ?? 'gpt-4o',
+  };
+}
+
+export function summarizeModelProfile(profile: ModelProfile): ModelExecutionSummary {
+  return {
+    provider: profile.provider,
+    protocol: profile.protocol,
+    apiShape: profile.apiShape,
+    model: profile.model,
+    supportsTools: profile.supportsTools,
+    supportsParallelToolCalls: profile.supportsParallelToolCalls,
+    supportsReasoning: profile.supportsReasoning,
+    reasoningParam: profile.reasoningParam,
+    cachePolicy: profile.cachePolicy,
+    toolCallRepair: profile.toolCallRepair,
+    maxInputTokens: profile.maxInputTokens,
+    maxOutputTokens: profile.maxOutputTokens,
+    defaultTemperature: profile.defaultTemperature,
   };
 }
 

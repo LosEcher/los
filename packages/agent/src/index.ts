@@ -11,12 +11,14 @@ export {
   type ScheduledTaskEvent,
   type ScheduledTaskEventType,
 } from './scheduler.js';
-export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type Message, type ToolCall, type ProviderResponse } from './providers/index.js';
+export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions } from './providers/index.js';
 export {
   MODEL_PROFILES,
   resolveModelProfile,
+  summarizeModelProfile,
   type ApiShape,
   type CachePolicy,
+  type ModelExecutionSummary,
   type ModelProfile,
   type ProviderProtocol,
   type ResolveModelProfileOptions,

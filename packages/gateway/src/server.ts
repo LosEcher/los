@@ -59,6 +59,7 @@ interface ChatRequestBody {
   sessionId?: string;
   systemPrompt?: string;
   provider?: string;
+  model?: string;
   workspaceRoot?: string;
   toolMode?: ToolMode;
   allowedTools?: string[];
@@ -122,6 +123,7 @@ export async function createServer() {
     const sessionId = normalizeOptionalString(body.sessionId);
     const systemPrompt = normalizeOptionalString(body.systemPrompt);
     const provider = normalizeOptionalString(body.provider);
+    const model = normalizeOptionalString(body.model);
     const workspaceRoot = normalizeWorkspaceRoot(body.workspaceRoot);
     const toolMode = normalizeToolMode(body.toolMode);
     const allowedTools = normalizeAllowedTools(body.allowedTools);
@@ -165,6 +167,7 @@ export async function createServer() {
         prompt,
         sessionId: sid,
         provider,
+        model,
         systemPrompt,
         workspaceRoot,
         toolMode,
@@ -177,6 +180,7 @@ export async function createServer() {
         toolRetry,
         metadata: {
           maxLoops: maxLoops ?? config.agent.maxLoops,
+          model,
           allowedTools,
           timeoutMs,
           toolRetry,
@@ -194,6 +198,7 @@ export async function createServer() {
               traceId: event.taskRun.traceId,
               requestId: context.requestId,
               dedupeKey: event.taskRun.dedupeKey ?? null,
+              model: event.taskRun.model ?? null,
             });
           }
           send('task', {
@@ -204,6 +209,7 @@ export async function createServer() {
             requestId: context.requestId,
             dedupeKey: event.taskRun.dedupeKey ?? null,
             status: event.taskRun.status,
+            model: event.taskRun.model ?? null,
           });
         },
         onTurn: (turn) => {

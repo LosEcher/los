@@ -7,6 +7,7 @@
 
 import { getLogger } from '@los/infra/logger';
 import { createProvider, type Provider, type Message, type ToolCall } from './providers/index.js';
+import { summarizeModelProfile } from './model-profiles.js';
 import {
   createToolRegistry,
   registerBuiltinTools,
@@ -29,6 +30,7 @@ const log = getLogger('agent');
 export interface AgentConfig {
   sessionId?: string;
   provider?: string;
+  model?: string;
   initialMessages?: Message[];
   maxLoops?: number;
   systemPrompt?: string;
@@ -92,7 +94,8 @@ export async function runAgent(
   config: AgentConfig = {},
 ): Promise<AgentResult> {
   const maxLoops = config.maxLoops ?? 20;
-  const provider = createProvider(config.provider);
+  const provider = createProvider(config.provider, { model: config.model });
+  const modelProfile = summarizeModelProfile(provider.profile);
   const toolMode = config.toolMode ?? 'project-write';
   const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(toolMode);
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
@@ -106,6 +109,7 @@ export async function runAgent(
     runAgent,
     sessionId: config.sessionId,
     provider: config.provider,
+    model: config.model,
     workspaceRoot: config.workspaceRoot,
     toolRetry: config.toolRetry,
     signal,
@@ -131,6 +135,9 @@ export async function runAgent(
       promptLength: prompt.length,
       provider: provider.name,
       requestedProvider: config.provider ?? null,
+      requestedModel: config.model ?? null,
+      effectiveModel: provider.profile.model,
+      modelProfile,
       workspaceRoot: config.workspaceRoot ?? null,
       toolMode,
       allowedTools,
@@ -155,6 +162,7 @@ export async function runAgent(
       model: provider.name,
       payload: {
         provider: provider.name,
+        modelProfile,
         messageCount: messages.length,
         offeredToolCount: toolDefs.length,
       },
@@ -178,6 +186,7 @@ export async function runAgent(
       usage: normalizeUsage(res.usage),
       payload: {
         provider: provider.name,
+        modelProfile,
         durationMs: modelDurationMs,
         textPreview: previewText(res.text),
         textLength: res.text.length,

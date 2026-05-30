@@ -151,6 +151,12 @@ Proposed.
 3. Added a constrained `spawn_agent` tool that re-enters `runAgent()` but only exposes read-only or project-write child tool sets, with shell and recursive spawn kept out of the child registry.
 4. Included `sessionId` on streamed session events so nested child runs can still be distinguished in the live stream.
 
+2026-05-30 started Stage 3:
+
+1. Added explicit `model` override flow through CLI, gateway, scheduler, provider creation, and task-run persistence.
+2. Added runtime model profile summaries to `session.started` / `model.response` event payloads so DeepSeek/OpenAI/Anthropic capability differences are visible while a run is active.
+3. Persisted `task_runs.model` so task lists and lifecycle records can show the effective model instead of only the provider.
+
 ## Verification
 
 后续应验证：

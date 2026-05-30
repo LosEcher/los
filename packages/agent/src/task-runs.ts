@@ -17,6 +17,7 @@ export interface TaskRunRecord {
   workspaceRoot: string;
   toolMode: string;
   provider?: string;
+  model?: string;
   status: TaskRunStatus;
   attempt: number;
   promptPreview: string;
@@ -35,6 +36,7 @@ export interface CreateTaskRunInput {
   workspaceRoot: string;
   toolMode: string;
   provider?: string;
+  model?: string;
   promptPreview: string;
   metadata?: Record<string, unknown>;
   status?: TaskRunStatus;
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   workspace_root TEXT NOT NULL,
   tool_mode TEXT NOT NULL,
   provider TEXT,
+  model TEXT,
   status TEXT NOT NULL,
   attempt INTEGER NOT NULL DEFAULT 1,
   prompt_preview TEXT NOT NULL DEFAULT '',
@@ -67,6 +70,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
 
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS trace_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
@@ -96,10 +100,11 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
   const rows = await db.query<TaskRunRow>(
     `
     INSERT INTO task_runs (
-      id, session_id, trace_id, dedupe_key, workspace_root, tool_mode, provider, status,
+      id, session_id, trace_id, dedupe_key, workspace_root, tool_mode, provider, model,
+      status,
       attempt, prompt_preview, metadata_json, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, now())
     RETURNING *
   `,
     [
@@ -110,6 +115,7 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
       input.workspaceRoot,
       input.toolMode,
       input.provider ?? null,
+      input.model ?? null,
       input.status ?? 'queued',
       input.attempt ?? 1,
       input.promptPreview,
@@ -195,6 +201,7 @@ type TaskRunRow = {
   workspace_root: string;
   tool_mode: string;
   provider: string | null;
+  model: string | null;
   status: TaskRunStatus;
   attempt: number | null;
   prompt_preview: string;
@@ -214,6 +221,7 @@ function rowToTaskRun(row: TaskRunRow): TaskRunRecord {
     workspaceRoot: row.workspace_root,
     toolMode: row.tool_mode,
     provider: row.provider ?? undefined,
+    model: row.model ?? undefined,
     status: row.status,
     attempt: row.attempt ?? 1,
     promptPreview: row.prompt_preview,

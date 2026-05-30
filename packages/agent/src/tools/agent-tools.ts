@@ -6,6 +6,7 @@ import type { ToolRegistry, ToolResult } from './registry.js';
 export interface SpawnAgentRequest {
   prompt: string;
   provider?: string;
+  model?: string;
   toolMode?: 'read-only' | 'project-write';
   maxLoops?: number;
 }
@@ -17,6 +18,7 @@ export interface SpawnAgentRunnerOptions {
   runAgent: ChildAgentRunner;
   sessionId?: string;
   provider?: string;
+  model?: string;
   workspaceRoot?: string;
   toolRetry?: {
     maxAttempts?: number;
@@ -44,6 +46,7 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
     return runner({
       prompt,
       provider: normalizeString(args.provider),
+      model: normalizeString(args.model),
       toolMode: normalizeToolMode(args.toolMode),
       maxLoops: normalizeInteger(args.maxLoops),
     });
@@ -57,6 +60,7 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
         properties: {
           prompt: { type: 'string', description: 'Focused task for the child agent' },
           provider: { type: 'string', description: 'Optional provider override' },
+          model: { type: 'string', description: 'Optional model override for the child provider' },
           toolMode: { type: 'string', enum: ['read-only', 'project-write'], description: 'Child tool mode. Defaults to read-only.' },
           maxLoops: { type: 'number', description: 'Child loop budget, clamped by the parent runtime' },
         },
@@ -83,6 +87,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
     const childResult = await options.runAgent(request.prompt, {
       sessionId: childSessionId,
       provider: request.provider ?? options.provider,
+      model: request.model ?? options.model,
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
@@ -98,6 +103,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       content: JSON.stringify({
         childSessionId: childSessionId ?? null,
         provider: request.provider ?? options.provider ?? null,
+        model: request.model ?? options.model ?? null,
         toolMode: childToolMode,
         loopCount: childResult.loopCount,
         totalTokens: childResult.totalTokens,

@@ -102,6 +102,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     workspaceRoot,
     toolMode,
     provider: input.provider,
+    model: input.model,
     promptPreview: input.promptPreview ?? input.prompt.slice(0, 200),
     metadata: input.metadata ?? {},
     status: 'queued',
@@ -113,6 +114,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     status: 'running',
     metadata: {
       ...created.metadata,
+      model: input.model,
       maxLoops: input.maxLoops,
       allowedTools: input.allowedTools,
       toolRetry: input.toolRetry,
@@ -138,6 +140,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const result = await runAgent(input.prompt, {
       sessionId,
       provider: input.provider,
+      model: input.model,
       maxLoops: input.maxLoops,
       systemPrompt: input.systemPrompt,
       workspaceRoot,

@@ -62,6 +62,7 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
   const payload: JsonRecord = {
     prompt,
     provider: stringFlag(parsed, 'provider') ?? stringFlag(parsed, 'p'),
+    model: stringFlag(parsed, 'model'),
     workspaceRoot: stringFlag(parsed, 'workspace-root') ?? stringFlag(parsed, 'workspace') ?? stringFlag(parsed, 'w'),
     toolMode: stringFlag(parsed, 'tool-mode') ?? 'project-write',
     maxLoops: numberFlag(parsed, 'max-loops'),
@@ -166,6 +167,16 @@ function renderStreamEvent(event: string, data: JsonRecord): void {
     console.log(`[resume] messages=${String(data.messageCount ?? 0)} turns=${String(data.turnCount ?? 0)}`);
     return;
   }
+  if (event === 'session.started') {
+    const payload = asRecord(data.payload);
+    const modelProfile = asRecord(payload.modelProfile);
+    const provider = String(payload.provider ?? payload.requestedProvider ?? 'provider');
+    const model = String(payload.effectiveModel ?? payload.requestedModel ?? modelProfile.model ?? 'model');
+    const protocol = String(modelProfile.protocol ?? '?');
+    const reasoning = String(modelProfile.supportsReasoning ?? false);
+    console.log(`[start] ${provider}/${model} protocol=${protocol} reasoning=${reasoning}`);
+    return;
+  }
   if (event === 'task') {
     console.log(`[task] ${String(data.type ?? data.status ?? 'event')} ${String(data.taskRunId ?? '')}`);
     return;
@@ -242,7 +253,8 @@ function renderTasks(value: unknown, json: boolean): void {
   }
   for (const row of rows) {
     const item = asRecord(row);
-    console.log(`${String(item.id)}  ${String(item.status ?? '?')}  session=${String(item.sessionId ?? '?')} provider=${String(item.provider ?? '?')}`);
+    const metadata = asRecord(item.metadata);
+    console.log(`${String(item.id)}  ${String(item.status ?? '?')}  session=${String(item.sessionId ?? '?')} provider=${String(item.provider ?? '?')} model=${String(item.model ?? metadata.model ?? '?')}`);
   }
 }
 
@@ -424,6 +436,7 @@ Global:
 
 Chat:
   --provider, -p NAME     Provider endpoint, e.g. deepseek or openai
+  --model NAME            Model override for the selected provider
   --workspace, -w PATH    Workspace root for tools
   --tool-mode MODE        read-only, project-write, or all
   --session, -s ID        Continue writing to a session
@@ -440,6 +453,7 @@ function printChatHelp(): void {
 
 Examples:
   los chat --provider deepseek --workspace . "inspect this repo"
+  los chat --provider deepseek --model deepseek-reasoner "inspect this repo"
   los chat --provider openai --tool-mode all "run tests and summarize failures"
   los chat --resume session-123 "continue with the next fix"
   echo "review current structure" | los chat --provider deepseek

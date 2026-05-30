@@ -26,6 +26,7 @@ test('task run lifecycle persists status changes', async () => {
       workspaceRoot: '/tmp/workspace',
       toolMode: 'project-write',
       provider: 'deepseek',
+      model: 'deepseek-reasoner',
       promptPreview: 'inspect repo',
       metadata: { project: 'los' },
     });
@@ -34,6 +35,7 @@ test('task run lifecycle persists status changes', async () => {
     assert.equal(created.dedupeKey, `dedupe-${id}`);
     assert.equal(created.toolMode, 'project-write');
     assert.equal(created.provider, 'deepseek');
+    assert.equal(created.model, 'deepseek-reasoner');
 
     const duplicate = await findActiveTaskRunByDedupeKey(`dedupe-${id}`);
     assert.equal(duplicate?.id, id);
