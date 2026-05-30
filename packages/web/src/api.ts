@@ -70,9 +70,11 @@ export type TaskRun = {
   sessionId: string;
   traceId: string;
   dedupeKey?: string;
+  nodeId?: string;
   workspaceRoot: string;
   toolMode: string;
   provider?: string;
+  model?: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   attempt: number;
   promptPreview: string;
@@ -81,6 +83,93 @@ export type TaskRun = {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  heartbeatAt?: string;
+  leaseExpiresAt?: string;
+};
+
+export type ExecutorNode = {
+  nodeId: string;
+  nodeKind: 'executor' | 'ssh_target' | 'ingress' | 'proxy';
+  baseUrl?: string;
+  hostLabel?: string;
+  status: 'online' | 'draining' | 'offline';
+  version?: string;
+  targetVersion?: string;
+  rolloutState?: 'idle' | 'draining' | 'upgrading' | 'verifying' | 'failed';
+  rolloutMessage?: string;
+  connectModes: string[];
+  connectConfig: Record<string, unknown>;
+  capacity: Record<string, unknown>;
+  capabilities: Record<string, unknown>;
+  verified: Record<string, unknown>;
+  queueDepth: number;
+  activeTaskCount: number;
+  meshLinks: Array<Record<string, unknown>>;
+  lastProbeAt?: string;
+  lastProbeError?: string;
+  lastHeartbeatAt: string;
+  createdAt: string;
+  updatedAt: string;
+  execution: {
+    candidate: boolean;
+    mode?: string;
+    blockers: string[];
+    warnings: string[];
+  };
+};
+
+export type ExecutorNodeUpsertPayload = {
+  nodeKind?: ExecutorNode['nodeKind'];
+  baseUrl?: string;
+  hostLabel?: string;
+  status?: ExecutorNode['status'];
+  version?: string;
+  targetVersion?: string;
+  rolloutState?: ExecutorNode['rolloutState'];
+  rolloutMessage?: string;
+  connectModes?: ExecutorNode['connectModes'] | string;
+  connectConfig?: Record<string, unknown>;
+  capacity?: Record<string, unknown>;
+  capabilities?: Record<string, unknown>;
+  verified?: Record<string, unknown>;
+  queueDepth?: number;
+  activeTaskCount?: number;
+  meshLinks?: Array<Record<string, unknown>>;
+};
+
+export type ExecutorNodeProbeResponse = {
+  ok: boolean;
+  node: ExecutorNode;
+  probe: {
+    status: ExecutorNode['status'];
+    verified: Record<string, unknown>;
+    lastProbeError?: string;
+  };
+};
+
+export type SshConfigImportResponse = {
+  ok: boolean;
+  dryRun: boolean;
+  conflictStrategy: 'preserve_existing' | 'overwrite';
+  summary: {
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    total: number;
+  };
+  items: Array<{
+    alias: string;
+    hostName: string;
+    user?: string;
+    port: number;
+    nodeId: string;
+    matchedNodeId?: string;
+    action: 'create' | 'update' | 'skip_no_match' | 'error';
+    willWrite: boolean;
+    error?: string;
+    node?: ExecutorNodeUpsertPayload & { nodeId: string };
+  }>;
 };
 
 export type TodoKind = 'problem' | 'solution' | 'plan' | 'phase' | 'task' | 'batch';
@@ -147,6 +236,27 @@ export type ProviderDiscovery = {
   providers?: Array<Record<string, unknown>>;
   tools?: Array<Record<string, unknown>>;
   summary?: string;
+};
+
+export type ProviderModelInfo = {
+  id: string;
+  object?: string;
+  ownedBy?: string;
+};
+
+export type ProviderModelsResponse = {
+  provider: string | null;
+  count: number;
+  providers: Array<{
+    provider: string;
+    ok: boolean;
+    model?: string | null;
+    baseUrl?: string | null;
+    count?: number;
+    error?: string;
+    models: ProviderModelInfo[];
+    profile?: Record<string, unknown>;
+  }>;
 };
 
 export type LogFile = {

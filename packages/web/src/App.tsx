@@ -23,6 +23,7 @@ import {
   SessionsPage,
   TasksPage,
 } from './pages';
+import { NodesPage } from './nodes-page';
 import { TodosPage } from './todo-page';
 import { LogsPage, ReservedPage, SettingsPage } from './secondary-pages';
 import { formatDuration, StatusPill, type StatusState } from './ui';
@@ -56,7 +57,7 @@ const NAV: NavItem[] = [
   { id: 'providers', label: 'Providers', icon: Brain, status: 'partial' },
   { id: 'skills', label: 'Skills', icon: Zap, status: 'reserved' },
   { id: 'rules', label: 'Rules', icon: Shield, status: 'reserved' },
-  { id: 'nodes', label: 'Nodes', icon: Network, status: 'reserved' },
+  { id: 'nodes', label: 'Nodes', icon: Network, status: 'partial' },
   { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live' },
   { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
 ];
@@ -133,7 +134,7 @@ export function App() {
         {page === 'providers' && <ProvidersPage />}
         {page === 'skills' && <ReservedPage kind="Skills" icon={<BookOpen size={18} />} description="Read-only surface for reusable agent instruction bundles. API wiring is not present yet." fields={['name', 'category', 'run mode', 'source path/url', 'version hash', 'usage count', 'last used']} />}
         {page === 'rules' && <ReservedPage kind="Rules" icon={<Shield size={18} />} description="Read-only policy view until rule storage and evaluation contracts are explicit." fields={['name', 'scope', 'severity', 'enforcement mode', 'status', 'last changed', 'attached sessions/tasks']} />}
-        {page === 'nodes' && <ReservedPage kind="Executor Nodes" icon={<Network size={18} />} description="Nodes means mesh executor nodes only. Provider routes are provider endpoints, not nodes." fields={['node id', 'host label', 'role', 'status', 'queue depth', 'active tasks', 'mesh links', 'last heartbeat']} />}
+        {page === 'nodes' && <NodesPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
       </main>

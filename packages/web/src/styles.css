@@ -495,6 +495,12 @@ button:disabled {
   padding: 16px;
 }
 
+.section-divider {
+  height: 1px;
+  margin: 0 16px;
+  background: var(--line);
+}
+
 .fact {
   display: grid;
   gap: 4px;
@@ -525,8 +531,16 @@ button:disabled {
   padding: 11px 16px;
 }
 
+.route-row {
+  grid-template-columns: minmax(110px, 140px) minmax(220px, 1.2fr) minmax(120px, 180px) minmax(120px, 1fr);
+}
+
 .task-row {
   grid-template-columns: minmax(220px, 1fr) 110px 120px 120px 140px 80px;
+}
+
+.node-row {
+  grid-template-columns: minmax(220px, 1fr) 100px 86px minmax(160px, 1.2fr) 88px 132px;
 }
 
 .todo-row {
@@ -720,6 +734,15 @@ button:disabled {
   margin: 0 16px 16px;
 }
 
+.node-editor-actions {
+  border-top: 1px solid var(--line);
+  padding: 0 16px 16px;
+}
+
+.node-editor-actions .primary-btn {
+  margin: 0;
+}
+
 .definition {
   display: grid;
   gap: 4px;
@@ -733,6 +756,30 @@ button:disabled {
 
 .definition span {
   color: var(--muted);
+}
+
+.json-block {
+  border-top: 1px solid var(--line);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.json-block strong {
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.json-block pre {
+  margin: 0;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .field-grid {

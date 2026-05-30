@@ -16,6 +16,7 @@ import {
   type MemoryResponse,
   type MemoryStats,
   type ProviderDiscovery,
+  type ProviderModelsResponse,
   type SessionDetail,
   type SessionEventsResponse,
   type SessionObservability,
@@ -416,8 +417,14 @@ export function ProvidersPage() {
     queryFn: () => getJson<ProviderDiscovery>('/onboarding'),
     staleTime: 20_000,
   });
+  const modelRoutes = useQuery({
+    queryKey: ['provider-models'],
+    queryFn: () => getJson<ProviderModelsResponse>('/providers/models'),
+    staleTime: 20_000,
+  });
   const providers = onboarding.data?.providers ?? [];
   const tools = onboarding.data?.tools ?? [];
+  const routes = modelRoutes.data?.providers ?? [];
 
   return (
     <section className="panel-grid provider-grid">
@@ -442,11 +449,30 @@ export function ProvidersPage() {
             </div>
           )}
         />
+        <div className="section-divider" />
+        <div className="panel-head compact">
+          <h2>Effective Model Routes</h2>
+          <StatusPill status="live" />
+        </div>
+        <DataTable
+          loading={modelRoutes.isLoading}
+          empty="No callable model routes found."
+          rows={routes}
+          renderRow={(route) => (
+            <div className="record-row route-row">
+              <span className="row-title">{route.provider}</span>
+              <span>{route.baseUrl ?? 'baseUrl?'}</span>
+              <span>{route.model ?? 'model?'}</span>
+              <span>{route.ok ? `${route.count ?? route.models.length} models` : route.error ?? 'unavailable'}</span>
+            </div>
+          )}
+        />
       </div>
       <aside className="panel inspector">
         <div className="panel-head compact"><h2>Discovery Tools</h2></div>
         <div className="fact-list">
           <Fact label="providers" value={String(providers.length)} />
+          <Fact label="routes" value={String(routes.length)} />
           <Fact label="tools" value={String(tools.length)} />
           <Fact label="status" value={onboarding.data?.summary ?? 'not loaded'} />
         </div>
