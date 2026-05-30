@@ -21,6 +21,7 @@ export type ScheduledTaskEventType =
   | 'task.created'
   | 'task.deduplicated'
   | 'task.running'
+  | 'task.cancelled'
   | 'task.succeeded'
   | 'task.failed';
 
@@ -34,6 +35,7 @@ export interface ScheduledAgentTaskInput extends AgentConfig {
   taskRunId?: string;
   traceId?: string;
   dedupeKey?: string;
+  timeoutMs?: number;
   promptPreview?: string;
   metadata?: Record<string, unknown>;
   onTaskEvent?: (event: ScheduledTaskEvent) => void | Promise<void>;
@@ -50,7 +52,20 @@ export type ScheduledAgentTaskResult =
       status: 'deduplicated';
       sessionId: string;
       taskRun: TaskRunRecord;
+    }
+  | {
+      status: 'cancelled';
+      sessionId: string;
+      taskRun: TaskRunRecord;
+      reason: string;
     };
+
+type RunningTaskController = {
+  controller: AbortController;
+  reason: string;
+};
+
+const runningTaskControllers = new Map<string, RunningTaskController>();
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
   await ensureTaskRunStore();
@@ -62,6 +77,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const dedupeKey = normalizeOptionalString(input.dedupeKey);
   const toolMode = input.toolMode ?? 'project-write';
   const workspaceRoot = input.workspaceRoot ?? process.cwd();
+  const timeoutMs = normalizePositiveInteger(input.timeoutMs);
 
   if (dedupeKey) {
     const existing = await findActiveTaskRunByDedupeKey(dedupeKey);
@@ -99,12 +115,23 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       ...created.metadata,
       maxLoops: input.maxLoops,
       allowedTools: input.allowedTools,
+      timeoutMs,
     },
   });
   running ??= await loadTaskRun(taskRunId);
   if (!running) throw new Error(`Task run disappeared after create: ${taskRunId}`);
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
+
+  const controller = new AbortController();
+  const linkedAbortCleanup = linkAbortSignal(input.signal, controller);
+  let timeout: NodeJS.Timeout | undefined;
+  runningTaskControllers.set(taskRunId, { controller, reason: 'cancelled' });
+  if (timeoutMs) {
+    timeout = setTimeout(() => {
+      abortTaskController(taskRunId, `timeout:${timeoutMs}ms`);
+    }, timeoutMs);
+  }
 
   try {
     const result = await runAgent(input.prompt, {
@@ -115,6 +142,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       workspaceRoot,
       toolMode,
       allowedTools: input.allowedTools,
+      signal: controller.signal,
       onTurn: input.onTurn,
       onToolCall: input.onToolCall,
     });
@@ -138,6 +166,26 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (isAbortError(err)) {
+      const reason = runningTaskControllers.get(taskRunId)?.reason ?? message;
+      const cancelled = await updateTaskRun(taskRunId, {
+        status: 'cancelled',
+        metadata: {
+          ...running.metadata,
+          cancelReason: reason,
+        },
+      });
+      const finalTask = cancelled ?? running;
+      await emitTaskEvent(sessionId, 'task.cancelled', finalTask, { reason });
+      await input.onTaskEvent?.({ type: 'task.cancelled', taskRun: finalTask });
+      return {
+        status: 'cancelled',
+        sessionId,
+        taskRun: finalTask,
+        reason,
+      };
+    }
+
     const failed = await updateTaskRun(taskRunId, {
       status: 'failed',
       metadata: {
@@ -149,7 +197,15 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });
     await input.onTaskEvent?.({ type: 'task.failed', taskRun: finalTask });
     throw err;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    linkedAbortCleanup();
+    runningTaskControllers.delete(taskRunId);
   }
+}
+
+export function cancelScheduledTask(taskRunId: string, reason = 'cancelled'): boolean {
+  return abortTaskController(taskRunId, reason);
 }
 
 async function emitTaskEvent(
@@ -178,4 +234,42 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const int = Math.floor(value);
+  return int > 0 ? int : undefined;
+}
+
+function abortTaskController(taskRunId: string, reason: string): boolean {
+  const running = runningTaskControllers.get(taskRunId);
+  if (!running) return false;
+  running.reason = reason;
+  if (!running.controller.signal.aborted) {
+    running.controller.abort(createAbortError(reason));
+  }
+  return true;
+}
+
+function linkAbortSignal(source: AbortSignal | undefined, target: AbortController): () => void {
+  if (!source) return () => undefined;
+  if (source.aborted) {
+    target.abort(source.reason);
+    return () => undefined;
+  }
+
+  const onAbort = () => target.abort(source.reason);
+  source.addEventListener('abort', onAbort, { once: true });
+  return () => source.removeEventListener('abort', onAbort);
+}
+
+function createAbortError(reason: string): Error {
+  const err = new Error(reason);
+  err.name = 'AbortError';
+  return err;
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
 }

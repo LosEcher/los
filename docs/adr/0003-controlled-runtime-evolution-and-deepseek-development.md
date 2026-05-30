@@ -345,3 +345,35 @@ Result:
 1. `task-runs` persistence test passed.
 2. full check passed with the existing `packages/infra/src/discovery.ts` size warning.
 3. the new scheduler path compiled cleanly in `packages/gateway` and `packages/agent`.
+
+## Implementation Note: 2026-05-30 Scheduler Cancellation And Timeout
+
+Implemented:
+
+1. `AgentConfig` now accepts an `AbortSignal`.
+2. `runAgent()` checks abort state before model/tool work and wraps model/tool promises so a scheduler timeout or cancel request can release the caller.
+3. `runScheduledAgentTask()` accepts `timeoutMs`, registers a per-task `AbortController`, and returns `status: 'cancelled'` when the task is aborted.
+4. `cancelScheduledTask(taskRunId, reason)` cancels a live in-process scheduled task.
+5. `packages/gateway/src/server.ts` accepts `timeoutMs` in `/chat` and exposes `POST /tasks/:id/cancel`.
+6. Cancelled tasks persist `status: 'cancelled'` and emit `task.cancelled`.
+
+Current limitation:
+
+1. Provider fetches and synchronous shell handlers may continue at the underlying runtime layer after the caller is released.
+2. `project-write` still blocks shell execution, so this limitation mainly affects model calls until provider-level abort signals are added.
+3. Cancellation is process-local; a restarted gateway cannot interrupt a task that was in memory before restart.
+
+Verification:
+
+```bash
+pnpm --filter @los/agent check
+pnpm --filter @los/gateway check
+pnpm --filter @los/agent exec node --import tsx --test src/task-runs.test.ts
+pnpm check
+```
+
+Result:
+
+1. checks passed.
+2. `task-runs` persistence test passed.
+3. full check passed with the existing `packages/infra/src/discovery.ts` size warning.

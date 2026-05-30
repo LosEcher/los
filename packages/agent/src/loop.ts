@@ -33,6 +33,7 @@ export interface AgentConfig {
   workspaceRoot?: string;
   toolMode?: 'all' | 'project-write' | 'read-only';
   allowedTools?: readonly string[];
+  signal?: AbortSignal;
   onTurn?: (turn: TurnSummary) => void;
   onToolCall?: (tool: string, args: Record<string, unknown>) => void;
 }
@@ -95,6 +96,7 @@ export async function runAgent(
   const toolDefs = tools.getDefinitions();
   const toolNames = tools.list();
   const emitEvent = createEventEmitter(config.sessionId);
+  const signal = config.signal;
 
   // Build initial messages
   const messages: Message[] = [
@@ -130,6 +132,7 @@ export async function runAgent(
   });
 
   for (let i = 0; i < maxLoops; i++) {
+    assertNotAborted(signal);
     log.debug(`Turn ${i + 1}/${maxLoops}`);
     await emitEvent({
       type: 'model.turn.started',
@@ -143,8 +146,12 @@ export async function runAgent(
     });
 
     const modelStartedAt = Date.now();
-    const res = await provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined);
+    const res = await withAbort(
+      provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined),
+      signal,
+    );
     const modelDurationMs = Date.now() - modelStartedAt;
+    assertNotAborted(signal);
 
     totalPromptTokens += res.usage.promptTokens;
     totalCompletionTokens += res.usage.completionTokens;
@@ -209,6 +216,7 @@ export async function runAgent(
     // Execute tool calls
     const toolResults: string[] = [];
     for (const tc of res.toolCalls) {
+      assertNotAborted(signal);
       const fn = tc.function;
       log.debug(`Tool call: ${fn.name}(${fn.arguments.slice(0, 100)})`);
       let args: Record<string, unknown>;
@@ -275,10 +283,13 @@ export async function runAgent(
 
       const toolStartedAt = Date.now();
       const result = decision.allowed
-        ? await tools.execute({
-            name: fn.name,
-            arguments: args,
-          })
+        ? await withAbort(
+            tools.execute({
+              name: fn.name,
+              arguments: args,
+            }),
+            signal,
+          )
         : { content: '', error: decision.reason };
       const toolDurationMs = Date.now() - toolStartedAt;
 
@@ -324,7 +335,8 @@ export async function runAgent(
     content: 'You have reached the maximum number of turns. Please provide a final summary of what you accomplished and what remains to be done.',
   });
 
-  const finalRes = await provider.chat(messages);
+  assertNotAborted(signal);
+  const finalRes = await withAbort(provider.chat(messages), signal);
   totalPromptTokens += finalRes.usage.promptTokens;
   totalCompletionTokens += finalRes.usage.completionTokens;
 
@@ -470,4 +482,37 @@ Rules:
 - If you're unsure about something, ask instead of guessing`;
   }
   return DEFAULT_SYSTEM;
+}
+
+function assertNotAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw abortErrorFromSignal(signal);
+}
+
+function withAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortErrorFromSignal(signal));
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortErrorFromSignal(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      err => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+function abortErrorFromSignal(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const message = typeof signal.reason === 'string' ? signal.reason : 'Operation aborted';
+  const err = new Error(message);
+  err.name = 'AbortError';
+  return err;
 }

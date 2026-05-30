@@ -15,12 +15,13 @@ import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config
 import { initDb } from '@los/infra/db';
 import { printOnboardingReport, discoverAll } from '@los/infra/discovery';
 import { getLogger } from '@los/infra/logger';
-import { runScheduledAgentTask } from '@los/agent/scheduler';
+import { cancelScheduledTask, runScheduledAgentTask } from '@los/agent/scheduler';
 import { ensureSessionStore, saveSession, loadSession, listSessions } from '@los/agent/session';
 import {
   ensureTaskRunStore,
   loadTaskRun,
   listTaskRuns,
+  updateTaskRun,
 } from '@los/agent/task-runs';
 import {
   ensureSessionEventStore,
@@ -50,6 +51,7 @@ interface ChatRequestBody {
   maxLoops?: number;
   traceId?: string;
   dedupeKey?: string;
+  timeoutMs?: number;
 }
 
 export async function createServer() {
@@ -98,6 +100,7 @@ export async function createServer() {
     const maxLoops = normalizePositiveInteger(body.maxLoops);
     const traceId = normalizeOptionalString(body.traceId);
     const dedupeKey = normalizeOptionalString(body.dedupeKey);
+    const timeoutMs = normalizePositiveInteger(body.timeoutMs);
 
     if (!prompt) {
       return reply.status(400).send({ error: 'prompt is required' });
@@ -130,9 +133,11 @@ export async function createServer() {
         maxLoops,
         traceId,
         dedupeKey,
+        timeoutMs,
         metadata: {
           maxLoops: maxLoops ?? config.agent.maxLoops,
           allowedTools,
+          timeoutMs,
         },
         onTaskEvent: (event) => {
           activeTaskRunId = event.taskRun.id;
@@ -185,6 +190,24 @@ export async function createServer() {
         return;
       }
 
+      if (scheduled.status === 'cancelled') {
+        send('cancelled', {
+          sessionId: scheduled.sessionId,
+          taskRunId: scheduled.taskRun.id,
+          traceId: scheduled.taskRun.traceId,
+          dedupeKey: scheduled.taskRun.dedupeKey ?? null,
+          reason: scheduled.reason,
+        });
+        send('done', {
+          cancelled: true,
+          sessionId: scheduled.sessionId,
+          taskRunId: scheduled.taskRun.id,
+          reason: scheduled.reason,
+        });
+        reply.raw.end();
+        return;
+      }
+
       const result = scheduled.result;
       const taskRunId = scheduled.taskRun.id;
 
@@ -202,6 +225,7 @@ export async function createServer() {
           toolMode,
           allowedTools,
           maxLoops: maxLoops ?? config.agent.maxLoops,
+          timeoutMs,
           taskRunId,
           traceId: scheduled.taskRun.traceId,
           dedupeKey: scheduled.taskRun.dedupeKey ?? null,
@@ -321,6 +345,63 @@ export async function createServer() {
     const taskRun = await loadTaskRun(id);
     if (!taskRun) return { error: 'Not found' };
     return taskRun;
+  });
+
+  app.post('/tasks/:id/cancel', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { reason?: string } | undefined;
+    const reason = normalizeOptionalString(body?.reason) ?? 'cancelled_by_request';
+
+    await ensureTaskRunStore();
+    const taskRun = await loadTaskRun(id);
+    if (!taskRun) {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+
+    const live = cancelScheduledTask(id, reason);
+    if (live) {
+      return {
+        ok: true,
+        live: true,
+        taskRunId: id,
+        status: taskRun.status,
+        reason,
+      };
+    }
+
+    if (taskRun.status === 'queued' || taskRun.status === 'running') {
+      const cancelled = await updateTaskRun(id, {
+        status: 'cancelled',
+        metadata: {
+          ...taskRun.metadata,
+          cancelReason: reason,
+        },
+      });
+      const finalTask = cancelled ?? taskRun;
+      await appendSessionEvent({
+        sessionId: finalTask.sessionId,
+        type: 'task.cancelled',
+        payload: {
+          taskRunId: finalTask.id,
+          traceId: finalTask.traceId,
+          dedupeKey: finalTask.dedupeKey ?? null,
+          reason,
+          live: false,
+        },
+      }).catch(() => undefined);
+      return {
+        ok: true,
+        live: false,
+        taskRun: finalTask,
+      };
+    }
+
+    return {
+      ok: false,
+      live: false,
+      taskRun,
+      reason: `Task is already ${taskRun.status}`,
+    };
   });
 
   // ── Sync MEMORY.md ────────────────────────────────────

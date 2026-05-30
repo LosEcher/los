@@ -4,6 +4,7 @@
 
 export { runAgent, type AgentConfig, type AgentResult, type TurnSummary } from './loop.js';
 export {
+  cancelScheduledTask,
   runScheduledAgentTask,
   type ScheduledAgentTaskInput,
   type ScheduledAgentTaskResult,
