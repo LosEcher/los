@@ -53,14 +53,34 @@ port_owner() {
   lsof -tiTCP:"$(server_port)" -sTCP:LISTEN 2>/dev/null | head -1 || true
 }
 
+pid_command() {
+  local pid="${1:-}"
+  [ -n "$pid" ] || return 0
+  ps -p "$pid" -o command= 2>/dev/null || true
+}
+
+is_los_gateway_pid() {
+  local pid="${1:-}"
+  local command
+  command="$(pid_command "$pid")"
+  [ -n "$command" ] || return 1
+  [[ "$command" == *"$ROOT"* ]] || return 1
+  [[ "$command" == *"src/server.ts"* || "$command" == *"dist/server.js"* ]]
+}
+
+write_pid_file() {
+  mkdir -p "$RUNTIME_DIR"
+  printf '%s\n' "$1" > "$PID_FILE"
+}
+
 show_help() {
   cat <<EOF
 los local process helper
 
 Usage:
-  pnpm start      Start gateway in background
+  pnpm start          Start gateway in background, or adopt an existing los gateway
   pnpm run status     Show process and health status
-  pnpm run stop       Stop background gateway started by this helper
+  pnpm run stop       Stop managed or adopted los gateway
   pnpm run restart    Stop then start gateway
   pnpm run doctor     Check local runtime prerequisites and config/db access
   pnpm run help       Show this help
@@ -87,11 +107,17 @@ status_cmd() {
   echo "  log file: $LOG_FILE"
 
   if is_running "$pid"; then
-    echo "  process: running pid=$pid"
+    echo "  process: running pid=$pid managed=true"
   elif [ -n "$pid" ]; then
     echo "  process: stopped stale_pid=$pid"
   else
-    echo "  process: stopped"
+    local owner
+    owner="$(port_owner)"
+    if is_los_gateway_pid "$owner"; then
+      echo "  process: running pid=$owner managed=false"
+    else
+      echo "  process: stopped"
+    fi
   fi
 
   if health_check; then
@@ -138,7 +164,14 @@ start_cmd() {
   local owner
   owner="$(port_owner)"
   if [ -n "$owner" ]; then
-    echo "port $(server_port) is already in use by pid=$owner"
+    if is_los_gateway_pid "$owner"; then
+      write_pid_file "$owner"
+      echo "los gateway already running pid=$owner; adopted into $PID_FILE"
+      status_cmd
+      return 0
+    fi
+
+    echo "port $(server_port) is already in use by non-los pid=$owner"
     echo "not starting a second gateway"
     return 1
   fi
@@ -149,7 +182,7 @@ start_cmd() {
     pnpm --filter @los/gateway dev
   ) >"$LOG_FILE" 2>&1 &
   pid="$!"
-  echo "$pid" > "$PID_FILE"
+  write_pid_file "$pid"
 
   if wait_for_health "$pid"; then
     echo "started pid=$pid"
@@ -171,9 +204,17 @@ stop_cmd() {
   local pid
   pid="$(pid_from_file)"
   if ! is_running "$pid"; then
-    echo "los gateway is not running from $PID_FILE"
-    rm -f "$PID_FILE"
-    return 0
+    local owner
+    owner="$(port_owner)"
+    if is_los_gateway_pid "$owner"; then
+      pid="$owner"
+      write_pid_file "$pid"
+      echo "adopted unmanaged los gateway pid=$pid before stopping"
+    else
+      echo "los gateway is not running from $PID_FILE"
+      rm -f "$PID_FILE"
+      return 0
+    fi
   fi
 
   echo "stopping los gateway pid=$pid"

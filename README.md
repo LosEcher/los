@@ -22,6 +22,10 @@ Run the gateway in the background:
 pnpm start
 ```
 
+If `SERVER_PORT` is already occupied by a gateway from this same checkout,
+`pnpm start` adopts that process into `.los-runtime/gateway.pid` instead of
+starting a second server. `pnpm run status` shows this as `managed=true`.
+
 Common local process commands:
 
 ```bash
