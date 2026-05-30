@@ -33,6 +33,13 @@ los/
 ## Key Commands
 
 ```bash
+pnpm start            # Start gateway in background
+pnpm run status       # Show gateway process and health
+pnpm run stop         # Stop background gateway
+pnpm run restart      # Restart background gateway
+pnpm run doctor       # Check local prerequisites, config, and database
+pnpm run help         # Show los local command help
+
 pnpm dev              # Start gateway + agent
 pnpm build            # Build all packages
 pnpm check            # Type-check + lint + structure check

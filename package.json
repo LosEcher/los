@@ -3,6 +3,12 @@
   "private": true,
   "description": "Lightweight Agent Execution + Memory Management Platform",
   "scripts": {
+    "help": "./tools/los.sh help",
+    "status": "./tools/los.sh status",
+    "start": "./tools/los.sh start",
+    "stop": "./tools/los.sh stop",
+    "restart": "./tools/los.sh restart",
+    "doctor": "./tools/los.sh doctor",
     "dev": "turbo dev",
     "build": "turbo build",
     "check": "turbo check && ./tools/check-structure.sh",
