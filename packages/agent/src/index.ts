@@ -26,6 +26,7 @@ export {
   type ToolExecutionDecision,
   type ToolHandler,
   type ToolInput,
+  type ToolRetryPolicy,
   type ToolRiskLevel,
   type ToolResult,
 } from './tools/registry.js';

@@ -33,6 +33,11 @@ export interface AgentConfig {
   workspaceRoot?: string;
   toolMode?: 'all' | 'project-write' | 'read-only';
   allowedTools?: readonly string[];
+  toolRetry?: {
+    maxAttempts?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+  };
   signal?: AbortSignal;
   onTurn?: (turn: TurnSummary) => void;
   onToolCall?: (tool: string, args: Record<string, unknown>) => void;
@@ -87,7 +92,7 @@ export async function runAgent(
   const toolMode = config.toolMode ?? 'project-write';
   const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(toolMode);
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
-  const policy = resolveToolPolicy(toolMode);
+  const policy = resolveToolPolicy(toolMode, config.toolRetry);
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });
@@ -306,6 +311,9 @@ export async function runAgent(
           denied: !decision.allowed,
           reasonCode: decision.allowed ? undefined : decision.reasonCode,
           durationMs: toolDurationMs,
+          attempts: result.attempts ?? 1,
+          retried: result.retried ?? false,
+          retryErrors: result.retryErrors ?? [],
           contentPreview: previewText(content),
           contentLength: content.length,
           errorPreview: result.error ? previewText(result.error) : undefined,
@@ -446,12 +454,17 @@ function resolveAllowedTools(
   return selected.filter(tool => readOnly.has(tool));
 }
 
-function resolveToolPolicy(toolMode: 'all' | 'project-write' | 'read-only') {
+function resolveToolPolicy(
+  toolMode: 'all' | 'project-write' | 'read-only',
+  retry: AgentConfig['toolRetry'] | undefined,
+) {
+  const normalizedRetry = normalizeToolRetry(retry);
   if (toolMode === 'read-only') {
     return {
       maxRiskLevel: 'L0' as const,
       allowWrites: false,
       sandboxAvailable: false,
+      retry: normalizedRetry,
     };
   }
   if (toolMode === 'project-write') {
@@ -459,12 +472,23 @@ function resolveToolPolicy(toolMode: 'all' | 'project-write' | 'read-only') {
       maxRiskLevel: 'L1' as const,
       allowWrites: true,
       sandboxAvailable: false,
+      retry: normalizedRetry,
     };
   }
   return {
     maxRiskLevel: 'L2' as const,
     allowWrites: true,
     sandboxAvailable: true,
+    retry: normalizedRetry,
+  };
+}
+
+function normalizeToolRetry(retry: AgentConfig['toolRetry'] | undefined) {
+  if (!retry) return undefined;
+  return {
+    maxAttempts: retry.maxAttempts,
+    baseDelayMs: retry.baseDelayMs,
+    maxDelayMs: retry.maxDelayMs,
   };
 }
 

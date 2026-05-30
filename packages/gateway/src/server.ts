@@ -52,6 +52,11 @@ interface ChatRequestBody {
   traceId?: string;
   dedupeKey?: string;
   timeoutMs?: number;
+  toolRetry?: {
+    maxAttempts?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+  };
 }
 
 export async function createServer() {
@@ -101,6 +106,7 @@ export async function createServer() {
     const traceId = normalizeOptionalString(body.traceId);
     const dedupeKey = normalizeOptionalString(body.dedupeKey);
     const timeoutMs = normalizePositiveInteger(body.timeoutMs);
+    const toolRetry = normalizeToolRetry(body.toolRetry);
 
     if (!prompt) {
       return reply.status(400).send({ error: 'prompt is required' });
@@ -134,10 +140,12 @@ export async function createServer() {
         traceId,
         dedupeKey,
         timeoutMs,
+        toolRetry,
         metadata: {
           maxLoops: maxLoops ?? config.agent.maxLoops,
           allowedTools,
           timeoutMs,
+          toolRetry,
         },
         onTaskEvent: (event) => {
           activeTaskRunId = event.taskRun.id;
@@ -226,6 +234,7 @@ export async function createServer() {
           allowedTools,
           maxLoops: maxLoops ?? config.agent.maxLoops,
           timeoutMs,
+          toolRetry,
           taskRunId,
           traceId: scheduled.taskRun.traceId,
           dedupeKey: scheduled.taskRun.dedupeKey ?? null,
@@ -471,4 +480,20 @@ function normalizePositiveInteger(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const int = Math.floor(value);
   return int > 0 ? int : undefined;
+}
+
+function normalizeToolRetry(value: unknown): ChatRequestBody['toolRetry'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  return {
+    maxAttempts: normalizePositiveInteger(raw.maxAttempts),
+    baseDelayMs: normalizeNonNegativeInteger(raw.baseDelayMs),
+    maxDelayMs: normalizeNonNegativeInteger(raw.maxDelayMs),
+  };
+}
+
+function normalizeNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const int = Math.floor(value);
+  return int >= 0 ? int : undefined;
 }

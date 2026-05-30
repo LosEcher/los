@@ -160,3 +160,95 @@ test('tool capability timeout is enforced during execution', async () => {
   assert.equal(result.content, '');
   assert.match(result.error ?? '', /Tool timed out after 5ms: slow_tool/);
 });
+
+test('tool retry only applies to retryable and idempotent capabilities', async () => {
+  const registry = createToolRegistry({
+    policy: {
+      retry: {
+        maxAttempts: 3,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+      },
+    },
+  });
+  let attempts = 0;
+  registry.register(
+    'flaky_read',
+    async () => {
+      attempts += 1;
+      if (attempts < 2) return { content: '', error: 'temporary read failure' };
+      return { content: 'ok' };
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'flaky_read',
+        description: 'Flaky test read',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    {
+      riskLevel: 'L0',
+      retryable: true,
+      idempotent: true,
+      timeoutMs: 1_000,
+    },
+  );
+
+  const result = await registry.execute({
+    name: 'flaky_read',
+    arguments: {},
+  });
+
+  assert.equal(result.content, 'ok');
+  assert.equal(result.error, undefined);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.retried, true);
+  assert.deepEqual(result.retryErrors, ['temporary read failure']);
+});
+
+test('tool retry does not replay non-idempotent capabilities', async () => {
+  const registry = createToolRegistry({
+    policy: {
+      retry: {
+        maxAttempts: 3,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+      },
+    },
+  });
+  let attempts = 0;
+  registry.register(
+    'flaky_write',
+    async () => {
+      attempts += 1;
+      return { content: '', error: 'write failed' };
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'flaky_write',
+        description: 'Flaky test write',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    {
+      riskLevel: 'L1',
+      retryable: true,
+      idempotent: false,
+      timeoutMs: 1_000,
+    },
+  );
+
+  const result = await registry.execute({
+    name: 'flaky_write',
+    arguments: {},
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(result.content, '');
+  assert.equal(result.error, 'write failed');
+  assert.equal(result.attempts, 1);
+  assert.equal(result.retried, false);
+  assert.deepEqual(result.retryErrors, ['write failed']);
+});

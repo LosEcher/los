@@ -406,3 +406,32 @@ Result:
 
 1. agent tests passed: 4 tests.
 2. full check passed with the existing `packages/infra/src/discovery.ts` size warning.
+
+## Implementation Note: 2026-05-30 Idempotent Tool Retry
+
+Implemented:
+
+1. `ToolExecutionPolicy` now accepts `retry: { maxAttempts, baseDelayMs, maxDelayMs }`.
+2. `ToolRegistry.execute()` retries only when the tool capability declares both `retryable: true` and `idempotent: true`.
+3. Retry metadata is returned with tool results as `attempts`, `retried`, and `retryErrors`.
+4. `runAgent()` records that metadata in `tool.result` session events.
+5. `AgentConfig`, scheduler input, and Gateway `/chat` now accept `toolRetry`.
+6. Gateway persists the selected retry policy in task/session metadata.
+
+Rejected behavior:
+
+1. Non-idempotent tools are not replayed even when `retryable: true`.
+2. `write_file` and `run_shell` remain effectively single-attempt under current built-in capabilities.
+3. Retry remains per-tool-call; task-level retry is still deferred until the scheduler has durable attempt records and recovery semantics.
+
+Verification:
+
+```bash
+pnpm --filter @los/agent test
+pnpm check
+```
+
+Result:
+
+1. agent tests passed: 6 tests.
+2. full check passed with the existing `packages/infra/src/discovery.ts` size warning.

@@ -25,6 +25,9 @@ export interface ToolResult {
   tool_call_id?: string;
   content: string;
   error?: string;
+  attempts?: number;
+  retried?: boolean;
+  retryErrors?: string[];
 }
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
@@ -67,6 +70,13 @@ export interface ToolExecutionPolicy {
   maxRiskLevel?: ToolRiskLevel;
   allowWrites?: boolean;
   sandboxAvailable?: boolean;
+  retry?: Partial<ToolRetryPolicy>;
+}
+
+export interface ToolRetryPolicy {
+  maxAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
 }
 
 export type ToolExecutionDecision =
@@ -126,11 +136,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
       if (!handler) {
         return { content: '', error: `Unknown tool: ${input.name}` };
       }
-      try {
-        return await withTimeout(handler(input.arguments), decision.capability.timeoutMs, input.name);
-      } catch (err: any) {
-        return { content: '', error: err.message ?? String(err) };
-      }
+      return await executeWithRetry(input, handler, decision.capability, policy);
     },
 
     evaluateTool(name: string): ToolExecutionDecision {
@@ -412,6 +418,75 @@ function riskRank(riskLevel: ToolRiskLevel): number {
   if (riskLevel === 'L0') return 0;
   if (riskLevel === 'L1') return 1;
   return 2;
+}
+
+async function executeWithRetry(
+  input: ToolInput,
+  handler: ToolHandler,
+  capability: ToolCapability,
+  policy: ToolExecutionPolicy,
+): Promise<ToolResult> {
+  const retryPolicy = normalizeRetryPolicy(policy.retry);
+  const maxAttempts = capability.retryable && capability.idempotent ? retryPolicy.maxAttempts : 1;
+  const retryErrors: string[] = [];
+  let lastResult: ToolResult = { content: '', error: `Tool failed: ${input.name}` };
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await withTimeout(handler(input.arguments), capability.timeoutMs, input.name);
+      lastResult = result.error
+        ? { ...result }
+        : { ...result, attempts: attempt, retried: attempt > 1, retryErrors };
+
+      if (!result.error) {
+        return lastResult;
+      }
+      retryErrors.push(result.error);
+    } catch (err: any) {
+      const message = err?.message ?? String(err);
+      retryErrors.push(message);
+      lastResult = { content: '', error: message };
+    }
+
+    if (attempt < maxAttempts) {
+      await delay(computeRetryDelayMs(retryPolicy, attempt));
+    }
+  }
+
+  return {
+    ...lastResult,
+    attempts: maxAttempts,
+    retried: maxAttempts > 1,
+    retryErrors,
+  };
+}
+
+function normalizeRetryPolicy(input: Partial<ToolRetryPolicy> | undefined): ToolRetryPolicy {
+  const maxAttempts = Number.isFinite(input?.maxAttempts)
+    ? Math.max(1, Math.min(5, Math.floor(input!.maxAttempts!)))
+    : 1;
+  const baseDelayMs = Number.isFinite(input?.baseDelayMs)
+    ? Math.max(0, Math.min(60_000, Math.floor(input!.baseDelayMs!)))
+    : 100;
+  const maxDelayMs = Number.isFinite(input?.maxDelayMs)
+    ? Math.max(baseDelayMs, Math.min(120_000, Math.floor(input!.maxDelayMs!)))
+    : 2_000;
+
+  return {
+    maxAttempts,
+    baseDelayMs,
+    maxDelayMs,
+  };
+}
+
+function computeRetryDelayMs(policy: ToolRetryPolicy, completedAttempt: number): number {
+  const delay = policy.baseDelayMs * 2 ** Math.max(0, completedAttempt - 1);
+  return Math.min(delay, policy.maxDelayMs);
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, toolName: string): Promise<T> {

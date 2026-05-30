@@ -115,6 +115,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       ...created.metadata,
       maxLoops: input.maxLoops,
       allowedTools: input.allowedTools,
+      toolRetry: input.toolRetry,
       timeoutMs,
     },
   });
@@ -142,6 +143,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       workspaceRoot,
       toolMode,
       allowedTools: input.allowedTools,
+      toolRetry: input.toolRetry,
       signal: controller.signal,
       onTurn: input.onTurn,
       onToolCall: input.onToolCall,
