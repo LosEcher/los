@@ -18,6 +18,7 @@ import { getLogger } from '@los/infra/logger';
 import { createProvider } from '@los/agent';
 import { registerLogRoutes } from './log-routes.js';
 import { registerArtifactRoutes } from './artifact-routes.js';
+import { registerNodeCommandRoutes } from './node-command-routes.js';
 import { registerNodeRoutes } from './node-routes.js';
 import { registerTodoRoutes } from './todo-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
@@ -155,6 +156,7 @@ export async function createServer() {
   registerArtifactRoutes(app, {
     storageRoot: ARTIFACT_STORAGE_ROOT,
   });
+  registerNodeCommandRoutes(app);
   registerTodoRoutes(app);
   registerNodeRoutes(app);
 

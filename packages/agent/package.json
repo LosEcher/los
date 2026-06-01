@@ -12,6 +12,7 @@
     "./task-runs": "./src/task-runs.ts",
     "./executor-nodes": "./src/executor-nodes.ts",
     "./artifacts": "./src/artifacts.ts",
+    "./node-commands": "./src/node-commands.ts",
     "./model-profiles": "./src/model-profiles.ts",
     "./compat-harness": "./src/compat-harness.ts",
     "./todos": "./src/todos.ts",

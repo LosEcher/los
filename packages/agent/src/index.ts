@@ -135,3 +135,14 @@ export {
   type ListArtifactsOptions,
   type PutArtifactInput,
 } from './artifacts.js';
+export {
+  ensureNodeCommandStore,
+  executeNodeCommand,
+  listNodeCommands,
+  loadNodeCommand,
+  type ExecuteNodeCommandInput,
+  type ListNodeCommandsOptions,
+  type NodeCommandName,
+  type NodeCommandRecord,
+  type NodeCommandStatus,
+} from './node-commands.js';
