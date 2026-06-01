@@ -1,17 +1,25 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { loadConfig } from '@los/infra/config';
 import { initDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import {
+  deleteArtifact,
+  ensureArtifactStore,
   ensureExecutorNodeStore,
-  upsertExecutorNodeHeartbeat,
   heartbeatTaskRun,
+  listArtifacts,
+  loadArtifact,
   loadTaskRun,
+  putArtifact,
+  readArtifactContent,
   runAgent,
+  upsertExecutorNodeHeartbeat,
   type AgentConfig,
   type AgentModelDelta,
+  type ArtifactPathPolicy,
   type SessionEventRecord,
 } from '@los/agent';
 
@@ -29,6 +37,22 @@ interface RunAgentRequest {
   config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall'>;
 }
 
+interface PutExecutorArtifactRequest {
+  artifactId?: string;
+  nodeId?: string;
+  sessionId?: string;
+  taskRunId?: string;
+  traceId?: string;
+  requestId?: string;
+  workspaceRoot?: string;
+  path?: string;
+  pathPolicy?: ArtifactPathPolicy;
+  content?: string;
+  encoding?: 'utf8' | 'base64';
+  contentType?: string;
+  metadata?: Record<string, unknown>;
+}
+
 type ExecutorStreamChunk =
   | { type: 'session_event'; event: SessionEventRecord }
   | { type: 'model_delta'; delta: AgentModelDelta }
@@ -39,10 +63,12 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   const config = await loadConfig();
   await initDb(config.databaseUrl);
   await ensureExecutorNodeStore();
+  await ensureArtifactStore();
 
   const nodeId = config.executor.nodeId ?? process.env.EXECUTOR_NODE_ID ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
   const agentKey = config.executor.agentKey;
+  const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
 
   await heartbeatNode(nodeId, publicUrl);
   const nodeHeartbeat = setInterval(() => {
@@ -51,7 +77,8 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
 
   const server = createServer(async (req, res) => {
     try {
-      if (req.method === 'GET' && req.url === '/health') {
+      const route = new URL(req.url ?? '/', publicUrl);
+      if (req.method === 'GET' && route.pathname === '/health') {
         sendJson(res, 200, {
           status: 'ok',
           nodeId,
@@ -63,7 +90,16 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
         return;
       }
 
-      if (req.method === 'POST' && req.url === '/v1/tasks/run-agent') {
+      if (route.pathname.startsWith('/v1/artifacts')) {
+        if (!isAuthorized(req, agentKey)) {
+          sendJson(res, 401, { error: 'unauthorized' });
+          return;
+        }
+        await handleArtifactRoute(req, res, route, nodeId, artifactStorageRoot);
+        return;
+      }
+
+      if (req.method === 'POST' && route.pathname === '/v1/tasks/run-agent') {
         if (!isAuthorized(req, agentKey)) {
           sendJson(res, 401, { error: 'unauthorized' });
           return;
@@ -88,6 +124,108 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   server.on('close', () => clearInterval(nodeHeartbeat));
   log.info(`Executor node ${nodeId} listening on ${publicUrl}`);
   return server;
+}
+
+async function handleArtifactRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  route: URL,
+  nodeId: string,
+  storageRoot: string,
+): Promise<void> {
+  const artifactMatch = route.pathname.match(/^\/v1\/artifacts\/([^/]+)(\/content)?$/);
+
+  if (req.method === 'GET' && route.pathname === '/v1/artifacts') {
+    const artifacts = await listArtifacts({
+      nodeId,
+      sessionId: normalizeOptionalString(route.searchParams.get('sessionId')),
+      taskRunId: normalizeOptionalString(route.searchParams.get('taskRunId')),
+      limit: normalizePositiveInteger(route.searchParams.get('limit')),
+      includeDeleted: route.searchParams.get('includeDeleted') === 'true',
+    });
+    sendJson(res, 200, artifacts);
+    return;
+  }
+
+  if (req.method === 'POST' && route.pathname === '/v1/artifacts') {
+    const body = await readJson<PutExecutorArtifactRequest>(req);
+    const requestedNodeId = normalizeOptionalString(body.nodeId);
+    if (requestedNodeId && requestedNodeId !== nodeId) {
+      sendJson(res, 409, { error: `executor artifact nodeId mismatch: ${requestedNodeId}` });
+      return;
+    }
+
+    const content = normalizeArtifactContent(body);
+    if (!content) {
+      sendJson(res, 422, { error: 'content is required' });
+      return;
+    }
+
+    const artifact = await putArtifact({
+      artifactId: normalizeOptionalString(body.artifactId),
+      nodeId,
+      sessionId: normalizeOptionalString(body.sessionId),
+      taskRunId: normalizeOptionalString(body.taskRunId),
+      traceId: normalizeOptionalString(body.traceId),
+      requestId: normalizeOptionalString(body.requestId),
+      workspaceRoot: normalizeOptionalString(body.workspaceRoot),
+      path: normalizeOptionalString(body.path),
+      pathPolicy: normalizePathPolicy(body.pathPolicy),
+      content,
+      contentType: normalizeOptionalString(body.contentType),
+      metadata: normalizeJsonObject(body.metadata),
+      storageRoot,
+    });
+    sendJson(res, 201, { ok: true, artifact });
+    return;
+  }
+
+  if (artifactMatch && req.method === 'GET' && artifactMatch[2] === '/content') {
+    const artifactId = decodeURIComponent(artifactMatch[1]);
+    const existing = await loadArtifact(artifactId);
+    if (!existing || existing.nodeId !== nodeId) {
+      sendJson(res, 404, { error: 'artifact not found' });
+      return;
+    }
+    const artifact = await readArtifactContent(artifactId);
+    if (!artifact) {
+      sendJson(res, 404, { error: 'artifact not found' });
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': artifact.record.contentType,
+      'X-Artifact-Id': artifact.record.artifactId,
+      'X-Artifact-Checksum': artifact.record.checksum,
+    });
+    res.end(artifact.content);
+    return;
+  }
+
+  if (artifactMatch && req.method === 'GET') {
+    const artifactId = decodeURIComponent(artifactMatch[1]);
+    const artifact = await loadArtifact(artifactId);
+    if (!artifact || artifact.nodeId !== nodeId) {
+      sendJson(res, 404, { error: 'artifact not found' });
+      return;
+    }
+    sendJson(res, 200, artifact);
+    return;
+  }
+
+  if (artifactMatch && req.method === 'DELETE') {
+    const artifactId = decodeURIComponent(artifactMatch[1]);
+    const existing = await loadArtifact(artifactId);
+    if (!existing || existing.nodeId !== nodeId) {
+      sendJson(res, 404, { error: 'artifact not found' });
+      return;
+    }
+    const body = await readOptionalJson<{ reason?: string }>(req);
+    const artifact = await deleteArtifact(artifactId, normalizeOptionalString(body.reason));
+    sendJson(res, 200, { ok: true, artifact });
+    return;
+  }
+
+  sendJson(res, 404, { error: 'not found' });
 }
 
 async function streamAssignedAgentTask(
@@ -187,6 +325,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
         baseUrl,
         runAgentUrl: `${baseUrl}/v1/tasks/run-agent`,
         healthUrl: `${baseUrl}/health`,
+        artifactsUrl: `${baseUrl}/v1/artifacts`,
       },
     },
     capacity: {
@@ -200,6 +339,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
       task_lease: true,
       workspace_read: true,
       workspace_write: true,
+      artifact_transfer: true,
       shell: true,
       sandbox: 'tool_policy',
     },
@@ -213,13 +353,36 @@ function isAuthorized(req: IncomingMessage, agentKey: string | undefined): boole
   return req.headers.authorization === `Bearer ${agentKey}`;
 }
 
+function executorArtifactStorageRoot(nodeId: string): string {
+  const configured = process.env.EXECUTOR_ARTIFACT_ROOT ?? process.env.LOS_EXECUTOR_ARTIFACT_ROOT;
+  if (configured) return resolve(configured);
+  return resolve(process.cwd(), '.los-runtime', 'executor-artifacts', encodeURIComponent(nodeId));
+}
+
 function readJson<T>(req: IncomingMessage): Promise<T> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
     req.on('end', () => {
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')) as T);
+        const raw = Buffer.concat(chunks).toString('utf-8').trim();
+        resolve(JSON.parse(raw) as T);
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function readOptionalJson<T extends Record<string, unknown>>(req: IncomingMessage): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    req.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks).toString('utf-8').trim();
+        resolve((raw ? JSON.parse(raw) : {}) as T);
       } catch (err) {
         reject(err);
       }
@@ -243,6 +406,29 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeArtifactContent(body: PutExecutorArtifactRequest): Buffer | null {
+  if (typeof body.content !== 'string') return null;
+  if (body.encoding === 'base64') return Buffer.from(body.content, 'base64');
+  return Buffer.from(body.content, 'utf-8');
+}
+
+function normalizePathPolicy(value: unknown): ArtifactPathPolicy | undefined {
+  if (value === 'workspace-relative' || value === 'artifact-store' || value === 'read-only-export') return value;
+  return undefined;
+}
+
+function normalizeJsonObject(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  return undefined;
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) return undefined;
+  const integer = Math.floor(parsed);
+  return integer > 0 ? integer : undefined;
 }
 
 function normalizeLeaseMs(value: unknown): number {
