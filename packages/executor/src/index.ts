@@ -16,12 +16,15 @@ import {
   putArtifact,
   readArtifactContent,
   runAgent,
+  executeNodeCommand,
   upsertExecutorNodeHeartbeat,
   type AgentConfig,
   type AgentModelDelta,
   type ArtifactPathPolicy,
+  type NodeCommandName,
   type SessionEventRecord,
 } from '@los/agent';
+import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 
 const log = getLogger('executor');
 const VERSION = '0.1.0';
@@ -53,6 +56,17 @@ interface PutExecutorArtifactRequest {
   metadata?: Record<string, unknown>;
 }
 
+interface ExecutorNodeCommandRequest {
+  command?: NodeCommandName;
+  commandId?: string;
+  requestedBy?: string;
+  traceId?: string;
+  targetVersion?: string;
+  timeoutMs?: number;
+  reason?: string;
+  args?: Record<string, unknown>;
+}
+
 type ExecutorStreamChunk =
   | { type: 'session_event'; event: SessionEventRecord }
   | { type: 'model_delta'; delta: AgentModelDelta }
@@ -69,6 +83,7 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
   const agentKey = config.executor.agentKey;
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
+  const nodeCommandRuntime = createExecutorNodeCommandRuntime();
 
   await heartbeatNode(nodeId, publicUrl);
   const nodeHeartbeat = setInterval(() => {
@@ -96,6 +111,15 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
           return;
         }
         await handleArtifactRoute(req, res, route, nodeId, artifactStorageRoot);
+        return;
+      }
+
+      if (route.pathname.startsWith('/v1/nodes/') && route.pathname.endsWith('/commands')) {
+        if (!isAuthorized(req, agentKey)) {
+          sendJson(res, 401, { error: 'unauthorized' });
+          return;
+        }
+        await handleNodeCommandRoute(req, res, route, nodeId, nodeCommandRuntime);
         return;
       }
 
@@ -228,6 +252,51 @@ async function handleArtifactRoute(
   sendJson(res, 404, { error: 'not found' });
 }
 
+async function handleNodeCommandRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  route: URL,
+  nodeId: string,
+  runtime = createExecutorNodeCommandRuntime(),
+): Promise<void> {
+  const match = route.pathname.match(/^\/v1\/nodes\/([^/]+)\/commands$/);
+  if (!match) {
+    sendJson(res, 404, { error: 'not found' });
+    return;
+  }
+
+  const targetNodeId = decodeURIComponent(match[1]);
+  if (targetNodeId !== nodeId) {
+    sendJson(res, 409, { error: `node command target mismatch: ${targetNodeId}` });
+    return;
+  }
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'method not allowed' });
+    return;
+  }
+
+  const body = await readJson<ExecutorNodeCommandRequest>(req);
+  const command = normalizeNodeCommand(body.command);
+  if (!command) {
+    sendJson(res, 422, { error: 'command is required' });
+    return;
+  }
+
+  const record = await executeNodeCommand({
+    commandId: normalizeOptionalString(body.commandId),
+    nodeId,
+    command,
+    requestedBy: normalizeOptionalString(body.requestedBy),
+    traceId: normalizeOptionalString(body.traceId),
+    targetVersion: normalizeOptionalString(body.targetVersion),
+    timeoutMs: normalizePositiveInteger(body.timeoutMs),
+    reason: normalizeOptionalString(body.reason),
+    args: normalizeJsonObject(body.args),
+  }, runtime);
+  const statusCode = record.status === 'failed' ? 500 : record.status === 'denied' ? 409 : 202;
+  sendJson(res, statusCode, { ok: record.status !== 'failed' && record.status !== 'denied', command: record });
+}
+
 async function streamAssignedAgentTask(
   res: ServerResponse,
   body: RunAgentRequest,
@@ -326,6 +395,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
         runAgentUrl: `${baseUrl}/v1/tasks/run-agent`,
         healthUrl: `${baseUrl}/health`,
         artifactsUrl: `${baseUrl}/v1/artifacts`,
+        commandUrl: `${baseUrl}/v1/nodes/${nodeId}/commands`,
       },
     },
     capacity: {
@@ -340,6 +410,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
       workspace_read: true,
       workspace_write: true,
       artifact_transfer: true,
+      node_command_runner: true,
       shell: true,
       sandbox: 'tool_policy',
     },
@@ -421,6 +492,13 @@ function normalizePathPolicy(value: unknown): ArtifactPathPolicy | undefined {
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  return undefined;
+}
+
+function normalizeNodeCommand(value: unknown): NodeCommandName | undefined {
+  if (value === 'status' || value === 'probe' || value === 'drain' || value === 'promote' || value === 'restart' || value === 'upgrade' || value === 'rollback') {
+    return value;
+  }
   return undefined;
 }
 

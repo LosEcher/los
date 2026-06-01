@@ -48,6 +48,24 @@ export interface ListNodeCommandsOptions {
   limit?: number;
 }
 
+export interface NodeCommandRuntimeContext {
+  commandId: string;
+  input: ExecuteNodeCommandInput;
+  node: ExecutorNodeRecord;
+}
+
+export interface NodeCommandRuntimeResult {
+  status?: NodeCommandStatus;
+  output?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface NodeCommandRuntime {
+  restart?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
+  upgrade?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
+  rollback?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS node_commands (
   command_id TEXT PRIMARY KEY,
@@ -85,7 +103,7 @@ export async function ensureNodeCommandStore(): Promise<void> {
   _initialized = true;
 }
 
-export async function executeNodeCommand(input: ExecuteNodeCommandInput): Promise<NodeCommandRecord> {
+export async function executeNodeCommand(input: ExecuteNodeCommandInput, runtime: NodeCommandRuntime = {}): Promise<NodeCommandRecord> {
   await ensureNodeCommandStore();
   await ensureExecutorNodeStore();
 
@@ -144,6 +162,27 @@ export async function executeNodeCommand(input: ExecuteNodeCommandInput): Promis
       });
     }
 
+    if (command === 'restart') {
+      if (!runtime.restart) {
+        return await completeNodeCommand(created.commandId, {
+          status: 'denied',
+          error: 'restart requires an executor-side command runner',
+        });
+      }
+      const saved = await upsertExecutorNode({
+        nodeId,
+        status: 'draining',
+        rolloutState: 'draining',
+        rolloutMessage: normalizeOptionalString(input.reason) ?? 'restart requested',
+        activeTaskCount: node.activeTaskCount,
+      });
+      const runtimeResult = await runtime.restart({ commandId: created.commandId, input, node: saved });
+      return await completeRuntimeNodeCommand(created.commandId, runtimeResult, {
+        node: summarizeNode(saved),
+        nextAction: 'executor restart scheduled on owning node',
+      });
+    }
+
     if (command === 'upgrade') {
       const targetVersion = normalizeOptionalString(input.targetVersion);
       if (!targetVersion) {
@@ -156,16 +195,46 @@ export async function executeNodeCommand(input: ExecuteNodeCommandInput): Promis
         nodeId,
         status: 'draining',
         targetVersion,
-        rolloutState: 'draining',
+        rolloutState: runtime.upgrade ? 'upgrading' : 'draining',
         rolloutMessage: normalizeOptionalString(input.reason) ?? `upgrade requested: ${targetVersion}`,
         activeTaskCount: node.activeTaskCount,
       });
+      if (runtime.upgrade) {
+        const runtimeResult = await runtime.upgrade({ commandId: created.commandId, input, node: saved });
+        return await completeRuntimeNodeCommand(created.commandId, runtimeResult, {
+          node: summarizeNode(saved),
+          nextAction: 'executor upgrade scheduled on owning node',
+        });
+      }
       return await completeNodeCommand(created.commandId, {
         status: 'accepted',
         output: {
           node: summarizeNode(saved),
           nextAction: 'run executor drain/restart/verify workflow on the target node',
         },
+      });
+    }
+
+    if (command === 'rollback') {
+      if (!runtime.rollback) {
+        return await completeNodeCommand(created.commandId, {
+          status: 'denied',
+          error: 'rollback requires an executor-side command runner',
+        });
+      }
+      const targetVersion = normalizeOptionalString(input.targetVersion) ?? normalizeOptionalString(node.version);
+      const saved = await upsertExecutorNode({
+        nodeId,
+        status: 'draining',
+        targetVersion,
+        rolloutState: 'draining',
+        rolloutMessage: normalizeOptionalString(input.reason) ?? (targetVersion ? `rollback requested: ${targetVersion}` : 'rollback requested'),
+        activeTaskCount: node.activeTaskCount,
+      });
+      const runtimeResult = await runtime.rollback({ commandId: created.commandId, input, node: saved });
+      return await completeRuntimeNodeCommand(created.commandId, runtimeResult, {
+        node: summarizeNode(saved),
+        nextAction: 'executor rollback scheduled on owning node',
       });
     }
 
@@ -265,6 +334,18 @@ async function completeNodeCommand(
     ],
   );
   return rowToNodeCommand(assertRow(rows.rows[0]));
+}
+
+async function completeRuntimeNodeCommand(
+  commandId: string,
+  runtimeResult: NodeCommandRuntimeResult,
+  defaultOutput: Record<string, unknown>,
+): Promise<NodeCommandRecord> {
+  return await completeNodeCommand(commandId, {
+    status: runtimeResult.status ?? (runtimeResult.error ? 'failed' : 'accepted'),
+    output: { ...defaultOutput, ...(runtimeResult.output ?? {}) },
+    error: runtimeResult.error,
+  });
 }
 
 function summarizeNode(node: ExecutorNodeRecord): Record<string, unknown> {

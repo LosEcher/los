@@ -6,7 +6,12 @@ import {
   loadNodeCommand,
   type NodeCommandName,
 } from '@los/agent/node-commands';
+import { loadExecutorNode } from '@los/agent/executor-nodes';
 import { getRequestContext } from './request-context.js';
+
+type NodeCommandRoutesOptions = {
+  executorAgentKey?: string;
+};
 
 type NodeCommandBody = {
   command?: NodeCommandName;
@@ -19,7 +24,7 @@ type NodeCommandBody = {
   args?: Record<string, unknown>;
 };
 
-export function registerNodeCommandRoutes(app: FastifyInstance): void {
+export function registerNodeCommandRoutes(app: FastifyInstance, options: NodeCommandRoutesOptions = {}): void {
   app.get('/node-commands', async (req) => {
     await ensureNodeCommandStore();
     const query = req.query as { nodeId?: string; limit?: string };
@@ -55,7 +60,7 @@ export function registerNodeCommandRoutes(app: FastifyInstance): void {
     if (!command) return reply.status(422).send({ error: 'command is required' });
 
     const context = getRequestContext(req);
-    const record = await executeNodeCommand({
+    const commandInput = {
       commandId: normalizeOptionalString(body?.commandId),
       nodeId,
       command,
@@ -66,10 +71,37 @@ export function registerNodeCommandRoutes(app: FastifyInstance): void {
       timeoutMs: normalizePositiveInteger(body?.timeoutMs),
       reason: normalizeOptionalString(body?.reason),
       args: normalizeJsonObject(body?.args),
-    });
+    };
+    const proxied = await proxyNodeCommand(commandInput, options.executorAgentKey);
+    if (proxied) return reply.status(proxied.statusCode).send(proxied.body);
+
+    const record = await executeNodeCommand(commandInput);
     const statusCode = record.status === 'failed' ? 500 : record.status === 'denied' ? 409 : 202;
     return reply.status(statusCode).send({ ok: record.status !== 'failed' && record.status !== 'denied', command: record });
   });
+}
+
+async function proxyNodeCommand(
+  input: NodeCommandBody & { nodeId: string; command: NodeCommandName },
+  executorAgentKey: string | undefined,
+): Promise<{ statusCode: number; body: unknown } | null> {
+  const node = await loadExecutorNode(input.nodeId);
+  const commandUrl = normalizeOptionalString(normalizeJsonObject(node?.connectConfig?.agent_http)?.commandUrl);
+  if (!commandUrl) return null;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (executorAgentKey) headers.Authorization = `Bearer ${executorAgentKey}`;
+  const response = await fetch(commandUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(input),
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) as unknown : {};
+  if (!response.ok && response.status >= 500) {
+    throw new Error(`executor node command failed: ${response.status} ${response.statusText}: ${text}`);
+  }
+  return { statusCode: response.status, body };
 }
 
 function normalizeCommand(value: unknown): NodeCommandName | undefined {

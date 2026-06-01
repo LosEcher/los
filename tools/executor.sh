@@ -346,8 +346,14 @@ stop_cmd() {
 }
 
 restart_cmd() {
+  set_rollout_cmd draining "draining before restart"
+  drain_cmd
+  set_rollout_cmd upgrading "restarting executor"
   stop_cmd
   start_cmd
+  set_rollout_cmd verifying "validating health"
+  promote_cmd
+  set_rollout_cmd idle "restart complete"
 }
 
 upgrade_cmd() {

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
 import Fastify from 'fastify';
 
 import { closeDb, getDb, initDb } from '@los/infra/db';
@@ -99,5 +100,73 @@ test('node upgrade command records accepted rollout state without pretending to 
     await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
     await app.close();
+  }
+});
+
+test('node command routes proxy to advertised executor command url', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const nodeId = `test-node-command-proxy-${Date.now()}`;
+  const gateway = Fastify({ logger: false });
+  const executor = Fastify({ logger: false });
+  let authorization: string | undefined;
+  let proxiedBody: Record<string, unknown> = {};
+
+  executor.post('/v1/nodes/:id/commands', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    authorization = req.headers.authorization;
+    proxiedBody = req.body as Record<string, unknown>;
+    return reply.status(202).send({
+      ok: true,
+      command: {
+        commandId: 'proxy-command',
+        nodeId: id,
+        command: proxiedBody.command,
+        status: 'succeeded',
+        args: {},
+        output: { source: 'executor-proxy' },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  });
+
+  registerRequestContext(gateway);
+  registerNodeCommandRoutes(gateway, { executorAgentKey: 'proxy-key' });
+  await executor.listen({ host: '127.0.0.1', port: 0 });
+  const address = executor.server.address() as AddressInfo;
+
+  try {
+    await upsertExecutorNode({
+      nodeId,
+      nodeKind: 'executor',
+      status: 'online',
+      connectModes: ['agent_http'],
+      connectConfig: {
+        agent_http: {
+          commandUrl: `http://127.0.0.1:${address.port}/v1/nodes/${nodeId}/commands`,
+        },
+      },
+      capabilities: { node_command_runner: true },
+      verified: { agent_http: { ok: true } },
+    });
+
+    const response = await gateway.inject({
+      method: 'POST',
+      url: `/nodes/${nodeId}/commands`,
+      payload: { command: 'status', reason: 'proxy test' },
+    });
+    assert.equal(response.statusCode, 202);
+    assert.equal(response.json().command.output.source, 'executor-proxy');
+    assert.equal(authorization, 'Bearer proxy-key');
+    assert.equal(proxiedBody.nodeId, nodeId);
+    assert.equal(proxiedBody.command, 'status');
+    assert.equal(proxiedBody.reason, 'proxy test');
+  } finally {
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await gateway.close();
+    await executor.close();
   }
 });

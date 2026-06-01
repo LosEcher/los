@@ -144,5 +144,8 @@ export {
   type ListNodeCommandsOptions,
   type NodeCommandName,
   type NodeCommandRecord,
+  type NodeCommandRuntime,
+  type NodeCommandRuntimeContext,
+  type NodeCommandRuntimeResult,
   type NodeCommandStatus,
 } from './node-commands.js';
