@@ -1,0 +1,124 @@
+contract: los.node-registry
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Registry contract for executor, SSH target, ingress, and proxy nodes. Node
+  visibility is separate from execution eligibility.
+type: object
+required:
+  - nodeId
+  - nodeKind
+  - status
+  - connectModes
+  - capabilities
+  - verified
+properties:
+  nodeId:
+    type: string
+  nodeKind:
+    type: string
+    enum:
+      - executor
+      - ssh_target
+      - ingress
+      - proxy
+  status:
+    type: string
+    enum:
+      - online
+      - draining
+      - offline
+  version:
+    type: string
+  targetVersion:
+    type: string
+  rolloutState:
+    type: string
+    enum:
+      - idle
+      - draining
+      - upgrading
+      - verifying
+      - failed
+  connectModes:
+    type: array
+    items:
+      type: string
+      enum:
+        - agent_http
+        - agent_http_ndjson
+        - http_health
+        - direct_ssh
+        - tailscale_ssh
+        - tailscale_native_ssh
+        - cf_tunnel_http
+        - cf_tunnel_ssh
+        - socks5
+  connectConfig:
+    type: object
+    additionalProperties: true
+  capabilities:
+    type: object
+    properties:
+      run_agent:
+        type: boolean
+      stream_ndjson:
+        type: boolean
+      task_lease:
+        type: boolean
+      workspace_read:
+        type: boolean
+      workspace_write:
+        type: boolean
+      shell:
+        type: boolean
+      sandbox:
+        type: string
+      proxy_egress:
+        type: boolean
+      ingress_callback:
+        type: boolean
+      model_route:
+        type: boolean
+  verified:
+    type: object
+    description: Probe or heartbeat verification keyed by connect mode.
+    additionalProperties:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        checked_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+        endpoint:
+          type: string
+        error:
+          type: string
+  queueDepth:
+    type: integer
+    minimum: 0
+  activeTaskCount:
+    type: integer
+    minimum: 0
+  meshLinks:
+    type: array
+    items:
+      type: object
+      additionalProperties: true
+executionCandidate:
+  required:
+    - nodeKind: executor
+    - status: online
+    - capabilities.run_agent: true
+    - verified.agent_http_or_ndjson.ok: true
+  blockers:
+    - heartbeat:stale
+    - connect_mode:missing_agent_http
+    - capability:run_agent_missing
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh

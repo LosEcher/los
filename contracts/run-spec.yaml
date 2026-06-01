@@ -1,0 +1,93 @@
+contract: los.run-spec
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Request contract for a los agent run. Gateway, CLI, and executor nodes use
+  this shape before execution-specific callbacks are attached.
+type: object
+required:
+  - prompt
+properties:
+  prompt:
+    type: string
+    minLength: 1
+  provider:
+    type: string
+    nullable: true
+  model:
+    type: string
+    nullable: true
+  workspaceRoot:
+    type: string
+    description: Absolute workspace path resolved by the receiving runtime.
+  toolMode:
+    type: string
+    enum:
+      - read-only
+      - project-write
+      - all
+    default: project-write
+  allowedTools:
+    type: array
+    items:
+      type: string
+  sandbox:
+    type: object
+    properties:
+      mode:
+        type: string
+        enum:
+          - read-only
+          - workspace-write
+          - unrestricted
+      approvalPolicy:
+        type: string
+        enum:
+          - never
+          - on-request
+          - on-failure
+  sessionId:
+    type: string
+  parentSessionId:
+    type: string
+  traceId:
+    type: string
+  requestId:
+    type: string
+  tenantId:
+    type: string
+  projectId:
+    type: string
+  userId:
+    type: string
+  dedupeKey:
+    type: string
+  timeoutMs:
+    type: integer
+    minimum: 1
+  maxLoops:
+    type: integer
+    minimum: 1
+  executor:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+      nodeId:
+        type: string
+      leaseMs:
+        type: integer
+        minimum: 1000
+      heartbeatMs:
+        type: integer
+        minimum: 1000
+events:
+  writes:
+    - task_runs
+    - session_events
+  streams:
+    - los.run-stream
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh

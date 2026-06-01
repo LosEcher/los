@@ -1,0 +1,78 @@
+contract: los.node-command
+version: 0.1.0
+status: draft
+owner: packages/executor
+description: >
+  Maintenance command contract for node lifecycle actions. These commands are
+  operational controls and must stay separate from agent run_shell tools.
+type: object
+required:
+  - commandId
+  - nodeId
+  - command
+properties:
+  commandId:
+    type: string
+  nodeId:
+    type: string
+  requestedBy:
+    type: string
+  requestId:
+    type: string
+  traceId:
+    type: string
+  command:
+    type: string
+    enum:
+      - status
+      - probe
+      - drain
+      - promote
+      - restart
+      - upgrade
+      - rollback
+  args:
+    type: object
+    additionalProperties: true
+  targetVersion:
+    type: string
+  timeoutMs:
+    type: integer
+    minimum: 1000
+  reason:
+    type: string
+result:
+  required:
+    - commandId
+    - nodeId
+    - status
+  properties:
+    status:
+      type: string
+      enum:
+        - accepted
+        - running
+        - succeeded
+        - failed
+        - denied
+    startedAt:
+      type: string
+      format: date-time
+    completedAt:
+      type: string
+      format: date-time
+    output:
+      type: string
+    error:
+      type: string
+audit:
+  writes:
+    - session_events
+    - executor_nodes
+    - future node_commands
+security:
+  - Commands are allowlisted maintenance actions, not arbitrary shell.
+  - Agent tool execution must not imply node maintenance permission.
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh

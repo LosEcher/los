@@ -1,0 +1,92 @@
+contract: los.artifact-transfer
+version: 0.1.0
+status: draft
+owner: packages/executor
+description: >
+  File and artifact transfer contract for local and remote nodes. Artifact
+  transfer is audited separately from agent shell commands.
+type: object
+operations:
+  - put
+  - get
+  - list
+  - delete
+required:
+  - artifactId
+  - nodeId
+  - operation
+properties:
+  artifactId:
+    type: string
+  nodeId:
+    type: string
+  operation:
+    type: string
+    enum:
+      - put
+      - get
+      - list
+      - delete
+  sessionId:
+    type: string
+  taskRunId:
+    type: string
+  traceId:
+    type: string
+  workspaceRoot:
+    type: string
+  path:
+    type: string
+  pathPolicy:
+    type: string
+    enum:
+      - workspace-relative
+      - artifact-store
+      - read-only-export
+  sizeBytes:
+    type: integer
+    minimum: 0
+  checksum:
+    type: string
+  checksumAlgorithm:
+    type: string
+    enum:
+      - sha256
+  contentType:
+    type: string
+  chunk:
+    type: object
+    properties:
+      index:
+        type: integer
+        minimum: 0
+      count:
+        type: integer
+        minimum: 1
+      sizeBytes:
+        type: integer
+        minimum: 0
+result:
+  properties:
+    ok:
+      type: boolean
+    artifactId:
+      type: string
+    location:
+      type: string
+    sizeBytes:
+      type: integer
+    checksum:
+      type: string
+    error:
+      type: string
+audit:
+  writes:
+    - session_events
+    - future artifacts
+security:
+  - Paths must be normalized through workspace path safety.
+  - Large transfers should use chunked upload before being exposed to remote nodes.
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh

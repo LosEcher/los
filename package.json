@@ -23,7 +23,8 @@
     "cli": "./bin/los",
     "dev": "turbo dev",
     "build": "turbo build",
-    "check": "turbo check && ./tools/check-structure.sh",
+    "check:contracts": "./tools/check-contracts.sh",
+    "check": "turbo check && ./tools/check-structure.sh && ./tools/check-contracts.sh",
     "test": "turbo test",
     "clean": "turbo clean"
   },

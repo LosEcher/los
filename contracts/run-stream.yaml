@@ -1,0 +1,75 @@
+contract: los.run-stream
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Event contract for active run streaming and replay. HTTP SSE uses event names;
+  executor NDJSON uses typed chunks that carry the same session evidence.
+type: stream
+transport:
+  sse:
+    contentType: text/event-stream
+  ndjson:
+    contentType: application/x-ndjson
+eventTypes:
+  - session
+  - session.resumed
+  - session.resume_state
+  - session.started
+  - task
+  - task.created
+  - task.deduplicated
+  - task.running
+  - task.cancelled
+  - task.succeeded
+  - task.failed
+  - model.delta
+  - model.response
+  - tool.planned
+  - tool.approved
+  - tool.denied
+  - tool.call
+  - tool.result
+  - turn
+  - done
+  - error
+commonFields:
+  sessionId:
+    type: string
+  taskRunId:
+    type: string
+  nodeId:
+    type: string
+  traceId:
+    type: string
+  requestId:
+    type: string
+  tenantId:
+    type: string
+  projectId:
+    type: string
+  userId:
+    type: string
+  createdAt:
+    type: string
+    format: date-time
+chunks:
+  executorNdjson:
+    - type: session_event
+      event: session_events.row
+    - type: model_delta
+      delta: agent.model_delta
+    - type: result
+      result: agent.result
+    - type: error
+      error: string
+replay:
+  sourceOfTruth:
+    - session_events
+    - task_runs
+  future:
+    - Last-Event-ID
+    - since event cursor
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh
