@@ -17,12 +17,12 @@ import {
 } from 'lucide-react';
 import { getJson, type Health } from './api';
 import {
-  ChatPage,
   MemoryPage,
   ProvidersPage,
   SessionsPage,
   TasksPage,
 } from './pages';
+import { ChatPage } from './chat-page';
 import { NodesPage } from './nodes-page';
 import { TodosPage } from './todo-page';
 import { LogsPage, ReservedPage, SettingsPage } from './secondary-pages';
@@ -72,6 +72,10 @@ export function App() {
   });
 
   const active = NAV.find(item => item.id === page) ?? NAV[0]!;
+  const continueSession = (id: string) => {
+    setSelectedSessionId(id);
+    setPage('chat');
+  };
 
   return (
     <div className="app-shell">
@@ -126,10 +130,10 @@ export function App() {
           </div>
         </header>
 
-        {page === 'chat' && <ChatPage onSessionSelect={setSelectedSessionId} />}
-        {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} />}
+        {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} />}
+        {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} />}
         {page === 'todos' && <TodosPage />}
-        {page === 'tasks' && <TasksPage onSelectSession={setSelectedSessionId} />}
+        {page === 'tasks' && <TasksPage onSelectSession={continueSession} />}
         {page === 'memory' && <MemoryPage />}
         {page === 'providers' && <ProvidersPage />}
         {page === 'skills' && <ReservedPage kind="Skills" icon={<BookOpen size={18} />} description="Read-only surface for reusable agent instruction bundles. API wiring is not present yet." fields={['name', 'category', 'run mode', 'source path/url', 'version hash', 'usage count', 'last used']} />}

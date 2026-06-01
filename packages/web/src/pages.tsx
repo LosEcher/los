@@ -1,18 +1,15 @@
-import { type FormEvent, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Database,
-  RefreshCcw,
   Search,
   Send,
-  Square,
   Trash2,
 } from 'lucide-react';
 import {
   deleteJson,
   getJson,
   postJson,
-  streamChat,
   type MemoryResponse,
   type MemoryStats,
   type ProviderDiscovery,
@@ -22,7 +19,6 @@ import {
   type SessionObservability,
   type SessionSummary,
   type TaskRun,
-  type ToolMode,
 } from './api';
 import {
   DataTable,
@@ -36,157 +32,15 @@ import {
   StatusPill,
 } from './ui';
 
-type StreamRow = {
-  id: string;
-  event: string;
-  message: string;
-  meta?: string;
-  level?: 'normal' | 'ok' | 'warn' | 'error';
-};
-
-export function ChatPage({ onSessionSelect }: { onSessionSelect: (id: string) => void }) {
-  const queryClient = useQueryClient();
-  const [prompt, setPrompt] = useState('');
-  const [provider, setProvider] = useState('');
-  const [workspaceRoot, setWorkspaceRoot] = useState('');
-  const [toolMode, setToolMode] = useState<ToolMode>('project-write');
-  const [maxLoops, setMaxLoops] = useState(8);
-  const [timeoutMs, setTimeoutMs] = useState(120_000);
-  const [running, setRunning] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [taskRunId, setTaskRunId] = useState<string | null>(null);
-  const [rows, setRows] = useState<StreamRow[]>([
-    { id: 'ready', event: 'system', message: 'Ready for a bounded project task.', meta: 'project-write blocks shell execution' },
-  ]);
-  const abortRef = useRef<AbortController | null>(null);
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    const text = prompt.trim();
-    if (!text || running) return;
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setPrompt('');
-    setRunning(true);
-    setRows([{ id: crypto.randomUUID(), event: 'user', message: text }]);
-
-    try {
-      await streamChat({
-        prompt: text,
-        provider: provider.trim() || undefined,
-        workspaceRoot: workspaceRoot.trim() || undefined,
-        toolMode,
-        maxLoops,
-        timeoutMs,
-      }, controller.signal, ({ event, data }) => {
-        if (event === 'session' && typeof data.sessionId === 'string') {
-          setSessionId(data.sessionId);
-          onSessionSelect(data.sessionId);
-        }
-        if (typeof data.taskRunId === 'string') setTaskRunId(data.taskRunId);
-        setRows(prev => [...prev, streamRow(event, data)]);
-      });
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        setRows(prev => [...prev, { id: crypto.randomUUID(), event: 'error', message: String((err as Error).message ?? err), level: 'error' }]);
-      }
-    } finally {
-      setRunning(false);
-      abortRef.current = null;
-      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      await queryClient.invalidateQueries({ queryKey: ['memory'] });
-    }
-  }
-
-  async function cancelRun() {
-    if (taskRunId) {
-      await postJson(`/tasks/${taskRunId}/cancel`, { reason: 'cancelled_from_web_console' }).catch(() => undefined);
-    }
-    abortRef.current?.abort();
-    setRunning(false);
-  }
-
-  return (
-    <section className="panel-grid chat-grid">
-      <div className="panel main-panel">
-        <div className="panel-head">
-          <div>
-            <h2>Live Run</h2>
-            <p>Streamed from Gateway `/chat` with task and session evidence.</p>
-          </div>
-          <button className="ghost-btn" type="button" onClick={() => setRows([])}>
-            <RefreshCcw size={14} /> clear
-          </button>
-        </div>
-
-        <div className="stream-list">
-          {rows.length === 0 ? <EmptyText text="No stream events yet." /> : rows.map(row => (
-            <div className="stream-row" data-level={row.level ?? 'normal'} key={row.id}>
-              <span className="stream-event">{row.event}</span>
-              <div>
-                <p>{row.message}</p>
-                {row.meta ? <code>{row.meta}</code> : null}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <form className="composer" onSubmit={handleSubmit}>
-          <textarea
-            value={prompt}
-            onChange={event => setPrompt(event.target.value)}
-            placeholder="Ask los to inspect or prepare a bounded change..."
-            rows={3}
-          />
-          <div className="composer-actions">
-            <button className="primary-btn" type="submit" disabled={running || !prompt.trim()}>
-              <Send size={15} /> send
-            </button>
-            <button className="ghost-btn" type="button" disabled={!running} onClick={cancelRun}>
-              <Square size={14} /> cancel
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <aside className="panel inspector">
-        <div className="panel-head compact">
-          <h2>Run Controls</h2>
-        </div>
-        <Field label="provider endpoint">
-          <input value={provider} onChange={event => setProvider(event.target.value)} placeholder="default provider" />
-        </Field>
-        <Field label="workspace root">
-          <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="default los repo" />
-        </Field>
-        <Field label="tool mode">
-          <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
-            <option value="read-only">read-only</option>
-            <option value="project-write">project-write</option>
-            <option value="all">all</option>
-          </select>
-        </Field>
-        <div className="two-col">
-          <Field label="max loops">
-            <input type="number" min={1} max={50} value={maxLoops} onChange={event => setMaxLoops(Number(event.target.value))} />
-          </Field>
-          <Field label="timeout ms">
-            <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
-          </Field>
-        </div>
-        <div className="fact-list">
-          <Fact label="session" value={sessionId ?? 'not started'} />
-          <Fact label="task" value={taskRunId ?? 'not started'} />
-          <Fact label="shell" value={toolMode === 'all' ? 'allowed by mode' : 'blocked'} />
-        </div>
-      </aside>
-    </section>
-  );
-}
-
-export function SessionsPage({ selectedSessionId, onSelectSession }: { selectedSessionId: string | null; onSelectSession: (id: string) => void }) {
+export function SessionsPage({
+  selectedSessionId,
+  onSelectSession,
+  onContinueSession,
+}: {
+  selectedSessionId: string | null;
+  onSelectSession: (id: string) => void;
+  onContinueSession: (id: string) => void;
+}) {
   const sessions = useQuery({
     queryKey: ['sessions'],
     queryFn: () => getJson<SessionSummary[]>('/sessions'),
@@ -210,24 +64,31 @@ export function SessionsPage({ selectedSessionId, onSelectSession }: { selectedS
           renderRow={session => (
             <button
               type="button"
-              className="record-row"
+              className="record-row session-row"
               data-active={selectedSessionId === session.id}
               onClick={() => onSelectSession(session.id)}
             >
               <span className="row-title">{session.id}</span>
               <span>{formatDate(session.updatedAt)}</span>
-              <span>{String(session.metadata.provider ?? 'provider?')}</span>
-              <span>{String(session.metadata.toolMode ?? 'mode?')}</span>
+              <span>{metadataText(session.metadata.provider) ?? 'provider?'}</span>
+              <span>{metadataText(session.metadata.model) ?? 'model?'}</span>
+              <span>{metadataText(session.metadata.toolMode) ?? 'mode?'}</span>
             </button>
           )}
         />
       </div>
-      <SessionInspector sessionId={selectedSessionId} />
+      <SessionInspector sessionId={selectedSessionId} onContinueSession={onContinueSession} />
     </section>
   );
 }
 
-function SessionInspector({ sessionId }: { sessionId: string | null }) {
+function SessionInspector({
+  sessionId,
+  onContinueSession,
+}: {
+  sessionId: string | null;
+  onContinueSession: (id: string) => void;
+}) {
   const detail = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => getJson<SessionDetail>(`/sessions/${sessionId}`),
@@ -252,9 +113,21 @@ function SessionInspector({ sessionId }: { sessionId: string | null }) {
     <aside className="panel inspector">
       <div className="panel-head compact">
         <h2>Session Detail</h2>
-        <span className="mono-chip">{sessionId}</span>
+        <button className="ghost-btn" type="button" onClick={() => onContinueSession(sessionId)}>
+          <Send size={14} /> continue
+        </button>
       </div>
+      <span className="mono-chip">{sessionId}</span>
       {detail.isLoading ? <EmptyText text="Loading session..." /> : null}
+      {detail.data ? (
+        <div className="fact-list compact-facts">
+          <Fact label="provider" value={metadataText(detail.data.metadata.provider) ?? 'default'} />
+          <Fact label="model" value={metadataText(detail.data.metadata.model) ?? 'default'} />
+          <Fact label="tool mode" value={metadataText(detail.data.metadata.toolMode) ?? 'unknown'} />
+          <Fact label="workspace" value={metadataText(detail.data.metadata.workspaceRoot) ?? 'default'} />
+          <Fact label="task" value={metadataText(detail.data.metadata.taskRunId) ?? 'none'} />
+        </div>
+      ) : null}
       {observability.data ? (
         <div className="fact-list">
           <Fact label="events" value={String(observability.data.eventCount)} />
@@ -262,6 +135,14 @@ function SessionInspector({ sessionId }: { sessionId: string | null }) {
           <Fact label="tokens" value={String(observability.data.totalUsage.totalTokens)} />
           <Fact label="tools" value={observability.data.tools.names.join(', ') || observability.data.tools.status} />
           <Fact label="models" value={observability.data.models.names.join(', ') || observability.data.models.status} />
+        </div>
+      ) : null}
+      {detail.data ? (
+        <div className="definition-list compact-definition-list">
+          <Definition term="created" text={formatDate(detail.data.createdAt)} />
+          <Definition term="updated" text={formatDate(detail.data.updatedAt)} />
+          <Definition term="turns" text={String(detail.data.turns.length)} />
+          <Definition term="messages" text={String(detail.data.messages.length)} />
         </div>
       ) : null}
       <div className="event-timeline">
@@ -304,12 +185,16 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
         rows={tasks.data ?? []}
         renderRow={task => (
           <div className="record-row task-row">
-            <button type="button" className="link-cell" onClick={() => onSelectSession(task.sessionId)}>
-              {task.id}
-            </button>
+            <div className="task-main">
+              <button type="button" className="link-cell" onClick={() => onSelectSession(task.sessionId)}>
+                {task.id}
+              </button>
+              <span>{task.promptPreview}</span>
+            </div>
             <span className={`status-text ${task.status}`}>{task.status}</span>
             <span>{task.toolMode}</span>
-            <span>{task.provider ?? 'default'}</span>
+            <span>{task.provider ?? 'default'} / {task.model ?? 'model?'}</span>
+            <span>{task.nodeId ?? 'local'}</span>
             <span>{formatDate(task.updatedAt)}</span>
             <button className="tiny-btn" type="button" disabled={!['queued', 'running'].includes(task.status) || cancel.isPending} onClick={() => cancel.mutate(task.id)}>
               cancel
@@ -486,53 +371,13 @@ export function ProvidersPage() {
   );
 }
 
-function streamRow(event: string, data: Record<string, unknown>): StreamRow {
-  if (event === 'done') {
-    return {
-      id: crypto.randomUUID(),
-      event,
-      message: typeof data.text === 'string' ? data.text : 'Run completed.',
-      meta: data.sessionId ? `session ${data.sessionId}` : undefined,
-      level: 'ok',
-    };
+function metadataText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text || null;
   }
-  if (event === 'error') {
-    return {
-      id: crypto.randomUUID(),
-      event,
-      message: String(data.message ?? 'stream error'),
-      level: 'error',
-    };
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
   }
-  if (event === 'turn') {
-    return {
-      id: crypto.randomUUID(),
-      event,
-      message: String(data.text ?? 'model turn'),
-      meta: `loop ${String(data.loopCount ?? '?')} · tools ${Array.isArray(data.toolNames) ? data.toolNames.join(', ') || 'none' : '?'}`,
-    };
-  }
-  if (event === 'tool_call') {
-    return {
-      id: crypto.randomUUID(),
-      event,
-      message: String(data.tool ?? 'tool call'),
-      meta: String(data.args ?? ''),
-      level: 'warn',
-    };
-  }
-  if (event === 'task') {
-    return {
-      id: crypto.randomUUID(),
-      event,
-      message: String(data.type ?? data.status ?? 'task event'),
-      meta: String(data.taskRunId ?? ''),
-      level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal',
-    };
-  }
-  return {
-    id: crypto.randomUUID(),
-    event,
-    message: JSON.stringify(data),
-  };
+  return null;
 }

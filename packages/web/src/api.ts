@@ -285,6 +285,7 @@ export type ChatPayload = {
   prompt: string;
   sessionId?: string;
   provider?: string;
+  model?: string;
   workspaceRoot?: string;
   toolMode: ToolMode;
   maxLoops?: number;

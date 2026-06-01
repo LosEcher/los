@@ -52,6 +52,7 @@ code,
 .mono-chip,
 .metric strong,
 .fact strong,
+.context-chip strong,
 .stream-event,
 .log-row,
 .status-pill {
@@ -297,7 +298,7 @@ p {
 .main-panel {
   min-height: calc(100vh - 140px);
   display: grid;
-  grid-template-rows: auto minmax(260px, 1fr) auto;
+  grid-template-rows: auto auto minmax(260px, 1fr) auto;
 }
 
 .inspector {
@@ -337,6 +338,46 @@ p {
   display: grid;
   gap: 8px;
   align-content: start;
+}
+
+.chat-context-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  background: rgb(16 17 15 / 0.44);
+}
+
+.context-chip {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px 16px;
+  border-right: 1px solid rgb(57 61 49 / 0.58);
+}
+
+.context-chip span,
+.mini-timeline-head span {
+  color: var(--faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.context-chip strong {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-chip.ok strong {
+  color: var(--ok);
+}
+
+.context-chip.warn strong {
+  color: var(--warn);
 }
 
 .stream-row {
@@ -475,6 +516,22 @@ button:disabled {
   gap: 10px;
 }
 
+.route-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.route-status span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .toolbar-toggle {
   display: inline-flex;
   align-items: center;
@@ -536,7 +593,11 @@ button:disabled {
 }
 
 .task-row {
-  grid-template-columns: minmax(220px, 1fr) 110px 120px 120px 140px 80px;
+  grid-template-columns: minmax(240px, 1.2fr) 98px 112px minmax(150px, 0.9fr) 120px 132px 80px;
+}
+
+.session-row {
+  grid-template-columns: minmax(210px, 1fr) minmax(100px, 150px) minmax(90px, 130px) minmax(120px, 170px) minmax(80px, 110px);
 }
 
 .node-row {
@@ -551,6 +612,20 @@ button:disabled {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.task-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.task-main span {
+  color: var(--faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .todo-main strong {
@@ -631,6 +706,52 @@ button:disabled {
 .event-timeline {
   max-height: 420px;
   padding: 0 16px 16px;
+}
+
+.mini-timeline {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0;
+  padding: 12px 16px 16px;
+}
+
+.mini-timeline-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+.mini-timeline-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.mini-event {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgb(57 61 49 / 0.48);
+  font-size: 12px;
+}
+
+.mini-event span {
+  color: var(--faint);
+}
+
+.mini-event strong {
+  color: var(--text);
+}
+
+.mini-event em {
+  grid-column: 2;
+  color: var(--muted);
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .event-line {
@@ -718,6 +839,10 @@ button:disabled {
 .compact-facts {
   padding: 0;
   gap: 8px;
+}
+
+.compact-definition-list {
+  padding-top: 0;
 }
 
 .todo-actions {
@@ -833,6 +958,8 @@ button:disabled {
 }
 
 .mono-chip {
+  display: inline-block;
+  margin: 12px 16px 0;
   color: var(--accent);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -879,9 +1006,11 @@ button:disabled {
 
   .record-row,
   .task-row,
+  .session-row,
   .todo-row,
   .log-row,
-  .stream-row {
+  .stream-row,
+  .chat-context-bar {
     grid-template-columns: 1fr;
   }
 
