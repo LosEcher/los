@@ -12,6 +12,7 @@ export {
   type ScheduledTaskEventType,
 } from './scheduler.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
+export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
 export {
   MODEL_PROFILES,
   resolveModelProfile,

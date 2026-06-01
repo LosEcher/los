@@ -532,6 +532,63 @@ button:disabled {
   white-space: nowrap;
 }
 
+.route-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 16px 14px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.route-meta span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 7px;
+}
+
+.settings-block {
+  display: grid;
+  gap: 2px;
+  padding: 14px 0 2px;
+}
+
+.settings-block-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-block-head span {
+  color: var(--faint);
+}
+
+.config-note {
+  display: grid;
+  gap: 8px;
+  margin: 0 16px 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.config-note strong {
+  font-size: 12px;
+}
+
+.config-note code {
+  display: block;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.55;
+  overflow: auto;
+  white-space: pre;
+}
+
 .toolbar-toggle {
   display: inline-flex;
   align-items: center;
@@ -589,7 +646,7 @@ button:disabled {
 }
 
 .route-row {
-  grid-template-columns: minmax(110px, 140px) minmax(220px, 1.2fr) minmax(120px, 180px) minmax(120px, 1fr);
+  grid-template-columns: minmax(110px, 140px) minmax(220px, 1.2fr) minmax(120px, 180px) minmax(120px, 1fr) minmax(130px, 0.8fr);
 }
 
 .task-row {

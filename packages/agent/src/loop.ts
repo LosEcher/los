@@ -8,6 +8,7 @@
 import { getLogger } from '@los/infra/logger';
 import { createProvider, type Provider, type Message, type ProviderDelta, type ToolCall } from './providers/index.js';
 import { summarizeModelProfile } from './model-profiles.js';
+import type { ModelSettings } from './model-settings.js';
 import {
   createToolRegistry,
   registerBuiltinTools,
@@ -30,6 +31,7 @@ export interface AgentConfig {
   sessionId?: string;
   provider?: string;
   model?: string;
+  modelSettings?: ModelSettings;
   initialMessages?: Message[];
   maxLoops?: number;
   systemPrompt?: string;
@@ -121,6 +123,7 @@ export async function runAgent(
     sessionId: config.sessionId,
     provider: config.provider,
     model: config.model,
+    modelSettings: config.modelSettings,
     workspaceRoot: config.workspaceRoot,
     toolRetry: config.toolRetry,
     signal,
@@ -154,6 +157,7 @@ export async function runAgent(
       allowedTools,
       toolPolicy: policy,
       maxLoops,
+      modelSettings: config.modelSettings ?? null,
     },
   });
   await emitEvent({
@@ -183,6 +187,7 @@ export async function runAgent(
     const res = await withAbort(
       provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined, {
         signal,
+        modelSettings: config.modelSettings,
         onDelta: config.onModelDelta
           ? async (delta) => {
               await config.onModelDelta?.({ ...delta, turn: i + 1, provider: provider.name });
@@ -383,6 +388,7 @@ export async function runAgent(
   assertNotAborted(signal);
   const finalRes = await withAbort(provider.chat(messages, undefined, {
     signal,
+    modelSettings: config.modelSettings,
     onDelta: config.onModelDelta
       ? async (delta) => {
           await config.onModelDelta?.({ ...delta, turn: maxLoops + 1, provider: provider.name });

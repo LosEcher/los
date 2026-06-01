@@ -15,6 +15,7 @@
     "./artifacts": "./src/artifacts.ts",
     "./node-commands": "./src/node-commands.ts",
     "./model-profiles": "./src/model-profiles.ts",
+    "./model-settings": "./src/model-settings.ts",
     "./compat-harness": "./src/compat-harness.ts",
     "./todos": "./src/todos.ts",
     "./tools": "./src/tools/registry.ts"

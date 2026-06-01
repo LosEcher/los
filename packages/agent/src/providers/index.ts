@@ -18,6 +18,11 @@
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
 import { resolveModelProfile, type ModelProfile } from '../model-profiles.js';
+import {
+  buildAnthropicModelSettings,
+  buildOpenAIModelSettings,
+  type ModelSettings,
+} from '../model-settings.js';
 
 const log = getLogger('agent');
 
@@ -56,6 +61,7 @@ export interface ProviderResponse {
 export interface ChatOptions {
   signal?: AbortSignal;
   onDelta?: (delta: ProviderDelta) => void | Promise<void>;
+  modelSettings?: ModelSettings;
 }
 
 export interface ProviderDelta {
@@ -166,6 +172,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         model,
         messages,
         stream: Boolean(options.onDelta),
+        ...buildOpenAIModelSettings(options.modelSettings),
       };
       if (options.onDelta) {
         body.stream_options = { include_usage: true };
@@ -476,8 +483,8 @@ function createAnthropicProvider(cfg: AnthropicConfig): Provider {
       // Build request
       const body: Record<string, unknown> = {
         model,
-        max_tokens: MAX_TOKENS,
         messages: anthropicMessages,
+        ...buildAnthropicModelSettings(options.modelSettings, MAX_TOKENS),
       };
 
       if (systemMessages.length > 0) {

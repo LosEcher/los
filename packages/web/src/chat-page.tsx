@@ -10,6 +10,7 @@ import {
   getJson,
   postJson,
   streamChat,
+  type ModelSettings,
   type ProviderDiscovery,
   type ProviderModelsResponse,
   type SessionDetail,
@@ -40,6 +41,7 @@ type ProviderOption = {
   source: string;
   defaultModel: string;
   state: string;
+  hasApiKey?: boolean;
 };
 
 export function ChatPage({
@@ -57,6 +59,11 @@ export function ChatPage({
   const [toolMode, setToolMode] = useState<ToolMode>('project-write');
   const [maxLoops, setMaxLoops] = useState(8);
   const [timeoutMs, setTimeoutMs] = useState(120_000);
+  const [temperature, setTemperature] = useState('');
+  const [topP, setTopP] = useState('');
+  const [maxTokens, setMaxTokens] = useState('');
+  const [presencePenalty, setPresencePenalty] = useState('');
+  const [frequencyPenalty, setFrequencyPenalty] = useState('');
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskRunId, setTaskRunId] = useState<string | null>(null);
@@ -165,6 +172,13 @@ export function ChatPage({
         sessionId: sessionId ?? undefined,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
+        modelSettings: buildModelSettingsPayload({
+          temperature,
+          topP,
+          maxTokens,
+          presencePenalty,
+          frequencyPenalty,
+        }),
         workspaceRoot: workspaceRoot.trim() || undefined,
         toolMode,
         maxLoops,
@@ -290,6 +304,10 @@ export function ChatPage({
           <StatusPill status={selectedRoute?.ok ? 'live' : 'partial'} />
           <span>{selectedRoute?.baseUrl ?? selectedRoute?.error ?? onboarding.data?.summary ?? 'discovery pending'}</span>
         </div>
+        <div className="route-meta">
+          <span>{selectedRoute?.hasApiKey ? 'api key configured' : 'api key missing'}</span>
+          <span>{selectedRoute?.source ?? metadataText(selectedRoute?.profile?.provider) ?? 'server config'}</span>
+        </div>
 
         <Field label="workspace root">
           <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="default los repo" />
@@ -309,11 +327,48 @@ export function ChatPage({
             <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
           </Field>
         </div>
+        <div className="section-divider" />
+        <div className="settings-block">
+          <div className="settings-block-head">
+            <strong>Model settings</strong>
+            <span>per request</span>
+          </div>
+          <div className="two-col">
+            <Field label="temperature">
+              <input inputMode="decimal" value={temperature} onChange={event => setTemperature(event.target.value)} placeholder="provider default" />
+            </Field>
+            <Field label="top p">
+              <input inputMode="decimal" value={topP} onChange={event => setTopP(event.target.value)} placeholder="provider default" />
+            </Field>
+          </div>
+          <Field label="max tokens">
+            <input inputMode="numeric" value={maxTokens} onChange={event => setMaxTokens(event.target.value)} placeholder="provider default" />
+          </Field>
+          <div className="two-col">
+            <Field label="presence penalty">
+              <input inputMode="decimal" value={presencePenalty} onChange={event => setPresencePenalty(event.target.value)} placeholder="0" />
+            </Field>
+            <Field label="frequency penalty">
+              <input inputMode="decimal" value={frequencyPenalty} onChange={event => setFrequencyPenalty(event.target.value)} placeholder="0" />
+            </Field>
+          </div>
+        </div>
+        <div className="config-note">
+          <strong>Server-side provider config</strong>
+          <code>DEEPSEEK_API_KEY=...</code>
+          <code>DEEPSEEK_BASE_URL=https://api.deepseek.com</code>
+          <code>{`providers:
+  deepseek:
+    apiKey: "\${DEEPSEEK_API_KEY}"
+    baseUrl: "https://api.deepseek.com"
+    model: "deepseek-v4-flash"`}</code>
+        </div>
 
         <div className="fact-list compact-facts">
           <Fact label="session" value={sessionId ?? 'not started'} />
           <Fact label="last provider" value={metadataText(sessionMetadata.provider) ?? 'none'} />
           <Fact label="last model" value={metadataText(sessionMetadata.model) ?? 'none'} />
+          <Fact label="settings" value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
           <Fact label="tokens" value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
           <Fact label="shell" value={toolMode === 'all' ? 'allowed by mode' : 'blocked'} />
         </div>
@@ -362,6 +417,7 @@ function buildProviderOptions(discovery?: ProviderDiscovery, routes?: ProviderMo
       source: route.baseUrl ?? 'model route',
       defaultModel: route.model ?? '',
       state: route.ok ? 'ok' : route.error ?? 'unavailable',
+      hasApiKey: route.hasApiKey,
     });
   }
 
@@ -374,6 +430,7 @@ function buildProviderOptions(discovery?: ProviderDiscovery, routes?: ProviderMo
       source: metadataText(provider.source) ?? previous?.source ?? 'discovery',
       defaultModel: metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? previous?.defaultModel ?? '',
       state: metadataText(provider.available) ?? metadataText(provider.importable) ?? previous?.state ?? 'discovered',
+      hasApiKey: (provider.hasApiKey as boolean | undefined) ?? previous?.hasApiKey,
     });
   }
 
@@ -389,6 +446,29 @@ function metadataText(value: unknown): string | null {
     return String(value);
   }
   return null;
+}
+
+function buildModelSettingsPayload(input: Record<keyof ModelSettings, string>): ModelSettings | undefined {
+  const settings: ModelSettings = {
+    temperature: parseOptionalNumber(input.temperature),
+    topP: parseOptionalNumber(input.topP),
+    maxTokens: parseOptionalInteger(input.maxTokens),
+    presencePenalty: parseOptionalNumber(input.presencePenalty),
+    frequencyPenalty: parseOptionalNumber(input.frequencyPenalty),
+  };
+  return Object.values(settings).some(value => value !== undefined) ? settings : undefined;
+}
+
+function parseOptionalNumber(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const number = Number(trimmed);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function parseOptionalInteger(value: string): number | undefined {
+  const number = parseOptionalNumber(value);
+  return number === undefined ? undefined : Math.floor(number);
 }
 
 function streamRow(event: string, data: Record<string, unknown>): StreamRow {

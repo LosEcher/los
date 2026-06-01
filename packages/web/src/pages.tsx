@@ -349,6 +349,7 @@ export function ProvidersPage() {
               <span>{route.baseUrl ?? 'baseUrl?'}</span>
               <span>{route.model ?? 'model?'}</span>
               <span>{route.ok ? `${route.count ?? route.models.length} models` : route.error ?? 'unavailable'}</span>
+              <span>{route.hasApiKey ? 'key set' : 'no key'} · {route.source ?? 'manual'}</span>
             </div>
           )}
         />
@@ -365,6 +366,21 @@ export function ProvidersPage() {
           <Definition term="provider endpoint" text="Callable model backend or route." />
           <Definition term="provider account" text="Credential-bearing identity behind an endpoint." />
           <Definition term="provider model" text="Concrete model identifier exposed by the endpoint." />
+        </div>
+        <div className="config-note">
+          <strong>Environment</strong>
+          <code>OPENAI_API_KEY=...</code>
+          <code>OPENAI_BASE_URL=https://api.openai.com/v1</code>
+          <code>OPENAI_MODEL=gpt-5.5</code>
+        </div>
+        <div className="config-note">
+          <strong>~/.los/config.yaml</strong>
+          <code>{`providers:
+  packycode:
+    apiKey: "\${PACKYCODE_API_KEY}"
+    baseUrl: "https://www.packyapi.com/v1"
+    model: "gpt-5.5"
+    enabled: true`}</code>
         </div>
       </aside>
     </section>

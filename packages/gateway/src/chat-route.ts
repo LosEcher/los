@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { resolve } from 'node:path';
 import type { Config } from '@los/infra/config';
 import { runScheduledAgentTask } from '@los/agent/scheduler';
+import { normalizeModelSettings, type ModelSettings } from '@los/agent/model-settings';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
 import { listTaskRunsForSession, type TaskRunRecord } from '@los/agent/task-runs';
 import {
@@ -26,6 +27,7 @@ interface ChatRequestBody {
   systemPrompt?: string;
   provider?: string;
   model?: string;
+  modelSettings?: ModelSettings;
   workspaceRoot?: string;
   toolMode?: ToolMode;
   allowedTools?: string[];
@@ -49,6 +51,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     const systemPrompt = normalizeOptionalString(body.systemPrompt);
     const provider = normalizeOptionalString(body.provider);
     const model = normalizeOptionalString(body.model);
+    const modelSettings = normalizeModelSettings(body.modelSettings);
     const workspaceRoot = normalizeWorkspaceRoot(body.workspaceRoot, defaultWorkspaceRoot);
     const toolMode = normalizeToolMode(body.toolMode);
     const allowedTools = normalizeAllowedTools(body.allowedTools);
@@ -146,6 +149,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         sessionId: sid,
         provider,
         model,
+        modelSettings,
         systemPrompt,
         workspaceRoot,
         toolMode,
@@ -169,6 +173,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         metadata: {
           maxLoops: maxLoops ?? config.agent.maxLoops,
           model,
+          modelSettings,
           allowedTools,
           timeoutMs,
           toolRetry,
@@ -309,6 +314,8 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         metadata: {
           ...(resumedSession?.metadata ?? {}),
           provider: provider ?? config.agent.defaultProvider,
+          model: scheduled.taskRun.model ?? model ?? null,
+          modelSettings: modelSettings ?? null,
           workspaceRoot,
           toolMode,
           allowedTools,

@@ -250,6 +250,9 @@ export type ProviderModelsResponse = {
   providers: Array<{
     provider: string;
     ok: boolean;
+    enabled?: boolean;
+    hasApiKey?: boolean;
+    source?: string | null;
     model?: string | null;
     baseUrl?: string | null;
     count?: number;
@@ -286,10 +289,19 @@ export type ChatPayload = {
   sessionId?: string;
   provider?: string;
   model?: string;
+  modelSettings?: ModelSettings;
   workspaceRoot?: string;
   toolMode: ToolMode;
   maxLoops?: number;
   timeoutMs?: number;
+};
+
+export type ModelSettings = {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
 };
 
 export type TodoPayload = {

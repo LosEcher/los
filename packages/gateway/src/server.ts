@@ -115,12 +115,16 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       : selectAgentModelProviders(config);
 
     const providers = await Promise.all(providerNames.map(async (providerName) => {
+      const providerConfig = config.providers[providerName];
       try {
         const provider = createProvider(providerName);
         if (!provider.listModels) {
           return {
             provider: providerName,
             ok: false,
+            enabled: providerConfig?.enabled ?? false,
+            hasApiKey: Boolean(providerConfig?.apiKey),
+            source: readProviderSource(providerConfig),
             model: provider.profile.model,
             baseUrl: provider.profile.baseUrl,
             profile: provider.profile,
@@ -133,6 +137,9 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
         return {
           provider: providerName,
           ok: true,
+          enabled: providerConfig?.enabled ?? true,
+          hasApiKey: Boolean(providerConfig?.apiKey),
+          source: readProviderSource(providerConfig),
           model: provider.profile.model,
           baseUrl: provider.profile.baseUrl,
           profile: provider.profile,
@@ -143,6 +150,9 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
         return {
           provider: providerName,
           ok: false,
+          enabled: providerConfig?.enabled ?? false,
+          hasApiKey: Boolean(providerConfig?.apiKey),
+          source: readProviderSource(providerConfig),
           count: 0,
           models: [],
           error: sanitizeErrorMessage(err?.message ?? String(err)),
@@ -444,6 +454,12 @@ function sanitizeProviderDiscovery(provider: DiscoveredProvider): Record<string,
 
 function sanitizeErrorMessage(message: string): string {
   return message.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-REDACTED');
+}
+
+function readProviderSource(provider: unknown): string | null {
+  if (!provider || typeof provider !== 'object') return null;
+  const source = (provider as Record<string, unknown>)._source;
+  return typeof source === 'string' && source.trim() ? source : null;
 }
 
 function resolveGatewayServiceIdentity(
