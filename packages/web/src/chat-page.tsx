@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  MessageSquarePlus,
   RefreshCcw,
   Send,
   SlidersHorizontal,
@@ -49,7 +50,7 @@ export function ChatPage({
   onSessionSelect,
 }: {
   selectedSessionId: string | null;
-  onSessionSelect: (id: string) => void;
+  onSessionSelect: (id: string | null) => void;
 }) {
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
@@ -220,6 +221,20 @@ export function ChatPage({
     setRunning(false);
   }
 
+  function startNewChat() {
+    if (running) return;
+    setSessionId(null);
+    setTaskRunId(null);
+    setRows([{
+      id: crypto.randomUUID(),
+      event: 'session.new',
+      message: 'New chat is ready.',
+      meta: 'next send will create a new session',
+      level: 'ok',
+    }]);
+    onSessionSelect(null);
+  }
+
   return (
     <section className="panel-grid chat-grid">
       <div className="panel main-panel">
@@ -228,9 +243,14 @@ export function ChatPage({
             <h2>Chat Run</h2>
             <p>Current run controls feed Gateway `/chat`; session evidence stays in the ledger.</p>
           </div>
-          <button className="ghost-btn" type="button" onClick={() => setRows([])}>
-            <RefreshCcw size={14} /> clear
-          </button>
+          <div className="toolbar">
+            <button className="ghost-btn" type="button" disabled={running} onClick={startNewChat}>
+              <MessageSquarePlus size={14} /> new chat
+            </button>
+            <button className="ghost-btn" type="button" onClick={() => setRows([])}>
+              <RefreshCcw size={14} /> clear
+            </button>
+          </div>
         </div>
 
         <div className="chat-context-bar">
@@ -353,17 +373,6 @@ export function ChatPage({
             </Field>
           </div>
         </div>
-        <div className="config-note">
-          <strong>Server-side provider config</strong>
-          <code>DEEPSEEK_API_KEY=...</code>
-          <code>DEEPSEEK_BASE_URL=https://api.deepseek.com</code>
-          <code>{`providers:
-  deepseek:
-    apiKey: "\${DEEPSEEK_API_KEY}"
-    baseUrl: "https://api.deepseek.com"
-    model: "deepseek-v4-flash"`}</code>
-        </div>
-
         <div className="fact-list compact-facts">
           <Fact label="session" value={sessionId ?? 'not started'} />
           <Fact label="last provider" value={metadataText(sessionMetadata.provider) ?? 'none'} />

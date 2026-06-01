@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Copy,
   Database,
   Search,
   Send,
@@ -355,6 +356,8 @@ export function ProvidersPage() {
         />
       </div>
       <aside className="panel inspector">
+        <ProviderConfigWorkspace />
+        <div className="section-divider" />
         <div className="panel-head compact"><h2>Discovery Tools</h2></div>
         <div className="fact-list">
           <Fact label="providers" value={String(providers.length)} />
@@ -367,24 +370,143 @@ export function ProvidersPage() {
           <Definition term="provider account" text="Credential-bearing identity behind an endpoint." />
           <Definition term="provider model" text="Concrete model identifier exposed by the endpoint." />
         </div>
-        <div className="config-note">
-          <strong>Environment</strong>
-          <code>OPENAI_API_KEY=...</code>
-          <code>OPENAI_BASE_URL=https://api.openai.com/v1</code>
-          <code>OPENAI_MODEL=gpt-5.5</code>
-        </div>
-        <div className="config-note">
-          <strong>~/.los/config.yaml</strong>
-          <code>{`providers:
-  packycode:
-    apiKey: "\${PACKYCODE_API_KEY}"
-    baseUrl: "https://www.packyapi.com/v1"
-    model: "gpt-5.5"
-    enabled: true`}</code>
-        </div>
       </aside>
     </section>
   );
+}
+
+type ProviderConfigDraft = {
+  providerId: string;
+  apiKeyEnv: string;
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+};
+
+function ProviderConfigWorkspace() {
+  const [draft, setDraft] = useState<ProviderConfigDraft>({
+    providerId: 'deepseek',
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-flash',
+    enabled: true,
+  });
+  const [copied, setCopied] = useState<'env' | 'yaml' | null>(null);
+  const envSnippet = buildProviderEnvSnippet(draft);
+  const yamlSnippet = buildProviderYamlSnippet(draft);
+
+  async function copySnippet(kind: 'env' | 'yaml', text: string) {
+    await navigator.clipboard?.writeText(text);
+    setCopied(kind);
+    window.setTimeout(() => setCopied(null), 1600);
+  }
+
+  function setProviderId(value: string) {
+    const providerId = value.trim();
+    setDraft(prev => ({
+      ...prev,
+      providerId,
+      apiKeyEnv: providerId ? `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY` : prev.apiKeyEnv,
+    }));
+  }
+
+  return (
+    <div className="provider-config-workspace">
+      <div className="panel-head compact">
+        <h2>Provider Settings</h2>
+        <StatusPill status="partial" />
+      </div>
+      <Field label="provider id">
+        <input value={draft.providerId} onChange={event => setProviderId(event.target.value)} placeholder="deepseek" />
+      </Field>
+      <Field label="api key env">
+        <input value={draft.apiKeyEnv} onChange={event => setDraft(prev => ({ ...prev, apiKeyEnv: event.target.value }))} placeholder="DEEPSEEK_API_KEY" />
+      </Field>
+      <Field label="base url">
+        <input value={draft.baseUrl} onChange={event => setDraft(prev => ({ ...prev, baseUrl: event.target.value }))} placeholder="https://api.deepseek.com" />
+      </Field>
+      <Field label="default model">
+        <input value={draft.model} onChange={event => setDraft(prev => ({ ...prev, model: event.target.value }))} placeholder="deepseek-v4-flash" />
+      </Field>
+      <label className="toolbar-toggle provider-toggle">
+        <input type="checkbox" checked={draft.enabled} onChange={event => setDraft(prev => ({ ...prev, enabled: event.target.checked }))} />
+        enabled
+      </label>
+      <ConfigSnippet
+        title=".env"
+        value={envSnippet}
+        copied={copied === 'env'}
+        onCopy={() => copySnippet('env', envSnippet)}
+      />
+      <ConfigSnippet
+        title="~/.los/config.yaml"
+        value={yamlSnippet}
+        copied={copied === 'yaml'}
+        onCopy={() => copySnippet('yaml', yamlSnippet)}
+      />
+    </div>
+  );
+}
+
+function ConfigSnippet({
+  title,
+  value,
+  copied,
+  onCopy,
+}: {
+  title: string;
+  value: string;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div className="config-note">
+      <div className="snippet-head">
+        <strong>{title}</strong>
+        <button className="tiny-btn" type="button" onClick={onCopy}>
+          <Copy size={12} /> {copied ? 'copied' : 'copy'}
+        </button>
+      </div>
+      <code>{value}</code>
+    </div>
+  );
+}
+
+function buildProviderEnvSnippet(draft: ProviderConfigDraft): string {
+  const prefix = envPrefixForProvider(draft.providerId);
+  const apiKeyEnv = normalizeEnvName(draft.apiKeyEnv) || `${prefix}_API_KEY`;
+  return [
+    `${apiKeyEnv}=...`,
+    `${prefix}_BASE_URL=${draft.baseUrl.trim() || 'https://api.example.com/v1'}`,
+    `${prefix}_MODEL=${draft.model.trim() || 'model-id'}`,
+  ].join('\n');
+}
+
+function buildProviderYamlSnippet(draft: ProviderConfigDraft): string {
+  const providerId = sanitizeProviderId(draft.providerId) || 'provider';
+  const apiKeyEnv = normalizeEnvName(draft.apiKeyEnv) || `${envPrefixForProvider(providerId)}_API_KEY`;
+  const baseUrl = draft.baseUrl.trim() || 'https://api.example.com/v1';
+  const model = draft.model.trim() || 'model-id';
+  return [
+    'providers:',
+    `  ${providerId}:`,
+    `    apiKey: "\${${apiKeyEnv}}"`,
+    `    baseUrl: "${baseUrl}"`,
+    `    model: "${model}"`,
+    `    enabled: ${draft.enabled ? 'true' : 'false'}`,
+  ].join('\n');
+}
+
+function envPrefixForProvider(providerId: string): string {
+  return (sanitizeProviderId(providerId) || 'provider').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function normalizeEnvName(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function sanitizeProviderId(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 function metadataText(value: unknown): string | null {

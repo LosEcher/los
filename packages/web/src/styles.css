@@ -566,6 +566,15 @@ button:disabled {
   color: var(--faint);
 }
 
+.provider-config-workspace {
+  display: grid;
+  gap: 0;
+}
+
+.provider-toggle {
+  padding: 0 16px 14px;
+}
+
 .config-note {
   display: grid;
   gap: 8px;
@@ -578,6 +587,13 @@ button:disabled {
 
 .config-note strong {
   font-size: 12px;
+}
+
+.snippet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
 }
 
 .config-note code {
