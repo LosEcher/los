@@ -9,6 +9,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { existsSync, readFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
@@ -20,6 +21,7 @@ import { registerLogRoutes } from './log-routes.js';
 import { registerArtifactRoutes } from './artifact-routes.js';
 import { registerNodeCommandRoutes } from './node-command-routes.js';
 import { registerNodeRoutes } from './node-routes.js';
+import { registerServiceRoutes } from './service-routes.js';
 import { registerTodoRoutes } from './todo-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
@@ -30,10 +32,15 @@ import {
   ensureTaskRunStore,
   loadTaskRun,
   listTaskRuns,
-  recoverExpiredTaskRuns,
+  recoverExpiredTaskRunsWithAdvisoryLock,
   updateTaskRun,
 } from '@los/agent/task-runs';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
+import {
+  ensureServiceInstanceStore,
+  loadServiceInstance,
+  upsertServiceInstanceHeartbeat,
+} from '@los/agent/service-instances';
 import {
   ensureTodoStore,
   seedLosPlanningTodos,
@@ -50,6 +57,8 @@ import {
 } from '@los/memory';
 
 const log = getLogger('gateway');
+const VERSION = '0.1.0';
+const SERVICE_HEARTBEAT_MS = 10_000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_WORKSPACE_ROOT = resolve(__dirname, '../../..');
 const WORKSPACE_ROOT = resolve(__dirname, '../../..');
@@ -60,7 +69,14 @@ const RUNTIME_LOG_DIR = join(WORKSPACE_ROOT, '.los-runtime');
 const RUNTIME_LOG_PATH = join(RUNTIME_LOG_DIR, 'gateway.log');
 const ARTIFACT_STORAGE_ROOT = join(WORKSPACE_ROOT, '.los-runtime', 'artifacts');
 
-export async function createServer() {
+type GatewayServiceIdentity = {
+  serviceId: string;
+  bindUrl: string;
+  publicUrl: string;
+  hostLabel: string;
+};
+
+export async function createServer(service: GatewayServiceIdentity = resolveGatewayServiceIdentity(getConfig())) {
   const config = getConfig();
   const app = Fastify({ logger: false });
 
@@ -144,7 +160,15 @@ export async function createServer() {
   // ── Health ───────────────────────────────────────────
 
   app.get('/health', async () => {
-    return { status: 'ok', uptime: process.uptime() };
+    const current = await loadServiceInstance(service.serviceId).catch(() => null);
+    return {
+      status: 'ok',
+      uptime: process.uptime(),
+      serviceId: service.serviceId,
+      serviceKind: 'gateway',
+      ready: current?.readiness.ready ?? false,
+      blockers: current?.readiness.blockers ?? ['service:not_registered'],
+    };
   });
 
   // ── Logs ─────────────────────────────────────────────
@@ -162,6 +186,10 @@ export async function createServer() {
   });
   registerTodoRoutes(app);
   registerNodeRoutes(app);
+  registerServiceRoutes(app, {
+    serviceId: service.serviceId,
+    serviceKind: 'gateway',
+  });
 
   registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT);
 
@@ -340,13 +368,22 @@ export async function createServer() {
 export async function startServer(port?: number, host?: string) {
   // Bootstrap: load config → init DB → start server
   const config = await loadConfig();
+  const p = port ?? config.server.port;
+  const h = host ?? config.server.host;
+  const service = resolveGatewayServiceIdentity(config, p, h);
+
   await initDb(config.databaseUrl);
   await ensureTodoStore();
   await ensureIdempotencyStore();
   await ensureExecutorNodeStore();
+  await ensureServiceInstanceStore();
+  await heartbeatGatewayService(service);
   await ensureTaskRunStore();
-  const recoveredTasks = await recoverExpiredTaskRuns('gateway_startup_recovery');
-  for (const task of recoveredTasks) {
+  const recovery = await recoverExpiredTaskRunsWithAdvisoryLock('gateway_startup_recovery');
+  if (!recovery.lockAcquired) {
+    log.info('Gateway startup recovery skipped because another service owns the advisory lock');
+  }
+  for (const task of recovery.recovered) {
     await appendSessionEvent({
       sessionId: task.sessionId,
       tenantId: task.tenantId,
@@ -368,13 +405,14 @@ export async function startServer(port?: number, host?: string) {
   console.log(await printOnboardingReport());
   console.log(printConfigDiagnostics(config));
 
-  const app = await createServer();
-
-  const p = port ?? config.server.port;
-  const h = host ?? config.server.host;
+  const app = await createServer(service);
+  const heartbeat = setInterval(() => {
+    heartbeatGatewayService(service).catch((err) => log.warn(`service heartbeat failed: ${err.message ?? String(err)}`));
+  }, SERVICE_HEARTBEAT_MS);
+  app.addHook('onClose', async () => clearInterval(heartbeat));
 
   await app.listen({ port: p, host: h });
-  log.info(`Gateway listening on http://${h}:${p}`);
+  log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);
 
   return app;
 }
@@ -406,6 +444,57 @@ function sanitizeProviderDiscovery(provider: DiscoveredProvider): Record<string,
 
 function sanitizeErrorMessage(message: string): string {
   return message.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-REDACTED');
+}
+
+function resolveGatewayServiceIdentity(
+  config: ReturnType<typeof getConfig>,
+  port = config.server.port,
+  host = config.server.host,
+): GatewayServiceIdentity {
+  const hostLabel = hostname();
+  const bindUrl = `http://${host}:${port}`;
+  const publicUrl = process.env.GATEWAY_PUBLIC_URL ?? process.env.LOS_SERVICE_URL ?? bindUrl;
+  const serviceId = process.env.GATEWAY_SERVICE_ID
+    ?? process.env.LOS_SERVICE_ID
+    ?? `gateway-${sanitizeServiceId(hostLabel)}-${port}`;
+  return {
+    serviceId,
+    bindUrl,
+    publicUrl,
+    hostLabel,
+  };
+}
+
+async function heartbeatGatewayService(service: GatewayServiceIdentity): Promise<void> {
+  await upsertServiceInstanceHeartbeat({
+    serviceId: service.serviceId,
+    serviceKind: 'gateway',
+    hostLabel: service.hostLabel,
+    bindUrl: service.bindUrl,
+    publicUrl: service.publicUrl,
+    version: VERSION,
+    role: 'active',
+    capabilities: {
+      chat_api: true,
+      web_ui: true,
+      artifact_proxy: true,
+      node_registry: true,
+      service_registry: true,
+    },
+    health: {
+      db_ok: true,
+      schema_ok: true,
+    },
+    load: {
+      active_requests: 0,
+      active_streams: 0,
+    },
+    priority: 100,
+  });
+}
+
+function sanitizeServiceId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'local';
 }
 
 function selectAgentModelProviders(config: ReturnType<typeof getConfig>): string[] {
