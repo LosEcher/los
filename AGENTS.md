@@ -76,6 +76,24 @@ Database:
 - No new files in `packages/infra/` without package-level approval
 - Delete transitional files in the same change (no legacy/v2/temp artifacts)
 
+## AI-Assisted Change Management
+
+This section applies to AI-assisted changes in `los`.
+
+- Inspect changed files, understand the runtime effect, and tie the result to checks or explicit residual risk before presenting code as ready.
+- When practical, finish with a repo-documented validation command or live probe and record the exact check used.
+- Do not mark todo, task, session, node, or provider work as complete from UI state alone. Treat `todos` as the planning ledger, not as execution evidence. Prefer persisted evidence from `task_runs`, `session_events`, API responses, tests, or live health probes.
+
+- Keep repo-wide operating rules in this single `AGENTS.md`. Do not add package-local `AGENTS.md` files.
+- Put canonical design decisions in `docs/adr/`. Put active work queues and execution state in `todos` or project docs, not in shared/global prompt rules.
+- Create a project `SKILL.md` only for repeated los-specific workflows with stable triggers, steps, evidence, and stop conditions.
+
+- Before editing or making current-state claims, read the relevant ADR and implementation. If they disagree, treat implementation as runtime behavior and the ADR as design intent until verified.
+- For API or package boundary changes, read `contracts/` first, then implementation, and verify with `./tools/check-contracts.sh` plus `pnpm check`.
+- For sessions, todos, provider behavior, client flow, and node capability changes, consult the matching ADR and verify on the live surface or with the focused harness.
+- Treat harnesses as quality gates for durable agent behavior, not as optional demos. When changing provider profiles, tool policy, scheduler behavior, todo dispatch, node classification, or session replay, add or update the focused test, compatibility probe, or harness assertion.
+- Represent long-running work as structured `todos` when recovery or audit matters. Use the todo model to keep active work, historical evidence, and replacement or split tasks distinct.
+
 ## Reference Codebases
 
 | Source | What we reuse |
