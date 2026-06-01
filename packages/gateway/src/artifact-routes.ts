@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import {
   deleteArtifact,
   ensureArtifactStore,
@@ -6,12 +7,15 @@ import {
   loadArtifact,
   putArtifact,
   readArtifactContent,
+  type ArtifactRecord,
   type ArtifactPathPolicy,
 } from '@los/agent/artifacts';
+import { loadExecutorNode } from '@los/agent/executor-nodes';
 import { getRequestContext } from './request-context.js';
 
 type ArtifactRoutesOptions = {
   storageRoot: string;
+  executorAgentKey?: string;
 };
 
 type PutArtifactBody = {
@@ -84,22 +88,105 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
 
   app.get('/artifacts/:id/content', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const artifact = await readArtifactContent(id);
-    if (!artifact) return reply.status(404).send({ error: 'artifact not found' });
+    const record = await loadArtifact(id);
+    if (!record) return reply.status(404).send({ error: 'artifact not found' });
+    const artifact = await readArtifactContentFromOwner(record, options.executorAgentKey);
     return reply
-      .type(artifact.record.contentType)
-      .header('X-Artifact-Id', artifact.record.artifactId)
-      .header('X-Artifact-Checksum', artifact.record.checksum)
+      .type(artifact.contentType)
+      .header('X-Artifact-Id', record.artifactId)
+      .header('X-Artifact-Checksum', artifact.checksum)
       .send(artifact.content);
   });
 
   app.delete('/artifacts/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { reason?: string } | undefined;
+    const existing = await loadArtifact(id);
+    if (!existing) return reply.status(404).send({ error: 'artifact not found' });
+    const remote = await deleteArtifactFromOwner(existing, normalizeOptionalString(body?.reason), options.executorAgentKey);
+    if (remote) return remote;
     const artifact = await deleteArtifact(id, normalizeOptionalString(body?.reason));
     if (!artifact) return reply.status(404).send({ error: 'artifact not found' });
     return { ok: true, artifact };
   });
+}
+
+async function readArtifactContentFromOwner(
+  record: ArtifactRecord,
+  executorAgentKey: string | undefined,
+): Promise<{ content: Buffer; contentType: string; checksum: string }> {
+  const artifactsUrl = await artifactOwnerUrl(record.nodeId);
+  if (artifactsUrl) {
+    return await fetchOwnerArtifactContent(artifactsUrl, record, executorAgentKey);
+  }
+
+  const local = await readArtifactContent(record.artifactId);
+  if (!local) throw new Error('artifact not found');
+  return {
+    content: local.content,
+    contentType: local.record.contentType,
+    checksum: local.record.checksum,
+  };
+}
+
+async function deleteArtifactFromOwner(
+  record: ArtifactRecord,
+  reason: string | undefined,
+  executorAgentKey: string | undefined,
+): Promise<unknown | null> {
+  const artifactsUrl = await artifactOwnerUrl(record.nodeId);
+  if (!artifactsUrl) return null;
+
+  const response = await fetch(`${artifactsUrl}/${encodeURIComponent(record.artifactId)}`, {
+    method: 'DELETE',
+    headers: ownerHeaders(executorAgentKey),
+    body: JSON.stringify({ reason }),
+  });
+  if (response.status === 404) return null;
+  const text = await response.text();
+  const body = text ? JSON.parse(text) as unknown : {};
+  if (!response.ok) {
+    throw new Error(`executor artifact delete failed: ${response.status} ${response.statusText}: ${text}`);
+  }
+  return body;
+}
+
+async function fetchOwnerArtifactContent(
+  artifactsUrl: string,
+  record: ArtifactRecord,
+  executorAgentKey: string | undefined,
+): Promise<{ content: Buffer; contentType: string; checksum: string }> {
+  const response = await fetch(`${artifactsUrl}/${encodeURIComponent(record.artifactId)}/content`, {
+    headers: ownerHeaders(executorAgentKey),
+  });
+  if (!response.ok) {
+    throw new Error(`executor artifact read failed: ${response.status} ${response.statusText}: ${await response.text()}`);
+  }
+  const content = Buffer.from(await response.arrayBuffer());
+  const checksum = createHash('sha256').update(content).digest('hex');
+  if (checksum !== record.checksum) {
+    throw new Error(`artifact checksum mismatch: ${record.artifactId}`);
+  }
+  return {
+    content,
+    contentType: response.headers.get('content-type') ?? record.contentType,
+    checksum,
+  };
+}
+
+async function artifactOwnerUrl(nodeId: string): Promise<string | null> {
+  const node = await loadExecutorNode(nodeId);
+  const agentHttp = normalizeJsonObject(node?.connectConfig?.agent_http);
+  const configured = normalizeOptionalString(agentHttp?.artifactsUrl);
+  if (configured) return configured.replace(/\/+$/, '');
+  const baseUrl = normalizeOptionalString(node?.baseUrl);
+  return baseUrl ? `${baseUrl.replace(/\/+$/, '')}/v1/artifacts` : null;
+}
+
+function ownerHeaders(executorAgentKey: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (executorAgentKey) headers.Authorization = `Bearer ${executorAgentKey}`;
+  return headers;
 }
 
 function normalizeContent(body: PutArtifactBody | undefined): Buffer | null {

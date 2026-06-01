@@ -155,6 +155,7 @@ export async function createServer() {
   });
   registerArtifactRoutes(app, {
     storageRoot: ARTIFACT_STORAGE_ROOT,
+    executorAgentKey: config.executor.agentKey,
   });
   registerNodeCommandRoutes(app);
   registerTodoRoutes(app);
