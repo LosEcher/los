@@ -5,9 +5,11 @@
  * queued -> running -> succeeded/failed/cancelled
  */
 
-import { getDb } from '@los/infra/db';
+import { getDb, withDbClient } from '@los/infra/db';
 
 export type TaskRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export const TASK_RUN_STARTUP_RECOVERY_LOCK_KEY = 7_602_026_001;
 
 export interface TaskRunRecord {
   id: string;
@@ -61,6 +63,11 @@ export interface UpdateTaskRunInput {
   nodeId?: string | null;
   heartbeatAt?: Date | string | null;
   leaseExpiresAt?: Date | string | null;
+}
+
+export interface TaskRunRecoveryResult {
+  lockAcquired: boolean;
+  recovered: TaskRunRecord[];
 }
 
 const SCHEMA = `
@@ -246,6 +253,49 @@ export async function recoverExpiredTaskRuns(reason = 'lease_expired'): Promise<
     [JSON.stringify({ recoveryReason: reason })],
   );
   return rows.rows.map(rowToTaskRun);
+}
+
+export async function recoverExpiredTaskRunsWithAdvisoryLock(
+  reason = 'lease_expired',
+  lockKey = TASK_RUN_STARTUP_RECOVERY_LOCK_KEY,
+): Promise<TaskRunRecoveryResult> {
+  await ensureTaskRunStore();
+  return await withDbClient(async (client) => {
+    const lock = await client.query<{ acquired: boolean }>(
+      'SELECT pg_try_advisory_lock($1::bigint) AS acquired',
+      [lockKey],
+    );
+    if (lock.rows[0]?.acquired !== true) {
+      return {
+        lockAcquired: false,
+        recovered: [],
+      };
+    }
+
+    try {
+      const rows = await client.query<TaskRunRow>(
+        `
+        UPDATE task_runs
+        SET status = 'failed',
+            metadata_json = metadata_json || $1::jsonb,
+            completed_at = now(),
+            lease_expires_at = NULL,
+            updated_at = now()
+        WHERE status IN ('queued', 'running')
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at < now()
+        RETURNING *
+      `,
+        [JSON.stringify({ recoveryReason: reason })],
+      );
+      return {
+        lockAcquired: true,
+        recovered: rows.rows.map(rowToTaskRun),
+      };
+    } finally {
+      await client.query('SELECT pg_advisory_unlock($1::bigint)', [lockKey]).catch(() => undefined);
+    }
+  });
 }
 
 export async function loadTaskRun(id: string): Promise<TaskRunRecord | null> {
