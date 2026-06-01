@@ -1,6 +1,7 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Activity,
   MessageSquarePlus,
   RefreshCcw,
   Send,
@@ -22,7 +23,6 @@ import {
 import {
   EmptyText,
   Fact,
-  Field,
   formatDate,
   formatTime,
   StatusPill,
@@ -273,6 +273,85 @@ export function ChatPage({
         </div>
 
         <form className="composer" onSubmit={handleSubmit}>
+          <div className="composer-run-panel">
+            <div className="composer-run-head">
+              <div>
+                <strong>Run choices</strong>
+                <span>Provider setup stays in Providers; these values apply only to the next send.</span>
+              </div>
+              <div className="route-status composer-route-status">
+                <StatusPill status={selectedRoute?.ok ? 'live' : 'partial'} />
+                <span>{selectedRoute?.baseUrl ?? selectedRoute?.error ?? onboarding.data?.summary ?? 'discovery pending'}</span>
+              </div>
+            </div>
+            <div className="composer-control-grid">
+              <RunField label="provider">
+                {providerOptions.length > 0 ? (
+                  <select value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
+                    {providerOptions.map(option => (
+                      <option value={option.id} key={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }} placeholder="provider id" />
+                )}
+              </RunField>
+              <RunField label="model">
+                {modelOptions.length > 0 ? (
+                  <select value={model} onChange={event => setModel(event.target.value)}>
+                    {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
+                  </select>
+                ) : (
+                  <input value={model} onChange={event => setModel(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
+                )}
+              </RunField>
+              <RunField label="tools / skills">
+                <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
+                  <option value="read-only">off / read-only</option>
+                  <option value="project-write">project tools</option>
+                  <option value="all">all tools</option>
+                </select>
+              </RunField>
+              <RunField label="execution dir">
+                <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="default los repo" />
+              </RunField>
+            </div>
+            <div className="route-meta composer-route-meta">
+              <span>{selectedRoute?.hasApiKey ? 'api key configured' : 'api key missing'}</span>
+              <span>{selectedRoute?.source ?? metadataText(selectedRoute?.profile?.provider) ?? 'server config'}</span>
+            </div>
+            <details className="composer-advanced">
+              <summary>
+                <SlidersHorizontal size={14} />
+                advanced request settings
+              </summary>
+              <div className="composer-control-grid dense">
+                <RunField label="max loops">
+                  <input type="number" min={1} max={50} value={maxLoops} onChange={event => setMaxLoops(Number(event.target.value))} />
+                </RunField>
+                <RunField label="timeout ms">
+                  <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
+                </RunField>
+                <RunField label="temperature">
+                  <input inputMode="decimal" value={temperature} onChange={event => setTemperature(event.target.value)} placeholder="provider default" />
+                </RunField>
+                <RunField label="top p">
+                  <input inputMode="decimal" value={topP} onChange={event => setTopP(event.target.value)} placeholder="provider default" />
+                </RunField>
+                <RunField label="max tokens">
+                  <input inputMode="numeric" value={maxTokens} onChange={event => setMaxTokens(event.target.value)} placeholder="provider default" />
+                </RunField>
+                <RunField label="presence penalty">
+                  <input inputMode="decimal" value={presencePenalty} onChange={event => setPresencePenalty(event.target.value)} placeholder="0" />
+                </RunField>
+                <RunField label="frequency penalty">
+                  <input inputMode="decimal" value={frequencyPenalty} onChange={event => setFrequencyPenalty(event.target.value)} placeholder="0" />
+                </RunField>
+              </div>
+            </details>
+          </div>
           <textarea
             value={prompt}
             onChange={event => setPrompt(event.target.value)}
@@ -292,94 +371,16 @@ export function ChatPage({
 
       <aside className="panel inspector">
         <div className="panel-head compact">
-          <h2>Run Controls</h2>
-          <SlidersHorizontal size={16} />
-        </div>
-
-        <Field label="provider endpoint">
-          {providerOptions.length > 0 ? (
-            <select value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
-              {providerOptions.map(option => (
-                <option value={option.id} key={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }} placeholder="provider id" />
-          )}
-        </Field>
-
-        <Field label="provider model">
-          {modelOptions.length > 0 ? (
-            <select value={model} onChange={event => setModel(event.target.value)}>
-              {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
-            </select>
-          ) : (
-            <input value={model} onChange={event => setModel(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
-          )}
-        </Field>
-
-        <div className="route-status">
-          <StatusPill status={selectedRoute?.ok ? 'live' : 'partial'} />
-          <span>{selectedRoute?.baseUrl ?? selectedRoute?.error ?? onboarding.data?.summary ?? 'discovery pending'}</span>
-        </div>
-        <div className="route-meta">
-          <span>{selectedRoute?.hasApiKey ? 'api key configured' : 'api key missing'}</span>
-          <span>{selectedRoute?.source ?? metadataText(selectedRoute?.profile?.provider) ?? 'server config'}</span>
-        </div>
-
-        <Field label="workspace root">
-          <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="default los repo" />
-        </Field>
-        <Field label="tool mode">
-          <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
-            <option value="read-only">read-only</option>
-            <option value="project-write">project-write</option>
-            <option value="all">all</option>
-          </select>
-        </Field>
-        <div className="two-col">
-          <Field label="max loops">
-            <input type="number" min={1} max={50} value={maxLoops} onChange={event => setMaxLoops(Number(event.target.value))} />
-          </Field>
-          <Field label="timeout ms">
-            <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
-          </Field>
-        </div>
-        <div className="section-divider" />
-        <div className="settings-block">
-          <div className="settings-block-head">
-            <strong>Model settings</strong>
-            <span>per request</span>
-          </div>
-          <div className="two-col">
-            <Field label="temperature">
-              <input inputMode="decimal" value={temperature} onChange={event => setTemperature(event.target.value)} placeholder="provider default" />
-            </Field>
-            <Field label="top p">
-              <input inputMode="decimal" value={topP} onChange={event => setTopP(event.target.value)} placeholder="provider default" />
-            </Field>
-          </div>
-          <Field label="max tokens">
-            <input inputMode="numeric" value={maxTokens} onChange={event => setMaxTokens(event.target.value)} placeholder="provider default" />
-          </Field>
-          <div className="two-col">
-            <Field label="presence penalty">
-              <input inputMode="decimal" value={presencePenalty} onChange={event => setPresencePenalty(event.target.value)} placeholder="0" />
-            </Field>
-            <Field label="frequency penalty">
-              <input inputMode="decimal" value={frequencyPenalty} onChange={event => setFrequencyPenalty(event.target.value)} placeholder="0" />
-            </Field>
-          </div>
+          <h2>Run Evidence</h2>
+          <Activity size={16} />
         </div>
         <div className="fact-list compact-facts">
           <Fact label="session" value={sessionId ?? 'not started'} />
+          <Fact label="task run" value={taskRunId ?? (running ? 'starting' : 'idle')} />
           <Fact label="last provider" value={metadataText(sessionMetadata.provider) ?? 'none'} />
           <Fact label="last model" value={metadataText(sessionMetadata.model) ?? 'none'} />
           <Fact label="settings" value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
           <Fact label="tokens" value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
-          <Fact label="shell" value={toolMode === 'all' ? 'allowed by mode' : 'blocked'} />
         </div>
 
         <div className="mini-timeline">
@@ -399,6 +400,15 @@ export function ChatPage({
         </div>
       </aside>
     </section>
+  );
+}
+
+function RunField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="run-field">
+      <span>{label}</span>
+      {children}
+    </label>
   );
 }
 

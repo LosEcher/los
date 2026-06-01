@@ -185,7 +185,7 @@ Recommended write policy by area:
 
 Current implementation after the React console pass:
 
-1. `packages/web/src/chat-page.tsx` owns active run state: prompt, selected session, provider/model override, model settings, tool mode, max loops, timeout, stream rows, and cancel.
+1. `packages/web/src/chat-page.tsx` owns active run state: prompt, selected session, provider/model override, model settings, tool mode, max loops, timeout, stream rows, and cancel. These are run choices and are rendered near the chat composer, not as provider configuration.
 2. `packages/web/src/pages.tsx` owns the `Providers` page and already reads `/onboarding` plus `/providers/models`.
 3. `packages/infra/src/config.ts` is the current provider configuration source. It supports `providers.<name>.apiKey`, `baseUrl`, `model`, `enabled`, and `weight`, with discovery from `.env`, process env, `~/.los/config.yaml`, `/etc/los/config.yaml`, and tool/account scanners.
 4. No stable backend write API exists yet for editing provider credentials or endpoint config from the web UI.
@@ -194,7 +194,7 @@ Current implementation after the React console pass:
 
 The UI should keep two separate contracts:
 
-1. `Chat` is a run launcher. It may choose a provider endpoint, model, and per-request model settings for the next `/chat` call.
+1. `Chat` is a run launcher. It may choose a provider endpoint, model, execution directory, tool/skill mode, and per-request model settings for the next `/chat` call.
 2. `Providers` is the configuration and discovery surface. API key, base URL, enabled state, default model, and provider health belong here.
 
 If Chat accepts raw API keys or base URLs directly, it mixes a per-run override with credential lifecycle and makes it harder to audit which configuration produced a session. Provider credentials should stay server-side and should not be stored in browser local state.
@@ -202,7 +202,7 @@ If Chat accepts raw API keys or base URLs directly, it mixes a per-run override 
 ### Judgment
 
 1. Add an explicit `New Chat` action to Chat. Clearing stream output is not enough because it does not clear the selected `sessionId`.
-2. Keep provider/model selectors in Chat as run controls.
+2. Keep provider/model selectors in Chat as run controls, but place them near the input composer with execution directory and tool/skill mode so the user can see what the next message will use.
 3. Move API key/base URL setup guidance to Providers.
 4. Do not add web-based provider save until the backend owns a stable write contract for user config, redaction, validation, and reload semantics.
 5. Use a provider configuration workspace that generates `.env` and `~/.los/config.yaml` snippets as the first step.

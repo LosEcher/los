@@ -421,6 +421,91 @@ p {
   gap: 10px;
 }
 
+.composer-run-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(31 33 26 / 0.66);
+}
+
+.composer-run-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.composer-run-head > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.composer-run-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.composer-run-head span {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.composer-control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.composer-control-grid.dense {
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  padding-top: 10px;
+}
+
+.run-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.run-field > span {
+  color: var(--faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.composer-route-status {
+  flex: 0 1 42%;
+  justify-content: flex-end;
+  padding: 0;
+}
+
+.composer-route-meta {
+  padding: 0;
+}
+
+.composer-advanced {
+  border-top: 1px solid rgb(57 61 49 / 0.72);
+  padding-top: 10px;
+}
+
+.composer-advanced summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.composer-advanced summary::marker,
+.composer-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
 textarea,
 input,
 select {
@@ -1056,6 +1141,11 @@ button:disabled {
   .inspector {
     position: static;
   }
+
+  .composer-control-grid,
+  .composer-control-grid.dense {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 780px) {
@@ -1095,5 +1185,26 @@ button:disabled {
   .panel-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .panel-head.compact {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .composer-run-head {
+    flex-direction: column;
+  }
+
+  .composer-route-status {
+    flex: none;
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .composer-control-grid,
+  .composer-control-grid.dense,
+  .two-col {
+    grid-template-columns: 1fr;
   }
 }
