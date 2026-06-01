@@ -17,6 +17,7 @@ import { printOnboardingReport, discoverAll, type DiscoveredProvider } from '@lo
 import { getLogger } from '@los/infra/logger';
 import { createProvider } from '@los/agent';
 import { registerLogRoutes } from './log-routes.js';
+import { registerArtifactRoutes } from './artifact-routes.js';
 import { registerNodeRoutes } from './node-routes.js';
 import { registerTodoRoutes } from './todo-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
@@ -56,6 +57,7 @@ const WEB_INDEX_PATH = join(WEB_DIST_ROOT, 'index.html');
 const LEGACY_INDEX_PATH = resolve(__dirname, '../src/index.html');
 const RUNTIME_LOG_DIR = join(WORKSPACE_ROOT, '.los-runtime');
 const RUNTIME_LOG_PATH = join(RUNTIME_LOG_DIR, 'gateway.log');
+const ARTIFACT_STORAGE_ROOT = join(WORKSPACE_ROOT, '.los-runtime', 'artifacts');
 
 export async function createServer() {
   const config = getConfig();
@@ -149,6 +151,9 @@ export async function createServer() {
   registerLogRoutes(app, {
     runtimeLogDir: RUNTIME_LOG_DIR,
     runtimeLogPath: RUNTIME_LOG_PATH,
+  });
+  registerArtifactRoutes(app, {
+    storageRoot: ARTIFACT_STORAGE_ROOT,
   });
   registerTodoRoutes(app);
   registerNodeRoutes(app);

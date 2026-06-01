@@ -122,3 +122,16 @@ export {
   type UpdateTodoInput,
   type SeedLosPlanningTodosOptions,
 } from './todos.js';
+export {
+  deleteArtifact,
+  ensureArtifactStore,
+  listArtifacts,
+  loadArtifact,
+  putArtifact,
+  readArtifactContent,
+  type ArtifactOperation,
+  type ArtifactPathPolicy,
+  type ArtifactRecord,
+  type ListArtifactsOptions,
+  type PutArtifactInput,
+} from './artifacts.js';
