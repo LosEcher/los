@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { artifactsCommand } from './artifacts.js';
 import { compatCommand } from './compat.js';
 import { resolveClientPath } from './client-path.js';
+import { nodesCommand } from './node-commands.js';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonRecord = Record<string, unknown>;
@@ -35,6 +37,14 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'tasks') {
     await listCommand(globalArgs, commandArgs, '/tasks', renderTasks);
+    return;
+  }
+  if (command === 'artifacts') {
+    await artifactsCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'nodes' || command === 'node') {
+    await nodesCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'compat') {
@@ -444,6 +454,8 @@ Usage:
   los chat [options] <prompt>
   los run [options] <prompt>
   los compat [options] [provider[:model]...]
+  los artifacts <list|put|get|delete> [options]
+  los nodes <list|commands|command> [options]
   los sessions [--gateway URL] [--json]
   los tasks [--gateway URL] [--json]
   los health [--gateway URL] [--json]
@@ -470,6 +482,14 @@ Compat:
   --execute               Execute probes through the gateway; default is dry-run
   --trace-prefix ID       Prefix for per-run trace ids
   --dedupe-prefix KEY     Prefix for per-run dedupe keys
+
+Artifacts:
+  list | put | get | delete
+  Run "los artifacts --help" for artifact transfer options.
+
+Nodes:
+  list | commands | command
+  Run "los nodes --help" for node registry and command options.
 `);
 }
 
