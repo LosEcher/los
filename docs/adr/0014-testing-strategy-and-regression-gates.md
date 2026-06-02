@@ -177,7 +177,9 @@ The following behavior requires operation smoke evidence:
    `deepseek-v4-flash/read-context`. OpenAI/Codex OAuth-based readiness and
    Anthropic API-key readiness remain advisory until each target has live
    compatibility evidence and an explicit policy decision to promote it into
-   `DEFAULT_COMPATIBILITY_TARGETS`.
+   `DEFAULT_COMPATIBILITY_TARGETS`. `deepseek-v4-pro/read-context` has live
+   passing evidence and is now verified advisory, but it is not a required
+   default gate.
 5. Operation smoke docs should state whether they prove live runtime behavior,
    persisted DB evidence, live SSE evidence, or all three.
 
