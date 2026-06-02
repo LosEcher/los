@@ -202,7 +202,7 @@ If Chat accepts raw API keys or base URLs directly, it mixes a per-run override 
 ### Judgment
 
 1. Add an explicit `New Chat` action to Chat. Clearing stream output is not enough because it does not clear the selected `sessionId`.
-2. Keep provider/model selectors in Chat as run controls, but place them near the input composer with execution directory and tool/skill mode so the user can see what the next message will use.
+2. Keep provider/model selectors in Chat as run controls, but render them as a compact toolbar or pill controls near the input composer with execution directory and tool/skill mode. Do not promote them back into a separate card or right inspector.
 3. Move API key/base URL setup guidance to Providers.
 4. Do not add web-based provider save until the backend owns a stable write contract for user config, redaction, validation, and reload semantics.
 5. Use a provider configuration workspace that generates `.env` and `~/.los/config.yaml` snippets as the first step.
@@ -221,3 +221,4 @@ If Chat accepts raw API keys or base URLs directly, it mixes a per-run override 
 3. The test must fail if Chat's right inspector becomes a configuration surface again instead of `Run Evidence`.
 4. The test must fail if Provider setup fields disappear from `ProviderConfigWorkspace`.
 5. Visual verification still uses the running Vite page and desktop/mobile screenshots to catch spacing, wrapping, and overlap issues that source-level tests cannot see.
+6. The reference shape is compact input-bar controls like Hermes `ChatInput` and Open WebUI `MessageInput`, not a stacked settings panel.

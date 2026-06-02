@@ -2,11 +2,13 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
+  Folder,
   MessageSquarePlus,
   RefreshCcw,
   Send,
   SlidersHorizontal,
   Square,
+  Wrench,
 } from 'lucide-react';
 import {
   getJson,
@@ -25,7 +27,6 @@ import {
   Fact,
   formatDate,
   formatTime,
-  StatusPill,
 } from './ui';
 
 type StreamRow = {
@@ -273,80 +274,69 @@ export function ChatPage({
         </div>
 
         <form className="composer" onSubmit={handleSubmit}>
-          <div className="composer-run-panel">
-            <div className="composer-run-head">
-              <div>
-                <strong>Run choices</strong>
-                <span>Provider setup stays in Providers; these values apply only to the next send.</span>
-              </div>
-              <div className="route-status composer-route-status">
-                <StatusPill status={selectedRoute?.ok ? 'live' : 'partial'} />
-                <span>{selectedRoute?.baseUrl ?? selectedRoute?.error ?? onboarding.data?.summary ?? 'discovery pending'}</span>
-              </div>
-            </div>
-            <div className="composer-control-grid">
-              <RunField label="provider">
-                {providerOptions.length > 0 ? (
-                  <select value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
-                    {providerOptions.map(option => (
-                      <option value={option.id} key={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }} placeholder="provider id" />
-                )}
-              </RunField>
-              <RunField label="model">
-                {modelOptions.length > 0 ? (
-                  <select value={model} onChange={event => setModel(event.target.value)}>
-                    {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
-                  </select>
-                ) : (
-                  <input value={model} onChange={event => setModel(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
-                )}
-              </RunField>
-              <RunField label="tools / skills">
-                <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
-                  <option value="read-only">off / read-only</option>
-                  <option value="project-write">project tools</option>
-                  <option value="all">all tools</option>
+          <div className="composer-toolbar" aria-label="run choices">
+            <span
+              className={`route-dot ${selectedRoute?.ok ? 'ok' : 'partial'}`}
+              title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? onboarding.data?.summary ?? 'discovery pending'}
+            />
+            <RunField label="provider" title="Provider endpoint for this send">
+              {providerOptions.length > 0 ? (
+                <select value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
+                  {providerOptions.map(option => (
+                    <option value={option.id} key={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
-              </RunField>
-              <RunField label="execution dir">
-                <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="default los repo" />
-              </RunField>
-            </div>
-            <div className="route-meta composer-route-meta">
-              <span>{selectedRoute?.hasApiKey ? 'api key configured' : 'api key missing'}</span>
-              <span>{selectedRoute?.source ?? metadataText(selectedRoute?.profile?.provider) ?? 'server config'}</span>
-            </div>
+              ) : (
+                <input value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }} placeholder="provider id" />
+              )}
+            </RunField>
+            <RunField label="model" title="Model for this send">
+              {modelOptions.length > 0 ? (
+                <select value={model} onChange={event => setModel(event.target.value)}>
+                  {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
+                </select>
+              ) : (
+                <input value={model} onChange={event => setModel(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
+              )}
+            </RunField>
+            <RunField label="tools / skills" title="Tool and skill access for this send">
+              <Wrench size={13} />
+              <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
+                <option value="read-only">off / read-only</option>
+                <option value="project-write">project tools</option>
+                <option value="all">all tools</option>
+              </select>
+            </RunField>
+            <RunField label="execution dir" title="Execution directory for this send">
+              <Folder size={13} />
+              <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="cwd" />
+            </RunField>
             <details className="composer-advanced">
-              <summary>
+              <summary title="Advanced request settings">
                 <SlidersHorizontal size={14} />
-                advanced request settings
               </summary>
-              <div className="composer-control-grid dense">
-                <RunField label="max loops">
+              <div className="composer-advanced-panel">
+                <RunField label="max loops" title="Maximum agent loops" variant="panel">
                   <input type="number" min={1} max={50} value={maxLoops} onChange={event => setMaxLoops(Number(event.target.value))} />
                 </RunField>
-                <RunField label="timeout ms">
+                <RunField label="timeout ms" title="Request timeout in milliseconds" variant="panel">
                   <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
                 </RunField>
-                <RunField label="temperature">
+                <RunField label="temperature" title="Temperature" variant="panel">
                   <input inputMode="decimal" value={temperature} onChange={event => setTemperature(event.target.value)} placeholder="provider default" />
                 </RunField>
-                <RunField label="top p">
+                <RunField label="top p" title="Top P" variant="panel">
                   <input inputMode="decimal" value={topP} onChange={event => setTopP(event.target.value)} placeholder="provider default" />
                 </RunField>
-                <RunField label="max tokens">
+                <RunField label="max tokens" title="Maximum output tokens" variant="panel">
                   <input inputMode="numeric" value={maxTokens} onChange={event => setMaxTokens(event.target.value)} placeholder="provider default" />
                 </RunField>
-                <RunField label="presence penalty">
+                <RunField label="presence penalty" title="Presence penalty" variant="panel">
                   <input inputMode="decimal" value={presencePenalty} onChange={event => setPresencePenalty(event.target.value)} placeholder="0" />
                 </RunField>
-                <RunField label="frequency penalty">
+                <RunField label="frequency penalty" title="Frequency penalty" variant="panel">
                   <input inputMode="decimal" value={frequencyPenalty} onChange={event => setFrequencyPenalty(event.target.value)} placeholder="0" />
                 </RunField>
               </div>
@@ -403,9 +393,19 @@ export function ChatPage({
   );
 }
 
-function RunField({ label, children }: { label: string; children: ReactNode }) {
+function RunField({
+  label,
+  title,
+  variant = 'toolbar',
+  children,
+}: {
+  label: string;
+  title: string;
+  variant?: 'toolbar' | 'panel';
+  children: ReactNode;
+}) {
   return (
-    <label className="run-field">
+    <label className={`run-field ${variant === 'panel' ? 'panel-field' : ''}`} title={title}>
       <span>{label}</span>
       {children}
     </label>

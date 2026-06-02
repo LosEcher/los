@@ -421,89 +421,164 @@ p {
   gap: 10px;
 }
 
-.composer-run-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgb(31 33 26 / 0.66);
-}
-
-.composer-run-head {
+.composer-toolbar {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.composer-run-head > div:first-child {
-  display: grid;
-  gap: 3px;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
-.composer-run-head strong {
-  color: var(--text);
-  font-size: 13px;
+.route-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 7px;
+  background: var(--accent);
 }
 
-.composer-run-head span {
-  color: var(--faint);
-  font-size: 12px;
-}
-
-.composer-control-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-}
-
-.composer-control-grid.dense {
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  padding-top: 10px;
+.route-dot.ok {
+  background: var(--ok);
 }
 
 .run-field {
-  display: grid;
+  display: inline-flex;
+  align-items: center;
   gap: 5px;
   min-width: 0;
+  height: 28px;
+  max-width: 210px;
+  color: var(--muted);
+  background: rgb(31 33 26 / 0.72);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
 }
 
 .run-field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.run-field input,
+.run-field select {
+  width: auto;
+  min-width: 0;
+  max-width: 172px;
+  height: 24px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.run-field input:focus,
+.run-field select:focus {
+  outline: none;
+  border-color: transparent;
+}
+
+.run-field input::placeholder {
+  color: var(--faint);
+}
+
+.run-field.panel-field {
+  display: grid;
+  gap: 5px;
+  height: auto;
+  max-width: none;
+  padding: 0;
+  color: var(--faint);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.run-field.panel-field > span {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
   color: var(--faint);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.composer-route-status {
-  flex: 0 1 42%;
-  justify-content: flex-end;
-  padding: 0;
+.run-field.panel-field input,
+.run-field.panel-field select {
+  width: 100%;
+  max-width: none;
+  height: 30px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
 }
 
-.composer-route-meta {
-  padding: 0;
+.run-field.panel-field input:focus,
+.run-field.panel-field select:focus {
+  outline: 2px solid rgb(215 168 66 / 0.28);
+  border-color: var(--accent);
 }
 
 .composer-advanced {
-  border-top: 1px solid rgb(57 61 49 / 0.72);
-  padding-top: 10px;
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .composer-advanced summary {
+  width: 28px;
+  height: 28px;
+  list-style: none;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
   color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 12px;
 }
 
 .composer-advanced summary::marker,
 .composer-advanced summary::-webkit-details-marker {
   display: none;
+}
+
+.composer-advanced[open] summary,
+.composer-advanced summary:hover,
+.run-field:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.composer-advanced-panel {
+  position: absolute;
+  left: 0;
+  bottom: 34px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(138px, 1fr));
+  gap: 8px;
+  width: min(430px, calc(100vw - 36px));
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
 textarea,
@@ -1142,9 +1217,8 @@ button:disabled {
     position: static;
   }
 
-  .composer-control-grid,
-  .composer-control-grid.dense {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .composer-toolbar {
+    flex-wrap: wrap;
   }
 }
 
@@ -1192,19 +1266,23 @@ button:disabled {
     flex-direction: row;
   }
 
-  .composer-run-head {
-    flex-direction: column;
-  }
-
-  .composer-route-status {
-    flex: none;
-    justify-content: flex-start;
-    width: 100%;
-  }
-
-  .composer-control-grid,
-  .composer-control-grid.dense,
   .two-col {
     grid-template-columns: 1fr;
+  }
+
+  .run-field {
+    max-width: 100%;
+  }
+
+  .run-field input,
+  .run-field select {
+    max-width: min(220px, 64vw);
+  }
+
+  .composer-advanced-panel {
+    right: 0;
+    left: auto;
+    grid-template-columns: 1fr;
+    width: min(300px, calc(100vw - 36px));
   }
 }
