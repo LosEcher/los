@@ -56,8 +56,9 @@ surfaces, not only in a review document.
    `docs/adr/0014-testing-strategy-and-regression-gates.md`.
 3. Sync legacy AGENTS/CLAUDE boundary references in a separate change, because
    the legacy worktrees already contain unrelated uncommitted edits.
-4. Decide whether `.reasonix` 32KB truncation is an intentional cap or a bug
-   after M-1 produces fresh evidence.
+4. `.reasonix` truncation and `los` run replay policy are now separated in
+   ADR 0015. `.reasonix/truncated-results/` is external capture evidence, not
+   the source of truth for `los` run replay.
 
 ## Verification
 
