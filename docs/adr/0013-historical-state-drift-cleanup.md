@@ -59,6 +59,9 @@ surfaces, not only in a review document.
 4. `.reasonix` truncation and `los` run replay policy are now separated in
    ADR 0015. `.reasonix/truncated-results/` is external capture evidence, not
    the source of truth for `los` run replay.
+5. `.omx` tool-level logging scope is now separated in ADR 0016. Current
+   `.omx/logs/omx-*.jsonl` rows are external session/routing evidence, not a
+   `los` tool ledger or `session_events` replacement.
 
 ## Verification
 
