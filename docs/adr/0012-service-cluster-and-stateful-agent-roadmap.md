@@ -2,7 +2,16 @@
 
 ## Status
 
-Proposed.
+Partially implemented.
+
+As of 2026-06-02:
+
+1. Phase 1 is implemented for the service registry, gateway heartbeat,
+   `/live`, `/ready`, `/services`, drain, promote, and service-route tests.
+2. Phase 2 has a readiness baseline smoke for two gateways sharing PostgreSQL,
+   but it has not validated real `/chat` failover or cross-gateway stream
+   replay.
+3. Phases 3-7 remain roadmap work.
 
 ## Background
 
@@ -58,12 +67,13 @@ The current implementation already has useful pieces:
 
 The current implementation is still missing several cluster-grade pieces:
 
-1. There is no `service_instances` registry for gateway, web, scheduler, or
-   artifact proxy services.
-2. `/health` is liveness only. It does not distinguish liveness, readiness,
-   drain state, database reachability, or dependency health.
-3. Gateway startup currently runs expired task recovery. In a multi-gateway
-   deployment, recovery must avoid duplicate repair work.
+1. Service visibility currently covers gateway instances. Web, scheduler,
+   artifact proxy, and worker services are still future service kinds.
+2. `/live`, `/ready`, `/services`, drain, and promote exist, but no production
+   load balancer or routing config consumes readiness yet.
+3. Gateway startup recovery has advisory-lock protection in code and tests, but
+   concurrent production startup recovery still needs a live multi-gateway
+   validation record.
 4. `/chat` still runs as a request-bound stream. A gateway crash interrupts the
    live stream even though durable evidence remains in PostgreSQL.
 5. `task_runs` stores a prompt preview, not a full durable run spec. Another
@@ -620,7 +630,7 @@ Later fields:
 
 ## First Implementation Slice
 
-The next bounded implementation should be Phase 1 only:
+The first bounded implementation slice was Phase 1:
 
 1. `packages/agent/src/service-instances.ts`
 2. gateway heartbeat from `packages/gateway/src/server.ts`
@@ -631,8 +641,24 @@ The next bounded implementation should be Phase 1 only:
 7. service registry tests
 8. one operation smoke doc
 
-This does not need to change `/chat` execution yet. It creates the evidence
-surface required before multi-gateway failover.
+This did not change `/chat` execution. It created the evidence surface required
+before multi-gateway failover.
+
+## Implementation Status
+
+Evidence checked on 2026-06-02:
+
+| Area | Status | Evidence |
+|------|--------|----------|
+| `service_instances` store | Implemented | `packages/agent/src/service-instances.ts` |
+| `/live` and `/ready` | Implemented | `packages/gateway/src/service-routes.ts` |
+| `GET /services` and `GET /services/:id` | Implemented | `packages/gateway/src/service-routes.ts` |
+| Drain/promote commands | Implemented | `POST /services/:id/drain`, `POST /services/:id/promote` |
+| Service route tests | Implemented | `packages/gateway/src/service-routes.test.ts` |
+| Multi-gateway readiness smoke | Partially implemented | `docs/operations/2026-06-01-multi-gateway-readiness-smoke.md` |
+| Real `/chat` failover | Not validated | The smoke explicitly excludes real `/chat` model execution |
+| Cross-gateway stream replay | Not implemented | Requires durable `run_specs` and replay endpoints |
+| DAG scheduler / memory compaction / eval metrics | Not implemented | Phases 5-7 remain roadmap work |
 
 ## Verification
 

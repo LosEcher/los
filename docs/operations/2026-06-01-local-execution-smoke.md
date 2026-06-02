@@ -33,8 +33,8 @@ Result:
 2. Task run: `task-2c0d3d72-560e-4f1c-bf25-61e988d89e03`
 3. Node: `node34`
 4. Output: `los smoke ok`
-5. Session events included `session.started`, `model.delta`,
-   `session.completed`, and `task.succeeded`.
+5. The live SSE stream included `model.delta`; persisted session events
+   included `session.started`, `session.completed`, and `task.succeeded`.
 
 ## Gateway-Local Path
 

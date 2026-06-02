@@ -96,6 +96,10 @@ This section applies to AI-assisted changes in `los`.
 
 ## Reference Codebases
 
+These are pattern references, not runtime dependencies. Do not import packages
+or call services from legacy projects unless an ADR explicitly makes that
+decision.
+
 | Source | What we reuse |
 |--------|--------------|
 | pi `packages/ai` | Provider abstraction pattern |
