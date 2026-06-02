@@ -213,4 +213,11 @@ If Chat accepts raw API keys or base URLs directly, it mixes a per-run override 
 2. Add a `POST /providers/:name/probe` route that checks model listing or a minimal authenticated provider endpoint without starting a paid chat run.
 3. Decide whether config writes target `~/.los/config.yaml`, a los-managed profile store, or both.
 4. Add redaction tests so API keys never appear in `/providers/models`, `/onboarding`, logs, session events, or browser-visible errors.
-3. Confirm the preferred package shape before implementation starts.
+
+### Page Boundary Verification
+
+1. `packages/web/src/ui-boundary.test.mjs` is the current lightweight guard for this boundary. It checks source-level ownership instead of relying only on screenshot review.
+2. The test must fail if Chat moves API key, base URL, default model, or provider settings fields back into `ChatPage`.
+3. The test must fail if Chat's right inspector becomes a configuration surface again instead of `Run Evidence`.
+4. The test must fail if Provider setup fields disappear from `ProviderConfigWorkspace`.
+5. Visual verification still uses the running Vite page and desktop/mobile screenshots to catch spacing, wrapping, and overlap issues that source-level tests cannot see.
