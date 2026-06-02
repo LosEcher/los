@@ -14,7 +14,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb } from '@los/infra/db';
-import { printOnboardingReport, discoverAll, type DiscoveredProvider } from '@los/infra/discovery';
+import { describeProviderReadiness, printOnboardingReport, discoverAll, type DiscoveredProvider } from '@los/infra/discovery';
 import { getLogger } from '@los/infra/logger';
 import { createProvider } from '@los/agent';
 import { registerLogRoutes } from './log-routes.js';
@@ -449,6 +449,7 @@ function sanitizeProviderDiscovery(provider: DiscoveredProvider): Record<string,
   return {
     ...rest,
     hasApiKey: typeof apiKey === 'string' && apiKey.length > 0,
+    readiness: describeProviderReadiness(provider),
   };
 }
 

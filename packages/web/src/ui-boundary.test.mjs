@@ -50,6 +50,17 @@ test('provider setup fields live on the providers page, not chat', () => {
   assert.doesNotMatch(chatPage, /Provider Settings/);
 });
 
+test('providers page renders readiness instead of raw discovery booleans', () => {
+  const providersPage = between(pages, 'export function ProvidersPage()', 'type ProviderConfigDraft');
+
+  assert.match(providersPage, /providerReadinessLabel/);
+  assert.match(providersPage, /providerReadinessDetail/);
+  assert.match(providersPage, /className="record-row provider-row"/);
+  assert.match(providersPage, /readiness\.ready/);
+  assert.match(providersPage, /readiness\.manualSetupRequired/);
+  assert.doesNotMatch(providersPage, /String\(provider\.available \?\? provider\.importable/);
+});
+
 test('composer run controls are responsive instead of fixed to one crowded grid', () => {
   const toolbar = between(styles, '.composer-toolbar {', '}');
   const runField = between(styles, '.run-field {', '}');

@@ -49,10 +49,69 @@ export interface DiscoveredProvider {
   note?: string;
 }
 
+export interface ProviderReadiness {
+  configuredKey: boolean;
+  discovered: boolean;
+  ready: boolean;
+  manualSetupRequired: boolean;
+  blocker: string | null;
+}
+
+export interface ProviderReadinessSummary {
+  configuredKeys: number;
+  discoveredProviders: number;
+  readyProviders: number;
+  manualSetupBlockers: number;
+}
+
 export interface DiscoveryReport {
   tools: DiscoveredTool[];
   providers: DiscoveredProvider[];
   summary: string;
+}
+
+const PROVIDER_API_KEY_ENV: Record<string, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  minimax: 'MINIMAX_API_KEY',
+  moonshot: 'MOONSHOT_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  qwen: 'DASHSCOPE_API_KEY',
+};
+
+export function providerApiKeyEnv(providerName: string): string {
+  const normalized = providerName.trim().toLowerCase();
+  return PROVIDER_API_KEY_ENV[normalized]
+    ?? `${providerName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+}
+
+export function describeProviderReadiness(provider: DiscoveredProvider): ProviderReadiness {
+  const configuredKey = typeof provider.apiKey === 'string' && provider.apiKey.length > 0;
+  const ready = provider.available && provider.importable && configuredKey;
+  const manualSetupRequired = !ready;
+  const keyEnv = providerApiKeyEnv(provider.name);
+  const blocker = manualSetupRequired
+    ? `BLOCKER: ${keyEnv} not set. Ignore if ${provider.name} is not needed.`
+    : null;
+
+  return {
+    configuredKey,
+    discovered: true,
+    ready,
+    manualSetupRequired,
+    blocker,
+  };
+}
+
+export function summarizeProviderReadiness(providers: readonly DiscoveredProvider[]): ProviderReadinessSummary {
+  const readiness = providers.map(describeProviderReadiness);
+  return {
+    configuredKeys: readiness.filter(r => r.configuredKey).length,
+    discoveredProviders: providers.length,
+    readyProviders: readiness.filter(r => r.ready).length,
+    manualSetupBlockers: readiness.filter(r => r.manualSetupRequired).length,
+  };
 }
 
 // ── Tool Scanners ───────────────────────────────────────
@@ -537,12 +596,14 @@ export async function discoverAll(): Promise<DiscoveryReport> {
 
   // Build summary
   const installedTools = tools.filter(t => t.installed);
-  const importable = providers.filter(p => p.importable && p.available);
-  const detectable = providers.filter(p => !p.importable && p.available === false);
+  const readiness = summarizeProviderReadiness(providers);
 
   const summary = [
     `Scanned ${tools.length} tools, found ${installedTools.length} installed.`,
-    `${importable.length} providers ready to import, ${detectable.length} detected but need manual setup.`,
+    `${readiness.configuredKeys} configured keys, ` +
+      `${readiness.discoveredProviders} providers discovered, ` +
+      `${readiness.readyProviders} ready, ` +
+      `${readiness.manualSetupBlockers} manual setup blockers.`,
   ].join(' ');
 
   log.info(summary);
@@ -555,7 +616,7 @@ export async function discoverAll(): Promise<DiscoveryReport> {
  */
 export async function hasAnyProvider(): Promise<boolean> {
   const report = await discoverAll();
-  return report.providers.some(p => p.importable && p.available);
+  return report.providers.some(p => describeProviderReadiness(p).ready);
 }
 
 /**
@@ -586,28 +647,39 @@ export async function printOnboardingReport(): Promise<string> {
   // Providers found
   lines.push('');
   lines.push('── Discovered Providers ──');
-  const importable = providers.filter(p => p.importable && p.available);
-  const needsSetup = providers.filter(p => !p.importable);
+  const readiness = providers.map(p => ({
+    provider: p,
+    readiness: describeProviderReadiness(p),
+  }));
+  const readyProviders = readiness.filter(p => p.readiness.ready);
+  const needsSetup = readiness.filter(p => p.readiness.manualSetupRequired);
 
-  if (importable.length > 0) {
+  if (readiness.length > 0) {
     lines.push('');
-    lines.push('  Ready to import:');
-    for (const p of importable) {
+    lines.push('  Readiness:');
+    for (const { provider: p, readiness: r } of readiness) {
       const model = p.defaultModel ? ` [${p.defaultModel}]` : '';
-      lines.push(`    ✓ ${p.name.padEnd(14)} ← ${p.source}${model}`);
+      const status = r.ready ? '✓' : '⚠';
+      const blocker = r.blocker ? ` ${r.blocker}` : '';
+      lines.push(
+        `    ${status} ${p.name.padEnd(14)} ← ${p.source}${model} ` +
+        `configured_key=${r.configuredKey ? 'yes' : 'no'} ` +
+        `discovered=${r.discovered ? 'yes' : 'no'} ` +
+        `ready=${r.ready ? 'yes' : 'no'}${blocker}`,
+      );
     }
   }
 
   if (needsSetup.length > 0) {
     lines.push('');
-    lines.push('  Detected but needs manual setup:');
-    for (const p of needsSetup) {
+    lines.push('  Manual setup blockers:');
+    for (const { provider: p, readiness: r } of needsSetup) {
       const note = p.note ? ` — ${p.note}` : '';
-      lines.push(`    ⚠ ${p.name.padEnd(14)} ← ${p.source}${note}`);
+      lines.push(`    ${r.blocker} Source: ${p.source}${note}`);
     }
   }
 
-  if (importable.length === 0) {
+  if (readyProviders.length === 0) {
     lines.push('');
     lines.push('  No providers ready. To get started:');
     lines.push('    • Set DEEPSEEK_API_KEY in your environment or .env file');

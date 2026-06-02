@@ -825,6 +825,10 @@ button:disabled {
   grid-template-columns: minmax(110px, 140px) minmax(220px, 1.2fr) minmax(120px, 180px) minmax(120px, 1fr) minmax(130px, 0.8fr);
 }
 
+.provider-row {
+  grid-template-columns: minmax(120px, 150px) minmax(190px, 1.1fr) minmax(120px, 180px) minmax(110px, 130px) minmax(220px, 1.4fr);
+}
+
 .task-row {
   grid-template-columns: minmax(240px, 1.2fr) 98px 112px minmax(150px, 0.9fr) 120px 132px 80px;
 }
@@ -1242,6 +1246,7 @@ button:disabled {
   }
 
   .record-row,
+  .provider-row,
   .task-row,
   .session-row,
   .todo-row,

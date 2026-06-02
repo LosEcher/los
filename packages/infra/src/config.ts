@@ -51,6 +51,7 @@ export const ConfigSchema = z.object({
     baseUrl: z.string().optional(),
     model: z.string().optional(),
     enabled: z.coerce.boolean().default(true),
+    source: z.string().optional(),
     weight: z.coerce.number().default(100),
   })).default({}),
 
@@ -176,7 +177,7 @@ function setNested(obj: any, path: string, value: unknown): void {
   current[parts[parts.length - 1]] = value;
 }
 
-function flattenEnv(env: Record<string, string>): Record<string, unknown> {
+function flattenEnv(env: Record<string, string>, sourceLabel = 'env'): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [envKey, configPath] of ENV_MAP) {
     const val = env[envKey];
@@ -196,7 +197,11 @@ function flattenEnv(env: Record<string, string>): Record<string, unknown> {
     if (match && value) {
       const provider = match[1].toLowerCase();
       if (!result.providers) result.providers = {};
-      (result.providers as any)[provider] = { apiKey: value, enabled: true };
+      (result.providers as any)[provider] = {
+        apiKey: value,
+        enabled: true,
+        source: `${sourceLabel}:${key}`,
+      };
     }
   }
 
@@ -224,7 +229,7 @@ async function mergeDiscoveredProviders(
     if (!p.baseUrl && dp.baseUrl) p.baseUrl = dp.baseUrl;
     if (!p.model && dp.defaultModel) p.model = dp.defaultModel;
     if (p.enabled === undefined) p.enabled = dp.available;
-    if (dp.source) p._source = dp.source; // metadata, not used by schema
+    if (!p.source && dp.source) p.source = dp.source;
   }
 
   return config;
@@ -271,7 +276,7 @@ export async function loadConfig(opts?: {
   // Layer 4: .env file
   const envFile = loadEnvFile(cwd);
   if (Object.keys(envFile).length > 0) {
-    merged = deepMerge(merged, flattenEnv(envFile));
+    merged = deepMerge(merged, flattenEnv(envFile, '.env'));
     log.debug(`Loaded .env from ${cwd}`);
   }
 
@@ -285,7 +290,7 @@ export async function loadConfig(opts?: {
     if (key.endsWith('_API_KEY') && value) procEnv[key] = value;
   }
   if (Object.keys(procEnv).length > 0) {
-    merged = deepMerge(merged, flattenEnv(procEnv));
+    merged = deepMerge(merged, flattenEnv(procEnv, 'env'));
     log.debug('Applied process environment variables');
   }
 
@@ -358,10 +363,15 @@ export function printConfigDiagnostics(config: Config): string {
   ];
 
   for (const [name, p] of Object.entries(config.providers)) {
-    const source = (p as any)._source ?? 'manual';
-    const status = p.enabled ? '✓' : '✗';
+    const source = p.source ?? 'manual';
+    const hasKey = typeof p.apiKey === 'string' && p.apiKey.length > 0;
+    const ready = p.enabled && hasKey;
+    const status = ready ? '✓' : '✗';
     const model = p.model ?? '(default)';
-    lines.push(`    ${status} ${name.padEnd(12)} model=${model.padEnd(20)} source=${source}`);
+    lines.push(
+      `    ${status} ${name.padEnd(12)} model=${model.padEnd(20)} ` +
+      `configured_key=${hasKey ? 'yes' : 'no'} ready=${ready ? 'yes' : 'no'} source=${source}`,
+    );
   }
 
   return lines.join('\n');

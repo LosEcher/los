@@ -14,7 +14,9 @@ import {
   type MemoryResponse,
   type MemoryStats,
   type ProviderDiscovery,
+  type ProviderDiscoveryProvider,
   type ProviderModelsResponse,
+  type ProviderReadiness,
   type SessionDetail,
   type SessionEventsResponse,
   type SessionObservability,
@@ -326,14 +328,20 @@ export function ProvidersPage() {
           loading={onboarding.isLoading}
           empty="No provider endpoints discovered."
           rows={providers}
-          renderRow={(provider, index) => (
-            <div className="record-row">
-              <span className="row-title">{String(provider.name ?? provider.provider ?? `provider-${index + 1}`)}</span>
-              <span>{String(provider.source ?? 'source?')}</span>
-              <span>{String(provider.defaultModel ?? provider.model ?? 'model?')}</span>
-              <span>{String(provider.available ?? provider.importable ?? 'state?')}</span>
-            </div>
-          )}
+          renderRow={(provider, index) => {
+            const readiness = provider.readiness ?? {};
+            const state = providerReadinessLabel(readiness);
+            const detail = providerReadinessDetail(provider, readiness);
+            return (
+              <div className="record-row provider-row">
+                <span className="row-title">{metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`}</span>
+                <span>{metadataText(provider.source) ?? 'source?'}</span>
+                <span>{metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? 'model?'}</span>
+                <span className={`status-text ${readiness.ready ? 'succeeded' : readiness.manualSetupRequired ? 'blocked' : 'ready'}`}>{state}</span>
+                <span>{detail}</span>
+              </div>
+            );
+          }}
         />
         <div className="section-divider" />
         <div className="panel-head compact">
@@ -495,6 +503,25 @@ function buildProviderYamlSnippet(draft: ProviderConfigDraft): string {
     `    model: "${model}"`,
     `    enabled: ${draft.enabled ? 'true' : 'false'}`,
   ].join('\n');
+}
+
+function providerReadinessLabel(readiness: ProviderReadiness): string {
+  if (readiness.ready) return 'ready';
+  if (readiness.manualSetupRequired) return 'manual setup';
+  if (readiness.discovered) return 'discovered';
+  return 'unknown';
+}
+
+function providerReadinessDetail(provider: ProviderDiscoveryProvider, readiness: ProviderReadiness): string {
+  const blocker = metadataText(readiness.blocker);
+  if (blocker) return blocker;
+  if (readiness.configuredKey !== undefined) {
+    return readiness.configuredKey ? 'configured key' : 'no configured key';
+  }
+  if (provider.hasApiKey !== undefined) {
+    return provider.hasApiKey ? 'configured key' : 'no configured key';
+  }
+  return 'readiness unknown';
 }
 
 function envPrefixForProvider(providerId: string): string {

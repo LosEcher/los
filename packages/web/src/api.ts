@@ -232,8 +232,26 @@ export type MemoryStats = {
   bySource: Record<string, number>;
 };
 
+export type ProviderReadiness = {
+  configuredKey?: boolean;
+  discovered?: boolean;
+  ready?: boolean;
+  manualSetupRequired?: boolean;
+  blocker?: string | null;
+};
+
+export type ProviderDiscoveryProvider = Record<string, unknown> & {
+  name?: string;
+  provider?: string;
+  source?: string;
+  defaultModel?: string;
+  model?: string;
+  hasApiKey?: boolean;
+  readiness?: ProviderReadiness;
+};
+
 export type ProviderDiscovery = {
-  providers?: Array<Record<string, unknown>>;
+  providers?: ProviderDiscoveryProvider[];
   tools?: Array<Record<string, unknown>>;
   summary?: string;
 };
