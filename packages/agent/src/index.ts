@@ -26,6 +26,7 @@ export {
   type ToolCallRepairMode,
 } from './model-profiles.js';
 export {
+  ADVISORY_COMPATIBILITY_TARGETS,
   DEFAULT_COMPATIBILITY_PROBES,
   DEFAULT_COMPATIBILITY_TARGETS,
   createCompatibilityRunSpecs,

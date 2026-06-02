@@ -482,6 +482,7 @@ Compat:
   --execute               Execute probes through the gateway; default is dry-run
   --trace-prefix ID       Prefix for per-run trace ids
   --dedupe-prefix KEY     Prefix for per-run dedupe keys
+  Default target is the required DeepSeek compatibility gate; pass --target for advisory providers.
 
 Artifacts:
   list | put | get | delete

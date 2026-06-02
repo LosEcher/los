@@ -2,14 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ADVISORY_COMPATIBILITY_TARGETS,
   createCompatibilityRunSpecs,
   parseCompatibilityTargets,
   selectCompatibilityProbes,
   summarizeCompatibilityEvents,
 } from './compat-harness.js';
 
+test('compatibility harness defaults to required provider gates only', () => {
+  const targets = parseCompatibilityTargets(undefined);
+
+  assert.deepEqual(targets.map(item => item.label), ['deepseek:deepseek-v4-flash']);
+  assert.ok(ADVISORY_COMPATIBILITY_TARGETS.some(item => item.label === 'codex:gpt-5.5'));
+  assert.ok(ADVISORY_COMPATIBILITY_TARGETS.some(item => item.label === 'openai:gpt-5.5'));
+});
+
 test('compatibility harness creates provider-model probe specs', () => {
-  const targets = parseCompatibilityTargets(['deepseek:deepseek-reasoner', 'openai:gpt-4o']);
+  const targets = parseCompatibilityTargets(['deepseek:deepseek-v4-pro', 'openai:gpt-5.5']);
   const probes = selectCompatibilityProbes(['read-context']);
   const specs = createCompatibilityRunSpecs({
     targets,
@@ -20,18 +29,18 @@ test('compatibility harness creates provider-model probe specs', () => {
   });
 
   assert.equal(specs.length, 2);
-  assert.equal(specs[0].id, 'deepseek:deepseek-reasoner/read-context');
+  assert.equal(specs[0].id, 'deepseek:deepseek-v4-pro/read-context');
   assert.equal(specs[0].request.provider, 'deepseek');
-  assert.equal(specs[0].request.model, 'deepseek-reasoner');
+  assert.equal(specs[0].request.model, 'deepseek-v4-pro');
   assert.equal(specs[0].request.toolMode, 'read-only');
   assert.equal(specs[0].request.maxLoops, 3);
   assert.equal(specs[0].request.workspaceRoot, '/tmp/workspace');
-  assert.equal(specs[0].request.traceId, 'trace:deepseek:deepseek-reasoner/read-context');
+  assert.equal(specs[0].request.traceId, 'trace:deepseek:deepseek-v4-pro/read-context');
 });
 
 test('compatibility harness summarizes SSE evidence', () => {
   const [spec] = createCompatibilityRunSpecs({
-    targets: parseCompatibilityTargets(['deepseek:deepseek-reasoner']),
+    targets: parseCompatibilityTargets(['deepseek:deepseek-v4-pro']),
     probes: selectCompatibilityProbes(['read-context']),
   });
   const summary = summarizeCompatibilityEvents(spec, [
@@ -40,7 +49,7 @@ test('compatibility harness summarizes SSE evidence', () => {
       data: {
         sessionId: 'session-1',
         payload: {
-          effectiveModel: 'deepseek-reasoner',
+          effectiveModel: 'deepseek-v4-pro',
           modelProfile: {
             protocol: 'openai',
             supportsReasoning: true,
@@ -70,8 +79,8 @@ test('compatibility harness summarizes SSE evidence', () => {
   ]);
 
   assert.equal(summary.provider, 'deepseek');
-  assert.equal(summary.model, 'deepseek-reasoner');
-  assert.equal(summary.effectiveModel, 'deepseek-reasoner');
+  assert.equal(summary.model, 'deepseek-v4-pro');
+  assert.equal(summary.effectiveModel, 'deepseek-v4-pro');
   assert.equal(summary.protocol, 'openai');
   assert.equal(summary.reasoningSupported, true);
   assert.equal(summary.reasoningObserved, true);
@@ -79,4 +88,24 @@ test('compatibility harness summarizes SSE evidence', () => {
   assert.equal(summary.toolResultCount, 1);
   assert.equal(summary.totalTokens, 42);
   assert.equal(summary.completed, true);
+  assert.equal(summary.passed, false);
+  assert.deepEqual(summary.failures, ['missing expected tool(s): list_directory']);
+});
+
+test('compatibility harness marks complete expected-tool runs as passing', () => {
+  const [spec] = createCompatibilityRunSpecs({
+    targets: parseCompatibilityTargets(['deepseek:deepseek-v4-flash']),
+    probes: selectCompatibilityProbes(['read-context']),
+  });
+  const summary = summarizeCompatibilityEvents(spec, [
+    { event: 'session.started', data: { sessionId: 'session-1', payload: { effectiveModel: 'deepseek-v4-flash' } } },
+    { event: 'tool.call', data: { toolName: 'list_directory' } },
+    { event: 'tool.result', data: { payload: { ok: true } } },
+    { event: 'tool.call', data: { toolName: 'read_file' } },
+    { event: 'tool.result', data: { payload: { ok: true } } },
+    { event: 'session.completed', data: { taskRunId: 'task-1' } },
+  ]);
+
+  assert.equal(summary.passed, true);
+  assert.deepEqual(summary.failures, []);
 });

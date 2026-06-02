@@ -1,5 +1,7 @@
 import {
+  ADVISORY_COMPATIBILITY_TARGETS,
   createCompatibilityRunSpecs,
+  DEFAULT_COMPATIBILITY_TARGETS,
   parseCompatibilityTargets,
   selectCompatibilityProbes,
   summarizeCompatibilityEvents,
@@ -69,6 +71,9 @@ export async function compatCommand(globalArgs: string[], argv: string[]): Promi
 
   if (json) {
     console.log(JSON.stringify({ event: 'compat.summary', data: { summaries } }));
+  }
+  if (summaries.some(summary => !summary.passed)) {
+    process.exitCode = 1;
   }
 }
 
@@ -142,9 +147,9 @@ function renderCompatibilitySummary(summary: CompatibilityRunSummary, json: bool
     return;
   }
   const model = summary.effectiveModel ?? summary.model ?? '?';
-  const status = summary.error ? 'error' : summary.cancelled ? 'cancelled' : summary.completed ? 'completed' : 'incomplete';
+  const status = summary.passed ? 'passed' : summary.error ? 'error' : summary.cancelled ? 'cancelled' : summary.completed ? 'failed' : 'incomplete';
   console.log(`[compat:${status}] ${summary.specId} ${summary.provider}/${model} tokens=${summary.totalTokens} tools=${summary.toolCalls.join(',') || 'none'} failedTools=${summary.failedToolResultCount}`);
-  if (summary.error) console.log(indent(summary.error));
+  if (summary.failures.length > 0) console.log(indent(summary.failures.join('\n')));
 }
 
 async function readSse(
@@ -310,15 +315,20 @@ function indent(value: string): string {
 }
 
 function printCompatHelp(): void {
+  const defaultTargets = DEFAULT_COMPATIBILITY_TARGETS.map(target => target.label).join(', ');
+  const advisoryTargets = ADVISORY_COMPATIBILITY_TARGETS.map(target => target.label).join(',');
+
   console.log(`los compat
+
+Default required gate target(s): ${defaultTargets}
 
 Dry-run planned compatibility probes:
   los compat
-  los compat deepseek:deepseek-reasoner openai:gpt-4o
-  los compat --target deepseek:deepseek-chat,packycode:gpt-5.5 --probe read-context
+  los compat --target ${advisoryTargets} --probe read-context
+  los compat openai:gpt-5.5 codex:gpt-5.5
 
 Execute probes through the gateway:
-  los compat --execute --workspace . deepseek:deepseek-reasoner
+  los compat --execute --workspace . --target deepseek:deepseek-v4-flash --probe read-context --timeout-ms 120000
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}

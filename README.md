@@ -27,16 +27,18 @@ Run the client CLI:
 ```bash
 pnpm run cli -- chat --provider deepseek "inspect the current workspace"
 pnpm run cli -- chat --provider deepseek --model deepseek-reasoner "inspect the current workspace"
-pnpm run cli -- compat deepseek:deepseek-reasoner openai:gpt-4o
+pnpm run cli -- compat
+pnpm run cli -- compat --target openai:gpt-5.5,codex:gpt-5.5 --probe read-context
 pnpm run cli -- sessions
 pnpm run cli -- tasks
 ```
 
-`los compat` is dry-run by default. Add `--execute` to run the compatibility
-probes through the gateway:
+`los compat` is dry-run by default. Its default target is the required
+DeepSeek compatibility gate. Pass explicit `--target` values for advisory
+provider exploration. Add `--execute` to run probes through the gateway:
 
 ```bash
-pnpm run cli -- compat --execute --workspace . deepseek:deepseek-reasoner
+pnpm run cli -- compat --execute --workspace . --target deepseek:deepseek-v4-flash --probe read-context --timeout-ms 120000
 ```
 
 If `SERVER_PORT` is already occupied by a gateway from this same checkout,

@@ -65,11 +65,17 @@ export interface CompatibilityRunSummary {
   completed: boolean;
   cancelled: boolean;
   error?: string;
+  passed: boolean;
+  failures: string[];
 }
 
 export const DEFAULT_COMPATIBILITY_TARGETS: ProviderModelTarget[] = [
   target('deepseek', 'deepseek-v4-flash'),
+];
+
+export const ADVISORY_COMPATIBILITY_TARGETS: ProviderModelTarget[] = [
   target('deepseek', 'deepseek-v4-pro'),
+  target('openai', 'gpt-5.5'),
   target('codex', 'gpt-5.5'),
   target('codex', 'gpt-5.4'),
 ];
@@ -227,6 +233,15 @@ export function summarizeCompatibilityEvents(
     if (item.event === 'error') error = typeof data.message === 'string' ? data.message : JSON.stringify(data);
   }
 
+  const missingExpectedTools = spec.probe.expectedTools.filter(tool => !toolCalls.includes(tool));
+  const failures: string[] = [];
+  if (error) failures.push(`error: ${error}`);
+  if (cancelled) failures.push('run cancelled');
+  if (!completed) failures.push('run did not complete');
+  if (failedToolResultCount > 0) failures.push(`${failedToolResultCount} tool result(s) failed`);
+  if (deniedToolCount > 0) failures.push(`${deniedToolCount} tool call(s) denied`);
+  if (missingExpectedTools.length > 0) failures.push(`missing expected tool(s): ${missingExpectedTools.join(', ')}`);
+
   return {
     specId: spec.id,
     provider: spec.target.provider,
@@ -246,6 +261,8 @@ export function summarizeCompatibilityEvents(
     completed,
     cancelled,
     error,
+    passed: failures.length === 0,
+    failures,
   };
 }
 
