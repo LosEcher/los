@@ -197,7 +197,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     title: '定义 Reasonix/Codex CLI fallback gate',
     description: '定义何时允许临时走 Reasonix/Codex CLI，包括能力缺口、cwd、权限、预算、transcript、退出码、task/session evidence 和停用条件。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'agent-runtime',
@@ -207,6 +207,9 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '完全禁止 CLI fallback 会让应急能力不足；直接引入 CLI runtime 又会绕开 los 的状态和权限边界。',
       solution: '把 CLI fallback 做成有触发条件、有证据写入、有权限约束、有退出策略的应急门。',
+      adr: 'docs/adr/0018-cli-fallback-gate.md',
+      evidence: '当前 projects/los 没有 Reasonix/Codex CLI fallback adapter；ADR 0018 规定了能力缺口、显式触发、task_runs/session_events parity、权限 parity、预算、artifact/redaction 和退出策略。',
+      remaining: '真正实现 CLI fallback adapter 仍是单独后续任务，必须先证明内置 provider loop 无法补齐目标能力。',
     },
   },
   {
