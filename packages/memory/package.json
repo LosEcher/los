@@ -9,13 +9,14 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "node --test --experimental-test-coverage src/*.test.ts",
+    "test": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@los/infra": "workspace:*"
   },
   "devDependencies": {
+    "tsx": "^4.0.0",
     "typescript": "^5.5.0"
   }
 }

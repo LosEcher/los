@@ -22,7 +22,7 @@ surfaces, not only in a review document.
    and a multi-gateway readiness smoke already exist.
 2. The historical review repeated an older "zero tests" observation. Current
    source truth is different: excluding `node_modules/` and `dist/`, `los`
-   has 17 source test files under `packages/**/src`.
+   has 19 source test files under `packages/**/src`.
 3. The root workspace rules said legacy projects are read-only references, but
    `lsclaw`, `vpsagentweb`, `los-ast`, `los-memory`, and `pi` all have commits
    from 2026-05-28 or 2026-05-29.

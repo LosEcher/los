@@ -8,7 +8,7 @@ Accepted.
 
 The 2026-06-02 historical review initially treated `los` as if it had zero
 tests. Current source truth is different: excluding `node_modules/` and
-`dist/`, `packages/**/src` contains 17 source test files and about 667KB of
+`dist/`, `packages/**/src` contains 19 source test files and about 673KB of
 source code.
 
 The real gap is not "no tests." The gap is that tests, compatibility harnesses,
@@ -24,17 +24,19 @@ Checked on 2026-06-02:
 source files by package:
   agent     33
   cli        6
-  executor   3
+  executor   4
   gateway   16
   infra      6
-  memory     3
+  memory     4
   web       10
 
 source test files by package:
   agent      8
   cli        1
+  executor   1
   gateway    5
   infra      2
+  memory     1
   web        1
 ```
 
@@ -50,6 +52,7 @@ packages/agent/src/service-instances.test.ts
 packages/agent/src/task-runs.test.ts
 packages/agent/src/tools/registry.test.ts
 packages/cli/src/client-path.test.ts
+packages/executor/src/node-command-runner.test.ts
 packages/gateway/src/artifact-routes.test.ts
 packages/gateway/src/node-command-routes.test.ts
 packages/gateway/src/node-routes.test.ts
@@ -57,18 +60,17 @@ packages/gateway/src/service-routes.test.ts
 packages/gateway/src/ssh-config-import.test.ts
 packages/infra/src/config.test.ts
 packages/infra/src/discovery.test.ts
+packages/memory/src/markdown.test.ts
 packages/web/src/ui-boundary.test.mjs
 ```
 
 Current package scripts:
 
 1. `@los/agent`, `@los/gateway`, `@los/cli`, `@los/web`, `@los/infra`,
-   and `@los/memory` define `test` scripts.
-2. `@los/executor` defines `build`, `check`, and runtime scripts, but no test
-   script.
-3. Root `pnpm check` runs Turbo check, `tools/check-structure.sh`, and
+   `@los/memory`, and `@los/executor` define `test` scripts.
+2. Root `pnpm check` runs Turbo check, `tools/check-structure.sh`, and
    `tools/check-contracts.sh`.
-4. Root `pnpm test` runs Turbo test.
+3. Root `pnpm test` runs Turbo test.
 
 Current non-test gates:
 
@@ -161,10 +163,14 @@ The following behavior requires operation smoke evidence:
 
 ## Gaps To Close
 
-1. `@los/executor` has no package test script. Add one before adding more
-   executor-side command runner or task execution behavior.
-2. `@los/memory` has a test script but no current source test files. Add
-   focused tests before changing memory writes or memory search.
+1. Executor package test entry is now present:
+   `packages/executor/src/node-command-runner.test.ts` covers the maintenance
+   command runner's helper-script boundary before real restart/upgrade work is
+   added.
+2. Memory package source test is now present:
+   `packages/memory/src/markdown.test.ts` covers deterministic `MEMORY.md`
+   synchronization and missing-file reads before changing memory writes or
+   search.
 3. Root `pnpm test` is available but not yet named in the merge rule. Use it
    for broad shared behavior changes and before publishing larger batches.
 4. The current required provider runtime gate is DeepSeek
