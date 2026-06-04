@@ -244,25 +244,33 @@ function findIdentifierMatches(
   root: SgNode, name: string, kindFilter: string, source: string,
 ): CodeMatch[] {
   const allMatches: CodeMatch[] = [];
-  const idNodes = root.findAll({ rule: { kind: 'identifier' } });
 
-  for (const node of idNodes) {
-    if (node.text() !== name) continue;
-    if (isInsideCommentOrString(node)) continue;
+  // Search for regular identifiers + shorthand property identifiers
+  const kinds = ['identifier', 'shorthand_property_identifier'];
+  for (const astKind of kinds) {
+    let nodes: SgNode[];
+    try {
+      nodes = root.findAll({ rule: { kind: astKind } });
+    } catch { continue; }
 
-    const range = node.range();
-    const line = range.start.line;
-    const snippet = getSnippet(source, line);
-    const role = classifyIdentifierRole(node);
+    for (const node of nodes) {
+      if (node.text() !== name) continue;
+      if (isInsideCommentOrString(node)) continue;
 
-    if (kindFilter !== 'any' && role !== kindFilter) continue;
+      const range = node.range();
+      const line = range.start.line;
+      const snippet = getSnippet(source, line);
+      const role = classifyIdentifierRole(node);
 
-    allMatches.push({
-      line: line + 1,   // 0-based → 1-based
-      column: range.start.column + 1,
-      kind: role,
-      snippet,
-    });
+      if (kindFilter !== 'any' && role !== kindFilter) continue;
+
+      allMatches.push({
+        line: line + 1,   // 0-based → 1-based
+        column: range.start.column + 1,
+        kind: role,
+        snippet,
+      });
+    }
   }
 
   return allMatches;
