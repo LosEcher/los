@@ -2,6 +2,27 @@
 
 Lightweight Agent Execution + Memory Management Platform.
 
+## Primary Use
+
+Use `los` as the project-owned execution and evidence surface for local agent
+runs, runtime checks, provider compatibility, node readiness, and recurring
+governance reports. Codex, Claude, OpenCode, Reasonix, and OMX can remain
+entrypoints or comparison tools, but `los` owns the project-specific runtime
+evidence when a claim depends on task execution, session events, node state, or
+provider gates.
+
+Read these first for project work:
+
+1. [`AGENTS.md`](AGENTS.md) - architecture principles, commands, and
+   AI-assisted change rules.
+2. [`SKILL.md`](SKILL.md) - repeated los-specific workflows.
+3. [`docs/README.md`](docs/README.md) - documentation index and truth surfaces.
+4. [`docs/governance/periodic-analysis.md`](docs/governance/periodic-analysis.md)
+   - daily, weekly, and monthly governance checks.
+5. [`docs/governance/agent-workflow-roadmap.md`](docs/governance/agent-workflow-roadmap.md)
+   - stage goals for personal high-autonomy agent workflows, evals, and
+   toolchain governance.
+
 ## Local Runtime
 
 Install dependencies:
@@ -79,3 +100,21 @@ curl -fsS http://127.0.0.1:8080/health
 pnpm check
 pnpm test
 ```
+
+Use `pnpm check` as the default project coherence check. It runs package checks,
+structure checks, and contract checks. Use `pnpm test` when behavior changed or
+ADR 0014 requires a broader regression gate.
+
+## Documentation
+
+Project documentation starts at [`docs/README.md`](docs/README.md).
+
+Key surfaces:
+
+- `docs/adr/` - durable design decisions and status.
+- `docs/operations/` - dated runtime smoke evidence.
+- `docs/governance/` - recurring analysis and documentation hygiene.
+- `contracts/` - public runtime contracts checked by `./tools/check-contracts.sh`.
+
+Keep config truth, runtime truth, persisted evidence, and ADR intent separate
+when making current-state claims.

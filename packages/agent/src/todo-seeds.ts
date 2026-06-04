@@ -1,4 +1,5 @@
 import type { CreateTodoInput } from './todo-types.js';
+import { LOS_AGENT_WORKFLOW_TODO_SEED } from './todo-seeds-agent-workflow.js';
 
 export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   {
@@ -525,6 +526,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
       placement: 'todo-managed planning, task-run execution evidence, governance module for recurring automation when needed.',
     },
   },
+  ...LOS_AGENT_WORKFLOW_TODO_SEED,
   {
     id: 'todo-los-governance-periodic-sweeper',
     title: '实现周期性治理 sweeper 和租户级调度策略',
