@@ -25,6 +25,8 @@
     "build": "turbo build",
     "check:contracts": "./tools/check-contracts.sh",
     "check": "turbo check && ./tools/check-structure.sh && ./tools/check-contracts.sh",
+    "gate": "turbo check && ./tools/check-structure.sh && ./tools/check-contracts.sh && pnpm test",
+    "pre-push": "pnpm run gate",
     "test": "turbo test",
     "clean": "turbo clean"
   },
