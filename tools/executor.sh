@@ -106,6 +106,24 @@ health_check() {
   curl -fsS "$(executor_url)/health" >/dev/null 2>&1
 }
 
+mark_node_status() {
+  local status="$1"
+  local message="${2:-}"
+  local node_id
+  node_id="$(executor_node_id)"
+  (
+    cd "$ROOT"
+    if [ "$status" = "draining" ]; then
+      pnpm --filter @los/executor run maint -- drain "$node_id"
+    elif [ "$status" = "online" ]; then
+      pnpm --filter @los/executor run maint -- promote "$node_id"
+    else
+      pnpm --filter @los/executor run maint -- set-status "$node_id" offline
+      pnpm --filter @los/executor run maint -- set-rollout "$node_id" idle "$message"
+    fi
+  ) >/dev/null 2>&1 || true
+}
+
 write_pid_file() {
   mkdir -p "$RUNTIME_DIR"
   printf '%s\n' "$1" > "$PID_FILE"
@@ -315,12 +333,14 @@ stop_cmd() {
     else
       echo "los executor is not running from $PID_FILE"
       rm -f "$PID_FILE"
+      mark_node_status offline "executor stop observed no local process"
       return 0
     fi
   fi
 
   parent="$(parent_pid "$pid")"
   echo "stopping los executor pid=$pid"
+  mark_node_status draining "executor stop requested"
   if is_los_executor_pid "$parent"; then
     echo "stopping los executor parent pid=$parent"
     kill "$parent" >/dev/null 2>&1 || true
@@ -331,6 +351,7 @@ stop_cmd() {
   while [ "$SECONDS" -lt "$deadline" ]; do
     if ! is_running "$pid" && ! is_running "$parent"; then
       rm -f "$PID_FILE"
+      mark_node_status offline "executor stopped"
       echo "stopped"
       return 0
     fi
@@ -343,6 +364,7 @@ stop_cmd() {
     kill -9 "$parent" >/dev/null 2>&1 || true
   fi
   rm -f "$PID_FILE"
+  mark_node_status offline "executor stopped after SIGKILL"
 }
 
 restart_cmd() {

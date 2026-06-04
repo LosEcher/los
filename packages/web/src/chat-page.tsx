@@ -18,6 +18,7 @@ import {
   type ProviderDiscovery,
   type ProviderModelsResponse,
   type SessionDetail,
+  type SessionEvent,
   type SessionEventsResponse,
   type SessionObservability,
   type ToolMode,
@@ -109,25 +110,31 @@ export function ChatPage({
     queryKey: ['chat-session-events', sessionId],
     queryFn: () => getJson<SessionEventsResponse>(`/sessions/${sessionId}/events?limit=80`),
     enabled: Boolean(sessionId),
-    refetchInterval: running ? false : false, // live push replaces polling
+    refetchInterval: running ? 4_000 : false,
   });
   // Live event push via EventSource
   useEffect(() => {
     if (!sessionId || !running) return;
     const es = new EventSource(`/sessions/${sessionId}/events/live`);
-    es.onmessage = (msg) => {
+    const onSessionEvent = (msg: MessageEvent<string>) => {
       try {
-        const event = JSON.parse(msg.data);
+        const event = JSON.parse(msg.data) as SessionEvent;
         queryClient.setQueryData<SessionEventsResponse>(
           ['chat-session-events', sessionId],
-          (prev) => prev
-            ? { ...prev, events: [...prev.events, event].slice(-200), count: prev.count + 1 }
-            : { sessionId, count: 1, events: [event] },
+          (prev) => appendLiveSessionEvent(prev, sessionId, event),
         );
+        void queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
       } catch {}
     };
-    es.onerror = () => { es.close(); };
-    return () => es.close();
+    es.addEventListener('session_event', onSessionEvent);
+    es.onerror = () => {
+      es.close();
+      void queryClient.invalidateQueries({ queryKey: ['chat-session-events', sessionId] });
+    };
+    return () => {
+      es.removeEventListener('session_event', onSessionEvent);
+      es.close();
+    };
   }, [sessionId, running, queryClient]);
   const sessionObservability = useQuery({
     queryKey: ['chat-session-observability', sessionId],
@@ -340,7 +347,7 @@ export function ChatPage({
                 <option value="all">all tools</option>
               </select>
             </RunField>
-            <RunField label="workspace" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`}>
+            <RunField label="execution dir" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`}>
               <Folder size={13} />
               <input
                 list="workspace-suggestions"
@@ -536,6 +543,26 @@ function parseOptionalNumber(value: string): number | undefined {
 function parseOptionalInteger(value: string): number | undefined {
   const number = parseOptionalNumber(value);
   return number === undefined ? undefined : Math.floor(number);
+}
+
+function appendLiveSessionEvent(
+  prev: SessionEventsResponse | undefined,
+  sessionId: string,
+  event: SessionEvent,
+): SessionEventsResponse {
+  if (!prev) return { sessionId, count: 1, events: [event] };
+
+  const existingIndex = prev.events.findIndex(item => item.id === event.id);
+  const events = existingIndex >= 0
+    ? prev.events.map(item => item.id === event.id ? event : item)
+    : [...prev.events, event];
+
+  events.sort((a, b) => a.id - b.id);
+  return {
+    ...prev,
+    events: events.slice(-200),
+    count: existingIndex >= 0 ? prev.count : prev.count + 1,
+  };
 }
 
 function streamRow(event: string, data: Record<string, unknown>): StreamRow {

@@ -221,6 +221,16 @@ export async function listSessionEvents(sessionId: string, limit = 200): Promise
   return rows.rows.map(rowToSessionEvent);
 }
 
+export async function loadSessionEvent(sessionId: string, eventId: number): Promise<SessionEventRecord | null> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<SessionEventRow>(
+    'SELECT * FROM session_events WHERE session_id = $1 AND id = $2 LIMIT 1',
+    [sessionId, eventId],
+  );
+  return rows.rows[0] ? rowToSessionEvent(rows.rows[0]) : null;
+}
+
 export async function listRecentSessionEvents(sessionId: string, limit = 50): Promise<SessionEventRecord[]> {
   await ensureSessionEventStore();
   const db = getDb();

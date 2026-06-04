@@ -52,6 +52,7 @@ import {
 import {
   ensureSessionEventStore,
   appendSessionEvent,
+  loadSessionEvent,
   listSessionEvents,
   listSessionEventsSince,
   getSessionObservability,
@@ -491,7 +492,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── Live Event Push (PG LISTEN/NOTIFY) ────────────────
 
-  const liveClients = new Map<string, Set<(event: string, data: string) => void>>();
+  const liveClients = new Map<string, Set<(eventId: number, data: string) => void>>();
 
   // Start PG LISTEN for session_events channel
   try {
@@ -499,19 +500,32 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     const listenClient = await pool.connect();
     await listenClient.query('LISTEN session_events');
     listenClient.on('notification', (msg) => {
-      try {
-        const payload = JSON.parse(msg.payload ?? '{}');
-        const sessionId = payload.sessionId as string;
-        const subs = liveClients.get(sessionId);
-        if (subs) {
-          for (const send of subs) {
-            try { send(msg.channel, msg.payload ?? ''); } catch {}
-          }
+      void (async () => {
+        if (msg.channel !== 'session_events') return;
+        const payload = parseLiveSessionEventNotification(msg.payload);
+        if (!payload) return;
+        const subs = liveClients.get(payload.sessionId);
+        if (!subs || subs.size === 0) return;
+
+        const event = await loadSessionEvent(payload.sessionId, payload.eventId);
+        if (!event) return;
+        const data = JSON.stringify(event);
+        for (const send of subs) {
+          try { send(event.id, data); } catch {}
         }
-      } catch {}
+      })().catch((err) => {
+        log.warn(`PG LISTEN notification handling failed: ${err?.message ?? String(err)}`);
+      });
     });
-    listenClient.on('error', () => { /* reconnect handled by pool */ });
-    app.addHook('onClose', () => listenClient.release());
+    listenClient.on('error', (err) => {
+      log.warn(`PG LISTEN client error: ${err?.message ?? String(err)}`);
+    });
+    app.addHook('onClose', async () => {
+      try {
+        await listenClient.query('UNLISTEN session_events');
+      } catch {}
+      listenClient.release();
+    });
     log.info('PG LISTEN active on session_events');
   } catch (err: any) {
     log.warn(`PG LISTEN setup failed (live push disabled): ${err.message ?? String(err)}`);
@@ -543,12 +557,9 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     } catch {}
 
     // Register for live push
-    const handler = (_event: string, data: string) => {
-      try {
-        const payload = JSON.parse(data);
-        reply.raw.write(`id: ${payload.eventId ?? ''}\n`);
-        send('session_event', data);
-      } catch {}
+    const handler = (eventId: number, data: string) => {
+      reply.raw.write(`id: ${eventId}\n`);
+      send('session_event', data);
     };
 
     if (!liveClients.has(id)) liveClients.set(id, new Set());
@@ -650,6 +661,17 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function parseLiveSessionEventNotification(payload: string | undefined) {
+  try {
+    const parsed = JSON.parse(payload ?? '{}') as { sessionId?: unknown; eventId?: unknown };
+    const eventId = Number(parsed.eventId);
+    if (typeof parsed.sessionId !== 'string' || !Number.isFinite(eventId)) return null;
+    return { sessionId: parsed.sessionId, eventId };
+  } catch {
+    return null;
+  }
 }
 
 function sanitizeProviderDiscovery(provider: DiscoveredProvider): Record<string, unknown> {

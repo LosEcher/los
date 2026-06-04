@@ -19,6 +19,9 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
   assert.match(composer, /title="Advanced request settings"/);
   assert.match(composer, /label="temperature"/);
   assert.match(composer, /label="max tokens"/);
+  assert.match(chatPage, /refetchInterval: running \? 4_000 : false/);
+  assert.match(chatPage, /addEventListener\('session_event'/);
+  assert.doesNotMatch(chatPage, /es\.onmessage/);
 
   assert.match(inspector, /Run Evidence/);
   assert.match(inspector, /Recent Events/);

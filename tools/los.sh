@@ -52,6 +52,22 @@ health_check() {
   curl -fsS "$(server_url)/health" >/dev/null 2>&1
 }
 
+mark_service_status() {
+  local status="$1"
+  local message="${2:-}"
+  (
+    cd "$ROOT"
+    if [ "$status" = "draining" ]; then
+      pnpm --filter @los/gateway run maint -- drain "$message"
+    elif [ "$status" = "online" ]; then
+      pnpm --filter @los/gateway run maint -- promote "$message"
+    else
+      pnpm --filter @los/gateway run maint -- set-status offline
+      pnpm --filter @los/gateway run maint -- set-rollout idle "$message"
+    fi
+  ) >/dev/null 2>&1 || true
+}
+
 port_owner() {
   command -v lsof >/dev/null 2>&1 || return 0
   lsof -tiTCP:"$(server_port)" -sTCP:LISTEN 2>/dev/null | head -1 || true
@@ -282,11 +298,13 @@ stop_cmd() {
     else
       echo "los gateway is not running from $PID_FILE"
       rm -f "$PID_FILE"
+      mark_service_status offline "gateway stop observed no local process"
       return 0
     fi
   fi
 
   echo "stopping los gateway pid=$pid"
+  mark_service_status draining "gateway stop requested"
   launch_remove
   kill "$pid" >/dev/null 2>&1 || true
 
@@ -294,6 +312,7 @@ stop_cmd() {
   while [ "$SECONDS" -lt "$deadline" ]; do
     if ! is_running "$pid"; then
       rm -f "$PID_FILE"
+      mark_service_status offline "gateway stopped"
       echo "stopped"
       return 0
     fi
@@ -303,6 +322,7 @@ stop_cmd() {
   echo "process did not stop gracefully; sending SIGKILL"
   kill -9 "$pid" >/dev/null 2>&1 || true
   rm -f "$PID_FILE"
+  mark_service_status offline "gateway stopped after SIGKILL"
 }
 
 doctor_cmd() {
