@@ -325,15 +325,21 @@ export function ChatPage({
             <RunField label="workspace" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`}>
               <Folder size={13} />
               <input
+                list="workspace-suggestions"
                 value={workspaceRoot}
                 onChange={event => setWorkspaceRoot(event.target.value)}
                 placeholder={defaultWorkspace || 'cwd'}
                 style={{ width: workspaceRoot ? 140 : 100 }}
               />
+              <datalist id="workspace-suggestions">
+                {defaultWorkspace && <option value={defaultWorkspace} />}
+                {defaultWorkspace && <option value={defaultWorkspace.replace(/\/[^/]+$/, '')} />}
+              </datalist>
               {workspaceRoot && workspaceRoot !== defaultWorkspace && (
-                <button type="button" className="mini-btn" title="Reset to default workspace"
+                <button type="button" className="ghost-btn" title="Reset to default workspace"
+                  style={{ minHeight: 24, padding: '0 6px', fontSize: 12 }}
                   onClick={() => setWorkspaceRoot('')}>
-                  ↺
+                  ↺ default
                 </button>
               )}
             </RunField>
