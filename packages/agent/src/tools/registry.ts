@@ -24,6 +24,7 @@ import { registerSearchTools } from './search-tools.js';
 import { registerFileTools } from './file-tools.js';
 import { registerCodeIntelTools } from './code-intel.js';
 import { registerEditTools } from './edit-tools.js';
+import { registerWebTools } from './web-tools.js';
 
 const log = getLogger('agent');
 
@@ -374,6 +375,7 @@ export async function registerBuiltinTools(
   registerFileTools(registry, { workspaceRoot });
   registerCodeIntelTools(registry, { workspaceRoot });
   registerEditTools(registry, { workspaceRoot });
+  registerWebTools(registry);
 
   // ── MCP external tools ───────────────────────────────
   let mcpCleanup: (() => Promise<void>) | undefined;
