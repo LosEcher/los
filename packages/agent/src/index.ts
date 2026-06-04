@@ -79,6 +79,17 @@ export {
 } from './mcp-servers.js';
 export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSession, type SessionRecord } from './session.js';
 export {
+  ensureToolCallStateStore,
+  createToolCallState,
+  updateToolCallState,
+  loadToolCallState,
+  listToolCallStates,
+  type ToolCallStateRecord,
+  type ToolCallStateType,
+  type CreateToolCallStateInput,
+  type UpdateToolCallStateInput,
+} from './tool-call-states.js';
+export {
   ensureRunSpecStore,
   createRunSpec,
   loadRunSpec,

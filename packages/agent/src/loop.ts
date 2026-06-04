@@ -55,6 +55,7 @@ export interface AgentConfig {
   maxContextTokens?: number;
   contextCompression?: ContextCompressionConfig;
   mcpServers?: MCPServerConfig[];
+  onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void;
   onToolCall?: (tool: string, args: Record<string, unknown>) => void;
@@ -93,6 +94,21 @@ export interface ContextCompressionConfig {
   warningRatio?: number;       // start compressing at this % of budget (default 0.80)
   aggressiveRatio?: number;    // aggressive compression (default 0.88)
   emergencyRatio?: number;     // hard truncation (default 0.95)
+}
+
+export interface ToolCallStateTransition {
+  callId: string;
+  toolName: string;
+  state: 'requested' | 'approved' | 'denied' | 'running' | 'succeeded' | 'failed' | 'retrying';
+  turn: number;
+  input?: Record<string, unknown>;
+  outputSummary?: string;
+  error?: string;
+  durationMs?: number;
+  attempt?: number;
+  maxAttempts?: number;
+  idempotent?: boolean;
+  retryPolicy?: Record<string, unknown>;
 }
 
 // ── System Prompt ───────────────────────────────────────
@@ -335,6 +351,12 @@ export async function runAgent(
       }
       config.onToolCall?.(fn.name, args);
 
+      // Tool call state: requested
+      await config.onToolCallState?.({
+        callId: tc.id, toolName: fn.name, state: 'requested', turn: i + 1,
+        input: args,
+      });
+
       const capability = tools.getCapability(fn.name);
       const toolSource = inferToolSource(capability);
 
@@ -365,6 +387,15 @@ export async function runAgent(
       });
 
       const decision = tools.evaluateTool(fn.name);
+
+      // Tool call state: approved or denied
+      await config.onToolCallState?.({
+        callId: tc.id, toolName: fn.name,
+        state: decision.allowed ? 'approved' : 'denied',
+        turn: i + 1,
+        error: decision.allowed ? undefined : decision.reason,
+      });
+
       const decisionEvent = await emitEvent({
         type: decision.allowed ? 'tool.approved' : 'tool.denied',
         turn: i + 1,
@@ -391,6 +422,22 @@ export async function runAgent(
           )
         : { content: '', error: decision.reason };
       const toolDurationMs = Date.now() - toolStartedAt;
+
+      // Tool call state: running → succeeded or failed
+      if (decision.allowed) {
+        await config.onToolCallState?.({
+          callId: tc.id, toolName: fn.name, state: 'running', turn: i + 1,
+        });
+      }
+      await config.onToolCallState?.({
+        callId: tc.id, toolName: fn.name,
+        state: result.error ? 'failed' : 'succeeded',
+        turn: i + 1,
+        outputSummary: result.error ? undefined : previewText(result.content, 200),
+        error: result.error,
+        durationMs: toolDurationMs,
+        attempt: result.attempts ?? 1,
+      });
 
       const content = result.error ?? result.content;
       toolResults.push(content);

@@ -19,6 +19,7 @@
     "./compat-harness": "./src/compat-harness.ts",
     "./todos": "./src/todos.ts",
     "./run-specs": "./src/run-specs.ts",
+    "./tool-call-states": "./src/tool-call-states.ts",
     "./mcp-servers": "./src/mcp-servers.ts",
     "./tools": "./src/tools/registry.ts",
     "./tools/mcp-client": "./src/tools/mcp-client.ts"
