@@ -2,7 +2,7 @@
  * @los/agent — Public API.
  */
 
-export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type TurnSummary } from './loop.js';
+export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type TurnSummary, type CheckpointState } from './loop.js';
 export {
   cancelScheduledTask,
   runScheduledAgentTask,
@@ -61,6 +61,22 @@ export {
   type ToolRiskLevel,
   type ToolResult,
 } from './tools/registry.js';
+export { MCPToolBridge, MCPClient, type MCPServerConfig, type MCPToolDef, type MCPServerRegistryRecord, registryRecordToConfig } from './tools/mcp-client.js';
+export {
+  ensureMCPServerStore,
+  upsertMCPServer,
+  loadMCPServer,
+  listMCPServers,
+  deleteMCPServer,
+  updateMCPServerStatus,
+  type MCPServerRecord,
+  type MCPTransport,
+  type MCPServerStatus,
+  type MCPRegisteredTool,
+  type UpsertMCPServerInput,
+  type UpdateMCPServerStatusInput,
+  type ListMCPServersOptions,
+} from './mcp-servers.js';
 export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSession, type SessionRecord } from './session.js';
 export {
   ensureTaskRunStore,

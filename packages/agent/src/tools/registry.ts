@@ -14,6 +14,14 @@ import { safeWorkspacePath } from './path-safety.js';
 import { registerPatchTools } from './patch-tools.js';
 import { registerTodoTools } from './todo-tools.js';
 import { runSandboxedShell } from './shell-sandbox.js';
+import {
+  MCPToolBridge,
+  registryRecordToConfig,
+  type MCPServerConfig,
+  type MCPServerRegistryRecord,
+} from './mcp-client.js';
+import { registerSearchTools } from './search-tools.js';
+import { registerFileTools } from './file-tools.js';
 
 const log = getLogger('agent');
 
@@ -67,6 +75,8 @@ export interface ToolRegistryOptions {
 
 export interface BuiltinToolOptions {
   workspaceRoot?: string;
+  mcpServers?: MCPServerConfig[];
+  mcpRegistryRecords?: MCPServerRegistryRecord[];
 }
 
 export interface ToolExecutionPolicy {
@@ -108,7 +118,16 @@ export interface ToolRegistry {
 
 // ── Registry ─────────────────────────────────────────────
 
-export const READ_ONLY_BUILTIN_TOOLS = ['read_file', 'list_directory', 'todo_list'] as const;
+export const READ_ONLY_BUILTIN_TOOLS = [
+  'read_file',
+  'list_directory',
+  'directory_tree',
+  'search_content',
+  'search_files',
+  'glob',
+  'get_file_info',
+  'todo_list',
+] as const;
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const handlers = new Map<string, ToolHandler>();
@@ -185,7 +204,10 @@ export function setWorkspaceRoot(_root: string): never {
   throw new Error('setWorkspaceRoot is no longer supported. Pass workspaceRoot to runAgent() or registerBuiltinTools().');
 }
 
-export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToolOptions = {}): void {
+export async function registerBuiltinTools(
+  registry: ToolRegistry,
+  options: BuiltinToolOptions = {},
+): Promise<() => Promise<void>> {
   const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
 
   // read_file
@@ -344,6 +366,77 @@ export function registerBuiltinTools(registry: ToolRegistry, options: BuiltinToo
 
   registerPatchTools(registry, { workspaceRoot });
   registerTodoTools(registry);
+  registerSearchTools(registry, { workspaceRoot });
+  registerFileTools(registry, { workspaceRoot });
+
+  // ── MCP external tools ───────────────────────────────
+  let mcpCleanup: (() => Promise<void>) | undefined;
+
+  // Build tool → server ID map for event metadata
+  const mcpToolServerMap = new Map<string, string>();
+
+  // Merge registry records + request-level configs
+  const registryConfigs = (options.mcpRegistryRecords ?? [])
+    .map(registryRecordToConfig)
+    .filter((c): c is MCPServerConfig => c !== null);
+  const requestConfigs = options.mcpServers ?? [];
+  const allMCPConfigs = [...registryConfigs, ...requestConfigs];
+
+  if (allMCPConfigs.length > 0) {
+    const bridge = new MCPToolBridge();
+    await bridge.connect(allMCPConfigs);
+
+    const toolDefs = bridge.getToolDefs();
+    for (const toolDef of toolDefs) {
+      const name = toolDef.name;
+      const client = bridge.getClient(name);
+      if (!client) continue;
+
+      // Determine which server this tool belongs to (for event tracking)
+      // Map from the registry records first, then request configs
+      mcpToolServerMap.set(name, 'mcp');
+
+      registry.register(
+        name,
+        async (args) => {
+          try {
+            const result = await client.callTool(name, args);
+            return { content: result };
+          } catch (err: any) {
+            return { content: '', error: err?.message ?? String(err) };
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name,
+            description: toolDef.description ?? `MCP tool: ${name}`,
+            parameters: toolDef.inputSchema,
+          },
+        },
+        {
+          riskLevel: 'L1',
+          permissions: ['mcp:external'],
+          timeoutMs: 60_000,
+          retryable: false,
+          idempotent: false,
+          costLevel: 'medium',
+          sideEffect: true,
+          tags: ['mcp', 'external'],
+        },
+      );
+    }
+
+    log.info(
+      `Registered ${toolDefs.length} MCP tools from ${allMCPConfigs.length} server(s)`,
+    );
+
+    mcpCleanup = async () => {
+      await bridge.close();
+    };
+  }
+
+  return mcpCleanup ?? (async () => {});
 }
 
 function normalizeCapability(name: string, capability: Partial<ToolCapability> = {}): ToolCapability {

@@ -22,6 +22,7 @@ import { registerArtifactRoutes } from './artifact-routes.js';
 import { registerNodeCommandRoutes } from './node-command-routes.js';
 import { registerNodeRoutes } from './node-routes.js';
 import { registerServiceRoutes } from './service-routes.js';
+import { registerMCPRoutes } from './mcp-routes.js';
 import { registerTodoRoutes } from './todo-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
@@ -69,7 +70,7 @@ const RUNTIME_LOG_DIR = join(WORKSPACE_ROOT, '.los-runtime');
 const RUNTIME_LOG_PATH = join(RUNTIME_LOG_DIR, 'gateway.log');
 const ARTIFACT_STORAGE_ROOT = join(WORKSPACE_ROOT, '.los-runtime', 'artifacts');
 
-type GatewayServiceIdentity = {
+export type GatewayServiceIdentity = {
   serviceId: string;
   bindUrl: string;
   publicUrl: string;
@@ -200,6 +201,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     serviceId: service.serviceId,
     serviceKind: 'gateway',
   });
+  registerMCPRoutes(app);
 
   registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT);
 
@@ -463,7 +465,7 @@ function readProviderSource(provider: unknown): string | null {
   return typeof source === 'string' && source.trim() ? source : null;
 }
 
-function resolveGatewayServiceIdentity(
+export function resolveGatewayServiceIdentity(
   config: ReturnType<typeof getConfig>,
   port = config.server.port,
   host = config.server.host,

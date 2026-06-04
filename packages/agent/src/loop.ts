@@ -15,6 +15,8 @@ import {
   READ_ONLY_BUILTIN_TOOLS,
   type ToolRegistry,
 } from './tools/registry.js';
+import type { MCPServerConfig, MCPServerRegistryRecord } from './tools/mcp-client.js';
+import { listMCPServers } from './mcp-servers.js';
 import { createSpawnAgentRunner, registerSpawnAgentTool } from './tools/agent-tools.js';
 import {
   type SessionEventRecord,
@@ -50,10 +52,13 @@ export interface AgentConfig {
     maxDelayMs?: number;
   };
   signal?: AbortSignal;
+  maxContextTokens?: number;
+  mcpServers?: MCPServerConfig[];
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void;
   onToolCall?: (tool: string, args: Record<string, unknown>) => void;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
+  onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
 }
 
 export interface AgentModelDelta extends ProviderDelta {
@@ -69,6 +74,11 @@ export interface TurnSummary {
   reasoningContent?: string;
 }
 
+export interface CheckpointState {
+  messages: Message[];
+  turns: TurnSummary[];
+}
+
 export interface AgentResult {
   text: string;
   turns: TurnSummary[];
@@ -79,8 +89,8 @@ export interface AgentResult {
 
 // ── System Prompt ───────────────────────────────────────
 
-const DEFAULT_SYSTEM = `You are a helpful coding assistant with access to tools for reading, writing, patching, spawning child agents, and executing code.
-You can: read files (read_file), write files (write_file), patch files (preview_patch, apply_patch, edit_file), list directories (list_directory), spawn constrained child agents (spawn_agent), and run shell commands (run_shell).
+const DEFAULT_SYSTEM = `You are a helpful coding assistant with access to tools for reading, writing, searching, patching, spawning child agents, and executing code.
+You can: read files (read_file), write files (write_file), patch files (preview_patch, apply_patch, edit_file), search code (search_content, search_files, glob), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), delete files (delete_file), spawn constrained child agents (spawn_agent), and run shell commands (run_shell).
 
 Rules:
 - Read files before editing them
@@ -91,7 +101,7 @@ Rules:
 - If you're unsure about something, ask instead of guessing`;
 
 const READ_ONLY_SYSTEM = `You are a helpful coding assistant with read-only access to a workspace.
-You can: read files (read_file) and list directories (list_directory).
+You can: read files (read_file), search code (search_content, search_files, glob), inspect directories (list_directory, directory_tree, get_file_info).
 
 Rules:
 - Inspect files before making claims about the code
@@ -115,9 +125,36 @@ export async function runAgent(
   const policy = resolveToolPolicy(toolMode, config.toolRetry);
   const signal = config.signal;
 
+  // Load enabled MCP servers from the persistent registry
+  let mcpRegistryRecords: MCPServerRegistryRecord[] | undefined;
+  if (config.tenantId || config.projectId) {
+    try {
+      const registryServers = await listMCPServers({
+        tenantId: config.tenantId,
+        projectId: config.projectId,
+        enabled: true,
+      });
+      mcpRegistryRecords = registryServers
+        .filter(s => s.status !== 'disabled')
+        .map(s => ({
+          id: s.id,
+          command: s.command,
+          args: s.args,
+          url: s.url,
+          env: s.env,
+        }));
+    } catch (err: any) {
+      log.warn(`Failed to load MCP servers from registry: ${err.message ?? String(err)}`);
+    }
+  }
+
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });
-  registerBuiltinTools(tools, { workspaceRoot: config.workspaceRoot });
+  const mcpCleanup = await registerBuiltinTools(tools, {
+    workspaceRoot: config.workspaceRoot,
+    mcpServers: config.mcpServers,
+    mcpRegistryRecords,
+  });
   registerSpawnAgentTool(tools, createSpawnAgentRunner({
     runAgent,
     sessionId: config.sessionId,
@@ -135,7 +172,7 @@ export async function runAgent(
   const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
 
   // Build initial messages
-  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages);
+  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens);
 
   const turns: TurnSummary[] = [];
   let totalPromptTokens = 0;
@@ -168,7 +205,8 @@ export async function runAgent(
     },
   });
 
-  for (let i = 0; i < maxLoops; i++) {
+  try {
+    for (let i = 0; i < maxLoops; i++) {
     assertNotAborted(signal);
     log.debug(`Turn ${i + 1}/${maxLoops}`);
     await emitEvent({
@@ -239,6 +277,7 @@ export async function runAgent(
       };
       turns.push(turn);
       config.onTurn?.(turn);
+      await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
 
       log.info(`Agent finished — ${i + 1} turns, ${totalPromptTokens + totalCompletionTokens} tokens`);
       await emitEvent({
@@ -287,6 +326,10 @@ export async function runAgent(
         throw err;
       }
       config.onToolCall?.(fn.name, args);
+
+      const capability = tools.getCapability(fn.name);
+      const toolSource = inferToolSource(capability);
+
       const callEvent = await emitEvent({
         type: 'tool.call',
         turn: i + 1,
@@ -295,10 +338,10 @@ export async function runAgent(
           callId: tc.id,
           args,
           argsLength: fn.arguments.length,
+          source: toolSource,
         },
       });
 
-      const capability = tools.getCapability(fn.name);
       const planEvent = await emitEvent({
         type: 'tool.planned',
         turn: i + 1,
@@ -309,6 +352,7 @@ export async function runAgent(
           capability: summarizeCapability(capability),
           policy,
           argsLength: fn.arguments.length,
+          source: toolSource,
         },
       });
 
@@ -359,6 +403,7 @@ export async function runAgent(
           contentPreview: previewText(content),
           contentLength: content.length,
           errorPreview: result.error ? previewText(result.error) : undefined,
+          source: toolSource,
         },
       });
 
@@ -377,6 +422,7 @@ export async function runAgent(
     };
     turns.push(turn);
     config.onTurn?.(turn);
+    await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
   }
 
   // Max loops reached — ask model for final summary
@@ -418,12 +464,16 @@ export async function runAgent(
     totalTokens: { prompt: totalPromptTokens, completion: totalCompletionTokens },
     messages,
   };
+  } finally {
+    await mcpCleanup();
+  }
 }
 
 function buildInitialMessages(
   prompt: string,
   systemPrompt: string,
   initialMessages: Message[] | undefined,
+  maxContextTokens?: number,
 ): Message[] {
   const messages = initialMessages?.length
     ? initialMessages.map(message => ({ ...message }))
@@ -432,7 +482,125 @@ function buildInitialMessages(
     messages.unshift({ role: 'system', content: systemPrompt });
   }
   messages.push({ role: 'user', content: prompt });
+
+  if (maxContextTokens && maxContextTokens > 0) {
+    return trimMessagesToBudget(messages, maxContextTokens);
+  }
   return messages;
+}
+
+// ── Token Estimation ────────────────────────────────────
+
+/**
+ * Rough token estimator — chars/4 heuristic with a penalty for non-ASCII.
+ * Accurate enough for context-window budgeting (±15%).
+ * A proper tiktoken integration would replace this for exact counts.
+ */
+function estimateTokens(text: string): number {
+  let tokens = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code <= 0x7f) {
+      // ASCII: ~4 chars per token
+      tokens += 0.25;
+    } else if (code <= 0x7ff) {
+      // 2-byte UTF-8: ~2 chars per token
+      tokens += 0.5;
+    } else if (code <= 0xffff) {
+      // 3-byte UTF-8: ~1 char per token
+      tokens += 1.0;
+    } else {
+      // 4-byte UTF-8 (emoji etc.): 1-2 tokens
+      tokens += 1.5;
+    }
+  }
+  return Math.ceil(tokens);
+}
+
+function estimateMessageTokens(msg: Message): number {
+  let tokens = estimateTokens(msg.content);
+  // Tool calls add overhead
+  if (msg.tool_calls) {
+    for (const tc of msg.tool_calls) {
+      tokens += estimateTokens(tc.function.name) + estimateTokens(tc.function.arguments) + 4;
+    }
+  }
+  // Role overhead (~3 tokens)
+  return tokens + 3;
+}
+
+/**
+ * Trim messages to fit within a token budget.
+ * - System message is always preserved (truncated if necessary).
+ * - Oldest non-system messages are removed first.
+ * - At minimum, system + latest user message are kept.
+ */
+function trimMessagesToBudget(messages: Message[], budget: number): Message[] {
+  const systemIdx = messages.findIndex(m => m.role === 'system');
+  const systemMsg = systemIdx >= 0 ? messages[systemIdx] : null;
+
+  // Build the result: start from the end (most recent), work backwards
+  const nonSystem = systemIdx >= 0
+    ? [...messages.slice(0, systemIdx), ...messages.slice(systemIdx + 1)]
+    : [...messages];
+
+  // Always keep the last message (the current prompt)
+  const last = nonSystem[nonSystem.length - 1];
+  if (!last) {
+    // Only system message exists — truncate it if needed
+    if (systemMsg) {
+      const sysTokens = estimateMessageTokens(systemMsg);
+      if (sysTokens > budget) {
+        return [{ ...systemMsg, content: truncateContent(systemMsg.content, budget - 10) }];
+      }
+      return [systemMsg];
+    }
+    return [];
+  }
+
+  let used = estimateMessageTokens(last);
+  if (systemMsg) used += estimateMessageTokens(systemMsg);
+  const kept: Message[] = [last];
+
+  // Add older messages while under budget
+  for (let i = nonSystem.length - 2; i >= 0; i--) {
+    const msgTokens = estimateMessageTokens(nonSystem[i]!);
+    if (used + msgTokens <= budget) {
+      used += msgTokens;
+      kept.unshift(nonSystem[i]!);
+    } else {
+      break;
+    }
+  }
+
+  // If even system + last message exceeds budget, truncate the last message
+  if (systemMsg) {
+    const sysTokens = estimateMessageTokens(systemMsg);
+    if (sysTokens + estimateMessageTokens(last) > budget) {
+      const available = Math.max(50, budget - sysTokens);
+      kept[kept.length - 1] = { ...last, content: truncateContent(last.content, available) };
+    }
+    kept.unshift(systemMsg);
+  }
+
+  return kept;
+}
+
+function truncateContent(content: string, tokenBudget: number): string {
+  // Rough: 4 chars ≈ 1 token, leave some margin
+  const maxChars = Math.max(50, tokenBudget * 3);
+  if (content.length <= maxChars) return content;
+  return content.slice(0, maxChars) + '\n[...truncated]';
+}
+
+/**
+ * Determine the tool source for event metadata.
+ * Returns 'mcp' for MCP-registered tools, 'builtin' for everything else.
+ */
+function inferToolSource(capability: ReturnType<ToolRegistry['getCapability']>): string {
+  if (capability?.tags?.includes('mcp')) return 'mcp';
+  if (capability?.tags?.includes('agent')) return 'spawn_agent';
+  return 'builtin';
 }
 
 function normalizeUsage(usage: {
@@ -548,7 +716,7 @@ function getDefaultSystemPrompt(toolMode: 'all' | 'project-write' | 'read-only')
   if (toolMode === 'read-only') return READ_ONLY_SYSTEM;
   if (toolMode === 'project-write') {
     return `You are a helpful coding assistant with project-write access to a workspace.
-You can: read files (read_file), write files (write_file), and list directories (list_directory).
+You can: read files (read_file), write files (write_file), search code (search_content, search_files, glob), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), and delete files (delete_file).
 You can also manage the project planning ledger with todo_list, todo_create, todo_update, todo_archive, todo_reopen, and todo_link_dependency.
 
 Rules:

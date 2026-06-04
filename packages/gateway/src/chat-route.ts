@@ -11,6 +11,7 @@ import {
   listRecentSessionEvents,
   type SessionEventRecord,
 } from '@los/agent/session-events';
+import type { CheckpointState } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
 import {
   completeIdempotencyKey,
@@ -40,6 +41,7 @@ interface ChatRequestBody {
     baseDelayMs?: number;
     maxDelayMs?: number;
   };
+  mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
   persistMemory?: boolean;
 }
 
@@ -61,6 +63,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     const dedupeKey = normalizeOptionalString(body.dedupeKey);
     const timeoutMs = normalizePositiveInteger(body.timeoutMs);
     const toolRetry = normalizeToolRetry(body.toolRetry);
+    const mcpServers = normalizeMCPServers(body.mcpServers);
     const persistMemory = body.persistMemory === true;
 
     if (!prompt) {
@@ -123,9 +126,11 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     const sid = sessionId ?? `session-${Date.now()}`;
     let activeTaskRunId: string | undefined;
     let sentSession = false;
+    let lastCheckpoint: CheckpointState | null = null;
+
+    const resumedSession = sessionId ? await loadSession(sid) : null;
 
     try {
-      const resumedSession = sessionId ? await loadSession(sid) : null;
       const resumeState = resumedSession ? await loadResumeState(sid) : null;
       if (resumedSession) {
         send('session.resumed', {
@@ -164,6 +169,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         requestId: context.requestId,
         timeoutMs,
         toolRetry,
+        mcpServers,
         executor: {
           enabled: config.executor.enabled,
           nodeUrls: config.executor.meshNodes,
@@ -228,6 +234,29 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
             textDelta: delta.textDelta ?? '',
             reasoningDelta: delta.reasoningDelta ?? '',
           });
+        },
+        onCheckpoint: async (state) => {
+          lastCheckpoint = state;
+          await ensureSessionStore().catch(() => undefined);
+          await saveSession({
+            id: sid,
+            tenantId: context.tenantId,
+            projectId: context.projectId,
+            userId: context.userId,
+            requestId: context.requestId,
+            traceId,
+            createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            messages: state.messages,
+            turns: resumedSession ? [...resumedSession.turns, ...state.turns] : state.turns,
+            metadata: {
+              ...(resumedSession?.metadata ?? {}),
+              provider: provider ?? config.agent.defaultProvider,
+              model: model ?? null,
+              workspaceRoot,
+              toolMode,
+            },
+          }).catch(() => undefined);
         },
         onSessionEvent: (event) => {
           send(event.type, {
@@ -387,6 +416,35 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         },
       }).catch(() => undefined);
       send('error', { message: err?.message ?? String(err) });
+
+      // Save partial session state if we have a checkpoint
+      if (lastCheckpoint) {
+        // TS can't track assignment inside onCheckpoint callback, but it's guaranteed
+        // to be set before we reach catch if any checkpoint was emitted.
+        const cp = lastCheckpoint as CheckpointState;
+        await ensureSessionStore().catch(() => undefined);
+        await saveSession({
+          id: sid,
+          tenantId: context.tenantId,
+          projectId: context.projectId,
+          userId: context.userId,
+          requestId: context.requestId,
+          traceId,
+          createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: cp.messages,
+          turns: resumedSession ? [...resumedSession.turns, ...cp.turns] : cp.turns,
+          metadata: {
+            ...(resumedSession?.metadata ?? {}),
+            provider: provider ?? config.agent.defaultProvider,
+            model: model ?? null,
+            workspaceRoot,
+            toolMode,
+            error: err?.message ?? String(err),
+          },
+        }).catch(() => undefined);
+      }
+
       if (idempotency) {
         await failIdempotencyKey(idempotency.id, err).catch(() => undefined);
       }
@@ -501,6 +559,35 @@ function normalizeToolRetry(value: unknown): ChatRequestBody['toolRetry'] | unde
     baseDelayMs: normalizeNonNegativeInteger(raw.baseDelayMs),
     maxDelayMs: normalizeNonNegativeInteger(raw.maxDelayMs),
   };
+}
+
+function normalizeMCPServers(
+  value: unknown,
+): Array<{ command: string; args?: string[]; env?: Record<string, string> }> | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const servers: Array<{ command: string; args?: string[]; env?: Record<string, string> }> = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const raw = item as Record<string, unknown>;
+    const command = typeof raw.command === 'string' ? raw.command.trim() : '';
+    if (!command) continue;
+    const server: { command: string; args?: string[]; env?: Record<string, string> } = { command };
+    if (Array.isArray(raw.args)) {
+      const args = raw.args
+        .map(a => typeof a === 'string' ? a.trim() : '')
+        .filter(Boolean);
+      if (args.length > 0) server.args = args;
+    }
+    if (raw.env && typeof raw.env === 'object' && !Array.isArray(raw.env)) {
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw.env as Record<string, unknown>)) {
+        if (typeof v === 'string') env[k] = v;
+      }
+      if (Object.keys(env).length > 0) server.env = env;
+    }
+    servers.push(server);
+  }
+  return servers.length > 0 ? servers : undefined;
 }
 
 function normalizeNonNegativeInteger(value: unknown): number | undefined {

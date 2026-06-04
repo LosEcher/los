@@ -17,9 +17,12 @@ test('read-only tool mode excludes write and shell tools', async () => {
     writeFileSync(join(workspaceRoot, 'note.txt'), 'hello', 'utf-8');
 
     const registry = createToolRegistry({ allowedTools: READ_ONLY_BUILTIN_TOOLS });
-    registerBuiltinTools(registry, { workspaceRoot });
+    await registerBuiltinTools(registry, { workspaceRoot });
 
-    assert.deepEqual(registry.list().sort(), ['list_directory', 'read_file', 'todo_list']);
+    assert.deepEqual(
+      registry.list().sort(),
+      ['directory_tree', 'get_file_info', 'glob', 'list_directory', 'read_file', 'search_content', 'search_files', 'todo_list'],
+    );
 
     const readResult = await registry.execute({
       name: 'read_file',
@@ -64,10 +67,10 @@ test('tool runtime keeps workspace roots isolated per registry', async () => {
     writeFileSync(join(workspaceB, 'note.txt'), 'beta', 'utf-8');
 
     const registryA = createToolRegistry();
-    registerBuiltinTools(registryA, { workspaceRoot: workspaceA });
+    await registerBuiltinTools(registryA, { workspaceRoot: workspaceA });
 
     const registryB = createToolRegistry();
-    registerBuiltinTools(registryB, { workspaceRoot: workspaceB });
+    await registerBuiltinTools(registryB, { workspaceRoot: workspaceB });
 
     const readA = await registryA.execute({
       name: 'read_file',
@@ -104,7 +107,7 @@ test('project-write mode allows writes but still blocks shell execution', async 
         sandboxAvailable: false,
       },
     });
-    registerBuiltinTools(registry, { workspaceRoot });
+    await registerBuiltinTools(registry, { workspaceRoot });
 
     const writeResult = await registry.execute({
       name: 'write_file',
@@ -149,7 +152,7 @@ test('project-write mode exposes patch tools and applies unique replacements onl
         sandboxAvailable: false,
       },
     });
-    registerBuiltinTools(registry, { workspaceRoot });
+    await registerBuiltinTools(registry, { workspaceRoot });
 
     assert.ok(registry.list().includes('preview_patch'));
     assert.ok(registry.list().includes('apply_patch'));
@@ -210,7 +213,7 @@ test('all mode executes shell commands through the OS sandbox', { skip: !existsS
         sandboxAvailable: true,
       },
     });
-    registerBuiltinTools(registry, { workspaceRoot });
+    await registerBuiltinTools(registry, { workspaceRoot });
 
     const shellResult = await registry.execute({
       name: 'run_shell',

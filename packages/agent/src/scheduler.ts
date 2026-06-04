@@ -190,10 +190,12 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             initialMessages: input.initialMessages,
             allowedTools: input.allowedTools,
             toolRetry: input.toolRetry,
+            mcpServers: input.mcpServers,
           },
           signal: controller.signal,
           onSessionEvent: input.onSessionEvent,
           onModelDelta: input.onModelDelta,
+          onCheckpoint: input.onCheckpoint,
         })
       : await runAgent(input.prompt, {
           sessionId,
@@ -213,11 +215,13 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           initialMessages: input.initialMessages,
           allowedTools: input.allowedTools,
           toolRetry: input.toolRetry,
+          mcpServers: input.mcpServers,
           signal: controller.signal,
           onSessionEvent: input.onSessionEvent,
           onTurn: input.onTurn,
           onToolCall: input.onToolCall,
           onModelDelta: input.onModelDelta,
+          onCheckpoint: input.onCheckpoint,
         });
 
     const succeeded = await updateTaskRun(taskRunId, {
@@ -443,10 +447,11 @@ async function runAgentOnExecutor(
     taskRunId: string;
     leaseMs: number;
     prompt: string;
-    config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall'>;
+    config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
     onSessionEvent?: AgentConfig['onSessionEvent'];
     onModelDelta?: AgentConfig['onModelDelta'];
+    onCheckpoint?: AgentConfig['onCheckpoint'];
   },
 ): Promise<AgentResult> {
   const res = await fetch(`${executor.url}/v1/tasks/run-agent`, {
