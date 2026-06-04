@@ -28,7 +28,9 @@ test('provider source metadata survives config validation and diagnostics', () =
   assert.equal(config.providers.anthropic.source, 'claude/.claude.json');
 
   const diagnostics = printConfigDiagnostics(config);
-  assert.match(diagnostics, /deepseek\s+model=deepseek-v4-flash\s+configured_key=yes ready=yes source=env:DEEPSEEK_API_KEY/);
-  assert.match(diagnostics, /anthropic\s+model=\(default\)\s+configured_key=no ready=no source=claude\/\.claude\.json/);
+  assert.match(diagnostics, /deepseek\s+model=deepseek-v4-flash\s+key=yes ready=yes source=env:DEEPSEEK_API_KEY\s+\[advisory\]/);
+  assert.match(diagnostics, /anthropic\s+model=\(default\)\s+key=no\s+ready=no\s+source=claude\/\.claude\.json\s+\[blocked\]/);
   assert.doesNotMatch(diagnostics, /source=manual/);
+  assert.match(diagnostics, /Setup required for blocked providers/);
+  assert.match(diagnostics, /set ANTHROPIC_API_KEY/);
 });

@@ -4,6 +4,7 @@ import { artifactsCommand } from './artifacts.js';
 import { compatCommand } from './compat.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
+import { providerCommand } from './provider.js';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonRecord = Record<string, unknown>;
@@ -49,6 +50,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'compat') {
     await compatCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'provider') {
+    await providerCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'health') {
@@ -454,6 +459,7 @@ Usage:
   los chat [options] <prompt>
   los run [options] <prompt>
   los compat [options] [provider[:model]...]
+  los provider <list|promote> [options]
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
   los sessions [--gateway URL] [--json]

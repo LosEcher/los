@@ -49,12 +49,21 @@ export interface DiscoveredProvider {
   note?: string;
 }
 
+export type ProviderPromotionState =
+  | 'blocked'              // No API key configured
+  | 'advisory'             // Key configured but not yet verified by a live run
+  | 'verified_advisory'    // One live passing run with task_runs/session_events evidence
+  | 'required';            // Included in DEFAULT_COMPATIBILITY_TARGETS merge gate
+
 export interface ProviderReadiness {
   configuredKey: boolean;
   discovered: boolean;
   ready: boolean;
   manualSetupRequired: boolean;
   blocker: string | null;
+  promotionState: ProviderPromotionState;
+  credentialClass: 'api_key' | 'oauth' | 'local_endpoint' | 'cli_adapter' | 'unknown';
+  setupAction: string | null;  // Human-readable setup instruction
 }
 
 export interface ProviderReadinessSummary {
@@ -86,14 +95,53 @@ export function providerApiKeyEnv(providerName: string): string {
     ?? `${providerName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
 }
 
+function inferCredentialClass(
+  provider: DiscoveredProvider,
+): ProviderReadiness['credentialClass'] {
+  const source = provider.source?.toLowerCase() ?? '';
+  if (source.includes('env:')) return 'api_key';
+  if (source.includes('oauth') || source.includes('claude.json')) return 'oauth';
+  if (source.includes('ollama') || source.includes('lm-studio') || source.includes('vllm')) return 'local_endpoint';
+  if (source.includes('codex') || source.includes('cli')) return 'cli_adapter';
+  return 'unknown';
+}
+
+function describeSetupAction(provider: DiscoveredProvider): string | null {
+  const keyEnv = providerApiKeyEnv(provider.name);
+  const credentialClass = inferCredentialClass(provider);
+
+  if (credentialClass === 'api_key') {
+    return `export ${keyEnv}="<your-${provider.name}-api-key>"  # or add to ~/.los/accounts/${provider.name}.json`;
+  }
+  if (credentialClass === 'oauth') {
+    return `${provider.name} requires OAuth. Run 'claude login' or configure via ~/.claude.json`;
+  }
+  if (credentialClass === 'local_endpoint') {
+    return `${provider.name} is a local endpoint. Ensure the service is running and reachable.`;
+  }
+  if (credentialClass === 'cli_adapter') {
+    return `Run 'codex setup' or ensure ~/.codex/auth.json has valid credentials for ${provider.name}`;
+  }
+  return `Set ${keyEnv} or configure via ~/.los/accounts/${provider.name}.json`;
+}
+
 export function describeProviderReadiness(provider: DiscoveredProvider): ProviderReadiness {
   const configuredKey = typeof provider.apiKey === 'string' && provider.apiKey.length > 0;
   const ready = provider.available && provider.importable && configuredKey;
   const manualSetupRequired = !ready;
-  const keyEnv = providerApiKeyEnv(provider.name);
-  const blocker = manualSetupRequired
-    ? `BLOCKER: ${keyEnv} not set. Ignore if ${provider.name} is not needed.`
-    : null;
+  const credentialClass = inferCredentialClass(provider);
+
+  let promotionState: ProviderPromotionState = 'blocked';
+  let blocker: string | null = null;
+
+  if (!configuredKey || !provider.importable) {
+    promotionState = 'blocked';
+    const keyEnv = providerApiKeyEnv(provider.name);
+    blocker = `${keyEnv} not set. ${credentialClass === 'oauth' ? 'OAuth required.' : credentialClass === 'local_endpoint' ? 'Local endpoint unreachable.' : `Set ${keyEnv} to unlock ${provider.name}.`}`;
+  } else if (ready) {
+    // Ready but not yet verified — stays advisory until a live compat run passes
+    promotionState = 'advisory';
+  }
 
   return {
     configuredKey,
@@ -101,6 +149,9 @@ export function describeProviderReadiness(provider: DiscoveredProvider): Provide
     ready,
     manualSetupRequired,
     blocker,
+    promotionState,
+    credentialClass,
+    setupAction: manualSetupRequired ? describeSetupAction(provider) : null,
   };
 }
 

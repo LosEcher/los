@@ -362,17 +362,51 @@ export function printConfigDiagnostics(config: Config): string {
     '  Providers discovered:',
   ];
 
+  let hasBlockers = false;
+  const setupActions: string[] = [];
+
   for (const [name, p] of Object.entries(config.providers)) {
     const source = p.source ?? 'manual';
     const hasKey = typeof p.apiKey === 'string' && p.apiKey.length > 0;
     const ready = p.enabled && hasKey;
     const status = ready ? '✓' : '✗';
     const model = p.model ?? '(default)';
+
+    // Determine promotion tier
+    let tier = '';
+    if (!hasKey) {
+      tier = '[blocked]';
+      hasBlockers = true;
+      setupActions.push(`    • ${name}: ${p.apiKey ? 'key present but not importable' : `set ${discoverProviderKeyEnv(name)}`}`);
+    } else if (ready) {
+      tier = '[advisory]';
+    }
+
     lines.push(
       `    ${status} ${name.padEnd(12)} model=${model.padEnd(20)} ` +
-      `configured_key=${hasKey ? 'yes' : 'no'} ready=${ready ? 'yes' : 'no'} source=${source}`,
+      `key=${hasKey ? 'yes' : 'no '} ready=${ready ? 'yes' : 'no '} ` +
+      `source=${source.padEnd(24)} ${tier}`,
     );
   }
 
+  if (hasBlockers) {
+    lines.push('');
+    lines.push('  Setup required for blocked providers:');
+    for (const action of setupActions) {
+      lines.push(action);
+    }
+    lines.push('');
+    lines.push('  To promote a provider after setup: los provider promote <name>');
+  }
+
   return lines.join('\n');
+}
+
+function discoverProviderKeyEnv(name: string): string {
+  const KEY_ENV: Record<string, string> = {
+    anthropic: 'ANTHROPIC_API_KEY',
+    deepseek: 'DEEPSEEK_API_KEY',
+    openai: 'OPENAI_API_KEY',
+  };
+  return KEY_ENV[name] ?? `${name.toUpperCase()}_API_KEY`;
 }

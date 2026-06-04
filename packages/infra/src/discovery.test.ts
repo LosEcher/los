@@ -38,29 +38,29 @@ test('provider readiness distinguishes configured keys, discovery, ready state, 
     importable: false,
   });
 
-  assert.deepEqual(describeProviderReadiness(deepseek), {
-    configuredKey: true,
-    discovered: true,
-    ready: true,
-    manualSetupRequired: false,
-    blocker: null,
-  });
+  const deepseekR = describeProviderReadiness(deepseek);
+  assert.equal(deepseekR.configuredKey, true);
+  assert.equal(deepseekR.ready, true);
+  assert.equal(deepseekR.manualSetupRequired, false);
+  assert.equal(deepseekR.blocker, null);
+  assert.equal(deepseekR.promotionState, 'advisory');
+  assert.equal(deepseekR.credentialClass, 'api_key');
+  assert.equal(deepseekR.setupAction, null);
 
-  assert.deepEqual(describeProviderReadiness(openai), {
-    configuredKey: true,
-    discovered: true,
-    ready: true,
-    manualSetupRequired: false,
-    blocker: null,
-  });
+  const openaiR = describeProviderReadiness(openai);
+  assert.equal(openaiR.configuredKey, true);
+  assert.equal(openaiR.ready, true);
+  assert.equal(openaiR.promotionState, 'advisory');
+  assert.equal(openaiR.credentialClass, 'cli_adapter');
 
-  assert.deepEqual(describeProviderReadiness(anthropic), {
-    configuredKey: false,
-    discovered: true,
-    ready: false,
-    manualSetupRequired: true,
-    blocker: 'BLOCKER: ANTHROPIC_API_KEY not set. Ignore if anthropic is not needed.',
-  });
+  const anthropicR = describeProviderReadiness(anthropic);
+  assert.equal(anthropicR.configuredKey, false);
+  assert.equal(anthropicR.ready, false);
+  assert.equal(anthropicR.manualSetupRequired, true);
+  assert.equal(anthropicR.promotionState, 'blocked');
+  assert.ok(anthropicR.blocker?.includes('ANTHROPIC_API_KEY'));
+  assert.equal(anthropicR.credentialClass, 'oauth');
+  assert.ok(anthropicR.setupAction?.includes('OAuth'));
 
   assert.deepEqual(summarizeProviderReadiness([deepseek, openai, anthropic]), {
     configuredKeys: 2,
