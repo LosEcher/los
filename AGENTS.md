@@ -44,11 +44,35 @@ pnpm dev              # Start gateway + agent
 pnpm build            # Build all packages
 pnpm check            # Type-check + lint + structure check
 pnpm test             # Run all tests
+pnpm run gate         # Full pre-push gate: check + test
+pnpm run pre-push     # Shorthand for gate
 
 # Database
 pnpm --filter @los/infra db:push     # Push schema to database
 pnpm --filter @los/infra db:migrate  # Run migrations
 ```
+
+## OMX Tool-Level Logging
+
+A local OMX hook plugin at `.omx/hooks/los-omx-tool-logger.mjs` captures
+`PreToolUse` / `PostToolUse` events and writes structured JSONL records to
+`.omx/logs/omx-<date>.jsonl` alongside `session_start`/`session_end`.
+
+Three event types are logged:
+- `tool_call` — tool invocation with input byte count and optional command preview
+- `tool_result` — completed execution with exit code, duration, output byte count
+- `tool_error` — failed execution with non-zero exit code
+
+Query the log:
+```bash
+./tools/los-omx-tool-log.sh              # today's events
+./tools/los-omx-tool-log.sh --summary    # by tool name
+./tools/los-omx-tool-log.sh --errors     # errors only
+./tools/los-omx-tool-log.sh --date YYYY-MM-DD
+```
+
+Redaction: raw stdout/stderr, tool arguments, auth tokens are never stored.
+Only summaries (byte counts, status, timing, exit codes, command previews ≤200 chars).
 
 ## Configuration
 
