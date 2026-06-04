@@ -53,6 +53,7 @@ export interface AgentConfig {
   };
   signal?: AbortSignal;
   maxContextTokens?: number;
+  contextCompression?: ContextCompressionConfig;
   mcpServers?: MCPServerConfig[];
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void;
@@ -85,6 +86,13 @@ export interface AgentResult {
   loopCount: number;
   totalTokens: { prompt: number; completion: number };
   messages: Message[];
+}
+
+export interface ContextCompressionConfig {
+  enabled?: boolean;           // default true when maxContextTokens is set
+  warningRatio?: number;       // start compressing at this % of budget (default 0.80)
+  aggressiveRatio?: number;    // aggressive compression (default 0.88)
+  emergencyRatio?: number;     // hard truncation (default 0.95)
 }
 
 // ── System Prompt ───────────────────────────────────────
@@ -172,7 +180,7 @@ export async function runAgent(
   const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
 
   // Build initial messages
-  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens);
+  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens, config.contextCompression);
 
   const turns: TurnSummary[] = [];
   let totalPromptTokens = 0;
@@ -423,6 +431,20 @@ export async function runAgent(
     turns.push(turn);
     config.onTurn?.(turn);
     await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
+
+    // Mid-loop context compression
+    if (config.maxContextTokens && config.maxContextTokens > 0 &&
+        config.contextCompression?.enabled !== false) {
+      const compressed = compressOrTrimMessages(
+        messages, config.maxContextTokens, config.contextCompression,
+      );
+      // Only replace if compression actually reduced the message count
+      if (compressed.length < messages.length) {
+        messages.length = 0;
+        messages.push(...compressed);
+        log.debug(`Compressed context: ${compressed.length} messages (was ${messages.length + messages.length - compressed.length})`);
+      }
+    }
   }
 
   // Max loops reached — ask model for final summary
@@ -474,6 +496,7 @@ function buildInitialMessages(
   systemPrompt: string,
   initialMessages: Message[] | undefined,
   maxContextTokens?: number,
+  compression?: ContextCompressionConfig,
 ): Message[] {
   const messages = initialMessages?.length
     ? initialMessages.map(message => ({ ...message }))
@@ -484,7 +507,8 @@ function buildInitialMessages(
   messages.push({ role: 'user', content: prompt });
 
   if (maxContextTokens && maxContextTokens > 0) {
-    return trimMessagesToBudget(messages, maxContextTokens);
+    const compressed = compressOrTrimMessages(messages, maxContextTokens, compression);
+    return compressed;
   }
   return messages;
 }
@@ -591,6 +615,132 @@ function truncateContent(content: string, tokenBudget: number): string {
   const maxChars = Math.max(50, tokenBudget * 3);
   if (content.length <= maxChars) return content;
   return content.slice(0, maxChars) + '\n[...truncated]';
+}
+
+// ── Context Compression ─────────────────────────────────
+
+/**
+ * Three-tier context compression:
+ *   warning    (80%): compress old turns into brief summaries
+ *   aggressive (88%): compress old turns into terse summaries
+ *   emergency  (95%): hard truncation — drop oldest messages
+ *
+ * Preserves the system message and the most recent turns intact.
+ * Compressed turns become a synthetic "user" message summarizing earlier work.
+ */
+function compressOrTrimMessages(
+  messages: Message[],
+  budget: number,
+  compression?: ContextCompressionConfig,
+): Message[] {
+  const enabled = compression?.enabled !== false;
+  const warningRatio = compression?.warningRatio ?? 0.80;
+  const aggressiveRatio = compression?.aggressiveRatio ?? 0.88;
+  const emergencyRatio = compression?.emergencyRatio ?? 0.95;
+
+  const totalTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+  if (totalTokens <= budget) return messages; // Under budget — no action needed
+
+  const systemIdx = messages.findIndex(m => m.role === 'system');
+
+  // Emergency: hard truncation
+  if (totalTokens > budget * emergencyRatio || !enabled) {
+    return trimMessagesToBudget(messages, budget);
+  }
+
+  // Warning / Aggressive: compress instead of drop
+  const ratio = totalTokens / budget;
+  const summaryBudget = Math.floor(budget * (ratio > aggressiveRatio ? 0.05 : 0.10));
+
+  // Find the split point: which messages to compress?
+  // Keep the most recent user message + all after it intact
+  // Compress everything before that (except system)
+  const nonSystem = systemIdx >= 0
+    ? [...messages.slice(0, systemIdx), ...messages.slice(systemIdx + 1)]
+    : [...messages];
+
+  // Find the last user message — keep it and everything after
+  let keepFrom = nonSystem.length - 1;
+  for (let i = nonSystem.length - 1; i >= 0; i--) {
+    if (nonSystem[i]!.role === 'user') { keepFrom = i; break; }
+  }
+
+  const toKeep = nonSystem.slice(keepFrom);
+  const toCompress = nonSystem.slice(0, keepFrom);
+
+  if (toCompress.length === 0) {
+    return trimMessagesToBudget(messages, budget);
+  }
+
+  // Generate summary from compressed messages
+  const summary = generateCompressionSummary(toCompress, summaryBudget, ratio > aggressiveRatio);
+
+  // Build result: system + summary + recent messages
+  const result: Message[] = [];
+  if (systemIdx >= 0) result.push(messages[systemIdx]!);
+  result.push({ role: 'user', content: summary });
+  result.push(...toKeep);
+
+  return result;
+}
+
+/**
+ * Generate a compressed summary of old messages.
+ * Extracts: turns with tool calls, key decisions, errors.
+ */
+function generateCompressionSummary(
+  messages: Message[],
+  tokenBudget: number,
+  aggressive: boolean,
+): string {
+  const lines: string[] = ['[Compressed earlier context]'];
+  lines.push('');
+
+  let turnIdx = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.role === 'assistant') {
+      turnIdx++;
+      const text = summarizeText(msg.content, aggressive ? 60 : 120);
+      const tools = summarizeToolCallsForCompression(msg.tool_calls);
+
+      if (tools.length > 0) {
+        lines.push(`Turn ${turnIdx}: ${text} [Tools: ${tools.join(', ')}]`);
+      } else {
+        lines.push(`Turn ${turnIdx}: ${text}`);
+      }
+    } else if (msg.role === 'tool') {
+      const result = summarizeText(msg.content, aggressive ? 30 : 60);
+      if (result) {
+        const last = lines[lines.length - 1] ?? '';
+        if (last.startsWith(`Turn ${turnIdx}:`)) {
+          lines[lines.length - 1] = last + ` → ${result}`;
+        }
+      }
+    }
+  }
+
+  if (turnIdx === 0) {
+    lines.push('(no assistant turns to summarize)');
+  }
+
+  const full = lines.join('\n');
+  if (estimateTokens(full) <= tokenBudget) return full;
+  return full.slice(0, tokenBudget * 3) + '\n[...summary truncated]';
+}
+
+function summarizeText(text: string, maxLen: number): string {
+  const cleaned = text
+    .replace(/\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen) + '...';
+}
+
+function summarizeToolCallsForCompression(toolCalls?: ToolCall[]): string[] {
+  if (!toolCalls || toolCalls.length === 0) return [];
+  return toolCalls.map(tc => tc.function.name);
 }
 
 /**
