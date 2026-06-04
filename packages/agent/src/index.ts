@@ -133,6 +133,7 @@ export {
   appendSessionEvents,
   listSessionEvents,
   listRecentSessionEvents,
+  listSessionEventsSince,
   getSessionObservability,
   projectSessionObservability,
   type SessionEventRecord,

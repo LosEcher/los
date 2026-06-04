@@ -118,8 +118,9 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     });
 
     const replayEvents: Array<{ event: string; data: unknown }> = [];
-    const send = (event: string, data: unknown) => {
+    const send = (event: string, data: unknown, id?: number) => {
       replayEvents.push({ event, data });
+      if (id !== undefined) reply.raw.write(`id: ${id}\n`);
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
@@ -277,7 +278,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
             usage: event.usage ?? null,
             payload: event.payload,
             createdAt: event.createdAt,
-          });
+          }, event.id);
         },
       });
 

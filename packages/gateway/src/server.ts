@@ -33,6 +33,7 @@ import {
   ensureTaskRunStore,
   loadTaskRun,
   listTaskRuns,
+  listTaskRunsForSession,
   recoverExpiredTaskRunsWithAdvisoryLock,
   updateTaskRun,
 } from '@los/agent/task-runs';
@@ -50,6 +51,7 @@ import {
   ensureSessionEventStore,
   appendSessionEvent,
   listSessionEvents,
+  listSessionEventsSince,
   getSessionObservability,
 } from '@los/agent/session-events';
 import {
@@ -281,6 +283,107 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     const { id } = req.params as { id: string };
     await ensureSessionEventStore();
     return await getSessionObservability(id);
+  });
+
+  // ── SSE Event Replay ──────────────────────────────────
+
+  app.get('/sessions/:id/events/stream', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+
+    await ensureSessionEventStore();
+    await ensureTaskRunStore();
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const send = (event: string, data: unknown, eventId?: number) => {
+      if (eventId !== undefined) reply.raw.write(`id: ${eventId}\n`);
+      reply.raw.write(`event: ${event}\n`);
+      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    let lastId = since;
+    let ended = false;
+
+    const pollAndSend = async () => {
+      if (ended) return;
+      const events = await listSessionEventsSince(id, lastId, 100);
+      for (const event of events) {
+        // Map internal event types to stream events
+        const streamType = event.type.includes('.') ? event.type : event.type;
+        send(streamType, {
+          id: event.id,
+          sessionId: event.sessionId,
+          turn: event.turn,
+          type: event.type,
+          source: event.source,
+          model: event.model ?? null,
+          toolName: event.toolName ?? null,
+          usage: event.usage ?? null,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        }, event.id);
+        lastId = event.id;
+      }
+      return events.length;
+    };
+
+    try {
+      // Send historical events first
+      await pollAndSend();
+
+      // Check if there's an active task for this session
+      const activeTasks = await listTaskRunsForSession(id, 5);
+      const active = activeTasks.find(t => t.status === 'queued' || t.status === 'running');
+
+      if (active) {
+        send('session.live', {
+          sessionId: id,
+          taskRunId: active.id,
+          status: active.status,
+          message: `Session has active task. Streaming live events...`,
+        });
+
+        // Poll for new events while task is running
+        const interval = setInterval(async () => {
+          try {
+            const count = await pollAndSend();
+            const task = await loadTaskRun(active.id);
+            if (!task || !['queued', 'running'].includes(task.status)) {
+              ended = true;
+              clearInterval(interval);
+              send('session.completed', {
+                sessionId: id,
+                taskRunId: active.id,
+                status: task?.status ?? 'unknown',
+              });
+              reply.raw.end();
+            }
+          } catch {
+            clearInterval(interval);
+            reply.raw.end();
+          }
+        }, 1000);
+
+        req.raw.on('close', () => {
+          clearInterval(interval);
+        });
+      } else {
+        send('session.completed', {
+          sessionId: id,
+          message: 'No active task. All events delivered.',
+        });
+        reply.raw.end();
+      }
+    } catch (err: any) {
+      send('error', { message: err?.message ?? String(err) });
+      reply.raw.end();
+    }
   });
 
   // ── Tasks ─────────────────────────────────────────────

@@ -224,6 +224,26 @@ export async function listRecentSessionEvents(sessionId: string, limit = 50): Pr
   return rows.rows.reverse().map(rowToSessionEvent);
 }
 
+export async function listSessionEventsSince(
+  sessionId: string,
+  sinceId: number,
+  limit = 200,
+): Promise<SessionEventRecord[]> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<SessionEventRow>(
+    `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1 AND id > $2
+    ORDER BY id ASC
+    LIMIT $3
+  `,
+    [sessionId, sinceId, limit],
+  );
+  return rows.rows.map(rowToSessionEvent);
+}
+
 export async function getSessionObservability(sessionId: string): Promise<SessionObservability> {
   const events = await listSessionEvents(sessionId, 10000);
   return projectSessionObservability(sessionId, events);
