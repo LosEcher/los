@@ -35,6 +35,7 @@ export interface ScheduledTaskEvent {
 export interface ScheduledAgentTaskInput extends AgentConfig {
   prompt: string;
   taskRunId?: string;
+  runSpecId?: string;
   traceId?: string;
   dedupeKey?: string;
   tenantId?: string;
@@ -117,6 +118,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const created = await createTaskRun({
     id: taskRunId,
     sessionId,
+    runSpecId: input.runSpecId,
     traceId,
     dedupeKey,
     workspaceRoot,

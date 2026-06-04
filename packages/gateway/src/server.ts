@@ -29,6 +29,7 @@ import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import { ensureSessionStore, loadSession, listSessions } from '@los/agent/session';
+import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
 import {
   ensureTaskRunStore,
   loadTaskRun,
@@ -465,6 +466,21 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     };
   });
 
+  // ── Run Specs ─────────────────────────────────────────
+
+  app.get('/runs', async () => {
+    await ensureRunSpecStore();
+    return await listRunSpecs();
+  });
+
+  app.get('/runs/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    await ensureRunSpecStore();
+    const runSpec = await loadRunSpec(id);
+    if (!runSpec) return { error: 'Not found' };
+    return runSpec;
+  });
+
   // ── Sync MEMORY.md ────────────────────────────────────
 
   app.post('/memory/sync-md', async (req) => {
@@ -494,6 +510,7 @@ export async function startServer(port?: number, host?: string) {
   await ensureServiceInstanceStore();
   await heartbeatGatewayService(service);
   await ensureTaskRunStore();
+  await ensureRunSpecStore();
   const recovery = await recoverExpiredTaskRunsWithAdvisoryLock('gateway_startup_recovery');
   if (!recovery.lockAcquired) {
     log.info('Gateway startup recovery skipped because another service owns the advisory lock');

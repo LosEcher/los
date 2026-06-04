@@ -18,6 +18,7 @@
     "./model-settings": "./src/model-settings.ts",
     "./compat-harness": "./src/compat-harness.ts",
     "./todos": "./src/todos.ts",
+    "./run-specs": "./src/run-specs.ts",
     "./mcp-servers": "./src/mcp-servers.ts",
     "./tools": "./src/tools/registry.ts",
     "./tools/mcp-client": "./src/tools/mcp-client.ts"

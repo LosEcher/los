@@ -79,6 +79,17 @@ export {
 } from './mcp-servers.js';
 export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSession, type SessionRecord } from './session.js';
 export {
+  ensureRunSpecStore,
+  createRunSpec,
+  loadRunSpec,
+  listRunSpecs,
+  listRunSpecsForSession,
+  updateRunSpecStatus,
+  type RunSpecRecord,
+  type RunSpecStatus,
+  type CreateRunSpecInput,
+} from './run-specs.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

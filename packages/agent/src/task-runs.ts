@@ -14,6 +14,7 @@ export const TASK_RUN_STARTUP_RECOVERY_LOCK_KEY = 7_602_026_001;
 export interface TaskRunRecord {
   id: string;
   sessionId: string;
+  runSpecId?: string;
   traceId: string;
   dedupeKey?: string;
   tenantId?: string;
@@ -40,6 +41,7 @@ export interface TaskRunRecord {
 export interface CreateTaskRunInput {
   id: string;
   sessionId: string;
+  runSpecId?: string;
   traceId?: string;
   dedupeKey?: string;
   tenantId?: string;
@@ -106,6 +108,7 @@ ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS node_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS request_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS run_spec_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
@@ -140,17 +143,18 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
   const rows = await db.query<TaskRunRow>(
     `
     INSERT INTO task_runs (
-      id, session_id, trace_id, dedupe_key, tenant_id, project_id, user_id, node_id, request_id,
+      id, session_id, run_spec_id, trace_id, dedupe_key, tenant_id, project_id, user_id, node_id, request_id,
       workspace_root, tool_mode, provider, model,
       status,
       attempt, prompt_preview, metadata_json, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, now())
     RETURNING *
   `,
     [
       input.id,
       input.sessionId,
+      input.runSpecId ?? null,
       input.traceId ?? input.id,
       input.dedupeKey ?? null,
       input.tenantId ?? null,
@@ -354,6 +358,7 @@ export async function listTaskRunsForSession(sessionId: string, limit = 20): Pro
 type TaskRunRow = {
   id: string;
   session_id: string;
+  run_spec_id: string | null;
   trace_id: string | null;
   dedupe_key: string | null;
   tenant_id: string | null;
@@ -381,6 +386,7 @@ function rowToTaskRun(row: TaskRunRow): TaskRunRecord {
   return {
     id: row.id,
     sessionId: row.session_id,
+    runSpecId: row.run_spec_id ?? undefined,
     traceId: row.trace_id ?? row.id,
     dedupeKey: row.dedupe_key ?? undefined,
     tenantId: row.tenant_id ?? undefined,

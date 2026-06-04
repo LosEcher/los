@@ -6,6 +6,11 @@ import { normalizeModelSettings, type ModelSettings } from '@los/agent/model-set
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
 import { listTaskRunsForSession, type TaskRunRecord } from '@los/agent/task-runs';
 import {
+  ensureRunSpecStore,
+  createRunSpec,
+  updateRunSpecStatus,
+} from '@los/agent/run-specs';
+import {
   appendSessionEvent,
   ensureSessionEventStore,
   listRecentSessionEvents,
@@ -126,10 +131,37 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
 
     const sid = sessionId ?? `session-${Date.now()}`;
     let activeTaskRunId: string | undefined;
+    let activeRunSpecId: string | undefined;
     let sentSession = false;
     let lastCheckpoint: CheckpointState | null = null;
 
     const resumedSession = sessionId ? await loadSession(sid) : null;
+
+    // Create durable run spec before execution
+    await ensureRunSpecStore();
+    const runSpecId = `run-${sid}-${Date.now()}`;
+    activeRunSpecId = runSpecId;
+    await createRunSpec({
+      id: runSpecId,
+      sessionId: sid,
+      tenantId: context.tenantId,
+      projectId: context.projectId,
+      userId: context.userId,
+      requestId: context.requestId,
+      traceId,
+      prompt,
+      systemPrompt,
+      provider,
+      model,
+      modelSettings: (modelSettings ?? {}) as Record<string, unknown>,
+      workspaceRoot,
+      toolMode,
+      allowedTools: allowedTools ?? [],
+      toolRetry: toolRetry ?? {},
+      maxLoops: maxLoops ?? config.agent.maxLoops,
+      timeoutMs,
+      mcpServers,
+    });
 
     try {
       const resumeState = resumedSession ? await loadResumeState(sid) : null;
@@ -153,6 +185,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       const scheduled = await runScheduledAgentTask({
         prompt,
         sessionId: sid,
+        runSpecId,
         provider,
         model,
         modelSettings,
@@ -386,6 +419,8 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         });
       }
 
+      await updateRunSpecStatus(runSpecId, 'succeeded').catch(() => undefined);
+
       send('done', {
         text: result.text,
         turns: result.loopCount,
@@ -416,6 +451,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           requestId: context.requestId,
         },
       }).catch(() => undefined);
+      await updateRunSpecStatus(runSpecId, 'failed').catch(() => undefined);
       send('error', { message: err?.message ?? String(err) });
 
       // Save partial session state if we have a checkpoint
