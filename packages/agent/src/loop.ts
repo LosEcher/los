@@ -90,7 +90,7 @@ export interface AgentResult {
 // ── System Prompt ───────────────────────────────────────
 
 const DEFAULT_SYSTEM = `You are a helpful coding assistant with access to tools for reading, writing, searching, patching, spawning child agents, and executing code.
-You can: read files (read_file), write files (write_file), patch files (preview_patch, apply_patch, edit_file), search code (search_content, search_files, glob), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), delete files (delete_file), spawn constrained child agents (spawn_agent), and run shell commands (run_shell).
+You can: read files (read_file), write files (write_file), patch files (preview_patch, apply_patch, edit_file), search code (search_content, search_files, glob), analyze code (get_symbols, find_in_code), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), delete files (delete_file), spawn constrained child agents (spawn_agent), and run shell commands (run_shell).
 
 Rules:
 - Read files before editing them
@@ -101,7 +101,7 @@ Rules:
 - If you're unsure about something, ask instead of guessing`;
 
 const READ_ONLY_SYSTEM = `You are a helpful coding assistant with read-only access to a workspace.
-You can: read files (read_file), search code (search_content, search_files, glob), inspect directories (list_directory, directory_tree, get_file_info).
+You can: read files (read_file), search code (search_content, search_files, glob), analyze code (get_symbols, find_in_code), inspect directories (list_directory, directory_tree, get_file_info).
 
 Rules:
 - Inspect files before making claims about the code
@@ -716,7 +716,7 @@ function getDefaultSystemPrompt(toolMode: 'all' | 'project-write' | 'read-only')
   if (toolMode === 'read-only') return READ_ONLY_SYSTEM;
   if (toolMode === 'project-write') {
     return `You are a helpful coding assistant with project-write access to a workspace.
-You can: read files (read_file), write files (write_file), search code (search_content, search_files, glob), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), and delete files (delete_file).
+You can: read files (read_file), write files (write_file), search code (search_content, search_files, glob), analyze code (get_symbols, find_in_code), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), and delete files (delete_file).
 You can also manage the project planning ledger with todo_list, todo_create, todo_update, todo_archive, todo_reopen, and todo_link_dependency.
 
 Rules:

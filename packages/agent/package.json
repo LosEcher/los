@@ -29,6 +29,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.40.5",
     "@los/infra": "workspace:*"
   },
   "devDependencies": {

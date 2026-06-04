@@ -22,6 +22,7 @@ import {
 } from './mcp-client.js';
 import { registerSearchTools } from './search-tools.js';
 import { registerFileTools } from './file-tools.js';
+import { registerCodeIntelTools } from './code-intel.js';
 
 const log = getLogger('agent');
 
@@ -126,6 +127,8 @@ export const READ_ONLY_BUILTIN_TOOLS = [
   'search_files',
   'glob',
   'get_file_info',
+  'get_symbols',
+  'find_in_code',
   'todo_list',
 ] as const;
 
@@ -368,6 +371,7 @@ export async function registerBuiltinTools(
   registerTodoTools(registry);
   registerSearchTools(registry, { workspaceRoot });
   registerFileTools(registry, { workspaceRoot });
+  registerCodeIntelTools(registry, { workspaceRoot });
 
   // ── MCP external tools ───────────────────────────────
   let mcpCleanup: (() => Promise<void>) | undefined;

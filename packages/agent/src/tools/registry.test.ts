@@ -21,7 +21,7 @@ test('read-only tool mode excludes write and shell tools', async () => {
 
     assert.deepEqual(
       registry.list().sort(),
-      ['directory_tree', 'get_file_info', 'glob', 'list_directory', 'read_file', 'search_content', 'search_files', 'todo_list'],
+      ['directory_tree', 'find_in_code', 'get_file_info', 'get_symbols', 'glob', 'list_directory', 'read_file', 'search_content', 'search_files', 'todo_list'],
     );
 
     const readResult = await registry.execute({
