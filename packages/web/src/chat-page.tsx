@@ -109,8 +109,26 @@ export function ChatPage({
     queryKey: ['chat-session-events', sessionId],
     queryFn: () => getJson<SessionEventsResponse>(`/sessions/${sessionId}/events?limit=80`),
     enabled: Boolean(sessionId),
-    refetchInterval: running ? 4_000 : false,
+    refetchInterval: running ? false : false, // live push replaces polling
   });
+  // Live event push via EventSource
+  useEffect(() => {
+    if (!sessionId || !running) return;
+    const es = new EventSource(`/sessions/${sessionId}/events/live`);
+    es.onmessage = (msg) => {
+      try {
+        const event = JSON.parse(msg.data);
+        queryClient.setQueryData<SessionEventsResponse>(
+          ['chat-session-events', sessionId],
+          (prev) => prev
+            ? { ...prev, events: [...prev.events, event].slice(-200), count: prev.count + 1 }
+            : { sessionId, count: 1, events: [event] },
+        );
+      } catch {}
+    };
+    es.onerror = () => { es.close(); };
+    return () => es.close();
+  }, [sessionId, running, queryClient]);
   const sessionObservability = useQuery({
     queryKey: ['chat-session-observability', sessionId],
     queryFn: () => getJson<SessionObservability>(`/sessions/${sessionId}/observability`),

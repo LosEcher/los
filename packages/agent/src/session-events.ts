@@ -187,7 +187,20 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
   if (!row) {
     throw new Error('Failed to append session event');
   }
-  return rowToSessionEvent(row);
+  const record = rowToSessionEvent(row);
+
+  // Notify listeners (real-time push)
+  try {
+    await db.notify('session_events', JSON.stringify({
+      sessionId: record.sessionId,
+      eventId: record.id,
+      type: record.type,
+    }));
+  } catch {
+    // Non-critical — don't block event persistence on notification failure
+  }
+
+  return record;
 }
 
 export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<SessionEventRecord[]> {

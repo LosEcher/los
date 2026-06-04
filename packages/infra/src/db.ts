@@ -14,6 +14,7 @@ const log = getLogger('db');
 export interface DbConnection {
   query<T extends QueryResultRow = QueryResultRow>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
   exec(sql: string): Promise<void>;
+  notify(channel: string, payload: string): Promise<void>;
   close(): Promise<void>;
   readonly open: boolean;
   readonly dbType: 'postgres';
@@ -44,6 +45,9 @@ function wrap(pool: Pool): DbConnection {
     exec: async (sql: string) => {
       await pool.query(sql);
     },
+    notify: async (channel: string, payload: string) => {
+      await pool.query(`SELECT pg_notify($1, $2)`, [channel, payload]);
+    },
     close: async () => {
       await pool.end();
       _pool = null;
@@ -51,6 +55,11 @@ function wrap(pool: Pool): DbConnection {
     get open() { return true; },
     get dbType() { return 'postgres' as const; },
   };
+}
+
+export function getPool(): Pool {
+  if (!_pool) throw new Error('Database not initialized. Call initDb() first.');
+  return _pool;
 }
 
 export function getDb(): DbConnection {

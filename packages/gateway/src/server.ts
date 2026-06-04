@@ -30,6 +30,7 @@ import { getRequestContext, registerRequestContext } from './request-context.js'
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import { ensureSessionStore, loadSession, listSessions } from '@los/agent/session';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
+import { getPool } from '@los/infra/db';
 import {
   ensureTaskRunStore,
   loadTaskRun,
@@ -486,6 +487,84 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     const runSpec = await loadRunSpec(id);
     if (!runSpec) return { error: 'Not found' };
     return runSpec;
+  });
+
+  // ── Live Event Push (PG LISTEN/NOTIFY) ────────────────
+
+  const liveClients = new Map<string, Set<(event: string, data: string) => void>>();
+
+  // Start PG LISTEN for session_events channel
+  try {
+    const pool = getPool();
+    const listenClient = await pool.connect();
+    await listenClient.query('LISTEN session_events');
+    listenClient.on('notification', (msg) => {
+      try {
+        const payload = JSON.parse(msg.payload ?? '{}');
+        const sessionId = payload.sessionId as string;
+        const subs = liveClients.get(sessionId);
+        if (subs) {
+          for (const send of subs) {
+            try { send(msg.channel, msg.payload ?? ''); } catch {}
+          }
+        }
+      } catch {}
+    });
+    listenClient.on('error', () => { /* reconnect handled by pool */ });
+    app.addHook('onClose', () => listenClient.release());
+    log.info('PG LISTEN active on session_events');
+  } catch (err: any) {
+    log.warn(`PG LISTEN setup failed (live push disabled): ${err.message ?? String(err)}`);
+  }
+
+  app.get('/sessions/:id/events/live', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const send = (event: string, data: string) => {
+      reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
+    };
+
+    // Send any events since the given ID
+    try {
+      await ensureSessionEventStore();
+      const events = await listSessionEventsSince(id, since, 100);
+      for (const evt of events) {
+        reply.raw.write(`id: ${evt.id}\n`);
+        send('session_event', JSON.stringify(evt));
+      }
+    } catch {}
+
+    // Register for live push
+    const handler = (_event: string, data: string) => {
+      try {
+        const payload = JSON.parse(data);
+        reply.raw.write(`id: ${payload.eventId ?? ''}\n`);
+        send('session_event', data);
+      } catch {}
+    };
+
+    if (!liveClients.has(id)) liveClients.set(id, new Set());
+    liveClients.get(id)!.add(handler);
+
+    req.raw.on('close', () => {
+      liveClients.get(id)?.delete(handler);
+      if (liveClients.get(id)?.size === 0) liveClients.delete(id);
+    });
+
+    // Keep-alive ping every 15s
+    const keepAlive = setInterval(() => {
+      try { reply.raw.write(': keepalive\n\n'); } catch { clearInterval(keepAlive); }
+    }, 15_000);
+
+    req.raw.on('close', () => clearInterval(keepAlive));
   });
 
   // ── Sync MEMORY.md ────────────────────────────────────
