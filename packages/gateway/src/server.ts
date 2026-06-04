@@ -171,6 +171,13 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     };
   });
 
+  // ── Workspace ────────────────────────────────────────
+
+  app.get('/workspace', async () => ({
+    workspaceRoot: DEFAULT_WORKSPACE_ROOT,
+    cwd: process.cwd(),
+  }));
+
   // ── Health ───────────────────────────────────────────
 
   app.get('/health', async () => {

@@ -57,7 +57,9 @@ export function ChatPage({
   const [prompt, setPrompt] = useState('');
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
-  const [workspaceRoot, setWorkspaceRoot] = useState('');
+  const [workspaceRoot, setWorkspaceRoot] = useState(() => {
+    try { return localStorage.getItem('los-workspace') ?? ''; } catch { return ''; }
+  });
   const [toolMode, setToolMode] = useState<ToolMode>('project-write');
   const [maxLoops, setMaxLoops] = useState(8);
   const [timeoutMs, setTimeoutMs] = useState(120_000);
@@ -91,6 +93,12 @@ export function ChatPage({
     ),
     staleTime: 20_000,
   });
+  const workspaceInfo = useQuery({
+    queryKey: ['workspace'],
+    queryFn: () => getJson<{ workspaceRoot: string; cwd: string }>('/workspace'),
+    staleTime: 60_000,
+  });
+  const defaultWorkspace = workspaceInfo.data?.workspaceRoot ?? '';
   const sessionDetail = useQuery({
     queryKey: ['chat-session', sessionId],
     queryFn: () => getJson<SessionDetail>(`/sessions/${sessionId}`),
@@ -127,6 +135,11 @@ export function ChatPage({
   }, [selectedRoute]);
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
   const recentEvents = sessionEvents.data?.events.slice(-8) ?? [];
+
+  // Persist workspaceRoot to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('los-workspace', workspaceRoot); } catch {}
+  }, [workspaceRoot]);
 
   useEffect(() => {
     if (running) return;
@@ -309,9 +322,20 @@ export function ChatPage({
                 <option value="all">all tools</option>
               </select>
             </RunField>
-            <RunField label="execution dir" title="Execution directory for this send">
+            <RunField label="workspace" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`}>
               <Folder size={13} />
-              <input value={workspaceRoot} onChange={event => setWorkspaceRoot(event.target.value)} placeholder="cwd" />
+              <input
+                value={workspaceRoot}
+                onChange={event => setWorkspaceRoot(event.target.value)}
+                placeholder={defaultWorkspace || 'cwd'}
+                style={{ width: workspaceRoot ? 140 : 100 }}
+              />
+              {workspaceRoot && workspaceRoot !== defaultWorkspace && (
+                <button type="button" className="mini-btn" title="Reset to default workspace"
+                  onClick={() => setWorkspaceRoot('')}>
+                  ↺
+                </button>
+              )}
             </RunField>
             <details className="composer-advanced">
               <summary title="Advanced request settings">
