@@ -279,7 +279,7 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
     title: '把高风险 agent eval 样本接入测试或 harness',
     description: '先把 dirty worktree、runtime/config truth、provider gate、external transcript、jj 和 todo-done 六类样本变成可运行检查。',
     kind: 'batch',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'analysis-2026-06-05',
     stageId: 'agent-workflow-harness',
@@ -289,8 +289,12 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: 'eval backlog 仍是文档，不会自动阻止行为回归。',
       solution: '将最高风险样本逐步投到 tests、harness probes、operation smokes 或 review checklist。',
-      evidence: ['docs/governance/eval-backlog.md'],
+      evidence: [
+        'docs/governance/eval-backlog.md',
+        'packages/agent/src/eval-backlog.test.ts',
+      ],
       firstCases: ['E01', 'E02', 'E03', 'E04', 'E05', 'E06'],
+      validation: ['agent eval backlog test', 'agent test'],
     },
   },
   {
