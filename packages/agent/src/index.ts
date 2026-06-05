@@ -130,6 +130,15 @@ export {
   type RecordProviderCompatEvidenceInput,
 } from './provider-compat-evidence.js';
 export {
+  normalizeExternalToolSummary,
+  redactExternalSummaryText,
+  type ExternalAgentTool,
+  type ExternalSummaryEvidenceInput,
+  type ExternalSummarySourceKind,
+  type ExternalToolSummary,
+  type ExternalToolSummaryInput,
+} from './external-tool-summary.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

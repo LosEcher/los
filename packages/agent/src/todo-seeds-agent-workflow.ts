@@ -302,7 +302,7 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
     title: '设计 redacted external tool summary adapter',
     description: '为 Codex、Claude Code、Reasonix、OpenCode 和 OMX 的摘要输入定义 schema、provenance、redaction fixture 和禁止原始日志入库规则。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P2',
     source: 'analysis-2026-06-05',
     stageId: 'agent-workflow-harness',
@@ -312,8 +312,14 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '外部工具对比目前只能人工阅读，且原始 transcript/auth/log 不能直接成为 los 证据。',
       solution: '先定义只接受摘要的 adapter 和 redaction tests；任何 runtime ingestion 另走 ADR。',
-      evidence: ['docs/governance/toolchain-matrix.md'],
+      evidence: [
+        'docs/governance/toolchain-matrix.md',
+        'docs/governance/external-tool-summary-adapter.md',
+        'packages/agent/src/external-tool-summary.ts',
+        'packages/agent/src/external-tool-summary.test.ts',
+      ],
       blockedByPolicy: ['docs/adr/0015-external-transcript-truncation-and-run-replay-policy.md', 'docs/adr/0016-omx-tool-level-logging-scope.md'],
+      validation: ['external tool summary adapter test', 'agent test'],
     },
   },
   {
