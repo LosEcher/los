@@ -18,7 +18,7 @@ import { seedVerificationRequirementsForRunSpec } from './verification-records.j
 
 // ── Types ───────────────────────────────────────────────
 
-export type RunSpecStatus = 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type RunSpecStatus = 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
 
 export interface RunSpecRecord {
   id: string;

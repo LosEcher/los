@@ -12,6 +12,8 @@ import {
   listAgentTaskAttempts,
 } from './agent-task-graph.js';
 import { readAgentTaskGraph } from './agent-task-graph-read-model.js';
+import { createRunSpec, loadRunSpec } from './run-specs.js';
+import { listSessionEvents } from './session-events.js';
 import { loadToolCallState } from './tool-call-states.js';
 import { persistScheduledToolCallState, runAgentTaskGraphSerial, runScheduledAgentTask } from './scheduler.js';
 
@@ -333,6 +335,95 @@ test('scheduler runs a single agent task graph with conservative serial claims',
     assert.equal((await listAgentTaskAttempts(`${graphId}-plan`)).length, 1);
     assert.equal((await listAgentTaskAttempts(`${graphId}-exec`)).length, 1);
   } finally {
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
+test('scheduler blocks run spec completion when verifier is required but missing', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-verifier-gate-${suffix}`;
+  const sessionId = `session-verifier-gate-${suffix}`;
+  const runSpecId = `run-verifier-gate-${suffix}`;
+  const nodeId = `test-verifier-gate-executor-${suffix}`;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    await readRequestBody(req);
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: 'executor task succeeded',
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'run graph with required verifier',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute without verifier',
+      prompt: 'exec prompt',
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      runSpecId,
+      sessionId,
+      requireVerifier: true,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.equal(result.completion.status, 'blocked');
+    assert.equal(result.completion.reason, 'succeeded verifier task is required for completion');
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'blocked');
+
+    const events = await listSessionEvents(sessionId, 100);
+    const blocked = events.find(event => event.type === 'run.blocked');
+    assert.equal(blocked?.payload.runSpecId, runSpecId);
+    assert.equal(blocked?.payload.graphId, graphId);
+    assert.equal(blocked?.payload.requireVerifier, true);
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);

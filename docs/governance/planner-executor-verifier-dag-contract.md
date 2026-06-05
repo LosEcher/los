@@ -77,9 +77,11 @@ This contract now has a minimal store/API implementation in
 The completed scope is durable graph state, dependency-aware ready claims,
 failed dependency detection, retry/verifier evidence links, read-only graph
 inspection, completion decision reporting, and a conservative scheduler entry
-that claims and runs one ready task at a time for a single graph.
+that claims and runs one ready task at a time for a single graph. When that
+entry is run with `requireVerifier`, missing verifier success now blocks the
+linked `run_specs` row instead of allowing a false succeeded transition.
 
 Remaining runtime promotion work is still separate: parallel execution,
-editable-surface conflict checks, verifier-owned graph completion transitions,
+editable-surface conflict checks, richer verifier-owned execution transitions,
 and UI read models should be added only after they can preserve the same
 evidence boundary.

@@ -38,6 +38,7 @@ import {
   updateToolCallState,
   type ToolCallStateType,
 } from './tool-call-states.js';
+import { updateRunSpecStatus, type RunSpecStatus } from './run-specs.js';
 
 export type ScheduledTaskEventType =
   | 'task.created'
@@ -124,6 +125,9 @@ const runningTaskControllers = new Map<string, RunningTaskController>();
 
 export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInput): Promise<RunAgentTaskGraphSerialResult> {
   await ensureAgentTaskGraphStore();
+  if (input.runSpecId) {
+    await updateRunSpecStatus(input.runSpecId, 'running').catch(() => undefined);
+  }
 
   const maxTasks = normalizePositiveInteger(input.maxTasks) ?? 50;
   const claimedBy = normalizeOptionalString(input.nodeId)
@@ -145,13 +149,62 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
     if (executed.status !== 'succeeded') break;
   }
 
+  const completion = await getAgentTaskGraphCompletion(input.graphId, {
+    requireVerifier: input.requireVerifier,
+  });
+  await applyGraphCompletionRunSpecTransition(input, completion);
+
   return {
     graphId: input.graphId,
     executedTasks,
-    completion: await getAgentTaskGraphCompletion(input.graphId, {
-      requireVerifier: input.requireVerifier,
-    }),
+    completion,
   };
+}
+
+async function applyGraphCompletionRunSpecTransition(
+  input: RunAgentTaskGraphSerialInput,
+  completion: AgentTaskGraphCompletion,
+): Promise<void> {
+  if (!input.runSpecId) return;
+
+  const status = runSpecStatusForGraphCompletion(completion);
+  if (status) {
+    await updateRunSpecStatus(input.runSpecId, status);
+  }
+
+  if (status === 'blocked' && input.sessionId) {
+    await appendSessionEvent({
+      sessionId: input.sessionId,
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      userId: input.userId,
+      nodeId: input.nodeId,
+      requestId: input.requestId,
+      traceId: input.traceId,
+      type: 'run.blocked',
+      payload: {
+        runSpecId: input.runSpecId,
+        graphId: input.graphId,
+        reason: completion.reason,
+        requireVerifier: input.requireVerifier === true,
+        completionStatus: completion.status,
+        readyTaskIds: completion.readyTaskIds,
+        waitingTaskIds: completion.waitingTaskIds,
+        blockedTaskIds: completion.blockedTaskIds,
+        failedTaskIds: completion.failedTaskIds,
+        verifierTaskIds: completion.verifierTaskIds,
+        succeededVerifierTaskIds: completion.succeededVerifierTaskIds,
+      },
+    });
+  }
+}
+
+function runSpecStatusForGraphCompletion(completion: AgentTaskGraphCompletion): RunSpecStatus | undefined {
+  if (completion.status === 'succeeded') return 'succeeded';
+  if (completion.status === 'failed') return 'failed';
+  if (completion.status === 'blocked') return 'blocked';
+  if (completion.status === 'in_progress') return 'running';
+  return undefined;
 }
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {

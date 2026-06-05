@@ -82,6 +82,18 @@ properties:
       heartbeatMs:
         type: integer
         minimum: 1000
+  status:
+    type: string
+    enum:
+      - created
+      - running
+      - succeeded
+      - failed
+      - cancelled
+      - blocked
+    description: >
+      Durable run state. `blocked` is used when runtime completion is prevented
+      by a required verifier or another operator-action gate.
 events:
   writes:
     - task_runs
