@@ -64,12 +64,32 @@ chunks:
     - type: error
       error: string
 replay:
+  routes:
+    - method: GET
+      path: /runs/{runSpecId}/events
+      query:
+        since:
+          type: integer
+          minimum: 0
+          description: Return session_events rows with id greater than this cursor.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+      response:
+        runSpecId: string
+        sessionId: string
+        since: integer
+        count: integer
+        nextSince: integer
+        events: session_events.rows
   sourceOfTruth:
+    - run_specs
     - session_events
     - task_runs
   future:
     - Last-Event-ID
-    - since event cursor
+    - persisted model.delta chunk replay
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

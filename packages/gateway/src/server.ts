@@ -486,6 +486,28 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     return await listRunSpecs();
   });
 
+  app.get('/runs/:id/events', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const query = req.query as { since?: string; limit?: string };
+    const since = normalizeNonNegativeInteger(query.since, 0);
+    const limit = normalizeBoundedInteger(query.limit, 200, 1, 10000);
+
+    await ensureRunSpecStore();
+    await ensureSessionEventStore();
+    const runSpec = await loadRunSpec(id);
+    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+
+    const events = await listSessionEventsSince(runSpec.sessionId, since, limit);
+    return {
+      runSpecId: runSpec.id,
+      sessionId: runSpec.sessionId,
+      since,
+      count: events.length,
+      nextSince: events.at(-1)?.id ?? since,
+      events,
+    };
+  });
+
   app.get('/runs/:id', async (req) => {
     const { id } = req.params as { id: string };
     await ensureRunSpecStore();
@@ -665,6 +687,18 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function normalizeBoundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
 function parseLiveSessionEventNotification(payload: string | undefined) {
