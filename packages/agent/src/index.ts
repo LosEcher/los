@@ -88,6 +88,7 @@ export {
   loadToolCallState,
   listToolCallStates,
   listToolCallStatesForTaskRun,
+  listToolCallStatesForRunSpec,
   type ToolCallStateRecord,
   type ToolCallStateType,
   type CreateToolCallStateInput,
@@ -150,6 +151,7 @@ export {
   linkAgentTaskDependency,
   listAgentTaskAttempts,
   listAgentTasksForGraph,
+  listAgentTasksForRunSpec,
   listBlockedAgentTasks,
   updateAgentTaskStatus,
   type AgentTaskAttemptRecord,
@@ -182,6 +184,16 @@ export {
   type ExecutionStaticNodeKind,
 } from './execution-static-graph.js';
 export {
+  readRuntimeEvidenceGraph,
+  type ReadRuntimeEvidenceGraphOptions,
+  type RuntimeEvidenceEdge,
+  type RuntimeEvidenceEdgeKind,
+  type RuntimeEvidenceGraph,
+  type RuntimeEvidenceNode,
+  type RuntimeEvidenceNodeKind,
+  type RuntimeEvidenceRecord,
+} from './runtime-evidence-graph.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,
@@ -192,6 +204,7 @@ export {
   loadTaskRun,
   listTaskRuns,
   listTaskRunsForSession,
+  listTaskRunsForRunSpec,
   TASK_RUN_STARTUP_RECOVERY_LOCK_KEY,
   type CreateTaskRunInput,
   type TaskRunRecoveryResult,

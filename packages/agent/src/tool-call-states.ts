@@ -216,6 +216,19 @@ export async function listToolCallStatesForTaskRun(
   return rows.rows.map(rowToRecord);
 }
 
+export async function listToolCallStatesForRunSpec(
+  runSpecId: string,
+  limit = 1000,
+): Promise<ToolCallStateRecord[]> {
+  await ensureToolCallStateStore();
+  const db = getDb();
+  const rows = await db.query<ToolCallStateRow>(
+    'SELECT * FROM tool_call_states WHERE run_spec_id = $1 ORDER BY turn, id LIMIT $2',
+    [runSpecId, limit],
+  );
+  return rows.rows.map(rowToRecord);
+}
+
 // ── Helpers ─────────────────────────────────────────────
 
 type ToolCallStateRow = {

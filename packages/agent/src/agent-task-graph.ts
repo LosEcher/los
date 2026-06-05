@@ -356,6 +356,21 @@ export async function listAgentTasksForGraph(graphId: string): Promise<AgentTask
   return rows.rows.map(rowToTask);
 }
 
+export async function listAgentTasksForRunSpec(runSpecId: string): Promise<AgentTaskRecord[]> {
+  await ensureAgentTaskGraphStore();
+  const db = getDb();
+  const rows = await db.query<AgentTaskRow>(
+    `
+    SELECT *
+    FROM agent_tasks
+    WHERE run_spec_id = $1
+    ORDER BY graph_id ASC, priority ASC, created_at ASC, id ASC
+  `,
+    [runSpecId],
+  );
+  return rows.rows.map(rowToTask);
+}
+
 export async function listAgentTaskEdgesForGraph(graphId: string): Promise<AgentTaskEdgeRecord[]> {
   await ensureAgentTaskGraphStore();
   const db = getDb();

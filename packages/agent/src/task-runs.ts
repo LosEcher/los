@@ -360,6 +360,21 @@ export async function listTaskRunsForSession(sessionId: string, limit = 20): Pro
   return rows.rows.map(rowToTaskRun);
 }
 
+export async function listTaskRunsForRunSpec(runSpecId: string): Promise<TaskRunRecord[]> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    `
+    SELECT *
+    FROM task_runs
+    WHERE run_spec_id = $1
+    ORDER BY created_at ASC, id ASC
+  `,
+    [runSpecId],
+  );
+  return rows.rows.map(rowToTaskRun);
+}
+
 type TaskRunRow = {
   id: string;
   session_id: string;
