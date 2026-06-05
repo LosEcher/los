@@ -152,6 +152,99 @@ test('scheduler persists tool call state transitions', async () => {
   }
 });
 
+test('scheduler persists tool call states streamed from executor NDJSON', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const nodeId = `test-ndjson-executor-${suffix}`;
+  const taskRunId = `task-ndjson-tool-state-${suffix}`;
+  const sessionId = `session-ndjson-tool-state-${suffix}`;
+  const runSpecId = `run-ndjson-tool-state-${suffix}`;
+  const callId = `call-ndjson-tool-state-${suffix}`;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    await readRequestBody(req);
+    res.setHeader('content-type', 'application/x-ndjson');
+    res.write(JSON.stringify({
+      type: 'tool_call_state',
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'requested',
+        turn: 1,
+        input: { path: 'README.md' },
+        maxAttempts: 1,
+        idempotent: true,
+      },
+    }) + '\n');
+    res.write(JSON.stringify({
+      type: 'tool_call_state',
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'succeeded',
+        turn: 1,
+        outputSummary: 'executor ok',
+        durationMs: 7,
+        attempt: 1,
+      },
+    }) + '\n');
+    res.end(JSON.stringify({
+      type: 'result',
+      result: {
+        text: 'executor ok',
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    }) + '\n');
+  });
+
+  try {
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runScheduledAgentTask({
+      prompt: 'use ndjson executor',
+      taskRunId,
+      runSpecId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.equal(result.status, 'completed');
+    assert.equal(result.result.text, 'executor ok');
+
+    const loaded = await loadToolCallState(callId, sessionId);
+    assert.equal(loaded?.runSpecId, runSpecId);
+    assert.equal(loaded?.taskRunId, taskRunId);
+    assert.equal(loaded?.state, 'succeeded');
+    assert.equal(loaded?.toolName, 'read_file');
+    assert.deepEqual(loaded?.inputJson, { path: 'README.md' });
+    assert.equal(loaded?.outputSummary, 'executor ok');
+    assert.equal(loaded?.durationMs, 7);
+  } finally {
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 function listen(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once('error', reject);

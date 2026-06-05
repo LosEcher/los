@@ -2,7 +2,7 @@
  * @los/agent — Public API.
  */
 
-export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type TurnSummary, type CheckpointState } from './loop.js';
+export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState } from './loop.js';
 export {
   cancelScheduledTask,
   runScheduledAgentTask,

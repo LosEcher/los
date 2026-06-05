@@ -23,6 +23,7 @@ import {
   type ArtifactPathPolicy,
   type NodeCommandName,
   type SessionEventRecord,
+  type ToolCallStateTransition,
 } from '@los/agent';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 
@@ -37,7 +38,7 @@ interface RunAgentRequest {
   nodeId?: string;
   leaseMs?: number;
   prompt: string;
-  config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall'>;
+  config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
 }
 
 interface PutExecutorArtifactRequest {
@@ -70,6 +71,7 @@ interface ExecutorNodeCommandRequest {
 type ExecutorStreamChunk =
   | { type: 'session_event'; event: SessionEventRecord }
   | { type: 'model_delta'; delta: AgentModelDelta }
+  | { type: 'tool_call_state'; transition: ToolCallStateTransition }
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: string };
 
@@ -333,6 +335,7 @@ async function runAssignedAgentTask(
   const leaseMs = normalizeLeaseMs(body.leaseMs);
   const events: SessionEventRecord[] = [];
   const deltas: AgentModelDelta[] = [];
+  const toolCallStates: ToolCallStateTransition[] = [];
 
   const controller = new AbortController();
   const heartbeat = setInterval(() => {
@@ -354,9 +357,13 @@ async function runAssignedAgentTask(
         deltas.push(delta);
         emit?.({ type: 'model_delta', delta });
       },
+      onToolCallState: (transition) => {
+        toolCallStates.push(transition);
+        emit?.({ type: 'tool_call_state', transition });
+      },
     });
     emit?.({ type: 'result', result });
-    return { result, events, deltas };
+    return { result, events, deltas, toolCallStates };
   } finally {
     clearInterval(heartbeat);
   }

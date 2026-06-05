@@ -206,6 +206,15 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           signal: controller.signal,
           onSessionEvent: input.onSessionEvent,
           onModelDelta: input.onModelDelta,
+          onToolCallState: async (transition) => {
+            await persistScheduledToolCallState({
+              transition,
+              sessionId,
+              runSpecId: input.runSpecId,
+              taskRunId,
+            });
+            await input.onToolCallState?.(transition);
+          },
           onCheckpoint: input.onCheckpoint,
         })
       : await runAgent(input.prompt, {
@@ -523,6 +532,7 @@ async function runAgentOnExecutor(
     signal?: AbortSignal;
     onSessionEvent?: AgentConfig['onSessionEvent'];
     onModelDelta?: AgentConfig['onModelDelta'];
+    onToolCallState?: AgentConfig['onToolCallState'];
     onCheckpoint?: AgentConfig['onCheckpoint'];
   },
 ): Promise<AgentResult> {
@@ -561,6 +571,10 @@ async function runAgentOnExecutor(
   for (const delta of deltas) {
     await input.onModelDelta?.(delta);
   }
+  const toolCallStates = Array.isArray(data?.toolCallStates) ? data.toolCallStates : [];
+  for (const transition of toolCallStates) {
+    await input.onToolCallState?.(transition as ToolCallStateTransition);
+  }
   if (!data?.result || typeof data.result !== 'object') {
     throw new Error(`Executor ${executor.url} returned no agent result`);
   }
@@ -573,6 +587,7 @@ async function readExecutorStreamResponse(
   input: {
     onSessionEvent?: AgentConfig['onSessionEvent'];
     onModelDelta?: AgentConfig['onModelDelta'];
+    onToolCallState?: AgentConfig['onToolCallState'];
   },
 ): Promise<AgentResult> {
   if (!res.ok) {
@@ -595,6 +610,7 @@ async function readExecutorStreamResponse(
       type?: string;
       event?: unknown;
       delta?: unknown;
+      transition?: unknown;
       result?: unknown;
       error?: string;
     };
@@ -602,6 +618,8 @@ async function readExecutorStreamResponse(
       await input.onSessionEvent?.(chunk.event as any);
     } else if (chunk.type === 'model_delta') {
       await input.onModelDelta?.(chunk.delta as any);
+    } else if (chunk.type === 'tool_call_state') {
+      await input.onToolCallState?.(chunk.transition as ToolCallStateTransition);
     } else if (chunk.type === 'result') {
       result = chunk.result as AgentResult;
     } else if (chunk.type === 'error') {

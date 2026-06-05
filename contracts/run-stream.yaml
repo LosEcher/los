@@ -59,6 +59,8 @@ chunks:
       event: session_events.row
     - type: model_delta
       delta: agent.model_delta
+    - type: tool_call_state
+      transition: tool_call_states.transition
     - type: result
       result: agent.result
     - type: error
