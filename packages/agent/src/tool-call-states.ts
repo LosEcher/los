@@ -203,6 +203,19 @@ export async function listToolCallStates(
   return rows.rows.map(rowToRecord);
 }
 
+export async function listToolCallStatesForTaskRun(
+  taskRunId: string,
+  limit = 100,
+): Promise<ToolCallStateRecord[]> {
+  await ensureToolCallStateStore();
+  const db = getDb();
+  const rows = await db.query<ToolCallStateRow>(
+    'SELECT * FROM tool_call_states WHERE task_run_id = $1 ORDER BY turn, id LIMIT $2',
+    [taskRunId, limit],
+  );
+  return rows.rows.map(rowToRecord);
+}
+
 // ── Helpers ─────────────────────────────────────────────
 
 type ToolCallStateRow = {

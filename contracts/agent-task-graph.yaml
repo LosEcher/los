@@ -3,9 +3,10 @@ version: 0.1.0
 status: draft
 owner: packages/agent
 description: >
-  Read model contract for durable planner/executor/verifier task graphs.
-  The current scope is read-only graph inspection and completion decision
-  reporting; it does not promote the scheduler into a full graph engine.
+  Contract for durable planner/executor/verifier task graphs. The current
+  runtime scope supports read-only graph inspection, completion decision
+  reporting, and a conservative single-graph serial scheduler claim loop; it
+  does not promote los into a full parallel workflow engine.
 type: object
 sourceOfTruth:
   - agent_tasks
@@ -42,6 +43,7 @@ completion:
     - task attempts grouped by task id
 rules:
   - queued tasks with unmet dependencies cannot be ready
+  - initial scheduler integration claims at most one ready task at a time per loop
   - failed or cancelled dependencies block downstream completion
   - terminal task failure requires retry or operator action
   - external tool summaries cannot replace task attempts or verification records

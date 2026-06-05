@@ -6,8 +6,14 @@ import type { AddressInfo } from 'node:net';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
 import { upsertExecutorNode } from './executor-nodes.js';
+import {
+  createAgentTask,
+  linkAgentTaskDependency,
+  listAgentTaskAttempts,
+} from './agent-task-graph.js';
+import { readAgentTaskGraph } from './agent-task-graph-read-model.js';
 import { loadToolCallState } from './tool-call-states.js';
-import { persistScheduledToolCallState, runScheduledAgentTask } from './scheduler.js';
+import { persistScheduledToolCallState, runAgentTaskGraphSerial, runScheduledAgentTask } from './scheduler.js';
 
 test('scheduler uses a verified registry executor when nodeUrls is empty', async () => {
   const config = await loadConfig();
@@ -240,6 +246,99 @@ test('scheduler persists tool call states streamed from executor NDJSON', async 
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
+test('scheduler runs a single agent task graph with conservative serial claims', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-scheduler-serial-${suffix}`;
+  const sessionId = `session-graph-scheduler-serial-${suffix}`;
+  const nodeId = `test-graph-serial-executor-${suffix}`;
+  const requests: Array<{ prompt?: unknown }> = [];
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+
+    const body = JSON.parse(await readRequestBody(req)) as { prompt?: unknown };
+    requests.push(body);
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: `completed ${String(body.prompt ?? '')}`,
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await createAgentTask({
+      id: `${graphId}-plan`,
+      graphId,
+      sessionId,
+      role: 'planner',
+      title: 'Plan graph work',
+      prompt: 'plan prompt',
+      priority: 10,
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute graph work',
+      prompt: 'exec prompt',
+      priority: 20,
+    });
+    await linkAgentTaskDependency({
+      graphId,
+      taskId: `${graphId}-exec`,
+      dependsOnTaskId: `${graphId}-plan`,
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.deepEqual(result.executedTasks.map(task => task.taskId), [`${graphId}-plan`, `${graphId}-exec`]);
+    assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded']);
+    assert.equal(result.completion.status, 'succeeded');
+    assert.deepEqual(requests.map(request => request.prompt), ['plan prompt', 'exec prompt']);
+
+    const graph = await readAgentTaskGraph(graphId);
+    assert.deepEqual(graph.tasks.map(task => task.status), ['succeeded', 'succeeded']);
+    assert.equal((await listAgentTaskAttempts(`${graphId}-plan`)).length, 1);
+    assert.equal((await listAgentTaskAttempts(`${graphId}-exec`)).length, 1);
+  } finally {
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
     await closeServer(server);
   }

@@ -5,7 +5,10 @@
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState } from './loop.js';
 export {
   cancelScheduledTask,
+  runAgentTaskGraphSerial,
   runScheduledAgentTask,
+  type RunAgentTaskGraphSerialInput,
+  type RunAgentTaskGraphSerialResult,
   type ScheduledAgentTaskInput,
   type ScheduledAgentTaskResult,
   type ScheduledTaskEvent,
@@ -84,6 +87,7 @@ export {
   updateToolCallState,
   loadToolCallState,
   listToolCallStates,
+  listToolCallStatesForTaskRun,
   type ToolCallStateRecord,
   type ToolCallStateType,
   type CreateToolCallStateInput,

@@ -76,9 +76,10 @@ This contract now has a minimal store/API implementation in
 
 The completed scope is durable graph state, dependency-aware ready claims,
 failed dependency detection, retry/verifier evidence links, read-only graph
-inspection, and completion decision reporting.
+inspection, completion decision reporting, and a conservative scheduler entry
+that claims and runs one ready task at a time for a single graph.
 
-Runtime promotion is still separate work: scheduler integration,
+Remaining runtime promotion work is still separate: parallel execution,
 editable-surface conflict checks, verifier-owned graph completion transitions,
 and UI read models should be added only after they can preserve the same
 evidence boundary.

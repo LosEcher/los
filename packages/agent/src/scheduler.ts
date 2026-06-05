@@ -10,6 +10,19 @@ import { appendSessionEvent, ensureSessionEventStore } from './session-events.js
 import { listExecutorNodes, type ExecutorNodeRecord } from './executor-nodes.js';
 import { runAgent, type AgentConfig, type AgentResult, type ToolCallStateTransition, type TurnSummary } from './loop.js';
 import {
+  claimReadyAgentTasks,
+  createAgentTaskAttempt,
+  ensureAgentTaskGraphStore,
+  listAgentTaskAttempts,
+  updateAgentTaskStatus,
+  type AgentTaskAttemptStatus,
+  type AgentTaskRecord,
+} from './agent-task-graph.js';
+import {
+  getAgentTaskGraphCompletion,
+  type AgentTaskGraphCompletion,
+} from './agent-task-graph-read-model.js';
+import {
   createTaskRun,
   ensureTaskRunStore,
   findActiveTaskRunByDedupeKey,
@@ -21,6 +34,7 @@ import {
 import type { RunContractMetadataInput } from './run-contract.js';
 import {
   createToolCallState,
+  listToolCallStatesForTaskRun,
   updateToolCallState,
   type ToolCallStateType,
 } from './tool-call-states.js';
@@ -65,6 +79,23 @@ export interface ScheduledExecutorConfig {
   heartbeatMs?: number;
 }
 
+export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInput, 'prompt' | 'promptPreview' | 'taskRunId' | 'dedupeKey'> {
+  graphId: string;
+  maxTasks?: number;
+  requireVerifier?: boolean;
+}
+
+export interface RunAgentTaskGraphSerialResult {
+  graphId: string;
+  executedTasks: Array<{
+    taskId: string;
+    taskRunId: string;
+    attemptId: string;
+    status: AgentTaskAttemptStatus;
+  }>;
+  completion: AgentTaskGraphCompletion;
+}
+
 export type ScheduledAgentTaskResult =
   | {
       status: 'completed';
@@ -90,6 +121,38 @@ type RunningTaskController = {
 };
 
 const runningTaskControllers = new Map<string, RunningTaskController>();
+
+export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInput): Promise<RunAgentTaskGraphSerialResult> {
+  await ensureAgentTaskGraphStore();
+
+  const maxTasks = normalizePositiveInteger(input.maxTasks) ?? 50;
+  const claimedBy = normalizeOptionalString(input.nodeId)
+    ?? normalizeOptionalString(input.executor?.nodeId)
+    ?? 'gateway-local';
+  const executedTasks: RunAgentTaskGraphSerialResult['executedTasks'] = [];
+
+  for (let index = 0; index < maxTasks; index += 1) {
+    const [task] = await claimReadyAgentTasks({
+      graphId: input.graphId,
+      limit: 1,
+      nodeId: claimedBy,
+      leaseMs: input.executor?.leaseMs,
+    });
+    if (!task) break;
+
+    const executed = await runClaimedAgentGraphTask(task, input);
+    executedTasks.push(executed);
+    if (executed.status !== 'succeeded') break;
+  }
+
+  return {
+    graphId: input.graphId,
+    executedTasks,
+    completion: await getAgentTaskGraphCompletion(input.graphId, {
+      requireVerifier: input.requireVerifier,
+    }),
+  };
+}
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
   await ensureTaskRunStore();
@@ -311,6 +374,118 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   }
 }
 
+async function runClaimedAgentGraphTask(
+  task: AgentTaskRecord,
+  input: RunAgentTaskGraphSerialInput,
+): Promise<RunAgentTaskGraphSerialResult['executedTasks'][number]> {
+  const attempts = await listAgentTaskAttempts(task.id);
+  const attempt = attempts.length + 1;
+  const attemptId = `${task.id}-attempt-${attempt}-${randomUUID()}`;
+  const taskRunId = `task-${randomUUID()}`;
+  const sessionId = task.sessionId ?? input.sessionId;
+  const runSpecId = task.runSpecId ?? input.runSpecId;
+  const nodeId = normalizeOptionalString(input.nodeId)
+    ?? normalizeOptionalString(input.executor?.nodeId)
+    ?? 'gateway-local';
+
+  await createAgentTaskAttempt({
+    id: attemptId,
+    graphId: task.graphId,
+    taskId: task.id,
+    attempt,
+    status: 'running',
+    provider: input.provider,
+    model: input.model,
+    nodeId,
+    taskRunId,
+  });
+
+  try {
+    const result = await runScheduledAgentTask({
+      ...input,
+      prompt: task.prompt ?? task.title,
+      promptPreview: task.title,
+      taskRunId,
+      runSpecId,
+      sessionId,
+      dedupeKey: undefined,
+      metadata: {
+        ...(input.metadata ?? {}),
+        graphId: task.graphId,
+        agentTaskId: task.id,
+        agentTaskRole: task.role,
+        agentTaskTitle: task.title,
+      },
+    });
+
+    if (result.status === 'cancelled') {
+      await updateAgentTaskStatus(task.id, 'cancelled', {
+        taskRunId,
+        attemptId,
+        cancelReason: result.reason,
+      });
+      await createAgentTaskAttempt({
+        id: attemptId,
+        graphId: task.graphId,
+        taskId: task.id,
+        attempt,
+        status: 'cancelled',
+        provider: input.provider,
+        model: input.model,
+        nodeId: result.taskRun.nodeId ?? nodeId,
+        taskRunId,
+        error: result.reason,
+        toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
+      });
+      return { taskId: task.id, taskRunId, attemptId, status: 'cancelled' };
+    }
+
+    const outputSummary = result.status === 'completed'
+      ? previewText(result.result.text)
+      : 'deduplicated task run';
+    await updateAgentTaskStatus(task.id, 'succeeded', {
+      taskRunId,
+      attemptId,
+      outputSummary,
+    });
+    await createAgentTaskAttempt({
+      id: attemptId,
+      graphId: task.graphId,
+      taskId: task.id,
+      attempt,
+      status: 'succeeded',
+      provider: input.provider,
+      model: input.model,
+      nodeId: result.taskRun.nodeId ?? nodeId,
+      taskRunId,
+      outputSummary,
+      toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
+    });
+    return { taskId: task.id, taskRunId, attemptId, status: 'succeeded' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await updateAgentTaskStatus(task.id, 'failed', {
+      taskRunId,
+      attemptId,
+      error: message,
+    });
+    await createAgentTaskAttempt({
+      id: attemptId,
+      graphId: task.graphId,
+      taskId: task.id,
+      attempt,
+      status: 'failed',
+      provider: input.provider,
+      model: input.model,
+      nodeId,
+      taskRunId,
+      error: message,
+      toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
+    });
+    return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
+  }
+}
+
 export async function persistScheduledToolCallState(input: {
   transition: ToolCallStateTransition;
   sessionId: string;
@@ -412,6 +587,16 @@ function normalizePositiveInteger(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const int = Math.floor(value);
   return int > 0 ? int : undefined;
+}
+
+async function listToolCallStateIdsForTaskRun(taskRunId: string): Promise<string[]> {
+  const states = await listToolCallStatesForTaskRun(taskRunId, 1000);
+  return states.map(state => state.id);
+}
+
+function previewText(value: string, limit = 500): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}...`;
 }
 
 type ResolvedExecutor = {
