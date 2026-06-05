@@ -101,6 +101,35 @@ export {
   type CreateRunSpecInput,
 } from './run-specs.js';
 export {
+  mergeRunContractMetadata,
+  normalizeRunContractMetadata,
+  readRunContractMetadata,
+  type RunContractMetadata,
+  type RunContractMetadataInput,
+  type RunContractMode,
+} from './run-contract.js';
+export {
+  createVerificationRecord,
+  ensureVerificationRecordStore,
+  listVerificationRecordsForRunSpec,
+  seedVerificationRequirementsForRunSpec,
+  updateVerificationRecord,
+  type CreateVerificationRecordInput,
+  type UpdateVerificationRecordInput,
+  type VerificationRecord,
+  type VerificationRecordStatus,
+} from './verification-records.js';
+export {
+  ensureProviderCompatEvidenceStore,
+  listLatestProviderCompatEvidence,
+  recordProviderCompatEvidence,
+  recordProviderCompatEvidenceFromSummary,
+  recordProviderCompatEvidenceFromSummaryWithDefaultDb,
+  type ProviderCompatDecision,
+  type ProviderCompatEvidenceRecord,
+  type RecordProviderCompatEvidenceInput,
+} from './provider-compat-evidence.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

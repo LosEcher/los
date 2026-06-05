@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendSessionEvent, ensureSessionEventStore } from './session-events.js';
 import { listExecutorNodes, type ExecutorNodeRecord } from './executor-nodes.js';
-import { runAgent, type AgentConfig, type AgentResult, type TurnSummary } from './loop.js';
+import { runAgent, type AgentConfig, type AgentResult, type ToolCallStateTransition, type TurnSummary } from './loop.js';
 import {
   createTaskRun,
   ensureTaskRunStore,
@@ -18,6 +18,12 @@ import {
   updateTaskRun,
   type TaskRunRecord,
 } from './task-runs.js';
+import type { RunContractMetadataInput } from './run-contract.js';
+import {
+  createToolCallState,
+  updateToolCallState,
+  type ToolCallStateType,
+} from './tool-call-states.js';
 
 export type ScheduledTaskEventType =
   | 'task.created'
@@ -45,6 +51,7 @@ export interface ScheduledAgentTaskInput extends AgentConfig {
   timeoutMs?: number;
   promptPreview?: string;
   metadata?: Record<string, unknown>;
+  runContract?: RunContractMetadataInput;
   executor?: ScheduledExecutorConfig;
   onTaskEvent?: (event: ScheduledTaskEvent) => void | Promise<void>;
 }
@@ -132,6 +139,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     requestId: normalizeOptionalString(input.requestId),
     promptPreview: input.promptPreview ?? input.prompt.slice(0, 200),
     metadata: input.metadata ?? {},
+    runContract: input.runContract,
     status: 'queued',
   });
   await emitTaskEvent(sessionId, 'task.created', created);
@@ -151,6 +159,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       toolRetry: input.toolRetry,
       timeoutMs,
     },
+    runContract: input.runContract,
   });
   running ??= await loadTaskRun(taskRunId);
   if (!running) throw new Error(`Task run disappeared after create: ${taskRunId}`);
@@ -222,6 +231,15 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           onSessionEvent: input.onSessionEvent,
           onTurn: input.onTurn,
           onToolCall: input.onToolCall,
+          onToolCallState: async (transition) => {
+            await persistScheduledToolCallState({
+              transition,
+              sessionId,
+              runSpecId: input.runSpecId,
+              taskRunId,
+            });
+            await input.onToolCallState?.(transition);
+          },
           onModelDelta: input.onModelDelta,
           onCheckpoint: input.onCheckpoint,
         });
@@ -282,6 +300,58 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     linkedAbortCleanup();
     runningTaskControllers.delete(taskRunId);
   }
+}
+
+export async function persistScheduledToolCallState(input: {
+  transition: ToolCallStateTransition;
+  sessionId: string;
+  runSpecId?: string;
+  taskRunId?: string;
+}): Promise<void> {
+  const { transition, sessionId, runSpecId, taskRunId } = input;
+  if (transition.state === 'requested') {
+    await createToolCallState({
+      id: transition.callId,
+      sessionId,
+      runSpecId,
+      taskRunId,
+      turn: transition.turn,
+      toolName: transition.toolName,
+      state: transition.state,
+      inputJson: transition.input,
+      maxAttempts: transition.maxAttempts,
+      idempotent: transition.idempotent,
+      retryPolicy: transition.retryPolicy,
+    });
+    return;
+  }
+
+  const updated = await updateToolCallState(transition.callId, sessionId, {
+    state: normalizeToolCallState(transition.state),
+    outputSummary: transition.outputSummary,
+    error: transition.error ?? null,
+    durationMs: transition.durationMs,
+    attempt: transition.attempt,
+  });
+  if (updated) return;
+
+  await createToolCallState({
+    id: transition.callId,
+    sessionId,
+    runSpecId,
+    taskRunId,
+    turn: transition.turn,
+    toolName: transition.toolName,
+    state: normalizeToolCallState(transition.state),
+    inputJson: transition.input,
+    maxAttempts: transition.maxAttempts,
+    idempotent: transition.idempotent,
+    retryPolicy: transition.retryPolicy,
+  });
+}
+
+function normalizeToolCallState(state: ToolCallStateTransition['state']): ToolCallStateType {
+  return state;
 }
 
 export function cancelScheduledTask(taskRunId: string, reason = 'cancelled'): boolean {

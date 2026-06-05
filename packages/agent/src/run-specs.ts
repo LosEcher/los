@@ -9,6 +9,12 @@
  */
 
 import { getDb } from '@los/infra/db';
+import {
+  normalizeRunContractMetadata,
+  type RunContractMetadata,
+  type RunContractMetadataInput,
+} from './run-contract.js';
+import { seedVerificationRequirementsForRunSpec } from './verification-records.js';
 
 // ── Types ───────────────────────────────────────────────
 
@@ -35,6 +41,7 @@ export interface RunSpecRecord {
   maxLoops: number;
   timeoutMs?: number;
   mcpServers: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
+  runContract?: RunContractMetadata;
   status: RunSpecStatus;
   createdAt: string;
   updatedAt: string;
@@ -61,6 +68,7 @@ export interface CreateRunSpecInput {
   maxLoops?: number;
   timeoutMs?: number;
   mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
+  runContract?: RunContractMetadataInput;
 }
 
 // ── Schema ──────────────────────────────────────────────
@@ -87,10 +95,13 @@ CREATE TABLE IF NOT EXISTS run_specs (
   max_loops INTEGER NOT NULL DEFAULT 20,
   timeout_ms INTEGER,
   mcp_servers_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'created',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_run_specs_session_id ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_status ON run_specs(status);
@@ -113,15 +124,16 @@ export async function ensureRunSpecStore(): Promise<void> {
 export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecRecord> {
   await ensureRunSpecStore();
   const db = getDb();
+  const runContract = normalizeRunContractMetadata(input.runContract);
   const rows = await db.query<RunSpecRow>(
     `
     INSERT INTO run_specs (
       id, session_id, tenant_id, project_id, user_id, node_id,
       request_id, trace_id, prompt, system_prompt, provider, model,
       model_settings_json, workspace_root, tool_mode, allowed_tools_json,
-      tool_retry_json, max_loops, timeout_ms, mcp_servers_json, status
+      tool_retry_json, max_loops, timeout_ms, mcp_servers_json, run_contract_json, status
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20::jsonb, 'created')
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20::jsonb, $21::jsonb, 'created')
     RETURNING *
   `,
     [
@@ -145,9 +157,16 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
       input.maxLoops ?? 20,
       input.timeoutMs ?? null,
       JSON.stringify(input.mcpServers ?? []),
+      JSON.stringify(runContract ?? {}),
     ],
   );
-  return rowToRecord(assertRow(rows.rows[0]));
+  const record = rowToRecord(assertRow(rows.rows[0]));
+  await seedVerificationRequirementsForRunSpec({
+    runSpecId: record.id,
+    sessionId: record.sessionId,
+    requiredChecks: runContract?.requiredChecks,
+  });
+  return record;
 }
 
 export async function loadRunSpec(id: string): Promise<RunSpecRecord | null> {
@@ -218,6 +237,7 @@ type RunSpecRow = {
   max_loops: number;
   timeout_ms: number | null;
   mcp_servers_json: unknown;
+  run_contract_json: unknown;
   status: string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -245,6 +265,7 @@ function rowToRecord(row: RunSpecRow): RunSpecRecord {
     maxLoops: row.max_loops,
     timeoutMs: row.timeout_ms ?? undefined,
     mcpServers: normalizeMCPServers(row.mcp_servers_json),
+    runContract: normalizeRunContractMetadata(row.run_contract_json),
     status: row.status as RunSpecStatus,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),

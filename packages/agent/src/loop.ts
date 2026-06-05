@@ -349,16 +349,20 @@ export async function runAgent(
         });
         throw err;
       }
-      config.onToolCall?.(fn.name, args);
-
-      // Tool call state: requested
-      await config.onToolCallState?.({
-        callId: tc.id, toolName: fn.name, state: 'requested', turn: i + 1,
-        input: args,
-      });
-
       const capability = tools.getCapability(fn.name);
       const toolSource = inferToolSource(capability);
+      config.onToolCall?.(fn.name, args);
+
+      await config.onToolCallState?.({
+        callId: tc.id,
+        toolName: fn.name,
+        state: 'requested',
+        turn: i + 1,
+        input: args,
+        maxAttempts: capability?.retryable ? policy.retry?.maxAttempts : 1,
+        idempotent: capability?.idempotent ?? false,
+        retryPolicy: policy.retry,
+      });
 
       const callEvent = await emitEvent({
         type: 'tool.call',
@@ -411,6 +415,12 @@ export async function runAgent(
         },
       });
 
+      if (decision.allowed) {
+        await config.onToolCallState?.({
+          callId: tc.id, toolName: fn.name, state: 'running', turn: i + 1,
+        });
+      }
+
       const toolStartedAt = Date.now();
       const result = decision.allowed
         ? await withAbort(
@@ -423,12 +433,6 @@ export async function runAgent(
         : { content: '', error: decision.reason };
       const toolDurationMs = Date.now() - toolStartedAt;
 
-      // Tool call state: running → succeeded or failed
-      if (decision.allowed) {
-        await config.onToolCallState?.({
-          callId: tc.id, toolName: fn.name, state: 'running', turn: i + 1,
-        });
-      }
       await config.onToolCallState?.({
         callId: tc.id, toolName: fn.name,
         state: result.error ? 'failed' : 'succeeded',

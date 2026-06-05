@@ -75,6 +75,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       batchKey: normalizeToolString(args.batchKey),
       dependsOnIds: normalizeToolStringArray(args.dependsOnIds),
       metadata: normalizeToolObject(args.metadata),
+      runContract: normalizeToolObject(args.runContract),
     });
     return { content: JSON.stringify(todo, null, 2) };
   }, {
@@ -105,6 +106,10 @@ export function registerTodoTools(registry: ToolRegistry): void {
           batchKey: { type: 'string' },
           dependsOnIds: { type: 'array', items: { type: 'string' } },
           metadata: { type: 'object' },
+          runContract: {
+            type: 'object',
+            description: 'Optional run contract stored as metadata.runContract.',
+          },
         },
         required: ['title'],
       },
@@ -141,6 +146,7 @@ export function registerTodoTools(registry: ToolRegistry): void {
       batchKey: normalizeToolNullableString(args.batchKey),
       dependsOnIds: args.dependsOnIds === undefined ? undefined : normalizeToolStringArray(args.dependsOnIds) ?? [],
       metadata: args.metadata === undefined ? undefined : normalizeToolObject(args.metadata),
+      runContract: args.runContract === undefined ? undefined : normalizeToolObject(args.runContract),
     });
     if (!todo) return { content: '', error: `Todo not found: ${id}` };
     return { content: JSON.stringify(todo, null, 2) };
@@ -170,6 +176,10 @@ export function registerTodoTools(registry: ToolRegistry): void {
           batchKey: { type: ['string', 'null'] },
           dependsOnIds: { type: 'array', items: { type: 'string' } },
           metadata: { type: 'object' },
+          runContract: {
+            type: 'object',
+            description: 'Optional run contract stored as metadata.runContract.',
+          },
         },
         required: ['id'],
       },

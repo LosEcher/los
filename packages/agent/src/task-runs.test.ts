@@ -38,6 +38,11 @@ test('task run lifecycle persists status changes', async () => {
       model: 'deepseek-reasoner',
       promptPreview: 'inspect repo',
       metadata: { project: 'los' },
+      runContract: {
+        mode: 'execution',
+        requiredChecks: ['pnpm --filter @los/agent test'],
+        evidenceRequired: ['task_runs row'],
+      },
     });
     assert.equal(created.status, 'queued');
     assert.equal(created.traceId, `trace-${id}`);
@@ -50,6 +55,16 @@ test('task run lifecycle persists status changes', async () => {
     assert.equal(created.toolMode, 'project-write');
     assert.equal(created.provider, 'deepseek');
     assert.equal(created.model, 'deepseek-reasoner');
+    assert.deepEqual(created.metadata.runContract, {
+      mode: 'execution',
+      editableSurfaces: [],
+      requiredChecks: ['pnpm --filter @los/agent test'],
+      allowedSkippedChecks: [],
+      stopConditions: [],
+      evidenceRequired: ['task_runs row'],
+      externalEvidenceAllowed: [],
+      rawEvidenceProhibited: [],
+    });
 
     const duplicate = await findActiveTaskRunByDedupeKey(`dedupe-${id}`);
     assert.equal(duplicate?.id, id);
@@ -60,10 +75,15 @@ test('task run lifecycle persists status changes', async () => {
       leaseExpiresAt: new Date(Date.now() + 30_000),
       heartbeatAt: new Date(),
       metadata: { stage: 'execute' },
+      runContract: {
+        mode: 'closeout',
+        requiredChecks: ['pnpm check'],
+      },
     });
     assert.equal(running?.status, 'running');
     assert.equal(running?.nodeId, 'node-2');
     assert.equal(running?.metadata.stage, 'execute');
+    assert.equal((running?.metadata.runContract as Record<string, unknown> | undefined)?.mode, 'closeout');
     assert.ok(running?.startedAt);
     assert.ok(running?.heartbeatAt);
     assert.ok(running?.leaseExpiresAt);

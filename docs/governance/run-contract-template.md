@@ -10,6 +10,10 @@ explicit verifier records.
 Use this template for larger `los` work until the fields are stable enough to
 promote into CLI/UI affordances or stricter runtime schema.
 
+Current implementation stores the normalized contract at `metadata.runContract`
+for todos and task runs, and at `run_specs.run_contract_json` for durable run
+intent created through `/chat`.
+
 ## Template
 
 ```text
@@ -102,17 +106,16 @@ Current code already creates a basic `run_specs` row for `/chat`, including
 prompt, provider, model, workspace root, tool mode, allowed tools, retry
 policy, and MCP servers.
 
-The template fields that still need runtime reconciliation are:
+The template fields are now represented by the shared `RunContractMetadata`
+shape. The runtime work that still needs reconciliation is how those fields
+control execution behavior:
 
-1. `mode`;
-2. `goal`;
-3. `required_checks`;
-4. `allowed_skips`;
-5. `stop_conditions`;
-6. `evidence_required`;
-7. `commit_boundary`;
-8. `external_evidence_allowed`;
-9. `raw_evidence_prohibited`.
+1. stream replay cursor behavior;
+2. verification requirement execution;
+3. skipped-check state and risk;
+4. stop-condition enforcement;
+5. commit-boundary reporting;
+6. external evidence redaction and provenance.
 
 Do not require all fields in `/chat` until focused gateway/agent tests and one
 operation smoke prove the workflow.

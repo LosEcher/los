@@ -6,7 +6,8 @@ import type { AddressInfo } from 'node:net';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
 import { upsertExecutorNode } from './executor-nodes.js';
-import { runScheduledAgentTask } from './scheduler.js';
+import { loadToolCallState } from './tool-call-states.js';
+import { persistScheduledToolCallState, runScheduledAgentTask } from './scheduler.js';
 
 test('scheduler uses a verified registry executor when nodeUrls is empty', async () => {
   const config = await loadConfig();
@@ -81,6 +82,73 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
     await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
     await closeServer(server);
+  }
+});
+
+test('scheduler persists tool call state transitions', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-tool-state-${suffix}`;
+  const taskRunId = `task-tool-state-${suffix}`;
+  const runSpecId = `run-tool-state-${suffix}`;
+  const callId = `call-tool-state-${suffix}`;
+
+  try {
+    await persistScheduledToolCallState({
+      sessionId,
+      taskRunId,
+      runSpecId,
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'requested',
+        turn: 1,
+        input: { path: 'README.md' },
+        maxAttempts: 2,
+        idempotent: true,
+        retryPolicy: { maxAttempts: 2 },
+      },
+    });
+    await persistScheduledToolCallState({
+      sessionId,
+      taskRunId,
+      runSpecId,
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'running',
+        turn: 1,
+      },
+    });
+    await persistScheduledToolCallState({
+      sessionId,
+      taskRunId,
+      runSpecId,
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'succeeded',
+        turn: 1,
+        outputSummary: 'ok',
+        durationMs: 12,
+        attempt: 1,
+      },
+    });
+
+    const loaded = await loadToolCallState(callId, sessionId);
+    assert.equal(loaded?.runSpecId, runSpecId);
+    assert.equal(loaded?.taskRunId, taskRunId);
+    assert.equal(loaded?.state, 'succeeded');
+    assert.equal(loaded?.toolName, 'read_file');
+    assert.deepEqual(loaded?.inputJson, { path: 'README.md' });
+    assert.equal(loaded?.outputSummary, 'ok');
+    assert.equal(loaded?.durationMs, 12);
+    assert.equal(loaded?.maxAttempts, 2);
+    assert.equal(loaded?.idempotent, true);
+  } finally {
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
   }
 });
 

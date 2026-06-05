@@ -28,6 +28,7 @@ import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask } from '@los/agent/scheduler';
+import { listLatestProviderCompatEvidence } from '@los/agent';
 import { ensureSessionStore, loadSession, listSessions } from '@los/agent/session';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
 import { getPool } from '@los/infra/db';
@@ -107,9 +108,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   app.get('/onboarding', async () => {
     const report = await discoverAll();
+    const compatEvidence = await listLatestProviderCompatEvidence().catch(() => []);
     return {
       ...report,
-      providers: report.providers.map(sanitizeProviderDiscovery),
+      providers: report.providers.map(provider => sanitizeProviderDiscovery(provider, compatEvidence)),
     };
   });
 
@@ -674,12 +676,26 @@ function parseLiveSessionEventNotification(payload: string | undefined) {
   }
 }
 
-function sanitizeProviderDiscovery(provider: DiscoveredProvider): Record<string, unknown> {
+function sanitizeProviderDiscovery(provider: DiscoveredProvider, compatEvidence: Array<{ provider: string; decision: string; passed: boolean; model?: string; probeId: string; updatedAt: string }>): Record<string, unknown> {
   const { apiKey, ...rest } = provider;
+  const readiness = describeProviderReadiness(provider);
+  const evidence = compatEvidence.filter(item => item.provider === provider.name && item.passed);
+  const verified = evidence.some(item => item.decision === 'verified_advisory' || item.decision === 'required');
+  const promotionState = verified ? 'verified_advisory' : readiness.promotionState;
   return {
     ...rest,
     hasApiKey: typeof apiKey === 'string' && apiKey.length > 0,
-    readiness: describeProviderReadiness(provider),
+    promotionState,
+    compatibilityEvidence: evidence.map(item => ({
+      model: item.model ?? null,
+      probeId: item.probeId,
+      decision: item.decision,
+      updatedAt: item.updatedAt,
+    })),
+    readiness: {
+      ...readiness,
+      promotionState,
+    },
   };
 }
 

@@ -9,6 +9,7 @@ import {
   type CompatibilityRunSummary,
   type CompatibilitySseEvent,
 } from '@los/agent/compat-harness';
+import { recordProviderCompatEvidenceFromSummaryWithDefaultDb } from '@los/agent';
 import { resolveClientPath } from './client-path.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -66,6 +67,7 @@ export async function compatCommand(globalArgs: string[], argv: string[]): Promi
     if (!json) console.log(`[compat:start] ${spec.id}`);
     const summary = await executeCompatibilitySpec(gateway, spec, timeoutMs);
     summaries.push(summary);
+    await recordCompatibilityEvidence(summary, json);
     renderCompatibilitySummary(summary, json);
   }
 
@@ -74,6 +76,16 @@ export async function compatCommand(globalArgs: string[], argv: string[]): Promi
   }
   if (summaries.some(summary => !summary.passed)) {
     process.exitCode = 1;
+  }
+}
+
+async function recordCompatibilityEvidence(summary: CompatibilityRunSummary, json: boolean): Promise<void> {
+  try {
+    await recordProviderCompatEvidenceFromSummaryWithDefaultDb(summary);
+  } catch (err) {
+    if (!json) {
+      console.error(`[compat:evidence:warn] ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 

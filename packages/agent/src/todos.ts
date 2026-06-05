@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb, withDbClient } from '@los/infra/db';
 import { TODO_SCHEMA } from './todo-schema.js';
 import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
+import { mergeRunContractMetadata } from './run-contract.js';
 import type {
   CreateTodoInput,
   ListTodosOptions,
@@ -121,7 +122,9 @@ export async function updateTodo(id: string, input: UpdateTodoInput): Promise<To
   if (!existing) return null;
 
   const nextStatus = normalizeTodoStatus(input.status, existing.status);
-  const metadata = input.metadata ?? existing.metadata;
+  const metadata = input.runContract === undefined
+    ? input.metadata ?? existing.metadata
+    : mergeRunContractMetadata(input.metadata ?? existing.metadata, input.runContract);
   await withDbClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -374,7 +377,7 @@ function normalizeCreateInput(input: CreateTodoInput): Required<Pick<CreateTodoI
     priority: normalizeTodoPriority(input.priority),
     source: normalizeOptionalString(input.source) ?? 'manual',
     dependsOnIds: input.dependsOnIds ? normalizeStringArray(input.dependsOnIds) ?? [] : input.dependsOnIds,
-    metadata: input.metadata ?? {},
+    metadata: mergeRunContractMetadata(input.metadata, input.runContract),
   };
 }
 

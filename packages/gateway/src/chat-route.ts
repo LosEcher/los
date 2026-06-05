@@ -16,7 +16,7 @@ import {
   listRecentSessionEvents,
   type SessionEventRecord,
 } from '@los/agent/session-events';
-import type { CheckpointState } from '@los/agent';
+import type { CheckpointState, RunContractMetadataInput } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
 import {
   completeIdempotencyKey,
@@ -47,6 +47,7 @@ interface ChatRequestBody {
     maxDelayMs?: number;
   };
   mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
+  runContract?: RunContractMetadataInput;
   persistMemory?: boolean;
 }
 
@@ -161,6 +162,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       maxLoops: maxLoops ?? config.agent.maxLoops,
       timeoutMs,
       mcpServers,
+      runContract: body.runContract,
     });
 
     try {
@@ -204,6 +206,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         timeoutMs,
         toolRetry,
         mcpServers,
+        runContract: body.runContract,
         executor: {
           enabled: config.executor.enabled,
           nodeUrls: config.executor.meshNodes,

@@ -1,3 +1,5 @@
+import type { RunContractMetadataInput } from './run-contract.js';
+
 export type TodoKind = 'problem' | 'solution' | 'plan' | 'phase' | 'task' | 'batch';
 export type TodoStatus = 'backlog' | 'ready' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
 export type TodoPriority = 'P0' | 'P1' | 'P2' | 'P3';
@@ -57,6 +59,7 @@ export interface CreateTodoInput {
   batchKey?: string;
   dependsOnIds?: string[];
   metadata?: Record<string, unknown>;
+  runContract?: RunContractMetadataInput;
 }
 
 export interface UpdateTodoInput {
@@ -77,6 +80,7 @@ export interface UpdateTodoInput {
   batchKey?: string | null;
   dependsOnIds?: string[] | null;
   metadata?: Record<string, unknown>;
+  runContract?: RunContractMetadataInput | null;
 }
 
 export interface ListTodosOptions {

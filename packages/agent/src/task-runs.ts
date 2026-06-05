@@ -6,6 +6,7 @@
  */
 
 import { getDb, withDbClient } from '@los/infra/db';
+import { mergeRunContractMetadata, type RunContractMetadataInput } from './run-contract.js';
 
 export type TaskRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
@@ -55,6 +56,7 @@ export interface CreateTaskRunInput {
   model?: string;
   promptPreview: string;
   metadata?: Record<string, unknown>;
+  runContract?: RunContractMetadataInput;
   status?: TaskRunStatus;
   attempt?: number;
 }
@@ -62,6 +64,7 @@ export interface CreateTaskRunInput {
 export interface UpdateTaskRunInput {
   status?: TaskRunStatus;
   metadata?: Record<string, unknown>;
+  runContract?: RunContractMetadataInput | null;
   nodeId?: string | null;
   heartbeatAt?: Date | string | null;
   leaseExpiresAt?: Date | string | null;
@@ -169,7 +172,7 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
       input.status ?? 'queued',
       input.attempt ?? 1,
       input.promptPreview,
-      JSON.stringify(input.metadata ?? {}),
+      JSON.stringify(mergeRunContractMetadata(input.metadata, input.runContract)),
     ],
   );
   return rowToTaskRun(assertRow(rows.rows[0]));
@@ -182,7 +185,9 @@ export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Pr
   if (!existing) return null;
 
   const status = updates.status ?? existing.status;
-  const metadata = updates.metadata ?? existing.metadata;
+  const metadata = updates.runContract === undefined
+    ? updates.metadata ?? existing.metadata
+    : mergeRunContractMetadata(updates.metadata ?? existing.metadata, updates.runContract);
   const nodeId = updates.nodeId === undefined ? null : updates.nodeId;
   const heartbeatAt = updates.heartbeatAt === undefined ? null : updates.heartbeatAt;
   const leaseExpiresAt = updates.leaseExpiresAt === undefined ? null : updates.leaseExpiresAt;
