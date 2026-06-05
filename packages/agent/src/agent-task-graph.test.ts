@@ -13,6 +13,10 @@ import {
   listBlockedAgentTasks,
   updateAgentTaskStatus,
 } from './agent-task-graph.js';
+import {
+  readAgentTaskGraph,
+  getAgentTaskGraphCompletion,
+} from './agent-task-graph-read-model.js';
 
 test('agent task graph claims independent tasks and blocks failed dependencies', async () => {
   const config = await loadConfig();
@@ -115,6 +119,66 @@ test('agent task attempts preserve retry and verifier evidence links', async () 
     assert.deepEqual(attempts[0]?.toolCallStateIds, ['tool-1', 'tool-2']);
     assert.equal(attempts[0]?.verificationRecordId, 'verification-1');
     assert.equal(attempts[1]?.verificationRecordId, 'verification-2');
+  } finally {
+    await cleanupGraph(graphId);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('agent task graph read model reports completion decisions', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const graphId = `graph-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await ensureAgentTaskGraphStore();
+    await createAgentTask({ id: `${graphId}-plan`, graphId, role: 'planner', title: 'Plan work' });
+    await createAgentTask({ id: `${graphId}-exec`, graphId, role: 'executor', title: 'Implement work' });
+    await createAgentTask({ id: `${graphId}-verify`, graphId, role: 'verifier', title: 'Verify work' });
+    await linkAgentTaskDependency({ graphId, taskId: `${graphId}-exec`, dependsOnTaskId: `${graphId}-plan` });
+    await linkAgentTaskDependency({ graphId, taskId: `${graphId}-verify`, dependsOnTaskId: `${graphId}-exec` });
+    await createAgentTaskAttempt({
+      id: `${graphId}-verify-attempt-1`,
+      graphId,
+      taskId: `${graphId}-verify`,
+      attempt: 1,
+      status: 'succeeded',
+      verificationRecordId: 'verification-ok',
+    });
+
+    let completion = await getAgentTaskGraphCompletion(graphId, { requireVerifier: true });
+    assert.equal(completion.status, 'in_progress');
+    assert.deepEqual(completion.readyTaskIds, [`${graphId}-plan`]);
+
+    await updateAgentTaskStatus(`${graphId}-plan`, 'succeeded');
+    await updateAgentTaskStatus(`${graphId}-exec`, 'succeeded');
+    await updateAgentTaskStatus(`${graphId}-verify`, 'succeeded');
+
+    const graph = await readAgentTaskGraph(graphId, { requireVerifier: true });
+    completion = graph.completion;
+    assert.equal(completion.status, 'succeeded');
+    assert.equal(completion.canComplete, true);
+    assert.deepEqual(completion.succeededVerifierTaskIds, [`${graphId}-verify`]);
+    assert.equal(graph.edges.length, 2);
+    assert.equal(graph.attemptsByTaskId[`${graphId}-verify`]?.[0]?.verificationRecordId, 'verification-ok');
+  } finally {
+    await cleanupGraph(graphId);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('agent task graph completion requires verifier when requested', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const graphId = `graph-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await ensureAgentTaskGraphStore();
+    await createAgentTask({ id: `${graphId}-exec`, graphId, role: 'executor', title: 'Implement work' });
+    await updateAgentTaskStatus(`${graphId}-exec`, 'succeeded');
+
+    const completion = await getAgentTaskGraphCompletion(graphId, { requireVerifier: true });
+    assert.equal(completion.status, 'blocked');
+    assert.equal(completion.canComplete, false);
+    assert.equal(completion.reason, 'succeeded verifier task is required for completion');
   } finally {
     await cleanupGraph(graphId);
     await closeDb().catch(() => undefined);

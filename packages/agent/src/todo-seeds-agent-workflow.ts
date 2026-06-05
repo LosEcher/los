@@ -339,10 +339,14 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
       solution: '复用 ADR0012 DAG scheduler 方向，但让 verifier task 可以阻塞完成状态。',
       evidence: [
         'docs/governance/planner-executor-verifier-dag-contract.md',
+        'contracts/agent-task-graph.yaml',
         'packages/agent/src/agent-task-graph.ts',
+        'packages/agent/src/agent-task-graph-read-model.ts',
         'packages/agent/src/agent-task-graph.test.ts',
+        'packages/gateway/src/agent-task-graph-routes.ts',
+        'packages/gateway/src/agent-task-graph-routes.test.ts',
       ],
-      validation: ['parallel independent tasks smoke', 'failed dependency blocks downstream', 'verifier failure blocks completion'],
+      validation: ['parallel independent tasks smoke', 'failed dependency blocks downstream', 'verifier completion gate', 'read-only graph API'],
     },
   },
 ];

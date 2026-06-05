@@ -11,6 +11,7 @@ required_contracts=(
   node-registry.yaml
   node-command.yaml
   artifact-transfer.yaml
+  agent-task-graph.yaml
 )
 
 failures=0
@@ -51,6 +52,7 @@ run_stream="$CONTRACT_DIR/run-stream.yaml"
 node_registry="$CONTRACT_DIR/node-registry.yaml"
 node_command="$CONTRACT_DIR/node-command.yaml"
 artifact_transfer="$CONTRACT_DIR/artifact-transfer.yaml"
+agent_task_graph="$CONTRACT_DIR/agent-task-graph.yaml"
 
 [ -f "$run_spec" ] && {
   require_pattern "$run_spec" 'prompt:' 'prompt field'
@@ -83,6 +85,14 @@ artifact_transfer="$CONTRACT_DIR/artifact-transfer.yaml"
   require_pattern "$artifact_transfer" 'checksum' 'checksum field'
   require_pattern "$artifact_transfer" 'chunk:' 'chunk field'
   require_pattern "$artifact_transfer" 'pathPolicy:' 'pathPolicy field'
+}
+
+[ -f "$agent_task_graph" ] && {
+  require_pattern "$agent_task_graph" 'agent_tasks' 'agent_tasks source'
+  require_pattern "$agent_task_graph" 'task_edges' 'task_edges source'
+  require_pattern "$agent_task_graph" 'task_attempts' 'task_attempts source'
+  require_pattern "$agent_task_graph" '/agent-graphs/\{graphId\}' 'graph read route'
+  require_pattern "$agent_task_graph" 'requireVerifier' 'requireVerifier query'
 }
 
 if [ "$failures" -gt 0 ]; then

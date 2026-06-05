@@ -75,7 +75,10 @@ This contract now has a minimal store/API implementation in
 `packages/agent/src/agent-task-graph.test.ts`.
 
 The completed scope is durable graph state, dependency-aware ready claims,
-failed dependency detection, and retry/verifier evidence links. Runtime
-promotion is still separate work: scheduler integration, editable-surface
-conflict checks, verifier-driven graph completion, and API/UI read models
-should be added only after they can preserve the same evidence boundary.
+failed dependency detection, retry/verifier evidence links, read-only graph
+inspection, and completion decision reporting.
+
+Runtime promotion is still separate work: scheduler integration,
+editable-surface conflict checks, verifier-owned graph completion transitions,
+and UI read models should be added only after they can preserve the same
+evidence boundary.

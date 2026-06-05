@@ -390,10 +390,14 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
       solution: '已增加最小 agent task graph store、dependency claim query 和 task attempt 证据；完整 runtime graph engine 后续单独推进。',
       phase: 'ADR0012 Phase 5',
       evidence: [
+        'contracts/agent-task-graph.yaml',
         'packages/agent/src/agent-task-graph.ts',
+        'packages/agent/src/agent-task-graph-read-model.ts',
         'packages/agent/src/agent-task-graph.test.ts',
+        'packages/gateway/src/agent-task-graph-routes.ts',
+        'packages/gateway/src/agent-task-graph-routes.test.ts',
       ],
-      validation: ['agent task graph tests', 'agent check/test'],
+      validation: ['agent task graph tests', 'gateway graph route tests', 'agent and gateway check/test', 'contract check'],
     },
   },
   {

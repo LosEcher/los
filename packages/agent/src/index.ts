@@ -160,6 +160,15 @@ export {
   type LinkAgentTaskDependencyInput,
 } from './agent-task-graph.js';
 export {
+  getAgentTaskGraphCompletion,
+  readAgentTaskGraph,
+  summarizeAgentTaskGraph,
+  type AgentTaskGraphCompletion,
+  type AgentTaskGraphCompletionOptions,
+  type AgentTaskGraphCompletionStatus,
+  type AgentTaskGraphReadModel,
+} from './agent-task-graph-read-model.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

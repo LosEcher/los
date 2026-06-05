@@ -1,0 +1,51 @@
+contract: los.agent-task-graph
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Read model contract for durable planner/executor/verifier task graphs.
+  The current scope is read-only graph inspection and completion decision
+  reporting; it does not promote the scheduler into a full graph engine.
+type: object
+sourceOfTruth:
+  - agent_tasks
+  - task_edges
+  - task_attempts
+routes:
+  - method: GET
+    path: /agent-graphs/{graphId}
+    response: AgentTaskGraphReadModel
+  - method: GET
+    path: /agent-graphs/{graphId}/completion
+    response: AgentTaskGraphCompletion
+query:
+  requireVerifier:
+    type: boolean
+    description: >
+      When true, completion is blocked until at least one verifier task has
+      succeeded.
+completion:
+  statuses:
+    - empty
+    - in_progress
+    - blocked
+    - failed
+    - succeeded
+  canComplete:
+    type: boolean
+  requiredEvidence:
+    - task status counts
+    - ready task ids
+    - waiting task ids
+    - blocked task ids
+    - verifier task ids
+    - task attempts grouped by task id
+rules:
+  - queued tasks with unmet dependencies cannot be ready
+  - failed or cancelled dependencies block downstream completion
+  - terminal task failure requires retry or operator action
+  - external tool summaries cannot replace task attempts or verification records
+verification:
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - ./tools/check-contracts.sh
