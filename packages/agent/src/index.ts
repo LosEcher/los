@@ -169,6 +169,15 @@ export {
   type AgentTaskGraphReadModel,
 } from './agent-task-graph-read-model.js';
 export {
+  buildExecutionStaticGraph,
+  type BuildExecutionStaticGraphOptions,
+  type ExecutionStaticEdge,
+  type ExecutionStaticEdgeKind,
+  type ExecutionStaticGraph,
+  type ExecutionStaticNode,
+  type ExecutionStaticNodeKind,
+} from './execution-static-graph.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,
