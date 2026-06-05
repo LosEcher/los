@@ -74,6 +74,17 @@ Code, Reasonix, OpenCode, and OMX against current `los` execution gaps and
 deciding which missing capability should become docs, tests, runtime state, or
 a future ADR.
 
+Use `governance/run-contract-template.md` when a larger agent run needs an
+explicit mode, editable scope, required checks, stop conditions, evidence
+requirement, and commit boundary before execution.
+
+Use `governance/toolchain-matrix.md` when deciding which external agent tool is
+appropriate for a task and whether its output can be used only as external
+summary input or needs a future ingestion ADR.
+
+Use `governance/eval-backlog.md` when turning repeated agent failure modes into
+review checklists, tests, harness probes, operation smokes, or runtime metrics.
+
 ## Documentation Rules
 
 1. Keep project-specific runtime contracts in this repo, not in global

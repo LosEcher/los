@@ -220,22 +220,11 @@ reported with exact commands.
 
 ## Validation Contract Template
 
-Before starting a larger task, define:
+Before starting a larger task, use
+`docs/governance/run-contract-template.md`.
 
-```text
-Mode:
-Goal:
-Editable surfaces:
-Owner layer:
-Required checks:
-Allowed skipped checks:
-Stop and ask conditions:
-Commit boundary:
-Evidence to report:
-```
-
-This template should become a UI/CLI/task metadata shape only after the doc
-workflow is stable.
+That template should become a UI/CLI/task metadata shape only after the doc
+workflow is stable and focused agent/gateway tests prove the fields.
 
 ## Toolchain Matrix
 
@@ -253,18 +242,18 @@ Track at least:
 7. when not to use it;
 8. ingestion status: external-only, verified summary, or future adapter.
 
-The first durable artifact can be `docs/governance/toolchain-matrix.md`. A
-runtime ingestion adapter requires a separate ADR and redaction contract.
+The first durable artifact is `docs/governance/toolchain-matrix.md`. A runtime
+ingestion adapter requires a separate ADR and redaction contract.
 
 ## Implementation Mapping
 
 | Goal | Current owner | Next owner |
 | --- | --- | --- |
-| Mode contracts | `docs/governance/agent-workflow-roadmap.md` | future task metadata or CLI/UI field |
-| Completion contract | ADR 0014 + this doc | task/todo metadata |
-| Toolchain matrix | future governance doc | future redacted ingestion adapter ADR |
-| Eval corpus | `docs/governance/periodic-analysis.md` + todos | tests, compat harnesses, operation smokes |
-| Runtime recovery | ADR 0012 | run specs, stream replay, run/tool state |
+| Mode contracts | `docs/governance/agent-workflow-roadmap.md` + `docs/governance/run-contract-template.md` | task/todo metadata, then CLI/UI field if proven |
+| Completion contract | ADR 0014 + `docs/governance/run-contract-template.md` | task/todo metadata |
+| Toolchain matrix | `docs/governance/toolchain-matrix.md` | future redacted ingestion adapter ADR |
+| Eval corpus | `docs/governance/eval-backlog.md` + todos | tests, compat harnesses, operation smokes |
+| Runtime recovery | ADR 0012 + existing `run_specs`/`tool_call_states` modules | stream replay, loop wiring, run/tool/verifier state |
 | Procedural learning | skills/docs/todos | memory compaction with review gate |
 | Execution gap planning | `docs/governance/agent-execution-gap-plan.md` | future ADRs for run specs, tool state, provider evidence, or ingestion |
 

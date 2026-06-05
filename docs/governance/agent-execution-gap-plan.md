@@ -52,20 +52,23 @@ refreshed before turning any row into a required runtime dependency.
 Current state:
 
 1. `/chat` accepts prompt, provider, model, workspace, and tool mode.
-2. `task_runs` records attempts and lifecycle.
-3. `session_events` records audit events.
+2. `/chat` creates a basic `run_specs` row before execution.
+3. `task_runs` records attempts and lifecycle.
+4. `session_events` records audit events.
 
 Gap:
 
-There is no durable `run_spec` that states the intended work before execution:
-mode, goal, workspace, allowed tools, required checks, stop conditions,
-verification policy, expected evidence, and commit boundary.
+The current `run_specs` row captures execution parameters, but it does not yet
+state the full operator contract before execution: mode, goal, required checks,
+stop conditions, verification policy, expected evidence, and commit boundary.
 
 Supplement:
 
-1. Add a doc-first `Run Contract` template to governance docs.
-2. Add a `run_specs` schema only after the template stabilizes.
-3. Make `/chat` create or link to a run spec before execution.
+1. Use `run-contract-template.md` as the doc-first source for operator
+   contract fields.
+2. Add contract metadata to todo/task records first.
+3. Reconcile the existing `run_specs` schema and `/chat` input mapping after
+   the template stabilizes.
 
 Minimum fields:
 
@@ -113,15 +116,17 @@ Current state:
 1. The agent loop emits tool lifecycle events.
 2. Tool registry enforces read-only/project-write/all policies.
 3. Tool retry exists in policy form.
+4. `tool_call_states` already has CRUD and schema support.
 
 Gap:
 
-A tool call does not yet have a durable state record that can drive retry,
-resume, cancellation, or verifier decisions.
+The durable table exists, but the agent loop and scheduler do not yet write tool
+state transitions that can drive retry, resume, cancellation, or verifier
+decisions.
 
 Supplement:
 
-1. Add a `tool_call_states` table after `run_specs`.
+1. Wire `tool_call_states` into the loop and scheduler.
 2. Record requested, approved, denied, running, succeeded, failed, retrying,
    and skipped states.
 3. Attach input hash, output summary, duration, attempt, retry policy, and
@@ -170,7 +175,7 @@ safe to compare or ingest.
 
 Supplement:
 
-1. Create `docs/governance/toolchain-matrix.md`.
+1. Maintain `docs/governance/toolchain-matrix.md`.
 2. Track each tool's role, model route, permission surface, memory/transcript
    location, evidence quality, when to use it, when not to use it, and ingestion
    status.
@@ -235,6 +240,7 @@ Deliverables:
 2. `toolchain-matrix.md`.
 3. `eval-backlog.md` with 20-50 narrow cases.
 4. Run contract template finalized in docs.
+5. Todo seed entries with execution order and dependencies.
 
 Validation:
 
@@ -250,7 +256,8 @@ Deliverables:
 
 1. Add run contract fields to todo/task metadata.
 2. Add CLI/UI affordance for mode, required checks, and stop conditions.
-3. Keep schema optional until operation smokes prove the workflow.
+3. Keep runtime schema changes optional until operation smokes prove the
+   workflow.
 
 Validation:
 
@@ -264,10 +271,10 @@ Timeframe: ADR 0012 Phase 3-4.
 
 Deliverables:
 
-1. `run_specs`.
-2. `run_state_events`.
-3. `tool_call_states`.
-4. verification requirements and skipped-check records.
+1. Reconcile existing `run_specs` with operator contract fields.
+2. Add stream replay read model and cursor contract.
+3. Wire existing `tool_call_states` into agent execution.
+4. Add verification requirements and skipped-check records.
 
 Validation:
 
@@ -312,11 +319,13 @@ Validation:
 
 ## Immediate Next Work
 
-1. Add `toolchain-matrix.md` with current known surfaces and evidence classes.
-2. Convert the highest-risk eval families into `eval-backlog.md`.
-3. Add a small operation smoke for the current live event push path:
+1. Add run contract fields to todo/task metadata.
+2. Reconcile the existing `run_specs` implementation with operator contract
+   fields and replay requirements.
+3. Wire `tool_call_states` into the agent loop and scheduler.
+4. Add a small operation smoke for the current live event push path:
    `/chat` -> `session_events` -> PostgreSQL notify -> EventSource update.
-4. Decide whether `los provider promote` should remain instructional only or
+5. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
-5. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
+6. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.
