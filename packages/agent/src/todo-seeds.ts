@@ -378,7 +378,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     title: '在 run spec 和状态机稳定后引入 DAG scheduler',
     description: '新增 agent_tasks、task_edges、task_attempts，按依赖、优先级、成本、置信度和验证状态调度可并行任务。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P2',
     source: 'analysis-2026-06-01',
     stageId: 'run-orchestration',
@@ -387,8 +387,13 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     dedupeKey: 'los:todo:dag-scheduler',
     metadata: {
       problem: '当前执行是单个 scheduled agent run，无法表达真实任务依赖和并行验证。',
-      solution: '只在 durable run spec、state transition 和 tool state 可验证后增加最小 DAG。',
+      solution: '已增加最小 agent task graph store、dependency claim query 和 task attempt 证据；完整 runtime graph engine 后续单独推进。',
       phase: 'ADR0012 Phase 5',
+      evidence: [
+        'packages/agent/src/agent-task-graph.ts',
+        'packages/agent/src/agent-task-graph.test.ts',
+      ],
+      validation: ['agent task graph tests', 'agent check/test'],
     },
   },
   {

@@ -6,11 +6,12 @@ The current `los` runtime now has stronger evidence surfaces for run contracts,
 run specs, tool call state, verification records, provider compatibility
 evidence, eval backlog checks, and redacted external summaries. That makes a
 planner/executor/verifier split easier to reason about, but it does not yet
-mean a DAG scheduler exists.
+mean a full runtime graph engine exists.
 
-ADR 0012 keeps DAG scheduling in Phase 5. The current blocking dependency is
-`todo-los-dag-scheduler`, which still needs durable `agent_tasks`,
-`task_edges`, and `task_attempts` before graph execution can be runtime-owned.
+ADR 0012 keeps DAG scheduling in Phase 5. The current Phase 5 minimum is a
+durable graph store with `agent_tasks`, `task_edges`, `task_attempts`, ready
+task claiming, failed dependency blocking, and attempt evidence links. A full
+runtime graph engine remains a later promotion step.
 
 ## Contract
 
@@ -51,11 +52,12 @@ Required graph state:
 
 Stop before runtime implementation when any of these are true:
 
-1. `agent_tasks`, `task_edges`, and `task_attempts` do not exist.
-2. tool state cannot be linked to a graph task.
-3. verification records cannot block completion.
-4. task ownership or editable surfaces are unclear.
-5. a graph would need raw external transcript data.
+1. tool state cannot be linked to a graph task.
+2. verification records cannot block completion.
+3. task ownership or editable surfaces are unclear.
+4. a graph would need raw external transcript data.
+5. graph completion would rely on peer-chat output instead of durable task
+   status, task attempts, tool state, and verification evidence.
 
 ## Minimum Tests Before Runtime Promotion
 
@@ -68,5 +70,12 @@ Stop before runtime implementation when any of these are true:
 
 ## Current Status
 
-This contract is a design input. Runtime implementation remains blocked by
-`todo-los-dag-scheduler`.
+This contract now has a minimal store/API implementation in
+`packages/agent/src/agent-task-graph.ts`, with focused tests in
+`packages/agent/src/agent-task-graph.test.ts`.
+
+The completed scope is durable graph state, dependency-aware ready claims,
+failed dependency detection, and retry/verifier evidence links. Runtime
+promotion is still separate work: scheduler integration, editable-surface
+conflict checks, verifier-driven graph completion, and API/UI read models
+should be added only after they can preserve the same evidence boundary.

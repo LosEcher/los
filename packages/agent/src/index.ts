@@ -139,6 +139,27 @@ export {
   type ExternalToolSummaryInput,
 } from './external-tool-summary.js';
 export {
+  claimReadyAgentTasks,
+  createAgentTask,
+  createAgentTaskAttempt,
+  ensureAgentTaskGraphStore,
+  linkAgentTaskDependency,
+  listAgentTaskAttempts,
+  listAgentTasksForGraph,
+  listBlockedAgentTasks,
+  updateAgentTaskStatus,
+  type AgentTaskAttemptRecord,
+  type AgentTaskAttemptStatus,
+  type AgentTaskEdgeRecord,
+  type AgentTaskRecord,
+  type AgentTaskRole,
+  type AgentTaskStatus,
+  type ClaimReadyAgentTasksInput,
+  type CreateAgentTaskAttemptInput,
+  type CreateAgentTaskInput,
+  type LinkAgentTaskDependencyInput,
+} from './agent-task-graph.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

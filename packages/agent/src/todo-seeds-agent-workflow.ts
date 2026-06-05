@@ -327,7 +327,7 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
     title: '在状态可观测后设计 planner/executor/verifier DAG',
     description: '等 run spec、tool state、verification state 和 eval 指标可查询后，再把 planner、executor、verifier 作为最小 DAG 节点引入。',
     kind: 'task',
-    status: 'blocked',
+    status: 'done',
     priority: 'P2',
     source: 'analysis-2026-06-05',
     stageId: 'agent-workflow-harness',
@@ -337,9 +337,11 @@ export const LOS_AGENT_WORKFLOW_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '多 agent 协作如果早于 run/tool/verification state，会变成不可恢复的 peer chat。',
       solution: '复用 ADR0012 DAG scheduler 方向，但让 verifier task 可以阻塞完成状态。',
-      evidence: ['docs/governance/planner-executor-verifier-dag-contract.md'],
-      blockedBy: 'todo-los-dag-scheduler',
-      blockReason: 'DAG runtime still needs durable agent_tasks, task_edges, and task_attempts before planner/executor/verifier nodes can execute safely.',
+      evidence: [
+        'docs/governance/planner-executor-verifier-dag-contract.md',
+        'packages/agent/src/agent-task-graph.ts',
+        'packages/agent/src/agent-task-graph.test.ts',
+      ],
       validation: ['parallel independent tasks smoke', 'failed dependency blocks downstream', 'verifier failure blocks completion'],
     },
   },
