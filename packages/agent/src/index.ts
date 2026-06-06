@@ -352,8 +352,13 @@ export {
   listSkills,
   deleteSkill,
   incrementSkillUsage,
+  skillDirForScope,
+  syncSkillsToDir,
+  loadSkillsFromDir,
   type SkillRecord,
   type SkillRunMode,
+  type SkillScope,
+  type SkillLayer,
   type UpsertSkillInput,
 } from './skills.js';
 export {
@@ -363,10 +368,14 @@ export {
   listRules,
   updateRuleStatus,
   deleteRule,
+  ruleDirForScope,
+  syncRulesToDir,
+  loadRulesFromDir,
   type RuleRecord,
   type RuleScope,
   type RuleSeverity,
   type RuleEnforcementMode,
   type RuleStatus,
+  type RuleLayer,
   type UpsertRuleInput,
 } from './rules.js';

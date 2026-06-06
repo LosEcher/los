@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
@@ -10,7 +10,10 @@ import {
   RotateCcw,
   Search,
   Send,
+  SlidersHorizontal,
   Trash2,
+  Upload,
+  X,
 } from 'lucide-react';
 import {
   deleteJson,
@@ -32,6 +35,7 @@ import {
   type SessionObservability,
   type SessionSummary,
   type TaskRun,
+  type TodoItem,
 } from './api';
 import {
   DataTable,
@@ -49,15 +53,56 @@ export function SessionsPage({
   selectedSessionId,
   onSelectSession,
   onContinueSession,
+  onBranchSession,
+  onSelectTodo,
 }: {
   selectedSessionId: string | null;
   onSelectSession: (id: string) => void;
   onContinueSession: (id: string) => void;
+  onBranchSession: (id: string) => void;
+  onSelectTodo: (id: string) => void;
 }) {
+  const [search, setSearch] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const sessions = useQuery({
     queryKey: ['sessions'],
     queryFn: () => getJson<SessionSummary[]>('/sessions'),
     refetchInterval: 12_000,
+  });
+
+  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const res = await postJson<{ ok?: boolean; error?: string; id?: string }>('/sessions/import', data);
+      if (res.ok) {
+        setImportMessage(`Imported ${res.id ?? 'session'}`);
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      } else {
+        setImportMessage(res.error ?? 'Import failed');
+      }
+    } catch (err: any) {
+      setImportMessage(err?.message ?? 'Import failed');
+    } finally {
+      setImporting(false);
+      event.target.value = '';
+    }
+  }
+
+  const filtered = (sessions.data ?? []).filter(session => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      session.id.toLowerCase().includes(q) ||
+      (metadataText(session.metadata.provider) ?? '').toLowerCase().includes(q) ||
+      (metadataText(session.metadata.model) ?? '').toLowerCase().includes(q)
+    );
   });
 
   return (
@@ -68,29 +113,46 @@ export function SessionsPage({
             <h2>Sessions</h2>
             <p>Read-only persisted run list.</p>
           </div>
-          <RefreshQueryButton queryKey={['sessions']} />
+          <div className="toolbar">
+            <div className="search-box">
+              <Search size={14} />
+              <input value={search} onChange={event => setSearch(event.target.value)} placeholder="filter sessions" />
+            </div>
+            <label className="ghost-btn" title="Import session from JSON file">
+              <input type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportFile} disabled={importing} />
+              <Upload size={14} /> {importing ? 'importing...' : 'import'}
+            </label>
+            <RefreshQueryButton queryKey={['sessions']} />
+            {importMessage ? <span className="mono-chip">{importMessage}</span> : null}
+          </div>
         </div>
         <DataTable
           loading={sessions.isLoading}
           empty="No sessions found."
-          rows={sessions.data ?? []}
-          renderRow={session => (
+          rows={filtered}
+          renderRow={session => {
+            const branchFrom = metadataText(session.metadata.branchFrom);
+            return (
             <button
               type="button"
               className="record-row session-row"
               data-active={selectedSessionId === session.id}
               onClick={() => onSelectSession(session.id)}
             >
-              <span className="row-title">{session.id}</span>
+              <span className="row-title">
+                {branchFrom ? <span title={`branched from ${branchFrom}`}><GitGraph size={13} /></span> : null}
+                {session.id}
+              </span>
               <span>{formatDate(session.updatedAt)}</span>
               <span>{metadataText(session.metadata.provider) ?? 'provider?'}</span>
               <span>{metadataText(session.metadata.model) ?? 'model?'}</span>
               <span>{metadataText(session.metadata.toolMode) ?? 'mode?'}</span>
             </button>
-          )}
+            );
+          }}
         />
       </div>
-      <SessionInspector sessionId={selectedSessionId} onContinueSession={onContinueSession} />
+      <SessionInspector sessionId={selectedSessionId} onContinueSession={onContinueSession} onBranchSession={onBranchSession} onSelectTodo={onSelectTodo} />
     </section>
   );
 }
@@ -98,9 +160,13 @@ export function SessionsPage({
 function SessionInspector({
   sessionId,
   onContinueSession,
+  onBranchSession,
+  onSelectTodo,
 }: {
   sessionId: string | null;
   onContinueSession: (id: string) => void;
+  onBranchSession: (id: string) => void;
+  onSelectTodo: (id: string) => void;
 }) {
   const detail = useQuery({
     queryKey: ['session', sessionId],
@@ -117,6 +183,15 @@ function SessionInspector({
     queryFn: () => getJson<SessionObservability>(`/sessions/${sessionId}/observability`),
     enabled: Boolean(sessionId),
   });
+  const relatedTodos = useQuery({
+    queryKey: ['session-related-todos', sessionId, detail.data?.metadata],
+    queryFn: async () => {
+      const urls = buildRelatedTodoUrls(sessionId, detail.data?.metadata ?? {});
+      const batches = await Promise.all(urls.map(url => getJson<TodoItem[]>(url)));
+      return dedupeTodos(batches.flat());
+    },
+    enabled: Boolean(sessionId && detail.data),
+  });
 
   if (!sessionId) {
     return <div className="panel inspector"><EmptyText text="Select a session to inspect events and observability." /></div>;
@@ -126,9 +201,18 @@ function SessionInspector({
     <aside className="panel inspector">
       <div className="panel-head compact">
         <h2>Session Detail</h2>
-        <button className="ghost-btn" type="button" onClick={() => onContinueSession(sessionId)}>
-          <Send size={14} /> continue
-        </button>
+        <div className="toolbar">
+          <button className="ghost-btn" type="button" onClick={() => onContinueSession(sessionId)}>
+            <Send size={14} /> continue
+          </button>
+          <button className="ghost-btn" type="button" onClick={() => onBranchSession(sessionId)} title="Branch from this session into a new one">
+            <GitGraph size={14} /> branch
+          </button>
+          <button className="ghost-btn" type="button" onClick={() => exportSession(sessionId)}>
+            <Copy size={14} /> export
+          </button>
+          <DeleteSessionButton sessionId={sessionId} />
+        </div>
       </div>
       <span className="mono-chip">{sessionId}</span>
       {detail.isLoading ? <EmptyText text="Loading session..." /> : null}
@@ -139,6 +223,12 @@ function SessionInspector({
           <Fact label="tool mode" value={metadataText(detail.data.metadata.toolMode) ?? 'unknown'} />
           <Fact label="workspace" value={metadataText(detail.data.metadata.workspaceRoot) ?? 'default'} />
           <Fact label="task" value={metadataText(detail.data.metadata.taskRunId) ?? 'none'} />
+          {metadataText(detail.data.metadata.branchFrom) ? (
+            <Fact label="branch from" value={`${metadataText(detail.data.metadata.branchFrom)}${metadataText(detail.data.metadata.branchAtTurn) ? ` @ turn ${metadataText(detail.data.metadata.branchAtTurn)}` : ''}`} />
+          ) : null}
+          {metadataText(detail.data.metadata.resumed) === 'true' || detail.data.metadata.resumeMessageCount ? (
+            <Fact label="resumed" value={`${detail.data.metadata.resumeMessageCount ?? '?'} prior msgs`} />
+          ) : null}
         </div>
       ) : null}
       {observability.data ? (
@@ -167,17 +257,59 @@ function SessionInspector({
           </div>
         ))}
       </div>
+      <div className="section-divider">
+        <div className="mini-timeline-head">
+          <strong>Related Todos</strong>
+          <span>{String(relatedTodos.data?.length ?? 0)}</span>
+        </div>
+        {(relatedTodos.data ?? []).length === 0 ? (
+          <EmptyText text="No linked todos found." />
+        ) : relatedTodos.data!.slice(0, 8).map(todo => (
+          <button className="record-row compact-record" type="button" key={todo.id} onClick={() => onSelectTodo(todo.id)}>
+            <span className="row-title">{todo.title}</span>
+            <span className={`status-text ${todo.status}`}>{todo.status}</span>
+            <span>{todo.taskRunId ?? todo.traceId ?? 'linked'}</span>
+          </button>
+        ))}
+      </div>
     </aside>
   );
+}
+
+function buildRelatedTodoUrls(sessionId: string | null, metadata: Record<string, unknown>): string[] {
+  const filters: Array<[string, string | null]> = [
+    ['sessionId', sessionId],
+    ['taskRunId', metadataText(metadata.taskRunId)],
+    ['traceId', metadataText(metadata.traceId)],
+    ['requestId', metadataText(metadata.requestId)],
+  ];
+  const urls: string[] = [];
+  for (const [key, value] of filters) {
+    if (!value) continue;
+    const query = new URLSearchParams({ [key]: value, includeArchived: 'true', limit: '50' });
+    urls.push(`/todos?${query.toString()}`);
+  }
+  return Array.from(new Set(urls));
+}
+
+function dedupeTodos(todos: TodoItem[]): TodoItem[] {
+  const byId = new Map<string, TodoItem>();
+  for (const todo of todos) byId.set(todo.id, todo);
+  return [...byId.values()];
 }
 
 export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) => void }) {
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showRunSpecs, setShowRunSpecs] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('');
   const tasks = useQuery({
-    queryKey: ['tasks'],
-    queryFn: () => getJson<TaskRun[]>('/tasks'),
+    queryKey: ['tasks', statusFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      return getJson<TaskRun[]>(`/tasks?${params.toString()}`);
+    },
     refetchInterval: 8_000,
   });
   const runSpecs = useQuery({
@@ -201,6 +333,14 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
             <p>Scheduler records above chat sessions. Cancel is available only for active tasks.</p>
           </div>
           <div className="toolbar">
+            <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+              <option value="">all status</option>
+              <option value="queued">queued</option>
+              <option value="running">running</option>
+              <option value="succeeded">succeeded</option>
+              <option value="failed">failed</option>
+              <option value="cancelled">cancelled</option>
+            </select>
             <button className={`ghost-btn ${showRunSpecs ? 'active' : ''}`} type="button" onClick={() => setShowRunSpecs(prev => !prev)}>
               <GitGraph size={14} /> run specs
             </button>
@@ -355,6 +495,7 @@ export function MemoryPage() {
   const [scope, setScope] = useState('project');
   const [memoryLayer, setMemoryLayer] = useState('semantic');
   const [promotable, setPromotable] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const memory = useQuery({
     queryKey: ['memory', query, kindFilter, sourceFilter, scopeFilter, layerFilter, archivedFilter, projectFilter, tagFilter],
     queryFn: () => {
@@ -443,6 +584,19 @@ export function MemoryPage() {
     });
   };
 
+  const activeFilterCount = [kindFilter, sourceFilter, scopeFilter, layerFilter, archivedFilter !== 'false' ? archivedFilter : '', projectFilter.trim(), tagFilter.trim()].filter(Boolean).length;
+
+  function clearFilters() {
+    setQuery('');
+    setKindFilter('');
+    setSourceFilter('');
+    setScopeFilter('');
+    setLayerFilter('');
+    setArchivedFilter('false');
+    setProjectFilter('');
+    setTagFilter('');
+  }
+
   return (
     <section className="panel-grid memory-grid">
       <div className="panel">
@@ -452,52 +606,67 @@ export function MemoryPage() {
             <p>Classify observations by scope, memory layer, project, and archive state.</p>
           </div>
           <div className="toolbar">
+            <div className="search-box">
+              <Search size={14} />
+              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="search memory" />
+            </div>
+            <div className="filter-toggle">
+              <button className="ghost-btn" type="button" onClick={() => setShowFilters(prev => !prev)}>
+                <SlidersHorizontal size={14} /> filters
+              </button>
+              {activeFilterCount > 0 ? <span className="filter-badge">{activeFilterCount}</span> : null}
+            </div>
+            {activeFilterCount > 0 ? (
+              <button className="ghost-btn" type="button" onClick={clearFilters}>
+                <X size={14} /> clear
+              </button>
+            ) : null}
             <button className="ghost-btn" type="button" disabled={sync.isPending || !workspace.data?.workspaceRoot} onClick={() => sync.mutate()}>
               <FileText size={14} /> sync md
             </button>
             <RefreshQueryButton queryKey={['memory']} />
           </div>
         </div>
-        <div className="toolbar memory-toolbar">
-          <div className="search-box">
-            <Search size={14} />
-            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="search memory" />
+        <div className={`filter-bar ${showFilters ? '' : 'collapsed'}`}>
+          <div className="filter-row">
+            <select value={kindFilter} onChange={event => setKindFilter(event.target.value)}>
+              <option value="">all kinds</option>
+              <option value="note">note</option>
+              <option value="fact">fact</option>
+              <option value="rule">rule</option>
+              <option value="decision">decision</option>
+            </select>
+            <select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}>
+              <option value="">all sources</option>
+              <option value="user">user</option>
+              <option value="agent">agent</option>
+              <option value="system">system</option>
+            </select>
+            <select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}>
+              <option value="">all scopes</option>
+              <option value="global">global</option>
+              <option value="workspace">workspace</option>
+              <option value="project">project</option>
+              <option value="session">session</option>
+            </select>
           </div>
-          <select value={kindFilter} onChange={event => setKindFilter(event.target.value)}>
-            <option value="">all kinds</option>
-            <option value="note">note</option>
-            <option value="fact">fact</option>
-            <option value="rule">rule</option>
-            <option value="decision">decision</option>
-          </select>
-          <select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}>
-            <option value="">all sources</option>
-            <option value="user">user</option>
-            <option value="agent">agent</option>
-            <option value="system">system</option>
-          </select>
-          <select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}>
-            <option value="">all scopes</option>
-            <option value="global">global</option>
-            <option value="workspace">workspace</option>
-            <option value="project">project</option>
-            <option value="session">session</option>
-          </select>
-          <select value={layerFilter} onChange={event => setLayerFilter(event.target.value)}>
-            <option value="">all layers</option>
-            <option value="working">working</option>
-            <option value="episodic">episodic</option>
-            <option value="semantic">semantic</option>
-            <option value="procedural">procedural</option>
-            <option value="preference">preference</option>
-          </select>
-          <select value={archivedFilter} onChange={event => setArchivedFilter(event.target.value)}>
-            <option value="">archive any</option>
-            <option value="false">active</option>
-            <option value="true">archived</option>
-          </select>
-          <input value={projectFilter} onChange={event => setProjectFilter(event.target.value)} placeholder="project id" />
-          <input value={tagFilter} onChange={event => setTagFilter(event.target.value)} placeholder="tag" />
+          <div className="filter-row">
+            <select value={layerFilter} onChange={event => setLayerFilter(event.target.value)}>
+              <option value="">all layers</option>
+              <option value="working">working</option>
+              <option value="episodic">episodic</option>
+              <option value="semantic">semantic</option>
+              <option value="procedural">procedural</option>
+              <option value="preference">preference</option>
+            </select>
+            <select value={archivedFilter} onChange={event => setArchivedFilter(event.target.value)}>
+              <option value="">archive any</option>
+              <option value="false">active</option>
+              <option value="true">archived</option>
+            </select>
+            <input value={projectFilter} onChange={event => setProjectFilter(event.target.value)} placeholder="project id" />
+            <input value={tagFilter} onChange={event => setTagFilter(event.target.value)} placeholder="tag" />
+          </div>
         </div>
         <div className="memory-list">
           {memory.isLoading ? <EmptyText text="Loading memory..." /> : null}
@@ -885,6 +1054,45 @@ function normalizeEnvName(value: string): string {
 
 function sanitizeProviderId(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+async function exportSession(sessionId: string) {
+  const detail = await getJson<SessionDetail>(`/sessions/${sessionId}`);
+  const blob = new Blob([JSON.stringify(detail, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `los-session-${sessionId}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function DeleteSessionButton({ sessionId }: { sessionId: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const queryClient = useQueryClient();
+
+  if (confirming) {
+    return (
+      <span className="inline-confirm">
+        <button className="ghost-btn danger" type="button" onClick={async () => {
+          await deleteJson(`/sessions/${sessionId}`);
+          setConfirming(false);
+          void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        }}>
+          <Trash2 size={14} /> confirm delete
+        </button>
+        <button className="ghost-btn" type="button" onClick={() => setConfirming(false)}>
+          <X size={14} />
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <button className="ghost-btn" type="button" onClick={() => setConfirming(true)} title="Delete this session">
+      <Trash2 size={14} />
+    </button>
+  );
 }
 
 function metadataText(value: unknown): string | null {

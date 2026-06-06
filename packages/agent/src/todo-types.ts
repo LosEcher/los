@@ -88,6 +88,13 @@ export interface ListTodosOptions {
   projectId?: string;
   status?: TodoStatus;
   kind?: TodoKind;
+  stageId?: string;
+  source?: string;
+  traceId?: string;
+  requestId?: string;
+  taskRunId?: string;
+  sessionId?: string;
+  batchKey?: string;
   limit?: number;
   includeArchived?: boolean;
 }

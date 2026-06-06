@@ -317,6 +317,8 @@ export type LogsResponse = {
 export type ChatPayload = {
   prompt: string;
   sessionId?: string;
+  branchFrom?: string;
+  branchAtTurn?: number;
   systemPrompt?: string;
   provider?: string;
   model?: string;
@@ -325,9 +327,14 @@ export type ChatPayload = {
   toolMode: ToolMode;
   allowedTools?: string[];
   maxLoops?: number;
+  traceId?: string;
+  dedupeKey?: string;
   timeoutMs?: number;
   toolRetry?: ToolRetry;
   mcpServers?: MCPServerPayload[];
+  runContract?: Record<string, unknown>;
+  persistMemory?: boolean;
+  todoId?: string;
 };
 
 export type ToolRetry = {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
@@ -16,7 +16,7 @@ import {
   TerminalSquare,
   Zap,
 } from 'lucide-react';
-import { getJson, type Health } from './api';
+import { getJson, type Health, type TodoItem } from './api';
 import {
   MemoryPage,
   ProvidersPage,
@@ -74,9 +74,28 @@ const NAV: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
 ];
 
+function pageFromHash(): PageId {
+  const raw = window.location.hash.replace(/^#/, '');
+  return NAV.find(n => n.id === raw)?.id ?? 'chat';
+}
+
 export function App() {
-  const [page, setPage] = useState<PageId>('chat');
+  const [page, setPage] = useState<PageId>(pageFromHash);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
+  const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
+  const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onHashChange = () => setPage(pageFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const navigate = (id: PageId) => {
+    setPage(id);
+    window.location.hash = id;
+  };
   const health = useQuery({
     queryKey: ['health'],
     queryFn: () => getJson<Health>('/health'),
@@ -86,7 +105,23 @@ export function App() {
   const active = NAV.find(item => item.id === page) ?? NAV[0]!;
   const continueSession = (id: string) => {
     setSelectedSessionId(id);
-    setPage('chat');
+    setBranchFromSession(null);
+    navigate('chat');
+  };
+  const branchSession = (id: string) => {
+    setSelectedSessionId(null);
+    setBranchFromSession(id);
+    navigate('chat');
+  };
+  const openTodo = (id: string) => {
+    setSelectedTodoId(id);
+    navigate('todos');
+  };
+  const runTodo = (todo: TodoItem) => {
+    setSelectedTodoId(todo.id);
+    setActiveTodoContext(todo);
+    setSelectedSessionId(todo.sessionId ?? null);
+    navigate('chat');
   };
 
   return (
@@ -109,7 +144,7 @@ export function App() {
                 type="button"
                 className="nav-item"
                 data-active={page === item.id}
-                onClick={() => setPage(item.id)}
+                onClick={() => navigate(item.id)}
               >
                 <Icon size={16} />
                 <span>{item.label}</span>
@@ -142,9 +177,9 @@ export function App() {
           </div>
         </header>
 
-        {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} />}
-        {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} />}
-        {page === 'todos' && <TodosPage />}
+        {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} branchFromSession={branchFromSession} onBranchConsumed={() => setBranchFromSession(null)} activeTodoContext={activeTodoContext} onTodoContextClear={() => setActiveTodoContext(null)} />}
+        {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} onBranchSession={branchSession} onSelectTodo={openTodo} />}
+        {page === 'todos' && <TodosPage selectedTodoId={selectedTodoId} onTodoSelect={setSelectedTodoId} onRunTodo={runTodo} onSelectSession={continueSession} />}
         {page === 'tasks' && <TasksPage onSelectSession={continueSession} />}
         {page === 'memory' && <MemoryPage />}
         {page === 'providers' && <ProvidersPage />}

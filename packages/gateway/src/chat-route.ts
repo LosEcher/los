@@ -4,7 +4,9 @@ import type { Config } from '@los/infra/config';
 import { runScheduledAgentTask } from '@los/agent/scheduler';
 import { normalizeModelSettings, type ModelSettings } from '@los/agent/model-settings';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
+import type { Message } from '@los/agent';
 import { listTaskRunsForSession, type TaskRunRecord } from '@los/agent/task-runs';
+import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
 import {
   ensureRunSpecStore,
   createRunSpec,
@@ -31,6 +33,8 @@ type ToolMode = 'all' | 'project-write' | 'read-only';
 interface ChatRequestBody {
   prompt: string;
   sessionId?: string;
+  branchFrom?: string;
+  branchAtTurn?: number;
   systemPrompt?: string;
   provider?: string;
   model?: string;
@@ -50,6 +54,7 @@ interface ChatRequestBody {
   mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
   runContract?: RunContractMetadataInput;
   persistMemory?: boolean;
+  todoId?: string;
 }
 
 export function registerChatRoute(app: FastifyInstance, config: Config, defaultWorkspaceRoot: string): void {
@@ -72,6 +77,11 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     const toolRetry = normalizeToolRetry(body.toolRetry);
     const mcpServers = normalizeMCPServers(body.mcpServers);
     const persistMemory = body.persistMemory === true;
+    const boundTodoId = normalizeOptionalString(body.todoId);
+    const branchFrom = normalizeOptionalString(body.branchFrom);
+    const branchAtTurn = typeof body.branchAtTurn === 'number' && body.branchAtTurn > 0
+      ? Math.floor(body.branchAtTurn)
+      : undefined;
 
     if (!prompt) {
       return reply.status(400).send({ error: 'prompt is required' });
@@ -131,13 +141,43 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    const sid = sessionId ?? `session-${Date.now()}`;
+    // Branching: copy parent session messages into a new session
+    let branchSourceMessages: Message[] | null = null;
+    let branchParentForEvent: Awaited<ReturnType<typeof loadSession>> | null = null;
+    if (branchFrom) {
+      const branchParent = await loadSession(branchFrom);
+      if (!branchParent) {
+        send('error', { message: `Branch source session not found: ${branchFrom}` });
+        reply.raw.end();
+        return;
+      }
+      // Filter messages to branch point if specified
+      if (branchAtTurn && branchAtTurn > 0) {
+        let assistantCount = 0;
+        const filtered: Message[] = [];
+        for (const msg of branchParent.messages) {
+          if (msg.role === 'assistant') {
+            if (assistantCount >= branchAtTurn) break;
+            assistantCount++;
+          }
+          filtered.push(msg);
+        }
+        branchSourceMessages = filtered;
+      } else {
+        branchSourceMessages = branchParent.messages;
+      }
+      branchParentForEvent = branchParent;
+    }
+
+    const sid = branchFrom
+      ? `session-${Date.now()}`       // branch always creates a new session
+      : (sessionId ?? `session-${Date.now()}`);
     let activeTaskRunId: string | undefined;
     let activeRunSpecId: string | undefined;
     let sentSession = false;
     let lastCheckpoint: CheckpointState | null = null;
 
-    const resumedSession = sessionId ? await loadSession(sid) : null;
+    const resumedSession = (!branchFrom && sessionId) ? await loadSession(sid) : null;
 
     // Create durable run spec before execution
     await ensureRunSpecStore();
@@ -165,14 +205,31 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       mcpServers,
       runContract: body.runContract,
     });
+    if (boundTodoId) {
+      await updateBoundTodoFromRun(boundTodoId, {
+        status: 'in_progress',
+        sessionId: sid,
+        traceId,
+        requestId: context.requestId,
+        runSpecId,
+        event: 'run_spec.created',
+      });
+    }
 
     try {
       const resumeState = resumedSession ? await loadResumeState(sid) : null;
       if (resumedSession) {
+        const turnPreviews = resumedSession.turns.map(t => ({
+          loop: t.loopCount,
+          text: t.text.slice(0, 100),
+          tools: t.toolCalls.map(tc => tc.function.name),
+          hasReasoning: Boolean(t.reasoningContent),
+        }));
         send('session.resumed', {
           sessionId: sid,
           messageCount: resumedSession.messages.length,
           turnCount: resumedSession.turns.length,
+          turnPreviews,
           lastTaskRun: resumeState?.lastTaskRun ?? null,
           activeTaskRuns: resumeState?.activeTaskRuns ?? [],
           lastEventId: resumeState?.lastEventId ?? null,
@@ -182,6 +239,17 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           sessionId: sid,
           tasks: resumeState?.recentTaskRuns ?? [],
           recentEvents: resumeState?.recentEvents ?? [],
+        });
+      }
+
+      if (branchFrom && branchParentForEvent) {
+        send('session.branched', {
+          sessionId: sid,
+          parentSessionId: branchFrom,
+          branchAtTurn: branchAtTurn ?? null,
+          messageCount: branchParentForEvent.messages.length,
+          turnCount: branchParentForEvent.turns.length,
+          copiedMessageCount: branchSourceMessages?.length ?? branchParentForEvent.messages.length,
         });
       }
 
@@ -195,7 +263,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         systemPrompt,
         workspaceRoot,
         toolMode,
-        initialMessages: resumedSession?.messages,
+        initialMessages: branchSourceMessages ?? resumedSession?.messages,
         allowedTools,
         maxLoops,
         traceId,
@@ -293,6 +361,8 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
               model: model ?? null,
               workspaceRoot,
               toolMode,
+              branchFrom: branchFrom ?? null,
+              branchAtTurn: branchAtTurn ?? null,
             },
           }).catch(() => undefined);
         },
@@ -341,6 +411,18 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       }
 
       if (scheduled.status === 'cancelled') {
+        if (boundTodoId) {
+          await updateBoundTodoFromRun(boundTodoId, {
+            status: 'cancelled',
+            sessionId: scheduled.sessionId,
+            taskRunId: scheduled.taskRun.id,
+            traceId: scheduled.taskRun.traceId,
+            requestId: context.requestId,
+            runSpecId,
+            event: 'task.cancelled',
+            reason: scheduled.reason,
+          });
+        }
         send('cancelled', {
           sessionId: scheduled.sessionId,
           taskRunId: scheduled.taskRun.id,
@@ -434,6 +516,19 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         traceId: scheduled.taskRun.traceId,
         taskRunId,
       }).catch(() => undefined);
+      const todoCompletionStatus: TodoStatus = (runCompletion?.blockedVerificationRecordIds.length ?? 0) > 0 ? 'blocked' : 'done';
+      if (boundTodoId) {
+        await updateBoundTodoFromRun(boundTodoId, {
+          status: todoCompletionStatus,
+          sessionId: sid,
+          taskRunId,
+          traceId: scheduled.taskRun.traceId,
+          requestId: context.requestId,
+          runSpecId,
+          event: todoCompletionStatus === 'blocked' ? 'run.verification_blocked' : 'task.succeeded',
+          blockedVerificationRecordIds: runCompletion?.blockedVerificationRecordIds ?? [],
+        });
+      }
 
       send('done', {
         text: result.text,
@@ -452,6 +547,18 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         await completeIdempotencyKey(idempotency.id, 200, { events: replayEvents });
       }
     } catch (err: any) {
+      if (boundTodoId) {
+        await updateBoundTodoFromRun(boundTodoId, {
+          status: 'blocked',
+          sessionId: sid,
+          taskRunId: activeTaskRunId,
+          traceId,
+          requestId: context.requestId,
+          runSpecId: activeRunSpecId,
+          event: 'session.error',
+          reason: err?.message ?? String(err),
+        }).catch(() => undefined);
+      }
       await ensureSessionEventStore().catch(() => undefined);
       await appendSessionEvent({
         sessionId: sid,
@@ -566,6 +673,51 @@ function summarizeEventForResume(event: SessionEventRecord): Record<string, unkn
     payload: event.payload,
     createdAt: event.createdAt,
   };
+}
+
+type BoundTodoUpdate = {
+  status: TodoStatus;
+  sessionId: string;
+  taskRunId?: string;
+  traceId: string;
+  requestId: string;
+  runSpecId?: string;
+  event: string;
+  reason?: string;
+  blockedVerificationRecordIds?: string[];
+};
+
+async function updateBoundTodoFromRun(todoId: string, input: BoundTodoUpdate): Promise<void> {
+  const existing = await loadTodo(todoId).catch(() => null);
+  if (!existing) return;
+  await updateTodo(todoId, {
+    status: input.status,
+    sessionId: input.sessionId,
+    taskRunId: input.taskRunId ?? existing.taskRunId ?? null,
+    traceId: input.traceId,
+    requestId: input.requestId,
+    metadata: {
+      ...existing.metadata,
+      dispatchReady: false,
+      lastRun: {
+        ...(isRecord(existing.metadata.lastRun) ? existing.metadata.lastRun : {}),
+        event: input.event,
+        status: input.status,
+        sessionId: input.sessionId,
+        taskRunId: input.taskRunId ?? existing.taskRunId ?? null,
+        traceId: input.traceId,
+        requestId: input.requestId,
+        runSpecId: input.runSpecId ?? null,
+        reason: input.reason ?? null,
+        blockedVerificationRecordIds: input.blockedVerificationRecordIds ?? [],
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function normalizeWorkspaceRoot(value: unknown, defaultWorkspaceRoot: string): string {

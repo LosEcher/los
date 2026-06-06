@@ -22,6 +22,7 @@ import {
   type SessionEventsResponse,
   type SessionObservability,
   type ToolMode,
+  type TodoItem,
 } from './api';
 import {
   EmptyText,
@@ -50,9 +51,17 @@ type ProviderOption = {
 export function ChatPage({
   selectedSessionId,
   onSessionSelect,
+  branchFromSession,
+  onBranchConsumed,
+  activeTodoContext,
+  onTodoContextClear,
 }: {
   selectedSessionId: string | null;
   onSessionSelect: (id: string | null) => void;
+  branchFromSession: string | null;
+  onBranchConsumed: () => void;
+  activeTodoContext: TodoItem | null;
+  onTodoContextClear: () => void;
 }) {
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
@@ -77,6 +86,7 @@ export function ChatPage({
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskRunId, setTaskRunId] = useState<string | null>(null);
+  const [boundTodoId, setBoundTodoId] = useState<string | null>(null);
   const [rows, setRows] = useState<StreamRow[]>([
     {
       id: 'ready',
@@ -86,6 +96,8 @@ export function ChatPage({
     },
   ]);
   const abortRef = useRef<AbortController | null>(null);
+  const historyLoadedForSession = useRef<string | null>(null);
+  const branchFromRef = useRef<string | null>(null);
 
   const onboarding = useQuery({
     queryKey: ['onboarding'],
@@ -163,6 +175,22 @@ export function ChatPage({
     }
     return [...ids];
   }, [selectedRoute]);
+  const advancedCount = useMemo(() => {
+    let n = 0;
+    if (systemPrompt.trim()) n++;
+    if (allowedTools.trim()) n++;
+    if (maxLoops !== 8) n++;
+    if (timeoutMs !== 120_000) n++;
+    if (toolRetryMaxAttempts.trim()) n++;
+    if (toolRetryBaseDelayMs.trim()) n++;
+    if (toolRetryMaxDelayMs.trim()) n++;
+    if (temperature.trim()) n++;
+    if (topP.trim()) n++;
+    if (maxTokens.trim()) n++;
+    if (presencePenalty.trim()) n++;
+    if (frequencyPenalty.trim()) n++;
+    return n;
+  }, [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
   const recentEvents = sessionEvents.data?.events.slice(-8) ?? [];
 
@@ -176,14 +204,73 @@ export function ChatPage({
     if (!selectedSessionId || selectedSessionId === sessionId) return;
     setSessionId(selectedSessionId);
     setTaskRunId(null);
+    historyLoadedForSession.current = null;
     setRows([{
       id: crypto.randomUUID(),
-      event: 'session.selected',
-      message: `Ready to continue ${selectedSessionId}.`,
-      meta: 'next send will include this sessionId',
-      level: 'ok',
+      event: 'session.loading',
+      message: `Loading session ${selectedSessionId}...`,
+      level: 'normal',
     }]);
   }, [selectedSessionId, sessionId, running]);
+
+  // When session detail loads for a resumed session, render history in the chat
+  useEffect(() => {
+    if (running) return;
+    if (!sessionId || sessionId !== selectedSessionId) return;
+    if (historyLoadedForSession.current === sessionId) return;
+    const detail = sessionDetail.data;
+    if (!detail || !Array.isArray(detail.messages) || detail.messages.length === 0) return;
+    historyLoadedForSession.current = sessionId;
+    const historyRows = buildHistoryRows(
+      detail.messages as Array<Record<string, unknown>>,
+      Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [],
+    );
+    setRows(historyRows);
+  }, [sessionDetail.data, sessionId, selectedSessionId, running]);
+
+  // When branchFromSession is set, prepare chat for a branch
+  useEffect(() => {
+    if (running || !branchFromSession) return;
+    branchFromRef.current = branchFromSession;
+    setSessionId(null);
+    setTaskRunId(null);
+    historyLoadedForSession.current = null;
+    setRows([{
+      id: crypto.randomUUID(),
+      event: 'session.branch',
+      message: `Branching from ${branchFromSession}. Enter your prompt to start.`,
+      level: 'ok',
+    }]);
+    // Load parent session to show history context
+    getJson<SessionDetail>(`/sessions/${branchFromSession}`).then(detail => {
+      if (detail && Array.isArray(detail.messages) && detail.messages.length > 0) {
+        const historyRows = buildHistoryRows(
+          detail.messages as Array<Record<string, unknown>>,
+          Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [],
+        );
+        setRows(prev => {
+          // Only replace if we're still in branch mode
+          if (!branchFromRef.current) return prev;
+          return historyRows;
+        });
+      }
+    }).catch(() => undefined);
+  }, [branchFromSession, running]);
+
+  useEffect(() => {
+    if (running || !activeTodoContext || activeTodoContext.id === boundTodoId) return;
+    setBoundTodoId(activeTodoContext.id);
+    setSessionId(activeTodoContext.sessionId ?? null);
+    setTaskRunId(null);
+    setPrompt(buildTodoPrompt(activeTodoContext));
+    setRows([{
+      id: crypto.randomUUID(),
+      event: 'todo.selected',
+      message: activeTodoContext.title,
+      meta: activeTodoContext.id,
+      level: 'ok',
+    }]);
+  }, [activeTodoContext, boundTodoId, running, sessionId]);
 
   useEffect(() => {
     if (provider || providerOptions.length === 0) return;
@@ -209,12 +296,29 @@ export function ChatPage({
     abortRef.current = controller;
     setPrompt('');
     setRunning(true);
-    setRows([{ id: crypto.randomUUID(), event: 'user', message: text }]);
+    // Preserve history rows if continuing a session, otherwise start fresh
+    setRows(prev => {
+      const hasHistory = prev.length > 0 && prev.some(r => r.event === 'history.end');
+      if (hasHistory) {
+        return [...prev, {
+          id: crypto.randomUUID(),
+          event: '---',
+          message: 'New message below',
+          level: 'normal' as const,
+        }, {
+          id: crypto.randomUUID(),
+          event: 'user',
+          message: text,
+        }];
+      }
+      return [{ id: crypto.randomUUID(), event: 'user', message: text }];
+    });
 
     try {
       await streamChat({
         prompt: text,
-        sessionId: sessionId ?? undefined,
+        sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
+        branchFrom: branchFromRef.current ?? undefined,
         systemPrompt: systemPrompt.trim() || undefined,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
@@ -229,12 +333,16 @@ export function ChatPage({
         toolMode,
         allowedTools: parseCommaList(allowedTools),
         maxLoops,
+        traceId: activeTodoContext?.traceId,
+        dedupeKey: activeTodoContext ? `todo:${activeTodoContext.id}:${Date.now()}` : undefined,
         timeoutMs,
         toolRetry: buildToolRetryPayload({
           maxAttempts: toolRetryMaxAttempts,
           baseDelayMs: toolRetryBaseDelayMs,
           maxDelayMs: toolRetryMaxDelayMs,
         }),
+        runContract: readRunContract(activeTodoContext),
+        todoId: activeTodoContext?.id,
       }, controller.signal, ({ event, data }) => {
         if (event === 'session' && typeof data.sessionId === 'string') {
           setSessionId(data.sessionId);
@@ -255,8 +363,13 @@ export function ChatPage({
     } finally {
       setRunning(false);
       abortRef.current = null;
+      if (branchFromRef.current) {
+        branchFromRef.current = null;
+        onBranchConsumed();
+      }
       await queryClient.invalidateQueries({ queryKey: ['sessions'] });
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['todos'] });
       await queryClient.invalidateQueries({ queryKey: ['memory'] });
       await queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId] });
       await queryClient.invalidateQueries({ queryKey: ['chat-session-events', sessionId] });
@@ -276,6 +389,9 @@ export function ChatPage({
     if (running) return;
     setSessionId(null);
     setTaskRunId(null);
+    setBoundTodoId(null);
+    historyLoadedForSession.current = null;
+    onTodoContextClear();
     setRows([{
       id: crypto.randomUUID(),
       event: 'session.new',
@@ -306,6 +422,7 @@ export function ChatPage({
 
         <div className="chat-context-bar">
           <ContextChip label="session" value={sessionId ?? 'new'} tone={sessionId ? 'ok' : undefined} />
+          {activeTodoContext ? <ContextChip label="todo" value={activeTodoContext.id} tone="ok" /> : null}
           <ContextChip label="provider" value={provider || 'default'} />
           <ContextChip label="model" value={model || 'provider default'} />
           <ContextChip label="task" value={taskRunId ?? (running ? 'starting' : 'idle')} tone={running ? 'warn' : undefined} />
@@ -313,7 +430,7 @@ export function ChatPage({
 
         <div className="stream-list">
           {rows.length === 0 ? <EmptyText text="No stream events yet." /> : rows.map(row => (
-            <div className="stream-row" data-level={row.level ?? 'normal'} key={row.id}>
+            <div className={`stream-row${row.event === '---' || row.event === 'history.end' ? ' stream-separator' : ''}`} data-level={row.level ?? 'normal'} key={row.id}>
               <span className="stream-event">{row.event}</span>
               <div>
                 <p>{row.message}</p>
@@ -366,15 +483,14 @@ export function ChatPage({
                 value={workspaceRoot}
                 onChange={event => setWorkspaceRoot(event.target.value)}
                 placeholder={defaultWorkspace || 'cwd'}
-                style={{ width: workspaceRoot ? 140 : 100 }}
+                className="exec-dir-input"
               />
               <datalist id="workspace-suggestions">
                 {defaultWorkspace && <option value={defaultWorkspace} />}
                 {defaultWorkspace && <option value={defaultWorkspace.replace(/\/[^/]+$/, '')} />}
               </datalist>
               {workspaceRoot && workspaceRoot !== defaultWorkspace && (
-                <button type="button" className="ghost-btn" title="Reset to default workspace"
-                  style={{ minHeight: 24, padding: '0 6px', fontSize: 12 }}
+                <button type="button" className="ghost-btn exec-dir-reset" title="Reset to default workspace"
                   onClick={() => setWorkspaceRoot('')}>
                   ↺ default
                 </button>
@@ -383,6 +499,7 @@ export function ChatPage({
             <details className="composer-advanced">
               <summary title="Advanced request settings">
                 <SlidersHorizontal size={14} />
+                {advancedCount > 0 ? <span className="filter-badge">{advancedCount}</span> : null}
               </summary>
               <div className="composer-advanced-panel">
                 <RunField label="system prompt" title="System prompt override" variant="panel">
@@ -473,6 +590,28 @@ export function ChatPage({
       </aside>
     </section>
   );
+}
+
+function buildTodoPrompt(todo: TodoItem): string {
+  const lines = [
+    `处理 Todo: ${todo.title}`,
+    '',
+    todo.description ? todo.description : 'No description provided.',
+    '',
+    `Todo id: ${todo.id}`,
+    `Status: ${todo.status}`,
+    `Kind: ${todo.kind}`,
+    `Priority: ${todo.priority}`,
+    `Stage: ${todo.stageId ?? 'none'}`,
+  ];
+  if (todo.dependsOnIds.length > 0) lines.push(`Depends on: ${todo.dependsOnIds.join(', ')}`);
+  return lines.join('\n');
+}
+
+function readRunContract(todo: TodoItem | null): Record<string, unknown> | undefined {
+  const value = todo?.metadata?.runContract;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
 }
 
 function RunField({
@@ -589,6 +728,72 @@ function buildToolRetryPayload(input: { maxAttempts: string; baseDelayMs: string
   return retry;
 }
 
+function buildHistoryRows(
+  messages: Array<Record<string, unknown>>,
+  turns: Array<Record<string, unknown>>,
+): StreamRow[] {
+  const rows: StreamRow[] = [];
+  let turnIdx = 0;
+
+  for (const msg of messages) {
+    const role = String(msg.role ?? '');
+    if (role === 'system') continue;
+
+    if (role === 'user') {
+      rows.push({
+        id: crypto.randomUUID(),
+        event: 'user',
+        message: String(msg.content ?? '').slice(0, 500),
+        level: 'normal',
+      });
+    } else if (role === 'assistant') {
+      const toolCalls = Array.isArray(msg.tool_calls)
+        ? (msg.tool_calls as Array<Record<string, unknown>>)
+        : [];
+      const toolNames = toolCalls
+        .map(tc => String((tc.function as Record<string, unknown> | undefined)?.name ?? ''))
+        .filter(Boolean);
+      const text = String(msg.content ?? '');
+
+      rows.push({
+        id: crypto.randomUUID(),
+        event: `turn.${turnIdx + 1}`,
+        message: text.slice(0, 300) || (toolNames.length > 0 ? '(tool calls only)' : '(empty)'),
+        meta: toolNames.length > 0 ? `tools: ${toolNames.join(', ')}` : undefined,
+        level: 'ok',
+      });
+
+      const turn = turns[turnIdx] as Record<string, unknown> | undefined;
+      if (turn?.reasoningContent && typeof turn.reasoningContent === 'string') {
+        rows.push({
+          id: crypto.randomUUID(),
+          event: 'reasoning',
+          message: turn.reasoningContent.slice(0, 200),
+          level: 'normal',
+        });
+      }
+      turnIdx++;
+    } else if (role === 'tool') {
+      rows.push({
+        id: crypto.randomUUID(),
+        event: 'tool_result',
+        message: String(msg.content ?? '').slice(0, 200),
+        level: 'normal',
+      });
+    }
+  }
+
+  rows.push({
+    id: crypto.randomUUID(),
+    event: 'history.end',
+    message: `${rows.length} prior messages shown. Send a prompt to continue.`,
+    meta: `${turnIdx} turns in history`,
+    level: 'ok',
+  });
+
+  return rows;
+}
+
 function appendLiveSessionEvent(
   prev: SessionEventsResponse | undefined,
   sessionId: string,
@@ -628,11 +833,64 @@ function streamRow(event: string, data: Record<string, unknown>): StreamRow {
     };
   }
   if (event === 'session.resumed') {
+    const turnPreviews = Array.isArray(data.turnPreviews)
+      ? (data.turnPreviews as Array<Record<string, unknown>>)
+      : [];
+    const previewLines = turnPreviews.slice(0, 8).map(tp => {
+      const loop = tp.loop ?? '?';
+      const text = String(tp.text ?? '').slice(0, 60);
+      const tools = Array.isArray(tp.tools) ? (tp.tools as string[]).join(',') : '';
+      return `T${loop}: ${text}${tools ? ` [${tools}]` : ''}`;
+    });
+    const more = turnPreviews.length > 8 ? ` (+${turnPreviews.length - 8} more)` : '';
     return {
       id: crypto.randomUUID(),
       event,
-      message: `Resumed ${String(data.sessionId ?? 'session')}.`,
-      meta: data.resumeLastTaskRunId ? `last task ${String(data.resumeLastTaskRunId)}` : undefined,
+      message: `Resumed session (${data.turnCount ?? '?'} turns, ${data.messageCount ?? '?'} msgs)`,
+      meta: previewLines.length > 0 ? previewLines.join(' | ') + more : `last task ${String(data.resumeLastTaskRunId ?? 'none')}`,
+      level: 'ok',
+    };
+  }
+  if (event === 'session.branch') {
+    return {
+      id: crypto.randomUUID(),
+      event: 'branch',
+      message: String(data.message ?? data),
+      level: 'ok',
+    };
+  }
+  if (event === 'session.branched') {
+    return {
+      id: crypto.randomUUID(),
+      event,
+      message: `Branched from ${String(data.parentSessionId ?? 'unknown')}${data.branchAtTurn ? ` at turn ${data.branchAtTurn}` : ''}`,
+      meta: `${data.copiedMessageCount ?? data.messageCount ?? '?'} messages copied`,
+      level: 'ok',
+    };
+  }
+  if (event === 'session.loading') {
+    return {
+      id: crypto.randomUUID(),
+      event: 'session',
+      message: String(data.message ?? data),
+      level: 'normal',
+    };
+  }
+  if (event === '---') {
+    return {
+      id: crypto.randomUUID(),
+      event,
+      message: String(data.message ?? data),
+      meta: String(data.meta ?? ''),
+      level: 'normal',
+    };
+  }
+  if (event === 'history.end') {
+    return {
+      id: crypto.randomUUID(),
+      event: '---',
+      message: String(data.message ?? data),
+      meta: String(data.meta ?? ''),
       level: 'ok',
     };
   }

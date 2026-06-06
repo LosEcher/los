@@ -37,7 +37,7 @@ import {
   readToolCallRecoveryForRunSpec,
   runVerificationRecordsForRunSpec,
 } from '@los/agent';
-import { ensureSessionStore, loadSession, listSessions } from '@los/agent/session';
+import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSession, type SessionRecord } from '@los/agent/session';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
 import { getPool } from '@los/infra/db';
 import {
@@ -225,8 +225,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     serviceKind: 'gateway',
   });
   registerMCPRoutes(app);
-  registerSkillRoutes(app);
-  registerRuleRoutes(app);
+  registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);
+  registerRuleRoutes(app, DEFAULT_WORKSPACE_ROOT);
 
   registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT);
 
@@ -339,6 +339,42 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     const session = await loadSession(id);
     if (!session) return { error: 'Not found' };
     return session;
+  });
+
+  app.delete('/sessions/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    await ensureSessionStore();
+    const deleted = await deleteSession(id);
+    if (!deleted) return reply.status(404).send({ error: 'Not found' });
+    return { ok: true };
+  });
+
+  app.post('/sessions/import', async (req, reply) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    if (!body || typeof body.id !== 'string' || !body.id) {
+      return reply.status(400).send({ error: 'session id is required' });
+    }
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const turns = Array.isArray(body.turns) ? body.turns : [];
+    const metadata = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+      ? body.metadata as Record<string, unknown>
+      : {};
+
+    await ensureSessionStore();
+    const existing = await loadSession(body.id);
+    if (existing) {
+      return reply.status(409).send({ error: 'session already exists', id: body.id });
+    }
+
+    await saveSession({
+      id: body.id,
+      createdAt: typeof body.createdAt === 'string' ? body.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: messages as SessionRecord['messages'],
+      turns: turns as SessionRecord['turns'],
+      metadata: { ...metadata, imported: true, importedAt: new Date().toISOString() },
+    });
+    return { ok: true, id: body.id };
   });
 
   app.get('/sessions/:id/events', async (req) => {
@@ -718,6 +754,14 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     });
     syncMemoryMd(body.workspaceRoot, observations);
     return { ok: true, count: observations.length };
+  });
+
+  // ── SPA fallback ─────────────────────────────────────
+
+  app.setNotFoundHandler((req, reply) => {
+    if (req.method !== 'GET') return reply.status(404).send({ error: 'Not found' });
+    const indexPath = webIndexExists ? WEB_INDEX_PATH : LEGACY_INDEX_PATH;
+    return reply.type('text/html').send(readFileSync(indexPath, 'utf-8'));
   });
 
   return app;

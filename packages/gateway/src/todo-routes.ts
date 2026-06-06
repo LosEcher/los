@@ -22,6 +22,13 @@ export function registerTodoRoutes(app: FastifyInstance) {
       projectId?: string;
       status?: TodoStatus;
       kind?: TodoKind;
+      stageId?: string;
+      source?: string;
+      traceId?: string;
+      requestId?: string;
+      taskRunId?: string;
+      sessionId?: string;
+      batchKey?: string;
       limit?: string;
       includeArchived?: string;
     };
@@ -30,6 +37,13 @@ export function registerTodoRoutes(app: FastifyInstance) {
       projectId: normalizeOptionalString(query.projectId),
       status: normalizeTodoStatus(query.status),
       kind: normalizeTodoKind(query.kind),
+      stageId: normalizeOptionalString(query.stageId),
+      source: normalizeOptionalString(query.source),
+      traceId: normalizeOptionalString(query.traceId),
+      requestId: normalizeOptionalString(query.requestId),
+      taskRunId: normalizeOptionalString(query.taskRunId),
+      sessionId: normalizeOptionalString(query.sessionId),
+      batchKey: normalizeOptionalString(query.batchKey),
       limit: normalizePositiveInteger(query.limit) ?? 100,
       includeArchived: normalizeBoolean(query.includeArchived),
     });

@@ -288,6 +288,13 @@ export async function listTodos(options: ListTodosOptions = {}): Promise<TodoRec
     params.push(normalizeTodoKind(options.kind));
     clauses.push(`kind = $${params.length}`);
   }
+  appendOptionalClause(clauses, params, 'stage_id', options.stageId);
+  appendOptionalClause(clauses, params, 'source', options.source);
+  appendOptionalClause(clauses, params, 'trace_id', options.traceId);
+  appendOptionalClause(clauses, params, 'request_id', options.requestId);
+  appendOptionalClause(clauses, params, 'task_run_id', options.taskRunId);
+  appendOptionalClause(clauses, params, 'session_id', options.sessionId);
+  appendOptionalClause(clauses, params, 'batch_key', options.batchKey);
   if (!options.includeArchived) {
     clauses.push('archived_at IS NULL');
   }
@@ -446,6 +453,18 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function appendOptionalClause(
+  clauses: string[],
+  params: unknown[],
+  column: string,
+  value: unknown,
+): void {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) return;
+  params.push(normalized);
+  clauses.push(`${column} = $${params.length}`);
 }
 
 function normalizeStringArray(value: unknown): string[] | undefined {

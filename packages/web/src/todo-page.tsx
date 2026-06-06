@@ -1,6 +1,6 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GitBranchPlus, RefreshCcw } from 'lucide-react';
+import { GitBranchPlus, RefreshCcw, Send } from 'lucide-react';
 import {
   getJson,
   patchJson,
@@ -23,22 +23,37 @@ import {
 const TODO_STATUSES: TodoStatus[] = ['backlog', 'ready', 'in_progress', 'blocked', 'done', 'cancelled'];
 const TODO_KINDS: TodoKind[] = ['problem', 'solution', 'plan', 'phase', 'task', 'batch'];
 const TODO_PRIORITIES: TodoPriority[] = ['P0', 'P1', 'P2', 'P3'];
+const LINK_FILTERS = ['sessionId', 'taskRunId', 'traceId', 'requestId', 'stageId', 'source', 'batchKey'] as const;
+type LinkFilter = typeof LINK_FILTERS[number];
 
-export function TodosPage() {
+export function TodosPage({
+  selectedTodoId,
+  onTodoSelect,
+  onRunTodo,
+  onSelectSession,
+}: {
+  selectedTodoId: string | null;
+  onTodoSelect: (id: string) => void;
+  onRunTodo: (todo: TodoItem) => void;
+  onSelectSession: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState('');
   const [kind, setKind] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(selectedTodoId);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TodoPriority>('P1');
   const [newKind, setNewKind] = useState<TodoKind>('task');
   const [dependsOn, setDependsOn] = useState('');
+  const [linkFilter, setLinkFilter] = useState<LinkFilter>('sessionId');
+  const [linkValue, setLinkValue] = useState('');
 
   const query = new URLSearchParams();
   if (status) query.set('status', status);
   if (kind) query.set('kind', kind);
+  if (linkValue.trim()) query.set(linkFilter, linkValue.trim());
   if (includeArchived) query.set('includeArchived', 'true');
   query.set('limit', '200');
 
@@ -51,6 +66,10 @@ export function TodosPage() {
   const selected = (todos.data ?? []).find(todo => todo.id === selectedId) ?? todos.data?.[0] ?? null;
   const counts = summarizeTodos(todos.data ?? []);
 
+  useEffect(() => {
+    if (selectedTodoId) setSelectedId(selectedTodoId);
+  }, [selectedTodoId]);
+
   const create = useMutation({
     mutationFn: (payload: TodoPayload) => postJson<TodoItem>('/todos', payload),
     onSuccess: async (todo) => {
@@ -58,6 +77,7 @@ export function TodosPage() {
       setDescription('');
       setDependsOn('');
       setSelectedId(todo.id);
+      onTodoSelect(todo.id);
       await queryClient.invalidateQueries({ queryKey: ['todos'] });
     },
   });
@@ -65,6 +85,7 @@ export function TodosPage() {
     mutationFn: ({ id, body }: { id: string; body: Partial<TodoItem> }) => patchJson<TodoItem>(`/todos/${id}`, body),
     onSuccess: async (todo) => {
       setSelectedId(todo.id);
+      onTodoSelect(todo.id);
       await queryClient.invalidateQueries({ queryKey: ['todos'] });
     },
   });
@@ -110,6 +131,10 @@ export function TodosPage() {
               <option value="">all kinds</option>
               {TODO_KINDS.map(item => <option key={item} value={item}>{item}</option>)}
             </select>
+            <select value={linkFilter} onChange={event => setLinkFilter(event.target.value as LinkFilter)}>
+              {LINK_FILTERS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <input value={linkValue} onChange={event => setLinkValue(event.target.value)} placeholder="link value" />
             <label className="toolbar-toggle">
               <input type="checkbox" checked={includeArchived} onChange={event => setIncludeArchived(event.target.checked)} />
               archived
@@ -137,7 +162,10 @@ export function TodosPage() {
               type="button"
               className="record-row todo-row"
               data-active={selected?.id === todo.id}
-              onClick={() => setSelectedId(todo.id)}
+              onClick={() => {
+                setSelectedId(todo.id);
+                onTodoSelect(todo.id);
+              }}
             >
               <span className="todo-main">
                 <strong>{todo.title}</strong>
@@ -174,6 +202,12 @@ export function TodosPage() {
                 <Fact label="archive" value={selected.archivedAt ? `${formatDate(selected.archivedAt)} · ${selected.archiveReason ?? 'archived'}` : 'active'} />
               </div>
               <div className="todo-actions">
+                <button className="tiny-btn" type="button" onClick={() => onRunTodo(selected)}>
+                  <Send size={12} /> run
+                </button>
+                <button className="tiny-btn" type="button" disabled={!selected.sessionId} onClick={() => selected.sessionId && onSelectSession(selected.sessionId)}>
+                  session
+                </button>
                 <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'ready' } })}>ready</button>
                 <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'in_progress' } })}>start</button>
                 <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'blocked' } })}>block</button>

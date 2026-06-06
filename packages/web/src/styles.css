@@ -400,6 +400,14 @@ p {
   color: var(--danger);
 }
 
+/* Separator row (between history and new conversation) */
+.stream-separator {
+  border-bottom: 2px dashed var(--muted-border);
+  padding: 12px 0;
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .stream-event {
   color: var(--info);
   font-size: 11px;
@@ -534,6 +542,21 @@ p {
   border-color: var(--accent);
 }
 
+.exec-dir-input {
+  width: 140px;
+  transition: width 120ms ease;
+}
+
+.exec-dir-input:focus {
+  width: 200px;
+}
+
+.exec-dir-reset {
+  min-height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
 .composer-advanced {
   position: relative;
   flex: 0 0 auto;
@@ -612,6 +635,48 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.filter-toggle {
+  position: relative;
+}
+
+.filter-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-bar.collapsed {
+  display: none;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .primary-btn,
 .ghost-btn,
 .tiny-btn,
@@ -653,6 +718,16 @@ select:focus {
 
 .icon-btn.danger:hover {
   color: var(--danger);
+}
+
+.ghost-btn.danger {
+  color: var(--danger);
+}
+
+.inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 button:disabled {
@@ -1155,6 +1230,35 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
   padding: 16px;
+}
+
+.section-group {
+  border-bottom: 1px solid var(--line);
+}
+
+.section-group summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.section-group summary:hover {
+  color: var(--text);
+}
+
+.section-group summary::marker,
+.section-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.section-group .field-grid {
+  padding-top: 0;
 }
 
 .field-token {

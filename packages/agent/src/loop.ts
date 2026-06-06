@@ -557,8 +557,22 @@ function buildInitialMessages(
   }
   messages.push({ role: 'user', content: prompt });
 
-  if (maxContextTokens && maxContextTokens > 0) {
-    const compressed = compressOrTrimMessages(messages, maxContextTokens, compression);
+  const RESUME_CONTEXT_BUDGET = 100_000;
+  const RESUME_ESTIMATED_THRESHOLD = 80_000;
+
+  // Auto-enable compression for resumed sessions with many messages to prevent
+  // context overflow. Explicit maxContextTokens always takes precedence.
+  const isResumed = Boolean(initialMessages?.length);
+  const estimatedTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+  const effectiveBudget = (maxContextTokens && maxContextTokens > 0)
+    ? maxContextTokens
+    : (isResumed && estimatedTokens > RESUME_ESTIMATED_THRESHOLD ? RESUME_CONTEXT_BUDGET : 0);
+
+  if (effectiveBudget > 0) {
+    const compressed = compressOrTrimMessages(messages, effectiveBudget, {
+      ...compression,
+      enabled: compression?.enabled !== false,
+    });
     return compressed;
   }
   return messages;

@@ -1,12 +1,14 @@
 import { type FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Plus, Trash2, Zap } from 'lucide-react';
+import { Download, Plus, Trash2, Upload, Zap } from 'lucide-react';
 import { deleteJson, getJson, postJson } from './api';
 import { DataTable, EmptyText, Fact, Field, formatDate, StatusPill } from './ui';
 
 const RUN_MODES = ['auto', 'manual'] as const;
+const SCOPES = ['', 'global', 'project'] as const;
 
 interface SkillRecordApi {
+  id: string;
   name: string;
   category: string;
   description: string;
@@ -25,21 +27,49 @@ interface SkillRecordApi {
 
 export function SkillsPage() {
   const queryClient = useQueryClient();
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [scopeFilter, setScopeFilter] = useState('');
+
+  const query = new URLSearchParams();
+  if (scopeFilter) query.set('scope', scopeFilter);
 
   const skills = useQuery({
-    queryKey: ['skills'],
-    queryFn: () => getJson<SkillRecordApi[]>('/skills'),
+    queryKey: ['skills', scopeFilter],
+    queryFn: () => getJson<SkillRecordApi[]>(`/skills?${query.toString()}`),
     refetchInterval: 15_000,
+  });
+  const workspace = useQuery({
+    queryKey: ['workspace'],
+    queryFn: () => getJson<{ workspaceRoot: string }>('/workspace'),
+    staleTime: 60_000,
   });
 
   const list = skills.data ?? [];
-  const selected = list.find(s => s.name === selectedName) ?? null;
+  const selected = list.find(s => skillKey(s) === selectedKey) ?? null;
 
   const remove = useMutation({
-    mutationFn: (name: string) => deleteJson(`/skills/${encodeURIComponent(name)}`),
+    mutationFn: (skill: SkillRecordApi) => deleteJson(`/skills/${encodeURIComponent(skill.name)}?scope=${encodeURIComponent(scopeValue(skill.metadata))}`),
     onSuccess: () => {
-      setSelectedName(null);
+      setSelectedKey(null);
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+    },
+  });
+
+  const syncToDir = useMutation({
+    mutationFn: (scope: string) => postJson('/skills/sync-to-dir', {
+      scope: scope || 'global',
+      workspaceRoot: workspace.data?.workspaceRoot,
+    }),
+    onSuccess: (data: any) => alert(`Synced ${data.count} skills to ${data.scope} dir`),
+  });
+
+  const loadFromDir = useMutation({
+    mutationFn: (scope: string) => postJson('/skills/load-from-dir', {
+      scope: scope || 'global',
+      workspaceRoot: workspace.data?.workspaceRoot,
+    }),
+    onSuccess: (data: any) => {
+      alert(`Loaded ${data.count} skills from ${data.scope} dir`);
       queryClient.invalidateQueries({ queryKey: ['skills'] });
     },
   });
@@ -56,6 +86,18 @@ export function SkillsPage() {
             </div>
           </div>
           <StatusPill status="live" />
+          <div className="toolbar">
+            <select value={scopeFilter} onChange={e => setScopeFilter(e.target.value)}>
+              <option value="">all scopes</option>
+              {SCOPES.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <button className="ghost-btn" type="button" disabled={syncToDir.isPending} onClick={() => syncToDir.mutate(scopeFilter)}>
+              <Download size={14} /> sync
+            </button>
+            <button className="ghost-btn" type="button" disabled={loadFromDir.isPending} onClick={() => loadFromDir.mutate(scopeFilter)}>
+              <Upload size={14} /> import
+            </button>
+          </div>
         </div>
         <DataTable
           loading={skills.isLoading}
@@ -65,10 +107,11 @@ export function SkillsPage() {
             <button
               type="button"
               className="record-row"
-              data-active={selected?.name === skill.name}
-              onClick={() => setSelectedName(skill.name)}
+              data-active={selected ? skillKey(selected) === skillKey(skill) : false}
+              onClick={() => setSelectedKey(skillKey(skill))}
             >
               <span className="row-title">{skill.name}</span>
+              <span>{scopeLabel(skill.metadata)}</span>
               <span>{skill.category}</span>
               <span>{skill.runMode}</span>
               <span>{skill.enabled ? 'enabled' : 'disabled'}</span>
@@ -87,6 +130,8 @@ export function SkillsPage() {
               <span className="mono-chip">{selected.name}</span>
             </div>
             <div className="fact-list compact-facts">
+              <Fact label="scope" value={scopeLabel(selected.metadata)} />
+              <Fact label="layer" value={layerLabel(selected.metadata)} />
               <Fact label="category" value={selected.category} />
               <Fact label="run mode" value={selected.runMode} />
               <Fact label="source" value={selected.sourcePath || 'none'} />
@@ -116,7 +161,7 @@ export function SkillsPage() {
                 className="ghost-btn"
                 type="button"
                 disabled={remove.isPending}
-                onClick={() => remove.mutate(selected.name)}
+                onClick={() => remove.mutate(selected)}
               >
                 <Trash2 size={14} /> delete
               </button>
@@ -124,8 +169,8 @@ export function SkillsPage() {
           </>
         ) : (
           <SkillCreate
-            onCreated={(name) => {
-              setSelectedName(name);
+            onCreated={(skill) => {
+              setSelectedKey(skillKey(skill));
               queryClient.invalidateQueries({ queryKey: ['skills'] });
             }}
           />
@@ -135,8 +180,9 @@ export function SkillsPage() {
   );
 }
 
-function SkillCreate({ onCreated }: { onCreated: (name: string) => void }) {
+function SkillCreate({ onCreated }: { onCreated: (skill: SkillRecordApi) => void }) {
   const [name, setName] = useState('');
+  const [scope, setScope] = useState('project');
   const [category, setCategory] = useState('general');
   const [description, setDescription] = useState('');
   const [runMode, setRunMode] = useState('manual');
@@ -155,6 +201,7 @@ function SkillCreate({ onCreated }: { onCreated: (name: string) => void }) {
     try {
       const created = await postJson<SkillRecordApi>('/skills', {
         name: name.trim(),
+        scope,
         category,
         description: description.trim() || undefined,
         runMode,
@@ -164,7 +211,7 @@ function SkillCreate({ onCreated }: { onCreated: (name: string) => void }) {
         enabled,
       });
       setName(''); setDescription(''); setSourcePath(''); setContent(''); setTags('');
-      onCreated(created.name);
+      onCreated(created);
     } catch (err) {
       setError(String((err as Error).message ?? err));
     } finally {
@@ -181,9 +228,17 @@ function SkillCreate({ onCreated }: { onCreated: (name: string) => void }) {
         <Field label="name">
           <input value={name} onChange={e => setName(e.target.value)} placeholder="code-review" />
         </Field>
-        <Field label="category">
-          <input value={category} onChange={e => setCategory(e.target.value)} placeholder="general" />
-        </Field>
+        <div className="two-col">
+          <Field label="scope">
+            <select value={scope} onChange={e => setScope(e.target.value)}>
+              <option value="global">global (~/.los/skills/)</option>
+              <option value="project">project (.los/skills/)</option>
+            </select>
+          </Field>
+          <Field label="category">
+            <input value={category} onChange={e => setCategory(e.target.value)} placeholder="general" />
+          </Field>
+        </div>
         <Field label="description">
           <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="What does this skill do?" />
         </Field>
@@ -212,4 +267,23 @@ function SkillCreate({ onCreated }: { onCreated: (name: string) => void }) {
       </form>
     </>
   );
+}
+
+function scopeLabel(metadata: Record<string, unknown>): string {
+  const scope = metadata.scope;
+  const layer = metadata.skillLayer;
+  if (typeof scope === 'string') return typeof layer === 'string' ? `${scope}/${layer}` : scope;
+  return typeof layer === 'string' ? `?/${layer}` : 'unspecified';
+}
+
+function layerLabel(metadata: Record<string, unknown>): string {
+  return typeof metadata.skillLayer === 'string' ? metadata.skillLayer : 'unspecified';
+}
+
+function scopeValue(metadata: Record<string, unknown>): string {
+  return typeof metadata.scope === 'string' ? metadata.scope : 'project';
+}
+
+function skillKey(skill: SkillRecordApi): string {
+  return `${scopeValue(skill.metadata)}:${skill.name}`;
 }

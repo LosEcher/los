@@ -263,73 +263,89 @@ function NodeEditor({
 
   return (
     <div className="stack-form node-editor">
-      <div className="field-grid">
-        <Field label="node id">
-          <input value={draft.nodeId} onChange={event => setDraft(prev => ({ ...prev, nodeId: event.target.value }))} placeholder="node34" />
-        </Field>
-        <Field label="node kind">
-          <select value={draft.nodeKind} onChange={event => setDraft(prev => ({ ...prev, nodeKind: event.target.value as NodeDraft['nodeKind'] }))}>
-            <option value="executor">executor</option>
-            <option value="ssh_target">ssh_target</option>
-            <option value="ingress">ingress</option>
-            <option value="proxy">proxy</option>
-          </select>
-        </Field>
-        <Field label="status">
-          <select value={draft.status} onChange={event => setDraft(prev => ({ ...prev, status: event.target.value as NodeDraft['status'] }))}>
-            <option value="online">online</option>
-            <option value="draining">draining</option>
-            <option value="offline">offline</option>
-          </select>
-        </Field>
-        <Field label="host label">
-          <input value={draft.hostLabel} onChange={event => setDraft(prev => ({ ...prev, hostLabel: event.target.value }))} placeholder="HStorage2" />
-        </Field>
-        <Field label="base url">
-          <input value={draft.baseUrl} onChange={event => setDraft(prev => ({ ...prev, baseUrl: event.target.value }))} placeholder="http://127.0.0.1:8090" />
-        </Field>
-        <Field label="version">
-          <input value={draft.version} onChange={event => setDraft(prev => ({ ...prev, version: event.target.value }))} placeholder="0.1.0" />
-        </Field>
-        <Field label="target version">
-          <input value={draft.targetVersion} onChange={event => setDraft(prev => ({ ...prev, targetVersion: event.target.value }))} placeholder="0.2.0" />
-        </Field>
-        <Field label="rollout state">
-          <select value={draft.rolloutState} onChange={event => setDraft(prev => ({ ...prev, rolloutState: event.target.value as NodeDraft['rolloutState'] }))}>
-            <option value="idle">idle</option>
-            <option value="draining">draining</option>
-            <option value="upgrading">upgrading</option>
-            <option value="verifying">verifying</option>
-            <option value="failed">failed</option>
-          </select>
-        </Field>
-        <Field label="rollout message">
-          <input value={draft.rolloutMessage} onChange={event => setDraft(prev => ({ ...prev, rolloutMessage: event.target.value }))} placeholder="rolling out 0.2.0" />
-        </Field>
-        <Field label="connect modes">
-          <input value={draft.connectModes} onChange={event => setDraft(prev => ({ ...prev, connectModes: event.target.value }))} placeholder="tailscale_ssh, direct_ssh" />
-        </Field>
-        <Field label="queue depth">
-          <input type="number" min={0} value={draft.queueDepth} onChange={event => setDraft(prev => ({ ...prev, queueDepth: event.target.value }))} />
-        </Field>
-        <Field label="active tasks">
-          <input type="number" min={0} value={draft.activeTaskCount} onChange={event => setDraft(prev => ({ ...prev, activeTaskCount: event.target.value }))} />
-        </Field>
-      </div>
-      <div className="field-grid">
-        <Field label="connect config">
-          <textarea rows={6} value={draft.connectConfig} onChange={event => setDraft(prev => ({ ...prev, connectConfig: event.target.value }))} />
-        </Field>
-        <Field label="capabilities">
-          <textarea rows={6} value={draft.capabilities} onChange={event => setDraft(prev => ({ ...prev, capabilities: event.target.value }))} />
-        </Field>
-        <Field label="verified">
-          <textarea rows={6} value={draft.verified} onChange={event => setDraft(prev => ({ ...prev, verified: event.target.value }))} />
-        </Field>
-        <Field label="mesh links">
-          <textarea rows={6} value={draft.meshLinks} onChange={event => setDraft(prev => ({ ...prev, meshLinks: event.target.value }))} />
-        </Field>
-      </div>
+      <details className="section-group" open>
+        <summary>Identity</summary>
+        <div className="field-grid">
+          <Field label="node id">
+            <input value={draft.nodeId} onChange={event => setDraft(prev => ({ ...prev, nodeId: event.target.value }))} placeholder="node34" />
+          </Field>
+          <Field label="node kind">
+            <select value={draft.nodeKind} onChange={event => setDraft(prev => ({ ...prev, nodeKind: event.target.value as NodeDraft['nodeKind'] }))}>
+              <option value="executor">executor</option>
+              <option value="ssh_target">ssh_target</option>
+              <option value="ingress">ingress</option>
+              <option value="proxy">proxy</option>
+            </select>
+          </Field>
+          <Field label="status">
+            <select value={draft.status} onChange={event => setDraft(prev => ({ ...prev, status: event.target.value as NodeDraft['status'] }))}>
+              <option value="online">online</option>
+              <option value="draining">draining</option>
+              <option value="offline">offline</option>
+            </select>
+          </Field>
+          <Field label="host label">
+            <input value={draft.hostLabel} onChange={event => setDraft(prev => ({ ...prev, hostLabel: event.target.value }))} placeholder="HStorage2" />
+          </Field>
+          <Field label="base url">
+            <input value={draft.baseUrl} onChange={event => setDraft(prev => ({ ...prev, baseUrl: event.target.value }))} placeholder="http://127.0.0.1:8090" />
+          </Field>
+        </div>
+      </details>
+      <details className="section-group">
+        <summary>Version &amp; Rollout</summary>
+        <div className="field-grid">
+          <Field label="version">
+            <input value={draft.version} onChange={event => setDraft(prev => ({ ...prev, version: event.target.value }))} placeholder="0.1.0" />
+          </Field>
+          <Field label="target version">
+            <input value={draft.targetVersion} onChange={event => setDraft(prev => ({ ...prev, targetVersion: event.target.value }))} placeholder="0.2.0" />
+          </Field>
+          <Field label="rollout state">
+            <select value={draft.rolloutState} onChange={event => setDraft(prev => ({ ...prev, rolloutState: event.target.value as NodeDraft['rolloutState'] }))}>
+              <option value="idle">idle</option>
+              <option value="draining">draining</option>
+              <option value="upgrading">upgrading</option>
+              <option value="verifying">verifying</option>
+              <option value="failed">failed</option>
+            </select>
+          </Field>
+          <Field label="rollout message">
+            <input value={draft.rolloutMessage} onChange={event => setDraft(prev => ({ ...prev, rolloutMessage: event.target.value }))} placeholder="rolling out 0.2.0" />
+          </Field>
+        </div>
+      </details>
+      <details className="section-group">
+        <summary>Runtime</summary>
+        <div className="field-grid">
+          <Field label="connect modes">
+            <input value={draft.connectModes} onChange={event => setDraft(prev => ({ ...prev, connectModes: event.target.value }))} placeholder="tailscale_ssh, direct_ssh" />
+          </Field>
+          <Field label="queue depth">
+            <input type="number" min={0} value={draft.queueDepth} onChange={event => setDraft(prev => ({ ...prev, queueDepth: event.target.value }))} />
+          </Field>
+          <Field label="active tasks">
+            <input type="number" min={0} value={draft.activeTaskCount} onChange={event => setDraft(prev => ({ ...prev, activeTaskCount: event.target.value }))} />
+          </Field>
+        </div>
+      </details>
+      <details className="section-group">
+        <summary>Config &amp; Capabilities</summary>
+        <div className="field-grid">
+          <Field label="connect config">
+            <textarea rows={6} value={draft.connectConfig} onChange={event => setDraft(prev => ({ ...prev, connectConfig: event.target.value }))} />
+          </Field>
+          <Field label="capabilities">
+            <textarea rows={6} value={draft.capabilities} onChange={event => setDraft(prev => ({ ...prev, capabilities: event.target.value }))} />
+          </Field>
+          <Field label="verified">
+            <textarea rows={6} value={draft.verified} onChange={event => setDraft(prev => ({ ...prev, verified: event.target.value }))} />
+          </Field>
+          <Field label="mesh links">
+            <textarea rows={6} value={draft.meshLinks} onChange={event => setDraft(prev => ({ ...prev, meshLinks: event.target.value }))} />
+          </Field>
+        </div>
+      </details>
       <div className="toolbar node-editor-actions">
         <button type="button" className="primary-btn" onClick={saveNode} disabled={busy}>
           <Save size={14} /> save
