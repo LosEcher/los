@@ -28,8 +28,12 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(VERSION);
     return;
   }
-  if (command === 'chat' || command === 'run') {
+  if (command === 'chat') {
     await chatCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'run') {
+    await runCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'sessions') {
@@ -119,6 +123,52 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
   });
 }
 
+async function runCommand(globalArgs: string[], argv: string[]): Promise<void> {
+  const subcommand = argv[0];
+  if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify') {
+    await runOperationCommand(subcommand, globalArgs, argv.slice(1));
+    return;
+  }
+  await chatCommand(globalArgs, argv);
+}
+
+async function runOperationCommand(
+  subcommand: 'inspect' | 'recover' | 'verify',
+  globalArgs: string[],
+  argv: string[],
+): Promise<void> {
+  const parsed = mergeParsed(parseArgs(globalArgs), parseArgs(argv));
+  if (hasFlag(parsed, 'help', 'h')) {
+    printRunHelp();
+    return;
+  }
+  const runSpecId = parsed.positionals[0];
+  if (!runSpecId) throw new Error(`Run id is required. Usage: los run ${subcommand} <run-id>`);
+
+  const gateway = gatewayUrl(parsed);
+  const json = booleanFlag(parsed, 'json');
+  if (subcommand === 'inspect') {
+    const value = await getJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/inspect`);
+    renderRunInspect(value, json);
+    return;
+  }
+  if (subcommand === 'recover') {
+    const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/recover`, {
+      intent: stringFlag(parsed, 'intent'),
+      staleMs: numberFlag(parsed, 'stale-ms'),
+    });
+    renderRunRecover(value, json);
+    return;
+  }
+  const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/verify`, {
+    cwd: stringFlag(parsed, 'cwd'),
+    timeoutMs: numberFlag(parsed, 'timeout-ms'),
+    outputLimit: numberFlag(parsed, 'output-limit'),
+    includeFailed: booleanFlag(parsed, 'skip-failed') ? false : undefined,
+  });
+  renderRunVerify(value, json);
+}
+
 async function listCommand(
   globalArgs: string[],
   argv: string[],
@@ -146,6 +196,19 @@ async function healthCommand(globalArgs: string[], argv: string[]): Promise<void
 
 async function getJson(url: string): Promise<unknown> {
   const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+  }
+  return await response.json() as JsonValue;
+}
+
+async function postJson(url: string, body: JsonRecord): Promise<unknown> {
+  removeUndefined(body);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
   }
@@ -280,6 +343,50 @@ function renderTasks(value: unknown, json: boolean): void {
     console.log(`${String(item.id)}  ${String(item.status ?? '?')}  session=${String(item.sessionId ?? '?')} provider=${String(item.provider ?? '?')} model=${String(item.model ?? metadata.model ?? '?')}`);
   }
 }
+
+function renderRunInspect(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const graph = asRecord(value);
+  const counts = asRecord(graph.counts);
+  const warnings = Array.isArray(graph.warnings) ? graph.warnings : [];
+  console.log(`run=${String(graph.runSpecId ?? '?')} session=${String(graph.sessionId ?? '?')}`);
+  console.log(`nodes run=${String(counts.run_spec ?? 0)} tasks=${String(counts.task_run ?? 0)} events=${String(counts.session_event ?? 0)} tools=${String(counts.tool_call_state ?? 0)} verifications=${String(counts.verification_record ?? 0)}`);
+  console.log(`edges=${Array.isArray(graph.edges) ? graph.edges.length : 0} warnings=${warnings.length}`);
+  for (const warning of warnings) console.log(`warning: ${String(warning)}`);
+}
+
+function renderRunRecover(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const decision = asRecord(value);
+  console.log(`status=${String(decision.status ?? '?')} recommendation=${String(decision.recommendation ?? '?')}`);
+  for (const key of ['resumeToolCallIds', 'retryToolCallIds', 'cancelToolCallIds', 'operatorAttentionToolCallIds']) {
+    const ids = Array.isArray(decision[key]) ? decision[key] : [];
+    if (ids.length > 0) console.log(`${key}=${ids.map(String).join(',')}`);
+  }
+  const reasons = Array.isArray(decision.reasons) ? decision.reasons : [];
+  for (const reason of reasons) console.log(`reason: ${String(reason)}`);
+}
+
+function renderRunVerify(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const result = asRecord(value);
+  const decision = asRecord(result.decision);
+  const ran = Array.isArray(result.ranRecordIds) ? result.ranRecordIds : [];
+  console.log(`run=${String(result.runSpecId ?? '?')} verification=${String(decision.status ?? '?')} ran=${ran.length}`);
+  for (const id of ran) console.log(`ran: ${String(id)}`);
+  const blocked = Array.isArray(decision.blockedVerificationRecordIds) ? decision.blockedVerificationRecordIds : [];
+  for (const id of blocked) console.log(`blocked: ${String(id)}`);
+}
+
 
 function parseArgs(argv: string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {};
@@ -458,6 +565,7 @@ function printHelp(): void {
 Usage:
   los chat [options] <prompt>
   los run [options] <prompt>
+  los run <inspect|recover|verify> <run-id> [options]
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
   los artifacts <list|put|get|delete> [options]
@@ -482,6 +590,15 @@ Chat:
   --trace-id ID           Trace id
   --dedupe-key KEY        Active task dedupe key
 
+Run operations:
+  inspect RUN_ID          Print runtime evidence graph counts and warnings
+  recover RUN_ID          Print tool recovery decision; use --intent cancel to cancel active tools
+  verify RUN_ID           Run required verification records
+  --stale-ms N            Recovery stale threshold
+  --cwd PATH              Verification working directory
+  --output-limit N        Verification output summary limit
+  --skip-failed           Do not rerun failed verification records
+
 Compat:
   --target NAME[:MODEL]   Target provider/model, repeat with comma or positional args
   --probe ID              Probe id, default all built-in probes
@@ -497,6 +614,27 @@ Artifacts:
 Nodes:
   list | commands | command
   Run "los nodes --help" for node registry and command options.
+`);
+}
+
+function printRunHelp(): void {
+  console.log(`los run operations
+
+Examples:
+  los run inspect run-123
+  los run recover run-123 --stale-ms 300000
+  los run recover run-123 --intent cancel
+  los run verify run-123 --timeout-ms 120000
+
+Options:
+  --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}
+  --json                  Emit raw JSON
+  --intent MODE           recover or cancel
+  --stale-ms N            Recovery stale threshold
+  --cwd PATH              Verification working directory
+  --timeout-ms N          Verification timeout
+  --output-limit N        Verification output summary limit
+  --skip-failed           Do not rerun failed verification records
 `);
 }
 

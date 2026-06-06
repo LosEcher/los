@@ -29,7 +29,12 @@ import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask } from '@los/agent/scheduler';
-import { listLatestProviderCompatEvidence } from '@los/agent';
+import {
+  listLatestProviderCompatEvidence,
+  readRuntimeEvidenceGraph,
+  readToolCallRecoveryForRunSpec,
+  runVerificationRecordsForRunSpec,
+} from '@los/agent';
 import { ensureSessionStore, loadSession, listSessions } from '@los/agent/session';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
 import { getPool } from '@los/infra/db';
@@ -508,6 +513,39 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     };
   });
 
+  app.get('/runs/:id/inspect', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const graph = await readRuntimeEvidenceGraph(id);
+    if (!graph) return reply.status(404).send({ error: 'Not found' });
+    return graph;
+  });
+
+  app.post('/runs/:id/recover', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = asRecord(req.body);
+    await ensureRunSpecStore();
+    const runSpec = await loadRunSpec(id);
+    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+    return await readToolCallRecoveryForRunSpec(id, {
+      intent: body.intent === 'cancel' ? 'cancel' : 'recover',
+      staleMs: normalizeOptionalNonNegativeInteger(body.staleMs),
+    });
+  });
+
+  app.post('/runs/:id/verify', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = asRecord(req.body);
+    await ensureRunSpecStore();
+    const runSpec = await loadRunSpec(id);
+    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+    return await runVerificationRecordsForRunSpec(id, {
+      cwd: normalizeOptionalString(body.cwd),
+      timeoutMs: normalizeOptionalNonNegativeInteger(body.timeoutMs),
+      outputLimit: normalizeOptionalNonNegativeInteger(body.outputLimit),
+      includeFailed: body.includeFailed === false ? false : undefined,
+    });
+  });
+
   app.get('/runs/:id', async (req) => {
     const { id } = req.params as { id: string };
     await ensureRunSpecStore();
@@ -689,6 +727,13 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeOptionalNonNegativeInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return Math.floor(parsed);
+}
+
 function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
@@ -699,6 +744,10 @@ function normalizeBoundedInteger(value: unknown, fallback: number, min: number, 
   const parsed = Number(value ?? fallback);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function parseLiveSessionEventNotification(payload: string | undefined) {

@@ -5,6 +5,8 @@ import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import {
   appendSessionEvent,
+  createToolCallState,
+  createVerificationRecord,
   createRunSpec,
   ensureRunSpecStore,
   ensureSessionEventStore,
@@ -76,6 +78,96 @@ test('run events route replays session events by run spec cursor', async () => {
     assert.equal(missing.statusCode, 404);
   } finally {
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await app.close();
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('run operation routes expose inspect, recover, and verify surfaces', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-ops-${suffix}`;
+  const sessionId = `session-run-ops-${suffix}`;
+  const taskRunId = `task-run-ops-${suffix}`;
+  const toolCallId = `tool-run-ops-${suffix}`;
+  const verificationId = `verification-run-ops-${suffix}`;
+  const app = await createServer({
+    serviceId: `gateway-run-ops-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'operate on run',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createToolCallState({
+      id: toolCallId,
+      sessionId,
+      runSpecId,
+      taskRunId,
+      turn: 1,
+      toolName: 'read_file',
+      state: 'failed',
+      inputJson: { path: 'AGENTS.md' },
+      maxAttempts: 2,
+      idempotent: true,
+    });
+    await createVerificationRecord({
+      id: verificationId,
+      sessionId,
+      runSpecId,
+      taskRunId,
+      checkName: 'verify ok',
+      command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify("console.log('verify ok')")}`,
+      status: 'required',
+    });
+
+    const inspect = await app.inject({
+      method: 'GET',
+      url: `/runs/${runSpecId}/inspect`,
+    });
+    assert.equal(inspect.statusCode, 200);
+    assert.equal(inspect.json().runSpecId, runSpecId);
+
+    const recover = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/recover`,
+      payload: {},
+    });
+    assert.equal(recover.statusCode, 200);
+    assert.equal(recover.json().recommendation, 'retry');
+
+    const verify = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/verify`,
+      payload: { timeoutMs: 30_000 },
+    });
+    assert.equal(verify.statusCode, 200);
+    const verifyBody = verify.json();
+    assert.equal(verifyBody.runSpecId, runSpecId);
+    assert.deepEqual(verifyBody.ranRecordIds, [verificationId]);
+    assert.equal(verifyBody.decision.status, 'succeeded');
+
+    const missing = await app.inject({
+      method: 'GET',
+      url: `/runs/${runSpecId}-missing/inspect`,
+    });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await app.close();
