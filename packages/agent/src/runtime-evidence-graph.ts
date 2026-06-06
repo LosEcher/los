@@ -193,6 +193,13 @@ export async function readRuntimeEvidenceGraph(
   if (toolStates.length >= toolCallStateLimit) {
     builder.warn(`tool call state evidence may be truncated at limit=${toolCallStateLimit}`);
   }
+  addStateEventConsistencyWarnings(builder, {
+    runSpec,
+    taskRuns,
+    sessionEvents,
+    toolStates,
+    verificationRecords,
+  });
 
   return builder.toGraph();
 }
@@ -346,4 +353,109 @@ function normalizeString(value: unknown): string | undefined {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter(Boolean))];
+}
+
+function addStateEventConsistencyWarnings(
+  builder: ReturnType<typeof createRuntimeEvidenceGraphBuilder>,
+  input: {
+    runSpec: RunSpecRecord;
+    taskRuns: readonly TaskRunRecord[];
+    sessionEvents: readonly SessionEventRecord[];
+    toolStates: readonly ToolCallStateRecord[];
+    verificationRecords: readonly VerificationRecord[];
+  },
+): void {
+  if (
+    input.runSpec.status !== 'created'
+    && !hasExecutionStateEvent(input.sessionEvents, 'run_spec', input.runSpec.id, input.runSpec.status)
+    && !hasLegacyEvent(input.sessionEvents, `run.${input.runSpec.status}`, { runSpecId: input.runSpec.id })
+  ) {
+    builder.warn(`run_spec ${input.runSpec.id} status=${input.runSpec.status} has no matching session event`);
+  }
+
+  for (const taskRun of input.taskRuns) {
+    if (
+      taskRun.status !== 'queued'
+      && !hasExecutionStateEvent(input.sessionEvents, 'task_run', taskRun.id, taskRun.status)
+      && !hasLegacyEvent(input.sessionEvents, `task.${taskRun.status}`, { taskRunId: taskRun.id })
+    ) {
+      builder.warn(`task_run ${taskRun.id} status=${taskRun.status} has no matching session event`);
+    }
+  }
+
+  for (const toolState of input.toolStates) {
+    if (!shouldRequireToolStateEvent(toolState.state)) continue;
+    if (
+      !hasExecutionStateEvent(input.sessionEvents, 'tool_call_state', toolState.id, toolState.state)
+      && !hasLegacyToolStateEvent(input.sessionEvents, toolState.id, toolState.state)
+    ) {
+      builder.warn(`tool_call_state ${toolState.id} state=${toolState.state} has no matching session event`);
+    }
+  }
+
+  for (const verification of input.verificationRecords) {
+    if (verification.status === 'required') continue;
+    if (
+      !hasExecutionStateEvent(input.sessionEvents, 'verification_record', verification.id, verification.status)
+      && !hasLegacyEvent(input.sessionEvents, `verification.${verification.status}`, { verificationRecordId: verification.id })
+    ) {
+      builder.warn(`verification_record ${verification.id} status=${verification.status} has no matching session event`);
+    }
+  }
+}
+
+function hasExecutionStateEvent(
+  events: readonly SessionEventRecord[],
+  entityType: string,
+  entityId: string,
+  to: string,
+): boolean {
+  return events.some(event =>
+    event.payload.entityType === entityType
+    && event.payload.entityId === entityId
+    && event.payload.to === to
+  );
+}
+
+function hasLegacyEvent(
+  events: readonly SessionEventRecord[],
+  type: string,
+  payloadMatch: Record<string, string>,
+): boolean {
+  return events.some(event => {
+    if (event.type !== type) return false;
+    return Object.entries(payloadMatch).every(([key, value]) => event.payload[key] === value);
+  });
+}
+
+function hasLegacyToolStateEvent(
+  events: readonly SessionEventRecord[],
+  toolCallStateId: string,
+  state: string,
+): boolean {
+  if (state === 'succeeded') {
+    return events.some(event =>
+      event.type === 'tool.result'
+      && event.payload.callId === toolCallStateId
+      && event.payload.ok !== false
+    );
+  }
+  if (state === 'failed') {
+    return events.some(event =>
+      event.type === 'tool.result'
+      && event.payload.callId === toolCallStateId
+      && event.payload.ok === false
+    );
+  }
+  if (state === 'denied') {
+    return events.some(event =>
+      event.type === 'tool.denied'
+      && event.payload.callId === toolCallStateId
+    );
+  }
+  return false;
+}
+
+function shouldRequireToolStateEvent(state: string): boolean {
+  return state === 'succeeded' || state === 'failed' || state === 'denied' || state === 'skipped';
 }

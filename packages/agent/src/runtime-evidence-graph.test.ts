@@ -55,10 +55,20 @@ test('runtime evidence graph projects run evidence across execution tables', asy
     });
     await appendSessionEvent({
       sessionId,
+      type: 'task.succeeded',
+      payload: { runSpecId, taskRunId },
+    });
+    await appendSessionEvent({
+      sessionId,
       type: 'tool.result',
       toolName: 'read_file',
       parentEventId: started.id,
-      payload: { runSpecId, taskRunId, callId: toolCallStateId },
+      payload: { runSpecId, taskRunId, callId: toolCallStateId, ok: true },
+    });
+    await appendSessionEvent({
+      sessionId,
+      type: 'verification.succeeded',
+      payload: { runSpecId, taskRunId, verificationRecordId: verificationId },
     });
     await createToolCallState({
       id: toolCallStateId,
@@ -121,7 +131,7 @@ test('runtime evidence graph projects run evidence across execution tables', asy
     assert.equal(graph.sessionId, sessionId);
     assert.equal(graph.counts.run_spec, 1);
     assert.equal(graph.counts.task_run, 1);
-    assert.equal(graph.counts.session_event, 2);
+    assert.equal(graph.counts.session_event, 4);
     assert.equal(graph.counts.tool_call_state, 1);
     assert.equal(graph.counts.verification_record, 1);
     assert.equal(graph.counts.agent_task, 2);
@@ -144,6 +154,47 @@ test('runtime evidence graph projects run evidence across execution tables', asy
     await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('runtime evidence graph warns when durable state has no matching event evidence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-evidence-warning-${suffix}`;
+  const sessionId = `session-evidence-warning-${suffix}`;
+  const taskRunId = `task-evidence-warning-${suffix}`;
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'collect warning evidence',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createTaskRun({
+      id: taskRunId,
+      sessionId,
+      runSpecId,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      promptPreview: 'collect warning evidence',
+      status: 'succeeded',
+    });
+
+    const graph = await readRuntimeEvidenceGraph(runSpecId);
+    assert.ok(graph);
+    assert.deepEqual(graph.warnings, [
+      `task_run ${taskRunId} status=succeeded has no matching session event`,
+    ]);
+  } finally {
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
