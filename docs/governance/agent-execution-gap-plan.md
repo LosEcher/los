@@ -121,18 +121,21 @@ Current state:
    agent loop.
 6. The executor NDJSON path now streams `tool_call_state` chunks and the
    scheduler persists them into the same table.
+7. `tool-call-recovery` can read durable tool rows and classify retry, resume,
+   cancel, and operator-attention decisions.
 
 Gap:
 
-Tool state is now durable evidence, but it is not yet a recovery controller.
-Retry, resume, cancellation, and verifier decisions can inspect
-`tool_call_states`, but they do not yet use those rows as their primary state
-machine.
+Tool state is now durable evidence and has a recovery decision surface. The
+remaining gap is execution orchestration: the scheduler still needs a higher
+level retry/resume/cancel loop that consumes those decisions and creates the
+next task attempt or operator handoff.
 
 Supplement:
 
-1. Use `tool_call_states` to drive retry, resume, cancellation, and verifier
-   decisions.
+1. Wire `readToolCallRecoveryForRunSpec` and `readToolCallRecoveryForTaskRun`
+   into scheduler/API flows that create follow-up attempts or cancellation
+   events.
 2. Keep requested, approved, denied, running, succeeded, failed, retrying, and
    skipped transitions queryable on both local and executor paths.
 3. Add explicit input hash and approval evidence fields if resumability needs
@@ -201,17 +204,20 @@ Current state:
 5. DAG execution can block completion when a verifier task has not succeeded.
 6. Direct `/chat` runs can block `run_specs` completion while required
    verification records remain unsatisfied.
+7. `verification-runner` executes commands from `verification_records`, writes
+   `verification.running/succeeded/failed` events, and updates `run_specs`
+   completion status from required-check outcomes.
 
 Gap:
 
-Verification intent and results are now tied to run state, but `los` does not
-yet execute verifier checks as a first-class runner. Check results still need an
-operator, external agent, or future verifier task to mark records succeeded,
-failed, or skipped with evidence.
+Verification intent, execution, result storage, and completion blocking are now
+tied to run state. The remaining gap is operator-facing integration: CLI/UI
+entrypoints and DAG verifier tasks still need to call the runner directly.
 
 Supplement:
 
-1. Add an executable verifier runner that consumes `verification_records`.
+1. Expose the executable verifier runner through CLI/API surfaces after the
+   core runner stays stable.
 2. Store skipped checks as explicit records with reason and risk.
 3. Promote verifier tasks into the DAG scheduler for multi-step runs.
 4. Add operation smokes that prove a required failed check blocks completion and
@@ -281,8 +287,7 @@ Validation:
 
 ### Phase 3: Durable Run Specs And Verification State
 
-Status: implemented as the current baseline, with verifier-runner work still
-open.
+Status: implemented as the current baseline.
 
 Deliverables:
 
@@ -301,15 +306,16 @@ Validation:
 
 ### Phase 4: Recovery And Verifier Runner
 
-Timeframe: next implementation phase.
+Status: P0 core implemented; operator-facing integration remains.
 
 Deliverables:
 
 1. Executable verifier runner over `verification_records`.
-2. Tool-state-driven retry/resume/cancel controller.
-3. Direct `/chat` and DAG completion policies that use the same verification
+2. Tool-state-driven retry/resume/cancel decision surface.
+3. Direct `/chat` and runner completion policies that use the same verification
    semantics.
 4. Operation smoke for required check failure and recovery.
+5. Follow-up scheduler/API integration that consumes the recovery decision.
 
 Validation:
 
@@ -354,11 +360,12 @@ Validation:
 
 ## Immediate Next Work
 
-1. Build the executable verifier runner over `verification_records`.
-2. Use `tool_call_states` as recovery input for retry, resume, and cancellation.
-3. Expose run contract fields in CLI/UI only after the verifier runner can
-   consume them.
-4. Add operation smokes for direct `/chat` verification blocking and release.
+1. Add API/CLI entrypoints for `runVerificationRecordsForRunSpec`.
+2. Wire `readToolCallRecoveryForRunSpec` into scheduler recovery and operation
+   routes.
+3. Promote verifier tasks into the DAG scheduler for multi-step graph runs.
+4. Add operation smokes for direct `/chat` verification blocking, verifier-runner
+   release, and tool-state recovery decisions.
 5. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
 6. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability

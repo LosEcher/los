@@ -133,6 +133,7 @@ export async function updateVerificationRecord(
         error = $5,
         completed_at = CASE
           WHEN $2 IN ('succeeded', 'failed', 'skipped') THEN now()
+          WHEN $2 IN ('required', 'running') THEN NULL
           ELSE completed_at
         END,
         updated_at = now()
@@ -140,6 +141,16 @@ export async function updateVerificationRecord(
     RETURNING *
   `,
     [id, status, input.skipReason ?? null, input.outputSummary ?? null, input.error ?? null],
+  );
+  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+}
+
+export async function loadVerificationRecord(id: string): Promise<VerificationRecord | null> {
+  await ensureVerificationRecordStore();
+  const db = getDb();
+  const rows = await db.query<VerificationRecordRow>(
+    'SELECT * FROM verification_records WHERE id = $1',
+    [id],
   );
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }

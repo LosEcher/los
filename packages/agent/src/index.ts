@@ -95,6 +95,15 @@ export {
   type UpdateToolCallStateInput,
 } from './tool-call-states.js';
 export {
+  evaluateToolCallRecovery,
+  readToolCallRecoveryForRunSpec,
+  readToolCallRecoveryForTaskRun,
+  type ToolCallRecoveryDecision,
+  type ToolCallRecoveryIntent,
+  type ToolCallRecoveryOptions,
+  type ToolCallRecoveryRecommendation,
+} from './tool-call-recovery.js';
+export {
   ensureRunSpecStore,
   createRunSpec,
   loadRunSpec,
@@ -117,6 +126,7 @@ export {
   createVerificationRecord,
   ensureVerificationRecordStore,
   listVerificationRecordsForRunSpec,
+  loadVerificationRecord,
   seedVerificationRequirementsForRunSpec,
   updateVerificationRecord,
   type CreateVerificationRecordInput,
@@ -124,6 +134,17 @@ export {
   type VerificationRecord,
   type VerificationRecordStatus,
 } from './verification-records.js';
+export {
+  resolveVerificationCompletionDecision,
+  runVerificationRecord,
+  runVerificationRecordsForRunSpec,
+  type RunVerificationRecordOptions,
+  type RunVerificationRecordResult,
+  type RunVerificationRecordsForRunSpecOptions,
+  type RunVerificationRecordsForRunSpecResult,
+  type VerificationCommandResult,
+  type VerificationCompletionDecision,
+} from './verification-runner.js';
 export {
   ensureProviderCompatEvidenceStore,
   listLatestProviderCompatEvidence,

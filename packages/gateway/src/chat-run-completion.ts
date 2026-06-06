@@ -1,7 +1,7 @@
 import type { RunSpecStatus } from '@los/agent/run-specs';
 import { updateRunSpecStatus } from '@los/agent/run-specs';
 import type { VerificationRecord } from '@los/agent';
-import { listVerificationRecordsForRunSpec } from '@los/agent';
+import { listVerificationRecordsForRunSpec, resolveVerificationCompletionDecision } from '@los/agent';
 import { appendSessionEvent } from '@los/agent/session-events';
 
 export interface DirectRunCompletionDecision {
@@ -24,12 +24,10 @@ export interface ApplyDirectRunCompletionStatusInput {
 export function resolveDirectRunCompletionDecision(
   verificationRecords: readonly Pick<VerificationRecord, 'id' | 'required' | 'status'>[],
 ): DirectRunCompletionDecision {
-  const blockedVerificationRecordIds = verificationRecords
-    .filter(record => record.required && record.status !== 'succeeded' && record.status !== 'skipped')
-    .map(record => record.id);
+  const decision = resolveVerificationCompletionDecision(verificationRecords);
   return {
-    status: blockedVerificationRecordIds.length > 0 ? 'blocked' : 'succeeded',
-    blockedVerificationRecordIds,
+    status: decision.status,
+    blockedVerificationRecordIds: decision.blockedVerificationRecordIds,
   };
 }
 
