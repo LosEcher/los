@@ -790,7 +790,8 @@ function sanitizeErrorMessage(message: string): string {
 
 function readProviderSource(provider: unknown): string | null {
   if (!provider || typeof provider !== 'object') return null;
-  const source = (provider as Record<string, unknown>)._source;
+  const record = provider as Record<string, unknown>;
+  const source = record.source ?? record._source;
   return typeof source === 'string' && source.trim() ? source : null;
 }
 
