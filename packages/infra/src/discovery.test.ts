@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ccSwitchProviderFromRow,
   describeProviderReadiness,
+  parseCodexRouteConfig,
   providerApiKeyEnv,
   summarizeProviderReadiness,
   type DiscoveredProvider,
@@ -73,6 +75,84 @@ test('provider readiness distinguishes configured keys, discovery, ready state, 
 test('provider API key env names use known provider conventions', () => {
   assert.equal(providerApiKeyEnv('anthropic'), 'ANTHROPIC_API_KEY');
   assert.equal(providerApiKeyEnv('deepseek'), 'DEEPSEEK_API_KEY');
+  assert.equal(providerApiKeyEnv('deepseek-anthropic'), 'DEEPSEEK_API_KEY');
+  assert.equal(providerApiKeyEnv('minimax'), 'MINIMAX_API_KEY');
   assert.equal(providerApiKeyEnv('qwen'), 'DASHSCOPE_API_KEY');
   assert.equal(providerApiKeyEnv('local router'), 'LOCAL_ROUTER_API_KEY');
+});
+
+test('Codex route config maps Packy API routes to packycode', () => {
+  const route = parseCodexRouteConfig(`
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "packycode"
+base_url = "https://www.packyapi.com/v1"
+`);
+
+  assert.deepEqual(route, {
+    providerName: 'packycode',
+    baseUrl: 'https://www.packyapi.com/v1',
+    model: 'gpt-5.5',
+  });
+});
+
+test('cc-switch rows import executable Claude-compatible DeepSeek and MiniMax providers', () => {
+  const deepseek = ccSwitchProviderFromRow({
+    app_type: 'claude',
+    name: 'DeepSeek',
+    is_current: 1,
+    settings_config: JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'deepseek-key',
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_MODEL: 'deepseek-v4-pro',
+      },
+    }),
+  });
+  assert.equal(deepseek?.name, 'deepseek-anthropic');
+  assert.equal(deepseek?.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.equal(deepseek?.defaultModel, 'deepseek-v4-pro');
+  assert.equal(deepseek?.source, 'cc-switch/claude/DeepSeek');
+
+  const minimax = ccSwitchProviderFromRow({
+    app_type: 'claude',
+    name: 'MiniMax',
+    is_current: 0,
+    settings_config: JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'minimax-key',
+        ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+        ANTHROPIC_MODEL: 'MiniMax-M3',
+      },
+    }),
+  });
+  assert.equal(minimax?.name, 'minimax');
+  assert.equal(minimax?.baseUrl, 'https://api.minimaxi.com/anthropic');
+  assert.equal(minimax?.defaultModel, 'MiniMax-M3');
+  assert.equal(minimax?.source, 'cc-switch/claude/MiniMax');
+});
+
+test('cc-switch Codex rows import PackyCode auth without exposing Claude OAuth as Anthropic', () => {
+  const provider = ccSwitchProviderFromRow({
+    app_type: 'codex',
+    name: 'PackyCode',
+    is_current: 1,
+    settings_config: JSON.stringify({
+      auth: JSON.stringify({ OPENAI_API_KEY: 'packy-key' }),
+      config: `
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+base_url = "https://www.packyapi.com/v1"
+`,
+    }),
+  });
+
+  assert.equal(provider?.name, 'packycode');
+  assert.equal(provider?.apiKey, 'packy-key');
+  assert.equal(provider?.baseUrl, 'https://www.packyapi.com/v1');
+  assert.equal(provider?.source, 'cc-switch/codex/PackyCode');
 });

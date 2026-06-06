@@ -846,7 +846,7 @@ function sanitizeServiceId(value: string): string {
 }
 
 function selectAgentModelProviders(config: ReturnType<typeof getConfig>): string[] {
-  const core = new Set(['deepseek', 'openai', 'codex', 'packycode']);
+  const core = new Set(['deepseek', 'deepseek-anthropic', 'minimax', 'openai', 'codex', 'packycode']);
   const configured = Object.entries(config.providers)
     .filter(([name, provider]) => core.has(name) && provider.enabled)
     .map(([name]) => name);

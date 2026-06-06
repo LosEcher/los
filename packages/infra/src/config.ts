@@ -406,7 +406,10 @@ function discoverProviderKeyEnv(name: string): string {
   const KEY_ENV: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
     deepseek: 'DEEPSEEK_API_KEY',
+    'deepseek-anthropic': 'DEEPSEEK_API_KEY',
+    minimax: 'MINIMAX_API_KEY',
     openai: 'OPENAI_API_KEY',
+    packycode: 'OPENAI_API_KEY',
   };
   return KEY_ENV[name] ?? `${name.toUpperCase()}_API_KEY`;
 }

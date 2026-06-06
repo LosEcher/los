@@ -17,6 +17,7 @@
  *   - cc-switch's multi-tool config sync
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -82,6 +83,7 @@ export interface DiscoveryReport {
 const PROVIDER_API_KEY_ENV: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
   deepseek: 'DEEPSEEK_API_KEY',
+  'deepseek-anthropic': 'DEEPSEEK_API_KEY',
   minimax: 'MINIMAX_API_KEY',
   moonshot: 'MOONSHOT_API_KEY',
   openai: 'OPENAI_API_KEY',
@@ -102,6 +104,7 @@ function inferCredentialClass(
   if (source.includes('env:')) return 'api_key';
   if (source.includes('oauth') || source.includes('claude.json')) return 'oauth';
   if (source.includes('ollama') || source.includes('lm-studio') || source.includes('vllm')) return 'local_endpoint';
+  if (source.includes('cc-switch') || source.includes('hermes/.env')) return 'api_key';
   if (source.includes('codex') || source.includes('cli')) return 'cli_adapter';
   return 'unknown';
 }
@@ -182,6 +185,147 @@ function fileAge(path: string): string | undefined {
   } catch { return undefined; }
 }
 
+interface CodexRouteConfig {
+  providerName: string;
+  baseUrl: string;
+  model?: string;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function parseJsonObject(value: unknown): Record<string, any> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, any>;
+  }
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, any>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
+  const model = toml.match(/^model\s*=\s*"(.+)"$/m)?.[1];
+  const providerId = toml.match(/^model_provider\s*=\s*"(.+)"$/m)?.[1];
+  let baseUrl = 'https://api.openai.com/v1';
+  let providerName = 'openai';
+
+  if (providerId) {
+    const section = new RegExp(`\\[model_providers\\.${providerId}\\]\\n(.*?)(?=\\n\\[|$)`, 's');
+    const sectionMatch = toml.match(section);
+    if (sectionMatch) {
+      baseUrl = sectionMatch[1].match(/^base_url\s*=\s*"(.+)"$/m)?.[1] ?? baseUrl;
+      providerName = sectionMatch[1].match(/^name\s*=\s*"(.+)"$/m)?.[1] ?? providerName;
+    }
+  }
+
+  if (baseUrl.includes('packyapi.com') || providerName.toLowerCase() === 'packycode') {
+    providerName = 'packycode';
+  }
+
+  return { providerName, baseUrl, model };
+}
+
+function parseCcSwitchRowsWithCli(dbPath: string): Array<Record<string, any>> {
+  const output = execFileSync('sqlite3', [
+    '-json',
+    dbPath,
+    'SELECT app_type, name, settings_config, is_current FROM providers ORDER BY is_current DESC',
+  ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  return JSON.parse(output || '[]') as Array<Record<string, any>>;
+}
+
+function extractApiKeyFromCodexAuth(auth: Record<string, any> | null): string | undefined {
+  return readString(auth?.OPENAI_API_KEY) ?? readString(auth?.tokens?.access_token);
+}
+
+export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredProvider | null {
+  const config = parseJsonObject(row.settings_config) ?? {};
+  const env = parseJsonObject(config.env) ?? {};
+  const appType = readString(row.app_type)?.toLowerCase();
+  const accountName = readString(row.name) ?? 'default';
+  const isCurrent = row.is_current === 1 || row.is_current === true;
+
+  if (appType === 'codex') {
+    const route = readString(config.config)
+      ? parseCodexRouteConfig(config.config)
+      : {
+          providerName: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          model: undefined,
+        };
+    const auth = parseJsonObject(config.auth);
+    const apiKey = extractApiKeyFromCodexAuth(auth);
+    if (!apiKey) return null;
+    return {
+      name: route.providerName,
+      apiKey,
+      baseUrl: route.baseUrl,
+      defaultModel: route.model,
+      available: true,
+      source: `cc-switch/codex/${accountName}`,
+      sourceTool: 'cc-switch',
+      importable: true,
+      note: isCurrent ? 'Currently active in cc-switch' : undefined,
+    };
+  }
+
+  if (appType === 'claude') {
+    const apiKey = readString(env.ANTHROPIC_AUTH_TOKEN);
+    const baseUrl = readString(env.ANTHROPIC_BASE_URL);
+    if (!apiKey || !baseUrl) return null;
+
+    const lowerName = accountName.toLowerCase();
+    const lowerBaseUrl = baseUrl.toLowerCase();
+    let providerName: string | null = null;
+    if (lowerBaseUrl.includes('deepseek.com') || lowerName.includes('deepseek')) {
+      providerName = 'deepseek-anthropic';
+    } else if (lowerBaseUrl.includes('minimax') || lowerName.includes('minimax')) {
+      providerName = 'minimax';
+    }
+    if (!providerName) return null;
+
+    return {
+      name: providerName,
+      apiKey,
+      baseUrl,
+      defaultModel: readString(env.ANTHROPIC_MODEL)
+        ?? readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME)
+        ?? readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL)
+        ?? readString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL),
+      available: true,
+      source: `cc-switch/claude/${accountName}`,
+      sourceTool: 'cc-switch',
+      importable: true,
+      note: isCurrent ? 'Currently active in cc-switch' : undefined,
+    };
+  }
+
+  const apiKey = readString(config.api_key) ?? readString(config.apiKey);
+  if (!apiKey) return null;
+  const providerMap: Record<string, string> = {
+    opencode: readString(config.provider) ?? 'anthropic',
+    gemini: 'google',
+  };
+  return {
+    name: providerMap[appType ?? ''] ?? appType ?? accountName.toLowerCase(),
+    apiKey,
+    baseUrl: readString(config.base_url) ?? readString(config.baseUrl),
+    defaultModel: readString(config.model),
+    available: true,
+    source: `cc-switch/${accountName}`,
+    sourceTool: 'cc-switch',
+    importable: true,
+    note: isCurrent ? 'Currently active in cc-switch' : undefined,
+  };
+}
+
 // ── 1. Codex CLI ────────────────────────────────────────
 
 function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } {
@@ -189,6 +333,10 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
   const authPath = join(home, 'auth.json');
   const configPath = join(home, 'config.toml');
   const providers: DiscoveredProvider[] = [];
+  let route: CodexRouteConfig = {
+    providerName: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+  };
 
   const installed = existsSync(home);
   const tool: DiscoveredTool = {
@@ -200,6 +348,12 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
 
   if (!installed) return { tool, providers };
 
+  if (existsSync(configPath)) {
+    try {
+      route = parseCodexRouteConfig(readFileSync(configPath, 'utf-8'));
+    } catch { /* invalid toml */ }
+  }
+
   // Parse auth.json
   if (existsSync(authPath)) {
     try {
@@ -208,10 +362,10 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
 
       if (auth.OPENAI_API_KEY) {
         providers.push({
-          name: 'openai',
+          name: route.providerName,
           apiKey: auth.OPENAI_API_KEY,
-          baseUrl: 'https://api.openai.com/v1',
-          defaultModel: 'gpt-5.5',
+          baseUrl: route.baseUrl,
+          defaultModel: route.model ?? 'gpt-5.5',
           available: true,
           source: 'codex/auth.json',
           sourceTool: 'codex',
@@ -221,10 +375,10 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
 
       if (auth.tokens?.access_token) {
         providers.push({
-          name: 'openai',
+          name: route.providerName,
           apiKey: auth.tokens.access_token,
-          baseUrl: 'https://api.openai.com/v1',
-          defaultModel: 'gpt-5.5',
+          baseUrl: route.baseUrl,
+          defaultModel: route.model ?? 'gpt-5.5',
           available: true,
           source: 'codex/auth.json (ChatGPT OAuth)',
           sourceTool: 'codex',
@@ -233,28 +387,6 @@ function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } 
         });
       }
     } catch { /* corrupt auth.json */ }
-  }
-
-  // Parse config.toml for model preferences
-  if (existsSync(configPath)) {
-    try {
-      const toml = readFileSync(configPath, 'utf-8');
-      const modelMatch = toml.match(/^model\s*=\s*"(.+)"$/m);
-      if (modelMatch && providers.length > 0) {
-        providers[0].defaultModel = modelMatch[1];
-      }
-
-      const providerMatch = toml.match(/^model_provider\s*=\s*"(.+)"$/m);
-      if (providerMatch) {
-        // Look up the provider URL in [model_providers] section
-        const section = new RegExp(`\\[model_providers\\.${providerMatch[1]}\\]\\n(.*?)(?=\\n\\[|$)`, 's');
-        const sectionMatch = toml.match(section);
-        if (sectionMatch && providers.length > 0) {
-          const urlMatch = sectionMatch[1].match(/^base_url\s*=\s*"(.+)"$/m);
-          if (urlMatch) providers[0].baseUrl = urlMatch[1];
-        }
-      }
-    } catch { /* invalid toml */ }
   }
 
   return { tool, providers };
@@ -279,21 +411,12 @@ function scanClaude(): { tool: DiscoveredTool; providers: DiscoveredProvider[] }
   if (!installed) return { tool, providers };
 
   // Claude OAuth tokens — only usable by Claude CLI itself
-  // But we can detect and report them
+  // Keep this as tool metadata only. OAuth/login state is not a LOS provider key.
   if (existsSync(oauthPath)) {
     try {
       const oauth = JSON.parse(readFileSync(oauthPath, 'utf-8'));
       const hasOAuth = !!(oauth.access_token || oauth.oauth_tokens);
-      providers.push({
-        name: 'anthropic',
-        available: false,               // cannot directly use Claude OAuth tokens
-        source: 'claude/.claude.json',
-        sourceTool: 'claude',
-        importable: false,
-        note: hasOAuth
-          ? 'Claude OAuth detected, but tokens only work with Claude CLI. Set ANTHROPIC_API_KEY to use directly.'
-          : 'Claude installed but no exportable API key found. Set ANTHROPIC_API_KEY.',
-      });
+      if (hasOAuth) tool.version = 'OAuth login detected';
     } catch { /* corrupt */ }
   }
 
@@ -301,18 +424,10 @@ function scanClaude(): { tool: DiscoveredTool; providers: DiscoveredProvider[] }
   if (existsSync(settingsPath)) {
     try {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-      if (settings.apiKeyHelper) {
-        providers.push({
-          name: 'anthropic',
-          available: false,
-          source: 'claude/settings.json (apiKeyHelper)',
-          sourceTool: 'claude',
-          importable: false,
-          note: 'Claude uses a custom apiKeyHelper script. Set ANTHROPIC_API_KEY to use directly.',
-        });
-      }
       if (settings.model) {
         tool.version = settings.model;
+      } else if (settings.apiKeyHelper && !tool.version) {
+        tool.version = 'apiKeyHelper configured';
       }
     } catch { /* corrupt */ }
   }
@@ -384,36 +499,22 @@ function scanCcSwitch(): { tool: DiscoveredTool; providers: DiscoveredProvider[]
     `).all() as any[];
 
     for (const row of rows) {
-      try {
-        const config = JSON.parse(row.settings_config ?? '{}');
-        if (config.api_key || config.apiKey) {
-          const key = config.api_key || config.apiKey;
-          // Map app_type to provider name
-          const providerMap: Record<string, string> = {
-            claude: 'anthropic',
-            codex: 'openai',
-            opencode: config.provider || 'anthropic',
-            gemini: 'google',
-          };
-
-          providers.push({
-            name: providerMap[row.app_type] ?? row.app_type,
-            apiKey: key,
-            baseUrl: config.base_url || config.baseUrl,
-            defaultModel: config.model,
-            available: true,
-            source: `cc-switch/${row.name}`,
-            sourceTool: 'cc-switch',
-            importable: true,
-            note: row.is_current ? 'Currently active in cc-switch' : undefined,
-          });
-        }
-      } catch { /* skip unparseable configs */ }
+      const provider = ccSwitchProviderFromRow(row);
+      if (provider) providers.push(provider);
     }
     db.close();
     tool.version = `${rows.length} accounts`;
   } catch {
-    tool.version = 'SQLite db found (optional parser unavailable)';
+    try {
+      const rows = parseCcSwitchRowsWithCli(dbPath);
+      for (const row of rows) {
+        const provider = ccSwitchProviderFromRow(row);
+        if (provider) providers.push(provider);
+      }
+      tool.version = `${rows.length} accounts`;
+    } catch {
+      tool.version = 'SQLite db found (parser unavailable)';
+    }
   }
 
   return { tool, providers };
@@ -454,6 +555,7 @@ function scanHermes(): { tool: DiscoveredTool; providers: DiscoveredProvider[] }
           'DEEPSEEK_API_KEY': { name: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
           'OPENAI_API_KEY': { name: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5' },
           'ANTHROPIC_API_KEY': { name: 'anthropic', baseUrl: 'https://api.anthropic.com' },
+          'MINIMAX_API_KEY': { name: 'minimax', baseUrl: 'https://api.minimaxi.com/anthropic', model: 'MiniMax-M3' },
           'HF_TOKEN': { name: 'huggingface' },
           'GROQ_API_KEY': { name: 'groq', baseUrl: 'https://api.groq.com/openai/v1' },
         };
@@ -502,7 +604,7 @@ function scanEnvKeys(): DiscoveredProvider[] {
     'DEEPSEEK_API_KEY':     { name: 'deepseek',   baseUrl: 'https://api.deepseek.com',              model: 'deepseek-v4-flash' },
     'OPENAI_API_KEY':       { name: 'openai',     baseUrl: 'https://api.openai.com/v1',             model: 'gpt-5.5' },
     'ANTHROPIC_API_KEY':    { name: 'anthropic',  baseUrl: 'https://api.anthropic.com',              model: 'claude-sonnet-4-20250514' },
-    'MINIMAX_API_KEY':      { name: 'minimax',    baseUrl: 'https://api.minimax.chat/v1',            model: 'abab7-chat' },
+    'MINIMAX_API_KEY':      { name: 'minimax',    baseUrl: 'https://api.minimaxi.com/anthropic',     model: 'MiniMax-M3' },
     'MOONSHOT_API_KEY':     { name: 'moonshot',   baseUrl: 'https://api.moonshot.cn/v1',              model: 'moonshot-v1-8k' },
     'ZHIPU_API_KEY':        { name: 'zhipu',      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   model: 'glm-4' },
     'DASHSCOPE_API_KEY':    { name: 'qwen',       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },

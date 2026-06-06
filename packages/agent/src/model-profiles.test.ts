@@ -28,6 +28,14 @@ test('resolveModelProfile knows codex-compatible and anthropic routing shapes', 
   assert.equal(anthropic.protocol, 'anthropic');
   assert.equal(anthropic.apiShape, 'anthropic-messages');
   assert.equal(anthropic.supportsReasoning, true);
+
+  const deepseekAnthropic = resolveModelProfile('deepseek-anthropic');
+  assert.equal(deepseekAnthropic.protocol, 'anthropic');
+  assert.equal(deepseekAnthropic.baseUrl, 'https://api.deepseek.com/anthropic');
+
+  const minimax = resolveModelProfile('minimax');
+  assert.equal(minimax.protocol, 'anthropic');
+  assert.equal(minimax.model, 'MiniMax-M3');
 });
 
 test('model profile registry includes the expected core providers', () => {
@@ -35,6 +43,8 @@ test('model profile registry includes the expected core providers', () => {
   assert.ok(MODEL_PROFILES.openai);
   assert.ok(MODEL_PROFILES.codex);
   assert.ok(MODEL_PROFILES.packycode);
+  assert.ok(MODEL_PROFILES['deepseek-anthropic']);
+  assert.ok(MODEL_PROFILES.minimax);
 });
 
 test('summarizeModelProfile exposes runtime-relevant model capabilities', () => {

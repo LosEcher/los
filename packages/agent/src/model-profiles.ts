@@ -147,7 +147,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
   vllm: openAICompatibleProfile('vllm', 'http://127.0.0.1:8000/v1', '(auto)'),
   anthropic: anthropicProfile('anthropic', 'https://api.anthropic.com', 'claude-sonnet-4-20250514'),
   claude: anthropicProfile('claude', 'https://api.anthropic.com', 'claude-sonnet-4-20250514'),
-  minimax: anthropicProfile('minimax', 'https://api.minimax.chat', 'abab7-chat'),
+  'deepseek-anthropic': anthropicProfile('deepseek-anthropic', 'https://api.deepseek.com/anthropic', 'deepseek-v4-pro'),
+  minimax: anthropicProfile('minimax', 'https://api.minimaxi.com/anthropic', 'MiniMax-M3'),
 };
 
 export function resolveModelProfile(
