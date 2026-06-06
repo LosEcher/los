@@ -116,21 +116,27 @@ Current state:
 1. The agent loop emits tool lifecycle events.
 2. Tool registry enforces read-only/project-write/all policies.
 3. Tool retry exists in policy form.
-4. `tool_call_states` already has CRUD and schema support.
+4. `tool_call_states` has CRUD and schema support.
+5. The local scheduler path writes `tool_call_states` transitions from the
+   agent loop.
+6. The executor NDJSON path now streams `tool_call_state` chunks and the
+   scheduler persists them into the same table.
 
 Gap:
 
-The durable table exists, but the agent loop and scheduler do not yet write tool
-state transitions that can drive retry, resume, cancellation, or verifier
-decisions.
+Tool state is now durable evidence, but it is not yet a recovery controller.
+Retry, resume, cancellation, and verifier decisions can inspect
+`tool_call_states`, but they do not yet use those rows as their primary state
+machine.
 
 Supplement:
 
-1. Wire `tool_call_states` into the loop and scheduler.
-2. Record requested, approved, denied, running, succeeded, failed, retrying,
-   and skipped states.
-3. Attach input hash, output summary, duration, attempt, retry policy, and
-   approval evidence.
+1. Use `tool_call_states` to drive retry, resume, cancellation, and verifier
+   decisions.
+2. Keep requested, approved, denied, running, succeeded, failed, retrying, and
+   skipped transitions queryable on both local and executor paths.
+3. Add explicit input hash and approval evidence fields if resumability needs
+   stronger idempotency than the current input JSON and retry policy records.
 
 This is the concrete bridge from Codex-style tool discipline to a `los` runtime
 that can recover from failures.
@@ -188,20 +194,28 @@ Current state:
 
 1. ADR 0014 defines required checks by change type.
 2. `pnpm check`, package tests, compat harnesses, and operation smokes exist.
-3. The workflow relies on the operator or agent to report checks.
+3. `verification_records` can store required, running, succeeded, failed, and
+   skipped checks.
+4. `run_specs` seeds required verification records from
+   `runContract.requiredChecks`.
+5. DAG execution can block completion when a verifier task has not succeeded.
+6. Direct `/chat` runs can block `run_specs` completion while required
+   verification records remain unsatisfied.
 
 Gap:
 
-Verification results are not tied to a run state. A run can produce output and
-claim checks, but `los` does not yet store verification intent, execution,
-result, skipped reason, or verifier ownership as state.
+Verification intent and results are now tied to run state, but `los` does not
+yet execute verifier checks as a first-class runner. Check results still need an
+operator, external agent, or future verifier task to mark records succeeded,
+failed, or skipped with evidence.
 
 Supplement:
 
-1. Add `verification_requirements` to run specs.
-2. Add verifier events or verifier tasks before marking durable work complete.
-3. Store skipped checks as explicit records with reason and risk.
-4. Later, promote verifier tasks into the DAG scheduler.
+1. Add an executable verifier runner that consumes `verification_records`.
+2. Store skipped checks as explicit records with reason and risk.
+3. Promote verifier tasks into the DAG scheduler for multi-step runs.
+4. Add operation smokes that prove a required failed check blocks completion and
+   a succeeded/skipped check releases it.
 
 ### G7. Eval Feedback Is Not Queryable
 
@@ -267,7 +281,8 @@ Validation:
 
 ### Phase 3: Durable Run Specs And Verification State
 
-Timeframe: ADR 0012 Phase 3-4.
+Status: implemented as the current baseline, with verifier-runner work still
+open.
 
 Deliverables:
 
@@ -275,14 +290,34 @@ Deliverables:
 2. Add stream replay read model and cursor contract.
 3. Wire existing `tool_call_states` into agent execution.
 4. Add verification requirements and skipped-check records.
+5. Add runtime evidence graph projection for cross-table run evidence.
 
 Validation:
 
-1. stream replay smoke;
-2. failed-tool retry smoke;
-3. verifier failure blocks completion.
+1. stream replay route test;
+2. local and executor tool-state persistence tests;
+3. verifier-missing completion gate test;
+4. runtime evidence graph cross-table projection test.
 
-### Phase 4: External Tool Comparison Adapter
+### Phase 4: Recovery And Verifier Runner
+
+Timeframe: next implementation phase.
+
+Deliverables:
+
+1. Executable verifier runner over `verification_records`.
+2. Tool-state-driven retry/resume/cancel controller.
+3. Direct `/chat` and DAG completion policies that use the same verification
+   semantics.
+4. Operation smoke for required check failure and recovery.
+
+Validation:
+
+1. required failed check blocks completion;
+2. succeeded/skipped required check releases completion;
+3. interrupted tool state can be queried and used for retry/resume decisions.
+
+### Phase 5: External Tool Comparison Adapter
 
 Timeframe: after toolchain matrix and eval backlog are stable.
 
@@ -299,7 +334,7 @@ Validation:
 2. redaction test;
 3. no raw prompt/stdout/stderr/auth persisted.
 
-### Phase 5: Controlled Planner/Executor/Verifier DAG
+### Phase 6: Controlled Planner/Executor/Verifier DAG
 
 Timeframe: long-term.
 
@@ -319,12 +354,11 @@ Validation:
 
 ## Immediate Next Work
 
-1. Add run contract fields to todo/task metadata.
-2. Reconcile the existing `run_specs` implementation with operator contract
-   fields and replay requirements.
-3. Wire `tool_call_states` into the agent loop and scheduler.
-4. Add a small operation smoke for the current live event push path:
-   `/chat` -> `session_events` -> PostgreSQL notify -> EventSource update.
+1. Build the executable verifier runner over `verification_records`.
+2. Use `tool_call_states` as recovery input for retry, resume, and cancellation.
+3. Expose run contract fields in CLI/UI only after the verifier runner can
+   consume them.
+4. Add operation smokes for direct `/chat` verification blocking and release.
 5. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
 6. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability

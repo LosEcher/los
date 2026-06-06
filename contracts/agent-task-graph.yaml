@@ -32,6 +32,14 @@ completion:
     - blocked
     - failed
     - succeeded
+  blockReason:
+    type: string
+    enum:
+      - dependency_failure
+      - verifier_required
+    description: >
+      Present when status is blocked, so consumers do not need to string-match
+      the human-readable reason.
   canComplete:
     type: boolean
   requiredEvidence:

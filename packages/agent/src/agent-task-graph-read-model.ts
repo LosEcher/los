@@ -14,6 +14,10 @@ export type AgentTaskGraphCompletionStatus =
   | 'failed'
   | 'succeeded';
 
+export type AgentTaskGraphBlockReason =
+  | 'dependency_failure'
+  | 'verifier_required';
+
 export interface AgentTaskGraphCompletionOptions {
   requireVerifier?: boolean;
 }
@@ -23,6 +27,7 @@ export interface AgentTaskGraphCompletion {
   status: AgentTaskGraphCompletionStatus;
   canComplete: boolean;
   reason: string;
+  blockReason?: AgentTaskGraphBlockReason;
   counts: {
     total: number;
     queued: number;
@@ -142,11 +147,11 @@ export function summarizeAgentTaskGraph(
   if (tasks.length === 0) {
     return completion('empty', false, 'graph has no tasks');
   }
+  if (blockedTaskIds.length > 0) {
+    return completion('blocked', false, 'failed dependency blocks downstream tasks', 'dependency_failure');
+  }
   if (failedTaskIds.length > 0 || cancelledTaskIds.length > 0) {
     return completion('failed', false, 'terminal task failure requires retry or operator action');
-  }
-  if (blockedTaskIds.length > 0) {
-    return completion('blocked', false, 'failed dependency blocks downstream tasks');
   }
   if (runningTaskIds.length > 0) {
     return completion('in_progress', false, 'tasks are still running');
@@ -158,7 +163,7 @@ export function summarizeAgentTaskGraph(
     return completion('in_progress', false, 'queued tasks are waiting for dependencies');
   }
   if (options.requireVerifier && succeededVerifierTaskIds.length === 0) {
-    return completion('blocked', false, 'succeeded verifier task is required for completion');
+    return completion('blocked', false, 'succeeded verifier task is required for completion', 'verifier_required');
   }
   return completion('succeeded', true, 'all tasks succeeded');
 
@@ -166,12 +171,14 @@ export function summarizeAgentTaskGraph(
     status: AgentTaskGraphCompletionStatus,
     canComplete: boolean,
     reason: string,
+    blockReason?: AgentTaskGraphBlockReason,
   ): AgentTaskGraphCompletion {
     return {
       graphId,
       status,
       canComplete,
       reason,
+      blockReason,
       counts,
       readyTaskIds,
       waitingTaskIds,

@@ -35,6 +35,18 @@ compatibility or verifier records.
    - test/harness for executable regression checks;
    - global skill only for repeated cross-project workflow.
 
+## Current Gap Comparison
+
+| Capability | los current state | Codex | Claude Code | Reasonix | OpenCode | Next los action |
+| --- | --- | --- | --- | --- | --- | --- |
+| Source-grounded coding execution | Has local agent loop, scheduler, executor nodes, `task_runs`, and tool-state evidence, but verifier runner is still manual | Strong at repo edits, tests, and `jj` closeout | Strong at project-context coding | Useful for planning experiments | Useful workflow reference | Add executable verifier runner and recovery controller |
+| Static execution understanding | `execution-static-graph` covers CLI commands, gateway routes, agent exports, and core call chain | Usually implicit through code reading | Usually implicit through code reading | Can model plans, not source truth | Can inspect project flow | Keep static graph as drift detector; add expected-route warnings if needed |
+| Runtime replay and audit | `/runs/:id/events?since=`, `tool_call_states`, `verification_records`, and runtime evidence graph exist | Transcript/command summary is external | Transcript/project jsonl is external | Receipts may be truncated | Prompt history is external | Use runtime evidence graph as the los-owned audit surface |
+| Verification gate | DAG gate and direct `/chat` required-verification blocking exist; check execution is not first-class yet | Human/agent runs commands and reports | Human/agent runs commands and reports | May record plan/receipt | May record task status | Build verifier runner over `verification_records` |
+| Recovery and resume | State is queryable, but tool state does not yet drive retry/resume/cancel decisions | Good human-directed recovery, not los ledger | Good interactive recovery, not los ledger | Good planning state ideas | Useful task UX reference | Promote `tool_call_states` from evidence to recovery controller input |
+| External tool ingestion | External-only unless ADR defines redaction/provenance | Source of bounded summaries only | Source of bounded summaries only | Source of comparison ideas only | Source of comparison ideas only | Draft ingestion ADR only after verifier/recovery state is stable |
+| Provider compatibility | Compatibility evidence exists, but provider promotion is not fully tied to run policy | Can run checks externally | Login/readiness can be misleading | Not provider authority | Not provider authority | Persist provider promotion decisions from compat evidence |
+
 ## Promotion Gates
 
 Before any external tool summary can be imported into `los`:
@@ -52,8 +64,10 @@ Before any external tool summary can be imported into `los`:
 
 Use this matrix to order the execution-gap todos:
 
-1. finish run contract docs and eval backlog first;
-2. add optional run-contract metadata fields;
-3. reconcile existing `run_specs` and `tool_call_states` with those fields;
-4. only then design external summary adapters for Codex, Claude Code,
+1. build the executable verifier runner over `verification_records`;
+2. use `tool_call_states` to drive retry, resume, and cancellation decisions;
+3. expose run contract fields in CLI/UI after the verifier runner can consume
+   them;
+4. persist provider promotion decisions from compat evidence;
+5. only then design external summary adapters for Codex, Claude Code,
    Reasonix, OpenCode, and OMX.

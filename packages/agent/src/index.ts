@@ -169,6 +169,7 @@ export {
   getAgentTaskGraphCompletion,
   readAgentTaskGraph,
   summarizeAgentTaskGraph,
+  type AgentTaskGraphBlockReason,
   type AgentTaskGraphCompletion,
   type AgentTaskGraphCompletionOptions,
   type AgentTaskGraphCompletionStatus,

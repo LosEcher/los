@@ -253,7 +253,7 @@ ingestion adapter requires a separate ADR and redaction contract.
 | Completion contract | ADR 0014 + `docs/governance/run-contract-template.md` | task/todo metadata |
 | Toolchain matrix | `docs/governance/toolchain-matrix.md` | future redacted ingestion adapter ADR |
 | Eval corpus | `docs/governance/eval-backlog.md` + todos | tests, compat harnesses, operation smokes |
-| Runtime recovery | ADR 0012 + existing `run_specs`/`tool_call_states` modules | stream replay, loop wiring, run/tool/verifier state |
+| Runtime recovery | ADR 0012 + `run_specs`/`tool_call_states`/`verification_records`/runtime evidence graph | executable verifier runner and tool-state-driven retry/resume/cancel controller |
 | Procedural learning | skills/docs/todos | memory compaction with review gate |
 | Execution gap planning | `docs/governance/agent-execution-gap-plan.md` | future ADRs for run specs, tool state, provider evidence, or ingestion |
 

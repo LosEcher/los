@@ -44,6 +44,9 @@ test('agent task graph claims independent tasks and blocks failed dependencies',
 
     const blocked = await listBlockedAgentTasks(graphId);
     assert.deepEqual(blocked.map(task => task.id), [`${graphId}-verify`]);
+    const blockedCompletion = await getAgentTaskGraphCompletion(graphId);
+    assert.equal(blockedCompletion.status, 'blocked');
+    assert.equal(blockedCompletion.blockReason, 'dependency_failure');
     const afterFailure = await claimReadyAgentTasks({ graphId, limit: 2, nodeId: 'node-a' });
     assert.deepEqual(afterFailure, []);
   } finally {
@@ -177,6 +180,7 @@ test('agent task graph completion requires verifier when requested', async () =>
 
     const completion = await getAgentTaskGraphCompletion(graphId, { requireVerifier: true });
     assert.equal(completion.status, 'blocked');
+    assert.equal(completion.blockReason, 'verifier_required');
     assert.equal(completion.canComplete, false);
     assert.equal(completion.reason, 'succeeded verifier task is required for completion');
   } finally {

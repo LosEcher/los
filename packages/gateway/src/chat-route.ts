@@ -18,6 +18,7 @@ import {
 } from '@los/agent/session-events';
 import type { CheckpointState, RunContractMetadataInput } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
+import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
 import {
   completeIdempotencyKey,
   failIdempotencyKey,
@@ -422,13 +423,26 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         });
       }
 
-      await updateRunSpecStatus(runSpecId, 'succeeded').catch(() => undefined);
+      const runCompletion = await applyDirectRunCompletionStatus({
+        runSpecId,
+        sessionId: sid,
+        tenantId: context.tenantId,
+        projectId: context.projectId,
+        userId: context.userId,
+        nodeId: scheduled.taskRun.nodeId,
+        requestId: context.requestId,
+        traceId: scheduled.taskRun.traceId,
+        taskRunId,
+      }).catch(() => undefined);
 
       send('done', {
         text: result.text,
         turns: result.loopCount,
         tokens: result.totalTokens,
         sessionId: sid,
+        runSpecId,
+        runSpecStatus: runCompletion?.status ?? null,
+        blockedVerificationRecordIds: runCompletion?.blockedVerificationRecordIds ?? [],
         taskRunId,
         traceId: scheduled.taskRun.traceId,
         requestId: context.requestId,
