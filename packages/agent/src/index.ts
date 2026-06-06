@@ -117,6 +117,13 @@ export {
   type ExecutionTransitionResult,
 } from './execution-transitions.js';
 export {
+  ensureExecutionStore,
+  transitionExecutionState,
+  type ExecutionEventEnvelope,
+  type TransitionExecutionStateInput,
+  type TransitionExecutionStateResult,
+} from './execution-store.js';
+export {
   ensureRunSpecStore,
   createRunSpec,
   loadRunSpec,
