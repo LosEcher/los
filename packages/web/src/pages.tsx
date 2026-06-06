@@ -1,8 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Archive,
   Copy,
   Database,
+  FileText,
+  GitGraph,
+  Layers,
+  RotateCcw,
   Search,
   Send,
   Trash2,
@@ -10,13 +15,18 @@ import {
 import {
   deleteJson,
   getJson,
+  patchJson,
   postJson,
+  type AgentTaskGraph,
+  type AgentTaskGraphCompletion,
+  type MemoryObservation,
   type MemoryResponse,
   type MemoryStats,
   type ProviderDiscovery,
   type ProviderDiscoveryProvider,
   type ProviderModelsResponse,
   type ProviderReadiness,
+  type RunSpec,
   type SessionDetail,
   type SessionEventsResponse,
   type SessionObservability,
@@ -164,10 +174,17 @@ function SessionInspector({
 export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) => void }) {
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [showRunSpecs, setShowRunSpecs] = useState(false);
   const tasks = useQuery({
     queryKey: ['tasks'],
     queryFn: () => getJson<TaskRun[]>('/tasks'),
     refetchInterval: 8_000,
+  });
+  const runSpecs = useQuery({
+    queryKey: ['runs'],
+    queryFn: () => getJson<RunSpec[]>('/runs'),
+    refetchInterval: 10_000,
+    enabled: showRunSpecs,
   });
   const selectedTask = (tasks.data ?? []).find(task => task.id === selectedTaskId) ?? null;
   const cancel = useMutation({
@@ -183,7 +200,12 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
             <h2>Tasks</h2>
             <p>Scheduler records above chat sessions. Cancel is available only for active tasks.</p>
           </div>
-          <RefreshQueryButton queryKey={['tasks']} />
+          <div className="toolbar">
+            <button className={`ghost-btn ${showRunSpecs ? 'active' : ''}`} type="button" onClick={() => setShowRunSpecs(prev => !prev)}>
+              <GitGraph size={14} /> run specs
+            </button>
+            <RefreshQueryButton queryKey={['tasks']} />
+          </div>
         </div>
         <DataTable
           loading={tasks.isLoading}
@@ -211,6 +233,30 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
             </div>
           )}
         />
+        {showRunSpecs ? (
+          <div className="section-divider">
+            <div className="panel-head compact">
+              <h2>Run Specs</h2>
+              <RefreshQueryButton queryKey={['runs']} />
+            </div>
+            <DataTable
+              loading={runSpecs.isLoading}
+              empty="No run specs found."
+              rows={runSpecs.data ?? []}
+              renderRow={run => (
+                <div className="record-row" key={run.id}>
+                  <span className="row-title">{run.id}</span>
+                  <span className={`status-text ${run.status}`}>{run.status}</span>
+                  <span>session: {run.sessionId.slice(0, 12)}...</span>
+                  <span>{formatDate(run.updatedAt)}</span>
+                  <button className="tiny-btn" type="button" onClick={() => setSelectedTaskId(run.taskRunId ?? null)}>
+                    <Search size={12} /> task
+                  </button>
+                </div>
+              )}
+            />
+          </div>
+        ) : null}
       </div>
       <TaskRunInspector task={selectedTask} />
     </section>
@@ -227,8 +273,15 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
   const verify = useMutation({
     mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/verify`, {}),
   });
+  const agentGraph = useMutation({
+    mutationFn: (taskId: string) => getJson<AgentTaskGraph>(`/agent-graphs/${taskId}`),
+  });
+  const agentGraphCompletion = useMutation({
+    mutationFn: (taskId: string) => getJson<AgentTaskGraphCompletion>(`/agent-graphs/${taskId}/completion`),
+  });
   const runSpecId = task?.runSpecId;
   const latestResult = verify.data ?? recover.data ?? inspect.data;
+  const graphResult = agentGraph.data ?? agentGraphCompletion.data;
 
   if (!task) {
     return <aside className="panel inspector"><EmptyText text="Select a task to inspect run evidence and recovery state." /></aside>;
@@ -247,6 +300,8 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
         <Fact label="trace" value={task.traceId} />
         <Fact label="attempt" value={String(task.attempt)} />
         <Fact label="node" value={task.nodeId ?? 'local'} />
+        <Fact label="heartbeat" value={task.heartbeatAt ? formatDate(task.heartbeatAt) : 'none'} />
+        {task.leaseExpiresAt ? <Fact label="lease expires" value={formatDate(task.leaseExpiresAt)} /> : null}
       </div>
       <div className="inline-actions">
         <button className="ghost-btn" type="button" disabled={!runSpecId || inspect.isPending} onClick={() => runSpecId && inspect.mutate(runSpecId)}>
@@ -258,14 +313,23 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
         <button className="ghost-btn" type="button" disabled={!runSpecId || verify.isPending} onClick={() => runSpecId && verify.mutate(runSpecId)}>
           <Send size={14} /> verify
         </button>
+        <button className="ghost-btn" type="button" disabled={agentGraph.isPending || agentGraphCompletion.isPending} onClick={() => { agentGraph.mutate(task.id); agentGraphCompletion.mutate(task.id); }}>
+          <GitGraph size={14} /> graph
+        </button>
       </div>
+      {graphResult ? (
+        <div className="json-block">
+          <strong>Agent Task Graph</strong>
+          <pre>{JSON.stringify(graphResult, null, 2)}</pre>
+        </div>
+      ) : null}
       {latestResult ? (
         <div className="json-block">
           <strong>Run Operation Result</strong>
           <pre>{JSON.stringify(latestResult, null, 2)}</pre>
         </div>
       ) : (
-        <EmptyText text={runSpecId ? 'No run operation loaded.' : 'Task has no run spec link.'} />
+        !graphResult ? <EmptyText text={runSpecId ? 'No run operation loaded.' : 'Task has no run spec link.'} /> : null
       )}
     </aside>
   );
@@ -274,27 +338,75 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
 export function MemoryPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
+  const [kindFilter, setKindFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [scopeFilter, setScopeFilter] = useState('');
+  const [layerFilter, setLayerFilter] = useState('');
+  const [archivedFilter, setArchivedFilter] = useState('false');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
+  const [content, setContent] = useState('');
+  const [kind, setKind] = useState('note');
+  const [source, setSource] = useState('user');
+  const [tags, setTags] = useState('web-console');
+  const [scope, setScope] = useState('project');
+  const [memoryLayer, setMemoryLayer] = useState('semantic');
+  const [promotable, setPromotable] = useState(false);
   const memory = useQuery({
-    queryKey: ['memory', query],
-    queryFn: () => getJson<MemoryResponse>(`/memory?limit=80&q=${encodeURIComponent(query)}`),
+    queryKey: ['memory', query, kindFilter, sourceFilter, scopeFilter, layerFilter, archivedFilter, projectFilter, tagFilter],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '120' });
+      if (query.trim()) params.set('q', query.trim());
+      if (kindFilter) params.set('kind', kindFilter);
+      if (sourceFilter) params.set('source', sourceFilter);
+      if (scopeFilter) params.set('scope', scopeFilter);
+      if (layerFilter) params.set('memoryLayer', layerFilter);
+      if (archivedFilter) params.set('archived', archivedFilter);
+      if (projectFilter.trim()) params.set('projectId', projectFilter.trim());
+      if (tagFilter.trim()) params.set('tag', tagFilter.trim());
+      return getJson<MemoryResponse>(`/memory?${params.toString()}`);
+    },
   });
   const stats = useQuery({
     queryKey: ['memory-stats'],
     queryFn: () => getJson<MemoryStats>('/memory/stats'),
   });
+  const workspace = useQuery({
+    queryKey: ['workspace'],
+    queryFn: () => getJson<{ workspaceRoot: string }>('/workspace'),
+    staleTime: 60_000,
+  });
+  const selected = (memory.data?.results ?? []).find(obs => obs.id === selectedId) ?? null;
   const add = useMutation({
     mutationFn: () => postJson('/memory', {
       title,
       summary,
-      kind: 'note',
-      tags: ['web-console'],
-      source: 'user',
+      content,
+      kind,
+      tags: splitCsv(tags),
+      source,
+      metadata: {
+        scope,
+        memoryLayer,
+        archived: false,
+        promotable,
+      },
     }),
     onSuccess: async () => {
       setTitle('');
       setSummary('');
+      setContent('');
+      await queryClient.invalidateQueries({ queryKey: ['memory'] });
+      await queryClient.invalidateQueries({ queryKey: ['memory-stats'] });
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Partial<MemoryObservation> }) => patchJson<MemoryObservation>(`/memory/${id}`, body),
+    onSuccess: async (obs) => {
+      setSelectedId(obs.id);
       await queryClient.invalidateQueries({ queryKey: ['memory'] });
       await queryClient.invalidateQueries({ queryKey: ['memory-stats'] });
     },
@@ -302,10 +414,34 @@ export function MemoryPage() {
   const remove = useMutation({
     mutationFn: (id: number) => deleteJson(`/memory/${id}`),
     onSuccess: async () => {
+      setSelectedId(null);
       await queryClient.invalidateQueries({ queryKey: ['memory'] });
       await queryClient.invalidateQueries({ queryKey: ['memory-stats'] });
     },
   });
+  const sync = useMutation({
+    mutationFn: () => postJson('/memory/sync-md', {
+      workspaceRoot: workspace.data?.workspaceRoot ?? '',
+      scope: scopeFilter || undefined,
+      memoryLayer: layerFilter || undefined,
+      archived: archivedFilter === '' ? undefined : archivedFilter === 'true',
+      projectId: projectFilter || undefined,
+    }),
+  });
+
+  const patchSelectedMetadata = (patch: Record<string, unknown>, extra?: Partial<MemoryObservation>) => {
+    if (!selected) return;
+    update.mutate({
+      id: selected.id,
+      body: {
+        ...extra,
+        metadata: {
+          ...selected.metadata,
+          ...patch,
+        },
+      },
+    });
+  };
 
   return (
     <section className="panel-grid memory-grid">
@@ -313,39 +449,177 @@ export function MemoryPage() {
         <div className="panel-head">
           <div>
             <h2>Memory</h2>
-            <p>Read/write observations with source and session linkage.</p>
+            <p>Classify observations by scope, memory layer, project, and archive state.</p>
           </div>
+          <div className="toolbar">
+            <button className="ghost-btn" type="button" disabled={sync.isPending || !workspace.data?.workspaceRoot} onClick={() => sync.mutate()}>
+              <FileText size={14} /> sync md
+            </button>
+            <RefreshQueryButton queryKey={['memory']} />
+          </div>
+        </div>
+        <div className="toolbar memory-toolbar">
           <div className="search-box">
             <Search size={14} />
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="search memory" />
           </div>
+          <select value={kindFilter} onChange={event => setKindFilter(event.target.value)}>
+            <option value="">all kinds</option>
+            <option value="note">note</option>
+            <option value="fact">fact</option>
+            <option value="rule">rule</option>
+            <option value="decision">decision</option>
+          </select>
+          <select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}>
+            <option value="">all sources</option>
+            <option value="user">user</option>
+            <option value="agent">agent</option>
+            <option value="system">system</option>
+          </select>
+          <select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}>
+            <option value="">all scopes</option>
+            <option value="global">global</option>
+            <option value="workspace">workspace</option>
+            <option value="project">project</option>
+            <option value="session">session</option>
+          </select>
+          <select value={layerFilter} onChange={event => setLayerFilter(event.target.value)}>
+            <option value="">all layers</option>
+            <option value="working">working</option>
+            <option value="episodic">episodic</option>
+            <option value="semantic">semantic</option>
+            <option value="procedural">procedural</option>
+            <option value="preference">preference</option>
+          </select>
+          <select value={archivedFilter} onChange={event => setArchivedFilter(event.target.value)}>
+            <option value="">archive any</option>
+            <option value="false">active</option>
+            <option value="true">archived</option>
+          </select>
+          <input value={projectFilter} onChange={event => setProjectFilter(event.target.value)} placeholder="project id" />
+          <input value={tagFilter} onChange={event => setTagFilter(event.target.value)} placeholder="tag" />
         </div>
         <div className="memory-list">
           {memory.isLoading ? <EmptyText text="Loading memory..." /> : null}
           {(memory.data?.results ?? []).map(obs => (
-            <article className="memory-row" key={obs.id}>
+            <button className="memory-row" data-active={selectedId === obs.id} key={obs.id} type="button" onClick={() => setSelectedId(obs.id)}>
               <div>
                 <h3>{obs.title}</h3>
                 <p>{obs.summary || 'No summary'}</p>
-                <span>{obs.kind} · {obs.source} · {formatDate(obs.updatedAt)}</span>
+                <span>
+                  {obs.kind} · {obs.source} · {metadataText(obs.metadata.scope) ?? 'scope?'} · {metadataText(obs.metadata.memoryLayer) ?? 'layer?'} · {isArchived(obs) ? 'archived' : 'active'} · {formatDate(obs.updatedAt)}
+                </span>
               </div>
-              <button className="icon-btn danger" type="button" onClick={() => remove.mutate(obs.id)} title="delete memory">
-                <Trash2 size={14} />
-              </button>
-            </article>
+            </button>
           ))}
+          {!memory.isLoading && (memory.data?.results ?? []).length === 0 ? <EmptyText text="No memory records match the filters." /> : null}
         </div>
       </div>
       <aside className="panel inspector">
         <div className="panel-head compact">
-          <h2>Add Observation</h2>
+          <h2>{selected ? 'Memory Detail' : 'Add Observation'}</h2>
         </div>
+        {selected ? (
+          <>
+            <span className="mono-chip">memory-{selected.id}</span>
+            <div className="fact-list">
+              <Fact label="scope" value={metadataText(selected.metadata.scope) ?? 'unspecified'} />
+              <Fact label="layer" value={metadataText(selected.metadata.memoryLayer) ?? 'unspecified'} />
+              <Fact label="archived" value={String(isArchived(selected))} />
+              <Fact label="project" value={selected.projectId ?? 'none'} />
+              <Fact label="session" value={selected.sessionId ?? 'none'} />
+              <Fact label="trace" value={selected.traceId ?? 'none'} />
+            </div>
+            <div className="toolbar">
+              {isArchived(selected) ? (
+                <button className="ghost-btn" type="button" onClick={() => patchSelectedMetadata({ archived: false, archiveReason: undefined })}>
+                  <RotateCcw size={14} /> restore
+                </button>
+              ) : (
+                <button className="ghost-btn" type="button" onClick={() => patchSelectedMetadata({ archived: true, archiveReason: 'archived_from_memory_page' })}>
+                  <Archive size={14} /> archive
+                </button>
+              )}
+              <button className="ghost-btn" type="button" onClick={() => patchSelectedMetadata({ scope: 'project', memoryLayer: 'semantic', archived: false }, { tags: mergeTags(selected.tags, ['semantic']) })}>
+                <Layers size={14} /> project semantic
+              </button>
+              <button className="icon-btn danger" type="button" onClick={() => remove.mutate(selected.id)} title="delete memory">
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="definition-list compact-definition-list">
+              <Definition term="title" text={selected.title} />
+              <Definition term="summary" text={selected.summary || 'none'} />
+              <Definition term="tags" text={selected.tags.join(', ') || 'none'} />
+              <Definition term="created" text={formatDate(selected.createdAt)} />
+              <Definition term="updated" text={formatDate(selected.updatedAt)} />
+            </div>
+            {selected.content ? (
+              <div className="json-block">
+                <strong>Content</strong>
+                <pre>{selected.content}</pre>
+              </div>
+            ) : null}
+            <div className="json-block">
+              <strong>Metadata</strong>
+              <pre>{JSON.stringify(selected.metadata, null, 2)}</pre>
+            </div>
+          </>
+        ) : null}
         <form className="stack-form" onSubmit={(event) => { event.preventDefault(); if (title.trim()) add.mutate(); }}>
+          <div className="panel-head compact">
+            <h2>Add Observation</h2>
+          </div>
           <Field label="title">
             <input value={title} onChange={event => setTitle(event.target.value)} placeholder="short memory title" />
           </Field>
           <Field label="summary">
-            <textarea value={summary} onChange={event => setSummary(event.target.value)} rows={5} placeholder="what should future runs know?" />
+            <textarea value={summary} onChange={event => setSummary(event.target.value)} rows={3} placeholder="what should future runs know?" />
+          </Field>
+          <Field label="content">
+            <textarea value={content} onChange={event => setContent(event.target.value)} rows={4} placeholder="optional details or evidence" />
+          </Field>
+          <Field label="kind">
+            <select value={kind} onChange={event => setKind(event.target.value)}>
+              <option value="note">note</option>
+              <option value="fact">fact</option>
+              <option value="rule">rule</option>
+              <option value="decision">decision</option>
+            </select>
+          </Field>
+          <Field label="source">
+            <select value={source} onChange={event => setSource(event.target.value)}>
+              <option value="user">user</option>
+              <option value="agent">agent</option>
+              <option value="system">system</option>
+            </select>
+          </Field>
+          <Field label="scope">
+            <select value={scope} onChange={event => setScope(event.target.value)}>
+              <option value="project">project</option>
+              <option value="workspace">workspace</option>
+              <option value="global">global</option>
+              <option value="session">session</option>
+            </select>
+          </Field>
+          <Field label="layer">
+            <select value={memoryLayer} onChange={event => setMemoryLayer(event.target.value)}>
+              <option value="semantic">semantic</option>
+              <option value="procedural">procedural</option>
+              <option value="preference">preference</option>
+              <option value="episodic">episodic</option>
+              <option value="working">working</option>
+            </select>
+          </Field>
+          <Field label="tags">
+            <input value={tags} onChange={event => setTags(event.target.value)} placeholder="comma separated tags" />
+          </Field>
+          <label className="toolbar-toggle">
+            <input type="checkbox" checked={promotable} onChange={event => setPromotable(event.target.checked)} />
+            promotable
+          </label>
+          <Field label="scope guide">
+            <p className="muted-copy">global is cross-project preference/procedure; project is tied to request project context; session is run history or smoke evidence.</p>
           </Field>
           <button className="primary-btn" type="submit" disabled={!title.trim() || add.isPending}>
             <Database size={14} /> save
@@ -353,12 +627,27 @@ export function MemoryPage() {
         </form>
         <div className="fact-list">
           <Fact label="total" value={String(stats.data?.totalObservations ?? 0)} />
+          <Fact label="archived" value={String(stats.data?.archived ?? 0)} />
           <Fact label="kinds" value={Object.keys(stats.data?.byKind ?? {}).join(', ') || 'none'} />
           <Fact label="sources" value={Object.keys(stats.data?.bySource ?? {}).join(', ') || 'none'} />
+          <Fact label="scopes" value={Object.keys(stats.data?.byScope ?? {}).join(', ') || 'none'} />
+          <Fact label="layers" value={Object.keys(stats.data?.byLayer ?? {}).join(', ') || 'none'} />
         </div>
       </aside>
     </section>
   );
+}
+
+function splitCsv(value: string): string[] {
+  return value.split(',').map(item => item.trim()).filter(Boolean);
+}
+
+function isArchived(obs: MemoryObservation): boolean {
+  return obs.metadata.archived === true || obs.metadata.archived === 'true';
+}
+
+function mergeTags(current: string[], next: string[]): string[] {
+  return Array.from(new Set([...current, ...next].map(tag => tag.trim()).filter(Boolean)));
 }
 
 export function ProvidersPage() {

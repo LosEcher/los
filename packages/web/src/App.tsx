@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
-  BookOpen,
+  Archive,
   Boxes,
   Brain,
   ClipboardList,
@@ -10,6 +10,7 @@ import {
   MemoryStick,
   MessageSquare,
   Network,
+  Server,
   Settings,
   Shield,
   TerminalSquare,
@@ -25,7 +26,12 @@ import {
 import { ChatPage } from './chat-page';
 import { NodesPage } from './nodes-page';
 import { TodosPage } from './todo-page';
-import { LogsPage, ReservedPage, SettingsPage } from './secondary-pages';
+import { MCPServersPage } from './mcp-page';
+import { ServicesPage } from './service-page';
+import { ArtifactsPage } from './artifact-page';
+import { SkillsPage } from './skills-page';
+import { RulesPage } from './rules-page';
+import { LogsPage, SettingsPage } from './secondary-pages';
 import { formatDuration, StatusPill, type StatusState } from './ui';
 
 type PageId =
@@ -36,6 +42,9 @@ type PageId =
   | 'memory'
   | 'providers'
   | 'skills'
+  | 'mcp'
+  | 'services'
+  | 'artifacts'
   | 'rules'
   | 'nodes'
   | 'logs'
@@ -55,8 +64,11 @@ const NAV: NavItem[] = [
   { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live' },
   { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live' },
   { id: 'providers', label: 'Providers', icon: Brain, status: 'partial' },
-  { id: 'skills', label: 'Skills', icon: Zap, status: 'reserved' },
-  { id: 'rules', label: 'Rules', icon: Shield, status: 'reserved' },
+  { id: 'skills', label: 'Skills', icon: Zap, status: 'live' },
+  { id: 'mcp', label: 'MCP', icon: Server, status: 'live' },
+  { id: 'services', label: 'Services', icon: Activity, status: 'live' },
+  { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live' },
+  { id: 'rules', label: 'Rules', icon: Shield, status: 'live' },
   { id: 'nodes', label: 'Nodes', icon: Network, status: 'partial' },
   { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live' },
   { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
@@ -136,8 +148,11 @@ export function App() {
         {page === 'tasks' && <TasksPage onSelectSession={continueSession} />}
         {page === 'memory' && <MemoryPage />}
         {page === 'providers' && <ProvidersPage />}
-        {page === 'skills' && <ReservedPage kind="Skills" icon={<BookOpen size={18} />} description="Read-only surface for reusable agent instruction bundles. API wiring is not present yet." fields={['name', 'category', 'run mode', 'source path/url', 'version hash', 'usage count', 'last used']} />}
-        {page === 'rules' && <ReservedPage kind="Rules" icon={<Shield size={18} />} description="Read-only policy view until rule storage and evaluation contracts are explicit." fields={['name', 'scope', 'severity', 'enforcement mode', 'status', 'last changed', 'attached sessions/tasks']} />}
+        {page === 'skills' && <SkillsPage />}
+        {page === 'mcp' && <MCPServersPage />}
+        {page === 'services' && <ServicesPage />}
+        {page === 'artifacts' && <ArtifactsPage />}
+        {page === 'rules' && <RulesPage />}
         {page === 'nodes' && <NodesPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}

@@ -66,8 +66,8 @@ export interface ListMCPServersOptions {
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id TEXT NOT NULL,
-  tenant_id TEXT,
-  project_id TEXT,
+  tenant_id TEXT NOT NULL DEFAULT '',
+  project_id TEXT NOT NULL DEFAULT '',
   transport TEXT NOT NULL DEFAULT 'stdio',
   command TEXT,
   args_json JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   tools_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (id, COALESCE(tenant_id, ''), COALESCE(project_id, ''))
+  PRIMARY KEY (id, tenant_id, project_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant_project
@@ -112,7 +112,7 @@ export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPS
       env_json, enabled, status, updated_at
     )
     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9, 'unverified', now())
-    ON CONFLICT (id, COALESCE(tenant_id, ''), COALESCE(project_id, ''))
+    ON CONFLICT (id, tenant_id, project_id)
     DO UPDATE SET
       transport = EXCLUDED.transport,
       command = EXCLUDED.command,
@@ -125,8 +125,8 @@ export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPS
   `,
     [
       input.id,
-      input.tenantId ?? null,
-      input.projectId ?? null,
+      normalizeScopeValue(input.tenantId),
+      normalizeScopeValue(input.projectId),
       input.transport,
       input.command ?? null,
       JSON.stringify(input.args ?? []),
@@ -149,10 +149,10 @@ export async function loadMCPServer(
     `
     SELECT * FROM mcp_servers
     WHERE id = $1
-      AND (tenant_id = $2 OR (tenant_id IS NULL AND $2 IS NULL))
-      AND (project_id = $3 OR (project_id IS NULL AND $3 IS NULL))
+      AND tenant_id = $2
+      AND project_id = $3
     `,
-    [id, tenantId ?? null, projectId ?? null],
+    [id, normalizeScopeValue(tenantId), normalizeScopeValue(projectId)],
   );
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }
@@ -199,11 +199,11 @@ export async function deleteMCPServer(
     `
     DELETE FROM mcp_servers
     WHERE id = $1
-      AND (tenant_id = $2 OR (tenant_id IS NULL AND $2 IS NULL))
-      AND (project_id = $3 OR (project_id IS NULL AND $3 IS NULL))
+      AND tenant_id = $2
+      AND project_id = $3
     RETURNING id
   `,
-    [id, tenantId ?? null, projectId ?? null],
+    [id, normalizeScopeValue(tenantId), normalizeScopeValue(projectId)],
   );
   return rows.rows.length > 0;
 }
@@ -225,14 +225,14 @@ export async function updateMCPServerStatus(
         tools_json = CASE WHEN $7::jsonb IS NOT NULL THEN $7::jsonb ELSE tools_json END,
         updated_at = now()
     WHERE id = $1
-      AND (tenant_id = $2 OR (tenant_id IS NULL AND $2 IS NULL))
-      AND (project_id = $3 OR (project_id IS NULL AND $3 IS NULL))
+      AND tenant_id = $2
+      AND project_id = $3
     RETURNING *
   `,
     [
       id,
-      tenantId ?? null,
-      projectId ?? null,
+      normalizeScopeValue(tenantId),
+      normalizeScopeValue(projectId),
       input.status ?? null,
       input.lastError ?? null,
       input.toolCount ?? null,
@@ -265,8 +265,8 @@ type MCPServerRow = {
 function rowToRecord(row: MCPServerRow): MCPServerRecord {
   return {
     id: row.id,
-    tenantId: row.tenant_id ?? undefined,
-    projectId: row.project_id ?? undefined,
+    tenantId: row.tenant_id || undefined,
+    projectId: row.project_id || undefined,
     transport: row.transport as MCPTransport,
     command: row.command ?? undefined,
     args: normalizeJsonArray(row.args_json).map(String),
@@ -280,6 +280,10 @@ function rowToRecord(row: MCPServerRow): MCPServerRecord {
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
+}
+
+function normalizeScopeValue(value: string | undefined): string {
+  return value?.trim() ?? '';
 }
 
 function normalizeJsonArray(value: unknown): unknown[] {

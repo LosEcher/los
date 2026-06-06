@@ -9,6 +9,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { delimiter, dirname } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('agent');
@@ -71,7 +72,7 @@ class MCPStdioTransport {
     return new Promise((resolve, reject) => {
       this.proc = spawn(this.command, this.args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...this.env },
+        env: buildMCPProcessEnv(this.env),
       });
 
       this.proc.stdout!.on('data', (chunk: Buffer) => {
@@ -148,6 +149,22 @@ class MCPStdioTransport {
       this.proc = null;
     }
   }
+}
+
+function buildMCPProcessEnv(env?: Record<string, string>): NodeJS.ProcessEnv {
+  const nodeBinDir = dirname(process.execPath);
+  const basePath = process.env.PATH ?? '';
+  const configuredPath = env?.PATH ?? '';
+  const pathEntries = new Set([
+    nodeBinDir,
+    ...configuredPath.split(delimiter).filter(Boolean),
+    ...basePath.split(delimiter).filter(Boolean),
+  ]);
+  return {
+    ...process.env,
+    ...env,
+    PATH: [...pathEntries].join(delimiter),
+  };
 }
 
 // ── MCP Client ──────────────────────────────────────────

@@ -23,6 +23,8 @@
     "./execution-store": "./src/execution-store.ts",
     "./tool-call-states": "./src/tool-call-states.ts",
     "./mcp-servers": "./src/mcp-servers.ts",
+    "./skills": "./src/skills.ts",
+    "./rules": "./src/rules.ts",
     "./tools": "./src/tools/registry.ts",
     "./tools/mcp-client": "./src/tools/mcp-client.ts"
   },

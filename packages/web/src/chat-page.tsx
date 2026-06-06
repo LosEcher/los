@@ -69,6 +69,11 @@ export function ChatPage({
   const [maxTokens, setMaxTokens] = useState('');
   const [presencePenalty, setPresencePenalty] = useState('');
   const [frequencyPenalty, setFrequencyPenalty] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [allowedTools, setAllowedTools] = useState('');
+  const [toolRetryMaxAttempts, setToolRetryMaxAttempts] = useState('');
+  const [toolRetryBaseDelayMs, setToolRetryBaseDelayMs] = useState('');
+  const [toolRetryMaxDelayMs, setToolRetryMaxDelayMs] = useState('');
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskRunId, setTaskRunId] = useState<string | null>(null);
@@ -210,6 +215,7 @@ export function ChatPage({
       await streamChat({
         prompt: text,
         sessionId: sessionId ?? undefined,
+        systemPrompt: systemPrompt.trim() || undefined,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
         modelSettings: buildModelSettingsPayload({
@@ -221,8 +227,14 @@ export function ChatPage({
         }),
         workspaceRoot: workspaceRoot.trim() || undefined,
         toolMode,
+        allowedTools: parseCommaList(allowedTools),
         maxLoops,
         timeoutMs,
+        toolRetry: buildToolRetryPayload({
+          maxAttempts: toolRetryMaxAttempts,
+          baseDelayMs: toolRetryBaseDelayMs,
+          maxDelayMs: toolRetryMaxDelayMs,
+        }),
       }, controller.signal, ({ event, data }) => {
         if (event === 'session' && typeof data.sessionId === 'string') {
           setSessionId(data.sessionId);
@@ -373,11 +385,26 @@ export function ChatPage({
                 <SlidersHorizontal size={14} />
               </summary>
               <div className="composer-advanced-panel">
+                <RunField label="system prompt" title="System prompt override" variant="panel">
+                  <textarea value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder="provider default" rows={2} />
+                </RunField>
+                <RunField label="allowed tools" title="Comma-separated tool names to allow (empty = all)" variant="panel">
+                  <input value={allowedTools} onChange={event => setAllowedTools(event.target.value)} placeholder="read_file, write_file, search" />
+                </RunField>
                 <RunField label="max loops" title="Maximum agent loops" variant="panel">
                   <input type="number" min={1} max={50} value={maxLoops} onChange={event => setMaxLoops(Number(event.target.value))} />
                 </RunField>
                 <RunField label="timeout ms" title="Request timeout in milliseconds" variant="panel">
                   <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
+                </RunField>
+                <RunField label="tool retry attempts" title="Max tool call retry attempts" variant="panel">
+                  <input type="number" min={0} max={10} value={toolRetryMaxAttempts} onChange={event => setToolRetryMaxAttempts(event.target.value)} placeholder="3" />
+                </RunField>
+                <RunField label="retry base delay ms" title="Base delay before first retry" variant="panel">
+                  <input type="number" min={0} step={500} value={toolRetryBaseDelayMs} onChange={event => setToolRetryBaseDelayMs(event.target.value)} placeholder="1000" />
+                </RunField>
+                <RunField label="retry max delay ms" title="Maximum retry delay" variant="panel">
+                  <input type="number" min={0} step={1000} value={toolRetryMaxDelayMs} onChange={event => setToolRetryMaxDelayMs(event.target.value)} placeholder="30000" />
                 </RunField>
                 <RunField label="temperature" title="Temperature" variant="panel">
                   <input inputMode="decimal" value={temperature} onChange={event => setTemperature(event.target.value)} placeholder="provider default" />
@@ -543,6 +570,23 @@ function parseOptionalNumber(value: string): number | undefined {
 function parseOptionalInteger(value: string): number | undefined {
   const number = parseOptionalNumber(value);
   return number === undefined ? undefined : Math.floor(number);
+}
+
+function parseCommaList(value: string): string[] | undefined {
+  const items = value.split(',').map(s => s.trim()).filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+function buildToolRetryPayload(input: { maxAttempts: string; baseDelayMs: string; maxDelayMs: string }): import('./api').ToolRetry | undefined {
+  const maxAttempts = parseOptionalInteger(input.maxAttempts);
+  const baseDelayMs = parseOptionalInteger(input.baseDelayMs);
+  const maxDelayMs = parseOptionalInteger(input.maxDelayMs);
+  if (maxAttempts === undefined && baseDelayMs === undefined && maxDelayMs === undefined) return undefined;
+  const retry: import('./api').ToolRetry = {};
+  if (maxAttempts !== undefined) retry.maxAttempts = maxAttempts;
+  if (baseDelayMs !== undefined) retry.baseDelayMs = baseDelayMs;
+  if (maxDelayMs !== undefined) retry.maxDelayMs = maxDelayMs;
+  return retry;
 }
 
 function appendLiveSessionEvent(

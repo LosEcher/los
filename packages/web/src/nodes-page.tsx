@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Network, Save, Radar, Plus, Upload } from 'lucide-react';
+import { Network, Save, Radar, Plus, Upload, ArrowDownCircle, ArrowUpCircle, RotateCcw, RefreshCw, Undo2 } from 'lucide-react';
 import { getJson, patchJson, postJson, type ExecutorNode, type ExecutorNodeUpsertPayload, type SshConfigImportResponse } from './api';
 import {
   DataTable,
@@ -197,10 +197,33 @@ function NodeEditor({
 }) {
   const [draft, setDraft] = useState<NodeDraft>(() => createDraft(null));
   const [busy, setBusy] = useState(false);
+  const [commandResult, setCommandResult] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     setDraft(createDraft(node));
+    setCommandResult(null);
   }, [node]);
+
+  async function sendCommand(command: string, extraArgs?: Record<string, unknown>) {
+    if (!draft.nodeId.trim()) {
+      await onProbed('node id is required for command');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await postJson<{ ok: boolean; command: Record<string, unknown> }>(
+        `/nodes/${encodeURIComponent(draft.nodeId.trim())}/commands`,
+        { command, ...(extraArgs ?? {}) },
+      );
+      setCommandResult(result);
+      const status = (result.command as Record<string, unknown>)?.status ?? 'executed';
+      await onProbed(`command ${command}: ${status}`);
+    } catch (error) {
+      await onProbed(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveNode() {
     if (!draft.nodeId.trim()) {
@@ -314,7 +337,28 @@ function NodeEditor({
         <button type="button" className="ghost-btn" onClick={probeNode} disabled={busy}>
           <Radar size={14} /> probe
         </button>
+        <button type="button" className="ghost-btn" onClick={() => sendCommand('drain')} disabled={busy}>
+          <ArrowDownCircle size={14} /> drain
+        </button>
+        <button type="button" className="ghost-btn" onClick={() => sendCommand('promote')} disabled={busy}>
+          <ArrowUpCircle size={14} /> promote
+        </button>
+        <button type="button" className="ghost-btn" onClick={() => sendCommand('restart')} disabled={busy}>
+          <RotateCcw size={14} /> restart
+        </button>
+        <button type="button" className="ghost-btn" onClick={() => sendCommand('upgrade')} disabled={busy}>
+          <RefreshCw size={14} /> upgrade
+        </button>
+        <button type="button" className="ghost-btn" onClick={() => sendCommand('rollback')} disabled={busy}>
+          <Undo2 size={14} /> rollback
+        </button>
       </div>
+      {commandResult ? (
+        <div className="json-block">
+          <strong>Command Result</strong>
+          <pre>{JSON.stringify(commandResult, null, 2)}</pre>
+        </div>
+      ) : null}
     </div>
   );
 }

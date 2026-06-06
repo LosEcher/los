@@ -34,6 +34,9 @@ export interface MemoryStats {
   totalObservations: number;
   byKind: Record<string, number>;
   bySource: Record<string, number>;
+  byScope: Record<string, number>;
+  byLayer: Record<string, number>;
+  archived: number;
 }
 
 const SCHEMA = `
@@ -75,6 +78,10 @@ CREATE INDEX IF NOT EXISTS idx_obs_request ON observations(request_id);
 CREATE INDEX IF NOT EXISTS idx_obs_trace ON observations(trace_id);
 CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_obs_search ON observations USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_obs_tags_json ON observations USING GIN (tags_json);
+CREATE INDEX IF NOT EXISTS idx_obs_scope ON observations ((metadata_json->>'scope'));
+CREATE INDEX IF NOT EXISTS idx_obs_memory_layer ON observations ((metadata_json->>'memoryLayer'));
+CREATE INDEX IF NOT EXISTS idx_obs_archived ON observations ((metadata_json->>'archived'));
 
 CREATE OR REPLACE FUNCTION touch_observations_updated_at()
 RETURNS trigger AS $$
@@ -196,11 +203,16 @@ export async function searchObservations(query: string, opts?: {
   limit?: number;
   kind?: string;
   source?: string;
+  tag?: string;
+  scope?: string;
+  memoryLayer?: string;
+  archived?: boolean;
   sessionId?: string;
   tenantId?: string;
   projectId?: string;
   userId?: string;
   requestId?: string;
+  traceId?: string;
 }): Promise<Observation[]> {
   await ensureMemoryStore();
   const db = getDb();
@@ -220,6 +232,22 @@ export async function searchObservations(query: string, opts?: {
   if (opts?.source) {
     params.push(opts.source);
     clauses.push(`source = $${params.length}`);
+  }
+  if (opts?.tag) {
+    params.push(opts.tag);
+    clauses.push(`tags_json ? $${params.length}`);
+  }
+  if (opts?.scope) {
+    params.push(opts.scope);
+    clauses.push(`metadata_json->>'scope' = $${params.length}`);
+  }
+  if (opts?.memoryLayer) {
+    params.push(opts.memoryLayer);
+    clauses.push(`metadata_json->>'memoryLayer' = $${params.length}`);
+  }
+  if (opts?.archived !== undefined) {
+    params.push(String(opts.archived));
+    clauses.push(`coalesce(metadata_json->>'archived', 'false') = $${params.length}`);
   }
   if (opts?.sessionId) {
     params.push(opts.sessionId);
@@ -241,6 +269,10 @@ export async function searchObservations(query: string, opts?: {
     params.push(opts.requestId);
     clauses.push(`request_id = $${params.length}`);
   }
+  if (opts?.traceId) {
+    params.push(opts.traceId);
+    clauses.push(`trace_id = $${params.length}`);
+  }
 
   params.push(limit);
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -259,6 +291,21 @@ export async function getStats(): Promise<MemoryStats> {
   const totalRows = await db.query<{ c: string }>('SELECT COUNT(*)::text AS c FROM observations');
   const kindRows = await db.query<{ kind: string; c: string }>('SELECT kind, COUNT(*)::text AS c FROM observations GROUP BY kind');
   const sourceRows = await db.query<{ source: string; c: string }>('SELECT source, COUNT(*)::text AS c FROM observations GROUP BY source');
+  const scopeRows = await db.query<{ scope: string; c: string }>(`
+    SELECT coalesce(nullif(metadata_json->>'scope', ''), 'unspecified') AS scope, COUNT(*)::text AS c
+    FROM observations
+    GROUP BY scope
+  `);
+  const layerRows = await db.query<{ layer: string; c: string }>(`
+    SELECT coalesce(nullif(metadata_json->>'memoryLayer', ''), 'unspecified') AS layer, COUNT(*)::text AS c
+    FROM observations
+    GROUP BY layer
+  `);
+  const archivedRows = await db.query<{ c: string }>(`
+    SELECT COUNT(*)::text AS c
+    FROM observations
+    WHERE coalesce(metadata_json->>'archived', 'false') = 'true'
+  `);
 
   const byKind: Record<string, number> = {};
   for (const r of kindRows.rows) byKind[r.kind] = Number(r.c);
@@ -266,7 +313,20 @@ export async function getStats(): Promise<MemoryStats> {
   const bySource: Record<string, number> = {};
   for (const r of sourceRows.rows) bySource[r.source] = Number(r.c);
 
-  return { totalObservations: Number(totalRows.rows[0]?.c ?? 0), byKind, bySource };
+  const byScope: Record<string, number> = {};
+  for (const r of scopeRows.rows) byScope[r.scope] = Number(r.c);
+
+  const byLayer: Record<string, number> = {};
+  for (const r of layerRows.rows) byLayer[r.layer] = Number(r.c);
+
+  return {
+    totalObservations: Number(totalRows.rows[0]?.c ?? 0),
+    byKind,
+    bySource,
+    byScope,
+    byLayer,
+    archived: Number(archivedRows.rows[0]?.c ?? 0),
+  };
 }
 
 type ObservationRow = {

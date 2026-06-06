@@ -23,6 +23,8 @@ import { registerNodeCommandRoutes } from './node-command-routes.js';
 import { registerNodeRoutes } from './node-routes.js';
 import { registerServiceRoutes } from './service-routes.js';
 import { registerMCPRoutes } from './mcp-routes.js';
+import { registerSkillRoutes } from './skill-routes.js';
+import { registerRuleRoutes } from './rule-routes.js';
 import { registerTodoRoutes } from './todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './agent-task-graph-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
@@ -66,7 +68,7 @@ import {
 } from '@los/agent/session-events';
 import {
   ensureMemoryStore, addObservation, searchObservations,
-  getStats, syncMemoryMd, deleteObservation
+  getStats, syncMemoryMd, deleteObservation, updateObservation
 } from '@los/memory';
 
 const log = getLogger('gateway');
@@ -223,38 +225,92 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     serviceKind: 'gateway',
   });
   registerMCPRoutes(app);
+  registerSkillRoutes(app);
+  registerRuleRoutes(app);
 
   registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT);
 
   // ── Memory ────────────────────────────────────────────
 
   app.get('/memory', async (req) => {
-    const { q, kind, limit } = req.query as { q?: string; kind?: string; limit?: string };
+    const query = req.query as {
+      q?: string;
+      kind?: string;
+      source?: string;
+      tag?: string;
+      scope?: string;
+      memoryLayer?: string;
+      archived?: string;
+      sessionId?: string;
+      tenantId?: string;
+      projectId?: string;
+      userId?: string;
+      requestId?: string;
+      traceId?: string;
+      limit?: string;
+    };
     await ensureMemoryStore();
-    const results = await searchObservations(q ?? '', {
-      kind,
-      limit: limit ? parseInt(limit) : 20,
+    const results = await searchObservations(query.q ?? '', {
+      kind: query.kind,
+      source: query.source,
+      tag: query.tag,
+      scope: query.scope,
+      memoryLayer: query.memoryLayer,
+      archived: parseOptionalBoolean(query.archived),
+      sessionId: query.sessionId,
+      tenantId: query.tenantId,
+      projectId: query.projectId,
+      userId: query.userId,
+      requestId: query.requestId,
+      traceId: query.traceId,
+      limit: normalizeBoundedInteger(query.limit, 20, 1, 200),
     });
     return { count: results.length, results };
   });
 
   app.post('/memory', async (req) => {
-    const { title, summary, kind, tags, content, source } = req.body as any;
+    const { title, summary, kind, tags, content, metadata, source, sessionId, nodeId } = req.body as any;
     const context = getRequestContext(req);
     await ensureMemoryStore();
     const obs = await addObservation({
       title,
       summary,
       kind,
-      tags,
+      tags: normalizeStringArray(tags),
       content,
       source,
+      metadata: normalizeMemoryMetadata(metadata, {
+        scope: 'project',
+        memoryLayer: 'semantic',
+        archived: false,
+      }),
+      sessionId: normalizeOptionalString(sessionId),
       tenantId: context.tenantId,
       projectId: context.projectId,
       userId: context.userId,
+      nodeId: normalizeOptionalString(nodeId),
       requestId: context.requestId,
       traceId: context.traceId,
     });
+    return obs;
+  });
+
+  app.patch('/memory/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as any;
+    await ensureMemoryStore();
+    const obs = await updateObservation(parseInt(id), {
+      title: normalizeOptionalString(body.title),
+      summary: normalizeOptionalString(body.summary),
+      kind: normalizeOptionalString(body.kind),
+      tags: body.tags === undefined ? undefined : normalizeStringArray(body.tags),
+      content: normalizeOptionalString(body.content),
+      metadata: body.metadata === undefined ? undefined : normalizeMemoryMetadata(body.metadata),
+    });
+    if (!obs) {
+      reply.code(404);
+      return { error: 'Not found' };
+    }
     return obs;
   });
 
@@ -645,10 +701,22 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   // ── Sync MEMORY.md ────────────────────────────────────
 
   app.post('/memory/sync-md', async (req) => {
-    const { workspaceRoot } = req.body as { workspaceRoot: string };
+    const body = req.body as {
+      workspaceRoot: string;
+      scope?: string;
+      memoryLayer?: string;
+      archived?: boolean;
+      projectId?: string;
+    };
     await ensureMemoryStore();
-    const observations = await searchObservations('', { limit: 50 });
-    syncMemoryMd(workspaceRoot, observations);
+    const observations = await searchObservations('', {
+      limit: 50,
+      scope: body.scope,
+      memoryLayer: body.memoryLayer,
+      archived: body.archived,
+      projectId: body.projectId,
+    });
+    syncMemoryMd(body.workspaceRoot, observations);
     return { ok: true, count: observations.length };
   });
 
@@ -725,6 +793,35 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeMemoryMetadata(
+  value: unknown,
+  defaults: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ...defaults,
+    ...asRecord(value),
+  };
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
 }
 
 function normalizeOptionalNonNegativeInteger(value: unknown): number | undefined {

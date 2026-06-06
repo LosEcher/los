@@ -345,3 +345,28 @@ export {
   type NodeCommandRuntimeResult,
   type NodeCommandStatus,
 } from './node-commands.js';
+export {
+  ensureSkillStore,
+  upsertSkill,
+  loadSkill,
+  listSkills,
+  deleteSkill,
+  incrementSkillUsage,
+  type SkillRecord,
+  type SkillRunMode,
+  type UpsertSkillInput,
+} from './skills.js';
+export {
+  ensureRuleStore,
+  upsertRule,
+  loadRule,
+  listRules,
+  updateRuleStatus,
+  deleteRule,
+  type RuleRecord,
+  type RuleScope,
+  type RuleSeverity,
+  type RuleEnforcementMode,
+  type RuleStatus,
+  type UpsertRuleInput,
+} from './rules.js';

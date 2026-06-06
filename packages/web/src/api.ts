@@ -216,8 +216,16 @@ export type MemoryObservation = {
   summary: string;
   kind: string;
   tags: string[];
+  content: string;
+  metadata: Record<string, unknown>;
   source: string;
   sessionId?: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  nodeId?: string;
+  requestId?: string;
+  traceId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -231,6 +239,9 @@ export type MemoryStats = {
   totalObservations: number;
   byKind: Record<string, number>;
   bySource: Record<string, number>;
+  byScope: Record<string, number>;
+  byLayer: Record<string, number>;
+  archived: number;
 };
 
 export type ProviderReadiness = {
@@ -306,13 +317,146 @@ export type LogsResponse = {
 export type ChatPayload = {
   prompt: string;
   sessionId?: string;
+  systemPrompt?: string;
   provider?: string;
   model?: string;
   modelSettings?: ModelSettings;
   workspaceRoot?: string;
   toolMode: ToolMode;
+  allowedTools?: string[];
   maxLoops?: number;
   timeoutMs?: number;
+  toolRetry?: ToolRetry;
+  mcpServers?: MCPServerPayload[];
+};
+
+export type ToolRetry = {
+  maxAttempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+};
+
+export type MCPServerPayload = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+};
+
+export type MCPTransport = 'stdio' | 'sse' | 'streamable-http';
+export type MCPServerStatus = 'unverified' | 'connected' | 'error' | 'disabled';
+
+export type MCPServer = {
+  id: string;
+  tenantId?: string;
+  projectId?: string;
+  transport: MCPTransport;
+  command?: string;
+  args: string[];
+  url?: string;
+  env: Record<string, string>;
+  enabled: boolean;
+  status: MCPServerStatus;
+  lastError?: string;
+  toolCount: number;
+  tools: MCPRegisteredTool[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MCPRegisteredTool = {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+};
+
+export type MCPServerListResponse = {
+  count: number;
+  servers: MCPServer[];
+};
+
+export type MCPServerVerifyResponse = {
+  ok: boolean;
+  serverId: string;
+  toolCount?: number;
+  tools?: Array<{ name: string; description?: string }>;
+  error?: string;
+};
+
+export type ServiceInstance = {
+  serviceId: string;
+  serviceKind: string;
+  hostLabel: string;
+  bindUrl?: string;
+  publicUrl?: string;
+  version?: string;
+  role: string;
+  status: string;
+  rolloutState?: string;
+  rolloutMessage?: string;
+  capabilities: Record<string, unknown>;
+  health: Record<string, unknown>;
+  load: Record<string, unknown>;
+  priority: number;
+  readiness: { ready: boolean; blockers: string[]; warnings: string[] };
+  createdAt: string;
+  updatedAt: string;
+  lastHeartbeatAt: string;
+};
+
+export type ArtifactRecord = {
+  id: string;
+  artifactId: string;
+  sessionId?: string;
+  taskRunId?: string;
+  nodeId?: string;
+  path: string;
+  size: number;
+  mimeType?: string;
+  contentHash?: string;
+  createdAt: string;
+};
+
+export type ArtifactListResponse = {
+  count: number;
+  artifacts: ArtifactRecord[];
+};
+
+export type AgentTaskGraph = {
+  taskId: string;
+  status: string;
+  sessionId: string;
+  attempts: Array<Record<string, unknown>>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentTaskGraphCompletion = {
+  taskId: string;
+  completed: boolean;
+  status: string;
+  attemptCount: number;
+  latestAttempt?: Record<string, unknown>;
+};
+
+export type RunSpec = {
+  id: string;
+  sessionId: string;
+  taskRunId?: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NodeCommandRecord = {
+  id: string;
+  nodeId: string;
+  command: string;
+  status: string;
+  requestedBy?: string;
+  result?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ModelSettings = {
