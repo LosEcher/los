@@ -104,6 +104,19 @@ export {
   type ToolCallRecoveryRecommendation,
 } from './tool-call-recovery.js';
 export {
+  ExecutionTransitionError,
+  assertExecutionTransition,
+  canTransitionExecutionState,
+  evaluateExecutionTransition,
+  executionTransitionEventType,
+  isTerminalExecutionState,
+  type ExecutionEntityType,
+  type ExecutionState,
+  type ExecutionStateByEntity,
+  type ExecutionTransitionInput,
+  type ExecutionTransitionResult,
+} from './execution-transitions.js';
+export {
   ensureRunSpecStore,
   createRunSpec,
   loadRunSpec,
