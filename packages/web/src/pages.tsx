@@ -163,49 +163,111 @@ function SessionInspector({
 
 export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) => void }) {
   const queryClient = useQueryClient();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const tasks = useQuery({
     queryKey: ['tasks'],
     queryFn: () => getJson<TaskRun[]>('/tasks'),
     refetchInterval: 8_000,
   });
+  const selectedTask = (tasks.data ?? []).find(task => task.id === selectedTaskId) ?? null;
   const cancel = useMutation({
     mutationFn: (id: string) => postJson(`/tasks/${id}/cancel`, { reason: 'cancelled_from_tasks_page' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   });
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>Tasks</h2>
-          <p>Scheduler records above chat sessions. Cancel is available only for active tasks.</p>
-        </div>
-        <RefreshQueryButton queryKey={['tasks']} />
-      </div>
-      <DataTable
-        loading={tasks.isLoading}
-        empty="No tasks yet."
-        rows={tasks.data ?? []}
-        renderRow={task => (
-          <div className="record-row task-row">
-            <div className="task-main">
-              <button type="button" className="link-cell" onClick={() => onSelectSession(task.sessionId)}>
-                {task.id}
-              </button>
-              <span>{task.promptPreview}</span>
-            </div>
-            <span className={`status-text ${task.status}`}>{task.status}</span>
-            <span>{task.toolMode}</span>
-            <span>{task.provider ?? 'default'} / {task.model ?? 'model?'}</span>
-            <span>{task.nodeId ?? 'local'}</span>
-            <span>{formatDate(task.updatedAt)}</span>
-            <button className="tiny-btn" type="button" disabled={!['queued', 'running'].includes(task.status) || cancel.isPending} onClick={() => cancel.mutate(task.id)}>
-              cancel
-            </button>
+    <section className="panel-grid detail-grid">
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Tasks</h2>
+            <p>Scheduler records above chat sessions. Cancel is available only for active tasks.</p>
           </div>
-        )}
-      />
+          <RefreshQueryButton queryKey={['tasks']} />
+        </div>
+        <DataTable
+          loading={tasks.isLoading}
+          empty="No tasks yet."
+          rows={tasks.data ?? []}
+          renderRow={task => (
+            <div className="record-row task-row" data-active={selectedTaskId === task.id}>
+              <div className="task-main">
+                <button type="button" className="link-cell" onClick={() => onSelectSession(task.sessionId)}>
+                  {task.id}
+                </button>
+                <span>{task.promptPreview}</span>
+              </div>
+              <span className={`status-text ${task.status}`}>{task.status}</span>
+              <span>{task.toolMode}</span>
+              <span>{task.provider ?? 'default'} / {task.model ?? 'model?'}</span>
+              <span>{task.nodeId ?? 'local'}</span>
+              <span>{formatDate(task.updatedAt)}</span>
+              <button className="tiny-btn" type="button" onClick={() => setSelectedTaskId(task.id)}>
+                <Search size={12} /> inspect
+              </button>
+              <button className="tiny-btn" type="button" disabled={!['queued', 'running'].includes(task.status) || cancel.isPending} onClick={() => cancel.mutate(task.id)}>
+                cancel
+              </button>
+            </div>
+          )}
+        />
+      </div>
+      <TaskRunInspector task={selectedTask} />
     </section>
+  );
+}
+
+function TaskRunInspector({ task }: { task: TaskRun | null }) {
+  const inspect = useMutation({
+    mutationFn: (runSpecId: string) => getJson(`/runs/${runSpecId}/inspect`),
+  });
+  const recover = useMutation({
+    mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/recover`, {}),
+  });
+  const verify = useMutation({
+    mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/verify`, {}),
+  });
+  const runSpecId = task?.runSpecId;
+  const latestResult = verify.data ?? recover.data ?? inspect.data;
+
+  if (!task) {
+    return <aside className="panel inspector"><EmptyText text="Select a task to inspect run evidence and recovery state." /></aside>;
+  }
+
+  return (
+    <aside className="panel inspector">
+      <div className="panel-head compact">
+        <h2>Task Run</h2>
+        <span className={`status-text ${task.status}`}>{task.status}</span>
+      </div>
+      <span className="mono-chip">{task.id}</span>
+      <div className="fact-list compact-facts">
+        <Fact label="run spec" value={runSpecId ?? 'none'} />
+        <Fact label="session" value={task.sessionId} />
+        <Fact label="trace" value={task.traceId} />
+        <Fact label="attempt" value={String(task.attempt)} />
+        <Fact label="node" value={task.nodeId ?? 'local'} />
+      </div>
+      <div className="inline-actions">
+        <button className="ghost-btn" type="button" disabled={!runSpecId || inspect.isPending} onClick={() => runSpecId && inspect.mutate(runSpecId)}>
+          <Search size={14} /> inspect
+        </button>
+        <button className="ghost-btn" type="button" disabled={!runSpecId || recover.isPending} onClick={() => runSpecId && recover.mutate(runSpecId)}>
+          <Database size={14} /> recover
+        </button>
+        <button className="ghost-btn" type="button" disabled={!runSpecId || verify.isPending} onClick={() => runSpecId && verify.mutate(runSpecId)}>
+          <Send size={14} /> verify
+        </button>
+      </div>
+      {latestResult ? (
+        <div className="json-block">
+          <strong>Run Operation Result</strong>
+          <pre>{JSON.stringify(latestResult, null, 2)}</pre>
+        </div>
+      ) : (
+        <EmptyText text={runSpecId ? 'No run operation loaded.' : 'Task has no run spec link.'} />
+      )}
+    </aside>
   );
 }
 

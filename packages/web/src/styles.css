@@ -1144,6 +1144,12 @@ button:disabled {
   word-break: break-word;
 }
 
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

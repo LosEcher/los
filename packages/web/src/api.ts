@@ -68,6 +68,7 @@ export type SessionObservability = {
 export type TaskRun = {
   id: string;
   sessionId: string;
+  runSpecId?: string;
   traceId: string;
   dedupeKey?: string;
   nodeId?: string;
