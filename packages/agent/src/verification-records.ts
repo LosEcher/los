@@ -121,6 +121,8 @@ export async function updateVerificationRecord(
   id: string,
   input: UpdateVerificationRecordInput,
 ): Promise<VerificationRecord | null> {
+  // Low-level persistence API. Business workflows should prefer
+  // transitionExecutionState so state, events, and outbox writes stay atomic.
   await ensureVerificationRecordStore();
   const db = getDb();
   const status = normalizeVerificationStatus(input.status);

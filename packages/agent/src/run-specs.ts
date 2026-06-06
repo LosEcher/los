@@ -200,6 +200,8 @@ export async function updateRunSpecStatus(
   id: string,
   status: RunSpecStatus,
 ): Promise<RunSpecRecord | null> {
+  // Low-level persistence API. Business workflows should prefer
+  // transitionExecutionState so state, events, and outbox writes stay atomic.
   await ensureRunSpecStore();
   const db = getDb();
   const rows = await db.query<RunSpecRow>(

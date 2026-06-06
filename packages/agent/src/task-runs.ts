@@ -179,6 +179,8 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
 }
 
 export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Promise<TaskRunRecord | null> {
+  // Low-level persistence API. Business workflows should prefer
+  // transitionExecutionState so state, events, and outbox writes stay atomic.
   await ensureTaskRunStore();
   const db = getDb();
   const existing = await loadTaskRun(id);

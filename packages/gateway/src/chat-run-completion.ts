@@ -1,7 +1,8 @@
 import type { RunSpecStatus } from '@los/agent/run-specs';
-import { updateRunSpecStatus } from '@los/agent/run-specs';
+import { loadRunSpec } from '@los/agent/run-specs';
 import type { VerificationRecord } from '@los/agent';
 import { listVerificationRecordsForRunSpec, resolveVerificationCompletionDecision } from '@los/agent';
+import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 
 export interface DirectRunCompletionDecision {
@@ -36,7 +37,29 @@ export async function applyDirectRunCompletionStatus(
 ): Promise<DirectRunCompletionDecision> {
   const verificationRecords = await listVerificationRecordsForRunSpec(input.runSpecId);
   const decision = resolveDirectRunCompletionDecision(verificationRecords);
-  await updateRunSpecStatus(input.runSpecId, decision.status);
+  const runSpec = await loadRunSpec(input.runSpecId);
+  if (runSpec?.status === 'created') {
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: input.runSpecId,
+      to: 'running',
+      reason: 'direct_run_completion_started',
+      commandId: input.requestId,
+      correlationId: input.traceId,
+      nodeId: input.nodeId,
+    });
+  }
+  await transitionExecutionState({
+    entityType: 'run_spec',
+    entityId: input.runSpecId,
+    to: decision.status,
+    reason: decision.status === 'blocked'
+      ? 'required verification records are not satisfied'
+      : 'direct run completed',
+    commandId: input.requestId,
+    correlationId: input.traceId,
+    nodeId: input.nodeId,
+  });
   if (decision.status === 'blocked') {
     await appendSessionEvent({
       sessionId: input.sessionId,

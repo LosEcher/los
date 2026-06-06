@@ -142,6 +142,8 @@ export async function updateToolCallState(
   sessionId: string,
   input: UpdateToolCallStateInput,
 ): Promise<ToolCallStateRecord | null> {
+  // Low-level persistence API. Business workflows should prefer
+  // transitionExecutionState so state, events, and outbox writes stay atomic.
   await ensureToolCallStateStore();
   const db = getDb();
   const rows = await db.query<ToolCallStateRow>(
