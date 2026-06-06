@@ -12,7 +12,7 @@ test('provider source metadata survives config validation and diagnostics', () =
     providers: {
       deepseek: {
         apiKey: 'test-key',
-        baseUrl: 'https://api.deepseek.com',
+        baseUrl: 'https://api.deepseek.com/v1',
         model: 'deepseek-v4-flash',
         enabled: true,
         source: 'env:DEEPSEEK_API_KEY',

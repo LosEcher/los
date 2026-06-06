@@ -183,13 +183,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         body.tool_choice = 'auto';
       }
 
-      const chatUrl = profile.provider === 'deepseek'
-        ? buildProviderUrl(baseUrl, '/chat/completions')
-        : baseUrl.endsWith('/v1')
-          ? `${baseUrl}/chat/completions`
-          : baseUrl.endsWith('/')
-            ? `${baseUrl}chat/completions`
-            : `${baseUrl}/v1/chat/completions`;
+      const chatUrl = buildOpenAICompatUrl(baseUrl, '/chat/completions');
 
       const res = await fetch(chatUrl, {
         method: 'POST',
@@ -256,7 +250,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
 
     async listModels(options: { signal?: AbortSignal } = {}): Promise<ProviderModelInfo[]> {
       const res = await fetch(
-        profile.provider === 'deepseek' ? buildProviderUrl(baseUrl, '/models') : buildOpenAICompatUrl(baseUrl, '/models'),
+        buildOpenAICompatUrl(baseUrl, '/models'),
         {
         method: 'GET',
         headers: {
@@ -292,15 +286,13 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
   };
 }
 
-function buildOpenAICompatUrl(baseUrl: string, path: string): string {
-  if (baseUrl.endsWith('/')) {
-    return `${baseUrl.slice(0, -1)}${path}`;
+export function buildOpenAICompatUrl(baseUrl: string, path: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (cleanBase.endsWith('/v1')) {
+    return `${cleanBase}${cleanPath}`;
   }
-  return `${baseUrl}${path}`;
-}
-
-function buildProviderUrl(baseUrl: string, path: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}${path}`;
+  return `${cleanBase}/v1${cleanPath}`;
 }
 
 async function readOpenAIStreamResponse(

@@ -6,6 +6,7 @@ import { MODEL_PROFILES, resolveModelProfile, summarizeModelProfile } from './mo
 test('resolveModelProfile keeps deepseek defaults and overrides', () => {
   const profile = resolveModelProfile('deepseek');
   assert.equal(profile.protocol, 'openai');
+  assert.equal(profile.baseUrl, 'https://api.deepseek.com/v1');
   assert.equal(profile.model, 'deepseek-v4-flash');
   assert.equal(profile.toolCallRepair, 'json-loose');
   assert.equal(profile.cachePolicy, 'prompt-cache-read');

@@ -14,7 +14,7 @@ function provider(overrides: Partial<DiscoveredProvider>): DiscoveredProvider {
   return {
     name: 'deepseek',
     apiKey: 'test-key',
-    baseUrl: 'https://api.deepseek.com',
+    baseUrl: 'https://api.deepseek.com/v1',
     defaultModel: 'deepseek-v4-flash',
     available: true,
     source: 'env:DEEPSEEK_API_KEY',

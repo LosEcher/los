@@ -78,7 +78,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     provider: 'deepseek',
     protocol: 'openai',
     apiShape: 'openai-chat-completions',
-    baseUrl: 'https://api.deepseek.com',
+    baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-v4-flash',
     supportsTools: true,
     supportsParallelToolCalls: false,
