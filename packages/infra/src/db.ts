@@ -30,7 +30,13 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
     throw new Error(`los uses PostgreSQL for persistence. Set DATABASE_URL=postgres://... (got ${url})`);
   }
 
-  _pool = new Pool({ connectionString: url });
+  _pool = new Pool({
+    connectionString: url,
+    max: 20,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 10000,
+    allowExitOnIdle: true,
+  });
   await _pool.query('select 1');
   log.info('Database: PostgreSQL connected');
   return wrap(_pool);

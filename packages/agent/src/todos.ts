@@ -325,13 +325,23 @@ export interface SeedLosPlanningTodosOptions {
 export async function seedLosPlanningTodos(options: SeedLosPlanningTodosOptions = {}): Promise<TodoRecord[]> {
   await ensureTodoStore();
   const out: TodoRecord[] = [];
+
+  // Batch-load existing todos in a single query to avoid N+1
+  const seedIds = LOS_PLANNING_TODO_SEED.map(item => item.id).filter((id): id is string => Boolean(id));
+  const existingIds = new Set<string>();
+  if (seedIds.length > 0) {
+    const db = getDb();
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM todos WHERE id = ANY($1::text[])`,
+      [seedIds],
+    );
+    for (const row of existing.rows) existingIds.add(row.id);
+  }
+
   for (const item of LOS_PLANNING_TODO_SEED) {
-    if (!options.overwrite && item.id) {
+    if (item.id && !options.overwrite && existingIds.has(item.id)) {
       const existing = await loadTodo(item.id);
-      if (existing) {
-        out.push(existing);
-        continue;
-      }
+      if (existing) { out.push(existing); continue; }
     }
     out.push(await createTodo(item));
   }

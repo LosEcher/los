@@ -144,6 +144,8 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     });
 
     const replayEvents: Array<{ event: string; data: unknown }> = [];
+    const MAX_REPLAY_EVENTS = 500;
+    const cappedReplay = () => replayEvents.slice(-MAX_REPLAY_EVENTS);
     const send = (event: string, data: unknown, id?: number) => {
       replayEvents.push({ event, data });
       if (id !== undefined) reply.raw.write(`id: ${id}\n`);
@@ -400,7 +402,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           taskRunId: scheduled.taskRun.id,
         });
         if (idempotency) {
-          await completeIdempotencyKey(idempotency.id, 200, { events: replayEvents });
+          await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
         }
         reply.raw.end();
         return;
@@ -434,7 +436,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           reason: scheduled.reason,
         });
         if (idempotency) {
-          await completeIdempotencyKey(idempotency.id, 200, { events: replayEvents });
+          await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
         }
         reply.raw.end();
         return;
@@ -443,54 +445,65 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       const result = scheduled.result;
       const taskRunId = scheduled.taskRun.id;
 
+      // Parallelize independent post-run writes (different tables, no data dependencies)
       await ensureSessionStore();
-      await saveSession({
-        id: sid,
-        tenantId: context.tenantId,
-        projectId: context.projectId,
-        userId: context.userId,
-        nodeId: scheduled.taskRun.nodeId,
-        requestId: context.requestId,
-        traceId: scheduled.taskRun.traceId,
-        createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: result.messages,
-        turns: resumedSession ? [...resumedSession.turns, ...result.turns] : result.turns,
-        metadata: {
-          ...(resumedSession?.metadata ?? {}),
-          provider: provider ?? config.agent.defaultProvider,
-          model: scheduled.taskRun.model ?? model ?? null,
-          modelSettings: modelSettings ?? null,
-          workspaceRoot,
-          toolMode,
-          allowedTools,
-          maxLoops: maxLoops ?? config.agent.maxLoops,
-          timeoutMs,
-          toolRetry,
-          taskRunId,
-          traceId: scheduled.taskRun.traceId,
-          requestId: context.requestId,
+      const postRun = await Promise.all([
+        saveSession({
+          id: sid,
           tenantId: context.tenantId,
           projectId: context.projectId,
           userId: context.userId,
-          nodeId: scheduled.taskRun.nodeId ?? null,
-          dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-          resumed: Boolean(resumedSession),
-          resumeMessageCount: resumedSession?.messages.length ?? 0,
-          resumeLastTaskRunId: resumeState?.lastTaskRun?.id ?? null,
-          resumeLastTaskStatus: resumeState?.lastTaskRun?.status ?? null,
-          resumeLastEventId: resumeState?.lastEventId ?? null,
-        },
-      });
-
-      if (persistMemory) {
-        await ensureMemoryStore();
-        await addObservation({
-          title: `Chat session ${sid.slice(0, 12)}`,
-          summary: `Prompt: ${prompt.slice(0, 200)} - ${result.text.slice(0, 200)}`,
-          kind: 'note',
-          tags: ['chat', 'session'],
-          source: 'agent',
+          nodeId: scheduled.taskRun.nodeId,
+          requestId: context.requestId,
+          traceId: scheduled.taskRun.traceId,
+          createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: result.messages,
+          turns: resumedSession ? [...resumedSession.turns, ...result.turns] : result.turns,
+          metadata: {
+            ...(resumedSession?.metadata ?? {}),
+            provider: provider ?? config.agent.defaultProvider,
+            model: scheduled.taskRun.model ?? model ?? null,
+            modelSettings: modelSettings ?? null,
+            workspaceRoot,
+            toolMode,
+            allowedTools,
+            maxLoops: maxLoops ?? config.agent.maxLoops,
+            timeoutMs,
+            toolRetry,
+            taskRunId,
+            traceId: scheduled.taskRun.traceId,
+            requestId: context.requestId,
+            tenantId: context.tenantId,
+            projectId: context.projectId,
+            userId: context.userId,
+            nodeId: scheduled.taskRun.nodeId ?? null,
+            dedupeKey: scheduled.taskRun.dedupeKey ?? null,
+            resumed: Boolean(resumedSession),
+            resumeMessageCount: resumedSession?.messages.length ?? 0,
+            resumeLastTaskRunId: resumeState?.lastTaskRun?.id ?? null,
+            resumeLastTaskStatus: resumeState?.lastTaskRun?.status ?? null,
+            resumeLastEventId: resumeState?.lastEventId ?? null,
+          },
+        }),
+        persistMemory
+          ? ensureMemoryStore().then(() => addObservation({
+              title: `Chat session ${sid.slice(0, 12)}`,
+              summary: `Prompt: ${prompt.slice(0, 200)} - ${result.text.slice(0, 200)}`,
+              kind: 'note',
+              tags: ['chat', 'session'],
+              source: 'agent',
+              sessionId: sid,
+              tenantId: context.tenantId,
+              projectId: context.projectId,
+              userId: context.userId,
+              nodeId: scheduled.taskRun.nodeId,
+              requestId: context.requestId,
+              traceId: scheduled.taskRun.traceId,
+            }))
+          : Promise.resolve(undefined),
+        applyDirectRunCompletionStatus({
+          runSpecId,
           sessionId: sid,
           tenantId: context.tenantId,
           projectId: context.projectId,
@@ -498,20 +511,11 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           nodeId: scheduled.taskRun.nodeId,
           requestId: context.requestId,
           traceId: scheduled.taskRun.traceId,
-        });
-      }
+          taskRunId,
+        }).catch(() => undefined),
+      ]);
 
-      const runCompletion = await applyDirectRunCompletionStatus({
-        runSpecId,
-        sessionId: sid,
-        tenantId: context.tenantId,
-        projectId: context.projectId,
-        userId: context.userId,
-        nodeId: scheduled.taskRun.nodeId,
-        requestId: context.requestId,
-        traceId: scheduled.taskRun.traceId,
-        taskRunId,
-      }).catch(() => undefined);
+      const runCompletion = postRun[2];
       const todoCompletionStatus: TodoStatus = (runCompletion?.blockedVerificationRecordIds.length ?? 0) > 0 ? 'blocked' : 'done';
       if (boundTodoId) {
         await updateBoundTodoFromRun(boundTodoId, {
@@ -540,7 +544,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         nodeId: scheduled.taskRun.nodeId ?? null,
       });
       if (idempotency) {
-        await completeIdempotencyKey(idempotency.id, 200, { events: replayEvents });
+        await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
       }
     } catch (err: any) {
       if (boundTodoId) {

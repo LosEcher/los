@@ -69,37 +69,35 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   const sessionId = normalizeRequired(input.sessionId, 'sessionId');
   const db = getDb();
 
-  // Gather observations for this session
-  const obsRows = await db.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM observations WHERE session_id = $1`,
-    [sessionId],
-  );
+  // Parallelize independent data-gathering queries (different tables)
+  const [obsRows, taskRows, evalRows] = await Promise.all([
+    db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM observations WHERE session_id = $1`,
+      [sessionId],
+    ),
+    db.query<{ count: string; statuses: string }>(
+      `SELECT
+         COUNT(*)::text AS count,
+         COALESCE(jsonb_agg(jsonb_build_object('id', id, 'status', status, 'model', model, 'node_id', node_id)), '[]'::jsonb)::text AS statuses
+       FROM task_runs WHERE session_id = $1`,
+      [sessionId],
+    ),
+    db.query<{ count: string; summary: string }>(
+      `SELECT
+         COUNT(*)::text AS count,
+         COALESCE(jsonb_agg(jsonb_build_object(
+           'success', success,
+           'failure_class', failure_class,
+           'failover_scope', failover_scope,
+           'verification_status', verification_status
+         )), '[]'::jsonb)::text AS summary
+       FROM run_evals WHERE session_id = $1`,
+      [sessionId],
+    ),
+  ]);
   const observationCount = Number(obsRows.rows[0]?.count ?? 0);
-
-  // Gather task runs for this session
-  const taskRows = await db.query<{ count: string; statuses: string }>(
-    `SELECT
-       COUNT(*)::text AS count,
-       COALESCE(jsonb_agg(jsonb_build_object('id', id, 'status', status, 'model', model, 'node_id', node_id)), '[]'::jsonb)::text AS statuses
-     FROM task_runs WHERE session_id = $1`,
-    [sessionId],
-  );
   const taskRunCount = Number(taskRows.rows[0]?.count ?? 0);
   const taskRunStatuses = parseJsonArray(taskRows.rows[0]?.statuses);
-
-  // Gather eval records for this session
-  const evalRows = await db.query<{ count: string; summary: string }>(
-    `SELECT
-       COUNT(*)::text AS count,
-       COALESCE(jsonb_agg(jsonb_build_object(
-         'success', success,
-         'failure_class', failure_class,
-         'failover_scope', failover_scope,
-         'verification_status', verification_status
-       )), '[]'::jsonb)::text AS summary
-     FROM run_evals WHERE session_id = $1`,
-    [sessionId],
-  );
   const evalCount = Number(evalRows.rows[0]?.count ?? 0);
   const evalSummaries = parseJsonArray(evalRows.rows[0]?.summary);
 

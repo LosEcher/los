@@ -175,36 +175,44 @@ async function applyCancelTransition(
 ): Promise<ToolCallRecoveryTransitionResult> {
   const toolStates = await listToolCallStatesForRunSpec(runSpec.id);
   const cancelIds = new Set(decision.cancelToolCallIds);
-  const transitionedToolCallIds: string[] = [];
 
-  for (const state of toolStates) {
-    if (!cancelIds.has(state.id)) continue;
-    const updated = await updateToolCallState(state.id, state.sessionId, {
-      state: 'skipped',
-      outputSummary: reason,
-      error: null,
-    });
-    if (updated) transitionedToolCallIds.push(state.id);
-  }
+  const toolUpdates = toolStates
+    .filter(state => cancelIds.has(state.id))
+    .map(state =>
+      updateToolCallState(state.id, state.sessionId, {
+        state: 'skipped',
+        outputSummary: reason,
+        error: null,
+      }),
+    );
+  const results = await Promise.all(toolUpdates);
+  const transitionedToolCallIds = results
+    .filter((r): r is NonNullable<typeof r> => Boolean(r))
+    .map(r => r.id);
 
   const taskRuns = await listTaskRunsForRunSpec(runSpec.id);
-  const transitionedTaskRunIds: string[] = [];
+  const activeTaskRuns = taskRuns.filter(taskRun => ACTIVE_TASK_RUN_STATUSES.has(taskRun.status));
   const liveCancelledTaskRunIds: string[] = [];
-  for (const taskRun of taskRuns) {
-    if (!ACTIVE_TASK_RUN_STATUSES.has(taskRun.status)) continue;
+  for (const taskRun of activeTaskRuns) {
     if (options.cancelLiveTaskRun?.(taskRun.id, reason) === true) {
       liveCancelledTaskRunIds.push(taskRun.id);
     }
-    const updated = await updateTaskRun(taskRun.id, {
+  }
+
+  const taskUpdates = activeTaskRuns.map(taskRun =>
+    updateTaskRun(taskRun.id, {
       status: 'cancelled',
       metadata: {
         ...taskRun.metadata,
         recoveryAction: 'cancel',
         cancelReason: reason,
       },
-    });
-    if (updated) transitionedTaskRunIds.push(taskRun.id);
-  }
+    }),
+  );
+  const taskResults = await Promise.all(taskUpdates);
+  const transitionedTaskRunIds = taskResults
+    .filter((r): r is NonNullable<typeof r> => Boolean(r))
+    .map(r => r.id);
 
   await updateRunSpecStatus(runSpec.id, 'cancelled');
   await appendRecoveryTransitionEvent(runSpec, 'run.recovery_cancelled', {
