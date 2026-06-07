@@ -1,7 +1,7 @@
 ---
 date: 2026-06-07
 change: run-state-vocabulary
-commit: pending
+commit: 5dc42268
 surface: web, cli, verification
 impact: Operators can inspect a compact run phase, next action, and blocker projection without reading raw graph JSON.
 ---

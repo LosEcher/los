@@ -346,6 +346,121 @@ test('scheduler runs a single agent task graph with conservative serial claims',
   }
 });
 
+test('scheduler blocks graph run completion when tool recovery is required', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-recovery-required-${suffix}`;
+  const sessionId = `session-recovery-required-${suffix}`;
+  const runSpecId = `run-recovery-required-${suffix}`;
+  const nodeId = `test-recovery-required-executor-${suffix}`;
+  const callId = `call-recovery-required-${suffix}`;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    await readRequestBody(req);
+    res.setHeader('content-type', 'application/x-ndjson');
+    res.write(JSON.stringify({
+      type: 'tool_call_state',
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'requested',
+        turn: 1,
+        input: { path: 'missing.md' },
+        maxAttempts: 2,
+        idempotent: true,
+      },
+    }) + '\n');
+    res.write(JSON.stringify({
+      type: 'tool_call_state',
+      transition: {
+        callId,
+        toolName: 'read_file',
+        state: 'failed',
+        turn: 1,
+        attempt: 1,
+        error: 'missing.md not found',
+      },
+    }) + '\n');
+    res.end(JSON.stringify({
+      type: 'result',
+      result: {
+        text: 'task returned despite failed tool state',
+        turns: [],
+        loopCount: 1,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    }) + '\n');
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'run graph with failed tool state',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute with failed tool state',
+      prompt: 'exec prompt',
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      runSpecId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.equal(result.completion.status, 'succeeded');
+    assert.equal(result.recovery?.status, 'action_required');
+    assert.equal(result.recovery?.recommendation, 'retry');
+    assert.deepEqual(result.recovery?.retryToolCallIds, [callId]);
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'blocked');
+
+    const events = await listSessionEvents(sessionId, 100);
+    const recoveryEvent = events.find(event => event.type === 'run.recovery_required');
+    assert.equal(recoveryEvent?.payload.runSpecId, runSpecId);
+    assert.equal(recoveryEvent?.payload.graphId, graphId);
+    assert.equal(recoveryEvent?.payload.recommendation, 'retry');
+    assert.deepEqual(recoveryEvent?.payload.retryToolCallIds, [callId]);
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 test('scheduler blocks run spec completion when verifier is required but missing', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

@@ -23,6 +23,10 @@ import {
   type AgentTaskGraphCompletion,
 } from './agent-task-graph-read-model.js';
 import {
+  readToolCallRecoveryForRunSpec,
+  type ToolCallRecoveryDecision,
+} from './tool-call-recovery.js';
+import {
   createTaskRun,
   ensureTaskRunStore,
   findActiveTaskRunByDedupeKey,
@@ -95,6 +99,7 @@ export interface RunAgentTaskGraphSerialResult {
     status: AgentTaskAttemptStatus;
   }>;
   completion: AgentTaskGraphCompletion;
+  recovery?: ToolCallRecoveryDecision;
 }
 
 export type ScheduledAgentTaskResult =
@@ -152,20 +157,52 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
   const completion = await getAgentTaskGraphCompletion(input.graphId, {
     requireVerifier: input.requireVerifier,
   });
-  await applyGraphCompletionRunSpecTransition(input, completion);
+  const recovery = await applyGraphCompletionRunSpecTransition(input, completion);
 
   return {
     graphId: input.graphId,
     executedTasks,
     completion,
+    recovery,
   };
 }
 
 async function applyGraphCompletionRunSpecTransition(
   input: RunAgentTaskGraphSerialInput,
   completion: AgentTaskGraphCompletion,
-): Promise<void> {
-  if (!input.runSpecId) return;
+): Promise<ToolCallRecoveryDecision | undefined> {
+  if (!input.runSpecId) return undefined;
+
+  const recovery = await readToolCallRecoveryForRunSpec(input.runSpecId);
+  if (recovery.status === 'action_required') {
+    await updateRunSpecStatus(input.runSpecId, 'blocked');
+    if (input.sessionId) {
+      await appendSessionEvent({
+        sessionId: input.sessionId,
+        tenantId: input.tenantId,
+        projectId: input.projectId,
+        userId: input.userId,
+        nodeId: input.nodeId,
+        requestId: input.requestId,
+        traceId: input.traceId,
+        type: 'run.recovery_required',
+        payload: {
+          runSpecId: input.runSpecId,
+          graphId: input.graphId,
+          recommendation: recovery.recommendation,
+          retryToolCallIds: recovery.retryToolCallIds,
+          resumeToolCallIds: recovery.resumeToolCallIds,
+          cancelToolCallIds: recovery.cancelToolCallIds,
+          operatorAttentionToolCallIds: recovery.operatorAttentionToolCallIds,
+          terminalFailedToolCallIds: recovery.terminalFailedToolCallIds,
+          activeToolCallIds: recovery.activeToolCallIds,
+          reasons: recovery.reasons,
+          completionStatus: completion.status,
+        },
+      });
+    }
+    return recovery;
+  }
 
   const status = runSpecStatusForGraphCompletion(completion);
   if (status) {
@@ -197,6 +234,7 @@ async function applyGraphCompletionRunSpecTransition(
       },
     });
   }
+  return recovery;
 }
 
 function runSpecStatusForGraphCompletion(completion: AgentTaskGraphCompletion): RunSpecStatus | undefined {

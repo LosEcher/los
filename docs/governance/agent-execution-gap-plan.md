@@ -312,7 +312,8 @@ Validation:
 
 ### Phase 4: Recovery And Verifier Runner
 
-Status: P0 core implemented; operator-facing integration remains.
+Status: P0 core plus API/CLI operation surfaces are implemented; automatic
+retry/resume orchestration remains.
 
 Deliverables:
 
@@ -322,6 +323,19 @@ Deliverables:
    semantics.
 4. Operation smoke for required check failure and recovery.
 5. Follow-up scheduler/API integration that consumes the recovery decision.
+
+Current 2026-06-07 update:
+
+1. `runVerificationRecordsForRunSpec` is exposed through
+   `POST /runs/:id/verify` and `los run verify`.
+2. `readToolCallRecoveryForRunSpec` is exposed through
+   `POST /runs/:id/recover`, `los run recover`, and scheduler graph completion
+   protection.
+3. The scheduler now blocks graph run completion and writes
+   `run.recovery_required` when durable tool state needs retry, resume, cancel,
+   or operator attention.
+4. Operation evidence is recorded in
+   `docs/operations/2026-06-07-run-verification-recovery-smoke.md`.
 
 Validation:
 
@@ -366,13 +380,10 @@ Validation:
 
 ## Immediate Next Work
 
-1. Add API/CLI entrypoints for `runVerificationRecordsForRunSpec`.
-2. Wire `readToolCallRecoveryForRunSpec` into scheduler recovery and operation
-   routes.
-3. Promote verifier tasks into the DAG scheduler for multi-step graph runs.
-4. Add operation smokes for direct `/chat` verification blocking, verifier-runner
-   release, tool-state recovery decisions, and run-state vocabulary display.
-5. Decide whether `los provider promote` should remain instructional only or
+1. Promote verifier tasks into the DAG scheduler for multi-step graph runs.
+2. Extend recovery from scheduler completion protection into automatic
+   retry/resume/cancel follow-up attempts.
+3. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
-6. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
+4. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.
