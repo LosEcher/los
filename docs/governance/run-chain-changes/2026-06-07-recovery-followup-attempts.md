@@ -13,9 +13,10 @@ impact: Scheduler graph execution now turns retryable or resumable tool recovery
   current task attempt as failed with recovery evidence, and requeues the task
   for the next graph attempt.
 - Validation: `pnpm --filter @los/agent test`.
-- Remaining risk: cancel and operator-attention recommendations still block
-  for explicit operator or API transition work; they are not automatically
-  executed by the scheduler.
+- Follow-up update: cancel and operator-attention recommendations now have
+  explicit API/CLI transition commands in
+  `2026-06-07-recovery-transition-commands.md`. The scheduler still does not
+  automatically execute those terminal/operator decisions.
 
 ## Notes
 

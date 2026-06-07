@@ -283,8 +283,9 @@ Owner surface: operation smoke templates and gateway tests.
    cases first because they protect common closeout and evidence errors.
 2. Convert E14, E15, and E16 when run contract metadata, tool call state wiring,
    and verifier state are implemented.
-3. Convert E17 and E18 only after an ADR defines external summary ingestion and
-   the scheduler has observable state transitions.
+3. Convert E17 and E18 next as focused harness cases: ADR 0019 now defines
+   external summary ingestion, and scheduler recovery transitions are observable
+   through run state, recovery, and verifier surfaces.
 
 ## Metrics To Add Later
 

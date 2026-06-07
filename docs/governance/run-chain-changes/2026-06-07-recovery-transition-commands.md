@@ -26,5 +26,7 @@ impact: Run recovery now has explicit cancel and operator-attention transition c
 
 ## Remaining Risk
 
-Provider promotion decisions, DAG parallel execution, editable-surface conflict
-checks, UI read models, and external summary ingestion remain separate work.
+UI eval dashboarding, failover-specific metrics, and memory compaction remain
+separate roadmap work. Provider policy decisions, bounded DAG parallel claims,
+editable-surface conflict checks, UI graph read models, and external summary
+ingestion have follow-up fragments or ADR evidence in this run chain.

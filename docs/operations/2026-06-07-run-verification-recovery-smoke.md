@@ -265,5 +265,7 @@ scheduler blocks graph run completion when tool recovery is required
 ## Remaining Risk
 
 This smoke proves blocking, release, recovery decision display, and scheduler
-completion protection. It does not yet implement a full automatic retry/resume
-executor loop that creates the next task attempt from the recovery decision.
+completion protection. Follow-up work in the same run chain added retry/resume
+follow-up attempts and explicit cancel/operator-attention transitions. The
+remaining risk is broader operational coverage, not the absence of those
+transition surfaces.

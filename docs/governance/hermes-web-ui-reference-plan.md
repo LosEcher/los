@@ -192,7 +192,7 @@ validates required docs exist.
 | P0 | Add run-chain change fragment policy for `los` chat/scheduler/tool-state changes | `docs/governance/` and `docs/README.md` | `./tools/check-contracts.sh` |
 | P1 | Add manual node pairing design note mapped to `node-registry` and executor nodes | governance doc first; contract/API after review | contract read + focused node-route tests when implemented |
 | P1 | Add provider promotion evidence display plan | `agent-execution-gap-plan.md`, provider routes, web Providers page | compat harness + provider route test |
-| P2 | Expose recovery-grade run state vocabulary in CLI/UI | `run_specs`, gateway routes, web/CLI | Initial read-only projection implemented; scheduler consumption remains future work |
+| P2 | Expose recovery-grade run state vocabulary in CLI/UI | `run_specs`, gateway routes, web/CLI | CLI/API projection, scheduler recovery consumption, retry/resume follow-up attempts, and cancel/operator-attention transitions are implemented; keep UI/read-model polish separate |
 | P2 | Convert ADR 0014 into a more mechanical validation matrix | ADR 0014 and tools script if repeated | `pnpm check` plus harness script |
 | P3 | Revisit external coding-agent config pages as an operator-only surface | toolchain matrix and external-summary ADR boundary | no raw transcript import |
 | Defer | Desktop runtime packaging | future product packaging plan | not current |
