@@ -617,7 +617,7 @@ Usage:
   los run <inspect|state|recover|verify> <run-id> [options]
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
-  los evals <list|record> [options]
+  los evals <list|summary|record> [options]
   los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
@@ -668,8 +668,8 @@ External summaries:
   Import redacted external tool summaries without making them runtime replay evidence.
 
 Evals:
-  list | record --run RUN_ID --success true|false
-  Record or list run quality eval metrics.
+  list | summary | record --run RUN_ID --success true|false
+  Record, list, or summarize run quality eval metrics.
 
 Nodes:
   list | commands | command

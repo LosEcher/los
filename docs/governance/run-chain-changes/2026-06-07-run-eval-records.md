@@ -16,8 +16,9 @@ impact: Run quality metrics can now be recorded and queried without mixing them 
   `los evals list` expose the operator path.
 - Validation: `packages/agent/src/run-evals.test.ts` and
   `packages/gateway/src/run-evals-routes.test.ts`.
-- Remaining risk: release before/after quality comparison, failure dashboards,
-  and failover-specific metrics remain future work.
+- Remaining risk: release before/after quality comparison, UI dashboards, and
+  failover-specific metrics remain future work. Failure-cause summary API/CLI
+  views were added in the follow-up run-eval-summary fragment.
 
 ## Notes
 

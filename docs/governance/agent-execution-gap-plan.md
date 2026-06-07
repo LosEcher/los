@@ -247,13 +247,16 @@ Current state:
 3. Tests and operation smokes catch some behavior regressions.
 4. `run_evals` records can now be written through `POST /run-evals`, listed
    through `GET /run-evals`, and operated from `los evals`.
+5. `GET /run-evals/summary` and `los evals summary` expose totals, success
+   rate, failure-class groups, verification-status groups, and provider/model
+   groups over the same eval records.
 
 Gap:
 
 The minimal eval table now connects a run to failure class, verification
 status, retry count, user feedback, model cost, and tool errors. The remaining
-gap is release-level comparison, failure-cause dashboarding, and metrics that
-separate service failover from executor failover.
+gap is UI dashboarding, first-class release before/after comparison, and metrics
+that separate service failover from executor failover.
 
 Supplement:
 
@@ -413,7 +416,8 @@ Current 2026-06-07 update:
 3. `requireProviderCompat` prevents a task from running when no target has
    passing compatibility evidence.
 4. `run_evals` provides a minimal record/list surface for run quality metrics;
-   dashboarding and before/after release comparison remain future work.
+   summary API/CLI surfaces now group failures and quality metrics by cause,
+   verification status, and provider/model.
 
 Validation:
 

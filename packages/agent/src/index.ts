@@ -214,10 +214,14 @@ export {
   ensureRunEvalStore,
   listRunEvals,
   recordRunEval,
+  summarizeRunEvals,
   type ListRunEvalsOptions,
   type RecordRunEvalInput,
   type RunEvalRecord,
+  type RunEvalSummary,
+  type RunEvalSummaryGroup,
   type RunEvalVerificationStatus,
+  type SummarizeRunEvalsOptions,
 } from './run-evals.js';
 export {
   claimReadyAgentTasks,

@@ -106,7 +106,7 @@ the task fails before execution instead of treating provider readiness as
 compatibility proof.
 
 Remaining runtime promotion work is still separate: minimal `run_evals`
-records preserve the evidence boundary for quality metrics, but release-level
-comparison and failure-cause dashboarding remain future work.
+records and summary views preserve the evidence boundary for quality metrics,
+but first-class release comparison and UI dashboarding remain future work.
 Cancel/operator-attention recovery transitions now exist as explicit API/CLI
 commands.

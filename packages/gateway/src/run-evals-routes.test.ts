@@ -68,6 +68,18 @@ test('run eval routes record and list quality metrics', async () => {
     assert.equal(body.count, 1);
     assert.equal(body.evals[0].id, id);
 
+    const summary = await app.inject({
+      method: 'GET',
+      url: `/run-evals/summary?runSpecId=${encodeURIComponent(runSpecId)}`,
+    });
+    assert.equal(summary.statusCode, 200);
+    const summaryBody = summary.json();
+    assert.equal(summaryBody.totals.count, 1);
+    assert.equal(summaryBody.totals.failureCount, 1);
+    assert.equal(summaryBody.byFailureClass[0].key, 'tool_error');
+    assert.equal(summaryBody.byVerificationStatus[0].key, 'failed');
+    assert.equal(summaryBody.byProviderModel[0].key, 'deepseek:deepseek-v4-pro');
+
     const invalid = await app.inject({
       method: 'POST',
       url: '/run-evals',

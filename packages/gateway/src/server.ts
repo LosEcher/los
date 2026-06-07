@@ -47,6 +47,7 @@ import {
   readRuntimeEvidenceGraph,
   readToolCallRecoveryForRunSpec,
   runVerificationRecordsForRunSpec,
+  summarizeRunEvals,
 } from '@los/agent';
 import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSession, type SessionRecord } from '@los/agent/session';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
@@ -215,28 +216,23 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     }
   });
 
+  app.get('/run-evals/summary', async (req, reply) => {
+    const query = req.query as RunEvalQuery;
+    try {
+      return await summarizeRunEvals({
+        ...parseRunEvalQuery(query),
+        createdFrom: normalizeOptionalString(query.createdFrom),
+        createdTo: normalizeOptionalString(query.createdTo),
+      });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.get('/run-evals', async (req) => {
-    const query = req.query as {
-      runSpecId?: string;
-      sessionId?: string;
-      taskRunId?: string;
-      provider?: string;
-      model?: string;
-      success?: string;
-      verificationStatus?: string;
-      failureClass?: string;
-      limit?: string;
-    };
+    const query = req.query as RunEvalQuery;
     const evals = await listRunEvals({
-      runSpecId: normalizeOptionalString(query.runSpecId),
-      sessionId: normalizeOptionalString(query.sessionId),
-      taskRunId: normalizeOptionalString(query.taskRunId),
-      provider: normalizeOptionalString(query.provider),
-      model: normalizeOptionalString(query.model),
-      success: parseOptionalBoolean(query.success),
-      verificationStatus: normalizeOptionalString(query.verificationStatus),
-      failureClass: normalizeOptionalString(query.failureClass),
-      limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+      ...parseRunEvalQuery(query),
     });
     return {
       count: evals.length,
@@ -1050,6 +1046,44 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+type RunEvalQuery = {
+  runSpecId?: string;
+  sessionId?: string;
+  taskRunId?: string;
+  provider?: string;
+  model?: string;
+  success?: string;
+  verificationStatus?: string;
+  failureClass?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  limit?: string;
+};
+
+function parseRunEvalQuery(query: RunEvalQuery): {
+  runSpecId?: string;
+  sessionId?: string;
+  taskRunId?: string;
+  provider?: string;
+  model?: string;
+  success?: boolean;
+  verificationStatus?: string;
+  failureClass?: string;
+  limit?: number;
+} {
+  return {
+    runSpecId: normalizeOptionalString(query.runSpecId),
+    sessionId: normalizeOptionalString(query.sessionId),
+    taskRunId: normalizeOptionalString(query.taskRunId),
+    provider: normalizeOptionalString(query.provider),
+    model: normalizeOptionalString(query.model),
+    success: parseOptionalBoolean(query.success),
+    verificationStatus: normalizeOptionalString(query.verificationStatus),
+    failureClass: normalizeOptionalString(query.failureClass),
+    limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+  };
 }
 
 function parseRecoveryTransitionAction(value: unknown): 'cancel' | 'operator_attention' | undefined {

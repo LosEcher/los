@@ -58,6 +58,52 @@ export interface ListRunEvalsOptions {
   limit?: number;
 }
 
+export interface SummarizeRunEvalsOptions extends Omit<ListRunEvalsOptions, 'limit'> {
+  createdFrom?: string;
+  createdTo?: string;
+  limit?: number;
+}
+
+export interface RunEvalSummaryGroup {
+  key: string;
+  count: number;
+  successCount: number;
+  failureCount: number;
+  successRate: number;
+  averageLatencyMs?: number;
+  averageRetryCount: number;
+  toolErrorCount: number;
+  modelCost: number;
+}
+
+export interface RunEvalSummary {
+  filters: {
+    runSpecId?: string;
+    sessionId?: string;
+    taskRunId?: string;
+    provider?: string;
+    model?: string;
+    success?: boolean;
+    verificationStatus?: string;
+    failureClass?: string;
+    createdFrom?: string;
+    createdTo?: string;
+  };
+  totals: {
+    count: number;
+    successCount: number;
+    failureCount: number;
+    successRate: number;
+    averageLatencyMs?: number;
+    averageRetryCount: number;
+    toolErrorCount: number;
+    modelCost: number;
+  };
+  byFailureClass: RunEvalSummaryGroup[];
+  byVerificationStatus: RunEvalSummaryGroup[];
+  byProviderModel: RunEvalSummaryGroup[];
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS run_evals (
   id TEXT PRIMARY KEY,
@@ -154,21 +200,8 @@ export async function recordRunEval(input: RecordRunEvalInput): Promise<RunEvalR
 
 export async function listRunEvals(options: ListRunEvalsOptions = {}): Promise<RunEvalRecord[]> {
   await ensureRunEvalStore();
-  const clauses: string[] = [];
-  const params: unknown[] = [];
-  addOptionalClause(clauses, params, 'run_spec_id', normalizeOptionalString(options.runSpecId));
-  addOptionalClause(clauses, params, 'session_id', normalizeOptionalString(options.sessionId));
-  addOptionalClause(clauses, params, 'task_run_id', normalizeOptionalString(options.taskRunId));
-  addOptionalClause(clauses, params, 'provider', normalizeOptionalString(options.provider));
-  addOptionalClause(clauses, params, 'model', normalizeOptionalString(options.model));
-  addOptionalClause(clauses, params, 'verification_status', normalizeOptionalString(options.verificationStatus));
-  addOptionalClause(clauses, params, 'failure_class', normalizeOptionalString(options.failureClass));
-  if (typeof options.success === 'boolean') {
-    params.push(options.success);
-    clauses.push(`success = $${params.length}`);
-  }
+  const { where, params } = buildRunEvalFilter(options);
   params.push(normalizeLimit(options.limit));
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = await getDb().query<RunEvalRow>(
     `
     SELECT *
@@ -182,10 +215,145 @@ export async function listRunEvals(options: ListRunEvalsOptions = {}): Promise<R
   return rows.rows.map(rowToRecord);
 }
 
+export async function summarizeRunEvals(options: SummarizeRunEvalsOptions = {}): Promise<RunEvalSummary> {
+  await ensureRunEvalStore();
+  const normalized = normalizeSummaryOptions(options);
+  const { where, params } = buildRunEvalFilter(normalized);
+  const limit = normalizeLimit(normalized.limit);
+  const [totals, byFailureClass, byVerificationStatus, byProviderModel] = await Promise.all([
+    getDb().query<RunEvalAggregateRow>(`
+      SELECT
+        COUNT(*)::integer AS count,
+        COUNT(*) FILTER (WHERE success)::integer AS success_count,
+        COUNT(*) FILTER (WHERE NOT success)::integer AS failure_count,
+        AVG(latency_ms)::float AS average_latency_ms,
+        AVG(retry_count)::float AS average_retry_count,
+        COALESCE(SUM(tool_error_count), 0)::integer AS tool_error_count,
+        COALESCE(SUM(model_cost), 0)::float AS model_cost
+      FROM run_evals
+      ${where}
+    `, params),
+    querySummaryGroups({
+      selectKey: `COALESCE(failure_class, 'unclassified')`,
+      where,
+      params,
+      limit,
+      failuresOnly: true,
+    }),
+    querySummaryGroups({
+      selectKey: 'verification_status',
+      where,
+      params,
+      limit,
+    }),
+    querySummaryGroups({
+      selectKey: `COALESCE(provider, 'unknown') || ':' || COALESCE(model, 'unknown')`,
+      where,
+      params,
+      limit,
+    }),
+  ]);
+  return {
+    filters: {
+      runSpecId: normalized.runSpecId,
+      sessionId: normalized.sessionId,
+      taskRunId: normalized.taskRunId,
+      provider: normalized.provider,
+      model: normalized.model,
+      success: normalized.success,
+      verificationStatus: normalized.verificationStatus,
+      failureClass: normalized.failureClass,
+      createdFrom: normalized.createdFrom,
+      createdTo: normalized.createdTo,
+    },
+    totals: aggregateRowToTotals(totals.rows[0]),
+    byFailureClass,
+    byVerificationStatus,
+    byProviderModel,
+  };
+}
+
+async function querySummaryGroups(input: {
+  selectKey: string;
+  where: string;
+  params: unknown[];
+  limit: number;
+  failuresOnly?: boolean;
+}): Promise<RunEvalSummaryGroup[]> {
+  const clauses = input.where ? [input.where.replace(/^WHERE\s+/i, '')] : [];
+  const params = [...input.params];
+  if (input.failuresOnly) clauses.push('success = false');
+  params.push(input.limit);
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const rows = await getDb().query<RunEvalSummaryGroupRow>(`
+    SELECT
+      ${input.selectKey} AS key,
+      COUNT(*)::integer AS count,
+      COUNT(*) FILTER (WHERE success)::integer AS success_count,
+      COUNT(*) FILTER (WHERE NOT success)::integer AS failure_count,
+      AVG(latency_ms)::float AS average_latency_ms,
+      AVG(retry_count)::float AS average_retry_count,
+      COALESCE(SUM(tool_error_count), 0)::integer AS tool_error_count,
+      COALESCE(SUM(model_cost), 0)::float AS model_cost
+    FROM run_evals
+    ${where}
+    GROUP BY 1
+    ORDER BY count DESC, key ASC
+    LIMIT $${params.length}
+  `, params);
+  return rows.rows.map(rowToSummaryGroup);
+}
+
+function buildRunEvalFilter(options: SummarizeRunEvalsOptions): { where: string; params: unknown[] } {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  addOptionalClause(clauses, params, 'run_spec_id', normalizeOptionalString(options.runSpecId));
+  addOptionalClause(clauses, params, 'session_id', normalizeOptionalString(options.sessionId));
+  addOptionalClause(clauses, params, 'task_run_id', normalizeOptionalString(options.taskRunId));
+  addOptionalClause(clauses, params, 'provider', normalizeOptionalString(options.provider));
+  addOptionalClause(clauses, params, 'model', normalizeOptionalString(options.model));
+  addOptionalClause(clauses, params, 'verification_status', normalizeOptionalString(options.verificationStatus));
+  addOptionalClause(clauses, params, 'failure_class', normalizeOptionalString(options.failureClass));
+  if (typeof options.success === 'boolean') {
+    params.push(options.success);
+    clauses.push(`success = $${params.length}`);
+  }
+  const createdFrom = normalizeOptionalIsoLike(options.createdFrom, 'createdFrom');
+  if (createdFrom) {
+    params.push(createdFrom);
+    clauses.push(`created_at >= $${params.length}::timestamptz`);
+  }
+  const createdTo = normalizeOptionalIsoLike(options.createdTo, 'createdTo');
+  if (createdTo) {
+    params.push(createdTo);
+    clauses.push(`created_at <= $${params.length}::timestamptz`);
+  }
+  return {
+    where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
+    params,
+  };
+}
+
 function addOptionalClause(clauses: string[], params: unknown[], column: string, value: string | undefined): void {
   if (!value) return;
   params.push(value);
   clauses.push(`${column} = $${params.length}`);
+}
+
+function normalizeSummaryOptions(options: SummarizeRunEvalsOptions): SummarizeRunEvalsOptions {
+  return {
+    runSpecId: normalizeOptionalString(options.runSpecId),
+    sessionId: normalizeOptionalString(options.sessionId),
+    taskRunId: normalizeOptionalString(options.taskRunId),
+    provider: normalizeOptionalString(options.provider),
+    model: normalizeOptionalString(options.model),
+    success: options.success,
+    verificationStatus: normalizeOptionalString(options.verificationStatus),
+    failureClass: normalizeOptionalString(options.failureClass),
+    createdFrom: normalizeOptionalIsoLike(options.createdFrom, 'createdFrom'),
+    createdTo: normalizeOptionalIsoLike(options.createdTo, 'createdTo'),
+    limit: normalizeLimit(options.limit),
+  };
 }
 
 type RunEvalRow = {
@@ -206,6 +374,20 @@ type RunEvalRow = {
   summary_json: unknown;
   created_at: Date | string;
   updated_at: Date | string;
+};
+
+type RunEvalAggregateRow = {
+  count: string | number | null;
+  success_count: string | number | null;
+  failure_count: string | number | null;
+  average_latency_ms: string | number | null;
+  average_retry_count: string | number | null;
+  tool_error_count: string | number | null;
+  model_cost: string | number | null;
+};
+
+type RunEvalSummaryGroupRow = RunEvalAggregateRow & {
+  key: string | null;
 };
 
 function rowToRecord(row: RunEvalRow): RunEvalRecord {
@@ -255,6 +437,14 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeOptionalIsoLike(value: unknown, name: string): string | undefined {
+  const raw = normalizeOptionalString(value);
+  if (!raw) return undefined;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) throw new Error(`${name} must be a valid timestamp`);
+  return date.toISOString();
+}
+
 function normalizeNonNegativeInteger(value: unknown, defaultValue: number): number {
   const parsed = Number(value ?? defaultValue);
   if (!Number.isFinite(parsed) || parsed < 0) return defaultValue;
@@ -292,6 +482,57 @@ function normalizeLimit(value: unknown): number {
   const parsed = Number(value ?? 100);
   if (!Number.isFinite(parsed) || parsed <= 0) return 100;
   return Math.max(1, Math.min(1000, Math.floor(parsed)));
+}
+
+function aggregateRowToTotals(row: RunEvalAggregateRow | undefined): RunEvalSummary['totals'] {
+  const count = normalizeCount(row?.count);
+  const successCount = normalizeCount(row?.success_count);
+  const failureCount = normalizeCount(row?.failure_count);
+  return {
+    count,
+    successCount,
+    failureCount,
+    successRate: count > 0 ? successCount / count : 0,
+    averageLatencyMs: normalizeOptionalFloat(row?.average_latency_ms),
+    averageRetryCount: normalizeFloat(row?.average_retry_count),
+    toolErrorCount: normalizeCount(row?.tool_error_count),
+    modelCost: normalizeFloat(row?.model_cost),
+  };
+}
+
+function rowToSummaryGroup(row: RunEvalSummaryGroupRow): RunEvalSummaryGroup {
+  const count = normalizeCount(row.count);
+  const successCount = normalizeCount(row.success_count);
+  return {
+    key: row.key ?? 'unknown',
+    count,
+    successCount,
+    failureCount: normalizeCount(row.failure_count),
+    successRate: count > 0 ? successCount / count : 0,
+    averageLatencyMs: normalizeOptionalFloat(row.average_latency_ms),
+    averageRetryCount: normalizeFloat(row.average_retry_count),
+    toolErrorCount: normalizeCount(row.tool_error_count),
+    modelCost: normalizeFloat(row.model_cost),
+  };
+}
+
+function normalizeCount(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.floor(parsed);
+}
+
+function normalizeFloat(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return parsed;
+}
+
+function normalizeOptionalFloat(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
 }
 
 function toIsoString(value: Date | string): string {

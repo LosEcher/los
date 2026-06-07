@@ -575,7 +575,8 @@ Tasks:
    record/list surface.
 3. Add compatibility probes for service failover, run replay, tool retry, and
    DAG recovery.
-4. Add dashboards or API views for failure causes.
+4. Add dashboards or API views for failure causes. A summary API/CLI view now
+   exists; UI dashboarding remains future work.
 
 Upgrade condition:
 
@@ -659,7 +660,7 @@ Evidence checked on 2026-06-02:
 | Multi-gateway readiness smoke | Partially implemented | `docs/operations/2026-06-01-multi-gateway-readiness-smoke.md` |
 | Real `/chat` failover | Not validated | The smoke explicitly excludes real `/chat` model execution |
 | Cross-gateway stream replay | Not implemented | Requires durable `run_specs` and replay endpoints |
-| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, provider/model graph-task selection from compat evidence, and minimal `run_evals` record/list surfaces exist; memory compaction, release quality comparison, failure dashboards, and failover-specific metrics remain roadmap work |
+| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, provider/model graph-task selection from compat evidence, minimal `run_evals` record/list surfaces, and eval summary API/CLI views exist; memory compaction, first-class release comparison, UI dashboards, and failover-specific metrics remain roadmap work |
 
 ## Verification
 

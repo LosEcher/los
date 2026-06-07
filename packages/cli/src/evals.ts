@@ -17,6 +17,10 @@ export async function evalsCommand(globalArgs: string[], argv: string[]): Promis
     await listEvals(parsed);
     return;
   }
+  if (action === 'summary' || action === 'summarize') {
+    await summarizeEvals(parsed);
+    return;
+  }
   if (action === 'record' || action === 'add') {
     await recordEval(parsed);
     return;
@@ -26,19 +30,19 @@ export async function evalsCommand(globalArgs: string[], argv: string[]): Promis
 }
 
 async function listEvals(parsed: ParsedArgs): Promise<void> {
-  const params = new URLSearchParams();
-  addQuery(params, 'runSpecId', stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'));
-  addQuery(params, 'sessionId', stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session'));
-  addQuery(params, 'taskRunId', stringFlag(parsed, 'task-run-id') ?? stringFlag(parsed, 'task'));
-  addQuery(params, 'provider', stringFlag(parsed, 'provider'));
-  addQuery(params, 'model', stringFlag(parsed, 'model'));
-  addQuery(params, 'success', stringFlag(parsed, 'success'));
-  addQuery(params, 'verificationStatus', stringFlag(parsed, 'verification-status'));
-  addQuery(params, 'failureClass', stringFlag(parsed, 'failure-class'));
-  addQuery(params, 'limit', stringFlag(parsed, 'limit'));
+  const params = buildEvalQuery(parsed);
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const value = await getJson(`${gatewayUrl(parsed)}/run-evals${suffix}`);
   renderEvalList(value, booleanFlag(parsed, 'json'));
+}
+
+async function summarizeEvals(parsed: ParsedArgs): Promise<void> {
+  const params = buildEvalQuery(parsed);
+  addQuery(params, 'createdFrom', stringFlag(parsed, 'created-from'));
+  addQuery(params, 'createdTo', stringFlag(parsed, 'created-to'));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const value = await getJson(`${gatewayUrl(parsed)}/run-evals/summary${suffix}`);
+  renderEvalSummary(value, booleanFlag(parsed, 'json'));
 }
 
 async function recordEval(parsed: ParsedArgs): Promise<void> {
@@ -108,6 +112,45 @@ function renderEvalRecord(value: unknown, json: boolean): void {
   const record = asRecord(asRecord(value).eval);
   console.log(`run_eval=${String(record.id ?? '?')} run=${String(record.runSpecId ?? '?')} success=${String(record.success ?? '?')} verification=${String(record.verificationStatus ?? '?')}`);
   console.log(`retry_count=${String(record.retryCount ?? 0)} tool_error_count=${String(record.toolErrorCount ?? 0)} failure_class=${String(record.failureClass ?? '')}`);
+}
+
+function renderEvalSummary(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const summary = asRecord(value);
+  const totals = asRecord(summary.totals);
+  const count = numberValue(totals.count);
+  const successRate = numberValue(totals.successRate);
+  console.log(`Run eval summary: count=${count} success_rate=${formatPercent(successRate)} failures=${String(totals.failureCount ?? 0)}`);
+  console.log(`  avg_latency_ms=${formatOptionalNumber(totals.averageLatencyMs)} avg_retry_count=${formatOptionalNumber(totals.averageRetryCount)} tool_errors=${String(totals.toolErrorCount ?? 0)} model_cost=${formatOptionalNumber(totals.modelCost)}`);
+  printGroups('failure_classes', asArray(summary.byFailureClass));
+  printGroups('verification_status', asArray(summary.byVerificationStatus));
+  printGroups('provider_models', asArray(summary.byProviderModel));
+}
+
+function printGroups(label: string, groups: unknown[]): void {
+  if (groups.length === 0) return;
+  console.log(`  ${label}:`);
+  for (const item of groups.slice(0, 10)) {
+    const group = asRecord(item);
+    console.log(`    ${String(group.key ?? '?')} count=${String(group.count ?? 0)} success_rate=${formatPercent(numberValue(group.successRate))}`);
+  }
+}
+
+function buildEvalQuery(parsed: ParsedArgs): URLSearchParams {
+  const params = new URLSearchParams();
+  addQuery(params, 'runSpecId', stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'));
+  addQuery(params, 'sessionId', stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session'));
+  addQuery(params, 'taskRunId', stringFlag(parsed, 'task-run-id') ?? stringFlag(parsed, 'task'));
+  addQuery(params, 'provider', stringFlag(parsed, 'provider'));
+  addQuery(params, 'model', stringFlag(parsed, 'model'));
+  addQuery(params, 'success', stringFlag(parsed, 'success'));
+  addQuery(params, 'verificationStatus', stringFlag(parsed, 'verification-status'));
+  addQuery(params, 'failureClass', stringFlag(parsed, 'failure-class'));
+  addQuery(params, 'limit', stringFlag(parsed, 'limit'));
+  return params;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -232,6 +275,21 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function numberValue(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatOptionalNumber(value: unknown): string {
+  if (value === undefined || value === null || value === '') return 'n/a';
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(2).replace(/\.00$/, '') : 'n/a';
+}
+
 function printEvalsHelp(): void {
   console.log(`los evals
 
@@ -239,6 +297,7 @@ Record and list run quality evals.
 
 Usage:
   los evals list [--run RUN_ID] [--session SESSION_ID] [--success true|false] [--json]
+  los evals summary [--created-from ISO] [--created-to ISO] [--json]
   los evals record --run RUN_ID --success true|false [options]
 
 Record options:
@@ -255,5 +314,9 @@ Record options:
   --user-feedback TEXT
   --failure-class CLASS
   --summary-json JSON
+
+Summary options:
+  --created-from ISO
+  --created-to ISO
 `);
 }
