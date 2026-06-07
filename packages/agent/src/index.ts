@@ -130,6 +130,7 @@ export {
 } from './execution-store.js';
 export {
   ensureRunSpecStore,
+  claimRunSpec,
   createRunSpec,
   loadRunSpec,
   listRunSpecs,

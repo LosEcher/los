@@ -10,6 +10,7 @@ import { listRecentSessionEvents } from '@los/agent/session-events';
 import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
 import { loadSession } from '@los/agent/session';
 import { listRunSpecs, type RunSpecRecord } from '@los/agent/run-specs';
+import { loadServiceInstance, type ServiceInstanceRecord } from '@los/agent/service-instances';
 import type { Message } from '@los/agent';
 
 // ── Replay event normalization ──────────────────────────
@@ -113,6 +114,8 @@ export interface RecoverableSession {
     status: string;
     prompt: string;
     createdAt: string;
+    gatewayId?: string;
+    gatewayOnline?: boolean;
   }>;
   lastEventId: number | null;
   recentEventCount: number;
@@ -126,6 +129,14 @@ export async function findRecoverableSessions(opts?: {
   const incomplete = activeRunSpecs.filter(
     r => r.status === 'failed' || r.status === 'cancelled' || r.status === 'blocked' || r.status === 'running',
   );
+
+  // Batch-load service instances for gateway liveness checks
+  const gatewayIds = [...new Set(incomplete.map(r => r.gatewayId).filter((id): id is string => Boolean(id)))];
+  const gatewayStatuses = new Map<string, boolean>();
+  for (const gid of gatewayIds) {
+    const inst = await loadServiceInstance(gid).catch(() => null);
+    gatewayStatuses.set(gid, inst?.status === 'online');
+  }
 
   const seen = new Set<string>();
   const results: RecoverableSession[] = [];
@@ -150,6 +161,8 @@ export async function findRecoverableSessions(opts?: {
         status: r.status ?? 'unknown',
         prompt: r.prompt ?? '',
         createdAt: r.createdAt,
+        gatewayId: r.gatewayId,
+        gatewayOnline: r.gatewayId ? (gatewayStatuses.get(r.gatewayId) ?? false) : undefined,
       })),
       lastEventId: recentEvents.at(-1)?.id ?? null,
       recentEventCount: recentEvents.length,

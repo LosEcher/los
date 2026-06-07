@@ -52,7 +52,7 @@ import {
   summarizeRunEvals,
 } from '@los/agent';
 import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSession, type SessionRecord } from '@los/agent/session';
-import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
+import { claimRunSpec, ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
 import { getPool } from '@los/infra/db';
 import {
   ensureTaskRunStore,
@@ -424,7 +424,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);
   registerRuleRoutes(app, DEFAULT_WORKSPACE_ROOT);
 
-  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT);
+  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId);
 
   // ── Memory ────────────────────────────────────────────
 
@@ -605,8 +605,16 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     return {
       count: sessions.length,
       sessions,
-      hint: 'Use POST /chat with sessionId to resume. GET /sessions/:id/events/stream replays missed events.',
+      hint: 'Use POST /chat with sessionId to resume. GET /sessions/:id/events/stream replays missed events. POST /runs/:id/claim to take over an orphaned run.',
     };
+  });
+
+  app.post('/runs/:id/claim', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const gatewayId = (req.body as { gatewayId?: string }).gatewayId ?? resolveGatewayServiceIdentity(getConfig()).serviceId;
+    const claimed = await claimRunSpec(id, gatewayId);
+    if (!claimed) return reply.status(404).send({ error: 'Run spec not found' });
+    return { ok: true, runSpec: claimed, claimedBy: gatewayId };
   });
 
   app.get('/sessions/:id/events', async (req) => {

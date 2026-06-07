@@ -66,7 +66,7 @@ interface ChatRequestBody {
   todoId?: string;
 }
 
-export function registerChatRoute(app: FastifyInstance, config: Config, defaultWorkspaceRoot: string): void {
+export function registerChatRoute(app: FastifyInstance, config: Config, defaultWorkspaceRoot: string, gatewayServiceId?: string): void {
   app.post('/chat', async (req, reply) => {
     const body = req.body as ChatRequestBody;
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
@@ -199,6 +199,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       timeoutMs,
       mcpServers,
       runContract: body.runContract,
+      gatewayId: gatewayServiceId,
     });
     if (boundTodoId) {
       await updateBoundTodoFromRun(boundTodoId, {

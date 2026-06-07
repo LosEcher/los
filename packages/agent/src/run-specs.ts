@@ -29,6 +29,7 @@ export interface RunSpecRecord {
   nodeId?: string;
   requestId?: string;
   traceId?: string;
+  gatewayId?: string;
   prompt: string;
   systemPrompt?: string;
   provider?: string;
@@ -56,6 +57,7 @@ export interface CreateRunSpecInput {
   nodeId?: string;
   requestId?: string;
   traceId?: string;
+  gatewayId?: string;
   prompt: string;
   systemPrompt?: string;
   provider?: string;
@@ -96,12 +98,14 @@ CREATE TABLE IF NOT EXISTS run_specs (
   timeout_ms INTEGER,
   mcp_servers_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  gateway_id TEXT,
   status TEXT NOT NULL DEFAULT 'created',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS gateway_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_run_specs_session_id ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_status ON run_specs(status);
@@ -131,9 +135,9 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
       id, session_id, tenant_id, project_id, user_id, node_id,
       request_id, trace_id, prompt, system_prompt, provider, model,
       model_settings_json, workspace_root, tool_mode, allowed_tools_json,
-      tool_retry_json, max_loops, timeout_ms, mcp_servers_json, run_contract_json, status
+      tool_retry_json, max_loops, timeout_ms, mcp_servers_json, run_contract_json, gateway_id, status
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20::jsonb, $21::jsonb, 'created')
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20::jsonb, $21::jsonb, $22, 'created')
     RETURNING *
   `,
     [
@@ -158,6 +162,7 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
       input.timeoutMs ?? null,
       JSON.stringify(input.mcpServers ?? []),
       JSON.stringify(runContract ?? {}),
+      input.gatewayId ?? null,
     ],
   );
   const record = rowToRecord(assertRow(rows.rows[0]));
@@ -196,6 +201,19 @@ export async function listRunSpecsForSession(sessionId: string, limit = 20): Pro
   return rows.rows.map(rowToRecord);
 }
 
+export async function claimRunSpec(runSpecId: string, gatewayId: string): Promise<RunSpecRecord | null> {
+  await ensureRunSpecStore();
+  const db = getDb();
+  const rows = await db.query<RunSpecRow>(
+    `UPDATE run_specs
+     SET gateway_id = $1, updated_at = now()
+     WHERE id = $2
+     RETURNING *`,
+    [gatewayId, runSpecId],
+  );
+  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+}
+
 export async function updateRunSpecStatus(
   id: string,
   status: RunSpecStatus,
@@ -225,6 +243,7 @@ type RunSpecRow = {
   project_id: string | null;
   user_id: string | null;
   node_id: string | null;
+  gateway_id: string | null;
   request_id: string | null;
   trace_id: string | null;
   prompt: string;
@@ -253,6 +272,7 @@ function rowToRecord(row: RunSpecRow): RunSpecRecord {
     projectId: row.project_id ?? undefined,
     userId: row.user_id ?? undefined,
     nodeId: row.node_id ?? undefined,
+    gatewayId: row.gateway_id ?? undefined,
     requestId: row.request_id ?? undefined,
     traceId: row.trace_id ?? undefined,
     prompt: row.prompt,
