@@ -1,7 +1,7 @@
 ---
 date: 2026-06-07
 change: dag-verifier-runner
-commit: pending
+commit: d5811901
 surface: scheduler, verification
 impact: Scheduler DAG verifier tasks now execute required verification records and use failed verifier checks to block graph completion.
 ---
