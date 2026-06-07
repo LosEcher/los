@@ -346,6 +346,117 @@ test('scheduler runs a single agent task graph with conservative serial claims',
   }
 });
 
+test('scheduler runs independent graph tasks in parallel without editable surface conflicts', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-scheduler-parallel-${suffix}`;
+  const sessionId = `session-graph-scheduler-parallel-${suffix}`;
+  const nodeId = `test-graph-parallel-executor-${suffix}`;
+  const requests: Array<{ prompt?: unknown }> = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+
+    const body = JSON.parse(await readRequestBody(req)) as { prompt?: unknown };
+    requests.push(body);
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await delay(40);
+    inFlight -= 1;
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: `completed ${String(body.prompt ?? '')}`,
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await createAgentTask({
+      id: `${graphId}-agent-a`,
+      graphId,
+      sessionId,
+      role: 'executor',
+      title: 'Implement agent A',
+      prompt: 'agent a prompt',
+      priority: 10,
+      metadata: { runContract: { editableSurfaces: ['packages/agent'] } },
+    });
+    await createAgentTask({
+      id: `${graphId}-agent-b`,
+      graphId,
+      sessionId,
+      role: 'executor',
+      title: 'Implement agent B',
+      prompt: 'agent b prompt',
+      priority: 20,
+      metadata: { runContract: { editableSurfaces: ['packages/agent/src/scheduler.ts'] } },
+    });
+    await createAgentTask({
+      id: `${graphId}-web`,
+      graphId,
+      sessionId,
+      role: 'executor',
+      title: 'Implement web',
+      prompt: 'web prompt',
+      priority: 30,
+      metadata: { runContract: { editableSurfaces: ['packages/web'] } },
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      maxParallelTasks: 2,
+      editableSurfaceMode: 'require-declared',
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.deepEqual(result.executedTasks.map(task => task.taskId), [
+      `${graphId}-agent-a`,
+      `${graphId}-web`,
+      `${graphId}-agent-b`,
+    ]);
+    assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded', 'succeeded']);
+    assert.equal(result.completion.status, 'succeeded');
+    assert.equal(maxInFlight, 2);
+    assert.deepEqual(requests.map(request => request.prompt), ['agent a prompt', 'web prompt', 'agent b prompt']);
+
+    const graph = await readAgentTaskGraph(graphId);
+    assert.deepEqual(graph.tasks.map(task => task.status), ['succeeded', 'succeeded', 'succeeded']);
+  } finally {
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 test('scheduler blocks graph run completion when tool recovery is required', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
@@ -932,6 +1043,10 @@ function readRequestBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(body));
     req.on('error', reject);
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function sendJson(res: ServerResponse, body: unknown): void {

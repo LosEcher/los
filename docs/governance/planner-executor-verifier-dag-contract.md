@@ -77,13 +77,13 @@ This contract now has a minimal store/API implementation in
 The completed scope is durable graph state, dependency-aware ready claims,
 failed dependency detection, retry/verifier evidence links, read-only graph
 inspection, completion decision reporting, UI read-model display, and a
-conservative scheduler entry that claims and runs one ready task at a time for a
-single graph. When that entry is run with `requireVerifier`, missing verifier
-success now blocks the linked `run_specs` row instead of allowing a false
-succeeded transition. Verifier tasks claimed by the scheduler now execute the
-linked run spec's `verification_records` through the verifier runner, attach the
-verification record id to the task attempt, and keep failed required checks in a
-blocked completion state.
+conservative scheduler entry that can either claim one ready task at a time or
+claim a bounded parallel batch for a single graph. When that entry is run with
+`requireVerifier`, missing verifier success now blocks the linked `run_specs`
+row instead of allowing a false succeeded transition. Verifier tasks claimed by
+the scheduler now execute the linked run spec's `verification_records` through
+the verifier runner, attach the verification record id to the task attempt, and
+keep failed required checks in a blocked completion state.
 
 The graph claim path now has editable-surface conflict checks. When a caller
 claims multiple ready tasks, explicit `metadata.runContract.editableSurfaces`
@@ -92,7 +92,12 @@ claims also avoid queued tasks whose editable surfaces overlap already-running
 graph tasks. `require-declared` mode is available for future parallel runners
 that should skip tasks without declared editable surfaces.
 
-Remaining runtime promotion work is still separate: parallel execution should
-be added only after it can preserve the same evidence boundary and use the
-conflict-aware claim path. Cancel/operator-attention recovery transitions now
-exist as explicit API/CLI commands.
+The scheduler now uses that conflict-aware claim path when `maxParallelTasks`
+is greater than one. Parallel mode defaults to `require-declared`, so tasks
+without declared editable surfaces are not claimed into a parallel batch unless
+the caller explicitly chooses a looser mode.
+
+Remaining runtime promotion work is still separate: provider/model selection
+inside graph tasks and quality metrics should be added only after they can
+preserve the same evidence boundary. Cancel/operator-attention recovery
+transitions now exist as explicit API/CLI commands.

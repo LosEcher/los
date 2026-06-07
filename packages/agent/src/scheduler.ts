@@ -18,6 +18,7 @@ import {
   type AgentTaskAttemptStatus,
   type AgentTaskRecord,
 } from './agent-task-graph.js';
+import type { EditableSurfaceConflictMode } from './agent-task-editable-surfaces.js';
 import {
   getAgentTaskGraphCompletion,
   type AgentTaskGraphCompletion,
@@ -93,6 +94,8 @@ export interface ScheduledExecutorConfig {
 export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInput, 'prompt' | 'promptPreview' | 'taskRunId' | 'dedupeKey'> {
   graphId: string;
   maxTasks?: number;
+  maxParallelTasks?: number;
+  editableSurfaceMode?: EditableSurfaceConflictMode;
   requireVerifier?: boolean;
 }
 
@@ -143,23 +146,29 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
   }
 
   const maxTasks = normalizePositiveInteger(input.maxTasks) ?? 50;
+  const maxParallelTasks = Math.min(maxTasks, normalizePositiveInteger(input.maxParallelTasks) ?? 1);
+  const editableSurfaceMode = input.editableSurfaceMode
+    ?? (maxParallelTasks > 1 ? 'require-declared' : 'exclude-overlaps');
   const claimedBy = normalizeOptionalString(input.nodeId)
     ?? normalizeOptionalString(input.executor?.nodeId)
     ?? 'gateway-local';
   const executedTasks: RunAgentTaskGraphSerialResult['executedTasks'] = [];
 
-  for (let index = 0; index < maxTasks; index += 1) {
-    const [task] = await claimReadyAgentTasks({
+  while (executedTasks.length < maxTasks) {
+    const remaining = maxTasks - executedTasks.length;
+    const batchLimit = Math.min(remaining, maxParallelTasks);
+    const tasks = await claimReadyAgentTasks({
       graphId: input.graphId,
-      limit: 1,
+      limit: batchLimit,
       nodeId: claimedBy,
       leaseMs: input.executor?.leaseMs,
+      editableSurfaceMode,
     });
-    if (!task) break;
+    if (tasks.length === 0) break;
 
-    const executed = await runClaimedAgentGraphTask(task, input);
-    executedTasks.push(executed);
-    if (executed.status !== 'succeeded' && executed.recoveryFollowUpQueued !== true) break;
+    const executed = await Promise.all(tasks.map(task => runClaimedAgentGraphTask(task, input)));
+    executedTasks.push(...executed);
+    if (executed.some(task => task.status !== 'succeeded' && task.recoveryFollowUpQueued !== true)) break;
   }
 
   const completion = await getAgentTaskGraphCompletion(input.graphId, {
