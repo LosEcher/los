@@ -1,7 +1,7 @@
 ---
 date: 2026-06-07
 change: run-verification-recovery
-commit: working-copy
+commit: 4f99ff2c
 surface: chat, scheduler, cli, api, verification
 impact: Operators can see direct chat verification blocking, release required checks through the verifier runner, inspect tool recovery decisions, and rely on scheduler graph completion to block when tool recovery is required.
 ---

@@ -1,7 +1,7 @@
 ---
 date: 2026-06-07
 change: provider-compat-evidence-display
-commit: 83431433
+commit: 35816587
 surface: provider, web, cli
 impact: Operators can inspect provider compatibility proof ids, task/run links, token usage, and redacted summary fields through API, CLI, and Web.
 ---
