@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '@los/infra/config';
 import { runScheduledAgentTask } from '@los/agent/scheduler';
-import { normalizeModelSettings, type ModelSettings } from '@los/agent/model-settings';
+import { normalizeModelSettings } from '@los/agent/model-settings';
 import {
   normalizeWorkspaceRoot,
   normalizeOptionalString,
@@ -10,9 +10,6 @@ import {
   normalizePositiveInteger,
   normalizeToolRetry,
   normalizeMCPServers,
-  type ToolMode,
-  type MCPRequestServer,
-  type ToolRetryInput,
 } from './chat-normalizers.js';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
 import type { Message } from '@los/agent';
@@ -32,7 +29,7 @@ import {
   appendSessionEvent,
   ensureSessionEventStore,
 } from '@los/agent/session-events';
-import type { CheckpointState, RunContractMetadataInput } from '@los/agent';
+import type { CheckpointState } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
 import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
 import {
@@ -41,30 +38,7 @@ import {
   reserveIdempotentRequest,
 } from './idempotency.js';
 import { getRequestContext } from './request-context.js';
-
-
-interface ChatRequestBody {
-  prompt: string;
-  sessionId?: string;
-  branchFrom?: string;
-  branchAtTurn?: number;
-  systemPrompt?: string;
-  provider?: string;
-  model?: string;
-  modelSettings?: ModelSettings;
-  workspaceRoot?: string;
-  toolMode?: ToolMode;
-  allowedTools?: string[];
-  maxLoops?: number;
-  traceId?: string;
-  dedupeKey?: string;
-  timeoutMs?: number;
-  toolRetry?: ToolRetryInput;
-  mcpServers?: MCPRequestServer[];
-  runContract?: RunContractMetadataInput;
-  persistMemory?: boolean;
-  todoId?: string;
-}
+import type { ChatRequestBody } from './chat-route-types.js';
 
 export function registerChatRoute(app: FastifyInstance, config: Config, defaultWorkspaceRoot: string, gatewayServiceId?: string): void {
   app.post('/chat', async (req, reply) => {

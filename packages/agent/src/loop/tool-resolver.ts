@@ -4,7 +4,7 @@
  */
 
 import { READ_ONLY_BUILTIN_TOOLS } from '../tools/registry.js';
-import type { AgentConfig } from '../loop.js';
+import type { AgentConfig } from './types.js';
 
 /**
  * Resolve the set of allowed tools based on explicit list and tool mode.

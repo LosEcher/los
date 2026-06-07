@@ -1,179 +1,37 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '@los/infra/db';
+import { RUN_EVAL_SCHEMA } from './run-evals/schema.js';
+import type {
+  CompareRunEvalsOptions,
+  ListRunEvalsOptions,
+  RecordRunEvalInput,
+  RunEvalComparison,
+  RunEvalFailoverScope,
+  RunEvalRecord,
+  RunEvalSummary,
+  RunEvalSummaryGroup,
+  RunEvalVerificationStatus,
+  SummarizeRunEvalsOptions,
+} from './run-evals/types.js';
 
-export type RunEvalVerificationStatus =
-  | 'unknown'
-  | 'not_required'
-  | 'pending'
-  | 'succeeded'
-  | 'failed'
-  | 'skipped';
-
-export type RunEvalFailoverScope = 'service' | 'executor';
-
-export interface RunEvalRecord {
-  id: string;
-  runSpecId: string;
-  sessionId?: string;
-  taskRunId?: string;
-  provider?: string;
-  model?: string;
-  success: boolean;
-  latencyMs?: number;
-  retryCount: number;
-  toolErrorCount: number;
-  verificationStatus: RunEvalVerificationStatus;
-  modelCost?: number;
-  userFeedback?: string;
-  failureClass?: string;
-  failoverScope?: RunEvalFailoverScope;
-  summary: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface RecordRunEvalInput {
-  id?: string;
-  runSpecId: string;
-  sessionId?: string;
-  taskRunId?: string;
-  provider?: string;
-  model?: string;
-  success: boolean;
-  latencyMs?: number;
-  retryCount?: number;
-  toolErrorCount?: number;
-  verificationStatus?: RunEvalVerificationStatus | string;
-  modelCost?: number;
-  userFeedback?: string;
-  failureClass?: string;
-  failoverScope?: RunEvalFailoverScope | string;
-  summary?: Record<string, unknown>;
-}
-
-export interface ListRunEvalsOptions {
-  runSpecId?: string;
-  sessionId?: string;
-  taskRunId?: string;
-  provider?: string;
-  model?: string;
-  success?: boolean;
-  verificationStatus?: RunEvalVerificationStatus | string;
-  failureClass?: string;
-  failoverScope?: RunEvalFailoverScope | string;
-  limit?: number;
-}
-
-export interface SummarizeRunEvalsOptions extends Omit<ListRunEvalsOptions, 'limit'> {
-  createdFrom?: string;
-  createdTo?: string;
-  limit?: number;
-}
-
-export interface RunEvalSummaryGroup {
-  key: string;
-  count: number;
-  successCount: number;
-  failureCount: number;
-  successRate: number;
-  averageLatencyMs?: number;
-  averageRetryCount: number;
-  toolErrorCount: number;
-  modelCost: number;
-}
-
-export interface RunEvalSummary {
-  filters: {
-    runSpecId?: string;
-    sessionId?: string;
-    taskRunId?: string;
-    provider?: string;
-    model?: string;
-    success?: boolean;
-    verificationStatus?: string;
-    failureClass?: string;
-    failoverScope?: string;
-    createdFrom?: string;
-    createdTo?: string;
-  };
-  totals: {
-    count: number;
-    successCount: number;
-    failureCount: number;
-    successRate: number;
-    averageLatencyMs?: number;
-    averageRetryCount: number;
-    toolErrorCount: number;
-    modelCost: number;
-  };
-  byFailureClass: RunEvalSummaryGroup[];
-  byFailoverScope: RunEvalSummaryGroup[];
-  byVerificationStatus: RunEvalSummaryGroup[];
-  byProviderModel: RunEvalSummaryGroup[];
-}
-
-export interface CompareRunEvalsOptions extends Omit<SummarizeRunEvalsOptions, 'createdFrom' | 'createdTo'> {
-  baselineFrom: string;
-  baselineTo: string;
-  candidateFrom: string;
-  candidateTo: string;
-}
-
-export interface RunEvalComparison {
-  filters: Omit<RunEvalSummary['filters'], 'createdFrom' | 'createdTo'>;
-  baseline: RunEvalSummary;
-  candidate: RunEvalSummary;
-  delta: {
-    count: number;
-    successCount: number;
-    failureCount: number;
-    successRate: number;
-    averageLatencyMs?: number;
-    averageRetryCount: number;
-    toolErrorCount: number;
-    modelCost: number;
-  };
-}
-
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS run_evals (
-  id TEXT PRIMARY KEY,
-  run_spec_id TEXT NOT NULL,
-  session_id TEXT,
-  task_run_id TEXT,
-  provider TEXT,
-  model TEXT,
-  success BOOLEAN NOT NULL,
-  latency_ms INTEGER,
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  tool_error_count INTEGER NOT NULL DEFAULT 0,
-  verification_status TEXT NOT NULL DEFAULT 'unknown',
-  model_cost NUMERIC,
-  user_feedback TEXT,
-  failure_class TEXT,
-  failover_scope TEXT,
-  summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-ALTER TABLE run_evals ADD COLUMN IF NOT EXISTS failover_scope TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_run_evals_run_spec ON run_evals(run_spec_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_session ON run_evals(session_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_task_run ON run_evals(task_run_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_provider_model ON run_evals(provider, model, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_success ON run_evals(success, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_failure_class ON run_evals(failure_class, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_failover_scope ON run_evals(failover_scope, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_run_evals_verification ON run_evals(verification_status, created_at DESC);
-`;
+export type {
+  CompareRunEvalsOptions,
+  ListRunEvalsOptions,
+  RecordRunEvalInput,
+  RunEvalComparison,
+  RunEvalFailoverScope,
+  RunEvalRecord,
+  RunEvalSummary,
+  RunEvalSummaryGroup,
+  RunEvalVerificationStatus,
+  SummarizeRunEvalsOptions,
+} from './run-evals/types.js';
 
 let _initialized = false;
 
 export async function ensureRunEvalStore(): Promise<void> {
   if (_initialized) return;
-  await getDb().exec(SCHEMA);
+  await getDb().exec(RUN_EVAL_SCHEMA);
   _initialized = true;
 }
 

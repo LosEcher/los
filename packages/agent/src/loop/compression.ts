@@ -5,7 +5,7 @@
 
 import type { Message, ToolCall } from '../providers/index.js';
 import { estimateTokens, estimateMessageTokens, trimMessagesToBudget, truncateContent } from './token-utils.js';
-import type { ContextCompressionConfig } from '../loop.js';
+import type { ContextCompressionConfig } from './types.js';
 
 /**
  * Three-tier context compression:

@@ -4,7 +4,7 @@
  */
 
 import type { Message } from '../providers/index.js';
-import type { ContextCompressionConfig } from '../loop.js';
+import type { ContextCompressionConfig } from './types.js';
 import { estimateMessageTokens } from './token-utils.js';
 import { compressOrTrimMessages } from './compression.js';
 

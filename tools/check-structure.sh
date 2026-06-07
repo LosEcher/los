@@ -13,15 +13,6 @@ MAX_DIR_FILES=15
 # Files exceeding MAX_LINES with active/in-progress split work.
 # These produce warnings instead of errors (tracked, not forgotten).
 ALLOWED_LARGE_FILES="
-packages/agent/src/loop.ts
-packages/agent/src/providers/index.ts
-packages/agent/src/run-evals.ts
-packages/agent/src/agent-task-graph.ts
-packages/agent/src/tools/registry.ts
-packages/cli/src/index.ts
-packages/gateway/src/chat-route.ts
-packages/infra/src/discovery.ts
-packages/web/src/chat-page.tsx
 "
 
 warn()  { echo -e "  \033[1;33m[WARN]\033[0m $*"; WARNINGS=$((WARNINGS + 1)); }

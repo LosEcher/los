@@ -6,6 +6,7 @@
 import type {
   ProviderDiscovery, ProviderModelsResponse, ModelSettings,
   SessionEvent, SessionEventsResponse,
+  TodoItem,
 } from './api';
 
 export type StreamRow = {
@@ -17,6 +18,20 @@ export type ProviderOption = {
   id: string; label: string; source: string;
   defaultModel: string; state: string; hasApiKey?: boolean;
 };
+
+export const SUPPRESSED_STREAM_EVENTS = new Set([
+  'session.started', 'session.completed', 'tool.catalog',
+  'model.turn.started', 'tool.planned', 'tool.approved',
+]);
+
+export function readyStreamRows(): StreamRow[] {
+  return [{
+    id: 'ready',
+    event: 'system',
+    message: 'Ready for a bounded project task.',
+    meta: 'project-write blocks shell execution',
+  }];
+}
 
 export function buildProviderOptions(discovery?: ProviderDiscovery, routes?: ProviderModelsResponse): ProviderOption[] {
   const results: ProviderOption[] = [];
@@ -81,6 +96,58 @@ export function buildToolRetryPayload(input: { maxAttempts: string; baseDelayMs:
   if (baseDelayMs !== undefined) r.baseDelayMs = baseDelayMs;
   if (maxDelayMs !== undefined) r.maxDelayMs = maxDelayMs;
   return r;
+}
+
+export function buildAdvancedCount(input: {
+  systemPrompt: string;
+  allowedTools: string;
+  maxLoops: number;
+  timeoutMs: number;
+  toolRetryMaxAttempts: string;
+  toolRetryBaseDelayMs: string;
+  toolRetryMaxDelayMs: string;
+  temperature: string;
+  topP: string;
+  maxTokens: string;
+  presencePenalty: string;
+  frequencyPenalty: string;
+}): number {
+  let n = 0;
+  if (input.systemPrompt.trim()) n++;
+  if (input.allowedTools.trim()) n++;
+  if (input.maxLoops !== 8) n++;
+  if (input.timeoutMs !== 120_000) n++;
+  if (input.toolRetryMaxAttempts.trim()) n++;
+  if (input.toolRetryBaseDelayMs.trim()) n++;
+  if (input.toolRetryMaxDelayMs.trim()) n++;
+  if (input.temperature.trim()) n++;
+  if (input.topP.trim()) n++;
+  if (input.maxTokens.trim()) n++;
+  if (input.presencePenalty.trim()) n++;
+  if (input.frequencyPenalty.trim()) n++;
+  return n;
+}
+
+export function buildTodoPrompt(todo: TodoItem): string {
+  const lines = [
+    `处理 Todo: ${todo.title}`,
+    '',
+    todo.description ? todo.description : 'No description provided.',
+    '',
+    `Todo id: ${todo.id}`,
+    `Status: ${todo.status}`,
+    `Kind: ${todo.kind}`,
+    `Priority: ${todo.priority}`,
+    `Stage: ${todo.stageId ?? 'none'}`,
+  ];
+  if (todo.dependsOnIds.length > 0) lines.push(`Depends on: ${todo.dependsOnIds.join(', ')}`);
+  return lines.join('\n');
+}
+
+export function readRunContract(todo: TodoItem | null): Record<string, unknown> | undefined {
+  const value = todo?.metadata?.runContract;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
 }
 
 function intOrUndef(v: string): number | undefined {

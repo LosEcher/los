@@ -6,22 +6,18 @@
  */
 
 import { getLogger } from '@los/infra/logger';
-import { createProvider, type Provider, type Message, type ProviderDelta, type ToolCall } from './providers/index.js';
+import { createProvider, type Message, type ToolCall } from './providers/index.js';
 import { summarizeModelProfile } from './model-profiles.js';
-import type { ModelSettings } from './model-settings.js';
 import {
   createToolRegistry,
   registerBuiltinTools,
-  READ_ONLY_BUILTIN_TOOLS,
   type ToolRegistry,
 } from './tools/registry.js';
-import type { MCPServerConfig, MCPServerRegistryRecord } from './tools/mcp-client.js';
+import type { MCPServerRegistryRecord } from './tools/mcp-client.js';
 import { listMCPServers } from './mcp-servers.js';
 import { createSpawnAgentRunner, registerSpawnAgentTool } from './tools/agent-tools.js';
 import {
-  type SessionEventRecord,
   type SessionEventUsage,
-  type SessionEventWrite,
 } from './session-events.js';
 import { createEventEmitter } from './event-emitter.js';
 import {
@@ -43,117 +39,28 @@ import {
 import {
   resolveAllowedTools,
   resolveToolPolicy,
-  normalizeToolRetry,
 } from './loop/tool-resolver.js';
+import type {
+  AgentConfig,
+  AgentModelDelta,
+  AgentResult,
+  CheckpointState,
+  ContextCompressionConfig,
+  ToolCallStateTransition,
+  TurnSummary,
+} from './loop/types.js';
 
 const log = getLogger('agent');
 
-// ── Types ───────────────────────────────────────────────
-
-export interface AgentConfig {
-  sessionId?: string;
-  provider?: string;
-  model?: string;
-  modelSettings?: ModelSettings;
-  initialMessages?: Message[];
-  maxLoops?: number;
-  systemPrompt?: string;
-  workspaceRoot?: string;
-  tenantId?: string;
-  projectId?: string;
-  userId?: string;
-  nodeId?: string;
-  requestId?: string;
-  traceId?: string;
-  toolMode?: 'all' | 'project-write' | 'read-only';
-  allowedTools?: readonly string[];
-  toolRetry?: {
-    maxAttempts?: number;
-    baseDelayMs?: number;
-    maxDelayMs?: number;
-  };
-  signal?: AbortSignal;
-  maxContextTokens?: number;
-  contextCompression?: ContextCompressionConfig;
-  mcpServers?: MCPServerConfig[];
-  onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
-  onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
-  onTurn?: (turn: TurnSummary) => void;
-  onToolCall?: (tool: string, args: Record<string, unknown>) => void;
-  onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
-  onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
-}
-
-export interface AgentModelDelta extends ProviderDelta {
-  turn: number;
-  provider: string;
-}
-
-export interface TurnSummary {
-  loopCount: number;
-  text: string;
-  toolCalls: ToolCall[];
-  toolResults: string[];
-  reasoningContent?: string;
-}
-
-export interface CheckpointState {
-  messages: Message[];
-  turns: TurnSummary[];
-}
-
-export interface AgentResult {
-  text: string;
-  turns: TurnSummary[];
-  loopCount: number;
-  totalTokens: { prompt: number; completion: number };
-  messages: Message[];
-}
-
-export interface ContextCompressionConfig {
-  enabled?: boolean;           // default true when maxContextTokens is set
-  warningRatio?: number;       // start compressing at this % of budget (default 0.80)
-  aggressiveRatio?: number;    // aggressive compression (default 0.88)
-  emergencyRatio?: number;     // hard truncation (default 0.95)
-}
-
-export interface ToolCallStateTransition {
-  callId: string;
-  toolName: string;
-  state: 'requested' | 'approved' | 'denied' | 'running' | 'succeeded' | 'failed' | 'retrying';
-  turn: number;
-  input?: Record<string, unknown>;
-  outputSummary?: string;
-  error?: string;
-  durationMs?: number;
-  attempt?: number;
-  maxAttempts?: number;
-  idempotent?: boolean;
-  retryPolicy?: Record<string, unknown>;
-}
-
-// ── System Prompt ───────────────────────────────────────
-
-const DEFAULT_SYSTEM = `You are a helpful coding assistant with access to tools for reading, writing, searching, patching, spawning child agents, and executing code.
-You can: read files (read_file), write files (write_file), patch files (preview_patch, apply_patch, edit_file), search code (search_content, search_files, glob), analyze code (get_symbols, find_in_code), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), delete files (delete_file), spawn constrained child agents (spawn_agent), run shell commands (run_shell), and manage background jobs (run_background, job_output, stop_job, list_jobs).
-
-Rules:
-- Read files before editing them
-- Prefer preview_patch/apply_patch/edit_file for focused changes instead of whole-file overwrites
-- Use absolute or relative paths within the workspace
-- For shell commands, be specific — use exact paths
-- When you're done, provide a clear summary
-- If you're unsure about something, ask instead of guessing`;
-
-const READ_ONLY_SYSTEM = `You are a helpful coding assistant with read-only access to a workspace.
-You can: read files (read_file), search code (search_content, search_files, glob), analyze code (get_symbols, find_in_code), inspect directories (list_directory, directory_tree, get_file_info).
-
-Rules:
-- Inspect files before making claims about the code
-- Do not claim to edit files, run shell commands, or execute tests in this mode
-- Use absolute or relative paths within the workspace
-- When you're done, provide a clear summary with evidence and next steps
-- If you're unsure about something, ask instead of guessing`;
+export type {
+  AgentConfig,
+  AgentModelDelta,
+  AgentResult,
+  CheckpointState,
+  ContextCompressionConfig,
+  ToolCallStateTransition,
+  TurnSummary,
+} from './loop/types.js';
 
 // ── Core Loop ───────────────────────────────────────────
 

@@ -25,14 +25,19 @@ import {
   type TodoItem,
 } from './api';
 import {
+  buildAdvancedCount,
   buildProviderOptions,
   buildModelSettingsPayload,
   buildToolRetryPayload,
+  buildTodoPrompt,
   parseCommaList,
+  readRunContract,
+  readyStreamRows,
   metadataText,
   buildHistoryRows,
   appendLiveSessionEvent,
   streamRow,
+  SUPPRESSED_STREAM_EVENTS,
   type StreamRow,
   type ProviderOption,
 } from './chat-helpers.js';
@@ -42,6 +47,7 @@ import {
   formatDate,
   formatTime,
 } from './ui';
+import { RunField, ContextChip } from './chat-ui.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -82,14 +88,7 @@ export function ChatPage({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskRunId, setTaskRunId] = useState<string | null>(null);
   const [boundTodoId, setBoundTodoId] = useState<string | null>(null);
-  const [rows, setRows] = useState<StreamRow[]>([
-    {
-      id: 'ready',
-      event: 'system',
-      message: 'Ready for a bounded project task.',
-      meta: 'project-write blocks shell execution',
-    },
-  ]);
+  const [rows, setRows] = useState<StreamRow[]>(() => readyStreamRows());
   const abortRef = useRef<AbortController | null>(null);
   const historyLoadedForSession = useRef<string | null>(null);
   const branchFromRef = useRef<string | null>(null);
@@ -171,20 +170,20 @@ export function ChatPage({
     return [...ids];
   }, [selectedRoute]);
   const advancedCount = useMemo(() => {
-    let n = 0;
-    if (systemPrompt.trim()) n++;
-    if (allowedTools.trim()) n++;
-    if (maxLoops !== 8) n++;
-    if (timeoutMs !== 120_000) n++;
-    if (toolRetryMaxAttempts.trim()) n++;
-    if (toolRetryBaseDelayMs.trim()) n++;
-    if (toolRetryMaxDelayMs.trim()) n++;
-    if (temperature.trim()) n++;
-    if (topP.trim()) n++;
-    if (maxTokens.trim()) n++;
-    if (presencePenalty.trim()) n++;
-    if (frequencyPenalty.trim()) n++;
-    return n;
+    return buildAdvancedCount({
+      systemPrompt,
+      allowedTools,
+      maxLoops,
+      timeoutMs,
+      toolRetryMaxAttempts,
+      toolRetryBaseDelayMs,
+      toolRetryMaxDelayMs,
+      temperature,
+      topP,
+      maxTokens,
+      presencePenalty,
+      frequencyPenalty,
+    });
   }, [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
   const recentEvents = sessionEvents.data?.events.slice(-8) ?? [];
@@ -344,11 +343,7 @@ export function ChatPage({
           onSessionSelect(data.sessionId);
         }
         if (typeof data.taskRunId === 'string') setTaskRunId(data.taskRunId);
-        const suppressed = new Set([
-          'session.started', 'session.completed', 'tool.catalog',
-          'model.turn.started', 'tool.planned', 'tool.approved',
-        ]);
-        if (!suppressed.has(event)) {
+        if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
           setRows(prev => [...prev, streamRow(event, data)]);
         }
       });
@@ -601,27 +596,3 @@ export function ChatPage({
     </section>
   );
 }
-
-function buildTodoPrompt(todo: TodoItem): string {
-  const lines = [
-    `处理 Todo: ${todo.title}`,
-    '',
-    todo.description ? todo.description : 'No description provided.',
-    '',
-    `Todo id: ${todo.id}`,
-    `Status: ${todo.status}`,
-    `Kind: ${todo.kind}`,
-    `Priority: ${todo.priority}`,
-    `Stage: ${todo.stageId ?? 'none'}`,
-  ];
-  if (todo.dependsOnIds.length > 0) lines.push(`Depends on: ${todo.dependsOnIds.join(', ')}`);
-  return lines.join('\n');
-}
-
-function readRunContract(todo: TodoItem | null): Record<string, unknown> | undefined {
-  const value = todo?.metadata?.runContract;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  return value as Record<string, unknown>;
-}
-
-import { RunField, ContextChip } from './chat-ui.js';

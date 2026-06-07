@@ -17,314 +17,46 @@
  *   - cc-switch's multi-tool config sync
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { getLogger } from './logger.js';
+import type { CodexRouteConfig, DiscoveredProvider, DiscoveredTool, DiscoveryReport } from './discovery/types.js';
+import { fileAge, readString } from './discovery/helpers.js';
+import {
+  describeProviderReadiness,
+  summarizeProviderReadiness,
+} from './discovery/readiness.js';
+import {
+  ccSwitchProviderFromRow,
+  parseCcSwitchRowsWithCli,
+  parseCodexRouteConfig,
+} from './discovery/provider-parsers.js';
 
 const require = createRequire(import.meta.url);
 
 const log = getLogger('discovery');
 
-// ── Types ───────────────────────────────────────────────
-
-export interface DiscoveredTool {
-  name: string;                // 'codex' | 'claude' | 'opencode' | 'cc-switch' | 'hermes'
-  installed: boolean;
-  configPath: string;
-  version?: string;
-  lastUsed?: string;           // mtime of config file
-}
-
-export interface DiscoveredProvider {
-  name: string;
-  apiKey?: string;
-  baseUrl?: string;
-  defaultModel?: string;
-  available: boolean;
-  source: string;              // e.g. 'codex/auth.json', 'claude/oauth', 'env:DEEPSEEK_API_KEY'
-  sourceTool?: string;         // which tool this came from
-  importable: boolean;         // can we actually use this key?
-  note?: string;
-}
-
-export type ProviderPromotionState =
-  | 'blocked'              // No API key configured
-  | 'advisory'             // Key configured but not yet verified by a live run
-  | 'verified_advisory'    // One live passing run with task_runs/session_events evidence
-  | 'required';            // Included in DEFAULT_COMPATIBILITY_TARGETS merge gate
-
-export interface ProviderReadiness {
-  configuredKey: boolean;
-  discovered: boolean;
-  ready: boolean;
-  manualSetupRequired: boolean;
-  blocker: string | null;
-  promotionState: ProviderPromotionState;
-  credentialClass: 'api_key' | 'oauth' | 'local_endpoint' | 'cli_adapter' | 'unknown';
-  setupAction: string | null;  // Human-readable setup instruction
-}
-
-export interface ProviderReadinessSummary {
-  configuredKeys: number;
-  discoveredProviders: number;
-  readyProviders: number;
-  manualSetupBlockers: number;
-}
-
-export interface DiscoveryReport {
-  tools: DiscoveredTool[];
-  providers: DiscoveredProvider[];
-  summary: string;
-}
-
-const PROVIDER_API_KEY_ENV: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  'deepseek-anthropic': 'DEEPSEEK_API_KEY',
-  minimax: 'MINIMAX_API_KEY',
-  moonshot: 'MOONSHOT_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  qwen: 'DASHSCOPE_API_KEY',
-};
-
-export function providerApiKeyEnv(providerName: string): string {
-  const normalized = providerName.trim().toLowerCase();
-  return PROVIDER_API_KEY_ENV[normalized]
-    ?? `${providerName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
-}
-
-function inferCredentialClass(
-  provider: DiscoveredProvider,
-): ProviderReadiness['credentialClass'] {
-  const source = provider.source?.toLowerCase() ?? '';
-  if (source.includes('env:')) return 'api_key';
-  if (source.includes('oauth') || source.includes('claude.json')) return 'oauth';
-  if (source.includes('ollama') || source.includes('lm-studio') || source.includes('vllm')) return 'local_endpoint';
-  if (source.includes('cc-switch') || source.includes('hermes/.env')) return 'api_key';
-  if (source.includes('codex') || source.includes('cli')) return 'cli_adapter';
-  return 'unknown';
-}
-
-function describeSetupAction(provider: DiscoveredProvider): string | null {
-  const keyEnv = providerApiKeyEnv(provider.name);
-  const credentialClass = inferCredentialClass(provider);
-
-  if (credentialClass === 'api_key') {
-    return `export ${keyEnv}="<your-${provider.name}-api-key>"  # or add to ~/.los/accounts/${provider.name}.json`;
-  }
-  if (credentialClass === 'oauth') {
-    return `${provider.name} requires OAuth. Run 'claude login' or configure via ~/.claude.json`;
-  }
-  if (credentialClass === 'local_endpoint') {
-    return `${provider.name} is a local endpoint. Ensure the service is running and reachable.`;
-  }
-  if (credentialClass === 'cli_adapter') {
-    return `Run 'codex setup' or ensure ~/.codex/auth.json has valid credentials for ${provider.name}`;
-  }
-  return `Set ${keyEnv} or configure via ~/.los/accounts/${provider.name}.json`;
-}
-
-export function describeProviderReadiness(provider: DiscoveredProvider): ProviderReadiness {
-  const configuredKey = typeof provider.apiKey === 'string' && provider.apiKey.length > 0;
-  const ready = provider.available && provider.importable && configuredKey;
-  const manualSetupRequired = !ready;
-  const credentialClass = inferCredentialClass(provider);
-
-  let promotionState: ProviderPromotionState = 'blocked';
-  let blocker: string | null = null;
-
-  if (!configuredKey || !provider.importable) {
-    promotionState = 'blocked';
-    const keyEnv = providerApiKeyEnv(provider.name);
-    blocker = `${keyEnv} not set. ${credentialClass === 'oauth' ? 'OAuth required.' : credentialClass === 'local_endpoint' ? 'Local endpoint unreachable.' : `Set ${keyEnv} to unlock ${provider.name}.`}`;
-  } else if (ready) {
-    // Ready but not yet verified — stays advisory until a live compat run passes
-    promotionState = 'advisory';
-  }
-
-  return {
-    configuredKey,
-    discovered: true,
-    ready,
-    manualSetupRequired,
-    blocker,
-    promotionState,
-    credentialClass,
-    setupAction: manualSetupRequired ? describeSetupAction(provider) : null,
-  };
-}
-
-export function summarizeProviderReadiness(providers: readonly DiscoveredProvider[]): ProviderReadinessSummary {
-  const readiness = providers.map(describeProviderReadiness);
-  return {
-    configuredKeys: readiness.filter(r => r.configuredKey).length,
-    discoveredProviders: providers.length,
-    readyProviders: readiness.filter(r => r.ready).length,
-    manualSetupBlockers: readiness.filter(r => r.manualSetupRequired).length,
-  };
-}
+export {
+  describeProviderReadiness,
+  providerApiKeyEnv,
+  summarizeProviderReadiness,
+} from './discovery/readiness.js';
+export {
+  ccSwitchProviderFromRow,
+  parseCodexRouteConfig,
+} from './discovery/provider-parsers.js';
+export type {
+  DiscoveredProvider,
+  DiscoveredTool,
+  DiscoveryReport,
+  ProviderPromotionState,
+  ProviderReadiness,
+  ProviderReadinessSummary,
+} from './discovery/types.js';
 
 // ── Tool Scanners ───────────────────────────────────────
-
-function fileMtime(path: string): string | undefined {
-  try { return statSync(path).mtime.toISOString(); } catch { return undefined; }
-}
-
-function fileAge(path: string): string | undefined {
-  try {
-    const age = Date.now() - statSync(path).mtimeMs;
-    const days = Math.floor(age / (1000 * 60 * 60 * 24));
-    if (days < 1) return 'today';
-    if (days < 7) return `${days}d ago`;
-    if (days < 30) return `${Math.floor(days / 7)}w ago`;
-    return `${Math.floor(days / 30)}mo ago`;
-  } catch { return undefined; }
-}
-
-interface CodexRouteConfig {
-  providerName: string;
-  baseUrl: string;
-  model?: string;
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function parseJsonObject(value: unknown): Record<string, any> | null {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, any>;
-  }
-  if (typeof value !== 'string' || value.trim().length === 0) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, any>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
-  const model = toml.match(/^model\s*=\s*"(.+)"$/m)?.[1];
-  const providerId = toml.match(/^model_provider\s*=\s*"(.+)"$/m)?.[1];
-  let baseUrl = 'https://api.openai.com/v1';
-  let providerName = 'openai';
-
-  if (providerId) {
-    const section = new RegExp(`\\[model_providers\\.${providerId}\\]\\n(.*?)(?=\\n\\[|$)`, 's');
-    const sectionMatch = toml.match(section);
-    if (sectionMatch) {
-      baseUrl = sectionMatch[1].match(/^base_url\s*=\s*"(.+)"$/m)?.[1] ?? baseUrl;
-      providerName = sectionMatch[1].match(/^name\s*=\s*"(.+)"$/m)?.[1] ?? providerName;
-    }
-  }
-
-  if (baseUrl.includes('packyapi.com') || providerName.toLowerCase() === 'packycode') {
-    providerName = 'packycode';
-  }
-
-  return { providerName, baseUrl, model };
-}
-
-function parseCcSwitchRowsWithCli(dbPath: string): Array<Record<string, any>> {
-  const output = execFileSync('sqlite3', [
-    '-json',
-    dbPath,
-    'SELECT app_type, name, settings_config, is_current FROM providers ORDER BY is_current DESC',
-  ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-  return JSON.parse(output || '[]') as Array<Record<string, any>>;
-}
-
-function extractApiKeyFromCodexAuth(auth: Record<string, any> | null): string | undefined {
-  return readString(auth?.OPENAI_API_KEY) ?? readString(auth?.tokens?.access_token);
-}
-
-export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredProvider | null {
-  const config = parseJsonObject(row.settings_config) ?? {};
-  const env = parseJsonObject(config.env) ?? {};
-  const appType = readString(row.app_type)?.toLowerCase();
-  const accountName = readString(row.name) ?? 'default';
-  const isCurrent = row.is_current === 1 || row.is_current === true;
-
-  if (appType === 'codex') {
-    const route = readString(config.config)
-      ? parseCodexRouteConfig(config.config)
-      : {
-          providerName: 'openai',
-          baseUrl: 'https://api.openai.com/v1',
-          model: undefined,
-        };
-    const auth = parseJsonObject(config.auth);
-    const apiKey = extractApiKeyFromCodexAuth(auth);
-    if (!apiKey) return null;
-    return {
-      name: route.providerName,
-      apiKey,
-      baseUrl: route.baseUrl,
-      defaultModel: route.model,
-      available: true,
-      source: `cc-switch/codex/${accountName}`,
-      sourceTool: 'cc-switch',
-      importable: true,
-      note: isCurrent ? 'Currently active in cc-switch' : undefined,
-    };
-  }
-
-  if (appType === 'claude') {
-    const apiKey = readString(env.ANTHROPIC_AUTH_TOKEN);
-    const baseUrl = readString(env.ANTHROPIC_BASE_URL);
-    if (!apiKey || !baseUrl) return null;
-
-    const lowerName = accountName.toLowerCase();
-    const lowerBaseUrl = baseUrl.toLowerCase();
-    let providerName: string | null = null;
-    if (lowerBaseUrl.includes('deepseek.com') || lowerName.includes('deepseek')) {
-      providerName = 'deepseek-anthropic';
-    } else if (lowerBaseUrl.includes('minimax') || lowerName.includes('minimax')) {
-      providerName = 'minimax';
-    }
-    if (!providerName) return null;
-
-    return {
-      name: providerName,
-      apiKey,
-      baseUrl,
-      defaultModel: readString(env.ANTHROPIC_MODEL)
-        ?? readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME)
-        ?? readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL)
-        ?? readString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL),
-      available: true,
-      source: `cc-switch/claude/${accountName}`,
-      sourceTool: 'cc-switch',
-      importable: true,
-      note: isCurrent ? 'Currently active in cc-switch' : undefined,
-    };
-  }
-
-  const apiKey = readString(config.api_key) ?? readString(config.apiKey);
-  if (!apiKey) return null;
-  const providerMap: Record<string, string> = {
-    opencode: readString(config.provider) ?? 'anthropic',
-    gemini: 'google',
-  };
-  return {
-    name: providerMap[appType ?? ''] ?? appType ?? accountName.toLowerCase(),
-    apiKey,
-    baseUrl: readString(config.base_url) ?? readString(config.baseUrl),
-    defaultModel: readString(config.model),
-    available: true,
-    source: `cc-switch/${accountName}`,
-    sourceTool: 'cc-switch',
-    importable: true,
-    note: isCurrent ? 'Currently active in cc-switch' : undefined,
-  };
-}
 
 // ── 1. Codex CLI ────────────────────────────────────────
 
