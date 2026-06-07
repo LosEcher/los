@@ -6,7 +6,7 @@ import {
 } from './provider-compat-evidence.js';
 
 export type ProviderPromotionPolicyAction = 'promote_required' | 'demote_advisory';
-export type ProviderPromotionPolicyStatus = 'proposed';
+export type ProviderPromotionPolicyStatus = 'proposed' | 'enforced';
 
 export interface ProviderPromotionDecisionRecord {
   id: string;
@@ -40,7 +40,13 @@ export interface RecordProviderPromotionDecisionInput {
 export interface ListProviderPromotionDecisionsOptions {
   provider?: string;
   model?: string;
+  status?: ProviderPromotionPolicyStatus;
   limit?: number;
+}
+
+export interface EnforceProviderPromotionDecisionInput {
+  id: string;
+  actor?: string;
 }
 
 const SCHEMA = `
@@ -141,6 +147,7 @@ export async function listProviderPromotionDecisions(
   await ensureProviderPromotionDecisionStore();
   const provider = normalizeOptionalString(options.provider);
   const model = normalizeOptionalString(options.model);
+  const status = normalizeOptionalStatus(options.status);
   const limit = normalizeLimit(options.limit, 100);
   const clauses: string[] = [];
   const params: unknown[] = [];
@@ -151,6 +158,10 @@ export async function listProviderPromotionDecisions(
   if (model) {
     params.push(model);
     clauses.push(`model = $${params.length}`);
+  }
+  if (status) {
+    params.push(status);
+    clauses.push(`status = $${params.length}`);
   }
   params.push(limit);
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -165,6 +176,27 @@ export async function listProviderPromotionDecisions(
     params,
   );
   return rows.rows.map(rowToRecord);
+}
+
+export async function enforceProviderPromotionDecision(
+  input: EnforceProviderPromotionDecisionInput,
+): Promise<ProviderPromotionDecisionRecord> {
+  await ensureProviderPromotionDecisionStore();
+  const id = normalizeRequiredString(input.id, 'id');
+  const rows = await getDb().query<ProviderPromotionDecisionRow>(
+    `
+    UPDATE provider_promotion_decisions
+    SET status = 'enforced',
+        actor = COALESCE($2, actor),
+        updated_at = now()
+    WHERE id = $1
+    RETURNING *
+  `,
+    [id, normalizeOptionalString(input.actor) ?? null],
+  );
+  const row = rows.rows[0];
+  if (!row) throw new Error(`provider promotion decision not found: ${id}`);
+  return rowToRecord(row);
 }
 
 function validatePromotionEvidence(evidence: ProviderCompatEvidenceRecord | null): asserts evidence is ProviderCompatEvidenceRecord {
@@ -216,7 +248,7 @@ function rowToRecord(row: ProviderPromotionDecisionRow): ProviderPromotionDecisi
   return {
     id: row.id,
     action: normalizeAction(row.action),
-    status: row.status === 'proposed' ? 'proposed' : 'proposed',
+    status: normalizeStatus(row.status),
     provider: row.provider,
     model: row.model ?? undefined,
     probeId: row.probe_id,
@@ -231,9 +263,19 @@ function rowToRecord(row: ProviderPromotionDecisionRow): ProviderPromotionDecisi
   };
 }
 
+function normalizeStatus(value: unknown): ProviderPromotionPolicyStatus {
+  if (value === 'enforced') return 'enforced';
+  return 'proposed';
+}
+
 function normalizeDecision(value: unknown): ProviderCompatDecision {
   if (value === 'advisory' || value === 'verified_advisory' || value === 'required' || value === 'blocked') return value;
   return 'advisory';
+}
+
+function normalizeOptionalStatus(value: unknown): ProviderPromotionPolicyStatus | undefined {
+  if (value === 'proposed' || value === 'enforced') return value;
+  return undefined;
 }
 
 function normalizeRequiredString(value: unknown, name: string): string {

@@ -79,6 +79,19 @@ test('provider compat evidence route exposes bounded operator evidence', async (
     assert.equal(policy.json().decision.action, 'promote_required');
     assert.equal(policy.json().decision.status, 'proposed');
     assert.equal(policy.json().decision.toDecision, 'required');
+    const decisionId = policy.json().decision.id;
+
+    const enforce = await app.inject({
+      method: 'POST',
+      url: '/providers/promotion-decisions/enforce',
+      payload: {
+        id: decisionId,
+        actor: 'test-enforcer',
+      },
+    });
+    assert.equal(enforce.statusCode, 200);
+    assert.equal(enforce.json().decision.id, decisionId);
+    assert.equal(enforce.json().decision.status, 'enforced');
 
     const decisions = await app.inject({
       method: 'GET',
@@ -87,6 +100,7 @@ test('provider compat evidence route exposes bounded operator evidence', async (
     assert.equal(decisions.statusCode, 200);
     assert.equal(decisions.json().count, 1);
     assert.equal(decisions.json().decisions[0].evidenceId, `provider-compat-route-${suffix}`);
+    assert.equal(decisions.json().decisions[0].status, 'enforced');
   } finally {
     await getDb().query('DELETE FROM provider_promotion_decisions WHERE provider = $1', [provider]).catch(() => undefined);
     await getDb().query('DELETE FROM provider_compat_evidence WHERE provider = $1', [provider]).catch(() => undefined);

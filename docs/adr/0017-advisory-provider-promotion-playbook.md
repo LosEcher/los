@@ -88,6 +88,11 @@ decisions with evidence links. A proposed decision is not enforcement; required
 gate enforcement still requires changing the target lists, ADR text, harness
 expectations, and operation evidence together.
 
+`los provider policy enforce <decision-id>` marks an existing policy decision
+as enforced after those updates are ready. Enforced decisions are read by
+`los compat` when no explicit `--target` is supplied: enforced promotions add
+required targets, and enforced demotions remove targets from the required set.
+
 ## Credential Rule
 
 Credential class matters:
@@ -147,7 +152,8 @@ Record at least:
 5. Keep `los provider promote` setup-only; do not overload it with required
    gate promotion or demotion.
 6. Use `los provider policy promote|demote` for proposed policy decisions, then
-   separately land the required target-list and harness changes when enforcing.
+   mark the decision enforced only when the ADR, harness, target-list behavior,
+   and operation evidence are ready.
 
 ## Verification
 

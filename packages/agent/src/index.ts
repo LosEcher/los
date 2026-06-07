@@ -35,6 +35,8 @@ export {
   createCompatibilityRunSpecs,
   parseCompatibilityTarget,
   parseCompatibilityTargets,
+  resolveRequiredCompatibilityTargets,
+  resolveRequiredCompatibilityTargetsWithDefaultDb,
   selectCompatibilityProbes,
   summarizeCompatibilityEvents,
   target,
@@ -183,9 +185,11 @@ export {
   type RecordProviderCompatEvidenceInput,
 } from './provider-compat-evidence.js';
 export {
+  enforceProviderPromotionDecision,
   ensureProviderPromotionDecisionStore,
   listProviderPromotionDecisions,
   recordProviderPromotionDecision,
+  type EnforceProviderPromotionDecisionInput,
   type ListProviderPromotionDecisionsOptions,
   type ProviderPromotionDecisionRecord,
   type ProviderPromotionPolicyAction,

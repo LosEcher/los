@@ -35,6 +35,7 @@ import {
   listLatestProviderCompatEvidence,
   listProviderCompatEvidence,
   listProviderPromotionDecisions,
+  enforceProviderPromotionDecision,
   recordProviderPromotionDecision,
   applyToolCallRecoveryTransitionForRunSpec,
   readRunStateProjection,
@@ -166,6 +167,19 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
         targetLabel: normalizeOptionalString(body.targetLabel),
         evidenceId: normalizeOptionalString(body.evidenceId),
         reason: normalizeOptionalString(body.reason) ?? '',
+        actor: normalizeOptionalString(body.actor),
+      });
+      return { decision };
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/providers/promotion-decisions/enforce', async (req, reply) => {
+    const body = asRecord(req.body);
+    try {
+      const decision = await enforceProviderPromotionDecision({
+        id: normalizeOptionalString(body.id) ?? '',
         actor: normalizeOptionalString(body.actor),
       });
       return { decision };

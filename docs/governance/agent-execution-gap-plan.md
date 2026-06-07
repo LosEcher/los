@@ -176,8 +176,11 @@ credential setup helper; compatibility promotion evidence is written by
 `los compat --execute`, and required-gate promotion remains a separate policy
 change. Proposed required-gate promotion/demotion decisions can now be recorded
 through `los provider policy promote|demote` and
-`POST /providers/promotion-decisions`; enforcement still requires updating ADR,
-harness, and target lists together.
+`POST /providers/promotion-decisions`. Those decisions can now be explicitly
+enforced with `los provider policy enforce <decision-id>` or
+`POST /providers/promotion-decisions/enforce`; `los compat` applies
+enforced promotions and demotions to the default required target set when no
+explicit `--target` is passed.
 
 ### G5. External Tools Are Compared Manually
 
@@ -395,7 +398,8 @@ Validation:
 
 ## Immediate Next Work
 
-1. Decide when proposed provider promotion/demotion decisions should be
-   promoted into enforced required-target list changes.
+1. Keep provider policy enforcement tied to ADR, harness, target-list behavior,
+   and operation evidence; proposed decisions must not change gates until they
+   are explicitly enforced.
 2. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.

@@ -1,3 +1,7 @@
+import { loadConfig } from '@los/infra/config';
+import { closeDb, initDb } from '@los/infra/db';
+import { listProviderPromotionDecisions } from './provider-promotion-decisions.js';
+
 export type CompatibilityToolMode = 'read-only' | 'project-write';
 
 export interface ProviderModelTarget {
@@ -136,6 +140,40 @@ export function parseCompatibilityTargets(rawTargets: readonly string[] | undefi
   return values.map(parseCompatibilityTarget);
 }
 
+export async function resolveRequiredCompatibilityTargets(
+  baseTargets: readonly ProviderModelTarget[] = DEFAULT_COMPATIBILITY_TARGETS,
+): Promise<ProviderModelTarget[]> {
+  const targets = new Map(baseTargets.map(item => [targetKey(item), item]));
+  const decisions = await listProviderPromotionDecisions({ status: 'enforced', limit: 1000 });
+  const latestByTarget = new Set<string>();
+
+  for (const decision of decisions) {
+    const item = target(decision.provider, decision.model);
+    const key = targetKey(item);
+    if (latestByTarget.has(key)) continue;
+    latestByTarget.add(key);
+    if (decision.action === 'promote_required') {
+      targets.set(key, item);
+    } else {
+      targets.delete(key);
+    }
+  }
+
+  return [...targets.values()];
+}
+
+export async function resolveRequiredCompatibilityTargetsWithDefaultDb(
+  baseTargets: readonly ProviderModelTarget[] = DEFAULT_COMPATIBILITY_TARGETS,
+): Promise<ProviderModelTarget[]> {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    return await resolveRequiredCompatibilityTargets(baseTargets);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+}
+
 export function selectCompatibilityProbes(ids: readonly string[] | undefined): CompatibilityProbe[] {
   const selected = ids?.map(id => id.trim()).filter(Boolean) ?? [];
   if (selected.length === 0) return DEFAULT_COMPATIBILITY_PROBES;
@@ -178,6 +216,10 @@ export function createCompatibilityRunSpecs(options: CompatibilityHarnessOptions
   }
 
   return specs;
+}
+
+function targetKey(value: ProviderModelTarget): string {
+  return `${value.provider}:${value.model ?? ''}`;
 }
 
 export function summarizeCompatibilityEvents(

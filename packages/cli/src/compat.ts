@@ -3,6 +3,7 @@ import {
   createCompatibilityRunSpecs,
   DEFAULT_COMPATIBILITY_TARGETS,
   parseCompatibilityTargets,
+  resolveRequiredCompatibilityTargetsWithDefaultDb,
   selectCompatibilityProbes,
   summarizeCompatibilityEvents,
   type CompatibilityRunSpec,
@@ -36,7 +37,9 @@ export async function compatCommand(globalArgs: string[], argv: string[]): Promi
     ...csvFlag(parsed, 'probe'),
     ...csvFlag(parsed, 'probes'),
   ];
-  const targets = parseCompatibilityTargets(targetValues);
+  const targets = targetValues.length > 0
+    ? parseCompatibilityTargets(targetValues)
+    : await resolveRequiredTargetsForCli(booleanFlag(parsed, 'json'));
   const probes = selectCompatibilityProbes(probeValues);
   const workspaceRoot = stringFlag(parsed, 'workspace-root') ?? stringFlag(parsed, 'workspace') ?? stringFlag(parsed, 'w');
   const specs = createCompatibilityRunSpecs({
@@ -151,6 +154,18 @@ function renderCompatibilityPlan(specs: CompatibilityRunSpec[], json: boolean): 
     console.log(`${spec.id} provider=${spec.request.provider}${model} probe=${spec.probe.id} toolMode=${spec.request.toolMode} maxLoops=${spec.request.maxLoops}${workspace}`);
   }
   console.log('Add --execute to run these probes through the gateway.');
+}
+
+async function resolveRequiredTargetsForCli(json: boolean) {
+  try {
+    return await resolveRequiredCompatibilityTargetsWithDefaultDb();
+  } catch (err) {
+    if (!json) {
+      console.error(`[compat:policy:warn] ${err instanceof Error ? err.message : String(err)}`);
+      console.error('[compat:policy:warn] falling back to static required targets');
+    }
+    return DEFAULT_COMPATIBILITY_TARGETS;
+  }
 }
 
 function renderCompatibilitySummary(summary: CompatibilityRunSummary, json: boolean): void {
@@ -333,6 +348,7 @@ function printCompatHelp(): void {
   console.log(`los compat
 
 Default required gate target(s): ${defaultTargets}
+Enforced provider policy decisions can add or remove default required targets.
 
 Dry-run planned compatibility probes:
   los compat

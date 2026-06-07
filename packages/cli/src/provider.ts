@@ -270,6 +270,26 @@ async function providerPolicy(parsed: ParsedArgs): Promise<void> {
     renderPolicyDecisionList(body, json);
     return;
   }
+  if (action === 'enforce') {
+    const decisionId = targetValue;
+    if (!decisionId) {
+      console.error('los provider policy enforce: decision id is required');
+      console.error('Usage: los provider policy enforce <decision-id>');
+      process.exit(2);
+    }
+    const response = await fetch(`${gateway}/providers/promotion-decisions/enforce`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: decisionId,
+        actor: stringFlag(parsed, 'actor') ?? 'cli',
+      }),
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+    const body = await response.json();
+    renderPolicyDecision(body, json);
+    return;
+  }
 
   const normalizedAction = normalizePolicyAction(action);
   const reason = stringFlag(parsed, 'reason');
@@ -323,7 +343,11 @@ function renderPolicyDecision(value: unknown, json: boolean): void {
   console.log(`decision ${String(decision.fromDecision ?? '?')} -> ${String(decision.toDecision ?? '?')}`);
   if (typeof decision.evidenceId === 'string') console.log(`evidence=${decision.evidenceId}`);
   if (typeof decision.reason === 'string') console.log(`reason: ${decision.reason}`);
-  console.log('next: update ADR 0017, ADR 0014, compatibility targets, harness expectations, and operation evidence together before enforcing this policy.');
+  if (decision.status === 'proposed') {
+    console.log(`next: enforce with los provider policy enforce ${String(decision.id ?? '<decision-id>')} after ADR, harness, and operation evidence are ready.`);
+  } else {
+    console.log('next: run los compat without --target to execute the enforced required target set.');
+  }
 }
 
 function renderPolicyDecisionList(value: unknown, json: boolean): void {
@@ -405,18 +429,20 @@ Usage:
   los provider list [--gateway URL] [--json]
   los provider promote <name> [--gateway URL]
   los provider policy <promote|demote> [provider[:model]] --reason TEXT [--evidence-id ID]
+  los provider policy enforce <decision-id>
   los provider policy list [--provider NAME] [--model NAME]
 
 Commands:
   list      Show all discovered providers with readiness and promotion state
   promote   Interactive setup guidance for a blocked provider (API key entry)
-  policy    Record or list proposed required-gate promotion/demotion decisions
+  policy    Record, enforce, or list required-gate promotion/demotion decisions
 
 Examples:
   los provider list
   los provider promote anthropic
   los provider promote openai --gateway http://localhost:8080
   los provider policy promote deepseek:deepseek-v4-pro --evidence-id provider-compat-deepseek:deepseek-v4-pro/read-context --reason "stable advisory probe"
+  los provider policy enforce provider-promotion-promote_required-deepseek:deepseek-v4-pro/read-context-...
   los provider policy demote deepseek:deepseek-v4-flash --reason "default gate too expensive"
 `);
 }

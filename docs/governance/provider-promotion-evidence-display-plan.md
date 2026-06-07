@@ -47,6 +47,12 @@ These records do not enforce gates by themselves; they preserve the decision
 and evidence link until ADR, harness, target lists, and operation evidence can
 be changed together.
 
+2026-06-07 enforcement update: policy decisions can now be explicitly marked
+`enforced` with `los provider policy enforce <decision-id>` or
+`POST /providers/promotion-decisions/enforce`. `los compat` reads enforced
+promotion/demotion decisions when no explicit `--target` is passed, so proposed
+records remain advisory until they are deliberately enforced.
+
 ## Display Goals
 
 The Providers UI and CLI should answer these questions without requiring a SQL
