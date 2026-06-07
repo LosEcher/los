@@ -30,3 +30,5 @@ UI eval dashboarding, failover-specific metrics, and memory compaction remain
 separate roadmap work. Provider policy decisions, bounded DAG parallel claims,
 editable-surface conflict checks, UI graph read models, and external summary
 ingestion have follow-up fragments or ADR evidence in this run chain.
+Failover-scope metrics, UI eval dashboard, and memory compaction ADR were
+added in the 2026-06-07 follow-up run chain.
