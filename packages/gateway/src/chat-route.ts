@@ -213,7 +213,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         requestId: context.requestId,
         runSpecId,
         event: 'run_spec.created',
-      });
+      }).catch(() => undefined);
     }
 
     try {
