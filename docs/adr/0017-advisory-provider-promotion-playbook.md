@@ -83,6 +83,11 @@ It does not persist required-gate policy decisions. Required promotion or
 demotion should use a separate policy command only after the ADR, compatibility
 harness, and target lists can be updated together.
 
+`los provider policy promote|demote` records proposed required-gate policy
+decisions with evidence links. A proposed decision is not enforcement; required
+gate enforcement still requires changing the target lists, ADR text, harness
+expectations, and operation evidence together.
+
 ## Credential Rule
 
 Credential class matters:
@@ -141,6 +146,8 @@ Record at least:
    CI/non-interactive behavior are documented.
 5. Keep `los provider promote` setup-only; do not overload it with required
    gate promotion or demotion.
+6. Use `los provider policy promote|demote` for proposed policy decisions, then
+   separately land the required target-list and harness changes when enforcing.
 
 ## Verification
 

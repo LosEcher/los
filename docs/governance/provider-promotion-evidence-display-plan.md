@@ -40,6 +40,13 @@ change compatibility policy. Persisted compatibility evidence comes from
 promotion/demotion policy commands should be separate and should update ADR,
 harness, and required-target code surfaces together.
 
+2026-06-07 follow-up: proposed required-target promotion/demotion decisions are
+now explicit records in `provider_promotion_decisions` and can be created with
+`los provider policy promote|demote` or `POST /providers/promotion-decisions`.
+These records do not enforce gates by themselves; they preserve the decision
+and evidence link until ADR, harness, target lists, and operation evidence can
+be changed together.
+
 ## Display Goals
 
 The Providers UI and CLI should answer these questions without requiring a SQL
@@ -146,8 +153,9 @@ Remaining order:
 1. Operation smoke is recorded in
    `docs/operations/2026-06-07-provider-compat-evidence-display-smoke.md`
    for API, CLI, and Web provider evidence display.
-2. Add separate promotion/demotion policy commands only after required-target policy is
-   updated together with ADR and harness expectations.
+2. Promote proposed promotion/demotion decisions into enforced target-list
+   changes only after required-target policy is updated together with ADR and
+   harness expectations.
 
 ## Verification
 

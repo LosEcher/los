@@ -64,7 +64,31 @@ test('provider compat evidence route exposes bounded operator evidence', async (
     assert.equal(body.evidence[0].totalTokens, 123);
     assert.deepEqual(body.evidence[0].summary.toolCalls, ['list_directory', 'read_file']);
     assert.equal(body.evidence[0].summary.rawTranscript, undefined);
+
+    const policy = await app.inject({
+      method: 'POST',
+      url: '/providers/promotion-decisions',
+      payload: {
+        action: 'promote_required',
+        evidenceId: `provider-compat-route-${suffix}`,
+        reason: 'route test proposed required gate',
+        actor: 'test',
+      },
+    });
+    assert.equal(policy.statusCode, 200);
+    assert.equal(policy.json().decision.action, 'promote_required');
+    assert.equal(policy.json().decision.status, 'proposed');
+    assert.equal(policy.json().decision.toDecision, 'required');
+
+    const decisions = await app.inject({
+      method: 'GET',
+      url: `/providers/promotion-decisions?provider=${encodeURIComponent(provider)}`,
+    });
+    assert.equal(decisions.statusCode, 200);
+    assert.equal(decisions.json().count, 1);
+    assert.equal(decisions.json().decisions[0].evidenceId, `provider-compat-route-${suffix}`);
   } finally {
+    await getDb().query('DELETE FROM provider_promotion_decisions WHERE provider = $1', [provider]).catch(() => undefined);
     await getDb().query('DELETE FROM provider_compat_evidence WHERE provider = $1', [provider]).catch(() => undefined);
     await app.close();
     await closeDb().catch(() => undefined);

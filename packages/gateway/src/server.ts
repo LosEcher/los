@@ -34,6 +34,8 @@ import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
   listLatestProviderCompatEvidence,
   listProviderCompatEvidence,
+  listProviderPromotionDecisions,
+  recordProviderPromotionDecision,
   applyToolCallRecoveryTransitionForRunSpec,
   readRunStateProjection,
   listVerificationRecordsForSession,
@@ -138,6 +140,38 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       count: evidence.length,
       evidence: evidence.map(sanitizeProviderCompatEvidence),
     };
+  });
+
+  app.get('/providers/promotion-decisions', async (req) => {
+    const query = req.query as { provider?: string; model?: string; limit?: string };
+    const decisions = await listProviderPromotionDecisions({
+      provider: normalizeOptionalString(query.provider),
+      model: normalizeOptionalString(query.model),
+      limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+    });
+    return {
+      count: decisions.length,
+      decisions,
+    };
+  });
+
+  app.post('/providers/promotion-decisions', async (req, reply) => {
+    const body = asRecord(req.body);
+    try {
+      const decision = await recordProviderPromotionDecision({
+        action: parseProviderPromotionAction(body.action),
+        provider: normalizeOptionalString(body.provider),
+        model: normalizeOptionalString(body.model),
+        probeId: normalizeOptionalString(body.probeId),
+        targetLabel: normalizeOptionalString(body.targetLabel),
+        evidenceId: normalizeOptionalString(body.evidenceId),
+        reason: normalizeOptionalString(body.reason) ?? '',
+        actor: normalizeOptionalString(body.actor),
+      });
+      return { decision };
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.get('/providers/models', async (req) => {
@@ -926,6 +960,14 @@ function parseRecoveryTransitionAction(value: unknown): 'cancel' | 'operator_att
   if (normalized === 'cancel') return 'cancel';
   if (normalized === 'operator_attention') return 'operator_attention';
   return undefined;
+}
+
+function parseProviderPromotionAction(value: unknown): 'promote_required' | 'demote_advisory' {
+  if (typeof value !== 'string') throw new Error('action is required');
+  const normalized = value.trim().toLowerCase().replace(/-/g, '_');
+  if (normalized === 'promote' || normalized === 'promote_required') return 'promote_required';
+  if (normalized === 'demote' || normalized === 'demote_advisory') return 'demote_advisory';
+  throw new Error('action must be promote_required or demote_advisory');
 }
 
 function normalizeStringArray(value: unknown): string[] {

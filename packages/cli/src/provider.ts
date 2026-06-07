@@ -97,6 +97,11 @@ export async function providerCommand(_globalArgs: string[], argv: string[]): Pr
     return;
   }
 
+  if (subcommand === 'policy') {
+    await providerPolicy(parsed);
+    return;
+  }
+
   console.error(`Unknown provider subcommand: ${subcommand}`);
   printProviderHelp();
   process.exit(2);
@@ -242,6 +247,62 @@ async function promoteProvider(name: string, parsed: ParsedArgs): Promise<void> 
   console.log('\n  A successful compat run marks this provider as verified_advisory.');
 }
 
+async function providerPolicy(parsed: ParsedArgs): Promise<void> {
+  const action = parsed.positionals[1];
+  const targetValue = parsed.positionals[2];
+  const gateway = stringFlag(parsed, 'gateway') ?? stringFlag(parsed, 'g') ?? DEFAULT_GATEWAY;
+  const json = hasFlag(parsed, 'json');
+
+  if (!action || action === 'help') {
+    printProviderHelp();
+    return;
+  }
+  if (action === 'list') {
+    const query = new URLSearchParams();
+    const provider = stringFlag(parsed, 'provider');
+    const model = stringFlag(parsed, 'model');
+    if (provider) query.set('provider', provider);
+    if (model) query.set('model', model);
+    const queryString = query.toString();
+    const response = await fetch(`${gateway}/providers/promotion-decisions${queryString ? `?${queryString}` : ''}`);
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+    const body = await response.json();
+    renderPolicyDecisionList(body, json);
+    return;
+  }
+
+  const normalizedAction = normalizePolicyAction(action);
+  const reason = stringFlag(parsed, 'reason');
+  if (!reason) {
+    console.error('los provider policy: --reason is required');
+    process.exit(2);
+  }
+  const target = targetValue ? parseProviderTarget(targetValue) : undefined;
+  const evidenceId = stringFlag(parsed, 'evidence-id', 'evidence');
+  if (!target && normalizedAction === 'demote_advisory' && !evidenceId) {
+    console.error('los provider policy demote: target or --evidence-id is required');
+    process.exit(2);
+  }
+
+  const response = await fetch(`${gateway}/providers/promotion-decisions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: normalizedAction,
+      provider: target?.provider,
+      model: target?.model,
+      targetLabel: target?.label,
+      probeId: stringFlag(parsed, 'probe') ?? stringFlag(parsed, 'probe-id'),
+      evidenceId,
+      reason,
+      actor: stringFlag(parsed, 'actor') ?? 'cli',
+    }),
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+  const body = await response.json();
+  renderPolicyDecision(body, json);
+}
+
 function providerKeyEnv(name: string): string {
   const map: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -250,6 +311,61 @@ function providerKeyEnv(name: string): string {
     minimax: 'MINIMAX_API_KEY',
   };
   return map[name] ?? `${name.toUpperCase()}_API_KEY`;
+}
+
+function renderPolicyDecision(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const decision = asRecord(asRecord(value).decision);
+  console.log(`policy=${String(decision.action ?? '?')} status=${String(decision.status ?? '?')} target=${String(decision.targetLabel ?? '?')}`);
+  console.log(`decision ${String(decision.fromDecision ?? '?')} -> ${String(decision.toDecision ?? '?')}`);
+  if (typeof decision.evidenceId === 'string') console.log(`evidence=${decision.evidenceId}`);
+  if (typeof decision.reason === 'string') console.log(`reason: ${decision.reason}`);
+  console.log('next: update ADR 0017, ADR 0014, compatibility targets, harness expectations, and operation evidence together before enforcing this policy.');
+}
+
+function renderPolicyDecisionList(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const rawDecisions = asRecord(value).decisions;
+  const decisions = Array.isArray(rawDecisions) ? rawDecisions : [];
+  console.log(`Provider promotion policy decisions: ${decisions.length}`);
+  for (const item of decisions) {
+    const decision = asRecord(item);
+    const evidence = typeof decision.evidenceId === 'string' ? ` evidence=${decision.evidenceId}` : '';
+    console.log(`  ${String(decision.status ?? '?')} ${String(decision.action ?? '?')} ${String(decision.targetLabel ?? '?')} ${String(decision.fromDecision ?? '?')}->${String(decision.toDecision ?? '?')}${evidence}`);
+  }
+}
+
+function normalizePolicyAction(value: string): 'promote_required' | 'demote_advisory' {
+  const normalized = value.trim().toLowerCase().replace(/-/g, '_');
+  if (normalized === 'promote' || normalized === 'promote_required') return 'promote_required';
+  if (normalized === 'demote' || normalized === 'demote_advisory') return 'demote_advisory';
+  console.error('los provider policy: action must be promote or demote');
+  process.exit(2);
+}
+
+function parseProviderTarget(value: string): { provider: string; model?: string; label: string } {
+  const [provider, ...modelParts] = value.split(':');
+  const normalizedProvider = provider?.trim();
+  if (!normalizedProvider) {
+    console.error('los provider policy: target must be provider[:model]');
+    process.exit(2);
+  }
+  const model = modelParts.join(':').trim() || undefined;
+  return {
+    provider: normalizedProvider,
+    model,
+    label: model ? `${normalizedProvider}:${model}` : normalizedProvider,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 async function readVisibleLine(prompt: string): Promise<string> {
@@ -288,14 +404,19 @@ Manage provider configuration and setup guidance.
 Usage:
   los provider list [--gateway URL] [--json]
   los provider promote <name> [--gateway URL]
+  los provider policy <promote|demote> [provider[:model]] --reason TEXT [--evidence-id ID]
+  los provider policy list [--provider NAME] [--model NAME]
 
 Commands:
   list      Show all discovered providers with readiness and promotion state
   promote   Interactive setup guidance for a blocked provider (API key entry)
+  policy    Record or list proposed required-gate promotion/demotion decisions
 
 Examples:
   los provider list
   los provider promote anthropic
   los provider promote openai --gateway http://localhost:8080
+  los provider policy promote deepseek:deepseek-v4-pro --evidence-id provider-compat-deepseek:deepseek-v4-pro/read-context --reason "stable advisory probe"
+  los provider policy demote deepseek:deepseek-v4-flash --reason "default gate too expensive"
 `);
 }

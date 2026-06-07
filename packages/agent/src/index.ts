@@ -171,6 +171,7 @@ export {
 } from './verification-runner.js';
 export {
   ensureProviderCompatEvidenceStore,
+  loadProviderCompatEvidence,
   listProviderCompatEvidence,
   listLatestProviderCompatEvidence,
   recordProviderCompatEvidence,
@@ -181,6 +182,16 @@ export {
   type ListProviderCompatEvidenceOptions,
   type RecordProviderCompatEvidenceInput,
 } from './provider-compat-evidence.js';
+export {
+  ensureProviderPromotionDecisionStore,
+  listProviderPromotionDecisions,
+  recordProviderPromotionDecision,
+  type ListProviderPromotionDecisionsOptions,
+  type ProviderPromotionDecisionRecord,
+  type ProviderPromotionPolicyAction,
+  type ProviderPromotionPolicyStatus,
+  type RecordProviderPromotionDecisionInput,
+} from './provider-promotion-decisions.js';
 export {
   normalizeExternalToolSummary,
   redactExternalSummaryText,

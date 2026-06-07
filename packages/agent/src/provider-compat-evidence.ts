@@ -221,6 +221,17 @@ export async function listProviderCompatEvidence(
   return rows.rows.map(rowToRecord);
 }
 
+export async function loadProviderCompatEvidence(id: string): Promise<ProviderCompatEvidenceRecord | null> {
+  await ensureProviderCompatEvidenceStore();
+  const normalized = normalizeOptionalString(id);
+  if (!normalized) return null;
+  const rows = await getDb().query<ProviderCompatEvidenceRow>(
+    'SELECT * FROM provider_compat_evidence WHERE id = $1',
+    [normalized],
+  );
+  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+}
+
 type ProviderCompatEvidenceRow = {
   id: string;
   provider: string;

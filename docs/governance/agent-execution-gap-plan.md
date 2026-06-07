@@ -174,7 +174,10 @@ evidence table, and `docs/governance/provider-promotion-evidence-display-plan.md
 tracks the API/CLI/Web UI display work. `los provider promote` remains a
 credential setup helper; compatibility promotion evidence is written by
 `los compat --execute`, and required-gate promotion remains a separate policy
-change.
+change. Proposed required-gate promotion/demotion decisions can now be recorded
+through `los provider policy promote|demote` and
+`POST /providers/promotion-decisions`; enforcement still requires updating ADR,
+harness, and target lists together.
 
 ### G5. External Tools Are Compared Manually
 
@@ -392,8 +395,7 @@ Validation:
 
 ## Immediate Next Work
 
-1. Define required-target provider promotion/demotion policy commands only
-   after ADR 0017, ADR 0014, and compatibility harness expectations can be
-   updated together.
+1. Decide when proposed provider promotion/demotion decisions should be
+   promoted into enforced required-target list changes.
 2. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.
