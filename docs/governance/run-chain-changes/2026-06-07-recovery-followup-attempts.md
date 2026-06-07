@@ -1,7 +1,7 @@
 ---
 date: 2026-06-07
 change: recovery-followup-attempts
-commit: pending
+commit: 60dd07a8
 surface: scheduler, recovery
 impact: Scheduler graph execution now turns retryable or resumable tool recovery decisions into follow-up task attempts when task retry capacity remains.
 ---
