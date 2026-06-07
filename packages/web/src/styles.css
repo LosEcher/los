@@ -134,6 +134,15 @@ code,
   background: var(--surface-2);
 }
 
+.nav-badge {
+  background: var(--surface);
+  color: var(--faint);
+  font-size: 0.6875rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
 .nav-item[data-active="true"] {
   box-shadow: inset 2px 0 0 var(--accent);
 }

@@ -385,8 +385,17 @@ export function ChatPage({
     setRunning(false);
   }
 
+  const [newChatConfirming, setNewChatConfirming] = useState(false);
+
   function startNewChat() {
     if (running) return;
+    if (sessionId || taskRunId) {
+      if (!newChatConfirming) {
+        setNewChatConfirming(true);
+        return;
+      }
+      setNewChatConfirming(false);
+    }
     setSessionId(null);
     setTaskRunId(null);
     setBoundTodoId(null);
@@ -411,8 +420,8 @@ export function ChatPage({
             <p>Current run controls feed Gateway `/chat`; session evidence stays in the ledger.</p>
           </div>
           <div className="toolbar">
-            <button className="ghost-btn" type="button" disabled={running} onClick={startNewChat}>
-              <MessageSquarePlus size={14} /> new chat
+            <button className={`ghost-btn${newChatConfirming ? ' danger' : ''}`} type="button" disabled={running} onClick={startNewChat}>
+              <MessageSquarePlus size={14} /> {newChatConfirming ? 'confirm new?' : 'new chat'}
             </button>
             <button className="ghost-btn" type="button" onClick={() => setRows([])}>
               <RefreshCcw size={14} /> clear

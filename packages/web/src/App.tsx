@@ -16,7 +16,7 @@ import {
   TerminalSquare,
   Zap,
 } from 'lucide-react';
-import { getJson, type Health, type TodoItem } from './api';
+import { getJson, type Health, type SessionSummary, type TodoItem } from './api';
 import {
   MemoryPage,
   ProvidersPage,
@@ -55,6 +55,7 @@ type NavItem = {
   label: string;
   icon: typeof MessageSquare;
   status: StatusState;
+  badge?: number;
 };
 
 const NAV: NavItem[] = [
@@ -100,6 +101,12 @@ export function App() {
     queryKey: ['health'],
     queryFn: () => getJson<Health>('/health'),
     refetchInterval: 10_000,
+  });
+  const sessionCount = useQuery({
+    queryKey: ['sessions'],
+    queryFn: () => getJson<SessionSummary[]>('/sessions'),
+    refetchInterval: 30_000,
+    select: (data) => data.length,
   });
 
   const active = NAV.find(item => item.id === page) ?? NAV[0]!;
@@ -148,6 +155,9 @@ export function App() {
               >
                 <Icon size={16} />
                 <span>{item.label}</span>
+                {item.id === 'sessions' && sessionCount.data !== undefined ? (
+                  <span className="nav-badge">{sessionCount.data}</span>
+                ) : null}
                 <StatusPill status={item.status} />
               </button>
             );
