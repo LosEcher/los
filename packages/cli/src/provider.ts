@@ -60,6 +60,7 @@ interface DiscoveredProvider {
   promotionState?: string;
   credentialClass?: string;
   setupAction?: string | null;
+  compatibilityEvidence?: Array<Record<string, unknown>>;
   readiness?: {
     configuredKey?: boolean;
     ready?: boolean;
@@ -142,6 +143,19 @@ async function listProviders(parsed: ParsedArgs): Promise<void> {
       const setupAction = r?.setupAction ?? p.setupAction;
       if (setupAction) {
         console.log(`    → ${setupAction}`);
+      }
+      const evidence = Array.isArray(p.compatibilityEvidence) ? p.compatibilityEvidence : [];
+      if (evidence.length > 0) {
+        for (const item of evidence.slice(0, 3)) {
+          const id = stringValue(item.id) ?? '?';
+          const probe = stringValue(item.probeId) ?? '?';
+          const task = stringValue(item.taskRunId) ?? 'task?';
+          const run = stringValue(item.runSpecId);
+          const tokens = typeof item.totalTokens === 'number' ? item.totalTokens : 0;
+          console.log(`    evidence ${id} probe=${probe} task=${task}${run ? ` run=${run}` : ''} tokens=${tokens}`);
+        }
+      } else if (isReady) {
+        console.log(`    evidence none; verify with: los compat --execute --target ${p.name} --probe read-context --workspace .`);
       }
     }
 
@@ -255,6 +269,10 @@ function stringFlag(parsed: ParsedArgs, ...names: string[]): string | undefined 
     if (parsed.values[name] !== undefined) return String(parsed.values[name]);
   }
   return undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function hasFlag(parsed: ParsedArgs, name: string): boolean {

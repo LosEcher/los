@@ -1,0 +1,59 @@
+contract: los.provider-compat-evidence
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Bounded operator evidence for provider/model compatibility runs. The storage
+  table may keep richer summary JSON, but HTTP surfaces expose only redacted
+  compatibility proof fields.
+type: object
+routes:
+  - method: GET
+    path: /providers/compat-evidence
+    query:
+      provider:
+        type: string
+      model:
+        type: string
+      limit:
+        type: integer
+        minimum: 1
+        maximum: 1000
+    response:
+      count: integer
+      evidence: provider_compat_evidence.rows
+fields:
+  id: string
+  provider: string
+  model: string | null
+  probeId: string
+  targetLabel: string
+  decision: advisory | verified_advisory | required | blocked
+  passed: boolean
+  sessionId: string | null
+  taskRunId: string | null
+  runSpecId: string | null
+  traceId: string | null
+  requestId: string | null
+  nodeId: string | null
+  totalTokens: integer
+  summary:
+    completed: boolean
+    cancelled: boolean
+    reasoningObserved: boolean
+    toolCalls: string[]
+    toolResultCount: integer
+    failedToolResultCount: integer
+    deniedToolCount: integer
+    failures: string[]
+  createdAt: date-time
+  updatedAt: date-time
+redaction:
+  - Do not expose provider credentials.
+  - Do not expose raw prompts, model output, raw transcripts, or arbitrary summary JSON.
+  - Failure strings are bounded before HTTP serialization.
+verification:
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm check
+  - ./tools/check-contracts.sh

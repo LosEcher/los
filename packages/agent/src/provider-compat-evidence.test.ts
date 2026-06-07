@@ -5,7 +5,9 @@ import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import {
   ensureProviderCompatEvidenceStore,
+  listProviderCompatEvidence,
   listLatestProviderCompatEvidence,
+  recordProviderCompatEvidence,
   recordProviderCompatEvidenceFromSummary,
 } from './provider-compat-evidence.js';
 
@@ -42,6 +44,25 @@ test('provider compat evidence records verified advisory summaries', async () =>
     const loaded = latest.find(item => item.provider === provider && item.model === 'model-a');
     assert.equal(loaded?.probeId, 'read-context');
     assert.equal(loaded?.decision, 'verified_advisory');
+
+    await recordProviderCompatEvidence({
+      id: `${provider}-model-b-read-context`,
+      provider,
+      model: 'model-b',
+      probeId: 'read-context',
+      decision: 'advisory',
+      passed: false,
+      totalTokens: 7,
+      summary: { failures: ['missing expected tool call'] },
+    });
+
+    const history = await listProviderCompatEvidence({ provider, limit: 10 });
+    assert.equal(history.length, 2);
+    assert.ok(history.some(item => item.model === 'model-a' && item.passed));
+    assert.ok(history.some(item => item.model === 'model-b' && !item.passed));
+
+    const modelA = await listProviderCompatEvidence({ provider, model: 'model-a' });
+    assert.deepEqual(modelA.map(item => item.model), ['model-a']);
   } finally {
     await getDb().query('DELETE FROM provider_compat_evidence WHERE provider = $1', [provider]).catch(() => undefined);
     await closeDb().catch(() => undefined);

@@ -33,6 +33,7 @@ import { getRequestContext, registerRequestContext } from './request-context.js'
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
   listLatestProviderCompatEvidence,
+  listProviderCompatEvidence,
   readRunStateProjection,
   listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
@@ -122,6 +123,19 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     return {
       ...report,
       providers: report.providers.map(provider => sanitizeProviderDiscovery(provider, compatEvidence)),
+    };
+  });
+
+  app.get('/providers/compat-evidence', async (req) => {
+    const query = req.query as { provider?: string; model?: string; limit?: string };
+    const evidence = await listProviderCompatEvidence({
+      provider: normalizeOptionalString(query.provider),
+      model: normalizeOptionalString(query.model),
+      limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+    });
+    return {
+      count: evidence.length,
+      evidence: evidence.map(sanitizeProviderCompatEvidence),
     };
   });
 
@@ -955,7 +969,25 @@ function parseLiveSessionEventNotification(payload: string | undefined) {
   }
 }
 
-function sanitizeProviderDiscovery(provider: DiscoveredProvider, compatEvidence: Array<{ provider: string; decision: string; passed: boolean; model?: string; probeId: string; updatedAt: string }>): Record<string, unknown> {
+function sanitizeProviderDiscovery(provider: DiscoveredProvider, compatEvidence: Array<{
+  id: string;
+  provider: string;
+  decision: string;
+  passed: boolean;
+  model?: string;
+  probeId: string;
+  targetLabel: string;
+  sessionId?: string;
+  taskRunId?: string;
+  runSpecId?: string;
+  traceId?: string;
+  requestId?: string;
+  nodeId?: string;
+  totalTokens: number;
+  summary: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}>): Record<string, unknown> {
   const { apiKey, ...rest } = provider;
   const readiness = describeProviderReadiness(provider);
   const evidence = compatEvidence.filter(item => item.provider === provider.name && item.passed);
@@ -965,17 +997,81 @@ function sanitizeProviderDiscovery(provider: DiscoveredProvider, compatEvidence:
     ...rest,
     hasApiKey: typeof apiKey === 'string' && apiKey.length > 0,
     promotionState,
-    compatibilityEvidence: evidence.map(item => ({
-      model: item.model ?? null,
-      probeId: item.probeId,
-      decision: item.decision,
-      updatedAt: item.updatedAt,
-    })),
+    compatibilityEvidence: evidence.map(sanitizeProviderCompatEvidence),
     readiness: {
       ...readiness,
       promotionState,
     },
   };
+}
+
+function sanitizeProviderCompatEvidence(item: {
+  id: string;
+  provider: string;
+  model?: string;
+  probeId: string;
+  targetLabel: string;
+  decision: string;
+  passed: boolean;
+  sessionId?: string;
+  taskRunId?: string;
+  runSpecId?: string;
+  traceId?: string;
+  requestId?: string;
+  nodeId?: string;
+  totalTokens: number;
+  summary: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}): Record<string, unknown> {
+  return {
+    id: item.id,
+    provider: item.provider,
+    model: item.model ?? null,
+    probeId: item.probeId,
+    targetLabel: item.targetLabel,
+    decision: item.decision,
+    passed: item.passed,
+    sessionId: item.sessionId ?? null,
+    taskRunId: item.taskRunId ?? null,
+    runSpecId: item.runSpecId ?? null,
+    traceId: item.traceId ?? null,
+    requestId: item.requestId ?? null,
+    nodeId: item.nodeId ?? null,
+    totalTokens: item.totalTokens,
+    summary: sanitizeProviderCompatSummary(item.summary),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function sanitizeProviderCompatSummary(summary: Record<string, unknown>): Record<string, unknown> {
+  return {
+    completed: summary.completed === true,
+    cancelled: summary.cancelled === true,
+    reasoningObserved: summary.reasoningObserved === true,
+    toolCalls: normalizeProviderSummaryStringArray(summary.toolCalls, 12),
+    toolResultCount: normalizeNonNegativeNumber(summary.toolResultCount),
+    failedToolResultCount: normalizeNonNegativeNumber(summary.failedToolResultCount),
+    deniedToolCount: normalizeNonNegativeNumber(summary.deniedToolCount),
+    failures: normalizeProviderSummaryStringArray(summary.failures, 8).map(failure => truncateForHttp(failure, 240)),
+  };
+}
+
+function normalizeProviderSummaryStringArray(value: unknown, max: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(item => typeof item === 'string' && item.trim())
+    .slice(0, max)
+    .map(item => item.trim());
+}
+
+function normalizeNonNegativeNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function truncateForHttp(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max)}...`;
 }
 
 function sanitizeErrorMessage(message: string): string {

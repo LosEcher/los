@@ -43,6 +43,12 @@ export interface RecordProviderCompatEvidenceInput {
   summary?: Record<string, unknown>;
 }
 
+export interface ListProviderCompatEvidenceOptions {
+  provider?: string;
+  model?: string;
+  limit?: number;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS provider_compat_evidence (
   id TEXT PRIMARY KEY,
@@ -179,6 +185,38 @@ export async function listLatestProviderCompatEvidence(): Promise<ProviderCompat
   return rows.rows.map(rowToRecord);
 }
 
+export async function listProviderCompatEvidence(
+  options: ListProviderCompatEvidenceOptions = {},
+): Promise<ProviderCompatEvidenceRecord[]> {
+  await ensureProviderCompatEvidenceStore();
+  const provider = normalizeOptionalString(options.provider);
+  const model = normalizeOptionalString(options.model);
+  const limit = normalizeLimit(options.limit, 100);
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (provider) {
+    params.push(provider);
+    clauses.push(`provider = $${params.length}`);
+  }
+  if (model) {
+    params.push(model);
+    clauses.push(`model = $${params.length}`);
+  }
+  params.push(limit);
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const rows = await getDb().query<ProviderCompatEvidenceRow>(
+    `
+    SELECT *
+    FROM provider_compat_evidence
+    ${where}
+    ORDER BY updated_at DESC, provider, COALESCE(model, ''), probe_id
+    LIMIT $${params.length}
+  `,
+    params,
+  );
+  return rows.rows.map(rowToRecord);
+}
+
 type ProviderCompatEvidenceRow = {
   id: string;
   provider: string;
@@ -249,6 +287,11 @@ function normalizeJsonObject(value: unknown): Record<string, unknown> {
     }
   }
   return {};
+}
+
+function normalizeLimit(value: unknown, defaultValue: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return defaultValue;
+  return Math.max(1, Math.min(1000, Math.floor(value)));
 }
 
 function toIsoString(value: Date | string): string {

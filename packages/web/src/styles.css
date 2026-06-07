@@ -1228,6 +1228,13 @@ button:disabled {
   color: var(--warn);
 }
 
+.compat-evidence-detail {
+  grid-column: 1 / -1;
+  color: var(--faint);
+  font-size: 0.7rem;
+  word-break: break-word;
+}
+
 .memory-row {
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 14px 16px;

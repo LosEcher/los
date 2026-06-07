@@ -125,12 +125,21 @@ of promotion proof.
 
 ## Implementation Order
 
-1. Add focused gateway route tests around provider evidence serialization.
-2. Add `GET /providers/compat-evidence` if `/onboarding` becomes too crowded.
-3. Add a Providers page detail panel for latest evidence.
-4. Update `los provider list` to show latest evidence ids.
-5. Add an operation smoke after one provider evidence detail is visible through
+Implemented first slice:
+
+1. `GET /providers/compat-evidence` exposes bounded provider/model/probe
+   evidence with redacted summary fields.
+2. `/onboarding` provider rows include traceable latest passing evidence.
+3. Providers page renders latest evidence id, task/run ids, and token count.
+4. `los provider list` prints latest evidence ids and the fallback compat
+   command when a ready provider has no passing evidence.
+
+Remaining order:
+
+1. Add an operation smoke after one provider evidence detail is visible through
    API, CLI, and Web UI.
+2. Add promotion/demotion policy commands only after required-target policy is
+   updated together with ADR and harness expectations.
 
 ## Verification
 

@@ -12,6 +12,7 @@ required_contracts=(
   node-command.yaml
   artifact-transfer.yaml
   agent-task-graph.yaml
+  provider-compat-evidence.yaml
 )
 
 failures=0
@@ -53,6 +54,7 @@ node_registry="$CONTRACT_DIR/node-registry.yaml"
 node_command="$CONTRACT_DIR/node-command.yaml"
 artifact_transfer="$CONTRACT_DIR/artifact-transfer.yaml"
 agent_task_graph="$CONTRACT_DIR/agent-task-graph.yaml"
+provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
 
 [ -f "$run_spec" ] && {
   require_pattern "$run_spec" 'prompt:' 'prompt field'
@@ -93,6 +95,13 @@ agent_task_graph="$CONTRACT_DIR/agent-task-graph.yaml"
   require_pattern "$agent_task_graph" 'task_attempts' 'task_attempts source'
   require_pattern "$agent_task_graph" '/agent-graphs/\{graphId\}' 'graph read route'
   require_pattern "$agent_task_graph" 'requireVerifier' 'requireVerifier query'
+}
+
+[ -f "$provider_compat_evidence" ] && {
+  require_pattern "$provider_compat_evidence" '/providers/compat-evidence' 'provider compat route'
+  require_pattern "$provider_compat_evidence" 'provider_compat_evidence\.rows' 'provider compat rows'
+  require_pattern "$provider_compat_evidence" 'verified_advisory' 'verified advisory decision'
+  require_pattern "$provider_compat_evidence" 'raw transcripts' 'raw transcript redaction'
 }
 
 if [ "$failures" -gt 0 ]; then

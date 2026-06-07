@@ -995,6 +995,7 @@ export function ProvidersPage() {
             const compatEvidence = Array.isArray(provider.compatibilityEvidence)
               ? provider.compatibilityEvidence as Array<Record<string, unknown>>
               : [];
+            const latestEvidence = compatEvidence[0];
             const promotionState = metadataText(provider.promotionState);
             return (
               <div className="record-row provider-row">
@@ -1014,11 +1015,18 @@ export function ProvidersPage() {
                       const model = ce.model ? String(ce.model) : '';
                       return (
                         <span key={i} className={`compat-badge ${decision === 'required' ? 'required' : 'passed'}`} title={`${probeId}: ${decision}${model ? ` (${model})` : ''}`}>
-                          {probeId}
+                          {metadataText(ce.id)?.slice(0, 22) ?? probeId}
                         </span>
                       );
                     })}
                   </span>
+                ) : null}
+                {latestEvidence ? (
+                  <span className="compat-evidence-detail">
+                    evidence {metadataText(latestEvidence.id) ?? '?'} · task {metadataText(latestEvidence.taskRunId) ?? 'none'} · run {metadataText(latestEvidence.runSpecId) ?? 'none'} · tokens {String(latestEvidence.totalTokens ?? 0)}
+                  </span>
+                ) : readiness.ready ? (
+                  <span className="compat-evidence-detail">evidence none · run los compat --execute --target {metadataText(provider.name) ?? metadataText(provider.provider) ?? 'provider'} --probe read-context</span>
                 ) : null}
               </div>
             );

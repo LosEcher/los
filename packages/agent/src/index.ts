@@ -168,12 +168,14 @@ export {
 } from './verification-runner.js';
 export {
   ensureProviderCompatEvidenceStore,
+  listProviderCompatEvidence,
   listLatestProviderCompatEvidence,
   recordProviderCompatEvidence,
   recordProviderCompatEvidenceFromSummary,
   recordProviderCompatEvidenceFromSummaryWithDefaultDb,
   type ProviderCompatDecision,
   type ProviderCompatEvidenceRecord,
+  type ListProviderCompatEvidenceOptions,
   type RecordProviderCompatEvidenceInput,
 } from './provider-compat-evidence.js';
 export {

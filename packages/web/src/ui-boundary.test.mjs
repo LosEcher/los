@@ -61,6 +61,8 @@ test('providers page renders readiness instead of raw discovery booleans', () =>
   assert.match(providersPage, /className="record-row provider-row"/);
   assert.match(providersPage, /readiness\.ready/);
   assert.match(providersPage, /readiness\.manualSetupRequired/);
+  assert.match(providersPage, /compat-evidence-detail/);
+  assert.match(providersPage, /taskRunId/);
   assert.doesNotMatch(providersPage, /String\(provider\.available \?\? provider\.importable/);
 });
 
