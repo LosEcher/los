@@ -87,6 +87,7 @@ async function recordEval(parsed: ParsedArgs): Promise<void> {
     modelCost: numberFlag(parsed, 'model-cost'),
     userFeedback: stringFlag(parsed, 'user-feedback'),
     failureClass: stringFlag(parsed, 'failure-class'),
+    failoverScope: stringFlag(parsed, 'failover-scope'),
     summary: jsonFlag(parsed, 'summary-json'),
   };
   removeUndefined(payload);
@@ -148,6 +149,7 @@ function renderEvalSummary(value: unknown, json: boolean): void {
   console.log(`Run eval summary: count=${count} success_rate=${formatPercent(successRate)} failures=${String(totals.failureCount ?? 0)}`);
   console.log(`  avg_latency_ms=${formatOptionalNumber(totals.averageLatencyMs)} avg_retry_count=${formatOptionalNumber(totals.averageRetryCount)} tool_errors=${String(totals.toolErrorCount ?? 0)} model_cost=${formatOptionalNumber(totals.modelCost)}`);
   printGroups('failure_classes', asArray(summary.byFailureClass));
+  printGroups('failover_scope', asArray(summary.byFailoverScope));
   printGroups('verification_status', asArray(summary.byVerificationStatus));
   printGroups('provider_models', asArray(summary.byProviderModel));
 }
@@ -187,6 +189,7 @@ function buildEvalQuery(parsed: ParsedArgs): URLSearchParams {
   addQuery(params, 'success', stringFlag(parsed, 'success'));
   addQuery(params, 'verificationStatus', stringFlag(parsed, 'verification-status'));
   addQuery(params, 'failureClass', stringFlag(parsed, 'failure-class'));
+  addQuery(params, 'failoverScope', stringFlag(parsed, 'failover-scope'));
   addQuery(params, 'limit', stringFlag(parsed, 'limit'));
   return params;
 }
@@ -365,6 +368,7 @@ Record options:
   --model-cost N
   --user-feedback TEXT
   --failure-class CLASS
+  --failover-scope service|executor
   --summary-json JSON
 
 Summary options:

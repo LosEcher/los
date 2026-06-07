@@ -257,9 +257,8 @@ Current state:
 Gap:
 
 The minimal eval table now connects a run to failure class, verification
-status, retry count, user feedback, model cost, and tool errors. The remaining
-gap is UI dashboarding and metrics that separate service failover from executor
-failover.
+status, retry count, user feedback, model cost, tool errors, and failover scope
+(service vs executor). The remaining gap is UI dashboarding.
 
 Supplement:
 
@@ -423,6 +422,9 @@ Current 2026-06-07 update:
    verification status, and provider/model.
 5. `run_evals` comparison API/CLI surfaces can compare baseline and candidate
    time windows for release before/after checks.
+6. `run_evals` records can carry a `failover_scope` dimension (service or
+   executor) that separates service-failover from executor-failover metrics in
+   list, summary, and comparison views.
 
 Validation:
 

@@ -8,6 +8,8 @@ export type RunEvalVerificationStatus =
   | 'failed'
   | 'skipped';
 
+export type RunEvalFailoverScope = 'service' | 'executor';
+
 export interface RunEvalRecord {
   id: string;
   runSpecId: string;
@@ -23,6 +25,7 @@ export interface RunEvalRecord {
   modelCost?: number;
   userFeedback?: string;
   failureClass?: string;
+  failoverScope?: RunEvalFailoverScope;
   summary: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -43,6 +46,7 @@ export interface RecordRunEvalInput {
   modelCost?: number;
   userFeedback?: string;
   failureClass?: string;
+  failoverScope?: RunEvalFailoverScope | string;
   summary?: Record<string, unknown>;
 }
 
@@ -55,6 +59,7 @@ export interface ListRunEvalsOptions {
   success?: boolean;
   verificationStatus?: RunEvalVerificationStatus | string;
   failureClass?: string;
+  failoverScope?: RunEvalFailoverScope | string;
   limit?: number;
 }
 
@@ -86,6 +91,7 @@ export interface RunEvalSummary {
     success?: boolean;
     verificationStatus?: string;
     failureClass?: string;
+    failoverScope?: string;
     createdFrom?: string;
     createdTo?: string;
   };
@@ -100,6 +106,7 @@ export interface RunEvalSummary {
     modelCost: number;
   };
   byFailureClass: RunEvalSummaryGroup[];
+  byFailoverScope: RunEvalSummaryGroup[];
   byVerificationStatus: RunEvalSummaryGroup[];
   byProviderModel: RunEvalSummaryGroup[];
 }
@@ -143,10 +150,13 @@ CREATE TABLE IF NOT EXISTS run_evals (
   model_cost NUMERIC,
   user_feedback TEXT,
   failure_class TEXT,
+  failover_scope TEXT,
   summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE run_evals ADD COLUMN IF NOT EXISTS failover_scope TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_run_evals_run_spec ON run_evals(run_spec_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_evals_session ON run_evals(session_id, created_at DESC);
@@ -154,6 +164,7 @@ CREATE INDEX IF NOT EXISTS idx_run_evals_task_run ON run_evals(task_run_id, crea
 CREATE INDEX IF NOT EXISTS idx_run_evals_provider_model ON run_evals(provider, model, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_evals_success ON run_evals(success, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_evals_failure_class ON run_evals(failure_class, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_evals_failover_scope ON run_evals(failover_scope, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_evals_verification ON run_evals(verification_status, created_at DESC);
 `;
 
@@ -175,12 +186,12 @@ export async function recordRunEval(input: RecordRunEvalInput): Promise<RunEvalR
     INSERT INTO run_evals (
       id, run_spec_id, session_id, task_run_id, provider, model, success,
       latency_ms, retry_count, tool_error_count, verification_status,
-      model_cost, user_feedback, failure_class, summary_json
+      model_cost, user_feedback, failure_class, failover_scope, summary_json
     )
     VALUES (
       $1, $2, $3, $4, $5, $6, $7,
       $8, $9, $10, $11,
-      $12, $13, $14, $15::jsonb
+      $12, $13, $14, $15, $16::jsonb
     )
     ON CONFLICT (id) DO UPDATE SET
       run_spec_id = EXCLUDED.run_spec_id,
@@ -196,6 +207,7 @@ export async function recordRunEval(input: RecordRunEvalInput): Promise<RunEvalR
       model_cost = EXCLUDED.model_cost,
       user_feedback = EXCLUDED.user_feedback,
       failure_class = EXCLUDED.failure_class,
+      failover_scope = EXCLUDED.failover_scope,
       summary_json = EXCLUDED.summary_json,
       updated_at = now()
     RETURNING *
@@ -215,6 +227,7 @@ export async function recordRunEval(input: RecordRunEvalInput): Promise<RunEvalR
       normalizeOptionalNonNegativeNumber(input.modelCost) ?? null,
       normalizeOptionalString(input.userFeedback) ?? null,
       normalizeOptionalString(input.failureClass) ?? null,
+      normalizeFailoverScope(input.failoverScope),
       JSON.stringify(normalizeJsonObject(input.summary)),
     ],
   );
@@ -243,7 +256,7 @@ export async function summarizeRunEvals(options: SummarizeRunEvalsOptions = {}):
   const normalized = normalizeSummaryOptions(options);
   const { where, params } = buildRunEvalFilter(normalized);
   const limit = normalizeLimit(normalized.limit);
-  const [totals, byFailureClass, byVerificationStatus, byProviderModel] = await Promise.all([
+  const [totals, byFailureClass, byFailoverScope, byVerificationStatus, byProviderModel] = await Promise.all([
     getDb().query<RunEvalAggregateRow>(`
       SELECT
         COUNT(*)::integer AS count,
@@ -262,6 +275,12 @@ export async function summarizeRunEvals(options: SummarizeRunEvalsOptions = {}):
       params,
       limit,
       failuresOnly: true,
+    }),
+    querySummaryGroups({
+      selectKey: `COALESCE(failover_scope, 'unspecified')`,
+      where,
+      params,
+      limit,
     }),
     querySummaryGroups({
       selectKey: 'verification_status',
@@ -286,11 +305,13 @@ export async function summarizeRunEvals(options: SummarizeRunEvalsOptions = {}):
       success: normalized.success,
       verificationStatus: normalized.verificationStatus,
       failureClass: normalized.failureClass,
+      failoverScope: normalized.failoverScope,
       createdFrom: normalized.createdFrom,
       createdTo: normalized.createdTo,
     },
     totals: aggregateRowToTotals(totals.rows[0]),
     byFailureClass,
+    byFailoverScope,
     byVerificationStatus,
     byProviderModel,
   };
@@ -388,6 +409,7 @@ function buildRunEvalFilter(options: SummarizeRunEvalsOptions): { where: string;
   addOptionalClause(clauses, params, 'model', normalizeOptionalString(options.model));
   addOptionalClause(clauses, params, 'verification_status', normalizeOptionalString(options.verificationStatus));
   addOptionalClause(clauses, params, 'failure_class', normalizeOptionalString(options.failureClass));
+  addOptionalClause(clauses, params, 'failover_scope', normalizeFailoverScope(options.failoverScope));
   if (typeof options.success === 'boolean') {
     params.push(options.success);
     clauses.push(`success = $${params.length}`);
@@ -424,6 +446,7 @@ function normalizeSummaryOptions(options: SummarizeRunEvalsOptions): SummarizeRu
     success: options.success,
     verificationStatus: normalizeOptionalString(options.verificationStatus),
     failureClass: normalizeOptionalString(options.failureClass),
+    failoverScope: normalizeFailoverScope(options.failoverScope),
     createdFrom: normalizeOptionalIsoLike(options.createdFrom, 'createdFrom'),
     createdTo: normalizeOptionalIsoLike(options.createdTo, 'createdTo'),
     limit: normalizeLimit(options.limit),
@@ -473,6 +496,7 @@ type RunEvalRow = {
   model_cost: string | number | null;
   user_feedback: string | null;
   failure_class: string | null;
+  failover_scope: string | null;
   summary_json: unknown;
   created_at: Date | string;
   updated_at: Date | string;
@@ -508,6 +532,7 @@ function rowToRecord(row: RunEvalRow): RunEvalRecord {
     modelCost: row.model_cost === null ? undefined : Number(row.model_cost),
     userFeedback: row.user_feedback ?? undefined,
     failureClass: row.failure_class ?? undefined,
+    failoverScope: normalizeFailoverScope(row.failover_scope) ?? undefined,
     summary: normalizeJsonObject(row.summary_json),
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
@@ -525,6 +550,13 @@ function normalizeVerificationStatus(value: unknown): RunEvalVerificationStatus 
     return value;
   }
   return 'unknown';
+}
+
+function normalizeFailoverScope(value: unknown): RunEvalFailoverScope | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed === 'service' || trimmed === 'executor') return trimmed;
+  return undefined;
 }
 
 function normalizeRequiredString(value: unknown, name: string): string {

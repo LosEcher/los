@@ -220,6 +220,7 @@ export {
   type ListRunEvalsOptions,
   type RecordRunEvalInput,
   type RunEvalComparison,
+  type RunEvalFailoverScope,
   type RunEvalRecord,
   type RunEvalSummary,
   type RunEvalSummaryGroup,

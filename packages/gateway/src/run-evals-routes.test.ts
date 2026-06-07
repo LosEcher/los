@@ -136,3 +136,78 @@ test('run eval routes record and list quality metrics', async () => {
     await closeDb().catch(() => undefined);
   }
 });
+
+test('run eval routes filter and group by failover scope', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-eval-failover-route-${suffix}`;
+  const sessionId = `session-failover-route-${suffix}`;
+  const app = await createServer({
+    serviceId: `gateway-failover-route-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'failover scope route test',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/run-evals',
+      payload: {
+        id: `${runSpecId}-svc`,
+        runSpecId,
+        sessionId,
+        success: false,
+        failureClass: 'service_timeout',
+        failoverScope: 'service',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/run-evals',
+      payload: {
+        id: `${runSpecId}-exec`,
+        runSpecId,
+        sessionId,
+        success: false,
+        failureClass: 'executor_crash',
+        failoverScope: 'executor',
+      },
+    });
+
+    const filterResponse = await app.inject({
+      method: 'GET',
+      url: `/run-evals?runSpecId=${encodeURIComponent(runSpecId)}&failoverScope=service`,
+    });
+    assert.equal(filterResponse.statusCode, 200);
+    assert.equal(filterResponse.json().count, 1);
+
+    const summaryResponse = await app.inject({
+      method: 'GET',
+      url: `/run-evals/summary?runSpecId=${encodeURIComponent(runSpecId)}`,
+    });
+    assert.equal(summaryResponse.statusCode, 200);
+    const summaryBody = summaryResponse.json();
+    const scopeGroups = summaryBody.byFailoverScope;
+    assert.deepEqual(
+      scopeGroups.map((g: { key: string; count: number }) => [g.key, g.count]).sort(),
+      [['executor', 1], ['service', 1]],
+    );
+  } finally {
+    await getDb().query('DELETE FROM run_evals WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await app.close();
+    await closeDb().catch(() => undefined);
+  }
+});

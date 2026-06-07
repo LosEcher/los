@@ -276,6 +276,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
         modelCost: normalizeOptionalNonNegativeNumber(body.modelCost),
         userFeedback: normalizeOptionalString(body.userFeedback),
         failureClass: normalizeOptionalString(body.failureClass),
+        failoverScope: normalizeOptionalString(body.failoverScope),
         summary: asRecord(body.summary),
       });
       return reply.status(201).send({ eval: evaluation });
@@ -1073,6 +1074,7 @@ type RunEvalQuery = {
   success?: string;
   verificationStatus?: string;
   failureClass?: string;
+  failoverScope?: string;
   createdFrom?: string;
   createdTo?: string;
   baselineFrom?: string;
@@ -1091,6 +1093,7 @@ function parseRunEvalQuery(query: RunEvalQuery): {
   success?: boolean;
   verificationStatus?: string;
   failureClass?: string;
+  failoverScope?: string;
   limit?: number;
 } {
   return {
@@ -1102,6 +1105,7 @@ function parseRunEvalQuery(query: RunEvalQuery): {
     success: parseOptionalBoolean(query.success),
     verificationStatus: normalizeOptionalString(query.verificationStatus),
     failureClass: normalizeOptionalString(query.failureClass),
+    failoverScope: normalizeOptionalString(query.failoverScope),
     limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
   };
 }

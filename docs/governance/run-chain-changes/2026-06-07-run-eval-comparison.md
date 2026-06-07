@@ -16,8 +16,9 @@ impact: Run eval metrics can now compare baseline and candidate time windows for
   --candidate-from ... --candidate-to ...` exposes the same comparison.
 - Validation: `packages/agent/src/run-evals.test.ts` and
   `packages/gateway/src/run-evals-routes.test.ts`.
-- Remaining risk: UI dashboards and service-failover versus executor-failover
-  metrics remain future work.
+- Remaining risk: UI dashboards remain future work. Failover-scope metrics
+  separating service and executor failures were added in the follow-up
+  failover-scope-metrics fragment.
 
 ## Notes
 

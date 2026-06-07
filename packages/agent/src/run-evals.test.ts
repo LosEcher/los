@@ -287,3 +287,82 @@ test('run eval summaries group failure causes and quality metrics', async () => 
     await closeDb().catch(() => undefined);
   }
 });
+
+test('run eval failover scope separates service from executor failures', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-eval-failover-${suffix}`;
+  const sessionId = `session-run-eval-failover-${suffix}`;
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'failover scope eval',
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'project-write',
+    });
+    await ensureRunEvalStore();
+
+    await recordRunEval({
+      id: `${runSpecId}-service-fail`,
+      runSpecId,
+      sessionId,
+      success: false,
+      latencyMs: 500,
+      retryCount: 1,
+      toolErrorCount: 0,
+      verificationStatus: 'unknown',
+      failureClass: 'service_timeout',
+      failoverScope: 'service',
+    });
+    await recordRunEval({
+      id: `${runSpecId}-executor-fail`,
+      runSpecId,
+      sessionId,
+      success: false,
+      latencyMs: 10000,
+      retryCount: 3,
+      toolErrorCount: 1,
+      verificationStatus: 'unknown',
+      failureClass: 'executor_crash',
+      failoverScope: 'executor',
+    });
+    await recordRunEval({
+      id: `${runSpecId}-ok`,
+      runSpecId,
+      sessionId,
+      success: true,
+      latencyMs: 200,
+      retryCount: 0,
+      toolErrorCount: 0,
+      verificationStatus: 'succeeded',
+    });
+
+    const serviceEvals = await listRunEvals({ runSpecId, failoverScope: 'service', limit: 10 });
+    assert.equal(serviceEvals.length, 1);
+    assert.equal(serviceEvals[0]?.id, `${runSpecId}-service-fail`);
+
+    const execEvals = await listRunEvals({ runSpecId, failoverScope: 'executor', limit: 10 });
+    assert.equal(execEvals.length, 1);
+    assert.equal(execEvals[0]?.id, `${runSpecId}-executor-fail`);
+
+    const summary = await summarizeRunEvals({ runSpecId, limit: 10 });
+    assert.equal(summary.totals.count, 3);
+    assert.deepEqual(
+      summary.byFailoverScope.map(item => [item.key, item.count]).sort(),
+      [['executor', 1], ['service', 1], ['unspecified', 1]],
+    );
+    const serviceGroup = summary.byFailoverScope.find(item => item.key === 'service')!;
+    assert.equal(serviceGroup.failureCount, 1);
+    assert.equal(serviceGroup.averageRetryCount, 1);
+    const executorGroup = summary.byFailoverScope.find(item => item.key === 'executor')!;
+    assert.equal(executorGroup.failureCount, 1);
+    assert.equal(executorGroup.averageRetryCount, 3);
+  } finally {
+    await getDb().query('DELETE FROM run_evals WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
