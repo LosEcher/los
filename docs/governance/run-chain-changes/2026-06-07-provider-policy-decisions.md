@@ -28,5 +28,8 @@ impact: Proposed required-gate provider promotion/demotion decisions are now per
 
 ## Remaining Risk
 
-Enforced required-target promotion/demotion is still separate work. The new
-records are a policy decision ledger, not runtime gate enforcement.
+At this change point, enforced required-target promotion/demotion was still
+separate work. Follow-up enforcement is recorded in
+`docs/governance/run-chain-changes/2026-06-07-provider-policy-enforcement.md`.
+Proposed records remain a policy decision ledger until explicitly marked
+`enforced`.
