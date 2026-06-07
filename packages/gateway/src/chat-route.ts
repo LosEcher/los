@@ -1,12 +1,28 @@
 import type { FastifyInstance } from 'fastify';
-import { resolve } from 'node:path';
 import type { Config } from '@los/infra/config';
 import { runScheduledAgentTask } from '@los/agent/scheduler';
 import { normalizeModelSettings, type ModelSettings } from '@los/agent/model-settings';
+import {
+  normalizeWorkspaceRoot,
+  normalizeOptionalString,
+  normalizeToolMode,
+  normalizeAllowedTools,
+  normalizePositiveInteger,
+  normalizeToolRetry,
+  normalizeMCPServers,
+  type ToolMode,
+  type MCPRequestServer,
+  type ToolRetryInput,
+} from './chat-normalizers.js';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
 import type { Message } from '@los/agent';
-import { listTaskRunsForSession, type TaskRunRecord } from '@los/agent/task-runs';
-import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
+import {
+  normalizeReplayEvents,
+  loadResumeState,
+  updateBoundTodoFromRun,
+  loadBranchSource,
+} from './chat-session-helpers.js';
+import { type TodoStatus } from '@los/agent/todos';
 import {
   ensureRunSpecStore,
   createRunSpec,
@@ -15,8 +31,6 @@ import {
 import {
   appendSessionEvent,
   ensureSessionEventStore,
-  listRecentSessionEvents,
-  type SessionEventRecord,
 } from '@los/agent/session-events';
 import type { CheckpointState, RunContractMetadataInput } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
@@ -28,7 +42,6 @@ import {
 } from './idempotency.js';
 import { getRequestContext } from './request-context.js';
 
-type ToolMode = 'all' | 'project-write' | 'read-only';
 
 interface ChatRequestBody {
   prompt: string;
@@ -46,12 +59,8 @@ interface ChatRequestBody {
   traceId?: string;
   dedupeKey?: string;
   timeoutMs?: number;
-  toolRetry?: {
-    maxAttempts?: number;
-    baseDelayMs?: number;
-    maxDelayMs?: number;
-  };
-  mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
+  toolRetry?: ToolRetryInput;
+  mcpServers?: MCPRequestServer[];
   runContract?: RunContractMetadataInput;
   persistMemory?: boolean;
   todoId?: string;
@@ -141,32 +150,18 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    // Branching: copy parent session messages into a new session
+    // Branch from parent session: copy messages into a new session
     let branchSourceMessages: Message[] | null = null;
     let branchParentForEvent: Awaited<ReturnType<typeof loadSession>> | null = null;
     if (branchFrom) {
-      const branchParent = await loadSession(branchFrom);
-      if (!branchParent) {
-        send('error', { message: `Branch source session not found: ${branchFrom}` });
+      const result = await loadBranchSource(branchFrom, branchAtTurn);
+      if ('error' in result) {
+        send('error', { message: result.error });
         reply.raw.end();
         return;
       }
-      // Filter messages to branch point if specified
-      if (branchAtTurn && branchAtTurn > 0) {
-        let assistantCount = 0;
-        const filtered: Message[] = [];
-        for (const msg of branchParent.messages) {
-          if (msg.role === 'assistant') {
-            if (assistantCount >= branchAtTurn) break;
-            assistantCount++;
-          }
-          filtered.push(msg);
-        }
-        branchSourceMessages = filtered;
-      } else {
-        branchSourceMessages = branchParent.messages;
-      }
-      branchParentForEvent = branchParent;
+      branchSourceMessages = result.messages;
+      branchParentForEvent = result.parent;
     }
 
     const sid = branchFrom
@@ -199,7 +194,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       workspaceRoot,
       toolMode,
       allowedTools: allowedTools ?? [],
-      toolRetry: toolRetry ?? {},
+      toolRetry: (toolRetry ?? {}) as Record<string, unknown>,
       maxLoops: maxLoops ?? config.agent.maxLoops,
       timeoutMs,
       mcpServers,
@@ -613,197 +608,4 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
 
     reply.raw.end();
   });
-}
-
-function normalizeReplayEvents(value: unknown): Array<{ event: string; data: unknown }> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-  const events = (value as { events?: unknown }).events;
-  if (!Array.isArray(events)) return [];
-  return events.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
-    const event = (entry as { event?: unknown }).event;
-    if (typeof event !== 'string' || !event.trim()) return [];
-    return [{ event, data: (entry as { data?: unknown }).data ?? {} }];
-  });
-}
-
-async function loadResumeState(sessionId: string) {
-  const [taskRuns, recentEvents] = await Promise.all([
-    listTaskRunsForSession(sessionId, 10),
-    listRecentSessionEvents(sessionId, 50),
-  ]);
-  const compactTasks = taskRuns.map(summarizeTaskRunForResume);
-  const compactEvents = recentEvents.map(summarizeEventForResume);
-  return {
-    recentTaskRuns: compactTasks,
-    activeTaskRuns: compactTasks.filter(task => task.status === 'queued' || task.status === 'running'),
-    lastTaskRun: compactTasks[0] ?? null,
-    recentEvents: compactEvents,
-    recentEventCount: compactEvents.length,
-    lastEventId: compactEvents.at(-1)?.id ?? null,
-  };
-}
-
-function summarizeTaskRunForResume(task: TaskRunRecord): Record<string, unknown> {
-  return {
-    id: task.id,
-    status: task.status,
-    traceId: task.traceId,
-    dedupeKey: task.dedupeKey ?? null,
-    nodeId: task.nodeId ?? null,
-    requestId: task.requestId ?? null,
-    provider: task.provider ?? null,
-    model: task.model ?? null,
-    startedAt: task.startedAt ?? null,
-    completedAt: task.completedAt ?? null,
-    heartbeatAt: task.heartbeatAt ?? null,
-    leaseExpiresAt: task.leaseExpiresAt ?? null,
-    updatedAt: task.updatedAt,
-  };
-}
-
-function summarizeEventForResume(event: SessionEventRecord): Record<string, unknown> {
-  return {
-    id: event.id,
-    type: event.type,
-    turn: event.turn,
-    source: event.source,
-    model: event.model ?? null,
-    toolName: event.toolName ?? null,
-    payload: event.payload,
-    createdAt: event.createdAt,
-  };
-}
-
-type BoundTodoUpdate = {
-  status: TodoStatus;
-  sessionId: string;
-  taskRunId?: string;
-  traceId: string;
-  requestId: string;
-  runSpecId?: string;
-  event: string;
-  reason?: string;
-  blockedVerificationRecordIds?: string[];
-};
-
-async function updateBoundTodoFromRun(todoId: string, input: BoundTodoUpdate): Promise<void> {
-  const existing = await loadTodo(todoId).catch(() => null);
-  if (!existing) return;
-  await updateTodo(todoId, {
-    status: input.status,
-    sessionId: input.sessionId,
-    taskRunId: input.taskRunId ?? existing.taskRunId ?? null,
-    traceId: input.traceId,
-    requestId: input.requestId,
-    metadata: {
-      ...existing.metadata,
-      dispatchReady: false,
-      lastRun: {
-        ...(isRecord(existing.metadata.lastRun) ? existing.metadata.lastRun : {}),
-        event: input.event,
-        status: input.status,
-        sessionId: input.sessionId,
-        taskRunId: input.taskRunId ?? existing.taskRunId ?? null,
-        traceId: input.traceId,
-        requestId: input.requestId,
-        runSpecId: input.runSpecId ?? null,
-        reason: input.reason ?? null,
-        blockedVerificationRecordIds: input.blockedVerificationRecordIds ?? [],
-        updatedAt: new Date().toISOString(),
-      },
-    },
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function normalizeWorkspaceRoot(value: unknown, defaultWorkspaceRoot: string): string {
-  if (typeof value !== 'string') return defaultWorkspaceRoot;
-  const trimmed = value.trim();
-  return trimmed ? resolve(trimmed) : defaultWorkspaceRoot;
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeToolMode(value: unknown): ToolMode {
-  if (value === 'read-only' || value === 'project-write' || value === 'all') return value;
-  return 'project-write';
-}
-
-function normalizeAllowedTools(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tools = value
-    .map(item => typeof item === 'string' ? item.trim() : '')
-    .filter(Boolean);
-  return tools.length > 0 ? [...new Set(tools)] : undefined;
-}
-
-function normalizePositiveInteger(value: unknown): number | undefined {
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return undefined;
-    const int = Math.floor(parsed);
-    return int > 0 ? int : undefined;
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  const int = Math.floor(value);
-  return int > 0 ? int : undefined;
-}
-
-function normalizeToolRetry(value: unknown): ChatRequestBody['toolRetry'] | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const raw = value as Record<string, unknown>;
-  return {
-    maxAttempts: normalizePositiveInteger(raw.maxAttempts),
-    baseDelayMs: normalizeNonNegativeInteger(raw.baseDelayMs),
-    maxDelayMs: normalizeNonNegativeInteger(raw.maxDelayMs),
-  };
-}
-
-function normalizeMCPServers(
-  value: unknown,
-): Array<{ command: string; args?: string[]; env?: Record<string, string> }> | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const servers: Array<{ command: string; args?: string[]; env?: Record<string, string> }> = [];
-  for (const item of value) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const raw = item as Record<string, unknown>;
-    const command = typeof raw.command === 'string' ? raw.command.trim() : '';
-    if (!command) continue;
-    const server: { command: string; args?: string[]; env?: Record<string, string> } = { command };
-    if (Array.isArray(raw.args)) {
-      const args = raw.args
-        .map(a => typeof a === 'string' ? a.trim() : '')
-        .filter(Boolean);
-      if (args.length > 0) server.args = args;
-    }
-    if (raw.env && typeof raw.env === 'object' && !Array.isArray(raw.env)) {
-      const env: Record<string, string> = {};
-      for (const [k, v] of Object.entries(raw.env as Record<string, unknown>)) {
-        if (typeof v === 'string') env[k] = v;
-      }
-      if (Object.keys(env).length > 0) server.env = env;
-    }
-    servers.push(server);
-  }
-  return servers.length > 0 ? servers : undefined;
-}
-
-function normalizeNonNegativeInteger(value: unknown): number | undefined {
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return undefined;
-    const int = Math.floor(parsed);
-    return int >= 0 ? int : undefined;
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  const int = Math.floor(value);
-  return int >= 0 ? int : undefined;
 }

@@ -1,0 +1,166 @@
+/**
+ * Chat helpers — model helpers, history builder, stream row renderer.
+ * Extracted from chat-page.tsx.
+ */
+
+import type {
+  ProviderDiscovery, ProviderModelsResponse, ModelSettings,
+  SessionEvent, SessionEventsResponse,
+} from './api';
+
+export type StreamRow = {
+  id: string; event: string; message: string;
+  meta?: string; level?: 'normal' | 'ok' | 'warn' | 'error';
+};
+
+export type ProviderOption = {
+  id: string; label: string; source: string;
+  defaultModel: string; state: string; hasApiKey?: boolean;
+};
+
+export function buildProviderOptions(discovery?: ProviderDiscovery, routes?: ProviderModelsResponse): ProviderOption[] {
+  const results: ProviderOption[] = [];
+  const seen = new Set<string>();
+  for (const provider of routes?.providers ?? []) {
+    if (seen.has(provider.provider)) continue;
+    seen.add(provider.provider);
+    const disc = (discovery?.providers ?? []).find(d => d.provider === provider.provider || d.name === provider.provider);
+    results.push({
+      id: provider.provider, label: provider.provider,
+      source: provider.source ?? disc?.source ?? 'configured',
+      defaultModel: provider.model ?? disc?.defaultModel ?? 'unknown',
+      state: provider.ok ? 'ok' : (provider.error ?? 'unavailable'),
+      hasApiKey: provider.hasApiKey,
+    });
+  }
+  for (const disc of discovery?.providers ?? []) {
+    const name = String(disc.provider ?? disc.name ?? '');
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    results.push({
+      id: name, label: name,
+      source: String(disc.source ?? 'discovered'),
+      defaultModel: String(disc.defaultModel ?? disc.model ?? 'unknown'),
+      state: (disc.readiness as Record<string, unknown> | undefined)?.ready ? 'ready' : 'discovered',
+      hasApiKey: Boolean(disc.hasApiKey),
+    });
+  }
+  return results;
+}
+
+export function metadataText(value: unknown): string | null {
+  if (typeof value === 'string') { const t = value.trim(); return t || null; }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return null;
+}
+
+export function buildModelSettingsPayload(input: Record<keyof ModelSettings, string>): ModelSettings | undefined {
+  const out: Record<string, number> = {};
+  for (const key of ['temperature', 'topP', 'maxTokens', 'presencePenalty', 'frequencyPenalty'] as const) {
+    const v = (input as Record<string, string>)[key];
+    if (v !== undefined && v !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n)) out[key] = n;
+    }
+  }
+  return Object.keys(out).length > 0 ? (out as unknown as ModelSettings) : undefined;
+}
+
+export function parseCommaList(value: string): string[] | undefined {
+  const items = value.split(',').map(s => s.trim()).filter(Boolean);
+  return items.length > 0 ? [...new Set(items)] : undefined;
+}
+
+export function buildToolRetryPayload(input: { maxAttempts: string; baseDelayMs: string; maxDelayMs: string }) {
+  const maxAttempts = intOrUndef(input.maxAttempts);
+  const baseDelayMs = intOrUndef(input.baseDelayMs);
+  const maxDelayMs = intOrUndef(input.maxDelayMs);
+  if (maxAttempts === undefined && baseDelayMs === undefined && maxDelayMs === undefined) return undefined;
+  const r: Record<string, number> = {};
+  if (maxAttempts !== undefined) r.maxAttempts = maxAttempts;
+  if (baseDelayMs !== undefined) r.baseDelayMs = baseDelayMs;
+  if (maxDelayMs !== undefined) r.maxDelayMs = maxDelayMs;
+  return r;
+}
+
+function intOrUndef(v: string): number | undefined {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export function buildHistoryRows(
+  messages: Array<Record<string, unknown>>,
+  turns: Array<Record<string, unknown>>,
+): StreamRow[] {
+  const rows: StreamRow[] = [];
+  let turnIdx = 0;
+  for (const msg of messages) {
+    const role = String(msg.role ?? '');
+    if (role === 'system') continue;
+    if (role === 'user') {
+      const content = String(msg.content ?? '');
+      rows.push({ id: crypto.randomUUID(), event: 'user', message: content.length > 400 ? content.slice(0, 400) + '…' : content, level: 'normal' });
+    } else if (role === 'assistant') {
+      const toolCalls = Array.isArray(msg.tool_calls) ? (msg.tool_calls as Array<Record<string, unknown>>) : [];
+      const toolNames = toolCalls.map(tc => String((tc.function as Record<string, unknown> | undefined)?.name ?? '')).filter(Boolean);
+      const text = String(msg.content ?? '');
+      const turn = turns[turnIdx] as Record<string, unknown> | undefined;
+      const hasReasoning = turn?.reasoningContent && typeof turn.reasoningContent === 'string' && turn.reasoningContent.length > 0;
+      const metaParts: string[] = [];
+      if (toolNames.length > 0) metaParts.push(`tools: ${toolNames.join(', ')}`);
+      if (hasReasoning) metaParts.push('🧠');
+      rows.push({
+        id: crypto.randomUUID(), event: `T${turnIdx + 1}/${turns.length}`,
+        message: text.length > 250 ? text.slice(0, 250) + '…' : (text || (toolNames.length > 0 ? '(tool calls only)' : '(empty)')),
+        meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
+        level: toolNames.length > 0 ? 'warn' : 'ok',
+      });
+      turnIdx++;
+    } else if (role === 'tool') {
+      const content = String(msg.content ?? '');
+      const lastRow = rows[rows.length - 1];
+      if (lastRow && lastRow.event.startsWith('T')) {
+        const summary = content.length > 150 ? content.slice(0, 150) + '…' : content;
+        lastRow.meta = lastRow.meta ? `${lastRow.meta} → ${summary}` : summary;
+      }
+    }
+  }
+  rows.push({ id: crypto.randomUUID(), event: 'history.end', message: `${rows.length} prior messages shown. Send a prompt to continue.`, meta: `${turnIdx} turns in history`, level: 'ok' });
+  return rows;
+}
+
+export function appendLiveSessionEvent(
+  prev: SessionEventsResponse | undefined, sessionId: string, event: SessionEvent,
+): SessionEventsResponse {
+  if (!prev) return { sessionId, count: 1, events: [event] };
+  const existingIndex = prev.events.findIndex(item => item.id === event.id);
+  const events = existingIndex >= 0
+    ? prev.events.map(item => item.id === event.id ? event : item)
+    : [...prev.events, event];
+  events.sort((a, b) => a.id - b.id);
+  return { ...prev, events: events.slice(-200), count: existingIndex >= 0 ? prev.count : prev.count + 1 };
+}
+
+export function streamRow(event: string, data: Record<string, unknown>): StreamRow {
+  if (event === 'done') return { id: crypto.randomUUID(), event, message: typeof data.text === 'string' ? data.text : 'Run completed.', meta: data.sessionId ? `session ${data.sessionId}` : undefined, level: 'ok' };
+  if (event === 'error') return { id: crypto.randomUUID(), event, message: String(data.message ?? 'stream error'), level: 'error' };
+  if (event === 'session.resumed') {
+    const tps = Array.isArray(data.turnPreviews) ? (data.turnPreviews as Array<Record<string, unknown>>) : [];
+    const lines = tps.slice(0, 8).map(tp => {
+      return `T${tp.loop ?? '?'}: ${String(tp.text ?? '').slice(0, 60)}${Array.isArray(tp.tools) && (tp.tools as string[]).length ? ` [${(tp.tools as string[]).join(',')}]` : ''}`;
+    });
+    const more = tps.length > 8 ? ` (+${tps.length - 8} more)` : '';
+    return { id: crypto.randomUUID(), event, message: `Resumed session (${data.turnCount ?? '?'} turns, ${data.messageCount ?? '?'} msgs)`, meta: lines.length > 0 ? lines.join(' | ') + more : `last task ${String(data.resumeLastTaskRunId ?? 'none')}`, level: 'ok' };
+  }
+  if (event === 'session.branch') return { id: crypto.randomUUID(), event: 'branch', message: String(data.message ?? data), level: 'ok' };
+  if (event === 'session.branched') return { id: crypto.randomUUID(), event, message: `Branched from ${String(data.parentSessionId ?? 'unknown')}${data.branchAtTurn ? ` at turn ${data.branchAtTurn}` : ''}`, meta: `${data.copiedMessageCount ?? data.messageCount ?? '?'} messages copied`, level: 'ok' };
+  if (event === 'session.loading') return { id: crypto.randomUUID(), event: 'session', message: String(data.message ?? data), level: 'normal' };
+  if (event === '---') return { id: crypto.randomUUID(), event, message: String(data.message ?? data), meta: String(data.meta ?? ''), level: 'normal' };
+  if (event === 'history.end') return { id: crypto.randomUUID(), event: '---', message: String(data.message ?? data), meta: String(data.meta ?? ''), level: 'ok' };
+  if (event === 'session.resume_state') return { id: crypto.randomUUID(), event, message: 'Loaded session resume state.', meta: JSON.stringify(data), level: 'normal' };
+  if (event === 'model.delta') return { id: crypto.randomUUID(), event, message: String(data.text ?? data.delta ?? ''), meta: [data.provider, data.model].filter(Boolean).join(' / ') };
+  if (event === 'turn') return { id: crypto.randomUUID(), event, message: String(data.text ?? 'model turn'), meta: `loop ${String(data.loopCount ?? '?')} · tools ${Array.isArray(data.toolNames) ? data.toolNames.join(', ') || 'none' : '?'}` };
+  if (event === 'tool_call') return { id: crypto.randomUUID(), event, message: String(data.tool ?? 'tool call'), meta: String(data.args ?? ''), level: 'warn' };
+  if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? 'task event'), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
+  return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };
+}
