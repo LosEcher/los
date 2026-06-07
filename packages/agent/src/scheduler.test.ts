@@ -550,6 +550,235 @@ test('scheduler blocks run spec completion when verifier is required but missing
   }
 });
 
+test('scheduler runs verifier graph tasks through verification records', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-verifier-runner-${suffix}`;
+  const sessionId = `session-verifier-runner-${suffix}`;
+  const runSpecId = `run-verifier-runner-${suffix}`;
+  const nodeId = `test-verifier-runner-executor-${suffix}`;
+  const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("console.log('dag verify ok')")}`;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    await readRequestBody(req);
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: 'executor task succeeded before verifier',
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'run graph with verifier task',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+      runContract: {
+        mode: 'closeout',
+        requiredChecks: [command],
+      },
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute before verifier',
+      prompt: 'exec prompt',
+      priority: 10,
+    });
+    await createAgentTask({
+      id: `${graphId}-verify`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'verifier',
+      title: 'Verify graph result',
+      priority: 20,
+    });
+    await linkAgentTaskDependency({
+      graphId,
+      taskId: `${graphId}-verify`,
+      dependsOnTaskId: `${graphId}-exec`,
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      runSpecId,
+      sessionId,
+      requireVerifier: true,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+      timeoutMs: 5_000,
+    });
+
+    assert.deepEqual(result.executedTasks.map(task => task.taskId), [`${graphId}-exec`, `${graphId}-verify`]);
+    assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded']);
+    assert.equal(result.executedTasks[1]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.equal(result.completion.status, 'succeeded');
+    assert.equal(result.completion.canComplete, true);
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'succeeded');
+
+    const attempts = await listAgentTaskAttempts(`${graphId}-verify`);
+    assert.equal(attempts[0]?.status, 'succeeded');
+    assert.equal(attempts[0]?.verificationRecordId, `verification-${runSpecId}-1`);
+
+    const events = await listSessionEvents(sessionId, 100);
+    assert.ok(events.some(event => event.type === 'verification.succeeded'));
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
+test('scheduler blocks graph completion when verifier graph task fails checks', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-verifier-failure-${suffix}`;
+  const sessionId = `session-verifier-failure-${suffix}`;
+  const runSpecId = `run-verifier-failure-${suffix}`;
+  const nodeId = `test-verifier-failure-executor-${suffix}`;
+  const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("console.error('dag verify failed'); process.exit(7)")}`;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    await readRequestBody(req);
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: 'executor task succeeded before failing verifier',
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'run graph with failing verifier task',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+      runContract: {
+        mode: 'closeout',
+        requiredChecks: [command],
+      },
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute before verifier failure',
+      prompt: 'exec prompt',
+      priority: 10,
+    });
+    await createAgentTask({
+      id: `${graphId}-verify`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'verifier',
+      title: 'Verify graph result fails',
+      priority: 20,
+    });
+    await linkAgentTaskDependency({
+      graphId,
+      taskId: `${graphId}-verify`,
+      dependsOnTaskId: `${graphId}-exec`,
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      runSpecId,
+      sessionId,
+      requireVerifier: true,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+      timeoutMs: 5_000,
+    });
+
+    assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'failed']);
+    assert.equal(result.executedTasks[1]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.equal(result.completion.status, 'blocked');
+    assert.equal(result.completion.blockReason, 'verifier_required');
+    assert.deepEqual(result.completion.failedVerifierTaskIds, [`${graphId}-verify`]);
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'blocked');
+
+    const attempts = await listAgentTaskAttempts(`${graphId}-verify`);
+    assert.equal(attempts[0]?.status, 'failed');
+    assert.equal(attempts[0]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.match(attempts[0]?.outputSummary ?? '', /verification blocked/);
+
+    const events = await listSessionEvents(sessionId, 100);
+    assert.ok(events.some(event => event.type === 'verification.failed'));
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 function listen(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once('error', reject);

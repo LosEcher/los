@@ -80,8 +80,12 @@ inspection, completion decision reporting, and a conservative scheduler entry
 that claims and runs one ready task at a time for a single graph. When that
 entry is run with `requireVerifier`, missing verifier success now blocks the
 linked `run_specs` row instead of allowing a false succeeded transition.
+Verifier tasks claimed by the scheduler now execute the linked run spec's
+`verification_records` through the verifier runner, attach the verification
+record id to the task attempt, and keep failed required checks in a blocked
+completion state.
 
 Remaining runtime promotion work is still separate: parallel execution,
-editable-surface conflict checks, richer verifier-owned execution transitions,
-and UI read models should be added only after they can preserve the same
-evidence boundary.
+editable-surface conflict checks, automatic recovery follow-up attempts, and UI
+read models should be added only after they can preserve the same evidence
+boundary.

@@ -43,6 +43,7 @@ export interface AgentTaskGraphCompletion {
   blockedTaskIds: string[];
   runningTaskIds: string[];
   failedTaskIds: string[];
+  failedVerifierTaskIds: string[];
   cancelledTaskIds: string[];
   verifierTaskIds: string[];
   succeededVerifierTaskIds: string[];
@@ -103,6 +104,7 @@ export function summarizeAgentTaskGraph(
   const blockedTaskIds: string[] = [];
   const runningTaskIds: string[] = [];
   const failedTaskIds: string[] = [];
+  const failedVerifierTaskIds: string[] = [];
   const cancelledTaskIds: string[] = [];
   const verifierTaskIds: string[] = [];
   const succeededVerifierTaskIds: string[] = [];
@@ -110,6 +112,7 @@ export function summarizeAgentTaskGraph(
   for (const task of tasks) {
     if (task.role === 'verifier') verifierTaskIds.push(task.id);
     if (task.role === 'verifier' && task.status === 'succeeded') succeededVerifierTaskIds.push(task.id);
+    if (task.role === 'verifier' && task.status === 'failed') failedVerifierTaskIds.push(task.id);
     if (task.status === 'running') runningTaskIds.push(task.id);
     if (task.status === 'failed') failedTaskIds.push(task.id);
     if (task.status === 'cancelled') cancelledTaskIds.push(task.id);
@@ -150,6 +153,9 @@ export function summarizeAgentTaskGraph(
   if (blockedTaskIds.length > 0) {
     return completion('blocked', false, 'failed dependency blocks downstream tasks', 'dependency_failure');
   }
+  if (failedVerifierTaskIds.length > 0) {
+    return completion('blocked', false, 'verifier task failed required checks', 'verifier_required');
+  }
   if (failedTaskIds.length > 0 || cancelledTaskIds.length > 0) {
     return completion('failed', false, 'terminal task failure requires retry or operator action');
   }
@@ -185,6 +191,7 @@ export function summarizeAgentTaskGraph(
       blockedTaskIds,
       runningTaskIds,
       failedTaskIds,
+      failedVerifierTaskIds,
       cancelledTaskIds,
       verifierTaskIds,
       succeededVerifierTaskIds,

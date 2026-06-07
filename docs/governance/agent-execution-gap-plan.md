@@ -312,8 +312,8 @@ Validation:
 
 ### Phase 4: Recovery And Verifier Runner
 
-Status: P0 core plus API/CLI operation surfaces are implemented; automatic
-retry/resume orchestration remains.
+Status: P0 core plus API/CLI operation surfaces and DAG verifier task execution
+are implemented; automatic retry/resume orchestration remains.
 
 Deliverables:
 
@@ -334,7 +334,9 @@ Current 2026-06-07 update:
 3. The scheduler now blocks graph run completion and writes
    `run.recovery_required` when durable tool state needs retry, resume, cancel,
    or operator attention.
-4. Operation evidence is recorded in
+4. Scheduler DAG verifier tasks now run `verification_records` through the
+   same verifier runner used by `POST /runs/:id/verify` and `los run verify`.
+5. Operation evidence is recorded in
    `docs/operations/2026-06-07-run-verification-recovery-smoke.md`.
 
 Validation:
@@ -380,10 +382,9 @@ Validation:
 
 ## Immediate Next Work
 
-1. Promote verifier tasks into the DAG scheduler for multi-step graph runs.
-2. Extend recovery from scheduler completion protection into automatic
+1. Extend recovery from scheduler completion protection into automatic
    retry/resume/cancel follow-up attempts.
-3. Decide whether `los provider promote` should remain instructional only or
+2. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
-4. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
+3. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.
