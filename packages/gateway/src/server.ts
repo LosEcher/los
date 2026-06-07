@@ -29,6 +29,7 @@ import { registerTodoRoutes } from './todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './agent-task-graph-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
+import { findRecoverableSessions } from './chat-session-helpers.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
@@ -595,6 +596,17 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       metadata: { ...metadata, imported: true, importedAt: new Date().toISOString() },
     });
     return { ok: true, id: body.id };
+  });
+
+  app.get('/sessions/recoverable', async (req) => {
+    const query = req.query as { limit?: string };
+    const limit = normalizeBoundedInteger(query.limit, 50, 1, 200);
+    const sessions = await findRecoverableSessions({ limit });
+    return {
+      count: sessions.length,
+      sessions,
+      hint: 'Use POST /chat with sessionId to resume. GET /sessions/:id/events/stream replays missed events.',
+    };
   });
 
   app.get('/sessions/:id/events', async (req) => {

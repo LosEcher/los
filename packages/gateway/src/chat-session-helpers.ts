@@ -9,6 +9,7 @@ import { listTaskRunsForSession } from '@los/agent/task-runs';
 import { listRecentSessionEvents } from '@los/agent/session-events';
 import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
 import { loadSession } from '@los/agent/session';
+import { listRunSpecs, type RunSpecRecord } from '@los/agent/run-specs';
 import type { Message } from '@los/agent';
 
 // ── Replay event normalization ──────────────────────────
@@ -98,6 +99,66 @@ export async function updateBoundTodoFromRun(todoId: string, input: BoundTodoUpd
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+// ── Session recovery (cross-gateway failover) ────────────
+
+export interface RecoverableSession {
+  sessionId: string;
+  lastCheckpointAt: string | null;
+  messageCount: number;
+  turnCount: number;
+  incompleteRunSpecs: Array<{
+    id: string;
+    status: string;
+    prompt: string;
+    createdAt: string;
+  }>;
+  lastEventId: number | null;
+  recentEventCount: number;
+}
+
+export async function findRecoverableSessions(opts?: {
+  limit?: number;
+}): Promise<RecoverableSession[]> {
+  const limit = opts?.limit ?? 50;
+  const activeRunSpecs = await listRunSpecs(500);
+  const incomplete = activeRunSpecs.filter(
+    r => r.status === 'failed' || r.status === 'cancelled' || r.status === 'blocked' || r.status === 'running',
+  );
+
+  const seen = new Set<string>();
+  const results: RecoverableSession[] = [];
+
+  for (const spec of incomplete) {
+    if (!spec.sessionId || seen.has(spec.sessionId)) continue;
+    seen.add(spec.sessionId);
+
+    const session = await loadSession(spec.sessionId).catch(() => null);
+    if (!session || session.messages.length === 0) continue;
+
+    const sessionIncomplete = incomplete.filter(r => r.sessionId === spec.sessionId);
+    const recentEvents = await listRecentSessionEvents(spec.sessionId, 10).catch(() => [] as SessionEventRecord[]);
+
+    results.push({
+      sessionId: spec.sessionId,
+      lastCheckpointAt: session.updatedAt,
+      messageCount: session.messages.length,
+      turnCount: session.turns.length,
+      incompleteRunSpecs: sessionIncomplete.map(r => ({
+        id: r.id,
+        status: r.status ?? 'unknown',
+        prompt: r.prompt ?? '',
+        createdAt: r.createdAt,
+      })),
+      lastEventId: recentEvents.at(-1)?.id ?? null,
+      recentEventCount: recentEvents.length,
+    });
+
+    if (results.length >= limit) break;
+  }
+
+  return results;
 }
 
 // ── Branch source loading ────────────────────────────────
