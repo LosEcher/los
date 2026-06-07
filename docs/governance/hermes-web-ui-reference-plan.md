@@ -210,3 +210,7 @@ changes. The first slice should:
 
 This keeps the immediate change reversible while giving future runtime changes
 a concrete place to record behavior impact.
+
+Status on 2026-06-07: started in
+`docs/governance/run-chain-changes/` with an initial fragment for
+`feat/agent-enhancements`.
