@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
   Archive,
+  BarChart3,
   Boxes,
   Brain,
   ClipboardList,
@@ -31,6 +32,7 @@ import { ServicesPage } from './service-page';
 import { ArtifactsPage } from './artifact-page';
 import { SkillsPage } from './skills-page';
 import { RulesPage } from './rules-page';
+import { EvalsPage } from './evals-page';
 import { LogsPage, SettingsPage } from './secondary-pages';
 import { formatDuration, StatusPill, type StatusState } from './ui';
 
@@ -46,6 +48,7 @@ type PageId =
   | 'services'
   | 'artifacts'
   | 'rules'
+  | 'evals'
   | 'nodes'
   | 'logs'
   | 'settings';
@@ -71,6 +74,7 @@ const NAV: NavItem[] = [
   { id: 'services', label: 'Services', icon: Activity, status: 'live' },
   { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live' },
   { id: 'rules', label: 'Rules', icon: Shield, status: 'live' },
+  { id: 'evals', label: 'Evals', icon: BarChart3, status: 'partial', section: 'Quality' },
   { id: 'nodes', label: 'Nodes', icon: Network, status: 'partial', section: 'Infra' },
   { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live' },
   { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
@@ -203,6 +207,7 @@ export function App() {
         {page === 'services' && <ServicesPage />}
         {page === 'artifacts' && <ArtifactsPage />}
         {page === 'rules' && <RulesPage />}
+        {page === 'evals' && <EvalsPage />}
         {page === 'nodes' && <NodesPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
