@@ -44,7 +44,7 @@ compatibility or verifier records.
 | Runtime replay and audit | `/runs/:id/events?since=`, `tool_call_states`, `verification_records`, and runtime evidence graph exist | Transcript/command summary is external | Transcript/project jsonl is external | Receipts may be truncated | Prompt history is external | Use runtime evidence graph as the los-owned audit surface |
 | Verification gate | DAG gate, direct `/chat` blocking, API/CLI verifier entrypoints, DAG verifier tasks, and `verification-runner` required-check execution exist | Human/agent runs commands and reports | Human/agent runs commands and reports | May record plan/receipt | May record task status | Keep verifier evidence linked to runtime evidence graph |
 | Recovery and resume | `tool-call-recovery` classifies retry/resume/cancel/operator-action decisions from durable tool rows; scheduler queues retry/resume follow-up attempts; API/CLI can apply cancel/operator-attention transitions | Good human-directed recovery, not los ledger | Good interactive recovery, not los ledger | Good planning state ideas | Useful task UX reference | Keep transition events auditable and expose recovery state through bounded read models |
-| External tool ingestion | External-only unless ADR defines redaction/provenance | Source of bounded summaries only | Source of bounded summaries only | Source of comparison ideas only | Source of comparison ideas only | Draft ingestion ADR only after verifier/recovery state is stable |
+| External tool ingestion | ADR 0019 allows `external_tool_summaries` imports for redacted `external_summary` records only | Source of bounded summaries only | Source of bounded summaries only | Source of comparison ideas only | Source of comparison ideas only | Keep imports isolated from runtime replay and provider compatibility evidence |
 | Provider compatibility | Compatibility evidence exists, `los provider promote` remains setup-only, and required-gate decisions have separate proposed/enforced states | Can run checks externally | Login/readiness can be misleading | Not provider authority | Not provider authority | Keep enforced policy changes tied to ADR, harness, target-list behavior, and operation evidence |
 
 ## Promotion Gates
@@ -69,6 +69,5 @@ Use this matrix to order the execution-gap todos:
    bounded parallel execution exist;
 2. keep provider policy enforcement evidence current when required-target
    decisions move from proposed to enforced;
-3. decide the external summary ingestion ADR before adding DB tables or import
-   routes for Codex, Claude Code,
-   Reasonix, OpenCode, and OMX.
+3. keep ADR 0019 external summary imports bounded, redacted, and separate from
+   runtime replay evidence.

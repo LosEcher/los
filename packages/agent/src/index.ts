@@ -197,13 +197,18 @@ export {
   type RecordProviderPromotionDecisionInput,
 } from './provider-promotion-decisions.js';
 export {
+  ensureExternalToolSummaryStore,
+  importExternalToolSummary,
+  listExternalToolSummaries,
   normalizeExternalToolSummary,
   redactExternalSummaryText,
   type ExternalAgentTool,
   type ExternalSummaryEvidenceInput,
   type ExternalSummarySourceKind,
+  type ExternalToolSummaryRecord,
   type ExternalToolSummary,
   type ExternalToolSummaryInput,
+  type ListExternalToolSummariesOptions,
 } from './external-tool-summary.js';
 export {
   claimReadyAgentTasks,

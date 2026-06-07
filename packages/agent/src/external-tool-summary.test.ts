@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeExternalToolSummary } from './external-tool-summary.js';
+import { loadConfig } from '@los/infra/config';
+import { closeDb, getDb, initDb } from '@los/infra/db';
+import {
+  importExternalToolSummary,
+  listExternalToolSummaries,
+  normalizeExternalToolSummary,
+} from './external-tool-summary.js';
 
 const BASE_TIME = '2026-06-05T12:00:00.000Z';
 
@@ -86,4 +92,53 @@ test('external tool summary adapter rejects raw transcript-shaped fields', () =>
     } as never),
     /rejects raw field: input\.evidence\[0\]\.stdout/,
   );
+});
+
+test('external tool summaries persist only redacted external_summary records', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const id = `external-summary-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const record = await importExternalToolSummary({
+      id,
+      tool: 'codex',
+      toolVersion: 'desktop-2026.06',
+      source: {
+        kind: 'operator_summary',
+        sourceRef: `operator-note:${id}`,
+        cwd: '/repo/projects/los',
+        capturedAt: BASE_TIME,
+      },
+      provenance: {
+        collectedAt: BASE_TIME,
+        capturePolicy: 'bounded-summary-only',
+        redactionPolicy: 'no raw prompt/stdout/stderr/auth snapshots',
+        importedBy: 'test',
+      },
+      summary: 'Codex inspected current status and saw fake key sk-test1234567890.',
+      findings: ['External summary should not become session replay evidence.'],
+      evidence: [
+        { label: 'status', kind: 'command', value: 'jj status' },
+      ],
+      metrics: { commands: 3 },
+      labels: ['codex', 'closeout'],
+      retentionDays: 30,
+    });
+
+    assert.equal(record.id, id);
+    assert.equal(record.evidenceClass, 'external_summary');
+    assert.equal(record.redaction.status, 'redacted');
+    assert.ok(!record.summary.includes('sk-test1234567890'));
+    assert.ok(record.sourceHash.length >= 32);
+    assert.ok(record.retentionExpiresAt);
+
+    const listed = await listExternalToolSummaries({ tool: 'codex', limit: 10 });
+    const loaded = listed.find(item => item.id === id);
+    assert.equal(loaded?.evidenceClass, 'external_summary');
+    assert.equal(loaded?.source.sourceRef, `operator-note:${id}`);
+    assert.deepEqual(loaded?.labels, ['codex', 'closeout']);
+  } finally {
+    await getDb().query('DELETE FROM external_tool_summaries WHERE id = $1', [id]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
 });

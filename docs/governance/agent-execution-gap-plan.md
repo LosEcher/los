@@ -363,7 +363,7 @@ Validation:
 
 ### Phase 5: External Tool Comparison Adapter
 
-Timeframe: after toolchain matrix and eval backlog are stable.
+Status: bounded ingestion implemented under ADR 0019.
 
 Deliverables:
 
@@ -371,6 +371,17 @@ Deliverables:
 2. Optional import path for summarized Codex/Claude/Reasonix/OMX run facts.
 3. Provenance fields: tool, version, cwd, source file, capture policy, redaction
    policy.
+
+Current 2026-06-07 update:
+
+1. `external_tool_summaries` stores only normalized `external_summary` records.
+2. `POST /external-summaries` imports bounded summaries and rejects raw
+   transcript-shaped fields.
+3. `GET /external-summaries` lists non-expired external summaries.
+4. `los external-summaries import --file summary.json` and
+   `los external-summaries list` expose the operator path.
+5. Imports do not write to `session_events`, `task_runs`, `run_specs`,
+   `verification_records`, or provider compatibility evidence.
 
 Validation:
 

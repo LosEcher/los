@@ -10,8 +10,9 @@ redaction, provenance, and retention.
 
 ## Current State
 
-`packages/agent/src/external-tool-summary.ts` defines the first adapter layer.
-It is intentionally a normalization and rejection layer, not a DB writer.
+`packages/agent/src/external-tool-summary.ts` defines the adapter and bounded
+ingestion layer. ADR 0019 allows a dedicated `external_tool_summaries` table
+and `/external-summaries` import route for redacted summaries only.
 
 Accepted input:
 
@@ -37,6 +38,10 @@ records how many replacements happened. The output is always labeled
 `task_runs`, `session_events`, `run_specs`, `verification_records`, or provider
 compatibility evidence.
 
+Persisted summaries live only in `external_tool_summaries`. Imports may include
+`retentionDays`; listing routes hide expired records by default. The route and
+CLI do not write to runtime evidence tables.
+
 ## Tool Comparison Boundary
 
 | Tool | Allowed summary use | Not allowed |
@@ -59,13 +64,16 @@ Executable checks:
 3. `packages/agent/src/eval-backlog.test.ts` keeps E04 and E17 present in the
    eval backlog with required evidence and passing patterns.
 
-## Next Promotion Gate
+## Ingestion Contract
 
-Do not add a DB table or import route until a follow-up ADR answers:
+ADR 0019 answers the promotion gate:
 
-1. where external summaries live;
-2. how source authenticity is verified;
-3. which fields are queryable;
-4. how retention and deletion work;
-5. how imported summaries are prevented from overwriting `los` runtime
-   evidence.
+1. external summaries live in `external_tool_summaries`;
+2. provenance records source kind, source reference, tool, version, cwd,
+   capture policy, redaction policy, importer, and source hash;
+3. tool, source kind, labels, metrics, redaction status, and timestamps are
+   queryable;
+4. retention is represented by optional `retentionExpiresAt`;
+5. imports cannot overwrite `los` runtime evidence because they do not touch
+   `session_events`, `task_runs`, `run_specs`, `verification_records`, or
+   provider compatibility tables.

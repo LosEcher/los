@@ -2,6 +2,7 @@
 
 import { artifactsCommand } from './artifacts.js';
 import { compatCommand } from './compat.js';
+import { externalSummariesCommand } from './external-summaries.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
 import { providerCommand } from './provider.js';
@@ -58,6 +59,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'provider') {
     await providerCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'external-summaries' || command === 'external-summary') {
+    await externalSummariesCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'health') {
@@ -607,6 +612,7 @@ Usage:
   los run <inspect|state|recover|verify> <run-id> [options]
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
+  los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
   los sessions [--gateway URL] [--json]
@@ -650,6 +656,10 @@ Compat:
 Artifacts:
   list | put | get | delete
   Run "los artifacts --help" for artifact transfer options.
+
+External summaries:
+  list | import --file summary.json
+  Import redacted external tool summaries without making them runtime replay evidence.
 
 Nodes:
   list | commands | command

@@ -38,6 +38,8 @@ import {
   enforceProviderPromotionDecision,
   recordProviderPromotionDecision,
   applyToolCallRecoveryTransitionForRunSpec,
+  importExternalToolSummary,
+  listExternalToolSummaries,
   readRunStateProjection,
   listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
@@ -183,6 +185,29 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
         actor: normalizeOptionalString(body.actor),
       });
       return { decision };
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/external-summaries', async (req) => {
+    const query = req.query as { tool?: string; sourceKind?: string; limit?: string; includeExpired?: string };
+    const summaries = await listExternalToolSummaries({
+      tool: normalizeOptionalString(query.tool),
+      sourceKind: normalizeOptionalString(query.sourceKind),
+      limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+      includeExpired: query.includeExpired === 'true',
+    });
+    return {
+      count: summaries.length,
+      summaries,
+    };
+  });
+
+  app.post('/external-summaries', async (req, reply) => {
+    try {
+      const summary = await importExternalToolSummary(req.body as never);
+      return reply.status(201).send({ summary });
     } catch (err) {
       return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
     }
