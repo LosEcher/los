@@ -349,7 +349,13 @@ export function ChatPage({
           onSessionSelect(data.sessionId);
         }
         if (typeof data.taskRunId === 'string') setTaskRunId(data.taskRunId);
-        setRows(prev => [...prev, streamRow(event, data)]);
+        const suppressed = new Set([
+          'session.started', 'session.completed', 'tool.catalog',
+          'model.turn.started', 'tool.planned', 'tool.approved',
+        ]);
+        if (!suppressed.has(event)) {
+          setRows(prev => [...prev, streamRow(event, data)]);
+        }
       });
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {

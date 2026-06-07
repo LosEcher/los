@@ -56,21 +56,22 @@ type NavItem = {
   icon: typeof MessageSquare;
   status: StatusState;
   badge?: number;
+  section?: string;
 };
 
 const NAV: NavItem[] = [
   { id: 'chat', label: 'Chat', icon: MessageSquare, status: 'live' },
-  { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live' },
+  { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live', section: 'Evidence' },
   { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live' },
   { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live' },
   { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live' },
-  { id: 'providers', label: 'Providers', icon: Brain, status: 'partial' },
+  { id: 'providers', label: 'Providers', icon: Brain, status: 'partial', section: 'Resources' },
   { id: 'skills', label: 'Skills', icon: Zap, status: 'live' },
   { id: 'mcp', label: 'MCP', icon: Server, status: 'live' },
   { id: 'services', label: 'Services', icon: Activity, status: 'live' },
   { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live' },
   { id: 'rules', label: 'Rules', icon: Shield, status: 'live' },
-  { id: 'nodes', label: 'Nodes', icon: Network, status: 'partial' },
+  { id: 'nodes', label: 'Nodes', icon: Network, status: 'partial', section: 'Infra' },
   { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live' },
   { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
 ];
@@ -143,23 +144,27 @@ export function App() {
         </div>
 
         <nav className="nav-list" aria-label="Primary">
-          {NAV.map(item => {
+          {NAV.map((item, idx) => {
             const Icon = item.icon;
+            const prev = idx > 0 ? NAV[idx - 1] : null;
+            const showSection = item.section && (!prev || prev.section !== item.section);
             return (
-              <button
-                key={item.id}
-                type="button"
-                className="nav-item"
-                data-active={page === item.id}
-                onClick={() => navigate(item.id)}
-              >
-                <Icon size={16} />
-                <span>{item.label}</span>
-                {item.id === 'sessions' && sessionCount.data !== undefined ? (
-                  <span className="nav-badge">{sessionCount.data}</span>
-                ) : null}
-                <StatusPill status={item.status} />
-              </button>
+              <div key={item.id}>
+                {showSection ? <div className="nav-section">{item.section}</div> : null}
+                <button
+                  type="button"
+                  className="nav-item"
+                  data-active={page === item.id}
+                  onClick={() => navigate(item.id)}
+                >
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                  {item.id === 'sessions' && sessionCount.data !== undefined ? (
+                    <span className="nav-badge">{sessionCount.data}</span>
+                  ) : null}
+                  <StatusPill status={item.status} />
+                </button>
+              </div>
             );
           })}
         </nav>

@@ -143,6 +143,18 @@ code,
   gap: 2px;
 }
 
+.nav-section {
+  color: var(--faint);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 14px 10px 4px;
+}
+
+.nav-section:first-child {
+  padding-top: 4px;
+}
+
 .nav-item {
   width: 100%;
   color: var(--muted);
@@ -1328,9 +1340,10 @@ button:disabled {
   color: var(--muted);
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 12px;
-  line-height: 1.5;
+  max-height: 200px;
+  overflow: auto;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
 }
 
 .inline-actions {
