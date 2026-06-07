@@ -293,13 +293,21 @@ function SessionInspector({
         </div>
       ) : null}
       <div className="event-timeline">
-        {(events.data?.events ?? []).slice(-80).map(event => (
-          <div className="event-line" key={event.id}>
-            <span>{formatTime(event.createdAt)}</span>
-            <strong>{event.type}</strong>
-            <em>{event.toolName ?? event.model ?? event.source}</em>
-          </div>
-        ))}
+        {(events.data?.events ?? []).slice(-80).map((event, idx, arr) => {
+          const category = eventCategory(event.type);
+          const isNewTurn = idx === 0 || event.turn !== (arr[idx - 1]?.turn ?? 0);
+          const payloadSummary = eventPayloadSummary(event);
+          return (
+            <div className={`event-line${isNewTurn ? ' turn-break' : ''}`} data-category={category} key={event.id}>
+              <span className="event-time">{formatTime(event.createdAt)}</span>
+              <span className={`event-dot ${category}`} />
+              <strong>{event.type}</strong>
+              {event.toolName ? <em>{event.toolName}</em> : null}
+              {event.model ? <em className="event-model">{event.model}</em> : null}
+              {payloadSummary ? <span className="event-summary">{payloadSummary}</span> : null}
+            </div>
+          );
+        })}
       </div>
       <div className="section-divider">
         <div className="mini-timeline-head">
@@ -318,6 +326,30 @@ function SessionInspector({
       </div>
     </aside>
   );
+}
+
+function eventCategory(type: string): string {
+  if (type.startsWith('session.')) return 'session';
+  if (type.startsWith('model.')) return 'model';
+  if (type.startsWith('tool.')) return 'tool';
+  if (type.startsWith('task.')) return 'task';
+  return 'other';
+}
+
+function eventPayloadSummary(event: { payload?: Record<string, unknown> }): string | null {
+  const p = event.payload;
+  if (!p) return null;
+  if (typeof p.textPreview === 'string' && p.textPreview) return p.textPreview.slice(0, 60);
+  if (typeof p.contentPreview === 'string' && p.contentPreview) return p.contentPreview.slice(0, 60);
+  if (typeof p.toolCalls === 'object') {
+    const calls = p.toolCalls as Array<Record<string, unknown>>;
+    if (Array.isArray(calls) && calls.length > 0) {
+      return calls.map(c => String(c.name ?? '?')).join(', ');
+    }
+  }
+  if (typeof p.callId === 'string') return `call: ${p.callId.slice(0, 12)}`;
+  if (typeof p.argsPreview === 'string') return p.argsPreview.slice(0, 60);
+  return null;
 }
 
 function buildRelatedTodoUrls(sessionId: string | null, metadata: Record<string, unknown>): string[] {

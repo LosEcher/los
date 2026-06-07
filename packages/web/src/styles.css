@@ -1068,11 +1068,18 @@ button:disabled {
 
 .event-line {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgb(57 61 49 / 0.5);
+  grid-template-columns: 52px 8px minmax(0, 1fr);
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgb(57 61 49 / 0.3);
   font-size: 12px;
+  align-items: baseline;
+}
+
+.event-line.turn-break {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 8px;
 }
 
 .event-line span {
@@ -1081,13 +1088,41 @@ button:disabled {
 
 .event-line strong {
   color: var(--text);
+  font-size: 11px;
 }
 
 .event-line em {
-  grid-column: 2;
   color: var(--muted);
   font-style: normal;
+  font-size: 11px;
 }
+
+.event-line .event-model {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.event-line .event-summary {
+  grid-column: 3;
+  color: var(--faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 3px;
+}
+
+.event-dot.session { background: var(--ok); }
+.event-dot.model   { background: rgb(59 130 246); }
+.event-dot.tool    { background: var(--warn); }
+.event-dot.task    { background: rgb(168 85 247); }
+.event-dot.other   { background: var(--faint); }
 
 .memory-row {
   grid-template-columns: minmax(0, 1fr) auto;
