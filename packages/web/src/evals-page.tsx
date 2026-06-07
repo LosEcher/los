@@ -274,7 +274,20 @@ function DeltaCard({ label, base, cand, delta, pct, ms, fixed, cost }: {
   };
   const baseFmt = fmt(base);
   const candFmt = fmt(cand);
-  const deltaVal = delta ?? 0;
+  if (delta === undefined || delta === null) {
+    return (
+      <div className="metric-card">
+        <div className="metric-card-label">{label}</div>
+        <div className="metric-card-value">
+          <span className="delta-from">{baseFmt}</span>
+          <span>→</span>
+          <span className="delta-to">{candFmt}</span>
+        </div>
+        <div className="metric-card-delta">Δ n/a</div>
+      </div>
+    );
+  }
+  const deltaVal = delta;
   const improved = pct ? deltaVal > 0 : (ms || cost ? deltaVal < 0 : deltaVal < 0);
   const worsened = pct ? deltaVal < 0 : (ms || cost ? deltaVal > 0 : deltaVal > 0);
 

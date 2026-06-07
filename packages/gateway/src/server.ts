@@ -44,6 +44,7 @@ import {
   listRunEvals,
   listExternalToolSummaries,
   recordRunEval,
+  ensureRunEvalStore,
   readRunStateProjection,
   listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
@@ -262,6 +263,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     const body = asRecord(req.body);
     const success = parseOptionalBoolean(body.success);
     if (success === undefined) return reply.status(422).send({ error: 'success is required' });
+    const failoverScope = normalizeOptionalString(body.failoverScope);
+    if (failoverScope !== undefined && failoverScope !== 'service' && failoverScope !== 'executor') {
+      return reply.status(422).send({ error: 'failoverScope must be service, executor, or omitted' });
+    }
     try {
       const evaluation = await recordRunEval({
         id: normalizeOptionalString(body.id),
@@ -522,12 +527,14 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     return await getStats();
   });
 
-  app.post('/memory/compact', async (req) => {
+  app.post('/memory/compact', async (req, reply) => {
     const body = req.body as { sessionId?: string; runSpecId?: string };
     const sessionId = normalizeOptionalString(body.sessionId);
-    if (!sessionId) return { error: 'sessionId is required' };
+    if (!sessionId) return reply.status(422).send({ error: 'sessionId is required' });
     const context = getRequestContext(req);
     await ensureMemoryCompactionStore();
+    await ensureRunEvalStore();
+    await ensureTaskRunStore();
     const compaction = await compactSession({
       sessionId,
       runSpecId: normalizeOptionalString(body.runSpecId),

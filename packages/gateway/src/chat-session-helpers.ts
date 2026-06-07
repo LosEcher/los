@@ -219,6 +219,10 @@ export async function reclaimOrphanedRuns(gatewayServiceId: string): Promise<Orp
     for (const svc of services) {
       if (svc.serviceId === gatewayServiceId) continue;
       if (svc.serviceKind !== 'gateway') continue;
+      if (!svc.lastHeartbeatAt) {
+        staleGatewayIds.push(svc.serviceId);
+        continue;
+      }
       const heartbeatAge = now - new Date(svc.lastHeartbeatAt).getTime();
       if (heartbeatAge > staleMs && svc.status === 'online') {
         staleGatewayIds.push(svc.serviceId);

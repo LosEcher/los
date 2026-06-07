@@ -6,6 +6,7 @@
  * are never automatically promoted to rules.
  */
 
+import { randomUUID } from 'node:crypto';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 
@@ -148,7 +149,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
 
   const confidence = proceduralCandidates.length > 0 ? 0.5 : 0;
 
-  const id = `memcomp-${sessionId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const id = `memcomp-${sessionId}-${randomUUID()}`;
   const rows = await db.query<CompactionRow>(
     `
     INSERT INTO memory_compactions (

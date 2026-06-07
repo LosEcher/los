@@ -207,7 +207,7 @@ export async function claimRunSpec(runSpecId: string, gatewayId: string): Promis
   const rows = await db.query<RunSpecRow>(
     `UPDATE run_specs
      SET gateway_id = $1, updated_at = now()
-     WHERE id = $2
+     WHERE id = $2 AND gateway_id IS DISTINCT FROM $1
      RETURNING *`,
     [gatewayId, runSpecId],
   );

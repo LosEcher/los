@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getDb } from '@los/infra/db';
 
 export type RunEvalVerificationStatus =
@@ -180,7 +181,7 @@ export async function recordRunEval(input: RecordRunEvalInput): Promise<RunEvalR
   await ensureRunEvalStore();
   const runSpecId = normalizeRequiredString(input.runSpecId, 'runSpecId');
   const id = normalizeOptionalString(input.id)
-    ?? `run-eval-${runSpecId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    ?? `run-eval-${runSpecId}-${randomUUID()}`;
   const rows = await getDb().query<RunEvalRow>(
     `
     INSERT INTO run_evals (
@@ -245,7 +246,7 @@ export async function recordFailoverEval(input: {
   errorMessage?: string;
 }): Promise<void> {
   await recordRunEval({
-    id: `failover-eval-${input.runSpecId}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: `failover-eval-${input.runSpecId}-${randomUUID()}`,
     runSpecId: input.runSpecId,
     sessionId: input.sessionId,
     taskRunId: input.taskRunId,
