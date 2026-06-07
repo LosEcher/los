@@ -22,7 +22,10 @@ impact: `los provider promote` is explicitly setup-only; compatibility promotion
 - `pnpm check`
 - `pnpm test`
 
-## Remaining Risk
+## Follow-Up
 
-The future required-target promotion/demotion command is not implemented in
-this change.
+At this change point, required-target promotion/demotion commands were not
+implemented. Follow-up proposed decisions are recorded in
+`docs/governance/run-chain-changes/2026-06-07-provider-policy-decisions.md`,
+and explicit enforcement is recorded in
+`docs/governance/run-chain-changes/2026-06-07-provider-policy-enforcement.md`.
