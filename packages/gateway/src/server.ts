@@ -32,6 +32,7 @@ import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
+  compareRunEvals,
   listLatestProviderCompatEvidence,
   listProviderCompatEvidence,
   listProviderPromotionDecisions,
@@ -223,6 +224,21 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
         ...parseRunEvalQuery(query),
         createdFrom: normalizeOptionalString(query.createdFrom),
         createdTo: normalizeOptionalString(query.createdTo),
+      });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/run-evals/compare', async (req, reply) => {
+    const query = req.query as RunEvalQuery;
+    try {
+      return await compareRunEvals({
+        ...parseRunEvalQuery(query),
+        baselineFrom: normalizeOptionalString(query.baselineFrom) ?? '',
+        baselineTo: normalizeOptionalString(query.baselineTo) ?? '',
+        candidateFrom: normalizeOptionalString(query.candidateFrom) ?? '',
+        candidateTo: normalizeOptionalString(query.candidateTo) ?? '',
       });
     } catch (err) {
       return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
@@ -1059,6 +1075,10 @@ type RunEvalQuery = {
   failureClass?: string;
   createdFrom?: string;
   createdTo?: string;
+  baselineFrom?: string;
+  baselineTo?: string;
+  candidateFrom?: string;
+  candidateTo?: string;
   limit?: string;
 };
 

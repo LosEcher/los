@@ -5,6 +5,7 @@ import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { createRunSpec } from './run-specs.js';
 import {
+  compareRunEvals,
   ensureRunEvalStore,
   listRunEvals,
   recordRunEval,
@@ -83,6 +84,117 @@ test('run evals persist quality metrics for a run spec', async () => {
     assert.equal(updated.success, true);
     assert.equal(updated.verificationStatus, 'succeeded');
     assert.equal(updated.toolErrorCount, 0);
+  } finally {
+    await getDb().query('DELETE FROM run_evals WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('run eval comparison reports before and after quality deltas', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-eval-compare-${suffix}`;
+  const sessionId = `session-run-eval-compare-${suffix}`;
+  const baselineAt = '2026-06-01T12:00:00.000Z';
+  const candidateAt = '2026-06-02T12:00:00.000Z';
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'compare eval quality',
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'project-write',
+    });
+    await ensureRunEvalStore();
+
+    await recordRunEval({
+      id: `${runSpecId}-baseline-failure`,
+      runSpecId,
+      sessionId,
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      success: false,
+      latencyMs: 3000,
+      retryCount: 2,
+      toolErrorCount: 2,
+      verificationStatus: 'failed',
+      modelCost: 0.3,
+      failureClass: 'tool_error',
+    });
+    await recordRunEval({
+      id: `${runSpecId}-baseline-success`,
+      runSpecId,
+      sessionId,
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      success: true,
+      latencyMs: 1000,
+      retryCount: 0,
+      toolErrorCount: 0,
+      verificationStatus: 'succeeded',
+      modelCost: 0.1,
+    });
+    await recordRunEval({
+      id: `${runSpecId}-candidate-success-a`,
+      runSpecId,
+      sessionId,
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      success: true,
+      latencyMs: 900,
+      retryCount: 0,
+      toolErrorCount: 0,
+      verificationStatus: 'succeeded',
+      modelCost: 0.09,
+    });
+    await recordRunEval({
+      id: `${runSpecId}-candidate-success-b`,
+      runSpecId,
+      sessionId,
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      success: true,
+      latencyMs: 1100,
+      retryCount: 0,
+      toolErrorCount: 0,
+      verificationStatus: 'succeeded',
+      modelCost: 0.11,
+    });
+    await getDb().query(
+      `
+      UPDATE run_evals
+      SET created_at = CASE
+        WHEN id LIKE $1 THEN $3::timestamptz
+        ELSE $4::timestamptz
+      END,
+      updated_at = CASE
+        WHEN id LIKE $1 THEN $3::timestamptz
+        ELSE $4::timestamptz
+      END
+      WHERE run_spec_id = $2
+    `,
+      [`${runSpecId}-baseline%`, runSpecId, baselineAt, candidateAt],
+    );
+
+    const comparison = await compareRunEvals({
+      runSpecId,
+      baselineFrom: '2026-06-01T00:00:00.000Z',
+      baselineTo: '2026-06-01T23:59:59.999Z',
+      candidateFrom: '2026-06-02T00:00:00.000Z',
+      candidateTo: '2026-06-02T23:59:59.999Z',
+    });
+
+    assert.equal(comparison.baseline.totals.count, 2);
+    assert.equal(comparison.candidate.totals.count, 2);
+    assert.equal(comparison.baseline.totals.successRate, 0.5);
+    assert.equal(comparison.candidate.totals.successRate, 1);
+    assert.equal(comparison.delta.successRate, 0.5);
+    assert.equal(comparison.delta.failureCount, -1);
+    assert.equal(comparison.delta.toolErrorCount, -2);
+    assert.equal(comparison.delta.averageLatencyMs, -1000);
   } finally {
     await getDb().query('DELETE FROM run_evals WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);

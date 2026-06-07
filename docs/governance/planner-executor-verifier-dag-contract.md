@@ -107,6 +107,7 @@ compatibility proof.
 
 Remaining runtime promotion work is still separate: minimal `run_evals`
 records and summary views preserve the evidence boundary for quality metrics,
-but first-class release comparison and UI dashboarding remain future work.
+and baseline/candidate comparison views can compare release windows. UI
+dashboarding and failover-specific metrics remain future work.
 Cancel/operator-attention recovery transitions now exist as explicit API/CLI
 commands.

@@ -212,11 +212,14 @@ export {
 } from './external-tool-summary.js';
 export {
   ensureRunEvalStore,
+  compareRunEvals,
   listRunEvals,
   recordRunEval,
   summarizeRunEvals,
+  type CompareRunEvalsOptions,
   type ListRunEvalsOptions,
   type RecordRunEvalInput,
+  type RunEvalComparison,
   type RunEvalRecord,
   type RunEvalSummary,
   type RunEvalSummaryGroup,

@@ -580,7 +580,8 @@ Tasks:
 
 Upgrade condition:
 
-1. A release can compare quality before and after a runtime change.
+1. A release can compare quality before and after a runtime change. A
+   baseline/candidate eval comparison API and CLI now exist.
 2. Failed runs can be grouped by cause.
 3. Service failover and executor failover have separate metrics.
 4. Model/provider changes can be evaluated without confusing them with runtime
@@ -660,7 +661,7 @@ Evidence checked on 2026-06-02:
 | Multi-gateway readiness smoke | Partially implemented | `docs/operations/2026-06-01-multi-gateway-readiness-smoke.md` |
 | Real `/chat` failover | Not validated | The smoke explicitly excludes real `/chat` model execution |
 | Cross-gateway stream replay | Not implemented | Requires durable `run_specs` and replay endpoints |
-| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, provider/model graph-task selection from compat evidence, minimal `run_evals` record/list surfaces, and eval summary API/CLI views exist; memory compaction, first-class release comparison, UI dashboards, and failover-specific metrics remain roadmap work |
+| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, provider/model graph-task selection from compat evidence, minimal `run_evals` record/list surfaces, eval summary views, and baseline/candidate eval comparison API/CLI views exist; memory compaction, UI dashboards, and failover-specific metrics remain roadmap work |
 
 ## Verification
 

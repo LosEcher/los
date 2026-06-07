@@ -21,6 +21,10 @@ export async function evalsCommand(globalArgs: string[], argv: string[]): Promis
     await summarizeEvals(parsed);
     return;
   }
+  if (action === 'compare') {
+    await compareEvals(parsed);
+    return;
+  }
   if (action === 'record' || action === 'add') {
     await recordEval(parsed);
     return;
@@ -43,6 +47,24 @@ async function summarizeEvals(parsed: ParsedArgs): Promise<void> {
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const value = await getJson(`${gatewayUrl(parsed)}/run-evals/summary${suffix}`);
   renderEvalSummary(value, booleanFlag(parsed, 'json'));
+}
+
+async function compareEvals(parsed: ParsedArgs): Promise<void> {
+  const params = buildEvalQuery(parsed);
+  const baselineFrom = stringFlag(parsed, 'baseline-from');
+  const baselineTo = stringFlag(parsed, 'baseline-to');
+  const candidateFrom = stringFlag(parsed, 'candidate-from');
+  const candidateTo = stringFlag(parsed, 'candidate-to');
+  if (!baselineFrom || !baselineTo || !candidateFrom || !candidateTo) {
+    throw new Error('evals compare requires --baseline-from, --baseline-to, --candidate-from, and --candidate-to');
+  }
+  addQuery(params, 'baselineFrom', baselineFrom);
+  addQuery(params, 'baselineTo', baselineTo);
+  addQuery(params, 'candidateFrom', candidateFrom);
+  addQuery(params, 'candidateTo', candidateTo);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const value = await getJson(`${gatewayUrl(parsed)}/run-evals/compare${suffix}`);
+  renderEvalComparison(value, booleanFlag(parsed, 'json'));
 }
 
 async function recordEval(parsed: ParsedArgs): Promise<void> {
@@ -128,6 +150,22 @@ function renderEvalSummary(value: unknown, json: boolean): void {
   printGroups('failure_classes', asArray(summary.byFailureClass));
   printGroups('verification_status', asArray(summary.byVerificationStatus));
   printGroups('provider_models', asArray(summary.byProviderModel));
+}
+
+function renderEvalComparison(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const comparison = asRecord(value);
+  const baseline = asRecord(asRecord(comparison.baseline).totals);
+  const candidate = asRecord(asRecord(comparison.candidate).totals);
+  const delta = asRecord(comparison.delta);
+  console.log(`Run eval comparison: baseline=${String(baseline.count ?? 0)} candidate=${String(candidate.count ?? 0)}`);
+  console.log(`  success_rate ${formatPercent(numberValue(baseline.successRate))} -> ${formatPercent(numberValue(candidate.successRate))} delta=${formatSignedPercent(numberValue(delta.successRate))}`);
+  console.log(`  failures ${String(baseline.failureCount ?? 0)} -> ${String(candidate.failureCount ?? 0)} delta=${formatSignedNumber(delta.failureCount)}`);
+  console.log(`  avg_latency_ms ${formatOptionalNumber(baseline.averageLatencyMs)} -> ${formatOptionalNumber(candidate.averageLatencyMs)} delta=${formatSignedNumber(delta.averageLatencyMs)}`);
+  console.log(`  tool_errors ${String(baseline.toolErrorCount ?? 0)} -> ${String(candidate.toolErrorCount ?? 0)} delta=${formatSignedNumber(delta.toolErrorCount)}`);
 }
 
 function printGroups(label: string, groups: unknown[]): void {
@@ -284,10 +322,23 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatSignedPercent(value: number): string {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${formatPercent(value)}`;
+}
+
 function formatOptionalNumber(value: unknown): string {
   if (value === undefined || value === null || value === '') return 'n/a';
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(2).replace(/\.00$/, '') : 'n/a';
+}
+
+function formatSignedNumber(value: unknown): string {
+  if (value === undefined || value === null || value === '') return 'n/a';
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 'n/a';
+  const formatted = parsed.toFixed(2).replace(/\.00$/, '');
+  return parsed > 0 ? `+${formatted}` : formatted;
 }
 
 function printEvalsHelp(): void {
@@ -298,6 +349,7 @@ Record and list run quality evals.
 Usage:
   los evals list [--run RUN_ID] [--session SESSION_ID] [--success true|false] [--json]
   los evals summary [--created-from ISO] [--created-to ISO] [--json]
+  los evals compare --baseline-from ISO --baseline-to ISO --candidate-from ISO --candidate-to ISO [--json]
   los evals record --run RUN_ID --success true|false [options]
 
 Record options:
@@ -318,5 +370,11 @@ Record options:
 Summary options:
   --created-from ISO
   --created-to ISO
+
+Compare options:
+  --baseline-from ISO
+  --baseline-to ISO
+  --candidate-from ISO
+  --candidate-to ISO
 `);
 }

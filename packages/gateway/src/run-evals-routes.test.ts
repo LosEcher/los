@@ -80,6 +80,46 @@ test('run eval routes record and list quality metrics', async () => {
     assert.equal(summaryBody.byVerificationStatus[0].key, 'failed');
     assert.equal(summaryBody.byProviderModel[0].key, 'deepseek:deepseek-v4-pro');
 
+    const candidateId = `${id}-candidate`;
+    const candidate = await app.inject({
+      method: 'POST',
+      url: '/run-evals',
+      payload: {
+        id: candidateId,
+        runSpecId,
+        sessionId,
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro',
+        success: true,
+        latencyMs: 1000,
+        retryCount: 0,
+        toolErrorCount: 0,
+        verificationStatus: 'succeeded',
+        modelCost: 0.05,
+      },
+    });
+    assert.equal(candidate.statusCode, 201);
+    await getDb().query(
+      `
+      UPDATE run_evals
+      SET created_at = CASE WHEN id = $1 THEN $3::timestamptz ELSE $4::timestamptz END,
+          updated_at = CASE WHEN id = $1 THEN $3::timestamptz ELSE $4::timestamptz END
+      WHERE run_spec_id = $2
+    `,
+      [id, runSpecId, '2026-06-01T12:00:00.000Z', '2026-06-02T12:00:00.000Z'],
+    );
+
+    const comparison = await app.inject({
+      method: 'GET',
+      url: `/run-evals/compare?runSpecId=${encodeURIComponent(runSpecId)}&baselineFrom=2026-06-01T00%3A00%3A00.000Z&baselineTo=2026-06-01T23%3A59%3A59.999Z&candidateFrom=2026-06-02T00%3A00%3A00.000Z&candidateTo=2026-06-02T23%3A59%3A59.999Z`,
+    });
+    assert.equal(comparison.statusCode, 200);
+    const comparisonBody = comparison.json();
+    assert.equal(comparisonBody.baseline.totals.successRate, 0);
+    assert.equal(comparisonBody.candidate.totals.successRate, 1);
+    assert.equal(comparisonBody.delta.successRate, 1);
+    assert.equal(comparisonBody.delta.failureCount, -1);
+
     const invalid = await app.inject({
       method: 'POST',
       url: '/run-evals',

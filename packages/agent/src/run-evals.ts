@@ -104,6 +104,29 @@ export interface RunEvalSummary {
   byProviderModel: RunEvalSummaryGroup[];
 }
 
+export interface CompareRunEvalsOptions extends Omit<SummarizeRunEvalsOptions, 'createdFrom' | 'createdTo'> {
+  baselineFrom: string;
+  baselineTo: string;
+  candidateFrom: string;
+  candidateTo: string;
+}
+
+export interface RunEvalComparison {
+  filters: Omit<RunEvalSummary['filters'], 'createdFrom' | 'createdTo'>;
+  baseline: RunEvalSummary;
+  candidate: RunEvalSummary;
+  delta: {
+    count: number;
+    successCount: number;
+    failureCount: number;
+    successRate: number;
+    averageLatencyMs?: number;
+    averageRetryCount: number;
+    toolErrorCount: number;
+    modelCost: number;
+  };
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS run_evals (
   id TEXT PRIMARY KEY,
@@ -273,6 +296,57 @@ export async function summarizeRunEvals(options: SummarizeRunEvalsOptions = {}):
   };
 }
 
+export async function compareRunEvals(options: CompareRunEvalsOptions): Promise<RunEvalComparison> {
+  const normalized = normalizeCompareOptions(options);
+  const shared: SummarizeRunEvalsOptions = {
+    runSpecId: normalized.runSpecId,
+    sessionId: normalized.sessionId,
+    taskRunId: normalized.taskRunId,
+    provider: normalized.provider,
+    model: normalized.model,
+    success: normalized.success,
+    verificationStatus: normalized.verificationStatus,
+    failureClass: normalized.failureClass,
+    limit: normalized.limit,
+  };
+  const [baseline, candidate] = await Promise.all([
+    summarizeRunEvals({
+      ...shared,
+      createdFrom: normalized.baselineFrom,
+      createdTo: normalized.baselineTo,
+    }),
+    summarizeRunEvals({
+      ...shared,
+      createdFrom: normalized.candidateFrom,
+      createdTo: normalized.candidateTo,
+    }),
+  ]);
+  return {
+    filters: {
+      runSpecId: shared.runSpecId,
+      sessionId: shared.sessionId,
+      taskRunId: shared.taskRunId,
+      provider: shared.provider,
+      model: shared.model,
+      success: shared.success,
+      verificationStatus: shared.verificationStatus,
+      failureClass: shared.failureClass,
+    },
+    baseline,
+    candidate,
+    delta: {
+      count: candidate.totals.count - baseline.totals.count,
+      successCount: candidate.totals.successCount - baseline.totals.successCount,
+      failureCount: candidate.totals.failureCount - baseline.totals.failureCount,
+      successRate: candidate.totals.successRate - baseline.totals.successRate,
+      averageLatencyMs: subtractOptional(candidate.totals.averageLatencyMs, baseline.totals.averageLatencyMs),
+      averageRetryCount: candidate.totals.averageRetryCount - baseline.totals.averageRetryCount,
+      toolErrorCount: candidate.totals.toolErrorCount - baseline.totals.toolErrorCount,
+      modelCost: candidate.totals.modelCost - baseline.totals.modelCost,
+    },
+  };
+}
+
 async function querySummaryGroups(input: {
   selectKey: string;
   where: string;
@@ -352,6 +426,34 @@ function normalizeSummaryOptions(options: SummarizeRunEvalsOptions): SummarizeRu
     failureClass: normalizeOptionalString(options.failureClass),
     createdFrom: normalizeOptionalIsoLike(options.createdFrom, 'createdFrom'),
     createdTo: normalizeOptionalIsoLike(options.createdTo, 'createdTo'),
+    limit: normalizeLimit(options.limit),
+  };
+}
+
+function normalizeCompareOptions(options: CompareRunEvalsOptions): CompareRunEvalsOptions {
+  const baselineFrom = normalizeRequiredIsoLike(options.baselineFrom, 'baselineFrom');
+  const baselineTo = normalizeRequiredIsoLike(options.baselineTo, 'baselineTo');
+  const candidateFrom = normalizeRequiredIsoLike(options.candidateFrom, 'candidateFrom');
+  const candidateTo = normalizeRequiredIsoLike(options.candidateTo, 'candidateTo');
+  if (new Date(baselineFrom).getTime() > new Date(baselineTo).getTime()) {
+    throw new Error('baselineFrom must be before or equal to baselineTo');
+  }
+  if (new Date(candidateFrom).getTime() > new Date(candidateTo).getTime()) {
+    throw new Error('candidateFrom must be before or equal to candidateTo');
+  }
+  return {
+    runSpecId: normalizeOptionalString(options.runSpecId),
+    sessionId: normalizeOptionalString(options.sessionId),
+    taskRunId: normalizeOptionalString(options.taskRunId),
+    provider: normalizeOptionalString(options.provider),
+    model: normalizeOptionalString(options.model),
+    success: options.success,
+    verificationStatus: normalizeOptionalString(options.verificationStatus),
+    failureClass: normalizeOptionalString(options.failureClass),
+    baselineFrom,
+    baselineTo,
+    candidateFrom,
+    candidateTo,
     limit: normalizeLimit(options.limit),
   };
 }
@@ -445,6 +547,12 @@ function normalizeOptionalIsoLike(value: unknown, name: string): string | undefi
   return date.toISOString();
 }
 
+function normalizeRequiredIsoLike(value: unknown, name: string): string {
+  const normalized = normalizeOptionalIsoLike(value, name);
+  if (!normalized) throw new Error(`${name} is required`);
+  return normalized;
+}
+
 function normalizeNonNegativeInteger(value: unknown, defaultValue: number): number {
   const parsed = Number(value ?? defaultValue);
   if (!Number.isFinite(parsed) || parsed < 0) return defaultValue;
@@ -533,6 +641,11 @@ function normalizeOptionalFloat(value: unknown): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return undefined;
   return parsed;
+}
+
+function subtractOptional(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined || right === undefined) return undefined;
+  return left - right;
 }
 
 function toIsoString(value: Date | string): string {

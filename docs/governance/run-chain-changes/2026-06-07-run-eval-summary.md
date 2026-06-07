@@ -16,8 +16,9 @@ impact: Run eval records can now be summarized into failure-cause and quality me
   window filters.
 - Validation: `packages/agent/src/run-evals.test.ts` and
   `packages/gateway/src/run-evals-routes.test.ts`.
-- Remaining risk: first-class release before/after comparison, UI dashboards,
-  and failover-specific metrics remain future work.
+- Remaining risk: UI dashboards and failover-specific metrics remain future
+  work. Baseline/candidate release comparison was added in the follow-up
+  run-eval-comparison fragment.
 
 ## Notes
 
