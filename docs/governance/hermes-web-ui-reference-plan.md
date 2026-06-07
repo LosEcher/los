@@ -214,3 +214,6 @@ a concrete place to record behavior impact.
 Status on 2026-06-07: started in
 `docs/governance/run-chain-changes/` with an initial fragment for
 `feat/agent-enhancements`.
+
+P1 manual node pairing status on 2026-06-07: design mapping recorded in
+`docs/governance/manual-node-pairing-plan.md`; no runtime contract change yet.
