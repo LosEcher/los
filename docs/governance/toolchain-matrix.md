@@ -64,8 +64,9 @@ Before any external tool summary can be imported into `los`:
 
 Use this matrix to order the execution-gap todos:
 
-1. finish DAG runtime promotion by adding parallel execution and
-   editable-surface conflict checks after the read-only graph UI stays stable;
+1. continue DAG runtime promotion with graph-task provider/model selection and
+   quality metrics now that read-only UI, editable-surface conflict checks, and
+   bounded parallel execution exist;
 2. promote provider policy decisions into enforced target-list changes when
    ADR and harness updates are ready;
 3. decide the external summary ingestion ADR before adding DB tables or import
