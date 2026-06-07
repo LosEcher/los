@@ -1,4 +1,15 @@
-import { getDb } from '@los/infra/db';
+import { getDb, withDbClient } from '@los/infra/db';
+import {
+  normalizeEditableSurfaceMode,
+  selectEditableSurfaceCompatibleTasks,
+  type EditableSurfaceConflictMode,
+} from './agent-task-editable-surfaces.js';
+
+export {
+  editableSurfacesForAgentTask,
+  editableSurfacesOverlap,
+  selectEditableSurfaceCompatibleTasks,
+} from './agent-task-editable-surfaces.js';
 
 export type AgentTaskRole = 'planner' | 'executor' | 'verifier';
 export type AgentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -85,6 +96,7 @@ export interface ClaimReadyAgentTasksInput {
   limit?: number;
   nodeId?: string;
   leaseMs?: number;
+  editableSurfaceMode?: EditableSurfaceConflictMode;
 }
 
 export interface CreateAgentTaskAttemptInput {
@@ -241,41 +253,79 @@ export async function linkAgentTaskDependency(input: LinkAgentTaskDependencyInpu
 
 export async function claimReadyAgentTasks(input: ClaimReadyAgentTasksInput): Promise<AgentTaskRecord[]> {
   await ensureAgentTaskGraphStore();
-  const db = getDb();
   const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 1)));
   const leaseMs = Math.max(1_000, Math.min(86_400_000, Math.floor(input.leaseMs ?? 300_000)));
-  const rows = await db.query<AgentTaskRow>(
-    `
-    WITH ready AS (
-      SELECT task.id
-      FROM agent_tasks task
-      WHERE task.graph_id = $1
-        AND task.status = 'queued'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM task_edges edge
-          LEFT JOIN agent_tasks upstream ON upstream.graph_id = edge.graph_id AND upstream.id = edge.depends_on_task_id
-          WHERE edge.graph_id = task.graph_id
-            AND edge.task_id = task.id
-            AND (upstream.id IS NULL OR upstream.status <> 'succeeded')
+  const mode = normalizeEditableSurfaceMode(input.editableSurfaceMode);
+  const candidateLimit = mode === 'ignore' ? limit : Math.min(200, Math.max(limit, limit * 4));
+  return await withDbClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const candidates = await client.query<AgentTaskRow>(
+        `
+        WITH ready AS (
+          SELECT task.*
+          FROM agent_tasks task
+          WHERE task.graph_id = $1
+            AND task.status = 'queued'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM task_edges edge
+              LEFT JOIN agent_tasks upstream ON upstream.graph_id = edge.graph_id AND upstream.id = edge.depends_on_task_id
+              WHERE edge.graph_id = task.graph_id
+                AND edge.task_id = task.id
+                AND (upstream.id IS NULL OR upstream.status <> 'succeeded')
+            )
+          ORDER BY task.priority ASC, task.created_at ASC, task.id ASC
+          LIMIT $2
+          FOR UPDATE SKIP LOCKED
         )
-      ORDER BY task.priority ASC, task.created_at ASC, task.id ASC
-      LIMIT $2
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE agent_tasks task
-    SET status = 'running',
-        claimed_by_node_id = $3,
-        lease_expires_at = now() + ($4::text || ' milliseconds')::interval,
-        started_at = COALESCE(started_at, now()),
-        updated_at = now()
-    FROM ready
-    WHERE task.id = ready.id
-    RETURNING task.*
-  `,
-    [input.graphId, limit, input.nodeId ?? null, leaseMs],
-  );
-  return rows.rows.map(rowToTask);
+        SELECT *
+        FROM ready
+      `,
+        [input.graphId, candidateLimit],
+      );
+      const runningRows = mode === 'ignore'
+        ? []
+        : (await client.query<AgentTaskRow>(
+          'SELECT * FROM agent_tasks WHERE graph_id = $1 AND status = $2 ORDER BY priority ASC, created_at ASC, id ASC',
+          [input.graphId, 'running'],
+        )).rows;
+      const selected = selectEditableSurfaceCompatibleTasks(
+        candidates.rows.map(rowToTask),
+        limit,
+        mode,
+        runningRows.map(rowToTask),
+      );
+      if (selected.length === 0) {
+        await client.query('COMMIT');
+        return [];
+      }
+
+      const rows = await client.query<AgentTaskRow>(
+        `
+        UPDATE agent_tasks task
+        SET status = 'running',
+            claimed_by_node_id = $3,
+            lease_expires_at = now() + ($4::text || ' milliseconds')::interval,
+            started_at = COALESCE(started_at, now()),
+            updated_at = now()
+        WHERE task.graph_id = $1
+          AND task.status = 'queued'
+          AND task.id = ANY($2::text[])
+        RETURNING task.*
+      `,
+        [input.graphId, selected.map(task => task.id), input.nodeId ?? null, leaseMs],
+      );
+      await client.query('COMMIT');
+      const order = new Map(selected.map((task, index) => [task.id, index]));
+      return rows.rows
+        .map(rowToTask)
+        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    }
+  });
 }
 
 export async function updateAgentTaskStatus(

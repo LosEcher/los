@@ -7,10 +7,13 @@ import {
   claimReadyAgentTasks,
   createAgentTask,
   createAgentTaskAttempt,
+  editableSurfacesForAgentTask,
+  editableSurfacesOverlap,
   ensureAgentTaskGraphStore,
   linkAgentTaskDependency,
   listAgentTaskAttempts,
   listBlockedAgentTasks,
+  selectEditableSurfaceCompatibleTasks,
   updateAgentTaskStatus,
 } from './agent-task-graph.js';
 import {
@@ -78,6 +81,82 @@ test('agent task graph treats missing upstream dependencies as unmet', async () 
     await cleanupGraph(graphId);
     await closeDb().catch(() => undefined);
   }
+});
+
+test('agent task graph claim skips editable surface conflicts', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const graphId = `graph-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await ensureAgentTaskGraphStore();
+    await createAgentTask({
+      id: `${graphId}-agent-a`,
+      graphId,
+      role: 'executor',
+      title: 'Implement agent A',
+      priority: 10,
+      metadata: { runContract: { editableSurfaces: ['packages/agent'] } },
+    });
+    await createAgentTask({
+      id: `${graphId}-agent-b`,
+      graphId,
+      role: 'executor',
+      title: 'Implement agent B',
+      priority: 20,
+      metadata: { runContract: { editableSurfaces: ['packages/agent/src/scheduler.ts'] } },
+    });
+    await createAgentTask({
+      id: `${graphId}-web`,
+      graphId,
+      role: 'executor',
+      title: 'Implement web',
+      priority: 30,
+      metadata: { runContract: { editableSurfaces: ['packages/web'] } },
+    });
+
+    const first = await claimReadyAgentTasks({
+      graphId,
+      limit: 2,
+      nodeId: 'node-a',
+      editableSurfaceMode: 'require-declared',
+    });
+    assert.deepEqual(first.map(task => task.id), [`${graphId}-agent-a`, `${graphId}-web`]);
+
+    await updateAgentTaskStatus(`${graphId}-web`, 'succeeded');
+    const blockedByRunningAgent = await claimReadyAgentTasks({
+      graphId,
+      limit: 2,
+      nodeId: 'node-b',
+      editableSurfaceMode: 'require-declared',
+    });
+    assert.deepEqual(blockedByRunningAgent, []);
+
+    await updateAgentTaskStatus(`${graphId}-agent-a`, 'succeeded');
+    const afterAgentDone = await claimReadyAgentTasks({
+      graphId,
+      limit: 2,
+      nodeId: 'node-b',
+      editableSurfaceMode: 'require-declared',
+    });
+    assert.deepEqual(afterAgentDone.map(task => task.id), [`${graphId}-agent-b`]);
+  } finally {
+    await cleanupGraph(graphId);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('agent task graph editable surface helpers normalize overlaps', () => {
+  assert.equal(editableSurfacesOverlap('./packages/agent/', 'packages/agent/src/scheduler.ts'), true);
+  assert.equal(editableSurfacesOverlap('packages/web', 'packages/agent'), false);
+
+  const compatible = selectEditableSurfaceCompatibleTasks([
+    taskFixture('a', ['packages/agent']),
+    taskFixture('b', ['packages/agent/src/scheduler.ts']),
+    taskFixture('c', ['packages/web']),
+    taskFixture('d', []),
+  ], 4, 'require-declared');
+  assert.deepEqual(compatible.map(task => task.id), ['a', 'c']);
+  assert.deepEqual(editableSurfacesForAgentTask(taskFixture('x', ['packages/agent', 'packages/agent'])), ['packages/agent']);
 });
 
 test('agent task attempts preserve retry and verifier evidence links', async () => {
@@ -193,4 +272,19 @@ async function cleanupGraph(graphId: string): Promise<void> {
   await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
   await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
   await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+}
+
+function taskFixture(id: string, surfaces: string[]) {
+  return {
+    id,
+    graphId: 'fixture-graph',
+    role: 'executor' as const,
+    title: id,
+    status: 'queued' as const,
+    priority: 100,
+    maxAttempts: 1,
+    metadata: { runContract: { editableSurfaces: surfaces } },
+    createdAt: '2026-06-07T00:00:00.000Z',
+    updatedAt: '2026-06-07T00:00:00.000Z',
+  };
 }
