@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from 'react';
+import { useState, useMemo, type ChangeEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
@@ -63,6 +63,8 @@ export function SessionsPage({
   onSelectTodo: (id: string) => void;
 }) {
   const [search, setSearch] = useState('');
+  const [providerFilter, setProviderFilter] = useState('');
+  const [modelFilter, setModelFilter] = useState('');
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -95,14 +97,32 @@ export function SessionsPage({
     }
   }
 
-  const filtered = (sessions.data ?? []).filter(session => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      session.id.toLowerCase().includes(q) ||
-      (metadataText(session.metadata.provider) ?? '').toLowerCase().includes(q) ||
-      (metadataText(session.metadata.model) ?? '').toLowerCase().includes(q)
-    );
+  const sessionList = sessions.data ?? [];
+
+  const { providers, models } = useMemo(() => {
+    const p = new Set<string>();
+    const m = new Set<string>();
+    for (const s of sessionList) {
+      const prov = metadataText(s.metadata.provider);
+      const mod = metadataText(s.metadata.model);
+      if (prov) p.add(prov);
+      if (mod) m.add(mod);
+    }
+    return { providers: [...p].sort(), models: [...m].sort() };
+  }, [sessionList]);
+
+  const filtered = sessionList.filter(session => {
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      if (!session.id.toLowerCase().includes(q) &&
+          !(metadataText(session.metadata.provider) ?? '').toLowerCase().includes(q) &&
+          !(metadataText(session.metadata.model) ?? '').toLowerCase().includes(q)) {
+        return false;
+      }
+    }
+    if (providerFilter && (metadataText(session.metadata.provider) ?? '') !== providerFilter) return false;
+    if (modelFilter && (metadataText(session.metadata.model) ?? '') !== modelFilter) return false;
+    return true;
   });
 
   return (
@@ -118,6 +138,18 @@ export function SessionsPage({
               <Search size={14} />
               <input value={search} onChange={event => setSearch(event.target.value)} placeholder="filter sessions" />
             </div>
+            {providers.length > 1 ? (
+              <select className="filter-select" value={providerFilter} onChange={event => setProviderFilter(event.target.value)} title="Filter by provider">
+                <option value="">all providers</option>
+                {providers.map(p => <option value={p} key={p}>{p}</option>)}
+              </select>
+            ) : null}
+            {models.length > 1 ? (
+              <select className="filter-select" value={modelFilter} onChange={event => setModelFilter(event.target.value)} title="Filter by model">
+                <option value="">all models</option>
+                {models.map(m => <option value={m} key={m}>{m}</option>)}
+              </select>
+            ) : null}
             <label className="ghost-btn" title="Import session from JSON file">
               <input type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportFile} disabled={importing} />
               <Upload size={14} /> {importing ? 'importing...' : 'import'}
@@ -192,6 +224,11 @@ function SessionInspector({
     },
     enabled: Boolean(sessionId && detail.data),
   });
+  const verification = useQuery({
+    queryKey: ['session-verification', sessionId],
+    queryFn: () => getJson<{ count: number; records: Array<{ id: string; checkName: string; status: string; outputSummary?: string }> }>(`/sessions/${sessionId}/verification`),
+    enabled: Boolean(sessionId),
+  });
 
   if (!sessionId) {
     return <div className="panel inspector"><EmptyText text="Select a session to inspect events and observability." /></div>;
@@ -246,6 +283,13 @@ function SessionInspector({
           <Definition term="updated" text={formatDate(detail.data.updatedAt)} />
           <Definition term="turns" text={String(detail.data.turns.length)} />
           <Definition term="messages" text={String(detail.data.messages.length)} />
+        </div>
+      ) : null}
+      {verification.data && verification.data.count > 0 ? (
+        <div className="fact-list">
+          <Fact label="verification" value={verification.data.records.map(r =>
+            `${r.checkName}: ${r.status}${r.outputSummary ? ` (${r.outputSummary.slice(0, 40)})` : ''}`
+          ).join('; ')} />
         </div>
       ) : null}
       <div className="event-timeline">

@@ -740,10 +740,12 @@ function buildHistoryRows(
     if (role === 'system') continue;
 
     if (role === 'user') {
+      const content = String(msg.content ?? '');
+      const truncated = content.length > 400;
       rows.push({
         id: crypto.randomUUID(),
         event: 'user',
-        message: String(msg.content ?? '').slice(0, 500),
+        message: truncated ? content.slice(0, 400) + '…' : content,
         level: 'normal',
       });
     } else if (role === 'assistant') {
@@ -754,32 +756,32 @@ function buildHistoryRows(
         .map(tc => String((tc.function as Record<string, unknown> | undefined)?.name ?? ''))
         .filter(Boolean);
       const text = String(msg.content ?? '');
+      const textTruncated = text.length > 250;
+      const turn = turns[turnIdx] as Record<string, unknown> | undefined;
+      const hasReasoning = turn?.reasoningContent && typeof turn.reasoningContent === 'string' && turn.reasoningContent.length > 0;
+
+      const metaParts: string[] = [];
+      if (toolNames.length > 0) metaParts.push(`tools: ${toolNames.join(', ')}`);
+      if (hasReasoning) metaParts.push('🧠');
 
       rows.push({
         id: crypto.randomUUID(),
-        event: `turn.${turnIdx + 1}`,
-        message: text.slice(0, 300) || (toolNames.length > 0 ? '(tool calls only)' : '(empty)'),
-        meta: toolNames.length > 0 ? `tools: ${toolNames.join(', ')}` : undefined,
-        level: 'ok',
+        event: `T${turnIdx + 1}/${turns.length}`,
+        message: textTruncated ? text.slice(0, 250) + '…' : (text || (toolNames.length > 0 ? '(tool calls only)' : '(empty)')),
+        meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
+        level: toolNames.length > 0 ? 'warn' : 'ok',
       });
 
-      const turn = turns[turnIdx] as Record<string, unknown> | undefined;
-      if (turn?.reasoningContent && typeof turn.reasoningContent === 'string') {
-        rows.push({
-          id: crypto.randomUUID(),
-          event: 'reasoning',
-          message: turn.reasoningContent.slice(0, 200),
-          level: 'normal',
-        });
-      }
       turnIdx++;
     } else if (role === 'tool') {
-      rows.push({
-        id: crypto.randomUUID(),
-        event: 'tool_result',
-        message: String(msg.content ?? '').slice(0, 200),
-        level: 'normal',
-      });
+      const content = String(msg.content ?? '');
+      const truncated = content.length > 150;
+      const lastRow = rows[rows.length - 1];
+      if (lastRow && lastRow.event.startsWith('T')) {
+        // Append tool result to the parent turn row
+        const summary = truncated ? content.slice(0, 150) + '…' : content;
+        lastRow.meta = lastRow.meta ? `${lastRow.meta} → ${summary}` : summary;
+      }
     }
   }
 

@@ -33,6 +33,7 @@ import { getRequestContext, registerRequestContext } from './request-context.js'
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
   listLatestProviderCompatEvidence,
+  listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
   readToolCallRecoveryForRunSpec,
   runVerificationRecordsForRunSpec,
@@ -394,6 +395,12 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     const { id } = req.params as { id: string };
     await ensureSessionEventStore();
     return await getSessionObservability(id);
+  });
+
+  app.get('/sessions/:id/verification', async (req) => {
+    const { id } = req.params as { id: string };
+    const records = await listVerificationRecordsForSession(id);
+    return { sessionId: id, count: records.length, records };
   });
 
   // ── SSE Event Replay ──────────────────────────────────

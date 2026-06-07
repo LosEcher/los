@@ -146,6 +146,7 @@ export {
   createVerificationRecord,
   ensureVerificationRecordStore,
   listVerificationRecordsForRunSpec,
+  listVerificationRecordsForSession,
   loadVerificationRecord,
   seedVerificationRequirementsForRunSpec,
   updateVerificationRecord,

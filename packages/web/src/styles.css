@@ -1123,6 +1123,16 @@ button:disabled {
   padding-left: 0;
 }
 
+.filter-select {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 0.8125rem;
+  max-width: 140px;
+}
+
 .stack-form {
   display: grid;
   gap: 0;

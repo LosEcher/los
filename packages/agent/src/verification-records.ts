@@ -167,6 +167,16 @@ export async function listVerificationRecordsForRunSpec(runSpecId: string): Prom
   return rows.rows.map(rowToRecord);
 }
 
+export async function listVerificationRecordsForSession(sessionId: string): Promise<VerificationRecord[]> {
+  await ensureVerificationRecordStore();
+  const db = getDb();
+  const rows = await db.query<VerificationRecordRow>(
+    'SELECT * FROM verification_records WHERE session_id = $1 ORDER BY created_at, id',
+    [sessionId],
+  );
+  return rows.rows.map(rowToRecord);
+}
+
 export async function seedVerificationRequirementsForRunSpec(input: {
   runSpecId: string;
   sessionId: string;
