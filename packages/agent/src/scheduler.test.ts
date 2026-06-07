@@ -461,6 +461,135 @@ test('scheduler blocks graph run completion when tool recovery is required', asy
   }
 });
 
+test('scheduler queues retry follow-up attempts for recoverable tool failures', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-recovery-followup-${suffix}`;
+  const sessionId = `session-recovery-followup-${suffix}`;
+  const runSpecId = `run-recovery-followup-${suffix}`;
+  const nodeId = `test-recovery-followup-executor-${suffix}`;
+  const callId = `call-recovery-followup-${suffix}`;
+  let requestCount = 0;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    requestCount += 1;
+    await readRequestBody(req);
+    res.setHeader('content-type', 'application/x-ndjson');
+    if (requestCount === 1) {
+      res.write(JSON.stringify({
+        type: 'tool_call_state',
+        transition: {
+          callId,
+          toolName: 'read_file',
+          state: 'requested',
+          turn: 1,
+          input: { path: 'missing-once.md' },
+          maxAttempts: 2,
+          idempotent: true,
+        },
+      }) + '\n');
+      res.write(JSON.stringify({
+        type: 'tool_call_state',
+        transition: {
+          callId,
+          toolName: 'read_file',
+          state: 'failed',
+          turn: 1,
+          attempt: 1,
+          error: 'temporary missing file',
+        },
+      }) + '\n');
+    }
+    res.end(JSON.stringify({
+      type: 'result',
+      result: {
+        text: requestCount === 1 ? 'first task returned with failed tool state' : 'second task recovered',
+        turns: [],
+        loopCount: 1,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    }) + '\n');
+  });
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'run graph with retryable failed tool state',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      runSpecId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute with retryable failed tool state',
+      prompt: 'exec prompt',
+      maxAttempts: 2,
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      runSpecId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.equal(requestCount, 2);
+    assert.deepEqual(result.executedTasks.map(task => task.status), ['failed', 'succeeded']);
+    assert.equal(result.executedTasks[0]?.recoveryFollowUpQueued, true);
+    assert.equal(result.completion.status, 'succeeded');
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'succeeded');
+
+    const attempts = await listAgentTaskAttempts(`${graphId}-exec`);
+    assert.deepEqual(attempts.map(attempt => attempt.status), ['failed', 'succeeded']);
+    assert.deepEqual(attempts[0]?.toolCallStateIds, [callId]);
+    assert.match(attempts[0]?.error ?? '', /recovery retry queued follow-up attempt 2\/2/);
+
+    const toolState = await loadToolCallState(callId, sessionId);
+    assert.equal(toolState?.state, 'retrying');
+    assert.equal(toolState?.attempt, 2);
+    assert.equal(toolState?.completedAt, undefined);
+
+    const events = await listSessionEvents(sessionId, 100);
+    const followUp = events.find(event => event.type === 'task.recovery_followup_queued');
+    assert.equal(followUp?.payload.taskId, `${graphId}-exec`);
+    assert.equal(followUp?.payload.recommendation, 'retry');
+    assert.deepEqual(followUp?.payload.retryToolCallIds, [callId]);
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 test('scheduler blocks run spec completion when verifier is required but missing', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

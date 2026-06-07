@@ -160,6 +160,7 @@ export async function updateToolCallState(
         END,
         completed_at = CASE
           WHEN $3 IN ('succeeded', 'failed', 'denied', 'skipped') THEN now()
+          WHEN $3 IN ('requested', 'approved', 'running', 'retrying') THEN NULL
           ELSE completed_at
         END,
         updated_at = now()

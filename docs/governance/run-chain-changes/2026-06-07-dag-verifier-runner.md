@@ -13,9 +13,8 @@ impact: Scheduler DAG verifier tasks now execute required verification records a
   `packages/agent/src/agent-task-graph-read-model.ts` treats failed verifier
   tasks as blocked completion rather than ordinary terminal failure.
 - Validation: `pnpm --filter @los/agent test`.
-- Remaining risk: verifier tasks execute required checks, but recovery
-  decisions still do not create automatic retry/resume/cancel follow-up
-  attempts.
+- Remaining risk: verifier tasks execute required checks, but cancel and
+  operator-attention recovery still remain operator-controlled.
 
 ## Notes
 
