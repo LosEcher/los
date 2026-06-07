@@ -50,6 +50,20 @@ import {
   StatusPill,
 } from './ui';
 
+type RunStateProjection = {
+  phase: string;
+  action: string;
+  blockers: Array<{ kind: string; message: string; ids: string[] }>;
+  counts: {
+    taskRuns: Record<string, number>;
+    verificationRecords: Record<string, number>;
+  };
+  ids: {
+    failedVerificationRecordIds: string[];
+    pendingVerificationRecordIds: string[];
+  };
+};
+
 export function SessionsPage({
   selectedSessionId,
   onSelectSession,
@@ -526,6 +540,12 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
     mutationFn: (taskId: string) => getJson<AgentTaskGraphCompletion>(`/agent-graphs/${taskId}/completion`),
   });
   const runSpecId = task?.runSpecId;
+  const runState = useQuery({
+    queryKey: ['run-state', runSpecId],
+    queryFn: () => getJson<RunStateProjection>(`/runs/${runSpecId}/state`),
+    enabled: Boolean(runSpecId),
+    refetchInterval: 10_000,
+  });
   const latestResult = verify.data ?? recover.data ?? inspect.data;
   const graphResult = agentGraph.data ?? agentGraphCompletion.data;
 
@@ -563,6 +583,20 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
           <GitGraph size={14} /> graph
         </button>
       </div>
+      {runState.data ? (
+        <div className="fact-list compact-facts">
+          <Fact label="phase" value={runState.data.phase} />
+          <Fact label="next action" value={runState.data.action} />
+          <Fact label="tasks" value={`${runState.data.counts.taskRuns.total ?? 0} total / ${(runState.data.counts.taskRuns.queued ?? 0) + (runState.data.counts.taskRuns.running ?? 0)} active`} />
+          <Fact label="verification" value={`${runState.data.counts.verificationRecords.total ?? 0} total / ${runState.data.ids.pendingVerificationRecordIds.length + runState.data.ids.failedVerificationRecordIds.length} blocked`} />
+        </div>
+      ) : null}
+      {runState.data?.blockers.length ? (
+        <div className="json-block">
+          <strong>Run State Blockers</strong>
+          <pre>{runState.data.blockers.map(blocker => `${blocker.kind}: ${blocker.message}${blocker.ids.length ? ` [${blocker.ids.join(', ')}]` : ''}`).join('\n')}</pre>
+        </div>
+      ) : null}
       {graphResult ? (
         <div className="json-block">
           <strong>Agent Task Graph</strong>

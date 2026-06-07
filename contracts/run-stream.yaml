@@ -85,10 +85,27 @@ replay:
         count: integer
         nextSince: integer
         events: session_events.rows
+    - method: GET
+      path: /runs/{runSpecId}/inspect
+      response:
+        graph: runtime_evidence_graph
+        state: run_state_projection
+      description: Runtime evidence graph with the recovery-grade state projection.
+    - method: GET
+      path: /runs/{runSpecId}/state
+      response:
+        runSpecId: string
+        sessionId: string
+        phase: created | running | succeeded | failed | cancelled | blocked
+        action: none | wait_for_task | recover_tools | cancel_tools | run_verification | inspect_events | operator_attention
+        blockers: run_state_blockers
+      description: Compact operator read model for next action and blockers.
   sourceOfTruth:
     - run_specs
     - session_events
     - task_runs
+    - tool_call_states
+    - verification_records
   future:
     - Last-Event-ID
     - persisted model.delta chunk replay

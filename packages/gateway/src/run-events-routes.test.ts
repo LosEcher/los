@@ -139,6 +139,17 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
     });
     assert.equal(inspect.statusCode, 200);
     assert.equal(inspect.json().runSpecId, runSpecId);
+    assert.equal(inspect.json().state.phase, 'created');
+    assert.equal(inspect.json().state.action, 'recover_tools');
+
+    const state = await app.inject({
+      method: 'GET',
+      url: `/runs/${runSpecId}/state`,
+    });
+    assert.equal(state.statusCode, 200);
+    assert.equal(state.json().runSpecId, runSpecId);
+    assert.equal(state.json().action, 'recover_tools');
+    assert.deepEqual(state.json().ids.failedVerificationRecordIds, []);
 
     const recover = await app.inject({
       method: 'POST',

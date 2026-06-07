@@ -33,6 +33,7 @@ import { getRequestContext, registerRequestContext } from './request-context.js'
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
   listLatestProviderCompatEvidence,
+  readRunStateProjection,
   listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
   readToolCallRecoveryForRunSpec,
@@ -646,9 +647,22 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   app.get('/runs/:id/inspect', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const graph = await readRuntimeEvidenceGraph(id);
+    const [graph, state] = await Promise.all([
+      readRuntimeEvidenceGraph(id),
+      readRunStateProjection(id),
+    ]);
     if (!graph) return reply.status(404).send({ error: 'Not found' });
-    return graph;
+    return {
+      ...graph,
+      state,
+    };
+  });
+
+  app.get('/runs/:id/state', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const state = await readRunStateProjection(id);
+    if (!state) return reply.status(404).send({ error: 'Not found' });
+    return state;
   });
 
   app.post('/runs/:id/recover', async (req, reply) => {

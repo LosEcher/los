@@ -123,6 +123,8 @@ Current state:
    scheduler persists them into the same table.
 7. `tool-call-recovery` can read durable tool rows and classify retry, resume,
    cancel, and operator-attention decisions.
+8. The run state vocabulary projection exposes run phase, next action,
+   blockers, and counts through agent/gateway/CLI/Web read surfaces.
 
 Gap:
 
@@ -369,7 +371,7 @@ Validation:
    routes.
 3. Promote verifier tasks into the DAG scheduler for multi-step graph runs.
 4. Add operation smokes for direct `/chat` verification blocking, verifier-runner
-   release, and tool-state recovery decisions.
+   release, tool-state recovery decisions, and run-state vocabulary display.
 5. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
 6. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability

@@ -125,7 +125,7 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
 
 async function runCommand(globalArgs: string[], argv: string[]): Promise<void> {
   const subcommand = argv[0];
-  if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify') {
+  if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify' || subcommand === 'state') {
     await runOperationCommand(subcommand, globalArgs, argv.slice(1));
     return;
   }
@@ -133,7 +133,7 @@ async function runCommand(globalArgs: string[], argv: string[]): Promise<void> {
 }
 
 async function runOperationCommand(
-  subcommand: 'inspect' | 'recover' | 'verify',
+  subcommand: 'inspect' | 'recover' | 'verify' | 'state',
   globalArgs: string[],
   argv: string[],
 ): Promise<void> {
@@ -150,6 +150,11 @@ async function runOperationCommand(
   if (subcommand === 'inspect') {
     const value = await getJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/inspect`);
     renderRunInspect(value, json);
+    return;
+  }
+  if (subcommand === 'state') {
+    const value = await getJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/state`);
+    renderRunState(value, json);
     return;
   }
   if (subcommand === 'recover') {
@@ -352,10 +357,32 @@ function renderRunInspect(value: unknown, json: boolean): void {
   const graph = asRecord(value);
   const counts = asRecord(graph.counts);
   const warnings = Array.isArray(graph.warnings) ? graph.warnings : [];
+  const state = asRecord(graph.state);
   console.log(`run=${String(graph.runSpecId ?? '?')} session=${String(graph.sessionId ?? '?')}`);
+  if (Object.keys(state).length > 0) renderRunState(state, false);
   console.log(`nodes run=${String(counts.run_spec ?? 0)} tasks=${String(counts.task_run ?? 0)} events=${String(counts.session_event ?? 0)} tools=${String(counts.tool_call_state ?? 0)} verifications=${String(counts.verification_record ?? 0)}`);
   console.log(`edges=${Array.isArray(graph.edges) ? graph.edges.length : 0} warnings=${warnings.length}`);
   for (const warning of warnings) console.log(`warning: ${String(warning)}`);
+}
+
+function renderRunState(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const state = asRecord(value);
+  const counts = asRecord(state.counts);
+  const taskCounts = asRecord(counts.taskRuns);
+  const verificationCounts = asRecord(counts.verificationRecords);
+  console.log(`state phase=${String(state.phase ?? '?')} action=${String(state.action ?? '?')}`);
+  if (typeof state.summary === 'string') console.log(`summary: ${state.summary}`);
+  console.log(`counts tasks=${String(taskCounts.total ?? 0)} active=${Number(taskCounts.queued ?? 0) + Number(taskCounts.running ?? 0)} failed=${String(taskCounts.failed ?? 0)} verifications=${String(verificationCounts.total ?? 0)} blocked=${Number(verificationCounts.required ?? 0) + Number(verificationCounts.running ?? 0) + Number(verificationCounts.failed ?? 0)}`);
+  const blockers = Array.isArray(state.blockers) ? state.blockers : [];
+  for (const blocker of blockers) {
+    const record = asRecord(blocker);
+    const ids = Array.isArray(record.ids) ? record.ids.map(String).join(',') : '';
+    console.log(`blocker ${String(record.kind ?? '?')}: ${String(record.message ?? '')}${ids ? ` [${ids}]` : ''}`);
+  }
 }
 
 function renderRunRecover(value: unknown, json: boolean): void {
@@ -565,7 +592,7 @@ function printHelp(): void {
 Usage:
   los chat [options] <prompt>
   los run [options] <prompt>
-  los run <inspect|recover|verify> <run-id> [options]
+  los run <inspect|state|recover|verify> <run-id> [options]
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
   los artifacts <list|put|get|delete> [options]
@@ -592,6 +619,7 @@ Chat:
 
 Run operations:
   inspect RUN_ID          Print runtime evidence graph counts and warnings
+  state RUN_ID            Print recovery-grade run phase, next action, and blockers
   recover RUN_ID          Print tool recovery decision; use --intent cancel to cancel active tools
   verify RUN_ID           Run required verification records
   --stale-ms N            Recovery stale threshold
@@ -622,6 +650,7 @@ function printRunHelp(): void {
 
 Examples:
   los run inspect run-123
+  los run state run-123
   los run recover run-123 --stale-ms 300000
   los run recover run-123 --intent cancel
   los run verify run-123 --timeout-ms 120000

@@ -6,6 +6,10 @@ The runtime evidence graph is a read model for auditing one `run_specs` row
 across the execution tables that `los` already owns. It is not a full knowledge
 graph engine and it does not ingest raw external tool transcripts.
 
+`run-state-vocabulary.ts` is the compact operator projection on top of the same
+tables. It exposes phase, next action, blockers, and counts for CLI/UI/API
+inspection without replacing the graph.
+
 ## Scope
 
 The first projection starts from `runSpecId` and returns nodes for:
@@ -45,3 +49,6 @@ The focused coverage is `packages/agent/src/runtime-evidence-graph.test.ts`.
 It creates a run spec, task run, session events, tool state, verification
 record, planner/verifier tasks, a dependency edge, and an attempt, then asserts
 the graph nodes and cross-table edges.
+
+The focused coverage for the compact state vocabulary is
+`packages/agent/src/run-state-vocabulary.test.ts`.

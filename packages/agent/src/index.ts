@@ -237,6 +237,15 @@ export {
   type RuntimeEvidenceRecord,
 } from './runtime-evidence-graph.js';
 export {
+  buildRunStateProjection,
+  readRunStateProjection,
+  type BuildRunStateProjectionInput,
+  type RunStateAction,
+  type RunStateBlocker,
+  type RunStateBlockerKind,
+  type RunStateProjection,
+} from './run-state-vocabulary.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,
