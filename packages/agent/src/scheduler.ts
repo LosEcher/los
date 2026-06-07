@@ -54,6 +54,7 @@ import {
   type ToolCallStateType,
 } from './tool-call-states.js';
 import { updateRunSpecStatus, type RunSpecStatus } from './run-specs.js';
+import { recordFailoverEval } from './run-evals.js';
 
 export type ScheduledTaskEventType =
   | 'task.created'
@@ -495,6 +496,21 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const finalTask = failed ?? running;
     await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });
     await input.onTaskEvent?.({ type: 'task.failed', taskRun: finalTask });
+
+    // Auto-record failover eval when executor failure is detected
+    if (executor && input.runSpecId) {
+      await recordFailoverEval({
+        runSpecId: input.runSpecId,
+        sessionId,
+        taskRunId,
+        provider: input.provider,
+        model: input.model,
+        failureClass: 'executor_failure',
+        failoverScope: 'executor',
+        errorMessage: message,
+      });
+    }
+
     throw err;
   } finally {
     if (timeout) clearTimeout(timeout);

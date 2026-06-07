@@ -214,6 +214,7 @@ export {
   ensureRunEvalStore,
   compareRunEvals,
   listRunEvals,
+  recordFailoverEval,
   recordRunEval,
   summarizeRunEvals,
   type CompareRunEvalsOptions,

@@ -8,6 +8,7 @@ import {
   compareRunEvals,
   ensureRunEvalStore,
   listRunEvals,
+  recordFailoverEval,
   recordRunEval,
   summarizeRunEvals,
 } from './run-evals.js';
@@ -360,6 +361,57 @@ test('run eval failover scope separates service from executor failures', async (
     const executorGroup = summary.byFailoverScope.find(item => item.key === 'executor')!;
     assert.equal(executorGroup.failureCount, 1);
     assert.equal(executorGroup.averageRetryCount, 3);
+  } finally {
+    await getDb().query('DELETE FROM run_evals WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('recordFailoverEval auto-records a failover eval with scope', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-eval-autofailover-${suffix}`;
+  const sessionId = `session-autofailover-${suffix}`;
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'auto failover eval',
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'project-write',
+    });
+    await ensureRunEvalStore();
+
+    await recordFailoverEval({
+      runSpecId,
+      sessionId,
+      taskRunId: `task-${suffix}`,
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      failureClass: 'executor_failure',
+      failoverScope: 'executor',
+      errorMessage: 'Executor http://10.0.0.1:9090 failed with 502',
+    });
+
+    const listed = await listRunEvals({ runSpecId, failoverScope: 'executor', limit: 10 });
+    assert.equal(listed.length, 1);
+    const record = listed[0]!;
+    assert.equal(record.success, false);
+    assert.equal(record.failoverScope, 'executor');
+    assert.equal(record.failureClass, 'executor_failure');
+    assert.equal(record.summary.kind, 'failover');
+
+    const serviceListed = await listRunEvals({ runSpecId, failoverScope: 'service', limit: 10 });
+    assert.equal(serviceListed.length, 0);
+
+    await recordFailoverEval({
+      runSpecId,
+      failoverScope: 'service',
+      errorMessage: 'DB connection lost',
+    });
   } finally {
     await getDb().query('DELETE FROM run_evals WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);

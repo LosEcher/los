@@ -234,6 +234,35 @@ export async function recordRunEval(input: RecordRunEvalInput): Promise<RunEvalR
   return rowToRecord(assertRow(rows.rows[0]));
 }
 
+export async function recordFailoverEval(input: {
+  runSpecId: string;
+  sessionId?: string;
+  taskRunId?: string;
+  provider?: string;
+  model?: string;
+  failureClass?: string;
+  failoverScope: RunEvalFailoverScope;
+  errorMessage?: string;
+}): Promise<void> {
+  await recordRunEval({
+    id: `failover-eval-${input.runSpecId}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    runSpecId: input.runSpecId,
+    sessionId: input.sessionId,
+    taskRunId: input.taskRunId,
+    provider: input.provider,
+    model: input.model,
+    success: false,
+    failureClass: input.failureClass ?? 'failover_error',
+    failoverScope: input.failoverScope,
+    summary: {
+      kind: 'failover',
+      scope: input.failoverScope,
+      error: input.errorMessage ?? null,
+      recordedAt: new Date().toISOString(),
+    },
+  }).catch(() => undefined);
+}
+
 export async function listRunEvals(options: ListRunEvalsOptions = {}): Promise<RunEvalRecord[]> {
   await ensureRunEvalStore();
   const { where, params } = buildRunEvalFilter(options);
