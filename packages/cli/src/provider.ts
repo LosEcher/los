@@ -2,7 +2,7 @@
  * @los/cli/provider — Provider management commands.
  *
  *   los provider list            Show readiness summary with promotion states
- *   los provider promote <name>  Interactive setup for a blocked provider
+ *   los provider promote <name>  Interactive setup guidance for a blocked provider
  */
 // ── Types ───────────────────────────────────────────────
 
@@ -162,7 +162,7 @@ async function listProviders(parsed: ParsedArgs): Promise<void> {
     console.log('─'.repeat(72));
     console.log(`  ${ready} ready, ${blocked} blocked`);
     if (blocked > 0) {
-      console.log('  Promote with: los provider promote <name>');
+      console.log('  Set up with: los provider promote <name>');
     }
   } catch (err) {
     console.error(`Failed to query providers: ${err instanceof Error ? err.message : String(err)}`);
@@ -174,7 +174,7 @@ async function listProviders(parsed: ParsedArgs): Promise<void> {
 async function promoteProvider(name: string, parsed: ParsedArgs): Promise<void> {
   const gateway = stringFlag(parsed, 'gateway') ?? stringFlag(parsed, 'g') ?? DEFAULT_GATEWAY;
 
-  console.log(`Promoting provider: ${name}`);
+  console.log(`Provider setup: ${name}`);
   console.log('─'.repeat(50));
 
   // 1. Check current state
@@ -205,6 +205,7 @@ async function promoteProvider(name: string, parsed: ParsedArgs): Promise<void> 
 
   if (isReady) {
     console.log(`  ${name} is already configured and ready.`);
+    console.log('  This command does not promote providers into required gates.');
     console.log('  To verify it with a live compatibility run:');
     console.log(`    los compat --execute --target ${name} --probe read-context --workspace .`);
     return;
@@ -282,7 +283,7 @@ function hasFlag(parsed: ParsedArgs, name: string): boolean {
 function printProviderHelp(): void {
   console.log(`los provider
 
-Manage provider configuration and promotion.
+Manage provider configuration and setup guidance.
 
 Usage:
   los provider list [--gateway URL] [--json]
@@ -290,7 +291,7 @@ Usage:
 
 Commands:
   list      Show all discovered providers with readiness and promotion state
-  promote   Interactive setup for a blocked provider (API key entry)
+  promote   Interactive setup guidance for a blocked provider (API key entry)
 
 Examples:
   los provider list

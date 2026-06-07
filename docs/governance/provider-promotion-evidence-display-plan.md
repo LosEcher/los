@@ -33,6 +33,13 @@ Judgment: the base evidence model exists. The missing surface is a clear
 operator view that explains why a provider is advisory, verified advisory,
 required, or blocked, and which evidence ids support that state.
 
+2026-06-07 decision: `los provider promote` remains a credential setup and
+operator guidance command. It must not persist required-gate decisions or
+change compatibility policy. Persisted compatibility evidence comes from
+`los compat --execute` through `provider_compat_evidence`; future
+promotion/demotion policy commands should be separate and should update ADR,
+harness, and required-target code surfaces together.
+
 ## Display Goals
 
 The Providers UI and CLI should answer these questions without requiring a SQL
@@ -139,7 +146,7 @@ Remaining order:
 1. Operation smoke is recorded in
    `docs/operations/2026-06-07-provider-compat-evidence-display-smoke.md`
    for API, CLI, and Web provider evidence display.
-2. Add promotion/demotion policy commands only after required-target policy is
+2. Add separate promotion/demotion policy commands only after required-target policy is
    updated together with ADR and harness expectations.
 
 ## Verification
@@ -184,3 +191,4 @@ usage, tool outcome, and the UI/API surface that displays it.
 2. Do not store raw model transcripts in provider evidence.
 3. Do not promote every ready provider into a required gate.
 4. Do not treat one passing advisory run as a required-gate decision.
+5. Do not make `los provider promote` mutate compatibility policy.

@@ -171,7 +171,10 @@ Supplement:
 
 Current follow-up: `provider_compat_evidence` now exists as the persisted
 evidence table, and `docs/governance/provider-promotion-evidence-display-plan.md`
-tracks the remaining API/CLI/Web UI display work.
+tracks the API/CLI/Web UI display work. `los provider promote` remains a
+credential setup helper; compatibility promotion evidence is written by
+`los compat --execute`, and required-gate promotion remains a separate policy
+change.
 
 ### G5. External Tools Are Compared Manually
 
@@ -389,7 +392,8 @@ Validation:
 
 ## Immediate Next Work
 
-1. Decide whether `los provider promote` should remain instructional only or
-   gain a persisted provider compatibility decision record.
+1. Define required-target provider promotion/demotion policy commands only
+   after ADR 0017, ADR 0014, and compatibility harness expectations can be
+   updated together.
 2. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.

@@ -396,7 +396,7 @@ export function printConfigDiagnostics(config: Config): string {
       lines.push(action);
     }
     lines.push('');
-    lines.push('  To promote a provider after setup: los provider promote <name>');
+    lines.push('  To set up a provider after adding credentials: los provider promote <name>');
   }
 
   return lines.join('\n');

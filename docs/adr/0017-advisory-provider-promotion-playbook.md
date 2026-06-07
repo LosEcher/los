@@ -78,6 +78,11 @@ Promote an advisory target to required only when all of these are true:
 One passing run is sufficient to mark a target verified advisory. It is not
 sufficient by itself to make the target required.
 
+`los provider promote` remains a setup helper for blocked provider credentials.
+It does not persist required-gate policy decisions. Required promotion or
+demotion should use a separate policy command only after the ADR, compatibility
+harness, and target lists can be updated together.
+
 ## Credential Rule
 
 Credential class matters:
@@ -134,6 +139,8 @@ Record at least:
    recorded in operation evidence, not in the default gate list.
 4. Keep OpenAI/Codex targets advisory until their credential class, quota, and
    CI/non-interactive behavior are documented.
+5. Keep `los provider promote` setup-only; do not overload it with required
+   gate promotion or demotion.
 
 ## Verification
 
