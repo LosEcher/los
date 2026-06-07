@@ -34,6 +34,7 @@ import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
   listLatestProviderCompatEvidence,
   listProviderCompatEvidence,
+  applyToolCallRecoveryTransitionForRunSpec,
   readRunStateProjection,
   listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
@@ -685,6 +686,19 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     await ensureRunSpecStore();
     const runSpec = await loadRunSpec(id);
     if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+    const action = parseRecoveryTransitionAction(body.action ?? body.intent);
+    if (body.apply === true) {
+      if (!action) {
+        return reply.status(400).send({ error: 'apply requires --intent cancel or --intent operator-attention' });
+      }
+      return await applyToolCallRecoveryTransitionForRunSpec(id, {
+        action,
+        reason: normalizeOptionalString(body.reason),
+        actor: normalizeOptionalString(body.actor),
+        staleMs: normalizeOptionalNonNegativeInteger(body.staleMs),
+        cancelLiveTaskRun: cancelScheduledTask,
+      });
+    }
     return await readToolCallRecoveryForRunSpec(id, {
       intent: body.intent === 'cancel' ? 'cancel' : 'recover',
       staleMs: normalizeOptionalNonNegativeInteger(body.staleMs),
@@ -904,6 +918,14 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function parseRecoveryTransitionAction(value: unknown): 'cancel' | 'operator_attention' | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase().replace(/-/g, '_');
+  if (normalized === 'cancel') return 'cancel';
+  if (normalized === 'operator_attention') return 'operator_attention';
+  return undefined;
 }
 
 function normalizeStringArray(value: unknown): string[] {

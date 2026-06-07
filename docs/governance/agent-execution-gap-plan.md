@@ -313,8 +313,8 @@ Validation:
 ### Phase 4: Recovery And Verifier Runner
 
 Status: P0 core plus API/CLI operation surfaces, DAG verifier task execution,
-and scheduler retry/resume follow-up attempts are implemented. Cancel and
-operator-attention recovery remain operator-controlled.
+scheduler retry/resume follow-up attempts, and explicit cancel/operator
+attention recovery transitions are implemented.
 
 Deliverables:
 
@@ -340,7 +340,10 @@ Current 2026-06-07 update:
 5. Scheduler graph execution now converts retryable or resumable tool recovery
    decisions into follow-up task attempts when the task still has `maxAttempts`
    capacity.
-6. Operation evidence is recorded in
+6. `POST /runs/:id/recover` and `los run recover` can apply explicit
+   cancel/operator-attention recovery transitions with `apply: true` /
+   `--apply`, preserving the read-only decision path by default.
+7. Operation evidence is recorded in
    `docs/operations/2026-06-07-run-verification-recovery-smoke.md`.
 
 Validation:
@@ -386,9 +389,7 @@ Validation:
 
 ## Immediate Next Work
 
-1. Extend cancel and operator-attention recovery from operation guidance into
-   explicit scheduler/API transition commands.
-2. Decide whether `los provider promote` should remain instructional only or
+1. Decide whether `los provider promote` should remain instructional only or
    gain a persisted provider compatibility decision record.
-3. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
+2. Avoid implementing a Reasonix/Codex CLI fallback until ADR 0018's capability
    gap and ledger parity criteria are met.

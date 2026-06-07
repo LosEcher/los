@@ -95,6 +95,7 @@ export {
   type UpdateToolCallStateInput,
 } from './tool-call-states.js';
 export {
+  applyToolCallRecoveryTransitionForRunSpec,
   evaluateToolCallRecovery,
   readToolCallRecoveryForRunSpec,
   readToolCallRecoveryForTaskRun,
@@ -102,6 +103,8 @@ export {
   type ToolCallRecoveryIntent,
   type ToolCallRecoveryOptions,
   type ToolCallRecoveryRecommendation,
+  type ToolCallRecoveryTransitionAction,
+  type ToolCallRecoveryTransitionResult,
 } from './tool-call-recovery.js';
 export {
   ExecutionTransitionError,

@@ -159,7 +159,10 @@ async function runOperationCommand(
   }
   if (subcommand === 'recover') {
     const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/recover`, {
+      apply: booleanFlag(parsed, 'apply') ? true : undefined,
       intent: stringFlag(parsed, 'intent'),
+      reason: stringFlag(parsed, 'reason'),
+      actor: stringFlag(parsed, 'actor'),
       staleMs: numberFlag(parsed, 'stale-ms'),
     });
     renderRunRecover(value, json);
@@ -390,7 +393,16 @@ function renderRunRecover(value: unknown, json: boolean): void {
     console.log(JSON.stringify(value));
     return;
   }
-  const decision = asRecord(value);
+  const root = asRecord(value);
+  if (typeof root.action === 'string') {
+    console.log(`transition=${String(root.action)} run=${String(root.runSpecId ?? '?')} status=${String(root.runSpecStatus ?? '?')}`);
+    if (typeof root.reason === 'string') console.log(`reason: ${root.reason}`);
+    for (const key of ['transitionedToolCallIds', 'transitionedTaskRunIds', 'liveCancelledTaskRunIds']) {
+      const ids = Array.isArray(root[key]) ? root[key] : [];
+      if (ids.length > 0) console.log(`${key}=${ids.map(String).join(',')}`);
+    }
+  }
+  const decision = asRecord(root.decision ?? root);
   console.log(`status=${String(decision.status ?? '?')} recommendation=${String(decision.recommendation ?? '?')}`);
   for (const key of ['resumeToolCallIds', 'retryToolCallIds', 'cancelToolCallIds', 'operatorAttentionToolCallIds']) {
     const ids = Array.isArray(decision[key]) ? decision[key] : [];
@@ -425,7 +437,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     s: 'session',
     w: 'workspace',
   };
-  const booleanFlags = new Set(['help', 'h', 'json', 'execute', 'version', 'v']);
+  const booleanFlags = new Set(['help', 'h', 'json', 'execute', 'version', 'v', 'apply']);
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -620,7 +632,7 @@ Chat:
 Run operations:
   inspect RUN_ID          Print runtime evidence graph counts and warnings
   state RUN_ID            Print recovery-grade run phase, next action, and blockers
-  recover RUN_ID          Print tool recovery decision; use --intent cancel to cancel active tools
+  recover RUN_ID          Print tool recovery decision; add --apply to transition cancel/operator-attention
   verify RUN_ID           Run required verification records
   --stale-ms N            Recovery stale threshold
   --cwd PATH              Verification working directory
@@ -652,13 +664,17 @@ Examples:
   los run inspect run-123
   los run state run-123
   los run recover run-123 --stale-ms 300000
-  los run recover run-123 --intent cancel
+  los run recover run-123 --apply --intent cancel
+  los run recover run-123 --apply --intent operator-attention --reason "needs approval"
   los run verify run-123 --timeout-ms 120000
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}
   --json                  Emit raw JSON
-  --intent MODE           recover or cancel
+  --intent MODE           recover, cancel, or operator-attention
+  --apply                 Apply cancel or operator-attention as a recovery transition
+  --reason TEXT           Recovery transition reason
+  --actor TEXT            Operator or system actor for the transition event
   --stale-ms N            Recovery stale threshold
   --cwd PATH              Verification working directory
   --timeout-ms N          Verification timeout

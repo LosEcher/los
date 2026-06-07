@@ -10,6 +10,7 @@ import {
   createRunSpec,
   ensureRunSpecStore,
   ensureSessionEventStore,
+  loadRunSpec,
 } from '@los/agent';
 import { createServer } from './server.js';
 
@@ -169,6 +170,16 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
     assert.equal(verifyBody.runSpecId, runSpecId);
     assert.deepEqual(verifyBody.ranRecordIds, [verificationId]);
     assert.equal(verifyBody.decision.status, 'succeeded');
+
+    const transition = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/recover`,
+      payload: { apply: true, intent: 'operator-attention', reason: 'route test attention' },
+    });
+    assert.equal(transition.statusCode, 200);
+    assert.equal(transition.json().action, 'operator_attention');
+    assert.equal(transition.json().runSpecStatus, 'blocked');
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'blocked');
 
     const missing = await app.inject({
       method: 'GET',

@@ -3,8 +3,15 @@ import assert from 'node:assert/strict';
 
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
-import { evaluateToolCallRecovery, readToolCallRecoveryForRunSpec } from './tool-call-recovery.js';
-import { createToolCallState, updateToolCallState, type ToolCallStateRecord } from './tool-call-states.js';
+import {
+  applyToolCallRecoveryTransitionForRunSpec,
+  evaluateToolCallRecovery,
+  readToolCallRecoveryForRunSpec,
+} from './tool-call-recovery.js';
+import { listSessionEvents } from './session-events.js';
+import { createTaskRun, loadTaskRun } from './task-runs.js';
+import { createRunSpec, loadRunSpec } from './run-specs.js';
+import { createToolCallState, loadToolCallState, updateToolCallState, type ToolCallStateRecord } from './tool-call-states.js';
 
 test('tool call recovery recommends retry, resume, cancel, or operator action from durable state', () => {
   const now = '2026-06-06T00:00:00.000Z';
@@ -89,6 +96,119 @@ test('tool call recovery reads durable tool_call_states by run spec', async () =
     assert.deepEqual(decision.resumeToolCallIds, [runningCallId]);
   } finally {
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('tool call recovery applies cancel and operator-attention transitions', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const cancelSessionId = `session-tool-cancel-${suffix}`;
+  const cancelRunSpecId = `run-tool-cancel-${suffix}`;
+  const cancelTaskRunId = `task-tool-cancel-${suffix}`;
+  const cancelCallId = `tool-cancel-${suffix}`;
+  const attentionSessionId = `session-tool-attention-${suffix}`;
+  const attentionRunSpecId = `run-tool-attention-${suffix}`;
+  const attentionTaskRunId = `task-tool-attention-${suffix}`;
+  const attentionCallId = `tool-attention-${suffix}`;
+  try {
+    await createRunSpec({
+      id: cancelRunSpecId,
+      sessionId: cancelSessionId,
+      prompt: 'cancel recovery',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createTaskRun({
+      id: cancelTaskRunId,
+      sessionId: cancelSessionId,
+      runSpecId: cancelRunSpecId,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      promptPreview: 'cancel recovery',
+      status: 'running',
+    });
+    await createToolCallState({
+      id: cancelCallId,
+      sessionId: cancelSessionId,
+      runSpecId: cancelRunSpecId,
+      taskRunId: cancelTaskRunId,
+      turn: 1,
+      toolName: 'read_file',
+      state: 'running',
+      inputJson: { path: 'README.md' },
+    });
+
+    const liveCancelled: string[] = [];
+    const cancel = await applyToolCallRecoveryTransitionForRunSpec(cancelRunSpecId, {
+      action: 'cancel',
+      reason: 'test cancel transition',
+      cancelLiveTaskRun: (taskRunId) => {
+        liveCancelled.push(taskRunId);
+        return true;
+      },
+    });
+
+    assert.equal(cancel.runSpecStatus, 'cancelled');
+    assert.deepEqual(cancel.transitionedToolCallIds, [cancelCallId]);
+    assert.deepEqual(cancel.transitionedTaskRunIds, [cancelTaskRunId]);
+    assert.deepEqual(cancel.liveCancelledTaskRunIds, [cancelTaskRunId]);
+    assert.deepEqual(liveCancelled, [cancelTaskRunId]);
+    assert.equal((await loadRunSpec(cancelRunSpecId))?.status, 'cancelled');
+    assert.equal((await loadTaskRun(cancelTaskRunId))?.status, 'cancelled');
+    assert.equal((await loadToolCallState(cancelCallId, cancelSessionId))?.state, 'skipped');
+    const cancelEvents = await listSessionEvents(cancelSessionId, 20);
+    assert.ok(cancelEvents.some(event => event.type === 'run.recovery_cancelled'));
+
+    await createRunSpec({
+      id: attentionRunSpecId,
+      sessionId: attentionSessionId,
+      prompt: 'operator attention recovery',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+    await createTaskRun({
+      id: attentionTaskRunId,
+      sessionId: attentionSessionId,
+      runSpecId: attentionRunSpecId,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      promptPreview: 'operator attention recovery',
+      status: 'failed',
+    });
+    await createToolCallState({
+      id: attentionCallId,
+      sessionId: attentionSessionId,
+      runSpecId: attentionRunSpecId,
+      taskRunId: attentionTaskRunId,
+      turn: 1,
+      toolName: 'write_file',
+      state: 'failed',
+      inputJson: { path: 'README.md' },
+      maxAttempts: 1,
+      idempotent: false,
+    });
+
+    const attention = await applyToolCallRecoveryTransitionForRunSpec(attentionRunSpecId, {
+      action: 'operator_attention',
+      reason: 'needs operator decision',
+      actor: 'test',
+    });
+
+    assert.equal(attention.runSpecStatus, 'blocked');
+    assert.equal(attention.decision.recommendation, 'operator_attention');
+    assert.deepEqual(attention.decision.operatorAttentionToolCallIds, [attentionCallId]);
+    assert.equal((await loadRunSpec(attentionRunSpecId))?.status, 'blocked');
+    const attentionEvents = await listSessionEvents(attentionSessionId, 20);
+    assert.ok(attentionEvents.some(event => event.type === 'run.operator_attention_required'));
+  } finally {
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id IN ($1, $2)', [cancelSessionId, attentionSessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE run_spec_id IN ($1, $2)', [cancelRunSpecId, attentionRunSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id IN ($1, $2)', [cancelRunSpecId, attentionRunSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id IN ($1, $2)', [cancelSessionId, attentionSessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

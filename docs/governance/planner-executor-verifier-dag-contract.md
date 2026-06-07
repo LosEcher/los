@@ -86,6 +86,6 @@ record id to the task attempt, and keep failed required checks in a blocked
 completion state.
 
 Remaining runtime promotion work is still separate: parallel execution,
-editable-surface conflict checks, cancel/operator-attention recovery transition
-commands, and UI read models should be added only after they can preserve the
-same evidence boundary.
+editable-surface conflict checks, and UI read models should be added only after
+they can preserve the same evidence boundary. Cancel/operator-attention
+recovery transitions now exist as explicit API/CLI commands.
