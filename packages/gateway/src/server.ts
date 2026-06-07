@@ -81,7 +81,8 @@ import {
 } from '@los/agent/session-events';
 import {
   ensureMemoryStore, addObservation, searchObservations,
-  getStats, syncMemoryMd, deleteObservation, updateObservation
+  getStats, syncMemoryMd, deleteObservation, updateObservation,
+  ensureMemoryCompactionStore, compactSession, listCompactions,
 } from '@los/memory';
 
 const log = getLogger('gateway');
@@ -518,6 +519,31 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   app.get('/memory/stats', async () => {
     await ensureMemoryStore();
     return await getStats();
+  });
+
+  app.post('/memory/compact', async (req) => {
+    const body = req.body as { sessionId?: string; runSpecId?: string };
+    const sessionId = normalizeOptionalString(body.sessionId);
+    if (!sessionId) return { error: 'sessionId is required' };
+    const context = getRequestContext(req);
+    await ensureMemoryCompactionStore();
+    const compaction = await compactSession({
+      sessionId,
+      runSpecId: normalizeOptionalString(body.runSpecId),
+      createdBy: context.userId ?? context.requestId,
+    });
+    return { compaction };
+  });
+
+  app.get('/memory/compactions', async (req) => {
+    const query = req.query as { sessionId?: string; runSpecId?: string; limit?: string };
+    await ensureMemoryCompactionStore();
+    const compactions = await listCompactions({
+      sessionId: normalizeOptionalString(query.sessionId),
+      runSpecId: normalizeOptionalString(query.runSpecId),
+      limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+    });
+    return { count: compactions.length, compactions };
   });
 
   // ── Sessions ──────────────────────────────────────────

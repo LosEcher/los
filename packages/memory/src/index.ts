@@ -15,3 +15,13 @@ export {
 } from './store.js';
 
 export { syncMemoryMd, readMemoryMd } from './markdown.js';
+
+export {
+  ensureMemoryCompactionStore,
+  compactSession,
+  getCompaction,
+  listCompactions,
+  type MemoryCompaction,
+  type CompactSessionInput,
+  type ListCompactionsOptions,
+} from './compaction.js';

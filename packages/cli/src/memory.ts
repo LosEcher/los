@@ -1,0 +1,175 @@
+type ParsedArgs = {
+  flags: Record<string, string | boolean>;
+  positionals: string[];
+};
+
+const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
+
+export async function memoryCommand(globalArgs: string[], argv: string[]): Promise<void> {
+  const parsed = mergeParsed(parseArgs(globalArgs), parseArgs(argv));
+  const [action = 'list'] = parsed.positionals;
+  if (hasFlag(parsed, 'help', 'h')) {
+    printMemoryHelp();
+    return;
+  }
+
+  if (action === 'compact') {
+    await compactMemory(parsed);
+    return;
+  }
+  if (action === 'compactions' || action === 'ls-compactions') {
+    await listMemoryCompactions(parsed);
+    return;
+  }
+
+  throw new Error(`Unknown memory command: ${action}`);
+}
+
+async function compactMemory(parsed: ParsedArgs): Promise<void> {
+  const sessionId = stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session') ?? parsed.positionals[1];
+  if (!sessionId) throw new Error('memory compact requires --session-id or a session ID positional argument');
+  const payload: Record<string, unknown> = {
+    sessionId,
+    runSpecId: stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'),
+  };
+  removeUndefined(payload);
+  const response = await fetch(`${gatewayUrl(parsed)}/memory/compact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json() as Record<string, unknown>;
+  if (!response.ok) throw new Error(String(data.error ?? response.statusText));
+  renderCompaction(data, booleanFlag(parsed, 'json'));
+}
+
+async function listMemoryCompactions(parsed: ParsedArgs): Promise<void> {
+  const params = new URLSearchParams();
+  addQuery(params, 'sessionId', stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session'));
+  addQuery(params, 'runSpecId', stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'));
+  addQuery(params, 'limit', stringFlag(parsed, 'limit'));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${gatewayUrl(parsed)}/memory/compactions${suffix}`);
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const data = await response.json() as Record<string, unknown>;
+  if (booleanFlag(parsed, 'json')) {
+    console.log(JSON.stringify(data));
+    return;
+  }
+  const compactions = Array.isArray(data.compactions) ? data.compactions : [];
+  console.log(`Memory compactions: ${compactions.length}`);
+  for (const item of compactions) {
+    const c = item as Record<string, unknown>;
+    const summary = (c.summary as Record<string, unknown>) ?? {};
+    console.log(`  ${String(c.id ?? '?')} session=${String(c.sessionId ?? '?').slice(0, 12)} obs=${String(summary.observationCount ?? 0)} tasks=${String(summary.taskRunCount ?? 0)} evals=${String(summary.evalCount ?? 0)} confidence=${String(c.confidence ?? 0)}`);
+  }
+}
+
+function renderCompaction(data: Record<string, unknown>, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(data));
+    return;
+  }
+  const c = (data.compaction as Record<string, unknown>) ?? {};
+  const summary = (c.summary as Record<string, unknown>) ?? {};
+  console.log(`Compaction: ${String(c.id ?? '?')}`);
+  console.log(`  session: ${String(c.sessionId ?? '?')}`);
+  console.log(`  evidence: observations=${String(summary.observationCount ?? 0)} tasks=${String(summary.taskRunCount ?? 0)} evals=${String(summary.evalCount ?? 0)}`);
+  console.log(`  confidence: ${String(c.confidence ?? 0)}`);
+  const candidates = Array.isArray(c.proceduralCandidates) ? c.proceduralCandidates : [];
+  if (candidates.length > 0) {
+    console.log(`  procedural candidates: ${candidates.length}`);
+    for (const cand of candidates) {
+      const r = cand as Record<string, unknown>;
+      console.log(`    - ${String(r.name ?? '?')} severity=${String(r.severity ?? 'warn')} confidence=${String(r.confidence ?? 0)}`);
+    }
+  }
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const flags: Record<string, string | boolean> = {};
+  const positionals: string[] = [];
+  const aliases: Record<string, string> = { g: 'gateway', h: 'help' };
+  const booleanFlags = new Set(['help', 'h', 'json']);
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === '--') {
+      positionals.push(...argv.slice(i + 1));
+      break;
+    }
+    if (token.startsWith('--')) {
+      const [rawKey, inlineValue] = token.slice(2).split('=', 2);
+      if (inlineValue !== undefined) {
+        flags[rawKey] = inlineValue;
+        continue;
+      }
+      if (booleanFlags.has(rawKey)) {
+        flags[rawKey] = true;
+        continue;
+      }
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith('-')) {
+        flags[rawKey] = next;
+        i += 1;
+      } else {
+        flags[rawKey] = true;
+      }
+      continue;
+    }
+    if (/^-[a-zA-Z]$/.test(token)) {
+      const key = aliases[token.slice(1)] ?? token.slice(1);
+      if (booleanFlags.has(key)) { flags[key] = true; continue; }
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith('-')) { flags[key] = next; i += 1; }
+      else { flags[key] = true; }
+      continue;
+    }
+    positionals.push(token);
+  }
+  return { flags, positionals };
+}
+
+function mergeParsed(first: ParsedArgs, second: ParsedArgs): ParsedArgs {
+  return { flags: { ...first.flags, ...second.flags }, positionals: [...first.positionals, ...second.positionals] };
+}
+
+function gatewayUrl(parsed: ParsedArgs): string {
+  return (stringFlag(parsed, 'gateway') ?? stringFlag(parsed, 'g') ?? DEFAULT_GATEWAY).replace(/\/+$/, '');
+}
+
+function stringFlag(parsed: ParsedArgs, key: string): string | undefined {
+  const value = parsed.flags[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function booleanFlag(parsed: ParsedArgs, key: string): boolean {
+  return parsed.flags[key] === true || parsed.flags[key] === 'true' || parsed.flags[key] === '1';
+}
+
+function hasFlag(parsed: ParsedArgs, ...keys: string[]): boolean {
+  return keys.some(key => parsed.flags[key] !== undefined);
+}
+
+function addQuery(params: URLSearchParams, key: string, value: string | undefined): void {
+  if (value) params.set(key, value);
+}
+
+function removeUndefined(value: Record<string, unknown>): void {
+  for (const key of Object.keys(value)) if (value[key] === undefined) delete value[key];
+}
+
+function printMemoryHelp(): void {
+  console.log(`los memory
+
+Compact session memory and list compactions.
+
+Usage:
+  los memory compact --session-id SESSION_ID [--run RUN_SPEC_ID] [--json]
+  los memory compactions [--session-id SESSION_ID] [--limit N] [--json]
+
+Commands:
+  compact           Compact a session into a structured summary
+  compactions       List memory compaction records
+`);
+}

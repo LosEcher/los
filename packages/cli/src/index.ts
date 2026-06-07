@@ -4,6 +4,7 @@ import { artifactsCommand } from './artifacts.js';
 import { compatCommand } from './compat.js';
 import { evalsCommand } from './evals.js';
 import { externalSummariesCommand } from './external-summaries.js';
+import { memoryCommand } from './memory.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
 import { providerCommand } from './provider.js';
@@ -68,6 +69,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'evals' || command === 'eval') {
     await evalsCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'memory' || command === 'mem') {
+    await memoryCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'health') {
