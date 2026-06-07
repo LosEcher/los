@@ -39,7 +39,9 @@ import {
   recordProviderPromotionDecision,
   applyToolCallRecoveryTransitionForRunSpec,
   importExternalToolSummary,
+  listRunEvals,
   listExternalToolSummaries,
+  recordRunEval,
   readRunStateProjection,
   listVerificationRecordsForSession,
   readRuntimeEvidenceGraph,
@@ -208,6 +210,63 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     try {
       const summary = await importExternalToolSummary(req.body as never);
       return reply.status(201).send({ summary });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/run-evals', async (req) => {
+    const query = req.query as {
+      runSpecId?: string;
+      sessionId?: string;
+      taskRunId?: string;
+      provider?: string;
+      model?: string;
+      success?: string;
+      verificationStatus?: string;
+      failureClass?: string;
+      limit?: string;
+    };
+    const evals = await listRunEvals({
+      runSpecId: normalizeOptionalString(query.runSpecId),
+      sessionId: normalizeOptionalString(query.sessionId),
+      taskRunId: normalizeOptionalString(query.taskRunId),
+      provider: normalizeOptionalString(query.provider),
+      model: normalizeOptionalString(query.model),
+      success: parseOptionalBoolean(query.success),
+      verificationStatus: normalizeOptionalString(query.verificationStatus),
+      failureClass: normalizeOptionalString(query.failureClass),
+      limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
+    });
+    return {
+      count: evals.length,
+      evals,
+    };
+  });
+
+  app.post('/run-evals', async (req, reply) => {
+    const body = asRecord(req.body);
+    const success = parseOptionalBoolean(body.success);
+    if (success === undefined) return reply.status(422).send({ error: 'success is required' });
+    try {
+      const evaluation = await recordRunEval({
+        id: normalizeOptionalString(body.id),
+        runSpecId: normalizeOptionalString(body.runSpecId) ?? '',
+        sessionId: normalizeOptionalString(body.sessionId),
+        taskRunId: normalizeOptionalString(body.taskRunId),
+        provider: normalizeOptionalString(body.provider),
+        model: normalizeOptionalString(body.model),
+        success,
+        latencyMs: normalizeOptionalNonNegativeInteger(body.latencyMs),
+        retryCount: normalizeOptionalNonNegativeInteger(body.retryCount),
+        toolErrorCount: normalizeOptionalNonNegativeInteger(body.toolErrorCount),
+        verificationStatus: normalizeOptionalString(body.verificationStatus),
+        modelCost: normalizeOptionalNonNegativeNumber(body.modelCost),
+        userFeedback: normalizeOptionalString(body.userFeedback),
+        failureClass: normalizeOptionalString(body.failureClass),
+        summary: asRecord(body.summary),
+      });
+      return reply.status(201).send({ eval: evaluation });
     } catch (err) {
       return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -1043,6 +1102,13 @@ function normalizeOptionalNonNegativeInteger(value: unknown): number | undefined
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return undefined;
   return Math.floor(parsed);
+}
+
+function normalizeOptionalNonNegativeNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return parsed;
 }
 
 function normalizeNonNegativeInteger(value: unknown, fallback: number): number {

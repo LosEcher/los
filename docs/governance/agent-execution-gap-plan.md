@@ -238,24 +238,28 @@ Supplement:
 4. Add operation smokes that prove a required failed check blocks completion and
    a succeeded/skipped check releases it.
 
-### G7. Eval Feedback Is Not Queryable
+### G7. Eval Feedback Is Minimally Queryable
 
 Current state:
 
 1. `periodic-analysis.md` lists eval candidates.
 2. `agent-workflow-roadmap.md` proposes 20-50 narrow personal evals.
 3. Tests and operation smokes catch some behavior regressions.
+4. `run_evals` records can now be written through `POST /run-evals`, listed
+   through `GET /run-evals`, and operated from `los evals`.
 
 Gap:
 
-There is no eval table or report that connects a run to failure class,
-verification status, retry count, user feedback, model cost, and tool errors.
+The minimal eval table now connects a run to failure class, verification
+status, retry count, user feedback, model cost, and tool errors. The remaining
+gap is release-level comparison, failure-cause dashboarding, and metrics that
+separate service failover from executor failover.
 
 Supplement:
 
 1. Add an eval backlog document first.
-2. Then add `run_evals` only after run specs exist.
-3. Derive initial evals from recurring failures:
+2. Add `run_evals` only after run specs exist.
+3. Use `run_evals` as the queryable record surface for recurring failures:
    - config truth treated as runtime truth;
    - provider readiness treated as compatibility;
    - dirty worktree broad formatting;
@@ -408,6 +412,8 @@ Current 2026-06-07 update:
    target and records the chosen evidence id on attempts and task-run metadata.
 3. `requireProviderCompat` prevents a task from running when no target has
    passing compatibility evidence.
+4. `run_evals` provides a minimal record/list surface for run quality metrics;
+   dashboarding and before/after release comparison remain future work.
 
 Validation:
 

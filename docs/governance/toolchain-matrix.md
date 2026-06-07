@@ -64,9 +64,9 @@ Before any external tool summary can be imported into `los`:
 
 Use this matrix to order the execution-gap todos:
 
-1. continue DAG runtime promotion with graph-task provider/model selection and
-   quality metrics now that read-only UI, editable-surface conflict checks, and
-   bounded parallel execution exist;
+1. continue DAG runtime promotion with release quality comparison and
+   failure-cause views now that graph-task provider/model selection and minimal
+   `run_evals` records exist;
 2. keep provider policy enforcement evidence current when required-target
    decisions move from proposed to enforced;
 3. keep ADR 0019 external summary imports bounded, redacted, and separate from

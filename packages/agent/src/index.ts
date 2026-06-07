@@ -211,6 +211,15 @@ export {
   type ListExternalToolSummariesOptions,
 } from './external-tool-summary.js';
 export {
+  ensureRunEvalStore,
+  listRunEvals,
+  recordRunEval,
+  type ListRunEvalsOptions,
+  type RecordRunEvalInput,
+  type RunEvalRecord,
+  type RunEvalVerificationStatus,
+} from './run-evals.js';
+export {
   claimReadyAgentTasks,
   createAgentTask,
   createAgentTaskAttempt,

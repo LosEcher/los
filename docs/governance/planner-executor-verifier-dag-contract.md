@@ -105,7 +105,8 @@ on the task attempt and task run metadata. When `requireProviderCompat` is set,
 the task fails before execution instead of treating provider readiness as
 compatibility proof.
 
-Remaining runtime promotion work is still separate: quality metrics and eval
-feedback should be added only after they can preserve the same evidence
-boundary. Cancel/operator-attention recovery transitions now exist as explicit
-API/CLI commands.
+Remaining runtime promotion work is still separate: minimal `run_evals`
+records preserve the evidence boundary for quality metrics, but release-level
+comparison and failure-cause dashboarding remain future work.
+Cancel/operator-attention recovery transitions now exist as explicit API/CLI
+commands.

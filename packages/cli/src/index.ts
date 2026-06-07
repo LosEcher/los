@@ -2,6 +2,7 @@
 
 import { artifactsCommand } from './artifacts.js';
 import { compatCommand } from './compat.js';
+import { evalsCommand } from './evals.js';
 import { externalSummariesCommand } from './external-summaries.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
@@ -63,6 +64,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'external-summaries' || command === 'external-summary') {
     await externalSummariesCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'evals' || command === 'eval') {
+    await evalsCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'health') {
@@ -612,6 +617,7 @@ Usage:
   los run <inspect|state|recover|verify> <run-id> [options]
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
+  los evals <list|record> [options]
   los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
@@ -660,6 +666,10 @@ Artifacts:
 External summaries:
   list | import --file summary.json
   Import redacted external tool summaries without making them runtime replay evidence.
+
+Evals:
+  list | record --run RUN_ID --success true|false
+  Record or list run quality eval metrics.
 
 Nodes:
   list | commands | command
