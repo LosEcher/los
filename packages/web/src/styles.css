@@ -1763,3 +1763,78 @@ button:disabled {
   color: var(--text-dim);
   font-size: 0.85rem;
 }
+
+/* ── Memory compaction UI ────────────────────────── */
+
+.compaction-list {
+  margin-top: 16px;
+}
+
+.compaction-list h4 {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compaction-card {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+
+.compaction-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+
+.compaction-meta code {
+  font-size: 0.7rem;
+}
+
+.compaction-summary {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.candidate-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.candidate-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--warn-bg, #fffbeb);
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
+.candidate-name {
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.candidate-severity[data-severity="warn"] { color: var(--warn); }
+.candidate-severity[data-severity="error"] { color: var(--err); }
+.candidate-severity[data-severity="info"] { color: var(--text-dim); }
+
+.candidate-rationale {
+  color: var(--text-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

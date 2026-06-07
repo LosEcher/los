@@ -680,6 +680,18 @@ function formatIdList(ids: string[]): string {
   return ids.length > 0 ? ids.join(', ') : 'none';
 }
 
+type CompactionRecord = {
+  id: string;
+  sessionId: string;
+  summary: Record<string, unknown>;
+  observedPatterns: Record<string, unknown>[];
+  proceduralCandidates: Record<string, unknown>[];
+  confidence: number;
+  evidenceCount: number;
+  createdBy?: string;
+  createdAt: string;
+};
+
 export function MemoryPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
@@ -719,6 +731,11 @@ export function MemoryPage() {
   const stats = useQuery({
     queryKey: ['memory-stats'],
     queryFn: () => getJson<MemoryStats>('/memory/stats'),
+  });
+  const compactions = useQuery({
+    queryKey: ['memory-compactions'],
+    queryFn: () => getJson<{ count: number; compactions: CompactionRecord[] }>('/memory/compactions?limit=10'),
+    refetchInterval: 30_000,
   });
   const workspace = useQuery({
     queryKey: ['workspace'],
@@ -1007,6 +1024,41 @@ export function MemoryPage() {
           <Fact label="scopes" value={Object.keys(stats.data?.byScope ?? {}).join(', ') || 'none'} />
           <Fact label="layers" value={Object.keys(stats.data?.byLayer ?? {}).join(', ') || 'none'} />
         </div>
+
+        {(compactions.data?.compactions ?? []).length > 0 ? (
+          <div className="compaction-list">
+            <h4>Recent Compactions</h4>
+            {compactions.data!.compactions.map(c => (
+              <div key={c.id} className="compaction-card">
+                <div className="compaction-meta">
+                  <code>{c.id.slice(0, 16)}...</code>
+                  <span>session={String(c.sessionId ?? '').slice(0, 12)}...</span>
+                  <span>evidence={c.evidenceCount}</span>
+                  <span>confidence={(Number(c.confidence) * 100).toFixed(0)}%</span>
+                  <span>{formatDate(c.createdAt)}</span>
+                </div>
+                <div className="compaction-summary">
+                  obs={String(c.summary.observationCount ?? 0)}
+                  tasks={String(c.summary.taskRunCount ?? 0)}
+                  evals={String(c.summary.evalCount ?? 0)}
+                </div>
+                {c.proceduralCandidates.length > 0 ? (
+                  <div className="candidate-list">
+                    {c.proceduralCandidates.map((cand, idx) => (
+                      <div key={idx} className="candidate-chip">
+                        <span className="candidate-name">{String(cand.name ?? '?')}</span>
+                        <span className="candidate-severity" data-severity={cand.severity ?? 'warn'}>{String(cand.severity ?? 'warn')}</span>
+                        <span className="candidate-rationale">{String((cand.rationale as string) ?? '').slice(0, 120)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted-copy">No compactions yet. Run 'los memory compact --session-id SID' to create one.</p>
+        )}
       </aside>
     </section>
   );
