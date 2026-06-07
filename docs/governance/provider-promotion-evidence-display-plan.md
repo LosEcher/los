@@ -136,8 +136,9 @@ Implemented first slice:
 
 Remaining order:
 
-1. Add an operation smoke after one provider evidence detail is visible through
-   API, CLI, and Web UI.
+1. Operation smoke is recorded in
+   `docs/operations/2026-06-07-provider-compat-evidence-display-smoke.md`
+   for API, CLI, and Web provider evidence display.
 2. Add promotion/demotion policy commands only after required-target policy is
    updated together with ADR and harness expectations.
 

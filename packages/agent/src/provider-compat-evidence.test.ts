@@ -24,6 +24,10 @@ test('provider compat evidence records verified advisory summaries', async () =>
       probeId: 'read-context',
       sessionId: 'session-provider-evidence',
       taskRunId: 'task-provider-evidence',
+      runSpecId: 'run-provider-evidence',
+      traceId: 'trace-provider-evidence',
+      requestId: 'request-provider-evidence',
+      nodeId: 'node-provider-evidence',
       reasoningObserved: false,
       toolCalls: ['list_directory', 'read_file'],
       toolResultCount: 2,
@@ -39,11 +43,17 @@ test('provider compat evidence records verified advisory summaries', async () =>
     assert.equal(record.decision, 'verified_advisory');
     assert.equal(record.passed, true);
     assert.equal(record.totalTokens, 42);
+    assert.equal(record.taskRunId, 'task-provider-evidence');
+    assert.equal(record.runSpecId, 'run-provider-evidence');
+    assert.equal(record.traceId, 'trace-provider-evidence');
+    assert.equal(record.requestId, 'request-provider-evidence');
+    assert.equal(record.nodeId, 'node-provider-evidence');
 
     const latest = await listLatestProviderCompatEvidence();
     const loaded = latest.find(item => item.provider === provider && item.model === 'model-a');
     assert.equal(loaded?.probeId, 'read-context');
     assert.equal(loaded?.decision, 'verified_advisory');
+    assert.equal(loaded?.taskRunId, 'task-provider-evidence');
 
     await recordProviderCompatEvidence({
       id: `${provider}-model-b-read-context`,

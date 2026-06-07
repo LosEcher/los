@@ -53,6 +53,10 @@ export interface CompatibilityRunSummary {
   probeId: string;
   sessionId?: string;
   taskRunId?: string;
+  runSpecId?: string;
+  traceId?: string;
+  requestId?: string;
+  nodeId?: string;
   effectiveModel?: string;
   protocol?: string;
   reasoningSupported?: boolean;
@@ -183,6 +187,10 @@ export function summarizeCompatibilityEvents(
   const toolCalls: string[] = [];
   let sessionId: string | undefined;
   let taskRunId: string | undefined;
+  let runSpecId: string | undefined;
+  let traceId: string | undefined;
+  let requestId: string | undefined;
+  let nodeId: string | undefined;
   let effectiveModel: string | undefined;
   let protocol: string | undefined;
   let reasoningSupported: boolean | undefined;
@@ -199,7 +207,15 @@ export function summarizeCompatibilityEvents(
     const data = item.data;
     const payload = asRecord(data.payload);
     if (typeof data.sessionId === 'string') sessionId = data.sessionId;
-    if (typeof data.taskRunId === 'string') taskRunId = data.taskRunId;
+    taskRunId = firstString(taskRunId, data.taskRunId, payload.taskRunId);
+    runSpecId = firstString(runSpecId, data.runSpecId, payload.runSpecId);
+    traceId = firstString(traceId, data.traceId, payload.traceId, payload.correlationId);
+    requestId = firstString(requestId, data.requestId, payload.requestId, payload.commandId);
+    nodeId = firstString(nodeId, data.nodeId, payload.nodeId);
+
+    if (item.event.startsWith('run_spec.')) {
+      runSpecId = firstString(runSpecId, payload.entityId);
+    }
 
     if (item.event === 'session.started') {
       if (typeof payload.effectiveModel === 'string') effectiveModel = payload.effectiveModel;
@@ -249,6 +265,10 @@ export function summarizeCompatibilityEvents(
     probeId: spec.probe.id,
     sessionId,
     taskRunId,
+    runSpecId,
+    traceId,
+    requestId,
+    nodeId,
     effectiveModel,
     protocol,
     reasoningSupported,
@@ -264,6 +284,14 @@ export function summarizeCompatibilityEvents(
     passed: failures.length === 0,
     failures,
   };
+}
+
+function firstString(current: string | undefined, ...values: unknown[]): string | undefined {
+  if (current) return current;
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

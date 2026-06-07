@@ -48,6 +48,9 @@ test('compatibility harness summarizes SSE evidence', () => {
       event: 'session.started',
       data: {
         sessionId: 'session-1',
+        requestId: 'request-1',
+        traceId: 'trace-1',
+        nodeId: 'node-1',
         payload: {
           effectiveModel: 'deepseek-v4-pro',
           modelProfile: {
@@ -74,7 +77,17 @@ test('compatibility harness summarizes SSE evidence', () => {
     },
     {
       event: 'done',
-      data: { taskRunId: 'task-1' },
+      data: {
+        payload: { taskRunId: 'task-1' },
+      },
+    },
+    {
+      event: 'run_spec.succeeded',
+      data: {
+        payload: {
+          entityId: 'run-1',
+        },
+      },
     },
   ]);
 
@@ -84,6 +97,12 @@ test('compatibility harness summarizes SSE evidence', () => {
   assert.equal(summary.protocol, 'openai');
   assert.equal(summary.reasoningSupported, true);
   assert.equal(summary.reasoningObserved, true);
+  assert.equal(summary.sessionId, 'session-1');
+  assert.equal(summary.taskRunId, 'task-1');
+  assert.equal(summary.runSpecId, 'run-1');
+  assert.equal(summary.requestId, 'request-1');
+  assert.equal(summary.traceId, 'trace-1');
+  assert.equal(summary.nodeId, 'node-1');
   assert.deepEqual(summary.toolCalls, ['read_file']);
   assert.equal(summary.toolResultCount, 1);
   assert.equal(summary.totalTokens, 42);

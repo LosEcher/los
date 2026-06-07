@@ -154,6 +154,10 @@ export async function recordProviderCompatEvidenceFromSummary(
     passed: summary.passed,
     sessionId: summary.sessionId,
     taskRunId: summary.taskRunId,
+    runSpecId: summary.runSpecId,
+    traceId: summary.traceId,
+    requestId: summary.requestId,
+    nodeId: summary.nodeId,
     totalTokens: summary.totalTokens,
     summary: summary as unknown as Record<string, unknown>,
   });
