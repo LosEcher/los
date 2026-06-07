@@ -549,10 +549,16 @@ function errorMessage(error: unknown): string {
 }
 
 function JsonBlock({ title, value }: { title: string; value: unknown }) {
+  const [open, setOpen] = useState(false);
+  const json = JSON.stringify(value, null, 2);
+  const isEmpty = json === '{}' || json === '[]' || json === '""' || json === 'null';
   return (
     <div className="json-block">
-      <strong>{title}</strong>
-      <pre>{JSON.stringify(value, null, 2)}</pre>
+      <button type="button" className="json-toggle" onClick={() => setOpen(!open)}>
+        <strong>{open ? '▾' : '▸'} {title}</strong>
+        {!open ? <span className="json-preview">{isEmpty ? '(empty)' : json.slice(0, 80).replace(/\n/g, ' ')}</span> : null}
+      </button>
+      {open ? <pre>{json}</pre> : null}
     </div>
   );
 }

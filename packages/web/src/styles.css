@@ -1182,6 +1182,29 @@ button:disabled {
 .event-dot.model   { background: rgb(59 130 246); }
 .event-dot.tool    { background: var(--warn); }
 .event-dot.task    { background: rgb(168 85 247); }
+.event-dot.other   { background: var(--faint); }
+
+.event-line.clickable {
+  cursor: pointer;
+}
+
+.event-line.clickable:hover {
+  background: var(--surface-2);
+}
+
+.event-payload {
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--faint);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
 .compat-badges {
   display: flex;
   gap: 4px;
@@ -1328,11 +1351,31 @@ button:disabled {
   gap: 10px;
 }
 
-.json-block strong {
+.json-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.json-toggle strong {
   color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.json-preview {
+  color: var(--faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "IBM Plex Mono", monospace;
 }
 
 .json-block pre {

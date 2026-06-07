@@ -31,6 +31,7 @@ import {
   type ProviderReadiness,
   type RunSpec,
   type SessionDetail,
+  type SessionEvent,
   type SessionEventsResponse,
   type SessionObservability,
   type SessionSummary,
@@ -298,14 +299,13 @@ function SessionInspector({
           const isNewTurn = idx === 0 || event.turn !== (arr[idx - 1]?.turn ?? 0);
           const payloadSummary = eventPayloadSummary(event);
           return (
-            <div className={`event-line${isNewTurn ? ' turn-break' : ''}`} data-category={category} key={event.id}>
-              <span className="event-time">{formatTime(event.createdAt)}</span>
-              <span className={`event-dot ${category}`} />
-              <strong>{event.type}</strong>
-              {event.toolName ? <em>{event.toolName}</em> : null}
-              {event.model ? <em className="event-model">{event.model}</em> : null}
-              {payloadSummary ? <span className="event-summary">{payloadSummary}</span> : null}
-            </div>
+            <ExpandableEvent
+              key={event.id}
+              event={event}
+              category={category}
+              isNewTurn={isNewTurn}
+              payloadSummary={payloadSummary}
+            />
           );
         })}
       </div>
@@ -350,6 +350,36 @@ function eventPayloadSummary(event: { payload?: Record<string, unknown> }): stri
   if (typeof p.callId === 'string') return `call: ${p.callId.slice(0, 12)}`;
   if (typeof p.argsPreview === 'string') return p.argsPreview.slice(0, 60);
   return null;
+}
+
+function ExpandableEvent({ event, category, isNewTurn, payloadSummary }: {
+  event: SessionEvent;
+  category: string;
+  isNewTurn: boolean;
+  payloadSummary: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const hasPayload = event.payload && Object.keys(event.payload).length > 0;
+
+  return (
+    <>
+      <div
+        className={`event-line${isNewTurn ? ' turn-break' : ''}${hasPayload ? ' clickable' : ''}`}
+        data-category={category}
+        onClick={() => hasPayload && setOpen(!open)}
+      >
+        <span className="event-time">{formatTime(event.createdAt)}</span>
+        <span className={`event-dot ${category}`} />
+        <strong>{open ? '▾' : hasPayload ? '▸' : ' '} {event.type}</strong>
+        {event.toolName ? <em>{event.toolName}</em> : null}
+        {event.model ? <em className="event-model">{event.model}</em> : null}
+        {payloadSummary ? <span className="event-summary">{payloadSummary}</span> : null}
+      </div>
+      {open && hasPayload ? (
+        <pre className="event-payload">{JSON.stringify(event.payload, null, 2)}</pre>
+      ) : null}
+    </>
+  );
 }
 
 function buildRelatedTodoUrls(sessionId: string | null, metadata: Record<string, unknown>): string[] {
