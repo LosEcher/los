@@ -13,6 +13,8 @@ import { describe, it } from 'node:test';
 
 // ── previewText ─────────────────────────────────────────
 import { type AgentConfig, type AgentModelDelta, type AgentResult, type TurnSummary } from './loop.js';
+import { compressOrTrimMessages } from './loop/compression.js';
+import type { Message as ProviderMessage } from './providers/index.js';
 
 // Re-implement the helpers inline to test them independently.
 // This avoids coupling to provider/DB imports while still validating logic.
@@ -336,5 +338,28 @@ describe('buildInitialMessages', () => {
     buildInitialMessages('hello', 'sys', existing);
     assert.strictEqual(existing.length, 1);
     assert.strictEqual(existing[0].content, 'original');
+  });
+});
+
+describe('compressOrTrimMessages', () => {
+  it('compresses warning-level context before it exceeds the hard budget', () => {
+    const messages: ProviderMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'assistant', content: 'A'.repeat(3200) },
+      { role: 'tool', content: 'tool result '.repeat(80) },
+      { role: 'user', content: 'final prompt' },
+    ];
+
+    const result = compressOrTrimMessages(messages, 1200, {
+      warningRatio: 0.70,
+      aggressiveRatio: 0.85,
+      emergencyRatio: 0.95,
+    });
+
+    assert.notStrictEqual(result, messages);
+    assert.strictEqual(result[0]?.role, 'system');
+    assert.match(result[1]?.content ?? '', /Compressed earlier context/);
+    assert.strictEqual(result.at(-1)?.content, 'final prompt');
+    assert.ok((result[1]?.content.length ?? 0) < messages[1].content.length);
   });
 });

@@ -34,6 +34,13 @@ export const ConfigSchema = z.object({
   server: z.object({
     port: z.coerce.number().default(8080),
     host: z.string().default('127.0.0.1'),
+    corsOrigin: z.union([z.string(), z.array(z.string())]).default('http://localhost:5173'),
+  }),
+
+  // Auth
+  auth: z.object({
+    enabled: z.coerce.boolean().default(false),
+    token: z.string().optional(),
   }),
 
   // Agent
@@ -82,6 +89,9 @@ const ENV_MAP: [string, string][] = [
   ['DATABASE_URL', 'databaseUrl'],
   ['SERVER_PORT', 'server.port'],
   ['SERVER_HOST', 'server.host'],
+  ['CORS_ORIGIN', 'server.corsOrigin'],
+  ['LOS_AUTH_ENABLED', 'auth.enabled'],
+  ['LOS_AUTH_TOKEN', 'auth.token'],
   ['AGENT_DEFAULT_PROVIDER', 'agent.defaultProvider'],
   ['AGENT_DEFAULT_MODEL', 'agent.defaultModel'],
   ['AGENT_MAX_LOOPS', 'agent.maxLoops'],
@@ -247,7 +257,8 @@ export async function loadConfig(opts?: {
 
   // Layer 1: Built-in defaults (ensure all schema keys exist)
   let merged: Record<string, unknown> = {
-    server: { port: 8080, host: '127.0.0.1' },
+    server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173' },
+    auth: { enabled: false },
     agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write' },
     memory: { ftsEnabled: true, maxObservations: 10000 },
     executor: { enabled: false, meshNodes: [] },
@@ -353,6 +364,8 @@ export function printConfigDiagnostics(config: Config): string {
     `  Profile:      ${config.profile}`,
     `  Database:     ${config.databaseUrl.replace(/\/\/.*@/, '//***@')}`,
     `  Server:       ${config.server.host}:${config.server.port}`,
+    `  CORS origin:  ${Array.isArray(config.server.corsOrigin) ? config.server.corsOrigin.join(', ') : config.server.corsOrigin}`,
+    `  Auth:         ${config.auth.enabled ? 'enabled' : 'disabled'}`,
     `  Provider:     ${config.agent.defaultProvider} / ${config.agent.defaultModel}`,
     `  Max loops:    ${config.agent.maxLoops}`,
     `  Sandbox:      ${config.agent.sandboxMode}`,

@@ -5,50 +5,105 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WARNINGS=0
+ERRORS=0
 MAX_LINES=600
+WARN_LINES=400
 MAX_DIR_FILES=15
 
-warn() { echo -e "  \033[1;33m[WARN]\033[0m $*"; WARNINGS=$((WARNINGS + 1)); }
+# Files exceeding MAX_LINES with active/in-progress split work.
+# These produce warnings instead of errors (tracked, not forgotten).
+ALLOWED_LARGE_FILES="
+packages/agent/src/loop.ts
+packages/agent/src/providers/index.ts
+packages/agent/src/run-evals.ts
+packages/agent/src/agent-task-graph.ts
+packages/agent/src/tools/registry.ts
+packages/cli/src/index.ts
+packages/gateway/src/chat-route.ts
+packages/infra/src/discovery.ts
+packages/web/src/chat-page.tsx
+"
+
+warn()  { echo -e "  \033[1;33m[WARN]\033[0m $*"; WARNINGS=$((WARNINGS + 1)); }
+error() { echo -e "  \033[1;31m[ERROR]\033[0m $*"; ERRORS=$((ERRORS + 1)); }
 header() { echo ""; echo -e "\033[0;36m--- $1 ---\033[0m"; }
+
+is_allowed() {
+  local file="$1"
+  local rel="${file#$ROOT/}"
+  for allowed in $ALLOWED_LARGE_FILES; do
+    [[ "$rel" == "$allowed" ]] && return 0
+  done
+  return 1
+}
 
 # 1. Large files
 header "Large files (>$MAX_LINES lines)"
-find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
+while IFS= read -r line; do
+  file=$(echo "$line" | awk '{print $2}')
+  count=$(echo "$line" | awk '{print $1}')
+  if is_allowed "$file"; then
+    warn "$file ($count lines) — allowed, split in progress"
+  else
+    error "$file ($count lines) — exceeds $MAX_LINES line limit"
+  fi
+done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   ! -path '*/node_modules/*' ! -path '*/dist/*' \
   ! -path '*/test/*' ! -name '*.test.*' \
   -exec wc -l {} + 2>/dev/null | awk -v max="$MAX_LINES" \
-  '$2 != "total" && $1 > max { printf "  \033[1;33m[WARN]\033[0m %s (%d lines)\n", $2, $1; c++ } END { exit c }' || WARNINGS=$((WARNINGS + 1))
+  '$2 != "total" && $1 > max { print $1, $2 }')
+
+# 1b. Warning-level large files (>WARN_LINES but <= MAX_LINES)
+while IFS= read -r line; do
+  file=$(echo "$line" | awk '{print $2}')
+  count=$(echo "$line" | awk '{print $1}')
+  if ! is_allowed "$file"; then
+    warn "$file ($count lines) — exceeds $WARN_LINES line warning threshold"
+  fi
+done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
+  ! -path '*/node_modules/*' ! -path '*/dist/*' \
+  ! -path '*/test/*' ! -name '*.test.*' \
+  -exec wc -l {} + 2>/dev/null | awk -v min="$WARN_LINES" -v max="$MAX_LINES" \
+  '$2 != "total" && $1 > min && $1 <= max { print $1, $2 }')
 
 # 2. Flat directories
 header "Flat directories (>$MAX_DIR_FILES files, no subdirs)"
-find "$ROOT/packages" -type d ! -name 'node_modules' ! -name 'dist' ! -path '*/node_modules/*' ! -path '*/dist/*' \
-  -print0 2>/dev/null | while IFS= read -r -d '' d; do
+while IFS= read -r -d '' d; do
   fc=$(find "$d" -maxdepth 1 -type f ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
   [ "$fc" -gt "$MAX_DIR_FILES" ] || continue
   sd=$(find "$d" -maxdepth 1 -type d ! -name '.' ! -name '..' 2>/dev/null | wc -l | tr -d ' ')
   [ "$sd" -le 1 ] && warn "$d/ has $fc files, no subdirectories"
-done
+done < <(find "$ROOT/packages" -type d ! -name 'node_modules' ! -name 'dist' ! -path '*/node_modules/*' ! -path '*/dist/*' \
+  -print0 2>/dev/null)
 
 # 3. Process-phase names
-header "Process-phase naming (legacy/v2/temp/backup/_new/_old)"
-find "$ROOT/packages" -type f \
+header "Process-phase naming (legacy/v2/temp/backup/new/old/tmp/bak)"
+while IFS= read -r f; do
+  error "$f"
+done < <(find "$ROOT/packages" -type f \
   \( -name '*legacy*' -o -name '*v2*' -o -name '*temp*' -o -name '*backup*' \
-     -o -name '*_new.*' -o -name '*_old.*' \) \
+     -o -name '*_new.*' -o -name '*_old.*' -o -name '*.new' -o -name '*.tmp' \
+     -o -name '*.bak' -o -name '*~' \) \
   ! -path '*/node_modules/*' ! -path '*/dist/*' \
-  ! -path '*/archive/*' 2>/dev/null | while read -r f; do
-  warn "$f"
-done
+  ! -path '*/archive/*' 2>/dev/null)
 
 # 4. Direct infra bypass (imports of third-party libs outside infra/)
 header "Direct third-party imports (should go through @los/infra)"
 for pkg in "$ROOT/packages"/*/; do
   name=$(basename "$pkg")
   [ "$name" = "infra" ] && continue
-  grep -rn "from ['\"]better-sqlite3\|from ['\"]zod\|from ['\"]winston\|from ['\"]pino" \
-    "$pkg/src/" --include='*.ts' 2>/dev/null | head -5 | while read -r line; do
-    warn "$name: $line"
-  done
+  while IFS= read -r line; do
+    error "$name: $line"
+  done < <(grep -rn "from ['\"]better-sqlite3\|from ['\"]zod\|from ['\"]winston\|from ['\"]pino\|from ['\"]pg['\"]" \
+    "$pkg/src/" --include='*.ts' 2>/dev/null | head -5)
 done
 
 echo ""
-[ "$WARNINGS" -gt 0 ] && echo -e "\033[1;33m$WARNINGS warning(s)\033[0m" || echo -e "\033[0;32mClean\033[0m"
+if [ "$ERRORS" -gt 0 ]; then
+  echo -e "\033[1;31m$ERRORS error(s), $WARNINGS warning(s)\033[0m"
+  exit 1
+elif [ "$WARNINGS" -gt 0 ]; then
+  echo -e "\033[1;33m$WARNINGS warning(s)\033[0m"
+else
+  echo -e "\033[0;32mClean\033[0m"
+fi

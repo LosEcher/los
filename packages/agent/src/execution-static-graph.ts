@@ -67,9 +67,9 @@ const CORE_FUNCTION_FILES: Record<string, string> = {
   chatCommand: 'packages/cli/src/index.ts',
   registerChatRoute: 'packages/gateway/src/chat-route.ts',
   createRunSpec: 'packages/agent/src/run-specs.ts',
-  runScheduledAgentTask: 'packages/agent/src/scheduler.ts',
-  resolveExecutor: 'packages/agent/src/scheduler.ts',
-  runAgentOnExecutor: 'packages/agent/src/scheduler.ts',
+  runScheduledAgentTask: 'packages/agent/src/scheduler/scheduled-task-runner.ts',
+  resolveExecutor: 'packages/agent/src/scheduler/executor-client.ts',
+  runAgentOnExecutor: 'packages/agent/src/scheduler/executor-client.ts',
   runAgent: 'packages/agent/src/loop.ts',
   runAssignedAgentTask: 'packages/executor/src/index.ts',
 };

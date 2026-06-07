@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
 const pages = readFileSync(new URL('./pages.tsx', import.meta.url), 'utf8');
+const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
+const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
@@ -36,7 +38,7 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
 });
 
 test('provider setup fields live on the providers page, not chat', () => {
-  const providerWorkspace = between(pages, 'function ProviderConfigWorkspace()', 'function ConfigSnippet');
+  const providerWorkspace = between(providersPage, 'function ProviderConfigWorkspace()', 'function ConfigSnippet');
 
   assert.match(providerWorkspace, /Provider Settings/);
   assert.match(providerWorkspace, /label="provider id"/);
@@ -54,20 +56,20 @@ test('provider setup fields live on the providers page, not chat', () => {
 });
 
 test('providers page renders readiness instead of raw discovery booleans', () => {
-  const providersPage = between(pages, 'export function ProvidersPage()', 'type ProviderConfigDraft');
+  const section = between(providersPage, 'export function ProvidersPage()', 'type ProviderConfigDraft');
 
-  assert.match(providersPage, /providerReadinessLabel/);
-  assert.match(providersPage, /providerReadinessDetail/);
-  assert.match(providersPage, /className="record-row provider-row"/);
-  assert.match(providersPage, /readiness\.ready/);
-  assert.match(providersPage, /readiness\.manualSetupRequired/);
-  assert.match(providersPage, /compat-evidence-detail/);
-  assert.match(providersPage, /taskRunId/);
-  assert.doesNotMatch(providersPage, /String\(provider\.available \?\? provider\.importable/);
+  assert.match(section, /providerReadinessLabel/);
+  assert.match(section, /providerReadinessDetail/);
+  assert.match(section, /className="record-row provider-row"/);
+  assert.match(section, /readiness\.ready/);
+  assert.match(section, /readiness\.manualSetupRequired/);
+  assert.match(section, /compat-evidence-detail/);
+  assert.match(section, /taskRunId/);
+  assert.doesNotMatch(section, /String\(provider\.available \?\? provider\.importable/);
 });
 
 test('task inspector renders agent graph read model fields', () => {
-  const taskInspector = between(pages, 'function TaskRunInspector', 'export function MemoryPage');
+  const taskInspector = between(tasksPage, 'function TaskRunInspector', 'function formatIdList');
 
   assert.match(taskInspector, /agentGraphIdForTask/);
   assert.match(taskInspector, /getJson<AgentTaskGraph>\(`\/agent-graphs\/\$\{graphId\}`\)/);

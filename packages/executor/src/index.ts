@@ -83,7 +83,12 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
 
   const nodeId = config.executor.nodeId ?? process.env.EXECUTOR_NODE_ID ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
-  const agentKey = config.executor.agentKey;
+  const agentKey = config.executor.agentKey ?? (() => {
+    const generated = `los-key-${randomUUID()}`;
+    log.warn(`No EXECUTOR_AGENT_KEY configured. Generated ephemeral key: ${generated}`);
+    log.warn('Set EXECUTOR_AGENT_KEY in .env or pass --agent-key to use a persistent key.');
+    return generated;
+  })();
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
 
@@ -427,7 +432,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
 }
 
 function isAuthorized(req: IncomingMessage, agentKey: string | undefined): boolean {
-  if (!agentKey) return true;
+  if (!agentKey) return false;
   return req.headers.authorization === `Bearer ${agentKey}`;
 }
 

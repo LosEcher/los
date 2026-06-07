@@ -18,7 +18,7 @@ test('artifact routes put, read, list, and delete a local artifact', async () =>
   const sessionId = `test-session-${Date.now()}`;
   const storageRoot = await mkdtemp(join(tmpdir(), 'los-artifacts-'));
   const app = Fastify({ logger: false });
-  registerRequestContext(app);
+  registerRequestContext(app, config);
   registerArtifactRoutes(app, { storageRoot });
 
   try {

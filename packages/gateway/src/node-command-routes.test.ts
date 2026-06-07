@@ -15,7 +15,7 @@ test('node command routes drain, promote, and record commands', async () => {
 
   const nodeId = `test-node-command-${Date.now()}`;
   const app = Fastify({ logger: false });
-  registerRequestContext(app);
+  registerRequestContext(app, config);
   registerNodeCommandRoutes(app);
 
   try {
@@ -68,7 +68,7 @@ test('node upgrade command records accepted rollout state without pretending to 
 
   const nodeId = `test-node-upgrade-${Date.now()}`;
   const app = Fastify({ logger: false });
-  registerRequestContext(app);
+  registerRequestContext(app, config);
   registerNodeCommandRoutes(app);
 
   try {
@@ -132,7 +132,7 @@ test('node command routes proxy to advertised executor command url', async () =>
     });
   });
 
-  registerRequestContext(gateway);
+  registerRequestContext(gateway, config);
   registerNodeCommandRoutes(gateway, { executorAgentKey: 'proxy-key' });
   await executor.listen({ host: '127.0.0.1', port: 0 });
   const address = executor.server.address() as AddressInfo;

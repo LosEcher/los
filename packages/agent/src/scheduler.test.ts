@@ -442,7 +442,10 @@ test('scheduler runs independent graph tasks in parallel without editable surfac
     assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded', 'succeeded']);
     assert.equal(result.completion.status, 'succeeded');
     assert.equal(maxInFlight, 2);
-    assert.deepEqual(requests.map(request => request.prompt), ['agent a prompt', 'web prompt', 'agent b prompt']);
+    assert.deepEqual(
+      requests.map(request => request.prompt).sort(),
+      ['agent a prompt', 'agent b prompt', 'web prompt'],
+    );
 
     const graph = await readAgentTaskGraph(graphId);
     assert.deepEqual(graph.tasks.map(task => task.status), ['succeeded', 'succeeded', 'succeeded']);

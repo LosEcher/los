@@ -24,6 +24,27 @@ import {
   type SessionEventWrite,
 } from './session-events.js';
 import { createEventEmitter } from './event-emitter.js';
+import {
+  buildInitialMessages,
+  getDefaultSystemPrompt,
+} from './loop/message-builder.js';
+import {
+  compressOrTrimMessages,
+  generateCompressionSummary,
+  summarizeText,
+  summarizeToolCallsForCompression,
+} from './loop/compression.js';
+import {
+  estimateTokens,
+  estimateMessageTokens,
+  trimMessagesToBudget,
+  truncateContent,
+} from './loop/token-utils.js';
+import {
+  resolveAllowedTools,
+  resolveToolPolicy,
+  normalizeToolRetry,
+} from './loop/tool-resolver.js';
 
 const log = getLogger('agent');
 
@@ -491,9 +512,10 @@ export async function runAgent(
       );
       // Only replace if compression actually reduced the message count
       if (compressed.length < messages.length) {
+        const previousLength = messages.length;
         messages.length = 0;
         messages.push(...compressed);
-        log.debug(`Compressed context: ${compressed.length} messages (was ${messages.length + messages.length - compressed.length})`);
+        log.debug(`Compressed context: ${compressed.length} messages (was ${previousLength})`);
       }
     }
   }
@@ -542,276 +564,7 @@ export async function runAgent(
   }
 }
 
-function buildInitialMessages(
-  prompt: string,
-  systemPrompt: string,
-  initialMessages: Message[] | undefined,
-  maxContextTokens?: number,
-  compression?: ContextCompressionConfig,
-): Message[] {
-  const messages = initialMessages?.length
-    ? initialMessages.map(message => ({ ...message }))
-    : [{ role: 'system' as const, content: systemPrompt }];
-  if (!messages.some(message => message.role === 'system')) {
-    messages.unshift({ role: 'system', content: systemPrompt });
-  }
-  messages.push({ role: 'user', content: prompt });
 
-  const RESUME_CONTEXT_BUDGET = 100_000;
-  const RESUME_ESTIMATED_THRESHOLD = 80_000;
-
-  // Auto-enable compression for resumed sessions with many messages to prevent
-  // context overflow. Explicit maxContextTokens always takes precedence.
-  const isResumed = Boolean(initialMessages?.length);
-  const estimatedTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
-  const effectiveBudget = (maxContextTokens && maxContextTokens > 0)
-    ? maxContextTokens
-    : (isResumed && estimatedTokens > RESUME_ESTIMATED_THRESHOLD ? RESUME_CONTEXT_BUDGET : 0);
-
-  if (effectiveBudget > 0) {
-    const compressed = compressOrTrimMessages(messages, effectiveBudget, {
-      ...compression,
-      enabled: compression?.enabled !== false,
-    });
-    return compressed;
-  }
-  return messages;
-}
-
-// ── Token Estimation ────────────────────────────────────
-
-/**
- * Rough token estimator — chars/4 heuristic with a penalty for non-ASCII.
- * Accurate enough for context-window budgeting (±15%).
- * A proper tiktoken integration would replace this for exact counts.
- */
-function estimateTokens(text: string): number {
-  let tokens = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (code <= 0x7f) {
-      // ASCII: ~4 chars per token
-      tokens += 0.25;
-    } else if (code <= 0x7ff) {
-      // 2-byte UTF-8: ~2 chars per token
-      tokens += 0.5;
-    } else if (code <= 0xffff) {
-      // 3-byte UTF-8: ~1 char per token
-      tokens += 1.0;
-    } else {
-      // 4-byte UTF-8 (emoji etc.): 1-2 tokens
-      tokens += 1.5;
-    }
-  }
-  return Math.ceil(tokens);
-}
-
-function estimateMessageTokens(msg: Message): number {
-  let tokens = estimateTokens(msg.content);
-  // Tool calls add overhead
-  if (msg.tool_calls) {
-    for (const tc of msg.tool_calls) {
-      tokens += estimateTokens(tc.function.name) + estimateTokens(tc.function.arguments) + 4;
-    }
-  }
-  // Role overhead (~3 tokens)
-  return tokens + 3;
-}
-
-/**
- * Trim messages to fit within a token budget.
- * - System message is always preserved (truncated if necessary).
- * - Oldest non-system messages are removed first.
- * - At minimum, system + latest user message are kept.
- */
-function trimMessagesToBudget(messages: Message[], budget: number): Message[] {
-  const systemIdx = messages.findIndex(m => m.role === 'system');
-  const systemMsg = systemIdx >= 0 ? messages[systemIdx] : null;
-
-  // Build the result: start from the end (most recent), work backwards
-  const nonSystem = systemIdx >= 0
-    ? [...messages.slice(0, systemIdx), ...messages.slice(systemIdx + 1)]
-    : [...messages];
-
-  // Always keep the last message (the current prompt)
-  const last = nonSystem[nonSystem.length - 1];
-  if (!last) {
-    // Only system message exists — truncate it if needed
-    if (systemMsg) {
-      const sysTokens = estimateMessageTokens(systemMsg);
-      if (sysTokens > budget) {
-        return [{ ...systemMsg, content: truncateContent(systemMsg.content, budget - 10) }];
-      }
-      return [systemMsg];
-    }
-    return [];
-  }
-
-  let used = estimateMessageTokens(last);
-  if (systemMsg) used += estimateMessageTokens(systemMsg);
-  const kept: Message[] = [last];
-
-  // Add older messages while under budget
-  for (let i = nonSystem.length - 2; i >= 0; i--) {
-    const msgTokens = estimateMessageTokens(nonSystem[i]!);
-    if (used + msgTokens <= budget) {
-      used += msgTokens;
-      kept.unshift(nonSystem[i]!);
-    } else {
-      break;
-    }
-  }
-
-  // If even system + last message exceeds budget, truncate the last message
-  if (systemMsg) {
-    const sysTokens = estimateMessageTokens(systemMsg);
-    if (sysTokens + estimateMessageTokens(last) > budget) {
-      const available = Math.max(50, budget - sysTokens);
-      kept[kept.length - 1] = { ...last, content: truncateContent(last.content, available) };
-    }
-    kept.unshift(systemMsg);
-  }
-
-  return kept;
-}
-
-function truncateContent(content: string, tokenBudget: number): string {
-  // Rough: 4 chars ≈ 1 token, leave some margin
-  const maxChars = Math.max(50, tokenBudget * 3);
-  if (content.length <= maxChars) return content;
-  return content.slice(0, maxChars) + '\n[...truncated]';
-}
-
-// ── Context Compression ─────────────────────────────────
-
-/**
- * Three-tier context compression:
- *   warning    (80%): compress old turns into brief summaries
- *   aggressive (88%): compress old turns into terse summaries
- *   emergency  (95%): hard truncation — drop oldest messages
- *
- * Preserves the system message and the most recent turns intact.
- * Compressed turns become a synthetic "user" message summarizing earlier work.
- */
-function compressOrTrimMessages(
-  messages: Message[],
-  budget: number,
-  compression?: ContextCompressionConfig,
-): Message[] {
-  const enabled = compression?.enabled !== false;
-  const warningRatio = compression?.warningRatio ?? 0.80;
-  const aggressiveRatio = compression?.aggressiveRatio ?? 0.88;
-  const emergencyRatio = compression?.emergencyRatio ?? 0.95;
-
-  const totalTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
-  if (totalTokens <= budget) return messages; // Under budget — no action needed
-
-  const systemIdx = messages.findIndex(m => m.role === 'system');
-
-  // Emergency: hard truncation
-  if (totalTokens > budget * emergencyRatio || !enabled) {
-    return trimMessagesToBudget(messages, budget);
-  }
-
-  // Warning / Aggressive: compress instead of drop
-  const ratio = totalTokens / budget;
-  const summaryBudget = Math.floor(budget * (ratio > aggressiveRatio ? 0.05 : 0.10));
-
-  // Find the split point: which messages to compress?
-  // Keep the most recent user message + all after it intact
-  // Compress everything before that (except system)
-  const nonSystem = systemIdx >= 0
-    ? [...messages.slice(0, systemIdx), ...messages.slice(systemIdx + 1)]
-    : [...messages];
-
-  // Find the last user message — keep it and everything after
-  let keepFrom = nonSystem.length - 1;
-  for (let i = nonSystem.length - 1; i >= 0; i--) {
-    if (nonSystem[i]!.role === 'user') { keepFrom = i; break; }
-  }
-
-  const toKeep = nonSystem.slice(keepFrom);
-  const toCompress = nonSystem.slice(0, keepFrom);
-
-  if (toCompress.length === 0) {
-    return trimMessagesToBudget(messages, budget);
-  }
-
-  // Generate summary from compressed messages
-  const summary = generateCompressionSummary(toCompress, summaryBudget, ratio > aggressiveRatio);
-
-  // Build result: system + summary + recent messages
-  const result: Message[] = [];
-  if (systemIdx >= 0) result.push(messages[systemIdx]!);
-  result.push({ role: 'user', content: summary });
-  result.push(...toKeep);
-
-  return result;
-}
-
-/**
- * Generate a compressed summary of old messages.
- * Extracts: turns with tool calls, key decisions, errors.
- */
-function generateCompressionSummary(
-  messages: Message[],
-  tokenBudget: number,
-  aggressive: boolean,
-): string {
-  const lines: string[] = ['[Compressed earlier context]'];
-  lines.push('');
-
-  let turnIdx = 0;
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!;
-    if (msg.role === 'assistant') {
-      turnIdx++;
-      const text = summarizeText(msg.content, aggressive ? 60 : 120);
-      const tools = summarizeToolCallsForCompression(msg.tool_calls);
-
-      if (tools.length > 0) {
-        lines.push(`Turn ${turnIdx}: ${text} [Tools: ${tools.join(', ')}]`);
-      } else {
-        lines.push(`Turn ${turnIdx}: ${text}`);
-      }
-    } else if (msg.role === 'tool') {
-      const result = summarizeText(msg.content, aggressive ? 30 : 60);
-      if (result) {
-        const last = lines[lines.length - 1] ?? '';
-        if (last.startsWith(`Turn ${turnIdx}:`)) {
-          lines[lines.length - 1] = last + ` → ${result}`;
-        }
-      }
-    }
-  }
-
-  if (turnIdx === 0) {
-    lines.push('(no assistant turns to summarize)');
-  }
-
-  const full = lines.join('\n');
-  if (estimateTokens(full) <= tokenBudget) return full;
-  return full.slice(0, tokenBudget * 3) + '\n[...summary truncated]';
-}
-
-function summarizeText(text: string, maxLen: number): string {
-  const cleaned = text
-    .replace(/\n+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (cleaned.length <= maxLen) return cleaned;
-  return cleaned.slice(0, maxLen) + '...';
-}
-
-function summarizeToolCallsForCompression(toolCalls?: ToolCall[]): string[] {
-  if (!toolCalls || toolCalls.length === 0) return [];
-  return toolCalls.map(tc => tc.function.name);
-}
-
-/**
- * Determine the tool source for event metadata.
- * Returns 'mcp' for MCP-registered tools, 'builtin' for everything else.
- */
 function inferToolSource(capability: ReturnType<ToolRegistry['getCapability']>): string {
   if (capability?.tags?.includes('mcp')) return 'mcp';
   if (capability?.tags?.includes('agent')) return 'spawn_agent';
@@ -870,79 +623,6 @@ function summarizeCapability(capability: ReturnType<ToolRegistry['getCapability'
     needsApproval: capability.needsApproval,
     tags: capability.tags,
   };
-}
-
-function resolveAllowedTools(
-  explicitAllowedTools: readonly string[] | undefined,
-  toolMode: 'all' | 'project-write' | 'read-only',
-): readonly string[] | undefined {
-  const selected = explicitAllowedTools ? [...new Set(explicitAllowedTools)] : undefined;
-  if (toolMode !== 'read-only') {
-    return selected;
-  }
-
-  const readOnly = new Set<string>(READ_ONLY_BUILTIN_TOOLS);
-  if (!selected) {
-    return [...readOnly];
-  }
-
-  return selected.filter(tool => readOnly.has(tool));
-}
-
-function resolveToolPolicy(
-  toolMode: 'all' | 'project-write' | 'read-only',
-  retry: AgentConfig['toolRetry'] | undefined,
-) {
-  const normalizedRetry = normalizeToolRetry(retry);
-  if (toolMode === 'read-only') {
-    return {
-      maxRiskLevel: 'L0' as const,
-      allowWrites: false,
-      sandboxAvailable: false,
-      retry: normalizedRetry,
-    };
-  }
-  if (toolMode === 'project-write') {
-    return {
-      maxRiskLevel: 'L1' as const,
-      allowWrites: true,
-      sandboxAvailable: false,
-      retry: normalizedRetry,
-    };
-  }
-  return {
-    maxRiskLevel: 'L2' as const,
-    allowWrites: true,
-    sandboxAvailable: true,
-    retry: normalizedRetry,
-  };
-}
-
-function normalizeToolRetry(retry: AgentConfig['toolRetry'] | undefined) {
-  if (!retry) return undefined;
-  return {
-    maxAttempts: retry.maxAttempts,
-    baseDelayMs: retry.baseDelayMs,
-    maxDelayMs: retry.maxDelayMs,
-  };
-}
-
-function getDefaultSystemPrompt(toolMode: 'all' | 'project-write' | 'read-only'): string {
-  if (toolMode === 'read-only') return READ_ONLY_SYSTEM;
-  if (toolMode === 'project-write') {
-    return `You are a helpful coding assistant with project-write access to a workspace.
-You can: read files (read_file), write files (write_file), search code (search_content, search_files, glob), analyze code (get_symbols, find_in_code), inspect directories (list_directory, directory_tree, get_file_info), create directories (create_directory), and delete files (delete_file).
-You can also manage the project planning ledger with todo_list, todo_create, todo_update, todo_archive, todo_reopen, and todo_link_dependency.
-
-Rules:
-- Read files before editing them
-- Limit changes to the provided workspace root
-- Do not run shell commands in this mode
-- For todo writes, preserve tenantId/projectId/requestId/traceId when available
-- When you're done, provide a clear summary with the files changed
-- If you're unsure about something, ask instead of guessing`;
-  }
-  return DEFAULT_SYSTEM;
 }
 
 function assertNotAborted(signal: AbortSignal | undefined): void {

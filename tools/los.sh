@@ -69,8 +69,30 @@ mark_service_status() {
 }
 
 port_owner() {
-  command -v lsof >/dev/null 2>&1 || return 0
-  lsof -tiTCP:"$(server_port)" -sTCP:LISTEN 2>/dev/null | head -1 || true
+  # Prefer the PID file for managed processes.
+  local pid
+  pid="$(pid_from_file)"
+  if [ -n "$pid" ] && is_running "$pid"; then
+    printf '%s' "$pid"
+    return 0
+  fi
+
+  # Check port occupancy without lsof (which can hang on macOS).
+  if command -v nc >/dev/null 2>&1; then
+    if nc -z "$(server_host)" "$(server_port)" 2>/dev/null; then
+      printf 'unknown'
+      return 0
+    fi
+  elif command -v curl >/dev/null 2>&1; then
+    # Fallback: if health endpoint responds, something is listening.
+    if curl -fsS "$(server_url)/health" >/dev/null 2>&1; then
+      printf 'unknown'
+      return 0
+    fi
+  fi
+
+  # Port appears free.
+  true
 }
 
 pid_command() {
@@ -195,7 +217,9 @@ status_cmd() {
   else
     local owner
     owner="$(port_owner)"
-    if is_los_gateway_pid "$owner"; then
+    if [ "$owner" = "unknown" ]; then
+      echo "  process: running pid=unknown managed=false"
+    elif is_los_gateway_pid "$owner"; then
       echo "  process: running pid=$owner managed=false"
     else
       echo "  process: stopped"

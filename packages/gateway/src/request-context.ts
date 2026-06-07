@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Config } from '@los/infra/config';
+import { getLogger } from '@los/infra/logger';
+
+const log = getLogger('request-context');
 
 export interface RequestContext {
   requestId: string;
@@ -15,27 +19,46 @@ declare module 'fastify' {
   }
 }
 
-export function registerRequestContext(app: FastifyInstance): void {
+export function registerRequestContext(app: FastifyInstance, config: Config): void {
   app.addHook('onRequest', async (req, reply) => {
     const requestId = normalizeHeader(req.headers['x-request-id']) ?? `req-${randomUUID()}`;
     const traceId = normalizeHeader(req.headers['x-trace-id']) ?? requestId;
-    const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
-    const projectId = normalizeHeader(req.headers['x-project-id']) ?? 'los';
-    const userId = normalizeHeader(req.headers['x-user-id']) ?? 'local-user';
 
-    req.requestContext = {
-      requestId,
-      traceId,
-      tenantId,
-      projectId,
-      userId,
-    };
+    if (config.auth.enabled) {
+      const tenantId = normalizeHeader(req.headers['x-tenant-id']);
+      const projectId = normalizeHeader(req.headers['x-project-id']);
+      const userId = normalizeHeader(req.headers['x-user-id']);
 
-    reply.header('x-request-id', requestId);
-    reply.header('x-trace-id', traceId);
-    reply.header('x-tenant-id', tenantId);
-    reply.header('x-project-id', projectId);
-    reply.header('x-user-id', userId);
+      if (!tenantId || !userId) {
+        log.warn(`Request missing tenant/user context: tenant=${tenantId ?? '<none>'}, user=${userId ?? '<none>'} (auth enabled, headers required)`);
+      }
+
+      req.requestContext = {
+        requestId,
+        traceId,
+        tenantId: tenantId ?? 'unknown',
+        projectId: projectId ?? 'unknown',
+        userId: userId ?? 'unknown',
+      };
+
+      reply.header('x-request-id', requestId);
+      reply.header('x-trace-id', traceId);
+      if (tenantId) reply.header('x-tenant-id', tenantId);
+      if (projectId) reply.header('x-project-id', projectId);
+      if (userId) reply.header('x-user-id', userId);
+    } else {
+      const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
+      const projectId = normalizeHeader(req.headers['x-project-id']) ?? 'los';
+      const userId = normalizeHeader(req.headers['x-user-id']) ?? 'local-user';
+
+      req.requestContext = { requestId, traceId, tenantId, projectId, userId };
+
+      reply.header('x-request-id', requestId);
+      reply.header('x-trace-id', traceId);
+      reply.header('x-tenant-id', tenantId);
+      reply.header('x-project-id', projectId);
+      reply.header('x-user-id', userId);
+    }
   });
 }
 

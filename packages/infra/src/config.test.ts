@@ -9,6 +9,7 @@ test('provider source metadata survives config validation and diagnostics', () =
     agent: {},
     memory: {},
     executor: {},
+    auth: {},
     providers: {
       deepseek: {
         apiKey: 'test-key',

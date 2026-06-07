@@ -8,7 +8,7 @@
 
 1. **Modular monolith** — one Node process, but each package has enforceable import boundaries
 2. **Contract-first** — `contracts/` → generated types → implementation → CI validation
-3. **infra/ is mandatory** — no direct third-party imports outside `packages/infra/`
+3. **infra/ is mandatory for cross-cutting concerns** — DB, config, logger, and provider discovery go through `@los/infra`. UI frameworks (React, Fastify), build tools (Vite, tsc), and type systems may import directly from their respective packages.
 4. **Feature flags, not experimental dirs** — all features live in their target package
 5. **Zod-driven config** — single schema → TypeScript types auto-derived
 6. **PostgreSQL-first persistence** — single-node is treated as a one-node mesh/cloud deployment
