@@ -1131,7 +1131,28 @@ button:disabled {
 .event-dot.model   { background: rgb(59 130 246); }
 .event-dot.tool    { background: var(--warn); }
 .event-dot.task    { background: rgb(168 85 247); }
-.event-dot.other   { background: var(--faint); }
+.compat-badges {
+  display: flex;
+  gap: 4px;
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+.compat-badge {
+  font-size: 0.625rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--faint);
+}
+
+.compat-badge.passed {
+  color: var(--ok);
+}
+
+.compat-badge.required {
+  color: var(--warn);
+}
 
 .memory-row {
   grid-template-columns: minmax(0, 1fr) auto;

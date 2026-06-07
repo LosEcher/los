@@ -73,20 +73,55 @@ export function LogsPage() {
 
 export function SettingsPage() {
   const health = useQuery({ queryKey: ['health'], queryFn: () => getJson<Health>('/health') });
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => getJson<Record<string, unknown>>('/settings'),
+    staleTime: 30_000,
+  });
+  const cfg = (settings.data ?? {}) as Record<string, Record<string, unknown>>;
+  const providers = Array.isArray(cfg.providers) ? cfg.providers as Array<Record<string, unknown>> : [];
+
   return (
     <section className="panel-grid settings-grid">
       <div className="panel">
         <div className="panel-head">
           <div>
             <h2>Settings</h2>
-            <p>Partial surface. Runtime writes should be added only after config ownership is explicit.</p>
+            <p>Runtime configuration. Writes require explicit config ownership.</p>
           </div>
           <StatusPill status="partial" />
         </div>
         <div className="definition-list">
-          <Definition term="read/write now" text="Chat prompt execution, Memory observations." />
-          <Definition term="read-only now" text="Sessions, Tasks, Logs, Provider discovery, Nodes, Skills, Rules." />
-          <Definition term="deferred writes" text="Provider credentials, rule edits, node maintenance, skill source edits." />
+          <div className="section-divider"><strong>Server</strong></div>
+          <Definition term="port" text={String((cfg.server as Record<string, unknown> | undefined)?.port ?? '—')} />
+          <Definition term="host" text={String((cfg.server as Record<string, unknown> | undefined)?.host ?? '—')} />
+
+          <div className="section-divider"><strong>Agent</strong></div>
+          <Definition term="default provider" text={String((cfg.agent as Record<string, unknown> | undefined)?.defaultProvider ?? '—')} />
+          <Definition term="default model" text={String((cfg.agent as Record<string, unknown> | undefined)?.defaultModel ?? '—')} />
+          <Definition term="max loops" text={String((cfg.agent as Record<string, unknown> | undefined)?.maxLoops ?? '—')} />
+          <Definition term="sandbox mode" text={String((cfg.agent as Record<string, unknown> | undefined)?.sandboxMode ?? '—')} />
+
+          <div className="section-divider"><strong>Memory</strong></div>
+          <Definition term="FTS enabled" text={String((cfg.memory as Record<string, unknown> | undefined)?.ftsEnabled ?? '—')} />
+          <Definition term="max observations" text={String((cfg.memory as Record<string, unknown> | undefined)?.maxObservations ?? '—')} />
+
+          <div className="section-divider"><strong>Executor</strong></div>
+          <Definition term="enabled" text={String((cfg.executor as Record<string, unknown> | undefined)?.enabled ?? '—')} />
+          <Definition term="node ID" text={String((cfg.executor as Record<string, unknown> | undefined)?.nodeId ?? '—')} />
+          <Definition term="mesh nodes" text={String((cfg.executor as Record<string, unknown> | undefined)?.meshNodeCount ?? '—')} />
+
+          {providers.length > 0 ? (
+            <>
+              <div className="section-divider"><strong>Providers</strong></div>
+              {providers.map((p, i) => (
+                <Definition key={i}
+                  term={String(p.name ?? `provider-${i}`)}
+                  text={`${p.enabled ? 'enabled' : 'disabled'} · ${p.hasApiKey ? 'key set' : 'no key'}${p.model ? ` · ${p.model}` : ''}${p.weight ? ` · weight:${p.weight}` : ''}`}
+                />
+              ))}
+            </>
+          ) : null}
         </div>
       </div>
       <aside className="panel inspector">
@@ -94,8 +129,6 @@ export function SettingsPage() {
         <div className="fact-list">
           <Fact label="gateway" value={health.data?.status ?? 'unknown'} />
           <Fact label="uptime" value={formatDuration(health.data?.uptime ?? 0)} />
-          <Fact label="api boundary" value="packages/gateway" />
-          <Fact label="web package" value="packages/web" />
         </div>
       </aside>
     </section>

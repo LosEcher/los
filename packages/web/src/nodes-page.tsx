@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Network, Save, Radar, Plus, Upload, ArrowDownCircle, ArrowUpCircle, RotateCcw, RefreshCw, Undo2 } from 'lucide-react';
+import { Network, Save, Radar, Plus, Upload, ArrowDownCircle, ArrowUpCircle, RotateCcw, RefreshCw, Undo2, Info } from 'lucide-react';
 import { getJson, patchJson, postJson, type ExecutorNode, type ExecutorNodeUpsertPayload, type SshConfigImportResponse } from './api';
 import {
   DataTable,
@@ -341,6 +341,9 @@ function NodeEditor({
           <Field label="verified">
             <textarea rows={6} value={draft.verified} onChange={event => setDraft(prev => ({ ...prev, verified: event.target.value }))} />
           </Field>
+          <Field label="capacity">
+            <textarea rows={4} value={draft.capacity} onChange={event => setDraft(prev => ({ ...prev, capacity: event.target.value }))} placeholder='{"maxTasks": 5, "cpuCores": 4}' />
+          </Field>
           <Field label="mesh links">
             <textarea rows={6} value={draft.meshLinks} onChange={event => setDraft(prev => ({ ...prev, meshLinks: event.target.value }))} />
           </Field>
@@ -367,6 +370,9 @@ function NodeEditor({
         </button>
         <button type="button" className="ghost-btn" onClick={() => sendCommand('rollback')} disabled={busy}>
           <Undo2 size={14} /> rollback
+        </button>
+        <button type="button" className="ghost-btn" onClick={() => sendCommand('status')} disabled={busy}>
+          <Info size={14} /> status
         </button>
       </div>
       {commandResult ? (
@@ -436,6 +442,7 @@ type NodeDraft = {
   capabilities: string;
   verified: string;
   meshLinks: string;
+  capacity: string;
 };
 
 function createDraft(node: ExecutorNode | null): NodeDraft {
@@ -456,6 +463,7 @@ function createDraft(node: ExecutorNode | null): NodeDraft {
     capabilities: stringifyJson(node?.capabilities ?? { run_agent: false }),
     verified: stringifyJson(node?.verified ?? {}),
     meshLinks: stringifyJson(node?.meshLinks ?? []),
+    capacity: stringifyJson(node?.capacity ?? {}),
   };
 }
 
@@ -479,6 +487,7 @@ function draftToPayload(draft: NodeDraft): ExecutorNodeUpsertPayload {
     capabilities: parseJsonBlock(draft.capabilities),
     verified: parseJsonBlock(draft.verified),
     meshLinks: parseJsonArrayBlock(draft.meshLinks),
+    capacity: parseJsonBlock(draft.capacity),
   };
 }
 

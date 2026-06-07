@@ -205,6 +205,38 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     };
   });
 
+  app.get('/settings', async () => {
+    return {
+      server: {
+        port: config.server.port,
+        host: config.server.host,
+      },
+      agent: {
+        defaultProvider: config.agent.defaultProvider,
+        defaultModel: config.agent.defaultModel,
+        maxLoops: config.agent.maxLoops,
+        sandboxMode: config.agent.sandboxMode,
+      },
+      memory: {
+        ftsEnabled: config.memory.ftsEnabled,
+        maxObservations: config.memory.maxObservations,
+      },
+      executor: {
+        enabled: config.executor.enabled,
+        nodeId: config.executor.nodeId,
+        nodeUrl: config.executor.nodeUrl,
+        meshNodeCount: config.executor.meshNodes.length,
+      },
+      providers: Object.entries(config.providers).map(([name, p]) => ({
+        name,
+        enabled: p.enabled ?? false,
+        hasApiKey: typeof p.apiKey === 'string' && p.apiKey.length > 0,
+        model: p.model ?? null,
+        weight: p.weight ?? null,
+      })),
+    };
+  });
+
   // ── Logs ─────────────────────────────────────────────
 
   registerLogRoutes(app, {

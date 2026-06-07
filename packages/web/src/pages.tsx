@@ -928,13 +928,34 @@ export function ProvidersPage() {
             const readiness = provider.readiness ?? {};
             const state = providerReadinessLabel(readiness);
             const detail = providerReadinessDetail(provider, readiness);
+            const compatEvidence = Array.isArray(provider.compatibilityEvidence)
+              ? provider.compatibilityEvidence as Array<Record<string, unknown>>
+              : [];
+            const promotionState = metadataText(provider.promotionState);
             return (
               <div className="record-row provider-row">
-                <span className="row-title">{metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`}</span>
+                <span className="row-title">
+                  {metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`}
+                  {promotionState === 'verified_advisory' ? <span className="status-text succeeded" title="Verified advisory"> ✓</span> : null}
+                </span>
                 <span>{metadataText(provider.source) ?? 'source?'}</span>
                 <span>{metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? 'model?'}</span>
                 <span className={`status-text ${readiness.ready ? 'succeeded' : readiness.manualSetupRequired ? 'blocked' : 'ready'}`}>{state}</span>
                 <span>{detail}</span>
+                {compatEvidence.length > 0 ? (
+                  <span className="compat-badges">
+                    {compatEvidence.map((ce, i) => {
+                      const probeId = String(ce.probeId ?? ce.id ?? `probe-${i}`);
+                      const decision = String(ce.decision ?? '');
+                      const model = ce.model ? String(ce.model) : '';
+                      return (
+                        <span key={i} className={`compat-badge ${decision === 'required' ? 'required' : 'passed'}`} title={`${probeId}: ${decision}${model ? ` (${model})` : ''}`}>
+                          {probeId}
+                        </span>
+                      );
+                    })}
+                  </span>
+                ) : null}
               </div>
             );
           }}
