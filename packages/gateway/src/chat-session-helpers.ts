@@ -9,8 +9,8 @@ import { listTaskRunsForSession } from '@los/agent/task-runs';
 import { listRecentSessionEvents } from '@los/agent/session-events';
 import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
 import { loadSession } from '@los/agent/session';
-import { listRunSpecs, type RunSpecRecord } from '@los/agent/run-specs';
-import { loadServiceInstance, type ServiceInstanceRecord } from '@los/agent/service-instances';
+import { claimRunSpec, listRunSpecs, type RunSpecRecord } from '@los/agent/run-specs';
+import { listServiceInstances, loadServiceInstance, type ServiceInstanceRecord } from '@los/agent/service-instances';
 import type { Message } from '@los/agent';
 
 // ── Replay event normalization ──────────────────────────
@@ -195,4 +195,56 @@ export async function loadBranchSource(branchFrom: string, branchAtTurn?: number
     messages = parent.messages;
   }
   return { messages, parent };
+}
+
+// ── Auto orphan reclamation ────────────────────────────
+
+export interface OrphanReclamationResult {
+  staleGatewayIds: string[];
+  claimedRunSpecIds: string[];
+  errors: string[];
+}
+
+export async function reclaimOrphanedRuns(gatewayServiceId: string): Promise<OrphanReclamationResult> {
+  const staleGatewayIds: string[] = [];
+  const claimedRunSpecIds: string[] = [];
+  const errors: string[] = [];
+
+  try {
+    // Find gateways whose heartbeat is older than 60s
+    const services = await listServiceInstances(200);
+    const now = Date.now();
+    const staleMs = 60_000;
+
+    for (const svc of services) {
+      if (svc.serviceId === gatewayServiceId) continue;
+      if (svc.serviceKind !== 'gateway') continue;
+      const heartbeatAge = now - new Date(svc.lastHeartbeatAt).getTime();
+      if (heartbeatAge > staleMs && svc.status === 'online') {
+        staleGatewayIds.push(svc.serviceId);
+      }
+    }
+
+    if (staleGatewayIds.length === 0) return { staleGatewayIds: [], claimedRunSpecIds: [], errors: [] };
+
+    // Find orphaned run specs owned by stale gateways
+    const allSpecs = await listRunSpecs(1000);
+    const nonTerminal = new Set(['created', 'running', 'blocked']);
+    const orphaned = allSpecs.filter(
+      r => r.gatewayId && staleGatewayIds.includes(r.gatewayId) && nonTerminal.has(r.status),
+    );
+
+    for (const spec of orphaned) {
+      try {
+        await claimRunSpec(spec.id, gatewayServiceId);
+        claimedRunSpecIds.push(spec.id);
+      } catch (err) {
+        errors.push(`${spec.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  } catch (err) {
+    errors.push(`reclamation scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  return { staleGatewayIds, claimedRunSpecIds, errors };
 }

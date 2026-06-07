@@ -29,7 +29,7 @@ import { registerTodoRoutes } from './todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './agent-task-graph-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
-import { findRecoverableSessions } from './chat-session-helpers.js';
+import { findRecoverableSessions, reclaimOrphanedRuns } from './chat-session-helpers.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import {
@@ -1087,6 +1087,19 @@ export async function startServer(port?: number, host?: string) {
     heartbeatGatewayService(service).catch((err) => log.warn(`service heartbeat failed: ${err.message ?? String(err)}`));
   }, SERVICE_HEARTBEAT_MS);
   app.addHook('onClose', async () => clearInterval(heartbeat));
+
+  const ORPHAN_REAPER_MS = 30_000;
+  const orphanReaper = setInterval(() => {
+    reclaimOrphanedRuns(service.serviceId).then((result) => {
+      if (result.claimedRunSpecIds.length > 0) {
+        log.info(`Orphan reaper claimed ${result.claimedRunSpecIds.length} run(s) from stale gateways: ${result.staleGatewayIds.join(', ')}`);
+      }
+      if (result.errors.length > 0) {
+        log.warn(`Orphan reaper errors: ${result.errors.join('; ')}`);
+      }
+    }).catch((err) => log.warn(`Orphan reaper failed: ${err.message ?? String(err)}`));
+  }, ORPHAN_REAPER_MS);
+  app.addHook('onClose', async () => clearInterval(orphanReaper));
 
   await app.listen({ port: p, host: h });
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);
