@@ -82,6 +82,9 @@ Use `governance/manual-node-pairing-plan.md` when adapting manual device or
 node-pairing ideas to the existing `los` node registry, probe, and scheduler
 eligibility model.
 
+Use `governance/provider-promotion-evidence-display-plan.md` when deciding how
+provider compatibility evidence should appear in API, CLI, and Web UI surfaces.
+
 Use `governance/run-chain-changes/` when a change affects `/chat`, scheduler,
 executor dispatch, provider gates, verification records, or run-inspection UI
 and needs a small behavior-impact fragment.

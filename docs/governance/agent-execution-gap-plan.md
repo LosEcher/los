@@ -167,6 +167,10 @@ Supplement:
    usage, cost if available, and decision.
 3. Let `los provider list` show verified advisory only when evidence exists.
 
+Current follow-up: `provider_compat_evidence` now exists as the persisted
+evidence table, and `docs/governance/provider-promotion-evidence-display-plan.md`
+tracks the remaining API/CLI/Web UI display work.
+
 ### G5. External Tools Are Compared Manually
 
 Current state:

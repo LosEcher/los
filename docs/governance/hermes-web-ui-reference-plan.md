@@ -217,3 +217,7 @@ Status on 2026-06-07: started in
 
 P1 manual node pairing status on 2026-06-07: design mapping recorded in
 `docs/governance/manual-node-pairing-plan.md`; no runtime contract change yet.
+
+P1 provider promotion evidence status on 2026-06-07: current evidence storage
+and remaining display work recorded in
+`docs/governance/provider-promotion-evidence-display-plan.md`.
