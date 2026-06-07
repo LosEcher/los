@@ -66,6 +66,19 @@ test('providers page renders readiness instead of raw discovery booleans', () =>
   assert.doesNotMatch(providersPage, /String\(provider\.available \?\? provider\.importable/);
 });
 
+test('task inspector renders agent graph read model fields', () => {
+  const taskInspector = between(pages, 'function TaskRunInspector', 'export function MemoryPage');
+
+  assert.match(taskInspector, /agentGraphIdForTask/);
+  assert.match(taskInspector, /getJson<AgentTaskGraph>\(`\/agent-graphs\/\$\{graphId\}`\)/);
+  assert.match(taskInspector, /Graph Completion/);
+  assert.match(taskInspector, /readyTaskIds/);
+  assert.match(taskInspector, /waitingTaskIds/);
+  assert.match(taskInspector, /blockedTaskIds/);
+  assert.match(taskInspector, /Attempt Evidence/);
+  assert.doesNotMatch(taskInspector, /JSON\.stringify\(graphResult/);
+});
+
 test('composer run controls are responsive instead of fixed to one crowded grid', () => {
   const toolbar = between(styles, '.composer-toolbar {', '}');
   const runField = between(styles, '.run-field {', '}');

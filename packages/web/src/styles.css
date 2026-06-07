@@ -1358,6 +1358,24 @@ button:disabled {
   gap: 10px;
 }
 
+.graph-read-model {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.graph-read-model > .panel-head,
+.graph-read-model > .mono-chip,
+.graph-read-model > .fact-list {
+  margin-inline: 16px;
+}
+
+.graph-read-model .json-block:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+
 .json-toggle {
   display: flex;
   gap: 8px;

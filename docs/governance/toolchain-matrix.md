@@ -43,7 +43,7 @@ compatibility or verifier records.
 | Static execution understanding | `execution-static-graph` covers CLI commands, gateway routes, agent exports, and core call chain | Usually implicit through code reading | Usually implicit through code reading | Can model plans, not source truth | Can inspect project flow | Keep static graph as drift detector; add expected-route warnings if needed |
 | Runtime replay and audit | `/runs/:id/events?since=`, `tool_call_states`, `verification_records`, and runtime evidence graph exist | Transcript/command summary is external | Transcript/project jsonl is external | Receipts may be truncated | Prompt history is external | Use runtime evidence graph as the los-owned audit surface |
 | Verification gate | DAG gate, direct `/chat` blocking, API/CLI verifier entrypoints, DAG verifier tasks, and `verification-runner` required-check execution exist | Human/agent runs commands and reports | Human/agent runs commands and reports | May record plan/receipt | May record task status | Keep verifier evidence linked to runtime evidence graph |
-| Recovery and resume | `tool-call-recovery` classifies retry/resume/cancel/operator-action decisions from durable tool rows; scheduler queues retry/resume follow-up attempts; API/CLI can apply cancel/operator-attention transitions | Good human-directed recovery, not los ledger | Good interactive recovery, not los ledger | Good planning state ideas | Useful task UX reference | Keep transition events auditable and extend UI read models later |
+| Recovery and resume | `tool-call-recovery` classifies retry/resume/cancel/operator-action decisions from durable tool rows; scheduler queues retry/resume follow-up attempts; API/CLI can apply cancel/operator-attention transitions | Good human-directed recovery, not los ledger | Good interactive recovery, not los ledger | Good planning state ideas | Useful task UX reference | Keep transition events auditable and expose recovery state through bounded read models |
 | External tool ingestion | External-only unless ADR defines redaction/provenance | Source of bounded summaries only | Source of bounded summaries only | Source of comparison ideas only | Source of comparison ideas only | Draft ingestion ADR only after verifier/recovery state is stable |
 | Provider compatibility | Compatibility evidence exists, `los provider promote` remains setup-only, and proposed required-gate decisions can be recorded separately | Can run checks externally | Login/readiness can be misleading | Not provider authority | Not provider authority | Promote proposed policy decisions into enforced target-list changes only when ADR and harness updates can land together |
 
@@ -64,8 +64,10 @@ Before any external tool summary can be imported into `los`:
 
 Use this matrix to order the execution-gap todos:
 
-1. expose run contract fields in CLI/UI after verifier and recovery entrypoints can consume
-   them;
-2. promote provider policy decisions into enforced target-list changes when ADR and harness updates are ready;
-3. only then design external summary adapters for Codex, Claude Code,
+1. finish DAG runtime promotion by adding parallel execution and
+   editable-surface conflict checks after the read-only graph UI stays stable;
+2. promote provider policy decisions into enforced target-list changes when
+   ADR and harness updates are ready;
+3. decide the external summary ingestion ADR before adding DB tables or import
+   routes for Codex, Claude Code,
    Reasonix, OpenCode, and OMX.

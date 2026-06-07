@@ -534,12 +534,13 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
     mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/verify`, {}),
   });
   const agentGraph = useMutation({
-    mutationFn: (taskId: string) => getJson<AgentTaskGraph>(`/agent-graphs/${taskId}`),
+    mutationFn: (graphId: string) => getJson<AgentTaskGraph>(`/agent-graphs/${graphId}`),
   });
   const agentGraphCompletion = useMutation({
-    mutationFn: (taskId: string) => getJson<AgentTaskGraphCompletion>(`/agent-graphs/${taskId}/completion`),
+    mutationFn: (graphId: string) => getJson<AgentTaskGraphCompletion>(`/agent-graphs/${graphId}/completion`),
   });
   const runSpecId = task?.runSpecId;
+  const graphId = task ? agentGraphIdForTask(task) : null;
   const runState = useQuery({
     queryKey: ['run-state', runSpecId],
     queryFn: () => getJson<RunStateProjection>(`/runs/${runSpecId}/state`),
@@ -547,7 +548,7 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
     refetchInterval: 10_000,
   });
   const latestResult = verify.data ?? recover.data ?? inspect.data;
-  const graphResult = agentGraph.data ?? agentGraphCompletion.data;
+  const graphCompletion = agentGraph.data?.completion ?? agentGraphCompletion.data;
 
   if (!task) {
     return <aside className="panel inspector"><EmptyText text="Select a task to inspect run evidence and recovery state." /></aside>;
@@ -562,6 +563,7 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
       <span className="mono-chip">{task.id}</span>
       <div className="fact-list compact-facts">
         <Fact label="run spec" value={runSpecId ?? 'none'} />
+        <Fact label="graph" value={graphId ?? 'none'} />
         <Fact label="session" value={task.sessionId} />
         <Fact label="trace" value={task.traceId} />
         <Fact label="attempt" value={String(task.attempt)} />
@@ -579,7 +581,7 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
         <button className="ghost-btn" type="button" disabled={!runSpecId || verify.isPending} onClick={() => runSpecId && verify.mutate(runSpecId)}>
           <Send size={14} /> verify
         </button>
-        <button className="ghost-btn" type="button" disabled={agentGraph.isPending || agentGraphCompletion.isPending} onClick={() => { agentGraph.mutate(task.id); agentGraphCompletion.mutate(task.id); }}>
+        <button className="ghost-btn" type="button" disabled={!graphId || agentGraph.isPending || agentGraphCompletion.isPending} onClick={() => { if (graphId) { agentGraph.mutate(graphId); agentGraphCompletion.mutate(graphId); } }}>
           <GitGraph size={14} /> graph
         </button>
       </div>
@@ -597,22 +599,85 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
           <pre>{runState.data.blockers.map(blocker => `${blocker.kind}: ${blocker.message}${blocker.ids.length ? ` [${blocker.ids.join(', ')}]` : ''}`).join('\n')}</pre>
         </div>
       ) : null}
-      {graphResult ? (
-        <div className="json-block">
-          <strong>Agent Task Graph</strong>
-          <pre>{JSON.stringify(graphResult, null, 2)}</pre>
-        </div>
-      ) : null}
+      {graphCompletion ? <AgentGraphReadModel graph={agentGraph.data} completion={graphCompletion} /> : null}
       {latestResult ? (
         <div className="json-block">
           <strong>Run Operation Result</strong>
           <pre>{JSON.stringify(latestResult, null, 2)}</pre>
         </div>
       ) : (
-        !graphResult ? <EmptyText text={runSpecId ? 'No run operation loaded.' : 'Task has no run spec link.'} /> : null
+        !graphCompletion ? <EmptyText text={runSpecId ? 'No run operation loaded.' : 'Task has no run spec link.'} /> : null
       )}
     </aside>
   );
+}
+
+function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; completion: AgentTaskGraphCompletion }) {
+  const attempts = graph
+    ? Object.entries(graph.attemptsByTaskId)
+      .flatMap(([, items]) => items)
+      .sort((a, b) => `${a.taskId}:${a.attempt}`.localeCompare(`${b.taskId}:${b.attempt}`))
+    : [];
+
+  return (
+    <div className="graph-read-model">
+      <div className="panel-head compact">
+        <h2>Agent Task Graph</h2>
+        <span className={`status-text ${completion.status}`}>{completion.status}</span>
+      </div>
+      <span className="mono-chip">{completion.graphId}</span>
+      <div className="fact-list compact-facts">
+        <Fact label="complete" value={completion.canComplete ? 'yes' : 'no'} />
+        <Fact label="tasks" value={`${completion.counts.total} total / ${completion.counts.running} running`} />
+        <Fact label="queued" value={String(completion.counts.queued)} />
+        <Fact label="succeeded" value={String(completion.counts.succeeded)} />
+        <Fact label="failed" value={String(completion.counts.failed + completion.counts.cancelled)} />
+        <Fact label="verifier" value={`${completion.counts.succeededVerifier}/${completion.counts.verifier} succeeded`} />
+      </div>
+      <div className="json-block">
+        <strong>Graph Completion</strong>
+        <pre>{[
+          `reason: ${completion.reason}`,
+          completion.blockReason ? `blockReason: ${completion.blockReason}` : '',
+          `ready: ${formatIdList(completion.readyTaskIds)}`,
+          `waiting: ${formatIdList(completion.waitingTaskIds)}`,
+          `running: ${formatIdList(completion.runningTaskIds)}`,
+          `blocked: ${formatIdList(completion.blockedTaskIds)}`,
+          `failed: ${formatIdList([...completion.failedTaskIds, ...completion.failedVerifierTaskIds])}`,
+          `verifier: ${formatIdList(completion.verifierTaskIds)}`,
+        ].filter(Boolean).join('\n')}</pre>
+      </div>
+      {graph ? (
+        <div className="json-block">
+          <strong>Graph Tasks</strong>
+          <pre>{graph.tasks.map(task => `${task.id} | ${task.role} | ${task.status} | attempts ${attempts.filter(attempt => attempt.taskId === task.id).length}/${task.maxAttempts}`).join('\n') || 'none'}</pre>
+        </div>
+      ) : null}
+      {attempts.length > 0 ? (
+        <div className="json-block">
+          <strong>Attempt Evidence</strong>
+          <pre>{attempts.map(attempt => `${attempt.taskId} #${attempt.attempt} ${attempt.status}${attempt.taskRunId ? ` taskRun=${attempt.taskRunId}` : ''}${attempt.verificationRecordId ? ` verification=${attempt.verificationRecordId}` : ''}${attempt.toolCallStateIds.length ? ` tools=${attempt.toolCallStateIds.join(',')}` : ''}`).join('\n')}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function agentGraphIdForTask(task: TaskRun): string | null {
+  const metadata = task.metadata ?? {};
+  const nestedGraph = metadata.graph && typeof metadata.graph === 'object' && !Array.isArray(metadata.graph)
+    ? (metadata.graph as Record<string, unknown>).id
+    : undefined;
+  return [
+    metadata.graphId,
+    metadata.agentGraphId,
+    metadata.agentTaskGraphId,
+    nestedGraph,
+  ].map(metadataText).find(Boolean) ?? null;
+}
+
+function formatIdList(ids: string[]): string {
+  return ids.length > 0 ? ids.join(', ') : 'none';
 }
 
 export function MemoryPage() {
