@@ -48,6 +48,36 @@ button {
   border: 0;
 }
 
+/* ── Accessibility ──────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── Global select styling ──────────────────────────── */
+
+select {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+select:hover {
+  border-color: var(--line-strong);
+}
+
 code,
 .mono-chip,
 .metric strong,
@@ -903,7 +933,16 @@ button:disabled {
 .record-row {
   grid-template-columns: minmax(210px, 1fr) minmax(100px, 160px) minmax(90px, 140px) minmax(80px, 110px);
   padding: 11px 16px;
+  border-left: 3px solid transparent;
 }
+
+.record-row:has(.status-text.succeeded)  { border-left-color: var(--ok); }
+.record-row:has(.status-text.failed)     { border-left-color: var(--danger); }
+.record-row:has(.status-text.running),
+.record-row:has(.status-text.in_progress),
+.record-row:has(.status-text.ready)      { border-left-color: var(--info); }
+.record-row:has(.status-text.blocked),
+.record-row:has(.status-text.queued)     { border-left-color: var(--warn); }
 
 .route-row {
   grid-template-columns: minmax(110px, 140px) minmax(220px, 1.2fr) minmax(120px, 180px) minmax(120px, 1fr) minmax(130px, 0.8fr);

@@ -386,6 +386,13 @@ function NodeEditor({
 }
 
 function NodeInspector({ node }: { node: ExecutorNode | null }) {
+  const nodeCommands = useQuery({
+    queryKey: ['node-commands', node?.nodeId],
+    queryFn: () => getJson<Array<{ id: string; command: string; status: string; createdAt: string; result?: Record<string, unknown> }>>(`/nodes/${encodeURIComponent(node!.nodeId)}/commands`),
+    enabled: Boolean(node?.nodeId),
+    refetchInterval: 15_000,
+  });
+
   if (!node) {
     return <aside className="panel inspector"><EmptyText text="Select a node to inspect capabilities and verification state." /></aside>;
   }
@@ -421,6 +428,18 @@ function NodeInspector({ node }: { node: ExecutorNode | null }) {
       <JsonBlock title="verified" value={node.verified} />
       <JsonBlock title="mesh links" value={node.meshLinks} />
       <JsonBlock title="capacity" value={node.capacity} />
+      {nodeCommands.data && nodeCommands.data.length > 0 ? (
+        <div className="definition-list">
+          <div className="section-divider"><strong>Command History</strong></div>
+          {(nodeCommands.data ?? []).slice(-8).reverse().map(cmd => (
+            <Definition
+              key={cmd.id}
+              term={`${cmd.command} · ${cmd.status}`}
+              text={formatDate(cmd.createdAt)}
+            />
+          ))}
+        </div>
+      ) : null}
     </aside>
   );
 }
