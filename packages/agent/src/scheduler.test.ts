@@ -13,6 +13,7 @@ import {
 } from './agent-task-graph.js';
 import { readAgentTaskGraph } from './agent-task-graph-read-model.js';
 import { createRunSpec, loadRunSpec } from './run-specs.js';
+import { recordProviderCompatEvidence } from './provider-compat-evidence.js';
 import { listSessionEvents } from './session-events.js';
 import { loadToolCallState } from './tool-call-states.js';
 import { persistScheduledToolCallState, runAgentTaskGraphSerial, runScheduledAgentTask } from './scheduler.js';
@@ -454,6 +455,164 @@ test('scheduler runs independent graph tasks in parallel without editable surfac
     await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
     await closeServer(server);
+  }
+});
+
+test('scheduler selects graph task provider and model from compatibility evidence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-provider-selection-${suffix}`;
+  const sessionId = `session-provider-selection-${suffix}`;
+  const nodeId = `test-provider-selection-executor-${suffix}`;
+  const unverifiedProvider = `unverified-provider-${suffix}`;
+  const verifiedProvider = `verified-provider-${suffix}`;
+  const evidenceId = `provider-selection-evidence-${suffix}`;
+  const requests: Array<{ config?: { provider?: unknown; model?: unknown } }> = [];
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+
+    const body = JSON.parse(await readRequestBody(req)) as { config?: { provider?: unknown; model?: unknown } };
+    requests.push(body);
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: 'provider-selected task succeeded',
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await recordProviderCompatEvidence({
+      id: evidenceId,
+      provider: verifiedProvider,
+      model: 'model-b',
+      probeId: 'read-context',
+      decision: 'verified_advisory',
+      passed: true,
+      totalTokens: 12,
+      summary: { selectedBy: 'graph task provider target test' },
+    });
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute with task-level provider target',
+      prompt: 'provider selection prompt',
+      metadata: {
+        providerModelTargets: [
+          `${unverifiedProvider}:model-a`,
+          { provider: verifiedProvider, model: 'model-b' },
+        ],
+        requireProviderCompat: true,
+      },
+    });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      sessionId,
+      provider: 'scheduler-default-provider',
+      model: 'scheduler-default-model',
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.equal(result.completion.status, 'succeeded');
+    assert.equal(requests[0]?.config?.provider, verifiedProvider);
+    assert.equal(requests[0]?.config?.model, 'model-b');
+
+    const attempts = await listAgentTaskAttempts(`${graphId}-exec`);
+    assert.equal(attempts[0]?.provider, verifiedProvider);
+    assert.equal(attempts[0]?.model, 'model-b');
+
+    const graph = await readAgentTaskGraph(graphId);
+    const selection = graph.tasks[0]?.metadata.providerModelSelection as Record<string, unknown> | undefined;
+    assert.equal(selection?.source, 'provider_compat_evidence');
+    assert.equal(selection?.evidenceId, evidenceId);
+    assert.equal(selection?.targetLabel, `${verifiedProvider}:model-b`);
+  } finally {
+    await getDb().query('DELETE FROM provider_compat_evidence WHERE provider IN ($1, $2)', [unverifiedProvider, verifiedProvider]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
+test('scheduler blocks graph task provider selection when required compatibility evidence is missing', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-provider-selection-missing-${suffix}`;
+  const sessionId = `session-provider-selection-missing-${suffix}`;
+  const provider = `missing-evidence-provider-${suffix}`;
+
+  try {
+    await createAgentTask({
+      id: `${graphId}-exec`,
+      graphId,
+      sessionId,
+      role: 'executor',
+      title: 'Execute without required provider evidence',
+      prompt: 'provider selection should fail',
+      metadata: {
+        providerModelTargets: [{ provider, model: 'model-missing' }],
+        requireProviderCompat: true,
+      },
+    });
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      sessionId,
+      provider: 'scheduler-default-provider',
+      model: 'scheduler-default-model',
+      workspaceRoot: process.cwd(),
+    });
+
+    assert.deepEqual(result.executedTasks.map(task => task.status), ['failed']);
+    assert.equal(result.completion.status, 'failed');
+
+    const attempts = await listAgentTaskAttempts(`${graphId}-exec`);
+    assert.equal(attempts[0]?.provider, undefined);
+    assert.match(attempts[0]?.error ?? '', /requires passing provider compatibility evidence/);
+
+    const graph = await readAgentTaskGraph(graphId);
+    assert.equal(graph.tasks[0]?.status, 'failed');
+    assert.match(String(graph.tasks[0]?.metadata.error ?? ''), /requires passing provider compatibility evidence/);
+  } finally {
+    await getDb().query('DELETE FROM provider_compat_evidence WHERE provider = $1', [provider]).catch(() => undefined);
+    await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
   }
 });
 

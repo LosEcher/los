@@ -658,7 +658,7 @@ Evidence checked on 2026-06-02:
 | Multi-gateway readiness smoke | Partially implemented | `docs/operations/2026-06-01-multi-gateway-readiness-smoke.md` |
 | Real `/chat` failover | Not validated | The smoke explicitly excludes real `/chat` model execution |
 | Cross-gateway stream replay | Not implemented | Requires durable `run_specs` and replay endpoints |
-| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, and bounded parallel claims exist; provider/model graph selection, memory compaction, and eval metrics remain roadmap work |
+| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, and provider/model graph-task selection from compat evidence exist; memory compaction and eval metrics remain roadmap work |
 
 ## Verification
 

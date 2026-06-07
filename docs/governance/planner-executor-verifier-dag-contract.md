@@ -97,7 +97,15 @@ is greater than one. Parallel mode defaults to `require-declared`, so tasks
 without declared editable surfaces are not claimed into a parallel batch unless
 the caller explicitly chooses a looser mode.
 
-Remaining runtime promotion work is still separate: provider/model selection
-inside graph tasks and quality metrics should be added only after they can
-preserve the same evidence boundary. Cancel/operator-attention recovery
-transitions now exist as explicit API/CLI commands.
+Graph tasks can now declare `metadata.providerModelTargets` or
+`metadata.runContract.providerModelTargets`. The scheduler reads
+`provider_compat_evidence` and chooses the first target with passing
+compatibility evidence, recording the selected provider/model and evidence id
+on the task attempt and task run metadata. When `requireProviderCompat` is set,
+the task fails before execution instead of treating provider readiness as
+compatibility proof.
+
+Remaining runtime promotion work is still separate: quality metrics and eval
+feedback should be added only after they can preserve the same evidence
+boundary. Cancel/operator-attention recovery transitions now exist as explicit
+API/CLI commands.

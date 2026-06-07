@@ -400,12 +400,23 @@ Deliverables:
 3. provider/model selection based on run contract and compat evidence;
 4. eval dashboard or API.
 
+Current 2026-06-07 update:
+
+1. Graph executor tasks can declare provider/model targets in task metadata or
+   run-contract metadata.
+2. The scheduler reads passing `provider_compat_evidence` before selecting a
+   target and records the chosen evidence id on attempts and task-run metadata.
+3. `requireProviderCompat` prevents a task from running when no target has
+   passing compatibility evidence.
+
 Validation:
 
 1. two independent tasks run in parallel;
 2. failed dependency blocks downstream work;
 3. verifier task controls final run state;
-4. quality metrics compare before and after a runtime change.
+4. graph task provider/model selection uses compatibility evidence instead of
+   readiness alone;
+5. quality metrics compare before and after a runtime change.
 
 ## Immediate Next Work
 

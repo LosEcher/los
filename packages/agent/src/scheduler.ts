@@ -29,6 +29,10 @@ import {
   type ToolCallRecoveryDecision,
 } from './tool-call-recovery.js';
 import {
+  listLatestProviderCompatEvidence,
+  type ProviderCompatEvidenceRecord,
+} from './provider-compat-evidence.js';
+import {
   runVerificationRecordsForRunSpec,
   type RunVerificationRecordsForRunSpecResult,
 } from './verification-runner.js';
@@ -135,6 +139,24 @@ export type ScheduledAgentTaskResult =
 type RunningTaskController = {
   controller: AbortController;
   reason: string;
+};
+
+type GraphTaskProviderModelTarget = {
+  provider?: string;
+  model?: string;
+};
+
+type GraphTaskRequiredProviderModelTarget = {
+  provider: string;
+  model?: string;
+};
+
+type GraphTaskProviderModelSelection = GraphTaskProviderModelTarget & {
+  source: 'task_metadata' | 'provider_compat_evidence' | 'graph_task_target' | 'scheduler_input';
+  evidenceId?: string;
+  targetLabel?: string;
+  requireProviderCompat?: boolean;
+  rejectedTargetLabels?: string[];
 };
 
 const runningTaskControllers = new Map<string, RunningTaskController>();
@@ -499,6 +521,28 @@ async function runClaimedAgentGraphTask(
   const nodeId = normalizeOptionalString(input.nodeId)
     ?? normalizeOptionalString(input.executor?.nodeId)
     ?? 'gateway-local';
+  let selection: GraphTaskProviderModelSelection;
+
+  try {
+    selection = await resolveGraphTaskProviderModelSelection(task, input);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await updateAgentTaskStatus(task.id, 'failed', {
+      attemptId,
+      error: message,
+      providerModelSelection: { error: message },
+    });
+    await createAgentTaskAttempt({
+      id: attemptId,
+      graphId: task.graphId,
+      taskId: task.id,
+      attempt,
+      status: 'failed',
+      nodeId,
+      error: message,
+    });
+    return { taskId: task.id, attemptId, status: 'failed' };
+  }
 
   await createAgentTaskAttempt({
     id: attemptId,
@@ -506,8 +550,8 @@ async function runClaimedAgentGraphTask(
     taskId: task.id,
     attempt,
     status: 'running',
-    provider: input.provider,
-    model: input.model,
+    provider: selection.provider,
+    model: selection.model,
     nodeId,
     taskRunId,
   });
@@ -515,6 +559,8 @@ async function runClaimedAgentGraphTask(
   try {
     const result = await runScheduledAgentTask({
       ...input,
+      provider: selection.provider,
+      model: selection.model,
       prompt: task.prompt ?? task.title,
       promptPreview: task.title,
       taskRunId,
@@ -527,6 +573,7 @@ async function runClaimedAgentGraphTask(
         agentTaskId: task.id,
         agentTaskRole: task.role,
         agentTaskTitle: task.title,
+        providerModelSelection: selection,
       },
     });
 
@@ -542,8 +589,8 @@ async function runClaimedAgentGraphTask(
         taskId: task.id,
         attempt,
         status: 'cancelled',
-        provider: input.provider,
-        model: input.model,
+        provider: selection.provider,
+        model: selection.model,
         nodeId: result.taskRun.nodeId ?? nodeId,
         taskRunId,
         error: result.reason,
@@ -563,6 +610,7 @@ async function runClaimedAgentGraphTask(
       taskRunId,
       sessionId,
       nodeId: result.taskRun.nodeId ?? nodeId,
+      selection,
       outputSummary,
     });
     if (recoveryFollowUp) return recoveryFollowUp;
@@ -571,6 +619,7 @@ async function runClaimedAgentGraphTask(
       taskRunId,
       attemptId,
       outputSummary,
+      providerModelSelection: selection,
     });
     await createAgentTaskAttempt({
       id: attemptId,
@@ -578,8 +627,8 @@ async function runClaimedAgentGraphTask(
       taskId: task.id,
       attempt,
       status: 'succeeded',
-      provider: input.provider,
-      model: input.model,
+      provider: selection.provider,
+      model: selection.model,
       nodeId: result.taskRun.nodeId ?? nodeId,
       taskRunId,
       outputSummary,
@@ -592,6 +641,7 @@ async function runClaimedAgentGraphTask(
       taskRunId,
       attemptId,
       error: message,
+      providerModelSelection: selection,
     });
     await createAgentTaskAttempt({
       id: attemptId,
@@ -599,8 +649,8 @@ async function runClaimedAgentGraphTask(
       taskId: task.id,
       attempt,
       status: 'failed',
-      provider: input.provider,
-      model: input.model,
+      provider: selection.provider,
+      model: selection.model,
       nodeId,
       taskRunId,
       error: message,
@@ -618,6 +668,7 @@ async function maybeQueueRecoveryFollowUp(input: {
   taskRunId: string;
   sessionId?: string;
   nodeId: string;
+  selection: GraphTaskProviderModelSelection;
   outputSummary: string;
 }): Promise<RunAgentTaskGraphSerialResult['executedTasks'][number] | undefined> {
   if (input.attempt >= input.task.maxAttempts) return undefined;
@@ -647,8 +698,8 @@ async function maybeQueueRecoveryFollowUp(input: {
     taskId: input.task.id,
     attempt: input.attempt,
     status: 'failed',
-    provider: input.input.provider,
-    model: input.input.model,
+    provider: input.selection.provider,
+    model: input.selection.model,
     nodeId: input.nodeId,
     taskRunId: input.taskRunId,
     outputSummary: input.outputSummary,
@@ -705,6 +756,110 @@ function summarizeRecoveryFollowUp(
   maxAttempts: number,
 ): string {
   return `recovery ${recovery.recommendation} queued follow-up attempt ${nextAttempt}/${maxAttempts}: ${recovery.reasons.join('; ')}`;
+}
+
+async function resolveGraphTaskProviderModelSelection(
+  task: AgentTaskRecord,
+  input: RunAgentTaskGraphSerialInput,
+): Promise<GraphTaskProviderModelSelection> {
+  const runContract = readObject(task.metadata.runContract);
+  const targets = readProviderModelTargets(task.metadata.providerModelTargets ?? runContract.providerModelTargets);
+  const requireProviderCompat = readBoolean(task.metadata.requireProviderCompat)
+    ?? readBoolean(runContract.requireProviderCompat)
+    ?? false;
+
+  if (targets.length > 0) {
+    const evidence = await listLatestProviderCompatEvidence();
+    const selected = selectProviderModelTargetFromEvidence(targets, evidence);
+    if (selected) {
+      return {
+        provider: selected.target.provider,
+        model: selected.target.model ?? selected.evidence.model,
+        source: 'provider_compat_evidence',
+        evidenceId: selected.evidence.id,
+        targetLabel: targetLabel(selected.target),
+        requireProviderCompat,
+        rejectedTargetLabels: targets
+          .filter(target => targetLabel(target) !== targetLabel(selected.target))
+          .map(targetLabel),
+      };
+    }
+    if (requireProviderCompat) {
+      throw new Error(`graph task ${task.id} requires passing provider compatibility evidence for targets: ${targets.map(targetLabel).join(', ')}`);
+    }
+    const fallback = targets[0];
+    return {
+      provider: fallback?.provider,
+      model: fallback?.model,
+      source: 'graph_task_target',
+      targetLabel: fallback ? targetLabel(fallback) : undefined,
+      requireProviderCompat,
+      rejectedTargetLabels: targets.slice(1).map(targetLabel),
+    };
+  }
+
+  const explicit = readProviderModelTarget(task.metadata) ?? readProviderModelTarget(runContract);
+  if (explicit?.provider) {
+    return {
+      provider: explicit.provider,
+      model: explicit.model,
+      source: 'task_metadata',
+      targetLabel: targetLabel(explicit),
+      requireProviderCompat,
+    };
+  }
+
+  return {
+    provider: input.provider,
+    model: input.model,
+    source: 'scheduler_input',
+    targetLabel: targetLabel({ provider: input.provider, model: input.model }),
+    requireProviderCompat,
+  };
+}
+
+function selectProviderModelTargetFromEvidence(
+  targets: readonly GraphTaskRequiredProviderModelTarget[],
+  evidence: readonly ProviderCompatEvidenceRecord[],
+): { target: GraphTaskRequiredProviderModelTarget; evidence: ProviderCompatEvidenceRecord } | undefined {
+  for (const target of targets) {
+    const passed = evidence.find(item => (
+      item.passed
+      && item.provider === target.provider
+      && (!target.model || item.model === target.model)
+    ));
+    if (passed) return { target, evidence: passed };
+  }
+  return undefined;
+}
+
+function readProviderModelTargets(value: unknown): GraphTaskRequiredProviderModelTarget[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(readProviderModelTarget)
+    .filter((target): target is GraphTaskRequiredProviderModelTarget => Boolean(target?.provider));
+}
+
+function readProviderModelTarget(value: unknown): GraphTaskProviderModelTarget | undefined {
+  if (typeof value === 'string') {
+    const [provider, ...modelParts] = value.split(':');
+    const normalizedProvider = normalizeOptionalString(provider);
+    if (!normalizedProvider) return undefined;
+    return {
+      provider: normalizedProvider,
+      model: normalizeOptionalString(modelParts.join(':')),
+    };
+  }
+  const record = readObject(value);
+  const provider = normalizeOptionalString(record.provider);
+  const model = normalizeOptionalString(record.model);
+  if (!provider && !model) return undefined;
+  return { provider, model };
+}
+
+function targetLabel(target: GraphTaskProviderModelTarget): string {
+  if (!target.provider) return target.model ? `?:${target.model}` : 'scheduler-default';
+  return target.model ? `${target.provider}:${target.model}` : target.provider;
 }
 
 async function runClaimedVerifierGraphTask(
@@ -1001,6 +1156,15 @@ function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
 }
 
 function normalizeExecutorUrl(value: string): string {
