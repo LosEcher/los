@@ -244,6 +244,11 @@ export {
   type SummarizeRunEvalsOptions,
 } from './run-evals.js';
 export {
+  getEvalBacklogCases,
+  recordEvalBacklogSnapshot,
+  type EvalBacklogCase,
+} from './eval-backlog-runner.js';
+export {
   claimReadyAgentTasks,
   createAgentTask,
   createAgentTaskAttempt,

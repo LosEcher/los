@@ -10,6 +10,8 @@ import {
   importExternalToolSummary,
   listRunEvals,
   listExternalToolSummaries,
+  recordEvalBacklogSnapshot,
+  getEvalBacklogCases,
   recordRunEval,
   compareRunEvals,
   summarizeRunEvals,
@@ -286,6 +288,39 @@ export function registerProviderRoutes(app: FastifyInstance): void {
     } catch (err) {
       return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ── Eval backlog ─────────────────────────────────────
+  app.post('/eval-backlog/run', async (_req, reply) => {
+    try {
+      const snapshot = await recordEvalBacklogSnapshot({ triggeredBy: 'gateway' });
+      return reply.status(201).send({ ok: true, snapshot });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/eval-backlog', async (_req) => {
+    const { getDb } = await import('@los/infra/db');
+    const rows = await getDb().query<{
+      id: string; run_spec_id: string; provider: string; model: string;
+      success: boolean; verification_status: string; summary_json: Record<string, unknown>;
+      updated_at: string;
+    }>(
+      `SELECT DISTINCT ON (run_spec_id, id) id, run_spec_id, provider, model,
+              success, verification_status, summary_json, updated_at
+       FROM run_evals
+       WHERE run_spec_id = 'eval-backlog'
+       ORDER BY run_spec_id, id, updated_at DESC`,
+    );
+    const cases = rows.rows.map(r => ({
+      id: r.id,
+      success: r.success,
+      verificationStatus: r.verification_status,
+      summary: r.summary_json,
+      updatedAt: r.updated_at,
+    }));
+    return { count: cases.length, cases, backlogCases: getEvalBacklogCases() };
   });
 
   app.get('/providers/models', async (req) => {

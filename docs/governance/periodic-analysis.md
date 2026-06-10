@@ -106,6 +106,24 @@ pnpm check
 pnpm test
 ```
 
+### Backlog Inspection (weekly)
+
+Question: are eval backlog cases with automated probes still passing?
+
+```bash
+# Run only the eval backlog probes
+node --import tsx --test --test-name-pattern="E0[238]" packages/agent/src/eval-probes.test.ts
+
+# Record a snapshot into run_evals for the dashboard
+curl -X POST http://127.0.0.1:8080/eval-backlog/run
+```
+
+Check the dashboard at `#evals` with `runSpecId=eval-backlog` to see which cases have
+probes and whether the automated ones pass.
+
+If a previously passing probe now fails, treat it as P1: the guarded failure pattern
+may have regressed.
+
 Use ADR 0014 to decide whether a package-level test, compatibility harness, or
 operation smoke is also required.
 
@@ -167,6 +185,8 @@ Analyze these dimensions:
 8. toolchain matrix drift: whether Codex, Claude, OpenCode, Reasonix, OMX, or
    browser tools changed model route, permissions, memory location, or evidence
    quality.
+9. eval backlog coverage: how many backlog cases have automated probes, whether
+   automated probes pass, which manual-only cases should be promoted next.
 
 Report:
 
@@ -201,8 +221,20 @@ non-actionable note.
 
 ## Agent Evaluation Backlog
 
+The canonical backlog is `docs/governance/eval-backlog.md`. Automated probes for
+E02, E03, and E08 live in `packages/agent/src/eval-probes.test.ts`. Results are
+recorded into the `run_evals` table via `POST /eval-backlog/run` and are visible
+in the evals dashboard.
+
 Keep eval candidates narrow. Each candidate should name the failure mode and
 the evidence that catches it.
+
+To promote a backlog case to an automated probe:
+
+1. add a test in `packages/agent/src/eval-probes.test.ts` following the existing
+   pattern (case ID in test name, `eval-backlog-runner.ts` already knows about it);
+2. update `packages/agent/src/eval-backlog-runner.ts` to mark `hasProbe: true`;
+3. record a snapshot: `curl -X POST http://127.0.0.1:8080/eval-backlog/run`.
 
 Useful initial candidates:
 
