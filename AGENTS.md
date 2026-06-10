@@ -98,6 +98,10 @@ Database:
 - Keep each commit scoped to one bounded context
 - Update `contracts/` before changing API surfaces
 - No new files in `packages/infra/` without package-level approval
+- Gateway route modules live in `packages/gateway/src/routes/`; keep
+  `packages/gateway/src/server.ts` as registration/composition, not route
+  implementation. Root-level gateway `*-routes.ts` files are blocked by
+  `tools/check-structure.sh`.
 - Delete transitional files in the same change (no legacy/v2/temp artifacts)
 
 ## AI-Assisted Change Management

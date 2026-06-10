@@ -54,7 +54,8 @@ gradable.
 
 ### Stage A: Evidence Harness
 
-Status: current phase.
+Status: complete as of 2026-06-10. Evidence and residual risk are recorded in
+`docs/governance/2026-06-10-stage-a-exit-audit.md`.
 
 Goal: make a single agent run, provider probe, runtime check, or governance
 review explainable from bounded evidence.
@@ -76,7 +77,11 @@ Exit criteria:
 
 ### Stage B: Operator Contract Layer
 
-Status: short-term target.
+Status: partially implemented early. `run_specs.run_contract_json`, mode/phase
+metadata, plan revision, approval, verification requirements, and scheduler
+completion gates exist. Remaining work is to make the operator contract
+consistently visible in UI/CLI workflows and to keep eval coverage aligned with
+the contract fields.
 
 Goal: make the intended agent behavior explicit before the task starts.
 
@@ -126,7 +131,11 @@ Exit criteria:
 
 ### Stage D: Stateful Runtime
 
-Status: mid-term target, aligned with ADR 0012.
+Status: partially implemented early, aligned with ADR 0012. Durable run specs,
+task runs, session events, stream checkpoints, tool-call recovery, verification
+records, service heartbeat, and failover recovery surfaces exist. Remaining
+work is to prove resume behavior across real interrupted `/chat` sessions and
+to keep provider/model evaluation separate from runtime recovery evaluation.
 
 Goal: move from audit-grade evidence to recovery-grade execution.
 
@@ -149,7 +158,11 @@ Exit criteria:
 
 ### Stage E: Controlled Multi-Agent Execution
 
-Status: long-term target.
+Status: partially implemented early. The DAG store, dependency claims, bounded
+parallel execution, verifier tasks, provider/model task selection, and
+procedural memory candidates exist. Remaining work is to harden graph-level
+operator UX, provenance display, and eval comparisons before increasing
+autonomy.
 
 Goal: support planner, executor, and verifier roles without turning the runtime
 into unconstrained peer chat.

@@ -11,7 +11,7 @@ import {
   linkAgentTaskDependency,
   updateAgentTaskStatus,
 } from '@los/agent';
-import { registerAgentTaskGraphRoutes } from './agent-task-graph-routes.js';
+import { registerAgentTaskGraphRoutes } from './routes/agent-task-graph-routes.js';
 
 test('agent task graph routes expose read model and completion status', async () => {
   const config = await loadConfig();

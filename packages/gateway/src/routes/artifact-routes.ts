@@ -11,7 +11,7 @@ import {
   type ArtifactPathPolicy,
 } from '@los/agent/artifacts';
 import { loadExecutorNode } from '@los/agent/executor-nodes';
-import { getRequestContext } from './request-context.js';
+import { getRequestContext } from '../request-context.js';
 
 type ArtifactRoutesOptions = {
   storageRoot: string;

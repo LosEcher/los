@@ -67,6 +67,12 @@ while IFS= read -r -d '' d; do
 done < <(find "$ROOT/packages" -type d ! -name 'node_modules' ! -name 'dist' ! -path '*/node_modules/*' ! -path '*/dist/*' \
   -print0 2>/dev/null)
 
+# 2b. Gateway route placement
+header "Gateway route placement"
+while IFS= read -r f; do
+  error "$f — route modules belong in packages/gateway/src/routes/"
+done < <(find "$ROOT/packages/gateway/src" -maxdepth 1 -type f -name '*-routes.ts' 2>/dev/null | sort)
+
 # 3. Process-phase names
 header "Process-phase naming (legacy/v2/temp/backup/new/old/tmp/bak)"
 while IFS= read -r f; do

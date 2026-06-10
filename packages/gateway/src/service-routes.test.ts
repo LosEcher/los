@@ -8,7 +8,7 @@ import {
   ensureServiceInstanceStore,
   upsertServiceInstanceHeartbeat,
 } from '@los/agent/service-instances';
-import { registerServiceRoutes } from './service-routes.js';
+import { registerServiceRoutes } from './routes/service-routes.js';
 
 test('service routes expose liveness, readiness, and drain state', async () => {
   const config = await loadConfig();

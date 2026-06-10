@@ -659,7 +659,7 @@ before multi-gateway failover.
 
 ## Implementation Status
 
-Evidence checked on 2026-06-02:
+Evidence checked on 2026-06-10:
 
 | Area | Status | Evidence |
 |------|--------|----------|
@@ -670,8 +670,8 @@ Evidence checked on 2026-06-02:
 | Service route tests | Implemented | `packages/gateway/src/service-routes.test.ts` |
 | Multi-gateway readiness smoke | Partially implemented | `docs/operations/2026-06-01-multi-gateway-readiness-smoke.md` |
 | Real `/chat` failover | Not validated | The smoke explicitly excludes real `/chat` model execution |
-| Cross-gateway stream replay | Not implemented | Requires durable `run_specs` and replay endpoints |
-| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, provider/model graph-task selection from compat evidence, minimal `run_evals` record/list surfaces, eval summary views, and baseline/candidate eval comparison API/CLI views exist; memory compaction, UI dashboards, and failover-specific metrics remain roadmap work |
+| Cross-gateway stream replay | Partially implemented | `stream_checkpoints` plus `/runs/:id/stream` replay exist; real interrupted `/chat` recovery across gateway instances still needs an operation smoke |
+| DAG scheduler / memory compaction / eval metrics | Partially implemented | DAG store, dependency claim, verifier tasks, UI read model, editable-surface checks, bounded parallel claims, provider/model graph-task selection from compat evidence, `run_evals` record/list/summary/comparison surfaces, memory compaction, retrieval routing, and project-scoped active procedural rules exist; graph UX, provenance display, and failover-specific comparisons remain roadmap work |
 
 ## Verification
 
