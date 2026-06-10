@@ -57,6 +57,7 @@ export const ConfigSchema = z.object({
     apiKey: z.string().optional(),
     baseUrl: z.string().optional(),
     model: z.string().optional(),
+    apiShape: z.string().optional(),
     enabled: z.coerce.boolean().default(true),
     source: z.string().optional(),
     weight: z.coerce.number().default(100),
@@ -79,6 +80,9 @@ export const ConfigSchema = z.object({
 
   // Active profile name
   profile: z.string().default('default'),
+
+  // Project
+  defaultProjectId: z.string().default('los'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -104,6 +108,7 @@ const ENV_MAP: [string, string][] = [
   ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],
   ['EXECUTOR_MESH_NODES', 'executor.meshNodes'],
   ['LOS_PROFILE', 'profile'],
+  ['LOS_DEFAULT_PROJECT_ID', 'defaultProjectId'],
 ];
 
 function loadEnvFile(cwd: string): Record<string, string> {
@@ -238,6 +243,7 @@ async function mergeDiscoveredProviders(
     if (!p.apiKey && dp.apiKey) p.apiKey = dp.apiKey;
     if (!p.baseUrl && dp.baseUrl) p.baseUrl = dp.baseUrl;
     if (!p.model && dp.defaultModel) p.model = dp.defaultModel;
+    if (!p.apiShape && dp.apiShape) p.apiShape = dp.apiShape;
     if (p.enabled === undefined) p.enabled = dp.available;
     if (!p.source && dp.source) p.source = dp.source;
   }
@@ -265,6 +271,7 @@ export async function loadConfig(opts?: {
     providers: {},
     databaseUrl: 'postgres://los:los@127.0.0.1:5432/los',
     profile: 'default',
+    defaultProjectId: 'los',
   };
 
   // Layer 2: System config (/etc/los/config.yaml)

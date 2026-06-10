@@ -5,6 +5,8 @@ import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import {
   appendSessionEvent,
+  createStreamCheckpoint,
+  ensureStreamCheckpointStore,
   createToolCallState,
   createVerificationRecord,
   createRunSpec,
@@ -192,6 +194,118 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await app.close();
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('run stream route interleaves stream checkpoints and session events', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-stream-${suffix}`;
+  const sessionId = `session-run-stream-${suffix}`;
+  const app = await createServer({
+    serviceId: `gateway-run-stream-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await ensureRunSpecStore();
+    await ensureSessionEventStore();
+    await ensureStreamCheckpointStore();
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'stream replay test',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+    });
+
+    // Insert a session event first
+    const event1 = await appendSessionEvent({
+      sessionId,
+      type: 'session.started',
+      payload: { runSpecId },
+    });
+
+    // Insert a stream checkpoint (model.delta)
+    const delta = await createStreamCheckpoint({
+      sessionId,
+      runSpecId,
+      turn: 1,
+      eventType: 'model.delta',
+      payload: { textDelta: 'Hello world', provider: 'deepseek' },
+    });
+
+    // Insert another session event
+    const event2 = await appendSessionEvent({
+      sessionId,
+      type: 'model.response',
+      model: 'deepseek-v4',
+      turn: 1,
+      payload: { textPreview: 'Hello world' },
+    });
+
+    // Insert another stream checkpoint (tool_call)
+    const tool = await createStreamCheckpoint({
+      sessionId,
+      runSpecId,
+      eventType: 'tool_call',
+      payload: { tool: 'read_file', args: { path: 'foo.txt' } },
+    });
+
+    // Fetch stream replay from cursor 0
+    const replay = await app.inject({
+      method: 'GET',
+      url: `/runs/${runSpecId}/stream?since=0&streamSince=0&limit=20`,
+    });
+    assert.equal(replay.statusCode, 200);
+    const body = replay.json();
+    assert.equal(body.runSpecId, runSpecId);
+    assert.equal(body.sessionId, sessionId);
+    assert.equal(body.count, 4);
+    assert.equal(body.nextSince, event2.id);
+    assert.equal(body.nextStreamSince, tool.id);
+
+    // Items should be interleaved by createdAt order
+    const items = body.items as Array<{ kind: string; eventType?: string; type?: string; id: number }>;
+    assert.equal(items.length, 4);
+
+    // First should be session.started event (inserted first)
+    assert.equal(items[0].kind, 'event');
+    assert.equal(items[0].type, 'session.started');
+
+    // Verify stream checkpoints are present
+    const streamItems = items.filter(i => i.kind === 'stream');
+    assert.equal(streamItems.length, 2);
+    assert.equal(streamItems[0].eventType, 'model.delta');
+    assert.equal(streamItems[1].eventType, 'tool_call');
+
+    const eventItems = items.filter(i => i.kind === 'event');
+    assert.equal(eventItems.length, 2);
+
+    // Replay with since cursor only (streamSince defaults to 0)
+    const replayFromEvent2 = await app.inject({
+      method: 'GET',
+      url: `/runs/${runSpecId}/stream?since=${event2.id}&limit=20`,
+    });
+    assert.equal(replayFromEvent2.statusCode, 200);
+
+    // Missing run spec returns 404
+    const missing = await app.inject({
+      method: 'GET',
+      url: `/runs/${runSpecId}-missing/stream`,
+    });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    await getDb().query('DELETE FROM stream_checkpoints WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await app.close();
     await closeDb().catch(() => undefined);
   }

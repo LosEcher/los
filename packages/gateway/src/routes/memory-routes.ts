@@ -3,6 +3,7 @@ import {
   ensureMemoryStore, addObservation, searchObservations,
   getStats, deleteObservation, updateObservation,
   ensureMemoryCompactionStore, compactSession, listCompactions,
+  retrieveActiveRules, routeMemoryRetrieval,
 } from '@los/memory';
 import { syncMemoryMd } from '@los/memory';
 import { ensureRunEvalStore } from '@los/agent';
@@ -106,6 +107,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     const compaction = await compactSession({
       sessionId,
       runSpecId: normalizeOptionalString(body.runSpecId),
+      tenantId: context.tenantId,
+      projectId: context.projectId,
       createdBy: context.userId ?? context.requestId,
     });
     return { compaction };
@@ -113,13 +116,49 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
 
   app.get('/memory/compactions', async (req) => {
     const query = req.query as { sessionId?: string; runSpecId?: string; limit?: string };
+    const context = getRequestContext(req);
     await ensureMemoryCompactionStore();
     const compactions = await listCompactions({
       sessionId: normalizeOptionalString(query.sessionId),
       runSpecId: normalizeOptionalString(query.runSpecId),
+      tenantId: context.tenantId,
+      projectId: context.projectId,
       limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
     });
     return { count: compactions.length, compactions };
+  });
+
+  app.get('/memory/active-rules', async (req) => {
+    const query = req.query as { runSpecId?: string; limit?: string };
+    const context = getRequestContext(req);
+    await ensureMemoryCompactionStore();
+    const rules = await retrieveActiveRules({
+      runSpecId: normalizeOptionalString(query.runSpecId),
+      tenantId: context.tenantId,
+      projectId: context.projectId,
+      limit: normalizeBoundedInteger(query.limit, 50, 1, 200),
+    });
+    return { count: rules.length, rules };
+  });
+
+  app.post('/memory/retrieve', async (req) => {
+    const body = req.body as {
+      taskState?: string; runPhase?: string; sessionId?: string;
+      runSpecId?: string; maxObservationsPerLayer?: string;
+    };
+    const context = getRequestContext(req);
+    await ensureMemoryStore();
+    await ensureMemoryCompactionStore();
+    const result = await routeMemoryRetrieval({
+      taskState: normalizeOptionalString(body.taskState) as any,
+      runPhase: normalizeOptionalString(body.runPhase),
+      sessionId: normalizeOptionalString(body.sessionId),
+      runSpecId: normalizeOptionalString(body.runSpecId),
+      tenantId: context.tenantId,
+      projectId: context.projectId,
+      maxObservationsPerLayer: normalizeBoundedInteger(body.maxObservationsPerLayer, 5, 1, 20),
+    });
+    return result;
   });
 
   app.post('/memory/sync-md', async (req) => {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '@los/infra/config';
-import { getLogger } from '@los/infra/logger';
+import { getLogger, type Logger } from '@los/infra/logger';
 
 const log = getLogger('request-context');
 
@@ -11,6 +11,8 @@ export interface RequestContext {
   tenantId: string;
   projectId: string;
   userId: string;
+  /** Request-scoped child logger with requestId and traceId bound. */
+  log: Logger;
 }
 
 declare module 'fastify' {
@@ -39,6 +41,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
         tenantId: tenantId ?? 'unknown',
         projectId: projectId ?? 'unknown',
         userId: userId ?? 'unknown',
+        log: getGatewayLogger().child({ requestId, traceId }),
       };
 
       reply.header('x-request-id', requestId);
@@ -48,10 +51,17 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
       if (userId) reply.header('x-user-id', userId);
     } else {
       const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
-      const projectId = normalizeHeader(req.headers['x-project-id']) ?? 'los';
+      const projectId = normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los';
       const userId = normalizeHeader(req.headers['x-user-id']) ?? 'local-user';
 
-      req.requestContext = { requestId, traceId, tenantId, projectId, userId };
+      req.requestContext = {
+        requestId,
+        traceId,
+        tenantId,
+        projectId,
+        userId,
+        log: getGatewayLogger().child({ requestId, traceId }),
+      };
 
       reply.header('x-request-id', requestId);
       reply.header('x-trace-id', traceId);
@@ -70,7 +80,15 @@ export function getRequestContext(req: FastifyRequest): RequestContext {
     tenantId: 'local',
     projectId: 'los',
     userId: 'local-user',
+    log: getGatewayLogger().child({ requestId }),
   };
+}
+
+let _gatewayLogger: Logger | undefined;
+
+function getGatewayLogger(): Logger {
+  if (!_gatewayLogger) _gatewayLogger = getLogger('gateway');
+  return _gatewayLogger;
 }
 
 function normalizeHeader(value: string | string[] | undefined): string | undefined {

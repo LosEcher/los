@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MODEL_PROFILES, resolveModelProfile, summarizeModelProfile } from './model-profiles.js';
+import { calculateCost, estimateCost, MODEL_PROFILES, resolveModelProfile, summarizeModelProfile } from './model-profiles.js';
 
 test('resolveModelProfile keeps deepseek defaults and overrides', () => {
   const profile = resolveModelProfile('deepseek');
@@ -58,4 +58,81 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
   assert.equal(summary.supportsReasoning, true);
   assert.equal(summary.cachePolicy, 'prompt-cache-read');
   assert.equal(summary.toolCallRepair, 'json-loose');
+});
+
+test('packycode defaults to openai-responses apiShape', () => {
+  const profile = resolveModelProfile('packycode');
+  assert.equal(profile.protocol, 'openai');
+  assert.equal(profile.apiShape, 'openai-responses');
+  assert.equal(profile.baseUrl, 'https://www.packyapi.com/v1');
+  assert.equal(profile.supportsTools, true);
+});
+
+test('packycode apiShape can be overridden via options', () => {
+  const overridden = resolveModelProfile('packycode', { apiShape: 'openai-chat-completions' });
+  assert.equal(overridden.apiShape, 'openai-chat-completions');
+});
+
+test('openai stays on chat-completions, not affected by packycode changes', () => {
+  const profile = resolveModelProfile('openai');
+  assert.equal(profile.apiShape, 'openai-chat-completions');
+});
+
+test('summarizeModelProfile includes apiShape for runtime routing', () => {
+  const packySummary = summarizeModelProfile(resolveModelProfile('packycode'));
+  assert.equal(packySummary.apiShape, 'openai-responses');
+  const deepseekSummary = summarizeModelProfile(resolveModelProfile('deepseek'));
+  assert.equal(deepseekSummary.apiShape, 'openai-chat-completions');
+});
+
+test('calculateCost computes per-component and total cost', () => {
+  const cost = calculateCost(
+    { promptTokens: 1_000_000, completionTokens: 500_000, cacheHitTokens: 200_000 },
+    { promptTokenCostPer1M: 1.10, completionTokenCostPer1M: 4.40, cacheHitTokenCostPer1M: 0.14 },
+  );
+  assert.equal(cost.promptCostUsd, 1.10);
+  assert.equal(cost.completionCostUsd, 2.20);
+  // 200k cache hit tokens at $0.14/1M = $0.028 (floating point OK)
+  assert.ok(Math.abs(cost.cacheHitCostUsd - 0.028) < 0.0001);
+  // cache savings: 200k tokens at (1.10 - 0.14) = 0.96/1M = 0.192
+  assert.ok(Math.abs(cost.cacheSavingsUsd - 0.192) < 0.001);
+  assert.ok(Math.abs(cost.totalCostUsd - (1.10 + 2.20 + 0.028)) < 0.001);
+});
+
+test('calculateCost handles zero usage', () => {
+  const cost = calculateCost(
+    { promptTokens: 0, completionTokens: 0 },
+    { promptTokenCostPer1M: 1.10, completionTokenCostPer1M: 4.40, cacheHitTokenCostPer1M: 0.14 },
+  );
+  assert.equal(cost.totalCostUsd, 0);
+  assert.equal(cost.cacheSavingsUsd, 0);
+});
+
+test('estimateCost returns null when profile has no pricing', () => {
+  const groq = resolveModelProfile('groq');
+  assert.equal(groq.pricing, undefined);
+  const cost = estimateCost({ promptTokens: 1000, completionTokens: 500 }, groq);
+  assert.equal(cost, null);
+});
+
+test('estimateCost returns cost for priced profiles', () => {
+  const deepseek = resolveModelProfile('deepseek');
+  assert.ok(deepseek.pricing);
+  const cost = estimateCost(
+    { promptTokens: 100000, completionTokens: 50000, cacheHitTokens: 10000 },
+    deepseek,
+  );
+  assert.ok(cost);
+  assert.ok(cost.totalCostUsd > 0);
+  assert.ok(cost.cacheSavingsUsd > 0);
+});
+
+test('openai and codex have pricing data', () => {
+  assert.ok(resolveModelProfile('openai').pricing);
+  assert.ok(resolveModelProfile('codex').pricing);
+});
+
+test('anthropic-based profiles have pricing data', () => {
+  assert.ok(resolveModelProfile('claude').pricing);
+  assert.ok(resolveModelProfile('anthropic').pricing);
 });

@@ -2,7 +2,6 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
-  Folder,
   MessageSquarePlus,
   RefreshCcw,
   Send,
@@ -48,6 +47,7 @@ import {
   formatTime,
 } from './ui';
 import { RunField, ContextChip } from './chat-ui.js';
+import { ProjectSelector } from './project-selector.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -482,24 +482,11 @@ export function ChatPage({
               </select>
             </RunField>
             <RunField label="execution dir" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`}>
-              <Folder size={13} />
-              <input
-                list="workspace-suggestions"
-                value={workspaceRoot}
-                onChange={event => setWorkspaceRoot(event.target.value)}
-                placeholder={defaultWorkspace || 'cwd'}
-                className="exec-dir-input"
+              <ProjectSelector
+                workspaceRoot={workspaceRoot}
+                onChange={setWorkspaceRoot}
+                defaultWorkspace={defaultWorkspace}
               />
-              <datalist id="workspace-suggestions">
-                {defaultWorkspace && <option value={defaultWorkspace} />}
-                {defaultWorkspace && <option value={defaultWorkspace.replace(/\/[^/]+$/, '')} />}
-              </datalist>
-              {workspaceRoot && workspaceRoot !== defaultWorkspace && (
-                <button type="button" className="ghost-btn exec-dir-reset" title="Reset to default workspace"
-                  onClick={() => setWorkspaceRoot('')}>
-                  ↺ default
-                </button>
-              )}
             </RunField>
             <details className="composer-advanced">
               <summary title="Advanced request settings">

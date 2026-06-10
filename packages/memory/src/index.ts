@@ -21,7 +21,26 @@ export {
   compactSession,
   getCompaction,
   listCompactions,
+  attestCompaction,
+  promoteCandidate,
   type MemoryCompaction,
   type CompactSessionInput,
   type ListCompactionsOptions,
+  type ProceduralCandidate,
+  type CandidateStatus,
 } from './compaction.js';
+
+export {
+  retrieveActiveRules,
+  formatRulesForPrompt,
+  resolveMemoryLayers,
+  routeMemoryRetrieval,
+  augmentSystemPrompt,
+  type ActiveRule,
+  type RetrievalOptions,
+  type RetrievalResult,
+  type AugmentPromptResult,
+  type TaskState,
+  type RunPhase,
+  type MemoryLayer,
+} from './retrieval.js';

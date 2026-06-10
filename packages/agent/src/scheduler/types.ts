@@ -12,7 +12,8 @@ export type ScheduledTaskEventType =
   | 'task.running'
   | 'task.cancelled'
   | 'task.succeeded'
-  | 'task.failed';
+  | 'task.failed'
+  | 'task.blocked';
 
 export interface ScheduledTaskEvent {
   type: ScheduledTaskEventType;
@@ -84,6 +85,13 @@ export type ScheduledAgentTaskResult =
       status: 'cancelled';
       sessionId: string;
       taskRun: TaskRunRecord;
+      reason: string;
+    }
+  | {
+      status: 'blocked';
+      sessionId: string;
+      taskRun: TaskRunRecord;
+      result: AgentResult;
       reason: string;
     };
 

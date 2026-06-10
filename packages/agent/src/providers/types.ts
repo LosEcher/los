@@ -15,6 +15,12 @@ export interface ToolCall {
     name: string;
     arguments: string;
   };
+  /** Present when the provider repaired malformed arguments. Set by provider adapters. */
+  _repair?: {
+    repaired: boolean;
+    originalArguments?: string;
+    repairSteps?: string[];
+  };
 }
 
 export interface ProviderResponse {
@@ -69,4 +75,5 @@ export interface ToolDef {
 export interface CreateProviderOptions {
   model?: string;
   baseUrl?: string;
+  apiShape?: string;
 }

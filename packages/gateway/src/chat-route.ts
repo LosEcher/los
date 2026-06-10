@@ -29,8 +29,10 @@ import {
   appendSessionEvent,
   ensureSessionEventStore,
 } from '@los/agent/session-events';
+import { persistStreamCheckpoint } from './chat-stream-persist.js';
 import type { CheckpointState } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
+import { augmentChatSystemPrompt } from './chat-memory-augment.js';
 import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
 import {
   completeIdempotencyKey,
@@ -118,8 +120,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     });
 
     const replayEvents: Array<{ event: string; data: unknown }> = [];
-    const MAX_REPLAY_EVENTS = 500;
-    const cappedReplay = () => replayEvents.slice(-MAX_REPLAY_EVENTS);
+    const cappedReplay = () => replayEvents.slice(-500);
     const send = (event: string, data: unknown, id?: number) => {
       replayEvents.push({ event, data });
       if (id !== undefined) reply.raw.write(`id: ${id}\n`);
@@ -143,10 +144,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     const sid = branchFrom
       ? `session-${Date.now()}`       // branch always creates a new session
       : (sessionId ?? `session-${Date.now()}`);
-    let activeTaskRunId: string | undefined;
-    let activeRunSpecId: string | undefined;
-    let sentSession = false;
-    let lastCheckpoint: CheckpointState | null = null;
+    let activeTaskRunId: string | undefined, activeRunSpecId: string | undefined, sentSession = false, lastCheckpoint: CheckpointState | null = null;
 
     const resumedSession = (!branchFrom && sessionId) ? await loadSession(sid) : null;
 
@@ -187,6 +185,15 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         event: 'run_spec.created',
       }).catch(() => undefined);
     }
+    // ADR 0020: memory-augmented system prompt
+    const effectiveSystemPrompt = await augmentChatSystemPrompt({
+      systemPrompt,
+      toolMode,
+      sessionId: sid,
+      runSpecId,
+      tenantId: context.tenantId,
+      projectId: context.projectId,
+    });
 
     try {
       const resumeState = resumedSession ? await loadResumeState(sid) : null;
@@ -232,7 +239,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         provider,
         model,
         modelSettings,
-        systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         workspaceRoot,
         toolMode,
         initialMessages: branchSourceMessages ?? resumedSession?.messages,
@@ -292,7 +299,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
             model: event.taskRun.model ?? null,
           });
         },
-        onTurn: (turn) => {
+        onTurn: async (turn) => {
           send('turn', {
             loopCount: turn.loopCount,
             text: turn.text.slice(0, 200),
@@ -300,11 +307,13 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
             toolNames: turn.toolCalls.map(tc => tc.function.name),
             reasoning: turn.reasoningContent?.slice(0, 200),
           });
+          await persistStreamCheckpoint({ sessionId: sid, runSpecId, eventType: 'turn', turn: turn.loopCount, payload: { loopCount: turn.loopCount, textPreview: turn.text.slice(0, 500), toolCallCount: turn.toolCalls.length, toolNames: turn.toolCalls.map(tc => tc.function.name) } });
         },
-        onToolCall: (tool, args) => {
+        onToolCall: async (tool, args) => {
           send('tool_call', { tool, args: JSON.stringify(args).slice(0, 200) });
+          await persistStreamCheckpoint({ sessionId: sid, runSpecId, eventType: 'tool_call', payload: { tool, args } });
         },
-        onModelDelta: (delta) => {
+        onModelDelta: async (delta) => {
           send('model.delta', {
             turn: delta.turn,
             provider: delta.provider,
@@ -312,6 +321,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
             textDelta: delta.textDelta ?? '',
             reasoningDelta: delta.reasoningDelta ?? '',
           });
+          await persistStreamCheckpoint({ sessionId: sid, runSpecId, eventType: 'model.delta', turn: delta.turn, payload: { provider: delta.provider, model: delta.model ?? null, textDelta: delta.textDelta ?? '', reasoningDelta: delta.reasoningDelta ?? '' } });
         },
         onCheckpoint: async (state) => {
           lastCheckpoint = state;

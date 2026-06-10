@@ -192,6 +192,7 @@ function countTaskRuns(taskRuns: readonly TaskRunRecord[]): Record<TaskRunStatus
     succeeded: taskRuns.filter(task => task.status === 'succeeded').length,
     failed: taskRuns.filter(task => task.status === 'failed').length,
     cancelled: taskRuns.filter(task => task.status === 'cancelled').length,
+    blocked: taskRuns.filter(task => task.status === 'blocked').length,
   };
 }
 

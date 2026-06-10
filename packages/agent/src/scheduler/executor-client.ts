@@ -1,4 +1,4 @@
-import { listExecutorNodes, type ExecutorNodeRecord } from '../executor-nodes.js';
+import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
 import type { ScheduledExecutorConfig } from './types.js';
@@ -26,8 +26,7 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
 
   const candidates = (await listExecutorNodes(100)).filter(node => node.execution.candidate);
   const preferredNodeId = normalizeOptionalString(config.nodeId);
-  const preferred = preferredNodeId ? candidates.find(node => node.nodeId === preferredNodeId) : undefined;
-  const ordered = preferred ? [preferred, ...candidates.filter(node => node.nodeId !== preferred.nodeId)] : candidates;
+  const ordered = sortExecutorCandidates(candidates, preferredNodeId);
 
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);

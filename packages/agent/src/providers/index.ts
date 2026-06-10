@@ -17,11 +17,13 @@
 
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
-import { resolveModelProfile, type ModelProfile } from '../model-profiles.js';
+import { resolveModelProfile, type ApiShape, type ModelProfile } from '../model-profiles.js';
 import {
-  buildAnthropicModelSettings,
   buildOpenAIModelSettings,
 } from '../model-settings.js';
+import { buildOpenAICompatUrl, drainSseBuffer, repairJson, repairToolCallArguments, type RepairResult } from './openai-utils.js';
+import { createAnthropicProvider } from './anthropic.js';
+import { createOpenAIResponsesProvider } from './responses.js';
 import type {
   ChatOptions,
   CreateProviderOptions,
@@ -48,6 +50,10 @@ export type {
   ToolDef,
 } from './types.js';
 
+// Re-export shared utilities used by external consumers
+export { buildOpenAICompatUrl } from './openai-utils.js';
+export { convertMessagesToResponsesInput, readResponsesStreamResponse } from './responses.js';
+
 // ── Provider Factory ─────────────────────────────────────
 
 function getProviderConfig(name: string) {
@@ -62,44 +68,7 @@ function getProviderConfig(name: string) {
   return p;
 }
 
-// ── Tool Call JSON Repair (DeepSeek) ────────────────────
 
-/**
- * Non-destructive JSON repair for DeepSeek's known malformed tool-call arguments.
- * Handles: markdown fences, trailing commas, unbalanced braces, unescaped control chars.
- *
- * From lsclaw's `repairDeepSeekToolCall()` in provider-router-adapters.mjs:946-1033
- */
-function repairJson(content: string): string | null {
-  let text = content.trim();
-
-  // Strip markdown fences
-  text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/, '');
-
-  if (!text) return null;
-
-  // Try direct parse
-  try { JSON.parse(text); return text; } catch {}
-
-  // Fix trailing commas: ,} → }  ,] → ]
-  let fixed = text.replace(/,(\s*[}\]])/g, '$1');
-
-  // Balance braces
-  let depth = 0;
-  for (const ch of fixed) {
-    if (ch === '{' || ch === '[') depth++;
-    if (ch === '}' || ch === ']') depth--;
-  }
-  while (depth > 0) { fixed += '}'; depth--; }
-  while (depth < 0) { fixed = '{' + fixed; depth++; }
-
-  // Fix unquoted property names like {name: "x"} → {"name": "x"}
-  fixed = fixed.replace(/(\{|\,)\s*([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
-
-  try { JSON.parse(fixed); return fixed; } catch {}
-
-  return null; // Give up — caller will surface original error
-}
 
 // ── OpenAI-compatible Provider (DeepSeek, OpenAI, Groq...) ─
 
@@ -172,10 +141,14 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
             JSON.parse(tc.function.arguments);
             return tc;
           } catch {
-            const repaired = repairJson(tc.function.arguments);
-            if (repaired) {
-              log.debug(`[${name}] Repaired tool call args for ${tc.function.name}`);
-              return { ...tc, function: { ...tc.function, arguments: repaired } };
+            const { result, steps } = repairJson(tc.function.arguments);
+            if (result) {
+              log.debug(`[${name}] Repaired tool call args for ${tc.function.name} (steps: ${steps.join(',')})`);
+              return {
+                ...tc,
+                function: { ...tc.function, arguments: result },
+                _repair: { repaired: true, originalArguments: tc.function.arguments, repairSteps: steps },
+              } as ToolCall & { _repair?: RepairResult };
             }
             log.warn(`[${name}] Could not repair tool call args for ${tc.function.name}`);
             return tc;
@@ -236,14 +209,7 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
   };
 }
 
-export function buildOpenAICompatUrl(baseUrl: string, path: string): string {
-  const cleanBase = baseUrl.replace(/\/+$/, '');
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  if (cleanBase.endsWith('/v1')) {
-    return `${cleanBase}${cleanPath}`;
-  }
-  return `${cleanBase}/v1${cleanPath}`;
-}
+// ── OpenAI stream reader (internal) ──────────────────────
 
 async function readOpenAIStreamResponse(
   res: Response,
@@ -301,17 +267,6 @@ async function readOpenAIStreamResponse(
   };
 }
 
-function drainSseBuffer(buffer: string): { payloads: string[]; rest: string } {
-  const parts = buffer.split(/\n\n|\r\n\r\n/);
-  const rest = parts.pop() ?? '';
-  const payloads = parts.flatMap((part) => {
-    const lines = part.split(/\r?\n/).filter(line => line.startsWith('data:'));
-    const payload = lines.map(line => line.slice(5).trimStart()).join('\n').trim();
-    return payload ? [payload] : [];
-  });
-  return { payloads, rest };
-}
-
 function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): void {
   for (const delta of deltas) {
     const index = Number.isInteger(delta.index) ? delta.index : toolCalls.size;
@@ -332,21 +287,6 @@ function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): v
   }
 }
 
-function repairToolCallArguments(toolCall: ToolCall, providerName: string): ToolCall {
-  try {
-    JSON.parse(toolCall.function.arguments);
-    return toolCall;
-  } catch {
-    const repaired = repairJson(toolCall.function.arguments);
-    if (repaired) {
-      log.debug(`[${providerName}] Repaired streamed tool call args for ${toolCall.function.name}`);
-      return { ...toolCall, function: { ...toolCall.function, arguments: repaired } };
-    }
-    log.warn(`[${providerName}] Could not repair streamed tool call args for ${toolCall.function.name}`);
-    return toolCall;
-  }
-}
-
 function normalizeOpenAIUsage(raw: any, fallback: ProviderResponse['usage']): ProviderResponse['usage'] {
   if (!raw) return fallback;
   return {
@@ -358,151 +298,7 @@ function normalizeOpenAIUsage(raw: any, fallback: ProviderResponse['usage']): Pr
   };
 }
 
-// ── Anthropic Messages Provider (Claude, MiniMax) ────────
 
-interface AnthropicConfig {
-  name: string;
-  apiKey: string;
-  profile: ModelProfile;
-}
-
-/**
- * Anthropic Messages API adapter.
- * MiniMax speaks this protocol natively at api.minimaxi.com/anthropic.
- * Claude uses api.anthropic.com/v1/messages.
- *
- * From lsclaw's `callAnthropic()` and pi's `streamAnthropic()`.
- */
-function createAnthropicProvider(cfg: AnthropicConfig): Provider {
-  const { name, apiKey, profile } = cfg;
-  const { baseUrl, model } = profile;
-  const API_VERSION = '2023-06-01';
-  const MAX_TOKENS = 8192;
-
-  return {
-    name,
-    profile,
-
-    async chat(messages: Message[], tools?: ToolDef[], options: ChatOptions = {}): Promise<ProviderResponse> {
-      // Convert OpenAI-format messages → Anthropic format
-      const systemMessages: string[] = [];
-      const anthropicMessages: any[] = [];
-
-      for (const msg of messages) {
-        if (msg.role === 'system') {
-          systemMessages.push(msg.content);
-        } else if (msg.role === 'tool') {
-          anthropicMessages.push({
-            role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: msg.tool_call_id!, content: msg.content }],
-          });
-        } else if (msg.role === 'assistant' && msg.tool_calls?.length) {
-          anthropicMessages.push({
-            role: 'assistant',
-            content: msg.tool_calls.map((tc: ToolCall) => ({
-              type: 'tool_use',
-              id: tc.id,
-              name: tc.function.name,
-              input: JSON.parse(tc.function.arguments),
-            })),
-          });
-        } else {
-          const content = msg.content || '(empty)';
-          const existing = anthropicMessages[anthropicMessages.length - 1];
-          if (existing?.role === msg.role) {
-            // Merge consecutive same-role messages
-            if (typeof existing.content === 'string') {
-              existing.content += '\n' + content;
-            } else {
-              existing.content.push({ type: 'text', text: content });
-            }
-          } else {
-            anthropicMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content });
-          }
-        }
-      }
-
-      // Build request
-      const body: Record<string, unknown> = {
-        model,
-        messages: anthropicMessages,
-        ...buildAnthropicModelSettings(options.modelSettings, MAX_TOKENS),
-      };
-
-      if (systemMessages.length > 0) {
-        body.system = systemMessages.join('\n');
-      }
-
-      if (tools?.length) {
-        body.tools = tools.map(t => ({
-          name: t.function.name,
-          description: t.function.description,
-          input_schema: t.function.parameters,
-        }));
-      }
-
-      const messagesUrl = baseUrl.endsWith('/v1/messages') ? baseUrl
-        : baseUrl.endsWith('/') ? `${baseUrl}v1/messages`
-        : `${baseUrl}/v1/messages`;
-
-      const res = await fetch(messagesUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': API_VERSION,
-        },
-        body: JSON.stringify(body),
-        signal: options.signal,
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`${name} API error ${res.status}: ${err.slice(0, 300)}`);
-      }
-
-      const data = await res.json() as any;
-
-      // Parse response back to OpenAI-compatible format
-      let text = '';
-      const toolCalls: ToolCall[] = [];
-      let reasoningContent: string | undefined;
-
-      for (const block of data.content ?? []) {
-        if (block.type === 'text') {
-          text += (text ? '\n' : '') + block.text;
-        } else if (block.type === 'tool_use') {
-          toolCalls.push({
-            id: block.id,
-            type: 'function',
-            function: {
-              name: block.name,
-              arguments: JSON.stringify(block.input),
-            },
-          });
-        } else if (block.type === 'thinking') {
-          reasoningContent = (reasoningContent ?? '') + block.thinking;
-        }
-      }
-
-      return {
-        text,
-        toolCalls,
-        reasoningContent,
-        usage: {
-          promptTokens: data.usage?.input_tokens ?? 0,
-          completionTokens: data.usage?.output_tokens ?? 0,
-          cacheHitTokens: data.usage?.cache_read_input_tokens ?? 0,
-          cacheMissTokens: data.usage?.cache_creation_input_tokens ?? 0,
-          totalTokens: data.usage?.input_tokens != null && data.usage?.output_tokens != null
-            ? (data.usage.input_tokens + data.usage.output_tokens)
-            : undefined,
-        },
-        model: data.model ?? model,
-      };
-    },
-  };
-}
 
 // ── Provider Registry ────────────────────────────────────
 
@@ -511,14 +307,24 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
   const providerName = name ?? config.agent.defaultProvider;
 
   const p = getProviderConfig(providerName);
+  const apiShapeOverride = (options.apiShape ?? (p as Record<string, unknown>).apiShape) as ApiShape | undefined;
   const profile = resolveModelProfile(providerName, {
     baseUrl: options.baseUrl ?? p.baseUrl,
     model: options.model ?? p.model,
     defaultModel: config.agent.defaultModel,
+    apiShape: apiShapeOverride,
   });
 
   if (profile.protocol === 'anthropic') {
     return createAnthropicProvider({
+      name: providerName,
+      apiKey: p.apiKey!,
+      profile,
+    });
+  }
+
+  if (profile.apiShape === 'openai-responses') {
+    return createOpenAIResponsesProvider({
       name: providerName,
       apiKey: p.apiKey!,
       profile,

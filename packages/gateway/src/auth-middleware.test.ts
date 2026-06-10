@@ -78,5 +78,6 @@ function configForAuth(enabled: boolean): Config {
       meshNodes: [],
     },
     profile: 'test',
+    defaultProjectId: 'los',
   };
 }

@@ -94,6 +94,77 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
   }
 });
 
+test('scheduler phase gate reads current run spec contract instead of stale task metadata', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const taskRunId = `task-current-contract-${suffix}`;
+  const sessionId = `session-current-contract-${suffix}`;
+  const runSpecId = `run-current-contract-${suffix}`;
+  const nodeId = `test-current-contract-executor-${suffix}`;
+
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    await readRequestBody(req);
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: {
+        text: 'executor ok',
+        turns: [],
+        loopCount: 0,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'current contract',
+      systemPrompt: undefined,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+      runContract: { mode: 'execution', phase: 'plan_approved' },
+    });
+
+    const result = await runScheduledAgentTask({
+      prompt: 'use current run spec contract',
+      taskRunId,
+      runSpecId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      runContract: { mode: 'execution', phase: 'planning' },
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    assert.equal(result.status, 'completed');
+    assert.equal(result.result.text, 'executor ok');
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 test('scheduler persists tool call state transitions', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

@@ -1,11 +1,13 @@
 import { type ReactNode, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Braces, Search } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Braces, Search, Trash2 } from 'lucide-react';
 import {
   getJson,
+  deleteJson,
   type Health,
   type LogFile,
   type LogsResponse,
+  type ProjectListResponse,
 } from './api';
 import {
   Definition,
@@ -72,14 +74,22 @@ export function LogsPage() {
 }
 
 export function SettingsPage() {
+  const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ['health'], queryFn: () => getJson<Health>('/health') });
   const settings = useQuery({
     queryKey: ['settings'],
     queryFn: () => getJson<Record<string, unknown>>('/settings'),
     staleTime: 30_000,
   });
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => getJson<ProjectListResponse>('/projects'),
+    staleTime: 30_000,
+  });
   const cfg = (settings.data ?? {}) as Record<string, Record<string, unknown>>;
   const providers = Array.isArray(cfg.providers) ? cfg.providers as Array<Record<string, unknown>> : [];
+  const projectList = projects.data?.projects ?? [];
+  const defaultProjectId = projects.data?.defaultProjectId;
 
   return (
     <section className="panel-grid settings-grid">
@@ -131,6 +141,55 @@ export function SettingsPage() {
           <Fact label="uptime" value={formatDuration(health.data?.uptime ?? 0)} />
         </div>
       </aside>
+
+      {/* ── Project Management ───────────────────────── */}
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Projects</h2>
+            <p>Bound workspace directories. Click to set as default.</p>
+          </div>
+          <StatusPill status={projectList.length > 0 ? 'live' : 'partial'} />
+        </div>
+        {projectList.length === 0 ? (
+          <div style={{ padding: '12px 0', color: 'var(--text-dim)', fontSize: '13px' }}>No projects bound. Use the &quot;bind project&quot; action on the Chat page to register a workspace.</div>
+        ) : (
+          <table className="project-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Path</th>
+                <th>Last Used</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {projectList
+                .sort((a, b) => b.lastUsed.localeCompare(a.lastUsed))
+                .map(p => (
+                  <tr key={p.projectId} className={p.projectId === defaultProjectId ? 'project-default-row' : ''}>
+                    <td>
+                      <span className="project-name">{p.displayName}</span>
+                      {p.projectId === defaultProjectId ? <span className="default-badge">default</span> : null}
+                    </td>
+                    <td className="project-path-cell" title={p.workspacePath}>{p.workspacePath}</td>
+                    <td className="text-dim">{p.lastUsed ? new Date(p.lastUsed).toLocaleDateString() : '—'}</td>
+                    <td>
+                      <button type="button" className="ghost-btn"
+                        title="Remove project binding"
+                        onClick={async () => {
+                          await deleteJson(`/projects/${p.projectId}`);
+                          queryClient.invalidateQueries({ queryKey: ['projects'] });
+                        }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </section>
   );
 }

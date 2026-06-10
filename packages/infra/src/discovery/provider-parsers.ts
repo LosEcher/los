@@ -7,6 +7,7 @@ export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
   const providerId = toml.match(/^model_provider\s*=\s*"(.+)"$/m)?.[1];
   let baseUrl = 'https://api.openai.com/v1';
   let providerName = 'openai';
+  let wireApi: string | undefined;
 
   if (providerId) {
     const section = new RegExp(`\\[model_providers\\.${providerId}\\]\\n(.*?)(?=\\n\\[|$)`, 's');
@@ -14,6 +15,7 @@ export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
     if (sectionMatch) {
       baseUrl = sectionMatch[1].match(/^base_url\s*=\s*"(.+)"$/m)?.[1] ?? baseUrl;
       providerName = sectionMatch[1].match(/^name\s*=\s*"(.+)"$/m)?.[1] ?? providerName;
+      wireApi = sectionMatch[1].match(/^wire_api\s*=\s*"(.+)"$/m)?.[1];
     }
   }
 
@@ -21,7 +23,17 @@ export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
     providerName = 'packycode';
   }
 
-  return { providerName, baseUrl, model };
+  return { providerName, baseUrl, model, ...(wireApi ? { wireApi } : {}) };
+}
+
+function mapWireApiToShape(wireApi?: string): string | undefined {
+  if (!wireApi) return undefined;
+  switch (wireApi.toLowerCase()) {
+    case 'responses':
+      return 'openai-responses';
+    default:
+      return undefined;
+  }
 }
 
 export function parseCcSwitchRowsWithCli(dbPath: string): Array<Record<string, any>> {
@@ -51,6 +63,7 @@ export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredPro
           providerName: 'openai',
           baseUrl: 'https://api.openai.com/v1',
           model: undefined,
+          wireApi: undefined,
         };
     const auth = parseJsonObject(config.auth);
     const apiKey = extractApiKeyFromCodexAuth(auth);
@@ -60,6 +73,7 @@ export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredPro
       apiKey,
       baseUrl: route.baseUrl,
       defaultModel: route.model,
+      apiShape: mapWireApiToShape(route.wireApi),
       available: true,
       source: `cc-switch/codex/${accountName}`,
       sourceTool: 'cc-switch',

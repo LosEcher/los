@@ -2,12 +2,57 @@ import type { FastifyInstance } from 'fastify';
 import { ensureTaskRunStore, loadTaskRun, listTaskRuns, updateTaskRun } from '@los/agent/task-runs';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { cancelScheduledTask } from '@los/agent/scheduler';
+import { requestCancellation } from '@los/agent';
 import { normalizeOptionalString } from './server-helpers.js';
+import { listServiceInstances } from '@los/agent/service-instances';
+
+type OrphanClassification = 'stale-gateway' | 'expired-lease' | 'cancelled' | 'none';
+
+async function classifyOrphans(): Promise<{
+  orphans: Array<{ taskRunId: string; sessionId: string; status: string; classification: OrphanClassification; gatewayId?: string }>;
+  staleGatewayIds: string[];
+}> {
+  await ensureTaskRunStore();
+  const tasks = await listTaskRuns(500);
+  const services = await listServiceInstances(200);
+
+  const now = Date.now();
+  const staleMs = 60_000;
+  const staleGatewayIds = services
+    .filter(s => s.serviceKind === 'gateway' && s.status === 'online' &&
+      s.lastHeartbeatAt && (now - new Date(s.lastHeartbeatAt).getTime()) > staleMs)
+    .map(s => s.serviceId);
+
+  const orphans = tasks
+    .filter(t => t.status === 'running' || t.status === 'queued')
+    .map(t => {
+      let classification: OrphanClassification = 'none';
+      if (t.leaseExpiresAt && new Date(t.leaseExpiresAt).getTime() < now) {
+        classification = 'expired-lease';
+      } else if (t.nodeId && staleGatewayIds.includes(t.nodeId)) {
+        classification = 'stale-gateway';
+      }
+      return {
+        taskRunId: t.id,
+        sessionId: t.sessionId,
+        status: t.status,
+        classification,
+        gatewayId: t.nodeId,
+      };
+    })
+    .filter(t => t.classification !== 'none');
+
+  return { orphans, staleGatewayIds };
+}
 
 export function registerTaskRoutes(app: FastifyInstance): void {
   app.get('/tasks', async () => {
     await ensureTaskRunStore();
     return await listTaskRuns();
+  });
+
+  app.get('/tasks/orphans', async () => {
+    return await classifyOrphans();
   });
 
   app.get('/tasks/:id', async (req) => {
@@ -30,6 +75,9 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     }
 
     const live = cancelScheduledTask(id, reason);
+    // Also write to cross-process cancellation table for remote executors
+    await requestCancellation(id, reason, 'api').catch(() => undefined);
+
     if (live) {
       await updateTaskRun(id, {
         status: 'cancelled',

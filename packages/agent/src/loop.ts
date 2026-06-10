@@ -7,7 +7,8 @@
 
 import { getLogger } from '@los/infra/logger';
 import { createProvider, type Message, type ToolCall } from './providers/index.js';
-import { summarizeModelProfile } from './model-profiles.js';
+import { summarizeModelProfile, estimateCost, type CostEstimate } from './model-profiles.js';
+import { runPreExecutionPhases } from './loop/phases.js';
 import {
   createToolRegistry,
   registerBuiltinTools,
@@ -40,6 +41,18 @@ import {
   resolveAllowedTools,
   resolveToolPolicy,
 } from './loop/tool-resolver.js';
+import {
+  inferToolSource,
+  normalizeUsage,
+  inferCacheHit,
+  summarizeToolCalls,
+  previewText,
+  summarizeCapability,
+  assertNotAborted,
+  withAbort,
+  abortErrorFromSignal,
+  summarizeSessionErrors,
+} from './loop/utils.js';
 import type {
   AgentConfig,
   AgentModelDelta,
@@ -129,6 +142,11 @@ export async function runAgent(
   const turns: TurnSummary[] = [];
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let totalCacheHitTokens = 0;
+  let totalCacheMissTokens = 0;
+  let totalCostUsd = 0;
+  let cacheEventCount = 0;
+  const sessionErrors: Array<{ turn: number; type: string; toolName?: string; message: string }> = [];
 
   log.info(`Agent starting — maxLoops=${maxLoops}, provider=${provider.name}`);
   await emitEvent({
@@ -156,6 +174,23 @@ export async function runAgent(
       tools: toolNames,
     },
   });
+
+  // B1: Optional pre-execution discovery and planning turns.
+  // These are guided model turns that produce structured outputs.
+  // Enforcement (B0) is in the scheduler, not here.
+  const phaseResult = await runPreExecutionPhases(
+    config.runContractMetadata ?? {},
+    {
+      provider,
+      emitEvent,
+      messages,
+      toolDefs,
+      signal,
+      toolMode,
+      modelSettings: config.modelSettings,
+    },
+  );
+  if (phaseResult) return phaseResult;
 
   try {
     for (let i = 0; i < maxLoops; i++) {
@@ -191,6 +226,18 @@ export async function runAgent(
 
     totalPromptTokens += res.usage.promptTokens;
     totalCompletionTokens += res.usage.completionTokens;
+    totalCacheHitTokens += res.usage.cacheHitTokens ?? 0;
+    totalCacheMissTokens += res.usage.cacheMissTokens ?? 0;
+
+    // Cost estimation
+    const turnCost = estimateCost({
+      promptTokens: res.usage.promptTokens,
+      completionTokens: res.usage.completionTokens,
+      cacheHitTokens: res.usage.cacheHitTokens,
+      cacheMissTokens: res.usage.cacheMissTokens,
+    }, provider.profile);
+    if (turnCost) totalCostUsd += turnCost.totalCostUsd;
+
     await emitEvent({
       type: 'model.response',
       turn: i + 1,
@@ -207,8 +254,27 @@ export async function runAgent(
         reasoningLength: res.reasoningContent?.length ?? 0,
         toolCallCount: res.toolCalls.length,
         toolCalls: summarizeToolCalls(res.toolCalls),
+        cost: turnCost ?? undefined,
+        transport: provider.profile.transportHints?.[0] ?? 'http-stream',
       },
     });
+
+    // Emit model.cache event when cache activity is detected
+    if ((res.usage.cacheHitTokens ?? 0) > 0 || (res.usage.cacheMissTokens ?? 0) > 0) {
+      cacheEventCount++;
+      await emitEvent({
+        type: 'model.cache',
+        turn: i + 1,
+        model: res.model,
+        cacheHit: inferCacheHit(res.usage),
+        payload: {
+          cacheHitTokens: res.usage.cacheHitTokens ?? 0,
+          cacheMissTokens: res.usage.cacheMissTokens ?? 0,
+          cacheHit: (res.usage.cacheHitTokens ?? 0) > 0,
+          estimatedSavingsUsd: turnCost?.cacheSavingsUsd ?? 0,
+        },
+      });
+    }
 
     // Add assistant message
     const assistantMsg: Message = {
@@ -228,7 +294,7 @@ export async function runAgent(
         reasoningContent: res.reasoningContent,
       };
       turns.push(turn);
-      config.onTurn?.(turn);
+      await config.onTurn?.(turn);
       await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
 
       log.info(`Agent finished — ${i + 1} turns, ${totalPromptTokens + totalCompletionTokens} tokens`);
@@ -240,6 +306,11 @@ export async function runAgent(
           totalTokens: totalPromptTokens + totalCompletionTokens,
           totalPromptTokens,
           totalCompletionTokens,
+          totalCacheHitTokens,
+          totalCacheMissTokens,
+          totalCostUsd: totalCostUsd > 0 ? totalCostUsd : undefined,
+          cacheEventCount,
+          errorSummary: sessionErrors.length > 0 ? summarizeSessionErrors(sessionErrors) : undefined,
         },
       });
       return {
@@ -257,10 +328,37 @@ export async function runAgent(
       assertNotAborted(signal);
       const fn = tc.function;
       log.debug(`Tool call: ${fn.name}(${fn.arguments.slice(0, 100)})`);
+
+      // Emit tool.repair if provider repaired malformed arguments
+      if (tc._repair?.repaired) {
+        await emitEvent({
+          type: 'tool.repair',
+          turn: i + 1,
+          toolName: fn.name,
+          payload: {
+            callId: tc.id,
+            repairSteps: tc._repair.repairSteps ?? [],
+          },
+        });
+        // Track as session error (non-fatal, but worth noting)
+        sessionErrors.push({
+          turn: i + 1,
+          type: 'tool_repair',
+          toolName: fn.name,
+          message: `Repaired tool call arguments for ${fn.name}: ${(tc._repair.repairSteps ?? []).join(', ')}`,
+        });
+      }
+
       let args: Record<string, unknown>;
       try {
         args = JSON.parse(fn.arguments) as Record<string, unknown>;
       } catch (err: any) {
+        sessionErrors.push({
+          turn: i + 1,
+          type: 'tool_parse_error',
+          toolName: fn.name,
+          message: `Failed to parse tool arguments: ${err?.message ?? String(err)}`,
+        });
         await emitEvent({
           type: 'tool.result',
           turn: i + 1,
@@ -279,7 +377,7 @@ export async function runAgent(
       }
       const capability = tools.getCapability(fn.name);
       const toolSource = inferToolSource(capability);
-      config.onToolCall?.(fn.name, args);
+      await config.onToolCall?.(fn.name, args);
 
       await config.onToolCallState?.({
         callId: tc.id,
@@ -371,6 +469,15 @@ export async function runAgent(
         attempt: result.attempts ?? 1,
       });
 
+      if (result.error) {
+        sessionErrors.push({
+          turn: i + 1,
+          type: decision.allowed ? 'tool_execution_error' : 'tool_denied',
+          toolName: fn.name,
+          message: result.error,
+        });
+      }
+
       const content = result.error ?? result.content;
       toolResults.push(content);
       await emitEvent({
@@ -408,7 +515,7 @@ export async function runAgent(
       toolResults,
     };
     turns.push(turn);
-    config.onTurn?.(turn);
+    await config.onTurn?.(turn);
     await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
 
     // Mid-loop context compression
@@ -447,6 +554,12 @@ export async function runAgent(
   totalCompletionTokens += finalRes.usage.completionTokens;
 
   log.warn(`Agent hit maxLoops (${maxLoops})`);
+  // Add max-loops as an error
+  sessionErrors.push({
+    turn: maxLoops,
+    type: 'max_loops_reached',
+    message: `Agent reached the maximum of ${maxLoops} turns without completing.`,
+  });
   await emitEvent({
     type: 'session.completed',
     turn: maxLoops + 1,
@@ -455,7 +568,12 @@ export async function runAgent(
       totalTokens: totalPromptTokens + totalCompletionTokens,
       totalPromptTokens,
       totalCompletionTokens,
+      totalCacheHitTokens,
+      totalCacheMissTokens,
+      totalCostUsd: totalCostUsd > 0 ? totalCostUsd : undefined,
+      cacheEventCount,
       forcedSummary: true,
+      errorSummary: summarizeSessionErrors(sessionErrors),
     },
   });
 
@@ -469,98 +587,4 @@ export async function runAgent(
   } finally {
     await mcpCleanup();
   }
-}
-
-
-function inferToolSource(capability: ReturnType<ToolRegistry['getCapability']>): string {
-  if (capability?.tags?.includes('mcp')) return 'mcp';
-  if (capability?.tags?.includes('agent')) return 'spawn_agent';
-  return 'builtin';
-}
-
-function normalizeUsage(usage: {
-  promptTokens: number;
-  completionTokens: number;
-  cacheHitTokens?: number;
-  cacheMissTokens?: number;
-  totalTokens?: number;
-}): SessionEventUsage {
-  return {
-    promptTokens: usage.promptTokens,
-    completionTokens: usage.completionTokens,
-    cacheHitTokens: usage.cacheHitTokens ?? 0,
-    cacheMissTokens: usage.cacheMissTokens ?? 0,
-    totalTokens: usage.totalTokens ?? usage.promptTokens + usage.completionTokens,
-  };
-}
-
-function inferCacheHit(usage: { cacheHitTokens?: number; cacheMissTokens?: number }): boolean | undefined {
-  const hit = usage.cacheHitTokens ?? 0;
-  const miss = usage.cacheMissTokens ?? 0;
-  if (hit === 0 && miss === 0) return undefined;
-  return hit > 0;
-}
-
-function summarizeToolCalls(toolCalls: ToolCall[]): Array<Record<string, unknown>> {
-  return toolCalls.map(tc => ({
-    id: tc.id,
-    name: tc.function.name,
-    argsPreview: previewText(tc.function.arguments, 1000),
-    argsLength: tc.function.arguments.length,
-  }));
-}
-
-function previewText(text: string, max = 8000): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}... [truncated ${text.length - max} chars]`;
-}
-
-function summarizeCapability(capability: ReturnType<ToolRegistry['getCapability']> | undefined): Record<string, unknown> | null {
-  if (!capability) return null;
-  return {
-    name: capability.name,
-    riskLevel: capability.riskLevel,
-    permissions: capability.permissions,
-    timeoutMs: capability.timeoutMs,
-    retryable: capability.retryable,
-    idempotent: capability.idempotent,
-    costLevel: capability.costLevel,
-    sideEffect: capability.sideEffect,
-    sandboxRequired: capability.sandboxRequired,
-    needsApproval: capability.needsApproval,
-    tags: capability.tags,
-  };
-}
-
-function assertNotAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  throw abortErrorFromSignal(signal);
-}
-
-function withAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return promise;
-  if (signal.aborted) return Promise.reject(abortErrorFromSignal(signal));
-
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(abortErrorFromSignal(signal));
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      value => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      err => {
-        signal.removeEventListener('abort', onAbort);
-        reject(err);
-      },
-    );
-  });
-}
-
-function abortErrorFromSignal(signal: AbortSignal): Error {
-  if (signal.reason instanceof Error) return signal.reason;
-  const message = typeof signal.reason === 'string' ? signal.reason : 'Operation aborted';
-  const err = new Error(message);
-  err.name = 'AbortError';
-  return err;
 }

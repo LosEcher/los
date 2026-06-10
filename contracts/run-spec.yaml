@@ -94,6 +94,53 @@ properties:
     description: >
       Durable run state. `blocked` is used when runtime completion is prevented
       by a required verifier or another operator-action gate.
+  runContract:
+    type: object
+    description: >
+      Operator-provided execution contract. Includes mode, required checks,
+      stop conditions, phase lifecycle, plan steps, and verification requirements.
+      Phase transitions are enforced: created → discovering → discovery_ready →
+      planning → plan_approved → executing → verifying → succeeded|blocked|failed.
+    properties:
+      mode:
+        type: string
+        enum: [audit, execution, closeout, governance]
+      phase:
+        type: string
+        enum: [created, discovering, discovery_ready, planning, plan_approved, executing, verifying, succeeded, blocked, failed]
+      plan:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            title: { type: string }
+            description: { type: string }
+            dependsOnIds: { type: array; items: { type: string } }
+            editableSurfaces: { type: array; items: { type: string } }
+            completionCriteria: { type: string }
+      verifications:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            kind: { type: string; enum: [command, assertion, operator_review] }
+            description: { type: string }
+            command: { type: string }
+            assertion: { type: string }
+            reviewer: { type: string }
+      requiredChecks:
+        type: array
+        items: { type: string }
+      stopConditions:
+        type: array
+        items: { type: string }
+      evidenceRequired:
+        type: array
+        items: { type: string }
+      commitBoundary:
+        type: string
 events:
   writes:
     - task_runs

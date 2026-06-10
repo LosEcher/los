@@ -11,6 +11,7 @@ export interface DiscoveredProvider {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
+  apiShape?: string;
   available: boolean;
   source: string;
   sourceTool?: string;
@@ -52,4 +53,5 @@ export interface CodexRouteConfig {
   providerName: string;
   baseUrl: string;
   model?: string;
+  wireApi?: string;
 }

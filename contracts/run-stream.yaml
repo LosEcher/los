@@ -100,15 +100,57 @@ replay:
         action: none | wait_for_task | recover_tools | cancel_tools | run_verification | inspect_events | operator_attention
         blockers: run_state_blockers
       description: Compact operator read model for next action and blockers.
+    - method: GET
+      path: /runs/{runSpecId}/stream
+      query:
+        since:
+          type: integer
+          minimum: 0
+          description: Return session_events rows with id greater than this cursor.
+        streamSince:
+          type: integer
+          minimum: 0
+          description: Return stream_checkpoints rows with id greater than this cursor.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+      response:
+        runSpecId: string
+        sessionId: string
+        since: integer
+        streamSince: integer
+        count: integer
+        nextSince: integer
+        nextStreamSince: integer
+        items:
+          type: array
+          items:
+            oneOf:
+              - kind: stream
+                id: integer
+                eventType: string
+                turn: integer
+                payload: object
+                createdAt: string
+              - kind: event
+                id: integer
+                type: string
+                turn: integer
+                payload: object
+                createdAt: string
+      description: Interleaved stream checkpoints and session events for cross-gateway stream replay.
   sourceOfTruth:
     - run_specs
     - session_events
+    - stream_checkpoints
     - task_runs
     - tool_call_states
     - verification_records
   future:
-    - Last-Event-ID
-    - persisted model.delta chunk replay
+    - Last-Event-ID (implemented for session_events)
+    - persisted model.delta chunk replay (implemented via stream_checkpoints)
+    - SSE reconnect with model.delta replay
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

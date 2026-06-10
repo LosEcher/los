@@ -1,6 +1,10 @@
 import type { ChatPayload, StreamEvent } from './types.js';
+
 export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const pid = getCurrentProjectId();
+  if (pid) headers['x-project-id'] = pid;
+  const res = await fetch(path, { headers });
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText}`);
   }
@@ -8,9 +12,12 @@ export async function getJson<T>(path: string): Promise<T> {
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const pid = getCurrentProjectId();
+  if (pid) headers['x-project-id'] = pid;
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -20,7 +27,10 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function deleteJson<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: 'DELETE' });
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const pid = getCurrentProjectId();
+  if (pid) headers['x-project-id'] = pid;
+  const res = await fetch(path, { method: 'DELETE', headers });
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText}`);
   }
@@ -28,9 +38,12 @@ export async function deleteJson<T>(path: string): Promise<T> {
 }
 
 export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const pid = getCurrentProjectId();
+  if (pid) headers['x-project-id'] = pid;
   const res = await fetch(path, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -44,9 +57,12 @@ export async function streamChat(
   signal: AbortSignal,
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const pid = getCurrentProjectId();
+  if (pid) headers['x-project-id'] = pid;
   const res = await fetch('/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
     signal,
   });
@@ -78,4 +94,27 @@ export async function streamChat(
       }
     }
   }
+}
+
+// ── Current project header ───────────────────────────
+
+const PROJECT_ID_KEY = 'los-project-id';
+
+export function getCurrentProjectId(): string | undefined {
+  try {
+    const val = localStorage.getItem(PROJECT_ID_KEY);
+    return val?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setCurrentProjectId(projectId: string | undefined): void {
+  try {
+    if (projectId) {
+      localStorage.setItem(PROJECT_ID_KEY, projectId);
+    } else {
+      localStorage.removeItem(PROJECT_ID_KEY);
+    }
+  } catch { /* ignore */ }
 }

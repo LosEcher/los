@@ -16,11 +16,14 @@ import {
   linkAbortSignal,
   registerScheduledTaskController,
 } from './abort-registry.js';
+import { canStartExecution, canMarkSucceeded, readRunContractMetadata, type RunContractMetadata } from '../run-contract.js';
+import { loadRunSpec } from '../run-specs.js';
 import { resolveExecutor, runAgentOnExecutor } from './executor-client.js';
 import { normalizeOptionalString, normalizePositiveInteger } from './helpers.js';
 import { emitTaskEvent } from './task-events.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
 import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
+import { listVerificationRecordsForRunSpec } from '../verification-records.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
@@ -98,6 +101,18 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
 
+  // B0: enforce phase contract — no execution without approved plan
+  const runContract = await readCurrentRunContract(input.runSpecId, running.metadata);
+  const execCheck = canStartExecution(runContract);
+  if (!execCheck.allowed) {
+    await updateTaskRun(taskRunId, {
+      status: 'blocked',
+      metadata: { ...running.metadata, blockReason: execCheck.reason },
+    });
+    await emitTaskEvent(sessionId, 'task.blocked', { ...running, status: 'blocked' });
+    throw new Error(`Execution blocked: ${execCheck.reason}`);
+  }
+
   const controller = new AbortController();
   const linkedAbortCleanup = linkAbortSignal(input.signal, controller);
   let timeout: NodeJS.Timeout | undefined;
@@ -168,6 +183,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           allowedTools: input.allowedTools,
           toolRetry: input.toolRetry,
           mcpServers: input.mcpServers,
+          runContractMetadata: {
+            ...running.metadata,
+            ...(runContract ? { runContract } : {}),
+          },
           signal: controller.signal,
           onSessionEvent: input.onSessionEvent,
           onTurn: input.onTurn,
@@ -184,6 +203,32 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           onModelDelta: input.onModelDelta,
           onCheckpoint: input.onCheckpoint,
         });
+
+    // B0: enforce phase contract — no succeeded while verification pending/failed
+    const verifyContract = await readCurrentRunContract(input.runSpecId, running.metadata);
+    // Load verification record statuses for this run spec
+    const verifyCheck = await checkVerificationGate(input.runSpecId, verifyContract);
+    if (!verifyCheck.allowed) {
+      const blocked = await updateTaskRun(taskRunId, {
+        status: 'blocked',
+        metadata: {
+          ...running.metadata,
+          blockReason: verifyCheck.reason,
+          loopCount: result.loopCount,
+          totalTokens: result.totalTokens,
+        },
+      });
+      const finalBlocked = blocked ?? running;
+      await emitTaskEvent(sessionId, 'task.blocked', finalBlocked);
+      await input.onTaskEvent?.({ type: 'task.blocked', taskRun: finalBlocked });
+      return {
+        status: 'blocked',
+        sessionId,
+        taskRun: { ...finalBlocked, status: 'blocked' },
+        result,
+        reason: verifyCheck.reason ?? 'verification pending',
+      };
+    }
 
     const succeeded = await updateTaskRun(taskRunId, {
       status: 'succeeded',
@@ -255,4 +300,34 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     linkedAbortCleanup();
     unregisterTaskController();
   }
+}
+
+/**
+ * B0: Check verification gate before marking a run succeeded.
+ * Loads persisted verification records and checks against the run contract.
+ */
+async function checkVerificationGate(
+  runSpecId: string | undefined,
+  contract: RunContractMetadata | undefined,
+): Promise<{ allowed: boolean; reason?: string }> {
+  if (!runSpecId) return { allowed: true };
+  let statuses: Array<{ requirementId: string; status: string }> = [];
+  try {
+    const records = await listVerificationRecordsForRunSpec(runSpecId);
+    statuses = records.map((r: { checkName: string; status: string }) => ({ requirementId: r.checkName, status: r.status }));
+  } catch {
+    // No records yet — allow if no contract verifications defined
+  }
+  return canMarkSucceeded(contract, statuses);
+}
+
+async function readCurrentRunContract(
+  runSpecId: string | undefined,
+  taskMetadata: Record<string, unknown>,
+): Promise<RunContractMetadata | undefined> {
+  if (runSpecId) {
+    const runSpec = await loadRunSpec(runSpecId).catch(() => null);
+    if (runSpec?.runContract) return runSpec.runContract;
+  }
+  return readRunContractMetadata(taskMetadata);
 }

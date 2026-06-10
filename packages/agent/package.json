@@ -19,6 +19,7 @@
     "./compat-harness": "./src/compat-harness.ts",
     "./todos": "./src/todos.ts",
     "./run-specs": "./src/run-specs.ts",
+    "./stream-checkpoints": "./src/stream-checkpoints.ts",
     "./run-evals": "./src/run-evals.ts",
     "./execution-transitions": "./src/execution-transitions.ts",
     "./execution-store": "./src/execution-store.ts",
@@ -27,7 +28,8 @@
     "./skills": "./src/skills.ts",
     "./rules": "./src/rules.ts",
     "./tools": "./src/tools/registry.ts",
-    "./tools/mcp-client": "./src/tools/mcp-client.ts"
+    "./tools/mcp-client": "./src/tools/mcp-client.ts",
+    "./cancellation": "./src/cancellation.ts"
   },
   "scripts": {
     "build": "tsc",

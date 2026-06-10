@@ -11,9 +11,12 @@
 import { getDb } from '@los/infra/db';
 import {
   normalizeRunContractMetadata,
+  validatePhaseTransition,
   type RunContractMetadata,
   type RunContractMetadataInput,
+  type RunPhase,
 } from './run-contract.js';
+import { appendSessionEvent, ensureSessionEventStore } from './session-events.js';
 import { seedVerificationRequirementsForRunSpec } from './verification-records.js';
 
 // ── Types ───────────────────────────────────────────────
@@ -232,6 +235,135 @@ export async function updateRunSpecStatus(
     [id, status],
   );
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+}
+
+/**
+ * Approve a run spec's phase transition to `plan_approved`.
+ *
+ * Validates the current phase → plan_approved transition, persists the new
+ * phase in run_contract_json, and records an operator approval session event.
+ *
+ * Returns the updated run spec record, or throws on invalid transition.
+ */
+export async function approveRunSpecPhase(
+  id: string,
+  opts: { actor?: string; reason?: string } = {},
+): Promise<RunSpecRecord> {
+  await ensureRunSpecStore();
+
+  const record = await loadRunSpec(id);
+  if (!record) throw new Error(`Run spec not found: ${id}`);
+
+  const currentContract: RunContractMetadata = {
+    editableSurfaces: [],
+    requiredChecks: [],
+    allowedSkippedChecks: [],
+    stopConditions: [],
+    evidenceRequired: [],
+    externalEvidenceAllowed: [],
+    rawEvidenceProhibited: [],
+    ...(record.runContract ?? {}),
+  };
+  const currentPhase: RunPhase | undefined = currentContract.phase;
+  const targetPhase: RunPhase = 'plan_approved';
+
+  const error = validatePhaseTransition(currentPhase, targetPhase);
+  if (error) throw new Error(error);
+
+  const now = new Date().toISOString();
+  const updatedContract: RunContractMetadata = {
+    ...currentContract,
+    phase: targetPhase,
+    previousPhase: currentPhase,
+    phaseChangedAt: now,
+  };
+
+  const db = getDb();
+  await db.query(
+    `UPDATE run_specs SET run_contract_json = $2, updated_at = now() WHERE id = $1`,
+    [id, JSON.stringify(updatedContract)],
+  );
+
+  // Record operator approval event
+  await ensureSessionEventStore();
+  await appendSessionEvent({
+    sessionId: record.sessionId,
+    type: 'run.plan_approved',
+    source: 'operator',
+    payload: {
+      runSpecId: id,
+      previousPhase: currentPhase ?? null,
+      phase: targetPhase,
+      actor: opts.actor ?? null,
+      reason: opts.reason ?? null,
+      approvedAt: now,
+    },
+  });
+
+  return (await loadRunSpec(id))!;
+}
+
+/**
+ * Revise a run spec's plan, incrementing the revision number and preserving
+ * lineage. Records a `run.plan_revised` session event.
+ *
+ * Returns the updated run spec record.
+ */
+export async function reviseRunSpecPlan(
+  id: string,
+  opts: { plan?: import('./run-contract.js').PlanStep[]; actor?: string; reason?: string } = {},
+): Promise<RunSpecRecord> {
+  await ensureRunSpecStore();
+  await ensureSessionEventStore();
+
+  const record = await loadRunSpec(id);
+  if (!record) throw new Error(`Run spec not found: ${id}`);
+
+  const currentContract: RunContractMetadata = {
+    editableSurfaces: [],
+    requiredChecks: [],
+    allowedSkippedChecks: [],
+    stopConditions: [],
+    evidenceRequired: [],
+    externalEvidenceAllowed: [],
+    rawEvidenceProhibited: [],
+    ...(record.runContract ?? {}),
+  };
+
+  const currentRevision = currentContract.planRevision ?? 1;
+  const now = new Date().toISOString();
+  const updatedContract: RunContractMetadata = {
+    ...currentContract,
+    plan: opts.plan ?? currentContract.plan,
+    planRevision: currentRevision + 1,
+    planParentRunSpecId: id,
+    phase: 'planning',
+    previousPhase: currentContract.phase,
+    phaseChangedAt: now,
+  };
+
+  const db = getDb();
+  await db.query(
+    `UPDATE run_specs SET run_contract_json = $2, updated_at = now() WHERE id = $1`,
+    [id, JSON.stringify(updatedContract)],
+  );
+
+  await appendSessionEvent({
+    sessionId: record.sessionId,
+    type: 'run.plan_revised',
+    source: 'operator',
+    payload: {
+      runSpecId: id,
+      planRevision: updatedContract.planRevision,
+      previousRevision: currentRevision,
+      previousPhase: currentContract.phase ?? null,
+      actor: opts.actor ?? null,
+      reason: opts.reason ?? null,
+      revisedAt: now,
+    },
+  });
+
+  return (await loadRunSpec(id))!;
 }
 
 // ── Helpers ─────────────────────────────────────────────

@@ -3,6 +3,7 @@
  */
 
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState } from './loop.js';
+export { getDefaultSystemPrompt } from './loop/message-builder.js';
 export {
   cancelScheduledTask,
   runAgentTaskGraphSerial,
@@ -18,15 +19,20 @@ export { createProvider, createDeepSeekProvider, createOpenAIProvider, type Chat
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
 export {
   MODEL_PROFILES,
+  calculateCost,
+  estimateCost,
   resolveModelProfile,
   summarizeModelProfile,
   type ApiShape,
   type CachePolicy,
+  type CostEstimate,
   type ModelExecutionSummary,
+  type ModelPricing,
   type ModelProfile,
   type ProviderProtocol,
   type ResolveModelProfileOptions,
   type ToolCallRepairMode,
+  type TransportHint,
 } from './model-profiles.js';
 export {
   ADVISORY_COMPATIBILITY_TARGETS,
@@ -132,7 +138,9 @@ export {
   ensureRunSpecStore,
   claimRunSpec,
   createRunSpec,
+  approveRunSpecPhase,
   loadRunSpec,
+  reviseRunSpecPlan,
   listRunSpecs,
   listRunSpecsForSession,
   updateRunSpecStatus,
@@ -141,12 +149,18 @@ export {
   type CreateRunSpecInput,
 } from './run-specs.js';
 export {
+  canMarkSucceeded,
+  canStartExecution,
   mergeRunContractMetadata,
   normalizeRunContractMetadata,
   readRunContractMetadata,
+  validatePhaseTransition,
+  type PlanStep,
   type RunContractMetadata,
   type RunContractMetadataInput,
   type RunContractMode,
+  type RunPhase,
+  type VerificationRequirement,
 } from './run-contract.js';
 export {
   createVerificationRecord,
@@ -324,6 +338,13 @@ export {
   type ExecutorNodeUpsertInput,
 } from './executor-nodes.js';
 export {
+  clearCancellation,
+  ensureCancellationStore,
+  pollCancellation,
+  requestCancellation,
+  type CancellationRequest,
+} from './cancellation.js';
+export {
   ensureServiceInstanceStore,
   evaluateServiceInstance,
   listServiceInstances,
@@ -353,6 +374,14 @@ export {
   type SessionEventWrite,
   type SessionObservability,
 } from './session-events.js';
+export {
+  ensureStreamCheckpointStore,
+  createStreamCheckpoint,
+  listStreamCheckpointsSince,
+  listStreamCheckpointsForRunSpec,
+  type StreamCheckpointRecord,
+  type CreateStreamCheckpointInput,
+} from './stream-checkpoints.js';
 export {
   ensureTodoStore,
   archiveTodo,

@@ -575,3 +575,18 @@ export type StreamEvent = {
   event: string;
   data: Record<string, unknown>;
 };
+
+// ── Project binding ──────────────────────────────────
+
+export type ProjectBinding = {
+  projectId: string;
+  displayName: string;
+  workspacePath: string;
+  createdAt: string;
+  lastUsed: string;
+};
+
+export type ProjectListResponse = {
+  projects: ProjectBinding[];
+  defaultProjectId: string | null;
+};

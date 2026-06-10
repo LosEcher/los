@@ -23,7 +23,11 @@ function parseLiveSessionEventNotification(payload: string | undefined) {
 export function registerSseRoutes(app: FastifyInstance): void {
   app.get('/sessions/:id/events/stream', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+    // Support Last-Event-ID header (sent by EventSource on reconnect) — overrides query param
+    const lastEventId = req.headers['last-event-id'];
+    const since = lastEventId
+      ? Math.max(0, Number(lastEventId))
+      : Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
     await ensureSessionEventStore();
     await ensureTaskRunStore();
@@ -132,7 +136,10 @@ export function setupLiveEventPush(app: FastifyInstance): void {
 export function registerLiveEventRoutes(app: FastifyInstance): void {
   app.get('/sessions/:id/events/live', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+    const lastEventId = req.headers['last-event-id'];
+    const since = lastEventId
+      ? Math.max(0, Number(lastEventId))
+      : Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
     await ensureSessionEventStore();
 

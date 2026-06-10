@@ -8,7 +8,7 @@
 import { getDb, withDbClient } from '@los/infra/db';
 import { mergeRunContractMetadata, type RunContractMetadataInput } from './run-contract.js';
 
-export type TaskRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type TaskRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
 
 export const TASK_RUN_STARTUP_RECOVERY_LOCK_KEY = 7_602_026_001;
 
@@ -202,7 +202,7 @@ export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Pr
         node_id = COALESCE($4, node_id),
         heartbeat_at = COALESCE($5::timestamptz, heartbeat_at),
         lease_expires_at = CASE
-          WHEN $6::timestamptz IS NULL AND $2 IN ('succeeded', 'failed', 'cancelled') THEN NULL
+          WHEN $6::timestamptz IS NULL AND $2 IN ('succeeded', 'failed', 'cancelled', 'blocked') THEN NULL
           ELSE COALESCE($6::timestamptz, lease_expires_at)
         END,
         updated_at = now(),
@@ -211,7 +211,7 @@ export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Pr
           ELSE started_at
         END,
         completed_at = CASE
-          WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN now()
+          WHEN $2 IN ('succeeded', 'failed', 'cancelled', 'blocked') THEN now()
           ELSE completed_at
         END
     WHERE id = $1

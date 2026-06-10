@@ -40,10 +40,11 @@ const RUN_SPEC_TRANSITIONS = {
 
 const TASK_RUN_TRANSITIONS = {
   queued: ['running', 'cancelled'],
-  running: ['succeeded', 'failed', 'cancelled'],
+  running: ['succeeded', 'failed', 'cancelled', 'blocked'],
   succeeded: [],
   failed: [],
   cancelled: [],
+  blocked: ['running', 'failed', 'cancelled'],
 } satisfies Record<TaskRunStatus, TaskRunStatus[]>;
 
 const TOOL_CALL_STATE_TRANSITIONS = {

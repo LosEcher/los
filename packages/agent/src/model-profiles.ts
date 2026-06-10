@@ -1,7 +1,19 @@
 export type ProviderProtocol = 'openai' | 'anthropic';
-export type ApiShape = 'openai-chat-completions' | 'anthropic-messages';
+export type ApiShape = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
 export type ToolCallRepairMode = 'none' | 'json-loose';
 export type CachePolicy = 'none' | 'prompt-cache-read';
+
+/** Transport hints for a provider/model. */
+export type TransportHint = 'sse' | 'websocket' | 'http-stream' | 'auto';
+
+export interface ModelPricing {
+  /** USD per 1M prompt (input) tokens. */
+  promptTokenCostPer1M: number;
+  /** USD per 1M completion (output) tokens. */
+  completionTokenCostPer1M: number;
+  /** USD per 1M cache-hit tokens (typically cheaper than prompt). */
+  cacheHitTokenCostPer1M: number;
+}
 
 export interface ModelProfile {
   provider: string;
@@ -29,6 +41,10 @@ export interface ModelProfile {
     retryableStatusCodes: number[];
   };
   knownFailurePatterns: string[];
+  /** Optional pricing data for cost estimation. When absent, cost is not calculated. */
+  pricing?: ModelPricing;
+  /** Transport hints — what transport protocols the provider supports. */
+  transportHints?: TransportHint[];
 }
 
 export interface ModelExecutionSummary {
@@ -51,6 +67,7 @@ export interface ResolveModelProfileOptions {
   baseUrl?: string;
   model?: string;
   defaultModel?: string;
+  apiShape?: ApiShape;
 }
 
 const OPENAI_USAGE_MAPPING = {
@@ -89,6 +106,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     usageMapping: OPENAI_USAGE_MAPPING,
     retryPolicy: DEFAULT_RETRY_POLICY,
     knownFailurePatterns: ['malformed_tool_call_arguments'],
+    pricing: { promptTokenCostPer1M: 1.10, completionTokenCostPer1M: 4.40, cacheHitTokenCostPer1M: 0.14 },
+    transportHints: ['sse'],
   },
   openai: {
     provider: 'openai',
@@ -104,11 +123,12 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     usageMapping: OPENAI_USAGE_MAPPING,
     retryPolicy: DEFAULT_RETRY_POLICY,
     knownFailurePatterns: [],
+    pricing: { promptTokenCostPer1M: 2.50, completionTokenCostPer1M: 10.00, cacheHitTokenCostPer1M: 1.25 },
   },
   packycode: {
     provider: 'packycode',
     protocol: 'openai',
-    apiShape: 'openai-chat-completions',
+    apiShape: 'openai-responses',
     baseUrl: 'https://www.packyapi.com/v1',
     model: 'gpt-5.5',
     supportsTools: true,
@@ -135,6 +155,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     usageMapping: OPENAI_USAGE_MAPPING,
     retryPolicy: DEFAULT_RETRY_POLICY,
     knownFailurePatterns: [],
+    pricing: { promptTokenCostPer1M: 2.50, completionTokenCostPer1M: 10.00, cacheHitTokenCostPer1M: 1.25 },
   },
   groq: openAICompatibleProfile('groq', 'https://api.groq.com/openai/v1', 'llama-3.1-70b-versatile'),
   together: openAICompatibleProfile('together', 'https://api.together.xyz/v1', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'),
@@ -160,6 +181,7 @@ export function resolveModelProfile(
     ...base,
     baseUrl: options.baseUrl ?? base.baseUrl,
     model: options.model ?? base.model ?? options.defaultModel ?? 'gpt-4o',
+    apiShape: options.apiShape ?? base.apiShape,
   };
 }
 
@@ -215,5 +237,55 @@ function anthropicProfile(provider: string, baseUrl: string, model: string): Mod
     usageMapping: ANTHROPIC_USAGE_MAPPING,
     retryPolicy: DEFAULT_RETRY_POLICY,
     knownFailurePatterns: [],
+    pricing: { promptTokenCostPer1M: 3.00, completionTokenCostPer1M: 15.00, cacheHitTokenCostPer1M: 0.30 },
   };
+}
+
+// ── Cost Estimation ─────────────────────────────────────
+
+export interface CostEstimate {
+  /** Total estimated cost in USD. */
+  totalCostUsd: number;
+  /** Prompt (input) token cost. */
+  promptCostUsd: number;
+  /** Completion (output) token cost. */
+  completionCostUsd: number;
+  /** Cache-hit token cost. */
+  cacheHitCostUsd: number;
+  /** Savings from cache hits vs regular prompt pricing. */
+  cacheSavingsUsd: number;
+}
+
+/**
+ * Calculate estimated cost from token usage and model pricing.
+ * Returns null when pricing data is unavailable.
+ */
+export function calculateCost(
+  usage: { promptTokens: number; completionTokens: number; cacheHitTokens?: number; cacheMissTokens?: number },
+  pricing: ModelPricing,
+): CostEstimate {
+  const promptCost = (usage.promptTokens / 1_000_000) * pricing.promptTokenCostPer1M;
+  const completionCost = (usage.completionTokens / 1_000_000) * pricing.completionTokenCostPer1M;
+  const cacheHitCost = ((usage.cacheHitTokens ?? 0) / 1_000_000) * pricing.cacheHitTokenCostPer1M;
+  // Cache-miss tokens are billed at regular prompt rate and are already included in promptTokens
+  const cacheSavings = ((usage.cacheHitTokens ?? 0) / 1_000_000) * (pricing.promptTokenCostPer1M - pricing.cacheHitTokenCostPer1M);
+  return {
+    totalCostUsd: promptCost + completionCost + cacheHitCost,
+    promptCostUsd: promptCost,
+    completionCostUsd: completionCost,
+    cacheHitCostUsd: cacheHitCost,
+    cacheSavingsUsd: cacheSavings,
+  };
+}
+
+/**
+ * Calculate estimated cost from token usage and a model profile.
+ * Returns null when the profile has no pricing data.
+ */
+export function estimateCost(
+  usage: { promptTokens: number; completionTokens: number; cacheHitTokens?: number; cacheMissTokens?: number },
+  profile: ModelProfile,
+): CostEstimate | null {
+  if (!profile.pricing) return null;
+  return calculateCost(usage, profile.pricing);
 }

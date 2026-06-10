@@ -29,10 +29,12 @@ export interface AgentConfig {
   maxContextTokens?: number;
   contextCompression?: ContextCompressionConfig;
   mcpServers?: MCPServerConfig[];
+  /** Run contract metadata (mode, phase, plan, verifications). Passed from scheduler. */
+  runContractMetadata?: Record<string, unknown>;
   onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
-  onTurn?: (turn: TurnSummary) => void;
-  onToolCall?: (tool: string, args: Record<string, unknown>) => void;
+  onTurn?: (turn: TurnSummary) => void | Promise<void>;
+  onToolCall?: (tool: string, args: Record<string, unknown>) => void | Promise<void>;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
   onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
 }

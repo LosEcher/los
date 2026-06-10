@@ -9,7 +9,7 @@ const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
 
 export async function runCommand(globalArgs: string[], argv: string[]): Promise<void> {
   const subcommand = argv[0];
-  if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify' || subcommand === 'state') {
+  if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify' || subcommand === 'state' || subcommand === 'approve' || subcommand === 'revise-plan' || subcommand === 'replay') {
     await runOperationCommand(subcommand, globalArgs, argv.slice(1));
     return;
   }
@@ -17,7 +17,7 @@ export async function runCommand(globalArgs: string[], argv: string[]): Promise<
 }
 
 async function runOperationCommand(
-  subcommand: 'inspect' | 'recover' | 'verify' | 'state',
+  subcommand: 'inspect' | 'recover' | 'verify' | 'state' | 'approve' | 'revise-plan' | 'replay',
   globalArgs: string[],
   argv: string[],
 ): Promise<void> {
@@ -50,6 +50,34 @@ async function runOperationCommand(
       staleMs: numberFlag(parsed, 'stale-ms'),
     });
     renderRunRecover(value, json);
+    return;
+  }
+  if (subcommand === 'approve') {
+    const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/approve`, {
+      actor: stringFlag(parsed, 'actor'),
+      reason: stringFlag(parsed, 'reason'),
+    });
+    renderRunApprove(value, json);
+    return;
+  }
+  if (subcommand === 'revise-plan') {
+    const planArg = stringFlag(parsed, 'plan');
+    const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/revise-plan`, {
+      plan: planArg ? JSON.parse(planArg) : undefined,
+      actor: stringFlag(parsed, 'actor'),
+      reason: stringFlag(parsed, 'reason'),
+    });
+    renderRunRevisePlan(value, json);
+    return;
+  }
+  if (subcommand === 'replay') {
+    const since = numberFlag(parsed, 'since') ?? 0;
+    const streamSince = numberFlag(parsed, 'stream-since') ?? 0;
+    const limit = numberFlag(parsed, 'limit') ?? 500;
+    const value = await getJson(
+      `${gateway}/runs/${encodeURIComponent(runSpecId)}/stream?since=${since}&streamSince=${streamSince}&limit=${limit}`,
+    );
+    renderRunReplay(value, json);
     return;
   }
   const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/verify`, {
@@ -136,6 +164,26 @@ function renderRunRecover(value: unknown, json: boolean): void {
   }
   const reasons = Array.isArray(decision.reasons) ? decision.reasons : [];
   for (const reason of reasons) console.log(`reason: ${String(reason)}`);
+}
+
+function renderRunApprove(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const result = asRecord(value);
+  console.log(`run=${String(result.runSpecId ?? '?')} phase=${String(result.phase ?? '?')} previousPhase=${String(result.previousPhase ?? 'null')}`);
+  if (typeof result.phaseChangedAt === 'string') console.log(`approvedAt=${result.phaseChangedAt}`);
+}
+
+function renderRunRevisePlan(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const result = asRecord(value);
+  console.log(`run=${String(result.runSpecId ?? '?')} planRevision=${String(result.planRevision ?? '?')} previousRevision=${String(result.previousRevision ?? 1)}`);
+  console.log(`phase=${String(result.phase ?? '?')} previousPhase=${String(result.previousPhase ?? 'null')}`);
 }
 
 function renderRunVerify(value: unknown, json: boolean): void {
@@ -253,10 +301,66 @@ function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+function truncate(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max)}...`;
+}
+
 function removeUndefined(value: JsonRecord): void {
   for (const key of Object.keys(value)) {
     if (value[key] === undefined) delete value[key];
   }
+}
+
+function renderRunReplay(value: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  const result = asRecord(value);
+  const items = Array.isArray(result.items) ? result.items : [];
+  console.log(`run=${String(result.runSpecId ?? '?')} session=${String(result.sessionId ?? '?')} items=${items.length} since=${String(result.since ?? 0)} nextSince=${String(result.nextSince ?? 0)} nextStreamSince=${String(result.nextStreamSince ?? 0)}`);
+
+  let textBuf = '';
+  for (const item of items) {
+    const record = asRecord(item);
+    const kind = record.kind as string;
+    if (kind === 'stream') {
+      const eventType = String(record.eventType ?? '');
+      const payload = asRecord(record.payload);
+      if (eventType === 'model.delta') {
+        const text = String(payload.textDelta ?? '');
+        if (text) textBuf += text;
+      } else if (eventType === 'tool_call') {
+        if (textBuf) { console.log(textBuf); textBuf = ''; }
+        console.log(`[tool:call] ${String(payload.tool ?? 'tool')}`);
+      } else if (eventType === 'turn') {
+        if (textBuf) { console.log(textBuf); textBuf = ''; }
+        console.log(`[turn ${String(payload.loopCount ?? '?')}] tools=${Array.isArray(payload.toolNames) ? payload.toolNames.join(',') || 'none' : '?'}`);
+      } else {
+        console.log(`[stream:${eventType}] ${truncate(JSON.stringify(payload), 400)}`);
+      }
+    } else {
+      // kind === 'event' — session event
+      if (textBuf) { console.log(textBuf); textBuf = ''; }
+      const type = String(record.type ?? 'event');
+      const payload = asRecord(record.payload);
+      if (type === 'model.response') {
+        console.log(`[model] turn=${String(record.turn ?? '?')}`);
+        const preview = typeof payload.textPreview === 'string' ? payload.textPreview : undefined;
+        if (preview) console.log(`  ${truncate(preview, 600)}`);
+      } else if (type === 'tool.call' || type === 'tool.planned' || type === 'tool.approved' || type === 'tool.denied') {
+        console.log(`[tool:${type.split('.')[1] ?? 'call'}] ${String(record.toolName ?? payload.tool ?? 'tool')}`);
+      } else if (type === 'tool.result') {
+        const ok = payload.ok === false ? 'failed' : 'ok';
+        console.log(`[tool:result:${ok}] ${String(record.toolName ?? 'tool')}`);
+      } else if (type === 'session.started' || type === 'session.completed' || type === 'session.resumed' || type === 'session.error') {
+        console.log(`[${type}]`);
+      } else {
+        console.log(`[event:${type}] ${truncate(JSON.stringify(payload), 400)}`);
+      }
+    }
+  }
+  if (textBuf) console.log(textBuf);
 }
 
 function printRunHelp(): void {
@@ -265,10 +369,14 @@ function printRunHelp(): void {
 Examples:
   los run inspect run-123
   los run state run-123
+  los run approve run-123 --reason "plan reviewed, looks good"
+  los run revise-plan run-123 --reason "updated scope" --plan '[{"id":"step-1","title":"Add login","description":"...","dependsOnIds":[],"editableSurfaces":[],"completionCriteria":"tests pass"}]'
   los run recover run-123 --stale-ms 300000
   los run recover run-123 --apply --intent cancel
   los run recover run-123 --apply --intent operator-attention --reason "needs approval"
   los run verify run-123 --timeout-ms 120000
+  los run replay run-123 --since 50 --stream-since 10
+  los run replay run-123 --json
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}

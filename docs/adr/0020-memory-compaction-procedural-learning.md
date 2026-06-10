@@ -2,7 +2,21 @@
 
 ## Status
 
-Proposed.
+Accepted (2026-06-09).
+
+### Implementation Status
+
+Core:
+- `memory_compactions` table + `compactSession()` pipeline — implemented
+- Cross-session evidence counting (`lookupCrossSessionEvidence`) — implemented
+- ProceduralCandidate lifecycle (`draft → review → approved → active → retired`) — implemented
+- Operator attestation (`attestCompaction()`) — implemented
+- Candidate promotion (`promoteCandidate()`) — implemented
+
+Remaining:
+- Rule retrieval policy (when active rules are injected into system prompt)
+- Precision/recall metrics vs operator review
+- Automated rule promotion (always requires operator gate per ADR decision)
 
 ## Context
 

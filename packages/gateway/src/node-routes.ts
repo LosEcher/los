@@ -6,6 +6,7 @@ import {
   listExecutorNodes,
   recordExecutorNodeProbe,
   upsertExecutorNode,
+  upsertExecutorNodeHeartbeat,
   type ExecutorNodeConnectMode,
   type ExecutorNodeKind,
   type ExecutorNodeRecord,
@@ -75,6 +76,29 @@ export function registerNodeRoutes(app: FastifyInstance): void {
       meshLinks: hasField(body, 'meshLinks') ? normalizeJsonArray(body?.meshLinks) : undefined,
     });
     return { ok: true, node };
+  });
+
+  // POST /nodes/heartbeat — remote executor auto-registration
+  app.post('/nodes/heartbeat', async (req, reply) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
+    if (!nodeId) return reply.status(400).send({ error: 'nodeId is required' });
+
+    await ensureExecutorNodeStore();
+    const node = await upsertExecutorNodeHeartbeat({
+      nodeId,
+      hostLabel: normalizeOptionalString(body?.hostLabel ?? body?.host_label),
+      baseUrl: normalizeOptionalString(body?.baseUrl ?? body?.base_url),
+      version: normalizeOptionalString(body?.version),
+      connectModes: hasField(body, 'connectModes') ? normalizeConnectModes(body?.connectModes) : undefined,
+      connectConfig: hasField(body, 'connectConfig') ? normalizeJsonObject(body?.connectConfig) : undefined,
+      capacity: hasField(body, 'capacity') ? normalizeJsonObject(body?.capacity) : undefined,
+      capabilities: hasField(body, 'capabilities') ? normalizeJsonObject(body?.capabilities) : undefined,
+      queueDepth: hasField(body, 'queueDepth') ? normalizeInteger(body?.queueDepth) : undefined,
+      activeTaskCount: hasField(body, 'activeTaskCount') ? normalizeInteger(body?.activeTaskCount) : undefined,
+      meshLinks: hasField(body, 'meshLinks') ? normalizeJsonArray(body?.meshLinks) : undefined,
+    });
+    return { ok: true, nodeId: node.nodeId, status: node.status };
   });
 
   app.post('/nodes/:id/probe', async (req, reply) => {
@@ -190,6 +214,7 @@ export function registerNodeRoutes(app: FastifyInstance): void {
       items: appliedItems,
     };
   });
+
 }
 
 async function probeNode(node: ExecutorNodeRecord): Promise<{

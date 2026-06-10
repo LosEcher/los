@@ -92,7 +92,7 @@ test('compaction detects executor failover patterns from run evals', async () =>
     ));
     assert.ok(compaction.proceduralCandidates.length > 0);
     assert.ok(compaction.proceduralCandidates.some(
-      (c: Record<string, unknown>) => String(c.name ?? '').includes('executor-failover'),
+      (c) => c.name.includes('executor-failover'),
     ));
   } finally {
     await getDb().query('DELETE FROM run_evals WHERE session_id = $1', [sessionId]).catch(() => undefined);

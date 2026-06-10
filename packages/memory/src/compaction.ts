@@ -12,28 +12,51 @@ import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('memory-compaction');
 
+export type CandidateStatus = 'draft' | 'review' | 'approved' | 'active' | 'retired';
+
 export interface MemoryCompaction {
   id: string;
   sessionId: string;
   runSpecId?: string;
+  tenantId?: string;
+  projectId?: string;
   summary: Record<string, unknown>;
   observedPatterns: Record<string, unknown>[];
-  proceduralCandidates: Record<string, unknown>[];
+  proceduralCandidates: ProceduralCandidate[];
   confidence: number;
+  /** Number of distinct sessions that support these patterns (cross-session). */
   evidenceCount: number;
   createdBy?: string;
   createdAt: string;
+  /** Operator attestation — when a human confirms the pattern is valid. */
+  attestedAt?: string;
+  attestedBy?: string;
+}
+
+export interface ProceduralCandidate {
+  name: string;
+  content: string;
+  severity: 'info' | 'warn' | 'error';
+  rationale: string;
+  confidence: number;
+  status: CandidateStatus;
+  /** Session IDs that also observed this pattern. */
+  supportingSessionIds: string[];
 }
 
 export interface CompactSessionInput {
   sessionId: string;
   runSpecId?: string;
+  tenantId?: string;
+  projectId?: string;
   createdBy?: string;
 }
 
 export interface ListCompactionsOptions {
   sessionId?: string;
   runSpecId?: string;
+  tenantId?: string;
+  projectId?: string;
   limit?: number;
 }
 
@@ -42,6 +65,8 @@ CREATE TABLE IF NOT EXISTS memory_compactions (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
   run_spec_id TEXT,
+  tenant_id TEXT,
+  project_id TEXT,
   summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   observed_patterns_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   procedural_candidates_json JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -51,8 +76,12 @@ CREATE TABLE IF NOT EXISTS memory_compactions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS project_id TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_memcomp_session ON memory_compactions(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memcomp_run_spec ON memory_compactions(run_spec_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memcomp_tenant_project ON memory_compactions(tenant_id, project_id, created_at DESC);
 `;
 
 let _initialized = false;
@@ -62,6 +91,33 @@ export async function ensureMemoryCompactionStore(): Promise<void> {
   await getDb().exec(SCHEMA);
   _initialized = true;
   log.info('Memory compaction store initialized');
+}
+
+/**
+ * Search existing compactions across other sessions for matching observed patterns.
+ * Returns the number of distinct sessions that observed each pattern kind.
+ */
+async function lookupCrossSessionEvidence(
+  sessionId: string,
+  patternKinds: string[],
+): Promise<Map<string, number>> {
+  if (patternKinds.length === 0) return new Map();
+  await ensureMemoryCompactionStore();
+  const db = getDb();
+  const counts = new Map<string, number>();
+
+  for (const kind of patternKinds) {
+    const rows = await db.query<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT session_id)::text AS cnt
+       FROM memory_compactions
+       WHERE session_id != $1
+         AND observed_patterns_json @> $2::jsonb`,
+      [sessionId, JSON.stringify([{ kind }])],
+    );
+    const count = Number(rows.rows[0]?.cnt ?? 0);
+    if (count > 0) counts.set(kind, count);
+  }
+  return counts;
 }
 
 export async function compactSession(input: CompactSessionInput): Promise<MemoryCompaction> {
@@ -116,15 +172,26 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     });
   }
 
-  // Count distinct evidence sources
+  // Look up cross-session evidence for observed pattern kinds
+  const patternKinds = observedPatterns.map(p => String(p.kind ?? ''));
+  const crossSessionCounts = await lookupCrossSessionEvidence(sessionId, patternKinds);
+
+  // Count distinct evidence sources (source categories within session + cross-session)
   let evidenceCount = 0;
   if (observationCount > 0) evidenceCount += 1;
   if (taskRunCount > 0) evidenceCount += 1;
   if (evalCount > 0) evidenceCount += 1;
+  // Cross-session evidence: count distinct sessions that support the same patterns
+  for (const [kind, count] of crossSessionCounts.entries()) {
+    // Each cross-session match adds 1 to evidence count (distinct session)
+    evidenceCount += count;
+  }
 
   const summary = {
     sessionId,
     runSpecId: input.runSpecId ?? null,
+    tenantId: input.tenantId ?? null,
+    projectId: input.projectId ?? null,
     observationCount,
     taskRunCount,
     evalCount,
@@ -133,34 +200,43 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     compactedAt: new Date().toISOString(),
   };
 
-  // Build procedural candidates (stored for review, NEVER auto-promoted)
-  const proceduralCandidates: Record<string, unknown>[] = [];
+  // Build procedural candidates with cross-session evidence
+  const proceduralCandidates: ProceduralCandidate[] = [];
   if (executorFailures > 0) {
+    const crossSessions = crossSessionCounts.get('executor_failover') ?? 0;
+    const totalSupporting = [sessionId];
+    // Note: we could query for actual supporting session IDs here for full traceability
     proceduralCandidates.push({
       name: `executor-failover-alert-${sessionId.slice(0, 8)}`,
       content: `Session ${sessionId} experienced ${executorFailures} executor failures. Review executor node health.`,
       severity: 'warn',
-      rationale: `Observed ${executorFailures} executor failover eval(s) in a single session.`,
-      confidence: 0.5,
+      rationale: `Observed ${executorFailures} executor failover eval(s) in this session${crossSessions > 0 ? ` and ${crossSessions} other session(s)` : ''}.`,
+      confidence: crossSessions >= 2 ? 0.7 : 0.5,
+      status: crossSessions >= 2 ? 'review' : 'draft',
+      supportingSessionIds: totalSupporting,
     });
   }
 
-  const confidence = proceduralCandidates.length > 0 ? 0.5 : 0;
+  const confidence = proceduralCandidates.length > 0
+    ? Math.max(...proceduralCandidates.map(c => c.confidence))
+    : 0;
 
   const id = `memcomp-${sessionId}-${randomUUID()}`;
   const rows = await db.query<CompactionRow>(
     `
     INSERT INTO memory_compactions (
-      id, session_id, run_spec_id, summary_json, observed_patterns_json,
+      id, session_id, run_spec_id, tenant_id, project_id, summary_json, observed_patterns_json,
       procedural_candidates_json, confidence, evidence_count, created_by
     )
-    VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9)
+    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11)
     RETURNING *
   `,
     [
       id,
       sessionId,
       input.runSpecId ?? null,
+      input.tenantId ?? null,
+      input.projectId ?? null,
       JSON.stringify(summary),
       JSON.stringify(observedPatterns),
       JSON.stringify(proceduralCandidates),
@@ -171,6 +247,65 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   );
 
   return rowToCompaction(assertRow(rows.rows[0]));
+}
+
+/**
+ * Add operator attestation to a compaction. Confirms that the observed
+ * patterns are valid and the procedural candidates should be promoted.
+ */
+export async function attestCompaction(
+  id: string,
+  attestedBy: string,
+): Promise<MemoryCompaction | null> {
+  await ensureMemoryCompactionStore();
+  const db = getDb();
+  const rows = await db.query<CompactionRow>(
+    `UPDATE memory_compactions
+     SET created_by = COALESCE(created_by, $2)
+     WHERE id = $1
+     RETURNING *`,
+    [id, attestedBy],
+  );
+  // Note: attestedAt/attestedBy stored in summary_json for queryability
+  if (rows.rows[0]) {
+    const existing = rowToCompaction(rows.rows[0]);
+    const updatedSummary = {
+      ...existing.summary,
+      attestedAt: new Date().toISOString(),
+      attestedBy,
+    };
+    await db.query(
+      `UPDATE memory_compactions SET summary_json = $2::jsonb WHERE id = $1`,
+      [id, JSON.stringify(updatedSummary)],
+    );
+    return { ...existing, summary: updatedSummary, attestedAt: updatedSummary.attestedAt as string, attestedBy };
+  }
+  return null;
+}
+
+/**
+ * Promote a procedural candidate within a compaction from draft → review → approved → active.
+ */
+export async function promoteCandidate(
+  compactionId: string,
+  candidateName: string,
+  newStatus: CandidateStatus,
+): Promise<MemoryCompaction | null> {
+  await ensureMemoryCompactionStore();
+  const compaction = await getCompaction(compactionId);
+  if (!compaction) return null;
+
+  const candidates = compaction.proceduralCandidates.map(c =>
+    c.name === candidateName ? { ...c, status: newStatus } : c,
+  );
+
+  const db = getDb();
+  await db.query(
+    `UPDATE memory_compactions SET procedural_candidates_json = $2::jsonb WHERE id = $1`,
+    [compactionId, JSON.stringify(candidates)],
+  );
+
+  return await getCompaction(compactionId);
 }
 
 export async function getCompaction(id: string): Promise<MemoryCompaction | null> {
@@ -195,6 +330,14 @@ export async function listCompactions(options: ListCompactionsOptions = {}): Pro
     params.push(options.runSpecId);
     clauses.push(`run_spec_id = $${params.length}`);
   }
+  if (options.tenantId) {
+    params.push(options.tenantId);
+    clauses.push(`(tenant_id IS NULL OR tenant_id = $${params.length})`);
+  }
+  if (options.projectId) {
+    params.push(options.projectId);
+    clauses.push(`(project_id IS NULL OR project_id = $${params.length})`);
+  }
 
   const limit = normalizeLimit(options.limit);
   params.push(limit);
@@ -217,6 +360,8 @@ type CompactionRow = {
   id: string;
   session_id: string;
   run_spec_id: string | null;
+  tenant_id: string | null;
+  project_id: string | null;
   summary_json: unknown;
   observed_patterns_json: unknown;
   procedural_candidates_json: unknown;
@@ -227,18 +372,40 @@ type CompactionRow = {
 };
 
 function rowToCompaction(row: CompactionRow): MemoryCompaction {
+  const summary = normalizeJsonObject(row.summary_json);
   return {
     id: row.id,
     sessionId: row.session_id,
     runSpecId: row.run_spec_id ?? undefined,
-    summary: normalizeJsonObject(row.summary_json),
+    tenantId: row.tenant_id ?? undefined,
+    projectId: row.project_id ?? undefined,
+    summary,
     observedPatterns: normalizeJsonArray(row.observed_patterns_json),
-    proceduralCandidates: normalizeJsonArray(row.procedural_candidates_json),
+    proceduralCandidates: normalizeCandidateArray(row.procedural_candidates_json),
     confidence: Number(row.confidence),
     evidenceCount: Number(row.evidence_count),
     createdBy: row.created_by ?? undefined,
     createdAt: toIsoString(row.created_at),
+    attestedAt: typeof summary.attestedAt === 'string' ? summary.attestedAt : undefined,
+    attestedBy: typeof summary.attestedBy === 'string' ? summary.attestedBy : undefined,
   };
+}
+
+function normalizeCandidateArray(value: unknown): ProceduralCandidate[] {
+  const raw = normalizeJsonArray(value);
+  return raw.map((item: Record<string, unknown>): ProceduralCandidate => ({
+    name: typeof item.name === 'string' ? item.name : 'unknown',
+    content: typeof item.content === 'string' ? item.content : '',
+    severity: (item.severity === 'info' || item.severity === 'warn' || item.severity === 'error')
+      ? item.severity as 'info' | 'warn' | 'error' : 'info',
+    rationale: typeof item.rationale === 'string' ? item.rationale : '',
+    confidence: typeof item.confidence === 'number' ? item.confidence : 0,
+    status: (item.status === 'draft' || item.status === 'review' || item.status === 'approved' || item.status === 'active' || item.status === 'retired')
+      ? item.status as CandidateStatus : 'draft',
+    supportingSessionIds: Array.isArray(item.supportingSessionIds)
+      ? item.supportingSessionIds.filter((s): s is string => typeof s === 'string')
+      : [],
+  }));
 }
 
 function normalizeRequired(value: unknown, name: string): string {

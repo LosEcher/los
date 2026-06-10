@@ -22,7 +22,7 @@ const VERSION = '0.1.0';
 const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
 
 async function main(argv = process.argv.slice(2)): Promise<void> {
-  const { command, globalArgs, commandArgs } = splitCommand(argv);
+  const { command, globalArgs, commandArgs } = splitCommand(normalizeArgv(argv));
 
   if (command === 'help' || command === '--help' || command === '-h') {
     printHelp();
@@ -38,7 +38,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'run') {
     const subcommand = commandArgs[0];
-    if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify' || subcommand === 'state') {
+    if (subcommand === 'inspect' || subcommand === 'recover' || subcommand === 'verify' || subcommand === 'state' || subcommand === 'approve' || subcommand === 'revise-plan' || subcommand === 'replay') {
       await runOperationCommand(globalArgs, commandArgs);
       return;
     }
@@ -87,6 +87,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   throw new Error(`Unknown command: ${command}`);
+}
+
+function normalizeArgv(argv: string[]): string[] {
+  return argv[0] === '--' ? argv.slice(1) : argv;
 }
 
 async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> {
@@ -496,7 +500,7 @@ function printHelp(): void {
 Usage:
   los chat [options] <prompt>
   los run [options] <prompt>
-  los run <inspect|state|recover|verify> <run-id> [options]
+  los run <inspect|state|recover|verify|approve|revise-plan|replay> <run-id> [options]
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
   los evals <list|summary|compare|record> [options]
@@ -526,6 +530,7 @@ Chat:
 Run operations:
   inspect RUN_ID          Print runtime evidence graph counts and warnings
   state RUN_ID            Print recovery-grade run phase, next action, and blockers
+  approve RUN_ID          Approve the plan_approved phase transition for a run
   recover RUN_ID          Print tool recovery decision; add --apply to transition cancel/operator-attention
   verify RUN_ID           Run required verification records
   --stale-ms N            Recovery stale threshold

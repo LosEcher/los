@@ -21,6 +21,14 @@ export async function memoryCommand(globalArgs: string[], argv: string[]): Promi
     await listMemoryCompactions(parsed);
     return;
   }
+  if (action === 'active-rules' || action === 'rules') {
+    await listActiveRules(parsed);
+    return;
+  }
+  if (action === 'retrieve') {
+    await retrieveMemory(parsed);
+    return;
+  }
 
   throw new Error(`Unknown memory command: ${action}`);
 }
@@ -159,17 +167,83 @@ function removeUndefined(value: Record<string, unknown>): void {
   for (const key of Object.keys(value)) if (value[key] === undefined) delete value[key];
 }
 
+async function listActiveRules(parsed: ParsedArgs): Promise<void> {
+  const params = new URLSearchParams();
+  addQuery(params, 'runSpecId', stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'));
+  addQuery(params, 'limit', stringFlag(parsed, 'limit'));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${gatewayUrl(parsed)}/memory/active-rules${suffix}`);
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const data = await response.json() as Record<string, unknown>;
+  if (booleanFlag(parsed, 'json')) {
+    console.log(JSON.stringify(data));
+    return;
+  }
+  const rules = Array.isArray(data.rules) ? data.rules : [];
+  console.log(`Active procedural rules: ${rules.length}`);
+  for (const item of rules) {
+    const r = item as Record<string, unknown>;
+    const sev = String(r.severity ?? 'info');
+    const icon = sev === 'error' ? '⚠️' : sev === 'warn' ? '⚡' : 'ℹ️';
+    console.log(`  ${icon} ${String(r.name ?? '?')} (confidence: ${Number(r.confidence ?? 0).toFixed(0)}%)`);
+  }
+}
+
+async function retrieveMemory(parsed: ParsedArgs): Promise<void> {
+  const sessionId = stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session') ?? parsed.positionals[1];
+  const payload: Record<string, unknown> = {
+    taskState: stringFlag(parsed, 'task-state') ?? 'running',
+    runPhase: stringFlag(parsed, 'run-phase'),
+    sessionId,
+    runSpecId: stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'),
+    maxObservationsPerLayer: stringFlag(parsed, 'max-per-layer'),
+  };
+  removeUndefined(payload);
+  const response = await fetch(`${gatewayUrl(parsed)}/memory/retrieve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const data = await response.json() as Record<string, unknown>;
+  if (booleanFlag(parsed, 'json')) {
+    console.log(JSON.stringify(data));
+    return;
+  }
+  const rules = Array.isArray(data.activeRules) ? data.activeRules : [];
+  const layers = Array.isArray(data.queriedLayers) ? data.queriedLayers : [];
+  console.log(`Memory retrieval — layers: ${layers.join(', ')}`);
+  if (rules.length > 0) {
+    console.log(`Active rules: ${rules.length}`);
+    for (const item of rules) {
+      const r = item as Record<string, unknown>;
+      console.log(`  - ${String(r.name ?? '?')} (confidence: ${Number(r.confidence ?? 0).toFixed(0)}%)`);
+    }
+  }
+  const byLayer = data.observationsByLayer as Record<string, unknown> | undefined;
+  if (byLayer) {
+    for (const layer of layers) {
+      const obs = Array.isArray(byLayer[layer as string]) ? byLayer[layer as string] as Array<Record<string, unknown>> : [];
+      console.log(`  ${layer}: ${obs.length} observations`);
+    }
+  }
+}
+
 function printMemoryHelp(): void {
   console.log(`los memory
 
-Compact session memory and list compactions.
+Compact session memory, list compactions, retrieve active rules and memory.
 
 Usage:
   los memory compact --session-id SESSION_ID [--run RUN_SPEC_ID] [--json]
   los memory compactions [--session-id SESSION_ID] [--limit N] [--json]
+  los memory active-rules [--run RUN_SPEC_ID] [--limit N] [--json]
+  los memory retrieve [--session-id SESSION_ID] [--task-state STATE] [--json]
 
 Commands:
   compact           Compact a session into a structured summary
   compactions       List memory compaction records
+  active-rules      List active procedural rules from compactions
+  retrieve          Route memory retrieval by task state
 `);
 }

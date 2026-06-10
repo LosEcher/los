@@ -1,4 +1,18 @@
 import { getDb } from '@los/infra/db';
+import {
+  normalizeOptionalString,
+  normalizeRolloutState,
+  normalizeInteger,
+  normalizeStringArray,
+  normalizeJsonObject,
+  normalizeJsonArray,
+  jsonOrNull,
+  preferredExecutorMode,
+  readVerification,
+  buildHeartbeatVerification,
+  toIsoString,
+  assertRow,
+} from './executor-node-utils.js';
 
 const EXECUTOR_NODE_STALE_MS = 60_000;
 
@@ -42,7 +56,6 @@ export interface ExecutorNodeRecord {
   updatedAt: string;
   execution: ExecutorNodeExecutionState;
 }
-
 export interface ExecutorNodeExecutionState {
   candidate: boolean;
   mode?: string;
@@ -351,6 +364,34 @@ function isHeartbeatStale(value: string | undefined): boolean {
   return Date.now() - timestamp > EXECUTOR_NODE_STALE_MS;
 }
 
+/**
+ * Sort executor candidates by load: lower queue depth → lower active task count → higher capacity → fresher heartbeat.
+ * Preferred nodeId (if specified) always comes first.
+ */
+export function sortExecutorCandidates(
+  candidates: ExecutorNodeRecord[],
+  preferredNodeId?: string,
+): ExecutorNodeRecord[] {
+  const sorted = [...candidates].sort((a, b) => {
+    // Preferred node always first
+    if (preferredNodeId) {
+      if (a.nodeId === preferredNodeId && b.nodeId !== preferredNodeId) return -1;
+      if (b.nodeId === preferredNodeId && a.nodeId !== preferredNodeId) return 1;
+    }
+    // Lower queue depth first
+    if (a.queueDepth !== b.queueDepth) return a.queueDepth - b.queueDepth;
+    // Lower active task count first
+    if (a.activeTaskCount !== b.activeTaskCount) return a.activeTaskCount - b.activeTaskCount;
+    // Higher capacity first (approximate by presence)
+    const aCap = Object.keys(a.capacity).length;
+    const bCap = Object.keys(b.capacity).length;
+    if (aCap !== bCap) return bCap - aCap;
+    // Fresher heartbeat first
+    return (b.lastHeartbeatAt ?? '').localeCompare(a.lastHeartbeatAt ?? '');
+  });
+  return sorted;
+}
+
 function resolveHeartbeatStatus(
   existing: ExecutorNodeStatus | undefined,
   requested: ExecutorNodeStatus | undefined,
@@ -482,103 +523,4 @@ async function writeExecutorNode(
     ],
   );
   return rowToExecutorNode(assertRow(rows.rows[0]));
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeRolloutState(value: unknown): ExecutorNodeRolloutState | undefined {
-  if (value === 'idle' || value === 'draining' || value === 'upgrading' || value === 'verifying' || value === 'failed') {
-    return value;
-  }
-  return undefined;
-}
-
-function normalizeInteger(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed));
-  }
-  return 0;
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map(item => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean);
-}
-
-function normalizeJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function normalizeJsonArray(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map(item => {
-      if (item && typeof item === 'object' && !Array.isArray(item)) return item as Record<string, unknown>;
-      if (typeof item === 'string' && item.trim()) return { value: item.trim() };
-      return null;
-    })
-    .filter((item): item is Record<string, unknown> => Boolean(item));
-}
-
-function jsonOrNull(value: unknown): string | null {
-  return value === undefined ? null : JSON.stringify(value);
-}
-
-function preferredExecutorMode(modes: string[]): string | undefined {
-  if (modes.includes('agent_http_ndjson')) return 'agent_http_ndjson';
-  if (modes.includes('agent_http')) return 'agent_http';
-  return undefined;
-}
-
-function readVerification(verified: Record<string, unknown>, mode: string): boolean | null {
-  const value = verified[mode];
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  return (value as Record<string, unknown>).ok === true;
-}
-
-function buildHeartbeatVerification(
-  existing: Record<string, unknown>,
-  connectModes: ExecutorNodeConnectMode[],
-  input: ExecutorNodeHeartbeatInput,
-): Record<string, unknown> {
-  const verified = { ...existing };
-  const checkedAt = new Date().toISOString();
-  const config = input.connectConfig ?? {};
-  for (const mode of connectModes) {
-    if (mode !== 'agent_http' && mode !== 'agent_http_ndjson') continue;
-    const modeConfig = normalizeJsonObject(config[mode] ?? config.agent_http);
-    verified[mode] = {
-      ok: true,
-      checked_at: checkedAt,
-      source: 'heartbeat',
-      endpoint: normalizeOptionalString(modeConfig.healthUrl) ?? normalizeOptionalString(modeConfig.baseUrl) ?? input.baseUrl,
-    };
-  }
-  return verified;
-}
-
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('Failed to write executor node heartbeat');
-  return row;
 }

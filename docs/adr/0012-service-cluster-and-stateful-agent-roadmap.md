@@ -4,14 +4,24 @@
 
 Partially implemented.
 
-As of 2026-06-02:
+As of 2026-06-09:
 
 1. Phase 1 is implemented for the service registry, gateway heartbeat,
    `/live`, `/ready`, `/services`, drain, promote, and service-route tests.
 2. Phase 2 has a readiness baseline smoke for two gateways sharing PostgreSQL,
    but it has not validated real `/chat` failover or cross-gateway stream
    replay.
-3. Phases 3-7 remain roadmap work.
+3. **Phase 4 (durable phase-state enforcement) partially implemented:**
+   - `run-contract.ts`: `RunPhase` type with 10 lifecycle states, legal transition
+     map (`PHASE_TRANSITIONS`), `PlanStep` and `VerificationRequirement` separated
+     types, `validatePhaseTransition()`, `canStartExecution()`, `canMarkSucceeded()`.
+   - `scheduled-task-runner.ts`: enforcement gates — execution blocked when
+     `phase != plan_approved`, succeeded blocked when verification pending/failed.
+   - `task-runs.ts`: `TaskRunStatus` now includes `'blocked'` state.
+   - `contracts/run-spec.yaml`: `runContract` section with phase/plan/verifications.
+   - Remaining: cross-process phase propagation to child agents, plan revision
+     lineage, operator approval events, active execution resume.
+4. Phases 5-7 remain roadmap work.
 
 ## Background
 

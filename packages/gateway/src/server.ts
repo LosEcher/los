@@ -37,6 +37,7 @@ import { registerSessionRoutes } from './routes/session-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/sse-routes.js';
 import { registerTaskRoutes } from './routes/task-routes.js';
 import { registerRunRoutes } from './routes/run-routes.js';
+import { registerProjectRoutes } from './routes/project-routes.js';
 import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
 import { ensureRunSpecStore } from '@los/agent/run-specs';
@@ -94,6 +95,9 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     cwd: process.cwd(),
   }));
 
+  // ── Projects ────────────────────────────────────────
+  registerProjectRoutes(app);
+
   // ── Health ───────────────────────────────────────────
   app.get('/health', async () => {
     const current = await loadServiceInstance(service.serviceId).catch(() => null);
@@ -109,6 +113,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   app.get('/settings', async () => ({
     server: { port: config.server.port, host: config.server.host },
+    defaultProjectId: config.defaultProjectId,
     agent: {
       defaultProvider: config.agent.defaultProvider,
       defaultModel: config.agent.defaultModel,
