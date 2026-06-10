@@ -118,7 +118,12 @@ Required evidence: source paths, tests, routes, schema, or operation smoke.
 
 Passing pattern: label ADR as design intent and source/runtime as current fact.
 
-Owner surface: docs review checklist.
+Owner surface: docs review checklist, automated probe (`eval-probes.test.ts`).
+
+Real case (2026-06-10): CI workflow added and marked "done," but pnpm version
+conflict caused 4 consecutive red runs while 3 more commits landed on main. The
+remote gate never produced a green run — a perfect E08 sample. Documented in
+`docs/governance/run-chain-changes/2026-06-10-ci-silent-failure-e08.md`.
 
 ### E09 Operation Smoke Not Promoted
 
