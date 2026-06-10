@@ -30,27 +30,29 @@ test('E02: service instance health reflects live DB state, not config defaults',
 
   const serviceId = `eval-e02-${Date.now()}`;
 
-  // Write a heartbeat with explicit health — this is runtime truth, not config
-  await upsertServiceInstanceHeartbeat({
-    serviceId,
-    serviceKind: 'gateway',
-    health: { db_ok: true, schema_ok: true },
-    capabilities: { chat_api: true },
-  });
+  try {
+    // Write a heartbeat with explicit health — this is runtime truth, not config
+    await upsertServiceInstanceHeartbeat({
+      serviceId,
+      serviceKind: 'gateway',
+      health: { db_ok: true, schema_ok: true },
+      capabilities: { chat_api: true },
+    });
 
-  const loaded = await loadServiceInstance(serviceId);
-  assert.ok(loaded, 'service instance persisted');
+    const loaded = await loadServiceInstance(serviceId);
+    assert.ok(loaded, 'service instance persisted');
 
-  // Runtime-derived fields must exist — these cannot come from config alone
-  assert.ok(typeof loaded.health === 'object' && loaded.health !== null, 'health is live object');
-  assert.equal((loaded.health as Record<string, unknown>).db_ok, true, 'db_ok from actual connection');
-  assert.ok(typeof loaded.lastHeartbeatAt === 'string', 'heartbeat timestamp is runtime-derived');
-  assert.ok(new Date(loaded.lastHeartbeatAt).getTime() > 0, 'heartbeat time is valid');
+    // Runtime-derived fields must exist — these cannot come from config alone
+    assert.ok(typeof loaded.health === 'object' && loaded.health !== null, 'health is live object');
+    assert.equal((loaded.health as Record<string, unknown>).db_ok, true, 'db_ok from actual connection');
+    assert.ok(typeof loaded.lastHeartbeatAt === 'string', 'heartbeat timestamp is runtime-derived');
+    assert.ok(new Date(loaded.lastHeartbeatAt).getTime() > 0, 'heartbeat time is valid');
 
-  // Config-only fields are not present on a heartbeat row (status is separate)
-  assert.ok(typeof loaded.status === 'string', 'status reflects live registration');
-
-  await closeDb().catch(() => undefined);
+    // Config-only fields are not present on a heartbeat row (status is separate)
+    assert.ok(typeof loaded.status === 'string', 'status reflects live registration');
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
 });
 
 // ── E03 ───────────────────────────────────────────────────
@@ -65,44 +67,46 @@ test('E03: provider compat evidence is stored independently from discovery readi
   const provider = `eval-e03-${Date.now()}`;
   const model = 'eval-e03-model';
 
-  // Readiness (discovery) and compatibility (evidence) are separate stores
-  // Before any compat run, the compat table has no row for this provider
-  const db = getDb();
-  const before = await db.query<{ id: string }>(
-    'SELECT id FROM provider_compat_evidence WHERE provider = $1',
-    [provider],
-  );
-  assert.equal(before.rows.length, 0,
-    `no compat evidence before a compat run — readiness != compatibility (found ${before.rows.length} rows for ${provider})`);
+  try {
+    // Readiness (discovery) and compatibility (evidence) are separate stores
+    // Before any compat run, the compat table has no row for this provider
+    const db = getDb();
+    const before = await db.query<{ id: string }>(
+      'SELECT id FROM provider_compat_evidence WHERE provider = $1',
+      [provider],
+    );
+    assert.equal(before.rows.length, 0,
+      `no compat evidence before a compat run — readiness != compatibility (found ${before.rows.length} rows for ${provider})`);
 
-  // A compat run records separate evidence with a decision
-  const recorded = await recordProviderCompatEvidence({
-    provider,
-    model,
-    probeId: 'eval-e03-probe',
-    targetLabel: `${provider}:${model}`,
-    decision: 'verified_advisory',
-    passed: true,
-    summary: { toolPolicyTested: true, sandboxMode: 'read-only' },
-  });
+    // A compat run records separate evidence with a decision
+    const recorded = await recordProviderCompatEvidence({
+      provider,
+      model,
+      probeId: 'eval-e03-probe',
+      targetLabel: `${provider}:${model}`,
+      decision: 'verified_advisory',
+      passed: true,
+      summary: { toolPolicyTested: true, sandboxMode: 'read-only' },
+    });
 
-  assert.equal(recorded.provider, provider);
-  assert.equal(recorded.model, model);
-  assert.equal(recorded.decision, 'verified_advisory');
-  assert.equal(recorded.passed, true);
+    assert.equal(recorded.provider, provider);
+    assert.equal(recorded.model, model);
+    assert.equal(recorded.decision, 'verified_advisory');
+    assert.equal(recorded.passed, true);
 
-  // The compat evidence row has its own identity — not derived from discovery
-  assert.ok(recorded.id.startsWith('provider-compat-'), 'compat evidence has its own id namespace');
-  assert.ok(typeof recorded.createdAt === 'string', 'compat evidence has its own creation timestamp');
+    // The compat evidence row has its own identity — not derived from discovery
+    assert.ok(recorded.id.startsWith('provider-compat-'), 'compat evidence has its own id namespace');
+    assert.ok(typeof recorded.createdAt === 'string', 'compat evidence has its own creation timestamp');
 
-  const after = await db.query<{ id: string }>(
-    'SELECT id FROM provider_compat_evidence WHERE provider = $1',
-    [provider],
-  );
-  assert.equal(after.rows.length, 1,
-    'compat evidence exists after a compat run');
-
-  await closeDb().catch(() => undefined);
+    const after = await db.query<{ id: string }>(
+      'SELECT id FROM provider_compat_evidence WHERE provider = $1',
+      [provider],
+    );
+    assert.equal(after.rows.length, 1,
+      'compat evidence exists after a compat run');
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
 });
 
 // ── E08 ───────────────────────────────────────────────────

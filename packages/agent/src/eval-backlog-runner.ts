@@ -58,7 +58,7 @@ export async function recordEvalBacklogSnapshot(input: {
       model: c.hasProbe ? 'automated-probe' : 'document-only',
       success: c.hasProbe ? (passed ?? false) : false,
       latencyMs: probeResult?.durationMs,
-      verificationStatus: c.hasProbe ? (passed ? 'verified' : 'failed') : 'unverified',
+      verificationStatus: c.hasProbe ? (passed ? 'succeeded' : 'failed') : 'not_required',
       failureClass: c.hasProbe && !passed ? 'eval_backlog_probe_failed' : undefined,
       summary: {
         kind: 'eval_backlog_snapshot',
