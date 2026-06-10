@@ -115,6 +115,9 @@ importers:
 
   packages/memory:
     dependencies:
+      '@los/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@los/infra':
         specifier: workspace:*
         version: link:../infra
