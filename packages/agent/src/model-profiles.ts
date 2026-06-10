@@ -128,7 +128,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
   packycode: {
     provider: 'packycode',
     protocol: 'openai',
-    apiShape: 'openai-responses',
+    apiShape: 'openai-chat-completions',
     baseUrl: 'https://www.packyapi.com/v1',
     model: 'gpt-5.5',
     supportsTools: true,
