@@ -73,6 +73,17 @@ while IFS= read -r f; do
   error "$f — route modules belong in packages/gateway/src/routes/"
 done < <(find "$ROOT/packages/gateway/src" -maxdepth 1 -type f -name '*-routes.ts' 2>/dev/null | sort)
 
+# 2c. Web package dual-track prevention (no file sharing a name with a directory)
+header "Web package dual-track (api.ts + api/, pages.tsx + pages/)"
+while IFS= read -r f; do
+  base=$(basename "$f")
+  name="${base%.*}"  # remove extension
+  dir=$(dirname "$f")
+  if [ -d "$dir/$name" ]; then
+    error "$f — file shares name with directory $dir/$name/; use $dir/$name/index.ts instead"
+  fi
+done < <(find "$ROOT/packages/web/src" -maxdepth 1 -type f \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null | sort)
+
 # 3. Process-phase names
 header "Process-phase naming (legacy/v2/temp/backup/new/old/tmp/bak)"
 while IFS= read -r f; do

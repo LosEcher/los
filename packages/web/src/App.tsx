@@ -19,9 +19,11 @@ import {
 } from 'lucide-react';
 import { getJson, type Health, type SessionSummary, type TodoItem } from './api';
 import {
+  LogsPage,
   MemoryPage,
   ProvidersPage,
   SessionsPage,
+  SettingsPage,
   TasksPage,
 } from './pages';
 import { ChatPage } from './chat-page';
@@ -33,7 +35,6 @@ import { ArtifactsPage } from './artifact-page';
 import { SkillsPage } from './skills-page';
 import { RulesPage } from './rules-page';
 import { EvalsPage } from './evals-page';
-import { LogsPage, SettingsPage } from './secondary-pages';
 import { formatDuration, StatusPill, type StatusState } from './ui';
 
 type PageId =

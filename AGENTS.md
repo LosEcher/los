@@ -103,6 +103,9 @@ Database:
   implementation. Root-level gateway `*-routes.ts` files are blocked by
   `tools/check-structure.sh`.
 - Delete transitional files in the same change (no legacy/v2/temp artifacts)
+- Web package: no file in `packages/web/src/` may share a name with a
+  directory in the same location (e.g. `api.ts` + `api/`). Use
+  `api/index.ts` instead. Blocked by `tools/check-structure.sh`.
 
 ## AI-Assisted Change Management
 

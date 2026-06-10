@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
-const pages = readFileSync(new URL('./pages.tsx', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');

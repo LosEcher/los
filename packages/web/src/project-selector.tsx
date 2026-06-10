@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Folder, FolderOpen, Star, X, Check } from 'lucide-react';
-import { getJson, postJson, deleteJson, setCurrentProjectId } from './api.js';
+import { getJson, postJson, deleteJson, setCurrentProjectId } from './api/index.js';
 import type { ProjectBinding, ProjectListResponse } from './api/types.js';
 
 interface ProjectSelectorProps {

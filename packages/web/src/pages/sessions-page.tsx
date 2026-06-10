@@ -420,7 +420,7 @@ function dedupeTodos(todos: TodoItem[]): TodoItem[] {
 
 
 async function exportSession(sessionId: string) {
-  const { getJson } = await import('../api.js');
+  const { getJson } = await import('../api/index.js');
   const events = await getJson<{ events: Array<Record<string, unknown>> }>(`/sessions/${encodeURIComponent(sessionId)}/events?limit=10000`);
   const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
