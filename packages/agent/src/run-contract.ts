@@ -161,6 +161,46 @@ export function canMarkSucceeded(
   return { allowed: true };
 }
 
+/**
+ * Validate that run_spec.status and run_contract.phase are consistent.
+ *
+ * Two independent state machines govern the same run entity. This function
+ * checks invariants that prevent silent drift between them:
+ *   - Terminal run_spec status requires a compatible (terminal or absent) phase.
+ *   - Terminal phase requires a compatible (terminal) run_spec status.
+ *
+ * Returns null if consistent, or an error string describing the inconsistency.
+ */
+export function validatePhaseStatusConsistency(
+  runSpecStatus: string | undefined,
+  contract: RunContractMetadata | undefined,
+): string | null {
+  const phase = contract?.phase;
+  if (!phase) return null;
+
+  const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled']);
+  const terminalPhases = new Set(['succeeded', 'failed']);
+  const statusIsTerminal = runSpecStatus ? terminalStatuses.has(runSpecStatus) : false;
+  const phaseIsTerminal = terminalPhases.has(phase);
+
+  // If phase is terminal but status isn't, that's a drift
+  if (phaseIsTerminal && !statusIsTerminal) {
+    return `run_contract.phase is '${phase}' but run_spec.status is '${runSpecStatus ?? 'unknown'}' (expected terminal)`;
+  }
+
+  // If status is succeeded but phase says we never left executing, that's a drift
+  if (runSpecStatus === 'succeeded' && !phaseIsTerminal && phase !== 'verifying') {
+    return `run_spec.status is 'succeeded' but run_contract.phase is '${phase}' (expected 'succeeded', 'failed', or 'verifying')`;
+  }
+
+  // If status is running but phase is a pre-execution state, that's suspicious
+  if (runSpecStatus === 'running' && ['created', 'discovering', 'discovery_ready', 'planning'].includes(phase)) {
+    return `run_spec.status is 'running' but run_contract.phase is '${phase}' (expected 'plan_approved' or later)`;
+  }
+
+  return null;
+}
+
 export type RunContractMetadataInput = Partial<{
   mode: unknown;
   goal: unknown;

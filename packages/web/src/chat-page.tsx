@@ -37,8 +37,8 @@ import {
   appendLiveSessionEvent,
   streamRow,
   SUPPRESSED_STREAM_EVENTS,
+  providerRoutesFromModels,
   type StreamRow,
-  type ProviderOption,
 } from './chat-helpers.js';
 import {
   EmptyText,
@@ -157,10 +157,10 @@ export function ChatPage({
   const providerOptions = useMemo(() => {
     return buildProviderOptions(onboarding.data, modelRoutes.data);
   }, [onboarding.data, modelRoutes.data]);
+  const providerRoutes = useMemo(() => providerRoutesFromModels(modelRoutes.data), [modelRoutes.data]);
   const selectedRoute = useMemo(() => {
-    const routes = modelRoutes.data?.providers ?? [];
-    return routes.find(route => route.provider === provider) ?? routes[0] ?? null;
-  }, [modelRoutes.data, provider]);
+    return providerRoutes.find(route => route.provider === provider) ?? providerRoutes[0] ?? null;
+  }, [providerRoutes, provider]);
   const modelOptions = useMemo(() => {
     const ids = new Set<string>();
     if (selectedRoute?.model) ids.add(selectedRoute.model);
@@ -477,11 +477,11 @@ export function ChatPage({
               <Wrench size={13} />
               <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
                 <option value="read-only">off / read-only</option>
-                <option value="project-write">project tools</option>
-                <option value="all">all tools</option>
+                <option value="project-write">project tools (no shell)</option>
+                <option value="all">all tools + sandboxed shell</option>
               </select>
             </RunField>
-            <RunField label="execution dir" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`}>
+            <RunField label="execution dir" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`} variant="group">
               <ProjectSelector
                 workspaceRoot={workspaceRoot}
                 onChange={setWorkspaceRoot}

@@ -16,6 +16,7 @@ import {
   linkAbortSignal,
   registerScheduledTaskController,
 } from './abort-registry.js';
+import { clearCancellation } from '../cancellation.js';
 import { canStartExecution, canMarkSucceeded, readRunContractMetadata, type RunContractMetadata } from '../run-contract.js';
 import { loadRunSpec } from '../run-specs.js';
 import { resolveExecutor, runAgentOnExecutor } from './executor-client.js';
@@ -299,6 +300,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     stopHeartbeat();
     linkedAbortCleanup();
     unregisterTaskController();
+    clearCancellation(taskRunId).catch(() => undefined);
   }
 }
 

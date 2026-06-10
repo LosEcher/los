@@ -329,7 +329,14 @@ export function registerProviderRoutes(app: FastifyInstance): void {
     const modelFilter = normalizeOptionalString(query.model);
     const search = normalizeOptionalString(query.q);
     const config = getConfig();
-    const modelSet = new Map<string, { provider: string; model: string; source: string; enabled: boolean }>();
+    const modelSet = new Map<string, {
+      provider: string;
+      model: string;
+      source: string;
+      enabled: boolean;
+      hasApiKey: boolean;
+      baseUrl?: string | null;
+    }>();
     const discoveryReport = await discoverAll().catch(() => ({ providers: [] }));
     for (const dp of discoveryReport.providers) {
       if (!dp.available) continue;
@@ -340,6 +347,8 @@ export function registerProviderRoutes(app: FastifyInstance): void {
         model: dp.defaultModel ?? 'unknown',
         source: dp.source ?? 'discovery',
         enabled: true,
+        hasApiKey: false,
+        baseUrl: null,
       });
     }
     for (const [name, p] of Object.entries(config.providers)) {
@@ -350,6 +359,8 @@ export function registerProviderRoutes(app: FastifyInstance): void {
         model,
         source: p.source ?? 'config',
         enabled: p.enabled ?? false,
+        hasApiKey: typeof p.apiKey === 'string' && p.apiKey.length > 0,
+        baseUrl: p.baseUrl ?? null,
       });
     }
     let results = [...modelSet.values()];
@@ -359,6 +370,43 @@ export function registerProviderRoutes(app: FastifyInstance): void {
       const s = search.toLowerCase();
       results = results.filter(r => r.provider.toLowerCase().includes(s) || r.model.toLowerCase().includes(s));
     }
-    return { count: results.length, models: results };
+    const providers = [...results.reduce((map, item) => {
+      const existing = map.get(item.provider);
+      const modelInfo = { id: item.model };
+      if (existing) {
+        if (!existing.models.some(model => model.id === item.model)) existing.models.push(modelInfo);
+        existing.count = existing.models.length;
+        existing.ok = existing.ok || item.enabled;
+        existing.enabled = existing.enabled || item.enabled;
+        existing.hasApiKey = existing.hasApiKey || item.hasApiKey;
+        existing.source = existing.source ?? item.source;
+        existing.baseUrl = existing.baseUrl ?? item.baseUrl ?? null;
+        return map;
+      }
+      map.set(item.provider, {
+        provider: item.provider,
+        ok: item.enabled,
+        enabled: item.enabled,
+        hasApiKey: item.hasApiKey,
+        source: item.source,
+        model: item.model,
+        baseUrl: item.baseUrl ?? null,
+        count: 1,
+        models: [modelInfo],
+      });
+      return map;
+    }, new Map<string, {
+      provider: string;
+      ok: boolean;
+      enabled: boolean;
+      hasApiKey: boolean;
+      source: string;
+      model: string;
+      baseUrl: string | null;
+      count: number;
+      models: Array<{ id: string }>;
+    }>()).values()];
+
+    return { provider: providerFilter ?? null, count: results.length, models: results, providers };
   });
 }

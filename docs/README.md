@@ -48,6 +48,9 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0017-advisory-provider-promotion-playbook.md` - provider compatibility
   target states and promotion evidence.
 - `0018-cli-fallback-gate.md` - requirements before any external CLI fallback.
+- `0021-stage-b-operator-contract-implemented-state.md` - Stage B operator
+  contract current-state declaration: fields, routes, state machines, gates,
+  and evidence coverage.
 
 ### Operation Smokes
 

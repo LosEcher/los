@@ -29,7 +29,8 @@
     "./rules": "./src/rules.ts",
     "./tools": "./src/tools/registry.ts",
     "./tools/mcp-client": "./src/tools/mcp-client.ts",
-    "./cancellation": "./src/cancellation.ts"
+    "./cancellation": "./src/cancellation.ts",
+    "./agent-task-graph": "./src/agent-task-graph.ts"
   },
   "scripts": {
     "build": "tsc",

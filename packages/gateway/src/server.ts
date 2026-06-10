@@ -39,6 +39,7 @@ import { registerTaskRoutes } from './routes/task-routes.js';
 import { registerRunRoutes } from './routes/run-routes.js';
 import { registerProjectRoutes } from './routes/project-routes.js';
 import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
+import { ensureAgentTaskGraphStore, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
 import { ensureRunSpecStore } from '@los/agent/run-specs';
 import { ensureServiceInstanceStore, loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
@@ -182,6 +183,7 @@ export async function startServer(port?: number, host?: string) {
   await heartbeatGatewayService(service);
   await ensureTaskRunStore();
   await ensureRunSpecStore();
+  await ensureAgentTaskGraphStore();
   const recovery = await recoverExpiredTaskRunsWithAdvisoryLock('gateway_startup_recovery');
   if (!recovery.lockAcquired) {
     log.info('Gateway startup recovery skipped because another service owns the advisory lock');
@@ -193,6 +195,11 @@ export async function startServer(port?: number, host?: string) {
       type: 'task.failed',
       payload: { taskRunId: task.id, traceId: task.traceId, nodeId: task.nodeId ?? null, reason: 'gateway_startup_recovery' },
     }).catch(() => undefined);
+  }
+
+  const agentTaskRecovery = await recoverExpiredAgentTasksWithAdvisoryLock('gateway_startup_recovery');
+  if (agentTaskRecovery.lockAcquired && agentTaskRecovery.recovered.length > 0) {
+    log.info(`Gateway startup recovered ${agentTaskRecovery.recovered.length} expired agent task(s)`);
   }
   await seedLosPlanningTodos();
   console.log(await printOnboardingReport());

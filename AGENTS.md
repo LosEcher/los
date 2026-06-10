@@ -106,6 +106,21 @@ Database:
 - Web package: no file in `packages/web/src/` may share a name with a
   directory in the same location (e.g. `api.ts` + `api/`). Use
   `api/index.ts` instead. Blocked by `tools/check-structure.sh`.
+- **Test DB schema initialization**: Every package that has DB-dependent tests
+  MUST have a `test-setup.ts` that calls `initDb()` and all required
+  `ensure*Store()` functions (both own-package and cross-package). Do NOT rely
+  on per-file `initDb()` calls alone — `node --test` runs test files in
+  parallel, and two files calling the same `ensure*Store()` simultaneously
+  will race on `CREATE TABLE IF NOT EXISTS`. When adding a new store module,
+  update every `test-setup.ts` in every package whose tests transitively depend
+  on that store. The current package inventory:
+  - `packages/agent/src/test-setup.ts` — 22 stores, all agent-owned
+  - `packages/memory/src/test-setup.ts` — 2 stores (`ensureTaskRunStore`,
+    `ensureRunEvalStore`), cross-depends on `@los/agent`
+  - `packages/gateway/` — no `test-setup.ts`; gateway tests that need agent
+    stores import `ensure*Store` ad-hoc. If a new gateway test fails with
+    "relation does not exist", check whether the needed `ensure*Store()` is
+    called before the test.
 
 ## AI-Assisted Change Management
 

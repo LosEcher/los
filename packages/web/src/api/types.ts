@@ -274,22 +274,22 @@ export type ProviderModelInfo = {
   ownedBy?: string;
 };
 
+export type ProviderModelRoute = {
+  provider: string; ok: boolean; models: ProviderModelInfo[];
+  enabled?: boolean; hasApiKey?: boolean; source?: string | null; model?: string | null;
+  baseUrl?: string | null; count?: number; error?: string; profile?: Record<string, unknown>;
+};
+
+export type ProviderModelRecord = {
+  provider: string; model: string; source?: string | null;
+  enabled?: boolean; hasApiKey?: boolean; baseUrl?: string | null;
+};
+
 export type ProviderModelsResponse = {
   provider: string | null;
   count: number;
-  providers: Array<{
-    provider: string;
-    ok: boolean;
-    enabled?: boolean;
-    hasApiKey?: boolean;
-    source?: string | null;
-    model?: string | null;
-    baseUrl?: string | null;
-    count?: number;
-    error?: string;
-    models: ProviderModelInfo[];
-    profile?: Record<string, unknown>;
-  }>;
+  providers?: ProviderModelRoute[];
+  models?: ProviderModelRecord[];
 };
 
 export type LogFile = {
@@ -589,4 +589,10 @@ export type ProjectBinding = {
 export type ProjectListResponse = {
   projects: ProjectBinding[];
   defaultProjectId: string | null;
+};
+
+export type ProjectBrowseResponse = {
+  path: string; parent: string | null;
+  roots: Array<{ label: string; path: string }>;
+  entries: Array<{ name: string; path: string; hidden: boolean }>;
 };

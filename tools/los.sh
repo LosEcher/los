@@ -77,7 +77,16 @@ port_owner() {
     return 0
   fi
 
-  # Check port occupancy without lsof (which can hang on macOS).
+  # Recover the listener PID when the pid file is missing or stale.
+  if command -v lsof >/dev/null 2>&1; then
+    pid="$(lsof -nP -tiTCP:"$(server_port)" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+    if [ -n "$pid" ]; then
+      printf '%s' "$pid"
+      return 0
+    fi
+  fi
+
+  # Fall back to a connection probe when PID attribution is unavailable.
   if command -v nc >/dev/null 2>&1; then
     if nc -z "$(server_host)" "$(server_port)" 2>/dev/null; then
       printf 'unknown'
@@ -157,24 +166,36 @@ gateway_launch_command() {
 }
 
 start_gateway_process() {
+  STARTED_GATEWAY_PID=""
   mkdir -p "$RUNTIME_DIR"
   : > "$LOG_FILE"
 
   local command
   command="$(gateway_launch_command)"
 
-  if command -v launchctl >/dev/null 2>&1; then
-    launch_remove
-    launchctl submit \
-      -l "$(launch_label)" \
-      -o "$LOG_FILE" \
-      -e "$LOG_FILE" \
-      -- /bin/bash -lc "$command"
+  launch_remove
+  if command -v perl >/dev/null 2>&1; then
+    STARTED_GATEWAY_PID="$(
+      perl -MPOSIX=setsid -e '
+        my ($command, $log_file) = @ARGV;
+        defined(my $pid = fork) or die "fork failed: $!";
+        if ($pid) {
+          print "$pid\n";
+          exit 0;
+        }
+        setsid() or die "setsid failed: $!";
+        open STDIN, "<", "/dev/null" or die "stdin redirect failed: $!";
+        open STDOUT, ">", $log_file or die "stdout redirect failed: $!";
+        open STDERR, ">&", \*STDOUT or die "stderr redirect failed: $!";
+        exec "/bin/bash", "-lc", $command;
+        die "exec failed: $!";
+      ' "$command" "$LOG_FILE"
+    )"
     return 0
   fi
 
   nohup /bin/bash -lc "$command" </dev/null >"$LOG_FILE" 2>&1 &
-  printf '%s' "$!"
+  STARTED_GATEWAY_PID="$!"
 }
 
 show_help() {
@@ -283,7 +304,8 @@ start_cmd() {
   fi
 
   echo "starting los gateway at $(server_url)"
-  pid="$(start_gateway_process)"
+  start_gateway_process
+  pid="$STARTED_GATEWAY_PID"
   if [ -n "$pid" ]; then
     write_pid_file "$pid"
   fi

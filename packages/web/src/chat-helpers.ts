@@ -5,6 +5,7 @@
 
 import type {
   ProviderDiscovery, ProviderModelsResponse, ModelSettings,
+  ProviderModelRoute,
   SessionEvent, SessionEventsResponse,
   TodoItem,
 } from './api';
@@ -28,15 +29,15 @@ export function readyStreamRows(): StreamRow[] {
   return [{
     id: 'ready',
     event: 'system',
-    message: 'Ready for a bounded project task.',
-    meta: 'project-write blocks shell execution',
+    message: 'Choose a project, provider, model, and tool mode before sending.',
+    meta: 'project tools can edit files; choose all tools when the run needs shell commands',
   }];
 }
 
 export function buildProviderOptions(discovery?: ProviderDiscovery, routes?: ProviderModelsResponse): ProviderOption[] {
   const results: ProviderOption[] = [];
   const seen = new Set<string>();
-  for (const provider of routes?.providers ?? []) {
+  for (const provider of providerRoutesFromModels(routes)) {
     if (seen.has(provider.provider)) continue;
     seen.add(provider.provider);
     const disc = (discovery?.providers ?? []).find(d => d.provider === provider.provider || d.name === provider.provider);
@@ -61,6 +62,39 @@ export function buildProviderOptions(discovery?: ProviderDiscovery, routes?: Pro
     });
   }
   return results;
+}
+
+export function providerRoutesFromModels(routes?: ProviderModelsResponse): ProviderModelRoute[] {
+  if (!routes) return [];
+  if (Array.isArray(routes.providers) && routes.providers.length > 0) return routes.providers;
+
+  const grouped = new Map<string, ProviderModelRoute>();
+  for (const model of routes.models ?? []) {
+    const existing = grouped.get(model.provider);
+    const modelInfo = { id: model.model };
+    if (existing) {
+      if (!existing.models.some(item => item.id === model.model)) existing.models.push(modelInfo);
+      existing.count = existing.models.length;
+      existing.ok = existing.ok || model.enabled === true;
+      existing.enabled = existing.enabled || model.enabled === true;
+      existing.hasApiKey = existing.hasApiKey || model.hasApiKey === true;
+      existing.source = existing.source ?? model.source ?? null;
+      existing.baseUrl = existing.baseUrl ?? model.baseUrl ?? null;
+      continue;
+    }
+    grouped.set(model.provider, {
+      provider: model.provider,
+      ok: model.enabled === true,
+      enabled: model.enabled,
+      hasApiKey: model.hasApiKey,
+      source: model.source ?? null,
+      model: model.model,
+      baseUrl: model.baseUrl ?? null,
+      count: 1,
+      models: [modelInfo],
+    });
+  }
+  return [...grouped.values()];
 }
 
 export function metadataText(value: unknown): string | null {

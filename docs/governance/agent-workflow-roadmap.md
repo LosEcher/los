@@ -77,28 +77,53 @@ Exit criteria:
 
 ### Stage B: Operator Contract Layer
 
-Status: partially implemented early. `run_specs.run_contract_json`, mode/phase
-metadata, plan revision, approval, verification requirements, and scheduler
-completion gates exist. Remaining work is to make the operator contract
-consistently visible in UI/CLI workflows and to keep eval coverage aligned with
-the contract fields.
+Status: implemented. Current-state declaration in
+`docs/adr/0021-stage-b-operator-contract-implemented-state.md`.
 
 Goal: make the intended agent behavior explicit before the task starts.
 
-Required contracts:
+#### Implemented
 
-1. mode contract: audit, execution, or closeout;
-2. completion contract: required checks, allowed skipped checks, and stop
-   conditions;
-3. scope contract: editable paths, owner layer, and legacy/project boundary;
-4. closeout contract: diff review, validation evidence, commit boundary, and
-   residual risks.
+| Capability | Source | Test | Smoke |
+|------------|--------|------|-------|
+| `RunContractMetadata` (21 fields) | `packages/agent/src/run-contract.ts` | `run-contract.test.ts` (E14/E15/E16) | B0 smoke |
+| `RunPhase` 10-state lifecycle + `PHASE_TRANSITIONS` | `run-contract.ts` | `scheduler.test.ts` (phase gate) | B0 smoke |
+| `validatePhaseTransition()` | `run-contract.ts` | Via scheduler phase gate | — |
+| `canStartExecution()` B0 gate | `run-contract.ts` | `scheduler.test.ts` | B0 smoke |
+| `canMarkSucceeded()` verification gate | `run-contract.ts` | Via verification-records test | B0 smoke |
+| `PlanStep` + `VerificationRequirement` types | `run-contract.ts` | `run-contract.test.ts` (E16) | — |
+| `normalizeRunContractMetadata()` | `run-contract.ts` | `run-contract.test.ts` | — |
+| `run_specs.run_contract_json` JSONB storage | `run-specs.ts` | `run-specs.test.ts` | B0 smoke |
+| `approveRunSpecPhase()` operator approval | `run-specs.ts` | Indirect (scheduler phase gate) | — |
+| `reviseRunSpecPlan()` plan revision + lineage | `run-specs.ts` | — | — |
+| Scheduler B0 enforcement (pre-exec + pre-completion) | `scheduled-task-runner.ts` | `scheduler.test.ts` | B0 smoke |
+| `POST /runs/:id/approve` | `gateway/run-routes.ts` | — | — |
+| `POST /runs/:id/revise-plan` | `gateway/run-routes.ts` | — | — |
+| `POST /runs/:id/verify` + `POST /runs/:id/recover` | `gateway/run-routes.ts` | `run-events-routes.test.ts` | Recovery smoke |
+| CLI: `los run approve\|revise-plan\|verify\|recover` | `cli/run-operations.ts` | — | — |
+| `contracts/run-spec.yaml` runContract definition | `contracts/` | — | — |
+| Mode contract (audit/execution/closeout/governance) | `run-contract.ts` | `run-contract.test.ts` | — |
+| Completion contract (required/allowed skips/stop conditions) | `run-contract.ts` | `run-contract.test.ts` | — |
+| Scope contract (editable surfaces, owner layer) | `run-contract.ts` | Agent task graph/scheduler tests | — |
+| Closeout contract (commit boundary, evidence) | `run-contract.ts` | `run-contract.test.ts` | — |
 
-Exit criteria:
+#### Remaining Gaps
 
-1. a governance report can say which mode was used;
-2. todos can track missing contracts as a failure class;
-3. repeated mode failures have eval candidates.
+1. Direct unit tests for `approveRunSpecPhase()` and `reviseRunSpecPlan()`
+2. Gateway route integration tests for `POST /runs/:id/approve` and `/revise-plan`
+3. End-to-end smoke covering audit→execution→closeout full mode lifecycle
+4. Cross-process phase propagation to child agents and executor nodes
+5. Active execution resume with attempt/retry contract
+6. Phase latency and rejection metrics
+7. Operator approval UI in Web console
+8. Stop-condition runtime enforcement (types exist, enforcement does not)
+9. Commit-boundary reporting automation
+
+#### Exit Criteria
+
+1. a governance report can say which mode was used — **satisfied** (mode persisted in run_contract_json)
+2. todos can track missing contracts as a failure class — **satisfied** (todos store runContract metadata, E14 covers missing-contract case)
+3. repeated mode failures have eval candidates — **satisfied** (E14/E15/E16 in eval backlog, covered by run-contract.test.ts)
 
 ### Stage C: Personal Eval Corpus
 
@@ -262,8 +287,9 @@ ingestion adapter requires a separate ADR and redaction contract.
 
 | Goal | Current owner | Next owner |
 | --- | --- | --- |
-| Mode contracts | `docs/governance/agent-workflow-roadmap.md` + `docs/governance/run-contract-template.md` | task/todo metadata, then CLI/UI field if proven |
-| Completion contract | ADR 0014 + `docs/governance/run-contract-template.md` | task/todo metadata |
+| Mode contracts | `run-contract.ts` + `run_specs.ts` + ADR 0021 | CLI/UI entrypoints, Web approval UI |
+| Completion contract | `run-contract.ts` (canStartExecution, canMarkSucceeded) + `scheduled-task-runner.ts` (B0 gate) + ADR 0014 | Stop-condition runtime enforcement, commit-boundary automation |
+| Scope contract | `run-contract.ts` (editableSurfaces, ownerLayer) + agent task graph/scheduler | — |
 | Toolchain matrix | `docs/governance/toolchain-matrix.md` | future redacted ingestion adapter ADR |
 | Eval corpus | `docs/governance/eval-backlog.md` + todos | tests, compat harnesses, operation smokes |
 | Runtime recovery | ADR 0012 + `run_specs`/`tool_call_states`/`verification_records`/runtime evidence graph + verifier/recovery core modules | API/CLI entrypoints, scheduler follow-up attempts, and DAG verifier tasks |

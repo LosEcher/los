@@ -260,7 +260,7 @@ export async function updateAgentTaskStatus(
     SET status = $2,
         metadata_json = CASE WHEN $3::jsonb IS NULL THEN metadata_json ELSE metadata_json || $3::jsonb END,
         completed_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN now() ELSE completed_at END,
-        lease_expires_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN NULL ELSE lease_expires_at END,
+        lease_expires_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled', 'blocked') THEN NULL ELSE lease_expires_at END,
         updated_at = now()
     WHERE id = $1
     RETURNING *
@@ -269,6 +269,13 @@ export async function updateAgentTaskStatus(
   );
   return rows.rows[0] ? rowToTask(rows.rows[0]) : null;
 }
+
+export {
+  AGENT_TASK_STARTUP_RECOVERY_LOCK_KEY,
+  heartbeatAgentTask,
+  recoverExpiredAgentTasks,
+  recoverExpiredAgentTasksWithAdvisoryLock,
+} from './agent-task-graph/lease.js';
 
 export async function createAgentTaskAttempt(input: CreateAgentTaskAttemptInput): Promise<AgentTaskAttemptRecord> {
   await ensureAgentTaskGraphStore();
@@ -357,11 +364,21 @@ export async function listBlockedAgentTasks(graphId: string): Promise<AgentTaskR
     `
     SELECT DISTINCT task.*
     FROM agent_tasks task
-    JOIN task_edges edge ON edge.graph_id = task.graph_id AND edge.task_id = task.id
-    JOIN agent_tasks upstream ON upstream.graph_id = edge.graph_id AND upstream.id = edge.depends_on_task_id
     WHERE task.graph_id = $1
-      AND task.status = 'queued'
-      AND upstream.status IN ('failed', 'cancelled')
+      AND (
+        task.status = 'blocked'
+        OR (
+          task.status = 'queued'
+          AND EXISTS (
+            SELECT 1
+            FROM task_edges edge
+            JOIN agent_tasks upstream ON upstream.graph_id = edge.graph_id AND upstream.id = edge.depends_on_task_id
+            WHERE edge.graph_id = task.graph_id
+              AND edge.task_id = task.id
+              AND upstream.status IN ('failed', 'cancelled')
+          )
+        )
+      )
     ORDER BY task.priority ASC, task.created_at ASC, task.id ASC
   `,
     [graphId],
@@ -402,6 +419,8 @@ type AgentTaskRow = {
   completed_at: Date | string | null;
 };
 
+export type { AgentTaskRow };
+
 type AgentTaskEdgeRow = {
   graph_id: string;
   task_id: string;
@@ -431,7 +450,7 @@ type AgentTaskAttemptRow = {
   updated_at: Date | string;
 };
 
-function rowToTask(row: AgentTaskRow): AgentTaskRecord {
+export function rowToTask(row: AgentTaskRow): AgentTaskRecord {
   return {
     id: row.id,
     graphId: row.graph_id,
@@ -495,7 +514,7 @@ function normalizeRole(value: unknown): AgentTaskRole {
 }
 
 function normalizeTaskStatus(value: unknown): AgentTaskStatus {
-  if (value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled') return value;
+  if (value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled' || value === 'blocked') return value;
   return 'queued';
 }
 
