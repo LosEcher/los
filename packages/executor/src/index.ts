@@ -86,7 +86,7 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   const agentKey = config.executor.agentKey ?? (() => {
     const generated = `los-key-${randomUUID()}`;
     log.warn(`No EXECUTOR_AGENT_KEY configured. Generated ephemeral key: ${generated}`);
-    log.warn('Set EXECUTOR_AGENT_KEY in .env or pass --agent-key to use a persistent key.');
+    log.warn('Set EXECUTOR_AGENT_KEY in .env (same value for gateway and executor) to use a persistent key.');
     return generated;
   })();
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId);

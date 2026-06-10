@@ -72,7 +72,7 @@ export function ChatPage({
     try { return localStorage.getItem('los-workspace') ?? ''; } catch { return ''; }
   });
   const [toolMode, setToolMode] = useState<ToolMode>('project-write');
-  const [maxLoops, setMaxLoops] = useState(8);
+  const [maxLoops, setMaxLoops] = useState(20); // default from infra/config.ts, overridden by /settings
   const [timeoutMs, setTimeoutMs] = useState(120_000);
   const [temperature, setTemperature] = useState('');
   const [topP, setTopP] = useState('');
@@ -98,6 +98,13 @@ export function ChatPage({
     queryFn: () => getJson<ProviderDiscovery>('/onboarding'),
     staleTime: 20_000,
   });
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => getJson<Record<string, unknown>>('/settings'),
+    staleTime: 60_000,
+  });
+  const configMaxLoops = (settings.data as Record<string, Record<string, unknown>> | undefined)?.agent?.maxLoops;
+  const defaultMaxLoops = typeof configMaxLoops === 'number' ? configMaxLoops : 20;
   const modelRoutes = useQuery({
     queryKey: ['provider-models', provider || 'default'],
     queryFn: () => getJson<ProviderModelsResponse>(

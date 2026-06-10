@@ -149,7 +149,7 @@ export function buildAdvancedCount(input: {
   let n = 0;
   if (input.systemPrompt.trim()) n++;
   if (input.allowedTools.trim()) n++;
-  if (input.maxLoops !== 8) n++;
+  if (input.maxLoops !== 20) n++;  // default from infra/config.ts
   if (input.timeoutMs !== 120_000) n++;
   if (input.toolRetryMaxAttempts.trim()) n++;
   if (input.toolRetryBaseDelayMs.trim()) n++;
