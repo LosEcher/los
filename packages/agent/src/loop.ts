@@ -81,8 +81,9 @@ export async function runAgent(
   prompt: string,
   config: AgentConfig = {},
 ): Promise<AgentResult> {
+  const log = config.log ?? getLogger('agent');
   const maxLoops = config.maxLoops ?? 20;
-  const provider = createProvider(config.provider, { model: config.model });
+  const provider = createProvider(config.provider, { model: config.model, traceId: config.traceId });
   const modelProfile = summarizeModelProfile(provider.profile);
   const toolMode = config.toolMode ?? 'project-write';
   const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(toolMode);
@@ -212,6 +213,8 @@ export async function runAgent(
     const res = await withAbort(
       provider.chat(messages, toolDefs.length > 0 ? toolDefs : undefined, {
         signal,
+        traceId: config.traceId,
+        sessionId: config.sessionId,
         modelSettings: config.modelSettings,
         onDelta: config.onModelDelta
           ? async (delta) => {
@@ -543,6 +546,8 @@ export async function runAgent(
   assertNotAborted(signal);
   const finalRes = await withAbort(provider.chat(messages, undefined, {
     signal,
+    traceId: config.traceId,
+    sessionId: config.sessionId,
     modelSettings: config.modelSettings,
     onDelta: config.onModelDelta
       ? async (delta) => {

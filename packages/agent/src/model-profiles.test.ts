@@ -60,10 +60,10 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
   assert.equal(summary.toolCallRepair, 'json-loose');
 });
 
-test('packycode defaults to openai-responses apiShape', () => {
+test('packycode defaults to openai-chat-completions apiShape (PackyCode does not support /v1/responses)', () => {
   const profile = resolveModelProfile('packycode');
   assert.equal(profile.protocol, 'openai');
-  assert.equal(profile.apiShape, 'openai-responses');
+  assert.equal(profile.apiShape, 'openai-chat-completions');
   assert.equal(profile.baseUrl, 'https://www.packyapi.com/v1');
   assert.equal(profile.supportsTools, true);
 });
@@ -80,7 +80,7 @@ test('openai stays on chat-completions, not affected by packycode changes', () =
 
 test('summarizeModelProfile includes apiShape for runtime routing', () => {
   const packySummary = summarizeModelProfile(resolveModelProfile('packycode'));
-  assert.equal(packySummary.apiShape, 'openai-responses');
+  assert.equal(packySummary.apiShape, 'openai-chat-completions');
   const deepseekSummary = summarizeModelProfile(resolveModelProfile('deepseek'));
   assert.equal(deepseekSummary.apiShape, 'openai-chat-completions');
 });

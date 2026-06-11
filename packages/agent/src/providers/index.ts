@@ -17,6 +17,7 @@
 
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
+import { AgentError } from '../error-base.js';
 import { resolveModelProfile, type ApiShape, type ModelProfile } from '../model-profiles.js';
 import {
   buildOpenAIModelSettings,
@@ -24,6 +25,7 @@ import {
 import { buildOpenAICompatUrl, drainSseBuffer, repairJson, repairToolCallArguments, type RepairResult } from './openai-utils.js';
 import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIResponsesProvider } from './responses.js';
+import { recordProviderCall } from './telemetry.js';
 import type {
   ChatOptions,
   CreateProviderOptions,
@@ -37,6 +39,16 @@ import type {
 } from './types.js';
 
 const log = getLogger('agent');
+
+// ── Provider diagnostics ────────────────────────────────
+// Set LOS_DEBUG_PROVIDER=true to log raw SSE tool-call deltas at info level.
+// This surfaces provider-specific streaming quirks without code changes.
+const DEBUG_PROVIDER = process.env.LOS_DEBUG_PROVIDER === 'true';
+
+function diag(traceId: string | undefined, msg: string, detail?: Record<string, unknown>) {
+  if (!DEBUG_PROVIDER) return;
+  log.info(msg, { traceId, ...detail });
+}
 
 export type {
   ChatOptions,
@@ -76,10 +88,11 @@ interface OpenAIConfig {
   name: string;
   apiKey: string;
   profile: ModelProfile;
+  traceId?: string;
 }
 
 function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
-  const { name, apiKey, profile } = cfg;
+  const { name, apiKey, profile, traceId } = cfg;
   const { baseUrl, model } = profile;
 
   return {
@@ -103,26 +116,48 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
       }
 
       const chatUrl = buildOpenAICompatUrl(baseUrl, '/chat/completions');
+      const bodyStr = JSON.stringify(body);
+      const fetchStart = Date.now();
 
-      const res = await fetch(chatUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: options.signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch(chatUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: bodyStr,
+          signal: options.signal,
+        });
+      } catch (err: any) {
+        recordProviderCall({
+          traceId: options.traceId ?? traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/chat/completions', method: 'POST',
+          stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+          status: 0, durationMs: Date.now() - fetchStart,
+          errorCode: 'PROVIDER_NETWORK', errorMessage: err?.message?.slice(0, 500),
+        }).catch(() => {});
+        throw err;
+      }
+      recordProviderCall({
+        traceId: options.traceId ?? traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model, endpoint: '/chat/completions', method: 'POST',
+        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+        status: res.status, durationMs: Date.now() - fetchStart,
+        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
+      }).catch(() => {});
 
       if (!res.ok) {
         const err = await res.text();
-        throw new Error(`${name} API error ${res.status}: ${err.slice(0, 300)}`);
+        throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       if (options.onDelta) {
-        return await readOpenAIStreamResponse(res, model, name, options.onDelta);
+        return await readOpenAIStreamResponse(res, model, name, options.onDelta, options.traceId ?? traceId);
       }
-
       const data = await res.json() as any;
       const choice = data.choices?.[0];
       const msg = choice?.message;
@@ -172,20 +207,42 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
     },
 
     async listModels(options: { signal?: AbortSignal } = {}): Promise<ProviderModelInfo[]> {
-      const res = await fetch(
-        buildOpenAICompatUrl(baseUrl, '/models'),
-        {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        signal: options.signal,
-      });
+      const modelsUrl = buildOpenAICompatUrl(baseUrl, '/models');
+      const fetchStart = Date.now();
+
+      let res: Response;
+      try {
+        res = await fetch(modelsUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          signal: options.signal,
+        });
+      } catch (err: any) {
+        recordProviderCall({
+          traceId: traceId ?? '',
+          sessionId: undefined,
+          provider: name, model, endpoint: '/models', method: 'GET',
+          stream: false, requestPayloadSize: 0,
+          status: 0, durationMs: Date.now() - fetchStart,
+          errorCode: 'PROVIDER_NETWORK', errorMessage: err?.message?.slice(0, 500),
+        }).catch(() => {});
+        throw err;
+      }
+      recordProviderCall({
+        traceId: traceId ?? '',
+        sessionId: undefined,
+        provider: name, model, endpoint: '/models', method: 'GET',
+        stream: false, requestPayloadSize: 0,
+        status: res.status, durationMs: Date.now() - fetchStart,
+        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
+      }).catch(() => {});
 
       if (!res.ok) {
         const err = await res.text();
-        throw new Error(`${name} models API error ${res.status}: ${err.slice(0, 300)}`);
+        throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       const data = await res.json() as any;
@@ -216,6 +273,7 @@ async function readOpenAIStreamResponse(
   fallbackModel: string,
   providerName: string,
   onDelta: (delta: ProviderDelta) => void | Promise<void>,
+  traceId?: string,
 ): Promise<ProviderResponse> {
   const reader = res.body?.getReader();
   if (!reader) throw new Error(`${providerName} API returned no stream body`);
@@ -240,6 +298,12 @@ async function readOpenAIStreamResponse(
         responseModel = chunk.model ?? responseModel;
         usage = normalizeOpenAIUsage(chunk.usage, usage);
         const delta = chunk.choices?.[0]?.delta ?? {};
+        // Diagnostic: log raw tool-call deltas when LOS_DEBUG_PROVIDER is set
+        if (delta.tool_calls?.length) {
+          diag(traceId, `[${providerName}] raw tool_call deltas`, {
+            deltas: delta.tool_calls,
+          } as Record<string, unknown>);
+        }
         const textDelta = delta.content ?? '';
         const reasoningDelta = delta.reasoning_content ?? '';
         if (textDelta) {
@@ -256,20 +320,59 @@ async function readOpenAIStreamResponse(
     if (done) break;
   }
 
+  const finalToolCalls = [...toolCalls.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, toolCall]) => repairToolCallArguments(toolCall, providerName));
+
+  // Detect phantom tool calls: entries with empty name or arguments that
+  // likely resulted from a provider-specific delta-merging quirk.
+  const phantomCalls = finalToolCalls.filter(
+    tc => !tc.function.name || !tc.function.arguments,
+  );
+  if (phantomCalls.length > 0) {
+    log.warn(
+      `[${providerName}] ${phantomCalls.length} suspicious tool call(s) detected ` +
+      `(trace=${traceId ?? 'none'}) — may indicate a provider delta-merging issue: ` +
+      JSON.stringify(phantomCalls.map(tc => ({
+        id: tc.id, name: tc.function.name || '(empty)', argsLen: tc.function.arguments.length,
+      }))),
+    );
+  }
+
   return {
     text,
-    toolCalls: [...toolCalls.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, toolCall]) => repairToolCallArguments(toolCall, providerName)),
+    toolCalls: finalToolCalls,
     reasoningContent: reasoningContent || undefined,
     usage,
     model: responseModel,
   };
 }
 
-function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): void {
+export function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): void {
   for (const delta of deltas) {
-    const index = Number.isInteger(delta.index) ? delta.index : toolCalls.size;
+    let index: number;
+    if (Number.isInteger(delta.index)) {
+      // PackyCode quirk: the first delta (with name) uses index=0, but all
+      // subsequent argument deltas use index=1. When an index-only delta
+      // (no id, no name) points to a non-existent entry, route it to the
+      // last existing entry instead of creating a phantom tool call.
+      if (!delta.id && !delta.function?.name && !toolCalls.has(delta.index) && toolCalls.size > 0) {
+        index = toolCalls.size - 1;
+      } else {
+        index = delta.index;
+      }
+    } else if (delta.id && typeof delta.id === 'string') {
+      // No index — try to match an existing entry by call id.
+      let found = -1;
+      for (const [k, v] of toolCalls) {
+        if (v.id === delta.id) { found = k; break; }
+      }
+      index = found >= 0 ? found : toolCalls.size;
+    } else {
+      // No index and no id — continuation delta for the most recent tool call
+      // (PackyCode and some OpenAI-compatible proxies omit index on follow-up deltas).
+      index = toolCalls.size > 0 ? toolCalls.size - 1 : 0;
+    }
     const existing = toolCalls.get(index) ?? {
       id: delta.id ?? `call_${index}`,
       type: 'function' as const,
@@ -277,7 +380,7 @@ function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): v
     };
     toolCalls.set(index, {
       ...existing,
-      id: delta.id ?? existing.id,
+      id: delta.id || existing.id,
       type: 'function',
       function: {
         name: existing.function.name + (delta.function?.name ?? ''),
@@ -315,11 +418,17 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
     apiShape: apiShapeOverride,
   });
 
+  diag(options.traceId, `createProvider name=${providerName}`, {
+    protocol: profile.protocol,
+    apiShape: profile.apiShape,
+  } as Record<string, unknown>);
+
   if (profile.protocol === 'anthropic') {
     return createAnthropicProvider({
       name: providerName,
       apiKey: p.apiKey!,
       profile,
+      traceId: options.traceId,
     });
   }
 
@@ -328,6 +437,7 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
       name: providerName,
       apiKey: p.apiKey!,
       profile,
+      traceId: options.traceId,
     });
   }
 
@@ -335,6 +445,7 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
     name: providerName,
     apiKey: p.apiKey!,
     profile,
+    traceId: options.traceId,
   });
 }
 

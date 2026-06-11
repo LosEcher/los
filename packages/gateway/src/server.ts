@@ -26,6 +26,7 @@ import { registerSkillRoutes } from './routes/skill-routes.js';
 import { registerRuleRoutes } from './routes/rule-routes.js';
 import { registerTodoRoutes } from './routes/todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/agent-task-graph-routes.js';
+import { registerDiagnosticsRoutes } from './routes/diagnostics-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
@@ -141,6 +142,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerNodeCommandRoutes(app, { executorAgentKey: config.executor.agentKey });
   registerTodoRoutes(app);
   registerAgentTaskGraphRoutes(app);
+  registerDiagnosticsRoutes(app);
   registerNodeRoutes(app);
   registerServiceRoutes(app, { serviceId: service.serviceId, serviceKind: 'gateway' });
   registerMCPRoutes(app);

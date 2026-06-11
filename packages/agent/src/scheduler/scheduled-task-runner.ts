@@ -179,6 +179,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           nodeId,
           requestId: input.requestId,
           traceId,
+          log: input.log,
           toolMode,
           initialMessages: input.initialMessages,
           allowedTools: input.allowedTools,

@@ -1,4 +1,6 @@
 import type { ModelProfile } from '../model-profiles.js';
+import { AgentError } from '../error-base.js';
+import { recordProviderCall } from './telemetry.js';
 import { buildOpenAIModelSettings } from '../model-settings.js';
 import { buildOpenAICompatUrl, drainSseBuffer, repairToolCallArguments } from './openai-utils.js';
 import type {
@@ -16,6 +18,7 @@ interface ResponsesConfig {
   name: string;
   apiKey: string;
   profile: ModelProfile;
+  traceId?: string;
 }
 
 interface ResponsesInputItem {
@@ -97,20 +100,43 @@ export function createOpenAIResponsesProvider(cfg: ResponsesConfig): Provider {
       }
 
       const responsesUrl = buildOpenAICompatUrl(baseUrl, '/responses');
+      const bodyStr = JSON.stringify(body);
+      const fetchStart = Date.now();
 
-      const res = await fetch(responsesUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: options.signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch(responsesUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: bodyStr,
+          signal: options.signal,
+        });
+      } catch (err: any) {
+        recordProviderCall({
+          traceId: options.traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/responses', method: 'POST',
+          stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+          status: 0, durationMs: Date.now() - fetchStart,
+          errorCode: 'PROVIDER_NETWORK', errorMessage: err?.message?.slice(0, 500),
+        }).catch(() => {});
+        throw err;
+      }
+      recordProviderCall({
+        traceId: options.traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model, endpoint: '/responses', method: 'POST',
+        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+        status: res.status, durationMs: Date.now() - fetchStart,
+        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
+      }).catch(() => {});
 
       if (!res.ok) {
         const err = await res.text();
-        throw new Error(`${name} Responses API error ${res.status}: ${err.slice(0, 300)}`);
+        throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       if (options.onDelta) {
@@ -135,7 +161,7 @@ export function createOpenAIResponsesProvider(cfg: ResponsesConfig): Provider {
 
       if (!res.ok) {
         const err = await res.text();
-        throw new Error(`${name} models API error ${res.status}: ${err.slice(0, 300)}`);
+        throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       const data = await res.json() as any;
@@ -203,7 +229,7 @@ export async function readResponsesStreamResponse(
   onDelta: (delta: ProviderDelta) => void | Promise<void>,
 ): Promise<ProviderResponse> {
   const reader = res.body?.getReader();
-  if (!reader) throw new Error(`${providerName} Responses API returned no stream body`);
+  if (!reader) throw new AgentError('PROVIDER_PARSE', `${providerName} Responses API returned no stream body`, { provider: providerName, retryable: false });
 
   const decoder = new TextDecoder();
   const toolCallStates = new Map<string, ResponsesToolCallState>(); // keyed by item_id

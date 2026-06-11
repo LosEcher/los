@@ -194,7 +194,6 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       tenantId: context.tenantId,
       projectId: context.projectId,
     });
-
     try {
       const resumeState = resumedSession ? await loadResumeState(sid) : null;
       if (resumedSession) {
@@ -255,6 +254,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         toolRetry,
         mcpServers,
         runContract: body.runContract,
+        log: context.log,
         executor: {
           enabled: config.executor.enabled,
           nodeUrls: config.executor.meshNodes,
