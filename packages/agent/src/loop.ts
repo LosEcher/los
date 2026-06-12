@@ -355,7 +355,8 @@ export async function runAgent(
 
       let args: Record<string, unknown>;
       try {
-        args = JSON.parse(fn.arguments) as Record<string, unknown>;
+        // Graceful fallback for empty arguments (e.g. from split tool call repair)
+        args = fn.arguments ? JSON.parse(fn.arguments) as Record<string, unknown> : {};
       } catch (err: any) {
         sessionErrors.push({
           turn: i + 1,

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildOpenAICompatUrl, mergeToolCallDeltas } from './providers/index.js';
+import { buildOpenAICompatUrl } from './providers/index.js';
+import { mergeToolCallDeltas, mergeSplitToolCalls } from './providers/delta-repair.js';
 import type { ToolCall } from './providers/types.js';
 
 test('OpenAI-compatible URLs normalize missing v1 segments', () => {
@@ -144,4 +145,148 @@ test('mergeToolCallDeltas parallel tool calls with mixed index presence', () => 
   // NOT create a new phantom call_2 entry
   assert.ok(!map.has(2), 'should not create phantom tool call at index 2');
   assert.deepEqual(JSON.parse(map.get(1)!.function.arguments), { path: '.' });
+});
+
+// ── L2: Content-based orphan args detection ──────────────────
+
+test('mergeToolCallDeltas routes orphan args with unknown id to name-only entry (L2)', () => {
+  // PackyCode sends the name delta with one call id, then the arguments
+  // delta with a completely different call id (e.g. "call_1").
+  const map = new Map<number, ToolCall>();
+
+  // First tool call: normal (name + args together)
+  mergeToolCallDeltas(map, [
+    { index: 0, id: 'call_b7WIUj', function: { name: 'glob', arguments: '{"pattern":"**/*"}' } },
+  ]);
+
+  // Second tool call: name delta arrives with proper id
+  mergeToolCallDeltas(map, [
+    { index: 1, id: 'call_GKdGrEo', function: { name: 'directory_tree', arguments: '' } },
+  ]);
+
+  // Third: orphan args delta — PackyCode assigns a DIFFERENT id ("call_1")
+  // and omits the index entirely. L2 should find the name-only entry (index 1)
+  // and merge into it, NOT create a phantom call_1.
+  mergeToolCallDeltas(map, [
+    { id: 'call_1', function: { arguments: '{"maxDepth":2,"path":"."}' } },
+  ]);
+
+  assert.equal(map.size, 2, 'should not create phantom call_1 entry');
+  assert.equal(map.get(0)!.function.name, 'glob');
+  assert.equal(map.get(1)!.function.name, 'directory_tree');
+  // The id should be preserved from the name delta, not overwritten by call_1
+  assert.equal(map.get(1)!.id, 'call_GKdGrEo');
+  assert.equal(map.get(1)!.function.arguments, '{"maxDepth":2,"path":"."}');
+  assert.deepEqual(JSON.parse(map.get(1)!.function.arguments), { maxDepth: 2, path: '.' });
+});
+
+test('mergeToolCallDeltas routes orphan args with unknown index to name-only entry (L2)', () => {
+  // Variant where the orphan args delta HAS an index, but it points to a
+  // non-existent entry (e.g. PackyCode uses index=2 when only 0 and 1 exist).
+  const map = new Map<number, ToolCall>();
+
+  mergeToolCallDeltas(map, [
+    { index: 0, id: 'call_A', function: { name: 'tool_a', arguments: '{}' } },
+    { index: 1, id: 'call_B', function: { name: 'tool_b', arguments: '' } },
+  ]);
+
+  // Orphan args at index=2 (non-existent) with a different id
+  mergeToolCallDeltas(map, [
+    { index: 2, id: 'call_X', function: { arguments: '{"key":"val"}' } },
+  ]);
+
+  assert.equal(map.size, 2, 'should not create phantom at index 2');
+  assert.equal(map.get(1)!.function.arguments, '{"key":"val"}');
+  // Id should be preserved from the name delta
+  assert.equal(map.get(1)!.id, 'call_B');
+});
+
+// ── mergeSplitToolCalls — post-processing split repair (方案 B) ──
+
+test('mergeSplitToolCalls merges adjacent name-only + args-only pairs', () => {
+  // Simulates the output after mergeToolCallDeltas where PackyCode's
+  // id-mismatch quirk created two adjacent entries:
+  //   [0]: glob (complete)
+  //   [1]: directory_tree (name only, args="")
+  //   [2]: call_1 (args only, name="")
+  const toolCalls: ToolCall[] = [
+    { id: 'call_b7WIUj', type: 'function', function: { name: 'glob', arguments: '{"pattern":"**/*"}' } },
+    { id: 'call_GKdGrEo', type: 'function', function: { name: 'directory_tree', arguments: '' } },
+    { id: 'call_1', type: 'function', function: { name: '', arguments: '{"maxDepth":2,"path":"."}' } },
+  ];
+
+  const merged = mergeSplitToolCalls(toolCalls, 'test');
+
+  assert.equal(merged.length, 2, 'should merge split pair into 2 total calls');
+  assert.equal(merged[0].function.name, 'glob');
+  assert.equal(merged[1].function.name, 'directory_tree');
+  assert.equal(merged[1].function.arguments, '{"maxDepth":2,"path":"."}');
+  assert.equal(merged[1]._repair?.repaired, true);
+  assert.ok(merged[1]._repair?.repairSteps?.includes('split-tool-call-merge'));
+  // Verify args parse correctly
+  assert.deepEqual(JSON.parse(merged[1].function.arguments), { maxDepth: 2, path: '.' });
+});
+
+test('mergeSplitToolCalls handles unmatched name-only entry', () => {
+  const toolCalls: ToolCall[] = [
+    { id: 'call_A', type: 'function', function: { name: 'some_tool', arguments: '' } },
+  ];
+
+  const merged = mergeSplitToolCalls(toolCalls, 'test');
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].function.name, 'some_tool');
+  assert.equal(merged[0].function.arguments, ''); // kept, loop will handle gracefully
+  assert.equal(merged[0]._repair, undefined);
+});
+
+test('mergeSplitToolCalls drops fully phantom entries (no name, no args)', () => {
+  const toolCalls: ToolCall[] = [
+    { id: 'call_good', type: 'function', function: { name: 'good_tool', arguments: '{}' } },
+    { id: 'call_phantom', type: 'function', function: { name: '', arguments: '' } },
+  ];
+
+  const merged = mergeSplitToolCalls(toolCalls, 'test');
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].function.name, 'good_tool');
+});
+
+test('mergeSplitToolCalls pairs by proximity with multiple splits', () => {
+  // Two split pairs interleaved
+  const toolCalls: ToolCall[] = [
+    { id: 'c0', type: 'function', function: { name: 'tool_a', arguments: '' } },
+    { id: 'c1', type: 'function', function: { name: '', arguments: '{"a":1}' } },
+    { id: 'c2', type: 'function', function: { name: 'tool_b', arguments: '' } },
+    { id: 'c3', type: 'function', function: { name: '', arguments: '{"b":2}' } },
+  ];
+
+  const merged = mergeSplitToolCalls(toolCalls, 'test');
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].function.name, 'tool_a');
+  assert.equal(merged[0].function.arguments, '{"a":1}');
+  assert.equal(merged[1].function.name, 'tool_b');
+  assert.equal(merged[1].function.arguments, '{"b":2}');
+});
+
+test('mergeSplitToolCalls emits synthetic name for unmatched orphan args', () => {
+  // When an orphan args entry can't be paired with a name-only entry,
+  // it must be assigned a synthetic name rather than silently dropped.
+  const toolCalls: ToolCall[] = [
+    { id: 'call_good', type: 'function', function: { name: 'good_tool', arguments: '{}' } },
+    { id: 'call_orphan', type: 'function', function: { name: '', arguments: '{"key":"val"}' } },
+  ];
+
+  const merged = mergeSplitToolCalls(toolCalls, 'test');
+
+  assert.equal(merged.length, 2, 'both entries should be kept');
+  assert.equal(merged[0].function.name, 'good_tool');
+  // The orphan must get a synthetic name
+  assert.ok(merged[1].function.name.startsWith('_orphan_args_'));
+  assert.equal(merged[1].function.arguments, '{"key":"val"}');
+  assert.equal(merged[1]._repair?.repaired, true);
+  assert.ok(merged[1]._repair?.repairSteps?.includes('orphan-args-synthetic'));
+  // Verify the orphan's original id is preserved
+  assert.equal(merged[1].id, 'call_orphan');
 });

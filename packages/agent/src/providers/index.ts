@@ -23,9 +23,11 @@ import {
   buildOpenAIModelSettings,
 } from '../model-settings.js';
 import { buildOpenAICompatUrl, drainSseBuffer, repairJson, repairToolCallArguments, type RepairResult } from './openai-utils.js';
+import { mergeToolCallDeltas, mergeSplitToolCalls } from './delta-repair.js';
 import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIResponsesProvider } from './responses.js';
 import { recordProviderCall } from './telemetry.js';
+import { incrementRepairCounter } from './repair-telemetry.js';
 import type {
   ChatOptions,
   CreateProviderOptions,
@@ -113,6 +115,9 @@ function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
       if (tools?.length) {
         body.tools = tools;
         body.tool_choice = 'auto';
+        if (!profile.supportsParallelToolCalls) {
+          body.parallel_tool_calls = false;
+        }
       }
 
       const chatUrl = buildOpenAICompatUrl(baseUrl, '/chat/completions');
@@ -324,12 +329,17 @@ async function readOpenAIStreamResponse(
     .sort(([a], [b]) => a - b)
     .map(([, toolCall]) => repairToolCallArguments(toolCall, providerName));
 
+  // Post-processing: repair split tool calls where a provider/streaming quirk
+  // separated the function name and arguments into adjacent entries.
+  const mergedToolCalls = mergeSplitToolCalls(finalToolCalls, providerName);
+
   // Detect phantom tool calls: entries with empty name or arguments that
   // likely resulted from a provider-specific delta-merging quirk.
-  const phantomCalls = finalToolCalls.filter(
+  const phantomCalls = mergedToolCalls.filter(
     tc => !tc.function.name || !tc.function.arguments,
   );
   if (phantomCalls.length > 0) {
+    incrementRepairCounter(providerName, 'phantom_tool_call');
     log.warn(
       `[${providerName}] ${phantomCalls.length} suspicious tool call(s) detected ` +
       `(trace=${traceId ?? 'none'}) — may indicate a provider delta-merging issue: ` +
@@ -341,53 +351,11 @@ async function readOpenAIStreamResponse(
 
   return {
     text,
-    toolCalls: finalToolCalls,
+    toolCalls: mergedToolCalls,
     reasoningContent: reasoningContent || undefined,
     usage,
     model: responseModel,
   };
-}
-
-export function mergeToolCallDeltas(toolCalls: Map<number, ToolCall>, deltas: any[]): void {
-  for (const delta of deltas) {
-    let index: number;
-    if (Number.isInteger(delta.index)) {
-      // PackyCode quirk: the first delta (with name) uses index=0, but all
-      // subsequent argument deltas use index=1. When an index-only delta
-      // (no id, no name) points to a non-existent entry, route it to the
-      // last existing entry instead of creating a phantom tool call.
-      if (!delta.id && !delta.function?.name && !toolCalls.has(delta.index) && toolCalls.size > 0) {
-        index = toolCalls.size - 1;
-      } else {
-        index = delta.index;
-      }
-    } else if (delta.id && typeof delta.id === 'string') {
-      // No index — try to match an existing entry by call id.
-      let found = -1;
-      for (const [k, v] of toolCalls) {
-        if (v.id === delta.id) { found = k; break; }
-      }
-      index = found >= 0 ? found : toolCalls.size;
-    } else {
-      // No index and no id — continuation delta for the most recent tool call
-      // (PackyCode and some OpenAI-compatible proxies omit index on follow-up deltas).
-      index = toolCalls.size > 0 ? toolCalls.size - 1 : 0;
-    }
-    const existing = toolCalls.get(index) ?? {
-      id: delta.id ?? `call_${index}`,
-      type: 'function' as const,
-      function: { name: '', arguments: '' },
-    };
-    toolCalls.set(index, {
-      ...existing,
-      id: delta.id || existing.id,
-      type: 'function',
-      function: {
-        name: existing.function.name + (delta.function?.name ?? ''),
-        arguments: existing.function.arguments + (delta.function?.arguments ?? ''),
-      },
-    });
-  }
 }
 
 function normalizeOpenAIUsage(raw: any, fallback: ProviderResponse['usage']): ProviderResponse['usage'] {

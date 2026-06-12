@@ -32,7 +32,8 @@
     "./tools/mcp-client": "./src/tools/mcp-client.ts",
     "./cancellation": "./src/cancellation.ts",
     "./agent-task-graph": "./src/agent-task-graph.ts",
-    "./providers/telemetry": "./src/providers/telemetry.ts"
+    "./providers/telemetry": "./src/providers/telemetry.ts",
+    "./providers/repair-telemetry": "./src/providers/repair-telemetry.ts"
   },
   "scripts": {
     "build": "tsc",
