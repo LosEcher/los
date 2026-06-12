@@ -132,7 +132,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     baseUrl: 'https://www.packyapi.com/v1',
     model: 'gpt-5.5',
     supportsTools: true,
-    supportsParallelToolCalls: true,
+    supportsParallelToolCalls: false,
     supportsReasoning: false,
     cachePolicy: 'none',
     toolCallRepair: 'none',

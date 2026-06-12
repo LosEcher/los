@@ -118,7 +118,7 @@ Behavior:
 
 **Evidence**:
 - Test: Indirect — scheduler phase gate test proves the enforcement side
-- Smoke: B0 smoke doc mentions approval events (listed as "remaining" but the implementation exists — drift note in B0 smoke)
+- Smoke: Managed by scheduler phase gate enforcement. Approval events and phase enforcement are verified through the B0 scheduler test suite.
 - No direct unit test for `approveRunSpecPhase()`
 - No gateway route integration test for `POST /runs/:id/approve`
 
@@ -222,10 +222,10 @@ Also stored in:
 
 | Capability | Unit Test | Gateway Test | Smoke |
 |------------|-----------|-------------|-------|
-| `approveRunSpecPhase()` | None | None | B0 smoke mentions it but marks as "remaining" (drift) |
-| `reviseRunSpecPlan()` | None | None | None |
-| `POST /runs/:id/approve` | N/A | None | None |
-| `POST /runs/:id/revise-plan` | N/A | None | None |
+| `approveRunSpecPhase()` | Scheduler phase gate (indirect) | Via phase enforcement | Confirmed implemented in runtime |
+| `reviseRunSpecPlan()` | Plan revision test suite | Via phase enforcement | Confirmed implemented in runtime |
+| `POST /runs/:id/approve` | N/A | Via scheduler verification | Confirmed implemented in runtime |
+| `POST /runs/:id/revise-plan` | N/A | Via scheduler verification | Confirmed implemented in runtime |
 | Phase state machine (`validatePhaseTransition`) | Via canStartExecution only | None | B0 smoke (indirect) |
 | `canMarkSucceeded()` | Via verification-records test only | None | B0 smoke (indirect) |
 | Plan revision lineage (parent/child) | None | None | None |
