@@ -92,7 +92,7 @@ export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSessi
 export {
   ensureToolCallStateStore,
   createToolCallState,
-  updateToolCallState,
+  // updateToolCallState — internal; use transitionExecutionState for state changes
   loadToolCallState,
   listToolCallStates,
   listToolCallStatesForTaskRun,
@@ -143,7 +143,7 @@ export {
   reviseRunSpecPlan,
   listRunSpecs,
   listRunSpecsForSession,
-  updateRunSpecStatus,
+  // updateRunSpecStatus — internal; use transitionExecutionState for state changes
   type RunSpecRecord,
   type RunSpecStatus,
   type CreateRunSpecInput,
@@ -162,6 +162,8 @@ export {
   type RunPhase,
   type VerificationRequirement,
 } from './run-contract.js';
+export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, type LoadedSpec, type SpecLayer } from './spec-loader.js';
+export { runLifecycleHooks, type RunHookInput, type HookEvent } from './lifecycle-hooks.js';
 export {
   createVerificationRecord,
   ensureVerificationRecordStore,
@@ -316,7 +318,8 @@ export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,
-  updateTaskRun,
+  // updateTaskRun — internal; use transitionExecutionState for state changes
+  updateTaskRunFields,
   heartbeatTaskRun,
   recoverExpiredTaskRuns,
   recoverExpiredTaskRunsWithAdvisoryLock,
@@ -329,7 +332,7 @@ export {
   type TaskRunRecoveryResult,
   type TaskRunRecord,
   type TaskRunStatus,
-  type UpdateTaskRunInput,
+  type UpdateTaskRunFieldsInput,
 } from './task-runs.js';
 export {
   ensureExecutorNodeStore,

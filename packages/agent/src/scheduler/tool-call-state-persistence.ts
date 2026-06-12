@@ -51,7 +51,7 @@ export async function persistScheduledToolCallState(input: {
     entityId: transition.callId,
     to: normalizeToolCallState(transition.state),
     sessionId,
-    reason: transition.error ?? transition.outputSummary ?? transition.state,
+    reason: truncateReason(transition.error ?? transition.outputSummary ?? transition.state),
     turn: transition.turn,
     attempt: transition.attempt,
   }).then(async () => {
@@ -119,4 +119,11 @@ export async function listToolCallStateIdsForTaskRun(taskRunId: string): Promise
 
 function normalizeToolCallState(state: ToolCallStateTransition['state']): ToolCallStateType {
   return state;
+}
+
+/** Truncate reason text to prevent storing full tool results in session event payloads.
+ *  The full output is already available in tool.result events and tool_call_states table. */
+function truncateReason(reason: string): string {
+  if (reason.length <= 200) return reason;
+  return reason.slice(0, 200) + '…';
 }

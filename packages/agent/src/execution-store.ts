@@ -442,6 +442,7 @@ type SessionEventRow = {
   cache_hit: boolean | null;
   usage_json: unknown;
   parent_event_id: string | number | null;
+  visibility: string | null;
   payload_json: unknown;
   created_at: Date | string;
 };
@@ -466,6 +467,7 @@ function rowToSessionEvent(row: SessionEventRow): SessionEventRecord {
     usage: undefined,
     parentEventId: row.parent_event_id === null ? undefined : Number(row.parent_event_id),
     payload: normalizeJsonObject(row.payload_json),
+    visibility: (row.visibility as import('./session-events.js').SessionEventVisibility) ?? 'public',
     createdAt: toIsoString(row.created_at),
   };
 }

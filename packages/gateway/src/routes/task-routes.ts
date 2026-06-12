@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { ensureTaskRunStore, loadTaskRun, listTaskRuns, updateTaskRun } from '@los/agent/task-runs';
+import { ensureTaskRunStore, loadTaskRun, listTaskRuns, updateTaskRunFields } from '@los/agent/task-runs';
+import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import { requestCancellation } from '@los/agent';
@@ -79,8 +80,14 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     await requestCancellation(id, reason, 'api').catch(() => undefined);
 
     if (live) {
-      await updateTaskRun(id, {
-        status: 'cancelled',
+      await transitionExecutionState({
+        entityType: 'task_run',
+        entityId: id,
+        to: 'cancelled',
+        sessionId: taskRun.sessionId,
+        reason,
+      }).catch(() => undefined);
+      await updateTaskRunFields(id, {
         metadata: {
           ...taskRun.metadata,
           cancelReason: reason,
@@ -90,8 +97,14 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     }
 
     if (taskRun.status === 'queued' || taskRun.status === 'running') {
-      const cancelled = await updateTaskRun(id, {
-        status: 'cancelled',
+      await transitionExecutionState({
+        entityType: 'task_run',
+        entityId: id,
+        to: 'cancelled',
+        sessionId: taskRun.sessionId,
+        reason,
+      });
+      const cancelled = await updateTaskRunFields(id, {
         metadata: {
           ...taskRun.metadata,
           cancelReason: reason,
