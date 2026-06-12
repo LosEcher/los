@@ -9,6 +9,7 @@ import { getLogger } from '@los/infra/logger';
 import { createProvider, type Message, type ToolCall } from './providers/index.js';
 import { summarizeModelProfile, estimateCost, type CostEstimate } from './model-profiles.js';
 import { runPreExecutionPhases } from './loop/phases.js';
+import { applyPhaseGate } from './loop/phase-tool-gate.js';
 import {
   createToolRegistry,
   registerBuiltinTools,
@@ -419,8 +420,9 @@ export async function runAgent(
         },
       });
 
-      const decision = tools.evaluateTool(fn.name);
-
+      const decision = applyPhaseGate(
+        tools.evaluateTool(fn.name), fn.name, config.runContractMetadata,
+      ) as ReturnType<typeof tools.evaluateTool>;
       // Tool call state: approved or denied
       await config.onToolCallState?.({
         callId: tc.id, toolName: fn.name,
