@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed.
+Implemented (stage 0-2). The mesh-ready single-node approach described here is the foundation for Stage A/B execution. Superseded by ADR 0021 for Stage B operator contract details.
 
 ## Observation
 
@@ -14,7 +14,7 @@ Proposed.
 2. `packages/agent/src/scheduler.ts` 已有单进程 task lifecycle、dedupe、cancel 和 timeout。
 3. `packages/agent/src/loop.ts` 已有 provider API agent loop、tool execution 和 session event 写入。
 4. `packages/infra/src/config.ts` 有 `executor.enabled` 和 `executor.meshNodes`，但默认关闭。
-5. `packages/executor/README.md` 仍是从 vpsagentweb 复制 Go executor 的集成说明。
+5. `packages/executor/` is a TypeScript HTTP executor service (NDJSON stream, port 8090).
 6. ADR 0005 已指出 executor node 还停留在配置、README 和 reserved UI 阶段，缺少 node registry、heartbeat、lease 和弱网恢复。
 
 ## Inference

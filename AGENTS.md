@@ -1,7 +1,7 @@
 # los AGENTS
 
 > Lightweight Agent Execution + Memory Management Platform.
-> Single monorepo, single language (TypeScript + minimal Go for executor).
+> Single monorepo, single language (TypeScript).
 > Inspired by Codex, OpenCode, JiuwenSwarm, Hermes, ZeroClaw, IronClaw, and los-workspace.
 
 ## Architecture Principles
@@ -32,7 +32,7 @@ los/
 │   ├── agent/              # ReAct loop, providers, tools, sessions, spec-loader
 │   ├── memory/             # PostgreSQL full-text memory + observations + MEMORY.md
 │   ├── gateway/            # Fastify HTTP + SSE + Web UI (React)
-│   └── executor/           # Go agent binary (SSH/sandbox)
+│   └── executor/           # TypeScript HTTP executor service
 ├── tools/                  # check-structure.sh
 └── docs/                   # adr/, research/
 ```
@@ -295,7 +295,7 @@ decision.
 | pi `packages/ai` | Provider abstraction pattern |
 | pi `packages/agent` | Agent event loop |
 | los-memory | Observation/feedback model |
-| vpsagentweb agent/ | Go SSH executor |
+| vpsagentweb agent/ | SSH executor pattern reference |
 | JiuwenSwarm | FTS5 memory search pattern |
 | Codex | exec mode + sandbox tiers |
 | OpenCode | build/plan dual-agent concept |

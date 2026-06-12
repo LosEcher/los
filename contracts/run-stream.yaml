@@ -149,8 +149,6 @@ replay:
     - tool_call_states
     - verification_records
   future:
-    - Last-Event-ID (implemented for session_events)
-    - persisted model.delta chunk replay (implemented via stream_checkpoints)
     - SSE reconnect with model.delta replay
 verification:
   - pnpm check
