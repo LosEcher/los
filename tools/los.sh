@@ -1,153 +1,30 @@
 #!/usr/bin/env bash
-# los.sh — local process helper for the los gateway.
+# los.sh — unified process helper for the los gateway and executor.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RUNTIME_DIR="${LOS_RUNTIME_DIR:-$ROOT/.los-runtime}"
-PID_FILE="$RUNTIME_DIR/gateway.pid"
-LOG_FILE="$RUNTIME_DIR/gateway.log"
 
-shell_quote() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
-}
+# ── Source shared library ────────────────────────────────
+# shellcheck source=tools/los-common.sh
+. "$ROOT/tools/los-common.sh"
 
-read_env_value() {
-  local key="$1"
-  local file="$ROOT/.env"
-  [ -f "$file" ] || return 1
-  awk -F= -v key="$key" '
-    $0 !~ /^[[:space:]]*#/ && $1 == key {
-      value = substr($0, index($0, "=") + 1)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      gsub(/^["'\'']|["'\'']$/, "", value)
-      print value
-      exit
-    }
-  ' "$file"
-}
+# ── Gateway config ───────────────────────────────────────
+GW_PID_FILE="$RUNTIME_DIR/gateway.pid"
+GW_LOG_FILE="$RUNTIME_DIR/gateway.log"
+GW_SRC="src/server.ts"
+GW_DIST="dist/server.js"
+GW_LAUNCH_PREFIX="com.los.gateway"
+GW_MAINT_FILTER="@los/gateway"
 
-server_host() {
-  printf '%s' "${SERVER_HOST:-$(read_env_value SERVER_HOST || printf '127.0.0.1')}"
-}
+gw_host() { printf '%s' "${SERVER_HOST:-$(read_env_value SERVER_HOST || printf '127.0.0.1')}"; }
+gw_port() { printf '%s' "${SERVER_PORT:-$(read_env_value SERVER_PORT || printf '8080')}"; }
+gw_url()  { printf 'http://%s:%s' "$(gw_host)" "$(gw_port)"; }
 
-server_port() {
-  printf '%s' "${SERVER_PORT:-$(read_env_value SERVER_PORT || printf '8080')}"
-}
-
-server_url() {
-  printf 'http://%s:%s' "$(server_host)" "$(server_port)"
-}
-
-is_running() {
-  local pid="${1:-}"
-  [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
-}
-
-pid_from_file() {
-  [ -f "$PID_FILE" ] && tr -d '[:space:]' < "$PID_FILE" || true
-}
-
-health_check() {
-  command -v curl >/dev/null 2>&1 || return 2
-  curl -fsS "$(server_url)/health" >/dev/null 2>&1
-}
-
-mark_service_status() {
-  local status="$1"
-  local message="${2:-}"
-  (
-    cd "$ROOT"
-    if [ "$status" = "draining" ]; then
-      pnpm --filter @los/gateway run maint -- drain "$message"
-    elif [ "$status" = "online" ]; then
-      pnpm --filter @los/gateway run maint -- promote "$message"
-    else
-      pnpm --filter @los/gateway run maint -- set-status offline
-      pnpm --filter @los/gateway run maint -- set-rollout idle "$message"
-    fi
-  ) >/dev/null 2>&1 || true
-}
-
-port_owner() {
-  # Prefer the PID file for managed processes.
-  local pid
-  pid="$(pid_from_file)"
-  if [ -n "$pid" ] && is_running "$pid"; then
-    printf '%s' "$pid"
-    return 0
-  fi
-
-  # Check port occupancy without lsof (which can hang on macOS).
-  if command -v nc >/dev/null 2>&1; then
-    if nc -z "$(server_host)" "$(server_port)" 2>/dev/null; then
-      printf 'unknown'
-      return 0
-    fi
-  elif command -v curl >/dev/null 2>&1; then
-    # Fallback: if health endpoint responds, something is listening.
-    if curl -fsS "$(server_url)/health" >/dev/null 2>&1; then
-      printf 'unknown'
-      return 0
-    fi
-  fi
-
-  # Port appears free.
-  true
-}
-
-pid_command() {
-  local pid="${1:-}"
-  [ -n "$pid" ] || return 0
-  ps -p "$pid" -o command= 2>/dev/null || true
-}
-
-is_los_gateway_pid() {
-  local pid="${1:-}"
-  local command
-  command="$(pid_command "$pid")"
-  [ -n "$command" ] || return 1
-  [[ "$command" == *"$ROOT"* ]] || return 1
-  [[ "$command" == *"src/server.ts"* || "$command" == *"dist/server.js"* ]]
-}
-
-write_pid_file() {
-  mkdir -p "$RUNTIME_DIR"
-  printf '%s\n' "$1" > "$PID_FILE"
-}
-
-launch_label() {
-  local suffix
-  suffix="$(printf '%s' "$ROOT" | cksum | awk '{print $1}')"
-  printf 'com.los.gateway.%s.%s' "$(id -u)" "$suffix"
-}
-
-launch_remove() {
-  command -v launchctl >/dev/null 2>&1 || return 0
-  launchctl remove "$(launch_label)" >/dev/null 2>&1 || true
-}
-
-node_bin() {
-  command -v node
-}
-
-tsx_dist() {
-  local candidate
-  for candidate in \
-    "$ROOT"/node_modules/.pnpm/tsx@*/node_modules/tsx/dist \
-    "$ROOT"/packages/gateway/node_modules/.pnpm/tsx@*/node_modules/tsx/dist
-  do
-    if [ -d "$candidate" ]; then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
-
-gateway_launch_command() {
+gw_launch_command() {
   local node tsx
   node="$(node_bin)"
-  tsx="$(tsx_dist)"
+  tsx="$(tsx_dist gateway)"
   printf 'cd %s && exec %s --require %s --import %s %s' \
     "$(shell_quote "$ROOT")" \
     "$(shell_quote "$node")" \
@@ -158,144 +35,119 @@ gateway_launch_command() {
 
 start_gateway_process() {
   mkdir -p "$RUNTIME_DIR"
-  : > "$LOG_FILE"
-
+  : > "$GW_LOG_FILE"
   local command
-  command="$(gateway_launch_command)"
+  command="$(gw_launch_command)"
+
+  if command -v perl >/dev/null 2>&1; then
+    start_daemon_perl "$command" "$GW_LOG_FILE" "$GW_LAUNCH_PREFIX"
+  else
+    start_daemon_nohup "$command" "$GW_LOG_FILE"
+  fi
+}
+
+# ── Executor config ──────────────────────────────────────
+EX_PID_FILE="$RUNTIME_DIR/executor.pid"
+EX_LOG_FILE="$RUNTIME_DIR/executor.log"
+EX_SRC="packages/executor/src/index.ts"
+EX_DIST="packages/executor/dist/index.js"
+EX_LAUNCH_PREFIX="com.los.executor"
+EX_MAINT_FILTER="@los/executor"
+
+ex_host() { printf '%s' "${EXECUTOR_HOST:-$(read_env_value EXECUTOR_HOST || printf '127.0.0.1')}"; }
+ex_port() { printf '%s' "${EXECUTOR_PORT:-$(read_env_value EXECUTOR_PORT || printf '8090')}"; }
+ex_url()  { printf 'http://%s:%s' "$(ex_host)" "$(ex_port)"; }
+ex_node_id() { printf '%s' "${EXECUTOR_NODE_ID:-$(read_env_value EXECUTOR_NODE_ID || hostname -s 2>/dev/null || hostname)}"; }
+ex_node_id_arg() { printf '%s' "$(ex_node_id)"; }
+
+is_executor_enabled() {
+  local val
+  val="${EXECUTOR_ENABLED:-$(read_env_value EXECUTOR_ENABLED || true)}"
+  [ "$val" = "true" ]
+}
+
+ex_launch_command() {
+  local node tsx
+  node="$(node_bin)"
+  tsx="$(tsx_dist executor)"
+  printf 'cd %s && export EXECUTOR_HOST=%s && export EXECUTOR_PORT=%s && exec %s %s %s' \
+    "$(shell_quote "$ROOT")" \
+    "$(shell_quote "$(ex_host)")" \
+    "$(shell_quote "$(ex_port)")" \
+    "$(shell_quote "$node")" \
+    "$(shell_quote "$tsx/cli.mjs")" \
+    "$(shell_quote "$ROOT/packages/executor/src/index.ts")"
+}
+
+start_executor_process() {
+  mkdir -p "$RUNTIME_DIR"
+  : > "$EX_LOG_FILE"
+  local command
+  command="$(ex_launch_command)"
 
   if command -v launchctl >/dev/null 2>&1; then
-    launch_remove
-    launchctl submit \
-      -l "$(launch_label)" \
-      -o "$LOG_FILE" \
-      -e "$LOG_FILE" \
-      -- /bin/bash -lc "$command"
-    return 0
-  fi
-
-  nohup /bin/bash -lc "$command" </dev/null >"$LOG_FILE" 2>&1 &
-  printf '%s' "$!"
-}
-
-show_help() {
-  cat <<EOF
-los local process helper
-
-Usage:
-  pnpm start          Start gateway in background, or adopt an existing los gateway
-  pnpm run status     Show process and health status
-  pnpm run stop       Stop managed or adopted los gateway
-  pnpm run restart    Stop then start gateway
-  pnpm run doctor     Check local runtime prerequisites and config/db access
-  pnpm run help       Show this help
-
-Direct:
-  ./tools/los.sh <start|status|stop|restart|doctor|help>
-
-Runtime:
-  url:      $(server_url)
-  pid file: $PID_FILE
-  log file: $LOG_FILE
-
-Development foreground mode remains available:
-  pnpm dev
-EOF
-}
-
-status_cmd() {
-  local pid
-  pid="$(pid_from_file)"
-  echo "los status"
-  echo "  url: $(server_url)"
-  echo "  pid file: $PID_FILE"
-  echo "  log file: $LOG_FILE"
-
-  if is_running "$pid"; then
-    echo "  process: running pid=$pid managed=true"
-  elif [ -n "$pid" ]; then
-    echo "  process: stopped stale_pid=$pid"
+    start_daemon_launchctl "$command" "$EX_LOG_FILE" "$EX_LAUNCH_PREFIX"
+    # launchctl doesn't return a PID, caller must discover via lsof
+    printf ''
   else
-    local owner
-    owner="$(port_owner)"
-    if [ "$owner" = "unknown" ]; then
-      echo "  process: running pid=unknown managed=false"
-    elif is_los_gateway_pid "$owner"; then
-      echo "  process: running pid=$owner managed=false"
-    else
-      echo "  process: stopped"
-    fi
-  fi
-
-  if health_check; then
-    echo "  health: ok"
-  else
-    echo "  health: unavailable"
-  fi
-
-  local owner
-  owner="$(port_owner)"
-  if [ -n "$owner" ]; then
-    echo "  port: $(server_port) owned_by_pid=$owner"
-  else
-    echo "  port: $(server_port) not_listening"
+    # shellcheck disable=SC2034
+    local tsx
+    tsx="$(tsx_dist executor)"
+    start_daemon_nohup "$command" "$EX_LOG_FILE" "$ROOT"
   fi
 }
 
-wait_for_health() {
-  local pid="${1:-}"
-  local deadline=$((SECONDS + 25))
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    if health_check; then
-      return 0
-    fi
-    if [ -n "$pid" ] && ! is_running "$pid"; then
-      return 1
-    fi
-    sleep 1
-  done
-  return 1
+# ── Agent key check ──────────────────────────────────────
+
+check_agent_key() {
+  local key
+  key="${EXECUTOR_AGENT_KEY:-$(read_env_value EXECUTOR_AGENT_KEY || true)}"
+  if [ -z "$key" ]; then
+    echo "  agent_key: WARNING — EXECUTOR_AGENT_KEY is not set"
+    echo "    Gateway and executor will each generate independent random keys."
+    echo "    They will not trust each other. Set EXECUTOR_AGENT_KEY in .env to fix this."
+    return 2
+  fi
+  echo "  agent_key: configured"
+  return 0
 }
 
-start_cmd() {
-  mkdir -p "$RUNTIME_DIR"
+# ── Component-level: Gateway ─────────────────────────────
 
-  local pid
-  pid="$(pid_from_file)"
+start_gateway() {
+  local pid owner
+  pid="$(pid_from_file "$GW_PID_FILE")"
   if is_running "$pid"; then
     echo "los gateway already running pid=$pid"
-    status_cmd
     return 0
   fi
 
-  local owner
-  owner="$(port_owner)"
-  if [ -n "$owner" ]; then
-    if is_los_gateway_pid "$owner"; then
-      write_pid_file "$owner"
-      echo "los gateway already running pid=$owner; adopted into $PID_FILE"
-      status_cmd
+  owner="$(port_owner "$(gw_port)" "$(gw_host)" "" "$(gw_url)" "$GW_SRC" "$GW_DIST")"
+  if [ -n "$owner" ] && [ "$owner" != "unknown" ]; then
+    if is_los_pid "$owner" "$GW_SRC" "$GW_DIST"; then
+      write_pid_file "$owner" "$GW_PID_FILE" "$RUNTIME_DIR"
+      echo "los gateway already running pid=$owner; adopted into $GW_PID_FILE"
       return 0
     fi
-
-    echo "port $(server_port) is already in use by non-los pid=$owner"
+    echo "port $(gw_port) is already in use by non-los pid=$owner"
     echo "not starting a second gateway"
     return 1
   fi
 
-  echo "starting los gateway at $(server_url)"
+  echo "starting los gateway at $(gw_url)"
   pid="$(start_gateway_process)"
   if [ -n "$pid" ]; then
-    write_pid_file "$pid"
+    write_pid_file "$pid" "$GW_PID_FILE" "$RUNTIME_DIR"
   fi
 
-  if wait_for_health "$pid"; then
-    owner="$(port_owner)"
-    if is_los_gateway_pid "$owner"; then
+  if wait_for_health "$pid" "$(gw_url)"; then
+    owner="$(port_owner "$(gw_port)" "$(gw_host)" "" "$(gw_url)" "$GW_SRC" "$GW_DIST")"
+    if [ -n "$owner" ] && [ "$owner" != "unknown" ] && is_los_pid "$owner" "$GW_SRC" "$GW_DIST"; then
       pid="$owner"
-      write_pid_file "$pid"
+      write_pid_file "$pid" "$GW_PID_FILE" "$RUNTIME_DIR"
     fi
     echo "started pid=$pid"
-    echo "log: $LOG_FILE"
+    echo "log: $GW_LOG_FILE"
     return 0
   fi
 
@@ -305,49 +157,228 @@ start_cmd() {
   else
     echo "process still running but health is unavailable; recent log:"
   fi
-  tail -40 "$LOG_FILE" 2>/dev/null || true
+  tail -40 "$GW_LOG_FILE" 2>/dev/null || true
   return 1
 }
 
-stop_cmd() {
-  local pid
-  pid="$(pid_from_file)"
-  if ! is_running "$pid"; then
-    local owner
-    owner="$(port_owner)"
-    if is_los_gateway_pid "$owner"; then
-      pid="$owner"
-      write_pid_file "$pid"
-      echo "adopted unmanaged los gateway pid=$pid before stopping"
+stop_gateway() {
+  stop_process \
+    "gateway" "$GW_PID_FILE" "$(gw_port)" "$(gw_host)" "$(gw_url)" \
+    "$GW_SRC" "$GW_DIST" "$GW_MAINT_FILTER" "" "$GW_LAUNCH_PREFIX" "0"
+}
+
+gateway_status() {
+  local pid owner
+  pid="$(pid_from_file "$GW_PID_FILE")"
+  owner="$(port_owner "$(gw_port)" "$(gw_host)" "" "$(gw_url)" "$GW_SRC" "$GW_DIST")"
+  echo "  ── gateway ──"
+  echo "  url: $(gw_url)"
+  echo "  pid file: $GW_PID_FILE"
+  echo "  log file: $GW_LOG_FILE"
+
+  if is_los_pid "$owner" "$GW_SRC" "$GW_DIST"; then
+    if [ "$owner" != "$pid" ]; then
+      write_pid_file "$owner" "$GW_PID_FILE" "$RUNTIME_DIR"
+      echo "  process: running pid=$owner managed=true adopted_from=${pid:-none}"
     else
-      echo "los gateway is not running from $PID_FILE"
-      rm -f "$PID_FILE"
-      mark_service_status offline "gateway stop observed no local process"
-      return 0
+      echo "  process: running pid=$owner managed=true"
     fi
+  elif is_running "$pid"; then
+    echo "  process: running pid=$pid managed=true"
+  elif [ -n "$pid" ]; then
+    echo "  process: stopped stale_pid=$pid"
+  else
+    echo "  process: stopped"
   fi
 
-  echo "stopping los gateway pid=$pid"
-  mark_service_status draining "gateway stop requested"
-  launch_remove
-  kill "$pid" >/dev/null 2>&1 || true
+  if health_check "$(gw_url)"; then
+    echo "  health: ok"
+  else
+    echo "  health: unavailable"
+  fi
 
-  local deadline=$((SECONDS + 15))
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    if ! is_running "$pid"; then
-      rm -f "$PID_FILE"
-      mark_service_status offline "gateway stopped"
-      echo "stopped"
+  if [ -n "$owner" ]; then
+    echo "  port: $(gw_port) owned_by_pid=$owner"
+  else
+    echo "  port: $(gw_port) not_listening"
+  fi
+}
+
+# ── Component-level: Executor ────────────────────────────
+
+start_executor() {
+  local pid owner
+  owner="$(port_owner "$(ex_port)" "$(ex_host)" "" "$(ex_url)" "$EX_SRC" "$EX_DIST")"
+  if [ -n "$owner" ] && [ "$owner" != "unknown" ]; then
+    if is_los_pid "$owner" "$EX_SRC" "$EX_DIST"; then
+      write_pid_file "$owner" "$EX_PID_FILE" "$RUNTIME_DIR"
+      echo "executor already running pid=$owner; adopted into $EX_PID_FILE"
       return 0
     fi
-    sleep 1
-  done
+    echo "port $(ex_port) is already in use by non-los pid=$owner"
+    echo "not starting a second executor"
+    return 1
+  fi
 
-  echo "process did not stop gracefully; sending SIGKILL"
-  kill -9 "$pid" >/dev/null 2>&1 || true
-  rm -f "$PID_FILE"
-  mark_service_status offline "gateway stopped after SIGKILL"
+  pid="$(pid_from_file "$EX_PID_FILE")"
+  if is_running "$pid"; then
+    echo "executor already running pid=$pid"
+    return 0
+  fi
+
+  echo "starting los executor at $(ex_url)"
+  pid="$(start_executor_process)"
+  if [ -n "$pid" ]; then
+    write_pid_file "$pid" "$EX_PID_FILE" "$RUNTIME_DIR"
+  fi
+
+  if wait_for_health "$pid" "$(ex_url)"; then
+    owner="$(port_owner "$(ex_port)" "$(ex_host)" "" "$(ex_url)" "$EX_SRC" "$EX_DIST")"
+    if [ -n "$owner" ] && [ "$owner" != "unknown" ] && is_los_pid "$owner" "$EX_SRC" "$EX_DIST"; then
+      pid="$owner"
+      write_pid_file "$pid" "$EX_PID_FILE" "$RUNTIME_DIR"
+    fi
+    echo "started pid=$pid"
+    echo "log: $EX_LOG_FILE"
+    return 0
+  fi
+
+  echo "executor did not become healthy"
+  if ! is_running "$pid"; then
+    echo "process exited; recent log:"
+  else
+    echo "process still running but health is unavailable; recent log:"
+  fi
+  tail -40 "$EX_LOG_FILE" 2>/dev/null || true
+  return 1
 }
+
+stop_executor() {
+  stop_process \
+    "executor" "$EX_PID_FILE" "$(ex_port)" "$(ex_host)" "$(ex_url)" \
+    "$EX_SRC" "$EX_DIST" "$EX_MAINT_FILTER" "$(ex_node_id_arg)" "$EX_LAUNCH_PREFIX" "1"
+}
+
+executor_status() {
+  local pid owner node_id
+  node_id="$(ex_node_id)"
+  pid="$(pid_from_file "$EX_PID_FILE")"
+  owner="$(port_owner "$(ex_port)" "$(ex_host)" "" "$(ex_url)" "$EX_SRC" "$EX_DIST")"
+  echo "  ── executor ──"
+  echo "  node: $node_id"
+  echo "  url: $(ex_url)"
+  echo "  pid file: $EX_PID_FILE"
+  echo "  log file: $EX_LOG_FILE"
+
+  if is_los_pid "$owner" "$EX_SRC" "$EX_DIST"; then
+    if [ "$owner" != "$pid" ]; then
+      write_pid_file "$owner" "$EX_PID_FILE" "$RUNTIME_DIR"
+      echo "  process: running pid=$owner managed=true adopted_from=${pid:-none}"
+    else
+      echo "  process: running pid=$owner managed=true"
+    fi
+  elif is_running "$pid"; then
+    echo "  process: running pid=$pid managed=true"
+  elif [ -n "$pid" ]; then
+    echo "  process: stopped stale_pid=$pid"
+  else
+    echo "  process: stopped"
+  fi
+
+  if health_check "$(ex_url)"; then
+    echo "  health: ok"
+  else
+    echo "  health: unavailable"
+  fi
+
+  if [ -n "$owner" ]; then
+    echo "  port: $(ex_port) owned_by_pid=$owner"
+  else
+    echo "  port: $(ex_port) not_listening"
+  fi
+}
+
+# ── Unified commands ─────────────────────────────────────
+
+unified_status() {
+  echo "los status"
+  if is_executor_enabled; then
+    echo "  executor: enabled=true"
+  else
+    echo "  executor: enabled=false"
+  fi
+  gateway_status
+  if is_executor_enabled; then
+    executor_status
+    echo ""
+    check_agent_key
+  else
+    echo "  ── executor ──"
+    echo "  disabled"
+  fi
+}
+
+unified_start() {
+  mkdir -p "$RUNTIME_DIR"
+
+  if is_executor_enabled; then
+    echo "==> starting executor"
+    if ! start_executor; then
+      echo "WARNING: executor did not start — gateway will run agents locally"
+    else
+      echo ""
+      check_agent_key
+    fi
+    echo ""
+  fi
+
+  echo "==> starting gateway"
+  start_gateway
+}
+
+unified_stop() {
+  echo "==> stopping gateway"
+  stop_gateway || true
+
+  if is_executor_enabled; then
+    echo ""
+    echo "==> stopping executor"
+    stop_executor || true
+  fi
+}
+
+unified_restart() {
+  unified_stop
+  echo ""
+  unified_start
+}
+
+# ── Executor maintenance commands ────────────────────────
+
+drain_executor() {
+  local timeout_ms="${1:-120000}"
+  local node_id
+  node_id="$(ex_node_id)"
+  (cd "$ROOT" && pnpm --filter "$EX_MAINT_FILTER" run maint -- drain "$node_id" "$timeout_ms")
+}
+
+promote_executor() {
+  if ! health_check "$(ex_url)"; then
+    echo "executor health is unavailable at $(ex_url)/health"
+    return 1
+  fi
+  local node_id
+  node_id="$(ex_node_id)"
+  (cd "$ROOT" && pnpm --filter "$EX_MAINT_FILTER" run maint -- promote "$node_id")
+}
+
+executor_maint_status() {
+  local node_id
+  node_id="$(ex_node_id)"
+  (cd "$ROOT" && pnpm --filter "$EX_MAINT_FILTER" run maint -- status "$node_id")
+}
+
+# ── Doctor ───────────────────────────────────────────────
 
 doctor_cmd() {
   echo "los doctor"
@@ -385,6 +416,11 @@ doctor_cmd() {
         console.log(printConfigDiagnostics(cfg));
         await initDb(cfg.databaseUrl);
         console.log('database: ok');
+        if (cfg.executor.enabled) {
+          console.log('executor: enabled (nodeId=' + (cfg.executor.nodeId || 'auto') + ')');
+        } else {
+          console.log('executor: disabled');
+        }
         await closeDb();
       }
       main().catch((err) => {
@@ -394,33 +430,68 @@ doctor_cmd() {
     "
   )
 
-  if health_check; then
-    echo "  health: ok at $(server_url)/health"
+  if health_check "$(gw_url)"; then
+    echo "  health: ok at $(gw_url)/health"
   else
-    echo "  health: not running at $(server_url)/health"
+    echo "  health: not running at $(gw_url)/health"
   fi
 }
 
+# ── Help ─────────────────────────────────────────────────
+
+show_help() {
+  cat <<EOF
+los process helper
+
+Unified commands:
+  start         Start executor (if EXECUTOR_ENABLED=true), then gateway
+  stop          Stop gateway first, then executor
+  restart       Stop both, then start both
+  status        Show gateway and executor health
+  doctor        Check runtime prerequisites and config/db access
+  help          Show this help
+
+Executor-only (when EXECUTOR_ENABLED=true):
+  start-executor   Start only the executor
+  stop-executor    Stop only the executor
+  drain-executor   Drain executor node (wait for active tasks)
+  promote-executor Promote executor node to online
+  status-executor  Show executor health + maint status
+
+Gateway-only:
+  start-gateway    Start only the gateway
+  stop-gateway     Stop only the gateway
+
+Runtime:
+  gateway:  $(gw_url)
+  executor: $(ex_url) (enabled: $(is_executor_enabled && echo true || echo false))
+  pid dir:  $RUNTIME_DIR
+EOF
+}
+
+# ── Command dispatch ─────────────────────────────────────
+
 case "${1:-help}" in
-  help|-h|--help)
-    show_help
-    ;;
-  status)
-    status_cmd
-    ;;
-  start)
-    start_cmd
-    ;;
-  stop)
-    stop_cmd
-    ;;
-  restart)
-    stop_cmd
-    start_cmd
-    ;;
-  doctor)
-    doctor_cmd
-    ;;
+  # Unified
+  help|-h|--help)     show_help ;;
+  status)             unified_status ;;
+  start)              unified_start ;;
+  stop)               unified_stop ;;
+  restart)            unified_restart ;;
+  doctor)             doctor_cmd ;;
+
+  # Gateway-only
+  start-gateway)      start_gateway ;;
+  stop-gateway)       stop_gateway ;;
+  status-gateway)     gateway_status ;;
+
+  # Executor-only
+  start-executor)     start_executor ;;
+  stop-executor)      stop_executor ;;
+  status-executor)    executor_status && echo "" && executor_maint_status ;;
+  drain-executor)     drain_executor "${2:-}" ;;
+  promote-executor)   promote_executor ;;
+
   *)
     echo "unknown command: $1"
     echo

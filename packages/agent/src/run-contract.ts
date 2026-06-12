@@ -72,6 +72,24 @@ export interface VerificationRequirement {
   reviewer?: string;
 }
 
+/**
+ * Lifecycle hooks attached to a task/run. Each hook is a shell command or script
+ * path executed at the corresponding lifecycle event. Hook failures emit a
+ * warning session event but do NOT block the main operation.
+ *
+ * Pattern inspired by Trellis's config.yaml lifecycle hooks.
+ */
+export interface TaskLifecycleHooks {
+  /** Run after the run spec is created */
+  afterCreate?: string[];
+  /** Run when the task transitions to in_progress */
+  afterStart?: string[];
+  /** Run when the task completes (succeeded/failed/cancelled) */
+  afterFinish?: string[];
+  /** Run when the task is archived */
+  afterArchive?: string[];
+}
+
 export interface RunContractMetadata {
   mode?: RunContractMode;
   goal?: string;
@@ -102,6 +120,28 @@ export interface RunContractMetadata {
   planRevision?: number;
   /** Run spec id of the parent plan (for revision lineage). */
   planParentRunSpecId?: string;
+  /**
+   * Context files to inject into the agent session, keyed by phase.
+   * Each entry maps a repo-relative file path to the reason it's relevant
+   * and which phase(s) should receive it.
+   *
+   * Pattern inspired by Trellis's implement.jsonl / check.jsonl context injection.
+   */
+  contextFiles?: ContextFileEntry[];
+  /** Lifecycle hooks for task automation */
+  hooks?: TaskLifecycleHooks;
+}
+
+/**
+ * A file to inject into the agent's context during a specific workflow phase.
+ */
+export interface ContextFileEntry {
+  /** Repo-relative path (e.g., 'docs/adr/0007-provider-loop.md') */
+  path: string;
+  /** Why this file is relevant to the task */
+  reason: string;
+  /** Which phase(s) should receive this file. If omitted, all phases. */
+  phases?: RunPhase[];
 }
 
 /**
@@ -161,6 +201,46 @@ export function canMarkSucceeded(
   return { allowed: true };
 }
 
+/**
+ * Validate that run_spec.status and run_contract.phase are consistent.
+ *
+ * Two independent state machines govern the same run entity. This function
+ * checks invariants that prevent silent drift between them:
+ *   - Terminal run_spec status requires a compatible (terminal or absent) phase.
+ *   - Terminal phase requires a compatible (terminal) run_spec status.
+ *
+ * Returns null if consistent, or an error string describing the inconsistency.
+ */
+export function validatePhaseStatusConsistency(
+  runSpecStatus: string | undefined,
+  contract: RunContractMetadata | undefined,
+): string | null {
+  const phase = contract?.phase;
+  if (!phase) return null;
+
+  const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled']);
+  const terminalPhases = new Set(['succeeded', 'failed']);
+  const statusIsTerminal = runSpecStatus ? terminalStatuses.has(runSpecStatus) : false;
+  const phaseIsTerminal = terminalPhases.has(phase);
+
+  // If phase is terminal but status isn't, that's a drift
+  if (phaseIsTerminal && !statusIsTerminal) {
+    return `run_contract.phase is '${phase}' but run_spec.status is '${runSpecStatus ?? 'unknown'}' (expected terminal)`;
+  }
+
+  // If status is succeeded but phase says we never left executing, that's a drift
+  if (runSpecStatus === 'succeeded' && !phaseIsTerminal && phase !== 'verifying') {
+    return `run_spec.status is 'succeeded' but run_contract.phase is '${phase}' (expected 'succeeded', 'failed', or 'verifying')`;
+  }
+
+  // If status is running but phase is a pre-execution state, that's suspicious
+  if (runSpecStatus === 'running' && ['created', 'discovering', 'discovery_ready', 'planning'].includes(phase)) {
+    return `run_spec.status is 'running' but run_contract.phase is '${phase}' (expected 'plan_approved' or later)`;
+  }
+
+  return null;
+}
+
 export type RunContractMetadataInput = Partial<{
   mode: unknown;
   goal: unknown;
@@ -184,6 +264,8 @@ export type RunContractMetadataInput = Partial<{
   verifications: unknown;
   planRevision: unknown;
   planParentRunSpecId: unknown;
+  contextFiles: unknown;
+  hooks: unknown;
 }>;
 
 const ARRAY_FIELDS: Array<keyof Pick<
@@ -248,6 +330,12 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
   const verifications = normalizeVerificationRequirements(raw.verifications);
   if (verifications) out.verifications = verifications;
 
+  const contextFiles = normalizeContextFiles(raw.contextFiles);
+  if (contextFiles) out.contextFiles = contextFiles;
+
+  const hooks = normalizeLifecycleHooks(raw.hooks);
+  if (hooks) out.hooks = hooks;
+
   if (!hasRunContractValue(out)) return undefined;
   return out;
 }
@@ -307,6 +395,8 @@ function hasRunContractValue(contract: RunContractMetadata): boolean {
   if (contract.phase) return true;
   if (contract.plan && contract.plan.length > 0) return true;
   if (contract.verifications && contract.verifications.length > 0) return true;
+  if (contract.contextFiles && contract.contextFiles.length > 0) return true;
+  if (contract.hooks && (contract.hooks.afterCreate || contract.hooks.afterStart || contract.hooks.afterFinish || contract.hooks.afterArchive)) return true;
   return ARRAY_FIELDS.some((field) => contract[field].length > 0);
 }
 
@@ -353,4 +443,55 @@ function normalizeVerificationRequirements(value: unknown): VerificationRequirem
     });
   }
   return reqs.length > 0 ? reqs : undefined;
+}
+
+function normalizeContextFiles(value: unknown): ContextFileEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries: ContextFileEntry[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    const path = normalizeString(raw.path);
+    if (!path) continue;
+    const reason = normalizeString(raw.reason) ?? 'no reason provided';
+    const phases = normalizeContextFilePhases(raw.phases);
+    entries.push({ path, reason, phases });
+  }
+  return entries.length > 0 ? entries : undefined;
+}
+
+function normalizeContextFilePhases(value: unknown): RunPhase[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const phases: RunPhase[] = [];
+  const valid = new Set<RunPhase>(['created', 'discovering', 'discovery_ready', 'planning', 'plan_approved', 'executing', 'verifying', 'succeeded', 'blocked', 'failed']);
+  for (const item of value) {
+    if (typeof item === 'string' && valid.has(item as RunPhase)) {
+      phases.push(item as RunPhase);
+    }
+  }
+  return phases.length > 0 ? phases : undefined;
+}
+
+/**
+ * Filter context file entries for a specific phase.
+ * Entries without a `phases` filter apply to all phases.
+ */
+export function filterContextFilesForPhase(
+  entries: ContextFileEntry[] | undefined,
+  phase: RunPhase,
+): ContextFileEntry[] {
+  if (!entries || entries.length === 0) return [];
+  return entries.filter(entry => !entry.phases || entry.phases.includes(phase));
+}
+
+function normalizeLifecycleHooks(value: unknown): TaskLifecycleHooks | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const hooks: TaskLifecycleHooks = {};
+  const keys: Array<keyof TaskLifecycleHooks> = ['afterCreate', 'afterStart', 'afterFinish', 'afterArchive'];
+  for (const key of keys) {
+    const commands = normalizeStringArray(raw[key]);
+    if (commands.length > 0) hooks[key] = commands;
+  }
+  return (hooks.afterCreate || hooks.afterStart || hooks.afterFinish || hooks.afterArchive) ? hooks : undefined;
 }

@@ -21,6 +21,10 @@ export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
 
   if (baseUrl.includes('packyapi.com') || providerName.toLowerCase() === 'packycode') {
     providerName = 'packycode';
+    // PackyCode does not support the OpenAI Responses API endpoint (/v1/responses).
+    // Codex may set wire_api="responses" for its own internal routing, but that
+    // format is not available through the PackyCode proxy — force Chat Completions.
+    wireApi = undefined;
   }
 
   return { providerName, baseUrl, model, ...(wireApi ? { wireApi } : {}) };

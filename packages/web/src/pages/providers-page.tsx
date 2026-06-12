@@ -1,5 +1,5 @@
 import { useState, useMemo, type ChangeEvent } from 'react';
-import { metadataText } from '../chat-helpers.js';
+import { metadataText, providerRoutesFromModels } from '../chat-helpers.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
@@ -77,7 +77,7 @@ export function ProvidersPage() {
   });
   const providers = onboarding.data?.providers ?? [];
   const tools = onboarding.data?.tools ?? [];
-  const routes = modelRoutes.data?.providers ?? [];
+  const routes = providerRoutesFromModels(modelRoutes.data);
 
   return (
     <section className="panel-grid provider-grid">
@@ -329,4 +329,3 @@ function normalizeEnvName(value: string): string {
 function sanitizeProviderId(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
-

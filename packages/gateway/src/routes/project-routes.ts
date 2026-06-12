@@ -1,4 +1,7 @@
 import type { FastifyInstance } from 'fastify';
+import { readdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, resolve } from 'node:path';
 import {
   bindProject,
   getDefaultProjectId,
@@ -15,6 +18,53 @@ function sanitizeProjectId(raw: string): string {
 }
 
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const MAX_DIRECTORY_ENTRIES = 200;
+
+function normalizeBrowsePath(raw: unknown): string {
+  const fallback = process.cwd();
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  if (trimmed === '~') return homedir();
+  if (trimmed.startsWith('~/')) return resolve(homedir(), trimmed.slice(2));
+  return resolve(trimmed);
+}
+
+function browseDirectory(path: string): {
+  path: string;
+  parent: string | null;
+  entries: Array<{ name: string; path: string; hidden: boolean }>;
+  roots: Array<{ label: string; path: string }>;
+} {
+  const stat = statSync(path);
+  if (!stat.isDirectory()) {
+    throw new Error('Path exists but is not a directory');
+  }
+  const parent = dirname(path);
+  const entries = readdirSync(path, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => ({
+      name: entry.name,
+      path: resolve(path, entry.name),
+      hidden: entry.name.startsWith('.'),
+    }))
+    .sort((a, b) => {
+      if (a.hidden !== b.hidden) return a.hidden ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, MAX_DIRECTORY_ENTRIES);
+
+  return {
+    path,
+    parent: parent === path ? null : parent,
+    entries,
+    roots: [
+      { label: 'workspace', path: process.cwd() },
+      { label: 'projects', path: resolve(homedir(), 'projects') },
+      { label: 'home', path: homedir() },
+    ],
+  };
+}
 
 export function registerProjectRoutes(app: FastifyInstance) {
   // ── List ────────────────────────────────────────────
@@ -22,6 +72,20 @@ export function registerProjectRoutes(app: FastifyInstance) {
     const projects = listProjects();
     const defaultId = getDefaultProjectId();
     return { projects, defaultProjectId: defaultId ?? null };
+  });
+
+  // ── Browse local directories for project binding ─────
+  app.get('/projects/browse', async (req, reply) => {
+    const query = req.query as { path?: string };
+    const path = normalizeBrowsePath(query.path);
+    try {
+      return browseDirectory(path);
+    } catch (err) {
+      return reply.status(400).send({
+        error: err instanceof Error ? err.message : String(err),
+        path,
+      });
+    }
   });
 
   // ── Get one ─────────────────────────────────────────

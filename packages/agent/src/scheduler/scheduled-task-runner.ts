@@ -7,8 +7,10 @@ import {
   ensureTaskRunStore,
   findActiveTaskRunByDedupeKey,
   loadTaskRun,
-  updateTaskRun,
+  updateTaskRunFields,
 } from '../task-runs.js';
+import { transitionExecutionState } from '../execution-store.js';
+import { runLifecycleHooks } from '../lifecycle-hooks.js';
 import {
   cancelScheduledTask,
   getScheduledTaskAbortReason,
@@ -16,6 +18,7 @@ import {
   linkAbortSignal,
   registerScheduledTaskController,
 } from './abort-registry.js';
+import { clearCancellation } from '../cancellation.js';
 import { canStartExecution, canMarkSucceeded, readRunContractMetadata, type RunContractMetadata } from '../run-contract.js';
 import { loadRunSpec } from '../run-specs.js';
 import { resolveExecutor, runAgentOnExecutor } from './executor-client.js';
@@ -80,8 +83,15 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   await emitTaskEvent(sessionId, 'task.created', created);
   await input.onTaskEvent?.({ type: 'task.created', taskRun: created });
 
-  let running = await updateTaskRun(taskRunId, {
-    status: 'running',
+  await transitionExecutionState({
+    entityType: 'task_run',
+    entityId: taskRunId,
+    to: 'running',
+    sessionId,
+    reason: 'task_started',
+    nodeId,
+  });
+  let running = await updateTaskRunFields(taskRunId, {
     nodeId,
     heartbeatAt: new Date(),
     leaseExpiresAt: new Date(Date.now() + leaseMs),
@@ -101,12 +111,28 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
 
+  // Execute afterStart lifecycle hooks (non-blocking)
+  if (input.runContract?.hooks) {
+    runLifecycleHooks('afterStart', {
+      hooks: input.runContract.hooks as import('../run-contract.js').TaskLifecycleHooks,
+      sessionId,
+      runSpecId: input.runSpecId,
+      taskRunId,
+    }).catch(() => undefined);
+  }
+
   // B0: enforce phase contract — no execution without approved plan
   const runContract = await readCurrentRunContract(input.runSpecId, running.metadata);
   const execCheck = canStartExecution(runContract);
   if (!execCheck.allowed) {
-    await updateTaskRun(taskRunId, {
-      status: 'blocked',
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'blocked',
+      sessionId,
+      reason: execCheck.reason ?? 'b0_phase_gate',
+    });
+    await updateTaskRunFields(taskRunId, {
       metadata: { ...running.metadata, blockReason: execCheck.reason },
     });
     await emitTaskEvent(sessionId, 'task.blocked', { ...running, status: 'blocked' });
@@ -178,6 +204,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           nodeId,
           requestId: input.requestId,
           traceId,
+          log: input.log,
           toolMode,
           initialMessages: input.initialMessages,
           allowedTools: input.allowedTools,
@@ -209,8 +236,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     // Load verification record statuses for this run spec
     const verifyCheck = await checkVerificationGate(input.runSpecId, verifyContract);
     if (!verifyCheck.allowed) {
-      const blocked = await updateTaskRun(taskRunId, {
-        status: 'blocked',
+      await transitionExecutionState({
+        entityType: 'task_run',
+        entityId: taskRunId,
+        to: 'blocked',
+        sessionId,
+        reason: verifyCheck.reason ?? 'verification_pending',
+      });
+      const blocked = await updateTaskRunFields(taskRunId, {
         metadata: {
           ...running.metadata,
           blockReason: verifyCheck.reason,
@@ -230,8 +263,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       };
     }
 
-    const succeeded = await updateTaskRun(taskRunId, {
-      status: 'succeeded',
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'succeeded',
+      sessionId,
+      reason: 'task_completed',
+    });
+    const succeeded = await updateTaskRunFields(taskRunId, {
       metadata: {
         ...running.metadata,
         loopCount: result.loopCount,
@@ -241,6 +280,17 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const finalTask = succeeded ?? running;
     await emitTaskEvent(sessionId, 'task.succeeded', finalTask);
     await input.onTaskEvent?.({ type: 'task.succeeded', taskRun: finalTask });
+
+    // Execute afterFinish lifecycle hooks (non-blocking)
+    if (input.runContract?.hooks) {
+      runLifecycleHooks('afterFinish', {
+        hooks: input.runContract.hooks as any,
+        sessionId,
+        runSpecId: input.runSpecId,
+        taskRunId,
+      }).catch(() => undefined);
+    }
+
     return {
       status: 'completed',
       sessionId,
@@ -251,8 +301,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const message = err instanceof Error ? err.message : String(err);
     if (isAbortError(err)) {
       const reason = getScheduledTaskAbortReason(taskRunId) ?? message;
-      const cancelled = await updateTaskRun(taskRunId, {
-        status: 'cancelled',
+      await transitionExecutionState({
+        entityType: 'task_run',
+        entityId: taskRunId,
+        to: 'cancelled',
+        sessionId,
+        reason,
+      });
+      const cancelled = await updateTaskRunFields(taskRunId, {
         metadata: {
           ...running.metadata,
           cancelReason: reason,
@@ -261,6 +317,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       const finalTask = cancelled ?? running;
       await emitTaskEvent(sessionId, 'task.cancelled', finalTask, { reason });
       await input.onTaskEvent?.({ type: 'task.cancelled', taskRun: finalTask });
+      if (input.runContract?.hooks) {
+        runLifecycleHooks('afterFinish', {
+          hooks: input.runContract.hooks as any,
+          sessionId,
+          runSpecId: input.runSpecId,
+          taskRunId,
+        }).catch(() => undefined);
+      }
       return {
         status: 'cancelled',
         sessionId,
@@ -269,8 +333,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       };
     }
 
-    const failed = await updateTaskRun(taskRunId, {
-      status: 'failed',
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'failed',
+      sessionId,
+      reason: message,
+    });
+    const failed = await updateTaskRunFields(taskRunId, {
       metadata: {
         ...running.metadata,
         error: message,
@@ -279,6 +349,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const finalTask = failed ?? running;
     await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });
     await input.onTaskEvent?.({ type: 'task.failed', taskRun: finalTask });
+    if (input.runContract?.hooks) {
+      runLifecycleHooks('afterFinish', {
+        hooks: input.runContract.hooks as any,
+        sessionId,
+        runSpecId: input.runSpecId,
+        taskRunId,
+      }).catch(() => undefined);
+    }
 
     if (executor && input.runSpecId) {
       await recordFailoverEval({
@@ -299,6 +377,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     stopHeartbeat();
     linkedAbortCleanup();
     unregisterTaskController();
+    clearCancellation(taskRunId).catch(() => undefined);
   }
 }
 

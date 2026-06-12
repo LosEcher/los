@@ -25,7 +25,13 @@ let _pool: Pool | null = null;
 export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   if (_pool) return wrap(_pool);
 
-  const url = databaseUrl ?? process.env.DATABASE_URL ?? 'postgres://los:los@127.0.0.1:5432/los';
+  const url = databaseUrl ?? process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL is not configured. Set DATABASE_URL=postgres://user:pass@host:5432/db ' +
+      'via the .env file, environment variable, or ~/.los/config.yaml.',
+    );
+  }
   if (!url.startsWith('postgres://') && !url.startsWith('postgresql://')) {
     throw new Error(`los uses PostgreSQL for persistence. Set DATABASE_URL=postgres://... (got ${url})`);
   }

@@ -10,6 +10,10 @@ import { ensureSessionEventStore, type SessionEventRecord } from './session-even
 import { ensureTaskRunStore } from './task-runs.js';
 import { ensureToolCallStateStore } from './tool-call-states.js';
 import { ensureVerificationRecordStore } from './verification-records.js';
+import { validatePhaseStatusConsistency, readRunContractMetadata, type RunContractMetadata } from './run-contract.js';
+import { getLogger } from '@los/infra/logger';
+
+const log = getLogger('execution-store');
 
 export interface ExecutionEventEnvelope<T extends ExecutionEntityType = ExecutionEntityType> {
   entityType: T;
@@ -138,6 +142,16 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
       });
 
       await client.query('COMMIT');
+
+      // Cross-validate run_spec.status ↔ run_contract.phase consistency.
+      // The two state machines are independent; warn on drift without blocking.
+      if (input.entityType === 'run_spec' && entity.contract) {
+        const drift = validatePhaseStatusConsistency(input.to as string, entity.contract);
+        if (drift) {
+          log.warn(`Phase/status drift on run_spec ${input.entityId}: ${drift}`);
+        }
+      }
+
       return {
         entity,
         event,
@@ -182,6 +196,7 @@ type ExecutionEntityRow = {
   request_id: string | null;
   trace_id: string | null;
   attempt: number | null;
+  run_contract_json: unknown | null;
 };
 
 type ExecutionEntityContext = {
@@ -197,6 +212,7 @@ type ExecutionEntityContext = {
   requestId?: string;
   traceId?: string;
   attempt?: number;
+  contract?: RunContractMetadata;
 };
 
 async function loadExecutionEntity<T extends ExecutionEntityType>(
@@ -207,7 +223,8 @@ async function loadExecutionEntity<T extends ExecutionEntityType>(
     case 'run_spec':
       return rowToContext(await loadOne(client, `
         SELECT id, session_id, id AS run_spec_id, NULL::text AS task_run_id, status AS state,
-               tenant_id, project_id, user_id, node_id, request_id, trace_id, NULL::integer AS attempt
+               tenant_id, project_id, user_id, node_id, request_id, trace_id, NULL::integer AS attempt,
+               run_contract_json
         FROM run_specs
         WHERE id = $1
         FOR UPDATE
@@ -403,6 +420,7 @@ function rowToContext(
     requestId: row.request_id ?? undefined,
     traceId: row.trace_id ?? undefined,
     attempt: row.attempt ?? undefined,
+    contract: parseRunContract(row.run_contract_json),
   };
 }
 
@@ -424,6 +442,7 @@ type SessionEventRow = {
   cache_hit: boolean | null;
   usage_json: unknown;
   parent_event_id: string | number | null;
+  visibility: string | null;
   payload_json: unknown;
   created_at: Date | string;
 };
@@ -448,6 +467,7 @@ function rowToSessionEvent(row: SessionEventRow): SessionEventRecord {
     usage: undefined,
     parentEventId: row.parent_event_id === null ? undefined : Number(row.parent_event_id),
     payload: normalizeJsonObject(row.payload_json),
+    visibility: (row.visibility as import('./session-events.js').SessionEventVisibility) ?? 'public',
     createdAt: toIsoString(row.created_at),
   };
 }
@@ -475,6 +495,11 @@ function normalizeJsonObject(value: unknown): Record<string, unknown> {
     }
   }
   return {};
+}
+
+function parseRunContract(json: unknown): RunContractMetadata | undefined {
+  if (!json) return undefined;
+  return readRunContractMetadata({ runContract: json });
 }
 
 function toIsoString(value: Date | string): string {

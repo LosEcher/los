@@ -26,6 +26,7 @@ import { registerSkillRoutes } from './routes/skill-routes.js';
 import { registerRuleRoutes } from './routes/rule-routes.js';
 import { registerTodoRoutes } from './routes/todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/agent-task-graph-routes.js';
+import { registerDiagnosticsRoutes } from './routes/diagnostics-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
@@ -34,11 +35,13 @@ import { reclaimOrphanedRuns } from './chat-session-helpers.js';
 import { registerProviderRoutes } from './routes/provider-routes.js';
 import { registerMemoryRoutes } from './routes/memory-routes.js';
 import { registerSessionRoutes } from './routes/session-routes.js';
+import { registerTraceRoutes } from './routes/trace-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/sse-routes.js';
 import { registerTaskRoutes } from './routes/task-routes.js';
 import { registerRunRoutes } from './routes/run-routes.js';
 import { registerProjectRoutes } from './routes/project-routes.js';
 import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
+import { ensureAgentTaskGraphStore, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
 import { ensureRunSpecStore } from '@los/agent/run-specs';
 import { ensureServiceInstanceStore, loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
@@ -140,6 +143,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerNodeCommandRoutes(app, { executorAgentKey: config.executor.agentKey });
   registerTodoRoutes(app);
   registerAgentTaskGraphRoutes(app);
+  registerDiagnosticsRoutes(app);
   registerNodeRoutes(app);
   registerServiceRoutes(app, { serviceId: service.serviceId, serviceKind: 'gateway' });
   registerMCPRoutes(app);
@@ -150,6 +154,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   // ── Feature routes ─────────────────────────────────
   registerMemoryRoutes(app);
   registerSessionRoutes(app);
+  registerTraceRoutes(app);
   registerSseRoutes(app);
   registerTaskRoutes(app);
   registerRunRoutes(app);
@@ -182,6 +187,7 @@ export async function startServer(port?: number, host?: string) {
   await heartbeatGatewayService(service);
   await ensureTaskRunStore();
   await ensureRunSpecStore();
+  await ensureAgentTaskGraphStore();
   const recovery = await recoverExpiredTaskRunsWithAdvisoryLock('gateway_startup_recovery');
   if (!recovery.lockAcquired) {
     log.info('Gateway startup recovery skipped because another service owns the advisory lock');
@@ -193,6 +199,11 @@ export async function startServer(port?: number, host?: string) {
       type: 'task.failed',
       payload: { taskRunId: task.id, traceId: task.traceId, nodeId: task.nodeId ?? null, reason: 'gateway_startup_recovery' },
     }).catch(() => undefined);
+  }
+
+  const agentTaskRecovery = await recoverExpiredAgentTasksWithAdvisoryLock('gateway_startup_recovery');
+  if (agentTaskRecovery.lockAcquired && agentTaskRecovery.recovered.length > 0) {
+    log.info(`Gateway startup recovered ${agentTaskRecovery.recovered.length} expired agent task(s)`);
   }
   await seedLosPlanningTodos();
   console.log(await printOnboardingReport());

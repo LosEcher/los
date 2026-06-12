@@ -1,0 +1,201 @@
+import { Send, SlidersHorizontal, Square, Wrench } from 'lucide-react';
+import type { FormEvent } from 'react';
+import type { ProviderModelsResponse, ToolMode } from './api';
+import { RunField } from './chat-ui.js';
+import { ProjectSelector } from './project-selector.js';
+import { buildModelSettingsPayload, buildToolRetryPayload, parseCommaList, providerRoutesFromModels } from './chat-helpers.js';
+
+export function ChatComposer(props: {
+  prompt: string;
+  onPromptChange: (value: string) => void;
+  onSubmit: (event: FormEvent) => void;
+  onCancel: () => void;
+  running: boolean;
+
+  provider: string;
+  onProviderChange: (value: string) => void;
+  providerOptions: Array<{ id: string; label: string }>;
+  model: string;
+  onModelChange: (value: string) => void;
+  modelRoutes: ProviderModelsResponse | undefined;
+
+  toolMode: ToolMode;
+  onToolModeChange: (value: ToolMode) => void;
+  allowedTools: string;
+  onAllowedToolsChange: (value: string) => void;
+
+  workspaceRoot: string;
+  onWorkspaceRootChange: (value: string) => void;
+  defaultWorkspace: string;
+
+  systemPrompt: string;
+  onSystemPromptChange: (value: string) => void;
+
+  maxLoops: number;
+  onMaxLoopsChange: (value: number) => void;
+  timeoutMs: number;
+  onTimeoutMsChange: (value: number) => void;
+
+  toolRetryMaxAttempts: string;
+  toolRetryBaseDelayMs: string;
+  toolRetryMaxDelayMs: string;
+  onToolRetryMaxAttemptsChange: (value: string) => void;
+  onToolRetryBaseDelayMsChange: (value: string) => void;
+  onToolRetryMaxDelayMsChange: (value: string) => void;
+
+  temperature: string;
+  topP: string;
+  maxTokens: string;
+  presencePenalty: string;
+  frequencyPenalty: string;
+  onTemperatureChange: (value: string) => void;
+  onTopPChange: (value: string) => void;
+  onMaxTokensChange: (value: string) => void;
+  onPresencePenaltyChange: (value: string) => void;
+  onFrequencyPenaltyChange: (value: string) => void;
+
+  advancedCount: number;
+}) {
+  const providerRoutes = providerRoutesFromModels(props.modelRoutes);
+  const selectedRoute = providerRoutes.find(route => route.provider === props.provider) ?? providerRoutes[0] ?? null;
+  const modelOptions = (() => {
+    const ids = new Set<string>();
+    if (selectedRoute?.model) ids.add(selectedRoute.model);
+    for (const item of selectedRoute?.models ?? []) {
+      if (item.id) ids.add(item.id);
+    }
+    return [...ids];
+  })();
+
+  return (
+    <form className="composer" onSubmit={props.onSubmit}>
+      <div className="composer-toolbar" aria-label="run choices">
+        <span
+          className={`route-dot ${selectedRoute?.ok ? 'ok' : 'partial'}`}
+          title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? 'discovery pending'}
+        />
+        <RunField label="provider" title="Provider endpoint for this send">
+          {props.providerOptions.length > 0 ? (
+            <select value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }}>
+              {props.providerOptions.map(option => (
+                <option value={option.id} key={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder="provider id" />
+          )}
+        </RunField>
+        <RunField label="model" title="Model for this send">
+          {modelOptions.length > 0 ? (
+            <select value={props.model} onChange={event => props.onModelChange(event.target.value)}>
+              {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
+            </select>
+          ) : (
+            <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
+          )}
+        </RunField>
+        <RunField label="tools / skills" title="Tool and skill access for this send">
+          <Wrench size={13} />
+          <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
+            <option value="read-only">off / read-only</option>
+            <option value="project-write">project tools (no shell)</option>
+            <option value="all">all tools + sandboxed shell</option>
+          </select>
+        </RunField>
+        <RunField label="execution dir" title={`Execution directory. Default: ${props.defaultWorkspace || 'loading...'}`} variant="group">
+          <ProjectSelector
+            workspaceRoot={props.workspaceRoot}
+            onChange={props.onWorkspaceRootChange}
+            defaultWorkspace={props.defaultWorkspace}
+          />
+        </RunField>
+        <details className="composer-advanced">
+          <summary title="Advanced request settings">
+            <SlidersHorizontal size={14} />
+            {props.advancedCount > 0 ? <span className="filter-badge">{props.advancedCount}</span> : null}
+          </summary>
+          <div className="composer-advanced-panel">
+            <RunField label="system prompt" title="System prompt override" variant="panel">
+              <textarea value={props.systemPrompt} onChange={event => props.onSystemPromptChange(event.target.value)} placeholder="provider default" rows={2} />
+            </RunField>
+            <RunField label="allowed tools" title="Comma-separated tool names to allow (empty = all)" variant="panel">
+              <input value={props.allowedTools} onChange={event => props.onAllowedToolsChange(event.target.value)} placeholder="read_file, write_file, search_codebase" />
+            </RunField>
+            <RunField label="max turns" title="Hard cap on model turns (maxLoops)" variant="panel">
+              <input type="number" min={1} max={100} value={props.maxLoops} onChange={event => props.onMaxLoopsChange(Number(event.target.value))} />
+            </RunField>
+            <RunField label="timeout ms" title="Request timeout in milliseconds" variant="panel">
+              <input type="number" min={1000} step={1000} value={props.timeoutMs} onChange={event => props.onTimeoutMsChange(Number(event.target.value))} />
+            </RunField>
+            <RunField label="tool retry attempts" title="Max tool call retry attempts" variant="panel">
+              <input type="number" min={0} max={10} value={props.toolRetryMaxAttempts} onChange={event => props.onToolRetryMaxAttemptsChange(event.target.value)} placeholder="3" />
+              <input type="number" min={0} step={500} value={props.toolRetryBaseDelayMs} onChange={event => props.onToolRetryBaseDelayMsChange(event.target.value)} placeholder="1000" />
+              <input type="number" min={0} step={1000} value={props.toolRetryMaxDelayMs} onChange={event => props.onToolRetryMaxDelayMsChange(event.target.value)} placeholder="30000" />
+            </RunField>
+            <RunField label="temperature" title="Sampling temperature" variant="panel">
+              <input value={props.temperature} onChange={event => props.onTemperatureChange(event.target.value)} placeholder="provider default" />
+            </RunField>
+            <RunField label="top p" title="Nucleus sampling top_p" variant="panel">
+              <input value={props.topP} onChange={event => props.onTopPChange(event.target.value)} placeholder="provider default" />
+            </RunField>
+            <RunField label="max tokens" title="Model output token limit" variant="panel">
+              <input value={props.maxTokens} onChange={event => props.onMaxTokensChange(event.target.value)} placeholder="provider default" />
+            </RunField>
+            <RunField label="presence" title="Presence penalty" variant="panel">
+              <input value={props.presencePenalty} onChange={event => props.onPresencePenaltyChange(event.target.value)} placeholder="provider default" />
+            </RunField>
+            <RunField label="frequency" title="Frequency penalty" variant="panel">
+              <input value={props.frequencyPenalty} onChange={event => props.onFrequencyPenaltyChange(event.target.value)} placeholder="provider default" />
+            </RunField>
+          </div>
+        </details>
+      </div>
+      <textarea
+        value={props.prompt}
+        onChange={event => props.onPromptChange(event.target.value)}
+        placeholder="Ask los to inspect or prepare a bounded change..."
+        rows={3}
+      />
+      <div className="composer-actions">
+        <button className="primary-btn" type="submit" disabled={props.running || !props.prompt.trim()}>
+          <Send size={15} /> send
+        </button>
+        <button className="ghost-btn" type="button" disabled={!props.running} onClick={props.onCancel}>
+          <Square size={14} /> cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function buildComposerPayload(input: {
+  systemPrompt: string;
+  allowedTools: string;
+  toolRetryMaxAttempts: string;
+  toolRetryBaseDelayMs: string;
+  toolRetryMaxDelayMs: string;
+  temperature: string;
+  topP: string;
+  maxTokens: string;
+  presencePenalty: string;
+  frequencyPenalty: string;
+}) {
+  return {
+    systemPrompt: input.systemPrompt.trim() || undefined,
+    allowedTools: parseCommaList(input.allowedTools),
+    toolRetry: buildToolRetryPayload({
+      maxAttempts: input.toolRetryMaxAttempts,
+      baseDelayMs: input.toolRetryBaseDelayMs,
+      maxDelayMs: input.toolRetryMaxDelayMs,
+    }),
+    modelSettings: buildModelSettingsPayload({
+      temperature: input.temperature,
+      topP: input.topP,
+      maxTokens: input.maxTokens,
+      presencePenalty: input.presencePenalty,
+      frequencyPenalty: input.frequencyPenalty,
+    }),
+  };
+}

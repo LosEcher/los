@@ -61,13 +61,16 @@ export interface CreateTaskRunInput {
   attempt?: number;
 }
 
-export interface UpdateTaskRunInput {
-  status?: TaskRunStatus;
+export interface UpdateTaskRunFieldsInput {
   metadata?: Record<string, unknown>;
   runContract?: RunContractMetadataInput | null;
   nodeId?: string | null;
   heartbeatAt?: Date | string | null;
   leaseExpiresAt?: Date | string | null;
+}
+
+export interface UpdateTaskRunInput extends UpdateTaskRunFieldsInput {
+  status?: TaskRunStatus;
 }
 
 export interface TaskRunRecoveryResult {
@@ -218,6 +221,45 @@ export async function updateTaskRun(id: string, updates: UpdateTaskRunInput): Pr
     RETURNING *
   `,
     [id, status, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt],
+  );
+  return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
+}
+
+/**
+ * Update task run metadata and operational fields WITHOUT changing status.
+ *
+ * Use this after `transitionExecutionState()` to apply metadata updates
+ * (model, maxLoops, loopCount, error, cancelReason, etc.) without risking
+ * a second unvalidated status change.
+ */
+export async function updateTaskRunFields(
+  id: string,
+  updates: UpdateTaskRunFieldsInput,
+): Promise<TaskRunRecord | null> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const existing = await loadTaskRun(id);
+  if (!existing) return null;
+
+  const metadata = updates.runContract === undefined
+    ? updates.metadata ?? existing.metadata
+    : mergeRunContractMetadata(updates.metadata ?? existing.metadata, updates.runContract);
+  const nodeId = updates.nodeId === undefined ? null : updates.nodeId;
+  const heartbeatAt = updates.heartbeatAt === undefined ? null : updates.heartbeatAt;
+  const leaseExpiresAt = updates.leaseExpiresAt === undefined ? null : updates.leaseExpiresAt;
+
+  const rows = await db.query<TaskRunRow>(
+    `
+    UPDATE task_runs
+    SET metadata_json = $2::jsonb,
+        node_id = COALESCE($3, node_id),
+        heartbeat_at = COALESCE($4::timestamptz, heartbeat_at),
+        lease_expires_at = COALESCE($5::timestamptz, lease_expires_at),
+        updated_at = now()
+    WHERE id = $1
+    RETURNING *
+  `,
+    [id, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt],
   );
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
 }

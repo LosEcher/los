@@ -23,7 +23,8 @@ import {
   readToolCallRecoveryForRunSpec,
   type ToolCallRecoveryDecision,
 } from './tool-call-recovery.js';
-import { updateRunSpecStatus, type RunSpecStatus } from './run-specs.js';
+import { transitionExecutionState } from './execution-store.js';
+import { type RunSpecStatus } from './run-specs.js';
 import { cancelScheduledTask } from './scheduler/abort-registry.js';
 import {
   normalizeOptionalString,
@@ -58,7 +59,14 @@ export type {
 export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInput): Promise<RunAgentTaskGraphSerialResult> {
   await ensureAgentTaskGraphStore();
   if (input.runSpecId) {
-    await updateRunSpecStatus(input.runSpecId, 'running').catch(() => undefined);
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: input.runSpecId,
+      to: 'running',
+      reason: 'graph_serial_start',
+      sessionId: input.sessionId,
+      nodeId: input.nodeId,
+    }).catch(() => undefined);
   }
 
   const maxTasks = normalizePositiveInteger(input.maxTasks) ?? 50;
@@ -108,7 +116,14 @@ async function applyGraphCompletionRunSpecTransition(
 
   const recovery = await readToolCallRecoveryForRunSpec(input.runSpecId);
   if (recovery.status === 'action_required') {
-    await updateRunSpecStatus(input.runSpecId, 'blocked');
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: input.runSpecId,
+      to: 'blocked',
+      reason: 'recovery_action_required',
+      sessionId: input.sessionId,
+      nodeId: input.nodeId,
+    });
     if (input.sessionId) {
       await appendSessionEvent({
         sessionId: input.sessionId,
@@ -139,7 +154,14 @@ async function applyGraphCompletionRunSpecTransition(
 
   const status = runSpecStatusForGraphCompletion(completion);
   if (status) {
-    await updateRunSpecStatus(input.runSpecId, status);
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: input.runSpecId,
+      to: status,
+      reason: `graph_completion:${completion.status}`,
+      sessionId: input.sessionId,
+      nodeId: input.nodeId,
+    }).catch(() => undefined);
   }
 
   if (status === 'blocked' && input.sessionId) {

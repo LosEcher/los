@@ -1,4 +1,6 @@
 import type { ModelProfile } from '../model-profiles.js';
+import { AgentError } from '../error-base.js';
+import { recordProviderCall } from './telemetry.js';
 import { buildAnthropicModelSettings } from '../model-settings.js';
 import type {
   ChatOptions,
@@ -13,6 +15,7 @@ interface AnthropicConfig {
   name: string;
   apiKey: string;
   profile: ModelProfile;
+  traceId?: string;
 }
 
 /**
@@ -94,20 +97,44 @@ export function createAnthropicProvider(cfg: AnthropicConfig): Provider {
         : baseUrl.endsWith('/') ? `${baseUrl}v1/messages`
         : `${baseUrl}/v1/messages`;
 
-      const res = await fetch(messagesUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': API_VERSION,
-        },
-        body: JSON.stringify(body),
-        signal: options.signal,
-      });
+      const bodyStr = JSON.stringify(body);
+      const fetchStart = Date.now();
+
+      let res: Response;
+      try {
+        res = await fetch(messagesUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': API_VERSION,
+          },
+          body: bodyStr,
+          signal: options.signal,
+        });
+      } catch (err: any) {
+        recordProviderCall({
+          traceId: options.traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/v1/messages', method: 'POST',
+          stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+          status: 0, durationMs: Date.now() - fetchStart,
+          errorCode: 'PROVIDER_NETWORK', errorMessage: err?.message?.slice(0, 500),
+        }).catch(() => {});
+        throw err;
+      }
+      recordProviderCall({
+        traceId: options.traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model, endpoint: '/v1/messages', method: 'POST',
+        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+        status: res.status, durationMs: Date.now() - fetchStart,
+        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
+      }).catch(() => {});
 
       if (!res.ok) {
         const err = await res.text();
-        throw new Error(`${name} API error ${res.status}: ${err.slice(0, 300)}`);
+        throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       const data = await res.json() as any;

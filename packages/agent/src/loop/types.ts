@@ -1,6 +1,7 @@
 import type { SessionEventRecord } from '../session-events.js';
 import type { ModelSettings } from '../model-settings.js';
 import type { MCPServerConfig } from '../tools/mcp-client.js';
+import type { Logger } from '@los/infra/logger';
 import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
 
 export interface AgentConfig {
@@ -31,10 +32,12 @@ export interface AgentConfig {
   mcpServers?: MCPServerConfig[];
   /** Run contract metadata (mode, phase, plan, verifications). Passed from scheduler. */
   runContractMetadata?: Record<string, unknown>;
+  /** Request-scoped logger with traceId/requestId bound. Falls back to module-level logger. */
+  log?: Logger;
   onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void | Promise<void>;
-  onToolCall?: (tool: string, args: Record<string, unknown>) => void | Promise<void>;
+  onToolCall?: (callId: string, tool: string, args: Record<string, unknown>, turn: number) => void | Promise<void>;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
   onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
 }

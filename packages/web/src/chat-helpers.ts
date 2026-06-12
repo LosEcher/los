@@ -5,6 +5,7 @@
 
 import type {
   ProviderDiscovery, ProviderModelsResponse, ModelSettings,
+  ProviderModelRoute,
   SessionEvent, SessionEventsResponse,
   TodoItem,
 } from './api';
@@ -28,15 +29,15 @@ export function readyStreamRows(): StreamRow[] {
   return [{
     id: 'ready',
     event: 'system',
-    message: 'Ready for a bounded project task.',
-    meta: 'project-write blocks shell execution',
+    message: 'Choose a project, provider, model, and tool mode before sending.',
+    meta: 'project tools can edit files; choose all tools when the run needs shell commands',
   }];
 }
 
 export function buildProviderOptions(discovery?: ProviderDiscovery, routes?: ProviderModelsResponse): ProviderOption[] {
   const results: ProviderOption[] = [];
   const seen = new Set<string>();
-  for (const provider of routes?.providers ?? []) {
+  for (const provider of providerRoutesFromModels(routes)) {
     if (seen.has(provider.provider)) continue;
     seen.add(provider.provider);
     const disc = (discovery?.providers ?? []).find(d => d.provider === provider.provider || d.name === provider.provider);
@@ -61,6 +62,39 @@ export function buildProviderOptions(discovery?: ProviderDiscovery, routes?: Pro
     });
   }
   return results;
+}
+
+export function providerRoutesFromModels(routes?: ProviderModelsResponse): ProviderModelRoute[] {
+  if (!routes) return [];
+  if (Array.isArray(routes.providers) && routes.providers.length > 0) return routes.providers;
+
+  const grouped = new Map<string, ProviderModelRoute>();
+  for (const model of routes.models ?? []) {
+    const existing = grouped.get(model.provider);
+    const modelInfo = { id: model.model };
+    if (existing) {
+      if (!existing.models.some(item => item.id === model.model)) existing.models.push(modelInfo);
+      existing.count = existing.models.length;
+      existing.ok = existing.ok || model.enabled === true;
+      existing.enabled = existing.enabled || model.enabled === true;
+      existing.hasApiKey = existing.hasApiKey || model.hasApiKey === true;
+      existing.source = existing.source ?? model.source ?? null;
+      existing.baseUrl = existing.baseUrl ?? model.baseUrl ?? null;
+      continue;
+    }
+    grouped.set(model.provider, {
+      provider: model.provider,
+      ok: model.enabled === true,
+      enabled: model.enabled,
+      hasApiKey: model.hasApiKey,
+      source: model.source ?? null,
+      model: model.model,
+      baseUrl: model.baseUrl ?? null,
+      count: 1,
+      models: [modelInfo],
+    });
+  }
+  return [...grouped.values()];
 }
 
 export function metadataText(value: unknown): string | null {
@@ -115,7 +149,7 @@ export function buildAdvancedCount(input: {
   let n = 0;
   if (input.systemPrompt.trim()) n++;
   if (input.allowedTools.trim()) n++;
-  if (input.maxLoops !== 8) n++;
+  if (input.maxLoops !== 20) n++;  // default from infra/config.ts
   if (input.timeoutMs !== 120_000) n++;
   if (input.toolRetryMaxAttempts.trim()) n++;
   if (input.toolRetryBaseDelayMs.trim()) n++;
@@ -227,7 +261,15 @@ export function streamRow(event: string, data: Record<string, unknown>): StreamR
   if (event === 'session.resume_state') return { id: crypto.randomUUID(), event, message: 'Loaded session resume state.', meta: JSON.stringify(data), level: 'normal' };
   if (event === 'model.delta') return { id: crypto.randomUUID(), event, message: String(data.text ?? data.delta ?? ''), meta: [data.provider, data.model].filter(Boolean).join(' / ') };
   if (event === 'turn') return { id: crypto.randomUUID(), event, message: String(data.text ?? 'model turn'), meta: `loop ${String(data.loopCount ?? '?')} · tools ${Array.isArray(data.toolNames) ? data.toolNames.join(', ') || 'none' : '?'}` };
-  if (event === 'tool_call') return { id: crypto.randomUUID(), event, message: String(data.tool ?? 'tool call'), meta: String(data.args ?? ''), level: 'warn' };
+  if (event === 'tool.call.upsert' || event === 'tool_call') {
+    return {
+      id: crypto.randomUUID(),
+      event,
+      message: String(data.toolName ?? data.tool ?? 'tool call'),
+      meta: [data.callId, data.status, data.argsPreview].filter(Boolean).join(' · '),
+      level: 'warn',
+    };
+  }
   if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? 'task event'), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
   return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };
 }

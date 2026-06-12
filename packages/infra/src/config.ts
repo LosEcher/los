@@ -28,7 +28,7 @@ export const ConfigSchema = z.object({
   // Database
   databaseUrl: z.string()
     .refine(v => v.startsWith('postgres://') || v.startsWith('postgresql://'), 'DATABASE_URL must use postgres:// or postgresql://')
-    .default('postgres://los:los@127.0.0.1:5432/los'),
+    .default('postgres://localhost:5432/los'),
 
   // Server
   server: z.object({
@@ -269,7 +269,7 @@ export async function loadConfig(opts?: {
     memory: { ftsEnabled: true, maxObservations: 10000 },
     executor: { enabled: false, meshNodes: [] },
     providers: {},
-    databaseUrl: 'postgres://los:los@127.0.0.1:5432/los',
+    databaseUrl: 'postgres://localhost:5432/los',
     profile: 'default',
     defaultProjectId: 'los',
   };

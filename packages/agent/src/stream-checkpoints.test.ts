@@ -34,15 +34,15 @@ test('stream checkpoints persist and replay by cursor', async () => {
     assert.equal(delta.payload.textDelta, 'Hello');
     assert.ok(typeof delta.id === 'number' && delta.id > 0);
 
-    // Create tool_call checkpoint
+    // Create tool.call.upsert checkpoint
     const tool = await createStreamCheckpoint({
       sessionId,
       runSpecId,
-      eventType: 'tool_call',
-      payload: { tool: 'read_file', args: { path: 'foo.txt' } },
+      eventType: 'tool.call.upsert',
+      payload: { callId: 'call-1', toolName: 'read_file', status: 'running', argsPreview: '{"path":"foo.txt"}' },
     });
-    assert.equal(tool.eventType, 'tool_call');
-    assert.equal(tool.payload.tool, 'read_file');
+    assert.equal(tool.eventType, 'tool.call.upsert');
+    assert.equal(tool.payload.toolName, 'read_file');
 
     // Create turn checkpoint
     const turn = await createStreamCheckpoint({
@@ -58,13 +58,13 @@ test('stream checkpoints persist and replay by cursor', async () => {
     const all = await listStreamCheckpointsSince(sessionId, 0, 10);
     assert.equal(all.length, 3);
     assert.equal(all[0].eventType, 'model.delta');
-    assert.equal(all[1].eventType, 'tool_call');
+    assert.equal(all[1].eventType, 'tool.call.upsert');
     assert.equal(all[2].eventType, 'turn');
 
     // Replay from delta's id — should skip delta
     const afterDelta = await listStreamCheckpointsSince(sessionId, delta.id, 10);
     assert.equal(afterDelta.length, 2);
-    assert.equal(afterDelta[0].eventType, 'tool_call');
+    assert.equal(afterDelta[0].eventType, 'tool.call.upsert');
 
     // Replay with limit 1
     const limited = await listStreamCheckpointsSince(sessionId, 0, 1);
@@ -133,7 +133,7 @@ test('stream checkpoint with defaults works', async () => {
 
     const minimal = await createStreamCheckpoint({
       sessionId,
-      eventType: 'tool_call',
+      eventType: 'tool.call.upsert',
     });
     assert.equal(minimal.sessionId, sessionId);
     assert.equal(minimal.runSpecId, undefined);

@@ -1,7 +1,7 @@
 import type { EditableSurfaceConflictMode } from '../agent-task-editable-surfaces.js';
 
 export type AgentTaskRole = 'planner' | 'executor' | 'verifier';
-export type AgentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type AgentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
 export type AgentTaskAttemptStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AgentTaskRecord {

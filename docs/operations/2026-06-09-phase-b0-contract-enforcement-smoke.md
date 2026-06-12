@@ -55,10 +55,14 @@ pnpm test   # 164 pass, 0 fail
 ## Remaining for Phase 4 (future work)
 
 - Cross-process phase propagation to child agents and executor nodes
-- Plan revision lineage (version tracking)
-- Operator approval events for plan_approved transition
 - Active execution resume (attempt/retry contract)
 - Phase latency and rejection metrics
+
+## Since This Smoke (2026-06-10)
+
+Plan revision lineage (`reviseRunSpecPlan`, `planRevision`, `planParentRunSpecId`)
+and operator approval events (`approveRunSpecPhase`, `run.plan_approved`) are
+now implemented. See ADR 0021 for the full current-state declaration.
 
 ## Non-Goals
 

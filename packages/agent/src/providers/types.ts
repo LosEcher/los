@@ -41,6 +41,10 @@ export interface ChatOptions {
   signal?: AbortSignal;
   onDelta?: (delta: ProviderDelta) => void | Promise<void>;
   modelSettings?: ModelSettings;
+  /** Request trace id — passed through for diagnostic logging. */
+  traceId?: string;
+  /** Session id — passed through for provider call telemetry. */
+  sessionId?: string;
 }
 
 export interface ProviderDelta {
@@ -76,4 +80,6 @@ export interface CreateProviderOptions {
   model?: string;
   baseUrl?: string;
   apiShape?: string;
+  /** Request trace id — passed through for diagnostic logging. */
+  traceId?: string;
 }

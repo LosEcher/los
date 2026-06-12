@@ -1,0 +1,89 @@
+contract: los.session-trace
+version: 0.1.0
+status: draft
+owner: packages/gateway
+description: >
+  Read model for rendering a session transcript with tool call cards.
+  This is a stable UI-facing projection derived from session store + session_events.
+type: object
+routes:
+  - method: GET
+    path: /sessions/{sessionId}/trace
+    response:
+      sessionId: string
+      messageCount: integer
+      turnCount: integer
+      messages:
+        type: array
+        items:
+          type: object
+          required: [role, content, toolCalls]
+          properties:
+            role:
+              type: string
+              enum: [user, assistant, system, separator]
+            content:
+              type: string
+            meta:
+              type: string
+              nullable: true
+            level:
+              type: string
+              enum: [normal, ok, warn, error]
+              nullable: true
+            eventType:
+              type: string
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            model:
+              type: string
+              nullable: true
+            turnIndex:
+              type: integer
+              minimum: 1
+              nullable: true
+            totalTurns:
+              type: integer
+              minimum: 1
+              nullable: true
+            reasoning:
+              type: string
+              nullable: true
+            toolCalls:
+              type: array
+              items:
+                type: object
+                required: [callId, toolName, status, argsPreview]
+                properties:
+                  callId:
+                    type: string
+                  toolName:
+                    type: string
+                  status:
+                    type: string
+                    enum: [running, completed, error, denied]
+                  argsPreview:
+                    type: string
+                  args:
+                    type: object
+                    nullable: true
+                  resultPreview:
+                    type: string
+                    nullable: true
+                  errorPreview:
+                    type: string
+                    nullable: true
+                  durationMs:
+                    type: integer
+                    minimum: 0
+                    nullable: true
+                  attempts:
+                    type: integer
+                    minimum: 1
+                    nullable: true
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh
+

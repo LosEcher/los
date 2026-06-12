@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   gate:
@@ -16,6 +18,7 @@ jobs:
           POSTGRES_USER: los
           POSTGRES_PASSWORD: los
           POSTGRES_DB: los
+          POSTGRES_HOST_AUTH_METHOD: md5
         ports:
           - 5432:5432
         options: >-
@@ -24,6 +27,10 @@ jobs:
           --health-timeout 5s
           --health-retries 5
           --health-start-period 30s
+
+    env:
+      DATABASE_URL: postgres://los:los@localhost:5432/los
+      NODE_ENV: test
 
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +45,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run gate
-        env:
-          DATABASE_URL: postgres://los:los@localhost:5432/los
-          NODE_ENV: test

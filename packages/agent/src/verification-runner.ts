@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { appendSessionEvent } from './session-events.js';
-import { loadRunSpec, updateRunSpecStatus, type RunSpecStatus } from './run-specs.js';
+import { loadRunSpec, type RunSpecStatus } from './run-specs.js';
+import { transitionExecutionState } from './execution-store.js';
 import {
   listVerificationRecordsForRunSpec,
   loadVerificationRecord,
@@ -129,7 +130,13 @@ export async function runVerificationRecordsForRunSpec(
     return options.includeFailed !== false && record.status === 'failed';
   });
 
-  await updateRunSpecStatus(runSpecId, 'running').catch(() => undefined);
+  await transitionExecutionState({
+    entityType: 'run_spec',
+    entityId: runSpecId,
+    to: 'running',
+    reason: 'verification_started',
+    sessionId: initialRecords[0]?.sessionId,
+  }).catch(() => undefined);
   const ranRecordIds: string[] = [];
   for (const record of runnable) {
     await runVerificationRecord(record.id, {
@@ -159,7 +166,13 @@ async function applyVerificationDecisionForRunSpec(
   if (shouldUpdateStatus) {
     const runSpec = await loadRunSpec(runSpecId);
     if (runSpec && runSpec.status !== 'failed' && runSpec.status !== 'cancelled') {
-      await updateRunSpecStatus(runSpecId, decision.status);
+      await transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: runSpecId,
+        to: decision.status,
+        reason: `verification_decision:${decision.status}`,
+        sessionId: runSpec.sessionId,
+      }).catch(() => undefined);
     }
   }
   return decision;

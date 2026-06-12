@@ -1,5 +1,12 @@
 import { useState, useMemo, type ChangeEvent } from 'react';
 import { metadataText } from '../chat-helpers.js';
+import {
+  eventCategory,
+  eventPayloadSummary,
+  ExpandableEvent,
+  HIDDEN_INSPECTOR_EVENTS,
+  TurnGroup,
+} from './session-inspector.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
@@ -308,20 +315,39 @@ function SessionInspector({
         </div>
       ) : null}
       <div className="event-timeline">
-        {(events.data?.events ?? []).slice(-80).map((event, idx, arr) => {
-          const category = eventCategory(event.type);
-          const isNewTurn = idx === 0 || event.turn !== (arr[idx - 1]?.turn ?? 0);
-          const payloadSummary = eventPayloadSummary(event);
-          return (
-            <ExpandableEvent
-              key={event.id}
-              event={event}
-              category={category}
-              isNewTurn={isNewTurn}
-              payloadSummary={payloadSummary}
-            />
-          );
-        })}
+        {(() => {
+          const visible = (events.data?.events ?? [])
+            .filter(event => !HIDDEN_INSPECTOR_EVENTS.has(event.type))
+            .slice(-80);
+          // Group into turns
+          const groups: Array<{ turn: number; events: typeof visible }> = [];
+          for (const event of visible) {
+            const last = groups[groups.length - 1];
+            if (last && last.turn === event.turn) {
+              last.events.push(event);
+            } else {
+              groups.push({ turn: event.turn, events: [event] });
+            }
+          }
+          return groups.map(({ turn, events: turnEvents }) => (
+            <TurnGroup key={turn} turn={turn} events={turnEvents}>
+              {turnEvents.map((event, idx) => {
+                const category = eventCategory(event.type);
+                const isNewTurn = idx === 0;
+                const payloadSummary = eventPayloadSummary(event);
+                return (
+                  <ExpandableEvent
+                    key={event.id}
+                    event={event}
+                    category={category}
+                    isNewTurn={isNewTurn}
+                    payloadSummary={payloadSummary}
+                  />
+                );
+              })}
+            </TurnGroup>
+          ));
+        })()}
       </div>
       <div className="section-divider">
         <div className="mini-timeline-head">
@@ -339,60 +365,6 @@ function SessionInspector({
         ))}
       </div>
     </aside>
-  );
-}
-
-function eventCategory(type: string): string {
-  if (type.startsWith('session.')) return 'session';
-  if (type.startsWith('model.')) return 'model';
-  if (type.startsWith('tool.')) return 'tool';
-  if (type.startsWith('task.')) return 'task';
-  return 'other';
-}
-
-function eventPayloadSummary(event: { payload?: Record<string, unknown> }): string | null {
-  const p = event.payload;
-  if (!p) return null;
-  if (typeof p.textPreview === 'string' && p.textPreview) return p.textPreview.slice(0, 60);
-  if (typeof p.contentPreview === 'string' && p.contentPreview) return p.contentPreview.slice(0, 60);
-  if (typeof p.toolCalls === 'object') {
-    const calls = p.toolCalls as Array<Record<string, unknown>>;
-    if (Array.isArray(calls) && calls.length > 0) {
-      return calls.map(c => String(c.name ?? '?')).join(', ');
-    }
-  }
-  if (typeof p.callId === 'string') return `call: ${p.callId.slice(0, 12)}`;
-  if (typeof p.argsPreview === 'string') return p.argsPreview.slice(0, 60);
-  return null;
-}
-
-function ExpandableEvent({ event, category, isNewTurn, payloadSummary }: {
-  event: SessionEvent;
-  category: string;
-  isNewTurn: boolean;
-  payloadSummary: string | null;
-}) {
-  const [open, setOpen] = useState(false);
-  const hasPayload = event.payload && Object.keys(event.payload).length > 0;
-
-  return (
-    <>
-      <div
-        className={`event-line${isNewTurn ? ' turn-break' : ''}${hasPayload ? ' clickable' : ''}`}
-        data-category={category}
-        onClick={() => hasPayload && setOpen(!open)}
-      >
-        <span className="event-time">{formatTime(event.createdAt)}</span>
-        <span className={`event-dot ${category}`} />
-        <strong>{open ? '▾' : hasPayload ? '▸' : ' '} {event.type}</strong>
-        {event.toolName ? <em>{event.toolName}</em> : null}
-        {event.model ? <em className="event-model">{event.model}</em> : null}
-        {payloadSummary ? <span className="event-summary">{payloadSummary}</span> : null}
-      </div>
-      {open && hasPayload ? (
-        <pre className="event-payload">{JSON.stringify(event.payload, null, 2)}</pre>
-      ) : null}
-    </>
   );
 }
 

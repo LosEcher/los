@@ -23,7 +23,6 @@ import { type TodoStatus } from '@los/agent/todos';
 import {
   ensureRunSpecStore,
   createRunSpec,
-  updateRunSpecStatus,
 } from '@los/agent/run-specs';
 import {
   appendSessionEvent,
@@ -34,13 +33,18 @@ import type { CheckpointState } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
 import { augmentChatSystemPrompt } from './chat-memory-augment.js';
 import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
+import { persistChatError } from './chat-route-persist.js';
 import {
   completeIdempotencyKey,
-  failIdempotencyKey,
   reserveIdempotentRequest,
 } from './idempotency.js';
 import { getRequestContext } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
+import {
+  emitRunningToolCallUpsert,
+  emitToolCallUpsertFromSessionEvent,
+  relaySessionEvent,
+} from './chat-live-events.js';
 
 export function registerChatRoute(app: FastifyInstance, config: Config, defaultWorkspaceRoot: string, gatewayServiceId?: string): void {
   app.post('/chat', async (req, reply) => {
@@ -127,7 +131,6 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    // Branch from parent session: copy messages into a new session
     let branchSourceMessages: Message[] | null = null;
     let branchParentForEvent: Awaited<ReturnType<typeof loadSession>> | null = null;
     if (branchFrom) {
@@ -148,7 +151,6 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
 
     const resumedSession = (!branchFrom && sessionId) ? await loadSession(sid) : null;
 
-    // Create durable run spec before execution
     await ensureRunSpecStore();
     const runSpecId = `run-${sid}-${Date.now()}`;
     activeRunSpecId = runSpecId;
@@ -185,7 +187,6 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         event: 'run_spec.created',
       }).catch(() => undefined);
     }
-    // ADR 0020: memory-augmented system prompt
     const effectiveSystemPrompt = await augmentChatSystemPrompt({
       systemPrompt,
       toolMode,
@@ -194,7 +195,6 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       tenantId: context.tenantId,
       projectId: context.projectId,
     });
-
     try {
       const resumeState = resumedSession ? await loadResumeState(sid) : null;
       if (resumedSession) {
@@ -255,6 +255,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         toolRetry,
         mcpServers,
         runContract: body.runContract,
+        log: context.log,
         executor: {
           enabled: config.executor.enabled,
           nodeUrls: config.executor.meshNodes,
@@ -309,9 +310,8 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           });
           await persistStreamCheckpoint({ sessionId: sid, runSpecId, eventType: 'turn', turn: turn.loopCount, payload: { loopCount: turn.loopCount, textPreview: turn.text.slice(0, 500), toolCallCount: turn.toolCalls.length, toolNames: turn.toolCalls.map(tc => tc.function.name) } });
         },
-        onToolCall: async (tool, args) => {
-          send('tool_call', { tool, args: JSON.stringify(args).slice(0, 200) });
-          await persistStreamCheckpoint({ sessionId: sid, runSpecId, eventType: 'tool_call', payload: { tool, args } });
+        onToolCall: async (callId, tool, args, turn) => {
+          await emitRunningToolCallUpsert({ send, sessionId: sid, runSpecId, turn, callId, toolName: tool, input: args });
         },
         onModelDelta: async (delta) => {
           send('model.delta', {
@@ -348,26 +348,9 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
             },
           }).catch(() => undefined);
         },
-        onSessionEvent: (event) => {
-          send(event.type, {
-            id: event.id,
-            sessionId: event.sessionId,
-            tenantId: event.tenantId ?? null,
-            projectId: event.projectId ?? null,
-            userId: event.userId ?? null,
-            nodeId: event.nodeId ?? null,
-            requestId: event.requestId ?? null,
-            traceId: event.traceId ?? null,
-            turn: event.turn,
-            source: event.source,
-            model: event.model ?? null,
-            toolName: event.toolName ?? null,
-            cacheKey: event.cacheKey ?? null,
-            cacheHit: event.cacheHit ?? null,
-            usage: event.usage ?? null,
-            payload: event.payload,
-            createdAt: event.createdAt,
-          }, event.id);
+        onSessionEvent: async (event) => {
+          relaySessionEvent(send, event);
+          await emitToolCallUpsertFromSessionEvent({ send, sessionId: sid, runSpecId, event });
         },
       });
 
@@ -385,6 +368,27 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           sessionId: scheduled.sessionId,
           taskRunId: scheduled.taskRun.id,
         });
+        await ensureSessionStore().catch(() => undefined);
+        await saveSession({
+          id: scheduled.sessionId,
+          tenantId: context.tenantId,
+          projectId: context.projectId,
+          userId: context.userId,
+          requestId: context.requestId,
+          traceId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: [],
+          turns: [],
+          metadata: {
+            provider: provider ?? config.agent.defaultProvider,
+            model: model ?? null,
+            workspaceRoot,
+            toolMode,
+            deduplicated: true,
+            dedupeKey: scheduled.taskRun.dedupeKey ?? null,
+          },
+        }).catch(() => undefined);
         if (idempotency) {
           await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
         }
@@ -419,6 +423,28 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
           taskRunId: scheduled.taskRun.id,
           reason: scheduled.reason,
         });
+        await ensureSessionStore().catch(() => undefined);
+        await saveSession({
+          id: scheduled.sessionId,
+          tenantId: context.tenantId,
+          projectId: context.projectId,
+          userId: context.userId,
+          requestId: context.requestId,
+          traceId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: [],
+          turns: [],
+          metadata: {
+            provider: provider ?? config.agent.defaultProvider,
+            model: model ?? null,
+            workspaceRoot,
+            toolMode,
+            cancelled: true,
+            cancelReason: scheduled.reason,
+            prompt,
+          },
+        }).catch(() => undefined);
         if (idempotency) {
           await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
         }
@@ -429,7 +455,6 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
       const result = scheduled.result;
       const taskRunId = scheduled.taskRun.id;
 
-      // Parallelize independent post-run writes (different tables, no data dependencies)
       await ensureSessionStore();
       const postRun = await Promise.all([
         saveSession({
@@ -531,68 +556,27 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
       }
     } catch (err: any) {
-      if (boundTodoId) {
-        await updateBoundTodoFromRun(boundTodoId, {
-          status: 'blocked',
-          sessionId: sid,
-          taskRunId: activeTaskRunId,
-          traceId,
-          requestId: context.requestId,
-          runSpecId: activeRunSpecId,
-          event: 'session.error',
-          reason: err?.message ?? String(err),
-        }).catch(() => undefined);
-      }
-      await ensureSessionEventStore().catch(() => undefined);
-      await appendSessionEvent({
+      await persistChatError({
+        err,
         sessionId: sid,
+        taskRunId: activeTaskRunId ?? null,
+        traceId,
+        requestId: context.requestId,
         tenantId: context.tenantId,
         projectId: context.projectId,
         userId: context.userId,
-        requestId: context.requestId,
-        traceId,
-        type: 'session.error',
-        turn: 0,
-        payload: {
-          message: err?.message ?? String(err),
-          taskRunId: activeTaskRunId ?? null,
-          requestId: context.requestId,
-        },
-      }).catch(() => undefined);
-      await updateRunSpecStatus(runSpecId, 'failed').catch(() => undefined);
+        activeRunSpecId: activeRunSpecId,
+        boundTodoId: boundTodoId ?? null,
+        lastCheckpoint: lastCheckpoint as CheckpointState | null,
+        resumedSession: resumedSession,
+        provider: provider ?? config.agent.defaultProvider,
+        model: model ?? null,
+        workspaceRoot,
+        toolMode,
+        runSpecId,
+        idempotency: idempotency ? { id: idempotency.id } : null,
+      });
       send('error', { message: err?.message ?? String(err) });
-
-      // Save partial session state if we have a checkpoint
-      if (lastCheckpoint) {
-        // TS can't track assignment inside onCheckpoint callback, but it's guaranteed
-        // to be set before we reach catch if any checkpoint was emitted.
-        const cp = lastCheckpoint as CheckpointState;
-        await ensureSessionStore().catch(() => undefined);
-        await saveSession({
-          id: sid,
-          tenantId: context.tenantId,
-          projectId: context.projectId,
-          userId: context.userId,
-          requestId: context.requestId,
-          traceId,
-          createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          messages: cp.messages,
-          turns: resumedSession ? [...resumedSession.turns, ...cp.turns] : cp.turns,
-          metadata: {
-            ...(resumedSession?.metadata ?? {}),
-            provider: provider ?? config.agent.defaultProvider,
-            model: model ?? null,
-            workspaceRoot,
-            toolMode,
-            error: err?.message ?? String(err),
-          },
-        }).catch(() => undefined);
-      }
-
-      if (idempotency) {
-        await failIdempotencyKey(idempotency.id, err).catch(() => undefined);
-      }
     }
 
     reply.raw.end();
