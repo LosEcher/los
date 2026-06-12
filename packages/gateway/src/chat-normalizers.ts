@@ -1,7 +1,6 @@
-/**
- * Chat request body normalizers — extracted from chat-route.ts.
- */
+export { normalizeOptionalString } from './routes/server-helpers.js';
 
+import { normalizeOptionalString, normalizeNonNegativeInteger as serverNormalizeNonNegativeInteger } from './routes/server-helpers.js';
 import { resolve } from 'node:path';
 
 export type ToolMode = 'all' | 'project-write' | 'read-only';
@@ -22,12 +21,6 @@ export function normalizeWorkspaceRoot(value: unknown, defaultWorkspaceRoot: str
   if (typeof value !== 'string') return defaultWorkspaceRoot;
   const trimmed = value.trim();
   return trimmed ? resolve(trimmed) : defaultWorkspaceRoot;
-}
-
-export function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 export function normalizeToolMode(value: unknown): ToolMode {
@@ -67,9 +60,9 @@ export function normalizeToolRetry(value: unknown): ToolRetryInput | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
   return {
-    maxAttempts: normalizePositiveInteger(raw.maxAttempts),
-    baseDelayMs: normalizeNonNegativeInteger(raw.baseDelayMs),
-    maxDelayMs: normalizeNonNegativeInteger(raw.maxDelayMs),
+    maxAttempts: serverNormalizeNonNegativeInteger(raw.maxAttempts, 1),
+    baseDelayMs: serverNormalizeNonNegativeInteger(raw.baseDelayMs, 0),
+    maxDelayMs: serverNormalizeNonNegativeInteger(raw.maxDelayMs, 0),
   };
 }
 
