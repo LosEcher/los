@@ -3,6 +3,16 @@ import { getPool } from '@los/infra/db';
 import { ensureSessionEventStore, listSessionEventsSince } from '@los/agent/session-events';
 import { ensureTaskRunStore, listTaskRunsForSession, loadTaskRun } from '@los/agent/task-runs';
 
+interface LiveClient {
+  sessionId: string;
+  reply: any;
+  lastId: number;
+  ended: boolean;
+}
+
+const liveClients = new Map<number, LiveClient>();
+let clientSeq = 0;
+
 function parseLiveSessionEventNotification(payload: string | undefined) {
   if (!payload) return null;
   try {
@@ -81,12 +91,19 @@ export function registerSseRoutes(app: FastifyInstance): void {
           message: 'Session has active task. Streaming live events...',
         });
 
+        // Register as a live client so PG NOTIFY triggers instant push
+        const cid = ++clientSeq;
+        liveClients.set(cid, { sessionId: id, reply, lastId, ended: false });
+
         const interval = setInterval(async () => {
           try {
             await pollAndSend();
+            const client = liveClients.get(cid);
+            if (client) client.lastId = lastId;
             const task = await loadTaskRun(active.id);
             if (!task || !['queued', 'running'].includes(task.status)) {
               ended = true;
+              liveClients.delete(cid);
               clearInterval(interval);
               send('session.completed', {
                 sessionId: id, taskRunId: active.id,
@@ -95,12 +112,16 @@ export function registerSseRoutes(app: FastifyInstance): void {
               reply.raw.end();
             }
           } catch {
+            liveClients.delete(cid);
             clearInterval(interval);
             reply.raw.end();
           }
         }, 1000);
 
-        req.raw.on('close', () => clearInterval(interval));
+        req.raw.on('close', () => {
+          liveClients.delete(cid);
+          clearInterval(interval);
+        });
       } else {
         send('session.completed', {
           sessionId: id, message: 'No active task. All events delivered.',
@@ -114,22 +135,71 @@ export function registerSseRoutes(app: FastifyInstance): void {
   });
 }
 
+/**
+ * Wire PG NOTIFY → SSE push.
+ *
+ * When appendSessionEvent calls pg_notify('session_events', ...), this listener
+ * wakes up registered SSE clients and pushes new events immediately, eliminating
+ * the 1s polling delay.
+ */
 export function setupLiveEventPush(app: FastifyInstance): void {
   const pool = getPool();
   if (!pool) return;
 
+  let client: any = null;
+
   app.addHook('onReady', async () => {
     try {
-      const c: any = await pool.connect();
-      await c.query('LISTEN session_events');
-      c.on('notification', async (msg: any) => {
-        parseLiveSessionEventNotification(msg.payload);
+      client = await pool.connect();
+      await client.query('LISTEN session_events');
+
+      client.on('notification', async (msg: any) => {
+        const parsed = parseLiveSessionEventNotification(msg.payload);
+        if (!parsed) return;
+
+        // Push to any live client watching this session
+        for (const [cid, lc] of liveClients) {
+          if (lc.sessionId !== parsed.sessionId || lc.ended) continue;
+          try {
+            const events = await listSessionEventsSince(lc.sessionId, lc.lastId, 100);
+            for (const event of events) {
+              if (event.id <= lc.lastId) continue;
+              lc.reply.raw.write(`id: ${event.id}\n`);
+              lc.reply.raw.write(`event: ${event.type}\n`);
+              lc.reply.raw.write(`data: ${JSON.stringify({
+                id: event.id,
+                sessionId: event.sessionId,
+                turn: event.turn,
+                type: event.type,
+                source: event.source,
+                model: event.model ?? null,
+                toolName: event.toolName ?? null,
+                usage: event.usage ?? null,
+                payload: event.payload,
+                createdAt: event.createdAt,
+              })}\n\n`);
+              lc.lastId = event.id;
+            }
+          } catch {
+            lc.ended = true;
+            liveClients.delete(cid);
+          }
+        }
       });
-      c.on('error', () => {});
-      app.addHook('onClose', async () => {
-        try { c.release(); } catch { /* ignore */ }
+
+      client.on('error', () => {
+        // Connection errors on the LISTEN client are non-fatal;
+        // the per-connection polling fallback ensures liveness.
       });
-    } catch { /* pool not available */ }
+    } catch {
+      // Pool or LISTEN unavailable — all connections fall back to polling
+    }
+  });
+
+  app.addHook('onClose', async () => {
+    if (client) {
+      try { client.release(); } catch { /* ignore */ }
+    }
   });
 }
 
@@ -173,14 +243,23 @@ export function registerLiveEventRoutes(app: FastifyInstance): void {
       await pollAndSend();
       send('session.ready', { sessionId: id, lastEventId: lastId });
 
+      // Register for NOTIFY push
+      const cid = ++clientSeq;
+      liveClients.set(cid, { sessionId: id, reply, lastId, ended: false });
+
       const interval = setInterval(async () => {
-        try { await pollAndSend(); } catch {
+        try {
+          await pollAndSend();
+          const client = liveClients.get(cid);
+          if (client) client.lastId = lastId;
+        } catch {
+          liveClients.delete(cid);
           clearInterval(interval);
           reply.raw.end();
         }
       }, 1000);
 
-      req.raw.on('close', () => { ended = true; clearInterval(interval); });
+      req.raw.on('close', () => { ended = true; liveClients.delete(cid); clearInterval(interval); });
     } catch (err: any) {
       send('error', { message: err?.message ?? String(err) });
       reply.raw.end();
