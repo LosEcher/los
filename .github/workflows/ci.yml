@@ -45,3 +45,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run gate
+      - run: echo "DATABASE_URL=$DATABASE_URL"
+        if: failure()
