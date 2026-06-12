@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
+const chatComposer = readFileSync(new URL('./chat-composer.tsx', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
-  const composer = between(chatPage, '<form className="composer"', '</form>');
+  const composer = between(chatComposer, '<form className="composer"', '</form>');
   const inspector = between(chatPage, '<aside className="panel inspector">', '</aside>');
 
   assert.match(composer, /className="composer-toolbar"/);
@@ -21,11 +22,10 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
   assert.match(composer, /label="temperature"/);
   assert.match(composer, /label="max tokens"/);
   assert.match(chatPage, /refetchInterval: running \? 4_000 : false/);
-  assert.match(chatPage, /addEventListener\('session_event'/);
+  assert.match(chatPage, /addEventListener\('session\.event'/);
   assert.doesNotMatch(chatPage, /es\.onmessage/);
 
   assert.match(inspector, /Run Evidence/);
-  assert.match(inspector, /Recent Events/);
   assert.doesNotMatch(inspector, /Run Controls/);
   assert.doesNotMatch(composer, /Provider setup stays in Providers/);
   assert.doesNotMatch(composer, /composer-run-panel/);

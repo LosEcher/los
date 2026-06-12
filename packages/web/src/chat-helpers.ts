@@ -261,7 +261,15 @@ export function streamRow(event: string, data: Record<string, unknown>): StreamR
   if (event === 'session.resume_state') return { id: crypto.randomUUID(), event, message: 'Loaded session resume state.', meta: JSON.stringify(data), level: 'normal' };
   if (event === 'model.delta') return { id: crypto.randomUUID(), event, message: String(data.text ?? data.delta ?? ''), meta: [data.provider, data.model].filter(Boolean).join(' / ') };
   if (event === 'turn') return { id: crypto.randomUUID(), event, message: String(data.text ?? 'model turn'), meta: `loop ${String(data.loopCount ?? '?')} · tools ${Array.isArray(data.toolNames) ? data.toolNames.join(', ') || 'none' : '?'}` };
-  if (event === 'tool_call') return { id: crypto.randomUUID(), event, message: String(data.tool ?? 'tool call'), meta: String(data.args ?? ''), level: 'warn' };
+  if (event === 'tool.call.upsert' || event === 'tool_call') {
+    return {
+      id: crypto.randomUUID(),
+      event,
+      message: String(data.toolName ?? data.tool ?? 'tool call'),
+      meta: [data.callId, data.status, data.argsPreview].filter(Boolean).join(' · '),
+      level: 'warn',
+    };
+  }
   if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? 'task event'), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
   return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };
 }

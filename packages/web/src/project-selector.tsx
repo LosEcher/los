@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUp, Check, Folder, FolderOpen, Home, Star, X } from 'lucide-react';
 import { getJson, postJson, deleteJson, setCurrentProjectId } from './api/index.js';
@@ -13,11 +14,14 @@ interface ProjectSelectorProps {
 export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: ProjectSelectorProps) {
   const queryClient = useQueryClient();
   const selectorRef = useRef<HTMLDivElement>(null);
+  const portalRootRef = useRef<HTMLDivElement | null>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
   const [pickerFeedback, setPickerFeedback] = useState('');
   const [bindName, setBindName] = useState('');
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browsePath, setBrowsePath] = useState('');
   const [browserPlacement, setBrowserPlacement] = useState<'up' | 'down'>('down');
+  const [browserStyle, setBrowserStyle] = useState<React.CSSProperties>({});
 
   const { data } = useQuery({
     queryKey: ['projects'],
@@ -40,9 +44,19 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
     const rect = selectorRef.current?.getBoundingClientRect();
     if (!rect) return;
     const panelHeight = 360;
+    const maxHeight = Math.min(400, window.innerHeight - 48);
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    setBrowserPlacement(spaceBelow < panelHeight && spaceAbove > spaceBelow ? 'up' : 'down');
+    const goingUp = spaceBelow < panelHeight && spaceAbove > spaceBelow;
+    setBrowserPlacement(goingUp ? 'up' : 'down');
+    setBrowserStyle({
+      left: `${rect.left}px`,
+      width: `${Math.min(520, window.innerWidth - 32)}px`,
+      maxHeight: `${goingUp ? Math.min(maxHeight, rect.top - 12) : Math.min(maxHeight, spaceBelow - 12)}px`,
+      ...(goingUp
+        ? { bottom: `${window.innerHeight - rect.top + 6}px` }
+        : { top: `${rect.bottom + 6}px` }),
+    });
   }, []);
 
   useLayoutEffect(() => {
@@ -55,6 +69,52 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
       window.removeEventListener('scroll', updateBrowserPlacement, true);
     };
   }, [browserOpen, updateBrowserPlacement]);
+
+  // Portal container lifecycle
+  useEffect(() => {
+    if (!browserOpen) return;
+    const el = document.createElement('div');
+    el.className = 'project-browser-portal';
+    document.body.appendChild(el);
+    portalRootRef.current = el;
+    return () => {
+      el.remove();
+      portalRootRef.current = null;
+    };
+  }, [browserOpen]);
+
+  // Auto-focus path input when browser opens
+  useEffect(() => {
+    if (browserOpen) {
+      requestAnimationFrame(() => pathInputRef.current?.focus());
+    }
+  }, [browserOpen]);
+
+  // Click-outside dismiss
+  useEffect(() => {
+    if (!browserOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        selectorRef.current && !selectorRef.current.contains(target) &&
+        portalRootRef.current && !portalRootRef.current.contains(target)
+      ) {
+        setBrowserOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [browserOpen]);
+
+  // Escape key dismiss
+  useEffect(() => {
+    if (!browserOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBrowserOpen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [browserOpen]);
 
   // Sync projectId header whenever workspace changes to a known project
   useEffect(() => {
@@ -143,8 +203,8 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
         </datalist>
       </div>
 
-      {browserOpen && (
-        <div className="project-browser" data-placement={browserPlacement}>
+      {browserOpen && portalRootRef.current && createPortal(
+        <div className="project-browser project-browser--portalled" style={browserStyle} data-placement={browserPlacement}>
           <div className="project-browser-head">
             <button
               type="button"
@@ -156,10 +216,14 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
               <ArrowUp size={12} />
             </button>
             <input
+              ref={pathInputRef}
               value={browseTarget}
               onChange={event => setBrowsePath(event.target.value)}
               onKeyDown={event => {
-                if (event.key === 'Enter') setBrowsePath((event.target as HTMLInputElement).value);
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handleUseBrowsePath((event.target as HTMLInputElement).value);
+                }
               }}
               className="project-browser-path"
               spellCheck={false}
@@ -196,16 +260,35 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
               {browse.data?.entries.length === 0 ? (
                 <span className="project-empty">No subfolders</span>
               ) : browse.data?.entries.map(entry => (
-                <button
+                <div
                   key={entry.path}
-                  type="button"
-                  className={`project-browser-item${entry.hidden ? ' hidden' : ''}`}
-                  title={entry.path}
-                  onClick={() => setBrowsePath(entry.path)}
+                  className={`project-browser-item-row${entry.hidden ? ' hidden' : ''}`}
                 >
-                  <Folder size={12} />
-                  <span>{entry.name}</span>
-                </button>
+                  <button
+                    type="button"
+                    className="project-browser-item"
+                    title={`Browse into ${entry.path}`}
+                    onClick={() => setBrowsePath(entry.path)}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      handleUseBrowsePath(entry.path);
+                    }}
+                  >
+                    <Folder size={12} />
+                    <span>{entry.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="project-browser-item-select"
+                    title={`Select ${entry.path}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleUseBrowsePath(entry.path);
+                    }}
+                  >
+                    <Check size={12} />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -261,7 +344,8 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
               <div className="project-picker-feedback">{pickerFeedback}</div>
             )}
           </div>
-        </div>
+        </div>,
+        portalRootRef.current
       )}
     </div>
   );

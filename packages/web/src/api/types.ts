@@ -1,3 +1,6 @@
+import type { ExecutorNodeUpsertPayload } from './types-executor-nodes.js';
+export * from './types-executor-nodes.js';
+
 export type ToolMode = 'read-only' | 'project-write' | 'all';
 
 export type Health = {
@@ -26,6 +29,16 @@ export type SessionEvent = {
   model?: string;
   toolName?: string;
   payload: Record<string, unknown>;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    totalTokens: number;
+  };
+  cacheKey?: string;
+  cacheHit?: boolean;
+  parentEventId?: number;
   createdAt: string;
 };
 
@@ -33,6 +46,39 @@ export type SessionEventsResponse = {
   sessionId: string;
   count: number;
   events: SessionEvent[];
+};
+
+export type TraceToolCall = {
+  callId: string;
+  toolName: string;
+  status: 'running' | 'completed' | 'error' | 'denied';
+  argsPreview: string;
+  args?: Record<string, unknown>;
+  resultPreview?: string;
+  errorPreview?: string;
+  durationMs?: number;
+  attempts?: number;
+};
+
+export type TraceMessage = {
+  role: 'user' | 'assistant' | 'system' | 'separator';
+  content: string;
+  meta?: string;
+  level?: 'normal' | 'ok' | 'warn' | 'error';
+  eventType?: string;
+  provider?: string;
+  model?: string;
+  turnIndex?: number;
+  totalTurns?: number;
+  reasoning?: string;
+  toolCalls: TraceToolCall[];
+};
+
+export type SessionTraceResponse = {
+  sessionId: string;
+  messageCount: number;
+  turnCount: number;
+  messages: TraceMessage[];
 };
 
 export type SessionObservability = {
@@ -86,66 +132,6 @@ export type TaskRun = {
   completedAt?: string;
   heartbeatAt?: string;
   leaseExpiresAt?: string;
-};
-
-export type ExecutorNode = {
-  nodeId: string;
-  nodeKind: 'executor' | 'ssh_target' | 'ingress' | 'proxy';
-  baseUrl?: string;
-  hostLabel?: string;
-  status: 'online' | 'draining' | 'offline';
-  version?: string;
-  targetVersion?: string;
-  rolloutState?: 'idle' | 'draining' | 'upgrading' | 'verifying' | 'failed';
-  rolloutMessage?: string;
-  connectModes: string[];
-  connectConfig: Record<string, unknown>;
-  capacity: Record<string, unknown>;
-  capabilities: Record<string, unknown>;
-  verified: Record<string, unknown>;
-  queueDepth: number;
-  activeTaskCount: number;
-  meshLinks: Array<Record<string, unknown>>;
-  lastProbeAt?: string;
-  lastProbeError?: string;
-  lastHeartbeatAt: string;
-  createdAt: string;
-  updatedAt: string;
-  execution: {
-    candidate: boolean;
-    mode?: string;
-    blockers: string[];
-    warnings: string[];
-  };
-};
-
-export type ExecutorNodeUpsertPayload = {
-  nodeKind?: ExecutorNode['nodeKind'];
-  baseUrl?: string;
-  hostLabel?: string;
-  status?: ExecutorNode['status'];
-  version?: string;
-  targetVersion?: string;
-  rolloutState?: ExecutorNode['rolloutState'];
-  rolloutMessage?: string;
-  connectModes?: ExecutorNode['connectModes'] | string;
-  connectConfig?: Record<string, unknown>;
-  capacity?: Record<string, unknown>;
-  capabilities?: Record<string, unknown>;
-  verified?: Record<string, unknown>;
-  queueDepth?: number;
-  activeTaskCount?: number;
-  meshLinks?: Array<Record<string, unknown>>;
-};
-
-export type ExecutorNodeProbeResponse = {
-  ok: boolean;
-  node: ExecutorNode;
-  probe: {
-    status: ExecutorNode['status'];
-    verified: Record<string, unknown>;
-    lastProbeError?: string;
-  };
 };
 
 export type SshConfigImportResponse = {

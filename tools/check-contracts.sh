@@ -8,6 +8,7 @@ CONTRACT_DIR="$ROOT/contracts"
 required_contracts=(
   run-spec.yaml
   run-stream.yaml
+  session-trace.yaml
   node-registry.yaml
   node-command.yaml
   artifact-transfer.yaml

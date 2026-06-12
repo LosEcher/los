@@ -251,12 +251,12 @@ test('run stream route interleaves stream checkpoints and session events', async
       payload: { textPreview: 'Hello world' },
     });
 
-    // Insert another stream checkpoint (tool_call)
+    // Insert another stream checkpoint (tool.call.upsert)
     const tool = await createStreamCheckpoint({
       sessionId,
       runSpecId,
-      eventType: 'tool_call',
-      payload: { tool: 'read_file', args: { path: 'foo.txt' } },
+      eventType: 'tool.call.upsert',
+      payload: { callId: 'call-1', toolName: 'read_file', status: 'running', argsPreview: '{"path":"foo.txt"}' },
     });
 
     // Fetch stream replay from cursor 0
@@ -284,7 +284,7 @@ test('run stream route interleaves stream checkpoints and session events', async
     const streamItems = items.filter(i => i.kind === 'stream');
     assert.equal(streamItems.length, 2);
     assert.equal(streamItems[0].eventType, 'model.delta');
-    assert.equal(streamItems[1].eventType, 'tool_call');
+    assert.equal(streamItems[1].eventType, 'tool.call.upsert');
 
     const eventItems = items.filter(i => i.kind === 'event');
     assert.equal(eventItems.length, 2);

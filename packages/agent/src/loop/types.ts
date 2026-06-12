@@ -37,7 +37,7 @@ export interface AgentConfig {
   onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void | Promise<void>;
-  onToolCall?: (tool: string, args: Record<string, unknown>) => void | Promise<void>;
+  onToolCall?: (callId: string, tool: string, args: Record<string, unknown>, turn: number) => void | Promise<void>;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
   onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
 }

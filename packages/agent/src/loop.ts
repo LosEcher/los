@@ -380,7 +380,7 @@ export async function runAgent(
       }
       const capability = tools.getCapability(fn.name);
       const toolSource = inferToolSource(capability);
-      await config.onToolCall?.(fn.name, args);
+      await config.onToolCall?.(tc.id, fn.name, args, i + 1);
 
       await config.onToolCallState?.({
         callId: tc.id,

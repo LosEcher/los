@@ -35,6 +35,7 @@ import { reclaimOrphanedRuns } from './chat-session-helpers.js';
 import { registerProviderRoutes } from './routes/provider-routes.js';
 import { registerMemoryRoutes } from './routes/memory-routes.js';
 import { registerSessionRoutes } from './routes/session-routes.js';
+import { registerTraceRoutes } from './routes/trace-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/sse-routes.js';
 import { registerTaskRoutes } from './routes/task-routes.js';
 import { registerRunRoutes } from './routes/run-routes.js';
@@ -153,6 +154,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   // ── Feature routes ─────────────────────────────────
   registerMemoryRoutes(app);
   registerSessionRoutes(app);
+  registerTraceRoutes(app);
   registerSseRoutes(app);
   registerTaskRoutes(app);
   registerRunRoutes(app);

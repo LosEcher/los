@@ -4,10 +4,6 @@ import {
   Activity,
   MessageSquarePlus,
   RefreshCcw,
-  Send,
-  SlidersHorizontal,
-  Square,
-  Wrench,
 } from 'lucide-react';
 import {
   getJson,
@@ -17,8 +13,7 @@ import {
   type ProviderDiscovery,
   type ProviderModelsResponse,
   type SessionDetail,
-  type SessionEvent,
-  type SessionEventsResponse,
+  type SessionTraceResponse,
   type SessionObservability,
   type ToolMode,
   type TodoItem,
@@ -26,15 +21,11 @@ import {
 import {
   buildAdvancedCount,
   buildProviderOptions,
-  buildModelSettingsPayload,
-  buildToolRetryPayload,
   buildTodoPrompt,
-  parseCommaList,
   readRunContract,
   readyStreamRows,
   metadataText,
   buildHistoryRows,
-  appendLiveSessionEvent,
   streamRow,
   SUPPRESSED_STREAM_EVENTS,
   providerRoutesFromModels,
@@ -46,8 +37,14 @@ import {
   formatDate,
   formatTime,
 } from './ui';
-import { RunField, ContextChip } from './chat-ui.js';
-import { ProjectSelector } from './project-selector.js';
+import { ContextChip } from './chat-ui.js';
+import { ChatComposer, buildComposerPayload } from './chat-composer.js';
+import {
+  accumulateEvent,
+  readyMessages,
+  ChatMessages,
+  type Message,
+} from './chat-messages.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -89,6 +86,8 @@ export function ChatPage({
   const [taskRunId, setTaskRunId] = useState<string | null>(null);
   const [boundTodoId, setBoundTodoId] = useState<string | null>(null);
   const [rows, setRows] = useState<StreamRow[]>(() => readyStreamRows());
+  const [messages, setMessages] = useState<Message[]>(() => readyMessages());
+  const [debugMode, setDebugMode] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const historyLoadedForSession = useRef<string | null>(null);
   const branchFromRef = useRef<string | null>(null);
@@ -124,9 +123,9 @@ export function ChatPage({
     enabled: Boolean(sessionId),
     refetchInterval: running ? 4_000 : false,
   });
-  const sessionEvents = useQuery({
-    queryKey: ['chat-session-events', sessionId],
-    queryFn: () => getJson<SessionEventsResponse>(`/sessions/${sessionId}/events?limit=80`),
+  const sessionTrace = useQuery({
+    queryKey: ['chat-session-trace', sessionId],
+    queryFn: () => getJson<SessionTraceResponse>(`/sessions/${sessionId}/trace`),
     enabled: Boolean(sessionId),
     refetchInterval: running ? 4_000 : false,
   });
@@ -134,23 +133,17 @@ export function ChatPage({
   useEffect(() => {
     if (!sessionId || !running) return;
     const es = new EventSource(`/sessions/${sessionId}/events/live`);
-    const onSessionEvent = (msg: MessageEvent<string>) => {
-      try {
-        const event = JSON.parse(msg.data) as SessionEvent;
-        queryClient.setQueryData<SessionEventsResponse>(
-          ['chat-session-events', sessionId],
-          (prev) => appendLiveSessionEvent(prev, sessionId, event),
-        );
-        void queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
-      } catch {}
+    const onSessionEvent = () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
     };
-    es.addEventListener('session_event', onSessionEvent);
+    es.addEventListener('session.event', onSessionEvent);
     es.onerror = () => {
       es.close();
-      void queryClient.invalidateQueries({ queryKey: ['chat-session-events', sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
     };
     return () => {
-      es.removeEventListener('session_event', onSessionEvent);
+      es.removeEventListener('session.event', onSessionEvent);
       es.close();
     };
   }, [sessionId, running, queryClient]);
@@ -193,7 +186,32 @@ export function ChatPage({
     });
   }, [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
-  const recentEvents = sessionEvents.data?.events.slice(-8) ?? [];
+  function mapTraceMessages(input: SessionTraceResponse['messages']): Message[] {
+    return input.map((msg, idx) => ({
+      id: `${sessionId ?? 'no-session'}:${idx}:${msg.role}:${msg.turnIndex ?? ''}:${msg.eventType ?? ''}`,
+      role: msg.role,
+      content: msg.content,
+      meta: msg.meta,
+      level: msg.level,
+      eventType: msg.eventType,
+      provider: msg.provider,
+      model: msg.model,
+      turnIndex: msg.turnIndex,
+      totalTurns: msg.totalTurns,
+      reasoning: msg.reasoning,
+      toolCalls: msg.toolCalls.map(tc => ({
+        callId: tc.callId,
+        toolName: tc.toolName,
+        status: tc.status,
+        argsPreview: tc.argsPreview,
+        args: tc.args,
+        resultPreview: tc.resultPreview,
+        errorPreview: tc.errorPreview,
+        durationMs: tc.durationMs,
+        attempts: tc.attempts,
+      })),
+    }));
+  }
 
   // Persist workspaceRoot to localStorage
   useEffect(() => {
@@ -212,6 +230,13 @@ export function ChatPage({
       message: `Loading session ${selectedSessionId}...`,
       level: 'normal',
     }]);
+    setMessages([{
+      id: crypto.randomUUID(),
+      role: 'system' as const,
+      content: `Loading session ${selectedSessionId}...`,
+      eventType: 'session.loading',
+      toolCalls: [],
+    }]);
   }, [selectedSessionId, sessionId, running]);
 
   // When session detail loads for a resumed session, render history in the chat
@@ -219,15 +244,16 @@ export function ChatPage({
     if (running) return;
     if (!sessionId || sessionId !== selectedSessionId) return;
     if (historyLoadedForSession.current === sessionId) return;
-    const detail = sessionDetail.data;
-    if (!detail || !Array.isArray(detail.messages) || detail.messages.length === 0) return;
+    const trace = sessionTrace.data;
+    if (!trace || !Array.isArray(trace.messages) || trace.messages.length === 0) return;
     historyLoadedForSession.current = sessionId;
-    const historyRows = buildHistoryRows(
-      detail.messages as Array<Record<string, unknown>>,
-      Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [],
-    );
+    const detail = sessionDetail.data;
+    const messages_ = detail?.messages ?? [];
+    const turns_ = detail?.turns ?? [];
+    const historyRows = buildHistoryRows(messages_ as Array<Record<string, unknown>>, turns_ as Array<Record<string, unknown>>);
     setRows(historyRows);
-  }, [sessionDetail.data, sessionId, selectedSessionId, running]);
+    setMessages(mapTraceMessages(trace.messages));
+  }, [sessionDetail.data, sessionTrace.data, sessionId, selectedSessionId, running]);
 
   // When branchFromSession is set, prepare chat for a branch
   useEffect(() => {
@@ -242,17 +268,30 @@ export function ChatPage({
       message: `Branching from ${branchFromSession}. Enter your prompt to start.`,
       level: 'ok',
     }]);
+    setMessages([{
+      id: crypto.randomUUID(),
+      role: 'system' as const,
+      content: `Branching from ${branchFromSession}. Enter your prompt to start.`,
+      eventType: 'session.branch',
+      level: 'ok',
+      toolCalls: [],
+    }]);
     // Load parent session to show history context
-    getJson<SessionDetail>(`/sessions/${branchFromSession}`).then(detail => {
+    Promise.all([
+      getJson<SessionDetail>(`/sessions/${branchFromSession}`),
+      getJson<SessionTraceResponse>(`/sessions/${branchFromSession}/trace`),
+    ]).then(([detail, trace]) => {
       if (detail && Array.isArray(detail.messages) && detail.messages.length > 0) {
-        const historyRows = buildHistoryRows(
-          detail.messages as Array<Record<string, unknown>>,
-          Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [],
-        );
+        const msgs = detail.messages as Array<Record<string, unknown>>;
+        const turns = Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [];
+        const historyRows = buildHistoryRows(msgs, turns);
         setRows(prev => {
-          // Only replace if we're still in branch mode
           if (!branchFromRef.current) return prev;
           return historyRows;
+        });
+        setMessages(prev => {
+          if (!branchFromRef.current) return prev;
+          return trace?.messages ? mapTraceMessages(trace.messages) : prev;
         });
       }
     }).catch(() => undefined);
@@ -270,6 +309,14 @@ export function ChatPage({
       message: activeTodoContext.title,
       meta: activeTodoContext.id,
       level: 'ok',
+    }]);
+    setMessages([{
+      id: crypto.randomUUID(),
+      role: 'system' as const,
+      content: activeTodoContext.title,
+      meta: activeTodoContext.id,
+      level: 'ok',
+      toolCalls: [],
     }]);
   }, [activeTodoContext, boundTodoId, running, sessionId]);
 
@@ -314,34 +361,50 @@ export function ChatPage({
       }
       return [{ id: crypto.randomUUID(), event: 'user', message: text }];
     });
+    setMessages(prev => {
+      const hasHistory = prev.length > 0 && prev.some(m => m.role === 'separator');
+      const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, toolCalls: [] };
+      if (hasHistory) {
+        return [...prev, {
+          id: crypto.randomUUID(),
+          role: 'separator' as const,
+          content: 'New message below',
+          level: 'normal' as const,
+          toolCalls: [],
+        }, userMsg];
+      }
+      return [userMsg];
+    });
 
     try {
+      const composer = buildComposerPayload({
+        systemPrompt,
+        allowedTools,
+        toolRetryMaxAttempts,
+        toolRetryBaseDelayMs,
+        toolRetryMaxDelayMs,
+        temperature,
+        topP,
+        maxTokens,
+        presencePenalty,
+        frequencyPenalty,
+      });
       await streamChat({
         prompt: text,
         sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
         branchFrom: branchFromRef.current ?? undefined,
-        systemPrompt: systemPrompt.trim() || undefined,
+        systemPrompt: composer.systemPrompt,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
-        modelSettings: buildModelSettingsPayload({
-          temperature,
-          topP,
-          maxTokens,
-          presencePenalty,
-          frequencyPenalty,
-        }),
+        modelSettings: composer.modelSettings,
         workspaceRoot: workspaceRoot.trim() || undefined,
         toolMode,
-        allowedTools: parseCommaList(allowedTools),
+        allowedTools: composer.allowedTools,
         maxLoops,
         traceId: activeTodoContext?.traceId,
         dedupeKey: activeTodoContext ? `todo:${activeTodoContext.id}:${Date.now()}` : undefined,
         timeoutMs,
-        toolRetry: buildToolRetryPayload({
-          maxAttempts: toolRetryMaxAttempts,
-          baseDelayMs: toolRetryBaseDelayMs,
-          maxDelayMs: toolRetryMaxDelayMs,
-        }),
+        toolRetry: composer.toolRetry,
         runContract: readRunContract(activeTodoContext),
         todoId: activeTodoContext?.id,
       }, controller.signal, ({ event, data }) => {
@@ -353,14 +416,24 @@ export function ChatPage({
         if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
           setRows(prev => [...prev, streamRow(event, data)]);
         }
+        setMessages(prev => accumulateEvent(prev, event, data));
       });
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        const errMsg = String((err as Error).message ?? err);
         setRows(prev => [...prev, {
           id: crypto.randomUUID(),
           event: 'error',
-          message: String((err as Error).message ?? err),
+          message: errMsg,
           level: 'error',
+        }]);
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(),
+          role: 'system' as const,
+          content: errMsg,
+          eventType: 'error',
+          level: 'error',
+          toolCalls: [],
         }]);
       }
     } finally {
@@ -375,7 +448,7 @@ export function ChatPage({
       await queryClient.invalidateQueries({ queryKey: ['todos'] });
       await queryClient.invalidateQueries({ queryKey: ['memory'] });
       await queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId] });
-      await queryClient.invalidateQueries({ queryKey: ['chat-session-events', sessionId] });
+      await queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
       await queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
     }
   }
@@ -411,6 +484,14 @@ export function ChatPage({
       meta: 'next send will create a new session',
       level: 'ok',
     }]);
+    setMessages([{
+      id: crypto.randomUUID(),
+      role: 'system' as const,
+      content: 'New chat is ready.',
+      meta: 'next send will create a new session',
+      level: 'ok',
+      toolCalls: [],
+    }]);
     onSessionSelect(null);
   }
 
@@ -426,7 +507,7 @@ export function ChatPage({
             <button className={`ghost-btn${newChatConfirming ? ' danger' : ''}`} type="button" disabled={running} onClick={startNewChat}>
               <MessageSquarePlus size={14} /> {newChatConfirming ? 'confirm new?' : 'new chat'}
             </button>
-            <button className="ghost-btn" type="button" onClick={() => setRows([])}>
+            <button className="ghost-btn" type="button" onClick={() => { setRows([]); setMessages([]); }}>
               <RefreshCcw size={14} /> clear
             </button>
           </div>
@@ -440,7 +521,11 @@ export function ChatPage({
           <ContextChip label="task" value={taskRunId ?? (running ? 'starting' : 'idle')} tone={running ? 'warn' : undefined} />
         </div>
 
-        <div className="stream-list">
+        <ChatMessages
+          messages={messages}
+          debugMode={debugMode}
+          onDebugModeChange={setDebugMode}
+        >
           {rows.length === 0 ? <EmptyText text="No stream events yet." /> : rows.map(row => (
             <div className={`stream-row${row.event === '---' || row.event === 'history.end' ? ' stream-separator' : ''}`} data-level={row.level ?? 'normal'} key={row.id}>
               <span className="stream-event">{row.event}</span>
@@ -450,111 +535,50 @@ export function ChatPage({
               </div>
             </div>
           ))}
-        </div>
-
-        <form className="composer" onSubmit={handleSubmit}>
-          <div className="composer-toolbar" aria-label="run choices">
-            <span
-              className={`route-dot ${selectedRoute?.ok ? 'ok' : 'partial'}`}
-              title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? onboarding.data?.summary ?? 'discovery pending'}
-            />
-            <RunField label="provider" title="Provider endpoint for this send">
-              {providerOptions.length > 0 ? (
-                <select value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
-                  {providerOptions.map(option => (
-                    <option value={option.id} key={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }} placeholder="provider id" />
-              )}
-            </RunField>
-            <RunField label="model" title="Model for this send">
-              {modelOptions.length > 0 ? (
-                <select value={model} onChange={event => setModel(event.target.value)}>
-                  {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
-                </select>
-              ) : (
-                <input value={model} onChange={event => setModel(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
-              )}
-            </RunField>
-            <RunField label="tools / skills" title="Tool and skill access for this send">
-              <Wrench size={13} />
-              <select value={toolMode} onChange={event => setToolMode(event.target.value as ToolMode)}>
-                <option value="read-only">off / read-only</option>
-                <option value="project-write">project tools (no shell)</option>
-                <option value="all">all tools + sandboxed shell</option>
-              </select>
-            </RunField>
-            <RunField label="execution dir" title={`Execution directory. Default: ${defaultWorkspace || 'loading...'}`} variant="group">
-              <ProjectSelector
-                workspaceRoot={workspaceRoot}
-                onChange={setWorkspaceRoot}
-                defaultWorkspace={defaultWorkspace}
-              />
-            </RunField>
-            <details className="composer-advanced">
-              <summary title="Advanced request settings">
-                <SlidersHorizontal size={14} />
-                {advancedCount > 0 ? <span className="filter-badge">{advancedCount}</span> : null}
-              </summary>
-              <div className="composer-advanced-panel">
-                <RunField label="system prompt" title="System prompt override" variant="panel">
-                  <textarea value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder="provider default" rows={2} />
-                </RunField>
-                <RunField label="allowed tools" title="Comma-separated tool names to allow (empty = all)" variant="panel">
-                  <input value={allowedTools} onChange={event => setAllowedTools(event.target.value)} placeholder="read_file, write_file, search" />
-                </RunField>
-                <RunField label="max loops" title="Maximum agent loops" variant="panel">
-                  <input type="number" min={1} max={50} value={maxLoops} onChange={event => setMaxLoops(Number(event.target.value))} />
-                </RunField>
-                <RunField label="timeout ms" title="Request timeout in milliseconds" variant="panel">
-                  <input type="number" min={1000} step={1000} value={timeoutMs} onChange={event => setTimeoutMs(Number(event.target.value))} />
-                </RunField>
-                <RunField label="tool retry attempts" title="Max tool call retry attempts" variant="panel">
-                  <input type="number" min={0} max={10} value={toolRetryMaxAttempts} onChange={event => setToolRetryMaxAttempts(event.target.value)} placeholder="3" />
-                </RunField>
-                <RunField label="retry base delay ms" title="Base delay before first retry" variant="panel">
-                  <input type="number" min={0} step={500} value={toolRetryBaseDelayMs} onChange={event => setToolRetryBaseDelayMs(event.target.value)} placeholder="1000" />
-                </RunField>
-                <RunField label="retry max delay ms" title="Maximum retry delay" variant="panel">
-                  <input type="number" min={0} step={1000} value={toolRetryMaxDelayMs} onChange={event => setToolRetryMaxDelayMs(event.target.value)} placeholder="30000" />
-                </RunField>
-                <RunField label="temperature" title="Temperature" variant="panel">
-                  <input inputMode="decimal" value={temperature} onChange={event => setTemperature(event.target.value)} placeholder="provider default" />
-                </RunField>
-                <RunField label="top p" title="Top P" variant="panel">
-                  <input inputMode="decimal" value={topP} onChange={event => setTopP(event.target.value)} placeholder="provider default" />
-                </RunField>
-                <RunField label="max tokens" title="Maximum output tokens" variant="panel">
-                  <input inputMode="numeric" value={maxTokens} onChange={event => setMaxTokens(event.target.value)} placeholder="provider default" />
-                </RunField>
-                <RunField label="presence penalty" title="Presence penalty" variant="panel">
-                  <input inputMode="decimal" value={presencePenalty} onChange={event => setPresencePenalty(event.target.value)} placeholder="0" />
-                </RunField>
-                <RunField label="frequency penalty" title="Frequency penalty" variant="panel">
-                  <input inputMode="decimal" value={frequencyPenalty} onChange={event => setFrequencyPenalty(event.target.value)} placeholder="0" />
-                </RunField>
-              </div>
-            </details>
-          </div>
-          <textarea
-            value={prompt}
-            onChange={event => setPrompt(event.target.value)}
-            placeholder={sessionId ? 'Continue this session with the next task...' : 'Ask los to inspect or prepare a bounded change...'}
-            rows={3}
-          />
-          <div className="composer-actions">
-            <button className="primary-btn" type="submit" disabled={running || !prompt.trim()}>
-              <Send size={15} /> send
-            </button>
-            <button className="ghost-btn" type="button" disabled={!running} onClick={cancelRun}>
-              <Square size={14} /> cancel
-            </button>
-          </div>
-        </form>
+        </ChatMessages>
+        <ChatComposer
+          prompt={prompt}
+          onPromptChange={setPrompt}
+          onSubmit={handleSubmit}
+          onCancel={cancelRun}
+          running={running}
+          provider={provider}
+          onProviderChange={setProvider}
+          providerOptions={providerOptions}
+          model={model}
+          onModelChange={setModel}
+          modelRoutes={modelRoutes.data}
+          toolMode={toolMode}
+          onToolModeChange={setToolMode}
+          allowedTools={allowedTools}
+          onAllowedToolsChange={setAllowedTools}
+          workspaceRoot={workspaceRoot}
+          onWorkspaceRootChange={setWorkspaceRoot}
+          defaultWorkspace={defaultWorkspace}
+          systemPrompt={systemPrompt}
+          onSystemPromptChange={setSystemPrompt}
+          maxLoops={maxLoops}
+          onMaxLoopsChange={setMaxLoops}
+          timeoutMs={timeoutMs}
+          onTimeoutMsChange={setTimeoutMs}
+          toolRetryMaxAttempts={toolRetryMaxAttempts}
+          toolRetryBaseDelayMs={toolRetryBaseDelayMs}
+          toolRetryMaxDelayMs={toolRetryMaxDelayMs}
+          onToolRetryMaxAttemptsChange={setToolRetryMaxAttempts}
+          onToolRetryBaseDelayMsChange={setToolRetryBaseDelayMs}
+          onToolRetryMaxDelayMsChange={setToolRetryMaxDelayMs}
+          temperature={temperature}
+          topP={topP}
+          maxTokens={maxTokens}
+          presencePenalty={presencePenalty}
+          frequencyPenalty={frequencyPenalty}
+          onTemperatureChange={setTemperature}
+          onTopPChange={setTopP}
+          onMaxTokensChange={setMaxTokens}
+          onPresencePenaltyChange={setPresencePenalty}
+          onFrequencyPenaltyChange={setFrequencyPenalty}
+          advancedCount={advancedCount}
+        />
       </div>
 
       <aside className="panel inspector">
@@ -569,22 +593,6 @@ export function ChatPage({
           <Fact label="last model" value={metadataText(sessionMetadata.model) ?? 'none'} />
           <Fact label="settings" value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
           <Fact label="tokens" value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
-        </div>
-
-        <div className="mini-timeline">
-          <div className="mini-timeline-head">
-            <strong>Recent Events</strong>
-            <span>{sessionId ? formatDate(sessionDetail.data?.updatedAt) : 'no session'}</span>
-          </div>
-          {recentEvents.length === 0 ? (
-            <EmptyText text={sessionId ? 'No ledger events loaded.' : 'Select or start a session.'} />
-          ) : recentEvents.map(event => (
-            <div className="mini-event" key={event.id}>
-              <span>{formatTime(event.createdAt)}</span>
-              <strong>{event.type}</strong>
-              <em>{event.toolName ?? event.model ?? event.source}</em>
-            </div>
-          ))}
         </div>
       </aside>
     </section>

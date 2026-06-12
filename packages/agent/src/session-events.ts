@@ -22,6 +22,22 @@ export interface SessionEventUsage {
   totalTokens: number;
 }
 
+export type SessionEventVisibility = 'public' | 'audit' | 'internal';
+
+/** Classify an event type into its visibility tier.
+ *  - public: user-facing events (tool calls, model responses, task lifecycle)
+ *  - audit:  observability bookmarks (session started, tool catalog)
+ *  - internal: state-machine transitions that duplicate richer tool and task events
+ */
+export function sessionEventVisibility(type: string): SessionEventVisibility {
+  if (type.startsWith('tool_call_state.')) return 'internal';
+  if (type === 'session.started' || type === 'session.completed' ||
+      type === 'tool.catalog' || type === 'model.turn.started') {
+    return 'audit';
+  }
+  return 'public';
+}
+
 export interface SessionEventRecord {
   id: number;
   sessionId: string;
@@ -41,6 +57,7 @@ export interface SessionEventRecord {
   usage?: SessionEventUsage;
   parentEventId?: number;
   payload: Record<string, unknown>;
+  visibility: SessionEventVisibility;
   createdAt: string;
 }
 
@@ -61,6 +78,7 @@ export interface SessionEventWrite {
   cacheHit?: boolean;
   usage?: Partial<SessionEventUsage>;
   parentEventId?: number;
+  visibility?: SessionEventVisibility;
   payload?: Record<string, unknown>;
 }
 
@@ -117,6 +135,7 @@ CREATE TABLE IF NOT EXISTS session_events (
   usage_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   parent_event_id BIGINT,
+  visibility TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -126,6 +145,7 @@ ALTER TABLE session_events ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE session_events ADD COLUMN IF NOT EXISTS node_id TEXT;
 ALTER TABLE session_events ADD COLUMN IF NOT EXISTS request_id TEXT;
 ALTER TABLE session_events ADD COLUMN IF NOT EXISTS trace_id TEXT;
+ALTER TABLE session_events ADD COLUMN IF NOT EXISTS visibility TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_events_tenant_project ON session_events(tenant_id, project_id);
@@ -158,9 +178,9 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
     INSERT INTO session_events (
       session_id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
       turn, type, source, model, tool_name, cache_key, cache_hit,
-      usage_json, payload_json, parent_event_id
+      usage_json, payload_json, parent_event_id, visibility
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17, $18)
     RETURNING *
   `,
     [
@@ -181,6 +201,7 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
       JSON.stringify(normalizeUsage(input.usage)),
       JSON.stringify(redactValue(input.payload ?? {})),
       input.parentEventId ?? null,
+      input.visibility ?? sessionEventVisibility(input.type),
     ],
   );
   const row = rows.rows[0];
@@ -380,6 +401,7 @@ type SessionEventRow = {
   usage_json: unknown;
   payload_json: unknown;
   parent_event_id: number | string | null;
+  visibility: string | null;
   created_at: Date | string;
 };
 
@@ -403,6 +425,7 @@ function rowToSessionEvent(row: SessionEventRow): SessionEventRecord {
     usage: normalizeUsage(row.usage_json),
     parentEventId: row.parent_event_id == null ? undefined : Number(row.parent_event_id),
     payload: normalizeJsonObject(row.payload_json),
+    visibility: (row.visibility as SessionEventVisibility) ?? sessionEventVisibility(row.type),
     createdAt: toIsoString(row.created_at),
   };
 }

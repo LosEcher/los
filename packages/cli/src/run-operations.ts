@@ -330,9 +330,9 @@ function renderRunReplay(value: unknown, json: boolean): void {
       if (eventType === 'model.delta') {
         const text = String(payload.textDelta ?? '');
         if (text) textBuf += text;
-      } else if (eventType === 'tool_call') {
+      } else if (eventType === 'tool.call.upsert' || eventType === 'tool_call') {
         if (textBuf) { console.log(textBuf); textBuf = ''; }
-        console.log(`[tool:call] ${String(payload.tool ?? 'tool')}`);
+        console.log(`[tool:call] ${String(payload.toolName ?? payload.tool ?? 'tool')}`);
       } else if (eventType === 'turn') {
         if (textBuf) { console.log(textBuf); textBuf = ''; }
         console.log(`[turn ${String(payload.loopCount ?? '?')}] tools=${Array.isArray(payload.toolNames) ? payload.toolNames.join(',') || 'none' : '?'}`);

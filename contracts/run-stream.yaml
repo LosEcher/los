@@ -29,6 +29,7 @@ eventTypes:
   - tool.approved
   - tool.denied
   - tool.call
+  - tool.call.upsert
   - tool.result
   - turn
   - done
