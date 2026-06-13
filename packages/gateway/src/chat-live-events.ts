@@ -2,7 +2,7 @@ import type { SessionEventRecord } from '@los/agent/session-events';
 import { buildToolCallUpsertFromSessionEvent, createRunningToolCallUpsert } from './tool-call-upsert.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
 
-type SendEvent = (event: string, data: unknown, id?: number) => void;
+export type SendEvent = (event: string, data: unknown, id?: number) => void;
 
 export async function emitRunningToolCallUpsert(args: {
   send: SendEvent;

@@ -13,9 +13,11 @@ import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
-import { initDb } from '@los/infra/db';
-import { printOnboardingReport } from '@los/infra/discovery';
+import { initDb, getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
+import { migrateDir } from '@los/infra/migrate';
+import { getMigrateDir } from '@los/infra/config';
+import { printOnboardingReport } from '@los/infra/discovery';
 import { registerLogRoutes } from './routes/log-routes.js';
 import { registerArtifactRoutes } from './routes/artifact-routes.js';
 import { registerNodeCommandRoutes } from './routes/node-command-routes.js';
@@ -47,6 +49,7 @@ import { ensureRunSpecStore } from '@los/agent/run-specs';
 import { ensureServiceInstanceStore, loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
 import { ensureTodoStore, seedLosPlanningTodos } from '@los/agent/todos';
 import { appendSessionEvent } from '@los/agent/session-events';
+import { transitionExecutionState } from '@los/agent/execution-store';
 
 const log = getLogger('gateway');
 const VERSION = '0.1.0';
@@ -180,6 +183,17 @@ export async function startServer(port?: number, host?: string) {
   const service = resolveGatewayServiceIdentity(config, p, h);
 
   await initDb(config.databaseUrl);
+
+  // Run ordered migrations before any ensure*Store() calls.
+  // Migrations are idempotent (CREATE TABLE IF NOT EXISTS within each file).
+  const migrateResult = await migrateDir(getMigrateDir(config), getDb());
+  if (migrateResult.applied.length > 0) {
+    log.info(`Migrations applied: ${migrateResult.applied.join(', ')}`);
+  }
+  if (migrateResult.errors.length > 0) {
+    log.warn(`Migration errors: ${migrateResult.errors.join('; ')}`);
+  }
+
   await ensureTodoStore();
   await ensureIdempotencyStore();
   await ensureExecutorNodeStore();
@@ -199,6 +213,17 @@ export async function startServer(port?: number, host?: string) {
       type: 'task.failed',
       payload: { taskRunId: task.id, traceId: task.traceId, nodeId: task.nodeId ?? null, reason: 'gateway_startup_recovery' },
     }).catch(() => undefined);
+    // Transition parent run_spec to blocked so the failure is visible
+    // in the run-state-vocabulary operator_attention projection.
+    if (task.runSpecId) {
+      await transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: task.runSpecId,
+        to: 'blocked',
+        sessionId: task.sessionId,
+        reason: `task_run ${task.id} recovered as failed: gateway_startup_recovery`,
+      }).catch(() => undefined);
+    }
   }
 
   const agentTaskRecovery = await recoverExpiredAgentTasksWithAdvisoryLock('gateway_startup_recovery');

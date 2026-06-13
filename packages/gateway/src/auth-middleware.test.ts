@@ -79,5 +79,6 @@ function configForAuth(enabled: boolean): Config {
     },
     profile: 'test',
     defaultProjectId: 'los',
+    migrationsDir: 'packages/infra/migrations',
   };
 }

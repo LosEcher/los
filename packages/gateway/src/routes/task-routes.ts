@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ensureTaskRunStore, loadTaskRun, listTaskRuns, updateTaskRunFields } from '@los/agent/task-runs';
+import { ensureTaskRunStore, loadTaskRun, listTaskRuns, listTaskRunsByStatus, updateTaskRunFields } from '@los/agent/task-runs';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { cancelScheduledTask } from '@los/agent/scheduler';
@@ -54,6 +54,12 @@ export function registerTaskRoutes(app: FastifyInstance): void {
 
   app.get('/tasks/orphans', async () => {
     return await classifyOrphans();
+  });
+
+  app.get('/tasks/failed', async (_req, reply) => {
+    await ensureTaskRunStore();
+    const tasks = await listTaskRunsByStatus('failed', 50);
+    return reply.send({ tasks });
   });
 
   app.get('/tasks/:id', async (req) => {

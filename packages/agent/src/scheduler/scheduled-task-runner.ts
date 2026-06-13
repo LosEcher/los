@@ -345,6 +345,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         ...running.metadata,
         error: message,
       },
+      attempt: (running.attempt ?? 0) + 1,
     });
     const finalTask = failed ?? running;
     await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });

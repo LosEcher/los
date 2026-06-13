@@ -67,6 +67,7 @@ export interface UpdateTaskRunFieldsInput {
   nodeId?: string | null;
   heartbeatAt?: Date | string | null;
   leaseExpiresAt?: Date | string | null;
+  attempt?: number;
 }
 
 export interface UpdateTaskRunInput extends UpdateTaskRunFieldsInput {
@@ -247,6 +248,7 @@ export async function updateTaskRunFields(
   const nodeId = updates.nodeId === undefined ? null : updates.nodeId;
   const heartbeatAt = updates.heartbeatAt === undefined ? null : updates.heartbeatAt;
   const leaseExpiresAt = updates.leaseExpiresAt === undefined ? null : updates.leaseExpiresAt;
+  const attempt = updates.attempt;
 
   const rows = await db.query<TaskRunRow>(
     `
@@ -255,11 +257,12 @@ export async function updateTaskRunFields(
         node_id = COALESCE($3, node_id),
         heartbeat_at = COALESCE($4::timestamptz, heartbeat_at),
         lease_expires_at = COALESCE($5::timestamptz, lease_expires_at),
+        attempt = COALESCE($6, attempt),
         updated_at = now()
     WHERE id = $1
     RETURNING *
   `,
-    [id, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt],
+    [id, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt, attempt ?? null],
   );
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
 }
@@ -415,6 +418,19 @@ export async function listTaskRunsForRunSpec(runSpecId: string): Promise<TaskRun
     ORDER BY created_at ASC, id ASC
   `,
     [runSpecId],
+  );
+  return rows.rows.map(rowToTaskRun);
+}
+
+export async function listTaskRunsByStatus(
+  status: 'failed' | 'cancelled' | 'blocked',
+  limit = 50,
+): Promise<TaskRunRecord[]> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    'SELECT * FROM task_runs WHERE status = $1 ORDER BY completed_at DESC NULLS LAST LIMIT $2',
+    [status, limit],
   );
   return rows.rows.map(rowToTaskRun);
 }

@@ -325,6 +325,7 @@ export {
   recoverExpiredTaskRunsWithAdvisoryLock,
   loadTaskRun,
   listTaskRuns,
+  listTaskRunsByStatus,
   listTaskRunsForSession,
   listTaskRunsForRunSpec,
   TASK_RUN_STARTUP_RECOVERY_LOCK_KEY,
