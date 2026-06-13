@@ -133,6 +133,21 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_active_dedupe
   ON task_runs(dedupe_key)
   WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'task_runs_status_chk'
+      AND conrelid = 'task_runs'::regclass
+  ) THEN
+    ALTER TABLE task_runs
+      ADD CONSTRAINT task_runs_status_chk
+      CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'blocked'))
+      NOT VALID;
+  END IF;
+END $$;
 `;
 
 let _initialized = false;

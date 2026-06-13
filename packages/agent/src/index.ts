@@ -336,6 +336,26 @@ export {
   type RunStateProjection,
 } from './run-state-vocabulary.js';
 export {
+  reconcilePlanningTodos,
+  reconcilePlanningTodosFromOpenDb,
+  reconcilePlanningTodosWithDefaultDb,
+  type GovernanceTodoSnapshot,
+  type TodoReconciliationItem,
+  type TodoReconciliationOptions,
+  type TodoReconciliationReport,
+  type TodoStatusDrift,
+} from './governance-reconciliation.js';
+export {
+  detectRuntimeCleanup,
+  detectRuntimeCleanupFromOpenDb,
+  detectRuntimeCleanupWithDefaultDb,
+  type RuntimeCleanupCandidate,
+  type RuntimeCleanupOptions,
+  type RuntimeCleanupReport,
+  type RuntimeCleanupRunSpecSnapshot,
+  type RuntimeCleanupTaskRunSnapshot,
+} from './governance-runtime-cleanup.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

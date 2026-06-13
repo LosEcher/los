@@ -62,6 +62,36 @@ test('run specs persist normalized run contract metadata', async () => {
   }
 });
 
+test('run_specs status constraint rejects invalid raw database writes', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const id = `run-invalid-status-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await ensureRunSpecStore();
+    await assert.rejects(
+      () => getDb().query(
+        `
+        INSERT INTO run_specs (
+          id, session_id, prompt, workspace_root, tool_mode,
+          model_settings_json, allowed_tools_json, tool_retry_json,
+          max_loops, mcp_servers_json, run_contract_json, status
+        )
+        VALUES (
+          $1, $2, 'invalid status', '/tmp/workspace', 'project-write',
+          '{}'::jsonb, '[]'::jsonb, '{}'::jsonb,
+          20, '[]'::jsonb, '{}'::jsonb, 'deepseek-reasoner'
+        )
+      `,
+        [id, `session-${id}`],
+      ),
+      /run_specs_status_chk/,
+    );
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
 test('approveRunSpecPhase transitions from planning to plan_approved', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

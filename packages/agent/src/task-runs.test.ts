@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { closeDb, initDb, withDbClient } from '@los/infra/db';
+import { closeDb, getDb, initDb, withDbClient } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
 import {
   createTaskRun,
@@ -105,6 +105,30 @@ test('task run lifecycle persists status changes', async () => {
 
     const noActiveDuplicate = await findActiveTaskRunByDedupeKey(`dedupe-${id}`);
     assert.equal(noActiveDuplicate, null);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('task_runs status constraint rejects invalid raw database writes', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    await ensureTaskRunStore();
+    const id = `task-invalid-status-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await assert.rejects(
+      () => getDb().query(
+        `
+        INSERT INTO task_runs (
+          id, session_id, trace_id, workspace_root, tool_mode,
+          provider, status, attempt, prompt_preview, metadata_json
+        )
+        VALUES ($1, $2, $3, '/tmp/workspace', 'project-write', 'deepseek', 'deepseek-reasoner', 1, 'invalid status', '{}'::jsonb)
+      `,
+        [id, `session-${id}`, `trace-${id}`],
+      ),
+      /task_runs_status_chk/,
+    );
   } finally {
     await closeDb().catch(() => undefined);
   }
