@@ -174,5 +174,8 @@ async function countInvalidStatuses(definition: StatusConstraintDefinition): Pro
 async function validateKnownStatusConstraint(tableName: string, constraintName: string): Promise<void> {
   const definition = STATUS_CONSTRAINTS.find(item => item.tableName === tableName && item.constraintName === constraintName);
   if (!definition) throw new Error(`Unknown status constraint: ${tableName}.${constraintName}`);
+  // VALIDATE CONSTRAINT performs a full table scan with a SHARE UPDATE EXCLUSIVE lock
+  // (blocks concurrent DDL but allows reads and writes). Callers must check
+  // invalidRowCount === 0 first to ensure the scan finds no violations.
   await getDb().exec(`ALTER TABLE ${definition.tableName} VALIDATE CONSTRAINT ${definition.constraintName}`);
 }
