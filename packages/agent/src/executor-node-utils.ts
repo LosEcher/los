@@ -1,10 +1,7 @@
 import type { ExecutorNodeConnectMode, ExecutorNodeHeartbeatInput, ExecutorNodeRolloutState } from './executor-nodes.js';
+import { normalizeOptionalString } from './scheduler/helpers.js';
 
-export function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
+export { normalizeOptionalString };
 
 export function normalizeRolloutState(value: unknown): ExecutorNodeRolloutState | undefined {
   if (value === 'idle' || value === 'draining' || value === 'upgrading' || value === 'verifying' || value === 'failed') {
