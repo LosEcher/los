@@ -60,7 +60,6 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
       && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
     ) {
       throw new Error(
-      throw new Error(
         `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
         'Set TEST_DATABASE_URL=postgres://.../los_test or LOS_ALLOW_LIVE_TEST_DB=1 for an explicit one-off override.',
       );
