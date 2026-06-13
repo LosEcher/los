@@ -6,8 +6,12 @@ import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+function dbUrl(): string {
+  return process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? 'postgres://localhost:5432/los';
+}
+
 test('migrateDir applies pending migrations in order', async () => {
-  const db = await initDb(process.env.DATABASE_URL ?? 'postgres://localhost:5432/los');
+  const db = await initDb(dbUrl());
   const dir = join(tmpdir(), `los-migration-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(dir, { recursive: true });
 
@@ -39,7 +43,7 @@ test('migrateDir applies pending migrations in order', async () => {
 });
 
 test('migrateDir handles empty dir gracefully', async () => {
-  const db = await initDb(process.env.DATABASE_URL ?? 'postgres://localhost:5432/los');
+  const db = await initDb(dbUrl());
   const dir = join(tmpdir(), `los-migration-empty-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(dir, { recursive: true });
 
