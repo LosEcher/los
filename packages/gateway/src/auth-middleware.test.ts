@@ -57,6 +57,7 @@ function configForAuth(enabled: boolean): Config {
       port: 8080,
       host: '127.0.0.1',
       corsOrigin: 'http://localhost:5173',
+      localEndpoints: [],
     },
     auth: {
       enabled,

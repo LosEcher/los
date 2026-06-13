@@ -21,6 +21,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { getConfig } from './config.js';
 import { getLogger } from './logger.js';
 import type { CodexRouteConfig, DiscoveredProvider, DiscoveredTool, DiscoveryReport } from './discovery/types.js';
 import { fileAge, readString } from './discovery/helpers.js';
@@ -376,13 +377,25 @@ async function checkEndpoint(url: string, timeout = 2000): Promise<boolean> {
 }
 
 async function scanLocalEndpoints(): Promise<DiscoveredProvider[]> {
-  const endpoints = [
-    { name: 'ollama',    url: 'http://127.0.0.1:11434/api/tags', baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.1' },
-    { name: 'lmstudio',  url: 'http://127.0.0.1:1234/v1/models', baseUrl: 'http://127.0.0.1:1234/v1',   model: '(auto)' },
-    { name: 'vllm',      url: 'http://127.0.0.1:8000/v1/models', baseUrl: 'http://127.0.0.1:8000/v1',     model: '(auto)' },
-    { name: 'llamacpp',  url: 'http://127.0.0.1:8081/v1/models', baseUrl: 'http://127.0.0.1:8081/v1',     model: '(auto)' },
-    { name: 'localai',   url: 'http://127.0.0.1:8082/v1/models', baseUrl: 'http://127.0.0.1:8082/v1',     model: '(auto)' },
-  ];
+  let endpoints: Array<{ name: string; url: string; baseUrl: string; model: string }>;
+  try {
+    const config = getConfig();
+    endpoints = config.server.localEndpoints.map(ep => ({
+      name: ep.name,
+      url: ep.checkUrl,
+      baseUrl: ep.baseUrl,
+      model: ep.defaultModel,
+    }));
+  } catch {
+    // Config not loaded — use built-in defaults
+    endpoints = [
+      { name: 'ollama',   url: 'http://127.0.0.1:11434/api/tags', baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.1' },
+      { name: 'lmstudio', url: 'http://127.0.0.1:1234/v1/models', baseUrl: 'http://127.0.0.1:1234/v1',   model: '(auto)' },
+      { name: 'vllm',     url: 'http://127.0.0.1:8000/v1/models', baseUrl: 'http://127.0.0.1:8000/v1',     model: '(auto)' },
+      { name: 'llamacpp', url: 'http://127.0.0.1:8081/v1/models', baseUrl: 'http://127.0.0.1:8081/v1',     model: '(auto)' },
+      { name: 'localai',  url: 'http://127.0.0.1:8082/v1/models', baseUrl: 'http://127.0.0.1:8082/v1',     model: '(auto)' },
+    ];
+  }
 
   const results: DiscoveredProvider[] = [];
   for (const ep of endpoints) {

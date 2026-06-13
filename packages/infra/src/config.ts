@@ -35,6 +35,18 @@ export const ConfigSchema = z.object({
     port: z.coerce.number().default(8080),
     host: z.string().default('127.0.0.1'),
     corsOrigin: z.union([z.string(), z.array(z.string())]).default('http://localhost:5173'),
+    localEndpoints: z.array(z.object({
+      name: z.string(),
+      checkUrl: z.string(),
+      baseUrl: z.string(),
+      defaultModel: z.string(),
+    })).default([
+      { name: 'ollama',   checkUrl: 'http://127.0.0.1:11434/api/tags', baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: 'llama3.1' },
+      { name: 'lmstudio', checkUrl: 'http://127.0.0.1:1234/v1/models', baseUrl: 'http://127.0.0.1:1234/v1',   defaultModel: '(auto)' },
+      { name: 'vllm',     checkUrl: 'http://127.0.0.1:8000/v1/models', baseUrl: 'http://127.0.0.1:8000/v1',     defaultModel: '(auto)' },
+      { name: 'llamacpp', checkUrl: 'http://127.0.0.1:8081/v1/models', baseUrl: 'http://127.0.0.1:8081/v1',     defaultModel: '(auto)' },
+      { name: 'localai',  checkUrl: 'http://127.0.0.1:8082/v1/models', baseUrl: 'http://127.0.0.1:8082/v1',     defaultModel: '(auto)' },
+    ]),
   }),
 
   // Auth
