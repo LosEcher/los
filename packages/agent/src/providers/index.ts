@@ -47,7 +47,7 @@ const log = getLogger('agent');
 // This surfaces provider-specific streaming quirks without code changes.
 const DEBUG_PROVIDER = process.env.LOS_DEBUG_PROVIDER === 'true';
 
-function diag(traceId: string | undefined, msg: string, detail?: Record<string, unknown>) {
+export function diag(traceId: string | undefined, msg: string, detail?: Record<string, unknown>) {
   if (!DEBUG_PROVIDER) return;
   log.info(msg, { traceId, ...detail });
 }
@@ -70,7 +70,7 @@ export { convertMessagesToResponsesInput, readResponsesStreamResponse } from './
 
 // ── Provider Factory ─────────────────────────────────────
 
-function getProviderConfig(name: string) {
+export function getProviderConfig(name: string) {
   const config = getConfig();
   const p = config.providers[name];
   if (!p || !p.enabled) {
@@ -93,7 +93,7 @@ interface OpenAIConfig {
   traceId?: string;
 }
 
-function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
+export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
   const { name, apiKey, profile, traceId } = cfg;
   const { baseUrl, model } = profile;
 
@@ -369,82 +369,6 @@ function normalizeOpenAIUsage(raw: any, fallback: ProviderResponse['usage']): Pr
   };
 }
 
+// ── Provider registry (extracted → providers/registry.ts) ──
 
-
-// ── Provider Registry ────────────────────────────────────
-
-export function createProvider(name?: string, options: CreateProviderOptions = {}): Provider {
-  const config = getConfig();
-  const providerName = name ?? config.agent.defaultProvider;
-
-  const p = getProviderConfig(providerName);
-  const apiShapeOverride = (options.apiShape ?? (p as Record<string, unknown>).apiShape) as ApiShape | undefined;
-  const profile = resolveModelProfile(providerName, {
-    baseUrl: options.baseUrl ?? p.baseUrl,
-    model: options.model ?? p.model,
-    defaultModel: config.agent.defaultModel,
-    apiShape: apiShapeOverride,
-  });
-
-  diag(options.traceId, `createProvider name=${providerName}`, {
-    protocol: profile.protocol,
-    apiShape: profile.apiShape,
-  } as Record<string, unknown>);
-
-  if (profile.protocol === 'anthropic') {
-    return createAnthropicProvider({
-      name: providerName,
-      apiKey: p.apiKey!,
-      profile,
-      traceId: options.traceId,
-    });
-  }
-
-  if (profile.apiShape === 'openai-responses') {
-    return createOpenAIResponsesProvider({
-      name: providerName,
-      apiKey: p.apiKey!,
-      profile,
-      traceId: options.traceId,
-    });
-  }
-
-  return createOpenAICompatProvider({
-    name: providerName,
-    apiKey: p.apiKey!,
-    profile,
-    traceId: options.traceId,
-  });
-}
-
-// ── Named constructors (backward compat) ─────────────────
-
-export function createDeepSeekProvider(): Provider {
-  const p = getProviderConfig('deepseek');
-  const profile = resolveModelProfile('deepseek', {
-    baseUrl: p.baseUrl,
-    model: p.model,
-    defaultModel: getConfig().agent.defaultModel,
-  });
-  return createOpenAICompatProvider({
-    name: 'deepseek',
-    apiKey: p.apiKey!,
-    profile,
-  });
-}
-
-export function createOpenAIProvider(): Provider | null {
-  try {
-    const p = getProviderConfig('openai');
-    const profile = resolveModelProfile('openai', {
-      baseUrl: p.baseUrl,
-      model: p.model,
-      defaultModel: getConfig().agent.defaultModel,
-    });
-    return createOpenAICompatProvider({
-      name: 'openai',
-      apiKey: p.apiKey!,
-      profile,
-    });
-  } catch { return null; }
-}
+export { createProvider, createDeepSeekProvider, createOpenAIProvider } from './registry.js';

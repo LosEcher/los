@@ -3,6 +3,7 @@ import {
   normalizeEditableSurfaceMode,
   selectEditableSurfaceCompatibleTasks,
 } from './agent-task-editable-surfaces.js';
+import { normalizeOptionalString } from './scheduler/helpers.js';
 import type {
   AgentTaskAttemptRecord,
   AgentTaskAttemptStatus,
@@ -537,12 +538,6 @@ function normalizeRequiredString(value: unknown, name: string): string {
   const normalized = normalizeOptionalString(value);
   if (!normalized) throw new Error(`${name} is required`);
   return normalized;
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 function uniqueStrings(value: readonly string[]): string[] {
