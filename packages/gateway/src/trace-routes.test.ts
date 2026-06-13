@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 import { loadConfig } from '@los/infra/config';
 import { closeDb, initDb } from '@los/infra/db';
 import { appendSessionEvent, ensureSessionEventStore, ensureSessionStore, saveSession } from '@los/agent';
+import {
+  buildGoldenSessionTraceSession,
+  GOLDEN_SESSION_TRACE_EVENT_WRITES,
+  GOLDEN_SESSION_TRACE_MESSAGES_VIEW,
+} from '@los/agent/session-trace-fixtures';
 import { createServer } from './server.js';
 
 test('session trace route renders assistant tool cards from ledger', async () => {
@@ -152,6 +157,44 @@ test('session trace route falls back to events when session transcript is empty'
     assert.equal(body.messages[0].content, 'hello fallback');
     assert.equal(body.messages[1].role, 'assistant');
     assert.equal(body.messages[1].toolCalls[0].callId, callId);
+  } finally {
+    await app.close();
+    await closeDb();
+  }
+});
+
+test('session trace route matches golden view-model fixture', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-trace-golden-${suffix}`;
+
+  const app = await createServer({
+    serviceId: `gateway-trace-golden-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await ensureSessionStore();
+    await ensureSessionEventStore();
+    await saveSession(buildGoldenSessionTraceSession(sessionId));
+    for (const event of GOLDEN_SESSION_TRACE_EVENT_WRITES) {
+      await appendSessionEvent({ sessionId, ...event });
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${sessionId}/trace`,
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.sessionId, sessionId);
+    assert.equal(body.turnCount, 1);
+    assert.equal(body.messageCount, 2);
+    assert.deepEqual(body.messages, GOLDEN_SESSION_TRACE_MESSAGES_VIEW);
   } finally {
     await app.close();
     await closeDb();

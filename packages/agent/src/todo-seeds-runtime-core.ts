@@ -94,7 +94,7 @@ export const LOS_RUNTIME_CORE_TODO_SEED: CreateTodoInput[] = [
     title: '为执行事件投影增加 golden trace fixtures',
     description: '把 raw session_events、projection/read-model 和 UI view-model 分层固定，新增事件类型时必须同步 fixture。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-06-13',
     stageId: 'agent-runtime-core-hardening',
@@ -103,7 +103,16 @@ export const LOS_RUNTIME_CORE_TODO_SEED: CreateTodoInput[] = [
     dedupeKey: 'los:todo:golden-trace-fixtures',
     metadata: {
       problem: 'UI 如果直接消费 raw ledger，新增事件类型会把复杂度推到视图层。',
-      solution: '建立 ledger -> projection -> view-model 的 golden fixture gate，防止 trace UI 漂移。',
+      solution: '建立 raw session_events -> projectSessionTrace -> gateway trace messages 的 golden fixture gate，防止 trace UI 漂移。',
+      evidence: [
+        'packages/agent/src/session-trace-fixtures.ts',
+        'packages/agent/src/session-trace.test.ts',
+        'packages/gateway/src/trace-routes.test.ts',
+      ],
+      validation: [
+        'node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 src/session-trace.test.ts',
+        'pnpm --filter @los/gateway test -- --test-name-pattern "session trace route matches golden"',
+      ],
       statusUpdatedAt: '2026-06-13',
     },
   },

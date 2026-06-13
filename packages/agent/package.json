@@ -10,6 +10,7 @@
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
     "./session-trace": "./src/session-trace.ts",
+    "./session-trace-fixtures": "./src/session-trace-fixtures.ts",
     "./task-runs": "./src/task-runs.ts",
     "./executor-nodes": "./src/executor-nodes.ts",
     "./service-instances": "./src/service-instances.ts",
