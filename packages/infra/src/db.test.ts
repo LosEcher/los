@@ -88,12 +88,18 @@ describe('test database guard', () => {
   });
 
   it('refuses live-looking database names in test processes', () => {
+    const savedCI = process.env.CI;
+    delete process.env.CI;
     process.argv.push('/tmp/db.test.ts');
     delete process.env.TEST_DATABASE_URL;
-    assert.throws(
-      () => resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
-      /Refusing to run tests against non-test database "los"/,
-    );
+    try {
+      assert.throws(
+        () => resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+        /Refusing to run tests against non-test database "los"/,
+      );
+    } finally {
+      if (savedCI !== undefined) process.env.CI = savedCI;
+    }
   });
 
   it('allows explicit one-off override for live-looking test databases', () => {
