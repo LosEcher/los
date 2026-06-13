@@ -7,7 +7,8 @@
     "./logger": "./src/logger.ts",
     "./config": "./src/config.ts",
     "./db": "./src/db.ts",
-    "./discovery": "./src/discovery.ts"
+    "./discovery": "./src/discovery.ts",
+    "./migrate": "./src/migrate.ts"
   },
   "scripts": {
     "build": "tsc",

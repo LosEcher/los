@@ -83,6 +83,9 @@ export const ConfigSchema = z.object({
 
   // Project
   defaultProjectId: z.string().default('los'),
+
+  // Migration directory (relative to workspace root, or absolute)
+  migrationsDir: z.string().default('packages/infra/migrations'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -432,4 +435,16 @@ function discoverProviderKeyEnv(name: string): string {
     packycode: 'OPENAI_API_KEY',
   };
   return KEY_ENV[name] ?? `${name.toUpperCase()}_API_KEY`;
+}
+
+export function getMigrateDir(config: Config): string {
+  const dir = config.migrationsDir;
+  if (dir.startsWith('/')) return dir;
+  // Relative to workspace root
+  const workspaceRoot = resolve(process.cwd());
+  const abs = join(workspaceRoot, dir);
+  if (existsSync(abs)) return abs;
+  // Fallback: look from __dirname for bundled builds
+  const pkgDir = resolve(__dirname, '..', '..');
+  return join(pkgDir, dir);
 }
