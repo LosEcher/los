@@ -59,10 +59,10 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
       && !isSafeTestDatabaseUrl(candidate)
       && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
     ) {
-      const msg = `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
-        'Set TEST_DATABASE_URL=postgres://.../los_test or LOS_ALLOW_LIVE_TEST_DB=1 for an explicit one-off override.';
-      console.error('[resolveDatabaseUrlForInit] testUrl=unset candidate=', redactedDatabaseName(candidate), 'isTest=', true);
-      throw new Error(msg);
+      throw new Error(
+        `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
+        'Set TEST_DATABASE_URL=postgres://.../los_test or LOS_ALLOW_LIVE_TEST_DB=1 for an explicit one-off override.',
+      );
     }
     return candidate;
   }
