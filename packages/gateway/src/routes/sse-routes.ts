@@ -10,6 +10,16 @@ interface LiveClient {
   ended: boolean;
 }
 
+/** Shared SSE send factory. Both the live event route and the debug stream route
+ *  use the identical pattern: write SSE frames to reply.raw. */
+function makeSend(reply: { raw: { write: (chunk: string) => boolean } }) {
+  return (event: string, data: unknown, eventId?: number) => {
+    if (eventId !== undefined) reply.raw.write(`id: ${eventId}\n`);
+    reply.raw.write(`event: ${event}\n`);
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+}
+
 const liveClients = new Map<number, LiveClient>();
 let clientSeq = 0;
 
@@ -49,11 +59,7 @@ export function registerSseRoutes(app: FastifyInstance): void {
       'X-Accel-Buffering': 'no',
     });
 
-    const send = (event: string, data: unknown, eventId?: number) => {
-      if (eventId !== undefined) reply.raw.write(`id: ${eventId}\n`);
-      reply.raw.write(`event: ${event}\n`);
-      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const send = makeSend(reply);
 
     let lastId = since;
     let ended = false;
@@ -203,6 +209,10 @@ export function setupLiveEventPush(app: FastifyInstance): void {
   });
 }
 
+/**
+ * Live event route: serves raw session events via SSE for the debug stream view.
+ * Primary chat rendering uses GET /sessions/:id/trace instead.
+ */
 export function registerLiveEventRoutes(app: FastifyInstance): void {
   app.get('/sessions/:id/events/live', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -220,11 +230,7 @@ export function registerLiveEventRoutes(app: FastifyInstance): void {
       'X-Accel-Buffering': 'no',
     });
 
-    const send = (event: string, data: unknown, eventId?: number) => {
-      if (eventId !== undefined) reply.raw.write(`id: ${eventId}\n`);
-      reply.raw.write(`event: ${event}\n`);
-      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const send = makeSend(reply);
 
     let lastId = since;
     let ended = false;

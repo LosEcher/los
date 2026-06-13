@@ -35,7 +35,7 @@ function asObject(value: unknown): Record<string, unknown> | null {
 }
 
 function truncate(text: string, maxLen: number): string {
-  return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
+  return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
 }
 
 function previewArgs(args: unknown): string {
@@ -56,15 +56,27 @@ function resolveCallId(payload: Record<string, unknown> | null): string | null {
   return typeof callId === 'string' && callId ? callId : null;
 }
 
+function resolveToolName(event: { toolName?: string | null; payload: unknown }): string {
+  if (event.toolName) return event.toolName;
+  const p = asObject(event.payload);
+  return typeof p?.toolName === 'string' ? p.toolName : '';
+}
+
 type ToolCardState = TraceToolCallCard;
 
 export function projectSessionTrace(sessionId: string, events: SessionEventRecord[]): SessionTraceProjection {
   const toolByCallId = new Map<string, ToolCardState>();
   const toolsByTurn = new Map<number, string[]>();
   const turnMeta = new Map<number, Omit<TraceTurnProjection, 'turn' | 'toolCalls'>>();
+  let sessionCompleted = false;
 
   for (const event of events) {
     const payload = asObject(event.payload);
+
+    if (event.type === 'session.completed') {
+      sessionCompleted = true;
+      continue;
+    }
 
     if (event.type === 'model.response') {
       const durationMs = typeof payload?.durationMs === 'number' ? payload.durationMs : undefined;
@@ -79,9 +91,22 @@ export function projectSessionTrace(sessionId: string, events: SessionEventRecor
     }
 
     if (event.type.startsWith('tool.')) {
+      // tool.repair — argument repair events emitted during provider delta repair
+      if (event.type === 'tool.repair') {
+        const callId = resolveCallId(payload);
+        if (callId) {
+          const existing = toolByCallId.get(callId);
+          if (existing) {
+            existing.status = 'running';
+          }
+        }
+        continue;
+      }
+
       const callId = resolveCallId(payload);
       if (!callId) continue;
-      const toolName = event.toolName ?? (typeof payload?.toolName === 'string' ? payload.toolName : '') ?? '';
+
+      const toolName = resolveToolName(event);
       const existing = toolByCallId.get(callId);
 
       const state: ToolCardState = existing ?? {
@@ -138,6 +163,19 @@ export function projectSessionTrace(sessionId: string, events: SessionEventRecor
     }
   }
 
+  // Invariant: if session completed, any tool call still 'running' -> 'error'
+  if (sessionCompleted) {
+    for (const [callId, card] of toolByCallId) {
+      if (card.status === 'running') {
+        toolByCallId.set(callId, {
+          ...card,
+          status: 'error',
+          errorPreview: 'Session completed before tool call finished',
+        });
+      }
+    }
+  }
+
   const turns: TraceTurnProjection[] = [];
   const allTurns = new Set<number>();
   for (const event of events) {
@@ -162,3 +200,40 @@ export function projectSessionTrace(sessionId: string, events: SessionEventRecor
   return { sessionId, turns };
 }
 
+export function validateTraceCompleteness(
+  events: SessionEventRecord[],
+  projection: SessionTraceProjection,
+): { orphans: string[]; stalledRunning: string[] } {
+  const toolCallIds = new Set<string>();
+  const toolResultIds = new Set<string>();
+  const deniedIds = new Set<string>();
+
+  for (const event of events) {
+    const payload = asObject(event.payload);
+    if (event.type === 'tool.call') {
+      const callId = resolveCallId(payload);
+      if (callId) toolCallIds.add(callId);
+    }
+    if (event.type === 'tool.result') {
+      const callId = resolveCallId(payload);
+      if (callId) toolResultIds.add(callId);
+    }
+    if (event.type === 'tool.denied') {
+      const callId = resolveCallId(payload);
+      if (callId) deniedIds.add(callId);
+    }
+  }
+
+  const orphanCalls = [...toolCallIds].filter(id => !toolResultIds.has(id) && !deniedIds.has(id));
+
+  const stalledRunning: string[] = [];
+  for (const turn of projection.turns) {
+    for (const tc of turn.toolCalls) {
+      if (tc.status === 'running') {
+        stalledRunning.push(tc.callId);
+      }
+    }
+  }
+
+  return { orphans: orphanCalls, stalledRunning };
+}

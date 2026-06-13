@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { ensureSessionStore, loadSession } from '@los/agent/session';
-import { ensureSessionEventStore, listSessionEvents } from '@los/agent/session-events';
+import { ensureSessionEventStore, listSessionEvents, listSessionEventsSince } from '@los/agent/session-events';
 import { projectSessionTrace, type TraceToolCallCard, type TraceTurnProjection } from '@los/agent/session-trace';
 import type { Message, TurnSummary } from '@los/agent';
 import { asObject, truncate } from '../trace-utils.js';
@@ -223,6 +223,53 @@ export function registerTraceRoutes(app: FastifyInstance): void {
       messageCount: messages.length,
       turnCount: apiMessages.length > 0 ? turns.length : fallbackTurnCount,
       messages,
+    };
+  });
+
+  // Incremental trace endpoint for live update polling
+  app.get('/sessions/:id/trace/since', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+
+    await ensureSessionStore();
+    await ensureSessionEventStore();
+
+    const session = await loadSession(id);
+    if (!session) return reply.status(404).send({ error: 'Not found' });
+
+    if (since > 0) {
+      const newEvents = await listSessionEventsSince(id, since, 10000);
+      if (newEvents.length === 0) {
+        return { sessionId: id, since, nextSince: since, messages: [], unchanged: true };
+      }
+      const projection = projectSessionTrace(id, newEvents);
+      const messages =
+        session.messages.length > 0
+          ? buildTraceMessages({ apiMessages: session.messages, turns: session.turns, traceTurns: projection.turns })
+          : buildTraceMessagesFromEvents({ session, events: newEvents, traceTurns: projection.turns });
+      const nextSince = newEvents.reduce((max, e) => Math.max(max, e.id), since);
+      return { sessionId: id, since, nextSince, messages };
+    }
+
+    // since=0: full trace, same as /trace
+    const events = await listSessionEvents(id, 10000);
+    const projection = projectSessionTrace(id, events);
+    const apiMessages = session.messages;
+    const turns = session.turns;
+    const messages =
+      apiMessages.length > 0
+        ? buildTraceMessages({ apiMessages, turns, traceTurns: projection.turns })
+        : buildTraceMessagesFromEvents({ session, events, traceTurns: projection.turns });
+    const maxProjectedTurn = projection.turns.reduce((max, t) => Math.max(max, t.turn), 0);
+    const fallbackTurnCount = maxProjectedTurn > 0 ? maxProjectedTurn : projection.turns.length;
+    const nextSince = events.length > 0 ? events[events.length - 1].id : 0;
+    return {
+      sessionId: id,
+      messageCount: messages.length,
+      turnCount: apiMessages.length > 0 ? turns.length : fallbackTurnCount,
+      messages,
+      since: 0,
+      nextSince,
     };
   });
 }
