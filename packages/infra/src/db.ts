@@ -54,13 +54,12 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
     if (testUrl) return testUrl;
 
     const candidate = databaseUrl ?? process.env.DATABASE_URL;
-    const allowLive = process.env.LOS_ALLOW_LIVE_TEST_DB;
-    console.error('[resolveDatabaseUrlForInit] candidate=', redactedDatabaseName(candidate ?? ''), 'allowLive=', JSON.stringify(allowLive), 'isTest=', true);
     if (
       candidate
       && !isSafeTestDatabaseUrl(candidate)
-      && !(allowLive === '1' || allowLive === 'true' || allowLive === 'yes')
+      && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
     ) {
+      throw new Error(
       throw new Error(
         `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
         'Set TEST_DATABASE_URL=postgres://.../los_test or LOS_ALLOW_LIVE_TEST_DB=1 for an explicit one-off override.',
