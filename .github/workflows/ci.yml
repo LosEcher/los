@@ -46,5 +46,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run gate
-        env:
-          LOS_ALLOW_LIVE_TEST_DB: "1"

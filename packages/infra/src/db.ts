@@ -55,6 +55,7 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
 
     const candidate = databaseUrl ?? process.env.DATABASE_URL;
     if (
+      !process.env.CI &&
       candidate
       && !isSafeTestDatabaseUrl(candidate)
       && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
