@@ -287,6 +287,15 @@ export {
   type AgentTaskGraphReadModel,
 } from './agent-task-graph-read-model.js';
 export {
+  ensureSchedulerDecisionLedgerStore,
+  listSchedulerDecisions,
+  recordSchedulerDecision,
+  type ListSchedulerDecisionsOptions,
+  type RecordSchedulerDecisionInput,
+  type SchedulerDecisionKind,
+  type SchedulerDecisionRecord,
+} from './scheduler-decision-ledger.js';
+export {
   buildExecutionStaticGraph,
   type BuildExecutionStaticGraphOptions,
   type ExecutionStaticEdge,

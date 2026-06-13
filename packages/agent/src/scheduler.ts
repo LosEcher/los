@@ -32,6 +32,7 @@ import {
   previewText,
 } from './scheduler/helpers.js';
 import { resolveGraphTaskProviderModelSelection } from './scheduler/provider-selection.js';
+import { recordSchedulerDecision } from './scheduler-decision-ledger.js';
 import { maybeQueueRecoveryFollowUp } from './scheduler/recovery-follow-up.js';
 import {
   listToolCallStateIdsForTaskRun,
@@ -223,6 +224,22 @@ async function runClaimedAgentGraphTask(
     selection = await resolveGraphTaskProviderModelSelection(task, input);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await recordSchedulerDecision({
+      graphId: task.graphId,
+      taskId: task.id,
+      attemptId,
+      taskRunId,
+      runSpecId,
+      sessionId,
+      nodeId,
+      kind: 'provider_selection',
+      reason: 'provider_selection_failed',
+      skipped: [{ id: task.id, reason: 'provider_capability_mismatch', details: { error: message } }],
+      metadata: {
+        error: message,
+        taskMetadata: task.metadata,
+      },
+    });
     await updateAgentTaskStatus(task.id, 'failed', {
       attemptId,
       error: message,
@@ -239,6 +256,31 @@ async function runClaimedAgentGraphTask(
     });
     return { taskId: task.id, attemptId, status: 'failed' };
   }
+
+  await recordSchedulerDecision({
+    graphId: task.graphId,
+    taskId: task.id,
+    attemptId,
+    taskRunId,
+    runSpecId,
+    sessionId,
+    nodeId,
+    kind: 'provider_selection',
+    selectedIds: [selection.targetLabel ?? selection.provider ?? selection.model ?? 'scheduler-default'],
+    skipped: (selection.rejectedTargetLabels ?? []).map(label => ({
+      id: label,
+      reason: 'provider_capability_mismatch',
+    })),
+    reason: selection.source,
+    provider: selection.provider,
+    model: selection.model,
+    metadata: {
+      source: selection.source,
+      evidenceId: selection.evidenceId,
+      targetLabel: selection.targetLabel,
+      requireProviderCompat: selection.requireProviderCompat === true,
+    },
+  });
 
   await createAgentTaskAttempt({
     id: attemptId,

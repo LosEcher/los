@@ -7,20 +7,39 @@ export type ResolvedExecutor = {
   url: string;
   nodeId: string;
   agentKey?: string;
+  decision: ExecutorSelectionDecision;
+};
+
+export type ExecutorSelectionDecision = {
+  source: 'config_node_url' | 'executor_registry';
+  candidateIds: string[];
+  selectedId: string;
+  skipped: Array<{ id: string; reason: string; details?: Record<string, unknown> }>;
 };
 
 export async function resolveExecutor(config: ScheduledExecutorConfig | undefined): Promise<ResolvedExecutor | null> {
   if (!config?.enabled) return null;
 
   if (config.nodeUrls && config.nodeUrls.length > 0) {
-    const firstUrl = config.nodeUrls.map(normalizeExecutorUrl).find(Boolean);
+    const normalizedUrls = config.nodeUrls.map(normalizeExecutorUrl);
+    const firstUrl = normalizedUrls.find(Boolean);
     if (!firstUrl) {
       throw new Error('Executor is enabled but no executor node URL is configured');
     }
+    const nodeId = normalizeOptionalString(config.nodeId) ?? firstUrl;
     return {
       url: firstUrl,
-      nodeId: normalizeOptionalString(config.nodeId) ?? firstUrl,
+      nodeId,
       agentKey: normalizeOptionalString(config.agentKey),
+      decision: {
+        source: 'config_node_url',
+        candidateIds: normalizedUrls.filter(Boolean),
+        selectedId: nodeId,
+        skipped: normalizedUrls
+          .map((url, index) => ({ url, index }))
+          .filter(item => !item.url)
+          .map(item => ({ id: `nodeUrls[${item.index}]`, reason: 'invalid_executor_url' })),
+      },
     };
   }
 
@@ -28,6 +47,7 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
   const preferredNodeId = normalizeOptionalString(config.nodeId);
   const ordered = sortExecutorCandidates(candidates, preferredNodeId);
 
+  const skipped: ExecutorSelectionDecision['skipped'] = [];
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);
     if (url) {
@@ -35,8 +55,15 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
         url,
         nodeId: node.nodeId,
         agentKey: normalizeOptionalString(config.agentKey),
+        decision: {
+          source: 'executor_registry',
+          candidateIds: ordered.map(item => item.nodeId),
+          selectedId: node.nodeId,
+          skipped,
+        },
       };
     }
+    skipped.push({ id: node.nodeId, reason: 'missing_agent_http_url' });
   }
 
   if (candidates.length > 0) {

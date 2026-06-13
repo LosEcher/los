@@ -3,6 +3,10 @@ import {
   normalizeEditableSurfaceMode,
   selectEditableSurfaceCompatibleTasks,
 } from './agent-task-editable-surfaces.js';
+import {
+  recordClaimSchedulerDecision,
+  type ClaimDecisionContext,
+} from './scheduler/claim-decision.js';
 import { normalizeOptionalString } from './scheduler/helpers.js';
 import type {
   AgentTaskAttemptRecord,
@@ -177,7 +181,8 @@ export async function claimReadyAgentTasks(input: ClaimReadyAgentTasksInput): Pr
   const leaseMs = Math.max(1_000, Math.min(86_400_000, Math.floor(input.leaseMs ?? 300_000)));
   const mode = normalizeEditableSurfaceMode(input.editableSurfaceMode);
   const candidateLimit = mode === 'ignore' ? limit : Math.min(200, Math.max(limit, limit * 4));
-  return await withDbClient(async (client) => {
+  let decisionContext: ClaimDecisionContext | undefined;
+  const claimed = await withDbClient(async (client) => {
     await client.query('BEGIN');
     try {
       const candidates = await client.query<AgentTaskRow>(
@@ -216,7 +221,20 @@ export async function claimReadyAgentTasks(input: ClaimReadyAgentTasksInput): Pr
         mode,
         runningRows.map(rowToTask),
       );
+      const claimDecision = {
+        graphId: input.graphId,
+        nodeId: input.nodeId,
+        limit,
+        candidateLimit,
+        mode,
+        candidates: candidates.rows.map(rowToTask),
+        runningTasks: runningRows.map(rowToTask),
+      };
       if (selected.length === 0) {
+        decisionContext = {
+          ...claimDecision,
+          selected: [],
+        };
         await client.query('COMMIT');
         return [];
       }
@@ -238,14 +256,23 @@ export async function claimReadyAgentTasks(input: ClaimReadyAgentTasksInput): Pr
       );
       await client.query('COMMIT');
       const order = new Map(selected.map((task, index) => [task.id, index]));
-      return rows.rows
+      const claimedTasks = rows.rows
         .map(rowToTask)
         .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+      decisionContext = {
+        ...claimDecision,
+        selected: claimedTasks,
+      };
+      return claimedTasks;
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw err;
     }
   });
+  if (decisionContext) {
+    await recordClaimSchedulerDecision(decisionContext);
+  }
+  return claimed;
 }
 
 export async function updateAgentTaskStatus(
@@ -510,28 +537,23 @@ function rowToAttempt(row: AgentTaskAttemptRow): AgentTaskAttemptRecord {
 }
 
 function normalizeRole(value: unknown): AgentTaskRole {
-  if (value === 'planner' || value === 'executor' || value === 'verifier') return value;
-  return 'executor';
+  return value === 'planner' || value === 'executor' || value === 'verifier' ? value : 'executor';
 }
 
 function normalizeTaskStatus(value: unknown): AgentTaskStatus {
-  if (value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled' || value === 'blocked') return value;
-  return 'queued';
+  return value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled' || value === 'blocked' ? value : 'queued';
 }
 
 function normalizeAttemptStatus(value: unknown): AgentTaskAttemptStatus {
-  if (value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled') return value;
-  return 'running';
+  return value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled' ? value : 'running';
 }
 
 function normalizePriority(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 100;
-  return Math.max(0, Math.floor(value));
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 100;
 }
 
 function normalizeOptionalNumber(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  return value;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeRequiredString(value: unknown, name: string): string {
@@ -540,9 +562,7 @@ function normalizeRequiredString(value: unknown, name: string): string {
   return normalized;
 }
 
-function uniqueStrings(value: readonly string[]): string[] {
-  return [...new Set(value.map(item => item.trim()).filter(Boolean))];
-}
+function uniqueStrings(value: readonly string[]): string[] { return [...new Set(value.map(item => item.trim()).filter(Boolean))]; }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -570,9 +590,7 @@ function normalizeJsonStringArray(value: unknown): string[] {
   return [];
 }
 
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
+function toIsoString(value: Date | string): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
 
 function assertRow<T>(row: T | undefined): T {
   if (!row) throw new Error('agent task graph write returned no row');

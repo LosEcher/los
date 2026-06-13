@@ -133,7 +133,7 @@ Database:
   will race on `CREATE TABLE IF NOT EXISTS`. When adding a new store module,
   update every `test-setup.ts` in every package whose tests transitively depend
   on that store. The current package inventory:
-  - `packages/agent/src/test-setup.ts` — 22 stores, all agent-owned
+  - `packages/agent/src/test-setup.ts` — 23 stores, all agent-owned
   - `packages/memory/src/test-setup.ts` — 2 stores (`ensureTaskRunStore`,
     `ensureRunEvalStore`), cross-depends on `@los/agent`
   - `packages/gateway/` — no `test-setup.ts`; gateway tests that need agent

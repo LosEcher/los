@@ -21,8 +21,9 @@ import {
 import { clearCancellation } from '../cancellation.js';
 import { canStartExecution, canMarkSucceeded, readRunContractMetadata, type RunContractMetadata } from '../run-contract.js';
 import { loadRunSpec } from '../run-specs.js';
+import { recordSchedulerDecision } from '../scheduler-decision-ledger.js';
 import { resolveExecutor, runAgentOnExecutor } from './executor-client.js';
-import { normalizeOptionalString, normalizePositiveInteger } from './helpers.js';
+import { normalizeOptionalString, normalizePositiveInteger, readObject } from './helpers.js';
 import { emitTaskEvent } from './task-events.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
 import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
@@ -80,6 +81,25 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     runContract: input.runContract,
     status: 'queued',
   });
+  if (executor) {
+    const metadata = readObject(input.metadata);
+    await recordSchedulerDecision({
+      graphId: normalizeOptionalString(metadata.graphId) ?? input.runSpecId ?? taskRunId,
+      taskId: normalizeOptionalString(metadata.agentTaskId),
+      taskRunId,
+      runSpecId: input.runSpecId,
+      sessionId,
+      nodeId,
+      kind: 'executor_selection',
+      selectedIds: [executor.nodeId],
+      skipped: executor.decision.skipped,
+      reason: executor.decision.source,
+      metadata: {
+        candidateNodeIds: executor.decision.candidateIds,
+        executorUrl: executor.url,
+      },
+    });
+  }
   await emitTaskEvent(sessionId, 'task.created', created);
   await input.onTaskEvent?.({ type: 'task.created', taskRun: created });
 

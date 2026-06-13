@@ -63,7 +63,7 @@ export const LOS_RUNTIME_CORE_TODO_SEED: CreateTodoInput[] = [
     title: '持久化 scheduler decision ledger',
     description: '记录候选任务、候选节点、选择理由、跳过理由、能力缺口、editable-surface 冲突和成本/延迟估计。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-06-13',
     stageId: 'agent-runtime-core-hardening',
@@ -72,12 +72,19 @@ export const LOS_RUNTIME_CORE_TODO_SEED: CreateTodoInput[] = [
     dedupeKey: 'los:todo:scheduler-decision-ledger',
     metadata: {
       problem: '当前 task claim 和 executor selection 可运行，但调度理由没有可复盘的持久化证据。',
-      solution: '新增 scheduler_decisions 或等价 read-model，记录 why selected / why skipped，并接入 graph scheduler tests。',
-      candidateSurfaces: [
-        'packages/agent/src/scheduler',
+      solution: '新增 scheduler_decisions ledger，记录 graph claim 与 provider selection 的 why selected / why skipped，并接入 graph scheduler tests。',
+      evidence: [
+        'packages/agent/src/scheduler-decision-ledger.ts',
+        'packages/agent/src/scheduler/claim-decision.ts',
         'packages/agent/src/agent-task-graph.ts',
-        'packages/agent/src/executor-nodes.ts',
-        'contracts/agent-task-graph.yaml',
+        'packages/agent/src/scheduler.ts',
+        'packages/agent/src/scheduler/executor-client.ts',
+        'packages/agent/src/scheduler/scheduled-task-runner.ts',
+        'packages/agent/src/scheduler.test.ts',
+      ],
+      validation: [
+        'pnpm --filter @los/agent test -- --test-name-pattern "scheduler runs independent graph tasks in parallel|scheduler selects graph task provider"',
+        'pnpm --filter @los/agent check',
       ],
       statusUpdatedAt: '2026-06-13',
     },

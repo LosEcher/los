@@ -14,6 +14,7 @@ import {
 import { readAgentTaskGraph } from './agent-task-graph-read-model.js';
 import { createRunSpec, loadRunSpec } from './run-specs.js';
 import { recordProviderCompatEvidence } from './provider-compat-evidence.js';
+import { listSchedulerDecisions } from './scheduler-decision-ledger.js';
 import { listSessionEvents } from './session-events.js';
 import { loadToolCallState } from './tool-call-states.js';
 import { persistScheduledToolCallState, runAgentTaskGraphSerial, runScheduledAgentTask } from './scheduler.js';
@@ -85,7 +86,12 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
     assert.equal(result.taskRun.nodeId, nodeId);
     assert.equal(result.result.text, 'executor ok');
     assert.equal(requests[0]?.nodeId, nodeId);
+
+    const decisions = await listSchedulerDecisions({ graphId: taskRunId, kind: 'executor_selection' });
+    assert.equal(decisions[0]?.reason, 'executor_registry');
+    assert.deepEqual(decisions[0]?.selectedIds, [nodeId]);
   } finally {
+    await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [taskRunId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
     await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
@@ -523,7 +529,14 @@ test('scheduler runs independent graph tasks in parallel without editable surfac
 
     const graph = await readAgentTaskGraph(graphId);
     assert.deepEqual(graph.tasks.map(task => task.status), ['succeeded', 'succeeded', 'succeeded']);
+
+    const claimDecisions = await listSchedulerDecisions({ graphId, kind: 'claim' });
+    assert.equal(claimDecisions[0]?.reason, 'ready_tasks_claimed');
+    assert.deepEqual(claimDecisions[0]?.selectedIds.sort(), [`${graphId}-agent-a`, `${graphId}-web`].sort());
+    assert.equal(claimDecisions[0]?.skipped[0]?.id, `${graphId}-agent-b`);
+    assert.equal(claimDecisions[0]?.skipped[0]?.reason, 'editable_surface_conflict');
   } finally {
+    await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
@@ -627,7 +640,15 @@ test('scheduler selects graph task provider and model from compatibility evidenc
     assert.equal(selection?.source, 'provider_compat_evidence');
     assert.equal(selection?.evidenceId, evidenceId);
     assert.equal(selection?.targetLabel, `${verifiedProvider}:model-b`);
+
+    const decisions = await listSchedulerDecisions({ graphId, taskId: `${graphId}-exec`, kind: 'provider_selection' });
+    assert.equal(decisions[0]?.reason, 'provider_compat_evidence');
+    assert.equal(decisions[0]?.provider, verifiedProvider);
+    assert.equal(decisions[0]?.model, 'model-b');
+    assert.equal(decisions[0]?.metadata.evidenceId, evidenceId);
+    assert.deepEqual(decisions[0]?.skipped, [{ id: `${unverifiedProvider}:model-a`, reason: 'provider_capability_mismatch', details: {} }]);
   } finally {
+    await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await getDb().query('DELETE FROM provider_compat_evidence WHERE provider IN ($1, $2)', [unverifiedProvider, verifiedProvider]).catch(() => undefined);
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
@@ -682,6 +703,7 @@ test('scheduler blocks graph task provider selection when required compatibility
     assert.equal(graph.tasks[0]?.status, 'failed');
     assert.match(String(graph.tasks[0]?.metadata.error ?? ''), /requires passing provider compatibility evidence/);
   } finally {
+    await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await getDb().query('DELETE FROM provider_compat_evidence WHERE provider = $1', [provider]).catch(() => undefined);
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
