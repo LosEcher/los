@@ -2,6 +2,8 @@ export type ProviderProtocol = 'openai' | 'anthropic';
 export type ApiShape = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
 export type ToolCallRepairMode = 'none' | 'json-loose';
 export type CachePolicy = 'none' | 'prompt-cache-read';
+export type VisionCapabilityMode = 'none' | 'native' | 'proxy';
+export type SessionAffinity = 'none' | 'provider' | 'model' | 'account';
 
 /** Transport hints for a provider/model. */
 export type TransportHint = 'sse' | 'websocket' | 'http-stream' | 'auto';
@@ -15,6 +17,38 @@ export interface ModelPricing {
   cacheHitTokenCostPer1M: number;
 }
 
+export interface ModelCapabilityProfile {
+  modelAliases: string[];
+  reasoning: {
+    supported: boolean;
+    parameter?: string;
+  };
+  vision: {
+    supported: boolean;
+    mode: VisionCapabilityMode;
+    proxyProvider?: string;
+  };
+  tools: {
+    supported: boolean;
+    parallelCalls: boolean;
+    streaming: boolean;
+    repair: ToolCallRepairMode;
+  };
+  cache: {
+    policy: CachePolicy;
+    promptCacheRead: boolean;
+  };
+  session: {
+    affinity: SessionAffinity;
+    sticky: boolean;
+  };
+  routing: {
+    protocol: ProviderProtocol;
+    apiShape: ApiShape;
+    transportHints: TransportHint[];
+  };
+}
+
 export interface ModelProfile {
   provider: string;
   protocol: ProviderProtocol;
@@ -25,6 +59,12 @@ export interface ModelProfile {
   supportsParallelToolCalls: boolean;
   supportsReasoning: boolean;
   reasoningParam?: string;
+  modelAliases?: string[];
+  supportsToolStreaming?: boolean;
+  supportsVision?: boolean;
+  visionMode?: VisionCapabilityMode;
+  visionProxyProvider?: string;
+  sessionAffinity?: SessionAffinity;
   cachePolicy: CachePolicy;
   toolCallRepair: ToolCallRepairMode;
   maxInputTokens?: number;
@@ -45,6 +85,8 @@ export interface ModelProfile {
   pricing?: ModelPricing;
   /** Transport hints — what transport protocols the provider supports. */
   transportHints?: TransportHint[];
+  /** Normalized capability read model for scheduler and compatibility harnesses. */
+  capabilities?: ModelCapabilityProfile;
 }
 
 export interface ModelExecutionSummary {
@@ -61,6 +103,7 @@ export interface ModelExecutionSummary {
   maxInputTokens?: number;
   maxOutputTokens?: number;
   defaultTemperature?: number;
+  capabilities: ModelCapabilityProfile;
 }
 
 export interface ResolveModelProfileOptions {
@@ -101,6 +144,9 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsParallelToolCalls: false,
     supportsReasoning: true,
     reasoningParam: 'reasoning_content',
+    modelAliases: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner'],
+    supportsToolStreaming: true,
+    sessionAffinity: 'provider',
     cachePolicy: 'prompt-cache-read',
     toolCallRepair: 'json-loose',
     usageMapping: OPENAI_USAGE_MAPPING,
@@ -118,6 +164,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsTools: true,
     supportsParallelToolCalls: true,
     supportsReasoning: false,
+    modelAliases: ['gpt-5.5'],
+    supportsToolStreaming: true,
     cachePolicy: 'none',
     toolCallRepair: 'none',
     usageMapping: OPENAI_USAGE_MAPPING,
@@ -134,6 +182,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsTools: true,
     supportsParallelToolCalls: false,
     supportsReasoning: false,
+    modelAliases: ['gpt-5.5'],
+    supportsToolStreaming: false,
     cachePolicy: 'none',
     toolCallRepair: 'none',
     usageMapping: OPENAI_USAGE_MAPPING,
@@ -150,6 +200,9 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsParallelToolCalls: true,
     supportsReasoning: true,
     reasoningParam: 'reasoning_effort',
+    modelAliases: ['gpt-5.5', 'gpt-5.4'],
+    supportsToolStreaming: true,
+    sessionAffinity: 'provider',
     cachePolicy: 'prompt-cache-read',
     toolCallRepair: 'none',
     usageMapping: OPENAI_USAGE_MAPPING,
@@ -177,11 +230,15 @@ export function resolveModelProfile(
   options: ResolveModelProfileOptions = {},
 ): ModelProfile {
   const base = MODEL_PROFILES[provider] ?? openAICompatibleProfile(provider, 'https://api.openai.com/v1', options.defaultModel ?? 'gpt-4o');
-  return {
+  const resolved = {
     ...base,
     baseUrl: options.baseUrl ?? base.baseUrl,
     model: options.model ?? base.model ?? options.defaultModel ?? 'gpt-4o',
     apiShape: options.apiShape ?? base.apiShape,
+  };
+  return {
+    ...resolved,
+    capabilities: resolveModelCapabilityProfile(resolved),
   };
 }
 
@@ -200,6 +257,44 @@ export function summarizeModelProfile(profile: ModelProfile): ModelExecutionSumm
     maxInputTokens: profile.maxInputTokens,
     maxOutputTokens: profile.maxOutputTokens,
     defaultTemperature: profile.defaultTemperature,
+    capabilities: resolveModelCapabilityProfile(profile),
+  };
+}
+
+export function resolveModelCapabilityProfile(profile: ModelProfile): ModelCapabilityProfile {
+  const transportHints: TransportHint[] = profile.transportHints?.length ? profile.transportHints : ['http-stream'];
+  const visionMode = profile.visionMode ?? (profile.supportsVision ? 'native' : 'none');
+  const sessionAffinity = profile.sessionAffinity ?? (profile.cachePolicy === 'prompt-cache-read' ? 'provider' : 'none');
+  return {
+    modelAliases: uniqueStrings([profile.model, ...(profile.modelAliases ?? [])]),
+    reasoning: {
+      supported: profile.supportsReasoning,
+      parameter: profile.reasoningParam,
+    },
+    vision: {
+      supported: profile.supportsVision === true,
+      mode: visionMode,
+      proxyProvider: profile.visionProxyProvider,
+    },
+    tools: {
+      supported: profile.supportsTools,
+      parallelCalls: profile.supportsParallelToolCalls,
+      streaming: profile.supportsToolStreaming === true,
+      repair: profile.toolCallRepair,
+    },
+    cache: {
+      policy: profile.cachePolicy,
+      promptCacheRead: profile.cachePolicy === 'prompt-cache-read',
+    },
+    session: {
+      affinity: sessionAffinity,
+      sticky: sessionAffinity !== 'none',
+    },
+    routing: {
+      protocol: profile.protocol,
+      apiShape: profile.apiShape,
+      transportHints,
+    },
   };
 }
 
@@ -213,6 +308,7 @@ function openAICompatibleProfile(provider: string, baseUrl: string, model: strin
     supportsTools: true,
     supportsParallelToolCalls: false,
     supportsReasoning: false,
+    modelAliases: [model],
     cachePolicy: 'none',
     toolCallRepair: 'none',
     usageMapping: OPENAI_USAGE_MAPPING,
@@ -232,6 +328,9 @@ function anthropicProfile(provider: string, baseUrl: string, model: string): Mod
     supportsParallelToolCalls: false,
     supportsReasoning: true,
     reasoningParam: 'thinking',
+    modelAliases: [model],
+    supportsToolStreaming: true,
+    sessionAffinity: 'provider',
     cachePolicy: 'prompt-cache-read',
     toolCallRepair: 'none',
     usageMapping: ANTHROPIC_USAGE_MAPPING,
@@ -239,6 +338,10 @@ function anthropicProfile(provider: string, baseUrl: string, model: string): Mod
     knownFailurePatterns: [],
     pricing: { promptTokenCostPer1M: 3.00, completionTokenCostPer1M: 15.00, cacheHitTokenCostPer1M: 0.30 },
   };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map(value => value.trim()).filter(Boolean))];
 }
 
 // ── Cost Estimation ─────────────────────────────────────

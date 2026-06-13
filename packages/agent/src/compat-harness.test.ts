@@ -55,7 +55,9 @@ test('compatibility harness summarizes SSE evidence', () => {
           effectiveModel: 'deepseek-v4-pro',
           modelProfile: {
             protocol: 'openai',
-            supportsReasoning: true,
+            capabilities: {
+              reasoning: { supported: true },
+            },
           },
         },
       },

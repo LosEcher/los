@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { calculateCost, estimateCost, MODEL_PROFILES, resolveModelProfile, summarizeModelProfile } from './model-profiles.js';
+import {
+  calculateCost,
+  estimateCost,
+  MODEL_PROFILES,
+  resolveModelCapabilityProfile,
+  resolveModelProfile,
+  summarizeModelProfile,
+} from './model-profiles.js';
 
 test('resolveModelProfile keeps deepseek defaults and overrides', () => {
   const profile = resolveModelProfile('deepseek');
@@ -58,6 +65,35 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
   assert.equal(summary.supportsReasoning, true);
   assert.equal(summary.cachePolicy, 'prompt-cache-read');
   assert.equal(summary.toolCallRepair, 'json-loose');
+  assert.equal(summary.capabilities.reasoning.supported, true);
+  assert.equal(summary.capabilities.reasoning.parameter, 'reasoning_content');
+  assert.equal(summary.capabilities.cache.promptCacheRead, true);
+  assert.equal(summary.capabilities.session.affinity, 'provider');
+  assert.equal(summary.capabilities.session.sticky, true);
+  assert.equal(summary.capabilities.tools.streaming, true);
+  assert.deepEqual(summary.capabilities.routing.transportHints, ['sse']);
+  assert.ok(summary.capabilities.modelAliases.includes('deepseek-v4-pro'));
+});
+
+test('resolveModelCapabilityProfile normalizes model aliases and scheduling-relevant capability flags', () => {
+  const deepseek = resolveModelCapabilityProfile(resolveModelProfile('deepseek'));
+  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner']);
+  assert.equal(deepseek.tools.parallelCalls, false);
+  assert.equal(deepseek.tools.repair, 'json-loose');
+  assert.equal(deepseek.vision.supported, false);
+  assert.equal(deepseek.vision.mode, 'none');
+
+  const packycode = resolveModelCapabilityProfile(resolveModelProfile('packycode'));
+  assert.equal(packycode.tools.supported, true);
+  assert.equal(packycode.tools.parallelCalls, false);
+  assert.equal(packycode.tools.streaming, false);
+  assert.equal(packycode.cache.promptCacheRead, false);
+  assert.equal(packycode.session.sticky, false);
+
+  const claude = resolveModelCapabilityProfile(resolveModelProfile('claude'));
+  assert.equal(claude.routing.protocol, 'anthropic');
+  assert.equal(claude.reasoning.parameter, 'thinking');
+  assert.equal(claude.session.affinity, 'provider');
 });
 
 test('packycode defaults to openai-chat-completions apiShape (PackyCode does not support /v1/responses)', () => {

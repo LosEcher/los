@@ -263,7 +263,10 @@ export function summarizeCompatibilityEvents(
       if (typeof payload.effectiveModel === 'string') effectiveModel = payload.effectiveModel;
       const modelProfile = asRecord(payload.modelProfile);
       if (typeof modelProfile.protocol === 'string') protocol = modelProfile.protocol;
-      if (typeof modelProfile.supportsReasoning === 'boolean') reasoningSupported = modelProfile.supportsReasoning;
+      const capabilities = asRecord(modelProfile.capabilities);
+      const reasoning = asRecord(capabilities.reasoning);
+      if (typeof reasoning.supported === 'boolean') reasoningSupported = reasoning.supported;
+      else if (typeof modelProfile.supportsReasoning === 'boolean') reasoningSupported = modelProfile.supportsReasoning;
     }
 
     if (item.event === 'model.response') {
