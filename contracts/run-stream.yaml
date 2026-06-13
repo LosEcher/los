@@ -16,13 +16,16 @@ eventTypes:
   - session.resumed
   - session.resume_state
   - session.started
+  - session.branched
   - task
   - task.created
   - task.deduplicated
   - task.running
+  - task.blocked
   - task.cancelled
   - task.succeeded
   - task.failed
+  - task.recovery_followup_queued
   - model.delta
   - model.response
   - tool.planned
@@ -34,6 +37,13 @@ eventTypes:
   - turn
   - done
   - error
+  - cancelled
+  - deduplicated
+sseProtocol:
+  - session.live
+  - session.ready
+  - session.event
+  - session.completed
 commonFields:
   sessionId:
     type: string

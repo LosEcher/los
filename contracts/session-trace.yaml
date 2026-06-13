@@ -83,7 +83,16 @@ routes:
                     type: integer
                     minimum: 1
                     nullable: true
+projectorRules:
+  sourceEvents:
+    - session_events
+  invariant:
+    - Every tool.call event MUST have a corresponding tool.result or tool.denied event
+    - Tool calls still running when the session completes MUST be marked as error
+  governance:
+    - Every tool.* event type declared in run-stream.yaml eventTypes MUST have
+      a handler in packages/agent/src/session-trace.ts projectSessionTrace()
+    - New tool event types MUST update the projector before the contract gate passes
 verification:
   - pnpm check
   - ./tools/check-contracts.sh
-

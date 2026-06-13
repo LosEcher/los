@@ -105,6 +105,114 @@ provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
   require_pattern "$provider_compat_evidence" 'raw transcripts' 'raw transcript redaction'
 }
 
+# ── Event coverage: contract eventTypes vs actual emissions ──
+
+verify_event_coverage() {
+  local contract_file="$1"          # run-stream.yaml
+  local event_types_section="$2"     # eventTypes: | sseProtocol:
+  local label="$3"                   # human-readable label
+  shift 3
+  local src_files=("$@")
+
+  # Extract declared event types from contract (lines with "  - <name>" under the section)
+  local declared
+  declared=$(awk -v section="$event_types_section" '
+    $0 ~ "^" section ":" { in_section=1; next }
+    in_section && /^  - / { gsub(/^  - /, ""); print; next }
+    in_section && /^[a-zA-Z]/ { exit }
+  ' "$contract_file")
+
+  if [ -z "$declared" ]; then
+    printf '  (no %s entries in contract)\n' "$label"
+    return 0
+  fi
+
+  local had_failures=0
+
+  # Forward check: every declared event that appears as a session_events type
+  # must be emitted somewhere (relayed via relaySessionEvent or send).
+  for evt in $declared; do
+    local found=0
+    for f in "${src_files[@]}"; do
+      if grep -qE "send\('[^']*${evt}[^']*'" "$f" 2>/dev/null; then
+        found=1
+        break
+      fi
+      # Also check for relaySessionEvent which relays all session_events types
+      if grep -qE 'relaySessionEvent' "$f" 2>/dev/null; then
+        found=1
+        break
+      fi
+    done
+    if [ "$found" -eq 0 ]; then
+      fail "$label event '$evt' declared in contract but not found in emission code"
+      had_failures=1
+    fi
+  done
+
+  # Reverse check: every send('name', ...) must appear in one of the contract sections
+  local emitted
+  emitted=$(for f in "${src_files[@]}"; do
+    [ -f "$f" ] && grep -ohE "send\('[a-zA-Z._-]+'" "$f" 2>/dev/null || true
+  done | sed "s/send('//;s/'//" | sort -u)
+
+  local all_declared
+  all_declared=$(awk '
+    /^(eventTypes|sseProtocol):/ { in_section=1; next }
+    in_section && /^  - / { gsub(/^  - /, ""); print; next }
+    in_section && /^[a-zA-Z]/ { in_section=0 }
+  ' "$contract_file" | sort -u)
+
+  for evt in $emitted; do
+    if ! echo "$all_declared" | grep -qFx "$evt"; then
+      fail "event '$evt' emitted in code but not declared in $contract_file ($label)"
+      had_failures=1
+    fi
+  done
+
+  return $had_failures
+}
+
+scan_files=(
+  "$ROOT/packages/gateway/src/chat-route.ts"
+  "$ROOT/packages/gateway/src/chat-live-events.ts"
+  "$ROOT/packages/gateway/src/routes/sse-routes.ts"
+)
+
+[ -f "$run_stream" ] && verify_event_coverage "$run_stream" eventTypes "run-stream" "${scan_files[@]}"
+[ -f "$run_stream" ] && verify_event_coverage "$run_stream" sseProtocol "run-stream sse" "${scan_files[@]}"
+
+# ── Projector coverage: every tool.* event must be handled in session-trace.ts ──
+
+verify_projector_coverage() {
+  local contract_file="$1"
+  local projector_file="$2"
+
+  if [ ! -f "$contract_file" ] || [ ! -f "$projector_file" ]; then
+    return 0
+  fi
+
+  local tool_events
+  tool_events=$(awk '
+    /^(eventTypes):/ { in_section=1; next }
+    in_section && /^  - tool\./ { gsub(/^  - /, ""); print; next }
+    in_section && /^[a-zA-Z]/ { in_section=0 }
+  ' "$contract_file")
+
+  local had_failures=0
+  for evt in $tool_events; do
+    if ! grep -qE "event\.type === ['\"]${evt}['\"]|event\.type\.startsWith.*tool" "$projector_file" 2>/dev/null; then
+      fail "tool event '$evt' in contract has no handler in session-trace.ts projector"
+      had_failures=1
+    fi
+  done
+
+  return $had_failures
+}
+
+projector_file="$ROOT/packages/agent/src/session-trace.ts"
+[ -f "$run_stream" ] && verify_projector_coverage "$run_stream" "$projector_file"
+
 if [ "$failures" -gt 0 ]; then
   exit 1
 fi
