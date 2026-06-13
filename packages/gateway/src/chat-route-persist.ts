@@ -6,17 +6,13 @@ import type { CheckpointState } from '@los/agent';
 import { addObservation, ensureMemoryStore } from '@los/memory';
 import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
 import { updateBoundTodoFromRun } from './chat-session-helpers.js';
-import { completeIdempotencyKey, failIdempotencyKey } from './idempotency.js';
+import { failIdempotencyKey } from './idempotency.js';
 
 export async function persistChatSuccess(opts: {
   prompt: string;
   result: { text: string; loopCount: number; totalTokens: number };
   persistMemory: boolean;
   sessionId: string;
-  provider: string | null;
-  model: string | null;
-  workspaceRoot: string;
-  toolMode: string;
   boundTodoId: string | null;
   runSpecId: string;
   taskRunId: string;
@@ -26,8 +22,6 @@ export async function persistChatSuccess(opts: {
   projectId: string;
   userId: string;
   nodeId: string | null;
-  idempotency: { id: string } | null;
-  replayPayload: unknown;
 }) {
   const postRun = await Promise.all([
     opts.persistMemory
@@ -73,10 +67,6 @@ export async function persistChatSuccess(opts: {
       event: todoCompletionStatus === 'blocked' ? 'run.verification_blocked' : 'task.succeeded',
       blockedVerificationRecordIds: runCompletion?.blockedVerificationRecordIds ?? [],
     });
-  }
-
-  if (opts.idempotency) {
-    await completeIdempotencyKey(opts.idempotency.id, 200, opts.replayPayload as any);
   }
 
   return {
