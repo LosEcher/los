@@ -50,10 +50,11 @@ import {
   previewText,
   summarizeCapability,
   assertNotAborted,
-  withAbort,
   abortErrorFromSignal,
   summarizeSessionErrors,
 } from './loop/utils.js';
+import { runToolCalls } from './loop/tool-runner.js';
+import { withAbort } from './loop/utils.js';
 import type {
   AgentConfig,
   AgentModelDelta,
@@ -149,6 +150,7 @@ export async function runAgent(
   let totalCostUsd = 0;
   let cacheEventCount = 0;
   const sessionErrors: Array<{ turn: number; type: string; toolName?: string; message: string }> = [];
+  const onSessionError = (err: typeof sessionErrors[number]) => { sessionErrors.push(err); };
 
   log.info(`Agent starting — maxLoops=${maxLoops}, provider=${provider.name}`);
   await emitEvent({
@@ -177,8 +179,7 @@ export async function runAgent(
     },
   });
 
-  // B1: Optional pre-execution discovery and planning turns.
-  // These are guided model turns that produce structured outputs.
+  // Pre-execution discovery and planning turns moved to loop-phases.ts.
   // Enforcement (B0) is in the scheduler, not here.
   const phaseResult = await runPreExecutionPhases(
     config.runContractMetadata ?? {},
@@ -327,192 +328,17 @@ export async function runAgent(
     }
 
     // Execute tool calls
-    const toolResults: string[] = [];
-    for (const tc of res.toolCalls) {
-      assertNotAborted(signal);
-      const fn = tc.function;
-      log.debug(`Tool call: ${fn.name}(${fn.arguments.slice(0, 100)})`);
-
-      // Emit tool.repair if provider repaired malformed arguments
-      if (tc._repair?.repaired) {
-        await emitEvent({
-          type: 'tool.repair',
-          turn: i + 1,
-          toolName: fn.name,
-          payload: {
-            callId: tc.id,
-            repairSteps: tc._repair.repairSteps ?? [],
-          },
-        });
-        // Track as session error (non-fatal, but worth noting)
-        sessionErrors.push({
-          turn: i + 1,
-          type: 'tool_repair',
-          toolName: fn.name,
-          message: `Repaired tool call arguments for ${fn.name}: ${(tc._repair.repairSteps ?? []).join(', ')}`,
-        });
-      }
-
-      let args: Record<string, unknown>;
-      try {
-        // Graceful fallback for empty arguments (e.g. from split tool call repair)
-        args = fn.arguments ? JSON.parse(fn.arguments) as Record<string, unknown> : {};
-      } catch (err: any) {
-        sessionErrors.push({
-          turn: i + 1,
-          type: 'tool_parse_error',
-          toolName: fn.name,
-          message: `Failed to parse tool arguments: ${err?.message ?? String(err)}`,
-        });
-        await emitEvent({
-          type: 'tool.result',
-          turn: i + 1,
-          toolName: fn.name,
-          parentEventId: undefined,
-          payload: {
-            callId: tc.id,
-            ok: false,
-            durationMs: 0,
-            contentPreview: '',
-            contentLength: 0,
-            errorPreview: `Invalid tool arguments: ${err?.message ?? String(err)}`,
-          },
-        });
-        throw err;
-      }
-      const capability = tools.getCapability(fn.name);
-      const toolSource = inferToolSource(capability);
-      await config.onToolCall?.(tc.id, fn.name, args, i + 1);
-
-      await config.onToolCallState?.({
-        callId: tc.id,
-        toolName: fn.name,
-        state: 'requested',
-        turn: i + 1,
-        input: args,
-        maxAttempts: capability?.retryable ? policy.retry?.maxAttempts : 1,
-        idempotent: capability?.idempotent ?? false,
-        retryPolicy: policy.retry,
-      });
-
-      const callEvent = await emitEvent({
-        type: 'tool.call',
-        turn: i + 1,
-        toolName: fn.name,
-        payload: {
-          callId: tc.id,
-          args,
-          argsLength: fn.arguments.length,
-          source: toolSource,
-        },
-      });
-
-      const planEvent = await emitEvent({
-        type: 'tool.planned',
-        turn: i + 1,
-        toolName: fn.name,
-        parentEventId: callEvent?.id,
-        payload: {
-          callId: tc.id,
-          capability: summarizeCapability(capability),
-          policy,
-          argsLength: fn.arguments.length,
-          source: toolSource,
-        },
-      });
-
-      const decision = applyPhaseGate(
-        tools.evaluateTool(fn.name), fn.name, config.runContractMetadata,
-      ) as ReturnType<typeof tools.evaluateTool>;
-      // Tool call state: approved or denied
-      await config.onToolCallState?.({
-        callId: tc.id, toolName: fn.name,
-        state: decision.allowed ? 'approved' : 'denied',
-        turn: i + 1,
-        error: decision.allowed ? undefined : decision.reason,
-      });
-
-      const decisionEvent = await emitEvent({
-        type: decision.allowed ? 'tool.approved' : 'tool.denied',
-        turn: i + 1,
-        toolName: fn.name,
-        parentEventId: planEvent?.id ?? callEvent?.id,
-        payload: {
-          callId: tc.id,
-          allowed: decision.allowed,
-          reasonCode: decision.allowed ? undefined : decision.reasonCode,
-          reason: decision.allowed ? undefined : decision.reason,
-          capability: summarizeCapability(decision.capability),
-          policy: decision.policy,
-        },
-      });
-
-      if (decision.allowed) {
-        await config.onToolCallState?.({
-          callId: tc.id, toolName: fn.name, state: 'running', turn: i + 1,
-        });
-      }
-
-      const toolStartedAt = Date.now();
-      const result = decision.allowed
-        ? await withAbort(
-            tools.execute({
-              name: fn.name,
-              arguments: args,
-            }),
-            signal,
-          )
-        : { content: '', error: decision.reason };
-      const toolDurationMs = Date.now() - toolStartedAt;
-
-      await config.onToolCallState?.({
-        callId: tc.id, toolName: fn.name,
-        state: result.error ? 'failed' : 'succeeded',
-        turn: i + 1,
-        outputSummary: result.error ? undefined : previewText(result.content, 200),
-        error: result.error,
-        durationMs: toolDurationMs,
-        attempt: result.attempts ?? 1,
-      });
-
-      if (result.error) {
-        sessionErrors.push({
-          turn: i + 1,
-          type: decision.allowed ? 'tool_execution_error' : 'tool_denied',
-          toolName: fn.name,
-          message: result.error,
-        });
-      }
-
-      const content = result.error ?? result.content;
-      toolResults.push(content);
-      await emitEvent({
-        type: 'tool.result',
-        turn: i + 1,
-        toolName: fn.name,
-        parentEventId: decisionEvent?.id ?? callEvent?.id,
-        payload: {
-          callId: tc.id,
-          ok: !result.error,
-          denied: !decision.allowed,
-          reasonCode: decision.allowed ? undefined : decision.reasonCode,
-          durationMs: toolDurationMs,
-          attempts: result.attempts ?? 1,
-          retried: result.retried ?? false,
-          retryErrors: result.retryErrors ?? [],
-          contentPreview: previewText(content),
-          contentLength: content.length,
-          errorPreview: result.error ? previewText(result.error) : undefined,
-          source: toolSource,
-        },
-      });
-
-      messages.push({
-        role: 'tool',
-        content: content.slice(0, 8000), // Truncate very long results
-        tool_call_id: tc.id,
-      });
-    }
+    const { toolResults, toolMessages } = await runToolCalls({
+      toolCalls: res.toolCalls,
+      turn: i + 1,
+      tools,
+      config,
+      signal,
+      policy,
+      emitEvent,
+      onSessionError,
+    });
+    messages.push(...toolMessages);
 
     const turn: TurnSummary = {
       loopCount: i + 1,
