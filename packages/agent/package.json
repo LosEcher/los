@@ -9,6 +9,7 @@
     "./scheduler": "./src/scheduler.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
+    "./operator-control": "./src/operator-control.ts",
     "./session-trace": "./src/session-trace.ts",
     "./session-trace-fixtures": "./src/session-trace-fixtures.ts",
     "./task-runs": "./src/task-runs.ts",

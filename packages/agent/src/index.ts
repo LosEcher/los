@@ -90,6 +90,14 @@ export {
 } from './mcp-servers.js';
 export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSession, type SessionRecord } from './session.js';
 export {
+  recordOperatorFollowup,
+  recordOperatorSteering,
+  recordSessionBranchCreated,
+  type RecordOperatorFollowupInput,
+  type RecordOperatorSteeringInput,
+  type RecordSessionBranchCreatedInput,
+} from './operator-control.js';
+export {
   ensureToolCallStateStore,
   createToolCallState,
   // updateToolCallState — internal; use transitionExecutionState for state changes

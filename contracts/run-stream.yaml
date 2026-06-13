@@ -17,6 +17,9 @@ eventTypes:
   - session.resume_state
   - session.started
   - session.branched
+  - session.branch_created
+  - operator.steering
+  - operator.followup
   - task
   - task.created
   - task.deduplicated

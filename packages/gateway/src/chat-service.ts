@@ -16,6 +16,7 @@ import {
   ensureRunSpecStore,
   createRunSpec,
 } from '@los/agent/run-specs';
+import { recordSessionBranchCreated } from '@los/agent/operator-control';
 import { augmentChatSystemPrompt } from './chat-memory-augment.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
 import {
@@ -183,6 +184,22 @@ export async function runChat(params: {
     }
 
     if (branchFrom && branchParentForEvent) {
+      await recordSessionBranchCreated({
+        sessionId: sid,
+        parentSessionId: branchFrom,
+        branchAtTurn,
+        copiedMessageCount: branchSourceMessages?.length ?? branchParentForEvent.messages.length,
+        parentMessageCount: branchParentForEvent.messages.length,
+        parentTurnCount: branchParentForEvent.turns.length,
+        runSpecId,
+        tenantId,
+        projectId,
+        userId,
+        requestId,
+        traceId,
+        actor: userId,
+        reason: 'chat_branch_created',
+      });
       send('session.branched', {
         sessionId: sid,
         parentSessionId: branchFrom,
