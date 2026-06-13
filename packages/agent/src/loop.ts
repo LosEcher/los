@@ -129,6 +129,7 @@ export async function runAgent(
     provider: config.provider,
     model: config.model,
     modelSettings: config.modelSettings,
+    runContractMetadata: config.runContractMetadata,
     workspaceRoot: config.workspaceRoot,
     toolRetry: config.toolRetry,
     signal,

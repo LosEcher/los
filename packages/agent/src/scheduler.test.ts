@@ -103,6 +103,7 @@ test('scheduler phase gate reads current run spec contract instead of stale task
   const sessionId = `session-current-contract-${suffix}`;
   const runSpecId = `run-current-contract-${suffix}`;
   const nodeId = `test-current-contract-executor-${suffix}`;
+  const requests: Array<{ config?: { runContractMetadata?: { runContract?: { phase?: unknown; mode?: unknown } } } }> = [];
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
@@ -110,7 +111,7 @@ test('scheduler phase gate reads current run spec contract instead of stale task
       res.end('not found');
       return;
     }
-    await readRequestBody(req);
+    requests.push(JSON.parse(await readRequestBody(req)));
     sendJson(res, {
       events: [],
       deltas: [],
@@ -156,6 +157,8 @@ test('scheduler phase gate reads current run spec contract instead of stale task
 
     assert.equal(result.status, 'completed');
     assert.equal(result.result.text, 'executor ok');
+    assert.equal(requests[0]?.config?.runContractMetadata?.runContract?.mode, 'execution');
+    assert.equal(requests[0]?.config?.runContractMetadata?.runContract?.phase, 'plan_approved');
   } finally {
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);

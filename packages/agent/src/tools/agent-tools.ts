@@ -20,6 +20,7 @@ export interface SpawnAgentRunnerOptions {
   provider?: string;
   model?: string;
   modelSettings?: AgentConfig['modelSettings'];
+  runContractMetadata?: AgentConfig['runContractMetadata'];
   workspaceRoot?: string;
   toolRetry?: {
     maxAttempts?: number;
@@ -90,6 +91,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       provider: request.provider ?? options.provider,
       model: request.model ?? options.model,
       modelSettings: options.modelSettings,
+      runContractMetadata: options.runContractMetadata,
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,

@@ -1,6 +1,7 @@
 import type { CreateTodoInput } from './todo-types.js';
 import { LOS_AGENT_WORKFLOW_TODO_SEED } from './todo-seeds-agent-workflow.js';
 import { LOS_GOVERNANCE_TODO_SEED } from './todo-seeds-governance.js';
+import { LOS_RUNTIME_CORE_TODO_SEED } from './todo-seeds-runtime-core.js';
 
 export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   {
@@ -470,5 +471,6 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     },
   },
   ...LOS_AGENT_WORKFLOW_TODO_SEED,
+  ...LOS_RUNTIME_CORE_TODO_SEED,
   ...LOS_GOVERNANCE_TODO_SEED,
 ];

@@ -175,6 +175,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             allowedTools: input.allowedTools,
             toolRetry: input.toolRetry,
             mcpServers: input.mcpServers,
+            runContractMetadata: {
+              ...running.metadata,
+              ...(runContract ? { runContract } : {}),
+            },
           },
           signal: controller.signal,
           onSessionEvent: input.onSessionEvent,

@@ -106,13 +106,14 @@ Goal: make the intended agent behavior explicit before the task starts.
 | Completion contract (required/allowed skips/stop conditions) | `run-contract.ts` | `run-contract.test.ts` | — |
 | Scope contract (editable surfaces, owner layer) | `run-contract.ts` | Agent task graph/scheduler tests | — |
 | Closeout contract (commit boundary, evidence) | `run-contract.ts` | `run-contract.test.ts` | — |
+| Basic run contract propagation to child/executor runs | `agent-tools.ts`, `scheduled-task-runner.ts` | `registry.test.ts`, `scheduler.test.ts` | — |
 
 #### Remaining Gaps
 
 1. Direct unit tests for `approveRunSpecPhase()` and `reviseRunSpecPlan()`
 2. Gateway route integration tests for `POST /runs/:id/approve` and `/revise-plan`
 3. End-to-end smoke covering audit→execution→closeout full mode lifecycle
-4. Cross-process phase propagation to child agents and executor nodes
+4. Durable child run-spec lineage and child attempt linkage
 5. Active execution resume with attempt/retry contract
 6. Phase latency and rejection metrics
 7. Operator approval UI in Web console

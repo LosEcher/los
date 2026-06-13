@@ -19,8 +19,10 @@ As of 2026-06-09:
      `phase != plan_approved`, succeeded blocked when verification pending/failed.
    - `task-runs.ts`: `TaskRunStatus` now includes `'blocked'` state.
    - `contracts/run-spec.yaml`: `runContract` section with phase/plan/verifications.
-   - Remaining: cross-process phase propagation to child agents, plan revision
-     lineage, operator approval events, active execution resume.
+   - Remaining: durable child run-spec lineage, plan revision lineage,
+     operator approval events, active execution resume. Basic run contract
+     propagation to `spawn_agent` child runs and executor-node `runAgent`
+     requests is implemented as of 2026-06-13.
 4. Phases 5-7 remain roadmap work.
 
 ## Background

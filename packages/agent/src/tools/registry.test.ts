@@ -9,7 +9,7 @@ import {
   registerBuiltinTools,
   READ_ONLY_BUILTIN_TOOLS,
 } from './registry.js';
-import { registerSpawnAgentTool } from './agent-tools.js';
+import { createSpawnAgentRunner, registerSpawnAgentTool } from './agent-tools.js';
 
 test('read-only tool mode excludes write and shell tools', async () => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-readonly-'));
@@ -256,6 +256,55 @@ test('spawn_agent defaults to read-only and forwards runner inputs', async () =>
   assert.equal(seen.toolMode, undefined);
   assert.equal(seen.maxLoops, 4);
   assert.equal(JSON.parse(result.content).prompt, 'inspect the workspace');
+});
+
+test('spawn_agent child inherits parent run contract metadata', async () => {
+  let seenPrompt: string | undefined;
+  let seenConfig: any;
+  const runner = createSpawnAgentRunner({
+    sessionId: 'parent-session',
+    provider: 'parent-provider',
+    model: 'parent-model',
+    workspaceRoot: '/tmp/los-parent-workspace',
+    runContractMetadata: {
+      runContract: {
+        mode: 'execution',
+        phase: 'executing',
+        editableSurfaces: ['packages/agent'],
+        requiredChecks: ['pnpm --filter @los/agent test'],
+      },
+    },
+    runAgent: async (prompt, config) => {
+      seenPrompt = prompt;
+      seenConfig = config;
+      return {
+        text: 'child ok',
+        turns: [],
+        loopCount: 1,
+        totalTokens: { prompt: 0, completion: 0 },
+        messages: [],
+      };
+    },
+  });
+
+  const result = await runner({
+    prompt: 'do child work',
+    toolMode: 'project-write',
+    maxLoops: 99,
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(seenPrompt, 'do child work');
+  assert.equal(seenConfig.sessionId.startsWith('parent-session:child:'), true);
+  assert.equal(seenConfig.provider, 'parent-provider');
+  assert.equal(seenConfig.model, 'parent-model');
+  assert.equal(seenConfig.workspaceRoot, '/tmp/los-parent-workspace');
+  assert.equal(seenConfig.maxLoops, 12);
+  assert.equal(seenConfig.runContractMetadata.runContract.phase, 'executing');
+  assert.deepEqual(seenConfig.runContractMetadata.runContract.editableSurfaces, ['packages/agent']);
+  assert.equal(seenConfig.allowedTools.includes('spawn_agent'), false);
+  assert.equal(seenConfig.allowedTools.includes('run_shell'), false);
+  assert.equal(JSON.parse(result.content).childSessionId.startsWith('parent-session:child:'), true);
 });
 
 test('tool capability timeout is enforced during execution', async () => {

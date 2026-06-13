@@ -230,13 +230,13 @@ Also stored in:
 | `canMarkSucceeded()` | Via verification-records test only | None | B0 smoke (indirect) |
 | Plan revision lineage (parent/child) | None | None | None |
 | Verification `operator_review` kind routing | N/A | None | None |
-| Cross-process phase propagation | None | None | None |
+| Basic run contract propagation to child/executor runs | `registry.test.ts`, `scheduler.test.ts` | N/A | Confirmed for `spawn_agent` child config and executor request config |
 
 ## Gaps — Design Intent Not Yet Implemented
 
 These are roadmap items, not drift:
 
-1. Cross-process phase propagation to child agents and executor nodes
+1. Durable child run-spec lineage and child attempt linkage
 2. Active execution resume with attempt/retry contract
 3. Phase latency and rejection metrics
 4. Operator approval UI in Web console
