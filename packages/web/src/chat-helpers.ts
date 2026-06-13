@@ -273,3 +273,39 @@ export function streamRow(event: string, data: Record<string, unknown>): StreamR
   if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? 'task event'), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
   return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };
 }
+
+// ── Trace message mapping ──
+
+import type { SessionTraceResponse } from './api';
+import type { Message } from './chat-messages.js';
+
+export function mapTraceToMessages(
+  input: SessionTraceResponse['messages'],
+  sessionId: string | null,
+): Message[] {
+  const sid = sessionId ?? 'no-session';
+  return input.map((msg, idx) => ({
+    id: `${sid}:${idx}:${msg.role}:${msg.turnIndex ?? ''}:${msg.eventType ?? ''}`,
+    role: msg.role,
+    content: msg.content,
+    meta: msg.meta,
+    level: msg.level,
+    eventType: msg.eventType,
+    provider: msg.provider,
+    model: msg.model,
+    turnIndex: msg.turnIndex,
+    totalTurns: msg.totalTurns,
+    reasoning: msg.reasoning,
+    toolCalls: msg.toolCalls.map(tc => ({
+      callId: tc.callId,
+      toolName: tc.toolName,
+      status: tc.status,
+      argsPreview: tc.argsPreview,
+      args: tc.args,
+      resultPreview: tc.resultPreview,
+      errorPreview: tc.errorPreview,
+      durationMs: tc.durationMs,
+      attempts: tc.attempts,
+    })),
+  }));
+}

@@ -51,6 +51,9 @@ function truncateJson(raw: string, maxLen: number): string {
 
 // ── Accumulation ─────────────────────────────────────
 
+/** @deprecated Use trace projection (GET /sessions/:id/trace) as the single source of
+ *  truth for message rendering. This function is retained for debug-mode raw event
+ *  replay only. */
 export function accumulateEvent(
   messages: Message[],
   event: string,

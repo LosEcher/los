@@ -10,8 +10,6 @@ import {
   postJson,
   streamChat,
   type ModelSettings,
-  type ProviderDiscovery,
-  type ProviderModelsResponse,
   type SessionDetail,
   type SessionTraceResponse,
   type SessionObservability,
@@ -20,7 +18,6 @@ import {
 } from './api';
 import {
   buildAdvancedCount,
-  buildProviderOptions,
   buildTodoPrompt,
   readRunContract,
   readyStreamRows,
@@ -28,7 +25,7 @@ import {
   buildHistoryRows,
   streamRow,
   SUPPRESSED_STREAM_EVENTS,
-  providerRoutesFromModels,
+  mapTraceToMessages,
   type StreamRow,
 } from './chat-helpers.js';
 import {
@@ -40,11 +37,12 @@ import {
 import { ContextChip } from './chat-ui.js';
 import { ChatComposer, buildComposerPayload } from './chat-composer.js';
 import {
-  accumulateEvent,
   readyMessages,
   ChatMessages,
   type Message,
 } from './chat-messages.js';
+import { useChatProviders } from './hooks/useChatProviders.js';
+import { useChatSession } from './hooks/useChatSession.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -63,8 +61,6 @@ export function ChatPage({
 }) {
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
   const [workspaceRoot, setWorkspaceRoot] = useState(() => {
     try { return localStorage.getItem('los-workspace') ?? ''; } catch { return ''; }
   });
@@ -82,21 +78,32 @@ export function ChatPage({
   const [toolRetryBaseDelayMs, setToolRetryBaseDelayMs] = useState('');
   const [toolRetryMaxDelayMs, setToolRetryMaxDelayMs] = useState('');
   const [running, setRunning] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [taskRunId, setTaskRunId] = useState<string | null>(null);
-  const [boundTodoId, setBoundTodoId] = useState<string | null>(null);
   const [rows, setRows] = useState<StreamRow[]>(() => readyStreamRows());
   const [messages, setMessages] = useState<Message[]>(() => readyMessages());
   const [debugMode, setDebugMode] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const historyLoadedForSession = useRef<string | null>(null);
   const branchFromRef = useRef<string | null>(null);
 
-  const onboarding = useQuery({
-    queryKey: ['onboarding'],
-    queryFn: () => getJson<ProviderDiscovery>('/onboarding'),
-    staleTime: 20_000,
-  });
+  const {
+    provider, setProvider,
+    model, setModel,
+    onboarding,
+    modelRoutes,
+    providerOptions,
+    selectedRoute,
+    modelOptions,
+  } = useChatProviders();
+
+  const {
+    sessionId, setSessionId,
+    taskRunId, setTaskRunId,
+    boundTodoId, setBoundTodoId,
+    newChatConfirming, setNewChatConfirming,
+    historyLoadedForSession,
+    bindTodo,
+    startNewChat: startNewChatFromHook,
+  } = useChatSession({ selectedSessionId, onSessionSelect, onTodoContextClear });
+
   const settings = useQuery({
     queryKey: ['settings'],
     queryFn: () => getJson<Record<string, unknown>>('/settings'),
@@ -104,13 +111,6 @@ export function ChatPage({
   });
   const configMaxLoops = (settings.data as Record<string, Record<string, unknown>> | undefined)?.agent?.maxLoops;
   const defaultMaxLoops = typeof configMaxLoops === 'number' ? configMaxLoops : 20;
-  const modelRoutes = useQuery({
-    queryKey: ['provider-models', provider || 'default'],
-    queryFn: () => getJson<ProviderModelsResponse>(
-      provider ? `/providers/models?provider=${encodeURIComponent(provider)}` : '/providers/models',
-    ),
-    staleTime: 20_000,
-  });
   const workspaceInfo = useQuery({
     queryKey: ['workspace'],
     queryFn: () => getJson<{ workspaceRoot: string; cwd: string }>('/workspace'),
@@ -154,21 +154,6 @@ export function ChatPage({
     refetchInterval: running ? 4_000 : false,
   });
 
-  const providerOptions = useMemo(() => {
-    return buildProviderOptions(onboarding.data, modelRoutes.data);
-  }, [onboarding.data, modelRoutes.data]);
-  const providerRoutes = useMemo(() => providerRoutesFromModels(modelRoutes.data), [modelRoutes.data]);
-  const selectedRoute = useMemo(() => {
-    return providerRoutes.find(route => route.provider === provider) ?? providerRoutes[0] ?? null;
-  }, [providerRoutes, provider]);
-  const modelOptions = useMemo(() => {
-    const ids = new Set<string>();
-    if (selectedRoute?.model) ids.add(selectedRoute.model);
-    for (const item of selectedRoute?.models ?? []) {
-      if (item.id) ids.add(item.id);
-    }
-    return [...ids];
-  }, [selectedRoute]);
   const advancedCount = useMemo(() => {
     return buildAdvancedCount({
       systemPrompt,
@@ -186,32 +171,14 @@ export function ChatPage({
     });
   }, [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
-  function mapTraceMessages(input: SessionTraceResponse['messages']): Message[] {
-    return input.map((msg, idx) => ({
-      id: `${sessionId ?? 'no-session'}:${idx}:${msg.role}:${msg.turnIndex ?? ''}:${msg.eventType ?? ''}`,
-      role: msg.role,
-      content: msg.content,
-      meta: msg.meta,
-      level: msg.level,
-      eventType: msg.eventType,
-      provider: msg.provider,
-      model: msg.model,
-      turnIndex: msg.turnIndex,
-      totalTurns: msg.totalTurns,
-      reasoning: msg.reasoning,
-      toolCalls: msg.toolCalls.map(tc => ({
-        callId: tc.callId,
-        toolName: tc.toolName,
-        status: tc.status,
-        argsPreview: tc.argsPreview,
-        args: tc.args,
-        resultPreview: tc.resultPreview,
-        errorPreview: tc.errorPreview,
-        durationMs: tc.durationMs,
-        attempts: tc.attempts,
-      })),
-    }));
-  }
+
+  // Live trace update: when trace refetches during a run, rebuild messages
+  useEffect(() => {
+    if (!running) return;
+    const trace = sessionTrace.data;
+    if (!trace || !Array.isArray(trace.messages) || trace.messages.length === 0) return;
+    setMessages(mapTraceToMessages(trace.messages, sessionId));
+  }, [sessionTrace.data, running, sessionId]);
 
   // Persist workspaceRoot to localStorage
   useEffect(() => {
@@ -252,7 +219,7 @@ export function ChatPage({
     const turns_ = detail?.turns ?? [];
     const historyRows = buildHistoryRows(messages_ as Array<Record<string, unknown>>, turns_ as Array<Record<string, unknown>>);
     setRows(historyRows);
-    setMessages(mapTraceMessages(trace.messages));
+    setMessages(mapTraceToMessages(trace.messages, sessionId));
   }, [sessionDetail.data, sessionTrace.data, sessionId, selectedSessionId, running]);
 
   // When branchFromSession is set, prepare chat for a branch
@@ -291,7 +258,7 @@ export function ChatPage({
         });
         setMessages(prev => {
           if (!branchFromRef.current) return prev;
-          return trace?.messages ? mapTraceMessages(trace.messages) : prev;
+          return trace?.messages ? mapTraceToMessages(trace.messages, sessionId) : prev;
         });
       }
     }).catch(() => undefined);
@@ -299,9 +266,7 @@ export function ChatPage({
 
   useEffect(() => {
     if (running || !activeTodoContext || activeTodoContext.id === boundTodoId) return;
-    setBoundTodoId(activeTodoContext.id);
-    setSessionId(activeTodoContext.sessionId ?? null);
-    setTaskRunId(null);
+    bindTodo(activeTodoContext);
     setPrompt(buildTodoPrompt(activeTodoContext));
     setRows([{
       id: crypto.randomUUID(),
@@ -319,21 +284,6 @@ export function ChatPage({
       toolCalls: [],
     }]);
   }, [activeTodoContext, boundTodoId, running, sessionId]);
-
-  useEffect(() => {
-    if (provider || providerOptions.length === 0) return;
-    if (!modelRoutes.data && !modelRoutes.isError) return;
-    setProvider(providerOptions[0]!.id);
-  }, [modelRoutes.data, modelRoutes.isError, provider, providerOptions]);
-
-  useEffect(() => {
-    if (!selectedRoute) return;
-    const fallback = selectedRoute.model ?? modelOptions[0] ?? '';
-    if (!fallback) return;
-    if (!model || (modelOptions.length > 0 && !modelOptions.includes(model))) {
-      setModel(fallback);
-    }
-  }, [model, modelOptions, selectedRoute]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -416,7 +366,10 @@ export function ChatPage({
         if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
           setRows(prev => [...prev, streamRow(event, data)]);
         }
-        setMessages(prev => accumulateEvent(prev, event, data));
+        // Invalidate trace query on key events; messages rebuild from trace projection
+        if (event === 'turn' || event === 'done' || event === 'tool.result' || event === 'tool.call') {
+          void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
+        }
       });
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
@@ -461,8 +414,6 @@ export function ChatPage({
     setRunning(false);
   }
 
-  const [newChatConfirming, setNewChatConfirming] = useState(false);
-
   function startNewChat() {
     if (running) return;
     if (sessionId || taskRunId) {
@@ -472,11 +423,7 @@ export function ChatPage({
       }
       setNewChatConfirming(false);
     }
-    setSessionId(null);
-    setTaskRunId(null);
-    setBoundTodoId(null);
-    historyLoadedForSession.current = null;
-    onTodoContextClear();
+    startNewChatFromHook();
     setRows([{
       id: crypto.randomUUID(),
       event: 'session.new',
@@ -492,7 +439,6 @@ export function ChatPage({
       level: 'ok',
       toolCalls: [],
     }]);
-    onSessionSelect(null);
   }
 
   return (
