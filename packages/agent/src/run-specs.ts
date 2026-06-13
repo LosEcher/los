@@ -116,20 +116,6 @@ CREATE INDEX IF NOT EXISTS idx_run_specs_tenant_project ON run_specs(tenant_id, 
 CREATE INDEX IF NOT EXISTS idx_run_specs_request_id ON run_specs(request_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_trace_id ON run_specs(trace_id);
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'run_specs_status_chk'
-      AND conrelid = 'run_specs'::regclass
-  ) THEN
-    ALTER TABLE run_specs
-      ADD CONSTRAINT run_specs_status_chk
-      CHECK (status IN ('created', 'running', 'succeeded', 'failed', 'cancelled', 'blocked'))
-      NOT VALID;
-  END IF;
-END $$;
 `;
 
 let _initialized = false;
