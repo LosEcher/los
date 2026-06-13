@@ -394,9 +394,6 @@ export function scanOwnAccounts(): DiscoveredProvider[] {
       } catch { /* skip */ }
     }
   } catch { /* skip */ }
-
   return providers;
 }
-
-// ── Main Export ─────────────────────────────────────────
 
