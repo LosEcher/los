@@ -1,5 +1,4 @@
-import { loadConfig } from '@los/infra/config';
-import { closeDb, getDb, initDb } from '@los/infra/db';
+import { getDb, withInitDb } from '@los/infra/db';
 
 export interface RuntimeCleanupOptions {
   staleMs?: number;
@@ -87,13 +86,7 @@ const FIXTURE_PATTERN = /(^|[^a-z0-9])(fixture|smoke|test|verifier-failure|tool-
 export async function detectRuntimeCleanupWithDefaultDb(
   options: RuntimeCleanupOptions = {},
 ): Promise<RuntimeCleanupReport> {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  try {
-    return await detectRuntimeCleanupFromOpenDb(options);
-  } finally {
-    await closeDb().catch(() => undefined);
-  }
+  return withInitDb(() => detectRuntimeCleanupFromOpenDb(options));
 }
 
 export async function detectRuntimeCleanupFromOpenDb(

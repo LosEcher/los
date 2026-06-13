@@ -1,6 +1,4 @@
-import { getDb } from '@los/infra/db';
-import { loadConfig } from '@los/infra/config';
-import { closeDb, initDb } from '@los/infra/db';
+import { getDb, withInitDb } from '@los/infra/db';
 import type { CompatibilityRunSummary } from './compat-harness.js';
 
 export type ProviderCompatDecision = 'advisory' | 'verified_advisory' | 'required' | 'blocked';
@@ -167,13 +165,7 @@ export async function recordProviderCompatEvidenceFromSummaryWithDefaultDb(
   summary: CompatibilityRunSummary,
   decision?: ProviderCompatDecision,
 ): Promise<ProviderCompatEvidenceRecord> {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  try {
-    return await recordProviderCompatEvidenceFromSummary(summary, decision);
-  } finally {
-    await closeDb().catch(() => undefined);
-  }
+  return withInitDb(() => recordProviderCompatEvidenceFromSummary(summary, decision));
 }
 
 export async function listLatestProviderCompatEvidence(): Promise<ProviderCompatEvidenceRecord[]> {

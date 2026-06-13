@@ -1,5 +1,4 @@
-import { loadConfig } from '@los/infra/config';
-import { closeDb, initDb } from '@los/infra/db';
+import { withInitDb } from '@los/infra/db';
 import { listProviderPromotionDecisions } from './provider-promotion-decisions.js';
 
 export type CompatibilityToolMode = 'read-only' | 'project-write';
@@ -165,13 +164,7 @@ export async function resolveRequiredCompatibilityTargets(
 export async function resolveRequiredCompatibilityTargetsWithDefaultDb(
   baseTargets: readonly ProviderModelTarget[] = DEFAULT_COMPATIBILITY_TARGETS,
 ): Promise<ProviderModelTarget[]> {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  try {
-    return await resolveRequiredCompatibilityTargets(baseTargets);
-  } finally {
-    await closeDb().catch(() => undefined);
-  }
+  return withInitDb(() => resolveRequiredCompatibilityTargets(baseTargets));
 }
 
 export function selectCompatibilityProbes(ids: readonly string[] | undefined): CompatibilityProbe[] {

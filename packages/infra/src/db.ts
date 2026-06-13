@@ -145,6 +145,17 @@ export async function closeDb(): Promise<void> {
   }
 }
 
+export async function withInitDb<T>(fn: () => Promise<T>): Promise<T> {
+  const { loadConfig } = await import('./config.js');
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    return await fn();
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+}
+
 export async function withDbClient<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   getDb();
   const client = await _pool!.connect();

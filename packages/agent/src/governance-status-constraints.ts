@@ -1,5 +1,4 @@
-import { loadConfig } from '@los/infra/config';
-import { closeDb, getDb, initDb } from '@los/infra/db';
+import { getDb, withInitDb } from '@los/infra/db';
 
 export interface StatusConstraintDefinition {
   tableName: 'task_runs' | 'run_specs';
@@ -54,23 +53,11 @@ const STATUS_CONSTRAINTS: StatusConstraintDefinition[] = [
 ];
 
 export async function readStatusConstraintReportWithDefaultDb(): Promise<StatusConstraintReport> {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  try {
-    return await readStatusConstraintReportFromOpenDb();
-  } finally {
-    await closeDb().catch(() => undefined);
-  }
+  return withInitDb(() => readStatusConstraintReportFromOpenDb());
 }
 
 export async function validateStatusConstraintsWithDefaultDb(): Promise<ValidateStatusConstraintsResult> {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  try {
-    return await validateStatusConstraintsFromOpenDb();
-  } finally {
-    await closeDb().catch(() => undefined);
-  }
+  return withInitDb(() => validateStatusConstraintsFromOpenDb());
 }
 
 export async function validateStatusConstraintsFromOpenDb(): Promise<ValidateStatusConstraintsResult> {

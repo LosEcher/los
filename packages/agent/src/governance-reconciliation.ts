@@ -1,5 +1,4 @@
-import { loadConfig } from '@los/infra/config';
-import { closeDb, getDb, initDb } from '@los/infra/db';
+import { getDb, withInitDb } from '@los/infra/db';
 import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
 import type { CreateTodoInput, TodoKind, TodoPriority, TodoStatus } from './todo-types.js';
 
@@ -63,13 +62,7 @@ const TODO_STATUSES: TodoStatus[] = ['backlog', 'ready', 'in_progress', 'blocked
 export async function reconcilePlanningTodosWithDefaultDb(
   options: TodoReconciliationOptions = {},
 ): Promise<TodoReconciliationReport> {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  try {
-    return await reconcilePlanningTodosFromOpenDb(options);
-  } finally {
-    await closeDb().catch(() => undefined);
-  }
+  return withInitDb(() => reconcilePlanningTodosFromOpenDb(options));
 }
 
 export async function reconcilePlanningTodosFromOpenDb(
