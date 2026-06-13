@@ -54,10 +54,11 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
     if (testUrl) return testUrl;
 
     const candidate = databaseUrl ?? process.env.DATABASE_URL;
+    const allowLive = process.env.LOS_ALLOW_LIVE_TEST_DB;
     if (
       candidate
       && !isSafeTestDatabaseUrl(candidate)
-      && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
+      && !(allowLive === '1' || allowLive === 'true' || allowLive === 'yes')
     ) {
       throw new Error(
         `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
