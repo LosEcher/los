@@ -5,7 +5,8 @@
  * PostgreSQL. Tests for real connections go in db.integration.test.ts.
  */
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
+import { isSafeTestDatabaseUrl, resolveDatabaseUrlForInit } from './db.js';
 
 describe('DbConnection interface', () => {
   it('defines exec/prepare/transaction/close contract', () => {
@@ -52,6 +53,56 @@ describe('SQLite URL parsing', () => {
   it('leaves non-file URLs unchanged', () => {
     const pg = 'postgres://user:pass@host:5432/los';
     assert.strictEqual(extractSqlitePath(pg), pg);
+  });
+});
+
+// ── Test database guard ─────────────────────────────────
+
+describe('test database guard', () => {
+  const originalEnv = { ...process.env };
+  const originalArgv = [...process.argv];
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    process.argv.splice(0, process.argv.length, ...originalArgv);
+  });
+
+  it('accepts clearly named test databases', () => {
+    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los_test'), true);
+    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los-test'), true);
+    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los_test_123'), true);
+  });
+
+  it('rejects live-looking database names for tests', () => {
+    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los'), false);
+    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/prod'), false);
+  });
+
+  it('uses TEST_DATABASE_URL in test processes', () => {
+    process.argv.push('/tmp/db.test.ts');
+    process.env.TEST_DATABASE_URL = 'postgres://localhost:5432/los_test';
+    assert.equal(
+      resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+      'postgres://localhost:5432/los_test',
+    );
+  });
+
+  it('refuses live-looking database names in test processes', () => {
+    process.argv.push('/tmp/db.test.ts');
+    delete process.env.TEST_DATABASE_URL;
+    assert.throws(
+      () => resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+      /Refusing to run tests against non-test database "los"/,
+    );
+  });
+
+  it('allows explicit one-off override for live-looking test databases', () => {
+    process.argv.push('/tmp/db.test.ts');
+    process.env.LOS_ALLOW_LIVE_TEST_DB = '1';
+    assert.equal(
+      resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+      'postgres://localhost:5432/los',
+    );
   });
 });
 

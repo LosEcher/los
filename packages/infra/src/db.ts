@@ -25,7 +25,7 @@ let _pool: Pool | null = null;
 export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   if (_pool) return wrap(_pool);
 
-  const url = databaseUrl ?? process.env.DATABASE_URL;
+  const url = resolveDatabaseUrlForInit(databaseUrl);
   if (!url) {
     throw new Error(
       'DATABASE_URL is not configured. Set DATABASE_URL=postgres://user:pass@host:5432/db ' +
@@ -46,6 +46,61 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   await _pool.query('select 1');
   log.info('Database: PostgreSQL connected');
   return wrap(_pool);
+}
+
+export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefined {
+  if (isLikelyTestProcess()) {
+    const testUrl = normalizeOptionalString(process.env.TEST_DATABASE_URL);
+    if (testUrl) return testUrl;
+
+    const candidate = databaseUrl ?? process.env.DATABASE_URL;
+    if (
+      candidate
+      && !isSafeTestDatabaseUrl(candidate)
+      && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
+    ) {
+      throw new Error(
+        `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
+        'Set TEST_DATABASE_URL=postgres://.../los_test or LOS_ALLOW_LIVE_TEST_DB=1 for an explicit one-off override.',
+      );
+    }
+    return candidate;
+  }
+
+  return databaseUrl ?? process.env.DATABASE_URL;
+}
+
+export function isSafeTestDatabaseUrl(databaseUrl: string): boolean {
+  try {
+    const parsed = new URL(databaseUrl);
+    const dbName = parsed.pathname.replace(/^\/+/, '').toLowerCase();
+    if (!dbName) return false;
+    return /(^|[-_])test($|[-_])/.test(dbName) || dbName.endsWith('_test') || dbName.endsWith('-test');
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyTestProcess(): boolean {
+  if (process.env.NODE_ENV === 'test') return true;
+  if (process.env.LOS_TEST_MODE === '1') return true;
+  if (process.env.NODE_TEST_CONTEXT) return true;
+  return process.argv.some((arg) => /\.(test|spec)\.[cm]?[jt]s$/.test(arg));
+}
+
+function redactedDatabaseName(databaseUrl: string): string {
+  try {
+    const parsed = new URL(databaseUrl);
+    return parsed.pathname.replace(/^\/+/, '') || '<none>';
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function wrap(pool: Pool): DbConnection {

@@ -459,7 +459,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     title: '隔离测试数据库，避免测试任务污染 live todo/task 视图',
     description: 'task-runs 测试当前会写入有效配置的 PostgreSQL，应改为测试 schema、临时 database 或显式 cleanup。',
     kind: 'problem',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'quality',
@@ -467,7 +467,16 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     dependsOnIds: ['todo-los-saas-foundation'],
     metadata: {
       problem: 'live /tasks 中可见 task-runs.test.ts 写入的 session-1 测试记录。',
-      solution: '测试环境使用独立 DATABASE_URL 或清理 fixture.',
+      solution: '在 @los/infra initDb 加测试进程 guard：测试默认拒绝写入 live-looking DB，优先使用 TEST_DATABASE_URL，并保留 LOS_ALLOW_LIVE_TEST_DB=1 作为显式一次性 override。',
+      evidence: [
+        'packages/infra/src/db.ts',
+        'packages/infra/src/db.test.ts',
+      ],
+      validation: [
+        'pnpm --filter @los/infra check',
+        'node --import tsx --test src/db.test.ts',
+      ],
+      statusUpdatedAt: '2026-06-13',
     },
   },
   ...LOS_AGENT_WORKFLOW_TODO_SEED,
