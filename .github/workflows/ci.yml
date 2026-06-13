@@ -31,7 +31,6 @@ jobs:
 
     env:
       DATABASE_URL: postgres://los:los@localhost:5432/los
-      LOS_ALLOW_LIVE_TEST_DB: 1
       NODE_ENV: test
 
     steps:
@@ -47,3 +46,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run gate
+        env:
+          LOS_ALLOW_LIVE_TEST_DB: "1"
