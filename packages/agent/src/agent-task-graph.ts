@@ -21,6 +21,26 @@ import type {
   LinkAgentTaskDependencyInput,
 } from './agent-task-graph/types.js';
 
+import {
+  assertRow,
+  normalizeAttemptStatus,
+  normalizeOptionalNumber,
+  normalizePriority,
+  normalizeRequiredString,
+  normalizeRole,
+  normalizeTaskStatus,
+  toIsoString,
+  uniqueStrings,
+} from './agent-task-graph/normalizers.js';
+import {
+  rowToTask,
+  rowToEdge,
+  rowToAttempt,
+  type AgentTaskRow,
+  type AgentTaskEdgeRow,
+  type AgentTaskAttemptRow,
+} from './agent-task-graph/rows.js';
+
 export {
   editableSurfacesForAgentTask,
   editableSurfacesOverlap,
@@ -424,175 +444,6 @@ export async function listAgentTaskAttempts(taskId: string): Promise<AgentTaskAt
   return rows.rows.map(rowToAttempt);
 }
 
-type AgentTaskRow = {
-  id: string;
-  graph_id: string;
-  run_spec_id: string | null;
-  session_id: string | null;
-  role: string;
-  title: string;
-  prompt: string | null;
-  status: string;
-  priority: number;
-  confidence: number | null;
-  cost_estimate: number | null;
-  deadline_at: Date | string | null;
-  max_attempts: number;
-  metadata_json: unknown;
-  claimed_by_node_id: string | null;
-  lease_expires_at: Date | string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-  started_at: Date | string | null;
-  completed_at: Date | string | null;
-};
 
-export type { AgentTaskRow };
+export { rowToTask, type AgentTaskRow } from './agent-task-graph/rows.js';
 
-type AgentTaskEdgeRow = {
-  graph_id: string;
-  task_id: string;
-  depends_on_task_id: string;
-  kind: string;
-  metadata_json: unknown;
-  created_at: Date | string;
-};
-
-type AgentTaskAttemptRow = {
-  id: string;
-  graph_id: string;
-  task_id: string;
-  attempt: number;
-  status: string;
-  provider: string | null;
-  model: string | null;
-  node_id: string | null;
-  task_run_id: string | null;
-  verification_record_id: string | null;
-  tool_call_state_ids_json: unknown;
-  output_summary: string | null;
-  error: string | null;
-  started_at: Date | string;
-  completed_at: Date | string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-};
-
-export function rowToTask(row: AgentTaskRow): AgentTaskRecord {
-  return {
-    id: row.id,
-    graphId: row.graph_id,
-    runSpecId: row.run_spec_id ?? undefined,
-    sessionId: row.session_id ?? undefined,
-    role: normalizeRole(row.role),
-    title: row.title,
-    prompt: row.prompt ?? undefined,
-    status: normalizeTaskStatus(row.status),
-    priority: row.priority,
-    confidence: row.confidence ?? undefined,
-    costEstimate: row.cost_estimate ?? undefined,
-    deadlineAt: row.deadline_at ? toIsoString(row.deadline_at) : undefined,
-    maxAttempts: row.max_attempts,
-    metadata: normalizeJsonObject(row.metadata_json),
-    claimedByNodeId: row.claimed_by_node_id ?? undefined,
-    leaseExpiresAt: row.lease_expires_at ? toIsoString(row.lease_expires_at) : undefined,
-    createdAt: toIsoString(row.created_at),
-    updatedAt: toIsoString(row.updated_at),
-    startedAt: row.started_at ? toIsoString(row.started_at) : undefined,
-    completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
-  };
-}
-
-function rowToEdge(row: AgentTaskEdgeRow): AgentTaskEdgeRecord {
-  return {
-    graphId: row.graph_id,
-    taskId: row.task_id,
-    dependsOnTaskId: row.depends_on_task_id,
-    kind: 'blocks',
-    metadata: normalizeJsonObject(row.metadata_json),
-    createdAt: toIsoString(row.created_at),
-  };
-}
-
-function rowToAttempt(row: AgentTaskAttemptRow): AgentTaskAttemptRecord {
-  return {
-    id: row.id,
-    graphId: row.graph_id,
-    taskId: row.task_id,
-    attempt: row.attempt,
-    status: normalizeAttemptStatus(row.status),
-    provider: row.provider ?? undefined,
-    model: row.model ?? undefined,
-    nodeId: row.node_id ?? undefined,
-    taskRunId: row.task_run_id ?? undefined,
-    verificationRecordId: row.verification_record_id ?? undefined,
-    toolCallStateIds: normalizeJsonStringArray(row.tool_call_state_ids_json),
-    outputSummary: row.output_summary ?? undefined,
-    error: row.error ?? undefined,
-    startedAt: toIsoString(row.started_at),
-    completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
-    createdAt: toIsoString(row.created_at),
-    updatedAt: toIsoString(row.updated_at),
-  };
-}
-
-function normalizeRole(value: unknown): AgentTaskRole {
-  return value === 'planner' || value === 'executor' || value === 'verifier' ? value : 'executor';
-}
-
-function normalizeTaskStatus(value: unknown): AgentTaskStatus {
-  return value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled' || value === 'blocked' ? value : 'queued';
-}
-
-function normalizeAttemptStatus(value: unknown): AgentTaskAttemptStatus {
-  return value === 'running' || value === 'succeeded' || value === 'failed' || value === 'cancelled' ? value : 'running';
-}
-
-function normalizePriority(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 100;
-}
-
-function normalizeOptionalNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function normalizeRequiredString(value: unknown, name: string): string {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) throw new Error(`${name} is required`);
-  return normalized;
-}
-
-function uniqueStrings(value: readonly string[]): string[] { return [...new Set(value.map(item => item.trim()).filter(Boolean))]; }
-
-function normalizeJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function normalizeJsonStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) return uniqueStrings(value.filter((item): item is string => typeof item === 'string'));
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? normalizeJsonStringArray(parsed) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function toIsoString(value: Date | string): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
-
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('agent task graph write returned no row');
-  return row;
-}
