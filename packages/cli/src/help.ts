@@ -8,7 +8,7 @@ Usage:
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
   los evals <list|summary|compare|record> [options]
-  los governance <todo-reconcile|runtime-cleanup> [options]
+  los governance <todo-reconcile|runtime-cleanup|status-constraints> [options]
   los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
@@ -66,6 +66,7 @@ Evals:
 Governance:
   todo-reconcile         Dry-run compare code todo seeds with the DB todo ledger
   runtime-cleanup        Dry-run report illegal statuses and stale fixture runs
+  status-constraints     Report status CHECK constraints and invalid row counts
 
 Nodes:
   list | commands | command

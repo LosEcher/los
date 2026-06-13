@@ -1,8 +1,13 @@
 import {
   detectRuntimeCleanupWithDefaultDb,
+  readStatusConstraintReportWithDefaultDb,
   reconcilePlanningTodosWithDefaultDb,
+  summarizeStatusConstraintReport,
+  validateStatusConstraintsWithDefaultDb,
   type RuntimeCleanupReport,
+  type StatusConstraintReport,
   type TodoReconciliationReport,
+  type ValidateStatusConstraintsResult,
 } from '@los/agent';
 
 type ParsedArgs = {
@@ -24,6 +29,10 @@ export async function governanceCommand(globalArgs: string[], argv: string[]): P
   }
   if (action === 'runtime-cleanup' || action === 'cleanup') {
     await runtimeCleanup(parsed);
+    return;
+  }
+  if (action === 'status-constraints' || action === 'constraints') {
+    await statusConstraints(parsed);
     return;
   }
 
@@ -55,6 +64,36 @@ async function runtimeCleanup(parsed: ParsedArgs): Promise<void> {
   renderRuntimeCleanup(report, booleanFlag(parsed, 'json'));
 }
 
+async function statusConstraints(parsed: ParsedArgs): Promise<void> {
+  const apply = booleanFlag(parsed, 'apply');
+  const validate = booleanFlag(parsed, 'validate');
+  if (apply && !validate) {
+    throw new Error('governance status-constraints --apply requires --validate');
+  }
+  if (validate && !apply) {
+    throw new Error('governance status-constraints --validate requires --apply');
+  }
+  if (apply && validate) {
+    const result = await validateStatusConstraintsWithDefaultDb();
+    renderStatusValidation(result, booleanFlag(parsed, 'json'));
+    return;
+  }
+
+  const report = await readStatusConstraintReportWithDefaultDb();
+  renderStatusConstraints(report, booleanFlag(parsed, 'json'));
+}
+
+function renderStatusValidation(result: ValidateStatusConstraintsResult, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.log(`Governance status constraints validated: validated=${result.validated.length} skipped=${result.skipped.length}`);
+  printItems('Validated', result.validated);
+  printItems('Already validated', result.skipped);
+  renderStatusConstraints(result.after, false);
+}
+
 function renderTodoReconciliation(report: TodoReconciliationReport, json: boolean): void {
   if (json) {
     console.log(JSON.stringify({ dryRun: true, report }, null, 2));
@@ -67,6 +106,30 @@ function renderTodoReconciliation(report: TodoReconciliationReport, json: boolea
   printItems('Seed only', report.seedOnly.map(item => `${item.id} expected=${item.expectedStatus ?? '?'} ${item.title}`));
   printItems('DB only', report.dbOnly.map(item => `${item.id} status=${item.status ?? '?'}${item.archivedAt ? ' archived=true' : ''} ${item.title}`));
   printItems('Status drift', report.statusDrift.map(item => `${item.id} expected=${item.expectedStatus} actual=${item.actualStatus}${item.archivedAt ? ' archived=true' : ''} ${item.title}`));
+  console.log('No changes were applied.');
+}
+
+function renderStatusConstraints(report: StatusConstraintReport, json: boolean): void {
+  const summary = summarizeStatusConstraintReport(report);
+  if (json) {
+    console.log(JSON.stringify({ report, summary }, null, 2));
+    return;
+  }
+
+  console.log(`Governance status constraints: generatedAt=${report.generatedAt}`);
+  console.log(`missingTables=${summary.missingTables} missingConstraints=${summary.missingConstraints} unvalidated=${summary.unvalidatedConstraints} invalidRows=${summary.invalidRows} readyToValidate=${summary.readyToValidate}`);
+  for (const item of report.constraints) {
+    const state = !item.tableExists
+      ? 'missing-table'
+      : !item.constraintExists
+        ? 'missing-constraint'
+        : item.validated
+          ? 'validated'
+          : item.invalidRowCount === 0
+            ? 'ready-to-validate'
+            : 'dirty';
+    console.log(`  ${item.tableName}.${item.constraintName} state=${state} invalidRows=${item.invalidRowCount} legal=${item.legalStatuses.join(',')}`);
+  }
   console.log('No changes were applied.');
 }
 
@@ -191,6 +254,7 @@ function printGovernanceHelp(): void {
 Usage:
   los governance todo-reconcile [options]
   los governance runtime-cleanup [options]
+  los governance status-constraints [options]
 
 Options:
   --tenant-id ID          Tenant id, default local
@@ -199,9 +263,10 @@ Options:
   --stale-hours N         Runtime cleanup stale threshold in hours, default 24
   --stale-ms N            Runtime cleanup stale threshold in milliseconds
   --limit N               Runtime cleanup scan limit, default 500
+  --validate --apply      Validate ready status constraints after dirty-row checks
   --json                  Emit JSON report
 
 Notes:
-  governance commands are dry-run only. They report ledger/runtime drift and apply no changes.
+  governance commands are dry-run by default. status-constraints requires both --validate and --apply to mutate DB constraint validation state.
 `);
 }

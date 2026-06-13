@@ -356,6 +356,17 @@ export {
   type RuntimeCleanupTaskRunSnapshot,
 } from './governance-runtime-cleanup.js';
 export {
+  readStatusConstraintReportFromOpenDb,
+  readStatusConstraintReportWithDefaultDb,
+  summarizeStatusConstraintReport,
+  validateStatusConstraintsFromOpenDb,
+  validateStatusConstraintsWithDefaultDb,
+  type StatusConstraintDefinition,
+  type StatusConstraintReport,
+  type StatusConstraintSnapshot,
+  type ValidateStatusConstraintsResult,
+} from './governance-status-constraints.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,
