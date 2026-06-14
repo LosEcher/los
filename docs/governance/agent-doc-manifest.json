@@ -1,0 +1,29 @@
+{
+  "project": "los",
+  "entrypointMaxLines": 220,
+  "archivePaths": ["docs/archive/", "docs/research/legacy/"],
+  "documents": {
+    "entrypoint": [
+      {
+        "path": "AGENTS.md",
+        "maxLines": 220
+      }
+    ],
+    "active-truth": ["docs/README.md"],
+    "long-policy": ["docs/governance/anti-patterns.md"],
+    "governance": [
+      "docs/governance/periodic-analysis.md",
+      "docs/governance/agent-workflow-roadmap.md",
+      "docs/governance/toolchain-matrix.md",
+      "docs/governance/eval-backlog.md"
+    ],
+    "tooling": ["tools/check-state-machine-bypass.sh"]
+  },
+  "mustExist": [
+    "AGENTS.md",
+    "docs/README.md",
+    "docs/governance/anti-patterns.md",
+    "tools/check-state-machine-bypass.sh"
+  ],
+  "allowedArchiveReferences": []
+}
