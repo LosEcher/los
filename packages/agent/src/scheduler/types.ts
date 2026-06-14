@@ -45,6 +45,8 @@ export interface ScheduledExecutorConfig {
   nodeId?: string;
   leaseMs?: number;
   heartbeatMs?: number;
+  requiresBuild?: boolean;
+  requiresDeploy?: boolean;
 }
 
 export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInput, 'prompt' | 'promptPreview' | 'taskRunId' | 'dedupeKey'> {
