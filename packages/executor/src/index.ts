@@ -26,6 +26,7 @@ import {
   type ToolCallStateTransition,
 } from '@los/agent';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
+import { handleFileSyncRoute } from './file-sync-routes.js';
 
 const log = getLogger('executor');
 const VERSION = '0.1.0';
@@ -142,6 +143,15 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
         }
         const result = await runAssignedAgentTask(body, nodeId);
         sendJson(res, 200, result);
+        return;
+      }
+
+      if (route.pathname.startsWith('/v1/file-sync')) {
+        if (!isAuthorized(req, agentKey)) {
+          sendJson(res, 401, { error: 'unauthorized' });
+          return;
+        }
+        await handleFileSyncRoute(req, res, route, nodeId, readJson, normalizeOptionalString, normalizePositiveInteger, sendJson);
         return;
       }
 
@@ -423,6 +433,8 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
       workspace_write: true,
       artifact_transfer: true,
       node_command_runner: true,
+      file_sync_scan: true,
+      file_sync_deep_verify: true,
       shell: true,
       sandbox: 'tool_policy',
     },

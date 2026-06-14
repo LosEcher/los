@@ -52,7 +52,7 @@ done
 if [ "$FAILURES" -gt 0 ]; then
   echo ""
   echo "$FAILURES state-machine bypass violation(s) found"
-  echo "Use transitionExecutionState() for all status transitions (see AP1 in AGENTS.md)"
+  echo "Use transitionExecutionState() for all status transitions (see AP1 in docs/governance/anti-patterns.md)"
   exit 1
 fi
 

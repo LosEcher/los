@@ -10,7 +10,7 @@ rules, generic coding habits, and legacy project facts out of this file.
 
 ## Before Acting
 
-1. Read `AGENTS.md`.
+1. Read `AGENTS.md` — including the Unconditional Pre-Action Gate and self-check.
 2. For workspace-boundary questions, read `../../AGENTS.md` and `../../WORKSPACE.md`.
 3. If `.jj/` exists, use `jj status` for local version-control truth.
 4. Identify the affected surface before editing:
@@ -18,6 +18,23 @@ rules, generic coding habits, and legacy project facts out of this file.
    - `docs/adr/` for design intent
    - implementation source for runtime behavior
    - persisted DB/API/session evidence for execution truth
+
+### Complexity-Aware Task Dispatch
+
+Before starting a task, gauge scope. Choose the workflow that matches — do not
+over-instrument a one-line fix or under-instrument a cross-package refactor.
+
+| Scope | Mode | Required Gates |
+|-------|------|----------------|
+| 1 file, <20 lines, no API change | Direct edit | `loadSpecsForFiles` + `pnpm check` |
+| 2-3 files, same package | Bounded change | Above + read matching ADR + check after each file |
+| 4+ files or crossing package boundaries | Plan mode | Above + `contracts/` review + full `pnpm gate` |
+| >400 lines net new | Extract sub-module | Above + stay under 400-line warn threshold |
+| New package or route module | ADR + plan | All above + operator approval + test harness |
+| Provider, scheduler, or execution state change | ADR review + harness gate | All above + compat probe + golden trace update |
+
+For investigations (read-only, no file changes), audit mode is the default:
+read-first, lead with evidence, do not patch unless the operator switches mode.
 
 ## Workflow: Runtime Truth
 
@@ -46,8 +63,17 @@ Evidence to report:
 - whether heartbeat freshness, `candidate=true`, and `capabilities.run_agent`
   agree with the claim
 
+**Evidence confidence markers** — append one to every claim:
+
+- `[E]` = verified by exact command output, API response, or DB row value.
+  Reproducible by running the same command.
+- `[I]` = inferred from partial or indirect evidence. Name the missing surface.
+  Example: `[I] gateway healthy inferred from /health 200; process RSS not checked`.
+- `[U]` = unverified. Treat as hypothesis, not fact. Must be upgraded to `[E]`
+  or `[I]` before a closeout or publish decision.
+
 Stop when process truth, DB/API truth, and the user-facing claim agree, or when
-the remaining mismatch is named as residual risk.
+the remaining mismatch is named with a confidence marker as residual risk.
 
 ## Workflow: ADR And Source Reconciliation
 
