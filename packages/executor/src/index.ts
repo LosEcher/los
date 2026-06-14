@@ -17,7 +17,6 @@ import {
   readArtifactContent,
   runAgent,
   executeNodeCommand,
-  upsertExecutorNodeHeartbeat,
   type AgentConfig,
   type AgentModelDelta,
   type ArtifactPathPolicy,
@@ -93,9 +92,20 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
 
-  await heartbeatNode(nodeId, publicUrl);
+  // Read gateway URL for heartbeat registration via HTTP API.
+  // Falls back to direct DB write if not set (local dev / same-DB scenario).
+  const gatewayUrl = process.env.GATEWAY_URL;
+  const heartbeatViaApi = !!gatewayUrl;
+
+  if (!heartbeatViaApi) {
+    log.info('GATEWAY_URL not set — will heartbeat directly to database');
+  } else {
+    log.info(`Executing node heartbeat via gateway: ${gatewayUrl}/nodes/heartbeat`);
+  }
+
+  await heartbeatNode(nodeId, publicUrl, gatewayUrl);
   const nodeHeartbeat = setInterval(() => {
-    heartbeatNode(nodeId, publicUrl).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`));
+    heartbeatNode(nodeId, publicUrl, gatewayUrl).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`));
   }, DEFAULT_HEARTBEAT_MS);
 
   const server = createServer(async (req, res) => {
@@ -403,14 +413,14 @@ async function renewTaskLease(
   }
 }
 
-async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
-  await upsertExecutorNodeHeartbeat({
+async function heartbeatNode(nodeId: string, baseUrl: string, gatewayUrl?: string): Promise<void> {
+  const payload = {
     nodeId,
     baseUrl,
     hostLabel: hostname(),
     version: VERSION,
-    nodeKind: 'executor',
-    connectModes: ['agent_http', 'agent_http_ndjson'],
+    nodeKind: 'executor' as const,
+    connectModes: ['agent_http' as const, 'agent_http_ndjson' as const],
     connectConfig: {
       agent_http: {
         baseUrl,
@@ -440,7 +450,24 @@ async function heartbeatNode(nodeId: string, baseUrl: string): Promise<void> {
     },
     queueDepth: 0,
     activeTaskCount: 0,
-  });
+  };
+
+  if (gatewayUrl) {
+    // Heartbeat via gateway HTTP API (remote executor path)
+    const res = await fetch(`${gatewayUrl}/nodes/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      throw new Error(`gateway heartbeat returned ${res.status}: ${await res.text()}`);
+    }
+  } else {
+    // Direct DB heartbeat (local / same-DB executor path)
+    const { upsertExecutorNodeHeartbeat } = await import('@los/agent');
+    await upsertExecutorNodeHeartbeat(payload);
+  }
 }
 
 function isAuthorized(req: IncomingMessage, agentKey: string | undefined): boolean {
