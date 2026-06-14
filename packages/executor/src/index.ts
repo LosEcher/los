@@ -26,6 +26,7 @@ import {
 } from '@los/agent';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
+import { collectResourceMetrics, resolveResourceCapabilities } from './resource-metrics.js';
 
 const log = getLogger('executor');
 const VERSION = '0.1.0';
@@ -434,6 +435,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string, gatewayUrl?: strin
       pid: process.pid,
       platform: process.platform,
       arch: process.arch,
+      ...collectResourceMetrics(),
     },
     capabilities: {
       run_agent: true,
@@ -447,6 +449,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string, gatewayUrl?: strin
       file_sync_deep_verify: true,
       shell: true,
       sandbox: 'tool_policy',
+      ...resolveResourceCapabilities(),
     },
     queueDepth: 0,
     activeTaskCount: 0,
