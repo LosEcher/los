@@ -14,6 +14,10 @@
 #
 # GATEWAY_URL tells the executor where to POST heartbeats.
 # Without it, heartbeats go directly to the local database.
+#
+# Note: Uses tsx dev launcher because @los/* package.json exports point to .ts source.
+# Once conditional exports (dist for production, src for development) are added,
+# switch ExecStart to: /usr/bin/node /opt/los/packages/executor/dist/index.js
 
 [Unit]
 Description=los executor node
@@ -34,11 +38,7 @@ Environment=NODE_OPTIONS=--max-old-space-size=256
 Environment=EXECUTOR_HOST=0.0.0.0
 Environment=EXECUTOR_PORT=8090
 
-# Preferred: pre-built dist (stable, no tsx dependency)
-ExecStart=/usr/bin/node /opt/los/packages/executor/dist/index.js
-# Fallback: tsx dev launcher (requires pnpm internal paths)
-# ExecStart=/bin/bash -lc 'cd /opt/los && exec /usr/bin/node /opt/los/node_modules/.pnpm/tsx@*/node_modules/tsx/dist/cli.mjs /opt/los/packages/executor/src/index.ts'
-
+ExecStart=/bin/bash -lc 'cd /opt/los && exec /usr/bin/node /opt/los/node_modules/.pnpm/tsx@*/node_modules/tsx/dist/cli.mjs /opt/los/packages/executor/src/index.ts'
 ExecStop=/opt/los/tools/los.sh stop-executor
 ExecReload=/bin/kill -HUP $MAINPID
 
