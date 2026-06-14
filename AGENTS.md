@@ -71,6 +71,37 @@ pnpm --filter @los/infra db:push     # Push schema to database
 pnpm --filter @los/infra db:migrate  # Run migrations
 ```
 
+## Unconditional Pre-Action Gate
+
+Before touching any file or making a current-state claim, run this sequence.
+No exceptions — skipping steps is the root cause of AP5 and AP7.
+
+1. `loadSpecsForFiles(editableSurfaces)` — unconditionally required. Do not
+   rely on session-start cache. Specs may have changed.
+2. Check `docs/governance/anti-patterns.md` entries for the surfaces you
+   are about to touch — at minimum AP1 (state transitions), AP2 (plan
+   persistence), AP3 (verification gate).
+3. Run the self-check block below.
+4. Proceed with the change.
+
+### Pre-Action Self-Check
+
+Ask these before acting. A "no" to any question means stop and fix the gap first.
+
+- **State transitions**: Am I routing through `transitionExecutionState()`?
+  Will a `session_event` be emitted?
+- **Plan persistence**: Is the plan written to `run_contract_json` before
+  I mark the phase approved?
+- **Verification gate**: Did I call `canMarkSucceeded()` before any
+  `succeeded` transition?
+- **Spec freshness**: Did I `loadSpecsForFiles()` for the surfaces I'm about
+  to edit? Have specs or ADRs changed since session start?
+- **After each edit**: Did I run `pnpm check`? Is each file still under the
+  400/600 line gate?
+
+This is a hard gate. The Fable 5 forcing-function pattern: reading the
+relevant spec is non-negotiable before writing any code. Treat it the same way.
+
 ## OMX Tool-Level Logging
 
 A local OMX hook plugin at `.omx/hooks/los-omx-tool-logger.mjs` captures
@@ -159,130 +190,85 @@ This section applies to AI-assisted changes in `los`.
 - Treat harnesses as quality gates for durable agent behavior, not as optional demos. When changing provider profiles, tool policy, scheduler behavior, todo dispatch, node classification, or session replay, add or update the focused test, compatibility probe, or harness assertion.
 - Represent long-running work as structured `todos` when recovery or audit matters. Use the todo model to keep active work, historical evidence, and replacement or split tasks distinct.
 
-## Anti-Patterns
+## Anti-Patterns (Active Constraints)
 
-These are known failure modes observed in los development. Each entry describes
-the symptom, consequence, prevention mechanism, and relevant code locations.
+These are NOT descriptions of past failures — they are active, non-negotiable
+constraints. Violating any of them will produce drift that CI and review gates
+catch. Long-form prevention and code locations are in
+`docs/governance/anti-patterns.md`.
 
-### AP1: Bypassing transitionExecutionState for state changes
+### AP1: State Transitions
 
-**Symptom**: Calling `updateTaskRun()`, `updateRunSpecStatus()`, or
-`updateToolCallState()` directly for status transitions instead of routing
-through `transitionExecutionState()`.
+**NEVER** call `updateTaskRun()`, `updateRunSpecStatus()`, or
+`updateToolCallState()` directly for status changes.
 
-**Consequence**: State changes are not validated against legal transition maps,
-no `session_event` is emitted, and no `execution_outbox` row is written. This
-undermines B0 enforcement, cross-gateway recovery, and compaction evidence.
+**ALWAYS** route through `transitionExecutionState()`. Direct calls skip
+validation, skip `session_event` emission, and skip `execution_outbox` writes.
 
-**Prevention**: `transitionExecutionState()` in `execution-store.ts:94` is the
-single validated path. The low-level APIs are internal (not in barrel export).
-Recovery paths (`tool-call-recovery.ts`) are the only exceptions — they must
-emit audit events.
+Example of what NOT to do: `updateTaskRun(taskId, { status: 'succeeded' })`
+Example of what TO do: `transitionExecutionState(current, 'succeeded')`
 
-**Code**: `packages/agent/src/execution-store.ts:94`, `scheduler/tool-call-state-persistence.ts:69`
+### AP2: Plan Persistence
 
-### AP2: Plan output only in chat memory, not persisted
+**NEVER** leave an approved plan only in chat memory.
 
-**Symptom**: Brainstorming or planning results exist only in the conversation
-history, never written to `run_contract_json`.
+**ALWAYS** persist to `run_specs.run_contract_json` via `approveRunSpecPhase()`
+or `reviseRunSpecPlan()` before the plan_approved phase. Plans lost on context
+compaction are unrecoverable.
 
-**Consequence**: When the session ends or context is compacted, the plan is
-lost. The next session starts without the spec context that was agreed upon.
+Example of what NOT to do: brainstorm a plan in chat, verbally agree, then
+start executing without writing `approveRunSpecPhase()`.
+Example of what TO do: `approveRunSpecPhase(runId, planSteps, verificationReqs)`
+before transitioning to `plan_approved`.
 
-**Prevention**: All plan artifacts MUST be persisted to `run_specs.run_contract_json`
-via `approveRunSpecPhase()` or `reviseRunSpecPlan()`. The B0 scheduler gate
-enforces `canStartExecution()` → phase must be `plan_approved`.
+### AP3: Verification Before Success
 
-**Code**: `packages/agent/src/run-contract.ts:130`, `scheduled-task-runner.ts:113`
+**NEVER** mark a task `succeeded` before verification records pass.
 
-### AP3: Marking task succeeded before verification completes
+**ALWAYS** call `canMarkSucceeded()` first. The B0 pre-completion gate enforces
+this; bypassing it causes run_spec/task_run state machine drift.
 
-**Symptom**: `task_runs.status = 'succeeded'` is set immediately after
-`runAgent()` returns, without checking verification records.
+Example of what NOT to do: `runAgent()` returns, then immediately set
+`task_runs.status = 'succeeded'` because "the agent output looks correct."
+Example of what TO do: `canMarkSucceeded(runId)` → check verification_records →
+only then transition to `succeeded`.
 
-**Consequence**: Code is merged without passing required checks. The run_spec
-and task_run state machines drift — run_spec may later be blocked by
-verification while the task is already marked succeeded.
+### AP5: Spec Staleness
 
-**Prevention**: The scheduler's B0 pre-completion gate calls
-`checkVerificationGate()` → `canMarkSucceeded()` before allowing
-`succeeded` transition. All required verifications must be `succeeded` or
-`skipped`.
+**NEVER** rely on specs loaded at session start after `.los/spec/` or ADR
+changes.
 
-**Code**: `packages/agent/src/run-contract.ts:142`, `scheduled-task-runner.ts:223`
+**ALWAYS** call `loadSpecsForFiles()` at the start of each task phase. The
+spec-loader deduplicates and returns fresh content each call.
 
-### AP4: Dual state machine drift (run_spec.status vs run_contract.phase)
+### AP7: Deferred Checks
 
-**Symptom**: `run_spec.status = 'succeeded'` while `run_contract.phase = 'executing'`.
-The two independent state machines disagree about the entity's state.
+**NEVER** delay `pnpm check` to the end of a multi-step change.
 
-**Consequence**: Code that checks one surface gets a different answer than code
-checking the other. Recovery and replay logic produce inconsistent results.
+**ALWAYS** run `pnpm check` after every meaningful code change. Bugs compound
+when type errors cascade. The Trellis verify-after-implement pattern applies.
 
-**Prevention**: `validatePhaseStatusConsistency()` in `run-contract.ts:174`
-detects drift and logs warnings. The execution-store calls it after every
-`run_spec` transition. Fix drift at the source — always update both surfaces
-consistently.
+### AP4, AP6, AP8
 
-**Code**: `packages/agent/src/run-contract.ts:174`, `execution-store.ts:148`
+See `docs/governance/anti-patterns.md` for dual state machine drift (AP4),
+child agent contract inheritance (AP6), and hardcoded default divergence (AP8).
 
-### AP5: Spec updated but agent not re-reading it
+## Operator Consent Gates
 
-**Symptom**: `.los/spec/` or ADR is updated, but the agent session continues
-with the old spec loaded at session start.
+These escalation paths require explicit operator approval — urgency, confidence,
+or convenience are not exceptions. The Fable 5 consent pattern: "Never pick a
+partner for someone who didn't ask."
 
-**Consequence**: Agent follows outdated conventions. New rules are ignored until
-the next session.
-
-**Prevention**: Use `loadSpecsForFiles()` at the start of each task phase to
-reload relevant specs. The spec-loader deduplicates and returns fresh content
-each call. Do not cache spec content across phases.
-
-**Code**: `packages/agent/src/spec-loader.ts`
-
-### AP6: Child agent not inheriting run contract
-
-**Symptom**: `spawn_agent` or executor node creates a child agent without
-passing the parent's `runContract`.
-
-**Consequence**: Child agents have no phase constraints — they can execute
-without an approved plan and succeed without verification. The Fleet Loop
-invariant is broken.
-
-**Prevention**: Phase D cross-process propagation. Until implemented, document
-that child agents are unconstrained and treat their output as unverified.
-
-**Code**: `packages/agent/src/tools/agent-tools.ts:83` (child agent), Phase D roadmap
-
-### AP7: Delaying quality check to the end
-
-**Symptom**: Running lint/type-check/tests only in Phase 3 (Finish) instead of
-after each implementation change.
-
-**Consequence**: Bugs compound. A type error introduced in the first change
-cascades into multiple files before being caught. Fix cost is higher.
-
-**Prevention**: Run `pnpm check` after every meaningful code change. The
-`trellis-check` pattern (verify after implement, not only at finish) applies.
-CI enforces this but local iteration should too.
-
-**Code**: `pnpm check` (type-check + lint + structure), `pnpm test`
-
-### AP8: Hardcoded defaults diverging from config schema
-
-**Symptom**: A default value appears in both `config.ts` (Zod schema) and
-`db.ts` (fallback) with different values, or `.env` uses a different port
-than the code default.
-
-**Consequence**: Debugging confusion — the effective value depends on which code
-path is taken. Onboarding friction — new developers see one port in docs and
-another at runtime.
-
-**Prevention**: Single source of truth for each default. Zod schema default is
-the authority. Fallback values in other modules must match or be removed.
-Document any intentional differences.
-
-**Code**: `packages/infra/src/config.ts:31`, `db.ts:28`, `.env:1`
+- **Provider promotion**: advisory → trusted transitions require operator gate
+  (ADR 0017). Providers auto-discovered from env vars may be used in advisory
+  mode; operator must approve before production or recovery use.
+- **New tool registration**: tools that write files, modify DB state, or cross
+  package boundaries must be operator-approved before first use in execution
+  mode. Audit-mode inspection is pre-approved.
+- **Memory compaction promotion**: auto-discovered compaction candidates require
+  operator review before promotion (ADR 0020: auto-discover, manual approve).
+- **Mode switching**: audit → execution → closeout transitions require explicit
+  operator intent. Do not switch modes based on task convenience.
 
 ## Reference Codebases
 

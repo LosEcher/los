@@ -68,6 +68,11 @@ Use `docs/governance/` for repeated analysis practices. Start with
 `governance/periodic-analysis.md` when using `los` as the main execution and
 review tool.
 
+Use `governance/anti-patterns.md` when reviewing repeated los development
+failure modes such as execution-state bypass, non-persisted plans, premature
+success marking, stale spec loading, missing child-agent contracts, delayed
+checks, or default-value drift.
+
 Use `governance/agent-workflow-roadmap.md` when deciding how personal
 high-autonomy agent workflows should affect `los` stage goals, evals,
 toolchain governance, and future run metadata.
