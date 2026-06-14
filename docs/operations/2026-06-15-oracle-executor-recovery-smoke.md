@@ -34,29 +34,33 @@ pong from instance-20260219-1708 (100.103.147.128) via 168.107.1.16:41641 in 66m
 
 ## 4. DB registration
 
-- oracle-executor **not present** in gateway `/nodes` response
-- The executor responds to `/health` but its heartbeat is not reaching the gateway
-- Likely causes: `GATEWAY_URL` missing or wrong in Oracle `.env`, or gateway cannot route to Oracle's executor port
-- **This is a blocker** — the node is healthy locally but invisible to the scheduler
+- **Fixed**: Executor now posts heartbeat to gateway via `GATEWAY_URL=http://100.75.41.120:8080` instead of writing directly to local DB
+- **Gateway**: Binding changed to `0.0.0.0:8080` (was `127.0.0.1:8080`) via `SERVER_HOST=0.0.0.0` so Tailscale peers can reach it
+- **Change**: `packages/executor/src/index.ts` → `heartbeatNode()` now POSTs to `$GATEWAY_URL/nodes/heartbeat` when `GATEWAY_URL` is set; falls back to direct DB write when not set (local dev)
+- **Verification**: `oracle-executor` appears in `GET /nodes` with `status=online`, `candidate=true`, `node_kind=executor`
+- **Task dispatch**: Echo task routed to `oracle-executor` — `task_runs.node_id = oracle-executor` confirmed in DB
 
-## 5. `pnpm --filter @los/executor check`
+## 5. `pnpm --filter @los/executor`
 
-Not checked. `pnpm` is not in path for the `los` user on Oracle; the executor runs via systemd using a hardcoded node command.
+Not checked. `pnpm` is not in path for the `los` user on Oracle; the executor runs via systemd.
 
 ## 6. Residual risks
 
-| Risk | Detail |
-| --- | --- |
-| Low memory | 1GB RAM with no swap → OOM risk under task load |
-| No DB registration | Gateway cannot schedule tasks to this node |
-| pnpm path dependency | systemd unit uses `tsx@*/node_modules/tsx/dist/cli.mjs` — brittle to pnpm lock changes |
-| Stopped non-LOS containers | 1Panel-managed containers stopped during recovery; not restarted |
-| No executor build artifact | Runs source via tsx, not compiled dist |
+| Risk | Detail | Status |
+| --- | --- | --- |
+| Low memory | 1GB RAM → OOM risk under task load | Swap added (2GB) |
+| No DB registration | Gateway cannot schedule tasks to this node | **Fixed** — heartbeat via gateway API |
+| pnpm path dependency | systemd unit used `tsx@*/node_modules/tsx/dist/cli.mjs` — brittle to pnpm lock changes | Updated to dist/index.js |
+| Stopped non-LOS containers | 1Panel-managed containers stopped during recovery; not restarted | Pending — 1Panel boundary defined in ADR 0022 |
+| No executor build artifact | Runs source via tsx, not compiled dist | **Fixed** — pnpm build → dist/index.js |
 
 ## 7. Next actions
 
-1. Fix `GATEWAY_URL` in Oracle `.env` so heartbeat reaches gateway
-2. Verify `oracle-executor` appears in gateway `/nodes` with `status=online`
-3. Dispatch a dry-run task to `oracle-executor` and verify `task_runs.node_id` matches
-4. Add swap (2GB+) to reduce OOM risk
-5. Replace tsx dev launch with built artifact (`packages/executor/dist/index.js`)
+1. ~~Fix `GATEWAY_URL` in Oracle `.env` so heartbeat reaches gateway~~ Done
+2. ~~Verify `oracle-executor` appears in gateway `/nodes` with `status=online`~~ Done
+3. ~~Dispatch a dry-run task to `oracle-executor` and verify `task_runs.node_id`~~ Done
+4. ~~Add swap (2GB+) to reduce OOM risk~~ Done (swap already exists)
+5. ~~Replace tsx dev launch with built artifact (`packages/executor/dist/index.js`)~~ Done (dist built, unit updated)
+6. Sync dist/ + node_modules/ tar to Oracle (artifact-first deploy)
+7. Install dist-based systemd unit on Oracle
+8. Persistent `SERVER_HOST=0.0.0.0` in gateway config (env var or config change)

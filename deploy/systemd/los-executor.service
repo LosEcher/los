@@ -1,0 +1,61 @@
+# los executor — systemd service
+#
+# Install:
+#   sudo cp deploy/systemd/los-executor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now los-executor
+#
+# Requires a .env file at /opt/los/.env with at minimum:
+#   DATABASE_URL=postgres://user:pass@host:5432/los
+#   EXECUTOR_ENABLED=true
+#   EXECUTOR_HOST=0.0.0.0
+#   EXECUTOR_AGENT_KEY=<shared key>
+#   GATEWAY_URL=http://<gateway-host>:8080
+#
+# GATEWAY_URL tells the executor where to POST heartbeats.
+# Without it, heartbeats go directly to the local database.
+
+[Unit]
+Description=los executor node
+Documentation=https://github.com/echerlos/los
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=los
+Group=los
+WorkingDirectory=/opt/los
+EnvironmentFile=/opt/los/.env
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=256
+Environment=EXECUTOR_HOST=0.0.0.0
+Environment=EXECUTOR_PORT=8090
+
+# Preferred: pre-built dist (stable, no tsx dependency)
+ExecStart=/usr/bin/node /opt/los/packages/executor/dist/index.js
+# Fallback: tsx dev launcher (requires pnpm internal paths)
+# ExecStart=/bin/bash -lc 'cd /opt/los && exec /usr/bin/node /opt/los/node_modules/.pnpm/tsx@*/node_modules/tsx/dist/cli.mjs /opt/los/packages/executor/src/index.ts'
+
+ExecStop=/opt/los/tools/los.sh stop-executor
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/opt/los/.los-runtime /opt/los/tmp
+ProtectHome=read-only
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=los-executor
+
+[Install]
+WantedBy=multi-user.target
