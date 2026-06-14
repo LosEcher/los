@@ -50,24 +50,34 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
   const skipped: ExecutorSelectionDecision['skipped'] = [];
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);
-    if (url) {
-      return {
-        url,
-        nodeId: node.nodeId,
-        agentKey: normalizeOptionalString(config.agentKey),
-        decision: {
-          source: 'executor_registry',
-          candidateIds: ordered.map(item => item.nodeId),
-          selectedId: node.nodeId,
-          skipped,
-        },
-      };
+    if (!url) {
+      skipped.push({ id: node.nodeId, reason: 'missing_agent_http_url' });
+      continue;
     }
-    skipped.push({ id: node.nodeId, reason: 'missing_agent_http_url' });
+    // Constrained executor capability gate — skip if task requires heavy work
+    if (config.requiresBuild && node.capabilities.heavy_task_safe !== true) {
+      skipped.push({ id: node.nodeId, reason: 'capability:heavy_task_safe_false', details: { taskRequiresBuild: true } });
+      continue;
+    }
+    if (config.requiresDeploy && node.capabilities.deploy_safe !== true) {
+      skipped.push({ id: node.nodeId, reason: 'capability:deploy_safe_false', details: { taskRequiresDeploy: true } });
+      continue;
+    }
+    return {
+      url,
+      nodeId: node.nodeId,
+      agentKey: normalizeOptionalString(config.agentKey),
+      decision: {
+        source: 'executor_registry',
+        candidateIds: ordered.map(item => item.nodeId),
+        selectedId: node.nodeId,
+        skipped,
+      },
+    };
   }
 
   if (candidates.length > 0) {
-    throw new Error('Executor is enabled but candidate executor nodes have no runnable agent_http base URL');
+    throw new Error(`Executor is enabled but no candidate executor node passes capability gates: ${skipped.map(s => `${s.id}:${s.reason}`).join(', ')}`);
   }
   throw new Error('Executor is enabled but no verified executor node candidate is available');
 }
