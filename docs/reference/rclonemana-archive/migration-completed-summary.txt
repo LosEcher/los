@@ -1,0 +1,12 @@
+state: completed
+folder: needSort/sort/d
+time: 2026-06-14 11:04:15 +0800
+done_count: 533
+total_count: 504
+failed_count: 0
+progress: 100%
+next_bucket: none
+runner_active: 0
+master_state: 
+master_action: completed with 5 buckets verified on 34 directly (HH transient SSH timeout)
+note: completed 2026-06-14; 5 buckets (6P,AU,RP,WQ,J7) verified via 34 content check, HH was unreachable but data present
