@@ -98,6 +98,8 @@ Proposed.
 6. `ingress_callback`：是否能接回调入口。
 7. `model_route`：是否承担模型请求路径。
 8. `queue_depth` / `active_task_count`：是否有执行压力。
+9. `deploy_safe`：节点是否可以安全执行 pnpm install/build（constrained executor 默认为 false）。
+10. `heavy_task_safe`：节点是否可以接构建、长任务、批量文件任务调度。
 
 ### 4. Verification surface
 
@@ -110,7 +112,36 @@ Proposed.
 
 这部分不能由普通 heartbeat 直接覆盖。
 
-### 5. Classification rules
+### 5. Resource class
+
+Node kinds alone don't express whether a node can safely accept heavy work. An Oracle ARM 1GB machine and a 34 NAS with 32GB are both `executor`, but their operational envelope is different.
+
+`resource_class` describes the available resource headroom for scheduling decisions, separate from `node_kind`:
+
+1. `control`
+   - Gateway, PostgreSQL, Web UI — the scheduling center.
+   - Not a task execution target.
+
+2. `standard_executor`
+   - Sufficient RAM, swap, disk for pnpm install, build, and normal task execution.
+   - Default target for scheduled tasks.
+
+3. `constrained_executor`
+   - Low RAM (<2GB), no or minimal swap, limited disk.
+   - May be online and healthy, but should only accept lightweight tasks.
+   - Default `deploy_safe: false` — should receive pre-built artifacts.
+   - Default `heavy_task_safe: false` — excluded from build, long-task, and batch-file-task scheduling.
+
+Resource fields carried in `capacity` or heartbeat payload:
+
+- `memory_total_mb` / `memory_available_mb`
+- `swap_total_mb` / `swap_used_mb`
+- `disk_free_gb`
+- `psi_memory_some` / `psi_memory_full`
+- `psi_io_some` / `psi_io_full`
+- `resource_class`: one of `control`, `standard_executor`, `constrained_executor`
+
+### 6. Classification rules
 
 1. 普通设备
    - `node_kind=executor`
