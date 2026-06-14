@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from "node:url";
 import YAML from 'yaml';
 import { getLogger } from './logger.js';
 import { discoverAll, type DiscoveredProvider } from './discovery.js';
@@ -457,6 +458,6 @@ export function getMigrateDir(config: Config): string {
   const abs = join(workspaceRoot, dir);
   if (existsSync(abs)) return abs;
   // Fallback: look from __dirname for bundled builds
-  const pkgDir = resolve(__dirname, '..', '..');
+  const pkgDir = resolve(fileURLToPath(import.meta.url), '..', '..');
   return join(pkgDir, dir);
 }

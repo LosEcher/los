@@ -42,6 +42,7 @@ import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from '
 import { registerTaskRoutes } from './routes/task-routes.js';
 import { registerRunRoutes } from './routes/run-routes.js';
 import { registerProjectRoutes } from './routes/project-routes.js';
+import { registerFileSyncRoutes } from './routes/file-sync-routes.js';
 import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { ensureAgentTaskGraphStore, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
@@ -103,6 +104,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── Projects ────────────────────────────────────────
   registerProjectRoutes(app);
+  registerFileSyncRoutes(app, { executorAgentKey: config.executor.agentKey });
 
   // ── Health ───────────────────────────────────────────
   app.get('/health', async () => {
@@ -258,6 +260,7 @@ export async function startServer(port?: number, host?: string) {
 
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
   void startServer().catch((error) => {
+    console.error('GATEWAY FATAL:', error instanceof Error ? `${error.message}\n${error.stack}` : String(error));
     log.error('Gateway failed to start', { error: error instanceof Error ? error.message : String(error) });
     process.exitCode = 1;
   });
