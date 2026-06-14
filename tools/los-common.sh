@@ -219,12 +219,17 @@ start_daemon_nohup() {
   # Usage: start_daemon_nohup <command> <log_file> [cd_dir]
   # Prints PID to stdout.
   local command="$1" log_file="$2" cd_dir="${3:-}"
+  local pid
   if [ -n "$cd_dir" ]; then
-    (cd "$cd_dir" && nohup /bin/bash -lc "$command" </dev/null >"$log_file" 2>&1 &)
+    pushd "$cd_dir" >/dev/null
+    nohup /bin/bash -lc "$command" </dev/null >"$log_file" 2>&1 &
+    pid="$!"
+    popd >/dev/null
   else
     nohup /bin/bash -lc "$command" </dev/null >"$log_file" 2>&1 &
+    pid="$!"
   fi
-  printf '%s' "$!"
+  printf '%s' "$pid"
 }
 
 start_daemon_launchctl() {
