@@ -18,6 +18,7 @@ const EXECUTOR_NODE_STALE_MS = 60_000;
 
 export type ExecutorNodeStatus = 'online' | 'draining' | 'offline';
 export type ExecutorNodeKind = 'executor' | 'ssh_target' | 'ingress' | 'proxy';
+export type ResourceClass = 'control' | 'standard_executor' | 'constrained_executor';
 export type ExecutorNodeRolloutState = 'idle' | 'draining' | 'upgrading' | 'verifying' | 'failed';
 
 export type ExecutorNodeConnectMode =
@@ -34,6 +35,7 @@ export type ExecutorNodeConnectMode =
 export interface ExecutorNodeRecord {
   nodeId: string;
   nodeKind: ExecutorNodeKind;
+  resourceClass?: ResourceClass;
   baseUrl?: string;
   hostLabel?: string;
   status: ExecutorNodeStatus;
@@ -43,7 +45,7 @@ export interface ExecutorNodeRecord {
   rolloutMessage?: string;
   connectModes: string[];
   connectConfig: Record<string, unknown>;
-  capacity: Record<string, unknown>;
+  capacity: ExecutorNodeCapacity;
   capabilities: Record<string, unknown>;
   verified: Record<string, unknown>;
   queueDepth: number;
@@ -56,6 +58,21 @@ export interface ExecutorNodeRecord {
   updatedAt: string;
   execution: ExecutorNodeExecutionState;
 }
+
+export interface ExecutorNodeCapacity {
+  pid?: number;
+  arch?: string;
+  platform?: string;
+  memoryTotalMb?: number;
+  memoryAvailableMb?: number;
+  swapTotalMb?: number;
+  swapUsedMb?: number;
+  diskFreeGb?: number;
+  psiMemorySome?: number;
+  psiMemoryFull?: number;
+  psiIoSome?: number;
+  psiIoFull?: number;
+}
 export interface ExecutorNodeExecutionState {
   candidate: boolean;
   mode?: string;
@@ -66,6 +83,7 @@ export interface ExecutorNodeExecutionState {
 export interface ExecutorNodeHeartbeatInput {
   nodeId: string;
   nodeKind?: ExecutorNodeKind;
+  resourceClass?: ResourceClass;
   baseUrl?: string;
   hostLabel?: string;
   status?: ExecutorNodeStatus;
@@ -75,7 +93,7 @@ export interface ExecutorNodeHeartbeatInput {
   rolloutMessage?: string;
   connectModes?: ExecutorNodeConnectMode[];
   connectConfig?: Record<string, unknown>;
-  capacity?: Record<string, unknown>;
+  capacity?: Partial<ExecutorNodeCapacity>;
   capabilities?: Record<string, unknown>;
   queueDepth?: number;
   activeTaskCount?: number;
@@ -188,7 +206,7 @@ export async function upsertExecutorNodeHeartbeat(input: ExecutorNodeHeartbeatIn
     rolloutMessage: normalizeOptionalString(input.rolloutMessage),
     connectModes,
     connectConfig: mergeObjects(existing?.connectConfig, input.connectConfig),
-    capacity: mergeObjects(existing?.capacity, input.capacity),
+    capacity: mergeObjects(existing?.capacity as Record<string, unknown> | undefined, input.capacity as Record<string, unknown> | undefined) as Record<string, unknown>,
     capabilities: mergeObjects(existing?.capabilities, input.capabilities),
     verified: buildHeartbeatVerification(existing?.verified ?? {}, connectModes, input),
     queueDepth: input.queueDepth ?? 0,
@@ -337,6 +355,29 @@ export function evaluateExecutorNode(node: Omit<ExecutorNodeRecord, 'execution'>
   const verifiedMode = mode ? readVerification(node.verified, mode) : null;
   if (mode && verifiedMode !== true) {
     blockers.push(`verification:${mode}:not_confirmed`);
+  }
+
+  // Resource class checks — constrained executors are online but limited
+  if (node.resourceClass === 'constrained_executor') {
+    warnings.push('resource_class:constrained_executor');
+    if (node.capabilities.heavy_task_safe !== true) {
+      warnings.push('capability:heavy_task_safe_false');
+    }
+    if (node.capabilities.deploy_safe !== true) {
+      warnings.push('capability:deploy_safe_false');
+    }
+  }
+
+  // Memory pressure warnings
+  if (node.capacity.memoryAvailableMb !== undefined && node.capacity.memoryTotalMb !== undefined) {
+    const ratio = node.capacity.memoryAvailableMb / node.capacity.memoryTotalMb;
+    if (ratio < 0.1) {
+      warnings.push('resource:memory_pressure');
+    }
+  }
+
+  if (node.capacity.diskFreeGb !== undefined && node.capacity.diskFreeGb < 1) {
+    blockers.push('resource:disk_full');
   }
 
   if (node.connectModes.includes('socks5') && node.nodeKind !== 'executor') {

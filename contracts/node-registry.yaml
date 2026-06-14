@@ -23,6 +23,14 @@ properties:
       - ssh_target
       - ingress
       - proxy
+  resourceClass:
+    type: string
+    description: Resource headroom class for scheduling decisions. Separate from node_kind.
+    enum:
+      - control
+      - standard_executor
+      - constrained_executor
+    default: standard_executor
   status:
     type: string
     enum:
@@ -81,6 +89,33 @@ properties:
         type: boolean
       model_route:
         type: boolean
+      deploy_safe:
+        type: boolean
+        description: Whether the node can safely run pnpm install / build. Default false for constrained_executor.
+      heavy_task_safe:
+        type: boolean
+        description: Whether the node can accept build, long-task, or batch-file-task scheduling. Default false for constrained_executor.
+  capacity:
+    type: object
+    properties:
+      memory_total_mb:
+        type: integer
+      memory_available_mb:
+        type: integer
+      swap_total_mb:
+        type: integer
+      swap_used_mb:
+        type: integer
+      disk_free_gb:
+        type: number
+      psi_memory_some:
+        type: number
+      psi_memory_full:
+        type: number
+      psi_io_some:
+        type: number
+      psi_io_full:
+        type: number
   verified:
     type: object
     description: Probe or heartbeat verification keyed by connect mode.
@@ -119,6 +154,10 @@ executionCandidate:
     - heartbeat:stale
     - connect_mode:missing_agent_http
     - capability:run_agent_missing
+    - capability:heavy_task_safe_false
+    - resource:memory_pressure
+    - resource:disk_full
+    - resource:psi_high
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

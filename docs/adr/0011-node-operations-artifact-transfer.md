@@ -155,6 +155,25 @@ Minimum metadata:
 First implementation can be local filesystem backed. Remote implementation
 should use HTTP endpoints on the executor before adding chunked transfer.
 
+#### Constrained Node Release Strategy
+
+`constrained_executor` nodes (ADR 0010) must not perform full repo clone,
+`pnpm install`, or TypeScript build on the node itself. Release to constrained
+nodes follows an artifact-first path:
+
+1. **Build locally** (or on a `standard_executor`): `pnpm --filter @los/executor build`
+2. **Package**: tar of `dist/` + `node_modules/` + `tools/` + `deploy/systemd/`
+3. **Sync**: `deploy-to-remote.sh <node> sync` pushes the pre-built artifact via tar pipe
+4. **Install**: Skip `pnpm install` — extract the pre-built `node_modules/`
+5. **Verify**: `/health` check only, no remote build step
+
+Preflight resource checks (RAM, swap, disk, PSI) gate the sync step.
+If `deploy_safe: false`, the deploy script must refuse to run `pnpm install`
+and require `--low-resource` or artifact-first mode.
+
+The existing `setup-node.sh` retains git-clone + pnpm install for full nodes;
+`deploy-to-remote.sh` is the preferred path for constrained nodes.
+
 ### Node Commands
 
 Node commands are allowlisted operations:
