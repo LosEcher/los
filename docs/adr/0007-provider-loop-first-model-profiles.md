@@ -2,7 +2,65 @@
 
 ## Status
 
-Proposed.
+Implemented (2026-06-15). The core design described here is now the active runtime architecture. All eight sub-tasks listed below have been implemented and verified.
+
+## Implementation Evidence
+
+The four-layer architecture is fully materialized in the current codebase:
+
+**Layer 1 — Stable Agent Loop:**
+- `packages/agent/src/loop.ts` (425 lines) — ReAct loop, provider invocation, tool execution, session events
+- `packages/agent/src/loop/phases.ts` — discover/plan/execute phase gates with B0 enforcement
+
+**Layer 2 — Provider Adapter:**
+- `packages/agent/src/providers/anthropic.ts` — Anthropic Messages API
+- `packages/agent/src/providers/openai-utils.ts` — OpenAI-compatible Chat Completions  
+- `packages/agent/src/providers/responses.ts` — Responses API adapter
+- `packages/agent/src/providers/delta-repair.ts` — delta aggregation with PackyCode/OpenAI-compatible merge
+
+**Layer 3 — Model Profile:**
+- `packages/agent/src/model-profiles.ts` — 16-field ModelProfile with capability profile, pricing, cache policy, retry policy
+- `packages/agent/src/model-settings.ts` — per-model parameter normalization
+
+**Layer 4 — Harness and Fallback:**
+- `packages/agent/src/compat-harness.ts` — compatibility harness with required gate enforcement
+- `tools/compat-ci.sh` — CI gate script
+- `docs/adr/0018-cli-fallback-gate.md` — CLI fallback boundary defined
+
+**Cross-cutting:**
+- `packages/agent/src/scheduler/scheduled-task-runner.ts` — goal self-check gate (B0 enforcement, 2026-06-15)
+- All 8 sub-tasks listed below have corresponding `todo-seeds` entries with `status: done` and implementation evidence.
+
+## Adoption and Rejection Criteria
+
+The decision to build on a proprietary thin orchestration layer rather than adopt an external framework was made based on the following criteria:
+
+| Criterion | Verdict | Evidence |
+|-----------|---------|----------|
+| State model ownership | **Must not** duplicate `task_runs`/`session_events` | External frameworks introduce their own state machines incompatible with los's dual ledger |
+| Tool policy integration | **Must** go through `registry.ts` capability gates | Phase-tool-gate, risk-level ceiling, sandbox enforcement are los-specific |
+| Provider diversity | **Must** support DeepSeek, PackyCode/OpenAI-compatible, Anthropic, others via profiles | 16-field ModelProfile handles protocol/api-shape/cache/repair differences per model |
+| Audit trail fidelity | **Must** write structured session_events with trace/request linkage | External frameworks produce unstructured logs; los requires structured evidence |
+| PostgreSQL-first | **Must** use single PG for state, not in-memory or framework-specific stores | All los state (task_runs, session_events, executor_nodes, memory) lives in PostgreSQL |
+| Dependency surface | **Prefer** zero new runtime framework dependencies | `@los/agent` has zero external agent-framework npm dependencies |
+| Sub-agent contracts | **Must** propagate run contract to children | `spawn_agent` inherits parent `runContractMetadata` including phase/verification gates |
+
+Three frameworks were evaluated for adoption viability:
+
+- **OpenAI Agents SDK**: Strong trace and handoffs, but its trace model is OpenAI-specific and would require a parallel persistence layer alongside los's session_events.
+- **LangGraph**: Mature graph execution with state persistence, but its checkpoint/state model conflicts with los's PostgreSQL-first dual-ledger approach (run_specs + task_runs + session_events).
+- **AutoGen**: Multi-agent conversation model is valuable as a reference, but its event-driven workflow assumes a different execution contract (agent-to-agent messaging rather than run-contract-driven dispatching).
+
+None met the minimum bar: retaining los's PostgreSQL-first dual-ledger state model without introducing a parallel framework-owned persistence layer.
+
+The patterns from these frameworks worth absorbing (tool streaming, structured handoff, graph-based planning) are implemented within los's own architecture rather than via framework adoption:
+- Tool streaming: `providers/responses.ts` + `delta-repair.ts`
+- Graph-based planning: `agent-task-graph.ts` + `agent-task-graph-read-model.ts`
+- Verification gating: `verification-runner.ts` + `scheduler/verifier-task.ts`
+
+## Relationship to Self-Bootstrapping Framework
+
+This ADR's decision is the architectural precondition for the autonomous agent self-bootstrapping goal. The thin orchestration layer means los can implement Goal 闭环 (post-execution self-check), Tool 闭环 (alternative-tool routing), and Reflection 闭环 (error classification) entirely within its own execution pipe — no external framework boundaries to negotiate.
 
 ## Background
 

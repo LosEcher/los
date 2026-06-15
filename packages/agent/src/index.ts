@@ -527,3 +527,13 @@ export {
   type RuleLayer,
   type UpsertRuleInput,
 } from './rules.js';
+export {
+  runPostExecutionSelfCheck,
+  shouldRunSelfCheck,
+  buildSelfCheckPrompt,
+  parseSelfCheckResponse,
+  summarizeAgentContext,
+  type SelfCheckGap,
+  type SelfCheckInput,
+  type SelfCheckResult,
+} from './self-check.js';

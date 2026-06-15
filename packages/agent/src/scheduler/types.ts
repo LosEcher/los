@@ -13,7 +13,8 @@ export type ScheduledTaskEventType =
   | 'task.cancelled'
   | 'task.succeeded'
   | 'task.failed'
-  | 'task.blocked';
+  | 'task.blocked'
+  | 'task.self_check_completed';
 
 export interface ScheduledTaskEvent {
   type: ScheduledTaskEventType;

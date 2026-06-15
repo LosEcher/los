@@ -89,7 +89,7 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     title: '定义周期治理任务的模块边界',
     description: '明确一致性分析、性能优化、数据结构/存储/架构优化、实现漂移、工具层漂移和热点文件治理不放进 task_runs 主模型。',
     kind: 'plan',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-05-30',
     stageId: 'governance-jobs',
@@ -100,6 +100,13 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
       problem: '如果把治理目录塞进 Tasks，会把"执行尝试"和"治理工作目录"混成一个真相面。',
       solution: 'Todos 记录治理计划和依赖；task_runs 只记录每次执行；后续独立 governance_jobs/sweeps 存周期性运行配置和结果摘要。',
       placement: 'todo-managed planning, task-run execution evidence, governance module for recurring automation when needed.',
+      evidence: [
+        'docs/governance/governance-module-boundary.md — three-layer model (todos→task_runs→governance_jobs), category taxonomy, implementation status table',
+        'Three governance categories in scope: consistency audit, hotspot detection, architecture drift, tool drift, provider compatibility surveillance',
+        'Existing drift detection prototypes: governance-reconciliation.ts, governance-status-constraints.ts, governance-runtime-cleanup.ts',
+        'Existing infrastructure: execution-static-graph.ts (drift baseline), runtime-evidence-graph.ts (cross-table projection), external-tool-summary.ts (bounded ingestion)',
+      ],
+      implementedAt: '2026-06-15',
     },
   },
   {

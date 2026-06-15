@@ -63,7 +63,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     title: '确定 los 的 agent 工具框架边界',
     description: '评估现成 agent/tool framework 与自研薄编排层的取舍，冻结 los core 优先走内置 provider loop，并用 provider/model profile 承载服务商和模型差异。',
     kind: 'phase',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-05-30',
     stageId: 'agent-runtime',
@@ -72,6 +72,13 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
       problem: '如果直接引入通用框架，可能和 task_runs、session_events、tool policy、todo ledger 重叠。',
       solution: '保留 los 自己的核心执行合同，优先补 provider/model profile；Reasonix/Codex CLI 先作为参考或 fallback，不作为默认运行时。',
       adr: 'docs/adr/0007-provider-loop-first-model-profiles.md',
+      evidence: [
+        'ADR 0007 status updated: Proposed→Implemented (2026-06-15)',
+        'Adoption/rejection criteria documented for OpenAI Agents SDK, LangGraph, AutoGen',
+        'All 8 sub-tasks (framework benchmark, model profile, DeepSeek parity, Codex parity, event projection, compat harness, CLI fallback gate, reference watch) implemented as done',
+        'Four-layer architecture fully materialized: stable loop, provider adapter, model profile, harness/fallback',
+      ],
+      implementedAt: '2026-06-15',
     },
   },
   {
@@ -97,7 +104,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     title: '对比现成 agent 框架与 los 现有执行合同',
     description: '对 OpenAI Agents SDK、LangGraph、AutoGen 等框架做轻量对比，记录它们和 los loop、tool registry、scheduler、session_events 的重叠和可借鉴点。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-05-30',
     stageId: 'agent-runtime',
@@ -107,6 +114,12 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '框架选型如果没有证据，会在后续实现里反复摇摆。',
       solution: '用一页对比固定 adoption/rejection criteria，并把结果写入 ADR 0007。',
+      evidence: [
+        'ADR 0007 now includes Adoption and Rejection Criteria table evaluating OpenAI Agents SDK, LangGraph, AutoGen',
+        'Each framework assessed against los-specific constraints: state-model ownership, tool policy integration, provider diversity, audit trail fidelity, PostgreSQL-first, dependency surface, sub-agent contracts',
+        'Patterns worth absorbing (tool streaming, graph planning, verification gating) implemented in los architecture rather than via framework adoption',
+      ],
+      implementedAt: '2026-06-15',
     },
   },
   {
