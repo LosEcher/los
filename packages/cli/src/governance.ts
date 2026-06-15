@@ -2,8 +2,11 @@ import {
   detectRuntimeCleanupWithDefaultDb,
   readStatusConstraintReportWithDefaultDb,
   reconcilePlanningTodosWithDefaultDb,
+  runGovernanceSweep,
   summarizeStatusConstraintReport,
   validateStatusConstraintsWithDefaultDb,
+  type GovernanceSweepResult,
+  type GovernanceJobType,
   type RuntimeCleanupReport,
   type StatusConstraintReport,
   type TodoReconciliationReport,
@@ -33,6 +36,10 @@ export async function governanceCommand(globalArgs: string[], argv: string[]): P
   }
   if (action === 'status-constraints' || action === 'constraints') {
     await statusConstraints(parsed);
+    return;
+  }
+  if (action === 'sweep') {
+    await sweep(parsed);
     return;
   }
 
@@ -248,6 +255,53 @@ function hoursToMs(value: number | undefined): number | undefined {
   return value * 60 * 60 * 1000;
 }
 
+async function sweep(parsed: ParsedArgs): Promise<void> {
+  const apply = booleanFlag(parsed, 'apply');
+  const jobType = stringFlag(parsed, 'job-type');
+  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift'];
+  const jobTypes = jobType
+    ? (jobType.split(',').filter(t => validTypes.includes(t as GovernanceJobType)) as GovernanceJobType[])
+    : undefined;
+
+  const result = await runGovernanceSweep({
+    jobTypes,
+    dryRun: !apply,
+    tenantId: stringFlag(parsed, 'tenant-id') ?? stringFlag(parsed, 'tenant'),
+    projectId: stringFlag(parsed, 'project-id') ?? stringFlag(parsed, 'project'),
+  });
+  renderSweep(result, booleanFlag(parsed, 'json'));
+}
+
+function renderSweep(result: GovernanceSweepResult, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`Governance sweep: dryRun=${result.dryRun} jobsRun=${result.jobsRun} jobsSkipped=${result.jobsSkipped} findingsCreated=${result.findingsCreated} errors=${result.errors.length}`);
+  for (const r of result.results) {
+    console.log(`  ${r.jobType} (${r.jobId}) durationMs=${r.durationMs}`);
+    const summary = r.summary;
+    if (r.jobType === 'consistency_audit') {
+      const tr = summary.todoReconciliation as Record<string, unknown> | undefined;
+      const sc = summary.statusConstraints as Record<string, unknown> | undefined;
+      console.log(`    todoRecon seedOnly=${tr?.seedOnly ?? '?'} dbOnly=${tr?.dbOnly ?? '?'} statusDrift=${tr?.statusDrift ?? '?'}`);
+      console.log(`    statusConstraints invalidRows=${sc?.invalidRows ?? '?'}`);
+    } else if (r.jobType === 'hotspot') {
+      const rc = summary.runtimeCleanup as Record<string, unknown> | undefined;
+      console.log(`    runtimeCleanup illegalStatus=${rc?.illegalStatusCount ?? '?'} staleFixture=${rc?.staleFixtureCount ?? '?'}`);
+    } else if (r.jobType === 'architecture_drift') {
+      console.log(`    nodes=${summary.nodeCount ?? '?'} edges=${summary.edgeCount ?? '?'} nodeTypes=${(summary.nodeTypes as string[])?.join(',') ?? '?'}`);
+    }
+  }
+  for (const err of result.errors) {
+    console.log(`  ERROR: ${err}`);
+  }
+  if (!result.dryRun && result.errors.length === 0) {
+    console.log('Results recorded.');
+  }
+}
+
 function printGovernanceHelp(): void {
   console.log(`los governance
 
@@ -255,6 +309,7 @@ Usage:
   los governance todo-reconcile [options]
   los governance runtime-cleanup [options]
   los governance status-constraints [options]
+  los governance sweep [options]
 
 Options:
   --tenant-id ID          Tenant id, default local
@@ -264,6 +319,8 @@ Options:
   --stale-ms N            Runtime cleanup stale threshold in milliseconds
   --limit N               Runtime cleanup scan limit, default 500
   --validate --apply      Validate ready status constraints after dirty-row checks
+  --job-type TYPE         Sweep: filter by job type (consistency_audit|hotspot|architecture_drift)
+  --apply                 Sweep: actually run and record results (default dry-run)
   --json                  Emit JSON report
 
 Notes:
