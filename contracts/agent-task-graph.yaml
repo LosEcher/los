@@ -19,6 +19,10 @@ routes:
   - method: GET
     path: /agent-graphs/{graphId}/completion
     response: AgentTaskGraphCompletion
+  - method: GET
+    path: /runs/{runId}/graph
+    response: AgentTaskGraphReadModel
+    description: Read the task graph for a specific run.
 query:
   requireVerifier:
     type: boolean
