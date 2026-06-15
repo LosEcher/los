@@ -14,6 +14,7 @@ required_contracts=(
   artifact-transfer.yaml
   agent-task-graph.yaml
   provider-compat-evidence.yaml
+  todo-dispatch.yaml
 )
 
 failures=0

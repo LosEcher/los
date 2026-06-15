@@ -1,0 +1,52 @@
+contract: los.todo-dispatch
+version: 0.1.0
+status: draft
+owner: packages/gateway
+description: >
+  Dispatch a ready todo into the scheduler for execution. Only todos with
+  kind 'task' or 'batch' and status 'ready' are eligible. All dependsOnIds
+  must be 'done' before dispatch.
+type: object
+routes:
+  - method: POST
+    path: /todos/{todoId}/dispatch
+    request:
+      type: object
+      properties:
+        force:
+          type: boolean
+          description: Bypass the ready-status check (dependency and kind gates still apply).
+        workspaceRoot:
+          type: string
+          description: Absolute workspace path for the spawned task run.
+        toolMode:
+          type: string
+          enum: [read-only, project-write, all]
+          default: read-only
+    response:
+      type: object
+      properties:
+        todo:
+          description: The updated todo record with status 'in_progress'.
+        taskRun:
+          description: The created task_run record with status 'queued'.
+    errors:
+      - status: 400
+        code: todo_not_ready
+        description: Todo status is not 'ready' (unless force=true).
+      - status: 400
+        code: todo_not_dispatchable
+        description: Todo kind is not 'task' or 'batch'.
+      - status: 400
+        code: todo_dependencies_not_met
+        description: One or more dependsOnIds are not 'done'.
+      - status: 404
+        code: not_found
+        description: No todo exists with the given id.
+sourceOfTruth:
+  - todos
+  - todo_dependencies
+  - task_runs
+verification:
+  - pnpm check
+  - ./tools/check-contracts.sh

@@ -367,6 +367,38 @@ export {
   type ValidateStatusConstraintsResult,
 } from './governance-status-constraints.js';
 export {
+  ensureGovernanceJobStore,
+  createGovernanceJob,
+  getGovernanceJob,
+  listGovernanceJobs,
+  listDueGovernanceJobs,
+  updateGovernanceJob,
+  deleteGovernanceJob,
+  seedGovernanceJobs,
+  runGovernanceSweep,
+  type GovernanceJob,
+  type GovernanceJobType,
+  type GovernanceCadence,
+  type GovernanceJobStatus,
+  type CreateGovernanceJobInput,
+  type UpdateGovernanceJobInput,
+  type ListGovernanceJobsOptions,
+  type GovernanceSweepResult,
+  type GovernanceSweepJobResult,
+} from './governance-jobs.js';
+export {
+  ensureStaticGraphBaselineStore,
+  captureStaticGraphBaseline,
+  getLatestBaseline,
+  getBaseline,
+  deleteBaseline,
+  diffBaselines,
+  summarizeBaselineDiff,
+  type StaticGraphBaseline,
+  type BaselineDiff,
+  type CaptureBaselineInput,
+} from './static-graph-baselines.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,
@@ -554,24 +586,3 @@ export {
 
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';
-
-export {
-  ensureGovernanceJobStore,
-  upsertGovernanceJob,
-  listDueGovernanceJobs,
-  recordGovernanceJobRun,
-  loadGovernanceJob,
-  listGovernanceJobs,
-  seedGovernanceJobs,
-  type GovernanceJobRecord,
-  type GovernanceJobType,
-  type GovernanceCadence,
-  type GovernanceResultSummary,
-  type UpsertGovernanceJobInput,
-} from './governance-jobs.js';
-
-export {
-  runGovernanceSweep,
-  type SweeperOptions,
-  type SweeperResult,
-} from './governance-sweeper.js';

@@ -1,23 +1,35 @@
--- 006_procedural_candidates.sql
--- Creates standalone procedural_candidates table per ADR 0020 section 4.
--- Previously candidates were stored inline in memory_compactions.procedural_candidates_json JSONB.
-
 CREATE TABLE IF NOT EXISTS procedural_candidates (
   id TEXT PRIMARY KEY,
-  compaction_id TEXT NOT NULL REFERENCES memory_compactions(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  content TEXT NOT NULL,
-  severity TEXT DEFAULT 'info',
-  rationale TEXT DEFAULT '',
-  confidence NUMERIC DEFAULT 0,
-  status TEXT DEFAULT 'draft',
-  supporting_session_ids TEXT[] DEFAULT '{}',
-  rejected_at TIMESTAMPTZ,
-  rejection_reason TEXT,
+  content TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL DEFAULT 'info',
+  rationale TEXT NOT NULL DEFAULT '',
+  confidence NUMERIC NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft',
+  compaction_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  tenant_id TEXT,
+  project_id TEXT,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_procedural_candidates_compaction ON procedural_candidates(compaction_id);
-CREATE INDEX IF NOT EXISTS idx_procedural_candidates_status ON procedural_candidates(status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_procedural_candidates_name ON procedural_candidates(name, status);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'procedural_candidates_status_chk'
+      AND conrelid = 'procedural_candidates'::regclass
+  ) THEN
+    ALTER TABLE procedural_candidates
+      ADD CONSTRAINT procedural_candidates_status_chk
+      CHECK (status IN ('draft', 'review', 'approved', 'active', 'retired'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_proc_cand_status ON procedural_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_name ON procedural_candidates(name);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_compaction ON procedural_candidates(compaction_id);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_session ON procedural_candidates(session_id);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_tenant_project ON procedural_candidates(tenant_id, project_id);

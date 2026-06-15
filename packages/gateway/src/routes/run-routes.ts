@@ -9,6 +9,7 @@ import {
   applyToolCallRecoveryTransitionForRunSpec,
   approveRunSpecPhase,
   cancelScheduledTask,
+  readAgentTaskGraph,
   reviseRunSpecPlan,
   readRuntimeEvidenceGraph,
   readRunStateProjection,
@@ -111,18 +112,6 @@ export function registerRunRoutes(app: FastifyInstance): void {
     ]);
     if (!graph) return reply.status(404).send({ error: 'Not found' });
     return { ...graph, state };
-  });
-
-  app.get('/runs/:id/graph', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const graph = await readRuntimeEvidenceGraph(id);
-    if (!graph) return reply.status(404).send({ error: 'Not found' });
-    return {
-      nodes: graph.nodes,
-      edges: graph.edges,
-      runSpecId: graph.runSpecId,
-      sessionId: graph.sessionId,
-    };
   });
 
   app.get('/runs/:id/state', async (req, reply) => {
@@ -230,5 +219,13 @@ export function registerRunRoutes(app: FastifyInstance): void {
     const runSpec = await loadRunSpec(id);
     if (!runSpec) return { error: 'Not found' };
     return runSpec;
+  });
+
+  app.get('/runs/:id/graph', async (req) => {
+    const { id } = req.params as { id: string };
+    const query = req.query as { requireVerifier?: string };
+    return await readAgentTaskGraph(id, {
+      requireVerifier: query.requireVerifier === 'true' ? true : query.requireVerifier === 'false' ? false : undefined,
+    });
   });
 }

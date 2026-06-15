@@ -9,7 +9,11 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
-import { appendSessionEvent } from '@los/agent/session-events';
+import {
+  ensureProceduralCandidateStore,
+  createProceduralCandidate,
+  promoteProceduralCandidate,
+} from './procedural-candidates.js';
 
 const log = getLogger('memory-compaction');
 
@@ -247,6 +251,31 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     ],
   );
 
+  // Dual-write to standalone procedural_candidates table
+  if (proceduralCandidates.length > 0) {
+    await ensureProceduralCandidateStore();
+    await Promise.all(
+      proceduralCandidates.map(c =>
+        createProceduralCandidate({
+          name: c.name,
+          content: c.content,
+          severity: c.severity,
+          rationale: c.rationale,
+          confidence: c.confidence,
+          status: c.status,
+          compactionId: id,
+          sessionId,
+          tenantId: input.tenantId,
+          projectId: input.projectId,
+          supportingSessionIds: c.supportingSessionIds,
+        }).catch(err => {
+          log.warn(`Dual-write candidate "${c.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        }),
+      ),
+    );
+  }
+
   return rowToCompaction(assertRow(rows.rows[0]));
 }
 
@@ -267,6 +296,7 @@ export async function attestCompaction(
      RETURNING *`,
     [id, attestedBy],
   );
+  // Note: attestedAt/attestedBy stored in summary_json for queryability
   if (rows.rows[0]) {
     const existing = rowToCompaction(rows.rows[0]);
     const updatedSummary = {
@@ -278,27 +308,6 @@ export async function attestCompaction(
       `UPDATE memory_compactions SET summary_json = $2::jsonb WHERE id = $1`,
       [id, JSON.stringify(updatedSummary)],
     );
-
-    // Emit rule_approval events for each candidate being attested
-    for (const candidate of existing.proceduralCandidates) {
-      try {
-        await appendSessionEvent({
-          sessionId: existing.sessionId,
-          type: 'rule_approval',
-          source: 'los.memory',
-          payload: {
-            compactionId: existing.id,
-            candidateName: candidate.name,
-            candidateConfidence: candidate.confidence,
-            attestedBy,
-            attestedAt: updatedSummary.attestedAt,
-          },
-        });
-      } catch (err) {
-        log.warn('Failed to emit rule_approval event');
-      }
-    }
-
     return { ...existing, summary: updatedSummary, attestedAt: updatedSummary.attestedAt as string, attestedBy };
   }
   return null;
@@ -306,6 +315,8 @@ export async function attestCompaction(
 
 /**
  * Promote a procedural candidate within a compaction from draft → review → approved → active.
+ * Updates both the JSONB column in memory_compactions (backwards compat) and the standalone
+ * procedural_candidates table. Emits a session event on status transition.
  */
 export async function promoteCandidate(
   compactionId: string,
@@ -316,6 +327,7 @@ export async function promoteCandidate(
   const compaction = await getCompaction(compactionId);
   if (!compaction) return null;
 
+  const oldCandidate = compaction.proceduralCandidates.find(c => c.name === candidateName);
   const candidates = compaction.proceduralCandidates.map(c =>
     c.name === candidateName ? { ...c, status: newStatus } : c,
   );
@@ -325,6 +337,46 @@ export async function promoteCandidate(
     `UPDATE memory_compactions SET procedural_candidates_json = $2::jsonb WHERE id = $1`,
     [compactionId, JSON.stringify(candidates)],
   );
+
+  // Sync to standalone procedural_candidates table
+  try {
+    await ensureProceduralCandidateStore();
+    const pcId = `pc-${compactionId}-${candidateName.slice(0, 64)}`;
+    await promoteProceduralCandidate(pcId, newStatus);
+  } catch (err) {
+    log.warn(
+      `Failed to sync promote to procedural_candidates for "${candidateName}": ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Emit rule_approval session event
+  if (oldCandidate) {
+    try {
+      const { appendSessionEvent, ensureSessionEventStore } = await import(
+        '@los/agent/session-events'
+      );
+      await ensureSessionEventStore();
+      await appendSessionEvent({
+        sessionId: compaction.sessionId,
+        type: 'rule_approval',
+        source: 'los',
+        tenantId: compaction.tenantId,
+        projectId: compaction.projectId,
+        payload: {
+          candidateId: `pc-${compactionId}-${candidateName.slice(0, 64)}`,
+          candidateName,
+          oldStatus: oldCandidate.status,
+          newStatus,
+          compactionId,
+          promotedAt: new Date().toISOString(),
+        },
+      });
+    } catch (err) {
+      log.warn(
+        `Failed to emit rule_approval event for "${candidateName}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   return await getCompaction(compactionId);
 }

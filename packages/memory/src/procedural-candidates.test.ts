@@ -1,160 +1,135 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import {
-  ensureProceduralCandidateStore,
   createProceduralCandidate,
-  upsertProceduralCandidate,
-  promoteCandidate,
+  deleteProceduralCandidate,
+  ensureProceduralCandidateStore,
+  getProceduralCandidate,
+  listActiveCandidates,
   listProceduralCandidates,
-  loadProceduralCandidate,
+  promoteProceduralCandidate,
 } from './procedural-candidates.js';
-import { ensureMemoryCompactionStore } from './compaction.js';
 
-test('createProceduralCandidate stores a candidate row', async () => {
+test('procedural candidates: create, get, list, promote lifecycle', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
 
-  const sessionId = `pc-create-${Date.now()}`;
-  const compactionId = `comp-${Date.now()}`;
+  const sessionId = `pc-test-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const compactionId = randomUUID();
 
   try {
-    await ensureMemoryCompactionStore();
-    await getDb().query(
-      `INSERT INTO memory_compactions (id, session_id, summary_json) VALUES ($1, $2, '{}'::jsonb)`,
-      [compactionId, sessionId],
-    );
-
     await ensureProceduralCandidateStore();
-    const pc = await createProceduralCandidate({
-      compactionId,
-      name: 'test-candidate',
-      content: 'test rule content',
+
+    // Create
+    const created = await createProceduralCandidate({
+      name: 'test-rule',
+      content: 'Do not deploy on Fridays',
       severity: 'warn',
-      confidence: 0.8,
+      rationale: 'Observed 3 Friday deployment failures',
+      confidence: 0.7,
       status: 'draft',
-      supportingSessionIds: [sessionId],
-    });
-
-    assert.equal(pc.name, 'test-candidate');
-    assert.equal(pc.status, 'draft');
-    assert.equal(pc.confidence, 0.8);
-
-    const loaded = await loadProceduralCandidate(pc.id);
-    assert.ok(loaded);
-    assert.equal(loaded!.name, 'test-candidate');
-  } finally {
-    await getDb().query('DELETE FROM procedural_candidates WHERE compaction_id = $1', [compactionId]).catch(() => undefined);
-    await getDb().query('DELETE FROM memory_compactions WHERE id = $1', [compactionId]).catch(() => undefined);
-    await closeDb().catch(() => undefined);
-  }
-});
-
-test('promoteCandidate transitions through lifecycle', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-
-  const sessionId = `pc-promote-${Date.now()}`;
-  const compactionId = `comp-${Date.now()}`;
-
-  try {
-    await ensureMemoryCompactionStore();
-    await getDb().query(
-      `INSERT INTO memory_compactions (id, session_id, summary_json) VALUES ($1, $2, '{}'::jsonb)`,
-      [compactionId, sessionId],
-    );
-
-    const pc = await createProceduralCandidate({
       compactionId,
-      name: 'promote-test',
-      content: 'rule content',
-      status: 'draft',
+      sessionId,
+      supportingSessionIds: [sessionId, 'other-session-1'],
     });
 
-    const approved = await promoteCandidate(pc.id, 'approved');
+    assert.ok(created.id.startsWith('pc-'));
+    assert.equal(created.name, 'test-rule');
+    assert.equal(created.status, 'draft');
+    assert.equal(created.severity, 'warn');
+    assert.equal(created.evidence.supportingSessionIds.length, 2);
+
+    // Get
+    const found = await getProceduralCandidate(created.id);
+    assert.ok(found);
+    assert.equal(found.name, 'test-rule');
+
+    // List by status
+    const drafts = await listProceduralCandidates({ status: 'draft' });
+    assert.ok(drafts.some(c => c.id === created.id));
+
+    // listActiveCandidates: should be empty until promoted to active
+    const active0 = await listActiveCandidates();
+    assert.ok(active0.every(c => c.id !== created.id));
+
+    // Promote draft -> review -> approved -> active
+    const reviewed = await promoteProceduralCandidate(created.id, 'review');
+    assert.equal(reviewed!.status, 'review');
+
+    const approved = await promoteProceduralCandidate(created.id, 'approved');
     assert.equal(approved!.status, 'approved');
 
-    const act = await promoteCandidate(pc.id, 'active');
-    assert.equal(act!.status, 'active');
+    const active = await promoteProceduralCandidate(created.id, 'active');
+    assert.equal(active!.status, 'active');
 
-    const retired = await promoteCandidate(pc.id, 'retired', 'no longer relevant');
+    const activeList = await listActiveCandidates();
+    assert.ok(activeList.some(c => c.id === created.id));
+
+    // Promote active -> retired
+    const retired = await promoteProceduralCandidate(created.id, 'retired');
     assert.equal(retired!.status, 'retired');
-    assert.equal(retired!.rejectionReason, 'no longer relevant');
-    assert.ok(retired!.rejectedAt);
+
+    // Retired should not appear in active list
+    const activeAfterRetire = await listActiveCandidates();
+    assert.ok(activeAfterRetire.every(c => c.id !== created.id));
+
+    // Delete
+    const deleted = await deleteProceduralCandidate(created.id);
+    assert.equal(deleted, true);
+
+    const gone = await getProceduralCandidate(created.id);
+    assert.equal(gone, null);
   } finally {
-    await getDb().query('DELETE FROM procedural_candidates WHERE compaction_id = $1', [compactionId]).catch(() => undefined);
-    await getDb().query('DELETE FROM memory_compactions WHERE id = $1', [compactionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM procedural_candidates WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });
 
-test('upsertProceduralCandidate updates existing record', async () => {
+test('procedural candidates: listProceduralCandidates filters by compactionId and sessionId', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
 
-  const sessionId = `pc-upsert-${Date.now()}`;
-  const compactionId = `comp-${Date.now()}`;
+  const sessionA = `pc-filt-${Date.now()}-a`;
+  const sessionB = `pc-filt-${Date.now()}-b`;
+  const compA = randomUUID();
+  const compB = randomUUID();
 
   try {
-    await ensureMemoryCompactionStore();
-    await getDb().query(
-      `INSERT INTO memory_compactions (id, session_id, summary_json) VALUES ($1, $2, '{}'::jsonb)`,
-      [compactionId, sessionId],
-    );
+    await ensureProceduralCandidateStore();
 
-    const first = await createProceduralCandidate({
-      compactionId,
-      name: 'upsert-test',
-      content: 'original',
-      confidence: 0.3,
+    const a = await createProceduralCandidate({
+      name: 'rule-a', content: 'A', compactionId: compA, sessionId: sessionA,
     });
-    assert.equal(first.confidence, 0.3);
+    const b = await createProceduralCandidate({
+      name: 'rule-b', content: 'B', compactionId: compB, sessionId: sessionB,
+    });
 
-    const updated = await upsertProceduralCandidate({
-      id: first.id,
-      compactionId,
-      name: 'upsert-test',
-      confidence: 0.9,
-      content: 'updated',
-    });
-    assert.equal(updated.confidence, 0.9);
-    assert.equal(updated.content, 'updated');
+    const byComp = await listProceduralCandidates({ compactionId: compA });
+    assert.equal(byComp.length, 1);
+    assert.equal(byComp[0].id, a.id);
+
+    const bySess = await listProceduralCandidates({ sessionId: sessionB });
+    assert.equal(bySess.length, 1);
+    assert.equal(bySess[0].id, b.id);
   } finally {
-    await getDb().query('DELETE FROM procedural_candidates WHERE compaction_id = $1', [compactionId]).catch(() => undefined);
-    await getDb().query('DELETE FROM memory_compactions WHERE id = $1', [compactionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM procedural_candidates WHERE session_id IN ($1, $2)', [sessionA, sessionB]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });
 
-test('listProceduralCandidates filters by status', async () => {
+test('procedural candidates: promoteProceduralCandidate returns null for unknown id', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
 
-  const sessionId = `pc-list-${Date.now()}`;
-  const compactionId = `comp-${Date.now()}`;
-
   try {
-    await ensureMemoryCompactionStore();
-    await getDb().query(
-      `INSERT INTO memory_compactions (id, session_id, summary_json) VALUES ($1, $2, '{}'::jsonb)`,
-      [compactionId, sessionId],
-    );
-
-    await createProceduralCandidate({ compactionId, name: 'draft-1', content: 'draft content', status: 'draft' });
-    await createProceduralCandidate({ compactionId, name: 'review-1', content: 'review content', status: 'review' });
-    await createProceduralCandidate({ compactionId, name: 'active-1', content: 'active content', status: 'active' });
-
-    const active = await listProceduralCandidates({ status: 'active' });
-    assert.equal(active.length, 1);
-    assert.equal(active[0].name, 'active-1');
-
-    const multipl = await listProceduralCandidates({ status: ['draft', 'review'] });
-    assert.ok(multipl.length >= 2);
+    await ensureProceduralCandidateStore();
+    const result = await promoteProceduralCandidate('pc-nonexistent', 'active');
+    assert.equal(result, null);
   } finally {
-    await getDb().query('DELETE FROM procedural_candidates WHERE compaction_id = $1', [compactionId]).catch(() => undefined);
-    await getDb().query('DELETE FROM memory_compactions WHERE id = $1', [compactionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

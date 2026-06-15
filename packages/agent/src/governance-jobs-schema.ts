@@ -1,3 +1,10 @@
+import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
+import type { CreateGovernanceJobInput } from './governance-jobs-types.js';
+
+const log = getLogger('governance-jobs');
+
+export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS governance_jobs (
   id TEXT PRIMARY KEY,
   job_type TEXT NOT NULL,
@@ -43,3 +50,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_gov_jobs_dedupe
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_type_status ON governance_jobs(job_type, status);
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_cadence ON governance_jobs(cadence, last_run_at);
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_tenant_project ON governance_jobs(tenant_id, project_id);
+`;
+
+let _initialized = false;
+
+export async function ensureGovernanceJobStore(): Promise<void> {
+  if (_initialized) return;
+  await getDb().exec(SCHEMA);
+  _initialized = true;
+  log.info('Governance job store initialized');
+}
+
+export const SEED_JOBS: CreateGovernanceJobInput[] = [
+  {
+    jobType: 'consistency_audit',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-consistency-audit',
+  },
+  {
+    jobType: 'hotspot',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-hotspot',
+  },
+  {
+    jobType: 'architecture_drift',
+    cadence: 'weekly',
+    dedupeKey: 'gov-job-architecture-drift',
+  },
+];

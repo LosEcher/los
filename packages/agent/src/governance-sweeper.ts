@@ -1,193 +1,141 @@
-import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
-import {
-  listDueGovernanceJobs,
-  recordGovernanceJobRun,
-  type GovernanceJobRecord,
-  type GovernanceJobType,
-} from './governance-jobs.js';
-import { scanProject, loadRuleFiles } from './static-analysis/index.js';
+import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
+import { listDueGovernanceJobs, updateGovernanceJob } from './governance-jobs-crud.js';
+import { runJobAudit } from './governance-auditors.js';
+import type {
+  GovernanceJob,
+  GovernanceJobType,
+  GovernanceSweepJobResult,
+  GovernanceSweepResult,
+} from './governance-jobs-types.js';
 
-const log = getLogger('governance-sweeper');
+const log = getLogger('governance-jobs');
 
-export interface SweeperOptions {
-  /** Specific job types to run. If empty, runs all due jobs. */
+async function createTodosFromFindings(
+  job: GovernanceJob,
+  summary: Record<string, unknown>,
+  dryRun: boolean,
+): Promise<number> {
+  if (dryRun) return 0;
+
+  let created = 0;
+  try {
+    const { createTodo } = await import('./todos.js');
+
+    if (job.jobType === 'consistency_audit') {
+      const todoRecon = summary.todoReconciliation as Record<string, unknown> | undefined;
+      if (todoRecon && typeof todoRecon.seedOnly === 'number' && todoRecon.seedOnly > 0) {
+        await createTodo({
+          title: `Governance: ${todoRecon.seedOnly} seed-only todos detected`,
+          description: `Consistency audit found ${todoRecon.seedOnly} todos defined in seeds but missing from DB, and ${todoRecon.dbOnly ?? 0} DB-only todos. Review the full report at ${job.id}.`,
+          kind: 'task',
+          status: 'backlog',
+          priority: 'P1',
+          source: 'governance_sweep',
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'seedOnly' },
+        });
+        created += 1;
+      }
+      if (todoRecon && typeof todoRecon.statusDrift === 'number' && todoRecon.statusDrift > 0) {
+        await createTodo({
+          title: `Governance: ${todoRecon.statusDrift} status drift(s) detected`,
+          description: `Consistency audit found ${todoRecon.statusDrift} todo status mismatches between seeds and DB. Review the full report at ${job.id}.`,
+          kind: 'task',
+          status: 'backlog',
+          priority: 'P1',
+          source: 'governance_sweep',
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'statusDrift' },
+        });
+        created += 1;
+      }
+    }
+
+    if (job.jobType === 'hotspot') {
+      const cleanup = summary.runtimeCleanup as Record<string, unknown> | undefined;
+      if (cleanup && typeof cleanup.illegalStatusCount === 'number' && cleanup.illegalStatusCount > 0) {
+        await createTodo({
+          title: `Governance: ${cleanup.illegalStatusCount} task runs with illegal status`,
+          description: `Hotspot audit found ${cleanup.illegalStatusCount} illegal status task runs and ${cleanup.staleFixtureCount ?? 0} stale fixtures. Review the full report at ${job.id}.`,
+          kind: 'task',
+          status: 'backlog',
+          priority: 'P1',
+          source: 'governance_sweep',
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'illegalStatus' },
+        });
+        created += 1;
+      }
+    }
+
+    if (job.jobType === 'architecture_drift') {
+      await createTodo({
+        title: `Governance: Architecture graph audit — ${summary.nodeCount ?? 0} nodes, ${summary.edgeCount ?? 0} edges`,
+        description: `Architecture drift audit captured the current execution graph. Compare with previous baseline. Review at ${job.id}.`,
+        kind: 'task',
+        status: 'backlog',
+        priority: 'P2',
+        source: 'governance_sweep',
+        metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'baseline' },
+      });
+      created += 1;
+    }
+  } catch (err) {
+    log.warn(`Failed to create findings todo for ${job.jobType}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  return created;
+}
+
+export async function runGovernanceSweep(opts?: {
   jobTypes?: GovernanceJobType[];
-  /** Workspace root for file scanning. */
-  workspaceRoot?: string;
-  /** Limit the number of jobs run in a single sweep. */
-  limit?: number;
-}
+  dryRun?: boolean;
+  tenantId?: string;
+  projectId?: string;
+  now?: Date;
+}): Promise<GovernanceSweepResult> {
+  const dryRun = opts?.dryRun !== false;
+  await ensureGovernanceJobStore();
 
-export interface SweeperResult {
-  ran: number;
-  skipped: number;
-  errors: string[];
-  jobResults: Array<{
-    jobId: string;
-    jobType: GovernanceJobType;
-    status: 'pass' | 'fail' | 'action_required';
-    findings?: number;
-    error?: string;
-  }>;
-}
-
-/**
- * Run due governance jobs. This is the entry point for both operator-triggered
- * ("pnpm run govern") and scheduled automation.
- */
-export async function runGovernanceSweep(options: SweeperOptions = {}): Promise<SweeperResult> {
   const dueJobs = await listDueGovernanceJobs({
-    jobType: options.jobTypes?.[0],
+    jobTypes: opts?.jobTypes,
+    tenantId: opts?.tenantId,
+    projectId: opts?.projectId,
+    now: opts?.now,
   });
 
-  const jobsToRun = dueJobs.slice(0, options.limit ?? 10);
-  if (jobsToRun.length === 0) {
-    return { ran: 0, skipped: 0, errors: [], jobResults: [] };
+  if (dueJobs.length === 0) {
+    return { dryRun, jobsRun: 0, jobsSkipped: 0, findingsCreated: 0, errors: [], results: [] };
   }
 
-  const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const result: SweeperResult = { ran: 0, skipped: dueJobs.length - jobsToRun.length, errors: [], jobResults: [] };
+  const results: GovernanceSweepJobResult[] = [];
+  const errors: string[] = [];
+  let findingsCreated = 0;
 
-  for (const job of jobsToRun) {
+  for (const job of dueJobs) {
+    const started = Date.now();
     try {
-      const jobResult = await executeGovernanceJob(job, workspaceRoot);
-      result.jobResults.push(jobResult);
-      result.ran += 1;
-
-      const taskRunId = `sweep-${job.id}-${Date.now()}`;
-      await recordGovernanceJobRun(job.id, taskRunId, {
-        status: jobResult.status,
-        counts: { findings: jobResult.findings ?? 0 },
-        findings: jobResult.findings,
-        errors: jobResult.error ? [jobResult.error] : undefined,
+      const summary = await runJobAudit(job, dryRun);
+      results.push({
+        jobId: job.id,
+        jobType: job.jobType,
+        summary,
+        durationMs: Date.now() - started,
       });
+
+      if (!dryRun) {
+        await updateGovernanceJob(job.id, {
+          lastRunAt: new Date().toISOString(),
+          resultSummary: summary,
+        });
+      }
+
+      const created = await createTodosFromFindings(job, summary, dryRun);
+      findingsCreated += created;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`${job.jobType}/${job.id}: ${msg}`);
-      result.jobResults.push({ jobId: job.id, jobType: job.jobType, status: 'fail', error: msg });
+      const msg = `${job.jobType} (${job.id}): ${err instanceof Error ? err.message : String(err)}`;
+      errors.push(msg);
+      log.warn(`Sweep job failed: ${msg}`);
     }
   }
 
-  return result;
-}
-
-async function executeGovernanceJob(
-  job: GovernanceJobRecord,
-  workspaceRoot: string,
-): Promise<{ jobId: string; jobType: GovernanceJobType; status: 'pass' | 'fail' | 'action_required'; findings?: number; error?: string }> {
-  switch (job.jobType) {
-    case 'consistency_audit':
-      return runConsistencyAudit(job, workspaceRoot);
-    case 'hotspot':
-      return runHotspotDetection(job, workspaceRoot);
-    case 'architecture_drift':
-      return runArchitectureDrift(job, workspaceRoot);
-    case 'tool_drift':
-      return { jobId: job.id, jobType: 'tool_drift', status: 'pass', findings: 0 };
-    case 'provider_surveillance':
-      return { jobId: job.id, jobType: 'provider_surveillance', status: 'pass', findings: 0 };
-    default:
-      return { jobId: job.id, jobType: job.jobType, status: 'pass', findings: 0 };
-  }
-}
-
-async function runConsistencyAudit(
-  job: GovernanceJobRecord,
-  workspaceRoot: string,
-): Promise<{ jobId: string; jobType: GovernanceJobType; status: 'pass' | 'fail' | 'action_required'; findings?: number; error?: string }> {
-  const rules = job.config.rules as string[] | undefined;
-  if (!rules || rules.length === 0) {
-    return { jobId: job.id, jobType: 'consistency_audit', status: 'pass', findings: 0 };
-  }
-
-  try {
-    const loadedRules = await loadRuleFiles([
-      `${workspaceRoot}/packages/agent/src/static-analysis/rules/projects/los/*.yml`,
-      `${workspaceRoot}/packages/agent/src/static-analysis/rules/languages/typescript/*.yml`,
-    ]);
-
-    const relevantRules = loadedRules.filter(r => (rules as string[]).includes(r.id));
-    if (relevantRules.length === 0) {
-      return { jobId: job.id, jobType: 'consistency_audit', status: 'pass', findings: 0 };
-    }
-
-    const result = await scanProject({
-      project: `governance-${job.id}`,
-      rootDir: workspaceRoot,
-      include: ['packages/**/*.ts', 'packages/**/*.tsx'],
-      ignore: ['**/node_modules/**', '**/dist/**', '**/*.test.ts', '**/*.test.tsx'],
-      rules: relevantRules,
-    });
-
-    const status = result.findings.length > 0 ? 'action_required' : 'pass';
-    return { jobId: job.id, jobType: 'consistency_audit', status, findings: result.findings.length };
-  } catch (err) {
-    return {
-      jobId: job.id,
-      jobType: 'consistency_audit',
-      status: 'fail',
-      findings: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-async function runHotspotDetection(
-  job: GovernanceJobRecord,
-  workspaceRoot: string,
-): Promise<{ jobId: string; jobType: GovernanceJobType; status: 'pass' | 'fail' | 'action_required'; findings?: number; error?: string }> {
-  const sizeThreshold = (job.config.sizeThreshold as number) ?? 400;
-
-  try {
-    const rules = await loadRuleFiles([
-      `${workspaceRoot}/packages/agent/src/static-analysis/rules/projects/los/file-size-gate.yml`,
-    ]);
-    const result = await scanProject({
-      project: `hotspot-${job.id}`,
-      rootDir: workspaceRoot,
-      include: ['packages/**/*.ts', 'packages/**/*.tsx'],
-      ignore: ['**/node_modules/**', '**/dist/**', '**/*.test.ts', '**/*.test.tsx', '**/static-analysis/**'],
-      rules,
-    });
-
-    // file-size-gate matches every file once (kind:program). Count files.
-    const status = result.filesScanned > sizeThreshold ? 'action_required' : 'pass';
-    return { jobId: job.id, jobType: 'hotspot', status, findings: result.filesScanned };
-  } catch (err) {
-    return {
-      jobId: job.id, jobType: 'hotspot', status: 'fail', findings: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-async function runArchitectureDrift(
-  job: GovernanceJobRecord,
-  workspaceRoot: string,
-): Promise<{ jobId: string; jobType: GovernanceJobType; status: 'pass' | 'fail' | 'action_required'; findings?: number; error?: string }> {
-  const rules = (job.config.rules as string[]) ?? ['los.direct-infra-import', 'los.no-package-local-agents'];
-
-  try {
-    const loadedRules = await loadRuleFiles([
-      `${workspaceRoot}/packages/agent/src/static-analysis/rules/projects/los/*.yml`,
-    ]);
-    const relevantRules = loadedRules.filter(r => rules.includes(r.id));
-
-    const result = await scanProject({
-      project: `arch-drift-${job.id}`,
-      rootDir: workspaceRoot,
-      include: ['packages/**/*.ts', 'packages/**/*.tsx'],
-      ignore: ['**/node_modules/**', '**/dist/**', '**/*.test.ts', '**/*.test.tsx', '**/static-analysis/**'],
-      rules: relevantRules,
-    });
-
-    const status = result.findings.length > 0 ? 'action_required' : 'pass';
-    return { jobId: job.id, jobType: 'architecture_drift', status, findings: result.findings.length };
-  } catch (err) {
-    return {
-      jobId: job.id, jobType: 'architecture_drift', status: 'fail', findings: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+  return { dryRun, jobsRun: results.length, jobsSkipped: dueJobs.length - results.length, findingsCreated, errors, results };
 }
