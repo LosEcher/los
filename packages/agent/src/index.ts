@@ -551,6 +551,21 @@ export {
   type StaticAnalysisRange,
   type StaticAnalysisPosition,
 } from './static-analysis/index.js';
+export type { Rule as AstGrepRule } from '@ast-grep/napi';
+export {
+  scanProject,
+  scanFiles,
+  loadRuleFiles,
+  discoverFiles,
+  languageFromFilePath,
+  type StaticAnalysisFinding,
+  type StaticAnalysisRule,
+  type StaticAnalysisScanOptions,
+  type StaticAnalysisScanResult,
+  type StaticAnalysisConstraint,
+  type StaticAnalysisRange,
+  type StaticAnalysisPosition,
+} from './static-analysis/index.js';
 
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';
