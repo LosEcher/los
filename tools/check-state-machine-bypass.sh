@@ -33,6 +33,7 @@ ALLOWED_FILES=(
   "packages/agent/src/tool-call-recovery.ts"
   "packages/agent/src/scheduler/tool-call-state-persistence.ts"
   "packages/agent/src/scheduler/scheduled-task-runner.ts"
+  "packages/agent/src/scheduler/goal-self-check-runner.ts"
 )
 
 for api in "${BYPASS_APIS[@]}"; do
