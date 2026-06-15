@@ -104,6 +104,7 @@ describe('test database guard', () => {
 
   it('allows explicit one-off override for live-looking test databases', () => {
     process.argv.push('/tmp/db.test.ts');
+    delete process.env.TEST_DATABASE_URL;
     process.env.LOS_ALLOW_LIVE_TEST_DB = '1';
     assert.equal(
       resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
