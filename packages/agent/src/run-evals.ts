@@ -9,7 +9,6 @@ import type {
   RunEvalFailoverScope,
   RunEvalRecord,
   RunEvalSummary,
-  RunEvalSummaryGroup,
   RunEvalVerificationStatus,
   SummarizeRunEvalsOptions,
 } from './run-evals/types.js';
@@ -26,6 +25,31 @@ export type {
   RunEvalVerificationStatus,
   SummarizeRunEvalsOptions,
 } from './run-evals/types.js';
+
+import {
+  addOptionalClause,
+  assertRow,
+  normalizeFailoverScope,
+  normalizeJsonObject,
+  normalizeLimit,
+  normalizeNonNegativeInteger,
+  normalizeOptionalIsoLike,
+  normalizeOptionalNonNegativeInteger,
+  normalizeOptionalNonNegativeNumber,
+  normalizeOptionalString,
+  normalizeRequiredIsoLike,
+  normalizeRequiredString,
+  normalizeVerificationStatus,
+  toIsoString,
+} from './run-evals/normalizers.js';
+import {
+  aggregateRowToTotals,
+  rowToRecord,
+  rowToSummaryGroup,
+  type RunEvalAggregateRow,
+  type RunEvalRow,
+  type RunEvalSummaryGroupRow,
+} from './run-evals/rows.js';
 
 let _initialized = false;
 
@@ -157,31 +181,10 @@ export async function summarizeRunEvals(options: SummarizeRunEvalsOptions = {}):
       FROM run_evals
       ${where}
     `, params),
-    querySummaryGroups({
-      selectKey: `COALESCE(failure_class, 'unclassified')`,
-      where,
-      params,
-      limit,
-      failuresOnly: true,
-    }),
-    querySummaryGroups({
-      selectKey: `COALESCE(failover_scope, 'unspecified')`,
-      where,
-      params,
-      limit,
-    }),
-    querySummaryGroups({
-      selectKey: 'verification_status',
-      where,
-      params,
-      limit,
-    }),
-    querySummaryGroups({
-      selectKey: `COALESCE(provider, 'unknown') || ':' || COALESCE(model, 'unknown')`,
-      where,
-      params,
-      limit,
-    }),
+    querySummaryGroups({ selectKey: `COALESCE(failure_class, 'unclassified')`, where, params, limit, failuresOnly: true }),
+    querySummaryGroups({ selectKey: `COALESCE(failover_scope, 'unspecified')`, where, params, limit }),
+    querySummaryGroups({ selectKey: 'verification_status', where, params, limit }),
+    querySummaryGroups({ selectKey: `COALESCE(provider, 'unknown') || ':' || COALESCE(model, 'unknown')`, where, params, limit }),
   ]);
   return {
     filters: {
@@ -219,16 +222,8 @@ export async function compareRunEvals(options: CompareRunEvalsOptions): Promise<
     limit: normalized.limit,
   };
   const [baseline, candidate] = await Promise.all([
-    summarizeRunEvals({
-      ...shared,
-      createdFrom: normalized.baselineFrom,
-      createdTo: normalized.baselineTo,
-    }),
-    summarizeRunEvals({
-      ...shared,
-      createdFrom: normalized.candidateFrom,
-      createdTo: normalized.candidateTo,
-    }),
+    summarizeRunEvals({ ...shared, createdFrom: normalized.baselineFrom, createdTo: normalized.baselineTo }),
+    summarizeRunEvals({ ...shared, createdFrom: normalized.candidateFrom, createdTo: normalized.candidateTo }),
   ]);
   return {
     filters: {
@@ -262,7 +257,7 @@ async function querySummaryGroups(input: {
   params: unknown[];
   limit: number;
   failuresOnly?: boolean;
-}): Promise<RunEvalSummaryGroup[]> {
+}): Promise<import('./run-evals/types.js').RunEvalSummaryGroup[]> {
   const clauses = input.where ? [input.where.replace(/^WHERE\s+/i, '')] : [];
   const params = [...input.params];
   if (input.failuresOnly) clauses.push('success = false');
@@ -312,16 +307,7 @@ function buildRunEvalFilter(options: SummarizeRunEvalsOptions): { where: string;
     params.push(createdTo);
     clauses.push(`created_at <= $${params.length}::timestamptz`);
   }
-  return {
-    where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
-    params,
-  };
-}
-
-function addOptionalClause(clauses: string[], params: unknown[], column: string, value: string | undefined): void {
-  if (!value) return;
-  params.push(value);
-  clauses.push(`${column} = $${params.length}`);
+  return { where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '', params };
 }
 
 function normalizeSummaryOptions(options: SummarizeRunEvalsOptions): SummarizeRunEvalsOptions {
@@ -361,218 +347,12 @@ function normalizeCompareOptions(options: CompareRunEvalsOptions): CompareRunEva
     success: options.success,
     verificationStatus: normalizeOptionalString(options.verificationStatus),
     failureClass: normalizeOptionalString(options.failureClass),
-    baselineFrom,
-    baselineTo,
-    candidateFrom,
-    candidateTo,
+    baselineFrom, baselineTo, candidateFrom, candidateTo,
     limit: normalizeLimit(options.limit),
   };
-}
-
-type RunEvalRow = {
-  id: string;
-  run_spec_id: string;
-  session_id: string | null;
-  task_run_id: string | null;
-  provider: string | null;
-  model: string | null;
-  success: boolean;
-  latency_ms: number | null;
-  retry_count: number;
-  tool_error_count: number;
-  verification_status: string;
-  model_cost: string | number | null;
-  user_feedback: string | null;
-  failure_class: string | null;
-  failover_scope: string | null;
-  summary_json: unknown;
-  created_at: Date | string;
-  updated_at: Date | string;
-};
-
-type RunEvalAggregateRow = {
-  count: string | number | null;
-  success_count: string | number | null;
-  failure_count: string | number | null;
-  average_latency_ms: string | number | null;
-  average_retry_count: string | number | null;
-  tool_error_count: string | number | null;
-  model_cost: string | number | null;
-};
-
-type RunEvalSummaryGroupRow = RunEvalAggregateRow & {
-  key: string | null;
-};
-
-function rowToRecord(row: RunEvalRow): RunEvalRecord {
-  return {
-    id: row.id,
-    runSpecId: row.run_spec_id,
-    sessionId: row.session_id ?? undefined,
-    taskRunId: row.task_run_id ?? undefined,
-    provider: row.provider ?? undefined,
-    model: row.model ?? undefined,
-    success: row.success,
-    latencyMs: row.latency_ms ?? undefined,
-    retryCount: row.retry_count,
-    toolErrorCount: row.tool_error_count,
-    verificationStatus: normalizeVerificationStatus(row.verification_status),
-    modelCost: row.model_cost === null ? undefined : Number(row.model_cost),
-    userFeedback: row.user_feedback ?? undefined,
-    failureClass: row.failure_class ?? undefined,
-    failoverScope: normalizeFailoverScope(row.failover_scope) ?? undefined,
-    summary: normalizeJsonObject(row.summary_json),
-    createdAt: toIsoString(row.created_at),
-    updatedAt: toIsoString(row.updated_at),
-  };
-}
-
-function normalizeVerificationStatus(value: unknown): RunEvalVerificationStatus {
-  if (
-    value === 'not_required'
-    || value === 'pending'
-    || value === 'succeeded'
-    || value === 'failed'
-    || value === 'skipped'
-  ) {
-    return value;
-  }
-  return 'unknown';
-}
-
-function normalizeFailoverScope(value: unknown): RunEvalFailoverScope | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (trimmed === 'service' || trimmed === 'executor') return trimmed;
-  return undefined;
-}
-
-function normalizeRequiredString(value: unknown, name: string): string {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) throw new Error(`${name} is required`);
-  return normalized;
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeOptionalIsoLike(value: unknown, name: string): string | undefined {
-  const raw = normalizeOptionalString(value);
-  if (!raw) return undefined;
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw new Error(`${name} must be a valid timestamp`);
-  return date.toISOString();
-}
-
-function normalizeRequiredIsoLike(value: unknown, name: string): string {
-  const normalized = normalizeOptionalIsoLike(value, name);
-  if (!normalized) throw new Error(`${name} is required`);
-  return normalized;
-}
-
-function normalizeNonNegativeInteger(value: unknown, defaultValue: number): number {
-  const parsed = Number(value ?? defaultValue);
-  if (!Number.isFinite(parsed) || parsed < 0) return defaultValue;
-  return Math.floor(parsed);
-}
-
-function normalizeOptionalNonNegativeInteger(value: unknown): number | undefined {
-  if (value === undefined || value === null) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('integer metric must be non-negative');
-  return Math.floor(parsed);
-}
-
-function normalizeOptionalNonNegativeNumber(value: unknown): number | undefined {
-  if (value === undefined || value === null) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('numeric metric must be non-negative');
-  return parsed;
-}
-
-function normalizeJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function normalizeLimit(value: unknown): number {
-  const parsed = Number(value ?? 100);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 100;
-  return Math.max(1, Math.min(1000, Math.floor(parsed)));
-}
-
-function aggregateRowToTotals(row: RunEvalAggregateRow | undefined): RunEvalSummary['totals'] {
-  const count = normalizeCount(row?.count);
-  const successCount = normalizeCount(row?.success_count);
-  const failureCount = normalizeCount(row?.failure_count);
-  return {
-    count,
-    successCount,
-    failureCount,
-    successRate: count > 0 ? successCount / count : 0,
-    averageLatencyMs: normalizeOptionalFloat(row?.average_latency_ms),
-    averageRetryCount: normalizeFloat(row?.average_retry_count),
-    toolErrorCount: normalizeCount(row?.tool_error_count),
-    modelCost: normalizeFloat(row?.model_cost),
-  };
-}
-
-function rowToSummaryGroup(row: RunEvalSummaryGroupRow): RunEvalSummaryGroup {
-  const count = normalizeCount(row.count);
-  const successCount = normalizeCount(row.success_count);
-  return {
-    key: row.key ?? 'unknown',
-    count,
-    successCount,
-    failureCount: normalizeCount(row.failure_count),
-    successRate: count > 0 ? successCount / count : 0,
-    averageLatencyMs: normalizeOptionalFloat(row.average_latency_ms),
-    averageRetryCount: normalizeFloat(row.average_retry_count),
-    toolErrorCount: normalizeCount(row.tool_error_count),
-    modelCost: normalizeFloat(row.model_cost),
-  };
-}
-
-function normalizeCount(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed) || parsed < 0) return 0;
-  return Math.floor(parsed);
-}
-
-function normalizeFloat(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return 0;
-  return parsed;
-}
-
-function normalizeOptionalFloat(value: unknown): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return undefined;
-  return parsed;
 }
 
 function subtractOptional(left: number | undefined, right: number | undefined): number | undefined {
   if (left === undefined || right === undefined) return undefined;
   return left - right;
-}
-
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('run eval write returned no row');
-  return row;
 }
