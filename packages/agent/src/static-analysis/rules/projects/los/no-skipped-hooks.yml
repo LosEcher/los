@@ -1,0 +1,17 @@
+id: los.no-skipped-hooks
+language: TypeScript
+severity: warning
+message: "Do not skip git hooks (--no-verify, --no-gpg-sign) — investigate the root cause instead"
+rule:
+  any:
+    - kind: string
+      pattern: "--no-verify"
+    - kind: string
+      pattern: "--no-gpg-sign"
+    - kind: string
+      pattern: "HUSKY=0"
+governance:
+  domain: architecture
+  owner: platform
+  impact: medium
+  rationale: "Git hooks exist to catch issues before they reach remote. Skipping them masks problems."

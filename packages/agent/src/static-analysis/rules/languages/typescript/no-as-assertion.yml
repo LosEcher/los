@@ -1,0 +1,6 @@
+id: lang.typescript.no-as-assertion
+language: TypeScript
+severity: info
+message: "Prefer type annotations over 'as' assertions"
+rule:
+  kind: as_expression

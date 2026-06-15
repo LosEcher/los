@@ -1,0 +1,6 @@
+id: lang.typescript.no-non-null-assertion
+language: TypeScript
+severity: warning
+message: "Avoid non-null assertions (!) — use explicit null checks"
+rule:
+  pattern: $A!

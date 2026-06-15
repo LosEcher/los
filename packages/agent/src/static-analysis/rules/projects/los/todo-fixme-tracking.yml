@@ -1,0 +1,17 @@
+id: los.todo-fixme-tracking
+language: TypeScript
+severity: info
+message: "TODO/FIXME/HACK comment found — consider creating a todo record"
+rule:
+  any:
+    - kind: comment
+      pattern: "TODO"
+    - kind: comment
+      pattern: "FIXME"
+    - kind: comment
+      pattern: "HACK"
+governance:
+  domain: architecture
+  owner: backend
+  impact: low
+  rationale: "Track technical debt comments for periodic review"

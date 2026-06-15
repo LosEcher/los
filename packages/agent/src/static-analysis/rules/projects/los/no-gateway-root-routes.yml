@@ -1,0 +1,13 @@
+id: los.no-gateway-root-routes
+language: TypeScript
+severity: error
+message: "Route files must be in packages/gateway/src/routes/ — root-level *-routes.ts files are blocked by check-structure.sh"
+rule:
+  any:
+    - kind: program
+      pattern: "register$$$Routes"
+governance:
+  domain: architecture
+  owner: platform
+  impact: medium
+  rationale: "AGENTS.md change rules: gateway route modules live in routes/ directory"
