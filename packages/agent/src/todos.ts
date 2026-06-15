@@ -30,6 +30,23 @@ export type {
   UpdateTodoInput,
 } from './todo-types.js';
 
+import {
+  appendOptionalClause,
+  assertRow,
+  normalizeJsonObject,
+  normalizeOptionalString,
+  normalizeRequiredString,
+  normalizeStringArray,
+  normalizeTodoKind,
+  normalizeTodoPriority,
+  normalizeTodoStatus,
+  pickNullable,
+} from './todos/normalizers.js';
+import { rowToTodo } from './todos/rows.js';
+import { loadTodoRelations, replaceTodoDependencies, loadTodoDomino } from './todos/relations.js';
+
+export { loadTodoDomino };
+
 let _initialized = false;
 
 export async function ensureTodoStore(): Promise<void> {
@@ -266,10 +283,10 @@ export async function reopenTodo(id: string): Promise<TodoRecord | null> {
 export async function loadTodo(id: string): Promise<TodoRecord | null> {
   await ensureTodoStore();
   const db = getDb();
-  const rows = await db.query<TodoRow>('SELECT * FROM todos WHERE id = $1', [id]);
+  const rows = await db.query<import('./todos/rows.js').TodoRow>('SELECT * FROM todos WHERE id = $1', [id]);
   if (!rows.rows[0]) return null;
   const relationMap = await loadTodoRelations([id]);
-  return rowToTodo(rows.rows[0], relationMap.get(id));
+  return rowToTodo(rows.rows[0] as any, relationMap.get(id));
 }
 
 export async function listTodos(options: ListTodosOptions = {}): Promise<TodoRecord[]> {
@@ -301,7 +318,7 @@ export async function listTodos(options: ListTodosOptions = {}): Promise<TodoRec
 
   params.push(limit);
   const db = getDb();
-  const rows = await db.query<TodoRow>(
+  const rows = await db.query<import('./todos/rows.js').TodoRow>(
     `
     SELECT *
     FROM todos
@@ -326,7 +343,6 @@ export async function seedLosPlanningTodos(options: SeedLosPlanningTodosOptions 
   await ensureTodoStore();
   const out: TodoRecord[] = [];
 
-  // Batch-load existing todos in a single query to avoid N+1
   const seedIds = LOS_PLANNING_TODO_SEED.map(item => item.id).filter((id): id is string => Boolean(id));
   const existingIds = new Set<string>();
   if (seedIds.length > 0) {
@@ -348,39 +364,6 @@ export async function seedLosPlanningTodos(options: SeedLosPlanningTodosOptions 
   return out;
 }
 
-type TodoRow = {
-  id: string;
-  tenant_id: string;
-  project_id: string;
-  user_id: string | null;
-  node_id: string | null;
-  stage_id: string | null;
-  parent_id: string | null;
-  title: string;
-  description: string;
-  kind: TodoKind;
-  status: TodoStatus;
-  priority: TodoPriority;
-  source: string;
-  trace_id: string | null;
-  request_id: string | null;
-  dedupe_key: string | null;
-  task_run_id: string | null;
-  session_id: string | null;
-  batch_key: string | null;
-  archived_at: Date | string | null;
-  archive_reason: string | null;
-  metadata_json: unknown;
-  created_at: Date | string;
-  updated_at: Date | string;
-  started_at: Date | string | null;
-  completed_at: Date | string | null;
-  cancelled_at: Date | string | null;
-  reopened_at: Date | string | null;
-};
-
-type TodoRelationMap = Map<string, { dependsOnIds: string[]; blockedByIds: string[] }>;
-
 function normalizeCreateInput(input: CreateTodoInput): Required<Pick<CreateTodoInput, 'id' | 'tenantId' | 'projectId' | 'title' | 'description' | 'kind' | 'status' | 'priority' | 'source' | 'metadata'>> & CreateTodoInput {
   return {
     ...input,
@@ -396,186 +379,4 @@ function normalizeCreateInput(input: CreateTodoInput): Required<Pick<CreateTodoI
     dependsOnIds: input.dependsOnIds ? normalizeStringArray(input.dependsOnIds) ?? [] : input.dependsOnIds,
     metadata: mergeRunContractMetadata(input.metadata, input.runContract),
   };
-}
-
-function rowToTodo(row: TodoRow, relations?: { dependsOnIds?: string[]; blockedByIds?: string[] }): TodoRecord {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    projectId: row.project_id,
-    userId: row.user_id ?? undefined,
-    nodeId: row.node_id ?? undefined,
-    stageId: row.stage_id ?? undefined,
-    parentId: row.parent_id ?? undefined,
-    title: row.title,
-    description: row.description,
-    kind: row.kind,
-    status: row.status,
-    priority: row.priority,
-    source: row.source,
-    traceId: row.trace_id ?? undefined,
-    requestId: row.request_id ?? undefined,
-    dedupeKey: row.dedupe_key ?? undefined,
-    taskRunId: row.task_run_id ?? undefined,
-    sessionId: row.session_id ?? undefined,
-    batchKey: row.batch_key ?? undefined,
-    dependsOnIds: relations?.dependsOnIds ?? [],
-    blockedByIds: relations?.blockedByIds ?? [],
-    archivedAt: row.archived_at ? toIsoString(row.archived_at) : undefined,
-    archiveReason: row.archive_reason ?? undefined,
-    metadata: normalizeJsonObject(row.metadata_json),
-    createdAt: toIsoString(row.created_at),
-    updatedAt: toIsoString(row.updated_at),
-    startedAt: row.started_at ? toIsoString(row.started_at) : undefined,
-    completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
-    cancelledAt: row.cancelled_at ? toIsoString(row.cancelled_at) : undefined,
-    reopenedAt: row.reopened_at ? toIsoString(row.reopened_at) : undefined,
-  };
-}
-
-function normalizeTodoKind(value: unknown, fallback: TodoKind = 'task'): TodoKind {
-  if (value === 'problem' || value === 'solution' || value === 'plan' || value === 'phase' || value === 'task' || value === 'batch') return value;
-  return fallback;
-}
-
-function normalizeTodoStatus(value: unknown, fallback: TodoStatus = 'backlog'): TodoStatus {
-  if (value === 'backlog' || value === 'ready' || value === 'in_progress' || value === 'blocked' || value === 'done' || value === 'cancelled') return value;
-  return fallback;
-}
-
-function normalizeTodoPriority(value: unknown, fallback: TodoPriority = 'P2'): TodoPriority {
-  if (value === 'P0' || value === 'P1' || value === 'P2' || value === 'P3') return value;
-  return fallback;
-}
-
-function pickNullable(value: string | null | undefined, fallback: string | undefined): string | null {
-  if (value === null) return null;
-  return normalizeOptionalString(value) ?? fallback ?? null;
-}
-
-function normalizeRequiredString(value: unknown, name: string): string {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) throw new Error(`${name} is required`);
-  return normalized;
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function appendOptionalClause(
-  clauses: string[],
-  params: unknown[],
-  column: string,
-  value: unknown,
-): void {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) return;
-  params.push(normalized);
-  clauses.push(`${column} = $${params.length}`);
-}
-
-function normalizeStringArray(value: unknown): string[] | undefined {
-  if (Array.isArray(value)) {
-    const normalized = value.map((item) => normalizeOptionalString(item)).filter((item): item is string => Boolean(item));
-    return normalized.length > 0 ? uniqueStrings(normalized) : undefined;
-  }
-  if (typeof value === 'string') {
-    const normalized = value.split(',').map((item) => normalizeOptionalString(item)).filter((item): item is string => Boolean(item));
-    return normalized.length > 0 ? uniqueStrings(normalized) : undefined;
-  }
-  return undefined;
-}
-
-async function replaceTodoDependencies(
-  client: { query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }> },
-  todoId: string,
-  dependsOnIds: string[],
-): Promise<void> {
-  await client.query('DELETE FROM todo_dependencies WHERE todo_id = $1', [todoId]);
-  for (const dependsOnId of uniqueStrings(dependsOnIds)) {
-    if (dependsOnId === todoId) continue;
-    await client.query(
-      `
-      INSERT INTO todo_dependencies (todo_id, depends_on_todo_id, relation_type)
-      VALUES ($1, $2, 'blocks')
-      ON CONFLICT DO NOTHING
-    `,
-      [todoId, dependsOnId],
-    );
-  }
-}
-
-async function loadTodoRelations(todoIds: string[]): Promise<TodoRelationMap> {
-  const ids = uniqueStrings(todoIds);
-  const relationMap: TodoRelationMap = new Map();
-  if (ids.length === 0) return relationMap;
-
-  const db = getDb();
-  const rows = await db.query<{
-    todo_id: string;
-    depends_on_todo_id: string;
-    relation_type: string;
-  }>(
-    `
-    SELECT todo_id, depends_on_todo_id, relation_type
-    FROM todo_dependencies
-    WHERE todo_id = ANY($1::text[])
-       OR depends_on_todo_id = ANY($1::text[])
-  `,
-    [ids],
-  );
-
-  for (const row of rows.rows) {
-    if (row.relation_type !== 'blocks') continue;
-    const dependents = relationMap.get(row.todo_id) ?? { dependsOnIds: [], blockedByIds: [] };
-    dependents.dependsOnIds.push(row.depends_on_todo_id);
-    relationMap.set(row.todo_id, dependents);
-
-    const upstream = relationMap.get(row.depends_on_todo_id) ?? { dependsOnIds: [], blockedByIds: [] };
-    upstream.blockedByIds.push(row.todo_id);
-    relationMap.set(row.depends_on_todo_id, upstream);
-  }
-
-  for (const value of relationMap.values()) {
-    value.dependsOnIds = uniqueStrings(value.dependsOnIds);
-    value.blockedByIds = uniqueStrings(value.blockedByIds);
-  }
-  return relationMap;
-}
-
-function uniqueStrings(values: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const normalized = normalizeOptionalString(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push(normalized);
-  }
-  return out;
-}
-
-function normalizeJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function assertRow<T>(row: T | null | undefined): T {
-  if (!row) throw new Error('Failed to write todo');
-  return row;
 }
