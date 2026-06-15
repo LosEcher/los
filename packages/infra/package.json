@@ -8,7 +8,8 @@
     "./config": "./src/config.ts",
     "./db": "./src/db.ts",
     "./discovery": "./src/discovery.ts",
-    "./migrate": "./src/migrate.ts"
+    "./migrate": "./src/migrate.ts",
+    "./procedural-candidates-ddl": "./src/procedural-candidates-ddl.ts"
   },
   "scripts": {
     "build": "tsc",

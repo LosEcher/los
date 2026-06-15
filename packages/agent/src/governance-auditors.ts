@@ -1,5 +1,6 @@
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
+import { PROCEDURAL_CANDIDATES_DDL } from '@los/infra/procedural-candidates-ddl';
 import type { GovernanceJob } from './governance-jobs-types.js';
 
 const log = getLogger('governance-jobs');
@@ -127,24 +128,7 @@ async function checkRuleEffectiveness(
     // Use the full procedural_candidates DDL (matching @los/memory's schema)
     // to avoid a circular dependency. CREATE TABLE IF NOT EXISTS is idempotent.
     const db = getDb();
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS procedural_candidates (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        content TEXT NOT NULL DEFAULT '',
-        severity TEXT NOT NULL DEFAULT 'info',
-        rationale TEXT NOT NULL DEFAULT '',
-        confidence NUMERIC NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'draft',
-        compaction_id TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        tenant_id TEXT,
-        project_id TEXT,
-        evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
+    await db.exec(PROCEDURAL_CANDIDATES_DDL);
     const rows = await db.query<{ name: string; content: string; severity: string }>(
       `SELECT name, content, severity FROM procedural_candidates WHERE status = 'active'`,
     );
