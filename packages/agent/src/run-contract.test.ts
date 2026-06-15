@@ -152,3 +152,40 @@ test('E16 — verification requirement with operator_review kind accepts reviewe
   assert.equal(v3.kind, 'assertion');
   assert.equal(v3.assertion, 'all tests pass');
 });
+
+test('E20 — selfCheckEnabled normalizes to boolean only', () => {
+  // selfCheckEnabled must normalize to strict boolean (true/false); string
+  // values like 'true'/'false' are also accepted and coerced.
+  const enabled = normalizeRunContractMetadata({ selfCheckEnabled: true });
+  assert.equal(enabled?.selfCheckEnabled, true);
+
+  const disabled = normalizeRunContractMetadata({ selfCheckEnabled: false });
+  assert.equal(disabled?.selfCheckEnabled, false);
+
+  const stringTrue = normalizeRunContractMetadata({ selfCheckEnabled: 'true' });
+  assert.equal(stringTrue?.selfCheckEnabled, true);
+
+  const stringFalse = normalizeRunContractMetadata({ selfCheckEnabled: 'false' });
+  assert.equal(stringFalse?.selfCheckEnabled, false);
+
+  // Non-boolean non-string values like numbers should produce undefined
+  const numeric = normalizeRunContractMetadata({ selfCheckEnabled: 1 });
+  assert.equal(numeric?.selfCheckEnabled, undefined);
+});
+
+test('E21 — selfCheckResult pass-through preserves audit trail', () => {
+  const contract = normalizeRunContractMetadata({
+    selfCheckEnabled: true,
+    selfCheckResult: {
+      goalMet: true,
+      stopConditionsMet: [true, false],
+      selfCheckPassed: false,
+      evaluatedAt: '2026-06-15T00:00:00Z',
+    },
+  });
+  assert.ok(contract?.selfCheckResult);
+  assert.equal(contract!.selfCheckResult!.goalMet, true);
+  // Non-object selfCheckResult should be undefined
+  const empty = normalizeRunContractMetadata({ selfCheckResult: 'not-an-object' });
+  assert.equal(empty?.selfCheckResult, undefined);
+});

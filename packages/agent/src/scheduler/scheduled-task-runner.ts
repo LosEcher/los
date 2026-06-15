@@ -28,6 +28,8 @@ import { emitTaskEvent } from './task-events.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
 import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
 import { listVerificationRecordsForRunSpec } from '../verification-records.js';
+import { createProvider } from '../providers/index.js';
+import { runPostExecutionSelfCheck, shouldRunSelfCheck, summarizeAgentContext } from '../self-check.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
@@ -285,6 +287,70 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         result,
         reason: verifyCheck.reason ?? 'verification pending',
       };
+    }
+
+    // B0: post-execution goal self-check — evaluate output against declared goal and stop conditions
+    const selfCheckContract = await readCurrentRunContract(input.runSpecId, running.metadata);
+    if (selfCheckContract && shouldRunSelfCheck(selfCheckContract)) {
+      const selfCheckProvider = createProvider(input.provider, {
+        model: input.model,
+        traceId: input.traceId,
+      });
+      const contextSummary = summarizeAgentContext(result);
+      const selfCheckResult = await runPostExecutionSelfCheck({
+        goal: selfCheckContract.goal!,
+        stopConditions: selfCheckContract.stopConditions ?? [],
+        agentOutput: result.text,
+        contextSummary,
+        provider: selfCheckProvider,
+        traceId: input.traceId,
+      });
+
+      await emitTaskEvent(sessionId, 'task.self_check_completed', running, {
+        selfCheckResult,
+      });
+
+      if (!selfCheckResult.selfCheckPassed) {
+        const gapSummary = selfCheckResult.gaps
+          .map(g => `[${g.condition}] ${g.detail} → ${g.suggestion}`)
+          .join('; ');
+        await transitionExecutionState({
+          entityType: 'task_run',
+          entityId: taskRunId,
+          to: 'blocked',
+          sessionId,
+          reason: 'goal_self_check_failed',
+        });
+        const blocked = await updateTaskRunFields(taskRunId, {
+          metadata: {
+            ...running.metadata,
+            selfCheckResult,
+            blockReason: `Goal self-check failed: ${gapSummary}`,
+            loopCount: result.loopCount,
+            totalTokens: result.totalTokens,
+          },
+        });
+        const finalBlocked = blocked ?? running;
+        await emitTaskEvent(sessionId, 'task.blocked', finalBlocked);
+        await input.onTaskEvent?.({ type: 'task.blocked', taskRun: finalBlocked });
+        return {
+          status: 'blocked',
+          sessionId,
+          taskRun: { ...finalBlocked, status: 'blocked' },
+          result,
+          reason: `Goal self-check failed: ${gapSummary}`,
+        };
+      }
+
+      // Persist passed self-check result for audit trail
+      await updateTaskRunFields(taskRunId, {
+        metadata: {
+          ...running.metadata,
+          selfCheckResult,
+          loopCount: result.loopCount,
+          totalTokens: result.totalTokens,
+        },
+      });
     }
 
     await transitionExecutionState({

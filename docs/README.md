@@ -86,6 +86,10 @@ Use `governance/hermes-web-ui-reference-plan.md` when comparing Hermes Web UI
 patterns against `los` and deciding which UX, run-state, node-pairing,
 provider-evidence, or harness ideas should become local work items.
 
+Use `governance/github-branch-gates.md` when pushing, opening PRs, merging to
+`main`, checking GitHub Actions gate requirements, or separating local gate
+results from GitHub branch protection and ruleset state.
+
 Use `governance/manual-node-pairing-plan.md` when adapting manual device or
 node-pairing ideas to the existing `los` node registry, probe, and scheduler
 eligibility model.

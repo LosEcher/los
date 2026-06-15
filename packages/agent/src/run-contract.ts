@@ -130,6 +130,10 @@ export interface RunContractMetadata {
   contextFiles?: ContextFileEntry[];
   /** Lifecycle hooks for task automation */
   hooks?: TaskLifecycleHooks;
+  /** If false, skip post-execution goal self-check. Defaults true when goal or stopConditions are set. */
+  selfCheckEnabled?: boolean;
+  /** Result of the last post-execution goal self-check (persisted for audit). */
+  selfCheckResult?: Record<string, unknown>;
 }
 
 /**
@@ -266,6 +270,8 @@ export type RunContractMetadataInput = Partial<{
   planParentRunSpecId: unknown;
   contextFiles: unknown;
   hooks: unknown;
+  selfCheckEnabled: unknown;
+  selfCheckResult: unknown;
 }>;
 
 const ARRAY_FIELDS: Array<keyof Pick<
@@ -336,6 +342,12 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
   const hooks = normalizeLifecycleHooks(raw.hooks);
   if (hooks) out.hooks = hooks;
 
+  const selfCheckEnabled = normalizeBoolean(raw.selfCheckEnabled);
+  if (selfCheckEnabled !== undefined) out.selfCheckEnabled = selfCheckEnabled;
+
+  const selfCheckResult = normalizeObject(raw.selfCheckResult);
+  if (selfCheckResult) out.selfCheckResult = selfCheckResult;
+
   if (!hasRunContractValue(out)) return undefined;
   return out;
 }
@@ -381,6 +393,18 @@ function normalizeString(value: unknown): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function normalizeObject(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  return undefined;
+}
+
 function normalizeStringArray(value: unknown): string[] {
   const raw = Array.isArray(value)
     ? value
@@ -397,6 +421,8 @@ function hasRunContractValue(contract: RunContractMetadata): boolean {
   if (contract.verifications && contract.verifications.length > 0) return true;
   if (contract.contextFiles && contract.contextFiles.length > 0) return true;
   if (contract.hooks && (contract.hooks.afterCreate || contract.hooks.afterStart || contract.hooks.afterFinish || contract.hooks.afterArchive)) return true;
+  if (contract.selfCheckEnabled !== undefined) return true;
+  if (contract.selfCheckResult) return true;
   return ARRAY_FIELDS.some((field) => contract[field].length > 0);
 }
 
