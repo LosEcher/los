@@ -9,7 +9,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
-import { appendSessionEvent } from '@los/agent/session-events';
 import {
   ensureProceduralCandidateStore,
   createProceduralCandidate,
@@ -297,6 +296,7 @@ export async function attestCompaction(
      RETURNING *`,
     [id, attestedBy],
   );
+  // Note: attestedAt/attestedBy stored in summary_json for queryability
   if (rows.rows[0]) {
     const existing = rowToCompaction(rows.rows[0]);
     const updatedSummary = {
@@ -308,27 +308,6 @@ export async function attestCompaction(
       `UPDATE memory_compactions SET summary_json = $2::jsonb WHERE id = $1`,
       [id, JSON.stringify(updatedSummary)],
     );
-
-    // Emit rule_approval events for each candidate being attested
-    for (const candidate of existing.proceduralCandidates) {
-      try {
-        await appendSessionEvent({
-          sessionId: existing.sessionId,
-          type: 'rule_approval',
-          source: 'los.memory',
-          payload: {
-            compactionId: existing.id,
-            candidateName: candidate.name,
-            candidateConfidence: candidate.confidence,
-            attestedBy,
-            attestedAt: updatedSummary.attestedAt,
-          },
-        });
-      } catch (err) {
-        log.warn('Failed to emit rule_approval event');
-      }
-    }
-
     return { ...existing, summary: updatedSummary, attestedAt: updatedSummary.attestedAt as string, attestedBy };
   }
   return null;

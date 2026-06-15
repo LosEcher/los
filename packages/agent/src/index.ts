@@ -586,24 +586,3 @@ export {
 
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';
-
-export {
-  ensureGovernanceJobStore,
-  upsertGovernanceJob,
-  listDueGovernanceJobs,
-  recordGovernanceJobRun,
-  loadGovernanceJob,
-  listGovernanceJobs,
-  seedGovernanceJobs,
-  type GovernanceJobRecord,
-  type GovernanceJobType,
-  type GovernanceCadence,
-  type GovernanceResultSummary,
-  type UpsertGovernanceJobInput,
-} from './governance-jobs.js';
-
-export {
-  runGovernanceSweep,
-  type SweeperOptions,
-  type SweeperResult,
-} from './governance-sweeper.js';

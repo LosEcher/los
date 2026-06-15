@@ -1,63 +1,95 @@
+/**
+ * @los/memory/procedural-candidates — Standalone procedural_candidates table.
+ *
+ * Extracted from memory_compactions.procedural_candidates_json JSONB column
+ * for queryability, promotion tracking, and session event emission.
+ */
+
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('procedural-candidates');
 
-export interface ProceduralCandidateRecord {
+export type CandidateStatus = 'draft' | 'review' | 'approved' | 'active' | 'retired';
+
+export interface ProceduralCandidate {
   id: string;
-  compactionId: string;
   name: string;
   content: string;
   severity: 'info' | 'warn' | 'error';
   rationale: string;
   confidence: number;
-  status: 'draft' | 'review' | 'approved' | 'active' | 'retired';
-  supportingSessionIds: string[];
-  rejectedAt?: string;
-  rejectionReason?: string;
+  status: CandidateStatus;
+  compactionId: string;
+  sessionId: string;
+  tenantId?: string;
+  projectId?: string;
+  evidence: { supportingSessionIds: string[] };
   createdAt: string;
   updatedAt: string;
 }
 
 export interface CreateProceduralCandidateInput {
-  compactionId: string;
   name: string;
   content: string;
   severity?: 'info' | 'warn' | 'error';
   rationale?: string;
   confidence?: number;
-  status?: 'draft' | 'review' | 'approved' | 'active' | 'retired';
+  status?: CandidateStatus;
+  compactionId: string;
+  sessionId: string;
+  tenantId?: string;
+  projectId?: string;
   supportingSessionIds?: string[];
 }
 
-export interface UpsertProceduralCandidateInput {
-  id?: string;
-  compactionId: string;
-  name: string;
-  content?: string;
-  severity?: 'info' | 'warn' | 'error';
-  rationale?: string;
-  confidence?: number;
-  status?: 'draft' | 'review' | 'approved' | 'active' | 'retired';
-  supportingSessionIds?: string[];
+export interface ListProceduralCandidatesOptions {
+  status?: CandidateStatus;
+  compactionId?: string;
+  sessionId?: string;
+  tenantId?: string;
+  projectId?: string;
+  name?: string;
+  limit?: number;
 }
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS procedural_candidates (
   id TEXT PRIMARY KEY,
-  compaction_id TEXT NOT NULL REFERENCES memory_compactions(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  content TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
   severity TEXT NOT NULL DEFAULT 'info',
   rationale TEXT NOT NULL DEFAULT '',
   confidence NUMERIC NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft',
-  supporting_session_ids TEXT[] NOT NULL DEFAULT '{}',
-  rejected_at TIMESTAMPTZ,
-  rejection_reason TEXT,
+  compaction_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  tenant_id TEXT,
+  project_id TEXT,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)`;
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'procedural_candidates_status_chk'
+      AND conrelid = 'procedural_candidates'::regclass
+  ) THEN
+    ALTER TABLE procedural_candidates
+      ADD CONSTRAINT procedural_candidates_status_chk
+      CHECK (status IN ('draft', 'review', 'approved', 'active', 'retired'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_proc_cand_status ON procedural_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_name ON procedural_candidates(name);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_compaction ON procedural_candidates(compaction_id);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_session ON procedural_candidates(session_id);
+CREATE INDEX IF NOT EXISTS idx_proc_cand_tenant_project ON procedural_candidates(tenant_id, project_id);
+`;
 
 let _initialized = false;
 
@@ -70,165 +102,215 @@ export async function ensureProceduralCandidateStore(): Promise<void> {
 
 export async function createProceduralCandidate(
   input: CreateProceduralCandidateInput,
-): Promise<ProceduralCandidateRecord> {
+): Promise<ProceduralCandidate> {
   await ensureProceduralCandidateStore();
   const db = getDb();
-  const id = `pc-${input.compactionId}-${input.name.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 64)}`;
 
-  const rows = await db.query<ProceduralCandidateRow>(
-    `INSERT INTO procedural_candidates (id, compaction_id, name, content, severity, rationale, confidence, status, supporting_session_ids)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+  const id = `pc-${input.compactionId}-${input.name.slice(0, 64)}`;
+  const evidence = {
+    supportingSessionIds: input.supportingSessionIds ?? [input.sessionId],
+  };
+
+  const rows = await db.query<CandidateRow>(
+    `INSERT INTO procedural_candidates (
+      id, name, content, severity, rationale, confidence, status,
+      compaction_id, session_id, tenant_id, project_id, evidence_json
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+    RETURNING *`,
     [
-      id, input.compactionId, input.name, input.content,
-      input.severity ?? 'info', input.rationale ?? '',
-      input.confidence ?? 0, input.status ?? 'draft',
-      input.supportingSessionIds ?? [],
+      id,
+      input.name,
+      input.content,
+      input.severity ?? 'info',
+      input.rationale ?? '',
+      input.confidence ?? 0.5,
+      input.status ?? 'draft',
+      input.compactionId,
+      input.sessionId,
+      input.tenantId ?? null,
+      input.projectId ?? null,
+      JSON.stringify(evidence),
     ],
   );
-  return rowToCandidate(rows.rows[0]!);
+
+  return rowToCandidate(assertRow(rows.rows[0]));
 }
 
-export async function upsertProceduralCandidate(
-  input: UpsertProceduralCandidateInput,
-): Promise<ProceduralCandidateRecord> {
+export async function getProceduralCandidate(id: string): Promise<ProceduralCandidate | null> {
   await ensureProceduralCandidateStore();
-  const db = getDb();
-  const id = input.id ?? `pc-${input.compactionId}-${input.name.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 64)}`;
-
-  // Load existing to use as fallback for unspecified fields
-  let existing: Partial<ProceduralCandidateRow> = {};
-  try {
-    existing = (await db.query<ProceduralCandidateRow>(
-      'SELECT * FROM procedural_candidates WHERE id = $1', [id],
-    )).rows[0] ?? {};
-  } catch { /* first insert */ }
-
-  const rows = await db.query<ProceduralCandidateRow>(
-    `INSERT INTO procedural_candidates (id, compaction_id, name, content, severity, rationale, confidence, status, supporting_session_ids)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (id) DO UPDATE SET
-       content = COALESCE($4, procedural_candidates.content),
-       severity = COALESCE($5, procedural_candidates.severity),
-       rationale = COALESCE($6, procedural_candidates.rationale),
-       confidence = COALESCE($7, procedural_candidates.confidence),
-       status = COALESCE($8, procedural_candidates.status),
-       supporting_session_ids = COALESCE($9, procedural_candidates.supporting_session_ids),
-       updated_at = now()
-     RETURNING *`,
-    [
-      id, input.compactionId, input.name,
-      input.content ?? existing.content ?? null,
-      input.severity ?? existing.severity ?? 'info',
-      input.rationale ?? existing.rationale ?? '',
-      input.confidence ?? existing.confidence ?? 0,
-      input.status ?? existing.status ?? 'draft',
-      input.supportingSessionIds ?? existing.supporting_session_ids ?? [],
-    ],
+  const rows = await getDb().query<CandidateRow>(
+    'SELECT * FROM procedural_candidates WHERE id = $1',
+    [id],
   );
-  return rowToCandidate(rows.rows[0]!);
-}
-
-export async function promoteCandidate(
-  id: string,
-  newStatus: 'approved' | 'active' | 'retired',
-  rejectedReason?: string,
-): Promise<ProceduralCandidateRecord | null> {
-  await ensureProceduralCandidateStore();
-  const db = getDb();
-
-  const updates: string[] = ['status = $2', 'updated_at = now()'];
-  const params: unknown[] = [id, newStatus];
-
-  if (newStatus === 'retired' && rejectedReason) {
-    params.push(rejectedReason);
-    updates.push(`rejection_reason = $${params.length}`);
-    params.push(new Date().toISOString());
-    updates.push(`rejected_at = $${params.length}`);
-  }
-
-  const rows = await db.query<ProceduralCandidateRow>(
-    `UPDATE procedural_candidates SET ${updates.join(', ')} WHERE id = $1 RETURNING *`,
-    params,
-  );
-  if (!rows.rows[0]) return null;
-  return rowToCandidate(rows.rows[0]);
+  return rows.rows[0] ? rowToCandidate(rows.rows[0]) : null;
 }
 
 export async function listProceduralCandidates(
-  options: {
-    compactionId?: string;
-    status?: string | string[];
-    limit?: number;
-  } = {},
-): Promise<ProceduralCandidateRecord[]> {
+  options: ListProceduralCandidatesOptions = {},
+): Promise<ProceduralCandidate[]> {
   await ensureProceduralCandidateStore();
   const db = getDb();
   const clauses: string[] = [];
   const params: unknown[] = [];
 
+  if (options.status) {
+    params.push(options.status);
+    clauses.push(`status = $${params.length}`);
+  }
   if (options.compactionId) {
     params.push(options.compactionId);
     clauses.push(`compaction_id = $${params.length}`);
   }
-  if (options.status) {
-    const statuses = Array.isArray(options.status) ? options.status : [options.status];
-    params.push(statuses);
-    clauses.push(`status = ANY($${params.length})`);
+  if (options.sessionId) {
+    params.push(options.sessionId);
+    clauses.push(`session_id = $${params.length}`);
+  }
+  if (options.name) {
+    params.push(options.name);
+    clauses.push(`name = $${params.length}`);
+  }
+  if (options.tenantId) {
+    params.push(options.tenantId);
+    clauses.push(`(tenant_id IS NULL OR tenant_id = $${params.length})`);
+  }
+  if (options.projectId) {
+    params.push(options.projectId);
+    clauses.push(`(project_id IS NULL OR project_id = $${params.length})`);
   }
 
-  const limit = Math.max(1, Math.min(1000, options.limit ?? 100));
+  const limit = normalizeLimit(options.limit);
   params.push(limit);
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
 
-  const rows = await db.query<ProceduralCandidateRow>(
-    `SELECT * FROM procedural_candidates ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+  const rows = await db.query<CandidateRow>(
+    `SELECT * FROM procedural_candidates
+     ${where}
+     ORDER BY created_at DESC, id
+     LIMIT $${params.length}`,
     params,
   );
+
   return rows.rows.map(rowToCandidate);
 }
 
-export async function loadProceduralCandidate(id: string): Promise<ProceduralCandidateRecord | null> {
+export async function listActiveCandidates(options?: {
+  tenantId?: string;
+  projectId?: string;
+  limit?: number;
+}): Promise<ProceduralCandidate[]> {
+  return listProceduralCandidates({
+    status: 'active',
+    tenantId: options?.tenantId,
+    projectId: options?.projectId,
+    limit: options?.limit,
+  });
+}
+
+export async function promoteProceduralCandidate(
+  id: string,
+  newStatus: CandidateStatus,
+): Promise<ProceduralCandidate | null> {
   await ensureProceduralCandidateStore();
-  const rows = await getDb().query<ProceduralCandidateRow>(
-    'SELECT * FROM procedural_candidates WHERE id = $1', [id],
+  const existing = await getProceduralCandidate(id);
+  if (!existing) return null;
+
+  const db = getDb();
+
+  const rows = await db.query<CandidateRow>(
+    `UPDATE procedural_candidates
+     SET status = $2, updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [id, newStatus],
   );
+
   return rows.rows[0] ? rowToCandidate(rows.rows[0]) : null;
 }
 
-type ProceduralCandidateRow = {
+export async function deleteProceduralCandidate(id: string): Promise<boolean> {
+  await ensureProceduralCandidateStore();
+  const result = await getDb().query<{ id: string }>(
+    'DELETE FROM procedural_candidates WHERE id = $1 RETURNING id',
+    [id],
+  );
+  return result.rows.length > 0;
+}
+
+// ── Helpers ──────────────────────────────────────────────
+
+type CandidateRow = {
   id: string;
-  compaction_id: string;
   name: string;
   content: string;
   severity: string;
   rationale: string;
   confidence: string | number;
   status: string;
-  supporting_session_ids: string[] | string;
-  rejected_at: string | null;
-  rejection_reason: string | null;
+  compaction_id: string;
+  session_id: string;
+  tenant_id: string | null;
+  project_id: string | null;
+  evidence_json: unknown;
   created_at: Date | string;
   updated_at: Date | string;
 };
 
-function rowToCandidate(row: ProceduralCandidateRow): ProceduralCandidateRecord {
+function rowToCandidate(row: CandidateRow): ProceduralCandidate {
+  const evidence = normalizeJsonObject(row.evidence_json);
   return {
     id: row.id,
-    compactionId: row.compaction_id,
     name: row.name,
     content: row.content,
-    severity: row.severity as ProceduralCandidateRecord['severity'],
-    rationale: row.rationale ?? '',
+    severity: normalizeSeverity(row.severity),
+    rationale: row.rationale,
     confidence: Number(row.confidence),
-    status: row.status as ProceduralCandidateRecord['status'],
-    supportingSessionIds: Array.isArray(row.supporting_session_ids)
-      ? row.supporting_session_ids
-      : typeof row.supporting_session_ids === 'string'
-        ? row.supporting_session_ids.replace(/[{}]/g, '').split(',').filter(Boolean)
+    status: normalizeStatus(row.status),
+    compactionId: row.compaction_id,
+    sessionId: row.session_id,
+    tenantId: row.tenant_id ?? undefined,
+    projectId: row.project_id ?? undefined,
+    evidence: {
+      supportingSessionIds: Array.isArray(evidence.supportingSessionIds)
+        ? evidence.supportingSessionIds.filter((s): s is string => typeof s === 'string')
         : [],
-    rejectedAt: row.rejected_at ?? undefined,
-    rejectionReason: row.rejection_reason ?? undefined,
-    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    },
+    createdAt: toIsoString(row.created_at),
+    updatedAt: toIsoString(row.updated_at),
   };
+}
+
+function normalizeSeverity(value: string): 'info' | 'warn' | 'error' {
+  if (value === 'error' || value === 'warn' || value === 'info') return value;
+  return 'info';
+}
+
+function normalizeStatus(value: string): CandidateStatus {
+  const valid: CandidateStatus[] = ['draft', 'review', 'approved', 'active', 'retired'];
+  return valid.includes(value as CandidateStatus) ? (value as CandidateStatus) : 'draft';
+}
+
+function normalizeJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch { return {}; }
+  }
+  return {};
+}
+
+function normalizeLimit(value: unknown): number {
+  const parsed = Number(value ?? 100);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 100;
+  return Math.max(1, Math.min(1000, Math.floor(parsed)));
+}
+
+function toIsoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function assertRow<T>(row: T | undefined): T {
+  if (!row) throw new Error('procedural_candidates write returned no row');
+  return row;
 }
