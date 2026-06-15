@@ -44,3 +44,16 @@ export {
   type RunPhase,
   type MemoryLayer,
 } from './retrieval.js';
+
+export {
+  ensureProceduralCandidateStore,
+  createProceduralCandidate,
+  getProceduralCandidate,
+  listProceduralCandidates,
+  listActiveCandidates,
+  promoteProceduralCandidate,
+  deleteProceduralCandidate,
+  type ProceduralCandidate as ProceduralCandidateRecord,
+  type CreateProceduralCandidateInput,
+  type ListProceduralCandidatesOptions,
+} from './procedural-candidates.js';

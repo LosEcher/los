@@ -367,6 +367,38 @@ export {
   type ValidateStatusConstraintsResult,
 } from './governance-status-constraints.js';
 export {
+  ensureGovernanceJobStore,
+  createGovernanceJob,
+  getGovernanceJob,
+  listGovernanceJobs,
+  listDueGovernanceJobs,
+  updateGovernanceJob,
+  deleteGovernanceJob,
+  seedGovernanceJobs,
+  runGovernanceSweep,
+  type GovernanceJob,
+  type GovernanceJobType,
+  type GovernanceCadence,
+  type GovernanceJobStatus,
+  type CreateGovernanceJobInput,
+  type UpdateGovernanceJobInput,
+  type ListGovernanceJobsOptions,
+  type GovernanceSweepResult,
+  type GovernanceSweepJobResult,
+} from './governance-jobs.js';
+export {
+  ensureStaticGraphBaselineStore,
+  captureStaticGraphBaseline,
+  getLatestBaseline,
+  getBaseline,
+  deleteBaseline,
+  diffBaselines,
+  summarizeBaselineDiff,
+  type StaticGraphBaseline,
+  type BaselineDiff,
+  type CaptureBaselineInput,
+} from './static-graph-baselines.js';
+export {
   ensureTaskRunStore,
   createTaskRun,
   findActiveTaskRunByDedupeKey,

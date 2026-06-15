@@ -8,6 +8,7 @@
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { ensureMemoryCompactionStore } from './compaction.js';
+import { ensureProceduralCandidateStore } from './procedural-candidates.js';
 import { ensureMemoryStore, searchObservations, type Observation } from './store.js';
 
 const log = getLogger('memory-retrieval');
@@ -100,67 +101,22 @@ export async function retrieveActiveRules(options?: {
   projectId?: string;
   limit?: number;
 }): Promise<ActiveRule[]> {
-  await ensureMemoryCompactionStore();
   const db = getDb();
 
-  const params: unknown[] = [];
-  const clauses: string[] = [];
+  // Prefer standalone procedural_candidates table; fall back to JSONB
+  // column for backwards compat during the dual-write transition.
+  const results = await Promise.allSettled([
+    queryStandaloneRules(db, options),
+    queryCompactionRules(db, options),
+  ]);
 
-  if (options?.runSpecId) {
-    params.push(options.runSpecId);
-    clauses.push(`run_spec_id = $${params.length}`);
-  }
-  if (options?.tenantId) {
-    params.push(options.tenantId);
-    clauses.push(`(tenant_id IS NULL OR tenant_id = $${params.length})`);
-  }
-  if (options?.projectId) {
-    params.push(options.projectId);
-    clauses.push(`(project_id IS NULL OR project_id = $${params.length})`);
-  }
+  const standaloneRules: ActiveRule[] = results[0].status === 'fulfilled' ? results[0].value : [];
+  const compactionRules: ActiveRule[] = results[1].status === 'fulfilled' ? results[1].value : [];
 
-  clauses.push(`candidate->>'status' = 'active'`);
-  const where = `WHERE ${clauses.join(' AND ')}`;
-
-  const rows = await db.query<{
-    name: string;
-    content: string;
-    severity: string;
-    rationale: string;
-    confidence: string;
-    compaction_id: string;
-  }>(
-    `SELECT
-       candidate->>'name' AS name,
-       candidate->>'content' AS content,
-       candidate->>'severity' AS severity,
-       candidate->>'rationale' AS rationale,
-       (candidate->>'confidence')::numeric::text AS confidence,
-       id AS compaction_id
-     FROM memory_compactions,
-       jsonb_array_elements(procedural_candidates_json) AS candidate
-     ${where}
-     ORDER BY (candidate->>'confidence')::numeric DESC`,
-    params,
-  );
-
-  // Deduplicate by name, keeping highest confidence and merging source compaction IDs
+  // Deduplicate by name, preferring standalone (newer) entries
   const seen = new Map<string, ActiveRule>();
-  for (const row of rows.rows) {
-    const existing = seen.get(row.name);
-    if (existing) {
-      existing.sourceCompactionIds.push(row.compaction_id);
-    } else {
-      seen.set(row.name, {
-        name: row.name,
-        content: row.content,
-        severity: normalizeSeverity(row.severity),
-        rationale: row.rationale,
-        confidence: Number(row.confidence),
-        sourceCompactionIds: [row.compaction_id],
-      });
-    }
-  }
+  for (const rule of compactionRules) seen.set(rule.name, rule);
+  for (const rule of standaloneRules) seen.set(rule.name, rule);
 
   const rules = [...seen.values()];
   const limit = options?.limit && options.limit > 0 ? options.limit : rules.length;
@@ -302,6 +258,132 @@ export function augmentSystemPrompt(
 }
 
 // ── Helpers ──────────────────────────────────────────────
+
+async function queryStandaloneRules(
+  db: ReturnType<typeof getDb>,
+  options?: { runSpecId?: string; tenantId?: string; projectId?: string },
+): Promise<ActiveRule[]> {
+  try {
+    await ensureProceduralCandidateStore();
+  } catch {
+    return [];
+  }
+
+  const params: unknown[] = [];
+  const clauses: string[] = [];
+
+  if (options?.runSpecId) {
+    params.push(options.runSpecId);
+    clauses.push(`compaction_id IN (SELECT id FROM memory_compactions WHERE run_spec_id = $${params.length})`);
+  }
+  if (options?.tenantId) {
+    params.push(options.tenantId);
+    clauses.push(`(tenant_id IS NULL OR tenant_id = $${params.length})`);
+  }
+  if (options?.projectId) {
+    params.push(options.projectId);
+    clauses.push(`(project_id IS NULL OR project_id = $${params.length})`);
+  }
+
+  clauses.push(`status = 'active'`);
+  const where = `WHERE ${clauses.join(' AND ')}`;
+
+  const rows = await db.query<{
+    name: string;
+    content: string;
+    severity: string;
+    rationale: string;
+    confidence: string;
+    compaction_id: string;
+  }>(
+    `SELECT name, content, severity, rationale,
+       confidence::numeric::text AS confidence, compaction_id
+     FROM procedural_candidates ${where}
+     ORDER BY confidence DESC`,
+    params,
+  );
+
+  const seen = new Map<string, ActiveRule>();
+  for (const row of rows.rows) {
+    const existing = seen.get(row.name);
+    if (existing) {
+      existing.sourceCompactionIds.push(row.compaction_id);
+    } else {
+      seen.set(row.name, {
+        name: row.name, content: row.content,
+        severity: normalizeSeverity(row.severity),
+        rationale: row.rationale,
+        confidence: Number(row.confidence),
+        sourceCompactionIds: [row.compaction_id],
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+async function queryCompactionRules(
+  db: ReturnType<typeof getDb>,
+  options?: { runSpecId?: string; tenantId?: string; projectId?: string },
+): Promise<ActiveRule[]> {
+  try {
+    await ensureMemoryCompactionStore();
+  } catch {
+    return [];
+  }
+
+  const params: unknown[] = [];
+  const clauses: string[] = [];
+
+  if (options?.runSpecId) {
+    params.push(options.runSpecId);
+    clauses.push(`run_spec_id = $${params.length}`);
+  }
+  if (options?.tenantId) {
+    params.push(options.tenantId);
+    clauses.push(`(tenant_id IS NULL OR tenant_id = $${params.length})`);
+  }
+  if (options?.projectId) {
+    params.push(options.projectId);
+    clauses.push(`(project_id IS NULL OR project_id = $${params.length})`);
+  }
+
+  clauses.push(`candidate->>'status' = 'active'`);
+  const where = `WHERE ${clauses.join(' AND ')}`;
+
+  const rows = await db.query<{
+    name: string; content: string; severity: string;
+    rationale: string; confidence: string; compaction_id: string;
+  }>(
+    `SELECT candidate->>'name' AS name,
+       candidate->>'content' AS content,
+       candidate->>'severity' AS severity,
+       candidate->>'rationale' AS rationale,
+       (candidate->>'confidence')::numeric::text AS confidence,
+       id AS compaction_id
+     FROM memory_compactions,
+       jsonb_array_elements(procedural_candidates_json) AS candidate
+     ${where}
+     ORDER BY (candidate->>'confidence')::numeric DESC`,
+    params,
+  );
+
+  const seen = new Map<string, ActiveRule>();
+  for (const row of rows.rows) {
+    const existing = seen.get(row.name);
+    if (existing) {
+      existing.sourceCompactionIds.push(row.compaction_id);
+    } else {
+      seen.set(row.name, {
+        name: row.name, content: row.content,
+        severity: normalizeSeverity(row.severity),
+        rationale: row.rationale,
+        confidence: Number(row.confidence),
+        sourceCompactionIds: [row.compaction_id],
+      });
+    }
+  }
+  return [...seen.values()];
+}
 
 function normalizeSeverity(value: string): ActiveRule['severity'] {
   if (value === 'error' || value === 'warn' || value === 'info') return value;

@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  createTaskRun,
+} from '@los/agent/task-runs';
+import {
   archiveTodo,
   createTodo,
   listTodos,
@@ -12,6 +15,7 @@ import {
   type TodoPriority,
   type TodoStatus,
 } from '@los/agent/todos';
+import { randomUUID } from 'node:crypto';
 import { getRequestContext } from '../request-context.js';
 import { runIdempotentJson } from '../idempotency.js';
 
@@ -205,6 +209,53 @@ export function registerTodoRoutes(app: FastifyInstance) {
     const body = req.body as Record<string, unknown> | undefined;
     const todos = await seedLosPlanningTodos({ overwrite: body?.overwrite === true });
     return { ok: true, count: todos.length, todos };
+  });
+
+  app.post('/todos/:id/dispatch', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown> | undefined;
+    const context = getRequestContext(req);
+
+    return await runIdempotentJson(
+      req,
+      reply,
+      { route: `/todos/${id}/dispatch`, method: 'POST', body: body ?? {}, context },
+      async () => {
+        const todo = await loadTodo(id);
+        if (!todo) {
+          reply.status(404);
+          return { error: 'Not found' };
+        }
+
+        const force = body?.force === true;
+        if (todo.status !== 'ready' && !force) {
+          reply.status(400);
+          return { error: 'todo_not_ready', message: `Todo status is "${todo.status}", must be "ready". Use force=true to override.` };
+        }
+
+        const sessionId = todo.sessionId ?? `dispatch-${randomUUID()}`;
+        const taskRun = await createTaskRun({
+          id: `taskrun-${randomUUID()}`,
+          sessionId,
+          runSpecId: todo.metadata?.runSpecId as string | undefined,
+          workspaceRoot: (body?.workspaceRoot as string) ?? process.cwd(),
+          toolMode: (body?.toolMode as string) ?? 'read-only',
+          promptPreview: todo.title,
+          tenantId: todo.tenantId,
+          projectId: todo.projectId,
+          userId: todo.userId,
+          metadata: { ...todo.metadata, dispatchSource: 'todo', todoId: id },
+        });
+
+        await updateTodo(id, {
+          status: 'in_progress',
+          taskRunId: taskRun.id,
+          sessionId: taskRun.sessionId,
+        });
+
+        return { todo: await loadTodo(id), taskRun };
+      },
+    );
   });
 }
 

@@ -1,5 +1,5 @@
 import { loadConfig } from '@los/infra/config';
-import { initDb } from '@los/infra/db';
+import { initDb, getDb } from '@los/infra/db';
 
 // Pre-initialize DB and all agent stores before tests run concurrently.
 // This avoids a race where node --test's parallel file execution causes
@@ -9,6 +9,9 @@ import { initDb } from '@los/infra/db';
 
 const config = await loadConfig();
 await initDb(config.databaseUrl);
+
+// Drop stale governance_jobs from previous partial test runs
+await getDb().exec('DROP TABLE IF EXISTS governance_jobs CASCADE').catch(() => undefined);
 
 // Import all ensure*Store functions and call them sequentially.
 // Dynamic imports to avoid circular module issues.
