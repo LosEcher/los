@@ -1,12 +1,12 @@
 import {
   listToolCallStatesForRunSpec,
   listToolCallStatesForTaskRun,
-  updateToolCallState,
   type ToolCallStateRecord,
 } from './tool-call-states.js';
 import { appendSessionEvent } from './session-events.js';
-import { listTaskRunsForRunSpec, updateTaskRun } from './task-runs.js';
-import { loadRunSpec, updateRunSpecStatus, type RunSpecRecord } from './run-specs.js';
+import { listTaskRunsForRunSpec } from './task-runs.js';
+import { loadRunSpec, type RunSpecRecord } from './run-specs.js';
+import { transitionExecutionState } from './execution-store.js';
 
 export type ToolCallRecoveryIntent = 'recover' | 'cancel';
 export type ToolCallRecoveryRecommendation = 'none' | 'resume' | 'retry' | 'cancel' | 'operator_attention';
@@ -179,16 +179,18 @@ async function applyCancelTransition(
   const toolUpdates = toolStates
     .filter(state => cancelIds.has(state.id))
     .map(state =>
-      updateToolCallState(state.id, state.sessionId, {
-        state: 'skipped',
-        outputSummary: reason,
-        error: null,
-      }),
+      transitionExecutionState({
+        entityType: 'tool_call_state',
+        entityId: state.id,
+        sessionId: state.sessionId,
+        to: 'skipped',
+        reason,
+        source: 'los.recovery',
+        eventType: 'tool_call.recovery_skipped',
+      }).then(r => r.entityId),
     );
   const results = await Promise.all(toolUpdates);
-  const transitionedToolCallIds = results
-    .filter((r): r is NonNullable<typeof r> => Boolean(r))
-    .map(r => r.id);
+  const transitionedToolCallIds = results.filter((id): id is string => Boolean(id));
 
   const taskRuns = await listTaskRunsForRunSpec(runSpec.id);
   const activeTaskRuns = taskRuns.filter(taskRun => ACTIVE_TASK_RUN_STATUSES.has(taskRun.status));
@@ -200,21 +202,28 @@ async function applyCancelTransition(
   }
 
   const taskUpdates = activeTaskRuns.map(taskRun =>
-    updateTaskRun(taskRun.id, {
-      status: 'cancelled',
-      metadata: {
-        ...taskRun.metadata,
-        recoveryAction: 'cancel',
-        cancelReason: reason,
-      },
-    }),
+    transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRun.id,
+      sessionId: taskRun.sessionId,
+      to: 'cancelled',
+      reason,
+      source: 'los.recovery',
+      eventType: 'task.recovery_cancelled',
+    }).then(r => r.entityId),
   );
   const taskResults = await Promise.all(taskUpdates);
-  const transitionedTaskRunIds = taskResults
-    .filter((r): r is NonNullable<typeof r> => Boolean(r))
-    .map(r => r.id);
+  const transitionedTaskRunIds = taskResults.filter((id): id is string => Boolean(id));
 
-  await updateRunSpecStatus(runSpec.id, 'cancelled');
+  await transitionExecutionState({
+    entityType: 'run_spec',
+    entityId: runSpec.id,
+    sessionId: runSpec.sessionId,
+    to: 'cancelled',
+    reason,
+    source: 'los.recovery',
+    eventType: 'run.recovery_cancelled',
+  });
   await appendRecoveryTransitionEvent(runSpec, 'run.recovery_cancelled', {
     action: 'cancel',
     reason,
@@ -245,7 +254,15 @@ async function applyOperatorAttentionTransition(
   reason: string,
   actor?: string,
 ): Promise<ToolCallRecoveryTransitionResult> {
-  await updateRunSpecStatus(runSpec.id, 'blocked');
+  await transitionExecutionState({
+    entityType: 'run_spec',
+    entityId: runSpec.id,
+    sessionId: runSpec.sessionId,
+    to: 'blocked',
+    reason,
+    source: 'los.recovery',
+    eventType: 'run.operator_attention_required',
+  });
   await appendRecoveryTransitionEvent(runSpec, 'run.operator_attention_required', {
     action: 'operator_attention',
     reason,
