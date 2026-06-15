@@ -113,6 +113,18 @@ export function registerRunRoutes(app: FastifyInstance): void {
     return { ...graph, state };
   });
 
+  app.get('/runs/:id/graph', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const graph = await readRuntimeEvidenceGraph(id);
+    if (!graph) return reply.status(404).send({ error: 'Not found' });
+    return {
+      nodes: graph.nodes,
+      edges: graph.edges,
+      runSpecId: graph.runSpecId,
+      sessionId: graph.sessionId,
+    };
+  });
+
   app.get('/runs/:id/state', async (req, reply) => {
     const { id } = req.params as { id: string };
     const state = await readRunStateProjection(id);

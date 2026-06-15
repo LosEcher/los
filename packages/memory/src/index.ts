@@ -22,7 +22,7 @@ export {
   getCompaction,
   listCompactions,
   attestCompaction,
-  promoteCandidate,
+  promoteCandidate as promoteCompactionCandidate,
   type MemoryCompaction,
   type CompactSessionInput,
   type ListCompactionsOptions,
@@ -44,3 +44,15 @@ export {
   type RunPhase,
   type MemoryLayer,
 } from './retrieval.js';
+
+export {
+  ensureProceduralCandidateStore,
+  createProceduralCandidate,
+  upsertProceduralCandidate,
+  promoteCandidate as promoteProceduralCandidate,
+  listProceduralCandidates,
+  loadProceduralCandidate,
+  type ProceduralCandidateRecord,
+  type CreateProceduralCandidateInput,
+  type UpsertProceduralCandidateInput,
+} from './procedural-candidates.js';
