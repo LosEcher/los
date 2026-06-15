@@ -12,6 +12,7 @@ import { listSessionEvents } from './session-events.js';
 import { createTaskRun, loadTaskRun } from './task-runs.js';
 import { createRunSpec, loadRunSpec } from './run-specs.js';
 import { createToolCallState, loadToolCallState, updateToolCallState, type ToolCallStateRecord } from './tool-call-states.js';
+import { transitionExecutionState } from './execution-store.js';
 
 test('tool call recovery recommends retry, resume, cancel, or operator action from durable state', () => {
   const now = '2026-06-06T00:00:00.000Z';
@@ -169,6 +170,12 @@ test('tool call recovery applies cancel and operator-attention transitions', asy
       workspaceRoot: process.cwd(),
       toolMode: 'project-write',
       maxLoops: 1,
+    });
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: attentionRunSpecId,
+      to: 'running',
+      reason: 'test setup',
     });
     await createTaskRun({
       id: attentionTaskRunId,

@@ -13,6 +13,7 @@ import {
   ensureRunSpecStore,
   ensureSessionEventStore,
   loadRunSpec,
+  transitionExecutionState,
 } from '@los/agent';
 import { createServer } from './server.js';
 
@@ -114,6 +115,13 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
       toolMode: 'project-write',
       maxLoops: 1,
     });
+    // Transition to 'running' so that 'blocked' is a valid transition
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: runSpecId,
+      to: 'running',
+      reason: 'test setup',
+    });
     await createToolCallState({
       id: toolCallId,
       sessionId,
@@ -142,7 +150,7 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
     });
     assert.equal(inspect.statusCode, 200);
     assert.equal(inspect.json().runSpecId, runSpecId);
-    assert.equal(inspect.json().state.phase, 'created');
+    assert.equal(inspect.json().state.phase, 'running');
     assert.equal(inspect.json().state.action, 'recover_tools');
 
     const state = await app.inject({
@@ -162,6 +170,16 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
     assert.equal(recover.statusCode, 200);
     assert.equal(recover.json().recommendation, 'retry');
 
+    const transition = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/recover`,
+      payload: { apply: true, intent: 'operator-attention', reason: 'route test attention' },
+    });
+    assert.equal(transition.statusCode, 200);
+    assert.equal(transition.json().action, 'operator_attention');
+    assert.equal(transition.json().runSpecStatus, 'blocked');
+    assert.equal((await loadRunSpec(runSpecId))?.status, 'blocked');
+
     const verify = await app.inject({
       method: 'POST',
       url: `/runs/${runSpecId}/verify`,
@@ -172,16 +190,6 @@ test('run operation routes expose inspect, recover, and verify surfaces', async 
     assert.equal(verifyBody.runSpecId, runSpecId);
     assert.deepEqual(verifyBody.ranRecordIds, [verificationId]);
     assert.equal(verifyBody.decision.status, 'succeeded');
-
-    const transition = await app.inject({
-      method: 'POST',
-      url: `/runs/${runSpecId}/recover`,
-      payload: { apply: true, intent: 'operator-attention', reason: 'route test attention' },
-    });
-    assert.equal(transition.statusCode, 200);
-    assert.equal(transition.json().action, 'operator_attention');
-    assert.equal(transition.json().runSpecStatus, 'blocked');
-    assert.equal((await loadRunSpec(runSpecId))?.status, 'blocked');
 
     const missing = await app.inject({
       method: 'GET',
