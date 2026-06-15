@@ -233,6 +233,29 @@ export function registerTodoRoutes(app: FastifyInstance) {
           return { error: 'todo_not_ready', message: `Todo status is "${todo.status}", must be "ready". Use force=true to override.` };
         }
 
+        // Kind gate: only task and batch are dispatchable (ADR 0005)
+        if (todo.kind !== 'task' && todo.kind !== 'batch') {
+          reply.status(400);
+          return { error: 'todo_not_dispatchable', message: `Todo kind "${todo.kind}" cannot be dispatched. Only task and batch are eligible.` };
+        }
+
+        // Dependency gate: all dependsOnIds must be done
+        if (todo.dependsOnIds && todo.dependsOnIds.length > 0) {
+          const incomplete: string[] = [];
+          for (const depId of todo.dependsOnIds) {
+            const dep = await loadTodo(depId);
+            if (dep && dep.status !== 'done') incomplete.push(depId);
+          }
+          if (incomplete.length > 0) {
+            reply.status(400);
+            return {
+              error: 'todo_dependencies_not_met',
+              message: `${incomplete.length} dependencies not done`,
+              incompleteIds: incomplete,
+            };
+          }
+        }
+
         const sessionId = todo.sessionId ?? `dispatch-${randomUUID()}`;
         const taskRun = await createTaskRun({
           id: `taskrun-${randomUUID()}`,
