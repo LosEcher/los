@@ -4,6 +4,12 @@ import { Save, Radar, ArrowDownCircle, ArrowUpCircle, RotateCcw, RefreshCw, Undo
 import { getJson, patchJson, postJson, type ExecutorNode, type ExecutorNodeUpsertPayload } from './api';
 import { Fact, Field, formatDate, Definition, EmptyText } from './ui';
 
+export function fmtMb(value: unknown): string {
+  if (typeof value !== 'number' || !isFinite(value) || value <= 0) return '?';
+  if (value >= 1024) return `${Math.round(value / 1024)}GB`;
+  return `${value}MB`;
+}
+
 type NodeDraft = {
   nodeId: string;
   nodeKind: ExecutorNode['nodeKind'];
@@ -325,6 +331,13 @@ export function NodeInspector({ node }: { node: ExecutorNode | null }) {
         <Fact label="node" value={node.nodeId} />
         <Fact label="host" value={node.hostLabel ?? 'unknown'} />
         <Fact label="base url" value={node.baseUrl ?? 'none'} />
+        <Fact label="resource class" value={typeof node.capabilities?.deploy_safe === 'boolean'
+          ? (node.capabilities.heavy_task_safe ? 'standard' : 'constrained')
+          : (node.capabilities as Record<string, unknown>).resourceClass as string ?? '?'} />
+        <Fact label="memory" value={`${fmtMb((node.capacity as Record<string, unknown>)?.memoryTotalMb)} total / ${fmtMb((node.capacity as Record<string, unknown>)?.memoryAvailableMb)} avail`} />
+        <Fact label="swap" value={typeof (node.capacity as Record<string, unknown>)?.swapTotalMb === 'number'
+          ? `${fmtMb((node.capacity as Record<string, unknown>)?.swapTotalMb)} total / ${fmtMb((node.capacity as Record<string, unknown>)?.swapUsedMb)} used`
+          : '?'} />
         <Fact label="rollout" value={`${node.rolloutState ?? 'idle'}${node.targetVersion ? ` → ${node.targetVersion}` : ''}`} />
         <Fact label="rollout note" value={node.rolloutMessage ?? 'none'} />
         <Fact label="queue" value={`${node.queueDepth} queued / ${node.activeTaskCount} active`} />

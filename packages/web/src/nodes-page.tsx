@@ -3,14 +3,28 @@ import { useQuery } from '@tanstack/react-query';
 import { Network, Plus, Upload } from 'lucide-react';
 import { getJson, postJson, type SshConfigImportResponse } from './api';
 import { DataTable, EmptyText, Fact, Field, formatDate, RefreshQueryButton, StatusPill } from './ui';
-import { NodeEditor, NodeInspector, errorMessage } from './node-editor.js';
+import { NodeEditor, NodeInspector, errorMessage, fmtMb } from './node-editor.js';
+
+function shortCapFlags(capabilities: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (capabilities.deploy_safe === true) parts.push('d');
+  if (capabilities.heavy_task_safe === true) parts.push('H');
+  return parts.join('/') || '?';
+}
+
+function resourceCell(capacity: Record<string, unknown>): string {
+  const mem = fmtMb(capacity.memoryTotalMb);
+  const swap = fmtMb(capacity.swapTotalMb);
+  if (mem === '?' && swap === '?') return '?';
+  return `${mem}/${swap}`;
+}
 
 export function NodesPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string>('Registry edits are local until saved.');
   const nodes = useQuery({
     queryKey: ['nodes'],
-    queryFn: () => getJson<Array<{ nodeId: string; nodeKind: string; status: string; connectModes: string[]; rolloutState?: string; targetVersion?: string; execution: { candidate: boolean }; lastHeartbeatAt: string }>>('/nodes'),
+    queryFn: () => getJson<Array<{ nodeId: string; nodeKind: string; status: string; connectModes: string[]; rolloutState?: string; targetVersion?: string; execution: { candidate: boolean; blockers?: string[]; warnings?: string[] }; lastHeartbeatAt: string; capacity?: Record<string, unknown>; capabilities?: Record<string, unknown> }>>('/nodes'),
     refetchInterval: 8_000,
   });
   const selectedNode = useMemo(() => {
@@ -75,6 +89,8 @@ export function NodesPage() {
               <span className="row-title">{node.nodeId}</span>
               <span>{node.nodeKind}</span>
               <span className={`status-text ${node.status}`}>{node.status}</span>
+              <span>{resourceCell(node.capacity ?? {})}</span>
+              <span>{shortCapFlags(node.capabilities ?? {})}</span>
               <span>{node.connectModes.join(', ') || 'mode?'}</span>
               <span>{node.rolloutState ?? 'idle'}{node.targetVersion ? ` → ${node.targetVersion}` : ''}</span>
               <span>{node.execution.candidate ? 'exec' : 'non-exec'}</span>
