@@ -45,7 +45,9 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.40.5",
-    "@los/infra": "workspace:*"
+    "@los/infra": "workspace:*",
+    "fast-glob": "^3.3.3",
+    "yaml": "^2.6.0"
   },
   "devDependencies": {
     "tsx": "^4.0.0",

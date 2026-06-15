@@ -1,0 +1,12 @@
+id: los.no-package-local-agents
+language: TypeScript
+severity: error
+message: "Do NOT create package-local AGENTS.md — keep rules in single AGENTS.md per ADR"
+rule:
+  kind: string
+  pattern: "AGENTS.md"
+governance:
+  domain: architecture
+  owner: platform
+  impact: high
+  rationale: "AGENTS.md line 183: no package-local AGENTS.md files"

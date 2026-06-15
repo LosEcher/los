@@ -1,0 +1,14 @@
+id: los.state-machine-bypass
+language: TypeScript
+severity: error
+message: "Direct updateTaskRun/updateRunSpecStatus/updateToolCallState — use transitionExecutionState instead (AP1)"
+rule:
+  any:
+    - pattern: "updateTaskRun($A, $B)"
+    - pattern: "updateRunSpecStatus($A, $B)"
+    - pattern: "updateToolCallState($A, $B)"
+governance:
+  domain: architecture
+  owner: platform
+  impact: high
+  rationale: "AP1: state transitions MUST route through transitionExecutionState() to emit session_event and execution_outbox"

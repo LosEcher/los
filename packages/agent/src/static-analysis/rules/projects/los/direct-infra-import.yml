@@ -1,0 +1,14 @@
+id: los.direct-infra-import
+language: TypeScript
+severity: warning
+message: "Direct import from pg — use @los/infra/db instead"
+rule:
+  any:
+    - pattern: "import $$$ from 'pg'"
+    - pattern: "import { $$$ } from 'pg'"
+governance:
+  domain: architecture
+  owner: platform
+  impact: high
+  rationale: "infra/ is the mandatory cross-cutting entry point. static-analysis/ and infra/ itself are exempt."
+

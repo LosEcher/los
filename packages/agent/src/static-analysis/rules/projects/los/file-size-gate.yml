@@ -1,0 +1,10 @@
+id: los.file-size-gate
+language: TypeScript
+severity: warning
+message: "File exceeds 400 line warning threshold — consider extracting sub-modules"
+rule:
+  kind: program
+constraints:
+  - name: .
+    regex: "."
+    mode: any

@@ -1,0 +1,12 @@
+id: los.duplicate-functions
+language: TypeScript
+severity: info
+message: "Duplicate function pattern detected — consider extracting to shared utility"
+rule:
+  any:
+    - pattern: "normalizeOptionalString"
+governance:
+  domain: architecture
+  owner: backend
+  impact: low
+  rationale: "2026-06-12 audit identified normalizeOptionalString duplication across chat-normalizers.ts and server-helpers.ts"

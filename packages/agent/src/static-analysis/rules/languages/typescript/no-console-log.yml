@@ -1,0 +1,8 @@
+id: lang.typescript.no-console-log
+language: TypeScript
+severity: warning
+message: "Avoid console.log in production code"
+rule:
+  pattern: console.log($A)
+fix:
+  replace: console.info($A)

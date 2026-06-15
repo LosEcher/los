@@ -1,0 +1,10 @@
+id: lang.typescript.no-any
+language: TypeScript
+severity: warning
+message: "Avoid the 'any' type — use a specific type instead"
+rule:
+  kind: type_annotation
+constraints:
+  - name: .
+    regex: "any"
+    mode: any
