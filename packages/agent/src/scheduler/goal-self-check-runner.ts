@@ -1,6 +1,7 @@
 import type { AgentResult } from '../loop.js';
 import { createProvider } from '../providers/index.js';
 import { runPostExecutionSelfCheck, shouldRunSelfCheck, summarizeAgentContext } from '../self-check.js';
+import { reflectOnFailure, formatReflectionSummary } from '../reflection.js';
 import { readCurrentRunContract } from './contract-reader.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { updateTaskRunFields } from '../task-runs.js';
@@ -51,6 +52,29 @@ export async function runGoalSelfCheck(
     const gapSummary = selfCheckResult.gaps
       .map(g => `[${g.condition}] ${g.detail} → ${g.suggestion}`)
       .join('; ');
+
+    // Phase 4.4 Reflection闭环: analyze failure + suggest recovery
+    let reflection = reflectOnFailure({ selfCheck: selfCheckResult, sessionId, taskRunId });
+    try {
+      const { listDeadLetterEvents } = await import('../dead-letter.js');
+      const similar = await listDeadLetterEvents({ limit: 5 });
+      reflection = reflectOnFailure({
+        selfCheck: selfCheckResult,
+        dlqEvents: similar.filter(e => e.taskRunId !== taskRunId),
+        sessionId,
+        taskRunId,
+      });
+    } catch { /* DLQ query is best-effort */ }
+
+    await emitTaskEvent(sessionId, 'session.reflection', running as any, {
+      reflection: {
+        summary: reflection.summary,
+        recoveryType: reflection.recoveryType,
+        recoveryActions: reflection.recoveryActions,
+        similarFailureCount: reflection.similarFailures.length,
+      },
+    });
+
     await transitionExecutionState({
       entityType: 'task_run',
       entityId: taskRunId,
@@ -63,6 +87,11 @@ export async function runGoalSelfCheck(
         ...running.metadata,
         selfCheckResult,
         blockReason: `Goal self-check failed: ${gapSummary}`,
+        reflection: {
+          summary: reflection.summary,
+          recoveryType: reflection.recoveryType,
+          recoveryActions: reflection.recoveryActions,
+        },
         loopCount: result.loopCount,
         totalTokens: result.totalTokens,
       },
@@ -70,6 +99,21 @@ export async function runGoalSelfCheck(
     const finalBlocked = blocked ?? (running as any);
     await emitTaskEvent(sessionId, 'task.blocked', finalBlocked);
     await input.onTaskEvent?.({ type: 'task.blocked', taskRun: finalBlocked });
+
+    // Create recovery todo for operator attention
+    try {
+      const { createTodo } = await import('../todos.js');
+      await createTodo({
+        title: `Recovery: ${reflection.recoveryType === 'retry' ? 'Retry' : 'Review'} task ${taskRunId.slice(0, 8)}`,
+        description: formatReflectionSummary(reflection),
+        kind: 'task',
+        status: 'backlog',
+        priority: reflection.recoveryType === 'escalate' ? 'P1' : 'P2',
+        source: 'reflection',
+        metadata: { sessionId, taskRunId, recoveryType: reflection.recoveryType },
+      });
+    } catch { /* Todo creation is best-effort */ }
+
     return {
       status: 'blocked',
       sessionId,

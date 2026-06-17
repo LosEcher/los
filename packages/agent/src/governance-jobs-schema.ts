@@ -87,4 +87,9 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     cadence: 'daily',
     dedupeKey: 'gov-job-memory-retention',
   },
+  {
+    jobType: 'reflection',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-reflection',
+  },
 ];

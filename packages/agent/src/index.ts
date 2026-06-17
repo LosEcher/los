@@ -572,6 +572,11 @@ export {
   type SelfCheckResult,
 } from './self-check.js';
 export {
+  reflectOnFailure,
+  formatReflectionSummary,
+  type ReflectionResult,
+} from './reflection.js';
+export {
   scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFilePath,
   buildStaticAnalysisPayload,
   type StaticAnalysisEventPayload, type StaticAnalysisFinding, type StaticAnalysisRule,

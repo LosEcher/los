@@ -434,6 +434,53 @@ async function runMemoryRetentionAudit(): Promise<Record<string, unknown>> {
   };
 }
 
+async function runReflectionAudit(): Promise<Record<string, unknown>> {
+  const db = getDb();
+  const auditedAt = new Date().toISOString();
+
+  // Count blocked/failed tasks in the last 24h with reflection metadata
+  const blockedRows = await db.query<{ cnt: string; recovery_types: string }>(
+    `SELECT COUNT(*)::text AS cnt,
+            COALESCE(string_agg(DISTINCT metadata_json->'reflection'->>'recoveryType', ', '), '') AS recovery_types
+     FROM task_runs
+     WHERE status IN ('blocked', 'failed')
+       AND updated_at > now() - INTERVAL '24 hours'
+       AND metadata_json->'reflection' IS NOT NULL`,
+  );
+  const withReflection = Number(blockedRows.rows[0]?.cnt ?? 0);
+  const recoveryTypes = String(blockedRows.rows[0]?.recovery_types ?? '');
+
+  // Count blocked/failed without reflection (pre-Phase 4.4 tasks)
+  const withoutRows = await db.query<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt
+     FROM task_runs
+     WHERE status IN ('blocked', 'failed')
+       AND updated_at > now() - INTERVAL '24 hours'
+       AND (metadata_json->'reflection' IS NULL)`,
+  );
+  const withoutReflection = Number(withoutRows.rows[0]?.cnt ?? 0);
+
+  // Count recovery todos created by reflection
+  const todoRows = await db.query<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt
+     FROM todos
+     WHERE source = 'reflection'
+       AND created_at > now() - INTERVAL '24 hours'`,
+  );
+  const recoveryTodos = Number(todoRows.rows[0]?.cnt ?? 0);
+
+  return {
+    auditedAt,
+    tasksWithReflection: withReflection,
+    tasksWithoutReflection: withoutReflection,
+    recoveryTypes,
+    recoveryTodosCreated: recoveryTodos,
+    coverage: withReflection + withoutReflection > 0
+      ? `${Math.round((withReflection / (withReflection + withoutReflection)) * 100)}%`
+      : 'N/A',
+  };
+}
+
 export async function runJobAudit(
   job: GovernanceJob,
   dryRun: boolean,
@@ -449,6 +496,8 @@ export async function runJobAudit(
       return runMemoryIntegrityAudit();
     case 'memory_retention':
       return runMemoryRetentionAudit();
+    case 'reflection':
+      return runReflectionAudit();
     default:
       throw new Error(`Unknown job_type: ${job.jobType}`);
   }
