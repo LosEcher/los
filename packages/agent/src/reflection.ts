@@ -8,9 +8,6 @@
 
 import type { SelfCheckGap, SelfCheckResult } from './self-check.js';
 import type { DeadLetterEventRecord } from './dead-letter.js';
-import { getLogger } from '@los/infra/logger';
-
-const log = getLogger('reflection');
 
 export interface ReflectionResult {
   /** Overall assessment of what went wrong. */
@@ -34,10 +31,8 @@ export interface ReflectionResult {
 export function reflectOnFailure(params: {
   selfCheck?: SelfCheckResult;
   dlqEvents?: DeadLetterEventRecord[];
-  sessionId: string;
-  taskRunId: string;
 }): ReflectionResult {
-  const { selfCheck, dlqEvents = [], sessionId, taskRunId } = params;
+  const { selfCheck, dlqEvents = [] } = params;
   const gaps = selfCheck?.gaps ?? [];
   const recoveryActions: string[] = [];
   let recoveryType: ReflectionResult['recoveryType'] = 'escalate';

@@ -54,15 +54,13 @@ export async function runGoalSelfCheck(
       .join('; ');
 
     // Phase 4.4 Reflection闭环: analyze failure + suggest recovery
-    let reflection = reflectOnFailure({ selfCheck: selfCheckResult, sessionId, taskRunId });
+    let reflection = reflectOnFailure({ selfCheck: selfCheckResult });
     try {
       const { listDeadLetterEvents } = await import('../dead-letter.js');
       const similar = await listDeadLetterEvents({ limit: 5 });
       reflection = reflectOnFailure({
         selfCheck: selfCheckResult,
         dlqEvents: similar.filter(e => e.taskRunId !== taskRunId),
-        sessionId,
-        taskRunId,
       });
     } catch { /* DLQ query is best-effort */ }
 

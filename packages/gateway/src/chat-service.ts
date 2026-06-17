@@ -347,14 +347,15 @@ export async function runChat(params: {
           const ck = checkpointTracker.get(sid) ?? { count: 0, lastAt: Date.now() };
           ck.count += 1;
           const isToolTransition = event.type === 'tool_call_state.updated'
-            && (event.payload as any)?.to === 'succeeded' || (event.payload as any)?.to === 'failed';
+            && ((event.payload as any)?.to === 'succeeded' || (event.payload as any)?.to === 'failed');
           const timeSinceLast = Date.now() - ck.lastAt;
-          const shouldCheckpoint = ck.count >= 20 || isToolTransition
+          const triggeredByCount = ck.count >= 20;
+          const shouldCheckpoint = triggeredByCount || isToolTransition
             || timeSinceLast >= 10 * 60 * 1000; // 10-min fallback
           if (shouldCheckpoint) {
             ck.count = 0;
             ck.lastAt = Date.now();
-            const trigger = ck.count >= 20 ? 'event_count'
+            const trigger = triggeredByCount ? 'event_count'
               : isToolTransition ? 'tool_state_change' : 'time_interval';
             import('@los/memory').then(({ compactSession }) =>
               compactSession({ sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger }).catch(() => undefined)
