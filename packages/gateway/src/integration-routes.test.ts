@@ -38,6 +38,7 @@ test('integration routes: GET /api/integrations/feed-analysis/targets returns ta
     assert.ok(losTarget.supportedDeliveryModes.includes('delivery_only'));
     assert.ok(losTarget.supportedDeliveryModes.includes('result_returning'));
   } finally {
+    await app.close();
     await closeDb();
   }
 });
@@ -72,6 +73,7 @@ test('integration routes: targets rejects without auth', async () => {
     });
     assert.equal(wrongToken.statusCode, 401);
   } finally {
+    await app.close();
     await closeDb();
   }
 });
@@ -139,7 +141,7 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
     const statusBody = statusResponse.json();
     assert.equal(statusBody.data.dispatch.id, body.data.dispatch.id);
 
-    // Idempotent replay: same key should return existing cached response
+    // Idempotent replay: same key + same body returns existing cached response
     const replayResponse = await app.inject({
       method: 'POST',
       url: '/api/integrations/feed-analysis/dispatch',
@@ -151,7 +153,19 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
       payload: {
         sourceSystem: 'lot2extension',
         sourceJobId: `test-job-${suffix}`,
+        sourceSessionId: `test-session-${suffix}`,
         deliveryMode: 'delivery_only',
+        targetKind: 'los-ingress',
+        feedSession: {
+          platform: 'x',
+          pageUrl: 'https://x.com/home',
+          pageKind: 'home_feed',
+          markReason: 'test',
+        },
+        feedObservations: [
+          { platform: 'x', itemId: '123', titleOrCaption: 'Test tweet' },
+          { platform: 'x', itemId: '456', titleOrCaption: 'Another tweet' },
+        ],
       },
     });
     assert.equal(replayResponse.statusCode, 200);
@@ -159,6 +173,7 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
     assert.equal(replayBody.data.deduplicated, true);
     assert.equal(replayBody.data.dispatch.id, body.data.dispatch.id);
   } finally {
+    await app.close();
     await closeDb();
   }
 });
@@ -190,6 +205,7 @@ test('integration routes: dispatch rejects missing required fields', async () =>
     assert.equal(response.statusCode, 400);
     assert.match(response.json().error, /required/);
   } finally {
+    await app.close();
     await closeDb();
   }
 });
@@ -216,6 +232,7 @@ test('integration routes: GET dispatch returns 404 for unknown id', async () => 
     });
     assert.equal(response.statusCode, 404);
   } finally {
+    await app.close();
     await closeDb();
   }
 });

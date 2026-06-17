@@ -76,7 +76,15 @@ export async function runIdempotentJson<T>(
   }
 
   if (reservation.status === 'replayed') {
-    return reply.status(reservation.responseStatus ?? 200).send(reservation.responseJson ?? {});
+    const body = (reservation.responseJson ?? {}) as Record<string, unknown>;
+    // Mark replayed responses so consumers can distinguish cached from fresh.
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      const data = body['data'] as Record<string, unknown> | undefined;
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        data['deduplicated'] = true;
+      }
+    }
+    return reply.status(reservation.responseStatus ?? 200).send(body);
   }
 
   try {

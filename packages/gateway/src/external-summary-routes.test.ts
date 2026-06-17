@@ -11,6 +11,13 @@ test('external summary routes import bounded redacted summaries', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
 
+  // Include auth token when auth is enabled (matches .env LOS_AUTH_ENABLED + LOS_AUTH_TOKEN)
+  const authHeaders: Record<string, string> = {};
+  if (config.auth.enabled && config.auth.token) {
+    authHeaders['x-los-auth-token'] = config.auth.token;
+  }
+  const headers = Object.keys(authHeaders).length > 0 ? authHeaders : undefined;
+
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const id = `external-summary-route-${suffix}`;
   const app = await createServer({
@@ -24,6 +31,7 @@ test('external summary routes import bounded redacted summaries', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/external-summaries',
+      headers,
       payload: {
         id,
         tool: 'codex',
@@ -56,6 +64,7 @@ test('external summary routes import bounded redacted summaries', async () => {
     const raw = await app.inject({
       method: 'POST',
       url: '/external-summaries',
+      headers,
       payload: {
         tool: 'codex',
         source: {
@@ -77,6 +86,7 @@ test('external summary routes import bounded redacted summaries', async () => {
     const listed = await app.inject({
       method: 'GET',
       url: '/external-summaries?tool=codex',
+      headers,
     });
     assert.equal(listed.statusCode, 200);
     const body = listed.json();
