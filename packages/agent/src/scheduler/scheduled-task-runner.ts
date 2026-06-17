@@ -28,6 +28,7 @@ import { startTaskHeartbeat } from './task-heartbeat.js';
 import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
 import { readCurrentRunContract, checkVerificationGate } from './contract-reader.js';
 import { runGoalSelfCheck } from './goal-self-check-runner.js';
+import { writeDeadLetterEvent } from '../dead-letter.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
@@ -378,6 +379,24 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const finalTask = failed ?? running;
     await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });
     await input.onTaskEvent?.({ type: 'task.failed', taskRun: finalTask });
+
+    // Write to dead-letter queue for unrecoverable errors (non-abort failures)
+    if (!isAbortError(err)) {
+      writeDeadLetterEvent({
+        taskRunId,
+        runSpecId: input.runSpecId,
+        reason: finalTask.attempt && finalTask.attempt >= 3 ? 'max_attempts' : 'unrecoverable_error',
+        originalError: message,
+        eventPayload: {
+          attempt: finalTask.attempt,
+          provider: input.provider,
+          model: input.model,
+          sessionId,
+          promptPreview: input.promptPreview,
+        },
+      }).catch(() => undefined);
+    }
+
     if (input.runContract?.hooks) {
       runLifecycleHooks('afterFinish', {
         hooks: input.runContract.hooks as any,

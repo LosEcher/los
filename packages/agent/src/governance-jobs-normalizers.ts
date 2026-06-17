@@ -1,7 +1,7 @@
 import type { GovernanceJob, GovernanceJobType, GovernanceCadence, GovernanceJobStatus, GovernanceJobRow } from './governance-jobs-types.js';
 
 function normalizeJobType(value: string): GovernanceJobType {
-  const valid: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift'];
+  const valid: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention'];
   return valid.includes(value as GovernanceJobType) ? (value as GovernanceJobType) : 'consistency_audit';
 }
 

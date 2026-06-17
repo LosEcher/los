@@ -6,6 +6,7 @@ import { cancelScheduledTask } from '@los/agent/scheduler';
 import { requestCancellation } from '@los/agent';
 import { normalizeOptionalString } from './server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
+import { listDeadLetterEvents, acknowledgeDeadLetterEvent } from '@los/agent';
 
 type OrphanClassification = 'stale-gateway' | 'expired-lease' | 'cancelled' | 'none';
 
@@ -143,5 +144,22 @@ export function registerTaskRoutes(app: FastifyInstance): void {
       taskRun,
       reason: `Task is already ${taskRun.status}`,
     };
+  });
+
+  // ── Dead Letter Queue ─────────────────────────────────
+
+  app.get('/tasks/dead-letter', async (req) => {
+    const query = req.query as { acknowledged?: string; reason?: string; limit?: string };
+    const acknowledged = query.acknowledged === 'true' ? true : query.acknowledged === 'false' ? false : undefined;
+    const reason = normalizeOptionalString(query.reason);
+    const limit = query.limit ? parseInt(query.limit, 10) || 50 : 50;
+    return await listDeadLetterEvents({ acknowledged, reason: reason as any, limit });
+  });
+
+  app.post('/tasks/dead-letter/:id/ack', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const record = await acknowledgeDeadLetterEvent(id);
+    if (!record) return reply.status(404).send({ error: 'Dead letter event not found or already acknowledged' });
+    return record;
   });
 }

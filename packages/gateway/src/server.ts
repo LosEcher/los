@@ -43,6 +43,7 @@ import { registerTaskRoutes } from './routes/task-routes.js';
 import { registerRunRoutes } from './routes/run-routes.js';
 import { registerProjectRoutes } from './routes/project-routes.js';
 import { registerFileSyncRoutes } from './routes/file-sync-routes.js';
+import { registerIntegrationRoutes } from './routes/integration-routes.js';
 import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { ensureAgentTaskGraphStore, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
@@ -51,6 +52,7 @@ import { ensureServiceInstanceStore, loadServiceInstance, upsertServiceInstanceH
 import { ensureTodoStore, seedLosPlanningTodos } from '@los/agent/todos';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
+import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 
 const log = getLogger('gateway');
 const VERSION = '0.1.0';
@@ -122,6 +124,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   app.get('/settings', async () => ({
     server: { port: config.server.port, host: config.server.host },
     defaultProjectId: config.defaultProjectId,
+    auth: { enabled: config.auth.enabled },
     agent: {
       defaultProvider: config.agent.defaultProvider,
       defaultModel: config.agent.defaultModel,
@@ -163,6 +166,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerSseRoutes(app);
   registerTaskRoutes(app);
   registerRunRoutes(app);
+  registerIntegrationRoutes(app, config, DEFAULT_WORKSPACE_ROOT);
   setupLiveEventPush(app);
   registerLiveEventRoutes(app);
 
@@ -204,6 +208,9 @@ export async function startServer(port?: number, host?: string) {
   await ensureTaskRunStore();
   await ensureRunSpecStore();
   await ensureAgentTaskGraphStore();
+  await ensureMemoryStore();
+  await ensureMemoryCompactionStore();
+  await ensureProceduralCandidateStore();
   const recovery = await recoverExpiredTaskRunsWithAdvisoryLock('gateway_startup_recovery');
   if (!recovery.lockAcquired) {
     log.info('Gateway startup recovery skipped because another service owns the advisory lock');
@@ -215,6 +222,19 @@ export async function startServer(port?: number, host?: string) {
       type: 'task.failed',
       payload: { taskRunId: task.id, traceId: task.traceId, nodeId: task.nodeId ?? null, reason: 'gateway_startup_recovery' },
     }).catch(() => undefined);
+    // Write expired task runs to dead-letter queue for operator visibility
+    import('@los/agent/dead-letter').then(({ writeDeadLetterEvent }) =>
+      writeDeadLetterEvent({
+        taskRunId: task.id,
+        runSpecId: task.runSpecId ?? undefined,
+        reason: 'lease_expired',
+        eventPayload: {
+          taskStatus: 'failed',
+          recoveryReason: 'gateway_startup_recovery',
+          sessionId: task.sessionId,
+        },
+      }).catch(() => undefined)
+    ).catch(() => undefined);
     // Transition parent run_spec to blocked so the failure is visible
     // in the run-state-vocabulary operator_attention projection.
     if (task.runSpecId) {
@@ -252,6 +272,34 @@ export async function startServer(port?: number, host?: string) {
     }).catch((err) => log.warn(`Orphan reaper failed: ${err.message ?? String(err)}`));
   }, ORPHAN_REAPER_MS);
   app.addHook('onClose', async () => clearInterval(orphanReaper));
+
+  // Daily memory retention + integrity check (run at startup + every 24h)
+  const RETENTION_MS = 24 * 60 * 60 * 1000;
+  const runMemoryMaintenance = async () => {
+    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity }) => {
+      const retention = await applyRetentionPolicy().catch((err) => {
+        log.warn(`Memory retention failed: ${err.message ?? String(err)}`);
+        return null;
+      });
+      if (retention && (retention.archivedCount > 0 || retention.deletedCount > 0)) {
+        log.info(`Memory retention: archived ${retention.archivedCount}, deleted ${retention.deletedCount}`);
+      }
+      const integrity = await checkMemoryIntegrity().catch((err) => {
+        log.warn(`Memory integrity check failed: ${err.message ?? String(err)}`);
+        return null;
+      });
+      if (integrity && integrity.checks && integrity.checks.length > 0) {
+        const failed = integrity.checks.filter(c => c.severity === 'error');
+        if (failed.length > 0) {
+          log.warn(`Memory integrity: ${failed.length} error(s) — ${failed.slice(0, 3).map(c => c.name).join('; ')}`);
+        }
+      }
+    }).catch(() => undefined);
+  };
+  // Run once at startup, then daily
+  setTimeout(runMemoryMaintenance, 10_000); // 10s after startup
+  const retentionTimer = setInterval(runMemoryMaintenance, RETENTION_MS);
+  app.addHook('onClose', async () => clearInterval(retentionTimer));
 
   await app.listen({ port: p, host: h });
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);

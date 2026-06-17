@@ -1,0 +1,249 @@
+contract: los.integration-feed-analysis
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Feed-analysis integration contract for external systems (e.g. lot2extension)
+  to dispatch feed-analysis jobs into the los agent execution pipeline.
+  Replaces the discontinued lsclaw feed-analysis ingress.
+type: object
+routes:
+  - method: GET
+    path: /api/integrations/feed-analysis/targets
+    auth: Bearer token (service_token)
+    description: Discover available feed-analysis targets.
+    response:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - targets
+          properties:
+            targets:
+              type: array
+              items:
+                type: object
+                required:
+                  - kind
+                  - label
+                properties:
+                  kind:
+                    type: string
+                  label:
+                    type: string
+                  supportedDeliveryModes:
+                    type: array
+                    items:
+                      type: string
+                  supportsResultReturning:
+                    type: boolean
+                  status:
+                    type: string
+
+  - method: POST
+    path: /api/integrations/feed-analysis/dispatch
+    auth: Bearer token (service_token)
+    description: Dispatch a feed-analysis job into los execution.
+    headers:
+      X-Idempotency-Key:
+        type: string
+        description: Client-provided idempotency key for safe retry.
+      X-Contract-Version:
+        type: string
+      x-tenant-id:
+        type: string
+      x-actor-id:
+        type: string
+    request:
+      type: object
+      required:
+        - sourceSystem
+        - sourceJobId
+        - deliveryMode
+      properties:
+        sourceSystem:
+          type: string
+          description: Identifies the originating system (e.g. "lot2extension").
+        sourceJobId:
+          type: string
+          description: The upstream job identifier in the source system.
+        sourceSessionId:
+          type: string
+        deliveryMode:
+          type: string
+          enum:
+            - delivery_only
+            - result_returning
+        targetKind:
+          type: string
+          default: los-ingress
+        payloadVersion:
+          type: string
+        requestedOutputs:
+          type: array
+          items:
+            type: string
+        threadId:
+          type: string
+        sessionId:
+          type: string
+        callback:
+          type: object
+        metadata:
+          type: object
+        feedSession:
+          type: object
+          required:
+            - platform
+            - pageUrl
+          properties:
+            platform:
+              type: string
+            pageUrl:
+              type: string
+            pageKind:
+              type: string
+            markReason:
+              type: string
+            startedAt:
+              type: string
+            endedAt:
+              type: string
+            extraJson:
+              type: object
+        feedObservations:
+          type: array
+          items:
+            type: object
+            required:
+              - platform
+              - itemId
+            properties:
+              platform:
+                type: string
+              itemId:
+                type: string
+              itemUrl:
+                type: string
+              titleOrCaption:
+                type: string
+              authorHandle:
+                type: string
+              mediaSummary:
+                type: object
+              interactionSummary:
+                type: object
+              extraJson:
+                type: object
+              visibleAt:
+                type: string
+    response:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - dispatch
+            - dispatchState
+          properties:
+            dispatch:
+              type: object
+              properties:
+                id:
+                  type: string
+                status:
+                  type: string
+                runId:
+                  type: string
+                traceId:
+                  type: string
+                threadId:
+                  type: string
+                payloadSummary:
+                  type: object
+            dispatchState:
+              type: object
+              properties:
+                accepted:
+                  type: boolean
+                queued:
+                  type: boolean
+                failed:
+                  type: boolean
+                resultAvailable:
+                  type: boolean
+                deliveryMode:
+                  type: string
+            deduplicated:
+              type: boolean
+            idempotencyKey:
+              type: string
+
+  - method: GET
+    path: /api/integrations/feed-analysis/dispatch/:id
+    auth: Bearer token (service_token)
+    description: Query the status of a previously dispatched feed-analysis job.
+    params:
+      id:
+        type: string
+    response:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - dispatch
+            - dispatchState
+          properties:
+            dispatch:
+              type: object
+              properties:
+                id:
+                  type: string
+                status:
+                  type: string
+                runId:
+                  type: string
+                traceId:
+                  type: string
+                threadId:
+                  type: string
+                payloadSummary:
+                  type: object
+            dispatchState:
+              type: object
+              properties:
+                accepted:
+                  type: boolean
+                queued:
+                  type: boolean
+                failed:
+                  type: boolean
+                resultAvailable:
+                  type: boolean
+                deliveryMode:
+                  type: string
+            deduplicated:
+              type: boolean
+            idempotencyKey:
+              type: string
+
+sourceOfTruth:
+  - run_specs (table)
+  - task_runs (table)
+  - session_events (table)
+events:
+  writes:
+    - run_specs
+    - task_runs
+    - session_events
+verification:
+  - pnpm check
+  - pnpm --filter @los/gateway test -- --testPathPattern='integration-routes'

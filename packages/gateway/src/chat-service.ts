@@ -332,6 +332,12 @@ export async function runChat(params: {
       onSessionEvent: async (event) => {
         relaySessionEvent(send, event);
         await emitToolCallUpsertFromSessionEvent({ send, sessionId: sid, runSpecId, event });
+        // Auto-trigger memory compaction when a session completes or errors
+        if (event.type === 'session.completed' || event.type === 'session.error') {
+          import('@los/memory').then(({ compactSession }) =>
+            compactSession({ sessionId: sid, runSpecId }).catch(() => undefined)
+          ).catch(() => undefined);
+        }
       },
     });
 

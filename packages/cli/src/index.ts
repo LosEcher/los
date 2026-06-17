@@ -2,6 +2,7 @@
 
 import { artifactsCommand } from './artifacts.js';
 import { compatCommand } from './compat.js';
+import { deadLetterCommand } from './dead-letter.js';
 import { evalsCommand } from './evals.js';
 import { externalSummariesCommand } from './external-summaries.js';
 import { governanceCommand } from './governance.js';
@@ -10,6 +11,7 @@ import { memoryCommand } from './memory.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
 import { providerCommand } from './provider.js';
+import { scanCommand } from './scan.js';
 import { runCommand as runOperationCommand } from './run-operations.js';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -52,6 +54,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'tasks') {
+    if (commandArgs[0] === 'dead-letter' || commandArgs[0] === 'dlq') {
+      await deadLetterCommand(globalArgs, commandArgs.slice(1));
+      return;
+    }
     await listCommand(globalArgs, commandArgs, '/tasks', renderTasks);
     return;
   }
@@ -89,6 +95,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'health') {
     await healthCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'scan' || command === 'static-analysis') {
+    await scanCommand(globalArgs, commandArgs);
     return;
   }
 

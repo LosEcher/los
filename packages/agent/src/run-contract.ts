@@ -1,4 +1,4 @@
-export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance';
+export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress';
 
 /**
  * Durable run phase — legal lifecycle transitions for a single agent run.

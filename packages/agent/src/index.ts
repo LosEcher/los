@@ -239,6 +239,8 @@ export {
   type ExternalToolSummaryInput,
   type ListExternalToolSummariesOptions,
 } from './external-tool-summary.js';
+export { listFeedAnalysisTargets, dispatchFeedAnalysisJob, getFeedAnalysisDispatch, type FeedAnalysisTarget, type FeedAnalysisDispatchRequest, type FeedAnalysisDispatchReceipt, type FeedAnalysisDispatchState, type FeedAnalysisDispatchResult } from './integration/feed-analysis-ingress.js';
+export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
 export {
   ensureRunEvalStore,
   compareRunEvals,
@@ -570,18 +572,11 @@ export {
   type SelfCheckResult,
 } from './self-check.js';
 export {
-  scanProject,
-  scanFiles,
-  loadRuleFiles,
-  discoverFiles,
-  languageFromFilePath,
-  type StaticAnalysisFinding,
-  type StaticAnalysisRule,
-  type StaticAnalysisScanOptions,
-  type StaticAnalysisScanResult,
-  type StaticAnalysisConstraint,
-  type StaticAnalysisRange,
-  type StaticAnalysisPosition,
+  scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFilePath,
+  buildStaticAnalysisPayload,
+  type StaticAnalysisEventPayload, type StaticAnalysisFinding, type StaticAnalysisRule,
+  type StaticAnalysisScanOptions, type StaticAnalysisScanResult, type StaticAnalysisConstraint,
+  type StaticAnalysisRange, type StaticAnalysisPosition,
 } from './static-analysis/index.js';
 
 // Re-export ast-grep types for rule authors
