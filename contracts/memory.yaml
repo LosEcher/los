@@ -1,0 +1,308 @@
+contract: los.memory
+version: 0.1.0
+status: draft
+owner: packages/memory
+description: >
+  Memory ledger contract for observations, compaction, procedural learning,
+  retrieval routing, and MEMORY.md file synchronization. The memory subsystem
+  uses PostgreSQL full-text search (tsvector) with GIN indexes for durable,
+  queryable memory across sessions.
+type: object
+routes:
+  - method: GET
+    path: /memory
+    query:
+      q:
+        type: string
+        description: Full-text search query against title, summary, content, and tags.
+      kind:
+        type: string
+        description: Filter by observation kind.
+      source:
+        type: string
+        description: Filter by observation source.
+      tag:
+        type: string
+        description: Filter by exact tag match (JSONB containment).
+      scope:
+        type: string
+        description: Filter by metadata.scope.
+      memoryLayer:
+        type: string
+        description: Filter by metadata.memoryLayer.
+      archived:
+        type: boolean
+        description: Filter by metadata.archived.
+      sessionId:
+        type: string
+        description: Filter by session.
+      tenantId:
+        type: string
+      projectId:
+        type: string
+      userId:
+        type: string
+      requestId:
+        type: string
+      traceId:
+        type: string
+      limit:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 20
+    response:
+      count: integer
+      results: observations.rows
+    description: Search observations with full-text search and multi-facet filters.
+  - method: POST
+    path: /memory
+    request:
+      title:
+        type: string
+        required: true
+      summary:
+        type: string
+      kind:
+        type: string
+      tags:
+        type: array
+        items:
+          type: string
+      content:
+        type: string
+      metadata:
+        type: object
+      source:
+        type: string
+      sessionId:
+        type: string
+      nodeId:
+        type: string
+    response: observation.row
+    description: Create a new observation. Metadata defaults to scope=project, memoryLayer=semantic, archived=false.
+  - method: PATCH
+    path: /memory/:id
+    request:
+      title:
+        type: string
+      summary:
+        type: string
+      kind:
+        type: string
+      tags:
+        type: array
+      content:
+        type: string
+      metadata:
+        type: object
+    response:
+      oneOf:
+        - observation.row
+        - error: Not found (404)
+    description: Update an observation by integer ID. Returns 404 if not found.
+  - method: DELETE
+    path: /memory/:id
+    response:
+      ok: boolean
+    description: Delete an observation by integer ID.
+  - method: GET
+    path: /memory/stats
+    response:
+      totalObservations: integer
+      byKind: object
+      bySource: object
+      byScope: object
+      byLayer: object
+      archived: integer
+    description: Aggregated observation statistics.
+  - method: POST
+    path: /memory/compact
+    request:
+      sessionId:
+        type: string
+        required: true
+      runSpecId:
+        type: string
+    response:
+      compaction: memory_compactions.row
+    errors:
+      - 422: sessionId is required
+    description: >
+      Compact session observations into a structured summary. Extracts observed
+      patterns and procedural candidates. Cross-session evidence lookup increases
+      confidence. Dual-writes candidates to the standalone procedural_candidates table.
+  - method: GET
+    path: /memory/compactions
+    query:
+      sessionId:
+        type: string
+      runSpecId:
+        type: string
+      limit:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    response:
+      count: integer
+      compactions: memory_compactions.rows
+    description: List session compactions filtered by tenant and project context.
+  - method: GET
+    path: /memory/active-rules
+    query:
+      runSpecId:
+        type: string
+      limit:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    response:
+      count: integer
+      rules: procedural_candidates.active_rows
+    description: Retrieve active procedural rules scoped by tenant and project.
+  - method: POST
+    path: /memory/retrieve
+    request:
+      taskState:
+        type: string
+        enum: [created, queued, running, blocked, failed, cancelled, succeeded]
+      runPhase:
+        type: string
+      sessionId:
+        type: string
+      runSpecId:
+        type: string
+      maxObservationsPerLayer:
+        type: integer
+        minimum: 1
+        maximum: 20
+        default: 5
+    response:
+      activeRules: procedural_candidates.active_rows
+      observationsByLayer:
+        type: object
+        properties:
+          working:
+            type: array
+          episodic:
+            type: array
+          semantic:
+            type: array
+          procedural:
+            type: array
+      queriedLayers:
+        type: array
+        items:
+          type: string
+    description: >
+      Route memory retrieval by task state and run phase. Returns active rules
+      plus observations organized by memory layer (working, episodic, semantic,
+      procedural). Layer selection depends on task state.
+  - method: POST
+    path: /memory/sync-md
+    request:
+      workspaceRoot:
+        type: string
+        required: true
+      scope:
+        type: string
+      memoryLayer:
+        type: string
+      archived:
+        type: boolean
+      projectId:
+        type: string
+    response:
+      ok: boolean
+      count: integer
+    description: >
+      Sync up to 50 observations matching the provided filters to a MEMORY.md
+      file in the workspace root. Writes a human-readable markdown index.
+  - method: POST
+    path: /memory/retention
+    request:
+      dryRun:
+        type: boolean
+    response:
+      ok: boolean
+      archivedCount: integer
+      deletedCount: integer
+    description: >
+      Apply the retention policy (90d archive uncompacted, 30d archive compacted,
+      180d hard-delete orphans). Set dryRun=true to preview without applying.
+      Also runs automatically every 24h via the gateway retention timer.
+  - method: GET
+    path: /memory/integrity
+    response:
+      passed: boolean
+      checkedAt: string
+      checks: array
+    description: >
+      Run all memory integrity checks (compaction validity, candidate consistency,
+      orphaned compactions, search vector freshness, observation-compaction ratio).
+      Runs automatically every 24h via the gateway retention timer.
+sourceOfTruth:
+  - observations
+  - memory_compactions
+  - procedural_candidates
+retrieval:
+  layers:
+    - working
+    - episodic
+    - semantic
+    - procedural
+  routing:
+    created:
+      - working
+      - procedural
+    running:
+      - working
+      - procedural
+      - episodic
+    blocked:
+      - episodic
+      - procedural
+      - semantic
+    failed:
+      - episodic
+      - semantic
+    succeeded: []
+compaction:
+  autoDiscover: true
+  requiresOperatorReview: true
+  maxEvidenceSessions: 3
+  dualWrite:
+    - memory_compactions (procedural_candidates_json column)
+    - procedural_candidates (standalone table)
+events:
+  emits:
+    - rule_approval
+      on: candidate promotion
+      payload:
+        candidateId: string
+        candidateName: string
+        oldStatus: string
+        newStatus: string
+        compactionId: string
+        promotedAt: string
+candidateLifecycle:
+  states:
+    - draft
+    - review
+    - approved
+    - active
+    - retired
+  transitions:
+    draft: [review]
+    review: [approved, draft]
+    approved: [active, retired]
+    active: [retired]
+    retired: []
+  automaticPromotion: false
+  promotionRequires: operator attestation or >= 3 supporting sessions
+verification:
+  - pnpm --filter @los/memory check
+  - pnpm --filter @los/memory test
+  - ./tools/check-contracts.sh

@@ -48,12 +48,12 @@ test('cross-session evidence: same pattern across 3 sessions produces review can
     }
 
     // Session 0: only 1 session => confidence = 0.5, status = draft
-    assert.equal(sessionResults[0].compaction.proceduralCandidates.length, 1);
-    assert.equal(sessionResults[0].compaction.proceduralCandidates[0].status, 'draft');
-    assert.equal(sessionResults[0].compaction.proceduralCandidates[0].confidence, 0.5);
+    assert.equal(sessionResults[0].compaction!.proceduralCandidates.length, 1);
+    assert.equal(sessionResults[0].compaction!.proceduralCandidates[0].status, 'draft');
+    assert.equal(sessionResults[0].compaction!.proceduralCandidates[0].confidence, 0.5);
 
     // Session 2: at least 2 other sessions already have this pattern => crossSessions >= 2
-    const thirdCompaction = sessionResults[2].compaction;
+    const thirdCompaction = sessionResults[2].compaction!;
     const thirdCandidate = thirdCompaction.proceduralCandidates[0];
     assert.equal(thirdCandidate.status, 'review', `expected review, got ${thirdCandidate.status}`);
     assert.ok(thirdCandidate.confidence >= 0.7, `expected confidence >= 0.7, got ${thirdCandidate.confidence}`);
@@ -86,9 +86,10 @@ test('attestCompaction stores attestation in summary_json', async () => {
 
     await addObservation({ title: 'attest test obs', kind: 'note', sessionId });
     const compaction = await compactSession({ sessionId });
-    assert.ok(!compaction.attestedAt);
+    assert.ok(compaction, 'compaction should not be null for session with observations');
+    assert.ok(!compaction!.attestedAt);
 
-    const attested = await attestCompaction(compaction.id, 'operator-test');
+    const attested = await attestCompaction(compaction!.id, 'operator-test');
     assert.ok(attested);
     assert.equal(attested.attestedBy, 'operator-test');
     assert.ok(typeof attested.attestedAt === 'string');
@@ -127,25 +128,25 @@ test('promoteCandidate transitions candidate status correctly', async () => {
 
     const [compaction] = await listCompactions({ sessionId, limit: 1 });
     assert.ok(compaction);
-    assert.equal(compaction.proceduralCandidates[0].status, 'draft');
+    assert.equal(compaction!.proceduralCandidates[0].status, 'draft');
 
     // Promote draft → review
-    const reviewed = await promoteCandidate(compaction.id, 'test-candidate', 'review');
+    const reviewed = await promoteCandidate(compaction!.id, 'test-candidate', 'review');
     assert.ok(reviewed);
     assert.equal(reviewed.proceduralCandidates[0].status, 'review');
 
     // Promote review → approved
-    const approved = await promoteCandidate(compaction.id, 'test-candidate', 'approved');
+    const approved = await promoteCandidate(compaction!.id, 'test-candidate', 'approved');
     assert.ok(approved);
     assert.equal(approved.proceduralCandidates[0].status, 'approved');
 
     // Promote approved → active
-    const active = await promoteCandidate(compaction.id, 'test-candidate', 'active');
+    const active = await promoteCandidate(compaction!.id, 'test-candidate', 'active');
     assert.ok(active);
     assert.equal(active.proceduralCandidates[0].status, 'active');
 
     // Promote active → retired
-    const retired = await promoteCandidate(compaction.id, 'test-candidate', 'retired');
+    const retired = await promoteCandidate(compaction!.id, 'test-candidate', 'retired');
     assert.ok(retired);
     assert.equal(retired.proceduralCandidates[0].status, 'retired');
   } finally {
@@ -168,11 +169,11 @@ test('compactSession handles session with observations but no tasks or evals', a
     await addObservation({ title: 'solo observation', kind: 'note', sessionId });
 
     const compaction = await compactSession({ sessionId });
-    assert.equal(compaction.summary.observationCount, 1);
-    assert.equal(compaction.summary.taskRunCount, 0);
-    assert.equal(compaction.summary.evalCount, 0);
-    assert.equal(compaction.evidenceCount, 1);
-    assert.equal(compaction.proceduralCandidates.length, 0);
+    assert.equal(compaction!.summary.observationCount, 1);
+    assert.equal(compaction!.summary.taskRunCount, 0);
+    assert.equal(compaction!.summary.evalCount, 0);
+    assert.equal(compaction!.evidenceCount, 1);
+    assert.equal(compaction!.proceduralCandidates.length, 0);
   } finally {
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
@@ -190,12 +191,7 @@ test('compactSession handles empty session gracefully', async () => {
     await ensureMemoryCompactionStore();
 
     const compaction = await compactSession({ sessionId });
-    assert.equal(compaction.summary.observationCount, 0);
-    assert.equal(compaction.summary.taskRunCount, 0);
-    assert.equal(compaction.summary.evalCount, 0);
-    assert.equal(compaction.evidenceCount, 0);
-    assert.equal(compaction.proceduralCandidates.length, 0);
-    assert.equal(compaction.confidence, 0);
+    assert.equal(compaction, null, 'empty session should return null');
   } finally {
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
@@ -259,9 +255,9 @@ test('attestCompaction stores attestation in summary_json', async () => {
     await ensureMemoryCompactionStore();
     await addObservation({ title: 'attest obs', kind: 'note', sessionId });
     const compaction = await compactSession({ sessionId });
-    assert.ok(!compaction.attestedAt);
+    assert.ok(!compaction!.attestedAt);
 
-    const attested = await attestCompaction(compaction.id, 'operator-test');
+    const attested = await attestCompaction(compaction!.id, 'operator-test');
     assert.ok(attested);
     assert.equal(attested.attestedBy, 'operator-test');
     assert.ok(typeof attested.attestedAt === 'string');
@@ -319,10 +315,10 @@ test('compactSession with observations but no tasks or evals', async () => {
     await addObservation({ title: 'solo obs', kind: 'note', sessionId });
 
     const compaction = await compactSession({ sessionId });
-    assert.equal(compaction.summary.observationCount, 1);
-    assert.equal(compaction.summary.taskRunCount, 0);
-    assert.equal(compaction.summary.evalCount, 0);
-    assert.equal(compaction.proceduralCandidates.length, 0);
+    assert.equal(compaction!.summary.observationCount, 1);
+    assert.equal(compaction!.summary.taskRunCount, 0);
+    assert.equal(compaction!.summary.evalCount, 0);
+    assert.equal(compaction!.proceduralCandidates.length, 0);
   } finally {
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
@@ -338,12 +334,7 @@ test('compactSession handles completely empty session', async () => {
   try {
     await ensureMemoryCompactionStore();
     const compaction = await compactSession({ sessionId });
-    assert.equal(compaction.summary.observationCount, 0);
-    assert.equal(compaction.summary.taskRunCount, 0);
-    assert.equal(compaction.summary.evalCount, 0);
-    assert.equal(compaction.evidenceCount, 0);
-    assert.equal(compaction.confidence, 0);
-    assert.equal(compaction.proceduralCandidates.length, 0);
+    assert.equal(compaction, null, 'completely empty session should return null');
   } finally {
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);

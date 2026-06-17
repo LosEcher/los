@@ -10,8 +10,14 @@ export {
   deleteObservation,
   searchObservations,
   getStats,
+  listEntities,
+  findRelatedObservations,
+  findCooccurringEntities,
   type Observation,
   type MemoryStats,
+  type EntityNode,
+  type EntityCooccurrence,
+  type EntitySearchOptions,
 } from './store.js';
 
 export { syncMemoryMd, readMemoryMd } from './markdown.js';
@@ -57,3 +63,16 @@ export {
   type CreateProceduralCandidateInput,
   type ListProceduralCandidatesOptions,
 } from './procedural-candidates.js';
+
+export {
+  checkMemoryIntegrity,
+  type MemoryIntegrityReport,
+  type MemoryIntegrityCheck,
+} from './integrity.js';
+
+export {
+  applyRetentionPolicy,
+  DEFAULT_RETENTION_POLICY,
+  type RetentionPolicy,
+  type RetentionResult,
+} from './retention.js';

@@ -125,15 +125,31 @@ async function lookupCrossSessionEvidence(
   return counts;
 }
 
-export async function compactSession(input: CompactSessionInput): Promise<MemoryCompaction> {
+export async function compactSession(input: CompactSessionInput): Promise<MemoryCompaction | null> {
   await ensureMemoryCompactionStore();
   const sessionId = normalizeRequired(input.sessionId, 'sessionId');
   const db = getDb();
 
+  // Dedup: skip if this session was already compacted (unless force=true)
+  const existingCheck = await db.query<{ id: string }>(
+    `SELECT id FROM memory_compactions WHERE session_id = $1 LIMIT 1`,
+    [sessionId],
+  );
+  if (existingCheck.rows[0] && !(input as any).force) {
+    log.info(`Session ${sessionId} already compacted, skipping (use force=true to re-compact)`);
+    return getCompaction(existingCheck.rows[0].id);
+  }
+
+  // Advisory lock to prevent concurrent compaction of the same session
+  await db.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`compact_${sessionId}`]);
+
   // Parallelize independent data-gathering queries (different tables)
+  // Exclude already-archived observations from counts
   const [obsRows, taskRows, evalRows] = await Promise.all([
     db.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM observations WHERE session_id = $1`,
+      `SELECT COUNT(*)::text AS count FROM observations
+       WHERE session_id = $1
+         AND coalesce(metadata_json->>'archived', 'false') = 'false'`,
       [sessionId],
     ),
     db.query<{ count: string; statuses: string }>(
@@ -161,6 +177,13 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   const taskRunStatuses = parseJsonArray(taskRows.rows[0]?.statuses);
   const evalCount = Number(evalRows.rows[0]?.count ?? 0);
   const evalSummaries = parseJsonArray(evalRows.rows[0]?.summary);
+
+  // Early return for empty sessions: nothing to compact
+  const totalActivity = observationCount + taskRunCount + evalCount;
+  if (totalActivity === 0) {
+    log.info(`Session ${sessionId} has no observations, tasks, or evals — skipping compaction`);
+    return null;
+  }
 
   // Detect failover patterns
   const executorFailures = evalSummaries.filter(
@@ -274,6 +297,44 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
         }),
       ),
     );
+  }
+
+  // Classify observations: mark as compacted, upgrade kinds based on evidence
+  if (observationCount > 0) {
+    // Mark all session observations as compacted
+    await db.query(
+      `UPDATE observations
+       SET metadata_json = jsonb_set(
+         jsonb_set(
+           jsonb_set(metadata_json, '{compacted}', 'true'),
+           '{compactionId}', to_jsonb($2::text)
+         ),
+         '{compactedAt}', to_jsonb(now()::text)
+       )
+       WHERE session_id = $1`,
+      [sessionId, id],
+    ).catch(err => log.warn(`Failed to mark observations as compacted: ${err instanceof Error ? err.message : String(err)}`));
+
+    // If compaction has meaningful confidence, mark observations as promotable
+    if (confidence >= 0.5) {
+      await db.query(
+        `UPDATE observations
+         SET metadata_json = jsonb_set(metadata_json, '{promotable}', 'true')
+         WHERE session_id = $1 AND coalesce(metadata_json->>'promotable', 'false') = 'false'`,
+        [sessionId],
+      ).catch(err => log.warn(`Failed to mark observations as promotable: ${err instanceof Error ? err.message : String(err)}`));
+    }
+
+    // Upgrade kind=note to kind=fact for observations in sessions with cross-session evidence
+    const crossSessionKinds = [...crossSessionCounts.entries()].filter(([, count]) => count > 0);
+    if (crossSessionKinds.length > 0) {
+      await db.query(
+        `UPDATE observations
+         SET kind = 'fact'
+         WHERE session_id = $1 AND kind = 'note'`,
+        [sessionId],
+      ).catch(err => log.warn(`Failed to upgrade observation kinds: ${err instanceof Error ? err.message : String(err)}`));
+    }
   }
 
   return rowToCompaction(assertRow(rows.rows[0]));
