@@ -1,4 +1,4 @@
-export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift';
+export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention';
 export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly';
 export type GovernanceJobStatus = 'active' | 'paused' | 'retired';
 

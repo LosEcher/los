@@ -77,4 +77,14 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     cadence: 'weekly',
     dedupeKey: 'gov-job-architecture-drift',
   },
+  {
+    jobType: 'memory_integrity',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-memory-integrity',
+  },
+  {
+    jobType: 'memory_retention',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-memory-retention',
+  },
 ];

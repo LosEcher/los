@@ -4,10 +4,13 @@ import {
   getStats, deleteObservation, updateObservation,
   ensureMemoryCompactionStore, compactSession, listCompactions,
   retrieveActiveRules, routeMemoryRetrieval,
+  applyRetentionPolicy, checkMemoryIntegrity,
 } from '@los/memory';
 import { syncMemoryMd } from '@los/memory';
 import { ensureRunEvalStore } from '@los/agent';
 import { ensureTaskRunStore } from '@los/agent/task-runs';
+import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
 import { getRequestContext } from '../request-context.js';
 import {
   normalizeOptionalString,
@@ -16,6 +19,8 @@ import {
   parseOptionalBoolean,
   normalizeBoundedInteger,
 } from './server-helpers.js';
+
+const log = getLogger('memory-routes');
 
 export function registerMemoryRoutes(app: FastifyInstance): void {
   app.get('/memory', async (req) => {
@@ -176,5 +181,63 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     });
     syncMemoryMd(body.workspaceRoot, observations);
     return { ok: true, count: observations.length };
+  });
+
+  app.post('/memory/retention', async (req) => {
+    const body = req.body as { dryRun?: boolean };
+    if (body.dryRun) {
+      // For dry-run, just report what would happen without applying
+      const stats = await getStats();
+      return { dryRun: true, totalObservations: stats.totalObservations, archived: stats.archived };
+    }
+    const result = await applyRetentionPolicy();
+    return { ok: true, ...result };
+  });
+
+  app.get('/memory/integrity', async () => {
+    const report = await checkMemoryIntegrity();
+    return report;
+  });
+
+  // Auto-compact: find uncompacted sessions (>1h old) and compact them.
+  // Called by the scheduler or governance sweeper periodically.
+  app.post('/memory/auto-compact', async () => {
+    await ensureMemoryStore();
+    await ensureMemoryCompactionStore();
+    await ensureRunEvalStore();
+    await ensureTaskRunStore();
+
+    const db = getDb();
+    const rows = await db.query<{ session_id: string }>(
+      `SELECT DISTINCT o.session_id
+       FROM observations o
+       LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
+       WHERE o.session_id IS NOT NULL
+         AND mc.id IS NULL
+         AND o.created_at < now() - INTERVAL '1 hour'
+       LIMIT 10`,
+    );
+
+    const sessionIds = rows.rows.map(r => r.session_id).filter(Boolean);
+    if (sessionIds.length === 0) {
+      return { compacted: 0, detail: 'No uncompacted sessions found' };
+    }
+
+    const compacted: string[] = [];
+    const errors: Array<{ sessionId: string; error: string }> = [];
+
+    for (const sessionId of sessionIds) {
+      try {
+        const result = await compactSession({ sessionId });
+        if (result) {
+          compacted.push(sessionId);
+        }
+      } catch (err) {
+        errors.push({ sessionId, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    log.info(`Auto-compacted ${compacted.length} session(s)${errors.length > 0 ? `, ${errors.length} error(s)` : ''}`);
+    return { compacted: compacted.length, compactedSessionIds: compacted, errors };
   });
 }

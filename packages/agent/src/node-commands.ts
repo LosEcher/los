@@ -8,7 +8,7 @@ import {
 } from './executor-nodes.js';
 
 export type NodeCommandName = 'status' | 'probe' | 'drain' | 'promote' | 'restart' | 'upgrade' | 'rollback';
-export type NodeCommandStatus = 'accepted' | 'running' | 'succeeded' | 'failed' | 'denied';
+export type NodeCommandStatus = 'accepted' | 'running' | 'succeeded' | 'failed' | 'denied' | 'rejected';
 
 export interface NodeCommandRecord {
   commandId: string;
@@ -413,7 +413,7 @@ function normalizeCommand(value: unknown): NodeCommandName {
 }
 
 function normalizeStatus(value: unknown): NodeCommandStatus {
-  if (value === 'accepted' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'denied') {
+  if (value === 'accepted' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'denied' || value === 'rejected') {
     return value;
   }
   return 'failed';
