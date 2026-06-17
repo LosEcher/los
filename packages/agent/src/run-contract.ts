@@ -369,7 +369,7 @@ export function readRunContractMetadata(metadata: Record<string, unknown>): RunC
 }
 
 function normalizeRunContractMode(value: unknown): RunContractMode | undefined {
-  if (value === 'audit' || value === 'execution' || value === 'closeout' || value === 'governance') return value;
+  if (value === 'audit' || value === 'execution' || value === 'closeout' || value === 'governance' || value === 'feed-analysis-ingress') return value;
   return undefined;
 }
 

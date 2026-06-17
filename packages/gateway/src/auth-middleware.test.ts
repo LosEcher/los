@@ -22,23 +22,23 @@ test('auth middleware allows requests when auth is disabled', async () => {
 test('auth middleware requires the configured token outside public paths', async () => {
   const app = Fastify({ logger: false });
   await authMiddleware(app, { config: configForAuth(true) });
-  app.get('/settings', async () => ({ ok: true }));
+  app.get('/protected', async () => ({ ok: true }));
   app.get('/health', async () => ({ status: 'ok' }));
 
   try {
-    const missing = await app.inject({ method: 'GET', url: '/settings' });
+    const missing = await app.inject({ method: 'GET', url: '/protected' });
     assert.equal(missing.statusCode, 401);
 
     const invalid = await app.inject({
       method: 'GET',
-      url: '/settings',
+      url: '/protected',
       headers: { 'x-los-auth-token': 'wrong-token' },
     });
     assert.equal(invalid.statusCode, 401);
 
     const valid = await app.inject({
       method: 'GET',
-      url: '/settings',
+      url: '/protected',
       headers: { 'x-los-auth-token': 'test-token' },
     });
     assert.equal(valid.statusCode, 200);
@@ -77,6 +77,8 @@ function configForAuth(enabled: boolean): Config {
     },
     executor: {
       enabled: false,
+      nodeKind: 'executor',
+      connectModes: [],
       meshNodes: [],
     },
     profile: 'test',

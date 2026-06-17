@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import type {
   NodeCommandRuntime,
@@ -12,16 +12,58 @@ const EXECUTOR_HELPER = resolve(ROOT, 'tools', 'executor.sh');
 const RUNNER_LOG = resolve(ROOT, '.los-runtime', 'node-command-runner.log');
 
 export function createExecutorNodeCommandRuntime(): NodeCommandRuntime {
-  // Windows: maintenance commands not yet supported (requires bash + executor.sh)
+  // Windows: use PowerShell for maintenance commands.
+  // upgrade runs git pull + process.exit (relies on process manager to restart).
   if (process.platform === 'win32') {
-    const notSupported = (command: string) => async (_context: NodeCommandRuntimeContext): Promise<NodeCommandRuntimeResult> => ({
-      status: 'rejected',
-      output: { note: `${command} not supported on Windows` },
-    });
     return {
-      restart: notSupported('restart'),
-      upgrade: notSupported('upgrade'),
-      rollback: notSupported('rollback'),
+      restart: async (context) => {
+        // Schedule a delayed restart via detached powershell so the HTTP
+        // response can be sent before the process exits.
+        spawn('powershell', [
+          '-Command',
+          `Start-Sleep -Seconds 2; Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue | Stop-Process -Force`,
+        ], { detached: true, stdio: 'ignore' }).unref();
+        return {
+          status: 'accepted',
+          output: { note: 'restart scheduled (process will exit in 2s)', commandId: context.commandId },
+        };
+      },
+      upgrade: async (context) => {
+        try {
+          execSync('git pull', { cwd: ROOT, timeout: 30_000, stdio: 'pipe' });
+        } catch (err: any) {
+          return {
+            status: 'failed',
+            output: { error: `git pull failed: ${err?.message ?? String(err)}` },
+          };
+        }
+        spawn('powershell', [
+          '-Command',
+          `Start-Sleep -Seconds 2; Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue | Stop-Process -Force`,
+        ], { detached: true, stdio: 'ignore' }).unref();
+        return {
+          status: 'accepted',
+          output: { note: 'upgrade: git pull done, restart scheduled', commandId: context.commandId },
+        };
+      },
+      rollback: async (context) => {
+        try {
+          execSync('git checkout HEAD~1', { cwd: ROOT, timeout: 30_000, stdio: 'pipe' });
+        } catch (err: any) {
+          return {
+            status: 'failed',
+            output: { error: `git checkout failed: ${err?.message ?? String(err)}` },
+          };
+        }
+        spawn('powershell', [
+          '-Command',
+          `Start-Sleep -Seconds 2; Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue | Stop-Process -Force`,
+        ], { detached: true, stdio: 'ignore' }).unref();
+        return {
+          status: 'accepted',
+          output: { note: 'rollback: git checkout done, restart scheduled', commandId: context.commandId },
+        };
+      },
     };
   }
   return {

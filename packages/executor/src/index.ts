@@ -13,6 +13,8 @@ import {
   runAgent,
   type AgentConfig,
   type AgentModelDelta,
+  type ExecutorNodeConnectMode,
+  type ExecutorNodeKind,
   type SessionEventRecord,
   type ToolCallStateTransition,
 } from '@los/agent';
@@ -65,6 +67,9 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
 
   const nodeId = config.executor.nodeId ?? process.env.EXECUTOR_NODE_ID ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
+  const nodeKind: ExecutorNodeKind = (config.executor.nodeKind as ExecutorNodeKind) ?? 'executor';
+  const baseConnectModes: ExecutorNodeConnectMode[] = ['agent_http', 'agent_http_ndjson'];
+  const connectModes: ExecutorNodeConnectMode[] = [...baseConnectModes, ...(config.executor.connectModes as ExecutorNodeConnectMode[] ?? [])];
   const agentKey = config.executor.agentKey ?? (() => {
     const generated = `los-key-${randomUUID()}`;
     log.warn(`No EXECUTOR_AGENT_KEY configured. Generated ephemeral key: ${generated}`);
@@ -80,9 +85,12 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
     log.info(`Executing node heartbeat via gateway: ${gatewayUrl}/nodes/heartbeat`);
   }
 
-  await heartbeatNode(nodeId, publicUrl, gatewayUrl);
+  // Fire initial heartbeat without blocking server startup.
+  // If the gateway is temporarily unreachable the server still starts,
+  // and the interval below will retry every heartbeat interval.
+  heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
   const nodeHeartbeat = setInterval(() => {
-    heartbeatNode(nodeId, publicUrl, gatewayUrl).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`));
+    heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`));
   }, DEFAULT_HEARTBEAT_MS);
 
   const server = createServer(async (req, res) => {
@@ -94,8 +102,8 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
           nodeId,
           publicUrl,
           version: VERSION,
-          nodeKind: 'executor',
-          connectModes: ['agent_http', 'agent_http_ndjson'],
+          nodeKind,
+          connectModes,
         });
         return;
       }
@@ -225,14 +233,14 @@ async function renewTaskLease(
   }
 }
 
-async function heartbeatNode(nodeId: string, baseUrl: string, gatewayUrl?: string): Promise<void> {
+async function heartbeatNode(nodeId: string, baseUrl: string, nodeKind: ExecutorNodeKind, connectModes: ExecutorNodeConnectMode[], gatewayUrl?: string): Promise<void> {
   const payload = {
     nodeId,
     baseUrl,
     hostLabel: hostname(),
     version: VERSION,
-    nodeKind: 'executor' as const,
-    connectModes: ['agent_http' as const, 'agent_http_ndjson' as const],
+    nodeKind,
+    connectModes,
     connectConfig: {
       agent_http: {
         baseUrl,
