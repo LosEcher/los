@@ -47,4 +47,6 @@ export { loadRuleFiles } from './rule-loader.js';
 export { discoverFiles } from './discover.js';
 export { scanFiles } from './scanner.js';
 export { languageFromFilePath } from './languages.js';
+export { buildStaticAnalysisPayload } from './session-event-bridge.js';
+export type { StaticAnalysisEventPayload } from './session-event-bridge.js';
 export type * from './types.js';

@@ -1,10 +1,11 @@
 id: los.file-size-gate
 language: TypeScript
-severity: warning
-message: "File exceeds 400 line warning threshold — consider extracting sub-modules"
+severity: info
+message: "File size enforcement is handled by tools/check-structure.sh (400-line warn, 600-line block). This rule serves as a documentation marker for the policy."
 rule:
   kind: program
-constraints:
-  - name: .
-    regex: "."
-    mode: any
+governance:
+  domain: code-health
+  owner: build-pipeline
+  impact: low
+  rationale: "File-size enforcement requires line counting, which is more efficiently done by a shell script than by AST-grep pattern matching. This rule exists to document the policy in the static-analysis rule set."
