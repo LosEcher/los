@@ -96,6 +96,8 @@ export const ConfigSchema = z.object({
     agentKey: z.string().optional(),
     nodeId: z.string().optional(),
     nodeUrl: z.string().optional(),
+    nodeKind: z.string().optional(),
+    connectModes: z.array(z.string()).default([]),
     meshNodes: z.array(z.string()).default([]),
   }),
 
@@ -130,6 +132,8 @@ const ENV_MAP: [string, string][] = [
   ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'],
   ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],
+  ['EXECUTOR_NODE_KIND', 'executor.nodeKind'],
+  ['EXECUTOR_CONNECT_MODES', 'executor.connectModes'],
   ['EXECUTOR_MESH_NODES', 'executor.meshNodes'],
   ['LOS_PROFILE', 'profile'],
   ['LOS_DEFAULT_PROJECT_ID', 'defaultProjectId'],
@@ -227,8 +231,8 @@ function flattenEnv(env: Record<string, string>, sourceLabel = 'env'): Record<st
   for (const [envKey, configPath] of ENV_MAP) {
     const val = env[envKey];
     if (val !== undefined && val !== '') {
-      // Special handling: meshNodes is comma-separated
-      if (configPath === 'executor.meshNodes') {
+      // Special handling: meshNodes and connectModes are comma-separated
+      if (configPath === 'executor.meshNodes' || configPath === 'executor.connectModes') {
         setNested(result, configPath, val.split(',').map(s => s.trim()).filter(Boolean));
       } else {
         setNested(result, configPath, val);
@@ -297,7 +301,7 @@ export async function loadConfig(opts?: {
     auth: { enabled: false },
     agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write' },
     memory: { ftsEnabled: true, maxObservations: 10000 },
-    executor: { enabled: false, meshNodes: [] },
+    executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},
     databaseUrl: 'postgres://localhost:5432/los',
     profile: 'default',

@@ -53,21 +53,29 @@ export function collectResourceMetrics(): ResourceMetrics {
 }
 
 export function resolveResourceCapabilities(): Partial<Record<string, unknown>> {
-  if (process.platform !== 'linux') return {};
   try {
     const memTotalMb = Math.round(totalmem() / (1024 * 1024));
     const isConstrained = memTotalMb <= 2048;
 
-    let swapTotalMb = 0;
-    try {
-      const meminfo = readFileSync('/proc/meminfo', 'utf-8');
-      const m = meminfo.match(/^SwapTotal:\s+(\d+)/m);
-      if (m) swapTotalMb = Math.round(parseInt(m[1], 10) / 1024);
-    } catch { /* ignore */ }
+    if (process.platform === 'linux') {
+      let swapTotalMb = 0;
+      try {
+        const meminfo = readFileSync('/proc/meminfo', 'utf-8');
+        const m = meminfo.match(/^SwapTotal:\s+(\d+)/m);
+        if (m) swapTotalMb = Math.round(parseInt(m[1], 10) / 1024);
+      } catch { /* ignore */ }
 
+      return {
+        deploy_safe: !isConstrained || swapTotalMb >= 2048,
+        heavy_task_safe: !isConstrained,
+      };
+    }
+
+    // darwin / win32: evaluate from total memory without swap info.
+    // macOS and Windows report totalmem() in bytes via node:os.
     return {
-      deploy_safe: !isConstrained || swapTotalMb >= 2048,
-      heavy_task_safe: !isConstrained,
+      deploy_safe: !isConstrained,
+      heavy_task_safe: memTotalMb > 4096,
     };
   } catch {
     return {};
