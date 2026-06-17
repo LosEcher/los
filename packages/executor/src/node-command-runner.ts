@@ -12,6 +12,18 @@ const EXECUTOR_HELPER = resolve(ROOT, 'tools', 'executor.sh');
 const RUNNER_LOG = resolve(ROOT, '.los-runtime', 'node-command-runner.log');
 
 export function createExecutorNodeCommandRuntime(): NodeCommandRuntime {
+  // Windows: maintenance commands not yet supported (requires bash + executor.sh)
+  if (process.platform === 'win32') {
+    const notSupported = (command: string) => async (_context: NodeCommandRuntimeContext): Promise<NodeCommandRuntimeResult> => ({
+      status: 'rejected',
+      output: { note: `${command} not supported on Windows` },
+    });
+    return {
+      restart: notSupported('restart'),
+      upgrade: notSupported('upgrade'),
+      rollback: notSupported('rollback'),
+    };
+  }
   return {
     restart: async (context) => scheduleMaintenance('restart', context),
     upgrade: async (context) => scheduleMaintenance('upgrade', context),

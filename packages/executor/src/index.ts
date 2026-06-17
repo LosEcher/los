@@ -54,9 +54,14 @@ type ExecutorStreamChunk =
 
 export async function startExecutor(port = readPort(), host = process.env.EXECUTOR_HOST ?? '127.0.0.1') {
   const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  await ensureExecutorNodeStore();
-  await ensureArtifactStore();
+  const gatewayUrl = process.env.GATEWAY_URL;
+  const heartbeatViaApi = !!gatewayUrl;
+
+  if (!heartbeatViaApi) {
+    await initDb(config.databaseUrl);
+    await ensureExecutorNodeStore();
+    await ensureArtifactStore();
+  }
 
   const nodeId = config.executor.nodeId ?? process.env.EXECUTOR_NODE_ID ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
@@ -68,9 +73,6 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   })();
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
-
-  const gatewayUrl = process.env.GATEWAY_URL;
-  const heartbeatViaApi = !!gatewayUrl;
 
   if (!heartbeatViaApi) {
     log.info('GATEWAY_URL not set — will heartbeat directly to database');
@@ -293,7 +295,9 @@ function executorArtifactStorageRoot(nodeId: string): string {
 
 let activeServer: Awaited<ReturnType<typeof startExecutor>> | undefined;
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { pathToFileURL } from 'node:url';
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   startExecutor().then((server) => {
     activeServer = server;
   }).catch((err) => {
