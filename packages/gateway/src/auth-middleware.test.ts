@@ -77,6 +77,8 @@ function configForAuth(enabled: boolean): Config {
     },
     executor: {
       enabled: false,
+      nodeKind: 'executor',
+      connectModes: [],
       meshNodes: [],
     },
     profile: 'test',
