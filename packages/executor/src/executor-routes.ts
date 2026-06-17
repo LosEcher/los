@@ -7,10 +7,12 @@ import {
   putArtifact,
   readArtifactContent,
   type ArtifactPathPolicy,
+  type ExecutorNodeRecord,
   type NodeCommandName,
+  type NodeCommandRuntime,
 } from '@los/agent';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
-import type { NodeCommandRuntime } from '@los/agent';
+import { getDb } from '@los/infra/db';
 import {
   normalizeOptionalString,
   normalizePositiveInteger,
@@ -185,6 +187,52 @@ export async function handleNodeCommandRoute(
     return;
   }
 
+  // When DB is not available (gateway-heartbeat mode), invoke the runtime
+  // directly for operational commands — skip executeNodeCommand which
+  // requires a database connection for audit logging.
+  const dbAvailable = isDbAvailable();
+  if (!dbAvailable && (command === 'upgrade' || command === 'restart' || command === 'rollback')) {
+    const handler = runtime[command];
+    if (!handler) {
+      sendJson(res, 501, { error: `command not implemented: ${command}` });
+      return;
+    }
+    const context = {
+      commandId: normalizeOptionalString(body.commandId) ?? `node-command-direct-${Date.now()}`,
+      input: {
+        nodeId,
+        command,
+        requestedBy: normalizeOptionalString(body.requestedBy),
+        traceId: normalizeOptionalString(body.traceId),
+        targetVersion: normalizeOptionalString(body.targetVersion),
+        timeoutMs: normalizePositiveInteger(body.timeoutMs),
+        reason: normalizeOptionalString(body.reason),
+        args: normalizeJsonObject(body.args),
+      },
+      node: {
+        nodeId,
+        nodeKind: 'executor',
+        status: 'online',
+        connectModes: [],
+        connectConfig: {},
+        capacity: { pid: 0, platform: process.platform, arch: process.arch, memoryTotalMb: 0, memoryAvailableMb: 0 },
+        capabilities: {},
+        verified: {},
+        queueDepth: 0,
+        activeTaskCount: 0,
+        meshLinks: [],
+        lastHeartbeatAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        execution: { candidate: false, blockers: [], warnings: [] },
+      } as ExecutorNodeRecord,
+    };
+    const result = await handler(context);
+    const statusCode = result.status === 'failed' ? 500 : result.status === 'denied' ? 409 : 202;
+    sendJson(res, statusCode, { ok: result.status !== 'failed' && result.status !== 'denied', command: result });
+    return;
+  }
+
   const record = await executeNodeCommand({
     commandId: normalizeOptionalString(body.commandId),
     nodeId,
@@ -204,4 +252,13 @@ function normalizeArtifactContent(body: PutExecutorArtifactRequest): Buffer | nu
   if (typeof body.content !== 'string') return null;
   if (body.encoding === 'base64') return Buffer.from(body.content, 'base64');
   return Buffer.from(body.content, 'utf-8');
+}
+
+function isDbAvailable(): boolean {
+  try {
+    getDb();
+    return true;
+  } catch {
+    return false;
+  }
 }
