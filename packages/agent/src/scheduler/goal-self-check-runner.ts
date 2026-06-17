@@ -5,12 +5,14 @@ import { readCurrentRunContract } from './contract-reader.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { updateTaskRunFields } from '../task-runs.js';
 import { emitTaskEvent } from './task-events.js';
+import { getConfig } from '@los/infra/config';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 
 /**
  * B0: Post-execution goal self-check gate.
  * Evaluates agent output against declared goal and stop conditions.
- * Blocks the run if it doesn't pass.
+ * Uses an independent judge provider/model when configured (P0-2)
+ * to avoid self-affirmation bias. Blocks the run if it doesn't pass.
  */
 export async function runGoalSelfCheck(
   input: ScheduledAgentTaskInput,
@@ -22,8 +24,13 @@ export async function runGoalSelfCheck(
   const selfCheckContract = await readCurrentRunContract(input.runSpecId, running.metadata);
   if (!selfCheckContract || !shouldRunSelfCheck(selfCheckContract)) return null;
 
-  const selfCheckProvider = createProvider(input.provider, {
-    model: input.model,
+  // Use judge provider/model when configured, fall back to agent's provider/model
+  const config = getConfig();
+  const judgeProvider = config.judge.provider || input.provider;
+  const judgeModel = config.judge.model || input.model;
+
+  const selfCheckProvider = createProvider(judgeProvider, {
+    model: judgeModel,
     traceId: input.traceId,
   });
   const contextSummary = summarizeAgentContext(result);

@@ -38,6 +38,9 @@ export interface ChatRunContext {
 
 export type ChatStatus = 'completed' | 'deduplicated' | 'cancelled';
 
+/** Per-session checkpoint counters for mid-session auto-compaction (P0-1). */
+const checkpointTracker = new Map<string, { count: number; lastAt: number }>();
+
 export interface ChatResult {
   status: ChatStatus;
   sessionId: string;
@@ -332,11 +335,32 @@ export async function runChat(params: {
       onSessionEvent: async (event) => {
         relaySessionEvent(send, event);
         await emitToolCallUpsertFromSessionEvent({ send, sessionId: sid, runSpecId, event });
+
         // Auto-trigger memory compaction when a session completes or errors
         if (event.type === 'session.completed' || event.type === 'session.error') {
           import('@los/memory').then(({ compactSession }) =>
             compactSession({ sessionId: sid, runSpecId }).catch(() => undefined)
           ).catch(() => undefined);
+          checkpointTracker.delete(sid);
+        } else {
+          // Mid-session checkpoint tracking (P0-1: 3 triggers)
+          const ck = checkpointTracker.get(sid) ?? { count: 0, lastAt: Date.now() };
+          ck.count += 1;
+          const isToolTransition = event.type === 'tool_call_state.updated'
+            && (event.payload as any)?.to === 'succeeded' || (event.payload as any)?.to === 'failed';
+          const timeSinceLast = Date.now() - ck.lastAt;
+          const shouldCheckpoint = ck.count >= 20 || isToolTransition
+            || timeSinceLast >= 10 * 60 * 1000; // 10-min fallback
+          if (shouldCheckpoint) {
+            ck.count = 0;
+            ck.lastAt = Date.now();
+            const trigger = ck.count >= 20 ? 'event_count'
+              : isToolTransition ? 'tool_state_change' : 'time_interval';
+            import('@los/memory').then(({ compactSession }) =>
+              compactSession({ sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger }).catch(() => undefined)
+            ).catch(() => undefined);
+          }
+          checkpointTracker.set(sid, ck);
         }
       },
     });

@@ -65,6 +65,14 @@ export const ConfigSchema = z.object({
     systemPrompt: z.string().optional(),
   }),
 
+  // Judge model for post-execution goal evaluation (P0-2).
+  // Uses a different provider/model from the agent to avoid self-affirmation bias.
+  // Falls back to agent.defaultProvider/defaultModel when not configured.
+  judge: z.object({
+    provider: z.string().optional(),
+    model: z.string().optional(),
+  }).default({}),
+
   // Providers (auto-discovered, can be overridden)
   providers: z.record(z.string(), z.object({
     apiKey: z.string().optional(),

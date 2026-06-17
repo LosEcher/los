@@ -69,6 +69,7 @@ function configForAuth(enabled: boolean): Config {
       maxLoops: 20,
       sandboxMode: 'workspace-write',
     },
+    judge: {},
     providers: {},
     memory: {
       ftsEnabled: true,

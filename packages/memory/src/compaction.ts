@@ -36,6 +36,10 @@ export interface MemoryCompaction {
   /** Operator attestation — when a human confirms the pattern is valid. */
   attestedAt?: string;
   attestedBy?: string;
+  /** Checkpoint mode — lightweight mid-session snapshot without pattern extraction. */
+  checkpoint?: boolean;
+  /** What triggered this checkpoint/compaction (event_count, tool_state_change, time_interval, manual). */
+  autoTrigger?: string;
 }
 
 export interface ProceduralCandidate {
@@ -55,6 +59,10 @@ export interface CompactSessionInput {
   tenantId?: string;
   projectId?: string;
   createdBy?: string;
+  /** When true, skip dedup + cross-session evidence + pattern extraction. Allows multiple checkpoints per session. */
+  checkpoint?: boolean;
+  /** What triggered this operation (event_count, tool_state_change, time_interval, manual). */
+  autoTrigger?: string;
 }
 
 export interface ListCompactionsOptions {
@@ -83,10 +91,12 @@ CREATE TABLE IF NOT EXISTS memory_compactions (
 
 ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS tenant_id TEXT;
 ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS auto_trigger TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_memcomp_session ON memory_compactions(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memcomp_run_spec ON memory_compactions(run_spec_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memcomp_tenant_project ON memory_compactions(tenant_id, project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memcomp_checkpoint ON memory_compactions(session_id, auto_trigger, created_at DESC);
 `;
 
 let _initialized = false;
@@ -129,15 +139,18 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   await ensureMemoryCompactionStore();
   const sessionId = normalizeRequired(input.sessionId, 'sessionId');
   const db = getDb();
+  const isCheckpoint = input.checkpoint === true;
 
-  // Dedup: skip if this session was already compacted (unless force=true)
-  const existingCheck = await db.query<{ id: string }>(
-    `SELECT id FROM memory_compactions WHERE session_id = $1 LIMIT 1`,
-    [sessionId],
-  );
-  if (existingCheck.rows[0] && !(input as any).force) {
-    log.info(`Session ${sessionId} already compacted, skipping (use force=true to re-compact)`);
-    return getCompaction(existingCheck.rows[0].id);
+  // Dedup: skip if this session was already compacted (unless checkpoint mode or force=true)
+  if (!isCheckpoint) {
+    const existingCheck = await db.query<{ id: string }>(
+      `SELECT id FROM memory_compactions WHERE session_id = $1 LIMIT 1`,
+      [sessionId],
+    );
+    if (existingCheck.rows[0] && !(input as any).force) {
+      log.info(`Session ${sessionId} already compacted, skipping (use force=true to re-compact)`);
+      return getCompaction(existingCheck.rows[0].id);
+    }
   }
 
   // Advisory lock to prevent concurrent compaction of the same session
@@ -185,34 +198,47 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     return null;
   }
 
-  // Detect failover patterns
-  const executorFailures = evalSummaries.filter(
-    (e: Record<string, unknown>) => e.failover_scope === 'executor',
-  ).length;
-
-  // Build observed patterns
+  // Build observed patterns (skip for checkpoints — too expensive)
   const observedPatterns: Record<string, unknown>[] = [];
-  if (executorFailures > 0) {
-    observedPatterns.push({
-      kind: 'executor_failover',
-      count: executorFailures,
-      description: `Session had ${executorFailures} executor-level failures`,
-    });
-  }
-
-  // Look up cross-session evidence for observed pattern kinds
-  const patternKinds = observedPatterns.map(p => String(p.kind ?? ''));
-  const crossSessionCounts = await lookupCrossSessionEvidence(sessionId, patternKinds);
-
-  // Count distinct evidence sources (source categories within session + cross-session)
+  let crossSessionCounts: Map<string, number> = new Map();
+  let proceduralCandidates: ProceduralCandidate[] = [];
+  let confidence = 0;
   let evidenceCount = 0;
-  if (observationCount > 0) evidenceCount += 1;
-  if (taskRunCount > 0) evidenceCount += 1;
-  if (evalCount > 0) evidenceCount += 1;
-  // Cross-session evidence: count distinct sessions that support the same patterns
-  for (const [kind, count] of crossSessionCounts.entries()) {
-    // Each cross-session match adds 1 to evidence count (distinct session)
-    evidenceCount += count;
+
+  if (!isCheckpoint) {
+    const executorFailures = evalSummaries.filter((e: Record<string, unknown>) => e.failover_scope === 'executor').length;
+
+    if (executorFailures > 0) {
+      observedPatterns.push({ kind: 'executor_failover', count: executorFailures, description: `Session had ${executorFailures} executor-level failures` });
+    }
+
+    // Look up cross-session evidence for observed pattern kinds
+    const patternKinds = observedPatterns.map(p => String(p.kind ?? ''));
+    crossSessionCounts = await lookupCrossSessionEvidence(sessionId, patternKinds);
+
+    // Count distinct evidence sources
+    if (observationCount > 0) evidenceCount += 1;
+    if (taskRunCount > 0) evidenceCount += 1;
+    if (evalCount > 0) evidenceCount += 1;
+    for (const [, count] of crossSessionCounts.entries()) evidenceCount += count;
+
+    // Build procedural candidates
+    if (executorFailures > 0) {
+      const crossSessions = crossSessionCounts.get('executor_failover') ?? 0;
+      proceduralCandidates.push({
+        name: `executor-failover-alert-${sessionId.slice(0, 8)}`,
+        content: `Session ${sessionId} experienced ${executorFailures} executor failures. Review executor node health.`,
+        severity: 'warn',
+        rationale: `Observed ${executorFailures} executor failover eval(s) in this session${crossSessions > 0 ? ` and ${crossSessions} other session(s)` : ''}.`,
+        confidence: crossSessions >= 2 ? 0.7 : 0.5,
+        status: crossSessions >= 2 ? 'review' : 'draft',
+        supportingSessionIds: [sessionId],
+      });
+    }
+
+    confidence = proceduralCandidates.length > 0
+      ? Math.max(...proceduralCandidates.map(c => c.confidence))
+      : 0;
   }
 
   const summary = {
@@ -220,45 +246,22 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     runSpecId: input.runSpecId ?? null,
     tenantId: input.tenantId ?? null,
     projectId: input.projectId ?? null,
-    observationCount,
-    taskRunCount,
-    evalCount,
-    taskRunStatuses,
-    evalSummaries,
+    observationCount, taskRunCount, evalCount,
+    taskRunStatuses: isCheckpoint ? undefined : taskRunStatuses,
+    evalSummaries: isCheckpoint ? undefined : evalSummaries,
     compactedAt: new Date().toISOString(),
+    checkpoint: isCheckpoint || undefined,
   };
 
-  // Build procedural candidates with cross-session evidence
-  const proceduralCandidates: ProceduralCandidate[] = [];
-  if (executorFailures > 0) {
-    const crossSessions = crossSessionCounts.get('executor_failover') ?? 0;
-    const totalSupporting = [sessionId];
-    // Note: we could query for actual supporting session IDs here for full traceability
-    proceduralCandidates.push({
-      name: `executor-failover-alert-${sessionId.slice(0, 8)}`,
-      content: `Session ${sessionId} experienced ${executorFailures} executor failures. Review executor node health.`,
-      severity: 'warn',
-      rationale: `Observed ${executorFailures} executor failover eval(s) in this session${crossSessions > 0 ? ` and ${crossSessions} other session(s)` : ''}.`,
-      confidence: crossSessions >= 2 ? 0.7 : 0.5,
-      status: crossSessions >= 2 ? 'review' : 'draft',
-      supportingSessionIds: totalSupporting,
-    });
-  }
+  const id = isCheckpoint ? `chkpt-${sessionId}-${randomUUID()}` : `memcomp-${sessionId}-${randomUUID()}`;
+  const autoTrigger = input.autoTrigger ?? null;
 
-  const confidence = proceduralCandidates.length > 0
-    ? Math.max(...proceduralCandidates.map(c => c.confidence))
-    : 0;
-
-  const id = `memcomp-${sessionId}-${randomUUID()}`;
   const rows = await db.query<CompactionRow>(
-    `
-    INSERT INTO memory_compactions (
+    `INSERT INTO memory_compactions (
       id, session_id, run_spec_id, tenant_id, project_id, summary_json, observed_patterns_json,
-      procedural_candidates_json, confidence, evidence_count, created_by
-    )
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11)
-    RETURNING *
-  `,
+      procedural_candidates_json, confidence, evidence_count, created_by, auto_trigger
+    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
+    RETURNING *`,
     [
       id,
       sessionId,
@@ -271,11 +274,12 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       confidence,
       evidenceCount,
       input.createdBy ?? null,
+      autoTrigger,
     ],
   );
 
-  // Dual-write to standalone procedural_candidates table
-  if (proceduralCandidates.length > 0) {
+  // Dual-write to standalone procedural_candidates table (skip for checkpoints)
+  if (!isCheckpoint && proceduralCandidates.length > 0) {
     await ensureProceduralCandidateStore();
     await Promise.all(
       proceduralCandidates.map(c =>
@@ -299,8 +303,8 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     );
   }
 
-  // Classify observations: mark as compacted, upgrade kinds based on evidence
-  if (observationCount > 0) {
+  // Classify observations (skip for checkpoints — no pattern extraction)
+  if (!isCheckpoint && observationCount > 0) {
     // Mark all session observations as compacted
     await db.query(
       `UPDATE observations
@@ -502,6 +506,7 @@ type CompactionRow = {
   confidence: string | number;
   evidence_count: string | number;
   created_by: string | null;
+  auto_trigger: string | null;
   created_at: Date | string;
 };
 
@@ -522,6 +527,8 @@ function rowToCompaction(row: CompactionRow): MemoryCompaction {
     createdAt: toIsoString(row.created_at),
     attestedAt: typeof summary.attestedAt === 'string' ? summary.attestedAt : undefined,
     attestedBy: typeof summary.attestedBy === 'string' ? summary.attestedBy : undefined,
+    checkpoint: typeof summary.checkpoint === 'boolean' ? summary.checkpoint : undefined,
+    autoTrigger: row.auto_trigger ?? undefined,
   };
 }
 

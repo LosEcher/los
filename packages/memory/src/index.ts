@@ -36,6 +36,8 @@ export {
   type CandidateStatus,
 } from './compaction.js';
 
+export { getLatestCheckpoint } from './checkpoint.js';
+
 export {
   retrieveActiveRules,
   formatRulesForPrompt,

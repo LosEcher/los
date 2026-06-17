@@ -5,6 +5,7 @@ import {
   ensureMemoryCompactionStore, compactSession, listCompactions,
   retrieveActiveRules, routeMemoryRetrieval,
   applyRetentionPolicy, checkMemoryIntegrity,
+  getLatestCheckpoint,
 } from '@los/memory';
 import { syncMemoryMd } from '@los/memory';
 import { ensureRunEvalStore } from '@los/agent';
@@ -131,6 +132,14 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       limit: normalizeBoundedInteger(query.limit, 100, 1, 1000),
     });
     return { count: compactions.length, compactions };
+  });
+
+  // Checkpoint recovery: get the latest checkpoint for a session
+  app.get('/memory/checkpoint/:sessionId', async (req) => {
+    const { sessionId } = req.params as { sessionId: string };
+    if (!sessionId) return { checkpoint: null };
+    const checkpoint = await getLatestCheckpoint(sessionId);
+    return { checkpoint };
   });
 
   app.get('/memory/active-rules', async (req) => {
