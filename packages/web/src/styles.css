@@ -2559,3 +2559,58 @@ button:disabled {
   color: var(--text-dim);
   font-size: 12px;
 }
+
+/* ── Auth Banner ─────────────────────────────────────── */
+
+.auth-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #3d2e0a;
+  border-bottom: 1px solid #6b4f12;
+  color: #f0d060;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.auth-banner input {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  width: 220px;
+}
+
+.auth-banner button {
+  background: #6b4f12;
+  border: none;
+  color: #f0d060;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-banner button:hover {
+  background: #8a6518;
+}
+
+.auth-banner .auth-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  padding: 0 4px;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.auth-banner .auth-dismiss:hover {
+  color: var(--text);
+}

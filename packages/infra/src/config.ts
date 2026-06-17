@@ -147,6 +147,12 @@ function loadEnvFile(cwd: string): Record<string, string> {
         value = value.slice(1, -1);
       }
       result[key] = value;
+      // Mirror to process.env so downstream consumers (e.g. initDb's
+      // resolveDatabaseUrlForInit looking for TEST_DATABASE_URL) can see
+      // .env values without duplicating them in the shell environment.
+      if (!(key in process.env)) {
+        process.env[key] = value;
+      }
     }
   } catch { /* ignore */ }
   return result;

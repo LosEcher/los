@@ -15,6 +15,8 @@ required_contracts=(
   agent-task-graph.yaml
   provider-compat-evidence.yaml
   todo-dispatch.yaml
+  integration-feed-analysis.yaml
+  memory.yaml
 )
 
 failures=0
@@ -29,7 +31,7 @@ require_pattern() {
   local pattern="$2"
   local label="$3"
   if ! grep -Eq "$pattern" "$file"; then
-    fail "$(basename "$file") missing $label"
+    fail "$file: missing $label (pattern: $pattern)"
   fi
 }
 
@@ -105,6 +107,92 @@ provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
   require_pattern "$provider_compat_evidence" 'verified_advisory' 'verified advisory decision'
   require_pattern "$provider_compat_evidence" 'raw transcripts' 'raw transcript redaction'
 }
+
+integration_feed="$CONTRACT_DIR/integration-feed-analysis.yaml"
+memory="$CONTRACT_DIR/memory.yaml"
+
+[ -f "$integration_feed" ] && {
+  require_pattern "$integration_feed" '/api/integrations/feed-analysis/targets' 'targets route'
+  require_pattern "$integration_feed" '/api/integrations/feed-analysis/dispatch' 'dispatch route'
+  require_pattern "$integration_feed" 'sourceSystem' 'sourceSystem field'
+  require_pattern "$integration_feed" 'idempotency' 'idempotency support'
+  require_pattern "$integration_feed" 'sourceOfTruth' 'sourceOfTruth section'
+}
+
+[ -f "$memory" ] && {
+  require_pattern "$memory" '/memory' 'memory search route'
+  require_pattern "$memory" '/memory/compact' 'memory compact route'
+  require_pattern "$memory" '/memory/active-rules' 'active rules route'
+  require_pattern "$memory" '/memory/retrieve' 'retrieval route'
+  require_pattern "$memory" 'observations' 'observations source'
+  require_pattern "$memory" 'memory_compactions' 'compactions source'
+  require_pattern "$memory" 'procedural_candidates' 'candidates source'
+}
+
+# ── Status-based gating (informational only until all contracts reach review) ──
+
+for name in "${required_contracts[@]}"; do
+  file="$CONTRACT_DIR/$name"
+  [ -f "$file" ] || continue
+  status=$(grep -E '^status:[[:space:]]+' "$file" | head -1 | sed 's/^status:[[:space:]]*//')
+  if [ "$status" = "draft" ]; then
+    printf '  contract check warning: %s has status "draft"\n' "$name" >&2
+  fi
+done
+
+# ── Version consistency check ──
+
+declare -A contract_versions
+for name in "${required_contracts[@]}"; do
+  file="$CONTRACT_DIR/$name"
+  [ -f "$file" ] || continue
+  ver=$(grep -E '^version:[[:space:]]+' "$file" | head -1 | sed 's/^version:[[:space:]]*//')
+  contract_versions[$name]="$ver"
+done
+
+if [ "${#contract_versions[@]}" -gt 1 ]; then
+  printf '  contract versions:\n' >&2
+  for name in "${!contract_versions[@]}"; do
+    printf '    %-45s %s\n' "$name" "${contract_versions[$name]}" >&2
+  done
+fi
+
+versions_only=$(printf '%s\n' "${contract_versions[@]}" | sort -u)
+version_count=$(echo "$versions_only" | grep -c . || true)
+if [ "$version_count" -gt 1 ]; then
+  printf '  contract check warning: %d distinct versions across %d contracts\n' \
+    "$version_count" "${#required_contracts[@]}" >&2
+fi
+
+# ── Cross-contract reference validation ──
+
+# Verify session-trace → run-stream dependency
+if [ -f "$CONTRACT_DIR/session-trace.yaml" ]; then
+  if ! grep -q 'run-stream\.yaml' "$CONTRACT_DIR/session-trace.yaml"; then
+    fail "session-trace.yaml should declare its dependency on run-stream.yaml"
+  fi
+fi
+
+# Verify run-spec references los.run-stream
+if [ -f "$CONTRACT_DIR/run-spec.yaml" ]; then
+  if ! grep -q 'los\.run-stream' "$CONTRACT_DIR/run-spec.yaml" 2>/dev/null; then
+    printf '  contract check warning: run-spec.yaml does not reference los.run-stream\n' >&2
+  fi
+fi
+
+# Validate that referenced los.<name> contracts exist
+for name in "${required_contracts[@]}"; do
+  file="$CONTRACT_DIR/$name"
+  [ -f "$file" ] || continue
+  refs=$(grep -oE 'los\.[a-z-]+' "$file" 2>/dev/null | sort -u || true)
+  for ref in $refs; do
+    ref_file="$CONTRACT_DIR/${ref#los.}.yaml"
+    if [ ! -f "$ref_file" ]; then
+      printf '  contract check warning: %s references %s but %s does not exist\n' \
+        "$name" "$ref" "${ref#los.}.yaml" >&2
+    fi
+  done
+done
 
 # ── Event coverage: contract eventTypes vs actual emissions ──
 

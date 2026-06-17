@@ -17,7 +17,7 @@ import {
   TerminalSquare,
   Zap,
 } from 'lucide-react';
-import { getJson, type Health, type SessionSummary, type TodoItem } from './api';
+import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type SessionSummary, type TodoItem } from './api';
 import {
   LogsPage,
   MemoryPage,
@@ -185,6 +185,7 @@ export function App() {
       </aside>
 
       <main className="workspace">
+        <AuthBanner />
         <header className="topbar">
           <div>
             <div className="eyebrow">Workspace</div>
@@ -222,6 +223,57 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
     <div className={`metric ${tone ?? ''}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+// ── Auth Banner ────────────────────────────────────────────
+
+function AuthBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => getJson<{ auth?: { enabled?: boolean } }>('/settings'),
+    staleTime: 60_000,
+  });
+
+  const authEnabled = settings.data?.auth?.enabled === true;
+  const hasToken = Boolean(getAuthToken());
+
+  if (!authEnabled || hasToken || dismissed) return null;
+
+  return (
+    <div className="auth-banner">
+      <span>🔐 Auth is enabled — set your token to access data.</span>
+      <input
+        type="password"
+        value={tokenInput}
+        onChange={e => setTokenInput(e.target.value)}
+        placeholder="Paste auth token…"
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            setAuthToken(tokenInput.trim() || undefined);
+            setSaved(true);
+            setTimeout(() => setDismissed(true), 800);
+          }
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => {
+          setAuthToken(tokenInput.trim() || undefined);
+          setSaved(true);
+          setTimeout(() => setDismissed(true), 800);
+        }}
+      >
+        {saved ? '✓ Saved' : 'Save'}
+      </button>
+      <button type="button" className="auth-dismiss" onClick={() => setDismissed(true)}>
+        ×
+      </button>
     </div>
   );
 }

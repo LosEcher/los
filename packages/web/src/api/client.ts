@@ -1,54 +1,57 @@
 import type { ChatPayload, StreamEvent } from './types.js';
 
-export async function getJson<T>(path: string): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const pid = getCurrentProjectId();
-  if (pid) headers['x-project-id'] = pid;
-  const res = await fetch(path, { headers });
-  if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
+export class AuthError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = 'AuthError';
   }
+}
+
+function checkResponse(res: Response): void {
+  if (!res.ok) {
+    const err = res.status === 401
+      ? new AuthError('Authentication required — set auth token in Settings', res.status)
+      : new Error(`${res.status} ${res.statusText}`);
+    throw err;
+  }
+}
+
+export async function getJson<T>(path: string): Promise<T> {
+  const headers = buildHeaders();
+  const res = await fetch(path, { headers });
+  checkResponse(res);
   return await res.json() as T;
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const pid = getCurrentProjectId();
-  if (pid) headers['x-project-id'] = pid;
+  const headers = buildHeaders();
   const res = await fetch(path, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
-  }
+  checkResponse(res);
   return await res.json() as T;
 }
 
 export async function deleteJson<T>(path: string): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const pid = getCurrentProjectId();
-  if (pid) headers['x-project-id'] = pid;
+  const headers = buildHeaders();
   const res = await fetch(path, { method: 'DELETE', headers });
-  if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
-  }
+  checkResponse(res);
   return await res.json() as T;
 }
 
 export async function patchJson<T>(path: string, body: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const pid = getCurrentProjectId();
-  if (pid) headers['x-project-id'] = pid;
+  const headers = buildHeaders();
   const res = await fetch(path, {
     method: 'PATCH',
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw new Error(`${res.status} ${res.statusText}`);
-  }
+  checkResponse(res);
   return await res.json() as T;
 }
 
@@ -57,9 +60,7 @@ export async function streamChat(
   signal: AbortSignal,
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const pid = getCurrentProjectId();
-  if (pid) headers['x-project-id'] = pid;
+  const headers = buildHeaders();
   const res = await fetch('/chat', {
     method: 'POST',
     headers,
@@ -67,6 +68,7 @@ export async function streamChat(
     signal,
   });
   if (!res.ok || !res.body) {
+    checkResponse(res);
     throw new Error(`${res.status} ${res.statusText}`);
   }
 
@@ -96,6 +98,17 @@ export async function streamChat(
   }
 }
 
+// ── Shared header builder ────────────────────────────
+
+function buildHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const pid = getCurrentProjectId();
+  if (pid) headers['x-project-id'] = pid;
+  const token = getAuthToken();
+  if (token) headers['x-los-auth-token'] = token;
+  return headers;
+}
+
 // ── Current project header ───────────────────────────
 
 const PROJECT_ID_KEY = 'los-project-id';
@@ -115,6 +128,29 @@ export function setCurrentProjectId(projectId: string | undefined): void {
       localStorage.setItem(PROJECT_ID_KEY, projectId);
     } else {
       localStorage.removeItem(PROJECT_ID_KEY);
+    }
+  } catch { /* ignore */ }
+}
+
+// ── Auth token ───────────────────────────────────────
+
+const AUTH_TOKEN_KEY = 'los-auth-token';
+
+export function getAuthToken(): string | undefined {
+  try {
+    const val = localStorage.getItem(AUTH_TOKEN_KEY);
+    return val?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setAuthToken(token: string | undefined): void {
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
     }
   } catch { /* ignore */ }
 }
