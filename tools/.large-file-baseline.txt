@@ -29,11 +29,11 @@ packages/cli/src/index.ts
 packages/cli/src/provider.ts
 packages/gateway/src/chat-service.ts
 packages/gateway/src/routes/node-routes.ts
-packages/gateway/src/routes/provider-routes.ts
+packages/gateway/src/routes/providers/provider-routes.ts
 packages/gateway/src/server.ts
 packages/infra/src/config.ts
-packages/memory/src/compaction.ts
-packages/memory/src/store.ts
+packages/memory/src/core/compaction.ts
+packages/memory/src/core/store.ts
 packages/web/src/chat-page.tsx
 packages/web/src/pages/memory-page.tsx
 packages/web/src/pages/sessions-page.tsx

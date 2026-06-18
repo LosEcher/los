@@ -13,12 +13,12 @@ import {
   ensureProceduralCandidateStore,
   createProceduralCandidate,
   promoteProceduralCandidate,
-} from './procedural-candidates.js';
-import { buildTranscriptBrief, type TranscriptBrief } from './transcript-brief.js';
+} from '../procedures/procedural-candidates.js';
+import { buildTranscriptBrief, type TranscriptBrief } from '../transcript/transcript-brief.js';
 import {
   normalizeRequired, normalizeLimit, normalizeJsonObject,
   normalizeJsonArray, parseJsonArray, toIsoString,
-} from './normalizers.js';
+} from '../normalizers.js';
 
 const log = getLogger('memory-compaction');
 
@@ -246,7 +246,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
 
     // Self-reflection detection (Phase 2) — extracted to self-reflection.ts
     try {
-      const { detectSelfReflectionCandidates } = await import('./self-reflection.js');
+      const { detectSelfReflectionCandidates } = await import('../reflection/self-reflection.js');
       const sr = await detectSelfReflectionCandidates({ sessionId, tenantId: input.tenantId ?? undefined, projectId: input.projectId ?? undefined });
       for (const p of sr.observedPatterns) observedPatterns.push(p);
       for (const c of sr.proceduralCandidates) proceduralCandidates.push(c);

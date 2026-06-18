@@ -9,7 +9,7 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getLogger } from '@los/infra/logger';
-import type { Observation } from './store.js';
+import type { Observation } from './core/store.js';
 
 const log = getLogger('memory');
 

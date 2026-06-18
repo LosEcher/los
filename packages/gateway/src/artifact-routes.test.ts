@@ -8,7 +8,7 @@ import Fastify from 'fastify';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
 import { registerRequestContext } from './request-context.js';
-import { registerArtifactRoutes } from './routes/artifact-routes.js';
+import { registerArtifactRoutes } from './routes/tools/artifact-routes.js';
 
 test('artifact routes put, read, list, and delete a local artifact', async () => {
   const config = await loadConfig();

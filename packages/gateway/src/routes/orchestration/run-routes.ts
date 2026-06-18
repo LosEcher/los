@@ -22,7 +22,7 @@ import {
   normalizeNonNegativeInteger,
   normalizeBoundedInteger,
   normalizeOptionalNonNegativeInteger,
-} from './server-helpers.js';
+} from '../server-helpers.js';
 
 type StreamReplayItem =
   | { kind: 'stream'; id: number; eventType: string; turn: number; payload: Record<string, unknown>; createdAt: string }
