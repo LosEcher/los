@@ -122,7 +122,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   });
 
   app.get('/settings', async () => ({
-    server: { port: config.server.port, host: config.server.host },
+    server: { port: config.server.port, host: config.server.host, corsOrigin: config.server.corsOrigin },
     defaultProjectId: config.defaultProjectId,
     auth: { enabled: config.auth.enabled },
     agent: {
@@ -130,6 +130,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       defaultModel: config.agent.defaultModel,
       maxLoops: config.agent.maxLoops,
       sandboxMode: config.agent.sandboxMode,
+      systemPrompt: config.agent.systemPrompt ?? null,
       identity: {
         name: config.agent.identity.name,
         level: config.agent.identity.level ?? null,
@@ -162,6 +163,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       enabled: config.executor.enabled,
       nodeId: config.executor.nodeId,
       nodeUrl: config.executor.nodeUrl,
+      connectModes: config.executor.connectModes,
+      meshNodes: config.executor.meshNodes,
       meshNodeCount: config.executor.meshNodes.length,
     },
     providers: Object.entries(config.providers).map(([name, p]) => ({

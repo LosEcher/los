@@ -114,9 +114,9 @@ export function SettingsPage() {
   const authCfg = (cfg.auth ?? {}) as Record<string, unknown>;
 
   // Server draft
-  const [serverDraft, setServerDraft] = useState({ port: Number(serverCfg.port ?? 8080), host: String(serverCfg.host ?? '127.0.0.1') });
+  const [serverDraft, setServerDraft] = useState({ port: Number(serverCfg.port ?? 8080), host: String(serverCfg.host ?? '127.0.0.1'), corsOrigin: String(serverCfg.corsOrigin ?? 'http://localhost:5173') });
   // Agent draft
-  const [agentDraft, setAgentDraft] = useState({ defaultProvider: String(agentCfg.defaultProvider ?? ''), defaultModel: String(agentCfg.defaultModel ?? ''), maxLoops: Number(agentCfg.maxLoops ?? 20), sandboxMode: String(agentCfg.sandboxMode ?? 'workspace-write') });
+  const [agentDraft, setAgentDraft] = useState({ defaultProvider: String(agentCfg.defaultProvider ?? ''), defaultModel: String(agentCfg.defaultModel ?? ''), maxLoops: Number(agentCfg.maxLoops ?? 20), sandboxMode: String(agentCfg.sandboxMode ?? 'workspace-write'), systemPrompt: String(agentCfg.systemPrompt ?? '') });
   // Identity draft
   const [identityDraft, setIdentityDraft] = useState({ name: String(agentIdentity.name ?? 'default'), level: String(agentIdentity.level ?? ''), inheritForChildren: Boolean(agentIdentity.inheritForChildren) });
   // Judge draft
@@ -126,18 +126,18 @@ export function SettingsPage() {
   // Memory draft
   const [memoryDraft, setMemoryDraft] = useState({ ftsEnabled: Boolean(memoryCfg.ftsEnabled ?? true), maxObservations: Number(memoryCfg.maxObservations ?? 10000), selfReflectionEnabled: Boolean(memoryCfg.selfReflectionEnabled) });
   // Executor draft
-  const [executorDraft, setExecutorDraft] = useState({ enabled: Boolean(executorCfg.enabled), nodeId: String(executorCfg.nodeId ?? ''), meshNodeCount: Number(executorCfg.meshNodeCount ?? 0) });
+  const [executorDraft, setExecutorDraft] = useState({ enabled: Boolean(executorCfg.enabled), nodeId: String(executorCfg.nodeId ?? ''), connectModes: String(Array.isArray(executorCfg.connectModes) ? (executorCfg.connectModes as string[]).join(', ') : ''), meshNodes: String(Array.isArray(executorCfg.meshNodes) ? (executorCfg.meshNodes as string[]).join('\n') : ''), meshNodeCount: Number(executorCfg.meshNodeCount ?? 0) });
   // Auth draft
   const [authEnabled, setAuthEnabled] = useState(Boolean(authCfg.enabled));
 
   // Sync drafts when server data changes
-  useEffect(() => { setServerDraft({ port: Number(serverCfg.port ?? 8080), host: String(serverCfg.host ?? '127.0.0.1') }); }, [serverCfg.port, serverCfg.host]);
-  useEffect(() => { setAgentDraft({ defaultProvider: String(agentCfg.defaultProvider ?? ''), defaultModel: String(agentCfg.defaultModel ?? ''), maxLoops: Number(agentCfg.maxLoops ?? 20), sandboxMode: String(agentCfg.sandboxMode ?? 'workspace-write') }); }, [agentCfg.defaultProvider, agentCfg.defaultModel, agentCfg.maxLoops, agentCfg.sandboxMode]);
+  useEffect(() => { setServerDraft({ port: Number(serverCfg.port ?? 8080), host: String(serverCfg.host ?? '127.0.0.1'), corsOrigin: String(serverCfg.corsOrigin ?? 'http://localhost:5173') }); }, [serverCfg.port, serverCfg.host, serverCfg.corsOrigin]);
+  useEffect(() => { setAgentDraft({ defaultProvider: String(agentCfg.defaultProvider ?? ''), defaultModel: String(agentCfg.defaultModel ?? ''), maxLoops: Number(agentCfg.maxLoops ?? 20), sandboxMode: String(agentCfg.sandboxMode ?? 'workspace-write'), systemPrompt: String(agentCfg.systemPrompt ?? '') }); }, [agentCfg.defaultProvider, agentCfg.defaultModel, agentCfg.maxLoops, agentCfg.sandboxMode, agentCfg.systemPrompt]);
   useEffect(() => { setIdentityDraft({ name: String(agentIdentity.name ?? 'default'), level: String(agentIdentity.level ?? ''), inheritForChildren: Boolean(agentIdentity.inheritForChildren) }); }, [agentIdentity.name, agentIdentity.level, agentIdentity.inheritForChildren]);
   useEffect(() => { setJudgeDraft({ provider: String(judgeCfg.provider ?? ''), model: String(judgeCfg.model ?? ''), systemPrompt: String(judgeCfg.systemPrompt ?? '') }); }, [judgeCfg.provider, judgeCfg.model, judgeCfg.systemPrompt]);
   useEffect(() => { setReviewEnabled(Boolean(reviewCfg.enabled)); }, [reviewCfg.enabled]);
   useEffect(() => { setMemoryDraft({ ftsEnabled: Boolean(memoryCfg.ftsEnabled ?? true), maxObservations: Number(memoryCfg.maxObservations ?? 10000), selfReflectionEnabled: Boolean(memoryCfg.selfReflectionEnabled) }); }, [memoryCfg.ftsEnabled, memoryCfg.maxObservations, memoryCfg.selfReflectionEnabled]);
-  useEffect(() => { setExecutorDraft({ enabled: Boolean(executorCfg.enabled), nodeId: String(executorCfg.nodeId ?? ''), meshNodeCount: Number(executorCfg.meshNodeCount ?? 0) }); }, [executorCfg.enabled, executorCfg.nodeId, executorCfg.meshNodeCount]);
+  useEffect(() => { setExecutorDraft({ enabled: Boolean(executorCfg.enabled), nodeId: String(executorCfg.nodeId ?? ''), connectModes: String(Array.isArray(executorCfg.connectModes) ? (executorCfg.connectModes as string[]).join(', ') : ''), meshNodes: String(Array.isArray(executorCfg.meshNodes) ? (executorCfg.meshNodes as string[]).join('\n') : ''), meshNodeCount: Number(executorCfg.meshNodeCount ?? 0) }); }, [executorCfg.enabled, executorCfg.nodeId, executorCfg.connectModes, executorCfg.meshNodes, executorCfg.meshNodeCount]);
   useEffect(() => { setAuthEnabled(Boolean(authCfg.enabled)); }, [authCfg.enabled]);
 
   return (
@@ -159,6 +159,7 @@ export function SettingsPage() {
         <SectionHeader title="Server" onSave={() => saveSection.mutate({ server: serverDraft })} saving={saveSection.isPending} />
         <NumberField label="port" value={serverDraft.port} onChange={v => setServerDraft(p => ({ ...p, port: v }))} />
         <TextField label="host" value={serverDraft.host} onChange={v => setServerDraft(p => ({ ...p, host: v }))} />
+        <TextField label="CORS origin" value={serverDraft.corsOrigin} onChange={v => setServerDraft(p => ({ ...p, corsOrigin: v }))} />
 
         {/* ── Agent ─────────────────────────────────────── */}
         <SectionHeader title="Agent" onSave={() => saveSection.mutate({ agent: agentDraft })} saving={saveSection.isPending} />
@@ -166,6 +167,9 @@ export function SettingsPage() {
         <TextField label="default model" value={agentDraft.defaultModel} onChange={v => setAgentDraft(p => ({ ...p, defaultModel: v }))} />
         <NumberField label="max loops" value={agentDraft.maxLoops} onChange={v => setAgentDraft(p => ({ ...p, maxLoops: v }))} />
         <SelectField label="sandbox mode" value={agentDraft.sandboxMode} options={['readonly', 'workspace-write', 'sandbox']} onChange={v => setAgentDraft(p => ({ ...p, sandboxMode: v }))} />
+        <Field label="system prompt">
+          <textarea rows={3} value={agentDraft.systemPrompt} onChange={e => setAgentDraft(p => ({ ...p, systemPrompt: e.target.value }))} />
+        </Field>
 
         {/* ── Agent Identity ────────────────────────────── */}
         <SectionHeader title="Agent Identity" onSave={() => saveSection.mutate({ agent: { ...agentDraft, identity: identityDraft } })} saving={saveSection.isPending} />
@@ -205,9 +209,13 @@ export function SettingsPage() {
         <ToggleField label="self-reflection" checked={memoryDraft.selfReflectionEnabled} onChange={v => setMemoryDraft(p => ({ ...p, selfReflectionEnabled: v }))} />
 
         {/* ── Executor ──────────────────────────────────── */}
-        <SectionHeader title="Executor" onSave={() => saveSection.mutate({ executor: { enabled: executorDraft.enabled, nodeId: executorDraft.nodeId, meshNodes: [] } })} saving={saveSection.isPending} />
+        <SectionHeader title="Executor" onSave={() => saveSection.mutate({ executor: { enabled: executorDraft.enabled, nodeId: executorDraft.nodeId, connectModes: executorDraft.connectModes ? executorDraft.connectModes.split(',').map(s => s.trim()).filter(Boolean) : [], meshNodes: executorDraft.meshNodes ? executorDraft.meshNodes.split('\n').map(s => s.trim()).filter(Boolean) : [] } })} saving={saveSection.isPending} />
         <ToggleField label="enabled" checked={executorDraft.enabled} onChange={v => setExecutorDraft(p => ({ ...p, enabled: v }))} />
         <TextField label="node ID" value={executorDraft.nodeId} onChange={v => setExecutorDraft(p => ({ ...p, nodeId: v }))} />
+        <TextField label="connect modes" value={executorDraft.connectModes} onChange={v => setExecutorDraft(p => ({ ...p, connectModes: v }))} />
+        <Field label="mesh nodes (one per line)">
+          <textarea rows={4} value={executorDraft.meshNodes} onChange={e => setExecutorDraft(p => ({ ...p, meshNodes: e.target.value }))} />
+        </Field>
 
         {/* ── Providers (read-only summary) ─────────────── */}
         {providers.length > 0 ? (
