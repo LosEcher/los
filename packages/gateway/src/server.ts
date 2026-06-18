@@ -376,12 +376,17 @@ export async function startServer(port?: number, host?: string) {
       } catch (err) {
         log.warn(`Auto-compact maintenance failed: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }).catch(() => undefined);
+    }).catch((err) => {
+      log.warn(`Memory maintenance import failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   };
   // Run once at startup, then daily
-  setTimeout(runMemoryMaintenance, 10_000); // 10s after startup
+  const memoryMaintenanceTimeout = setTimeout(runMemoryMaintenance, 10_000);
   const retentionTimer = setInterval(runMemoryMaintenance, RETENTION_MS);
-  app.addHook('onClose', async () => clearInterval(retentionTimer));
+  app.addHook('onClose', async () => {
+    clearTimeout(memoryMaintenanceTimeout);
+    clearInterval(retentionTimer);
+  });
 
   // Governance sweep — seed jobs + run due audits (daily, offset from memory maintenance)
   const GOVERNANCE_SWEEP_MS = 24 * 60 * 60 * 1000;
@@ -400,11 +405,16 @@ export async function startServer(port?: number, host?: string) {
       } catch (err) {
         log.warn(`Governance sweep failed: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }).catch(() => undefined);
+    }).catch((err) => {
+      log.warn(`Governance sweep import failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   };
-  setTimeout(runGovernanceMaintenance, 30_000); // 30s after startup
+  const governanceTimeout = setTimeout(runGovernanceMaintenance, 30_000);
   const governanceTimer = setInterval(runGovernanceMaintenance, GOVERNANCE_SWEEP_MS);
-  app.addHook('onClose', async () => clearInterval(governanceTimer));
+  app.addHook('onClose', async () => {
+    clearTimeout(governanceTimeout);
+    clearInterval(governanceTimer);
+  });
 
   await app.listen({ port: p, host: h });
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);

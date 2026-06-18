@@ -115,7 +115,7 @@ fi
 # 2. Check/setup Node.js
 step "Check Node.js $NODE_VERSION"
 node_check=$(ssh_cmd "command -v node && node --version || echo missing" 2>&1 || true)
-if echo "$node_check" | grep -q "v${NODE_VERSION}\|v2[2-9]\|v[3-9][0-9]"; then
+if echo "$node_check" | grep -qE "v${NODE_VERSION}|v2[2-9]|v[3-9][0-9]"; then
   log "Node.js found: $(echo "$node_check" | head -1)"
 else
   log "Node.js $NODE_VERSION not found, installing via nvm..."
@@ -213,7 +213,8 @@ EOF"
 step "Configure systemd service"
 if ssh_cmd "command -v systemctl" 2>&1 | grep -q systemctl; then
   log "systemd detected, creating service unit..."
-  ssh_cmd "cat > /etc/systemd/system/los-executor.service << 'EOF'
+  NODE_PATH=$(ssh_cmd "command -v node || echo /usr/bin/node")
+  ssh_cmd "cat > /etc/systemd/system/los-executor.service << EOF
 [Unit]
 Description=los executor
 After=network-online.target
@@ -225,7 +226,7 @@ User=root
 WorkingDirectory=$INSTALL_DIR
 Environment=NODE_ENV=production
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$(command -v node) --import tsx $INSTALL_DIR/packages/executor/src/index.ts
+ExecStart=$NODE_PATH --import tsx $INSTALL_DIR/packages/executor/src/index.ts
 Restart=always
 RestartSec=10
 
