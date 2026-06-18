@@ -68,12 +68,15 @@ function configForAuth(enabled: boolean): Config {
       defaultModel: 'deepseek-v4-flash',
       maxLoops: 20,
       sandboxMode: 'workspace-write',
+      identity: { name: 'default', inheritForChildren: false },
     },
     judge: {},
+    review: { enabled: false, roles: {} },
     providers: {},
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,
+      selfReflectionEnabled: false,
     },
     executor: {
       enabled: false,

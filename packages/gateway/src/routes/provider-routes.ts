@@ -30,7 +30,7 @@ import {
   normalizeNonNegativeNumber,
   parseOptionalBoolean,
 } from './server-helpers.js';
-import { getConfig } from '@los/infra/config';
+import { getConfig, setConfig } from '@los/infra/config';
 
 // ── Provider/onboarding sanitizers ──────────────────────
 
@@ -321,6 +321,37 @@ export function registerProviderRoutes(app: FastifyInstance): void {
       updatedAt: r.updated_at,
     }));
     return { count: cases.length, cases, backlogCases: getEvalBacklogCases() };
+  });
+
+  // ── Provider CRUD (config-level) ─────────────────────
+  app.patch('/providers/:name', async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const body = asRecord(req.body);
+    const config = getConfig();
+    if (!config.providers[name]) {
+      return reply.status(404).send({ error: `Provider "${name}" not found in config` });
+    }
+    const updates: Record<string, unknown> = {};
+    if (body.model !== undefined) updates.model = normalizeOptionalString(body.model);
+    if (body.apiKey !== undefined) updates.apiKey = normalizeOptionalString(body.apiKey);
+    if (body.baseUrl !== undefined) updates.baseUrl = normalizeOptionalString(body.baseUrl);
+    if (body.weight !== undefined) updates.weight = normalizeOptionalNonNegativeInteger(body.weight);
+    if (typeof body.enabled === 'boolean') updates.enabled = body.enabled;
+
+    config.providers[name] = { ...config.providers[name], ...updates };
+    setConfig(config);
+    return { ok: true, provider: { name, ...config.providers[name] } };
+  });
+
+  app.delete('/providers/:name', async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const config = getConfig();
+    if (!config.providers[name]) {
+      return reply.status(404).send({ error: `Provider "${name}" not found in config` });
+    }
+    delete config.providers[name];
+    setConfig(config);
+    return { ok: true, removed: name };
   });
 
   app.get('/providers/models', async (req) => {

@@ -17,6 +17,7 @@ export default defineConfig({
       '/logs': 'http://127.0.0.1:8080',
       '/mcp-servers': 'http://127.0.0.1:8080',
       '/memory': 'http://127.0.0.1:8080',
+      '/node-commands': 'http://127.0.0.1:8080',
       '/nodes': 'http://127.0.0.1:8080',
       '/onboarding': 'http://127.0.0.1:8080',
       '/projects': 'http://127.0.0.1:8080',

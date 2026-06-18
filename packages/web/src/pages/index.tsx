@@ -4,4 +4,7 @@ export { MemoryPage } from './memory-page.js';
 export { ProvidersPage } from './providers-page.js';
 export { LogsPage } from './logs-page.js';
 export { SettingsPage } from './settings-page.js';
+export { DeadLetterPage } from './dead-letter-page.js';
+export { DiagnosticsPage } from './diagnostics-page.js';
+export { RunSpecsPage } from './run-specs-page.js';
 export { ReservedPage } from './reserved-page.js';

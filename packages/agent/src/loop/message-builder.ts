@@ -7,6 +7,10 @@ import type { Message } from '../providers/index.js';
 import type { ContextCompressionConfig } from './types.js';
 import { estimateMessageTokens } from './token-utils.js';
 import { compressOrTrimMessages } from './compression.js';
+import { preprocessInput } from '@los/input-preprocessor';
+import { getLogger } from '@los/infra/logger';
+
+const log = getLogger('agent');
 
 // ── System Prompts ────────────────────────────────────────
 
@@ -47,11 +51,24 @@ Rules:
 
 /**
  * Get the default system prompt based on the tool mode.
+ *
+ * @param toolMode — tool access level
+ * @param identityBlock — optional identity block to prepend before the base prompt.
+ *   When provided, the identity block is placed first, followed by a blank line
+ *   separator and the tool-mode system prompt.
  */
-export function getDefaultSystemPrompt(toolMode: 'all' | 'project-write' | 'read-only'): string {
-  if (toolMode === 'read-only') return READ_ONLY_SYSTEM;
-  if (toolMode === 'project-write') return PROJECT_WRITE_SYSTEM;
-  return DEFAULT_SYSTEM;
+export function getDefaultSystemPrompt(
+  toolMode: 'all' | 'project-write' | 'read-only',
+  identityBlock?: string,
+): string {
+  const base = toolMode === 'read-only' ? READ_ONLY_SYSTEM
+    : toolMode === 'project-write' ? PROJECT_WRITE_SYSTEM
+    : DEFAULT_SYSTEM;
+
+  if (identityBlock) {
+    return identityBlock + '\n\n' + base;
+  }
+  return base;
 }
 
 // ── Message Construction ──────────────────────────────────
@@ -77,7 +94,36 @@ export function buildInitialMessages(
   if (!messages.some(message => message.role === 'system')) {
     messages.unshift({ role: 'system', content: systemPrompt });
   }
-  messages.push({ role: 'user', content: prompt });
+  // Apply input preprocessing (log denoising, dedup, etc.) when configured.
+  const preprocessorConfig = compression?.preprocessor;
+  let processedPrompt = prompt;
+  if (compression?.enabled !== false && preprocessorConfig) {
+    const result = preprocessInput({ rawText: prompt, config: preprocessorConfig });
+    processedPrompt = result.processedText;
+
+    // Log significant preprocessing outcomes for observability.
+    const { metadata, safetyReport: safety } = result;
+    if (metadata.processingTimeMs > 100) {
+      log.warn('input preprocessing took >100ms', {
+        contentType: metadata.contentType,
+        timeMs: metadata.processingTimeMs,
+        originalTokens: safety.originalTokenEstimate,
+        finalTokens: safety.finalTokenEstimate,
+        compressionRatio: Math.round(safety.compressionRatio * 100) / 100,
+        removedByClassifier: safety.removedByClassifier,
+        deduplicatedCount: safety.deduplicatedCount,
+      });
+    } else if (metadata.contentType !== 'unknown' && safety.compressionRatio < 0.95) {
+      log.info('input preprocessed', {
+        contentType: metadata.contentType,
+        timeMs: metadata.processingTimeMs,
+        reduction: Math.round((1 - safety.compressionRatio) * 100),
+        originalLen: metadata.originalLength,
+        processedLen: metadata.processedLength,
+      });
+    }
+  }
+  messages.push({ role: 'user', content: processedPrompt });
 
   // Auto-enable compression for resumed sessions with many messages to prevent
   // context overflow. Explicit maxContextTokens always takes precedence.

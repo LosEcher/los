@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
+import { getConfig, setConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb, getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { migrateDir } from '@los/infra/migrate';
@@ -130,8 +130,34 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       defaultModel: config.agent.defaultModel,
       maxLoops: config.agent.maxLoops,
       sandboxMode: config.agent.sandboxMode,
+      identity: {
+        name: config.agent.identity.name,
+        level: config.agent.identity.level ?? null,
+        inheritForChildren: config.agent.identity.inheritForChildren,
+      },
     },
-    memory: { ftsEnabled: config.memory.ftsEnabled, maxObservations: config.memory.maxObservations },
+    judge: {
+      provider: config.judge.provider ?? null,
+      model: config.judge.model ?? null,
+      systemPrompt: config.judge.systemPrompt ?? null,
+    },
+    review: {
+      enabled: config.review.enabled,
+      roles: Object.fromEntries(
+        Object.entries(config.review.roles).map(([name, r]) => [name, {
+          provider: r.provider ?? null,
+          model: r.model ?? null,
+          systemPrompt: r.systemPrompt ?? null,
+          blockingSeverity: r.blockingSeverity,
+          enabled: r.enabled,
+        }])
+      ),
+    },
+    memory: {
+      ftsEnabled: config.memory.ftsEnabled,
+      maxObservations: config.memory.maxObservations,
+      selfReflectionEnabled: config.memory.selfReflectionEnabled,
+    },
     executor: {
       enabled: config.executor.enabled,
       nodeId: config.executor.nodeId,
@@ -144,6 +170,29 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       model: p.model ?? null, weight: p.weight ?? null,
     })),
   }));
+
+  app.patch('/settings', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return reply.status(400).send({ error: 'Request body must be a JSON object' });
+    }
+    const current = getConfig();
+    // Deep-merge the patch into current config. Only allow top-level keys
+    // that exist in the current config to prevent injection.
+    const merged = { ...current } as Record<string, unknown>;
+    for (const [key, val] of Object.entries(body)) {
+      if (val && typeof val === 'object' && !Array.isArray(val) &&
+          key in merged && merged[key] && typeof merged[key] === 'object') {
+        (merged as Record<string, unknown>)[key] = {
+          ...(merged[key] as Record<string, unknown>),
+          ...(val as Record<string, unknown>),
+        };
+      }
+    }
+    setConfig(merged as ReturnType<typeof getConfig>);
+    log.info('Settings updated via PATCH');
+    return { ok: true };
+  });
 
   // ── Logs & extracted routes ─────────────────────────
   registerLogRoutes(app, { runtimeLogDir: RUNTIME_LOG_DIR, runtimeLogPath: RUNTIME_LOG_PATH });
@@ -273,10 +322,10 @@ export async function startServer(port?: number, host?: string) {
   }, ORPHAN_REAPER_MS);
   app.addHook('onClose', async () => clearInterval(orphanReaper));
 
-  // Daily memory retention + integrity check (run at startup + every 24h)
+  // Daily memory retention + integrity + auto-compact (run at startup + every 24h)
   const RETENTION_MS = 24 * 60 * 60 * 1000;
   const runMemoryMaintenance = async () => {
-    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity }) => {
+    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore }) => {
       const retention = await applyRetentionPolicy().catch((err) => {
         log.warn(`Memory retention failed: ${err.message ?? String(err)}`);
         return null;
@@ -294,12 +343,65 @@ export async function startServer(port?: number, host?: string) {
           log.warn(`Memory integrity: ${failed.length} error(s) — ${failed.slice(0, 3).map(c => c.name).join('; ')}`);
         }
       }
+      // Auto-compact uncompacted sessions (>1h old, up to 10)
+      try {
+        const { getDb } = await import('@los/infra/db');
+        await ensureMemoryCompactionStore();
+        const db = getDb();
+        const rows = await db.query<{ session_id: string }>(
+          `SELECT DISTINCT o.session_id
+           FROM observations o
+           LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
+           WHERE o.session_id IS NOT NULL
+             AND mc.id IS NULL
+             AND o.created_at < now() - INTERVAL '1 hour'
+           LIMIT 10`,
+        );
+        const sessionIds = rows.rows.map(r => r.session_id).filter(Boolean);
+        if (sessionIds.length > 0) {
+          let compacted = 0;
+          for (const sessionId of sessionIds) {
+            try {
+              const result = await compactSession({ sessionId });
+              if (result) compacted += 1;
+            } catch (err) {
+              log.warn(`Auto-compact failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+          if (compacted > 0) log.info(`Auto-compact: compacted ${compacted}/${sessionIds.length} session(s)`);
+        }
+      } catch (err) {
+        log.warn(`Auto-compact maintenance failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }).catch(() => undefined);
   };
   // Run once at startup, then daily
   setTimeout(runMemoryMaintenance, 10_000); // 10s after startup
   const retentionTimer = setInterval(runMemoryMaintenance, RETENTION_MS);
   app.addHook('onClose', async () => clearInterval(retentionTimer));
+
+  // Governance sweep — seed jobs + run due audits (daily, offset from memory maintenance)
+  const GOVERNANCE_SWEEP_MS = 24 * 60 * 60 * 1000;
+  const runGovernanceMaintenance = async () => {
+    import('@los/agent').then(async ({ ensureGovernanceJobStore, seedGovernanceJobs, runGovernanceSweep }) => {
+      try {
+        await ensureGovernanceJobStore();
+        await seedGovernanceJobs();
+        const result = await runGovernanceSweep({ dryRun: false });
+        if (result.jobsRun > 0) {
+          log.info(`Governance sweep: ${result.jobsRun} job(s) run, ${result.findingsCreated} finding(s)`);
+        }
+        if (result.errors.length > 0) {
+          log.warn(`Governance sweep errors: ${result.errors.join('; ')}`);
+        }
+      } catch (err) {
+        log.warn(`Governance sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }).catch(() => undefined);
+  };
+  setTimeout(runGovernanceMaintenance, 30_000); // 30s after startup
+  const governanceTimer = setInterval(runGovernanceMaintenance, GOVERNANCE_SWEEP_MS);
+  app.addHook('onClose', async () => clearInterval(governanceTimer));
 
   await app.listen({ port: p, host: h });
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);

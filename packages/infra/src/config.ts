@@ -13,6 +13,7 @@
  */
 
 import { z } from 'zod';
+export { z };
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -63,6 +64,14 @@ export const ConfigSchema = z.object({
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
     systemPrompt: z.string().optional(),
+    identity: z.object({
+      /** Agent name used for identity resolution. 'default' uses the built-in los identity. */
+      name: z.string().default('default'),
+      /** Override identity level. 'none' disables identity injection entirely. */
+      level: z.enum(['none', 'minimal', 'standard', 'full']).optional(),
+      /** Whether child/spawned agents inherit parent identity (default: false). */
+      inheritForChildren: z.coerce.boolean().default(false),
+    }).default({}),
   }),
 
   // Judge model for post-execution goal evaluation (P0-2).
@@ -71,6 +80,28 @@ export const ConfigSchema = z.object({
   judge: z.object({
     provider: z.string().optional(),
     model: z.string().optional(),
+    /** Custom system prompt for the judge. Falls back to the built-in evaluator prompt. */
+    systemPrompt: z.string().optional(),
+  }).default({}),
+
+  // Multi-role review (P0): runs multiple review perspectives (spec-compliance,
+  // code-quality, etc.) as independent LLM evaluations before the goal self-check.
+  // Each role can use its own provider/model and blocking severity threshold.
+  // Disabled by default — set REVIEW_ENABLED=true to activate.
+  review: z.object({
+    enabled: z.coerce.boolean().default(false),
+    roles: z.record(z.string(), z.object({
+      /** Provider override for this role. Falls back: role → judge → agent default. */
+      provider: z.string().optional(),
+      /** Model override for this role. Falls back: role → judge → agent default. */
+      model: z.string().optional(),
+      /** Custom system prompt for this role. Falls back to the built-in lens prompt. */
+      systemPrompt: z.string().optional(),
+      /** Minimum severity that blocks task completion. Default: 'critical'. */
+      blockingSeverity: z.enum(['critical', 'error', 'warn', 'info']).default('critical'),
+      /** Whether this role is active. */
+      enabled: z.coerce.boolean().default(true),
+    })).default({}),
   }).default({}),
 
   // Providers (auto-discovered, can be overridden)
@@ -88,6 +119,10 @@ export const ConfigSchema = z.object({
   memory: z.object({
     ftsEnabled: z.coerce.boolean().default(true),
     maxObservations: z.coerce.number().default(10000),
+    /** Enable agent self-reflection recording. When true, agents persist insights
+     *  about their own behavior (strengths, weaknesses, patterns) as observations
+     *  with observerType: 'agent_self'. Default: false (opt-in). */
+    selfReflectionEnabled: z.coerce.boolean().default(false),
   }),
 
   // Executor
@@ -127,7 +162,12 @@ const ENV_MAP: [string, string][] = [
   ['AGENT_MAX_LOOPS', 'agent.maxLoops'],
   ['AGENT_SANDBOX_MODE', 'agent.sandboxMode'],
   ['AGENT_SYSTEM_PROMPT', 'agent.systemPrompt'],
+  ['AGENT_IDENTITY_NAME', 'agent.identity.name'],
+  ['AGENT_IDENTITY_LEVEL', 'agent.identity.level'],
+  ['JUDGE_SYSTEM_PROMPT', 'judge.systemPrompt'],
+  ['REVIEW_ENABLED', 'review.enabled'],
   ['MEMORY_FTS_ENABLED', 'memory.ftsEnabled'],
+  ['MEMORY_SELF_REFLECTION_ENABLED', 'memory.selfReflectionEnabled'],
   ['EXECUTOR_ENABLED', 'executor.enabled'],
   ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'],
@@ -299,8 +339,8 @@ export async function loadConfig(opts?: {
   let merged: Record<string, unknown> = {
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173' },
     auth: { enabled: false },
-    agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write' },
-    memory: { ftsEnabled: true, maxObservations: 10000 },
+    agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
+    memory: { ftsEnabled: true, maxObservations: 10000, selfReflectionEnabled: false },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},
     databaseUrl: 'postgres://localhost:5432/los',

@@ -101,6 +101,10 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       toolRetry: options.toolRetry,
       signal: options.signal,
       onSessionEvent: options.onSessionEvent,
+      // Child agents get Minimal identity: a role label only.
+      // Per Agent Identity Decision Framework: short-lived, single-purpose,
+      // constrained tools — identity should not consume context budget.
+      identity: { name: 'child', level: 'minimal' },
     });
 
     return {

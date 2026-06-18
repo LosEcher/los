@@ -3,6 +3,8 @@ import type { ModelSettings } from '../model-settings.js';
 import type { MCPServerConfig } from '../tools/mcp-client.js';
 import type { Logger } from '@los/infra/logger';
 import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
+import type { IdentityLevel } from '../identity-loader.js';
+import type { PreprocessorConfig } from '@los/input-preprocessor';
 
 export interface AgentConfig {
   sessionId?: string;
@@ -32,6 +34,14 @@ export interface AgentConfig {
   mcpServers?: MCPServerConfig[];
   /** Run contract metadata (mode, phase, plan, verifications). Passed from scheduler. */
   runContractMetadata?: Record<string, unknown>;
+  /** Agent identity configuration. When set and systemPrompt is not explicitly provided,
+   *  identity is resolved and prepended to the default system prompt. */
+  identity?: {
+    /** Agent name for identity resolution (e.g., 'default', 'child'). */
+    name?: string;
+    /** Identity level override. 'none' disables identity injection. */
+    level?: IdentityLevel;
+  };
   /** Request-scoped logger with traceId/requestId bound. Falls back to module-level logger. */
   log?: Logger;
   onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
@@ -73,6 +83,8 @@ export interface ContextCompressionConfig {
   warningRatio?: number;
   aggressiveRatio?: number;
   emergencyRatio?: number;
+  /** Input preprocessing configuration (log denoising, dedup, etc.). */
+  preprocessor?: Partial<PreprocessorConfig>;
 }
 
 export interface ToolCallStateTransition {

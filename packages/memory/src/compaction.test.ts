@@ -24,6 +24,10 @@ test('cross-session evidence: same pattern across 3 sessions produces review can
     await ensureMemoryStore();
     await ensureMemoryCompactionStore();
 
+    // Clean up ALL compactions to prevent cross-session pollution from previous runs
+    await getDb().query('DELETE FROM memory_compactions').catch(() => undefined);
+    await getDb().query('DELETE FROM run_evals').catch(() => undefined);
+
     // Create 3 sessions, each with an executor failover eval (same pattern kind)
     const sessionResults = [];
     for (let i = 0; i < 3; i++) {
@@ -194,52 +198,6 @@ test('compactSession handles empty session gracefully', async () => {
     assert.equal(compaction, null, 'empty session should return null');
   } finally {
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
-    await closeDb().catch(() => undefined);
-  }
-});
-
-test('cross-session evidence: same pattern across 3 sessions produces review candidate', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-
-  const prefix = `cross-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
-  try {
-    await ensureMemoryStore();
-    await ensureMemoryCompactionStore();
-
-    const results: Array<{ sessionId: string }> = [];
-    for (let i = 0; i < 3; i++) {
-      const sessionId = `${prefix}-s${i}`;
-      await addObservation({ title: `cross-obs-${i}`, kind: 'note', sessionId });
-      await getDb().query(
-        `INSERT INTO run_evals (id, run_spec_id, session_id, success, failover_scope, failure_class)
-         VALUES ($1, $2, $3, false, 'executor', 'executor_failure')`,
-        [`${prefix}-eval${i}`, `${prefix}-run${i}`, sessionId],
-      );
-      await compactSession({ sessionId });
-      results.push({ sessionId });
-    }
-
-    const all = await listCompactions({ limit: 20 });
-    const matching = all.filter(c => c.sessionId.startsWith(prefix));
-    assert.equal(matching.length, 3);
-
-    // First session: solo => draft (crossSessions < 2)
-    const s0 = matching.find(c => c.sessionId === `${prefix}-s0`)!;
-    assert.equal(s0.proceduralCandidates[0].status, 'draft');
-
-    // Third session: crossSessions >= 2 => review
-    const s2 = matching.find(c => c.sessionId === `${prefix}-s2`)!;
-    assert.equal(s2.proceduralCandidates[0].status, 'review');
-    assert.ok(s2.proceduralCandidates[0].confidence >= 0.7);
-    assert.ok(s2.evidenceCount >= 3);
-
-    for (const r of results) {
-      await getDb().query('DELETE FROM run_evals WHERE session_id = $1', [r.sessionId]).catch(() => undefined);
-      await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [r.sessionId]).catch(() => undefined);
-    }
-  } finally {
     await closeDb().catch(() => undefined);
   }
 });

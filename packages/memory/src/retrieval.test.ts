@@ -32,14 +32,14 @@ test('resolveMemoryLayers maps running to working + procedural + episodic', () =
   assert.deepEqual(layers, ['working', 'procedural', 'episodic']);
 });
 
-test('resolveMemoryLayers maps blocked to episodic + procedural + semantic', () => {
+test('resolveMemoryLayers maps blocked to episodic + procedural + semantic + self_reflective', () => {
   const layers = resolveMemoryLayers('blocked');
-  assert.deepEqual(layers, ['episodic', 'procedural', 'semantic']);
+  assert.deepEqual(layers, ['episodic', 'procedural', 'semantic', 'self_reflective']);
 });
 
-test('resolveMemoryLayers maps failed to episodic + semantic', () => {
+test('resolveMemoryLayers maps failed to episodic + semantic + self_reflective', () => {
   const layers = resolveMemoryLayers('failed');
-  assert.deepEqual(layers, ['episodic', 'semantic']);
+  assert.deepEqual(layers, ['episodic', 'semantic', 'self_reflective']);
 });
 
 test('resolveMemoryLayers maps succeeded to empty array', () => {
@@ -330,7 +330,7 @@ test('augmentSystemPrompt returns base prompt unchanged when no rules or observa
   const base = 'You are a helpful assistant.';
   const result = augmentSystemPrompt(base, {
     activeRules: [],
-    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [] },
+    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [], self_reflective: [] },
     queriedLayers: [],
   });
   assert.equal(result.augmentedPrompt, base);
@@ -349,7 +349,7 @@ test('augmentSystemPrompt appends active rules section', () => {
         sourceCompactionIds: ['comp-1'],
       },
     ],
-    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [] },
+    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [], self_reflective: [] },
     queriedLayers: ['procedural'],
   });
   assert.ok(result.augmentedPrompt.startsWith(base));
@@ -366,6 +366,7 @@ test('augmentSystemPrompt appends observation layers when present', () => {
       episodic: [],
       semantic: [],
       procedural: [],
+      self_reflective: [],
     },
     queriedLayers: ['working'],
   });

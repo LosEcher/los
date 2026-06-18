@@ -31,6 +31,8 @@ export interface Observation {
   updatedAt: string;
 }
 
+import type { ObserverType } from './types.js';
+
 export interface MemoryStats {
   totalObservations: number;
   byKind: Record<string, number>;
@@ -118,6 +120,8 @@ export async function addObservation(obs: {
   tags?: string[];
   content?: string;
   metadata?: Record<string, unknown>;
+  /** Who/what produced this observation. Stored in metadata.observerType. */
+  observerType?: ObserverType;
   source?: string;
   sessionId?: string;
   tenantId?: string;
@@ -129,6 +133,11 @@ export async function addObservation(obs: {
 }): Promise<Observation> {
   await ensureMemoryStore();
   const db = getDb();
+
+  // Merge observerType into metadata for JSONB storage (no schema change)
+  const mergedMetadata = obs.observerType
+    ? { ...(obs.metadata ?? {}), observerType: obs.observerType }
+    : (obs.metadata ?? {});
 
   // Enforce maxObservations cap
   const maxObs = getConfig().memory.maxObservations;
@@ -147,7 +156,7 @@ export async function addObservation(obs: {
     obs.kind ?? 'note',
     JSON.stringify(obs.tags ?? []),
     obs.content ?? '',
-    JSON.stringify(obs.metadata ?? {}),
+    JSON.stringify(mergedMetadata),
     obs.source ?? 'user',
     obs.sessionId ?? null,
     obs.tenantId ?? null,
@@ -388,9 +397,7 @@ export async function listEntities(opts?: EntitySearchOptions): Promise<EntityNo
         CASE jsonb_typeof(metadata_json->'entities')
           WHEN 'array' THEN metadata_json->'entities'
           ELSE '[]'::jsonb
-        END
       ) AS e
-      WHERE e->>'type' = $${params.length}
     )`);
   }
   if (opts?.tenantId) {
@@ -444,7 +451,7 @@ export async function listEntities(opts?: EntitySearchOptions): Promise<EntityNo
  */
 export async function findRelatedObservations(
   entityId: string,
-  opts?: { limit?: number; tenantId?: string; projectId?: string },
+  opts?: { tenantId?: string; projectId?: string; limit?: number },
 ): Promise<Observation[]> {
   await ensureMemoryStore();
   const db = getDb();
@@ -489,10 +496,8 @@ export async function findCooccurringEntities(
     `o.metadata_json->>'sourceEntity' != $1`,
     `o2.metadata_json->>'sourceEntity' = $1`,
   ];
-
   if (opts?.tenantId) {
     params.push(opts.tenantId);
-    clauses.push(`o.tenant_id = $${params.length}`);
   }
   if (opts?.projectId) {
     params.push(opts.projectId);

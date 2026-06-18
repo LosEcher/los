@@ -155,6 +155,31 @@ code,
   padding-top: 4px;
 }
 
+.nav-section-collapsible {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nav-section-collapsible:hover {
+  color: var(--text-dim);
+}
+
+.nav-section-collapsible.collapsed .nav-section-count {
+  color: var(--faint);
+}
+
+.nav-section-count {
+  margin-left: auto;
+  font-size: 0.6rem;
+  color: var(--muted);
+  background: var(--panel-bg);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
 .nav-item {
   width: 100%;
   color: var(--muted);
