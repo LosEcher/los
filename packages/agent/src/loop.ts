@@ -26,6 +26,7 @@ import {
   buildInitialMessages,
   getDefaultSystemPrompt,
 } from './loop/message-builder.js';
+import { resolveAgentIdentity, formatIdentityForPrompt } from './identity-loader.js';
 import {
   compressOrTrimMessages,
   generateCompressionSummary,
@@ -88,7 +89,25 @@ export async function runAgent(
   const provider = createProvider(config.provider, { model: config.model, traceId: config.traceId });
   const modelProfile = summarizeModelProfile(provider.profile);
   const toolMode = config.toolMode ?? 'project-write';
-  const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(toolMode);
+
+  // Resolve system prompt. When explicitly provided (e.g., from gateway
+  // memory augmentation), use as-is. Otherwise, resolve agent identity and
+  // compose it with the default tool-mode prompt.
+  let systemPrompt = config.systemPrompt;
+  if (!systemPrompt) {
+    let identityBlock = '';
+    if (config.identity?.level !== 'none') {
+      const agentName = config.identity?.name ?? 'default';
+      try {
+        const ws = config.workspaceRoot ?? process.cwd();
+        const id = resolveAgentIdentity(agentName, ws);
+        identityBlock = formatIdentityForPrompt(id, config.identity?.level ?? 'standard');
+      } catch {
+        // Identity resolution is best-effort; proceed without identity block
+      }
+    }
+    systemPrompt = getDefaultSystemPrompt(toolMode, identityBlock || undefined);
+  }
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
   const policy = resolveToolPolicy(toolMode, config.toolRetry);
   const signal = config.signal;

@@ -295,6 +295,8 @@ async function runClaimedAgentGraphTask(
   });
 
   try {
+    // Per Agent Identity Decision Framework: planner/executor tasks get standard
+    // identity (default). Verifier tasks are handled separately above and get none.
     const result = await runScheduledAgentTask({
       ...input,
       provider: selection.provider,
