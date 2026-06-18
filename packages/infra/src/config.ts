@@ -13,6 +13,7 @@
  */
 
 import { z } from 'zod';
+export { z };
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';

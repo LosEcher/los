@@ -4,7 +4,7 @@
  * Follows the @los/infra/config pattern: single Zod schema → TypeScript types auto-derived.
  */
 
-import { z } from 'zod';
+import { z } from '@los/infra/config';
 import type { PreprocessorConfig } from './types.js';
 
 export const PreprocessorConfigSchema = z.object({
