@@ -9,6 +9,7 @@ ERRORS=0
 MAX_LINES=600
 WARN_LINES=400
 MAX_DIR_FILES=15
+BASELINE_FILE="$ROOT/tools/.large-file-baseline.txt"
 
 # Files exceeding MAX_LINES with active/in-progress split work.
 # These produce warnings instead of errors (tracked, not forgotten).
@@ -28,6 +29,12 @@ is_allowed() {
   return 1
 }
 
+in_baseline() {
+  local rel="$1"
+  [[ -f "$BASELINE_FILE" ]] || return 1
+  grep -qFx "$rel" "$BASELINE_FILE" 2>/dev/null
+}
+
 # 1. Large files
 header "Large files (>$MAX_LINES lines)"
 while IFS= read -r line; do
@@ -44,12 +51,16 @@ done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   -exec wc -l {} + 2>/dev/null | awk -v max="$MAX_LINES" \
   '$2 != "total" && $1 > max { print $1, $2 }')
 
-# 1b. Warning-level large files (>WARN_LINES but <= MAX_LINES)
+# 1b. Large files (>WARN_LINES but <= MAX_LINES)
+# Grandfathered files (in baseline) → warning. New files → error.
 while IFS= read -r line; do
   file=$(echo "$line" | awk '{print $2}')
   count=$(echo "$line" | awk '{print $1}')
-  if ! is_allowed "$file"; then
-    warn "$file ($count lines) — exceeds $WARN_LINES line warning threshold"
+  rel="${file#$ROOT/}"
+  if in_baseline "$rel"; then
+    warn "$file ($count lines) — grandfathered, exceeds $WARN_LINES line threshold"
+  else
+    error "$file ($count lines) — new file exceeds $WARN_LINES line limit (if intentional, add to tools/.large-file-baseline.txt)"
   fi
 done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   ! -path '*/node_modules/*' ! -path '*/dist/*' \
