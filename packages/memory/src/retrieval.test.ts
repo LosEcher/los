@@ -330,7 +330,7 @@ test('augmentSystemPrompt returns base prompt unchanged when no rules or observa
   const base = 'You are a helpful assistant.';
   const result = augmentSystemPrompt(base, {
     activeRules: [],
-    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [] },
+    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [], self_reflective: [] },
     queriedLayers: [],
   });
   assert.equal(result.augmentedPrompt, base);
@@ -349,7 +349,7 @@ test('augmentSystemPrompt appends active rules section', () => {
         sourceCompactionIds: ['comp-1'],
       },
     ],
-    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [] },
+    observationsByLayer: { working: [], episodic: [], semantic: [], procedural: [], self_reflective: [] },
     queriedLayers: ['procedural'],
   });
   assert.ok(result.augmentedPrompt.startsWith(base));
@@ -366,6 +366,7 @@ test('augmentSystemPrompt appends observation layers when present', () => {
       episodic: [],
       semantic: [],
       procedural: [],
+      self_reflective: [],
     },
     queriedLayers: ['working'],
   });

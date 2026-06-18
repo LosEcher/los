@@ -17,7 +17,7 @@ const log = getLogger('memory-retrieval');
 
 export type TaskState = 'created' | 'queued' | 'running' | 'blocked' | 'failed' | 'cancelled' | 'succeeded';
 export type RunPhase = 'plan_approved' | 'execution' | 'verification' | 'completed' | string;
-export type MemoryLayer = 'working' | 'episodic' | 'semantic' | 'procedural';
+export type MemoryLayer = 'working' | 'episodic' | 'semantic' | 'procedural' | 'self_reflective';
 
 export interface ActiveRule {
   name: string;
@@ -58,14 +58,16 @@ export interface AugmentPromptResult {
 /**
  * Map task state + run phase to prioritized memory layers.
  *
- * | Task State       | Primary Layers              | Rationale |
- * |------------------|-----------------------------|-----------|
- * | created / queued | working, procedural         | Load active rules before execution |
- * | running          | working, procedural, episodic | Rules + similar past sessions |
- * | blocked          | episodic, procedural, semantic | What went wrong? What rules apply? |
- * | failed           | episodic, semantic          | Investigate similar failures |
- * | cancelled        | episodic                    | Learn from abandoned sessions |
- * | succeeded        | (empty)                     | No retrieval needed — recording phase |
+ * | Task State       | Primary Layers                    | Rationale |
+ * |------------------|-----------------------------------|-----------|
+ * | created / queued | working, procedural               | Load active rules before execution |
+ * | running          | working, procedural, episodic     | Rules + similar past sessions |
+ * | blocked          | episodic, procedural, semantic,   | What went wrong? What rules apply? |
+ * |                  | self_reflective                   | What has the agent learned about itself? |
+ * | failed           | episodic, semantic,               | Investigate similar failures + self-knowledge |
+ * |                  | self_reflective                   | |
+ * | cancelled        | episodic                          | Learn from abandoned sessions |
+ * | succeeded        | (empty)                           | No retrieval needed — recording phase |
  */
 export function resolveMemoryLayers(taskState?: TaskState, _runPhase?: RunPhase): MemoryLayer[] {
   if (!taskState) return ['working', 'procedural'];
@@ -77,9 +79,9 @@ export function resolveMemoryLayers(taskState?: TaskState, _runPhase?: RunPhase)
     case 'running':
       return ['working', 'procedural', 'episodic'];
     case 'blocked':
-      return ['episodic', 'procedural', 'semantic'];
+      return ['episodic', 'procedural', 'semantic', 'self_reflective'];
     case 'failed':
-      return ['episodic', 'semantic'];
+      return ['episodic', 'semantic', 'self_reflective'];
     case 'cancelled':
       return ['episodic'];
     case 'succeeded':
@@ -196,6 +198,7 @@ export async function routeMemoryRetrieval(options: RetrievalOptions): Promise<R
     episodic: [],
     semantic: [],
     procedural: [],
+    self_reflective: [],
   };
 
   for (let i = 0; i < observationLayers.length; i++) {
@@ -232,6 +235,7 @@ export function augmentSystemPrompt(
     episodic: 'Episodic Memory (past session experiences)',
     semantic: 'Semantic Memory (facts and knowledge)',
     procedural: 'Procedural Memory (learned rules)',
+    self_reflective: 'Self-Reflective Memory (agent self-knowledge)',
   };
 
   for (const layer of retrieval.queriedLayers) {

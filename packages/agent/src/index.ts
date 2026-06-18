@@ -175,6 +175,14 @@ export {
   type VerificationRequirement,
 } from './run-contract.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, type LoadedSpec, type SpecLayer } from './spec-loader.js';
+export {
+  resolveAgentIdentity,
+  resolveEffectiveIdentityLevel,
+  formatIdentityForPrompt,
+  type AgentIdentity,
+  type IdentityLevel,
+  type IdentityResolveSource,
+} from './identity-loader.js';
 export { runLifecycleHooks, type RunHookInput, type HookEvent } from './lifecycle-hooks.js';
 export {
   createVerificationRecord,

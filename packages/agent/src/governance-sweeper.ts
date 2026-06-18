@@ -192,6 +192,39 @@ async function createTodosFromFindings(
         created += 1;
       }
     }
+
+    if (job.jobType === 'reflection') {
+      const tasksWithout = typeof summary.tasksWithoutReflection === 'number' ? summary.tasksWithoutReflection : 0;
+      const tasksWith = typeof summary.tasksWithReflection === 'number' ? summary.tasksWithReflection : 0;
+      const coverage = typeof summary.coverage === 'string' ? summary.coverage : 'N/A';
+
+      if (tasksWithout > 0) {
+        await createTodo({
+          title: `Governance: ${tasksWithout} blocked/failed task(s) missing reflection metadata`,
+          description: `Reflection audit: ${tasksWith} tasks have reflection, ${tasksWithout} without (coverage: ${coverage}). Recovery types used: ${summary.recoveryTypes || 'none'}. ${summary.recoveryTodosCreated ?? 0} recovery todos created. Review at ${job.id}.`,
+          kind: 'task',
+          status: 'backlog',
+          priority: 'P1',
+          source: 'governance_sweep',
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'missingReflection' },
+        });
+        created += 1;
+      }
+
+      // Always create a summary todo for visibility into reflection health
+      if (tasksWith + tasksWithout > 0) {
+        await createTodo({
+          title: `Governance: Reflection coverage ${coverage} (${tasksWith}/${tasksWith + tasksWithout} tasks)`,
+          description: `Reflection audit summary: ${tasksWith} tasks with reflection, ${tasksWithout} without. Recovery types: ${summary.recoveryTypes || 'none'}. Recovery todos: ${summary.recoveryTodosCreated ?? 0}. Review at ${job.id}.`,
+          kind: 'task',
+          status: 'backlog',
+          priority: 'P3',
+          source: 'governance_sweep',
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'reflectionSummary' },
+        });
+        created += 1;
+      }
+    }
   } catch (err) {
     log.warn(`Failed to create findings todo for ${job.jobType}: ${err instanceof Error ? err.message : String(err)}`);
   }

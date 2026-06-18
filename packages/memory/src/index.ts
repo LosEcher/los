@@ -20,6 +20,8 @@ export {
   type EntitySearchOptions,
 } from './store.js';
 
+export type { ObserverType } from './types.js';
+
 export { syncMemoryMd, readMemoryMd } from './markdown.js';
 
 export {
@@ -65,6 +67,14 @@ export {
   type CreateProceduralCandidateInput,
   type ListProceduralCandidatesOptions,
 } from './procedural-candidates.js';
+
+export {
+  recordSelfReflection,
+  listSelfReflections,
+  getAgentSelfInsights,
+  type SelfReflectionInput,
+  type AgentSelfInsight,
+} from './self-reflection.js';
 
 export {
   checkMemoryIntegrity,

@@ -236,6 +236,14 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       });
     }
 
+    // Self-reflection detection (Phase 2) — extracted to self-reflection.ts
+    try {
+      const { detectSelfReflectionCandidates } = await import('./self-reflection.js');
+      const sr = await detectSelfReflectionCandidates({ sessionId, tenantId: input.tenantId ?? undefined, projectId: input.projectId ?? undefined });
+      for (const p of sr.observedPatterns) observedPatterns.push(p);
+      for (const c of sr.proceduralCandidates) proceduralCandidates.push(c);
+    } catch (err) { /* best-effort */ }
+
     confidence = proceduralCandidates.length > 0
       ? Math.max(...proceduralCandidates.map(c => c.confidence))
       : 0;
@@ -402,7 +410,6 @@ export async function promoteCandidate(
     `UPDATE memory_compactions SET procedural_candidates_json = $2::jsonb WHERE id = $1`,
     [compactionId, JSON.stringify(candidates)],
   );
-
   // Sync to standalone procedural_candidates table
   try {
     await ensureProceduralCandidateStore();
@@ -459,7 +466,6 @@ export async function listCompactions(options: ListCompactionsOptions = {}): Pro
   await ensureMemoryCompactionStore();
   const clauses: string[] = [];
   const params: unknown[] = [];
-
   if (options.sessionId) {
     params.push(options.sessionId);
     clauses.push(`session_id = $${params.length}`);
@@ -531,7 +537,6 @@ function rowToCompaction(row: CompactionRow): MemoryCompaction {
     autoTrigger: row.auto_trigger ?? undefined,
   };
 }
-
 function normalizeCandidateArray(value: unknown): ProceduralCandidate[] {
   const raw = normalizeJsonArray(value);
   return raw.map((item: Record<string, unknown>): ProceduralCandidate => ({
@@ -590,7 +595,6 @@ function parseJsonArray(raw: string | undefined): Record<string, unknown>[] {
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
-
 function assertRow<T>(row: T | undefined): T {
   if (!row) throw new Error('compaction write returned no row');
   return row;
