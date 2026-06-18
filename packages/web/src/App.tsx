@@ -26,6 +26,7 @@ import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type Sessi
 import {
   DeadLetterPage,
   DiagnosticsPage,
+  FileSyncPage,
   LogsPage,
   MemoryPage,
   ProvidersPage,
@@ -62,6 +63,7 @@ type PageId =
   | 'logs'
   | 'dead-letter'
   | 'diagnostics'
+  | 'file-sync'
   | 'run-specs'
   | 'settings';
 
@@ -101,6 +103,7 @@ const NAV: NavItem[] = [
   { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
   { id: 'dead-letter', label: 'DLQ', icon: Skull, status: 'reserved', audience: 'operations' },
   { id: 'diagnostics', label: 'Diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
+  { id: 'file-sync', label: 'File Sync', icon: Archive, status: 'partial', audience: 'operations' },
 ];
 
 function pageFromHash(): PageId {
@@ -264,6 +267,7 @@ export function App() {
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}
         {page === 'diagnostics' && <DiagnosticsPage />}
+        {page === 'file-sync' && <FileSyncPage />}
         {page === 'run-specs' && <RunSpecsPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
