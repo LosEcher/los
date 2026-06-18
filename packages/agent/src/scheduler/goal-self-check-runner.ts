@@ -109,6 +109,8 @@ export async function runGoalSelfCheck(
               recoveryType: reflection.recoveryType,
               recoveryActions: reflection.recoveryActions,
             },
+            loopCount: result.loopCount,
+            totalTokens: result.totalTokens,
           },
         });
 
