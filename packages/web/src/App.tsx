@@ -6,22 +6,30 @@ import {
   BarChart3,
   Boxes,
   Brain,
+  Bug,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   ListChecks,
   MemoryStick,
   MessageSquare,
   Network,
+  ScrollText,
   Server,
   Settings,
   Shield,
+  Skull,
   TerminalSquare,
   Zap,
 } from 'lucide-react';
 import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type SessionSummary, type TodoItem } from './api';
 import {
+  DeadLetterPage,
+  DiagnosticsPage,
   LogsPage,
   MemoryPage,
   ProvidersPage,
+  RunSpecsPage,
   SessionsPage,
   SettingsPage,
   TasksPage,
@@ -52,7 +60,12 @@ type PageId =
   | 'evals'
   | 'nodes'
   | 'logs'
+  | 'dead-letter'
+  | 'diagnostics'
+  | 'run-specs'
   | 'settings';
+
+type NavAudience = 'workspace' | 'configure' | 'operations';
 
 type NavItem = {
   id: PageId;
@@ -61,24 +74,33 @@ type NavItem = {
   status: StatusState;
   badge?: number;
   section?: string;
+  audience: NavAudience;
 };
 
 const NAV: NavItem[] = [
-  { id: 'chat', label: 'Chat', icon: MessageSquare, status: 'live' },
-  { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live', section: 'Evidence' },
-  { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live' },
-  { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live' },
-  { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live' },
-  { id: 'providers', label: 'Providers', icon: Brain, status: 'partial', section: 'Resources' },
-  { id: 'skills', label: 'Skills', icon: Zap, status: 'live' },
-  { id: 'mcp', label: 'MCP', icon: Server, status: 'live' },
-  { id: 'services', label: 'Services', icon: Activity, status: 'live' },
-  { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live' },
-  { id: 'rules', label: 'Rules', icon: Shield, status: 'live' },
-  { id: 'evals', label: 'Evals', icon: BarChart3, status: 'partial', section: 'Quality' },
-  { id: 'nodes', label: 'Nodes', icon: Network, status: 'partial', section: 'Infra' },
-  { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live' },
-  { id: 'settings', label: 'Settings', icon: Settings, status: 'partial' },
+  // ── Workspace (daily workflow) ──────────────────────────
+  { id: 'chat', label: 'Chat', icon: MessageSquare, status: 'live', audience: 'workspace' },
+  { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live', audience: 'workspace' },
+  { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
+  { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live', audience: 'workspace' },
+  { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'partial', audience: 'workspace' },
+
+  // ── Configure (setup, rarely changed) ────────────────────
+  { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure', section: 'Configure' },
+  { id: 'skills', label: 'Skills', icon: Zap, status: 'partial', audience: 'configure' },
+  { id: 'rules', label: 'Rules', icon: Shield, status: 'partial', audience: 'configure' },
+  { id: 'mcp', label: 'MCP', icon: Server, status: 'partial', audience: 'configure' },
+  { id: 'settings', label: 'Settings', icon: Settings, status: 'live', audience: 'configure' },
+
+  // ── Operations (debug / incident investigation) ──────────
+  { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live', audience: 'operations', section: 'Operations' },
+  { id: 'evals', label: 'Evals', icon: BarChart3, status: 'live', audience: 'operations' },
+  { id: 'run-specs', label: 'Run Specs', icon: ScrollText, status: 'partial', audience: 'operations' },
+  { id: 'nodes', label: 'Nodes', icon: Network, status: 'live', audience: 'operations' },
+  { id: 'services', label: 'Services', icon: Activity, status: 'partial', audience: 'operations' },
+  { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
+  { id: 'dead-letter', label: 'DLQ', icon: Skull, status: 'reserved', audience: 'operations' },
+  { id: 'diagnostics', label: 'Diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
 ];
 
 function pageFromHash(): PageId {
@@ -92,6 +114,16 @@ export function App() {
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
+
+  // Operations section collapsible — default collapsed, persisted in localStorage
+  const [opsExpanded, setOpsExpanded] = useState(() => {
+    try { return localStorage.getItem('los.nav.opsExpanded') === 'true'; } catch { return false; }
+  });
+  const toggleOps = () => {
+    const next = !opsExpanded;
+    setOpsExpanded(next);
+    try { localStorage.setItem('los.nav.opsExpanded', String(next)); } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     const onHashChange = () => setPage(pageFromHash());
@@ -153,22 +185,41 @@ export function App() {
             const Icon = item.icon;
             const prev = idx > 0 ? NAV[idx - 1] : null;
             const showSection = item.section && (!prev || prev.section !== item.section);
+            const isOps = item.audience === 'operations';
+            const isFirstOps = isOps && (!prev || prev.audience !== 'operations');
+
             return (
               <div key={item.id}>
-                {showSection ? <div className="nav-section">{item.section}</div> : null}
-                <button
-                  type="button"
-                  className="nav-item"
-                  data-active={page === item.id}
-                  onClick={() => navigate(item.id)}
-                >
-                  <Icon size={16} />
-                  <span>{item.label}</span>
-                  {item.id === 'sessions' && sessionCount.data !== undefined ? (
-                    <span className="nav-badge">{sessionCount.data}</span>
-                  ) : null}
-                  <StatusPill status={item.status} />
-                </button>
+                {isFirstOps ? (
+                  <div
+                    className={`nav-section nav-section-collapsible ${opsExpanded ? '' : 'collapsed'}`}
+                    onClick={toggleOps}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => { if (e.key === 'Enter') toggleOps(); }}
+                  >
+                    {opsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    Operations
+                    <span className="nav-section-count">{NAV.filter(n => n.audience === 'operations').length}</span>
+                  </div>
+                ) : showSection ? (
+                  <div className="nav-section">{item.section}</div>
+                ) : null}
+                {isOps && !opsExpanded ? null : (
+                  <button
+                    type="button"
+                    className="nav-item"
+                    data-active={page === item.id}
+                    onClick={() => navigate(item.id)}
+                  >
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                    {item.id === 'sessions' && sessionCount.data !== undefined ? (
+                      <span className="nav-badge">{sessionCount.data}</span>
+                    ) : null}
+                    <StatusPill status={item.status} />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -211,6 +262,9 @@ export function App() {
         {page === 'rules' && <RulesPage />}
         {page === 'evals' && <EvalsPage />}
         {page === 'nodes' && <NodesPage />}
+        {page === 'dead-letter' && <DeadLetterPage />}
+        {page === 'diagnostics' && <DiagnosticsPage />}
+        {page === 'run-specs' && <RunSpecsPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
       </main>
