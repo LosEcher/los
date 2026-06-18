@@ -27,4 +27,8 @@ export interface ChatRequestBody {
   runContract?: RunContractMetadataInput;
   persistMemory?: boolean;
   todoId?: string;
+  /** Agent identity name for resolution (e.g., 'default', 'child'). */
+  identityName?: string;
+  /** Agent identity level override. 'none' disables identity injection. */
+  identityLevel?: string;
 }

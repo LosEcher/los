@@ -45,6 +45,8 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
     const branchAtTurn = typeof body.branchAtTurn === 'number' && body.branchAtTurn > 0
       ? Math.floor(body.branchAtTurn)
       : undefined;
+    const identityName = normalizeOptionalString(body.identityName);
+    const identityLevel = normalizeOptionalString(body.identityLevel);
 
     if (!prompt) {
       return reply.status(400).send({ error: 'prompt is required' });
@@ -117,6 +119,7 @@ export function registerChatRoute(app: FastifyInstance, config: Config, defaultW
         workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs,
         toolRetry: toolRetry as Record<string, unknown> | undefined,
         mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
+        identityName, identityLevel,
         traceId, dedupeKey, sid,
         tenantId: context.tenantId, projectId: context.projectId,
         userId: context.userId, requestId: context.requestId,

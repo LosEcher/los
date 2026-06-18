@@ -248,10 +248,40 @@ spec-loader deduplicates and returns fresh content each call.
 **ALWAYS** run `pnpm check` after every meaningful code change. Bugs compound
 when type errors cascade. The Trellis verify-after-implement pattern applies.
 
-### AP4, AP6, AP8
+### AP8: Hardcoded Default Divergence
 
-See `docs/governance/anti-patterns.md` for dual state machine drift (AP4),
-child agent contract inheritance (AP6), and hardcoded default divergence (AP8).
+See `docs/governance/anti-patterns.md`.
+
+### AP9: Hardcoded Agent Identity
+
+**NEVER** add agent name, role, persona, or identity prose inline in system
+prompt strings in `message-builder.ts`, `self-check.ts`, or any tool/route handler.
+
+**ALWAYS** route through `resolveAgentIdentity()` → `formatIdentityForPrompt()`.
+Identity files live in `.los/identity/<name>/` (project > user > system > built-in).
+The decision matrix in ADR 0023 determines which agent path gets which identity level.
+
+Example of what NOT to do:
+```typescript
+// Hardcoded identity — will diverge from file-based definitions
+const prompt = "You are los, a precise coding assistant. Your style is direct...";
+```
+
+Example of what TO do:
+```typescript
+import { resolveAgentIdentity, formatIdentityForPrompt } from '@los/agent';
+const identity = resolveAgentIdentity(agentName, workspaceRoot);
+const identityBlock = formatIdentityForPrompt(identity, level);
+const prompt = identityBlock + '\n\n' + baseSystemPrompt;
+```
+
+Spec: `.los/spec/identity/index.md`
+ADR: `docs/adr/0023-agent-identity-decision-framework.md`
+
+### AP4, AP6
+
+See `docs/governance/anti-patterns.md` for dual state machine drift (AP4) and
+child agent contract inheritance (AP6).
 
 ## Operator Consent Gates
 

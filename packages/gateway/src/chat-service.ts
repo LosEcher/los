@@ -6,7 +6,7 @@ import {
   loadSession,
   saveSession,
 } from '@los/agent/session';
-import type { Message, CheckpointState, RunContractMetadataInput } from '@los/agent';
+import type { Message, CheckpointState, RunContractMetadataInput, IdentityLevel } from '@los/agent';
 import {
   loadResumeState,
   updateBoundTodoFromRun,
@@ -36,7 +36,7 @@ export interface ChatRunContext {
   lastCheckpoint: CheckpointState | null;
 }
 
-export type ChatStatus = 'completed' | 'deduplicated' | 'cancelled';
+export type ChatStatus = 'completed' | 'deduplicated' | 'cancelled' | 'blocked';
 
 /** Per-session checkpoint counters for mid-session auto-compaction (P0-1). */
 const checkpointTracker = new Map<string, { count: number; lastAt: number }>();
@@ -84,6 +84,8 @@ export async function runChat(params: {
   runContract: RunContractMetadataInput | undefined;
   config: Config;
   gatewayServiceId: string | undefined;
+  identityName: string | undefined;
+  identityLevel: string | undefined;
   log: Logger;
   ctx: ChatRunContext;
   send: SendEvent;
@@ -93,7 +95,7 @@ export async function runChat(params: {
     workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
     traceId, dedupeKey, sid, tenantId, projectId, userId, requestId,
-    runContract, config, gatewayServiceId, log, ctx, send,
+    runContract, config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
   } = params;
 
   // ── Branch source loading ──
@@ -158,6 +160,9 @@ export async function runChat(params: {
     runSpecId,
     tenantId,
     projectId,
+    agentIdentity: identityName,
+    identityLevel: identityLevel as IdentityLevel | undefined,
+    workspaceRoot,
   });
 
   try {
@@ -444,6 +449,45 @@ export async function runChat(params: {
       }).catch(() => undefined);
       return {
         status: 'cancelled',
+        sessionId: scheduled.sessionId,
+        taskRunId: scheduled.taskRun.id,
+        traceId: scheduled.taskRun.traceId,
+        cancelReason: scheduled.reason,
+      };
+    }
+
+    // ── Blocked outcome (self-check failed) ──
+    if (scheduled.status === 'blocked') {
+      // Phase 2: Record self-reflection when the agent has learned about
+      // its own failure patterns. Best-effort — gateway has both @los/agent
+      // and @los/memory, no circular dep.
+      try {
+        const { recordSelfReflection } = await import('@los/memory');
+        const reflectionMeta = (scheduled.taskRun.metadata as Record<string, unknown> | undefined)?.reflection as
+          { summary?: string; recoveryType?: string; recoveryActions?: string[] } | undefined;
+        if (reflectionMeta?.summary) {
+          await recordSelfReflection({
+            agentIdentity: identityName ?? 'default',
+            insight: reflectionMeta.summary,
+            confidence: 0.7,
+            evidenceSessionIds: [sid],
+            category: 'weakness',
+            sessionId: sid,
+            tenantId,
+            projectId,
+          });
+        }
+      } catch { /* Self-reflection recording is best-effort */ }
+
+      send('blocked', {
+        sessionId: scheduled.sessionId,
+        taskRunId: scheduled.taskRun.id,
+        traceId: scheduled.taskRun.traceId,
+        requestId,
+        reason: scheduled.reason,
+      });
+      return {
+        status: 'blocked',
         sessionId: scheduled.sessionId,
         taskRunId: scheduled.taskRun.id,
         traceId: scheduled.taskRun.traceId,

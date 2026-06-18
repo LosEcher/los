@@ -51,7 +51,7 @@ else
   red "PUT|PATCH /providers/:id missing (P1)"
 fi
 
-if route_exists "DELETE /providers"; then
+if route_exists "DELETE /providers" || route_exists "delete.*/providers"; then
   green "DELETE /providers/:id exists"
 else
   red "DELETE /providers/:id missing (P1)"
@@ -69,7 +69,9 @@ fi
 section "evals (currently: partial)"
 
 echo "  API completeness:"
-if route_exists "POST /run-evals" && route_exists "GET /run-evals/summary" && route_exists "GET /run-evals/compare"; then
+if { route_exists "POST /run-evals" || route_exists "post.*/run-evals"; } && \
+   { route_exists "GET /run-evals/summary" || route_exists "get.*/run-evals/summary"; } && \
+   { route_exists "GET /run-evals/compare" || route_exists "get.*/run-evals/compare"; }; then
   green "Eval CRUD + summary + compare endpoints exist"
 else
   red "Eval endpoints incomplete"
@@ -118,7 +120,7 @@ fi
 section "settings (currently: partial)"
 
 echo "  API completeness:"
-if route_exists "PUT /settings\|PATCH /settings\|post.*/settings"; then
+if route_exists "PUT /settings\|PATCH /settings\|post.*/settings\|patch.*/settings"; then
   green "PUT|PATCH /settings exists"
 else
   red "PUT|PATCH /settings missing (P1)"
