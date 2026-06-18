@@ -33,7 +33,7 @@ import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import authMiddleware from './auth-middleware.js';
-import { reclaimOrphanedRuns } from './chat-session-helpers.js';
+import { registerServerMaintenance } from './server-maintenance.js';
 import { registerProviderRoutes } from './routes/provider-routes.js';
 import { registerMemoryRoutes } from './routes/memory-routes.js';
 import { registerSessionRoutes } from './routes/session-routes.js';
@@ -314,107 +314,8 @@ export async function startServer(port?: number, host?: string) {
   }, SERVICE_HEARTBEAT_MS);
   app.addHook('onClose', async () => clearInterval(heartbeat));
 
-  const ORPHAN_REAPER_MS = 30_000;
-  const orphanReaper = setInterval(() => {
-    reclaimOrphanedRuns(service.serviceId).then((result) => {
-      if (result.claimedRunSpecIds.length > 0) {
-        log.info(`Orphan reaper claimed ${result.claimedRunSpecIds.length} run(s) from stale gateways: ${result.staleGatewayIds.join(', ')}`);
-      }
-      if (result.errors.length > 0) log.warn(`Orphan reaper errors: ${result.errors.join('; ')}`);
-    }).catch((err) => log.warn(`Orphan reaper failed: ${err.message ?? String(err)}`));
-  }, ORPHAN_REAPER_MS);
-  app.addHook('onClose', async () => clearInterval(orphanReaper));
-
-  // Daily memory retention + integrity + auto-compact (run at startup + every 24h)
-  const RETENTION_MS = 24 * 60 * 60 * 1000;
-  const runMemoryMaintenance = async () => {
-    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore }) => {
-      const retention = await applyRetentionPolicy().catch((err) => {
-        log.warn(`Memory retention failed: ${err.message ?? String(err)}`);
-        return null;
-      });
-      if (retention && (retention.archivedCount > 0 || retention.deletedCount > 0)) {
-        log.info(`Memory retention: archived ${retention.archivedCount}, deleted ${retention.deletedCount}`);
-      }
-      const integrity = await checkMemoryIntegrity().catch((err) => {
-        log.warn(`Memory integrity check failed: ${err.message ?? String(err)}`);
-        return null;
-      });
-      if (integrity && integrity.checks && integrity.checks.length > 0) {
-        const failed = integrity.checks.filter(c => c.severity === 'error');
-        if (failed.length > 0) {
-          log.warn(`Memory integrity: ${failed.length} error(s) — ${failed.slice(0, 3).map(c => c.name).join('; ')}`);
-        }
-      }
-      // Auto-compact uncompacted sessions (>1h old, up to 10)
-      try {
-        const { getDb } = await import('@los/infra/db');
-        await ensureMemoryCompactionStore();
-        const db = getDb();
-        const rows = await db.query<{ session_id: string }>(
-          `SELECT DISTINCT o.session_id
-           FROM observations o
-           LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
-           WHERE o.session_id IS NOT NULL
-             AND mc.id IS NULL
-             AND o.created_at < now() - INTERVAL '1 hour'
-           LIMIT 10`,
-        );
-        const sessionIds = rows.rows.map(r => r.session_id).filter(Boolean);
-        if (sessionIds.length > 0) {
-          let compacted = 0;
-          for (const sessionId of sessionIds) {
-            try {
-              const result = await compactSession({ sessionId });
-              if (result) compacted += 1;
-            } catch (err) {
-              log.warn(`Auto-compact failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          }
-          if (compacted > 0) log.info(`Auto-compact: compacted ${compacted}/${sessionIds.length} session(s)`);
-        }
-      } catch (err) {
-        log.warn(`Auto-compact maintenance failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }).catch((err) => {
-      log.warn(`Memory maintenance import failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
-  };
-  // Run once at startup, then daily
-  const memoryMaintenanceTimeout = setTimeout(runMemoryMaintenance, 10_000);
-  const retentionTimer = setInterval(runMemoryMaintenance, RETENTION_MS);
-  app.addHook('onClose', async () => {
-    clearTimeout(memoryMaintenanceTimeout);
-    clearInterval(retentionTimer);
-  });
-
-  // Governance sweep — seed jobs + run due audits (daily, offset from memory maintenance)
-  const GOVERNANCE_SWEEP_MS = 24 * 60 * 60 * 1000;
-  const runGovernanceMaintenance = async () => {
-    import('@los/agent').then(async ({ ensureGovernanceJobStore, seedGovernanceJobs, runGovernanceSweep }) => {
-      try {
-        await ensureGovernanceJobStore();
-        await seedGovernanceJobs();
-        const result = await runGovernanceSweep({ dryRun: false });
-        if (result.jobsRun > 0) {
-          log.info(`Governance sweep: ${result.jobsRun} job(s) run, ${result.findingsCreated} finding(s)`);
-        }
-        if (result.errors.length > 0) {
-          log.warn(`Governance sweep errors: ${result.errors.join('; ')}`);
-        }
-      } catch (err) {
-        log.warn(`Governance sweep failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }).catch((err) => {
-      log.warn(`Governance sweep import failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
-  };
-  const governanceTimeout = setTimeout(runGovernanceMaintenance, 30_000);
-  const governanceTimer = setInterval(runGovernanceMaintenance, GOVERNANCE_SWEEP_MS);
-  app.addHook('onClose', async () => {
-    clearTimeout(governanceTimeout);
-    clearInterval(governanceTimer);
-  });
+  // Register maintenance timers: orphan reaper, memory retention/integrity/auto-compact, governance sweep
+  registerServerMaintenance(app, service, config);
 
   await app.listen({ port: p, host: h });
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);
