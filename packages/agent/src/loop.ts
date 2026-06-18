@@ -109,7 +109,8 @@ export async function runAgent(
     systemPrompt = getDefaultSystemPrompt(toolMode, identityBlock || undefined);
   }
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
-  const policy = resolveToolPolicy(toolMode, config.toolRetry);
+  const sandboxMode = config.sandboxMode ?? 'workspace-write';
+  const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode);
   const signal = config.signal;
 
   // Load enabled MCP servers from the persistent registry

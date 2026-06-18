@@ -17,6 +17,20 @@ export interface SandboxedShellResult {
   sandbox: string;
 }
 
+/**
+ * Check which sandbox backend is available on this system.
+ * Returns the sandbox name, or 'native' if no sandbox is available.
+ */
+export function getAvailableSandbox(): string {
+  if (platform() === 'darwin' && findExecutable('/usr/bin/sandbox-exec')) {
+    return 'macos-sandbox-exec';
+  }
+  if (platform() === 'linux' && findExecutable('/usr/bin/bwrap')) {
+    return 'linux-bwrap';
+  }
+  return 'native';
+}
+
 export async function runSandboxedShell(input: SandboxedShellInput): Promise<SandboxedShellResult> {
   // 1. macOS: sandbox-exec
   if (platform() === 'darwin') {
