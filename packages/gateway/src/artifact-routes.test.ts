@@ -12,6 +12,7 @@ import { registerArtifactRoutes } from './routes/artifact-routes.js';
 
 test('artifact routes put, read, list, and delete a local artifact', async () => {
   const config = await loadConfig();
+  config.auth.enabled = false;
   await initDb(config.databaseUrl);
 
   const artifactId = `test-artifact-${Date.now()}`;

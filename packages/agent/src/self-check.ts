@@ -28,11 +28,16 @@ export interface SelfCheckResult {
   summaryOfEvidence: string;
   gaps: SelfCheckGap[];
   selfCheckPassed: boolean;
+  /** Judge LLM confidence in its own evaluation (0-1). */
+  confidence: number;
   rawResponse: string;
   evaluatedAt: string;
   skipped: boolean;
   skipReason?: string;
 }
+
+/** Minimum confidence threshold for auto-approval. Below this, operator_attention is triggered. */
+export const CONFIDENCE_GATE_THRESHOLD = 0.7;
 
 const MIN_OUTPUT_CHARS = 20;
 
@@ -54,6 +59,7 @@ export async function runPostExecutionSelfCheck(
         },
       ],
       selfCheckPassed: false,
+      confidence: 0,
       rawResponse: '',
       evaluatedAt: now,
       skipped: true,
@@ -84,6 +90,7 @@ export async function runPostExecutionSelfCheck(
         },
       ],
       selfCheckPassed: false,
+      confidence: 0,
       rawResponse: message,
       evaluatedAt: now,
       skipped: false,
@@ -97,6 +104,7 @@ export async function runPostExecutionSelfCheck(
     summaryOfEvidence: parsed.summaryOfEvidence,
     gaps: parsed.gaps,
     selfCheckPassed: parsed.goalMet && parsed.stopConditionsMet.every(Boolean),
+    confidence: parsed.confidence,
     rawResponse,
     evaluatedAt: now,
     skipped: false,
@@ -141,6 +149,7 @@ export function buildSelfCheckPrompt(input: SelfCheckInput): Message[] {
         '  "goalMet": true/false,',
         '  "stopConditionsMet": [true/false, ...],',
         '  "summaryOfEvidence": "what concrete evidence was found",',
+        '  "confidence": 0.0-1.0 (how confident are you in this evaluation?),',
         '  "gaps": [',
         '    {',
         '      "condition": "which condition",',
@@ -158,6 +167,7 @@ interface ParsedSelfCheckResult {
   goalMet: boolean;
   stopConditionsMet: boolean[];
   summaryOfEvidence: string;
+  confidence: number;
   gaps: SelfCheckGap[];
 }
 
@@ -169,6 +179,7 @@ export function parseSelfCheckResponse(
     goalMet: false,
     stopConditionsMet: Array(expectedStopCount).fill(false),
     summaryOfEvidence: '',
+    confidence: 0,
     gaps: [
       {
         condition: 'self_check_parse',
@@ -229,7 +240,11 @@ export function parseSelfCheckResponse(
     }
   }
 
-  return { goalMet, stopConditionsMet, summaryOfEvidence, gaps };
+  const confidence = typeof parsed.confidence === 'number'
+    ? Math.max(0, Math.min(1, parsed.confidence))
+    : (goalMet ? 0.5 : 0);
+
+  return { goalMet, stopConditionsMet, summaryOfEvidence, confidence, gaps };
 }
 
 export function shouldRunSelfCheck(

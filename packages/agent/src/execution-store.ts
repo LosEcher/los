@@ -18,6 +18,7 @@ import {
   insertExecutionOutbox,
 } from './execution-persistence.js';
 import { getLogger } from '@los/infra/logger';
+import { eventBus } from './event-bus.js';
 
 const log = getLogger('execution-store');
 
@@ -181,6 +182,26 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
   });
 
   await notifySessionEvent(result.entity.sessionId, result.event.id, result.event.type);
+
+  // Emit on in-process event bus so consumers (SSE, scheduler, etc.) don't
+  // need to poll execution_outbox. Cross-gateway push stays on PG NOTIFY.
+  eventBus.emit('execution:transition', {
+    entityType: input.entityType,
+    entityId: input.entityId,
+    sessionId: result.entity.sessionId,
+    from: String(result.from),
+    to: String(input.to),
+    reason: input.reason,
+    eventId: result.event.id,
+    outboxId: result.outboxId,
+    runSpecId: result.entity.runSpecId,
+    taskRunId: result.entity.taskRunId,
+    commandId: input.commandId,
+    causationId: input.causationId,
+    correlationId: input.correlationId ?? result.entity.traceId,
+    nodeId: input.nodeId ?? result.entity.nodeId,
+    attempt: input.attempt ?? result.entity.attempt,
+  });
 
   return {
     entityType: input.entityType,

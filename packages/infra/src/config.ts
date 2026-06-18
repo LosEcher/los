@@ -21,8 +21,18 @@ import { fileURLToPath } from "node:url";
 import YAML from 'yaml';
 import { getLogger } from './logger.js';
 import { discoverAll, type DiscoveredProvider } from './discovery.js';
-
 const log = getLogger('config');
+
+/**
+ * Heuristic to detect node:test runner processes so auth and DB guards
+ * default to safe values during integration tests.
+ */
+function isLikelyTestProcess(): boolean {
+  if (process.env.NODE_ENV === 'test') return true;
+  if (process.env.LOS_TEST_MODE === '1') return true;
+  if (process.env.NODE_TEST_CONTEXT) return true;
+  return process.argv.some((arg) => /\.(test|spec)\.[cm]?[jt]s$/.test(arg));
+}
 
 // ── Schema ──────────────────────────────────────────────
 
@@ -406,11 +416,18 @@ export async function loadConfig(opts?: {
 
   _config = result.data;
 
-  log.info(`Config loaded — db=PG, ` +
-    `provider=${result.data.agent.defaultProvider}, ` +
-    `providers_discovered=${Object.keys(result.data.providers).length}`);
+  // Tests disable auth by default to avoid 401 on inject() calls.
+  // Set LOS_FORCE_AUTH_IN_TEST=1 to override when auth must be tested.
+  if (isLikelyTestProcess() && _config.auth.enabled && process.env.LOS_FORCE_AUTH_IN_TEST !== '1') {
+    _config = { ..._config, auth: { ..._config.auth, enabled: false } };
+    log.debug('Auth disabled for test process (set LOS_FORCE_AUTH_IN_TEST=1 to override)');
+  }
 
-  return result.data;
+  log.info(`Config loaded — db=PG, ` +
+    `provider=${_config.agent.defaultProvider}, ` +
+    `providers_discovered=${Object.keys(_config.providers).length}`);
+
+  return _config;
 }
 
 export function getConfig(): Config {

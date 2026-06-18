@@ -82,7 +82,7 @@ export function isSafeTestDatabaseUrl(databaseUrl: string): boolean {
   }
 }
 
-function isLikelyTestProcess(): boolean {
+export function isLikelyTestProcess(): boolean {
   if (process.env.NODE_ENV === 'test') return true;
   if (process.env.LOS_TEST_MODE === '1') return true;
   if (process.env.NODE_TEST_CONTEXT) return true;

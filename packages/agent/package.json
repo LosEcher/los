@@ -36,7 +36,8 @@
     "./agent-task-graph": "./src/agent-task-graph.ts",
     "./providers/telemetry": "./src/providers/telemetry.ts",
     "./providers/repair-telemetry": "./src/providers/repair-telemetry.ts",
-    "./dead-letter": "./src/dead-letter.ts"
+    "./dead-letter": "./src/dead-letter.ts",
+    "./event-bus": "./src/event-bus.ts"
   },
   "scripts": {
     "build": "tsc",

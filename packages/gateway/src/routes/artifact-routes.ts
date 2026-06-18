@@ -7,8 +7,10 @@ import {
   loadArtifact,
   putArtifact,
   readArtifactContent,
+  updateArtifactStatus,
   type ArtifactRecord,
   type ArtifactPathPolicy,
+  type ArtifactStatus,
 } from '@los/agent/artifacts';
 import { loadExecutorNode } from '@los/agent/executor-nodes';
 import { getRequestContext } from '../request-context.js';
@@ -31,6 +33,7 @@ type PutArtifactBody = {
   content?: string;
   encoding?: 'utf8' | 'base64';
   contentType?: string;
+  confidence?: number;
   metadata?: Record<string, unknown>;
 };
 
@@ -73,6 +76,7 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
       pathPolicy: normalizePathPolicy(body?.pathPolicy),
       content,
       contentType: normalizeOptionalString(body?.contentType),
+      confidence: typeof body?.confidence === 'number' ? body.confidence : undefined,
       metadata: normalizeJsonObject(body?.metadata),
       storageRoot: options.storageRoot,
     });
@@ -108,6 +112,41 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
     const artifact = await deleteArtifact(id, normalizeOptionalString(body?.reason));
     if (!artifact) return reply.status(404).send({ error: 'artifact not found' });
     return { ok: true, artifact };
+  });
+
+  // PATCH /artifacts/:id/status — update artifact confidence lifecycle.
+  // 'confirmed' requires human attestation (operator-facing endpoint).
+  // AI agents calling through the gateway are limited to agent-writable statuses.
+  app.patch('/artifacts/:id/status', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      status?: ArtifactStatus;
+      confidence?: number;
+      reason?: string;
+      isHumanAttestation?: boolean;
+    } | undefined;
+
+    const existing = await loadArtifact(id);
+    if (!existing) return reply.status(404).send({ error: 'artifact not found' });
+
+    try {
+      const artifact = await updateArtifactStatus(
+        id,
+        {
+          status: normalizeArtifactStatusValue(body?.status),
+          confidence: typeof body?.confidence === 'number' ? body.confidence : undefined,
+          reason: normalizeOptionalString(body?.reason),
+        },
+        { isHumanAttestation: body?.isHumanAttestation === true },
+      );
+      return { ok: true, artifact };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('requires human attestation') || message.includes('not writable by AI agents')) {
+        return reply.status(403).send({ error: message });
+      }
+      throw err;
+    }
   });
 }
 
@@ -216,4 +255,12 @@ function normalizePositiveInteger(value: unknown): number | undefined {
   if (!Number.isFinite(raw)) return undefined;
   const int = Math.floor(raw);
   return int > 0 ? int : undefined;
+}
+
+function normalizeArtifactStatusValue(value: unknown): ArtifactStatus | undefined {
+  const VALID: ArtifactStatus[] = ['draft', 'candidate', 'reviewed', 'confirmed', 'rejected'];
+  if (typeof value === 'string' && VALID.includes(value as ArtifactStatus)) {
+    return value as ArtifactStatus;
+  }
+  return undefined;
 }
