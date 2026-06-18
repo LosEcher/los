@@ -1,6 +1,23 @@
 export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress';
 
 /**
+ * Execution mode controls how much human oversight is required.
+ *
+ * - lightweight: agent auto-executes; plan_approved gate is skipped.
+ *                Suitable for simple queries, read-only ops, summarization.
+ * - standard:    normal flow with plan_approved gate (default).
+ * - heavyweight: all phase transitions with confidence < 0.9 trigger operator_attention.
+ *                Suitable for data migrations, production config changes, destructive ops.
+ */
+export type ExecutionMode = 'lightweight' | 'standard' | 'heavyweight';
+
+/** Execution modes that skip the plan_approved human gate. */
+const AUTO_APPROVE_MODES: ReadonlySet<ExecutionMode> = new Set(['lightweight']);
+
+/** Confidence threshold below which heavyweight mode triggers operator_attention. */
+export const HEAVYWEIGHT_CONFIDENCE_THRESHOLD = 0.9;
+
+/**
  * Durable run phase — legal lifecycle transitions for a single agent run.
  *
  *   created → discovering → discovery_ready
@@ -92,6 +109,8 @@ export interface TaskLifecycleHooks {
 
 export interface RunContractMetadata {
   mode?: RunContractMode;
+  /** Execution mode controls operator oversight level. Default: 'standard'. */
+  executionMode?: ExecutionMode;
   goal?: string;
   editableSurfaces: string[];
   ownerLayer?: string;
@@ -169,15 +188,40 @@ export function validatePhaseTransition(
 /**
  * Check whether execution may start given the current run contract phase.
  * Execution requires `phase = 'plan_approved'` (or no contract with
- * requirePlan = false).
+ * requirePlan = false), unless the execution mode allows auto-approval.
+ *
+ * Lightweight mode skips the plan_approved human gate entirely —
+ * the agent proceeds from planning directly to execution.
  */
 export function canStartExecution(contract: RunContractMetadata | undefined): { allowed: boolean; reason?: string } {
   if (!contract || !contract.phase) return { allowed: true };
   if (contract.phase === 'plan_approved' || contract.phase === 'executing') return { allowed: true };
+  // Lightweight mode: skip plan_approved gate
+  if (contract.phase === 'planning' && shouldSkipPlanApprovalGate(contract)) {
+    return { allowed: true };
+  }
   return {
     allowed: false,
     reason: `Run is in phase '${contract.phase}'. Execution requires 'plan_approved'.`,
   };
+}
+
+/**
+ * Whether the execution mode allows skipping the plan_approved human gate.
+ * Lightweight mode skips it; standard and heavyweight do not.
+ */
+export function shouldSkipPlanApprovalGate(contract?: RunContractMetadata): boolean {
+  const mode = (contract?.executionMode ?? 'standard') as ExecutionMode;
+  return AUTO_APPROVE_MODES.has(mode);
+}
+
+/**
+ * Whether the execution mode requires heightened operator scrutiny.
+ * Heavyweight mode triggers operator_attention when confidence < threshold
+ * on any phase transition.
+ */
+export function isHeavyweightMode(contract?: RunContractMetadata): boolean {
+  return (contract?.executionMode ?? 'standard') === 'heavyweight';
 }
 
 /**

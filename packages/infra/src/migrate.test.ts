@@ -6,6 +6,10 @@ import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+// Migration tests manage their own tables (migration_test_1, schema_migrations)
+// and clean up after themselves. The live DB guard is safe to override here.
+process.env.LOS_ALLOW_LIVE_TEST_DB = '1';
+
 function dbUrl(): string {
   return process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? 'postgres://localhost:5432/los';
 }

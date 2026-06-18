@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { getPool } from '@los/infra/db';
+import { eventBus } from '@los/agent/event-bus';
 import { ensureSessionEventStore, listSessionEventsSince } from '@los/agent/session-events';
 import { ensureTaskRunStore, listTaskRunsForSession, loadTaskRun } from '@los/agent/task-runs';
 
@@ -142,13 +143,45 @@ export function registerSseRoutes(app: FastifyInstance): void {
 }
 
 /**
- * Wire PG NOTIFY → SSE push.
+ * Wire PG NOTIFY + EventBus → SSE push.
  *
- * When appendSessionEvent calls pg_notify('session_events', ...), this listener
- * wakes up registered SSE clients and pushes new events immediately, eliminating
- * the 1s polling delay.
+ * PG NOTIFY provides cross-gateway push. EventBus provides zero-latency
+ * in-process push without polling execution_outbox. When PG LISTEN is
+ * unavailable, EventBus still delivers events to same-process SSE clients.
  */
 export function setupLiveEventPush(app: FastifyInstance): void {
+  // ── EventBus subscription (in-process, zero latency) ──────────
+  const unsubBus = eventBus.on('execution:transition', (payload) => {
+    for (const [cid, lc] of liveClients) {
+      if (lc.sessionId !== payload.sessionId || lc.ended) continue;
+      try {
+        // Push the latest events since last known ID
+        listSessionEventsSince(lc.sessionId, lc.lastId, 100).then(events => {
+          if (lc.ended) return;
+          for (const event of events) {
+            if (event.id <= lc.lastId) continue;
+            lc.reply.raw.write(`id: ${event.id}\n`);
+            lc.reply.raw.write(`event: ${event.type}\n`);
+            lc.reply.raw.write(`data: ${JSON.stringify({
+              id: event.id, sessionId: event.sessionId, turn: event.turn,
+              type: event.type, source: event.source,
+              model: event.model ?? null, toolName: event.toolName ?? null,
+              usage: event.usage ?? null, payload: event.payload,
+              createdAt: event.createdAt,
+            })}\n\n`);
+            lc.lastId = event.id;
+          }
+        }).catch(() => {
+          // Best-effort: polling fallback ensures eventual delivery
+        });
+      } catch {
+        lc.ended = true;
+        liveClients.delete(cid);
+      }
+    }
+  });
+
+  // ── PG NOTIFY subscription (cross-gateway) ────────────────────
   const pool = getPool();
   if (!pool) return;
 
@@ -173,15 +206,10 @@ export function setupLiveEventPush(app: FastifyInstance): void {
               lc.reply.raw.write(`id: ${event.id}\n`);
               lc.reply.raw.write(`event: ${event.type}\n`);
               lc.reply.raw.write(`data: ${JSON.stringify({
-                id: event.id,
-                sessionId: event.sessionId,
-                turn: event.turn,
-                type: event.type,
-                source: event.source,
-                model: event.model ?? null,
-                toolName: event.toolName ?? null,
-                usage: event.usage ?? null,
-                payload: event.payload,
+                id: event.id, sessionId: event.sessionId, turn: event.turn,
+                type: event.type, source: event.source,
+                model: event.model ?? null, toolName: event.toolName ?? null,
+                usage: event.usage ?? null, payload: event.payload,
                 createdAt: event.createdAt,
               })}\n\n`);
               lc.lastId = event.id;
@@ -195,14 +223,15 @@ export function setupLiveEventPush(app: FastifyInstance): void {
 
       client.on('error', () => {
         // Connection errors on the LISTEN client are non-fatal;
-        // the per-connection polling fallback ensures liveness.
+        // EventBus + polling fallback ensures liveness.
       });
     } catch {
-      // Pool or LISTEN unavailable — all connections fall back to polling
+      // Pool or LISTEN unavailable — EventBus + polling keep liveness
     }
   });
 
   app.addHook('onClose', async () => {
+    unsubBus();
     if (client) {
       try { client.release(); } catch { /* ignore */ }
     }

@@ -1,6 +1,6 @@
 import type { AgentResult } from '../loop.js';
 import { createProvider } from '../providers/index.js';
-import { runPostExecutionSelfCheck, shouldRunSelfCheck, summarizeAgentContext } from '../self-check.js';
+import { runPostExecutionSelfCheck, shouldRunSelfCheck, summarizeAgentContext, CONFIDENCE_GATE_THRESHOLD } from '../self-check.js';
 import { runMultiRoleReview, type ReviewRoleConfig } from '../review-runner.js';
 import { reflectOnFailure, formatReflectionSummary } from '../reflection.js';
 import { readCurrentRunContract } from './contract-reader.js';
@@ -79,6 +79,7 @@ export async function runGoalSelfCheck(
             goalMet: false,
             stopConditionsMet: [],
             summaryOfEvidence: reviewResult.blockingFindings.map(f => f.detail).join('\n'),
+            confidence: 0,
             gaps: reviewResult.blockingFindings.map(f => ({
               condition: `review:${f.condition}`,
               detail: f.detail,
@@ -238,6 +239,57 @@ export async function runGoalSelfCheck(
       taskRun: { ...finalBlocked, status: 'blocked' },
       result,
       reason: `Goal self-check failed: ${gapSummary}`,
+    };
+  }
+
+  // ── Confidence Gate ─────────────────────────────────────────
+  // Even when self-check passes (goalMet + all stopConditions met),
+  // block if the judge's confidence is below threshold.
+  // This prevents low-certainty outputs from auto-succeeding
+  // without operator review. (Inspired by: draft → candidate → confirmed)
+  if (selfCheckResult.confidence < CONFIDENCE_GATE_THRESHOLD) {
+    const confidenceReason = `Confidence gate: judge confidence ${selfCheckResult.confidence.toFixed(2)} < threshold ${CONFIDENCE_GATE_THRESHOLD}`;
+
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'blocked',
+      sessionId,
+      reason: 'confidence_gate',
+    });
+
+    await updateTaskRunFields(taskRunId, {
+      metadata: {
+        ...running.metadata,
+        selfCheckResult,
+        blockReason: confidenceReason,
+        loopCount: result.loopCount,
+        totalTokens: result.totalTokens,
+      },
+    });
+
+    await emitTaskEvent(sessionId, 'task.blocked', running as any);
+    await input.onTaskEvent?.({ type: 'task.blocked', taskRun: running as any });
+
+    try {
+      const { createTodo } = await import('../todos.js');
+      await createTodo({
+        title: `Review: low-confidence task ${taskRunId.slice(0, 8)} (confidence=${selfCheckResult.confidence.toFixed(2)})`,
+        description: `Self-check passed but judge confidence (${selfCheckResult.confidence.toFixed(2)}) is below gate threshold (${CONFIDENCE_GATE_THRESHOLD}).\n\nGoal: ${selfCheckContract.goal}\nEvidence: ${selfCheckResult.summaryOfEvidence}\nGaps: ${selfCheckResult.gaps.length}`,
+        kind: 'task',
+        status: 'backlog',
+        priority: 'P1',
+        source: 'confidence_gate',
+        metadata: { sessionId, taskRunId, confidence: selfCheckResult.confidence },
+      });
+    } catch { /* Todo creation is best-effort */ }
+
+    return {
+      status: 'blocked',
+      sessionId,
+      taskRun: { ...(running as any), status: 'blocked' },
+      result,
+      reason: confidenceReason,
     };
   }
 

@@ -10,6 +10,7 @@ import {
   parseSelfCheckResponse,
   shouldRunSelfCheck,
   summarizeAgentContext,
+  CONFIDENCE_GATE_THRESHOLD,
   type SelfCheckInput,
   type SelfCheckResult,
 } from './self-check.js';
@@ -56,6 +57,7 @@ function makeInput(overrides?: Partial<SelfCheckInput>): SelfCheckInput {
         goalMet: true,
         stopConditionsMet: [true, true],
         summaryOfEvidence: 'agent output lists three files explicitly',
+        confidence: 0.95,
         gaps: [],
       }),
     ),
@@ -101,6 +103,7 @@ test('parseSelfCheckResponse handles valid JSON', () => {
       goalMet: true,
       stopConditionsMet: [true, true],
       summaryOfEvidence: 'found files',
+      confidence: 0.9,
       gaps: [],
     }),
     2,
@@ -108,6 +111,7 @@ test('parseSelfCheckResponse handles valid JSON', () => {
   assert.equal(result.goalMet, true);
   assert.deepEqual(result.stopConditionsMet, [true, true]);
   assert.equal(result.summaryOfEvidence, 'found files');
+  assert.equal(result.confidence, 0.9);
   assert.deepEqual(result.gaps, []);
 });
 
@@ -117,6 +121,7 @@ test('parseSelfCheckResponse handles valid JSON with gaps', () => {
       goalMet: false,
       stopConditionsMet: [true, false],
       summaryOfEvidence: 'partial',
+      confidence: 0.3,
       gaps: [
         {
           condition: 'output',
@@ -129,6 +134,7 @@ test('parseSelfCheckResponse handles valid JSON with gaps', () => {
   );
   assert.equal(result.goalMet, false);
   assert.deepEqual(result.stopConditionsMet, [true, false]);
+  assert.equal(result.confidence, 0.3);
   assert.equal(result.gaps.length, 1);
   assert.equal(result.gaps[0].condition, 'output');
   assert.equal(result.gaps[0].suggestion, 're-run with list_dir tool');
@@ -140,11 +146,13 @@ test('parseSelfCheckResponse handles JSON with code fence', () => {
       goalMet: true,
       stopConditionsMet: [true],
       summaryOfEvidence: 'ok',
+      confidence: 0.85,
       gaps: [],
     }) + '\n```',
     1,
   );
   assert.equal(result.goalMet, true);
+  assert.equal(result.confidence, 0.85);
 });
 
 test('parseSelfCheckResponse fallback on garbled text', () => {
@@ -167,11 +175,13 @@ test('parseSelfCheckResponse normalizes mismatched stop conditions count', () =>
       goalMet: true,
       stopConditionsMet: [true],
       summaryOfEvidence: '',
+      confidence: 0.5,
       gaps: [],
     }),
     3,
   );
   assert.deepEqual(result.stopConditionsMet, [false, false, false]);
+  assert.equal(result.confidence, 0.5);
 });
 
 // ── Unit: shouldRunSelfCheck ──
@@ -206,6 +216,7 @@ test('SelfCheckResult.selfCheckPassed = true when goalMet and all conditions met
   const result = await runPostExecutionSelfCheck(makeInput());
   assert.equal(result.selfCheckPassed, true);
   assert.equal(result.skipped, false);
+  assert.ok(result.confidence >= 0.9, `confidence ${result.confidence} should be >= 0.9`);
 });
 
 test('SelfCheckResult.selfCheckPassed = false when goalMet is false', async () => {
@@ -216,12 +227,14 @@ test('SelfCheckResult.selfCheckPassed = false when goalMet is false', async () =
           goalMet: false,
           stopConditionsMet: [true, true],
           summaryOfEvidence: '',
+          confidence: 0.2,
           gaps: [{ condition: 'goal', detail: 'not met', suggestion: 'retry' }],
         }),
       ),
     }),
   );
   assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.confidence, 0.2);
 });
 
 test('SelfCheckResult.selfCheckPassed = false when stop condition not met', async () => {
@@ -232,6 +245,7 @@ test('SelfCheckResult.selfCheckPassed = false when stop condition not met', asyn
           goalMet: true,
           stopConditionsMet: [true, false],
           summaryOfEvidence: '',
+          confidence: 0.45,
           gaps: [{ condition: 'stop', detail: 'not met', suggestion: 'fix' }],
         }),
       ),
@@ -249,6 +263,7 @@ test('SelfCheckResult selfCheckPassed = true when stop conditions empty and goal
           goalMet: true,
           stopConditionsMet: [],
           summaryOfEvidence: 'done',
+          confidence: 0.92,
           gaps: [],
         }),
       ),
@@ -264,6 +279,7 @@ test('pre-check skips LLM call when agent output is empty', async () => {
   assert.equal(result.skipped, true);
   assert.equal(result.skipReason, 'empty_output');
   assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.confidence, 0);
   assert.equal(result.gaps[0].condition, 'output');
 });
 
@@ -271,6 +287,7 @@ test('pre-check skips LLM call when agent output is too short', async () => {
   const result = await runPostExecutionSelfCheck(makeInput({ agentOutput: 'ok' }));
   assert.equal(result.skipped, true);
   assert.equal(result.skipReason, 'output_too_short');
+  assert.equal(result.confidence, 0);
 });
 
 // ── Unit: summarizeAgentContext ──
@@ -323,6 +340,7 @@ test('provider failure returns selfCheckPassed: false with error gap', async () 
   const result = await runPostExecutionSelfCheck(makeInput({ provider: failingProvider }));
   assert.equal(result.selfCheckPassed, false);
   assert.equal(result.skipped, false);
+  assert.equal(result.confidence, 0);
   assert.equal(result.gaps[0].condition, 'self_check_provider');
   assert.ok(result.gaps[0].detail.includes('provider unavailable'));
 });
@@ -335,6 +353,7 @@ test('integration: self-check result shape round-trips through parse', async () 
   assert.equal(result.selfCheckPassed, true);
   assert.equal(result.goalMet, true);
   assert.deepEqual(result.stopConditionsMet, [true, true]);
+  assert.ok(result.confidence >= 0, 'confidence should be a number');
   assert.ok(result.evaluatedAt);
   assert.ok(typeof result.rawResponse === 'string');
 });
@@ -347,6 +366,7 @@ test('integration: self-check with gaps produces structured gap report', async (
           goalMet: false,
           stopConditionsMet: [false, false],
           summaryOfEvidence: 'agent did not produce a listing',
+          confidence: 0.15,
           gaps: [
             {
               condition: 'directory listing produced',
@@ -364,8 +384,79 @@ test('integration: self-check with gaps produces structured gap report', async (
     }),
   );
   assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.confidence, 0.15);
   assert.equal(result.gaps.length, 2);
   assert.equal(result.gaps[0].condition, 'directory listing produced');
   assert.ok(result.gaps[0].suggestion.length > 0);
   assert.equal(result.gaps[1].condition, 'output contains file names');
+});
+
+// ── Confidence-specific tests ──
+
+test('confidence default: goalMet=true without explicit confidence gives 0.5', () => {
+  const result = parseSelfCheckResponse(
+    JSON.stringify({
+      goalMet: true,
+      stopConditionsMet: [true],
+      summaryOfEvidence: '',
+      gaps: [],
+    }),
+    1,
+  );
+  assert.equal(result.goalMet, true);
+  assert.equal(result.confidence, 0.5);
+});
+
+test('confidence default: goalMet=false without explicit confidence gives 0', () => {
+  const result = parseSelfCheckResponse(
+    JSON.stringify({
+      goalMet: false,
+      stopConditionsMet: [false],
+      summaryOfEvidence: '',
+      gaps: [],
+    }),
+    1,
+  );
+  assert.equal(result.confidence, 0);
+});
+
+test('confidence clamped to [0, 1] range', () => {
+  const high = parseSelfCheckResponse(
+    JSON.stringify({ goalMet: true, stopConditionsMet: [], summaryOfEvidence: '', confidence: 2.5, gaps: [] }),
+    0,
+  );
+  assert.equal(high.confidence, 1);
+
+  const low = parseSelfCheckResponse(
+    JSON.stringify({ goalMet: false, stopConditionsMet: [], summaryOfEvidence: '', confidence: -0.5, gaps: [] }),
+    0,
+  );
+  assert.equal(low.confidence, 0);
+});
+
+test('CONFIDENCE_GATE_THRESHOLD is a number between 0 and 1', () => {
+  assert.ok(typeof CONFIDENCE_GATE_THRESHOLD === 'number');
+  assert.ok(CONFIDENCE_GATE_THRESHOLD > 0 && CONFIDENCE_GATE_THRESHOLD < 1);
+});
+
+test('low-confidence output selfCheckPassed=true but confidence < threshold', async () => {
+  // Self-check passes all conditions but judge has low confidence.
+  // The gate check happens in goal-self-check-runner, not here.
+  // This test verifies the result shape is correct for the gate to consume.
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      provider: createFakeProvider(
+        JSON.stringify({
+          goalMet: true,
+          stopConditionsMet: [true, true],
+          summaryOfEvidence: 'found files but uncertain about completeness',
+          confidence: 0.45,
+          gaps: [],
+        }),
+      ),
+    }),
+  );
+  assert.equal(result.selfCheckPassed, true, 'conditions met');
+  assert.ok(result.confidence < CONFIDENCE_GATE_THRESHOLD, `confidence ${result.confidence} < ${CONFIDENCE_GATE_THRESHOLD}`);
+  // The gate runner will block this, but the raw self-check result says "pass"
 });

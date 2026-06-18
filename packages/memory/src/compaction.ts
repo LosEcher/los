@@ -14,6 +14,11 @@ import {
   createProceduralCandidate,
   promoteProceduralCandidate,
 } from './procedural-candidates.js';
+import { buildTranscriptBrief, type TranscriptBrief } from './transcript-brief.js';
+import {
+  normalizeRequired, normalizeLimit, normalizeJsonObject,
+  normalizeJsonArray, parseJsonArray, toIsoString,
+} from './normalizers.js';
 
 const log = getLogger('memory-compaction');
 
@@ -40,6 +45,8 @@ export interface MemoryCompaction {
   checkpoint?: boolean;
   /** What triggered this checkpoint/compaction (event_count, tool_state_change, time_interval, manual). */
   autoTrigger?: string;
+  /** Structured transcript brief (goal, files, flow, outstanding) for context augmentation. */
+  transcriptBrief?: TranscriptBrief;
 }
 
 export interface ProceduralCandidate {
@@ -92,6 +99,7 @@ CREATE TABLE IF NOT EXISTS memory_compactions (
 ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS tenant_id TEXT;
 ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS project_id TEXT;
 ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS auto_trigger TEXT;
+ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS transcript_brief_json JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_memcomp_session ON memory_compactions(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memcomp_run_spec ON memory_compactions(run_spec_id, created_at DESC);
@@ -261,28 +269,30 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     checkpoint: isCheckpoint || undefined,
   };
 
+  // Build transcript brief from session_events (best-effort augmentation)
+  let transcriptBrief: TranscriptBrief | undefined;
+  if (!isCheckpoint) {
+    transcriptBrief = await buildTranscriptBrief(sessionId, input.runSpecId ?? undefined).catch(() => {
+      log.info(`Transcript brief build skipped for session ${sessionId}`);
+      return undefined;
+    });
+  }
+
   const id = isCheckpoint ? `chkpt-${sessionId}-${randomUUID()}` : `memcomp-${sessionId}-${randomUUID()}`;
   const autoTrigger = input.autoTrigger ?? null;
 
   const rows = await db.query<CompactionRow>(
     `INSERT INTO memory_compactions (
       id, session_id, run_spec_id, tenant_id, project_id, summary_json, observed_patterns_json,
-      procedural_candidates_json, confidence, evidence_count, created_by, auto_trigger
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
+      procedural_candidates_json, confidence, evidence_count, created_by, auto_trigger, transcript_brief_json
+    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb)
     RETURNING *`,
     [
-      id,
-      sessionId,
-      input.runSpecId ?? null,
-      input.tenantId ?? null,
-      input.projectId ?? null,
-      JSON.stringify(summary),
-      JSON.stringify(observedPatterns),
-      JSON.stringify(proceduralCandidates),
-      confidence,
-      evidenceCount,
-      input.createdBy ?? null,
-      autoTrigger,
+      id, sessionId, input.runSpecId ?? null, input.tenantId ?? null, input.projectId ?? null,
+      JSON.stringify(summary), JSON.stringify(observedPatterns),
+      JSON.stringify(proceduralCandidates), confidence, evidenceCount,
+      input.createdBy ?? null, autoTrigger,
+      transcriptBrief ? JSON.stringify(transcriptBrief) : null,
     ],
   );
 
@@ -513,6 +523,7 @@ type CompactionRow = {
   evidence_count: string | number;
   created_by: string | null;
   auto_trigger: string | null;
+  transcript_brief_json: unknown | null;
   created_at: Date | string;
 };
 
@@ -535,8 +546,16 @@ function rowToCompaction(row: CompactionRow): MemoryCompaction {
     attestedBy: typeof summary.attestedBy === 'string' ? summary.attestedBy : undefined,
     checkpoint: typeof summary.checkpoint === 'boolean' ? summary.checkpoint : undefined,
     autoTrigger: row.auto_trigger ?? undefined,
+    transcriptBrief: row.transcript_brief_json
+      ? normalizeJsonObject(row.transcript_brief_json) as unknown as TranscriptBrief
+      : undefined,
   };
 }
+function assertRow<T>(row: T | undefined): T {
+  if (!row) throw new Error('compaction write returned no row');
+  return row;
+}
+
 function normalizeCandidateArray(value: unknown): ProceduralCandidate[] {
   const raw = normalizeJsonArray(value);
   return raw.map((item: Record<string, unknown>): ProceduralCandidate => ({
@@ -552,50 +571,4 @@ function normalizeCandidateArray(value: unknown): ProceduralCandidate[] {
       ? item.supportingSessionIds.filter((s): s is string => typeof s === 'string')
       : [],
   }));
-}
-
-function normalizeRequired(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
-  return value.trim();
-}
-
-function normalizeLimit(value: unknown): number {
-  const parsed = Number(value ?? 100);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 100;
-  return Math.max(1, Math.min(1000, Math.floor(parsed)));
-}
-
-function normalizeJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch { return {}; }
-  }
-  return {};
-}
-
-function normalizeJsonArray(value: unknown): Record<string, unknown>[] {
-  if (Array.isArray(value)) return value.map(v => normalizeJsonObject(v));
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.map((v: unknown) => normalizeJsonObject(v)) : [];
-    } catch { return []; }
-  }
-  return [];
-}
-
-function parseJsonArray(raw: string | undefined): Record<string, unknown>[] {
-  if (!raw) return [];
-  try { return JSON.parse(raw) as Record<string, unknown>[]; } catch { return []; }
-}
-
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('compaction write returned no row');
-  return row;
 }
