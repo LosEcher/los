@@ -7,9 +7,15 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { tsx, ts, jsx, js, type SgNode } from '@ast-grep/napi';
 import type { ToolRegistry } from './registry.js';
 import { safeWorkspacePath } from './path-safety.js';
+import {
+  LANG_EXTS,
+  findSymbolNodes,
+  normalizeSymbolKind,
+  cleanupWhitespace,
+  getLangForExt,
+} from './edit-ast-helpers.js';
 
 // ── multi_edit ──────────────────────────────────────────
 
@@ -257,19 +263,6 @@ export function registerDeleteRangeTool(
 
 // ── delete_symbol ───────────────────────────────────────
 
-const DELETE_SYMBOL_KINDS: Record<string, string> = {
-  function: 'function_declaration',
-  class: 'class_declaration',
-  method: 'method_definition',
-  interface: 'interface_declaration',
-  type: 'type_alias_declaration',
-};
-
-const LANG_EXTS: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
-  '.ts': 'ts', '.tsx': 'tsx', '.js': 'js', '.jsx': 'jsx',
-  '.mjs': 'js', '.cjs': 'js', '.mts': 'ts', '.cts': 'ts',
-};
-
 export function registerDeleteSymbolTool(
   registry: ToolRegistry,
   options: { workspaceRoot: string },
@@ -297,7 +290,10 @@ export function registerDeleteSymbolTool(
     }
 
     // Parse with ast-grep
-    const lang = LANG_EXTS[ext] === 'tsx' || LANG_EXTS[ext] === 'ts' ? tsx : jsx;
+    const lang = getLangForExt(ext);
+    if (!lang) {
+      return { content: '', error: `Unsupported file type: ${ext}. Supported: .ts, .tsx, .js, .jsx` };
+    }
     const root = lang.parse(content).root();
 
     // Find matching symbol
@@ -354,70 +350,6 @@ export function registerDeleteSymbolTool(
     sideEffect: true,
     tags: ['edit', 'write', 'ast'],
   });
-}
-
-interface CandidateNode { node: SgNode }
-
-function findSymbolNodes(
-  root: SgNode,
-  name: string,
-  kindFilter: string | null,
-  parentFilter: string | null,
-): CandidateNode[] {
-  const candidates: CandidateNode[] = [];
-
-  const kindNames = kindFilter
-    ? [DELETE_SYMBOL_KINDS[kindFilter]].filter(Boolean)
-    : Object.values(DELETE_SYMBOL_KINDS);
-
-  for (const astKind of kindNames) {
-    try {
-      const nodes = root.findAll({ rule: { kind: astKind } });
-      for (const node of nodes) {
-        const nameNode = node.find({ rule: { kind: 'identifier' } })
-          ?? node.find({ rule: { kind: 'property_identifier' } });
-        if (!nameNode || nameNode.text() !== name) continue;
-
-        // Check parent filter
-        if (parentFilter) {
-          const actualParent = findParentName(node);
-          if (actualParent !== parentFilter) continue;
-        }
-
-        candidates.push({ node });
-      }
-    } catch { /* kind not in grammar */ }
-  }
-
-  return candidates;
-}
-
-function normalizeSymbolKind(value: string): string | null {
-  return value && DELETE_SYMBOL_KINDS[value] ? value : null;
-}
-
-function findParentName(node: SgNode): string | null {
-  let current: SgNode | null = node.parent();
-  while (current) {
-    const k = current.kind();
-    if (k === 'class_declaration' || k === 'module_declaration') {
-      const id = current.find({ rule: { kind: 'identifier' } });
-      if (id) return id.text();
-    }
-    current = current.parent();
-  }
-  return null;
-}
-
-function cleanupWhitespace(before: string, after: string): string {
-  // Remove trailing whitespace from before, and leading blank lines from after
-  let cleanBefore = before.replace(/\s+$/, '\n');
-  let cleanAfter = after.replace(/^\n+/, '');
-  // Avoid double blank lines
-  if (cleanBefore.endsWith('\n\n') && cleanAfter.startsWith('\n')) {
-    cleanBefore = cleanBefore.slice(0, -1);
-  }
-  return cleanBefore + cleanAfter;
 }
 
 // ── Helpers ─────────────────────────────────────────────
