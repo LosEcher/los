@@ -1,10 +1,13 @@
 import type { Provider, Message, ToolDef } from './providers/types.js';
 import type { AgentResult } from './loop.js';
+import type { Severity } from './review-runner.js';
 
 export interface SelfCheckGap {
   condition: string;
   detail: string;
   suggestion: string;
+  /** Severity of this gap. Defaults to 'warn' when not specified (backward compat). */
+  severity?: Severity;
 }
 
 export interface SelfCheckInput {
@@ -15,6 +18,8 @@ export interface SelfCheckInput {
   provider: Provider;
   availableTools?: ToolDef[];
   traceId?: string;
+  /** Optional custom system prompt for the judge. Falls back to hardcoded evaluator prompt. */
+  judgeSystemPrompt?: string;
 }
 
 export interface SelfCheckResult {
@@ -103,11 +108,13 @@ export function buildSelfCheckPrompt(input: SelfCheckInput): Message[] {
     ? input.stopConditions.map((c, i) => `${i + 1}. ${c}`).join('\n')
     : '(none specified)';
 
+  const judgeSystemPrompt = input.judgeSystemPrompt
+    ?? 'You are a task evaluator. The agent\'s output may be incomplete or wrong — verify each condition systematically against the evidence.';
+
   return [
     {
       role: 'system',
-      content:
-        'You are a task evaluator. The agent\'s output may be incomplete or wrong — verify each condition systematically against the evidence.',
+      content: judgeSystemPrompt,
     },
     {
       role: 'user',

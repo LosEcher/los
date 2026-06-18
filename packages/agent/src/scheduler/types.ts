@@ -15,6 +15,7 @@ export type ScheduledTaskEventType =
   | 'task.failed'
   | 'task.blocked'
   | 'task.self_check_completed'
+  | 'task.review_completed'
   | 'session.reflection';
 
 export interface ScheduledTaskEvent {
