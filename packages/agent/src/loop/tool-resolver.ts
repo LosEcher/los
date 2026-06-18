@@ -4,6 +4,7 @@
  */
 
 import { READ_ONLY_BUILTIN_TOOLS } from '../tools/registry.js';
+import { getAvailableSandbox } from '../tools/shell-sandbox.js';
 import type { AgentConfig } from './types.js';
 
 /**
@@ -28,14 +29,38 @@ export function resolveAllowedTools(
 }
 
 /**
- * Resolve the tool execution policy based on tool mode and retry config.
+ * Resolve the tool execution policy based on tool mode, sandbox mode, and retry config.
+ *
+ * sandboxMode controls the actual isolation level:
+ *   'readonly' — force toolMode to 'read-only' regardless of user selection
+ *   'workspace-write' — allow up to L1 (file writes), no sandbox shell
+ *   'sandbox' — allow L2 shell execution with actual sandbox availability check
+ *
+ * If sandboxMode is 'sandbox' but no OS sandbox is available, L2 tools are
+ * still denied (sandboxAvailable stays false) and a warning is logged.
  */
 export function resolveToolPolicy(
   toolMode: 'all' | 'project-write' | 'read-only',
   retry: AgentConfig['toolRetry'] | undefined,
+  sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox',
 ) {
   const normalizedRetry = normalizeToolRetry(retry);
-  if (toolMode === 'read-only') {
+
+  // sandboxMode 'readonly' overrides toolMode to enforce read-only
+  const effectiveMode = sandboxMode === 'readonly' ? 'readonly' : toolMode;
+
+  // sandboxMode 'sandbox' enables sandbox availability, but only if an
+  // actual OS-level sandbox (macOS sandbox-exec or Linux bwrap) is present
+  let sandboxAvailable = false;
+  if (effectiveMode === 'all' && sandboxMode === 'sandbox') {
+    const detected = getAvailableSandbox();
+    sandboxAvailable = detected !== 'native';
+  } else if (effectiveMode === 'all') {
+    // Legacy: 'all' mode without explicit sandbox config still allows sandbox
+    sandboxAvailable = true;
+  }
+
+  if (effectiveMode === 'read-only') {
     return {
       maxRiskLevel: 'L0' as const,
       allowWrites: false,

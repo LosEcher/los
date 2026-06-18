@@ -22,6 +22,8 @@ export interface AgentConfig {
   requestId?: string;
   traceId?: string;
   toolMode?: 'all' | 'project-write' | 'read-only';
+  /** Sandbox isolation mode. Maps to config sandboxMode. Default: 'workspace-write'. */
+  sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
   allowedTools?: readonly string[];
   toolRetry?: {
     maxAttempts?: number;

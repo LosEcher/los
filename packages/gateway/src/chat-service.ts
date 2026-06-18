@@ -230,6 +230,7 @@ export async function runChat(params: {
       systemPrompt: effectiveSystemPrompt,
       workspaceRoot,
       toolMode: toolMode as 'all' | 'project-write' | 'read-only',
+      sandboxMode: (config as any).agent?.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox' | undefined,
       initialMessages: branchSourceMessages ?? resumedSession?.messages,
       allowedTools,
       maxLoops,
