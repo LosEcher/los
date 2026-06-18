@@ -32,14 +32,14 @@ test('resolveMemoryLayers maps running to working + procedural + episodic', () =
   assert.deepEqual(layers, ['working', 'procedural', 'episodic']);
 });
 
-test('resolveMemoryLayers maps blocked to episodic + procedural + semantic', () => {
+test('resolveMemoryLayers maps blocked to episodic + procedural + semantic + self_reflective', () => {
   const layers = resolveMemoryLayers('blocked');
-  assert.deepEqual(layers, ['episodic', 'procedural', 'semantic']);
+  assert.deepEqual(layers, ['episodic', 'procedural', 'semantic', 'self_reflective']);
 });
 
-test('resolveMemoryLayers maps failed to episodic + semantic', () => {
+test('resolveMemoryLayers maps failed to episodic + semantic + self_reflective', () => {
   const layers = resolveMemoryLayers('failed');
-  assert.deepEqual(layers, ['episodic', 'semantic']);
+  assert.deepEqual(layers, ['episodic', 'semantic', 'self_reflective']);
 });
 
 test('resolveMemoryLayers maps succeeded to empty array', () => {
