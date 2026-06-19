@@ -18,7 +18,7 @@ export {
   type EntityNode,
   type EntityCooccurrence,
   type EntitySearchOptions,
-} from './store.js';
+} from './core/store.js';
 
 export type { ObserverType } from './types.js';
 
@@ -36,9 +36,9 @@ export {
   type ListCompactionsOptions,
   type ProceduralCandidate,
   type CandidateStatus,
-} from './compaction.js';
+} from './core/compaction.js';
 
-export { getLatestCheckpoint } from './checkpoint.js';
+export { getLatestCheckpoint } from './core/checkpoint.js';
 
 export {
   retrieveActiveRules,
@@ -53,7 +53,7 @@ export {
   type TaskState,
   type RunPhase,
   type MemoryLayer,
-} from './retrieval.js';
+} from './core/retrieval.js';
 
 export {
   ensureProceduralCandidateStore,
@@ -66,7 +66,7 @@ export {
   type ProceduralCandidate as ProceduralCandidateRecord,
   type CreateProceduralCandidateInput,
   type ListProceduralCandidatesOptions,
-} from './procedural-candidates.js';
+} from './procedures/procedural-candidates.js';
 
 export {
   recordSelfReflection,
@@ -74,17 +74,17 @@ export {
   getAgentSelfInsights,
   type SelfReflectionInput,
   type AgentSelfInsight,
-} from './self-reflection.js';
+} from './reflection/self-reflection.js';
 
 export {
   checkMemoryIntegrity,
   type MemoryIntegrityReport,
   type MemoryIntegrityCheck,
-} from './integrity.js';
+} from './core/integrity.js';
 
 export {
   applyRetentionPolicy,
   DEFAULT_RETENTION_POLICY,
   type RetentionPolicy,
   type RetentionResult,
-} from './retention.js';
+} from './core/retention.js';

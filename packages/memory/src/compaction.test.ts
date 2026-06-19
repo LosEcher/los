@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
-import { ensureMemoryStore, addObservation } from './store.js';
+import { ensureMemoryStore, addObservation } from './core/store.js';
 import {
   compactSession,
   ensureMemoryCompactionStore,
@@ -12,7 +12,7 @@ import {
   listCompactions,
   attestCompaction,
   promoteCandidate,
-} from './compaction.js';
+} from './core/compaction.js';
 
 test('cross-session evidence: same pattern across 3 sessions produces review candidate', async () => {
   const config = await loadConfig();

@@ -9,7 +9,7 @@ import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { ensureMemoryStore } from './store.js';
 import { ensureMemoryCompactionStore } from './compaction.js';
-import { ensureProceduralCandidateStore } from './procedural-candidates.js';
+import { ensureProceduralCandidateStore } from '../procedures/procedural-candidates.js';
 
 const log = getLogger('memory-integrity');
 
