@@ -14,7 +14,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@los/agent": "workspace:*"
+    "@los/agent": "workspace:*",
+    "@los/memory": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

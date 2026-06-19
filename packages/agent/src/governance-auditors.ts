@@ -136,6 +136,63 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'memory_integrity': return runMemoryIntegrityAudit();
     case 'memory_retention': return runMemoryRetentionAudit();
     case 'reflection': return runReflectionAudit();
+    case 'branch_cleanup': return runBranchCleanupAudit();
+    case 'related_project_scan': return runRelatedProjectScanAudit();
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
+}
+
+// ... (before runBranchCleanupAudit)
+
+async function runRelatedProjectScanAudit(): Promise<Record<string, unknown>> {
+  try {
+    const { scanRelatedProjects } = await import('./ga-related-project-scanner.js');
+    const result = await scanRelatedProjects(process.cwd());
+    const absorbable = result.projects.filter(p => p.absorbableCapabilities && p.absorbableCapabilities.length > 0);
+    const inaccessible = result.projects.filter(p => !p.accessible);
+    return {
+      auditedAt: result.scannedAt,
+      since: result.since,
+      totalProjects: result.projects.length,
+      accessibleProjects: result.projects.filter(p => p.accessible).length,
+      withNewFeatures: result.projects.filter(p => p.newFeatures && p.newFeatures.length > 0).length,
+      absorbableCount: absorbable.length,
+      inaccessibleCount: inaccessible.length,
+    };
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runBranchCleanupAudit(): Promise<Record<string, unknown>> {
+  // Branch cleanup audit is a lightweight pre-check: does the repo
+  // have any stale remote branches? The actual fix runs in applyBranchCleanupFix.
+  try {
+    const { execSync } = await import('node:child_process');
+    execSync('git rev-parse --is-inside-work-tree', { encoding: 'utf8', timeout: 5000 });
+  } catch {
+    return { auditedAt: new Date().toISOString(), branchable: false, reason: 'Not a git worktree' };
+  }
+
+  let branchCount = 0;
+  try {
+    const refsOutput = (await import('node:child_process')).execSync(
+      'git for-each-ref --format=%(refname:short) refs/remotes/origin',
+      { encoding: 'utf8', timeout: 5000 },
+    );
+    branchCount = refsOutput
+      .split('\n')
+      .map(l => l.trim())
+      .filter(b => b && b !== 'origin' && !b.startsWith('origin/HEAD') && b !== 'origin/main')
+      .length;
+  } catch {
+    return { auditedAt: new Date().toISOString(), branchable: true, remoteBranches: 0, staleCandidateCount: 0 };
+  }
+
+  return {
+    auditedAt: new Date().toISOString(),
+    branchable: true,
+    remoteBranches: branchCount,
+    staleCandidateCount: branchCount, // all non-main remote branches are candidates
+  };
 }

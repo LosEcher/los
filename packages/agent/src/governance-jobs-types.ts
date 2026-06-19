@@ -1,6 +1,36 @@
-export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection';
+export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan';
 export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly';
 export type GovernanceJobStatus = 'active' | 'paused' | 'retired';
+export type CircuitState = 'closed' | 'half_open' | 'open';
+
+export interface GovernanceJobAutoFixConfig {
+  autoFixEnabled: boolean;
+  maxAutoFixAttempts?: number;
+  verificationCommands?: string[];
+  stopCondition?: string;
+  escalationCadence?: 'immediate' | 'after_retry' | 'never';
+}
+
+export interface GaLoopPhase {
+  phase: 'audit_run' | 'findings_ready' | 'fix_claimed' | 'fix_attempted' | 'verify_result' | 'completed' | 'retry' | 'escalated';
+  enteredAt: string;
+  attemptNumber: number;
+  detail?: string;
+}
+
+export interface GaLoopResult {
+  jobId: string;
+  jobType: GovernanceJobType;
+  auditSummary: Record<string, unknown>;
+  phases: GaLoopPhase[];
+  fixApplied: boolean;
+  fixSucceeded: boolean;
+  verificationPassed: boolean;
+  retried: boolean;
+  escalated: boolean;
+  escalatedReason?: string;
+  error?: string;
+}
 
 export interface GovernanceJob {
   id: string;
@@ -16,6 +46,12 @@ export interface GovernanceJob {
   projectId?: string;
   createdAt: string;
   updatedAt: string;
+  autoFix?: GovernanceJobAutoFixConfig;
+  consecutiveNoOps: number;
+  consecutiveFailures: number;
+  circuitState: CircuitState;
+  /** When the circuit was last opened (ISO string), for auto-recovery timing */
+  circuitOpenedAt?: string;
 }
 
 export interface CreateGovernanceJobInput {
@@ -23,6 +59,7 @@ export interface CreateGovernanceJobInput {
   cadence?: GovernanceCadence;
   status?: GovernanceJobStatus;
   config?: Record<string, unknown>;
+  autoFix?: GovernanceJobAutoFixConfig;
   dedupeKey?: string;
   tenantId?: string;
   projectId?: string;
@@ -32,10 +69,18 @@ export interface UpdateGovernanceJobInput {
   cadence?: GovernanceCadence;
   status?: GovernanceJobStatus;
   config?: Record<string, unknown>;
+  autoFix?: GovernanceJobAutoFixConfig;
   lastRunAt?: string;
   lastTaskRunId?: string;
   resultSummary?: Record<string, unknown>;
   dedupeKey?: string;
+}
+
+export interface UpdateGovernanceJobStateInput {
+  consecutiveNoOps?: number;
+  consecutiveFailures?: number;
+  circuitState?: CircuitState;
+  circuitOpenedAt?: string | null;
 }
 
 export interface ListGovernanceJobsOptions {
@@ -77,12 +122,17 @@ export type GovernanceJobRow = {
   cadence: string;
   status: string;
   config_json: unknown;
+  auto_fix_config_json: unknown;
   last_run_at: Date | string | null;
   last_task_run_id: string | null;
   result_summary_json: unknown;
   dedupe_key: string | null;
   tenant_id: string | null;
   project_id: string | null;
+  consecutive_no_ops: number | null;
+  consecutive_failures: number | null;
+  circuit_state: string | null;
+  circuit_opened_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
 };

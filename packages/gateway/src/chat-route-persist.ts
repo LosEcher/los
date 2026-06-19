@@ -7,6 +7,7 @@ import { addObservation, ensureMemoryStore } from '@los/memory';
 import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
 import { updateBoundTodoFromRun } from './chat-session-helpers.js';
 import { failIdempotencyKey } from './idempotency.js';
+import { drainSymbolCache } from './chat-cbm-symbol-cache.js';
 
 export async function persistChatSuccess(opts: {
   prompt: string;
@@ -25,20 +26,35 @@ export async function persistChatSuccess(opts: {
 }) {
   const postRun = await Promise.all([
     opts.persistMemory
-      ? ensureMemoryStore().then(() => addObservation({
-        title: `Chat session ${opts.sessionId.slice(0, 12)}`,
-        summary: `Prompt: ${opts.prompt.slice(0, 200)} - ${opts.result.text.slice(0, 200)}`,
-        kind: 'note',
-        tags: ['chat', 'session'],
-        source: 'agent',
-        sessionId: opts.sessionId,
-        tenantId: opts.tenantId,
-        projectId: opts.projectId,
-        userId: opts.userId,
-        nodeId: opts.nodeId ?? undefined,
-        requestId: opts.requestId,
-        traceId: opts.traceId,
-      }))
+      ? ensureMemoryStore().then(() => {
+          // Phase 3: drain CBM symbol cache for this session
+          const symbolRefs = drainSymbolCache();
+          const meta: Record<string, unknown> = {
+            scope: 'task',
+            memoryLayer: 'episodic',
+          };
+          if (symbolRefs.size > 0) {
+            meta.symbolRefs = [...symbolRefs.entries()].map(([callId, symbols]) => ({
+              callId,
+              symbols,
+            }));
+          }
+          return addObservation({
+            title: `Chat session ${opts.sessionId.slice(0, 12)}`,
+            summary: `Prompt: ${opts.prompt.slice(0, 200)} - ${opts.result.text.slice(0, 200)}`,
+            kind: 'note',
+            tags: ['chat', 'session'],
+            source: 'agent',
+            sessionId: opts.sessionId,
+            tenantId: opts.tenantId,
+            projectId: opts.projectId,
+            userId: opts.userId,
+            nodeId: opts.nodeId ?? undefined,
+            requestId: opts.requestId,
+            traceId: opts.traceId,
+            metadata: meta,
+          });
+        })
       : Promise.resolve(undefined),
     applyDirectRunCompletionStatus({
       runSpecId: opts.runSpecId,

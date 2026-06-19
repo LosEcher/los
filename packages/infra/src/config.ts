@@ -133,6 +133,24 @@ export const ConfigSchema = z.object({
      *  about their own behavior (strengths, weaknesses, patterns) as observations
      *  with observerType: 'agent_self'. Default: false (opt-in). */
     selfReflectionEnabled: z.coerce.boolean().default(false),
+    /** Code graph integration via codebase-memory-mcp (CBM).
+     *  All features default off — enable progressively after validation. */
+    codeGraph: z.object({
+      /** Master switch. When false, no CBM calls are made. */
+      enabled: z.coerce.boolean().default(false),
+      /** Shadow mode: query CBM but do not inject results into prompts or observations.
+       *  Used for measurement and validation. Requires enabled=true. */
+      shadowMode: z.coerce.boolean().default(false),
+      /** Inject caller/callee context into the system prompt before agent execution.
+       *  Requires enabled=true. Phase 2 — enable after shadow mode validation. */
+      injectArchitecture: z.coerce.boolean().default(false),
+      /** Path to the CBM binary. Default: 'codebase-memory-mcp' (resolved from PATH). */
+      cbmCommand: z.string().default('codebase-memory-mcp'),
+      /** Extra arguments passed to CBM on every invocation. */
+      cbmArgs: z.array(z.string()).default([]),
+      /** Maximum tokens for injected code structure context. */
+      maxPromptTokens: z.coerce.number().default(400),
+    }).default({}),
   }),
 
   // Executor
@@ -178,6 +196,10 @@ const ENV_MAP: [string, string][] = [
   ['REVIEW_ENABLED', 'review.enabled'],
   ['MEMORY_FTS_ENABLED', 'memory.ftsEnabled'],
   ['MEMORY_SELF_REFLECTION_ENABLED', 'memory.selfReflectionEnabled'],
+  ['LOS_CODE_GRAPH_ENABLED', 'memory.codeGraph.enabled'],
+  ['LOS_CODE_GRAPH_SHADOW_MODE', 'memory.codeGraph.shadowMode'],
+  ['LOS_CODE_GRAPH_INJECT_ARCH', 'memory.codeGraph.injectArchitecture'],
+  ['LOS_CBM_COMMAND', 'memory.codeGraph.cbmCommand'],
   ['EXECUTOR_ENABLED', 'executor.enabled'],
   ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'],
@@ -350,7 +372,7 @@ export async function loadConfig(opts?: {
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173' },
     auth: { enabled: false },
     agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
-    memory: { ftsEnabled: true, maxObservations: 10000, selfReflectionEnabled: false },
+    memory: { ftsEnabled: true, maxObservations: 10000, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},
     databaseUrl: 'postgres://localhost:5432/los',

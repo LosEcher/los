@@ -323,6 +323,23 @@ export async function startServer(port?: number, host?: string) {
   console.log(await printOnboardingReport());
   console.log(printConfigDiagnostics(config));
 
+  // ── CBM code graph availability check (best-effort) ──
+  if (config.memory?.codeGraph?.enabled) {
+    try {
+      const { CBMClient } = await import('@los/memory');
+      const cbm = CBMClient.createDefault({
+        command: config.memory.codeGraph.cbmCommand,
+        args: config.memory.codeGraph.cbmArgs,
+      });
+      await cbm.connect();
+      const metrics = cbm.getMetrics();
+      log.info(`CBM code graph: available (${metrics.successes} queries ok)`);
+      await cbm.close();
+    } catch (err) {
+      log.warn(`CBM code graph: unavailable — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const app = await createServer(service);
   const heartbeat = setInterval(() => {
     heartbeatGatewayService(service).catch((err) => log.warn(`service heartbeat failed: ${err.message ?? String(err)}`));

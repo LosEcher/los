@@ -21,6 +21,10 @@ import {
   type IdentityLevel,
 } from '@los/agent';
 import { getConfig } from '@los/infra/config';
+import {
+  buildCodeStructureBlock,
+  shouldInjectThisSession,
+} from './chat-cbm-inject.js';
 
 /**
  * Augment the system prompt with agent identity and task-state memory
@@ -80,11 +84,25 @@ export async function augmentChatSystemPrompt(params: {
     });
     const augmented = augmentSystemPrompt(baseSystemPrompt, retrieval);
 
-    // Compose: identity block → augmented prompt (base + memory)
-    if (identityBlock) {
-      return identityBlock + '\n\n' + augmented.augmentedPrompt;
+    // ── Phase 2: CBM code structure injection (A/B alternating) ──
+    let promptWithCode = augmented.augmentedPrompt;
+    const codeGraph = getConfig().memory?.codeGraph;
+    if (codeGraph?.enabled && codeGraph?.injectArchitecture && shouldInjectThisSession()) {
+      const codeBlock = await buildCodeStructureBlock(
+        params.systemPrompt ?? '',
+        params.workspaceRoot ?? process.cwd(),
+        codeGraph.maxPromptTokens ?? 400,
+      );
+      if (codeBlock) {
+        promptWithCode = augmented.augmentedPrompt + '\n\n' + codeBlock;
+      }
     }
-    return augmented.augmentedPrompt;
+
+    // Compose: identity block → augmented prompt (base + memory + code context)
+    if (identityBlock) {
+      return identityBlock + '\n\n' + promptWithCode;
+    }
+    return promptWithCode;
   } catch {
     // Memory retrieval is best-effort; fall back to base prompt + identity
     if (identityBlock) {
