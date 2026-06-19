@@ -1,14 +1,12 @@
 # Large-file baseline — files between 401–600 lines grandfathered as warnings.
 # New files exceeding 400 lines that are NOT in this list produce CI errors.
-# Generated 2026-06-18. To remove a file from this list, slim it below 401 lines
+# Generated 2026-06-19. To remove a file, slim it below 401 lines
 # and run: ./tools/update-large-file-baseline.sh
+
 packages/agent/src/agent-task-graph.ts
 packages/agent/src/executor-nodes.ts
 packages/agent/src/external-tool-summary.ts
-packages/agent/src/governance-auditors.ts
 packages/agent/src/identity-loader.ts
-packages/agent/src/index.ts
-packages/agent/src/loop.ts
 packages/agent/src/node-commands.ts
 packages/agent/src/review-runner.ts
 packages/agent/src/rules.ts
@@ -22,15 +20,10 @@ packages/agent/src/session-events.ts
 packages/agent/src/skills.ts
 packages/agent/src/todo-seeds-agent-workflow.ts
 packages/agent/src/todo-seeds.ts
-packages/agent/src/tools/edit-tools.ts
-packages/agent/src/tools/file-tools.ts
-packages/agent/src/tools/search-tools.ts
 packages/cli/src/index.ts
 packages/cli/src/provider.ts
 packages/gateway/src/chat-service.ts
-packages/gateway/src/routes/infrastructure/node-routes.ts
 packages/gateway/src/routes/providers/provider-routes.ts
-packages/gateway/src/server.ts
 packages/infra/src/config.ts
 packages/memory/src/core/compaction.ts
 packages/memory/src/core/store.ts

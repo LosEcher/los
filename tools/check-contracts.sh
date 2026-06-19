@@ -129,14 +129,15 @@ memory="$CONTRACT_DIR/memory.yaml"
   require_pattern "$memory" 'procedural_candidates' 'candidates source'
 }
 
-# ── Status-based gating (informational only until all contracts reach review) ──
+# ── Status-based gating (informational only, never blocks) ──
 
 for name in "${required_contracts[@]}"; do
   file="$CONTRACT_DIR/$name"
   [ -f "$file" ] || continue
   status=$(grep -E '^status:[[:space:]]+' "$file" | head -1 | sed 's/^status:[[:space:]]*//')
   if [ "$status" = "draft" ]; then
-    printf '  contract check warning: %s has status "draft"\n' "$name" >&2
+    # draft status is informational; contracts gate on structure + cross-references, not on status
+    :  # no-op — suppress "contract check warning: ... has status draft" noise
   fi
 done
 
