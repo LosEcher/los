@@ -164,4 +164,21 @@ else
   warn "$ISSUES issue(s) found — review before merging"
 fi
 
+# ── 6. Stale remote branches ────────────────────────────
+
+section "6. Stale remote branches"
+STALE_BRANCHES=$(git branch -r --merged origin/main 2>/dev/null | grep -v 'origin/HEAD\|origin/main' | sed 's/^[[:space:]]*//' || true)
+if [ -n "$STALE_BRANCHES" ]; then
+  STALE_COUNT=$(echo "$STALE_BRANCHES" | wc -l | tr -d ' ')
+  warn "$STALE_COUNT stale remote branch(es) merged into main but not deleted:"
+  echo "$STALE_BRANCHES" | while read -r branch; do
+    echo "    $branch"
+  done
+  echo ""
+  echo "  To delete: git push origin --delete <branch>"
+  ISSUES=$((ISSUES + 1))
+else
+  green "No stale remote branches"
+fi
+
 exit 0  # warn only, never block
