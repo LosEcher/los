@@ -1,9 +1,10 @@
-import { Send, SlidersHorizontal, Square, Wrench } from 'lucide-react';
+import { Send, Square, Wrench } from 'lucide-react';
 import type { FormEvent } from 'react';
 import type { ProviderModelsResponse, ToolMode } from './api';
 import { RunField } from './chat-ui.js';
 import { ProjectSelector } from './project-selector.js';
-import { buildModelSettingsPayload, buildToolRetryPayload, parseCommaList, providerRoutesFromModels } from './chat-helpers.js';
+import { providerRoutesFromModels } from './chat-helpers.js';
+import { ChatAdvancedSettings, type ChatAdvancedSettingsState } from './chat-advanced-settings.js';
 
 export function ChatComposer(props: {
   prompt: string;
@@ -21,39 +22,13 @@ export function ChatComposer(props: {
 
   toolMode: ToolMode;
   onToolModeChange: (value: ToolMode) => void;
-  allowedTools: string;
-  onAllowedToolsChange: (value: string) => void;
 
   workspaceRoot: string;
   onWorkspaceRootChange: (value: string) => void;
   defaultWorkspace: string;
 
-  systemPrompt: string;
-  onSystemPromptChange: (value: string) => void;
-
-  maxLoops: number;
-  onMaxLoopsChange: (value: number) => void;
-  timeoutMs: number;
-  onTimeoutMsChange: (value: number) => void;
-
-  toolRetryMaxAttempts: string;
-  toolRetryBaseDelayMs: string;
-  toolRetryMaxDelayMs: string;
-  onToolRetryMaxAttemptsChange: (value: string) => void;
-  onToolRetryBaseDelayMsChange: (value: string) => void;
-  onToolRetryMaxDelayMsChange: (value: string) => void;
-
-  temperature: string;
-  topP: string;
-  maxTokens: string;
-  presencePenalty: string;
-  frequencyPenalty: string;
-  onTemperatureChange: (value: string) => void;
-  onTopPChange: (value: string) => void;
-  onMaxTokensChange: (value: string) => void;
-  onPresencePenaltyChange: (value: string) => void;
-  onFrequencyPenaltyChange: (value: string) => void;
-
+  advancedState: ChatAdvancedSettingsState;
+  onAdvancedChange: (patch: Partial<ChatAdvancedSettingsState>) => void;
   advancedCount: number;
 }) {
   const providerRoutes = providerRoutesFromModels(props.modelRoutes);
@@ -111,46 +86,11 @@ export function ChatComposer(props: {
             defaultWorkspace={props.defaultWorkspace}
           />
         </RunField>
-        <details className="composer-advanced">
-          <summary title="Advanced request settings">
-            <SlidersHorizontal size={14} />
-            {props.advancedCount > 0 ? <span className="filter-badge">{props.advancedCount}</span> : null}
-          </summary>
-          <div className="composer-advanced-panel">
-            <RunField label="system prompt" title="System prompt override" variant="panel">
-              <textarea value={props.systemPrompt} onChange={event => props.onSystemPromptChange(event.target.value)} placeholder="provider default" rows={2} />
-            </RunField>
-            <RunField label="allowed tools" title="Comma-separated tool names to allow (empty = all)" variant="panel">
-              <input value={props.allowedTools} onChange={event => props.onAllowedToolsChange(event.target.value)} placeholder="read_file, write_file, search_codebase" />
-            </RunField>
-            <RunField label="max turns" title="Hard cap on model turns (maxLoops)" variant="panel">
-              <input type="number" min={1} max={100} value={props.maxLoops} onChange={event => props.onMaxLoopsChange(Number(event.target.value))} />
-            </RunField>
-            <RunField label="timeout ms" title="Request timeout in milliseconds" variant="panel">
-              <input type="number" min={1000} step={1000} value={props.timeoutMs} onChange={event => props.onTimeoutMsChange(Number(event.target.value))} />
-            </RunField>
-            <RunField label="tool retry attempts" title="Max tool call retry attempts" variant="panel">
-              <input type="number" min={0} max={10} value={props.toolRetryMaxAttempts} onChange={event => props.onToolRetryMaxAttemptsChange(event.target.value)} placeholder="3" />
-              <input type="number" min={0} step={500} value={props.toolRetryBaseDelayMs} onChange={event => props.onToolRetryBaseDelayMsChange(event.target.value)} placeholder="1000" />
-              <input type="number" min={0} step={1000} value={props.toolRetryMaxDelayMs} onChange={event => props.onToolRetryMaxDelayMsChange(event.target.value)} placeholder="30000" />
-            </RunField>
-            <RunField label="temperature" title="Sampling temperature" variant="panel">
-              <input value={props.temperature} onChange={event => props.onTemperatureChange(event.target.value)} placeholder="provider default" />
-            </RunField>
-            <RunField label="top p" title="Nucleus sampling top_p" variant="panel">
-              <input value={props.topP} onChange={event => props.onTopPChange(event.target.value)} placeholder="provider default" />
-            </RunField>
-            <RunField label="max tokens" title="Model output token limit" variant="panel">
-              <input value={props.maxTokens} onChange={event => props.onMaxTokensChange(event.target.value)} placeholder="provider default" />
-            </RunField>
-            <RunField label="presence" title="Presence penalty" variant="panel">
-              <input value={props.presencePenalty} onChange={event => props.onPresencePenaltyChange(event.target.value)} placeholder="provider default" />
-            </RunField>
-            <RunField label="frequency" title="Frequency penalty" variant="panel">
-              <input value={props.frequencyPenalty} onChange={event => props.onFrequencyPenaltyChange(event.target.value)} placeholder="provider default" />
-            </RunField>
-          </div>
-        </details>
+        <ChatAdvancedSettings
+          state={props.advancedState}
+          onChange={props.onAdvancedChange}
+          advancedCount={props.advancedCount}
+        />
       </div>
       <textarea
         value={props.prompt}
@@ -168,34 +108,4 @@ export function ChatComposer(props: {
       </div>
     </form>
   );
-}
-
-export function buildComposerPayload(input: {
-  systemPrompt: string;
-  allowedTools: string;
-  toolRetryMaxAttempts: string;
-  toolRetryBaseDelayMs: string;
-  toolRetryMaxDelayMs: string;
-  temperature: string;
-  topP: string;
-  maxTokens: string;
-  presencePenalty: string;
-  frequencyPenalty: string;
-}) {
-  return {
-    systemPrompt: input.systemPrompt.trim() || undefined,
-    allowedTools: parseCommaList(input.allowedTools),
-    toolRetry: buildToolRetryPayload({
-      maxAttempts: input.toolRetryMaxAttempts,
-      baseDelayMs: input.toolRetryBaseDelayMs,
-      maxDelayMs: input.toolRetryMaxDelayMs,
-    }),
-    modelSettings: buildModelSettingsPayload({
-      temperature: input.temperature,
-      topP: input.topP,
-      maxTokens: input.maxTokens,
-      presencePenalty: input.presencePenalty,
-      frequencyPenalty: input.frequencyPenalty,
-    }),
-  };
 }

@@ -18,9 +18,8 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
   assert.match(composer, /label="model"/);
   assert.match(composer, /label="tools \/ skills"/);
   assert.match(composer, /label="execution dir"/);
-  assert.match(composer, /title="Advanced request settings"/);
-  assert.match(composer, /label="temperature"/);
-  assert.match(composer, /label="max tokens"/);
+  assert.match(composer, /ChatAdvancedSettings/);
+  assert.match(composer, /aria-label="run choices"/);
   assert.match(chatPage, /refetchInterval: running \? 4_000 : false/);
   assert.match(chatPage, /addEventListener\('session\.event'/);
   assert.doesNotMatch(chatPage, /es\.onmessage/);
@@ -37,25 +36,24 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
 });
 
 test('provider setup fields live on the providers page, not chat', () => {
-  const providerWorkspace = between(providersPage, 'function ProviderConfigWorkspace()', 'function ConfigSnippet');
+  const providerWorkspace = between(providersPage, 'function ProviderAddForm', 'function providerReadinessLabel');
 
-  assert.match(providerWorkspace, /Provider Settings/);
-  assert.match(providerWorkspace, /label="provider id"/);
-  assert.match(providerWorkspace, /label="api key env"/);
-  assert.match(providerWorkspace, /label="base url"/);
-  assert.match(providerWorkspace, /label="default model"/);
+  assert.match(providerWorkspace, /Add Provider/);
+  assert.match(providerWorkspace, /provider id \*/);
+  assert.match(providerWorkspace, /api key/);
+  assert.match(providerWorkspace, /base url/);
+  assert.match(providerWorkspace, /default model/);
   assert.match(providerWorkspace, /enabled/);
-  assert.match(providerWorkspace, /\.env/);
-  assert.match(providerWorkspace, /~\/.los\/config.yaml/);
+  assert.match(providerWorkspace, /weight/);
 
-  assert.doesNotMatch(chatPage, /label="api key env"/);
-  assert.doesNotMatch(chatPage, /label="base url"/);
-  assert.doesNotMatch(chatPage, /label="default model"/);
+  assert.doesNotMatch(chatPage, /api key env/);
+  assert.doesNotMatch(chatPage, /base url/);
+  assert.doesNotMatch(chatPage, /default model/);
   assert.doesNotMatch(chatPage, /Provider Settings/);
 });
 
 test('providers page renders readiness instead of raw discovery booleans', () => {
-  const section = between(providersPage, 'export function ProvidersPage()', 'type ProviderConfigDraft');
+  const section = between(providersPage, 'export function ProvidersPage()', 'function ProviderAddForm');
 
   assert.match(section, /providerReadinessLabel/);
   assert.match(section, /providerReadinessDetail/);

@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { BarChart3, GitCompare, TrendingDown, TrendingUp } from 'lucide-react';
-import { getJson } from './api';
-import { DataTable, EmptyText, Fact, formatDate } from './ui';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { BarChart3, GitCompare, TrendingDown, TrendingUp, Zap, Plus } from 'lucide-react';
+import { getJson, postJson } from './api';
+import { Button, DataTable, EmptyText, Fact, Field, StatusPill, formatDate } from './ui';
 
 interface EvalSummaryGroup {
   key: string;
@@ -53,6 +53,7 @@ interface EvalComparison {
 type ViewMode = 'summary' | 'compare';
 
 export function EvalsPage() {
+  const qc = useQueryClient();
   const [mode, setMode] = useState<ViewMode>('summary');
   const [runSpecId, setRunSpecId] = useState('');
   const [provider, setProvider] = useState('');
@@ -61,6 +62,35 @@ export function EvalsPage() {
   const [baselineTo, setBaselineTo] = useState('');
   const [candidateFrom, setCandidateFrom] = useState('');
   const [candidateTo, setCandidateTo] = useState('');
+
+  // ── Backlog snapshot action ─────────────────────────
+  const backlogSnapshot = useMutation({
+    mutationFn: () => postJson<{ ok: boolean }>('/eval-backlog/run', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['evals-summary'] }),
+  });
+
+  // ── Manual eval record form state ──────────────────
+  const [showRecordForm, setShowRecordForm] = useState(false);
+  const [recordProvider, setRecordProvider] = useState('');
+  const [recordModel, setRecordModel] = useState('');
+  const [recordSuccess, setRecordSuccess] = useState(true);
+  const [recordLatencyMs, setRecordLatencyMs] = useState('');
+  const [recordRunSpecId, setRecordRunSpecId] = useState('');
+  const recordEval = useMutation({
+    mutationFn: () => postJson('/run-evals', {
+      provider: recordProvider.trim() || undefined,
+      model: recordModel.trim() || undefined,
+      success: recordSuccess,
+      latencyMs: recordLatencyMs.trim() ? Number(recordLatencyMs) : undefined,
+      runSpecId: recordRunSpecId.trim() || 'manual',
+    }),
+    onSuccess: () => {
+      setShowRecordForm(false);
+      setRecordProvider(''); setRecordModel(''); setRecordSuccess(true);
+      setRecordLatencyMs(''); setRecordRunSpecId('');
+      qc.invalidateQueries({ queryKey: ['evals-summary'] });
+    },
+  });
 
   const sharedParams = new URLSearchParams();
   if (runSpecId.trim()) sharedParams.set('runSpecId', runSpecId.trim());
@@ -127,7 +157,38 @@ export function EvalsPage() {
             onChange={e => setModel(e.target.value)}
           />
         </div>
+
+        <div className="toolbar-actions">
+          <Button variant="ghost" onClick={() => backlogSnapshot.mutate()} title="Record a snapshot of current eval backlog">
+            <Zap size={14} /> {backlogSnapshot.isPending ? 'Recording…' : 'Record Backlog Snapshot'}
+          </Button>
+          <Button variant="ghost" onClick={() => setShowRecordForm(v => !v)} title="Manually record a single eval">
+            <Plus size={14} /> Record Eval
+          </Button>
+        </div>
       </div>
+
+      {showRecordForm ? (
+        <div className="provider-edit-panel">
+          <div className="provider-edit-grid">
+            <Field label="provider"><input value={recordProvider} onChange={e => setRecordProvider(e.target.value)} placeholder="e.g. deepseek" /></Field>
+            <Field label="model"><input value={recordModel} onChange={e => setRecordModel(e.target.value)} placeholder="e.g. deepseek-v4-flash" /></Field>
+            <Field label="run spec id"><input value={recordRunSpecId} onChange={e => setRecordRunSpecId(e.target.value)} placeholder="manual" /></Field>
+            <Field label="latency (ms)"><input type="number" value={recordLatencyMs} onChange={e => setRecordLatencyMs(e.target.value)} placeholder="e.g. 1200" /></Field>
+          </div>
+          <div className="provider-edit-meta">
+            <label className="toolbar-toggle">
+              <input type="checkbox" checked={recordSuccess} onChange={e => setRecordSuccess(e.target.checked)} />
+              success
+            </label>
+            <Button onClick={() => recordEval.mutate()} disabled={recordEval.isPending}>
+              {recordEval.isPending ? 'Recording…' : 'Submit'}
+            </Button>
+            <Button variant="ghost" onClick={() => setShowRecordForm(false)}>Cancel</Button>
+          </div>
+          {recordEval.error ? <div className="error-banner">{String(recordEval.error)}</div> : null}
+        </div>
+      ) : null}
 
       {mode === 'summary' && <EvalSummaryView data={summary.data} loading={summary.isLoading} />}
       {mode === 'compare' && (

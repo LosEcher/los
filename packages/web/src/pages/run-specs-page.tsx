@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getJson } from '../api/index.js';
-import { DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, X, Play } from 'lucide-react';
+import { getJson, postJson } from '../api/index.js';
+import { Button, DataTable, Fact, StatusPill, EmptyText, Badge } from '../ui.js';
 
 interface RunSpec {
   id: string;
@@ -22,10 +23,14 @@ interface RunStateProjection {
   taskCount?: number;
   verificationCount?: number;
   verifierStatus?: string;
+  approvalStatus?: string;
 }
 
 export function RunSpecsPage() {
+  const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [approvalNote, setApprovalNote] = useState('');
+  const [showApproval, setShowApproval] = useState(false);
 
   const runs = useQuery({
     queryKey: ['runs'],
@@ -37,6 +42,16 @@ export function RunSpecsPage() {
     queryKey: ['run-state', selectedId],
     queryFn: () => getJson<RunStateProjection>(`/runs/${selectedId}/state`),
     enabled: Boolean(selectedId),
+  });
+
+  // ── Approval actions (scaffold — route tests pending) ─
+  const approveRun = useMutation({
+    mutationFn: (id: string) => postJson(`/runs/${id}/approve`, { approved: true, note: approvalNote.trim() || undefined }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['runs'] }); qc.invalidateQueries({ queryKey: ['run-state', selectedId] }); setShowApproval(false); setApprovalNote(''); },
+  });
+  const rejectRun = useMutation({
+    mutationFn: (id: string) => postJson(`/runs/${id}/approve`, { approved: false, note: approvalNote.trim() || 'operator rejected' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['runs'] }); qc.invalidateQueries({ queryKey: ['run-state', selectedId] }); setShowApproval(false); setApprovalNote(''); },
   });
 
   const runList = runs.data ?? [];
@@ -95,21 +110,58 @@ export function RunSpecsPage() {
         ) : runState.isLoading ? (
           <EmptyText text="Loading..." />
         ) : runState.data ? (
-          <div className="fact-list">
-            <Fact label="phase" value={runState.data.phase ?? '—'} />
-            <Fact label="action" value={runState.data.action ?? '—'} />
-            <Fact label="tasks" value={String(runState.data.taskCount ?? 0)} />
-            <Fact label="verifications" value={String(runState.data.verificationCount ?? 0)} />
-            <Fact label="verifier" value={runState.data.verifierStatus ?? '—'} />
-            {runState.data.blockers && runState.data.blockers.length > 0 ? (
-              <div style={{ marginTop: 12 }}>
-                <strong style={{ fontSize: 13 }}>Blockers</strong>
-                <ul style={{ margin: '4px 0 0 16px', fontSize: 13, color: 'var(--text-dim)' }}>
-                  {runState.data.blockers.map((b, i) => <li key={i}>{b}</li>)}
-                </ul>
+          <>
+            <div className="fact-list">
+              <Fact label="phase" value={runState.data.phase ?? '—'} />
+              <Fact label="action" value={runState.data.action ?? '—'} />
+              <Fact label="tasks" value={String(runState.data.taskCount ?? 0)} />
+              <Fact label="verifications" value={String(runState.data.verificationCount ?? 0)} />
+              <Fact label="verifier" value={runState.data.verifierStatus ?? '—'} />
+              {runState.data.approvalStatus ? (
+                <Fact label="approval" value={runState.data.approvalStatus} />
+              ) : null}
+              {runState.data.blockers && runState.data.blockers.length > 0 ? (
+                <div className="blocker-list">
+                  <strong style={{ fontSize: 13 }}>Blockers</strong>
+                  <ul style={{ margin: '4px 0 0 16px', fontSize: 13, color: 'var(--text-dim)' }}>
+                    {runState.data.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+
+            {/* ── Operator Approval Section ──────────────── */}
+            <div className="section-divider" />
+            <div className="panel-head compact"><h2>Operator Approval</h2></div>
+            {!showApproval ? (
+              <div style={{ padding: '8px 16px 16px' }}>
+                <Button variant="ghost" onClick={() => setShowApproval(true)}>
+                  <Play size={14} /> Approve / Reject
+                </Button>
               </div>
-            ) : null}
-          </div>
+            ) : (
+              <div className="approval-panel">
+                <textarea
+                  rows={2}
+                  placeholder="Approval note (optional)..."
+                  value={approvalNote}
+                  onChange={e => setApprovalNote(e.target.value)}
+                  style={{ width: '100%', marginBottom: 8 }}
+                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button onClick={() => approveRun.mutate(selectedId!)} disabled={approveRun.isPending}>
+                    <Check size={14} /> {approveRun.isPending ? 'Approving…' : 'Approve'}
+                  </Button>
+                  <Button variant="danger" onClick={() => rejectRun.mutate(selectedId!)} disabled={rejectRun.isPending}>
+                    <X size={14} /> {rejectRun.isPending ? 'Rejecting…' : 'Reject'}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setShowApproval(false)}>Cancel</Button>
+                </div>
+                {approveRun.error ? <div className="error-banner">Approve: {String(approveRun.error)}</div> : null}
+                {rejectRun.error ? <div className="error-banner">Reject: {String(rejectRun.error)}</div> : null}
+              </div>
+            )}
+          </>
         ) : (
           <EmptyText text="No state data available." />
         )}

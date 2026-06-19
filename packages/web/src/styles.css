@@ -382,6 +382,13 @@ p {
   top: 24px;
 }
 
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 12px 0 6px;
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
@@ -1056,6 +1063,7 @@ select:focus {
 }
 
 .primary-btn,
+.btn,
 .ghost-btn,
 .tiny-btn,
 .icon-btn {
@@ -1073,6 +1081,32 @@ select:focus {
   color: var(--bg);
   background: var(--accent);
   font-weight: 700;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: none;
+  border-radius: 6px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--bg);
+  background: var(--accent);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  color: var(--bg);
+  background: var(--danger);
 }
 
 .ghost-btn,
@@ -1098,7 +1132,8 @@ select:focus {
   color: var(--danger);
 }
 
-.ghost-btn.danger {
+.ghost-btn.danger,
+.tiny-btn.danger {
   color: var(--danger);
 }
 
@@ -1987,6 +2022,12 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.toolbar-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .toolbar-tabs {
   display: flex;
   gap: 4px;
@@ -2638,4 +2679,94 @@ button:disabled {
 
 .auth-banner .auth-dismiss:hover {
   color: var(--text);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Badges
+   ═══════════════════════════════════════════════════════════ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.badge-ok  { background: var(--ok-bg);  color: var(--ok);  border-color: var(--ok); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+.badge-err  { background: var(--err-bg); color: var(--err); border-color: var(--err); }
+.badge-info { background: var(--info); color: var(--bg); border-color: var(--info); }
+.badge-muted { background: transparent; color: var(--muted); border-color: var(--line); }
+.role-card {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.project-empty-state {
+  padding: 12px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.provider-edit-panel {
+  padding: 8px 12px;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.provider-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.provider-edit-meta {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.provider-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.error-banner {
+  color: var(--err);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: none;
+  border-radius: 6px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--bg);
+  background: var(--danger);
+}
+
+.btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

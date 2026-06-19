@@ -1,0 +1,128 @@
+/* ═══════════════════════════════════════════════════════════
+   Semantic Design Tokens — unified authority for los console.
+   All --text-dim, --border, --panel-bg, --muted-border,
+   --err, --err-bg, --ok-bg, --warn-bg and --portalled are
+   defined here so no page or component invents its own.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surface hierarchy ─────────── */
+  --bg: #10110f;
+  --surface: #171813;
+  --surface-2: #1f211a;
+  --surface-3: #282b22;
+  --panel-bg: var(--surface-2);
+
+  /* ── Borders ──────────────────── */
+  --line: #393d31;
+  --line-strong: #525842;
+  --border: var(--line);
+  --muted-border: var(--line);
+  --portalled: #2a2d24;
+
+  /* ── Text ─────────────────────── */
+  --text: #eff1e5;
+  --muted: #a8ad99;
+  --faint: #757b68;
+  --text-dim: var(--muted);
+
+  /* ── Semantic colors ──────────── */
+  --accent: #d7a842;
+  --accent-2: #7aa878;
+  --danger: #d76d5c;
+  --warn: #d7a842;
+  --ok: #7aa878;
+  --info: #8aa6a3;
+
+  /* ── Semantic backgrounds ─────── */
+  --err: var(--danger);
+  --err-bg: rgb(215 109 92 / 0.12);
+  --ok-bg: rgb(122 168 120 / 0.12);
+  --warn-bg: rgb(215 168 66 / 0.12);
+
+  /* ── Elevation ────────────────── */
+  --shadow: 0 18px 60px rgb(0 0 0 / 0.34);
+
+  /* ── Typography ───────────────── */
+  font-family: "IBM Plex Sans", "Avenir Next", sans-serif;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Theme: Light (opt-in via data-theme="light")
+   ═══════════════════════════════════════════════════════════ */
+
+[data-theme="light"] {
+  --bg: #f8f7f2;
+  --surface: #ffffff;
+  --surface-2: #f2f0ea;
+  --surface-3: #e8e5d8;
+  --panel-bg: var(--surface-2);
+  --line: #d6d3c4;
+  --line-strong: #b0ad9e;
+  --border: var(--line);
+  --muted-border: var(--line);
+  --portalled: #e0ddd0;
+  --text: #1c1b16;
+  --muted: #787656;
+  --faint: #a3a089;
+  --text-dim: var(--muted);
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.10);
+  /* semantic hues kept the same for contrast */
+  --accent: #b8910e;
+  --accent-2: #5d8a5d;
+  --danger: #c0392b;
+  --warn: #b8910e;
+  --ok: #5d8a5d;
+  --info: #5d7a78;
+  --err: var(--danger);
+  --err-bg: rgb(192 57 43 / 0.08);
+  --ok-bg: rgb(93 138 93 / 0.10);
+  --warn-bg: rgb(184 145 14 / 0.08);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Theme: System preference (auto)
+   ═══════════════════════════════════════════════════════════ */
+
+@media (prefers-color-scheme: light) {
+  [data-theme="system"] {
+    --bg: #f8f7f2;
+    --surface: #ffffff;
+    --surface-2: #f2f0ea;
+    --surface-3: #e8e5d8;
+    --panel-bg: var(--surface-2);
+    --line: #d6d3c4;
+    --line-strong: #b0ad9e;
+    --border: var(--line);
+    --muted-border: var(--line);
+    --portalled: #e0ddd0;
+    --text: #1c1b16;
+    --muted: #787656;
+    --faint: #a3a089;
+    --text-dim: var(--muted);
+    --shadow: 0 12px 40px rgb(0 0 0 / 0.10);
+    --accent: #b8910e;
+    --accent-2: #5d8a5d;
+    --danger: #c0392b;
+    --warn: #b8910e;
+    --ok: #5d8a5d;
+    --info: #5d7a78;
+    --err: var(--danger);
+    --err-bg: rgb(192 57 43 / 0.08);
+    --ok-bg: rgb(93 138 93 / 0.10);
+    --warn-bg: rgb(184 145 14 / 0.08);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Base reset (moved from styles.css to keep token file lean)
+   ═══════════════════════════════════════════════════════════ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
