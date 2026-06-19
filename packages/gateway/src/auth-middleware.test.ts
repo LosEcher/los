@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import type { Config } from '@los/infra/config';
 
 import authMiddleware from './auth-middleware.js';
+import { registerSecurityHeaders } from './security-headers.js';
 
 test('auth middleware allows requests when auth is disabled', async () => {
   const app = Fastify({ logger: false });
@@ -45,6 +46,35 @@ test('auth middleware requires the configured token outside public paths', async
 
     const health = await app.inject({ method: 'GET', url: '/health' });
     assert.equal(health.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test('security headers do not emit CSP unless explicitly configured', async () => {
+  const app = Fastify({ logger: false });
+  registerSecurityHeaders(app);
+  app.get('/', async () => '<html><script>window.ok=true</script></html>');
+
+  try {
+    const response = await app.inject({ method: 'GET', url: '/' });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['x-content-type-options'], 'nosniff');
+    assert.equal(response.headers['content-security-policy'], undefined);
+  } finally {
+    await app.close();
+  }
+});
+
+test('security headers emit CSP when explicitly configured', async () => {
+  const app = Fastify({ logger: false });
+  registerSecurityHeaders(app, { contentSecurityPolicy: "default-src 'self'" });
+  app.get('/', async () => ({ ok: true }));
+
+  try {
+    const response = await app.inject({ method: 'GET', url: '/' });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['content-security-policy'], "default-src 'self'");
   } finally {
     await app.close();
   }

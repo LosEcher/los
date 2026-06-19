@@ -8,8 +8,13 @@ import type { Config } from '@los/infra/config';
  * matching everything via startsWith).
  * PREFIX_PUBLIC_PATHS — any URL starting with this prefix is public.
  */
-const EXACT_PUBLIC_PATHS = ['/', '/favicon.ico', '/settings'];
+const EXACT_PUBLIC_PATHS = ['/', '/favicon.ico'];
 const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/nodes/heartbeat'];
+
+/** Paths that are public only for specific HTTP methods. */
+const METHOD_PUBLIC_PATHS: Record<string, Set<string>> = {
+  '/settings': new Set(['GET', 'HEAD', 'OPTIONS']),
+};
 
 export interface AuthMiddlewareOptions {
   config: Config;
@@ -24,7 +29,7 @@ export default async function authMiddleware(
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     if (!config.auth.enabled) return;
 
-    if (isPublicPath(req.url)) return;
+    if (isPublicPath(req.url, req.method)) return;
 
     const token = req.headers['x-los-auth-token'];
     const normalized = Array.isArray(token) ? token[0] : token;
@@ -35,11 +40,12 @@ export default async function authMiddleware(
   });
 }
 
-function isPublicPath(url: string | undefined): boolean {
+function isPublicPath(url: string | undefined, method: string): boolean {
   if (!url) return false;
   if (EXACT_PUBLIC_PATHS.includes(url)) return true;
   if (PREFIX_PUBLIC_PATHS.some(p => url.startsWith(p))) return true;
-  // Also allow static assets with cache-busting hashes (e.g. /assets/index-abc123.js)
   if (url.startsWith('/assets/')) return true;
+  const methods = METHOD_PUBLIC_PATHS[url];
+  if (methods && methods.has(method)) return true;
   return false;
 }

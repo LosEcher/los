@@ -39,6 +39,10 @@ export interface ToolCapability {
   sideEffect: boolean;
   sandboxRequired: boolean;
   needsApproval: boolean;
+  /** Whether this tool can run concurrently with other parallelizable tools.
+   *  Read-only, idempotent tools that don't modify workspace state are candidates.
+   *  Default: false — individual tools must opt in. */
+  parallelizable: boolean;
   tags: string[];
 }
 
@@ -114,6 +118,7 @@ export function normalizeCapability(name: string, capability: Partial<ToolCapabi
     timeoutMs: capability.timeoutMs ?? defaultTimeoutForRisk(riskLevel),
     retryable: capability.retryable ?? false,
     idempotent: capability.idempotent ?? false,
+    parallelizable: capability.parallelizable ?? false,
     costLevel: capability.costLevel ?? 'low',
     sideEffect: capability.sideEffect ?? false,
     sandboxRequired: capability.sandboxRequired ?? false,

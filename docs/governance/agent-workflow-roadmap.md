@@ -296,6 +296,19 @@ ingestion adapter requires a separate ADR and redaction contract.
 | Runtime recovery | ADR 0012 + `run_specs`/`tool_call_states`/`verification_records`/runtime evidence graph + verifier/recovery core modules | API/CLI entrypoints, scheduler follow-up attempts, and DAG verifier tasks |
 | Procedural learning | skills/docs/todos | memory compaction with review gate |
 | Execution gap planning | `docs/governance/agent-execution-gap-plan.md` | future ADRs for run specs, tool state, provider evidence, or ingestion |
+| Module readiness | `docs/governance/module-readiness.md` + `tools/check-readiness.sh` | `todo-los-provider-config-crud-readiness` for provider create/update/delete tests and Web state alignment |
+
+## Current Short-Term Work Items
+
+2026-06-19 architecture inventory produced one actionable readiness gap:
+
+1. Providers module is not ready to be treated as fully `live` even though
+   `packages/web/src/App.tsx` currently marks the NAV item as `live`.
+2. Code evidence shows `PATCH /providers/:name` and `DELETE /providers/:name`
+   exist, but `POST /providers`, CRUD lifecycle route tests, and Web write
+   controls are still missing.
+3. The owner todo is `todo-los-provider-config-crud-readiness`; the tracking
+   checklist lives in `docs/governance/module-readiness.md`.
 
 ## Non-Goals
 

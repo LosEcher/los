@@ -33,6 +33,8 @@ import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import authMiddleware from './auth-middleware.js';
+import { registerSecurityHeaders } from './security-headers.js';
+import { createRateLimiter } from './rate-limit.js';
 import { registerServerMaintenance } from './server-maintenance.js';
 import { registerProviderRoutes } from './routes/providers/provider-routes.js';
 import { registerMemoryRoutes } from './routes/data/memory-routes.js';
@@ -76,11 +78,24 @@ export type GatewayServiceIdentity = {
 
 export async function createServer(service: GatewayServiceIdentity = resolveGatewayServiceIdentity(getConfig())) {
   const config = getConfig();
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+  });
 
   await app.register(cors, { origin: config.server.corsOrigin });
   registerRequestContext(app, config);
   await authMiddleware(app, { config });
+  registerSecurityHeaders(app, { hsts: false });
+
+  // Rate limit for LLM-heavy endpoints
+  const chatLimiter = createRateLimiter({
+    max: 30,
+    windowMs: 60_000,
+    message: 'Too many chat requests. Please wait and try again.',
+  });
+  app.addHook('onClose', async () => {
+    clearInterval(chatLimiter.cleanupInterval);
+  });
 
   // ── Static HTML ──────────────────────────────────────
 
@@ -209,7 +224,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerMCPRoutes(app);
   registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);
   registerRuleRoutes(app, DEFAULT_WORKSPACE_ROOT);
-  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId);
+  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId, chatLimiter.hook);
 
   // ── Feature routes ─────────────────────────────────
   registerMemoryRoutes(app);

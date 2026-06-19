@@ -225,11 +225,76 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
 }
 
 export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<SessionEventRecord[]> {
-  const out: SessionEventRecord[] = [];
-  for (const input of inputs) {
-    out.push(await appendSessionEvent(input));
+  if (inputs.length === 0) return [];
+  if (inputs.length === 1) return [await appendSessionEvent(inputs[0])];
+
+  await ensureSessionEventStore();
+  const db = getDb();
+
+  const columns = [
+    'session_id', 'tenant_id', 'project_id', 'user_id', 'node_id', 'request_id', 'trace_id',
+    'turn', 'type', 'source', 'model', 'tool_name', 'cache_key', 'cache_hit',
+    'usage_json', 'payload_json', 'parent_event_id', 'visibility',
+  ];
+
+  // Build a single multi-row INSERT ... VALUES ... RETURNING *
+  const valuePlaceholders: string[] = [];
+  const params: unknown[] = [];
+  const colCount = columns.length;
+
+  for (let i = 0; i < inputs.length; i++) {
+    const input = inputs[i];
+    const base = i * colCount;
+    valuePlaceholders.push(`(${columns.map((_, j) => `$${base + j + 1}`).join(', ')})`);
+    params.push(
+      input.sessionId,
+      input.tenantId ?? null,
+      input.projectId ?? null,
+      input.userId ?? null,
+      input.nodeId ?? null,
+      input.requestId ?? null,
+      input.traceId ?? null,
+      input.turn ?? 0,
+      input.type,
+      input.source ?? 'los',
+      input.model ?? null,
+      input.toolName ?? null,
+      input.cacheKey ?? null,
+      input.cacheHit ?? null,
+      JSON.stringify(normalizeUsage(input.usage)),
+      JSON.stringify(redactValue(input.payload ?? {})),
+      input.parentEventId ?? null,
+      input.visibility ?? sessionEventVisibility(input.type),
+    );
   }
-  return out;
+
+  const sql = `
+    INSERT INTO session_events (${columns.join(', ')})
+    VALUES ${valuePlaceholders.join(', ')}
+    RETURNING *
+  `;
+
+  const rows = await db.query<SessionEventRow>(sql, params);
+  const records = rows.rows.map(rowToSessionEvent);
+
+  // Batch notify: emit one aggregated notification per session
+  const sessionIds = new Set(records.map(r => r.sessionId));
+  for (const sid of sessionIds) {
+    const eventsForSession = records.filter(r => r.sessionId === sid);
+    try {
+      await db.notify('session_events', JSON.stringify({
+        sessionId: sid,
+        count: eventsForSession.length,
+        firstEventId: eventsForSession[0].id,
+        lastEventId: eventsForSession[eventsForSession.length - 1].id,
+        types: [...new Set(eventsForSession.map(r => r.type))],
+      }));
+    } catch {
+      // Non-critical
+    }
+  }
+
+  return records;
 }
 
 export async function listSessionEvents(sessionId: string, limit = 200): Promise<SessionEventRecord[]> {
