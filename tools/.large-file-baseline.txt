@@ -31,3 +31,5 @@ packages/web/src/chat-page.tsx
 packages/web/src/pages/memory-page.tsx
 packages/web/src/pages/sessions-page.tsx
 packages/gateway/src/server.ts
+packages/agent/src/ga-loop-runner.ts
+packages/agent/src/ga-related-project-scanner.ts
