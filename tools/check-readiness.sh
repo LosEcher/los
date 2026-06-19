@@ -18,8 +18,8 @@ section() { echo ""; echo -e "\033[1m$1\033[0m"; }
 # Check if a route pattern exists in gateway route files
 route_exists() {
   local pattern="$1"
-  grep -rq "$pattern" "$PROJECT_DIR/packages/gateway/src/routes/" 2>/dev/null || \
-    grep -rq "$pattern" "$PROJECT_DIR/packages/gateway/src/server.ts" 2>/dev/null
+  grep -Eirq "$pattern" "$PROJECT_DIR/packages/gateway/src/routes/" 2>/dev/null || \
+    grep -Eiq "$pattern" "$PROJECT_DIR/packages/gateway/src/server.ts" 2>/dev/null
 }
 
 # Check if a Vite proxy entry exists
@@ -39,26 +39,26 @@ file_has() {
 section "providers (currently: partial)"
 
 echo "  API completeness:"
-if route_exists "POST /providers" || route_exists "post.*/providers"; then
+if route_exists "POST /providers" || route_exists "post\\([^)]*['\"]/providers['\"]"; then
   green "POST /providers exists"
 else
   red "POST /providers missing (P1)"
 fi
 
-if route_exists "PUT /providers" || route_exists "put.*/providers" || route_exists "PATCH /providers"; then
+if route_exists "PUT /providers" || route_exists "put\\([^)]*['\"]/providers/:?[A-Za-z_-]+" || route_exists "PATCH /providers" || route_exists "patch\\([^)]*['\"]/providers/:?[A-Za-z_-]+"; then
   green "PUT|PATCH /providers/:id exists"
 else
   red "PUT|PATCH /providers/:id missing (P1)"
 fi
 
-if route_exists "DELETE /providers" || route_exists "delete.*/providers"; then
+if route_exists "DELETE /providers" || route_exists "delete\\([^)]*['\"]/providers/:?[A-Za-z_-]+"; then
   green "DELETE /providers/:id exists"
 else
   red "DELETE /providers/:id missing (P1)"
 fi
 
 echo "  Evidence:"
-if file_has "packages/gateway/src/routes/provider-routes.test.ts" "POST\|PUT\|DELETE\|create\|update\|delete"; then
+if file_has "packages/gateway/src/provider-routes.test.ts" "POST\|PATCH\|PUT\|DELETE\|create\|update\|delete"; then
   green "Provider CRUD integration tests found"
 else
   red "Provider CRUD integration tests missing (P1)"
@@ -66,7 +66,7 @@ fi
 
 # ── evals ─────────────────────────────────────────────────
 
-section "evals (currently: partial)"
+section "evals (currently: live)"
 
 echo "  API completeness:"
 if { route_exists "POST /run-evals" || route_exists "post.*/run-evals"; } && \
@@ -93,7 +93,7 @@ fi
 
 # ── nodes ─────────────────────────────────────────────────
 
-section "nodes (currently: partial)"
+section "nodes (currently: live)"
 
 echo "  API completeness:"
 if proxy_exists "/node-commands"; then
@@ -117,10 +117,10 @@ fi
 
 # ── settings ──────────────────────────────────────────────
 
-section "settings (currently: partial)"
+section "settings (currently: live)"
 
 echo "  API completeness:"
-if route_exists "PUT /settings\|PATCH /settings\|post.*/settings\|patch.*/settings"; then
+if route_exists "PUT /settings|PATCH /settings|post\\([^)]*['\"]/settings['\"]|patch\\([^)]*['\"]/settings['\"]"; then
   green "PUT|PATCH /settings exists"
 else
   red "PUT|PATCH /settings missing (P1)"
@@ -128,9 +128,9 @@ fi
 
 echo "  Evidence:"
 if file_has "packages/gateway/src/server.ts" "setConfig\|saveConfig\|writeConfig\|persistConfig"; then
-  green "Config persistence wired"
+  green "Runtime config update path wired"
 else
-  red "Config persistence not wired (P1)"
+  red "Runtime config update path not wired (P1)"
 fi
 
 # ── summary ───────────────────────────────────────────────

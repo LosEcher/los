@@ -53,6 +53,14 @@ be changed together.
 promotion/demotion decisions when no explicit `--target` is passed, so proposed
 records remain advisory until they are deliberately enforced.
 
+2026-06-19 readiness update: provider compatibility evidence and provider
+configuration lifecycle are separate surfaces. Compatibility evidence display
+is implemented enough for API/CLI/Web inspection, but config-level provider CRUD
+is not fully live: `PATCH /providers/:name` and `DELETE /providers/:name`
+exist, while `POST /providers`, CRUD lifecycle route tests, and Web write
+controls remain tracked by `todo-los-provider-config-crud-readiness` and
+`docs/governance/module-readiness.md`.
+
 ## Display Goals
 
 The Providers UI and CLI should answer these questions without requiring a SQL
