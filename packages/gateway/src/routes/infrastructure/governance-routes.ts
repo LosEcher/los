@@ -20,7 +20,7 @@ import {
 const KNOWN_JOB_TYPES = [
   'consistency_audit', 'hotspot', 'architecture_drift',
   'memory_integrity', 'memory_retention', 'reflection',
-  'branch_cleanup', 'related_project_scan',
+  'branch_cleanup', 'related_project_scan', 'file_size',
 ] as const;
 
 interface GovernanceJobSummary {
