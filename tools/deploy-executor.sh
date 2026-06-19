@@ -73,6 +73,10 @@ SSH_OPTS="-p $SSH_PORT -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
 if [[ -n "$SSH_KEY" ]]; then
   SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
 fi
+SCP_OPTS="-P $SSH_PORT -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+if [[ -n "$SSH_KEY" ]]; then
+  SCP_OPTS="$SCP_OPTS -i $SSH_KEY"
+fi
 
 # ── Helpers ────────────────────────────────────────────
 
@@ -86,9 +90,9 @@ ssh_cmd() {
 
 scp_cmd() {
   if $DRY_RUN; then
-    echo "[dry-run] scp $SSH_OPTS $*"
+    echo "[dry-run] scp $SCP_OPTS $*"
   else
-    scp -r $SSH_OPTS "$@"
+    scp $SCP_OPTS "$@"
   fi
 }
 
@@ -156,12 +160,12 @@ DEPLOY_PACKAGES=(
   "packages/agent"
   "packages/memory"
   "packages/web"
+  "packages/input-preprocessor"
 )
 DEPLOY_FILES=(
   "pnpm-workspace.yaml"
   "pnpm-lock.yaml"
   "package.json"
-  "pnpm-workspace.yaml"
   "tsconfig.base.json"
   "turbo.json"
   ".npmrc"
@@ -190,13 +194,12 @@ done
 
 # 6. Transfer files
 step "Transfer files to $TARGET"
-scp_cmd "$TMP_DIR/"* "$TARGET:$INSTALL_DIR/"
+scp_cmd -r "$TMP_DIR/"* "$TARGET:$INSTALL_DIR/"
 
 # 7. Install dependencies on remote
 step "Install dependencies"
-ssh_cmd "cd $INSTALL_DIR && pnpm install --frozen-lockfile --prod" || {
-  log "pnpm install with --frozen-lockfile failed, trying without..."
-  ssh_cmd "cd $INSTALL_DIR && pnpm install --prod"
+ssh_cmd "cd $INSTALL_DIR && pnpm install" || {
+  log "pnpm install failed — check network on remote node"
 }
 
 # 8. Create .env file on remote
@@ -226,7 +229,7 @@ User=root
 WorkingDirectory=$INSTALL_DIR
 Environment=NODE_ENV=production
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$NODE_PATH --import tsx $INSTALL_DIR/packages/executor/src/index.ts
+ExecStart=$NODE_PATH --import $INSTALL_DIR/node_modules/.pnpm/tsx@4.22.3/node_modules/tsx/dist/preflight.cjs $INSTALL_DIR/packages/executor/src/index.ts
 Restart=always
 RestartSec=10
 
