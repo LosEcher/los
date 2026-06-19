@@ -7,27 +7,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WARNINGS=0
 ERRORS=0
 MAX_LINES=600
-WARN_LINES=400
-MAX_DIR_FILES=15
+BLOCK_LINES=400
+MAX_DIR_FILES=10
 BASELINE_FILE="$ROOT/tools/.large-file-baseline.txt"
-
-# Files exceeding MAX_LINES with active/in-progress split work.
-# These produce warnings instead of errors (tracked, not forgotten).
-ALLOWED_LARGE_FILES="
-"
 
 warn()  { echo -e "  \033[1;33m[WARN]\033[0m $*"; WARNINGS=$((WARNINGS + 1)); }
 error() { echo -e "  \033[1;31m[ERROR]\033[0m $*"; ERRORS=$((ERRORS + 1)); }
 header() { echo ""; echo -e "\033[0;36m--- $1 ---\033[0m"; }
-
-is_allowed() {
-  local file="$1"
-  local rel="${file#$ROOT/}"
-  for allowed in $ALLOWED_LARGE_FILES; do
-    [[ "$rel" == "$allowed" ]] && return 0
-  done
-  return 1
-}
 
 in_baseline() {
   local rel="$1"
@@ -35,40 +21,36 @@ in_baseline() {
   grep -qFx "$rel" "$BASELINE_FILE" 2>/dev/null
 }
 
-# 1. Large files
+# 1. Files exceeding MAX_LINES → always error
 header "Large files (>$MAX_LINES lines)"
 while IFS= read -r line; do
   file=$(echo "$line" | awk '{print $2}')
   count=$(echo "$line" | awk '{print $1}')
-  if is_allowed "$file"; then
-    warn "$file ($count lines) — allowed, split in progress"
-  else
-    error "$file ($count lines) — exceeds $MAX_LINES line limit"
-  fi
+  error "$file ($count lines) — exceeds $MAX_LINES line limit"
 done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   ! -path '*/node_modules/*' ! -path '*/dist/*' \
   ! -path '*/test/*' ! -name '*.test.*' \
   -exec wc -l {} + 2>/dev/null | awk -v max="$MAX_LINES" \
   '$2 != "total" && $1 > max { print $1, $2 }')
 
-# 1b. Large files (>WARN_LINES but <= MAX_LINES)
-# Grandfathered files (in baseline) → warning. New files → error.
+# 2. New files >400 lines (not in baseline) → error. Grandfathered files → warn.
+header "Files >$BLOCK_LINES lines"
 while IFS= read -r line; do
   file=$(echo "$line" | awk '{print $2}')
   count=$(echo "$line" | awk '{print $1}')
   rel="${file#$ROOT/}"
   if in_baseline "$rel"; then
-    warn "$file ($count lines) — grandfathered, exceeds $WARN_LINES line threshold"
+    warn "$file ($count lines) — grandfathered, exceeds $BLOCK_LINES line threshold"
   else
-    error "$file ($count lines) — new file exceeds $WARN_LINES line limit (if intentional, add to tools/.large-file-baseline.txt)"
+    error "$file ($count lines) — new file exceeds $BLOCK_LINES line limit (if intentional, add to tools/.large-file-baseline.txt)"
   fi
 done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   ! -path '*/node_modules/*' ! -path '*/dist/*' \
   ! -path '*/test/*' ! -name '*.test.*' \
-  -exec wc -l {} + 2>/dev/null | awk -v min="$WARN_LINES" -v max="$MAX_LINES" \
+  -exec wc -l {} + 2>/dev/null | awk -v min="$BLOCK_LINES" -v max="$MAX_LINES" \
   '$2 != "total" && $1 > min && $1 <= max { print $1, $2 }')
 
-# 2. Flat directories
+# 3. Flat directories (>MAX_DIR_FILES files, no subdirs) — warn only
 header "Flat directories (>$MAX_DIR_FILES files, no subdirs)"
 while IFS= read -r -d '' d; do
   fc=$(find "$d" -maxdepth 1 -type f ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
@@ -78,24 +60,24 @@ while IFS= read -r -d '' d; do
 done < <(find "$ROOT/packages" -type d ! -name 'node_modules' ! -name 'dist' ! -path '*/node_modules/*' ! -path '*/dist/*' \
   -print0 2>/dev/null)
 
-# 2b. Gateway route placement
+# 4. Gateway route placement
 header "Gateway route placement"
 while IFS= read -r f; do
   error "$f — route modules belong in packages/gateway/src/routes/"
 done < <(find "$ROOT/packages/gateway/src" -maxdepth 1 -type f -name '*-routes.ts' 2>/dev/null | sort)
 
-# 2c. Web package dual-track prevention (no file sharing a name with a directory)
+# 5. Web package dual-track prevention
 header "Web package dual-track (api.ts + api/, pages.tsx + pages/)"
 while IFS= read -r f; do
   base=$(basename "$f")
-  name="${base%.*}"  # remove extension
+  name="${base%.*}"
   dir=$(dirname "$f")
   if [ -d "$dir/$name" ]; then
     error "$f — file shares name with directory $dir/$name/; use $dir/$name/index.ts instead"
   fi
 done < <(find "$ROOT/packages/web/src" -maxdepth 1 -type f \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null | sort)
 
-# 3. Process-phase names
+# 6. Process-phase names
 header "Process-phase naming (legacy/v2/temp/backup/new/old/tmp/bak)"
 while IFS= read -r f; do
   error "$f"
@@ -106,7 +88,7 @@ done < <(find "$ROOT/packages" -type f \
   ! -path '*/node_modules/*' ! -path '*/dist/*' \
   ! -path '*/archive/*' 2>/dev/null)
 
-# 4. Direct infra bypass (imports of third-party libs outside infra/)
+# 7. Direct third-party imports (should go through @los/infra)
 header "Direct third-party imports (should go through @los/infra)"
 for pkg in "$ROOT/packages"/*/; do
   name=$(basename "$pkg")
