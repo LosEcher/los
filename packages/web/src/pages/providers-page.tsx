@@ -15,6 +15,9 @@ import {
   Trash2,
   Upload,
   X,
+  Plus,
+  Check,
+  Pencil,
 } from 'lucide-react';
 import {
   deleteJson,
@@ -65,6 +68,7 @@ type RunStateProjection = {
   };
 };
 export function ProvidersPage() {
+  const qc = useQueryClient();
   const onboarding = useQuery({
     queryKey: ['onboarding'],
     queryFn: () => getJson<ProviderDiscovery>('/onboarding'),
@@ -79,13 +83,72 @@ export function ProvidersPage() {
   const tools = onboarding.data?.tools ?? [];
   const routes = providerRoutesFromModels(modelRoutes.data);
 
+  // ── Add / Edit / Delete mutations ─────────────────────
+  const addProvider = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => postJson('/providers', payload),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['provider-models'] }); qc.invalidateQueries({ queryKey: ['onboarding'] }); },
+  });
+  const updateProvider = useMutation({
+    mutationFn: ({ name, ...payload }: { name: string } & Record<string, unknown>) =>
+      patchJson(`/providers/${encodeURIComponent(name)}`, payload),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['provider-models'] }); qc.invalidateQueries({ queryKey: ['onboarding'] }); },
+  });
+  const removeProvider = useMutation({
+    mutationFn: (name: string) => deleteJson(`/providers/${encodeURIComponent(name)}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['provider-models'] }); qc.invalidateQueries({ queryKey: ['onboarding'] }); },
+  });
+
+  // Track which provider is being edited inline, plus edit form state
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{
+    model?: string; baseUrl?: string; apiKey?: string; enabled?: boolean; weight?: number;
+  }>({});
+
+  function startEdit(name: string, provider: Record<string, unknown>) {
+    setEditingProvider(name);
+    setEditDraft({
+      model: String(provider.model ?? ''),
+      baseUrl: String(provider.baseUrl ?? ''),
+      apiKey: String(provider.apiKey ?? ''),
+      enabled: Boolean(provider.enabled ?? true),
+      weight: Number(provider.weight ?? 100),
+    });
+  }
+  function cancelEdit() { setEditingProvider(null); }
+
+  function saveEdit(name: string) {
+    updateProvider.mutate({ name, ...editDraft });
+    setEditingProvider(null);
+  }
+
+  // Build a map of config-level providers (from modelRoutes) for the edit/delete UI
+  const configProviders = useMemo(() => {
+    const map = new Map<string, { model?: string; baseUrl?: string; enabled?: boolean; hasApiKey?: boolean }>();
+    (modelRoutes.data?.providers ?? []).forEach((p: any) => {
+      map.set(p.provider, {
+        model: p.model,
+        baseUrl: p.baseUrl,
+        enabled: p.enabled,
+        hasApiKey: p.hasApiKey,
+      });
+    });
+    // Augment with discovery-level info
+    for (const dp of providers) {
+      const dpName = String(dp.name ?? '');
+      if (!map.has(dpName) && dp.configuredKey) {
+        map.set(dpName, { enabled: Boolean(dp.available) });
+      }
+    }
+    return map;
+  }, [modelRoutes.data, providers]);
+
   return (
     <section className="panel-grid provider-grid">
       <div className="panel">
         <div className="panel-head">
           <div>
             <h2>Provider Endpoints</h2>
-            <p>Read-only discovery surface. Provider lifecycle edits are deferred until stable APIs exist.</p>
+            <p>Manage provider configs: add, edit, enable/disable, or remove.</p>
           </div>
           <StatusPill status="partial" />
         </div>
@@ -102,16 +165,63 @@ export function ProvidersPage() {
               : [];
             const latestEvidence = compatEvidence[0];
             const promotionState = metadataText(provider.promotionState);
+            const name = metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`;
+            const cfg = configProviders.get(name);
+            const isEditing = editingProvider === name;
+            const deleteError = removeProvider.isError && removeProvider.variables === name ? String(removeProvider.error) : null;
+
             return (
-              <div className="record-row provider-row">
-                <span className="row-title">
-                  {metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`}
-                  {promotionState === 'verified_advisory' ? <span className="status-text succeeded" title="Verified advisory"> ✓</span> : null}
-                </span>
-                <span>{metadataText(provider.source) ?? 'source?'}</span>
-                <span>{metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? 'model?'}</span>
-                <span className={`status-text ${readiness.ready ? 'succeeded' : readiness.manualSetupRequired ? 'blocked' : 'ready'}`}>{state}</span>
-                <span>{detail}</span>
+              <div className="record-row provider-row" key={name}>
+                <div className="provider-row-main">
+                  <span className="row-title">
+                    {name}
+                    {promotionState === 'verified_advisory' ? <span className="status-text succeeded" title="Verified advisory"> ✓</span> : null}
+                    {cfg?.hasApiKey ? <span className="status-text" title="API key set"> 🔑</span> : null}
+                  </span>
+                  <span>{metadataText(provider.source) ?? 'source?'}</span>
+                  <span>{metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? 'model?'}</span>
+                  <span className={`status-text ${readiness.ready ? 'succeeded' : readiness.manualSetupRequired ? 'blocked' : 'ready'}`}>{state}</span>
+                  <span>{detail}</span>
+                  <span className="provider-row-actions">
+                    {cfg ? (
+                      isEditing ? (
+                        <>
+                          <button type="button" className="tiny-btn" onClick={() => saveEdit(name)} title="Save"><Check size={12} /> save</button>
+                          <button type="button" className="tiny-btn" onClick={cancelEdit} title="Cancel"><X size={12} /></button>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" className="tiny-btn" onClick={() => startEdit(name, cfg)} title="Edit"><Pencil size={12} /></button>
+                          <button type="button" className="tiny-btn danger" onClick={() => { if (confirm(`Remove provider "${name}"?`)) removeProvider.mutate(name); }} title="Remove"><Trash2 size={12} /></button>
+                          {cfg.enabled !== undefined ? (
+                            <button type="button" className="tiny-btn" onClick={() => updateProvider.mutate({ name, enabled: !cfg.enabled })} title={cfg.enabled ? 'Disable' : 'Enable'}>
+                              {cfg.enabled ? '⏻' : '⏼'}
+                            </button>
+                          ) : null}
+                        </>
+                      )
+                    ) : (
+                      <span className="status-text dim">discovery-only</span>
+                    )}
+                  </span>
+                </div>
+                {isEditing && cfg ? (
+                  <div className="provider-edit-panel">
+                    <div className="provider-edit-grid">
+                      <Field label="model"><input value={editDraft.model ?? ''} onChange={e => setEditDraft(d => ({ ...d, model: e.target.value }))} placeholder="model-id" /></Field>
+                      <Field label="api key"><input type="password" value={editDraft.apiKey ?? ''} onChange={e => setEditDraft(d => ({ ...d, apiKey: e.target.value }))} placeholder="sk-…" /></Field>
+                      <Field label="base url"><input value={editDraft.baseUrl ?? ''} onChange={e => setEditDraft(d => ({ ...d, baseUrl: e.target.value }))} placeholder="https://…" /></Field>
+                      <div className="provider-edit-meta">
+                        <label className="toolbar-toggle provider-toggle">
+                          <input type="checkbox" checked={editDraft.enabled ?? true} onChange={e => setEditDraft(d => ({ ...d, enabled: e.target.checked }))} />
+                          enabled
+                        </label>
+                        <Field label="weight"><input type="number" min={0} max={1000} value={editDraft.weight ?? 100} onChange={e => setEditDraft(d => ({ ...d, weight: Number(e.target.value) }))} /></Field>
+                      </div>
+                    </div>
+                    {deleteError ? <div className="error-banner">Error removing: {deleteError}</div> : null}
+                  </div>
+                ) : null}
                 {compatEvidence.length > 0 ? (
                   <span className="compat-badges">
                     {compatEvidence.map((ce, i) => {
@@ -131,7 +241,7 @@ export function ProvidersPage() {
                     evidence {metadataText(latestEvidence.id) ?? '?'} · task {metadataText(latestEvidence.taskRunId) ?? 'none'} · run {metadataText(latestEvidence.runSpecId) ?? 'none'} · tokens {String(latestEvidence.totalTokens ?? 0)}
                   </span>
                 ) : readiness.ready ? (
-                  <span className="compat-evidence-detail">evidence none · run los compat --execute --target {metadataText(provider.name) ?? metadataText(provider.provider) ?? 'provider'} --probe read-context</span>
+                  <span className="compat-evidence-detail">evidence none · run los compat --execute --target {name} --probe read-context</span>
                 ) : null}
               </div>
             );
@@ -158,11 +268,12 @@ export function ProvidersPage() {
         />
       </div>
       <aside className="panel inspector">
-        <ProviderConfigWorkspace />
+        <ProviderAddForm onAdd={addProvider.mutate} adding={addProvider.isPending} error={addProvider.error ? String(addProvider.error) : null} />
         <div className="section-divider" />
         <div className="panel-head compact"><h2>Discovery Tools</h2></div>
         <div className="fact-list">
           <Fact label="providers" value={String(providers.length)} />
+          <Fact label="config providers" value={String(configProviders.size)} />
           <Fact label="routes" value={String(routes.length)} />
           <Fact label="tools" value={String(tools.length)} />
           <Fact label="status" value={onboarding.data?.summary ?? 'not loaded'} />
@@ -177,127 +288,74 @@ export function ProvidersPage() {
   );
 }
 
-type ProviderConfigDraft = {
-  providerId: string;
-  apiKeyEnv: string;
-  baseUrl: string;
-  model: string;
-  enabled: boolean;
+// ── Add Provider Form ────────────────────────────────────
+
+type ProviderAddPayload = {
+  name: string;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  enabled?: boolean;
+  weight?: number;
+  apiShape?: string;
 };
 
-function ProviderConfigWorkspace() {
-  const [draft, setDraft] = useState<ProviderConfigDraft>({
-    providerId: 'deepseek',
-    apiKeyEnv: 'DEEPSEEK_API_KEY',
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-v4-flash',
-    enabled: true,
-  });
-  const [copied, setCopied] = useState<'env' | 'yaml' | null>(null);
-  const envSnippet = buildProviderEnvSnippet(draft);
-  const yamlSnippet = buildProviderYamlSnippet(draft);
+function ProviderAddForm({ onAdd, adding, error }: { onAdd: (p: Record<string, unknown>) => void; adding: boolean; error: string | null }) {
+  const [name, setName] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [model, setModel] = useState('');
+  const [enabled, setEnabled] = useState(true);
+  const [weight, setWeight] = useState(100);
 
-  async function copySnippet(kind: 'env' | 'yaml', text: string) {
-    await navigator.clipboard?.writeText(text);
-    setCopied(kind);
-    window.setTimeout(() => setCopied(null), 1600);
+  function submit() {
+    const payload: Record<string, unknown> = { name: name.trim() };
+    const key = apiKey.trim(); if (key) payload.apiKey = key;
+    const url = baseUrl.trim(); if (url) payload.baseUrl = url;
+    const m = model.trim(); if (m) payload.model = m;
+    payload.enabled = enabled;
+    payload.weight = weight;
+    onAdd(payload);
+    // Reset form on success (clears after next render if mutation succeeds)
+    setName(''); setApiKey(''); setBaseUrl(''); setModel(''); setEnabled(true); setWeight(100);
   }
 
-  function setProviderId(value: string) {
-    const providerId = value.trim();
-    setDraft(prev => ({
-      ...prev,
-      providerId,
-      apiKeyEnv: providerId ? `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY` : prev.apiKeyEnv,
-    }));
-  }
+  const canSubmit = name.trim().length > 0 && !adding;
 
   return (
     <div className="provider-config-workspace">
       <div className="panel-head compact">
-        <h2>Provider Settings</h2>
+        <h2>Add Provider</h2>
         <StatusPill status="partial" />
       </div>
-      <Field label="provider id">
-        <input value={draft.providerId} onChange={event => setProviderId(event.target.value)} placeholder="deepseek" />
+      <Field label="provider id *">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="my-provider" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
-      <Field label="api key env">
-        <input value={draft.apiKeyEnv} onChange={event => setDraft(prev => ({ ...prev, apiKeyEnv: event.target.value }))} placeholder="DEEPSEEK_API_KEY" />
+      <Field label="api key">
+        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
       <Field label="base url">
-        <input value={draft.baseUrl} onChange={event => setDraft(prev => ({ ...prev, baseUrl: event.target.value }))} placeholder="https://api.deepseek.com" />
+        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
       <Field label="default model">
-        <input value={draft.model} onChange={event => setDraft(prev => ({ ...prev, model: event.target.value }))} placeholder="deepseek-v4-flash" />
+        <input value={model} onChange={e => setModel(e.target.value)} placeholder="model-id" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+      </Field>
+      <Field label="weight">
+        <input type="number" min={0} max={1000} value={weight} onChange={e => setWeight(Number(e.target.value))} />
       </Field>
       <label className="toolbar-toggle provider-toggle">
-        <input type="checkbox" checked={draft.enabled} onChange={event => setDraft(prev => ({ ...prev, enabled: event.target.checked }))} />
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
         enabled
       </label>
-      <ConfigSnippet
-        title=".env"
-        value={envSnippet}
-        copied={copied === 'env'}
-        onCopy={() => copySnippet('env', envSnippet)}
-      />
-      <ConfigSnippet
-        title="~/.los/config.yaml"
-        value={yamlSnippet}
-        copied={copied === 'yaml'}
-        onCopy={() => copySnippet('yaml', yamlSnippet)}
-      />
+      <button type="button" className="btn" disabled={!canSubmit} onClick={submit}>
+        <Plus size={14} /> {adding ? 'Adding…' : 'Add Provider'}
+      </button>
+      {error ? <div className="error-banner">{error}</div> : null}
     </div>
   );
 }
 
-function ConfigSnippet({
-  title,
-  value,
-  copied,
-  onCopy,
-}: {
-  title: string;
-  value: string;
-  copied: boolean;
-  onCopy: () => void;
-}) {
-  return (
-    <div className="config-note">
-      <div className="snippet-head">
-        <strong>{title}</strong>
-        <button className="tiny-btn" type="button" onClick={onCopy}>
-          <Copy size={12} /> {copied ? 'copied' : 'copy'}
-        </button>
-      </div>
-      <code>{value}</code>
-    </div>
-  );
-}
-
-function buildProviderEnvSnippet(draft: ProviderConfigDraft): string {
-  const prefix = envPrefixForProvider(draft.providerId);
-  const apiKeyEnv = normalizeEnvName(draft.apiKeyEnv) || `${prefix}_API_KEY`;
-  return [
-    `${apiKeyEnv}=...`,
-    `${prefix}_BASE_URL=${draft.baseUrl.trim() || 'https://api.example.com/v1'}`,
-    `${prefix}_MODEL=${draft.model.trim() || 'model-id'}`,
-  ].join('\n');
-}
-
-function buildProviderYamlSnippet(draft: ProviderConfigDraft): string {
-  const providerId = sanitizeProviderId(draft.providerId) || 'provider';
-  const apiKeyEnv = normalizeEnvName(draft.apiKeyEnv) || `${envPrefixForProvider(providerId)}_API_KEY`;
-  const baseUrl = draft.baseUrl.trim() || 'https://api.example.com/v1';
-  const model = draft.model.trim() || 'model-id';
-  return [
-    'providers:',
-    `  ${providerId}:`,
-    `    apiKey: "\${${apiKeyEnv}}"`,
-    `    baseUrl: "${baseUrl}"`,
-    `    model: "${model}"`,
-    `    enabled: ${draft.enabled ? 'true' : 'false'}`,
-  ].join('\n');
-}
+// ── Helpers (unchanged) ──────────────────────────────────
 
 function providerReadinessLabel(readiness: ProviderReadiness): string {
   if (readiness.ready) return 'ready';
@@ -316,16 +374,4 @@ function providerReadinessDetail(provider: ProviderDiscoveryProvider, readiness:
     return provider.hasApiKey ? 'configured key' : 'no configured key';
   }
   return 'readiness unknown';
-}
-
-function envPrefixForProvider(providerId: string): string {
-  return (sanitizeProviderId(providerId) || 'provider').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-}
-
-function normalizeEnvName(value: string): string {
-  return value.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
-}
-
-function sanitizeProviderId(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
