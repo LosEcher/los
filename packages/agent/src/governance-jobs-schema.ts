@@ -172,4 +172,16 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
       escalationCadence: 'never',
     },
   },
+  {
+    jobType: 'file_size',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-file-size',
+    autoFix: {
+      autoFixEnabled: true,
+      maxAutoFixAttempts: 1,
+      verificationCommands: [],
+      stopCondition: 'no files exceed 400 lines (or all grandfathered in baseline)',
+      escalationCadence: 'immediate',
+    },
+  },
 ];
