@@ -8,8 +8,8 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { ToolRegistry } from './registry.js';
-import { safeWorkspacePath } from './path-safety.js';
+import type { ToolRegistry } from '../core/registry.js';
+import { safeWorkspacePath } from '../core/path-safety.js';
 
 // ── Job Manager ─────────────────────────────────────────
 

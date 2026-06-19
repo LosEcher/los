@@ -6,7 +6,7 @@
  */
 
 import { getLogger } from '@los/infra/logger';
-import type { ToolRegistry } from './registry.js';
+import type { ToolRegistry } from '../core/registry.js';
 
 const log = getLogger('agent');
 

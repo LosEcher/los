@@ -7,15 +7,15 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { ToolRegistry } from './registry.js';
-import { safeWorkspacePath } from './path-safety.js';
+import type { ToolRegistry } from '../core/registry.js';
+import { safeWorkspacePath } from '../core/path-safety.js';
 import {
   LANG_EXTS,
   findSymbolNodes,
   normalizeSymbolKind,
   cleanupWhitespace,
   getLangForExt,
-} from './edit-ast-helpers.js';
+} from '../helpers/edit-ast-helpers.js';
 
 // ── multi_edit ──────────────────────────────────────────
 

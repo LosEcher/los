@@ -15,10 +15,10 @@ import {
   createToolRegistry,
   registerBuiltinTools,
   type ToolRegistry,
-} from '../tools/registry.js';
-import type { MCPServerRegistryRecord } from '../tools/mcp-client.js';
+} from '../tools/core/registry.js';
+import type { MCPServerRegistryRecord } from '../tools/external/mcp-client.js';
 import { listMCPServers } from '../mcp-servers.js';
-import { createSpawnAgentRunner, registerSpawnAgentTool, type ChildAgentRunner } from '../tools/agent-tools.js';
+import { createSpawnAgentRunner, registerSpawnAgentTool, type ChildAgentRunner } from '../tools/core/agent-tools.js';
 import { createEventEmitter, type SessionEventContext, type SessionEventCallback } from '../event-emitter.js';
 import {
   buildInitialMessages,

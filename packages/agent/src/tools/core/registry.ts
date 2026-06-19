@@ -6,25 +6,25 @@
  */
 
 import { getLogger } from '@los/infra/logger';
-import type { ToolDef } from '../providers/index.js';
+import type { ToolDef } from '../../providers/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { safeWorkspacePath } from './path-safety.js';
-import { registerPatchTools } from './patch-tools.js';
-import { registerTodoTools } from './todo-tools.js';
-import { runSandboxedShell } from './shell-sandbox.js';
+import { registerPatchTools } from '../builtin/patch-tools.js';
+import { registerTodoTools } from '../builtin/todo-tools.js';
+import { runSandboxedShell } from '../external/shell-sandbox.js';
 import {
   MCPToolBridge,
   registryRecordToConfig,
   type MCPServerConfig,
-} from './mcp-client.js';
-import { registerSearchTools } from './search-tools.js';
-import { registerFileTools } from './file-tools.js';
-import { registerCodeIntelTools } from './code-intel.js';
-import { registerEditTools } from './edit-tools.js';
-import { registerWebTools } from './web-tools.js';
-import { registerJobTools } from './job-tools.js';
+} from '../external/mcp-client.js';
+import { registerSearchTools } from '../builtin/search-tools.js';
+import { registerFileTools } from '../builtin/file-tools.js';
+import { registerCodeIntelTools } from '../builtin/code-intel.js';
+import { registerEditTools } from '../builtin/edit-tools.js';
+import { registerWebTools } from '../external/web-tools.js';
+import { registerJobTools } from '../builtin/job-tools.js';
 import {
   READ_ONLY_BUILTIN_TOOLS,
   checkCapability,

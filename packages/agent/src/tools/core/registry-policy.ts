@@ -1,5 +1,5 @@
-import type { ToolDef } from '../providers/index.js';
-import type { MCPServerConfig, MCPServerRegistryRecord } from './mcp-client.js';
+import type { ToolDef } from '../../providers/index.js';
+import type { MCPServerConfig, MCPServerRegistryRecord } from '../external/mcp-client.js';
 
 export interface ToolInput {
   name: string;

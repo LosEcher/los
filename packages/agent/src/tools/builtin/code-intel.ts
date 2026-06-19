@@ -11,8 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { tsx, ts, jsx, js, type SgNode } from '@ast-grep/napi';
-import type { ToolRegistry } from './registry.js';
-import { safeWorkspacePath } from './path-safety.js';
+import type { ToolRegistry } from '../core/registry.js';
+import { safeWorkspacePath } from '../core/path-safety.js';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('agent');

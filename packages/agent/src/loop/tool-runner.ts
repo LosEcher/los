@@ -8,7 +8,7 @@
 
 import { assertNotAborted, withAbort, inferToolSource, summarizeCapability, previewText } from './utils.js';
 import { applyPhaseGate } from './phase-tool-gate.js';
-import type { ToolRegistry } from '../tools/registry.js';
+import type { ToolRegistry } from '../tools/core/registry.js';
 import type { AgentConfig } from './types.js';
 import type { Message, ToolCall } from '../providers/index.js';
 

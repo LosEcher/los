@@ -1,4 +1,4 @@
-import type { ToolRegistry } from '../tools/registry.js';
+import type { ToolRegistry } from '../tools/core/registry.js';
 import type { SessionEventUsage } from '../session-events.js';
 
 export function inferToolSource(capability: ReturnType<ToolRegistry['getCapability']>): string {
