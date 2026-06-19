@@ -54,7 +54,7 @@ describe('GA loop seed config', () => {
   });
 
   it('all seed jobs have valid job types', () => {
-    const validTypes = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan'];
+    const validTypes = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan', 'file_size'];
     for (const seed of SEED_JOBS) {
       assert.ok(validTypes.includes(seed.jobType), `Unknown job type: ${seed.jobType}`);
       assert.ok(seed.dedupeKey);

@@ -69,10 +69,10 @@ test('governance jobs: seedGovernanceJobs creates 6 default jobs, idempotent', a
     await getDb().query("DELETE FROM governance_jobs WHERE dedupe_key LIKE 'gov-job-%'").catch(() => undefined);
 
     const seeded = await seedGovernanceJobs();
-    assert.equal(seeded.length, 8);
+    assert.equal(seeded.length, 9);
 
     const types = seeded.map(j => j.jobType).sort();
-    assert.deepEqual(types, ['architecture_drift', 'branch_cleanup', 'consistency_audit', 'hotspot', 'memory_integrity', 'memory_retention', 'reflection', 'related_project_scan']);
+    assert.deepEqual(types, ['architecture_drift', 'branch_cleanup', 'consistency_audit', 'file_size', 'hotspot', 'memory_integrity', 'memory_retention', 'reflection', 'related_project_scan']);
 
     // Verify cadences
     const consistencyJob = seeded.find(j => j.jobType === 'consistency_audit')!;
@@ -83,7 +83,7 @@ test('governance jobs: seedGovernanceJobs creates 6 default jobs, idempotent', a
 
     // Idempotent: seed again should return same jobs
     const seededAgain = await seedGovernanceJobs();
-    assert.equal(seededAgain.length, 8);
+    assert.equal(seededAgain.length, 9);
 
     // Cleanup
     for (const j of seeded) {
@@ -157,8 +157,8 @@ test('governance jobs: runGovernanceSweep dry-run does not mutate', async () => 
     // Dry run
     const result = await runGovernanceSweep({ dryRun: true });
     assert.equal(result.dryRun, true);
-    assert.equal(result.jobsSkipped, 0); // All 8 should be due (never run)
-    assert.equal(result.jobsRun, 8);
+    assert.equal(result.jobsSkipped, 0); // All 9 should be due (never run)
+    assert.equal(result.jobsRun, 9);
     assert.equal(result.findingsCreated, 0); // No todos in dry-run
 
     // Verify no mutations

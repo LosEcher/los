@@ -258,7 +258,7 @@ function hoursToMs(value: number | undefined): number | undefined {
 async function sweep(parsed: ParsedArgs): Promise<void> {
   const apply = booleanFlag(parsed, 'apply');
   const jobType = stringFlag(parsed, 'job-type');
-  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan'];
+  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan', 'file_size'];
   const jobTypes = jobType
     ? (jobType.split(',').filter(t => validTypes.includes(t as GovernanceJobType)) as GovernanceJobType[])
     : undefined;
@@ -302,6 +302,8 @@ function renderSweep(result: GovernanceSweepResult, json: boolean): void {
       console.log(`    branchable=${summary.branchable ?? '?'} remoteBranches=${summary.remoteBranches ?? '?'} staleCandidates=${summary.staleCandidateCount ?? '?'}`);
     } else if (r.jobType === 'related_project_scan') {
       console.log(`    totalProjects=${summary.totalProjects ?? '?'} accessible=${summary.accessibleProjects ?? '?'} withFeatures=${summary.withNewFeatures ?? '?'} absorbable=${summary.absorbableCount ?? '?'}`);
+    } else if (r.jobType === 'file_size') {
+      console.log(`    hotFiles=${summary.hotFileCount ?? '?'} blockFiles=${summary.blockFiles ?? '?'} newOverThreshold=${summary.newOverThreshold ?? '?'}`);
     }
 
     // Show GA loop phases if present
