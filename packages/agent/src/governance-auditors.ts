@@ -137,8 +137,30 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'memory_retention': return runMemoryRetentionAudit();
     case 'reflection': return runReflectionAudit();
     case 'branch_cleanup': return runBranchCleanupAudit();
+    case 'file_size': return runFileSizeAudit();
     case 'related_project_scan': return runRelatedProjectScanAudit();
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
+  }
+}
+
+// ... (existing branch_cleanup auditor)
+
+async function runFileSizeAudit(): Promise<Record<string, unknown>> {
+  try {
+    const { detectHotFiles } = await import('./ga-file-size-fix.js');
+    const hotFiles = detectHotFiles(process.cwd());
+    const newFiles = hotFiles.filter(f => f.isNew);
+    const blockFiles = hotFiles.filter(f => f.threshold === 'block');
+    return {
+      auditedAt: new Date().toISOString(),
+      hotFileCount: hotFiles.length,
+      blockFiles: blockFiles.length,
+      newOverThreshold: newFiles.length,
+      totalLinesInHotFiles: hotFiles.reduce((sum, f) => sum + f.lines, 0),
+      files: hotFiles.slice(0, 20).map(f => ({ path: f.path, lines: f.lines, threshold: f.threshold, isNew: f.isNew })),
+    };
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
   }
 }
 
