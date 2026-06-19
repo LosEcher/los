@@ -22,6 +22,7 @@ import { runJobAudit } from './governance-auditors.js';
 import { updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { computeNextState, evaluateLoopGate, maybeAutoRecoverPaused } from './ga-circuit-breaker.js';
 import { applyBranchCleanupFix, applyRelatedProjectScanFix } from './ga-scenario-fixes.js';
+import { applyFileSizeFix } from './ga-file-size-fix.js';
 import type {
   GovernanceJob,
   GovernanceJobAutoFixConfig,
@@ -49,6 +50,8 @@ async function applyAutoFix(
       return applyHotspotFix(summary);
     case 'branch_cleanup':
       return applyBranchCleanupFix(summary);
+    case 'file_size':
+      return applyFileSizeFix(summary);
     case 'related_project_scan':
       return applyRelatedProjectScanFix(summary);
     default:
@@ -304,6 +307,17 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     }
 
     phases.push({ phase: 'completed', enteredAt: new Date().toISOString(), attemptNumber: 0, detail: 'No findings — loop complete' });
+
+    // ── Self-improvement: extract principles from clean run too ──
+    try {
+      const { persistLoopPrinciples } = await import('./ga-self-improve.js');
+      await persistLoopPrinciples({
+        jobId: job.id, jobType: job.jobType, auditSummary,
+        phases, fixApplied: false, fixSucceeded: true, verificationPassed: true,
+        retried: false, escalated: false,
+      }, job.tenantId, job.projectId);
+    } catch { /* best-effort */ }
+
     return {
       jobId: job.id,
       jobType: job.jobType,
@@ -419,13 +433,8 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     ...(finalStatus !== job.status ? { status: finalStatus } : {}),
   });
 
-  // ── Step 6: If circuit was opened, also pause the job ──
-  if (nextState.circuitState === 'open' && job.status !== 'paused') {
-    await updateGovernanceJob(job.id, { status: 'paused' });
-    log.warn(`GA loop: circuit OPEN for ${job.jobType} (${job.id}) — job paused`);
-  }
-
-  return {
+  // ── Step 6: Self-improvement — extract principles from this run ──
+  const loopResult: GaLoopResult = {
     jobId: job.id,
     jobType: job.jobType,
     auditSummary,
@@ -438,6 +447,19 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     escalatedReason,
     ...(lastError ? { error: lastError } : {}),
   };
+
+  try {
+    const { persistLoopPrinciples } = await import('./ga-self-improve.js');
+    await persistLoopPrinciples(loopResult, job.tenantId, job.projectId);
+  } catch { /* best-effort — self-improvement failures don't block the loop */ }
+
+  // ── Step 7: If circuit was opened, also pause the job ──
+  if (nextState.circuitState === 'open' && job.status !== 'paused') {
+    await updateGovernanceJob(job.id, { status: 'paused' });
+    log.warn(`GA loop: circuit OPEN for ${job.jobType} (${job.id}) — job paused`);
+  }
+
+  return loopResult;
 }
 
 /**
@@ -486,6 +508,10 @@ function checkHasFindings(jobType: string, summary: Record<string, unknown>): bo
     case 'related_project_scan': {
       const absorbable = typeof summary.absorbableCount === 'number' ? summary.absorbableCount : 0;
       return absorbable > 0;
+    }
+    case 'file_size': {
+      const count = typeof summary.hotFileCount === 'number' ? summary.hotFileCount : 0;
+      return count > 0;
     }
     default:
       return false;
