@@ -29,6 +29,7 @@ import { registerRuleRoutes } from './routes/tools/rule-routes.js';
 import { registerTodoRoutes } from './routes/data/todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/orchestration/agent-task-graph-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
+import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
@@ -219,6 +220,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerTodoRoutes(app);
   registerAgentTaskGraphRoutes(app);
   registerDiagnosticsRoutes(app);
+  registerGovernanceRoutes(app);
   registerNodeRoutes(app);
   registerServiceRoutes(app, { serviceId: service.serviceId, serviceKind: 'gateway' });
   registerMCPRoutes(app);
