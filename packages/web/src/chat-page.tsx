@@ -35,7 +35,9 @@ import {
   formatTime,
 } from './ui';
 import { ContextChip } from './chat-ui.js';
-import { ChatComposer, buildComposerPayload } from './chat-composer.js';
+import { ChatComposer } from './chat-composer.js';
+import { buildModelSettingsPayload, buildToolRetryPayload, parseCommaList } from './chat-helpers.js';
+import type { ChatAdvancedSettingsState } from './chat-advanced-settings.js';
 import {
   readyMessages,
   ChatMessages,
@@ -170,6 +172,36 @@ export function ChatPage({
       frequencyPenalty,
     });
   }, [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
+
+  const advancedState = useMemo((): ChatAdvancedSettingsState => ({
+    systemPrompt,
+    allowedTools,
+    maxLoops,
+    timeoutMs,
+    toolRetryMaxAttempts,
+    toolRetryBaseDelayMs,
+    toolRetryMaxDelayMs,
+    temperature,
+    topP,
+    maxTokens,
+    presencePenalty,
+    frequencyPenalty,
+  }), [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
+
+  function onAdvancedChange(patch: Partial<ChatAdvancedSettingsState>) {
+    if (patch.systemPrompt !== undefined) setSystemPrompt(patch.systemPrompt);
+    if (patch.allowedTools !== undefined) setAllowedTools(patch.allowedTools);
+    if (patch.maxLoops !== undefined) setMaxLoops(patch.maxLoops);
+    if (patch.timeoutMs !== undefined) setTimeoutMs(patch.timeoutMs);
+    if (patch.toolRetryMaxAttempts !== undefined) setToolRetryMaxAttempts(patch.toolRetryMaxAttempts);
+    if (patch.toolRetryBaseDelayMs !== undefined) setToolRetryBaseDelayMs(patch.toolRetryBaseDelayMs);
+    if (patch.toolRetryMaxDelayMs !== undefined) setToolRetryMaxDelayMs(patch.toolRetryMaxDelayMs);
+    if (patch.temperature !== undefined) setTemperature(patch.temperature);
+    if (patch.topP !== undefined) setTopP(patch.topP);
+    if (patch.maxTokens !== undefined) setMaxTokens(patch.maxTokens);
+    if (patch.presencePenalty !== undefined) setPresencePenalty(patch.presencePenalty);
+    if (patch.frequencyPenalty !== undefined) setFrequencyPenalty(patch.frequencyPenalty);
+  }
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
 
   // Live trace update: when trace refetches during a run, rebuild messages
@@ -327,34 +359,38 @@ export function ChatPage({
     });
 
     try {
-      const composer = buildComposerPayload({
-        systemPrompt,
-        allowedTools,
-        toolRetryMaxAttempts,
-        toolRetryBaseDelayMs,
-        toolRetryMaxDelayMs,
-        temperature,
-        topP,
-        maxTokens,
-        presencePenalty,
-        frequencyPenalty,
-      });
+      const composerPayload = {
+        systemPrompt: systemPrompt.trim() || undefined,
+        allowedTools: parseCommaList(allowedTools),
+        toolRetry: buildToolRetryPayload({
+          maxAttempts: toolRetryMaxAttempts,
+          baseDelayMs: toolRetryBaseDelayMs,
+          maxDelayMs: toolRetryMaxDelayMs,
+        }),
+        modelSettings: buildModelSettingsPayload({
+          temperature,
+          topP,
+          maxTokens,
+          presencePenalty,
+          frequencyPenalty,
+        }),
+      };
       await streamChat({
         prompt: text,
         sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
         branchFrom: branchFromRef.current ?? undefined,
-        systemPrompt: composer.systemPrompt,
+        systemPrompt: composerPayload.systemPrompt,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
-        modelSettings: composer.modelSettings,
+        modelSettings: composerPayload.modelSettings,
         workspaceRoot: workspaceRoot.trim() || undefined,
         toolMode,
-        allowedTools: composer.allowedTools,
+        allowedTools: composerPayload.allowedTools,
         maxLoops,
         traceId: activeTodoContext?.traceId,
         dedupeKey: activeTodoContext ? `todo:${activeTodoContext.id}:${Date.now()}` : undefined,
         timeoutMs,
-        toolRetry: composer.toolRetry,
+        toolRetry: composerPayload.toolRetry,
         runContract: readRunContract(activeTodoContext),
         todoId: activeTodoContext?.id,
       }, controller.signal, ({ event, data }) => {
@@ -496,33 +532,11 @@ export function ChatPage({
           modelRoutes={modelRoutes.data}
           toolMode={toolMode}
           onToolModeChange={setToolMode}
-          allowedTools={allowedTools}
-          onAllowedToolsChange={setAllowedTools}
           workspaceRoot={workspaceRoot}
           onWorkspaceRootChange={setWorkspaceRoot}
           defaultWorkspace={defaultWorkspace}
-          systemPrompt={systemPrompt}
-          onSystemPromptChange={setSystemPrompt}
-          maxLoops={maxLoops}
-          onMaxLoopsChange={setMaxLoops}
-          timeoutMs={timeoutMs}
-          onTimeoutMsChange={setTimeoutMs}
-          toolRetryMaxAttempts={toolRetryMaxAttempts}
-          toolRetryBaseDelayMs={toolRetryBaseDelayMs}
-          toolRetryMaxDelayMs={toolRetryMaxDelayMs}
-          onToolRetryMaxAttemptsChange={setToolRetryMaxAttempts}
-          onToolRetryBaseDelayMsChange={setToolRetryBaseDelayMs}
-          onToolRetryMaxDelayMsChange={setToolRetryMaxDelayMs}
-          temperature={temperature}
-          topP={topP}
-          maxTokens={maxTokens}
-          presencePenalty={presencePenalty}
-          frequencyPenalty={frequencyPenalty}
-          onTemperatureChange={setTemperature}
-          onTopPChange={setTopP}
-          onMaxTokensChange={setMaxTokens}
-          onPresencePenaltyChange={setPresencePenalty}
-          onFrequencyPenaltyChange={setFrequencyPenalty}
+          advancedState={advancedState}
+          onAdvancedChange={onAdvancedChange}
           advancedCount={advancedCount}
         />
       </div>

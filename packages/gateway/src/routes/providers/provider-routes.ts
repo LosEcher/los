@@ -324,6 +324,28 @@ export function registerProviderRoutes(app: FastifyInstance): void {
   });
 
   // ── Provider CRUD (config-level) ─────────────────────
+  app.post('/providers', async (req, reply) => {
+    const body = asRecord(req.body);
+    const name = (typeof body.name === 'string' ? body.name.trim() : '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!name) {
+      return reply.status(422).send({ error: 'name is required and must contain at least one alphanumeric character' });
+    }
+    const config = getConfig();
+    if (config.providers[name]) {
+      return reply.status(409).send({ error: `Provider "${name}" already exists` });
+    }
+    const provider: Record<string, unknown> = { enabled: true, weight: 100, source: 'manual' };
+    if (body.apiKey !== undefined) provider.apiKey = normalizeOptionalString(body.apiKey);
+    if (body.baseUrl !== undefined) provider.baseUrl = normalizeOptionalString(body.baseUrl);
+    if (body.model !== undefined) provider.model = normalizeOptionalString(body.model);
+    if (typeof body.enabled === 'boolean') provider.enabled = body.enabled;
+    if (body.weight !== undefined) provider.weight = normalizeOptionalNonNegativeInteger(body.weight);
+    if (body.apiShape !== undefined) provider.apiShape = normalizeOptionalString(body.apiShape);
+    config.providers[name] = provider as typeof config.providers[string];
+    setConfig(config);
+    return reply.status(201).send({ ok: true, provider: { name, ...config.providers[name] } });
+  });
+
   app.patch('/providers/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
     const body = asRecord(req.body);

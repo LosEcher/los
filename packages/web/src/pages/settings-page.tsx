@@ -68,7 +68,7 @@ function SelectField({ label, value, options, onChange }: { label: string; value
 
 function SectionHeader({ title, onSave, saving }: { title: string; onSave?: () => void; saving?: boolean }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0 6px' }}>
+    <div className="section-header">
       <strong>{title}</strong>
       {onSave ? (
         <button type="button" className="ghost-btn" onClick={onSave} disabled={saving}>
@@ -192,7 +192,7 @@ export function SettingsPage() {
           <EmptyText text="No review roles configured. Add roles in ~/.los/config.yaml under review.roles." />
         ) : (
           Object.entries(reviewRoles).map(([name, role]) => (
-            <div key={name} style={{ marginTop: 8 }}>
+            <div key={name} className="role-card">
               <SectionHeader title={`Role: ${name}`} />
               <TextField label="provider" value={String(role.provider ?? '')} onChange={v => { /* roles are read-only in this UI for now */ }} />
               <TextField label="model" value={String(role.model ?? '')} onChange={v => { }} />

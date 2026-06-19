@@ -133,6 +133,12 @@ else
   red "Runtime config update path not wired (P1)"
 fi
 
+if file_has "packages/gateway/src/settings-routes.test.ts" "PATCH\|round-trip\|roundtrip\|reflects changes\|runtime update"; then
+  green "Settings round-trip integration tests found"
+else
+  red "Settings round-trip integration tests missing (P1)"
+fi
+
 # ── summary ───────────────────────────────────────────────
 
 section "Summary"

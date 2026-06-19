@@ -144,3 +144,50 @@ For CI infrastructure failures, separate the surfaces:
 
 Do not flatten those four surfaces into a single statement such as "CI is
 green" without naming which commit and which surface was checked.
+
+## jj Closeout Checklist
+
+When using `jj` for version control, the merge step stays manual but the
+pre-merge verification is scriptable. Before requesting or performing a merge
+into `main`:
+
+### Pre-closeout Read-only Check
+
+```bash
+bash tools/branch-closeout.sh
+```
+
+This script performs the following read-only checks (it never writes, pushes,
+or merges):
+
+1. **jj status** — confirms working copy is clean (no uncommitted changes)
+2. **Diff scope** — lists changed files and counts insertions/deletions
+3. **Local gate** — runs applicable gate command from the project matrix
+4. **Remote SHA match** — verifies the pushed commit SHA matches the local
+   change ID's commit (compares `jj log -r 'main..@'` against the latest
+   commit on the tracked remote branch)
+5. **Remote CI** — checks GitHub Actions for the matching SHA (requires
+   `gh` CLI and repository access)
+
+### Manual Merge Steps (never automated)
+
+After the read-only check passes:
+
+1. `jj git fetch` — ensure remote refs are current
+2. `jj new main` — start a new change on top of `main`
+3. `jj squash` or rebase the feature change onto `main`
+4. `jj git push --allow-new` — push to `main` on the remote
+5. Verify the post-merge CI run on `main` is green
+6. Record the merge in the project decision ledger
+
+### Post-merge Verification
+
+```bash
+# Check that main CI completed successfully for the merge commit
+gh run list --repo LosEcher/los --branch main --limit 5 \
+  --json databaseId,status,conclusion,headSha,createdAt
+```
+
+The merge commit SHA on `main` must have a green `CI / gate` status before
+the merge is considered complete. If the post-merge CI fails, treat it as a
+recovery event per the "Recovery When A Gate Fails" section above.

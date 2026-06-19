@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Network, Plus, Upload } from 'lucide-react';
+import { Network, Plus, Upload, AlertTriangle } from 'lucide-react';
 import { getJson, postJson, type SshConfigImportResponse } from './api';
-import { DataTable, EmptyText, Fact, Field, formatDate, RefreshQueryButton, StatusPill } from './ui';
+import { Badge, DataTable, EmptyText, Fact, Field, formatDate, RefreshQueryButton, StatusPill } from './ui';
 import { NodeEditor, NodeInspector, errorMessage, fmtMb } from './node-editor.js';
 
 function shortCapFlags(capabilities: Record<string, unknown>): string {
@@ -17,6 +17,25 @@ function resourceCell(capacity: Record<string, unknown>): string {
   const swap = fmtMb(capacity.swapTotalMb);
   if (mem === '?' && swap === '?') return '?';
   return `${mem}/${swap}`;
+}
+
+function memoryPressure(capacity: Record<string, unknown>): { pct: number; tone: 'ok' | 'warn' | 'err' } {
+  const total = Number(capacity.memoryTotalMb ?? 0);
+  const avail = Number(capacity.memoryAvailableMb ?? 0);
+  if (!total || total <= 0) return { pct: 0, tone: 'ok' };
+  const used = total - avail;
+  const pct = Math.round((used / total) * 100);
+  if (pct >= 90) return { pct, tone: 'err' };
+  if (pct >= 70) return { pct, tone: 'warn' };
+  return { pct, tone: 'ok' };
+}
+
+function diskPressure(capacity: Record<string, unknown>): { freeGb: number; tone: 'ok' | 'warn' | 'err' } {
+  const freeGb = Number(capacity.diskFreeGb ?? -1);
+  if (freeGb < 0) return { freeGb: -1, tone: 'ok' };
+  if (freeGb < 5) return { freeGb, tone: 'err' };
+  if (freeGb < 20) return { freeGb, tone: 'warn' };
+  return { freeGb, tone: 'ok' };
 }
 
 export function NodesPage() {
@@ -79,7 +98,10 @@ export function NodesPage() {
           loading={nodes.isLoading}
           empty="No executor nodes have heartbeated yet."
           rows={nodes.data ?? []}
-          renderRow={node => (
+          renderRow={node => {
+            const mem = memoryPressure(node.capacity ?? {});
+            const disk = diskPressure(node.capacity ?? {});
+            return (
             <button
               type="button"
               className="record-row node-row"
@@ -90,13 +112,19 @@ export function NodesPage() {
               <span>{node.nodeKind}</span>
               <span className={`status-text ${node.status}`}>{node.status}</span>
               <span>{resourceCell(node.capacity ?? {})}</span>
+              <span>
+                {mem.pct > 0 ? <Badge tone={mem.tone}>mem {mem.pct}%</Badge> : null}
+                {disk.freeGb >= 0 ? <Badge tone={disk.tone}>disk {disk.freeGb}G</Badge> : null}
+                {mem.pct === 0 && disk.freeGb < 0 ? '—' : null}
+              </span>
               <span>{shortCapFlags(node.capabilities ?? {})}</span>
               <span>{node.connectModes.join(', ') || 'mode?'}</span>
               <span>{node.rolloutState ?? 'idle'}{node.targetVersion ? ` → ${node.targetVersion}` : ''}</span>
               <span>{node.execution.candidate ? 'exec' : 'non-exec'}</span>
               <span>{formatDate(node.lastHeartbeatAt)}</span>
             </button>
-          )}
+            );
+          }}
         />
       </div>
       <NodeInspector node={selectedNode as any} />

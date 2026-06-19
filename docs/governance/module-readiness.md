@@ -31,20 +31,20 @@
 ## 1. providers → live
 
 ### 1.1 API 完备
-- [ ] **P1** `POST /providers` — 创建 provider 配置
+- [x] **P1** `POST /providers` — 创建 provider 配置
 - [x] **P1** `PATCH /providers/:name` — 更新 provider 配置（含 enabled、API key、model、baseUrl、weight）
 - [x] **P1** `DELETE /providers/:name` — 删除 provider 配置
 - [x] **P1** Provider 配置可更新到进程内运行时 config（当前通过 `setConfig()`）
 - [ ] **P2** Provider 配置持久化到 `~/.los/config.yaml` 或等效 owner store
 
 ### 1.2 UI 完备
-- [ ] **P1** ProviderConfigWorkspace 表单接入 `useMutation` + `postJson`/`patchJson`，替代当前 copy-paste 片段
-- [ ] **P1** Provider Endpoints 表格增加 add/edit/delete 操作按钮
+- [x] **P1** ProviderConfigWorkspace 表单接入 `useMutation` + `postJson`/`patchJson`，替代当前 copy-paste 片段
+- [x] **P1** Provider Endpoints 表格增加 add/edit/delete 操作按钮
 - [ ] **P2** Provider Settings panel StatusPill 从 `partial` → `live`
-- [ ] **P1** NAV 中 providers StatusPill 与页面内部状态对齐；当前 `App.tsx` 标 `live`，页面 panel 仍标 `partial`
+- [x] **P1** NAV 中 providers StatusPill 与页面内部状态对齐；当前 `App.tsx` 标 `partial`，页面 panel 标 `partial`，一致
 
 ### 1.3 证据闭环
-- [ ] **P1** Provider CRUD 端点有集成测试（创建→读取→更新→删除 全生命周期）
+- [x] **P1** Provider CRUD 端点有集成测试（创建→读取→更新→删除 全生命周期）
 - [ ] **P2** Config 持久化 round-trip 测试（写入→重启→读取验证）
 
 ---
@@ -105,8 +105,9 @@
 - [x] **P2** NAV 中 settings StatusPill 从 `partial` → `live`
 
 ### 4.3 证据闭环
-- [ ] **P2** `PATCH /settings` 集成测试（修改→读取验证）
-- [ ] **P2** 配置热加载测试（PATCH → 无需重启 → GET 反映新值）
+- [x] **P2** `PATCH /settings` 集成测试（修改→读取验证）
+- [x] **P2** 配置热加载测试（PATCH → 无需重启 → GET 反映新值）
+- [ ] **P2** 磁盘持久化 round-trip 测试（写入→重启→读取验证，与 P2 持久化配套）
 
 ---
 
