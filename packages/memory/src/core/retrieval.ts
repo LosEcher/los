@@ -8,7 +8,7 @@
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { ensureMemoryCompactionStore } from './compaction.js';
-import { ensureProceduralCandidateStore } from './procedural-candidates.js';
+import { ensureProceduralCandidateStore } from '../procedures/procedural-candidates.js';
 import { ensureMemoryStore, searchObservations, type Observation } from './store.js';
 
 const log = getLogger('memory-retrieval');

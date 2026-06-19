@@ -6,19 +6,19 @@ import { closeDb, getDb, initDb } from '@los/infra/db';
 import {
   addObservation,
   ensureMemoryStore,
-} from './store.js';
+} from './core/store.js';
 import {
   compactSession,
   ensureMemoryCompactionStore,
   promoteCandidate,
-} from './compaction.js';
+} from './core/compaction.js';
 import {
   retrieveActiveRules,
   formatRulesForPrompt,
   resolveMemoryLayers,
   routeMemoryRetrieval,
   augmentSystemPrompt,
-} from './retrieval.js';
+} from './core/retrieval.js';
 
 // ── resolveMemoryLayers ──────────────────────────────────
 

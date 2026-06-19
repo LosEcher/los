@@ -17,7 +17,7 @@
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
 import { getDb } from '@los/infra/db';
-import { addObservation, ensureMemoryStore, type Observation } from './store.js';
+import { addObservation, ensureMemoryStore, type Observation } from '../core/store.js';
 
 const log = getLogger('memory-self-reflection');
 

@@ -31,7 +31,7 @@ export interface Observation {
   updatedAt: string;
 }
 
-import type { ObserverType } from './types.js';
+import type { ObserverType } from '../types.js';
 
 export interface MemoryStats {
   totalObservations: number;

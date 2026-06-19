@@ -12,7 +12,7 @@ import {
   listActiveCandidates,
   listProceduralCandidates,
   promoteProceduralCandidate,
-} from './procedural-candidates.js';
+} from './procedures/procedural-candidates.js';
 
 test('procedural candidates: create, get, list, promote lifecycle', async () => {
   const config = await loadConfig();
