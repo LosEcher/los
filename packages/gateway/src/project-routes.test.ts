@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { registerProjectRoutes } from './routes/project-routes.js';
+import { registerProjectRoutes } from './routes/infrastructure/project-routes.js';
 
 test('/projects/browse lists local directories by absolute path', async () => {
   const root = mkdtempSync(join(tmpdir(), 'los-project-browse-'));

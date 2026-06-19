@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 
 import { loadConfig } from '@los/infra/config';
-import { registerProviderRoutes } from './routes/provider-routes.js';
+import { registerProviderRoutes } from './routes/providers/provider-routes.js';
 
 test('/providers/models exposes grouped providers and flat model records', async () => {
   await loadConfig();

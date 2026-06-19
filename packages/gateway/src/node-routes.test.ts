@@ -7,7 +7,7 @@ import Fastify from 'fastify';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
 import { upsertExecutorNode } from '@los/agent/executor-nodes';
-import { registerNodeRoutes } from './routes/node-routes.js';
+import { registerNodeRoutes } from './routes/infrastructure/node-routes.js';
 
 test('node probe verifies non-executor http_health without creating an executor candidate', async () => {
   const config = await loadConfig();

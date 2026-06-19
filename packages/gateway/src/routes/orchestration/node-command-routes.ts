@@ -7,7 +7,7 @@ import {
   type NodeCommandName,
 } from '@los/agent/node-commands';
 import { loadExecutorNode } from '@los/agent/executor-nodes';
-import { getRequestContext } from '../request-context.js';
+import { getRequestContext } from '../../request-context.js';
 
 type NodeCommandRoutesOptions = {
   executorAgentKey?: string;

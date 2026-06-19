@@ -11,7 +11,7 @@ import {
   touchProject,
   unbindProject,
   validateProjectPath,
-} from '../project-store.js';
+} from '../../project-store.js';
 
 function sanitizeProjectId(raw: string): string {
   return raw.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+/, '').replace(/-+$/, '') || 'untitled';

@@ -29,7 +29,7 @@ import {
   normalizeProviderSummaryStringArray,
   normalizeNonNegativeNumber,
   parseOptionalBoolean,
-} from './server-helpers.js';
+} from '../server-helpers.js';
 import { getConfig, setConfig } from '@los/infra/config';
 
 // ── Provider/onboarding sanitizers ──────────────────────
