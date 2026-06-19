@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { ToolRegistry, ToolResult } from './registry.js';
-import { safeWorkspacePath } from './path-safety.js';
+import type { ToolRegistry, ToolResult } from '../core/registry.js';
+import { safeWorkspacePath } from '../core/path-safety.js';
 
 export interface PatchToolOptions {
   workspaceRoot: string;

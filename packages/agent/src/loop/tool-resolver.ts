@@ -3,8 +3,8 @@
  * Pure functions for resolving allowed tools and tool policies.
  */
 
-import { READ_ONLY_BUILTIN_TOOLS } from '../tools/registry.js';
-import { getAvailableSandbox } from '../tools/shell-sandbox.js';
+import { READ_ONLY_BUILTIN_TOOLS } from '../tools/core/registry.js';
+import { getAvailableSandbox } from '../tools/external/shell-sandbox.js';
 import type { AgentConfig } from './types.js';
 
 /**

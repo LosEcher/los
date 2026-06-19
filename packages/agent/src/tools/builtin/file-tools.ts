@@ -16,8 +16,8 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
-import type { ToolRegistry } from './registry.js';
-import { safeWorkspacePath } from './path-safety.js';
+import type { ToolRegistry } from '../core/registry.js';
+import { safeWorkspacePath } from '../core/path-safety.js';
 import { registerDirectoryTreeTool } from './directory-tree-tool.js';
 
 // ── get_file_info ───────────────────────────────────────

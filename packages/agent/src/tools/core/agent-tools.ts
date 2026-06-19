@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
-import type { AgentConfig, AgentResult } from '../loop.js';
+import type { AgentConfig, AgentResult } from '../../loop.js';
 import type { ToolRegistry, ToolResult } from './registry.js';
 
 export interface SpawnAgentRequest {
@@ -28,7 +28,7 @@ export interface SpawnAgentRunnerOptions {
     maxDelayMs?: number;
   };
   signal?: AbortSignal;
-  onSessionEvent?: (event: import('../session-events.js').SessionEventRecord) => void | Promise<void>;
+  onSessionEvent?: (event: import('../../session-events.js').SessionEventRecord) => void | Promise<void>;
 }
 
 const SUBAGENT_PROJECT_WRITE_TOOLS = [

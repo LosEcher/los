@@ -8,8 +8,8 @@ import {
   createToolRegistry,
   registerBuiltinTools,
   READ_ONLY_BUILTIN_TOOLS,
-} from './registry.js';
-import { createSpawnAgentRunner, registerSpawnAgentTool } from './agent-tools.js';
+} from './core/registry.js';
+import { createSpawnAgentRunner, registerSpawnAgentTool } from './core/agent-tools.js';
 
 test('read-only tool mode excludes write and shell tools', async () => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-readonly-'));

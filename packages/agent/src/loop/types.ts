@@ -1,6 +1,6 @@
 import type { SessionEventRecord } from '../session-events.js';
 import type { ModelSettings } from '../model-settings.js';
-import type { MCPServerConfig } from '../tools/mcp-client.js';
+import type { MCPServerConfig } from '../tools/external/mcp-client.js';
 import type { Logger } from '@los/infra/logger';
 import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
 import type { IdentityLevel } from '../identity-loader.js';

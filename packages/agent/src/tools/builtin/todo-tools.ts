@@ -8,8 +8,8 @@ import {
   type TodoKind,
   type TodoPriority,
   type TodoStatus,
-} from '../todos.js';
-import type { ToolRegistry } from './registry.js';
+} from '../../todos.js';
+import type { ToolRegistry } from '../core/registry.js';
 
 export function registerTodoTools(registry: ToolRegistry): void {
   registry.register('todo_list', async (args) => {

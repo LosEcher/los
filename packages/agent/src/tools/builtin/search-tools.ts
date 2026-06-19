@@ -8,9 +8,9 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import type { ToolRegistry } from './registry.js';
-import { safeWorkspacePath } from './path-safety.js';
-import { matchGlob, escapeRegex, globToFilenameRegex, isSubstringPattern } from './glob-matcher.js';
+import type { ToolRegistry } from '../core/registry.js';
+import { safeWorkspacePath } from '../core/path-safety.js';
+import { matchGlob, escapeRegex, globToFilenameRegex, isSubstringPattern } from '../helpers/glob-matcher.js';
 
 // ── Constants ───────────────────────────────────────────
 
