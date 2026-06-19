@@ -76,3 +76,42 @@ test('artifact routes put, read, list, and delete a local artifact', async () =>
     await rm(storageRoot, { recursive: true, force: true });
   }
 });
+
+test('artifact route accepts payloads above the gateway chat body limit', async () => {
+  const config = await loadConfig();
+  config.auth.enabled = false;
+  await initDb(config.databaseUrl);
+
+  const artifactId = `test-artifact-large-${Date.now()}`;
+  const sessionId = `test-session-large-${Date.now()}`;
+  const storageRoot = await mkdtemp(join(tmpdir(), 'los-artifacts-'));
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, config);
+  registerArtifactRoutes(app, { storageRoot });
+
+  try {
+    const content = 'x'.repeat(1024 * 1024 + 128);
+    const putResponse = await app.inject({
+      method: 'POST',
+      url: '/artifacts',
+      payload: {
+        artifactId,
+        nodeId: 'gateway-local',
+        sessionId,
+        path: 'notes/large.txt',
+        pathPolicy: 'artifact-store',
+        content,
+        contentType: 'text/plain',
+      },
+    });
+
+    assert.equal(putResponse.statusCode, 201);
+    assert.equal(putResponse.json().artifact.sizeBytes, content.length);
+  } finally {
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM artifacts WHERE artifact_id = $1', [artifactId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await app.close();
+    await rm(storageRoot, { recursive: true, force: true });
+  }
+});

@@ -1,5 +1,16 @@
 /**
- * @los/agent — Public API.
+ * @los/agent — Public API surface.
+ *
+ * Subpath exports (package.json "exports") are the primary access pattern for
+ * modular monolith consumers.  The barrel export here is a convenience subset
+ * of high-traffic symbols that gateways, CLIs, and executors use repeatedly.
+ *
+ * Symbols not exported here are still available via their subpath — e.g.
+ * `@los/agent/task-runs`, `@los/agent/governance-jobs`.  This is intentional:
+ * the barrel is the "front door", not the only door.
+ *
+ * When adding a new public symbol, prefer subpath-only until at least two
+ * external consumers request it via the barrel.
  */
 
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState } from './loop.js';
@@ -14,10 +25,8 @@ export { MCPToolBridge, MCPClient, type MCPServerConfig, type MCPToolDef, type M
 export { ensureMCPServerStore, upsertMCPServer, loadMCPServer, listMCPServers, deleteMCPServer, updateMCPServerStatus, type MCPServerRecord, type MCPTransport, type MCPServerStatus, type MCPRegisteredTool, type UpsertMCPServerInput, type UpdateMCPServerStatusInput, type ListMCPServersOptions } from './mcp-servers.js';
 export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSession, type SessionRecord } from './session.js';
 export { recordOperatorFollowup, recordOperatorSteering, recordSessionBranchCreated, type RecordOperatorFollowupInput, type RecordOperatorSteeringInput, type RecordSessionBranchCreatedInput } from './operator-control.js';
-export { ensureToolCallStateStore, createToolCallState, loadToolCallState, listToolCallStates, listToolCallStatesForTaskRun, listToolCallStatesForRunSpec, type ToolCallStateRecord, type ToolCallStateType, type CreateToolCallStateInput, type UpdateToolCallStateInput } from './tool-call-states.js';
 export { applyToolCallRecoveryTransitionForRunSpec, evaluateToolCallRecovery, readToolCallRecoveryForRunSpec, readToolCallRecoveryForTaskRun, type ToolCallRecoveryDecision, type ToolCallRecoveryIntent, type ToolCallRecoveryOptions, type ToolCallRecoveryRecommendation, type ToolCallRecoveryTransitionAction, type ToolCallRecoveryTransitionResult } from './tool-call-recovery.js';
 export { ExecutionTransitionError, assertExecutionTransition, canTransitionExecutionState, evaluateExecutionTransition, executionTransitionEventType, isTerminalExecutionState, type ExecutionEntityType, type ExecutionState, type ExecutionStateByEntity, type ExecutionTransitionInput, type ExecutionTransitionResult } from './execution-transitions.js';
-export { ensureExecutionStore, transitionExecutionState, type ExecutionEventEnvelope, type TransitionExecutionStateInput, type TransitionExecutionStateResult } from './execution-store.js';
 export { ensureRunSpecStore, claimRunSpec, createRunSpec, approveRunSpecPhase, loadRunSpec, reviseRunSpecPlan, listRunSpecs, listRunSpecsForSession, type RunSpecRecord, type RunSpecStatus, type CreateRunSpecInput } from './run-specs.js';
 export { canMarkSucceeded, canStartExecution, mergeRunContractMetadata, normalizeRunContractMetadata, readRunContractMetadata, validatePhaseTransition, type PlanStep, type RunContractMetadata, type RunContractMetadataInput, type RunContractMode, type RunPhase, type VerificationRequirement } from './run-contract.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, type LoadedSpec, type SpecLayer } from './spec-loader.js';
@@ -60,3 +69,21 @@ export { scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFileP
 
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';
+
+// ── Reserved for internal use only ──────────────────────────
+// The following symbols are available via subpath imports but are NOT
+// exported from the barrel.  Prefer subpath imports for:
+//   @los/agent/tool-call-states      — internal state-machine audit trail
+//   @los/agent/execution-store       — transitionExecutionState (low-level)
+//   @los/agent/execution-transitions — raw state machine evaluation
+//   @los/agent/governance-jobs       — background governance sweeper
+//   @los/agent/governance-*          — governance subsystem internals
+//   @los/agent/session-trace         — internal trace projection
+//   @los/agent/providers/telemetry   — internal provider plumbing
+//   @los/agent/providers/repair-telemetry
+//   @los/agent/cancellation           — low-level abort primitives
+//
+// Internal and governance symbols removed from the barrel 2026-06-19:
+//   ensureExecutionStore, transitionExecutionState,
+//   ensureToolCallStateStore, createToolCallState, loadToolCallState, etc.
+//   See package.json "exports" for subpath access.

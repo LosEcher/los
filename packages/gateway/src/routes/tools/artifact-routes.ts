@@ -37,6 +37,8 @@ type PutArtifactBody = {
   metadata?: Record<string, unknown>;
 };
 
+const ARTIFACT_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
+
 export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRoutesOptions): void {
   app.get('/artifacts', async (req) => {
     await ensureArtifactStore();
@@ -56,7 +58,7 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
     });
   });
 
-  app.post('/artifacts', async (req, reply) => {
+  app.post('/artifacts', { bodyLimit: ARTIFACT_BODY_LIMIT_BYTES }, async (req, reply) => {
     const body = req.body as PutArtifactBody | undefined;
     const nodeId = normalizeOptionalString(body?.nodeId);
     const content = normalizeContent(body);

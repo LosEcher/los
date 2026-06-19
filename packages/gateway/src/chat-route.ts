@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Config } from '@los/infra/config';
 import { normalizeModelSettings } from '@los/agent/model-settings';
 import {
@@ -20,8 +20,18 @@ import { getRequestContext } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 
-export function registerChatRoute(app: FastifyInstance, config: Config, defaultWorkspaceRoot: string, gatewayServiceId?: string): void {
-  app.post('/chat', async (req, reply) => {
+const CHAT_BODY_LIMIT_BYTES = 1024 * 1024;
+
+export function registerChatRoute(
+  app: FastifyInstance,
+  config: Config,
+  defaultWorkspaceRoot: string,
+  gatewayServiceId?: string,
+  rateLimitHook?: (req: FastifyRequest, reply: FastifyReply) => Promise<void>,
+): void {
+  app.post('/chat', { bodyLimit: CHAT_BODY_LIMIT_BYTES }, async (req, reply) => {
+    if (rateLimitHook) await rateLimitHook(req, reply);
+    if (reply.sent) return;
     const body = req.body as ChatRequestBody;
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     const sessionId = normalizeOptionalString(body.sessionId);
