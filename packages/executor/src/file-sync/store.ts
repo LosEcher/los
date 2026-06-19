@@ -170,8 +170,8 @@ async function upsertFileEntry(input: {
         status, change_type, source_node, scanned_at, changed_at, version_seq)
      VALUES ($1,$2,$3,$4,$5,$6,
         $7, $8, $9, $10::timestamptz,
-        CASE WHEN $8 IN ('added','modified') THEN $10::timestamptz ELSE file_sync_entries.changed_at END,
-        COALESCE(file_sync_entries.version_seq, 0) + 1)
+        CASE WHEN $8 IN ('added','modified') THEN $10::timestamptz ELSE NULL END,
+        1)
      ON CONFLICT (folder_id, file_path) DO UPDATE SET
        size = EXCLUDED.size,
        mtime_ns = EXCLUDED.mtime_ns,
