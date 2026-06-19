@@ -107,6 +107,14 @@ function configForAuth(enabled: boolean): Config {
       ftsEnabled: true,
       maxObservations: 10000,
       selfReflectionEnabled: false,
+      codeGraph: {
+        enabled: false,
+        shadowMode: false,
+        injectArchitecture: false,
+        cbmCommand: 'codebase-memory-mcp',
+        cbmArgs: [],
+        maxPromptTokens: 400,
+      },
     },
     executor: {
       enabled: false,

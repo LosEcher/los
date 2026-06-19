@@ -1,12 +1,15 @@
 import { getLogger } from '@los/infra/logger';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
-import { listDueGovernanceJobs, updateGovernanceJob } from './governance-jobs-crud.js';
+import { listDueGovernanceJobs, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { runJobAudit } from './governance-auditors.js';
+import { runGaLoop, maybeAutoRecoverPaused } from './ga-loop-runner.js';
+import { evaluateLoopGate } from './ga-circuit-breaker.js';
 import type {
   GovernanceJob,
   GovernanceJobType,
   GovernanceSweepJobResult,
   GovernanceSweepResult,
+  GaLoopResult,
 } from './governance-jobs-types.js';
 
 const log = getLogger('governance-jobs');
@@ -259,7 +262,72 @@ export async function runGovernanceSweep(opts?: {
 
   for (const job of dueJobs) {
     const started = Date.now();
+
+    // ── Auto-recover paused jobs whose circuit breaker has expired ──
+    if (maybeAutoRecoverPaused(job)) {
+      try {
+        await updateGovernanceJob(job.id, {
+          status: 'active',
+          lastRunAt: new Date().toISOString(),
+        });
+        await updateGovernanceJobState(job.id, {
+          circuitState: 'closed',
+          consecutiveFailures: 0,
+          circuitOpenedAt: null,
+        });
+        log.info(`GA loop: auto-recovered paused job ${job.jobType} (${job.id})`);
+        job.status = 'active';
+        job.circuitState = 'closed';
+      } catch (err) {
+        log.warn(`GA loop: failed to auto-recover job ${job.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ── Gate check: skip if circuit broken or no-op throttled ──
+    const gateDecision = evaluateLoopGate(job);
+    if (gateDecision.action === 'skip') {
+      log.info(`GA loop: skipping ${job.jobType} (${job.id}) — ${gateDecision.reason}`);
+      continue;
+    }
+
     try {
+      // ── GA Loop path: job has autoFix enabled ──────────
+      if (job.autoFix?.autoFixEnabled && !dryRun) {
+        const loopResult: GaLoopResult = await runGaLoop({ job, dryRun: false });
+        const summary = loopResult.auditSummary;
+
+        results.push({
+          jobId: job.id,
+          jobType: job.jobType,
+          summary: {
+            ...summary,
+            _gaLoop: {
+              fixApplied: loopResult.fixApplied,
+              fixSucceeded: loopResult.fixSucceeded,
+              verificationPassed: loopResult.verificationPassed,
+              retried: loopResult.retried,
+              escalated: loopResult.escalated,
+              phases: loopResult.phases.map(p => `${p.phase}(${p.attemptNumber})`),
+            },
+          },
+          durationMs: Date.now() - started,
+        });
+
+        // Apply gate decisions (downgrade / pause) from throttle
+        if (gateDecision.action === 'downgrade' && gateDecision.newCadence) {
+          await updateGovernanceJob(job.id, { cadence: gateDecision.newCadence });
+          log.info(`GA loop: downgraded ${job.jobType} cadence from ${job.cadence} to ${gateDecision.newCadence}`);
+        }
+        if (gateDecision.action === 'pause') {
+          await updateGovernanceJob(job.id, { status: 'paused' });
+          log.info(`GA loop: paused ${job.jobType} (${gateDecision.reason})`);
+        }
+
+        if (loopResult.fixSucceeded && !loopResult.escalated) findingsCreated += 1;
+        continue;
+      }
+
+      // ── Traditional path: audit + createTodos (dryRun or no autoFix) ──
       const summary = await runJobAudit(job, dryRun);
       results.push({
         jobId: job.id,

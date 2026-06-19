@@ -30,3 +30,4 @@ packages/memory/src/core/store.ts
 packages/web/src/chat-page.tsx
 packages/web/src/pages/memory-page.tsx
 packages/web/src/pages/sessions-page.tsx
+packages/gateway/src/server.ts

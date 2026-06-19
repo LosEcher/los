@@ -88,3 +88,25 @@ export {
   type RetentionPolicy,
   type RetentionResult,
 } from './core/retention.js';
+
+// ── CBM code graph client ────────────────────────────────
+
+export {
+  CBMClient,
+  type CBMArchitecture,
+  type CBMSymbol,
+  type CBMCallerInfo,
+  type CBMPathResult,
+  type CBMChangeImpact,
+  type CBMMetrics,
+} from './cbm/cbm-client.js';
+
+export {
+  appendShadowLog,
+  readShadowLog,
+  computeShadowStats,
+  printShadowStats,
+  setShadowLogDir,
+  type ShadowLogEntry,
+  type ShadowStats,
+} from './cbm/shadow-log.js';

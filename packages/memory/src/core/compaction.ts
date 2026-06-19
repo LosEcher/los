@@ -15,6 +15,7 @@ import {
   promoteProceduralCandidate,
 } from '../procedures/procedural-candidates.js';
 import { buildTranscriptBrief, type TranscriptBrief } from '../transcript/transcript-brief.js';
+import { collectSymbolSummary } from './compaction-symbol-summary.js';
 import {
   normalizeRequired, normalizeLimit, normalizeJsonObject,
   normalizeJsonArray, parseJsonArray, toIsoString,
@@ -212,6 +213,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   let proceduralCandidates: ProceduralCandidate[] = [];
   let confidence = 0;
   let evidenceCount = 0;
+  let symbolSummary: Map<string, { name: string; kind: string; file: string; count: number }> | null = null;
 
   if (!isCheckpoint) {
     const executorFailures = evalSummaries.filter((e: Record<string, unknown>) => e.failover_scope === 'executor').length;
@@ -244,6 +246,9 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       });
     }
 
+    // Phase 4: collect symbol summary from observations (data accumulation, not pattern detection)
+    symbolSummary = await collectSymbolSummary(db, sessionId);
+
     // Self-reflection detection (Phase 2) — extracted to self-reflection.ts
     try {
       const { detectSelfReflectionCandidates } = await import('../reflection/self-reflection.js');
@@ -267,6 +272,16 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     evalSummaries: isCheckpoint ? undefined : evalSummaries,
     compactedAt: new Date().toISOString(),
     checkpoint: isCheckpoint || undefined,
+    // Phase 4: symbol summary from observations (data accumulation only)
+    ...(symbolSummary && symbolSummary.size > 0 ? {
+      symbolSummary: [...symbolSummary.entries()].map(([id, s]) => ({
+        symbolId: id,
+        name: s.name,
+        kind: s.kind,
+        file: s.file,
+        operationCount: s.count,
+      })),
+    } : {}),
   };
 
   // Build transcript brief from session_events (best-effort augmentation)

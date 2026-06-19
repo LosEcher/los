@@ -8,6 +8,7 @@ import { externalSummariesCommand } from './external-summaries.js';
 import { governanceCommand } from './governance.js';
 import { printChatHelp, printHelp } from './help.js';
 import { memoryCommand } from './memory.js';
+import { cbmCommand } from './cbm.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
 import { providerCommand } from './provider.js';
@@ -99,6 +100,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'scan' || command === 'static-analysis') {
     await scanCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'cbm') {
+    await cbmCommand(globalArgs, commandArgs);
     return;
   }
 

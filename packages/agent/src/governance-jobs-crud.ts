@@ -9,6 +9,7 @@ import type {
   GovernanceJobType,
   CreateGovernanceJobInput,
   UpdateGovernanceJobInput,
+  UpdateGovernanceJobStateInput,
   ListGovernanceJobsOptions,
   ListDueGovernanceJobsOptions,
 } from './governance-jobs-types.js';
@@ -27,8 +28,8 @@ export async function createGovernanceJob(
 
   const rows = await db.query<GovernanceJobRow>(
     `INSERT INTO governance_jobs (
-      id, job_type, cadence, status, config_json, dedupe_key, tenant_id, project_id
-    ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+      id, job_type, cadence, status, config_json, auto_fix_config_json, dedupe_key, tenant_id, project_id
+    ) VALUES ($1, $2, $3, $4, $5::jsonb, $9::jsonb, $6, $7, $8)
     RETURNING *`,
     [
       id,
@@ -39,6 +40,7 @@ export async function createGovernanceJob(
       input.dedupeKey ?? null,
       input.tenantId ?? null,
       input.projectId ?? null,
+      input.autoFix ? JSON.stringify(input.autoFix) : null,
     ],
   );
 
@@ -122,6 +124,10 @@ export async function updateGovernanceJob(
     params.push(JSON.stringify(input.config));
     sets.push(`config_json = $${params.length}::jsonb`);
   }
+  if (input.autoFix !== undefined) {
+    params.push(JSON.stringify(input.autoFix));
+    sets.push(`auto_fix_config_json = $${params.length}::jsonb`);
+  }
   if (input.lastRunAt !== undefined) {
     params.push(input.lastRunAt);
     sets.push(`last_run_at = $${params.length}::timestamptz`);
@@ -154,6 +160,45 @@ export async function deleteGovernanceJob(id: string): Promise<boolean> {
     [id],
   );
   return result.rows.length > 0;
+}
+
+// ── State update (throttle / circuit breaker) ────────────
+
+export async function updateGovernanceJobState(
+  id: string,
+  state: UpdateGovernanceJobStateInput,
+): Promise<GovernanceJob | null> {
+  await ensureGovernanceJobStore();
+  const existing = await getGovernanceJob(id);
+  if (!existing) return null;
+
+  const db = getDb();
+  const sets: string[] = ['updated_at = now()'];
+  const params: unknown[] = [id];
+
+  if (state.consecutiveNoOps !== undefined) {
+    params.push(state.consecutiveNoOps);
+    sets.push(`consecutive_no_ops = $${params.length}`);
+  }
+  if (state.consecutiveFailures !== undefined) {
+    params.push(state.consecutiveFailures);
+    sets.push(`consecutive_failures = $${params.length}`);
+  }
+  if (state.circuitState !== undefined) {
+    params.push(state.circuitState);
+    sets.push(`circuit_state = $${params.length}`);
+  }
+  if (state.circuitOpenedAt !== undefined) {
+    params.push(state.circuitOpenedAt);
+    sets.push(`circuit_opened_at = $${params.length}::timestamptz`);
+  }
+
+  const rows = await db.query<GovernanceJobRow>(
+    `UPDATE governance_jobs SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+    params,
+  );
+
+  return rows.rows[0] ? rowToJob(rows.rows[0]) : null;
 }
 
 // ── Due Job Listing ──────────────────────────────────────

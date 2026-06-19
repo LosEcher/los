@@ -45,6 +45,9 @@ importers:
       '@los/agent':
         specifier: workspace:*
         version: link:../agent
+      '@los/memory':
+        specifier: workspace:*
+        version: link:../memory
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
