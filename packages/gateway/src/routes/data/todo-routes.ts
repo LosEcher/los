@@ -17,8 +17,8 @@ import {
   type TodoStatus,
 } from '@los/agent/todos';
 import { randomUUID } from 'node:crypto';
-import { getRequestContext } from '../request-context.js';
-import { runIdempotentJson } from '../idempotency.js';
+import { getRequestContext } from '../../request-context.js';
+import { runIdempotentJson } from '../../idempotency.js';
 
 export function registerTodoRoutes(app: FastifyInstance) {
   app.get('/todos', async (req) => {

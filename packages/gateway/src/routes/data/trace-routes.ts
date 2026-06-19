@@ -3,7 +3,7 @@ import { ensureSessionStore, loadSession } from '@los/agent/session';
 import { ensureSessionEventStore, listSessionEvents, listSessionEventsSince } from '@los/agent/session-events';
 import { projectSessionTrace, type TraceToolCallCard, type TraceTurnProjection } from '@los/agent/session-trace';
 import type { Message, TurnSummary } from '@los/agent';
-import { asObject, truncate } from '../trace-utils.js';
+import { asObject, truncate } from '../../trace-utils.js';
 
 type TraceMessageRole = 'user' | 'assistant' | 'system' | 'separator';
 

@@ -12,14 +12,14 @@ import { ensureRunEvalStore } from '@los/agent';
 import { ensureTaskRunStore } from '@los/agent/task-runs';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
-import { getRequestContext } from '../request-context.js';
+import { getRequestContext } from '../../request-context.js';
 import {
   normalizeOptionalString,
   normalizeStringArray,
   normalizeMemoryMetadata,
   parseOptionalBoolean,
   normalizeBoundedInteger,
-} from './server-helpers.js';
+} from '../server-helpers.js';
 
 const log = getLogger('memory-routes');
 

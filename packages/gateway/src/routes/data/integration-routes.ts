@@ -6,8 +6,8 @@ import {
   getFeedAnalysisDispatch,
   type FeedAnalysisDispatchRequest,
 } from '@los/agent';
-import { runIdempotentJson } from '../idempotency.js';
-import { getRequestContext } from '../request-context.js';
+import { runIdempotentJson } from '../../idempotency.js';
+import { getRequestContext } from '../../request-context.js';
 
 /**
  * Gateway routes for the feed-analysis integration.

@@ -12,14 +12,14 @@ import {
   type ExecutorNodeRolloutState,
   type ExecutorNodeStatus,
 } from '@los/agent/executor-nodes';
-import { buildSshImportItems } from '../ssh-config-import.js';
+import { buildSshImportItems } from '../../ssh-config-import.js';
 import {
   errorMessage,
   normalizeConnectModes,
   normalizeJsonObject,
   probeNode,
   readString,
-} from './node-probes.js';
+} from '../node-probes.js';
 
 type NodeEditorBody = {
   nodeKind?: ExecutorNodeKind;

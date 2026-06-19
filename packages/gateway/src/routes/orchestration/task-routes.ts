@@ -4,7 +4,7 @@ import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import { requestCancellation } from '@los/agent';
-import { normalizeOptionalString } from './server-helpers.js';
+import { normalizeOptionalString } from '../server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
 import { listDeadLetterEvents, acknowledgeDeadLetterEvent } from '@los/agent';
 

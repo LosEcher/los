@@ -11,11 +11,11 @@ import {
 import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSession, type SessionRecord } from '@los/agent/session';
 import { claimRunSpec } from '@los/agent/run-specs';
 import { listVerificationRecordsForSession } from '@los/agent';
-import { findRecoverableSessions } from '../chat-session-helpers.js';
-import { getRequestContext } from '../request-context.js';
+import { findRecoverableSessions } from '../../chat-session-helpers.js';
+import { getRequestContext } from '../../request-context.js';
 import { getConfig } from '@los/infra/config';
-import { resolveGatewayServiceIdentity } from '../server.js';
-import { normalizeBoundedInteger } from './server-helpers.js';
+import { resolveGatewayServiceIdentity } from '../../server.js';
+import { normalizeBoundedInteger } from '../server-helpers.js';
 
 export function registerSessionRoutes(app: FastifyInstance): void {
   app.get('/sessions', async () => {

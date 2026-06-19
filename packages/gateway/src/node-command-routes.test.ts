@@ -7,7 +7,7 @@ import { closeDb, getDb, initDb } from '@los/infra/db';
 import { loadConfig } from '@los/infra/config';
 import { upsertExecutorNode } from '@los/agent/executor-nodes';
 import { registerRequestContext } from './request-context.js';
-import { registerNodeCommandRoutes } from './routes/node-command-routes.js';
+import { registerNodeCommandRoutes } from './routes/orchestration/node-command-routes.js';
 
 test('node command routes drain, promote, and record commands', async () => {
   const config = await loadConfig();

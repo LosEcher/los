@@ -28,8 +28,8 @@ packages/agent/src/tools/search-tools.ts
 packages/cli/src/index.ts
 packages/cli/src/provider.ts
 packages/gateway/src/chat-service.ts
-packages/gateway/src/routes/node-routes.ts
-packages/gateway/src/routes/provider-routes.ts
+packages/gateway/src/routes/infrastructure/node-routes.ts
+packages/gateway/src/routes/providers/provider-routes.ts
 packages/gateway/src/server.ts
 packages/infra/src/config.ts
 packages/memory/src/core/compaction.ts
