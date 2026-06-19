@@ -10,6 +10,7 @@ import type { FileSyncStore } from './store.js';
 const log = getLogger('file-sync-scanner');
 
 export interface ScanResult {
+  folderId: string;
   folder: string;
   localPath: string;
   totalFiles: number;
@@ -82,6 +83,7 @@ export function createScanner(store: FileSyncStore, nodeId: string) {
 
     const durationMs = Date.now() - start;
     const result: ScanResult = {
+      folderId: entry.folderId,
       folder: folderName,
       localPath: resolvedRoot,
       totalFiles: entries.length,
@@ -114,7 +116,7 @@ export function createScanner(store: FileSyncStore, nodeId: string) {
 
     const resolvedRoot = resolve(localPath);
     let hashed = 0;
-    for (const entry of await store.listChangedFiles(result.folder, result.scanId)) {
+    for (const entry of await store.listChangedFiles(result.folderId, result.scanId)) {
       try {
         const sha256 = await computeFileSha256(resolve(resolvedRoot, entry.filePath));
         await store.updateFileSha256(entry.entryId, sha256);

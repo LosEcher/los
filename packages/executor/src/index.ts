@@ -18,6 +18,7 @@ import {
   type SessionEventRecord,
   type ToolCallStateTransition,
 } from '@los/agent';
+import { startPeriodicSync } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { collectResourceMetrics, resolveResourceCapabilities } from './resource-metrics.js';
@@ -145,8 +146,15 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   });
 
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
-  server.on('close', () => clearInterval(nodeHeartbeat));
+  server.on('close', () => {
+    clearInterval(nodeHeartbeat);
+    stopPeriodicSync();
+  });
   log.info(`Executor node ${nodeId} listening on ${publicUrl}`);
+
+  // Start periodic file-sync scanning for folders registered on this node
+  const stopPeriodicSync = startPeriodicSync(nodeId);
+
   return server;
 }
 

@@ -13,6 +13,7 @@ export function registerServerMaintenance(
   app: FastifyInstance,
   service: { serviceId: string },
   _config: unknown,
+  opts?: { executorAgentKey?: string },
 ): void {
   // ── Orphan reaper (30s) ──────────────────────────────────────
   const ORPHAN_REAPER_MS = 30_000;
@@ -116,4 +117,45 @@ export function registerServerMaintenance(
     clearTimeout(governanceTimeout);
     clearInterval(governanceTimer);
   });
+
+  // ── File-sync orchestration trigger (every 5 minutes) ─────────
+  const agentKey = opts?.executorAgentKey;
+  if (agentKey) {
+    const FILE_SYNC_TRIGGER_MS = 5 * 60 * 1000;
+    const triggerFileSyncScans = async () => {
+      try {
+        const { listExecutorNodes } = await import('@los/agent/executor-nodes');
+        const nodes = await listExecutorNodes();
+        for (const node of nodes) {
+          const caps = (node.capabilities ?? {}) as Record<string, unknown>;
+          if (!caps.file_sync_scan) continue;
+          const cfg = (node.connectConfig ?? {}) as Record<string, unknown>;
+          const httpCfg = (cfg.agent_http ?? {}) as Record<string, unknown>;
+          const healthUrl = String(httpCfg.healthUrl ?? '').replace(/\/+$/, '');
+          if (!healthUrl) continue;
+          try {
+            await fetch(`${healthUrl.replace('/health', '')}/v1/file-sync/scan`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${agentKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ mode: 'incremental' }),
+              signal: AbortSignal.timeout(300_000),
+            });
+          } catch {
+            // node unreachable, skip
+          }
+        }
+      } catch (err) {
+        // gateway may not have executor-nodes loaded yet
+      }
+    };
+    const fileSyncTimeout = setTimeout(triggerFileSyncScans, 30_000);
+    const fileSyncTimer = setInterval(triggerFileSyncScans, FILE_SYNC_TRIGGER_MS);
+    app.addHook('onClose', async () => {
+      clearTimeout(fileSyncTimeout);
+      clearInterval(fileSyncTimer);
+    });
+  }
 }

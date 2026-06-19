@@ -330,7 +330,7 @@ export async function startServer(port?: number, host?: string) {
   app.addHook('onClose', async () => clearInterval(heartbeat));
 
   // Register maintenance timers: orphan reaper, memory retention/integrity/auto-compact, governance sweep
-  registerServerMaintenance(app, service, config);
+  registerServerMaintenance(app, service, config, { executorAgentKey: config.executor.agentKey });
 
   await app.listen({ port: p, host: h });
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);
