@@ -1,0 +1,124 @@
+/**
+ * OpenAI-compatible /v1/chat/completions endpoint.
+ *
+ * Translates OpenAI chat completions format into los chat format,
+ * calls the los agent loop, and returns a plain JSON response
+ * (no SSE streaming needed for WeClaw HTTP agent integration).
+ *
+ * This enables WeClaw to use los as an HTTP agent:
+ *   WeChat → WeClaw → HTTP POST /v1/chat/completions → los agent loop → Tool Gate + OTel
+ */
+
+import type { FastifyInstance } from 'fastify';
+import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
+import { getRequestContext } from './request-context.js';
+
+interface OpenAIChatRequest {
+  model?: string;
+  messages: Array<{ role: string; content: string }>;
+  stream?: boolean;
+  max_tokens?: number;
+  temperature?: number;
+}
+
+export function registerOpenAICompatibleRoute(
+  app: FastifyInstance,
+  config: ReturnType<typeof import('@los/infra/config').getConfig>,
+  defaultWorkspaceRoot: string,
+  gatewayServiceId?: string,
+): void {
+  app.post('/v1/chat/completions', async (req: any, reply: any) => {
+    console.log(`[/v1/chat] incoming req.url=${req.url} headers=${JSON.stringify(req.headers)}`);
+    const body = req.body as OpenAIChatRequest;
+    const context = getRequestContext(req);
+    const sid = `chat-${body.model ?? 'openai'}-${Date.now()}`;
+    const traceId = `trace-${context.requestId}`;
+
+    // Convert OpenAI messages into los prompt
+    let systemPrompt = '';
+    let userPrompt = '';
+    for (const msg of body.messages) {
+      if (msg.role === 'system') systemPrompt += msg.content + '\n';
+      else if (msg.role === 'user') userPrompt += msg.content + '\n';
+    }
+    const prompt = userPrompt.trim() || 'Hello';
+
+    const ctx: ChatRunContext = { activeTaskRunId: undefined, activeRunSpecId: undefined, lastCheckpoint: null };
+    let resultText = '';
+    let finalStatus = 'failed';
+
+    // Minimal send function — captures text only (no SSE to WeClaw)
+    const send: SendEvent = (event, data) => {
+      if (event === 'done' && typeof data === 'object' && data !== null) {
+        const d = data as Record<string, unknown>;
+        if (typeof d.text === 'string') resultText = d.text;
+        finalStatus = 'completed';
+      }
+      if (event === 'cancelled' || event === 'blocked' || event === 'error') {
+        finalStatus = event;
+      }
+    };
+
+    try {
+      await (runChat as any)({
+        prompt,
+        sessionId: sid,
+        systemPrompt: systemPrompt || undefined,
+        provider: body.model ?? config.agent.defaultProvider,
+        model: body.model ? undefined : config.agent.defaultModel,
+        modelSettings: undefined,
+        workspaceRoot: defaultWorkspaceRoot,
+        toolMode: 'project-write',
+        allowedTools: undefined,
+        maxLoops: body.max_tokens ? Math.min(body.max_tokens, config.agent.maxLoops) : undefined,
+        timeoutMs: undefined,
+        toolRetry: undefined,
+        mcpServers: undefined,
+        persistMemory: false,
+        boundTodoId: undefined,
+        branchFrom: undefined,
+        branchAtTurn: undefined,
+        traceId,
+        dedupeKey: undefined,
+        sid,
+        tenantId: context.tenantId,
+        projectId: context.projectId,
+        userId: context.userId,
+        requestId: context.requestId,
+        runContract: undefined,
+        config,
+        gatewayServiceId,
+        log: context.log,
+        ctx,
+        send,
+      });
+
+      return reply.send({
+        id: `chatcmpl-${context.requestId}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: body.model ?? 'los',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: resultText || '(no response)',
+          },
+          finish_reason: finalStatus === 'completed' ? 'stop' : finalStatus,
+        }],
+        usage: {
+          prompt_tokens: prompt.length,
+          completion_tokens: resultText.length,
+          total_tokens: prompt.length + resultText.length,
+        },
+      });
+    } catch (err: any) {
+      return reply.status(500).send({
+        error: {
+          message: err?.message ?? 'Internal error',
+          type: 'internal_error',
+        },
+      });
+    }
+  });
+}

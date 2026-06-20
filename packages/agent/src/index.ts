@@ -71,6 +71,12 @@ export { runPostExecutionSelfCheck, shouldRunSelfCheck, buildSelfCheckPrompt, pa
 export { reflectOnFailure, formatReflectionSummary, type ReflectionResult } from './reflection.js';
 export { scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFilePath, buildStaticAnalysisPayload, type StaticAnalysisEventPayload, type StaticAnalysisFinding, type StaticAnalysisRule, type StaticAnalysisScanOptions, type StaticAnalysisScanResult, type StaticAnalysisConstraint, type StaticAnalysisRange, type StaticAnalysisPosition } from './static-analysis/index.js';
 
+// ── Runtime adapter — external agent CLI integration ──────
+export { startOtelBridge, isOtelBridgeRunning, spawnClaudeCode, runClaudeCodeWithBridge, claudeCodeSupportsOtel, claudeSpanToEventType, CLAUDE_CODE_SPAN_NAMES, spawnCodex, codexSupportsOtel, type OtelBridgeConfig, type ClaudeCodeSpawnInput, type CodexSpawnInput, type RuntimeKind, type RuntimeAdapterConfig, type RuntimeHandle } from './runtime-adapter/index.js';
+
+// ── Pre-action gate — reusable by tool gate routes ─────
+export { preActionGate, failureFingerprintFromError, extractFragilitySignal, type PreActionCheck, type PreActionGateConfig } from './pre-action-gate.js';
+
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';
 

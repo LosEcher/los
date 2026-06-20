@@ -39,7 +39,9 @@
     "./providers/telemetry": "./src/providers/telemetry.ts",
     "./providers/repair-telemetry": "./src/providers/repair-telemetry.ts",
     "./dead-letter": "./src/dead-letter.ts",
-    "./event-bus": "./src/event-bus.ts"
+    "./event-bus": "./src/event-bus.ts",
+    "./runtime-adapter": "./src/runtime-adapter/index.ts",
+    "./pre-action-gate": "./src/pre-action-gate.ts"
   },
   "scripts": {
     "build": "tsc",
