@@ -50,3 +50,97 @@ sourceOfTruth:
 verification:
   - pnpm check
   - ./tools/check-contracts.sh
+
+  # ── SaaS bridge (tenant/project-scoped) ──
+
+  - method: POST
+    path: /tenants/{tenantId}/projects/{projectId}/todos/dispatch
+    description: Dispatch los planning seeds into a tenant/project scope.
+    request:
+      type: object
+      properties:
+        source:
+          type: string
+          description: Filter seeds by source prefix.
+        dryRun:
+          type: boolean
+          description: Preview without writing.
+    response:
+      type: object
+      properties:
+        dispatched:
+          type: number
+        skipped:
+          type: number
+        todoIds:
+          type: array
+        jobId:
+          type: string
+        dryRun:
+          type: boolean
+        scope:
+          type: object
+
+  - method: GET
+    path: /tenants/{tenantId}/projects/{projectId}/todos/reconcile
+    description: Dry-run reconciliation report — compare seeds vs DB.
+    response:
+      type: object
+      properties:
+        scope:
+          type: object
+        seedCount:
+          type: number
+        dbCount:
+          type: number
+        hasDrift:
+          type: boolean
+        hasOrphans:
+          type: boolean
+        seedOnly:
+          type: array
+        dbOnly:
+          type: array
+        statusDrift:
+          type: array
+
+  - method: POST
+    path: /tenants/{tenantId}/projects/{projectId}/todos/reconcile
+    description: Execute reconciliation with auto-fix (seed dispatching, status correction, orphan archival).
+    request:
+      type: object
+      properties:
+        fixMode:
+          type: string
+          enum: [seed_only, db_only, status_drift, all]
+          default: all
+        dryRun:
+          type: boolean
+    response:
+      type: object
+      properties:
+        seedOnlyFixed:
+          type: number
+        dbOnlyFixed:
+          type: number
+        statusDriftFixed:
+          type: number
+        errors:
+          type: array
+
+  - method: GET
+    path: /tenants/{tenantId}/projects/{projectId}/todos
+    description: List todos scoped to a tenant/project.
+    query:
+      status:
+        type: string
+        description: Filter by status (backlog|ready|in_progress|blocked|done|cancelled).
+      limit:
+        type: number
+      includeArchived:
+        type: boolean
+    response:
+      type: object
+      properties:
+        todos:
+          type: array
