@@ -8,7 +8,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,6 +53,8 @@ import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
 import { ensureRunSpecStore } from '@los/agent/run-specs';
 import { ensureServiceInstanceStore, loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
 import { ensureTodoStore, seedLosPlanningTodos } from '@los/agent/todos';
+import { ensureSkillStore, upsertSkill, loadSkillsFromDir } from '@los/agent/skills';
+import { ensureRuleStore, upsertRule, loadRulesFromDir } from '@los/agent/rules';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
@@ -322,6 +324,8 @@ export async function startServer(port?: number, host?: string) {
     log.info(`Gateway startup recovered ${agentTaskRecovery.recovered.length} expired agent task(s)`);
   }
   await seedLosPlanningTodos();
+  await seedSkills(DEFAULT_WORKSPACE_ROOT);
+  await seedRules(DEFAULT_WORKSPACE_ROOT);
   console.log(await printOnboardingReport());
   console.log(printConfigDiagnostics(config));
 
@@ -363,6 +367,101 @@ if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.
     process.exitCode = 1;
   });
 }
+
+// ── Skills/Rules seed ───────────────────────────────────
+
+async function seedSkills(workspaceRoot: string) {
+  try {
+    await ensureSkillStore();
+    const projectSkills = loadSkillsFromDir('project', workspaceRoot);
+    const globalSkills = loadSkillsFromDir('global');
+    // Also scan Claude Code's directory (cross-tool compatibility)
+    const ccGlobalSkills = loadClaudeSkills(join(home(), '.claude', 'skills'), 'global');
+    const ccProjSkills = loadClaudeSkills(join(workspaceRoot, '.claude', 'skills'), 'project');
+    const all = [...projectSkills, ...globalSkills, ...ccGlobalSkills, ...ccProjSkills];
+    for (const s of all) {
+      await upsertSkill(s).catch(err => log.warn(`skill upsert failed for '${s.name}': ${(err as Error).message}`));
+    }
+    if (all.length > 0) {
+      log.info(`Seeded ${all.length} skills (${projectSkills.length} project, ${globalSkills.length} global, ${ccGlobalSkills.length} cc-global, ${ccProjSkills.length} cc-project)`);
+    }
+  } catch (err) {
+    log.warn(`Skills seed failed: ${(err as Error).message}`);
+  }
+}
+
+async function seedRules(workspaceRoot: string) {
+  try {
+    await ensureRuleStore();
+    const projectRules = loadRulesFromDir('project', workspaceRoot);
+    const globalRules = loadRulesFromDir('global');
+    // Also scan Claude Code's directory (cross-tool compatibility)
+    const ccGlobalRules = loadClaudeRules(join(home(), '.claude', 'rules'), 'global');
+    const ccProjRules = loadClaudeRules(join(workspaceRoot, '.claude', 'rules'), 'project');
+    const all = [...projectRules, ...globalRules, ...ccGlobalRules, ...ccProjRules];
+    for (const r of all) {
+      await upsertRule(r).catch(err => log.warn(`rule upsert failed for '${r.name}': ${(err as Error).message}`));
+    }
+    if (all.length > 0) {
+      log.info(`Seeded ${all.length} rules (${projectRules.length} project, ${globalRules.length} global, ${ccGlobalRules.length} cc-global, ${ccProjRules.length} cc-project)`);
+    }
+  } catch (err) {
+    log.warn(`Rules seed failed: ${(err as Error).message}`);
+  }
+}
+
+function home(): string {
+  return process.env.HOME ?? process.env.USERPROFILE ?? '/tmp';
+}
+
+function loadClaudeSkills(dir: string, scope: 'global' | 'project'): Array<{ name: string; content: string; metadata: Record<string, unknown>; enabled: boolean }> {
+  if (!existsSync(dir)) return [];
+  const results: Array<{ name: string; content: string; metadata: Record<string, unknown>; enabled: boolean }> = [];
+  for (const entry of readdirSync(dir)) {
+    // Claude Code skills are directories with SKILL.md, or single .md files
+    const entryPath = join(dir, entry);
+    let mdPath: string;
+    if (statSync(entryPath).isDirectory()) {
+      const skillMd = join(entryPath, 'SKILL.md');
+      if (existsSync(skillMd)) {
+        mdPath = skillMd;
+      } else {
+        continue;
+      }
+    } else if (entry.endsWith('.md')) {
+      mdPath = entryPath;
+    } else {
+      continue;
+    }
+    try {
+      const raw = readFileSync(mdPath, 'utf-8');
+      const name = entry.replace(/\.md$/i, '');
+      results.push({ name, content: raw, metadata: { scope, skillLayer: scope === 'global' ? 'user' : 'project' }, enabled: true });
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return results;
+}
+
+function loadClaudeRules(dir: string, scope: 'global' | 'project'): Array<{ name: string; content: string; severity: 'warn'; enforcementMode: 'advisory'; status: 'active'; metadata: Record<string, unknown> }> {
+  if (!existsSync(dir)) return [];
+  const results: Array<{ name: string; content: string; severity: 'warn'; enforcementMode: 'advisory'; status: 'active'; metadata: Record<string, unknown> }> = [];
+  for (const entry of readdirSync(dir)) {
+    if (!entry.endsWith('.md')) continue;
+    const mdPath = join(dir, entry);
+    try {
+      const raw = readFileSync(mdPath, 'utf-8');
+      const name = entry.replace(/\.md$/i, '');
+      results.push({ name, content: raw, severity: 'warn', enforcementMode: 'advisory', status: 'active', metadata: { scope, ruleLayer: scope === 'global' ? 'user' : 'project' } });
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return results;
+}
+
+// ── Service identity ───────────────────────────────────
 
 export function resolveGatewayServiceIdentity(
   config: ReturnType<typeof getConfig>,

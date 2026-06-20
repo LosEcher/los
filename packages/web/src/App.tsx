@@ -22,7 +22,7 @@ import {
   TerminalSquare,
   Zap,
 } from 'lucide-react';
-import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type SessionSummary, type TodoItem } from './api';
+import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type SessionSummary, type TodoItem, type MemoryStats } from './api';
 import {
   DeadLetterPage,
   DiagnosticsPage,
@@ -147,8 +147,35 @@ export function App() {
     queryKey: ['sessions'],
     queryFn: () => getJson<SessionSummary[]>('/sessions'),
     refetchInterval: 30_000,
-    select: (data) => data.length,
+    select: (data) => data.filter(s => !s.id.startsWith('session-trace-')).length,
   });
+  const dataStats = useQuery({
+    queryKey: ['data-stats'],
+    queryFn: async () => {
+      const [skills, rules, memStats] = await Promise.all([
+        getJson<{ id: string }[]>('/skills?limit=1'),
+        getJson<{ id: string }[]>('/rules?limit=1'),
+        getJson<MemoryStats>('/memory/stats'),
+      ]);
+      return {
+        skillsCount: Array.isArray(skills) ? skills.length : 0,
+        rulesCount: Array.isArray(rules) ? rules.length : 0,
+        memoryCount: memStats?.totalObservations ?? 0,
+      };
+    },
+    refetchInterval: 30_000,
+  });
+
+  function itemStatus(itemId: string, hardStatus: StatusState): StatusState {
+    const s = dataStats.data;
+    switch (itemId) {
+      case 'skills': return (s?.skillsCount ?? 0) > 0 ? 'live' : 'partial';
+      case 'rules': return (s?.rulesCount ?? 0) > 0 ? 'live' : 'partial';
+      case 'memory': return (s?.memoryCount ?? 0) > 0 ? 'live' : 'partial';
+      case 'sessions': return (sessionCount.data ?? 0) > 0 ? 'live' : 'partial';
+      default: return hardStatus;
+    }
+  }
 
   const active = NAV.find(item => item.id === page) ?? NAV[0]!;
   const continueSession = (id: string) => {
@@ -220,7 +247,7 @@ export function App() {
                     {item.id === 'sessions' && sessionCount.data !== undefined ? (
                       <span className="nav-badge">{sessionCount.data}</span>
                     ) : null}
-                    <StatusPill status={item.status} />
+                    <StatusPill status={itemStatus(item.id, item.status)} />
                   </button>
                 )}
               </div>

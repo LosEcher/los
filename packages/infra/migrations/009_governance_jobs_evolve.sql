@@ -8,7 +8,17 @@
 ALTER TABLE governance_jobs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 
 -- Data migration: map enabled=false rows to status='paused'
-UPDATE governance_jobs SET status = 'paused' WHERE enabled = false AND status = 'active';
+-- (enabled column does not exist in fresh 007 schema; guarded via
+--  information_schema check to avoid migration noise on new installs)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'governance_jobs' AND column_name = 'enabled'
+  ) THEN
+    UPDATE governance_jobs SET status = 'paused' WHERE enabled = false AND status = 'active';
+  END IF;
+END $$;
 
 -- Add status check constraint
 DO $$

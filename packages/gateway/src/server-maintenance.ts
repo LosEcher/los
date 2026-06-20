@@ -6,6 +6,8 @@
 import type { FastifyInstance } from 'fastify';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
+import { ensureGovernanceJobStore, seedGovernanceJobs, runGovernanceSweep } from '@los/agent';
+import { listExecutorNodes } from '@los/agent/executor-nodes';
 
 const log = getLogger('gateway');
 
@@ -93,23 +95,28 @@ export function registerServerMaintenance(
   // ── Daily governance sweep ─────────────────────────────────────
   const GOVERNANCE_SWEEP_MS = 24 * 60 * 60 * 1000;
   const runGovernanceMaintenance = async () => {
-    import('@los/agent').then(async ({ ensureGovernanceJobStore, seedGovernanceJobs, runGovernanceSweep }) => {
-      try {
-        await ensureGovernanceJobStore();
-        await seedGovernanceJobs();
-        const result = await runGovernanceSweep({ dryRun: false });
-        if (result.jobsRun > 0) {
-          log.info(`Governance sweep: ${result.jobsRun} job(s) run, ${result.findingsCreated} finding(s)`);
-        }
-        if (result.errors.length > 0) {
-          log.warn(`Governance sweep errors: ${result.errors.join('; ')}`);
-        }
-      } catch (err) {
-        log.warn(`Governance sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.info('Governance sweep starting...');
+    try {
+      await ensureGovernanceJobStore();
+      await seedGovernanceJobs();
+      const result = await runGovernanceSweep({ dryRun: false });
+      if (result.jobsRun > 0) {
+        log.info(`Governance sweep: ${result.jobsRun} job(s) run, ${result.findingsCreated} finding(s), ${result.errors.length} error(s)`);
       }
-    }).catch((err) => {
-      log.warn(`Governance sweep import failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
+      if (result.errors.length > 0) {
+        log.warn(`Governance sweep errors: ${result.errors.join('; ')}`);
+      }
+      // Emit a compact per-job line so the log itself is self-diagnostic
+      if (result.results.length > 0) {
+        const lines = result.results.map(r => {
+          const err = typeof r.summary?.error === 'string' ? ` ERR=${r.summary.error}` : '';
+          return `  ${r.jobType} (${r.durationMs}ms)${err}`;
+        });
+        log.info(`Governance sweep detail:\n${lines.join('\n')}`);
+      }
+    } catch (err) {
+      log.warn(`Governance sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
   const governanceTimeout = setTimeout(runGovernanceMaintenance, 30_000);
   const governanceTimer = setInterval(runGovernanceMaintenance, GOVERNANCE_SWEEP_MS);
@@ -124,7 +131,6 @@ export function registerServerMaintenance(
     const FILE_SYNC_TRIGGER_MS = 5 * 60 * 1000;
     const triggerFileSyncScans = async () => {
       try {
-        const { listExecutorNodes } = await import('@los/agent/executor-nodes');
         const nodes = await listExecutorNodes();
         for (const node of nodes) {
           const caps = (node.capabilities ?? {}) as Record<string, unknown>;
