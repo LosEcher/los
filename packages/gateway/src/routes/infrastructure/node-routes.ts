@@ -13,6 +13,7 @@ import {
   type ExecutorNodeStatus,
 } from '@los/agent/executor-nodes';
 import { buildSshImportItems } from '../../ssh-config-import.js';
+import { runSshCommand } from '../../ssh-command-runner.js';
 import {
   errorMessage,
   normalizeConnectModes,
@@ -134,6 +135,26 @@ export function registerNodeRoutes(app: FastifyInstance): void {
       node: saved,
       probe: result,
     };
+  });
+
+  app.post('/nodes/:id/ssh-run', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const nodeId = normalizeOptionalString(id);
+    if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
+
+    const body = req.body as Record<string, unknown> | undefined;
+    const command = normalizeOptionalString(body?.command);
+    if (!command) return reply.status(422).send({ error: 'command is required' });
+
+    await ensureExecutorNodeStore();
+    const node = await loadExecutorNode(nodeId);
+    if (!node) return reply.status(404).send({ error: 'Not found' });
+
+    const timeoutMs = typeof body?.timeoutMs === 'number' && body.timeoutMs > 0
+      ? Math.min(body.timeoutMs, 120_000)
+      : 30_000;
+    const result = await runSshCommand(node, { command, timeoutMs });
+    return { ok: true, ...result };
   });
 
   app.post('/nodes/import-ssh-config', async (req, reply) => {

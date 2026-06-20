@@ -4,6 +4,7 @@ import type {
   ExecutorNodeRecord,
   ExecutorNodeStatus,
 } from '@los/agent/executor-nodes';
+import { runSshCommand } from '../ssh-command-runner.js';
 
 export const PROBE_TIMEOUT_MS = 3_000;
 
@@ -69,6 +70,29 @@ export async function probeMode(
     const socketEndpoint = parseSocketEndpoint(endpoint);
     if (!socketEndpoint) {
       return { ok: false, endpoint, kind: 'tcp', error: `invalid endpoint ${endpoint}` };
+    }
+    // For SSH modes, do a full SSH connection + echo test to verify
+    // the transport, user, and key work (not just TCP reachable).
+    if (mode === 'direct_ssh' || mode === 'tailscale_ssh' || mode === 'tailscale_native_ssh' || mode === 'cf_tunnel_ssh') {
+      try {
+        const result = await runSshCommand(node, {
+          command: 'echo los-probe-ok && hostname && uname -s',
+          timeoutMs: PROBE_TIMEOUT_MS + 2_000,
+        });
+        if (result.connected && result.exitCode === 0) {
+          return {
+            ok: true,
+            endpoint,
+            kind: 'ssh',
+          };
+        }
+        return {
+          ok: false, endpoint, kind: 'ssh',
+          error: result.error ?? `ssh exit ${result.exitCode}: ${result.stderr}`,
+        };
+      } catch (error) {
+        return { ok: false, endpoint, kind: 'ssh', error: errorMessage(error) };
+      }
     }
     try {
       await probeTcp(socketEndpoint.host, socketEndpoint.port);
