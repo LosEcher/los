@@ -28,6 +28,7 @@ import { registerMCPRoutes } from './routes/tools/mcp-routes.js';
 import { registerSkillRoutes } from './routes/tools/skill-routes.js';
 import { registerRuleRoutes } from './routes/tools/rule-routes.js';
 import { registerTodoRoutes } from './routes/data/todo-routes.js';
+import { registerSaaSTodoRoutes } from './routes/data/saas-todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/orchestration/agent-task-graph-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
@@ -223,6 +224,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerArtifactRoutes(app, { storageRoot: ARTIFACT_STORAGE_ROOT, executorAgentKey: config.executor.agentKey });
   registerNodeCommandRoutes(app, { executorAgentKey: config.executor.agentKey });
   registerTodoRoutes(app);
+  registerSaaSTodoRoutes(app);
   registerAgentTaskGraphRoutes(app);
   registerDiagnosticsRoutes(app);
   registerGovernanceRoutes(app);
