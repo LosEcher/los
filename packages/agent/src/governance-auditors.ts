@@ -137,7 +137,7 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'memory_retention': return runMemoryRetentionAudit();
     case 'reflection': return runReflectionAudit();
     case 'branch_cleanup': return runBranchCleanupAudit();
-    case 'file_size': return runFileSizeAudit();
+    case 'file_size': return runFileSizeAudit(job, dryRun);
     case 'related_project_scan': return runRelatedProjectScanAudit();
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
@@ -145,19 +145,26 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
 
 // ... (existing branch_cleanup auditor)
 
-async function runFileSizeAudit(): Promise<Record<string, unknown>> {
+async function runFileSizeAudit(job: GovernanceJob, dryRun: boolean): Promise<Record<string, unknown>> {
   try {
-    const { detectHotFiles } = await import('./ga-file-size-fix.js');
-    const hotFiles = detectHotFiles(process.cwd());
-    const newFiles = hotFiles.filter(f => f.isNew);
-    const blockFiles = hotFiles.filter(f => f.threshold === 'block');
+    const { scanFileHotspots } = await import('./hotspot-drift-detector.js');
+    const hotspotReport = await scanFileHotspots({ workspaceRoot: process.cwd() });
     return {
-      auditedAt: new Date().toISOString(),
-      hotFileCount: hotFiles.length,
-      blockFiles: blockFiles.length,
-      newOverThreshold: newFiles.length,
-      totalLinesInHotFiles: hotFiles.reduce((sum, f) => sum + f.lines, 0),
-      files: hotFiles.slice(0, 20).map(f => ({ path: f.path, lines: f.lines, threshold: f.threshold, isNew: f.isNew })),
+      auditedAt: hotspotReport.scannedAt,
+      totalFilesScanned: hotspotReport.totalFilesScanned,
+      filesOver600: hotspotReport.filesOver600.length,
+      filesOver400: hotspotReport.filesOver400.length,
+      newCrossers: hotspotReport.newCrossers.length,
+      new600Crossers: hotspotReport.new600Crossers.length,
+      shrank: hotspotReport.shrank.length,
+      worseningFiles: hotspotReport.trend.worseningFiles,
+      totalOver400Delta: hotspotReport.trend.totalOver400Delta,
+      totalOver600Delta: hotspotReport.trend.totalOver600Delta,
+      avgDelta: hotspotReport.trend.avgDelta,
+      topFiles: hotspotReport.filesOver600.slice(0, 10).map(f => ({
+        file: f.file, lines: f.lines, package: f.package, delta: f.delta,
+      })),
+      topWorsening: hotspotReport.trend.worseningFiles.slice(0, 10),
     };
   } catch (err) {
     return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
