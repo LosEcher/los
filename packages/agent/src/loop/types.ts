@@ -52,6 +52,23 @@ export interface AgentConfig {
   onToolCall?: (callId: string, tool: string, args: Record<string, unknown>, turn: number) => void | Promise<void>;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
   onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
+  /** Context fill monitoring configuration. When set, enables 3-tier fill tracking. */
+  contextMonitor?: {
+    /** Model's advertised context window size. Default: 200_000 */
+    contextWindowTokens?: number;
+    /** Warn threshold (0-1). Default: 0.60 */
+    warnThreshold?: number;
+    /** Checkpoint threshold (0-1). Default: 0.75 */
+    checkpointThreshold?: number;
+    /** Critical / compact threshold (0-1). Default: 0.85 */
+    criticalThreshold?: number;
+    /** Callback on WARN level crossing */
+    onWarn?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
+    /** Callback on CHECKPOINT level crossing */
+    onCheckpoint?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
+    /** Callback on CRITICAL level crossing */
+    onCritical?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
+  };
 }
 
 export interface AgentModelDelta extends ProviderDelta {
