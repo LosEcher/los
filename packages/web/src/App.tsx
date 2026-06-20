@@ -85,13 +85,13 @@ const NAV: NavItem[] = [
   { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live', audience: 'workspace' },
   { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
   { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live', audience: 'workspace' },
-  { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'partial', audience: 'workspace' },
+  { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live', audience: 'workspace' },
 
   // ── Configure (setup, rarely changed) ────────────────────
   { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure', section: 'Configure' },
   { id: 'skills', label: 'Skills', icon: Zap, status: 'live', audience: 'configure' },
   { id: 'rules', label: 'Rules', icon: Shield, status: 'live', audience: 'configure' },
-  { id: 'mcp', label: 'MCP', icon: Server, status: 'partial', audience: 'configure' },
+  { id: 'mcp', label: 'MCP', icon: Server, status: 'live', audience: 'configure' },
   { id: 'settings', label: 'Settings', icon: Settings, status: 'live', audience: 'configure' },
 
   // ── Operations (debug / incident investigation) ──────────
