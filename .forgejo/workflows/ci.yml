@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: los
+          POSTGRES_PASSWORD: los
+          POSTGRES_DB: los_test
+          POSTGRES_HOST_AUTH_METHOD: md5
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 30s
+
+    env:
+      DATABASE_URL: postgres://los:los@postgres:5432/los_test
+      TEST_DATABASE_URL: postgres://los:los@postgres:5432/los_test
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git init .
+          git remote add origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "$FORGEJO_SHA"
+          git checkout --detach FETCH_HEAD
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+
+      - name: Prepare pnpm
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.0.0 --activate
+          pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Gate
+        run: pnpm run gate

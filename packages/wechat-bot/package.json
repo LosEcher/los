@@ -1,0 +1,22 @@
+{
+  "name": "@los/wechat-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "los WeChat bot — WxPusher push notification + interactive command callback for agent handoff",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@los/infra": "workspace:*",
+    "@los/media": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

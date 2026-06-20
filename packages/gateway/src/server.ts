@@ -34,6 +34,7 @@ import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-r
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { registerChatRoute } from './chat-route.js';
+import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
 import authMiddleware from './auth-middleware.js';
 import { registerSecurityHeaders } from './security-headers.js';
@@ -44,12 +45,16 @@ import { registerMemoryRoutes } from './routes/data/memory-routes.js';
 import { registerSessionRoutes } from './routes/data/session-routes.js';
 import { registerTraceRoutes } from './routes/data/trace-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/streaming/sse-routes.js';
+import { registerOperatorEvents } from './routes/streaming/operator-events-sse.js';
 import { registerWsRoutes } from './routes/streaming/ws-routes.js';
 import { registerTaskRoutes } from './routes/orchestration/task-routes.js';
 import { registerRunRoutes } from './routes/orchestration/run-routes.js';
 import { registerProjectRoutes } from './routes/infrastructure/project-routes.js';
 import { registerFileSyncRoutes } from './routes/infrastructure/file-sync-routes.js';
 import { registerIntegrationRoutes } from './routes/data/integration-routes.js';
+import { registerCommunicationRoutes } from './routes/data/communication-routes.js';
+import { registerRuntimeAdapterRoutes } from './routes/orchestration/runtime-adapter-routes.js';
+import { registerToolGateRoutes } from './routes/orchestration/tool-gate-routes.js';
 import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { ensureAgentTaskGraphStore, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
@@ -61,6 +66,7 @@ import { ensureRuleStore, upsertRule, loadRulesFromDir } from '@los/agent/rules'
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
+import { startOtelBridge } from '@los/agent/runtime-adapter';
 
 const log = getLogger('gateway');
 const VERSION = '0.1.0';
@@ -234,6 +240,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);
   registerRuleRoutes(app, DEFAULT_WORKSPACE_ROOT);
   registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId, chatLimiter.hook);
+  registerOpenAICompatibleRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId);
 
   // ── Feature routes ─────────────────────────────────
   registerMemoryRoutes(app);
@@ -244,8 +251,12 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerTaskRoutes(app);
   registerRunRoutes(app);
   registerIntegrationRoutes(app, config, DEFAULT_WORKSPACE_ROOT);
+  registerCommunicationRoutes(app);
+  registerRuntimeAdapterRoutes(app);
+  registerToolGateRoutes(app);
   setupLiveEventPush(app);
   registerLiveEventRoutes(app);
+  registerOperatorEvents(app);
 
   // ── SPA fallback ─────────────────────────────────────
   app.setNotFoundHandler((req, reply) => {
@@ -332,6 +343,16 @@ export async function startServer(port?: number, host?: string) {
   await seedLosPlanningTodos();
   await seedSkills(DEFAULT_WORKSPACE_ROOT);
   await seedRules(DEFAULT_WORKSPACE_ROOT);
+
+  // ── Start OTel bridge for external agent telemetry ingestion ──
+  let otelBridgeStop: (() => Promise<void>) | null = null;
+  try {
+    const otelBridge = await startOtelBridge({ source: 'gateway' });
+    otelBridgeStop = otelBridge.stop;
+    log.info(`OTel bridge auto-started on port ${otelBridge.port}`);
+  } catch (err) {
+    log.warn(`OTel bridge auto-start failed (non-fatal): ${(err as Error).message}`);
+  }
   console.log(await printOnboardingReport());
   console.log(printConfigDiagnostics(config));
 
@@ -356,7 +377,12 @@ export async function startServer(port?: number, host?: string) {
   const heartbeat = setInterval(() => {
     heartbeatGatewayService(service).catch((err) => log.warn(`service heartbeat failed: ${err.message ?? String(err)}`));
   }, SERVICE_HEARTBEAT_MS);
-  app.addHook('onClose', async () => clearInterval(heartbeat));
+  app.addHook('onClose', async () => {
+    clearInterval(heartbeat);
+    if (otelBridgeStop) {
+      await otelBridgeStop().catch((err) => log.warn(`OTel bridge stop failed: ${(err as Error).message}`));
+    }
+  });
 
   // Register maintenance timers: orphan reaper, memory retention/integrity/auto-compact, governance sweep
   registerServerMaintenance(app, service, config, { executorAgentKey: config.executor.agentKey });

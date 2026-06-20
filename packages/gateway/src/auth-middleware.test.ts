@@ -51,6 +51,47 @@ test('auth middleware requires the configured token outside public paths', async
   }
 });
 
+test('auth middleware protects settings mutation and operator runtime control paths', async () => {
+  const app = Fastify({ logger: false });
+  await authMiddleware(app, { config: configForAuth(true) });
+  app.get('/settings', async () => ({ ok: true }));
+  app.patch('/settings', async () => ({ ok: true }));
+  app.post('/operator/tool-gate', async () => ({ ok: true }));
+  app.get('/operator/events/live', async () => ({ ok: true }));
+  app.post('/runtimes/codex/run', async () => ({ ok: true }));
+  app.post('/v1/chat/completions', async () => ({ ok: true }));
+  app.post('/chat', async () => ({ ok: true }));
+  app.post('/sessions/session-a/operator-events', async () => ({ ok: true }));
+  app.get('/sessions/session-a/events/live', async () => ({ ok: true }));
+
+  try {
+    const publicSettings = await app.inject({ method: 'GET', url: '/settings?tab=auth' });
+    assert.equal(publicSettings.statusCode, 200);
+
+    for (const request of [
+      { method: 'PATCH', url: '/settings' },
+      { method: 'POST', url: '/operator/tool-gate' },
+      { method: 'GET', url: '/operator/events/live' },
+      { method: 'POST', url: '/runtimes/codex/run' },
+      { method: 'POST', url: '/v1/chat/completions' },
+      { method: 'POST', url: '/chat' },
+      { method: 'POST', url: '/sessions/session-a/operator-events' },
+      { method: 'GET', url: '/sessions/session-a/events/live' },
+    ] as const) {
+      const missing = await app.inject(request);
+      assert.equal(missing.statusCode, 401, `${request.method} ${request.url} should require auth`);
+
+      const valid = await app.inject({
+        ...request,
+        headers: { 'x-los-auth-token': 'test-token' },
+      });
+      assert.equal(valid.statusCode, 200, `${request.method} ${request.url} should accept auth`);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
 test('security headers do not emit CSP unless explicitly configured', async () => {
   const app = Fastify({ logger: false });
   registerSecurityHeaders(app);
