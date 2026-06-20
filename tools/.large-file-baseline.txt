@@ -33,3 +33,5 @@ packages/web/src/pages/sessions-page.tsx
 packages/gateway/src/server.ts
 packages/agent/src/ga-loop-runner.ts
 packages/agent/src/ga-related-project-scanner.ts
+packages/wechat-bot/src/index.ts
+packages/media/src/media-runtime.ts

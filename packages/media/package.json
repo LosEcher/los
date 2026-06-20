@@ -1,0 +1,27 @@
+{
+  "name": "@los/media",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Media generation and delivery — TTS, image, video, ASR providers for communication channels",
+  "exports": {
+    ".": "./src/index.ts",
+    "./provider-catalog": "./src/provider-catalog.ts",
+    "./media-runtime": "./src/media-runtime.ts",
+    "./media-actions": "./src/media-actions.ts",
+    "./media-delivery": "./src/media-delivery.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@los/infra": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}
