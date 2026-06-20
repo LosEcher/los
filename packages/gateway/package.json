@@ -16,14 +16,17 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@los/infra": "workspace:*",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/static": "^8.0.0",
+    "@fastify/websocket": "^11.2.0",
     "@los/agent": "workspace:*",
+    "@los/infra": "workspace:*",
     "@los/memory": "workspace:*",
     "fastify": "^5.0.0",
-    "@fastify/cors": "^10.0.0",
-    "@fastify/static": "^8.0.0"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"
   }
