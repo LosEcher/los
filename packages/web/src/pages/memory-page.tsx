@@ -284,7 +284,16 @@ export function MemoryPage() {
               </div>
             </button>
           ))}
-          {!memory.isLoading && (memory.data?.results ?? []).length === 0 ? <EmptyText text="No memory records match the filters." /> : null}
+          {!memory.isLoading && (memory.data?.results ?? []).length === 0 ? (
+            stats.data?.totalObservations === 0 ? (
+              <div className="empty-text">
+                <p>No observations yet.</p>
+                <p className="muted-copy">Memory observations are created automatically when a chat session completes. Start a conversation in Chat to create your first memory records.</p>
+              </div>
+            ) : (
+              <EmptyText text="No memory records match the filters." />
+            )
+          ) : null}
         </div>
       </div>
       <aside className="panel inspector">

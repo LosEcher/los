@@ -13,6 +13,7 @@
 import { getLogger } from '@los/infra/logger';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
+import { execSync } from 'node:child_process';
 
 const log = getLogger('ga-file-size');
 
@@ -58,7 +59,6 @@ export function detectHotFiles(root: string): HotFile[] {
   }
 
   const hotFiles: HotFile[] = [];
-  const { execSync } = require('node:child_process');
 
   // Use find + wc to scan all TypeScript files
   try {

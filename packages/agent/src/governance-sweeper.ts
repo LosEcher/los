@@ -336,6 +336,13 @@ export async function runGovernanceSweep(opts?: {
         durationMs: Date.now() - started,
       });
 
+      // Detect internal audit errors (caught by the auditor itself, not thrown)
+      if (!dryRun && summary && typeof summary.error === 'string') {
+        const msg = `${job.jobType} (${job.id}): ${summary.error}`;
+        errors.push(msg);
+        log.warn(`Sweep job internal error: ${msg}`);
+      }
+
       if (!dryRun) {
         await updateGovernanceJob(job.id, {
           lastRunAt: new Date().toISOString(),
