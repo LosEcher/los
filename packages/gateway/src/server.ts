@@ -7,6 +7,7 @@
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -27,6 +28,7 @@ import { registerMCPRoutes } from './routes/tools/mcp-routes.js';
 import { registerSkillRoutes } from './routes/tools/skill-routes.js';
 import { registerRuleRoutes } from './routes/tools/rule-routes.js';
 import { registerTodoRoutes } from './routes/data/todo-routes.js';
+import { registerSaaSTodoRoutes } from './routes/data/saas-todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/orchestration/agent-task-graph-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
@@ -42,6 +44,7 @@ import { registerMemoryRoutes } from './routes/data/memory-routes.js';
 import { registerSessionRoutes } from './routes/data/session-routes.js';
 import { registerTraceRoutes } from './routes/data/trace-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/streaming/sse-routes.js';
+import { registerWsRoutes } from './routes/streaming/ws-routes.js';
 import { registerTaskRoutes } from './routes/orchestration/task-routes.js';
 import { registerRunRoutes } from './routes/orchestration/run-routes.js';
 import { registerProjectRoutes } from './routes/infrastructure/project-routes.js';
@@ -86,6 +89,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   });
 
   await app.register(cors, { origin: config.server.corsOrigin });
+  await app.register(fastifyWebsocket);
   registerRequestContext(app, config);
   await authMiddleware(app, { config });
   registerSecurityHeaders(app, { hsts: false });
@@ -220,6 +224,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerArtifactRoutes(app, { storageRoot: ARTIFACT_STORAGE_ROOT, executorAgentKey: config.executor.agentKey });
   registerNodeCommandRoutes(app, { executorAgentKey: config.executor.agentKey });
   registerTodoRoutes(app);
+  registerSaaSTodoRoutes(app);
   registerAgentTaskGraphRoutes(app);
   registerDiagnosticsRoutes(app);
   registerGovernanceRoutes(app);
@@ -234,7 +239,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerMemoryRoutes(app);
   registerSessionRoutes(app);
   registerTraceRoutes(app);
-  registerSseRoutes(app);
+  registerSseRoutes(app, service.serviceId);
+  registerWsRoutes(app, service.serviceId);
   registerTaskRoutes(app);
   registerRunRoutes(app);
   registerIntegrationRoutes(app, config, DEFAULT_WORKSPACE_ROOT);

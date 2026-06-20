@@ -23,6 +23,11 @@ import {
 import { runToolCalls } from './loop/tool-runner.js';
 import { withAbort } from './loop/utils.js';
 import { setupAgentRun, completeAgentSetup } from './loop/setup.js';
+import {
+  createContextMonitor,
+  type ContextFillState,
+  formatContextFill,
+} from './context-monitor.js';
 import type {
   AgentConfig,
   AgentModelDelta,
@@ -89,6 +94,49 @@ export async function runAgent(
   );
   if (phaseResult) return phaseResult;
 
+  // ── Context fill monitoring ──
+  const ctxMon = config.contextMonitor
+    ? createContextMonitor({
+        contextWindowTokens: config.contextMonitor.contextWindowTokens ?? 200_000,
+        warnThreshold: config.contextMonitor.warnThreshold ?? 0.60,
+        checkpointThreshold: config.contextMonitor.checkpointThreshold ?? 0.75,
+        criticalThreshold: config.contextMonitor.criticalThreshold ?? 0.85,
+        onWarn: (s) => {
+          agentLog.warn(formatContextFill(s));
+          config.contextMonitor?.onWarn?.({
+            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
+          });
+          emitEvent({
+            type: 'context.fill.warn',
+            turn: s.turn,
+            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
+          });
+        },
+        onCheckpoint: (s) => {
+          agentLog.info(formatContextFill(s));
+          config.contextMonitor?.onCheckpoint?.({
+            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
+          });
+          emitEvent({
+            type: 'context.fill.checkpoint',
+            turn: s.turn,
+            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
+          });
+        },
+        onCritical: (s) => {
+          agentLog.warn(formatContextFill(s));
+          config.contextMonitor?.onCritical?.({
+            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
+          });
+          emitEvent({
+            type: 'context.fill.critical',
+            turn: s.turn,
+            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
+          });
+        },
+      })
+    : null;
+
   try {
     for (let i = 0; i < maxLoops; i++) {
     assertNotAborted(signal);
@@ -137,6 +185,13 @@ export async function runAgent(
     }, provider.profile);
     if (turnCost) totalCostUsd += turnCost.totalCostUsd;
 
+    // ── Context fill monitoring after each turn ──
+    let contextFill: { fillPercent: number; level: string; usedTokens: number } | undefined;
+    if (ctxMon) {
+      const fillState = ctxMon.update(res.usage, i + 1, messages.length);
+      contextFill = { fillPercent: fillState.fillPercent, level: fillState.level, usedTokens: fillState.usedTokens };
+    }
+
     await emitEvent({
       type: 'model.response',
       turn: i + 1,
@@ -155,6 +210,7 @@ export async function runAgent(
         toolCalls: summarizeToolCalls(res.toolCalls),
         cost: turnCost ?? undefined,
         transport: provider.profile.transportHints?.[0] ?? 'http-stream',
+        ...(contextFill ? { contextFill } : {}),
       },
     });
 

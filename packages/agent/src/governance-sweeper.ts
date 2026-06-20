@@ -359,5 +359,17 @@ export async function runGovernanceSweep(opts?: {
     }
   }
 
-  return { dryRun, jobsRun: results.length, jobsSkipped: dueJobs.length - results.length, findingsCreated, errors, results };
+  // ── Drift detection pass ──
+  let driftReport: Awaited<ReturnType<typeof import('./governance-drift-sweeper.js').sweepGovernanceDrift>> | null = null;
+  try {
+    const { sweepGovernanceDrift: runDrift } = await import('./governance-drift-sweeper.js');
+    driftReport = await runDrift({ dryRun, tenantId: opts?.tenantId, projectId: opts?.projectId });
+  } catch (err) {
+    log.warn(`Drift sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  return {
+    dryRun, jobsRun: results.length, jobsSkipped: dueJobs.length - results.length, findingsCreated, errors, results,
+    ...(driftReport ? { drift: driftReport } : {}),
+  };
 }
