@@ -9,3 +9,4 @@ export { DiagnosticsPage } from './diagnostics-page.js';
 export { FileSyncPage } from './file-sync-page.js';
 export { RunSpecsPage } from './run-specs-page.js';
 export { ReservedPage } from './reserved-page.js';
+export { CommunicationAccountsPage } from './communication-accounts-page.js';

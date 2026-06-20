@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type SessionSummary, type TodoItem, type MemoryStats } from './api';
 import {
+  CommunicationAccountsPage,
   DeadLetterPage,
   DiagnosticsPage,
   FileSyncPage,
@@ -65,6 +66,7 @@ type PageId =
   | 'diagnostics'
   | 'file-sync'
   | 'run-specs'
+  | 'communication-accounts'
   | 'settings';
 
 type NavAudience = 'workspace' | 'configure' | 'operations';
@@ -86,6 +88,9 @@ const NAV: NavItem[] = [
   { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
   { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live', audience: 'workspace' },
   { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live', audience: 'workspace' },
+
+  // ── Communication ─────────────────────────────────────
+  { id: 'communication-accounts', label: 'Communications', icon: MessageSquare, status: 'live', audience: 'workspace', section: 'Communication' },
 
   // ── Configure (setup, rarely changed) ────────────────────
   { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure', section: 'Configure' },
@@ -296,6 +301,7 @@ export function App() {
         {page === 'diagnostics' && <DiagnosticsPage />}
         {page === 'file-sync' && <FileSyncPage />}
         {page === 'run-specs' && <RunSpecsPage />}
+        {page === 'communication-accounts' && <CommunicationAccountsPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
       </main>
