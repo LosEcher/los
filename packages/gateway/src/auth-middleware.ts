@@ -3,10 +3,6 @@ import type { Config } from '@los/infra/config';
 
 /**
  * Paths that never require auth.
- *
- * EXACT_PUBLIC_PATHS — only the exact URL matches (prevents '/' from
- * matching everything via startsWith).
- * PREFIX_PUBLIC_PATHS — any URL starting with this prefix is public.
  */
 const EXACT_PUBLIC_PATHS = ['/', '/favicon.ico'];
 const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/nodes/heartbeat'];
@@ -43,9 +39,9 @@ export default async function authMiddleware(
 function isPublicPath(url: string | undefined, method: string): boolean {
   if (!url) return false;
   if (EXACT_PUBLIC_PATHS.includes(url)) return true;
-  if (PREFIX_PUBLIC_PATHS.some(p => url.startsWith(p))) return true;
-  if (url.startsWith('/assets/')) return true;
-  const methods = METHOD_PUBLIC_PATHS[url];
+  const path = url.split('?')[0] || url;
+  const methods = METHOD_PUBLIC_PATHS[path];
   if (methods && methods.has(method)) return true;
+  if (PREFIX_PUBLIC_PATHS.some(p => path.startsWith(p))) return true;
   return false;
 }

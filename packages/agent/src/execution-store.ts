@@ -217,7 +217,7 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
 }
 
 async function notifySessionEvent(sessionId: string, eventId: number, type: string): Promise<void> {
-  await getDb().notify('session_events', JSON.stringify({ sessionId, eventId, type })).catch(() => undefined);
+  await getDb().notify('session_events', JSON.stringify({ session_id: sessionId, event_id: eventId, type })).catch(() => undefined);
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {

@@ -213,8 +213,8 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
   // Notify listeners (real-time push)
   try {
     await db.notify('session_events', JSON.stringify({
-      sessionId: record.sessionId,
-      eventId: record.id,
+      session_id: record.sessionId,
+      event_id: record.id,
       type: record.type,
     }));
   } catch {
@@ -283,10 +283,10 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
     const eventsForSession = records.filter(r => r.sessionId === sid);
     try {
       await db.notify('session_events', JSON.stringify({
-        sessionId: sid,
+        session_id: sid,
         count: eventsForSession.length,
-        firstEventId: eventsForSession[0].id,
-        lastEventId: eventsForSession[eventsForSession.length - 1].id,
+        first_event_id: eventsForSession[0].id,
+        last_event_id: eventsForSession[eventsForSession.length - 1].id,
         types: [...new Set(eventsForSession.map(r => r.type))],
       }));
     } catch {
