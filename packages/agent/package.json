@@ -24,6 +24,7 @@
     "./run-specs": "./src/run-specs.ts",
     "./stream-checkpoints": "./src/stream-checkpoints.ts",
     "./stream-lease": "./src/stream-lease.ts",
+    "./todo-seeds": "./src/todo-seeds.ts",
     "./run-evals": "./src/run-evals.ts",
     "./execution-transitions": "./src/execution-transitions.ts",
     "./execution-store": "./src/execution-store.ts",
