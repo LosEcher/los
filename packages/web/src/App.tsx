@@ -97,13 +97,13 @@ const NAV: NavItem[] = [
   // ── Operations (debug / incident investigation) ──────────
   { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live', audience: 'operations', section: 'Operations' },
   { id: 'evals', label: 'Evals', icon: BarChart3, status: 'live', audience: 'operations' },
-  { id: 'run-specs', label: 'Run Specs', icon: ScrollText, status: 'partial', audience: 'operations' },
+  { id: 'run-specs', label: 'Run Specs', icon: ScrollText, status: 'live', audience: 'operations' },
   { id: 'nodes', label: 'Nodes', icon: Network, status: 'live', audience: 'operations' },
-  { id: 'services', label: 'Services', icon: Activity, status: 'partial', audience: 'operations' },
-  { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
+  { id: 'services', label: 'Services', icon: Activity, status: 'live', audience: 'operations' },
+  { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live', audience: 'operations' },
   { id: 'dead-letter', label: 'DLQ', icon: Skull, status: 'reserved', audience: 'operations' },
   { id: 'diagnostics', label: 'Diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
-  { id: 'file-sync', label: 'File Sync', icon: Archive, status: 'partial', audience: 'operations' },
+  { id: 'file-sync', label: 'File Sync', icon: Archive, status: 'live', audience: 'operations' },
 ];
 
 function pageFromHash(): PageId {
