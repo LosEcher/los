@@ -1,5 +1,6 @@
 import type { CreateTodoInput } from './todo-types.js';
 import { LOS_AGENT_WORKFLOW_TODO_SEED } from './todo-seeds-agent-workflow.js';
+import { CONTEXT_ENGINEERING_TODO_SEED } from './todo-seeds-context-engineering.js';
 import { LOS_GOVERNANCE_TODO_SEED } from './todo-seeds-governance.js';
 import { LOS_RUNTIME_CORE_TODO_SEED } from './todo-seeds-runtime-core.js';
 
@@ -47,7 +48,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     description: '按 tenant_id + route + idempotency_key + body_hash 记录请求状态、响应摘要和关联 todo/task。',
     kind: 'task',
     status: 'backlog',
-    priority: 'P0',
+    priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'saas-foundation',
     parentId: 'todo-los-saas-foundation',
@@ -146,7 +147,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     description: '分析 Reasonix 对 DeepSeek 的模型、effort、budget、缓存友好提示、transcript 和成本统计做法，优先在 los provider loop 内实现同类能力。',
     kind: 'task',
     status: 'backlog',
-    priority: 'P0',
+    priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'agent-runtime',
     parentId: 'todo-los-agent-runtime-strategy',
@@ -163,7 +164,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     description: '分析 Codex 在 sandbox、approval、coding prompt、tool boundary、review/exec 行为和 PackyCode/OpenAI-compatible 路由上的可借鉴点，优先在 los agent loop 内实现。',
     kind: 'task',
     status: 'backlog',
-    priority: 'P0',
+    priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'agent-runtime',
     parentId: 'todo-los-agent-runtime-strategy',
@@ -254,7 +255,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     kind: 'task',
     status: 'backlog',
     priority: 'P2',
-    source: 'analysis-2026-05-30',
+    source: 'analysis-2026-05-30 + 2026-06-20 sweep',
     stageId: 'agent-runtime',
     parentId: 'todo-los-agent-runtime-strategy',
     dependsOnIds: ['todo-los-agent-framework-benchmark'],
@@ -262,6 +263,25 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: 'agent 框架和 CLI 工具变化很快，一次性调研会很快过期。',
       solution: '保留轻量 reference watch，把值得吸收的工程做法转成 model profile、harness 或 tool policy 任务。',
+      lastSweep: '2026-06-20',
+      latestFindings: [
+        'Aider architect/editor mode — dual model separation for reasoning vs editing',
+        'Claude Code 2026: deferred tool loading, worktree isolation, PreCompact/PostCompact hooks, skills unification',
+        'Codex CLI 2026: per-tool-call sandbox (Bubblewrap+Landlock), dual-path compaction, Agents SDK multi-agent handoffs',
+        'arXiv:2606.11213 CWL — deterministic semantic eviction, 80M token span 89 tasks no degradation',
+        'arXiv:2606.12329 projectmem — Memory-as-Governance, pre-action gate',
+        'JetBrains Research — observation masking 52% cost reduction + 2.6% solve rate improvement',
+      ],
+      resultingTodos: [
+        'todo-los-context-engineering-phase',
+        'todo-los-context-fill-monitoring',
+        'todo-los-semantic-eviction-layer1',
+        'todo-los-pre-action-gate',
+        'todo-los-architect-editor-separation',
+        'todo-los-compaction-hooks',
+        'todo-los-deferred-tool-loading',
+        'todo-los-dual-path-compaction',
+      ],
     },
   },
   {
@@ -374,7 +394,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     description: '启动两个 gateway 实例共享 PostgreSQL，使用 /ready 做路由判断，验证 drain 一个 gateway 后新请求能进入另一个 gateway。',
     kind: 'task',
     status: 'backlog',
-    priority: 'P1',
+    priority: 'P2',
     source: 'analysis-2026-06-01',
     stageId: 'service-cluster',
     parentId: 'todo-los-service-cluster-roadmap',
@@ -493,6 +513,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     },
   },
   ...LOS_AGENT_WORKFLOW_TODO_SEED,
+  ...CONTEXT_ENGINEERING_TODO_SEED,
   ...LOS_RUNTIME_CORE_TODO_SEED,
   ...LOS_GOVERNANCE_TODO_SEED,
 ];
