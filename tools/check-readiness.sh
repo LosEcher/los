@@ -36,7 +36,7 @@ file_has() {
 
 # ── providers ────────────────────────────────────────────
 
-section "providers (currently: partial)"
+section "providers (currently: live)"
 
 echo "  API completeness:"
 if route_exists "POST /providers" || route_exists "post\\([^)]*['\"]/providers['\"]"; then
