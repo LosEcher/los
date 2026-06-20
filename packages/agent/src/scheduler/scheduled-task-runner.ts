@@ -256,6 +256,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           onModelDelta: input.onModelDelta,
           onCheckpoint: input.onCheckpoint,
+          contextMonitor: input.contextMonitor,
         });
 
     // B0: enforce phase contract — no succeeded while verification pending/failed

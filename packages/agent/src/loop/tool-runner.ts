@@ -15,6 +15,7 @@
 
 import { assertNotAborted, withAbort, inferToolSource, summarizeCapability, previewText } from './utils.js';
 import { applyPhaseGate } from './phase-tool-gate.js';
+import { preActionGate, type PreActionGateConfig } from '../pre-action-gate.js';
 import type { ToolRegistry } from '../tools/core/registry.js';
 import type { AgentConfig } from './types.js';
 import type { Message, ToolCall } from '../providers/index.js';
@@ -214,6 +215,32 @@ function prepareToolCall(input: {
       const decision = applyPhaseGate(
         tools.evaluateTool(fn.name), fn.name, config.runContractMetadata,
       ) as ReturnType<typeof tools.evaluateTool>;
+
+      // ── Pre-action gate: check known failure patterns ──
+      if (decision.allowed) {
+        const gateConfig: PreActionGateConfig = {
+          fragileFiles: (config as any).fragileFiles,
+          failureFingerprints: (config as any).failureFingerprints,
+          maxAttemptsBeforeWarn: (config as any).maxAttemptsBeforeWarn ?? 2,
+        };
+        const preCheck = preActionGate(fn.name, args, gateConfig);
+        if (preCheck.warnings.length > 0) {
+          await emitEvent({
+            type: 'tool.warned',
+            turn,
+            toolName: fn.name,
+            parentEventId: planEvent?.id ?? callEvent?.id,
+            payload: {
+              callId: tc.id,
+              warnings: preCheck.warnings,
+              knownFailure: preCheck.knownFailure,
+              failurePatterns: preCheck.failurePatterns,
+              fragileFile: preCheck.fragileFile,
+              flaggedFiles: preCheck.flaggedFiles,
+            },
+          });
+        }
+      }
 
       await config.onToolCallState?.({
         callId: tc.id, toolName: fn.name,
