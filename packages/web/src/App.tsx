@@ -89,8 +89,8 @@ const NAV: NavItem[] = [
 
   // ── Configure (setup, rarely changed) ────────────────────
   { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure', section: 'Configure' },
-  { id: 'skills', label: 'Skills', icon: Zap, status: 'partial', audience: 'configure' },
-  { id: 'rules', label: 'Rules', icon: Shield, status: 'partial', audience: 'configure' },
+  { id: 'skills', label: 'Skills', icon: Zap, status: 'live', audience: 'configure' },
+  { id: 'rules', label: 'Rules', icon: Shield, status: 'live', audience: 'configure' },
   { id: 'mcp', label: 'MCP', icon: Server, status: 'partial', audience: 'configure' },
   { id: 'settings', label: 'Settings', icon: Settings, status: 'live', audience: 'configure' },
 
