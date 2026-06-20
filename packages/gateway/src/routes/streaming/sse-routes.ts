@@ -3,12 +3,18 @@ import { getPool } from '@los/infra/db';
 import { eventBus } from '@los/agent/event-bus';
 import { ensureSessionEventStore, listSessionEventsSince } from '@los/agent/session-events';
 import { ensureTaskRunStore, listTaskRunsForSession, loadTaskRun } from '@los/agent/task-runs';
+import {
+  acquireStreamLease,
+  releaseStreamLease,
+  heartbeatStreamLease,
+} from '@los/agent/stream-lease';
 
 interface LiveClient {
   sessionId: string;
   reply: any;
   lastId: number;
   ended: boolean;
+  lease?: { gateway: string; heartbeatTimer: ReturnType<typeof setInterval> };
 }
 
 /** Shared SSE send factory. Both the live event route and the debug stream route
@@ -41,14 +47,44 @@ function parseLiveSessionEventNotification(payload: string | undefined) {
   }
 }
 
-export function registerSseRoutes(app: FastifyInstance): void {
+export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string): void {
   app.get('/sessions/:id/events/stream', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const gateway = gatewayServiceId;
+
     // Support Last-Event-ID header (sent by EventSource on reconnect) — overrides query param
     const lastEventId = req.headers['last-event-id'];
     const since = lastEventId
       ? Math.max(0, Number(lastEventId))
       : Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+
+    // ── Reconnect lease check ──
+    const isReconnect = since > 0;
+    const lease = isReconnect
+      ? await acquireStreamLease({ sessionId: id, gateway, ttlSeconds: 30 })
+      : await acquireStreamLease({ sessionId: id, gateway, ttlSeconds: 30 });
+
+    if (!lease.canTakeover) {
+      reply.raw.writeHead(409, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+      });
+      reply.raw.end(JSON.stringify({
+        error: 'session_stream_conflict',
+        message: lease.reason,
+        gateway: lease.previousLease?.gateway ?? null,
+        retryAfterSec: 5,
+      }));
+      return;
+    }
+
+    // Start heartbeat to keep lease alive
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    if (lease.newLease && isReconnect) {
+      heartbeatTimer = setInterval(() => {
+        heartbeatStreamLease(id, gateway).catch(() => undefined);
+      }, 10_000);
+    }
 
     await ensureSessionEventStore();
     await ensureTaskRunStore();
@@ -58,9 +94,25 @@ export function registerSseRoutes(app: FastifyInstance): void {
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
+      ...(isReconnect && lease.newLease ? {
+        'X-Stream-Lease': lease.newLease.leaseId,
+        'X-Stream-Gateway': gateway,
+        'X-Stream-Reconnect': '1',
+      } : {}),
     });
 
     const send = makeSend(reply);
+
+    // ── Emit session.resumed on reconnect ──
+    if (isReconnect) {
+      send('session.resumed', {
+        sessionId: id,
+        since,
+        gateway,
+        leaseId: lease.newLease?.leaseId ?? null,
+        previousGateway: lease.previousLease?.gateway ?? null,
+      });
+    }
 
     let lastId = since;
     let ended = false;
@@ -98,9 +150,11 @@ export function registerSseRoutes(app: FastifyInstance): void {
           message: 'Session has active task. Streaming live events...',
         });
 
-        // Register as a live client so PG NOTIFY triggers instant push
         const cid = ++clientSeq;
-        liveClients.set(cid, { sessionId: id, reply, lastId, ended: false });
+        liveClients.set(cid, {
+          sessionId: id, reply, lastId, ended: false,
+          lease: heartbeatTimer ? { gateway, heartbeatTimer } : undefined,
+        });
 
         const interval = setInterval(async () => {
           try {
@@ -112,6 +166,8 @@ export function registerSseRoutes(app: FastifyInstance): void {
               ended = true;
               liveClients.delete(cid);
               clearInterval(interval);
+              if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+              await releaseStreamLease(id, gateway).catch(() => undefined);
               send('session.completed', {
                 sessionId: id, taskRunId: active.id,
                 status: task?.status ?? 'unknown',
@@ -121,6 +177,8 @@ export function registerSseRoutes(app: FastifyInstance): void {
           } catch {
             liveClients.delete(cid);
             clearInterval(interval);
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+            await releaseStreamLease(id, gateway).catch(() => undefined);
             reply.raw.end();
           }
         }, 1000);
@@ -128,14 +186,20 @@ export function registerSseRoutes(app: FastifyInstance): void {
         req.raw.on('close', () => {
           liveClients.delete(cid);
           clearInterval(interval);
+          if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+          releaseStreamLease(id, gateway).catch(() => undefined);
         });
       } else {
         send('session.completed', {
           sessionId: id, message: 'No active task. All events delivered.',
         });
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        await releaseStreamLease(id, gateway).catch(() => undefined);
         reply.raw.end();
       }
     } catch (err: any) {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      await releaseStreamLease(id, gateway).catch(() => undefined);
       send('error', { message: err?.message ?? String(err) });
       reply.raw.end();
     }

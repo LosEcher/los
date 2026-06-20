@@ -7,6 +7,7 @@
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -42,6 +43,7 @@ import { registerMemoryRoutes } from './routes/data/memory-routes.js';
 import { registerSessionRoutes } from './routes/data/session-routes.js';
 import { registerTraceRoutes } from './routes/data/trace-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/streaming/sse-routes.js';
+import { registerWsRoutes } from './routes/streaming/ws-routes.js';
 import { registerTaskRoutes } from './routes/orchestration/task-routes.js';
 import { registerRunRoutes } from './routes/orchestration/run-routes.js';
 import { registerProjectRoutes } from './routes/infrastructure/project-routes.js';
@@ -86,6 +88,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   });
 
   await app.register(cors, { origin: config.server.corsOrigin });
+  await app.register(fastifyWebsocket);
   registerRequestContext(app, config);
   await authMiddleware(app, { config });
   registerSecurityHeaders(app, { hsts: false });
@@ -234,7 +237,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerMemoryRoutes(app);
   registerSessionRoutes(app);
   registerTraceRoutes(app);
-  registerSseRoutes(app);
+  registerSseRoutes(app, service.serviceId);
+  registerWsRoutes(app, service.serviceId);
   registerTaskRoutes(app);
   registerRunRoutes(app);
   registerIntegrationRoutes(app, config, DEFAULT_WORKSPACE_ROOT);
