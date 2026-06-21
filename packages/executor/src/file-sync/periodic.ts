@@ -26,7 +26,7 @@ export function startPeriodicSync(nodeId: string): () => void {
         if (activeTimers.has(folder.folderId)) continue;
 
         const intervalMs = (folder.scanIntervalSec ?? 1800) * 1000;
-        const settleMs = (folder.settleWindowSec ?? 900) * 1000;
+        const settleMs = (folder.settleWindowSec ?? 60) * 1000;
 
         // Fire an initial scan on first discovery (staggered to avoid thundering herd)
         setTimeout(() => {

@@ -79,19 +79,15 @@ async function runCore(options: {
   const now = new Date().toISOString();
   const changed = await store.listChangedFiles(folderId, 'pending');
 
-  // 3. Settle-window filter: only queue files whose mtime is stable
+  // 3. Settle-window filter: only queue files whose on-disk mtime is stable
   const ready: Array<{ filePath: string; size: number; mtimeNs: number }> = [];
   for (const entry of changed) {
-    if (!entry.changedAt) {
-      ready.push({ filePath: entry.filePath, size: entry.size, mtimeNs: entry.mtimeNs });
-      continue;
-    }
-    const changedMs = new Date(entry.changedAt).getTime();
-    const ageMs = Date.now() - changedMs;
+    const mtimeMs = Math.floor(entry.mtimeNs / 1_000_000);
+    const ageMs = Date.now() - mtimeMs;
     if (ageMs >= settleWindowMs) {
       ready.push({ filePath: entry.filePath, size: entry.size, mtimeNs: entry.mtimeNs });
     } else {
-      log.debug(`sync ${folderId}: ${entry.filePath} still settling (${ageMs}ms < ${settleWindowMs}ms)`);
+      log.debug(`sync ${folderId}: ${entry.filePath} still settling (mtime age ${ageMs}ms < ${settleWindowMs}ms settle window)`);
     }
   }
 
