@@ -89,6 +89,26 @@ export {
   type RetentionResult,
 } from './core/retention.js';
 
+// ── Scope & ACL ───────────────────────────────────────────
+
+export {
+  normalizeScope,
+  scopeRank,
+  resolveMemoryScope,
+  canAccessMemory,
+  canWriteToScope,
+  canDeleteMemory,
+  evaluatePromotion,
+  nextScope,
+  candidateStatusToScope,
+  scopeToCandidateStatus,
+  type MemoryScope,
+  type MemoryAccessContext,
+  type ScopeResolutionInput,
+  type PromotionEvidence,
+  type PromotionDecision,
+} from './core/scope-acl.js';
+
 // ── CBM code graph client ────────────────────────────────
 
 export {
