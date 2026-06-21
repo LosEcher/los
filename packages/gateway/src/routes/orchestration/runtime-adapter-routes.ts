@@ -17,6 +17,7 @@ import {
 } from '@los/agent/runtime-adapter';
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
+import type { MessageRouter } from '@los/agent/message-router';
 
 const log = getLogger('runtime-adapter-routes');
 
@@ -31,7 +32,7 @@ interface RunRuntimeBody {
   timeoutMs?: number;
 }
 
-export function registerRuntimeAdapterRoutes(app: FastifyInstance): void {
+export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter?: MessageRouter): void {
   const config = getConfig();
 
   // ── Run external agent ───────────────────────────────────

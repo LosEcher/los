@@ -161,15 +161,15 @@ export async function detectGovernanceDrift(job: {
   const prevRows = await db.query<{
     id: string;
     job_type: GovernanceJobType;
-    result_summary: unknown;
+    result_summary_json: unknown;
     last_run_at: string;
   }>(
     `
-    SELECT id, job_type, result_summary, last_run_at
+    SELECT id, job_type, result_summary_json, last_run_at
     FROM governance_jobs
     WHERE job_type = $1
       AND id != $2
-      AND result_summary IS NOT NULL
+      AND result_summary_json IS NOT NULL
     ORDER BY last_run_at DESC
     LIMIT 1
   `,
@@ -179,9 +179,9 @@ export async function detectGovernanceDrift(job: {
   if (prevRows.rows.length === 0) return null;
 
   const prev = prevRows.rows[0];
-  const prevSummary = typeof prev.result_summary === 'string'
-    ? JSON.parse(prev.result_summary)
-    : (prev.result_summary as Record<string, unknown>) ?? {};
+  const prevSummary = typeof prev.result_summary_json === 'string'
+    ? JSON.parse(prev.result_summary_json)
+    : (prev.result_summary_json as Record<string, unknown>) ?? {};
 
   const currentMetrics = extractMetrics(job.jobType, job.resultSummary ?? {});
   const previousMetrics = extractMetrics(job.jobType, prevSummary);
@@ -250,13 +250,13 @@ export async function sweepGovernanceDrift(opts: {
   const rows = await db.query<{
     id: string;
     job_type: GovernanceJobType;
-    result_summary: unknown;
+    result_summary_json: unknown;
     last_run_at: string;
   }>(
     `
-    SELECT id, job_type, result_summary, last_run_at
+    SELECT id, job_type, result_summary_json, last_run_at
     FROM governance_jobs
-    WHERE result_summary IS NOT NULL
+    WHERE result_summary_json IS NOT NULL
       AND last_run_at > now() - INTERVAL '2 hours'
     ORDER BY last_run_at DESC
     LIMIT 50
@@ -269,9 +269,9 @@ export async function sweepGovernanceDrift(opts: {
   let jobsWithDrift = 0;
 
   for (const row of rows.rows) {
-    const summary = typeof row.result_summary === 'string'
-      ? JSON.parse(row.result_summary)
-      : (row.result_summary as Record<string, unknown>) ?? {};
+    const summary = typeof row.result_summary_json === 'string'
+      ? JSON.parse(row.result_summary_json)
+      : (row.result_summary_json as Record<string, unknown>) ?? {};
 
     const job: {
       id: string;

@@ -5,7 +5,11 @@
 
 import { READ_ONLY_BUILTIN_TOOLS } from '../tools/core/registry.js';
 import { getAvailableSandbox } from '../tools/external/shell-sandbox.js';
+import { platform } from 'node:os';
+import { getLogger } from '@los/infra/logger';
 import type { AgentConfig } from './types.js';
+
+const log = getLogger('agent');
 
 /**
  * Resolve the set of allowed tools based on explicit list and tool mode.
@@ -46,21 +50,8 @@ export function resolveToolPolicy(
 ) {
   const normalizedRetry = normalizeToolRetry(retry);
 
-  // sandboxMode 'readonly' overrides toolMode to enforce read-only
-  const effectiveMode = sandboxMode === 'readonly' ? 'readonly' : toolMode;
-
-  // sandboxMode 'sandbox' enables sandbox availability, but only if an
-  // actual OS-level sandbox (macOS sandbox-exec or Linux bwrap) is present
-  let sandboxAvailable = false;
-  if (effectiveMode === 'all' && sandboxMode === 'sandbox') {
-    const detected = getAvailableSandbox();
-    sandboxAvailable = detected !== 'native';
-  } else if (effectiveMode === 'all') {
-    // Legacy: 'all' mode without explicit sandbox config still allows sandbox
-    sandboxAvailable = true;
-  }
-
-  if (effectiveMode === 'read-only') {
+  // sandboxMode 'readonly' overrides toolMode: no writes, no shell, no sandbox
+  if (sandboxMode === 'readonly') {
     return {
       maxRiskLevel: 'L0' as const,
       allowWrites: false,
@@ -68,7 +59,9 @@ export function resolveToolPolicy(
       retry: normalizedRetry,
     };
   }
-  if (toolMode === 'project-write') {
+
+  // sandboxMode 'workspace-write': file writes only (L1), no sandboxed shell
+  if (sandboxMode === 'workspace-write' || toolMode === 'project-write') {
     return {
       maxRiskLevel: 'L1' as const,
       allowWrites: true,
@@ -76,6 +69,36 @@ export function resolveToolPolicy(
       retry: normalizedRetry,
     };
   }
+
+  // sandboxMode 'sandbox' explicitly requested: check OS sandbox availability.
+  // If unavailable, L2 tools are denied (sandboxAvailable stays false) and the
+  // gate will block sandboxRequired tools like run_shell.
+  if (sandboxMode === 'sandbox') {
+    const detected = getAvailableSandbox();
+    const sandboxAvailable = detected !== 'native';
+    if (!sandboxAvailable) {
+      log.warn(`sandboxMode=sandbox but no OS sandbox available (platform=${platform()}); ` +
+        `L2 shell tools denied. Install sandbox-exec (macOS) or bwrap (Linux) for sandbox mode.`);
+    }
+    return {
+      maxRiskLevel: 'L2' as const,
+      allowWrites: true,
+      sandboxAvailable,
+      retry: normalizedRetry,
+    };
+  }
+
+  // Legacy: 'all' toolMode without explicit sandbox config
+  if (toolMode === 'read-only') {
+    return {
+      maxRiskLevel: 'L0' as const,
+      allowWrites: false,
+      sandboxAvailable: false,
+      retry: normalizedRetry,
+    };
+  }
+
+  // Legacy: 'all' toolMode → L2 without sandbox enforcement (backward-compat)
   return {
     maxRiskLevel: 'L2' as const,
     allowWrites: true,

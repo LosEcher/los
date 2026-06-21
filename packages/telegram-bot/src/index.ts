@@ -25,6 +25,7 @@
  */
 
 import { createServer } from 'node:http';
+import { resolveIntent } from '@los/agent/message-router';
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -306,15 +307,45 @@ async function handleCallback(callbackQuery: NonNullable<TgMessage['callback_que
   const data = callbackQuery.data;
   const [action, sessionId, callId] = data.split(':');
 
+  // Check for #command prefix (e.g. someone types "#status abc123" as a message)
   let response: string;
-  switch (action) {
-    case 'approve': response = await handleApprove(sessionId, callId); break;
-    case 'deny': response = await handleDeny(sessionId, callId); break;
-    case 'escalate': response = await handleEscalate(sessionId, callId); break;
-    default: response = `Unknown action: ${action}`;
+  if (data.startsWith('#')) {
+    const intent = resolveIntent(data);
+    response = await handleResolvedIntent(intent, sessionId, callId);
+  } else {
+    switch (action) {
+      case 'approve': response = await handleApprove(sessionId, callId); break;
+      case 'deny': response = await handleDeny(sessionId, callId); break;
+      case 'escalate': response = await handleEscalate(sessionId, callId); break;
+      default: response = `Unknown action: ${action}`;
+    }
   }
 
   await answerCallback(callbackQuery.id, response);
+}
+
+async function handleResolvedIntent(
+  intent: ReturnType<typeof resolveIntent>,
+  sessionId: string,
+  callId: string,
+): Promise<string> {
+  switch (intent.type) {
+    case 'steering':
+      return intent.instruction === 'approve' ? await handleApprove(intent.sessionId, callId)
+        : intent.instruction === 'deny' ? await handleDeny(intent.sessionId, callId)
+        : await handleEscalate(intent.sessionId, callId);
+    case 'status':
+      // Fall through to HTTP call for status (telegram-bot doesn't have DB access)
+      return `📊 Status for ${intent.sessionId.slice(0, 8)}… — check the gateway or #status in chat.`;
+    case 'chat':
+      return `💬 To start a chat, use #claude <prompt> or #codex <prompt>.`;
+    case 'runtime':
+      return `🔄 Runtime agents are available via #claude <prompt> or #codex <prompt> in WeChat.`;
+    case 'todo':
+      return `📋 Todo commands are available via #task in WeChat.`;
+    default:
+      return `Unknown intent: ${intent.type}`;
+  }
 }
 
 // ── Main ───────────────────────────────────────────────────────────

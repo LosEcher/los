@@ -65,6 +65,9 @@ export const ConfigSchema = z.object({
   auth: z.object({
     enabled: z.coerce.boolean().default(false),
     token: z.string().optional(),
+    /** Shared secret for operator access. When set, the x-los-operator-token header
+     *  must match this value for operator-level actions. */
+    operatorToken: z.string().optional(),
   }),
 
   // Agent
@@ -185,6 +188,7 @@ const ENV_MAP: [string, string][] = [
   ['CORS_ORIGIN', 'server.corsOrigin'],
   ['LOS_AUTH_ENABLED', 'auth.enabled'],
   ['LOS_AUTH_TOKEN', 'auth.token'],
+  ['LOS_OPERATOR_TOKEN', 'auth.operatorToken'],
   ['AGENT_DEFAULT_PROVIDER', 'agent.defaultProvider'],
   ['AGENT_DEFAULT_MODEL', 'agent.defaultModel'],
   ['AGENT_MAX_LOOPS', 'agent.maxLoops'],

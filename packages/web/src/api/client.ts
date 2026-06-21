@@ -1,4 +1,4 @@
-import type { ChatPayload, StreamEvent } from './types.js';
+import type { ChatPayload, RuntimePayload, StreamEvent } from './types.js';
 
 export class AuthError extends Error {
   constructor(
@@ -72,7 +72,31 @@ export async function streamChat(
     throw new Error(`${res.status} ${res.statusText}`);
   }
 
-  const reader = res.body.getReader();
+  await readSSEStream(res.body, onEvent);
+}
+
+export async function streamRuntime(
+  payload: RuntimePayload,
+  signal: AbortSignal,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const headers = buildHeaders();
+  const res = await fetch(`/runtimes/${payload.kind}/run`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    checkResponse(res);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
+
+  await readSSEStream(res.body, onEvent);
+}
+
+async function readSSEStream(body: ReadableStream<Uint8Array>, onEvent: (event: StreamEvent) => void): Promise<void> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let eventName = 'message';

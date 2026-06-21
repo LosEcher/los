@@ -11,6 +11,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@los/agent": "workspace:*",
     "@los/infra": "workspace:*",
     "@los/media": "workspace:*"
   },

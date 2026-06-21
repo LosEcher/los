@@ -18,7 +18,7 @@ import {
   type SessionEventRecord,
   type ToolCallStateTransition,
 } from '@los/agent';
-import { startPeriodicSync } from './file-sync/index.js';
+import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { collectResourceMetrics, resolveResourceCapabilities } from './resource-metrics.js';
@@ -77,6 +77,7 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   })();
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
+  const fileSyncStore = createFileSyncStore();
 
   if (!heartbeatViaApi) {
     log.info('GATEWAY_URL not set — will heartbeat directly to database');
@@ -84,12 +85,26 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
     log.info(`Executing node heartbeat via gateway: ${gatewayUrl}/nodes/heartbeat`);
   }
 
+  // Resolve active file-sync folders for heartbeat capability reporting
+  const resolveFileSyncFolders = async () => {
+    try {
+      const folders = await fileSyncStore.listFolders(nodeId);
+      return folders
+        .filter(f => f.status === 'active')
+        .map(f => ({ name: f.name, localPath: f.localPath, mode: 'incremental' as const }));
+    } catch {
+      return [];
+    }
+  };
+
   // Fire initial heartbeat without blocking server startup.
   // If the gateway is temporarily unreachable the server still starts,
   // and the interval below will retry every heartbeat interval.
-  heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
+  heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl, await resolveFileSyncFolders()).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
   const nodeHeartbeat = setInterval(() => {
-    heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`));
+    resolveFileSyncFolders().then(folders =>
+      heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl, folders).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`))
+    );
   }, DEFAULT_HEARTBEAT_MS);
 
   const server = createServer(async (req, res) => {
@@ -239,7 +254,37 @@ async function renewTaskLease(
   }
 }
 
-async function heartbeatNode(nodeId: string, baseUrl: string, nodeKind: ExecutorNodeKind, connectModes: ExecutorNodeConnectMode[], gatewayUrl?: string): Promise<void> {
+async function heartbeatNode(
+  nodeId: string,
+  baseUrl: string,
+  nodeKind: ExecutorNodeKind,
+  connectModes: ExecutorNodeConnectMode[],
+  gatewayUrl?: string,
+  fileSyncFolders?: Array<{ name: string; localPath: string; mode?: string }>,
+): Promise<void> {
+  const capabilities: Record<string, unknown> = {
+    run_agent: true,
+    stream_ndjson: true,
+    task_lease: true,
+    workspace_read: true,
+    workspace_write: true,
+    artifact_transfer: true,
+    node_command_runner: true,
+    file_sync_scan: true,
+    file_sync_deep_verify: true,
+    shell: true,
+    sandbox: 'tool_policy',
+    ...resolveResourceCapabilities(),
+  };
+  if (fileSyncFolders && fileSyncFolders.length > 0) {
+    capabilities.file_sync_folders = fileSyncFolders.map(f => ({
+      name: f.name,
+      folder: f.name,
+      path: f.localPath,
+      mode: f.mode ?? 'incremental',
+    }));
+  }
+
   const payload = {
     nodeId,
     baseUrl,
@@ -262,20 +307,7 @@ async function heartbeatNode(nodeId: string, baseUrl: string, nodeKind: Executor
       arch: process.arch,
       ...collectResourceMetrics(),
     },
-    capabilities: {
-      run_agent: true,
-      stream_ndjson: true,
-      task_lease: true,
-      workspace_read: true,
-      workspace_write: true,
-      artifact_transfer: true,
-      node_command_runner: true,
-      file_sync_scan: true,
-      file_sync_deep_verify: true,
-      shell: true,
-      sandbox: 'tool_policy',
-      ...resolveResourceCapabilities(),
-    },
+    capabilities,
     queueDepth: 0,
     activeTaskCount: 0,
   };

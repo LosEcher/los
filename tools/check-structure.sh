@@ -35,12 +35,14 @@ done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
 
 # 2. New files >400 lines (not in baseline) → error. Grandfathered files → warn.
 header "Files >$BLOCK_LINES lines"
+GRANDFATHERED_COUNT=0
 while IFS= read -r line; do
   file=$(echo "$line" | awk '{print $2}')
   count=$(echo "$line" | awk '{print $1}')
   rel="${file#$ROOT/}"
   if in_baseline "$rel"; then
     warn "$file ($count lines) — grandfathered, exceeds $BLOCK_LINES line threshold"
+    GRANDFATHERED_COUNT=$((GRANDFATHERED_COUNT + 1))
   else
     error "$file ($count lines) — new file exceeds $BLOCK_LINES line limit (if intentional, add to tools/.large-file-baseline.txt)"
   fi
@@ -49,6 +51,14 @@ done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   ! -path '*/test/*' ! -name '*.test.*' \
   -exec wc -l {} + 2>/dev/null | awk -v min="$BLOCK_LINES" -v max="$MAX_LINES" \
   '$2 != "total" && $1 > min && $1 <= max { print $1, $2 }')
+
+# Ratchet: grandfathered count must not grow. Baseline is the floor, not a rubber stamp.
+BASELINE_TOTAL=$(wc -l < "$BASELINE_FILE" 2>/dev/null | tr -d ' ')
+if [ "$GRANDFATHERED_COUNT" -gt "$BASELINE_TOTAL" ] 2>/dev/null; then
+  error "Grandfathered file count grew from $BASELINE_TOTAL to $GRANDFATHERED_COUNT — shrink files or remove them from baseline by slimming below $BLOCK_LINES lines"
+elif [ "$GRANDFATHERED_COUNT" -lt "$BASELINE_TOTAL" ] 2>/dev/null; then
+  echo "  [OK] Grandfathered files: $GRANDFATHERED_COUNT (baseline: $BASELINE_TOTAL) — shrank by $((BASELINE_TOTAL - GRANDFATHERED_COUNT)). Run tools/update-large-file-baseline.sh to compact."
+fi
 
 # 3. Flat directories (>MAX_DIR_FILES files, no subdirs) — warn only
 header "Flat directories (>$MAX_DIR_FILES files, no subdirs)"

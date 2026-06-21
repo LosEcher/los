@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '@los/infra/config';
 import { getLogger, type Logger } from '@los/infra/logger';
@@ -11,6 +11,9 @@ export interface RequestContext {
   tenantId: string;
   projectId: string;
   userId: string;
+  /** Whether the requester has been authenticated as an operator
+   *  (validated against auth.operatorToken, not a forgeable header). */
+  isOperator: boolean;
   /** Request-scoped child logger with requestId and traceId bound. */
   log: Logger;
 }
@@ -25,6 +28,13 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
   app.addHook('onRequest', async (req, reply) => {
     const requestId = normalizeHeader(req.headers['x-request-id']) ?? `req-${randomUUID()}`;
     const traceId = normalizeHeader(req.headers['x-trace-id']) ?? requestId;
+
+    // Operator token validation — uses timing-safe comparison so an attacker
+    // can't enumerate the token character by character.
+    const isOperator = validateOperatorToken(
+      req.headers['x-los-operator-token'],
+      config.auth.operatorToken,
+    );
 
     if (config.auth.enabled) {
       const tenantId = normalizeHeader(req.headers['x-tenant-id']);
@@ -41,6 +51,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
         tenantId: tenantId ?? 'unknown',
         projectId: projectId ?? 'unknown',
         userId: userId ?? 'unknown',
+        isOperator,
         log: getGatewayLogger().child({ requestId, traceId }),
       };
 
@@ -60,6 +71,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
         tenantId,
         projectId,
         userId,
+        isOperator,
         log: getGatewayLogger().child({ requestId, traceId }),
       };
 
@@ -80,6 +92,7 @@ export function getRequestContext(req: FastifyRequest): RequestContext {
     tenantId: 'local',
     projectId: 'los',
     userId: 'local-user',
+    isOperator: false,
     log: getGatewayLogger().child({ requestId }),
   };
 }
@@ -96,4 +109,25 @@ function normalizeHeader(value: string | string[] | undefined): string | undefin
   if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   return trimmed ? trimmed : undefined;
+}
+
+/**
+ * Validate the x-los-operator-token header against the configured operatorToken.
+ * Uses timing-safe comparison to prevent timing side-channel enumeration.
+ * When no operatorToken is configured, operator access is disabled entirely.
+ */
+function validateOperatorToken(
+  headerValue: string | string[] | undefined,
+  configuredToken: string | undefined,
+): boolean {
+  if (!configuredToken) return false;
+  const provided = normalizeHeader(headerValue);
+  if (!provided) return false;
+
+  // timingSafeEqual requires equal-length buffers, so we compare the header value
+  // against a known-good reference using a fixed-time comparison.
+  const a = Buffer.from(provided);
+  const b = Buffer.from(configuredToken);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }

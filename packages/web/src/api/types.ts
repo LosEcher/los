@@ -304,6 +304,19 @@ export type StreamEvent = {
   data: Record<string, unknown>;
 };
 
+// ── Runtime kinds ────────────────────────────────────
+
+export type RuntimeKind = 'claude-code' | 'codex';
+
+export type RuntimePayload = {
+  kind: RuntimeKind;
+  prompt: string;
+  workspaceRoot?: string;
+  sessionId?: string;
+  timeoutMs?: number;
+  extraArgs?: string[];
+};
+
 // ── Project binding ──────────────────────────────────
 
 export type ProjectBinding = {

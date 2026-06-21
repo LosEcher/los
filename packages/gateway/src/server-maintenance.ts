@@ -132,6 +132,8 @@ export function registerServerMaintenance(
     const triggerFileSyncScans = async () => {
       try {
         const nodes = await listExecutorNodes();
+        let triggered = 0;
+        let unreachable = 0;
         for (const node of nodes) {
           const caps = (node.capabilities ?? {}) as Record<string, unknown>;
           if (!caps.file_sync_scan) continue;
@@ -139,22 +141,35 @@ export function registerServerMaintenance(
           const httpCfg = (cfg.agent_http ?? {}) as Record<string, unknown>;
           const healthUrl = String(httpCfg.healthUrl ?? '').replace(/\/+$/, '');
           if (!healthUrl) continue;
-          try {
-            await fetch(`${healthUrl.replace('/health', '')}/v1/file-sync/scan`, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${agentKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ mode: 'incremental' }),
-              signal: AbortSignal.timeout(300_000),
-            });
-          } catch {
-            // node unreachable, skip
+          const folders = (Array.isArray(caps.file_sync_folders) ? caps.file_sync_folders : []) as unknown[];
+          if (folders.length === 0) continue;
+          for (const entry of folders) {
+            const f = entry as Record<string, unknown>;
+            const folderName = typeof f.name === 'string' ? f.name : typeof f.folder === 'string' ? f.folder : null;
+            const mode = typeof f.mode === 'string' ? f.mode : 'incremental';
+            if (!folderName) continue;
+            try {
+              await fetch(`${healthUrl.replace('/health', '')}/v1/file-sync/scan`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${agentKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ folder: folderName, mode }),
+                signal: AbortSignal.timeout(300_000),
+              });
+              triggered++;
+            } catch (err) {
+              unreachable++;
+              log.debug(`file-sync trigger: ${node.nodeId}/${folderName} unreachable (${err instanceof Error ? err.message : String(err)})`);
+            }
           }
         }
+        if (triggered > 0 || unreachable > 0) {
+          log.info(`file-sync trigger: ${triggered} scan(s) triggered, ${unreachable} unreachable`);
+        }
       } catch (err) {
-        // gateway may not have executor-nodes loaded yet
+        log.warn(`file-sync trigger sweep failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     };
     const fileSyncTimeout = setTimeout(triggerFileSyncScans, 30_000);

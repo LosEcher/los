@@ -2,6 +2,7 @@ import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } fr
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
 import type { ScheduledExecutorConfig } from './types.js';
+import { resolveSSHExecutorNodeUrl, resolveSSHExecutor, runAgentOnSSHExecutor, sshExecutorUrlToConnectConfig } from './ssh-client.js';
 
 export type ResolvedExecutor = {
   url: string;
@@ -96,6 +97,18 @@ export async function runAgentOnExecutor(
     onCheckpoint?: AgentConfig['onCheckpoint'];
   },
 ): Promise<AgentResult> {
+  // SSH-backed executors use a different transport (ssh CLI + ndjson stream).
+  if (executor.url.startsWith('ssh://')) {
+    const sshExecutor = resolveSSHExecutor({
+      nodeId: executor.nodeId,
+      nodeKind: 'ssh_target',
+      connectModes: ['direct_ssh'],
+      connectConfig: sshExecutorUrlToConnectConfig(executor.url),
+    } as ExecutorNodeRecord);
+    if (!sshExecutor) throw new Error(`SSH executor URL ${executor.url} missing valid SSH config`);
+    return await runAgentOnSSHExecutor(sshExecutor, input);
+  }
+
   const res = await fetch(`${executor.url}/v1/tasks/run-agent`, {
     method: 'POST',
     headers: {
@@ -146,6 +159,11 @@ function resolveExecutorNodeUrl(node: ExecutorNodeRecord): string | null {
   const modeConfig = readObject(mode ? node.connectConfig[mode] : undefined);
   const agentHttpConfig = readObject(node.connectConfig.agent_http);
   const agentNdjsonConfig = readObject(node.connectConfig.agent_http_ndjson);
+
+  // Prefer SSH-based modes when the node is an ssh_target or has SSH config.
+  const sshUrl = resolveSSHExecutorNodeUrl(node);
+  if (sshUrl) return sshUrl;
+
   const raw =
     readString(modeConfig.baseUrl) ??
     readString(modeConfig.endpoint) ??

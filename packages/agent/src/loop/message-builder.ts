@@ -8,6 +8,7 @@ import type { ContextCompressionConfig } from './types.js';
 import { estimateMessageTokens } from './token-utils.js';
 import { compressOrTrimMessages } from './compression.js';
 import { preprocessInput } from '@los/input-preprocessor';
+import { appendSessionEvent } from '../session-events.js';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('agent');
@@ -87,6 +88,7 @@ export function buildInitialMessages(
   initialMessages: Message[] | undefined,
   maxContextTokens?: number,
   compression?: ContextCompressionConfig,
+  sessionId?: string,
 ): Message[] {
   const messages = initialMessages?.length
     ? initialMessages.map(message => ({ ...message }))
@@ -121,6 +123,28 @@ export function buildInitialMessages(
         originalLen: metadata.originalLength,
         processedLen: metadata.processedLength,
       });
+    }
+
+    // Emit session event for audit trail (non-blocking, best-effort).
+    if (sessionId && metadata.contentType !== 'unknown' && safety.compressionRatio < 0.99) {
+      appendSessionEvent({
+        sessionId,
+        type: 'input.preprocessed',
+        source: 'input-preprocessor',
+        payload: {
+          contentType: metadata.contentType,
+          contentTypes: metadata.contentTypes,
+          confidence: Math.round(metadata.confidence * 100) / 100,
+          originalLength: metadata.originalLength,
+          processedLength: metadata.processedLength,
+          tokenEstimate: metadata.tokenEstimate,
+          compressionRatio: Math.round(safety.compressionRatio * 1000) / 1000,
+          processingTimeMs: metadata.processingTimeMs,
+          removedByClassifier: safety.removedByClassifier,
+          deduplicatedCount: safety.deduplicatedCount,
+          warnings: safety.warnings.slice(0, 5),
+        },
+      }).catch(() => undefined); // non-blocking
     }
   }
   messages.push({ role: 'user', content: processedPrompt });
