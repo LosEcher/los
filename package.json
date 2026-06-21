@@ -25,7 +25,7 @@
     "build": "turbo build",
     "check:contracts": "./tools/check-contracts.sh",
     "check:bypass": "./tools/check-state-machine-bypass.sh",
-    "check": "turbo check && ./tools/check-structure.sh && ./tools/check-state-machine-bypass.sh && ./tools/check-contracts.sh",
+    "check": "turbo check && ./tools/check-structure.sh && ./tools/check-state-machine-bypass.sh && ./tools/check-contracts.sh && ./tools/check-unwired-exports.sh",
     "gate": "./tools/ci-gate.sh",
     "pre-push": "./tools/ci-gate.sh",
     "_typecheck": "turbo check",
