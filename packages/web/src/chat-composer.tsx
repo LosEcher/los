@@ -1,6 +1,6 @@
-import { Send, Square, Wrench } from 'lucide-react';
+import { Send, Square, Wrench, Zap } from 'lucide-react';
 import type { FormEvent } from 'react';
-import type { ProviderModelsResponse, ToolMode } from './api';
+import type { ProviderModelsResponse, RuntimeKind, ToolMode } from './api';
 import { RunField } from './chat-ui.js';
 import { ProjectSelector } from './project-selector.js';
 import { providerRoutesFromModels } from './chat-helpers.js';
@@ -22,6 +22,9 @@ export function ChatComposer(props: {
 
   toolMode: ToolMode;
   onToolModeChange: (value: ToolMode) => void;
+
+  runtimeKind: RuntimeKind | 'los';
+  onRuntimeKindChange: (value: RuntimeKind | 'los') => void;
 
   workspaceRoot: string;
   onWorkspaceRootChange: (value: string) => void;
@@ -49,36 +52,50 @@ export function ChatComposer(props: {
           className={`route-dot ${selectedRoute?.ok ? 'ok' : 'partial'}`}
           title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? 'discovery pending'}
         />
-        <RunField label="provider" title="Provider endpoint for this send">
-          {props.providerOptions.length > 0 ? (
-            <select value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }}>
-              {props.providerOptions.map(option => (
-                <option value={option.id} key={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder="provider id" />
-          )}
-        </RunField>
-        <RunField label="model" title="Model for this send">
-          {modelOptions.length > 0 ? (
-            <select value={props.model} onChange={event => props.onModelChange(event.target.value)}>
-              {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
-            </select>
-          ) : (
-            <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
-          )}
-        </RunField>
-        <RunField label="tools / skills" title="Tool and skill access for this send">
-          <Wrench size={13} />
-          <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
-            <option value="read-only">off / read-only</option>
-            <option value="project-write">project tools (no shell)</option>
-            <option value="all">all tools + sandboxed shell</option>
+        <RunField label="runtime" title="Agent runtime engine">
+          <Zap size={13} />
+          <select value={props.runtimeKind} onChange={event => props.onRuntimeKindChange(event.target.value as RuntimeKind | 'los')}>
+            <option value="los">los agent</option>
+            <option value="claude-code">Claude Code</option>
+            <option value="codex">Codex</option>
           </select>
         </RunField>
+        {props.runtimeKind === 'los' ? (
+          <>
+            <RunField label="provider" title="Provider endpoint for this send">
+              {props.providerOptions.length > 0 ? (
+                <select value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }}>
+                  {props.providerOptions.map(option => (
+                    <option value={option.id} key={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder="provider id" />
+              )}
+            </RunField>
+            <RunField label="model" title="Model for this send">
+              {modelOptions.length > 0 ? (
+                <select value={props.model} onChange={event => props.onModelChange(event.target.value)}>
+                  {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
+                </select>
+              ) : (
+                <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
+              )}
+            </RunField>
+            <RunField label="tools / skills" title="Tool and skill access for this send">
+              <Wrench size={13} />
+              <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
+                <option value="read-only">off / read-only</option>
+                <option value="project-write">project tools (no shell)</option>
+                <option value="all">all tools + sandboxed shell</option>
+              </select>
+            </RunField>
+          </>
+        ) : (
+          <span className="route-dot warn" title={`${props.runtimeKind} runs externally — provider and tool mode are managed by the CLI`} />
+        )}
         <RunField label="execution dir" title={`Execution directory. Default: ${props.defaultWorkspace || 'loading...'}`} variant="group">
           <ProjectSelector
             workspaceRoot={props.workspaceRoot}

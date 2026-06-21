@@ -5,6 +5,7 @@ import {
   normalizeWorkspaceRoot,
   normalizeOptionalString,
   normalizeToolMode,
+  normalizeSandboxMode,
   normalizeAllowedTools,
   normalizePositiveInteger,
   normalizeToolRetry,
@@ -19,6 +20,7 @@ import {
 import { getRequestContext } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
+import type { MessageRouter } from '@los/agent/message-router';
 
 const CHAT_BODY_LIMIT_BYTES = 1024 * 1024;
 
@@ -28,12 +30,31 @@ export function registerChatRoute(
   defaultWorkspaceRoot: string,
   gatewayServiceId?: string,
   rateLimitHook?: (req: FastifyRequest, reply: FastifyReply) => Promise<void>,
+  messageRouter?: MessageRouter,
 ): void {
   app.post('/chat', { bodyLimit: CHAT_BODY_LIMIT_BYTES }, async (req, reply) => {
     if (rateLimitHook) await rateLimitHook(req, reply);
     if (reply.sent) return;
     const body = req.body as ChatRequestBody;
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+
+    // ── MessageRouter pre-check: if text starts with #, check for commands ──
+    if (messageRouter && prompt.startsWith('#')) {
+      const intent = messageRouter.resolveIntent(prompt);
+      if (intent.type !== 'chat' && intent.type !== 'unknown') {
+        // Command detected — dispatch via router (non-streaming)
+        const result = await messageRouter.route({
+          sourceKind: 'http-chat',
+          prompt,
+          sessionId: body.sessionId,
+        });
+        if (result.handled) {
+          return reply.send({ ok: true, text: result.text, sessionId: result.sessionId, intent: result.intent.type });
+        }
+        return reply.status(400).send({ error: result.error ?? 'Command not handled', intent: result.intent.type });
+      }
+      // # prefix but not a recognized command → fall through to normal chat
+    }
     const sessionId = normalizeOptionalString(body.sessionId);
     const systemPrompt = normalizeOptionalString(body.systemPrompt);
     const provider = normalizeOptionalString(body.provider);
@@ -57,6 +78,7 @@ export function registerChatRoute(
       : undefined;
     const identityName = normalizeOptionalString(body.identityName);
     const identityLevel = normalizeOptionalString(body.identityLevel);
+    const sandboxMode = normalizeSandboxMode(body.sandboxMode);
 
     if (!prompt) {
       return reply.status(400).send({ error: 'prompt is required' });
@@ -126,7 +148,7 @@ export function registerChatRoute(
       const result = await runChat({
         prompt, sessionId, systemPrompt, provider, model,
         modelSettings: modelSettings as Record<string, unknown> | undefined,
-        workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs,
+        workspaceRoot, toolMode, sandboxMode, allowedTools, maxLoops, timeoutMs,
         toolRetry: toolRetry as Record<string, unknown> | undefined,
         mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
         identityName, identityLevel,

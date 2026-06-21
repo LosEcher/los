@@ -65,6 +65,7 @@ export async function runChat(params: {
   modelSettings: Record<string, unknown> | undefined;
   workspaceRoot: string;
   toolMode: string;
+  sandboxMode?: string;
   allowedTools: string[] | undefined;
   maxLoops: number | undefined;
   timeoutMs: number | undefined;
@@ -235,7 +236,9 @@ export async function runChat(params: {
       systemPrompt: effectiveSystemPrompt,
       workspaceRoot,
       toolMode: toolMode as 'all' | 'project-write' | 'read-only',
-      sandboxMode: (config as any).agent?.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox' | undefined,
+      sandboxMode: params.sandboxMode
+        ? (params.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox')
+        : (config as any).agent?.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox' | undefined,
       initialMessages: branchSourceMessages ?? resumedSession?.messages,
       allowedTools,
       maxLoops,

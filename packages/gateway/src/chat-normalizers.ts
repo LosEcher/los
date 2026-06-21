@@ -4,6 +4,7 @@ import { normalizeOptionalString, normalizeNonNegativeInteger as serverNormalize
 import { resolve } from 'node:path';
 
 export type ToolMode = 'all' | 'project-write' | 'read-only';
+export type SandboxMode = 'readonly' | 'workspace-write' | 'sandbox';
 
 export interface MCPRequestServer {
   command: string;
@@ -26,6 +27,11 @@ export function normalizeWorkspaceRoot(value: unknown, defaultWorkspaceRoot: str
 export function normalizeToolMode(value: unknown): ToolMode {
   if (value === 'read-only' || value === 'project-write' || value === 'all') return value;
   return 'project-write';
+}
+
+export function normalizeSandboxMode(value: unknown): SandboxMode | undefined {
+  if (value === 'readonly' || value === 'workspace-write' || value === 'sandbox') return value;
+  return undefined;
 }
 
 export function normalizeAllowedTools(value: unknown): string[] | undefined {

@@ -9,7 +9,9 @@ import {
   getJson,
   postJson,
   streamChat,
+  streamRuntime,
   type ModelSettings,
+  type RuntimeKind,
   type SessionDetail,
   type SessionTraceResponse,
   type SessionObservability,
@@ -67,6 +69,7 @@ export function ChatPage({
     try { return localStorage.getItem('los-workspace') ?? ''; } catch { return ''; }
   });
   const [toolMode, setToolMode] = useState<ToolMode>('project-write');
+  const [runtimeKind, setRuntimeKind] = useState<RuntimeKind | 'los'>('los');
   const [maxLoops, setMaxLoops] = useState(20); // default from infra/config.ts, overridden by /settings
   const [timeoutMs, setTimeoutMs] = useState(120_000);
   const [temperature, setTemperature] = useState('');
@@ -359,54 +362,75 @@ export function ChatPage({
     });
 
     try {
-      const composerPayload = {
-        systemPrompt: systemPrompt.trim() || undefined,
-        allowedTools: parseCommaList(allowedTools),
-        toolRetry: buildToolRetryPayload({
-          maxAttempts: toolRetryMaxAttempts,
-          baseDelayMs: toolRetryBaseDelayMs,
-          maxDelayMs: toolRetryMaxDelayMs,
-        }),
-        modelSettings: buildModelSettingsPayload({
-          temperature,
-          topP,
-          maxTokens,
-          presencePenalty,
-          frequencyPenalty,
-        }),
-      };
-      await streamChat({
-        prompt: text,
-        sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
-        branchFrom: branchFromRef.current ?? undefined,
-        systemPrompt: composerPayload.systemPrompt,
-        provider: provider.trim() || undefined,
-        model: model.trim() || undefined,
-        modelSettings: composerPayload.modelSettings,
-        workspaceRoot: workspaceRoot.trim() || undefined,
-        toolMode,
-        allowedTools: composerPayload.allowedTools,
-        maxLoops,
-        traceId: activeTodoContext?.traceId,
-        dedupeKey: activeTodoContext ? `todo:${activeTodoContext.id}:${Date.now()}` : undefined,
-        timeoutMs,
-        toolRetry: composerPayload.toolRetry,
-        runContract: readRunContract(activeTodoContext),
-        todoId: activeTodoContext?.id,
-      }, controller.signal, ({ event, data }) => {
-        if (event === 'session' && typeof data.sessionId === 'string') {
-          setSessionId(data.sessionId);
-          onSessionSelect(data.sessionId);
-        }
-        if (typeof data.taskRunId === 'string') setTaskRunId(data.taskRunId);
-        if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
+      if (runtimeKind === 'los') {
+        // ── los agent (internal ReAct loop) ──
+        const composerPayload = {
+          systemPrompt: systemPrompt.trim() || undefined,
+          allowedTools: parseCommaList(allowedTools),
+          toolRetry: buildToolRetryPayload({
+            maxAttempts: toolRetryMaxAttempts,
+            baseDelayMs: toolRetryBaseDelayMs,
+            maxDelayMs: toolRetryMaxDelayMs,
+          }),
+          modelSettings: buildModelSettingsPayload({
+            temperature,
+            topP,
+            maxTokens,
+            presencePenalty,
+            frequencyPenalty,
+          }),
+        };
+        await streamChat({
+          prompt: text,
+          sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
+          branchFrom: branchFromRef.current ?? undefined,
+          systemPrompt: composerPayload.systemPrompt,
+          provider: provider.trim() || undefined,
+          model: model.trim() || undefined,
+          modelSettings: composerPayload.modelSettings,
+          workspaceRoot: workspaceRoot.trim() || undefined,
+          toolMode,
+          allowedTools: composerPayload.allowedTools,
+          maxLoops,
+          traceId: activeTodoContext?.traceId,
+          dedupeKey: activeTodoContext ? `todo:${activeTodoContext.id}:${Date.now()}` : undefined,
+          timeoutMs,
+          toolRetry: composerPayload.toolRetry,
+          runContract: readRunContract(activeTodoContext),
+          todoId: activeTodoContext?.id,
+        }, controller.signal, ({ event, data }) => {
+          if (event === 'session' && typeof data.sessionId === 'string') {
+            setSessionId(data.sessionId);
+            onSessionSelect(data.sessionId);
+          }
+          if (typeof data.taskRunId === 'string') setTaskRunId(data.taskRunId);
+          if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
+            setRows(prev => [...prev, streamRow(event, data)]);
+          }
+          if (event === 'turn' || event === 'done' || event === 'tool.result' || event === 'tool.call') {
+            void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
+          }
+        });
+      } else {
+        // ── External runtime (Claude Code / Codex CLI) ──
+        setRows(prev => [...prev, {
+          id: crypto.randomUUID(),
+          event: 'runtime.started',
+          message: `Starting ${runtimeKind}...`,
+          level: 'ok' as const,
+        }]);
+        await streamRuntime({
+          kind: runtimeKind,
+          prompt: text,
+          workspaceRoot: workspaceRoot.trim() || undefined,
+          timeoutMs,
+        }, controller.signal, ({ event, data }) => {
           setRows(prev => [...prev, streamRow(event, data)]);
-        }
-        // Invalidate trace query on key events; messages rebuild from trace projection
-        if (event === 'turn' || event === 'done' || event === 'tool.result' || event === 'tool.call') {
-          void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
-        }
-      });
+          if (event === 'runtime.completed' || event === 'runtime.error') {
+            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          }
+        });
+      }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
         const errMsg = String((err as Error).message ?? err);
@@ -498,8 +522,14 @@ export function ChatPage({
         <div className="chat-context-bar">
           <ContextChip label="session" value={sessionId ?? 'new'} tone={sessionId ? 'ok' : undefined} />
           {activeTodoContext ? <ContextChip label="todo" value={activeTodoContext.id} tone="ok" /> : null}
-          <ContextChip label="provider" value={provider || 'default'} />
-          <ContextChip label="model" value={model || 'provider default'} />
+          {runtimeKind !== 'los' ? (
+            <ContextChip label="runtime" value={runtimeKind} tone="warn" />
+          ) : (
+            <>
+              <ContextChip label="provider" value={provider || 'default'} />
+              <ContextChip label="model" value={model || 'provider default'} />
+            </>
+          )}
           <ContextChip label="task" value={taskRunId ?? (running ? 'starting' : 'idle')} tone={running ? 'warn' : undefined} />
         </div>
 
@@ -532,6 +562,8 @@ export function ChatPage({
           modelRoutes={modelRoutes.data}
           toolMode={toolMode}
           onToolModeChange={setToolMode}
+          runtimeKind={runtimeKind}
+          onRuntimeKindChange={setRuntimeKind}
           workspaceRoot={workspaceRoot}
           onWorkspaceRootChange={setWorkspaceRoot}
           defaultWorkspace={defaultWorkspace}

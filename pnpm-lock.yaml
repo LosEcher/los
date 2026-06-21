@@ -186,6 +186,10 @@ importers:
         version: 5.9.3
 
   packages/telegram-bot:
+    dependencies:
+      '@los/agent':
+        specifier: workspace:*
+        version: link:../agent
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -233,6 +237,9 @@ importers:
 
   packages/wechat-bot:
     dependencies:
+      '@los/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@los/infra':
         specifier: workspace:*
         version: link:../infra

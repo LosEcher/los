@@ -67,6 +67,7 @@ import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
+import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
 
 const log = getLogger('gateway');
 const VERSION = '0.1.0';
@@ -239,7 +240,14 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerMCPRoutes(app);
   registerSkillRoutes(app, DEFAULT_WORKSPACE_ROOT);
   registerRuleRoutes(app, DEFAULT_WORKSPACE_ROOT);
-  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId, chatLimiter.hook);
+
+  // ── MessageRouter (unified inbound routing) ─────────────
+  const messageRouter = new MessageRouter({
+    handlers: createBuiltinHandlers({ config }),
+    defaultChannelId: 'direct-http',
+  });
+
+  registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId, chatLimiter.hook, messageRouter);
   registerOpenAICompatibleRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId);
 
   // ── Feature routes ─────────────────────────────────
@@ -252,7 +260,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerRunRoutes(app);
   registerIntegrationRoutes(app, config, DEFAULT_WORKSPACE_ROOT);
   registerCommunicationRoutes(app);
-  registerRuntimeAdapterRoutes(app);
+  registerRuntimeAdapterRoutes(app, messageRouter);
   registerToolGateRoutes(app);
   setupLiveEventPush(app);
   registerLiveEventRoutes(app);

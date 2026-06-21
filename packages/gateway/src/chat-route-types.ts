@@ -2,9 +2,12 @@ import type { ModelSettings } from '@los/agent/model-settings';
 import type { RunContractMetadataInput } from '@los/agent';
 import type {
   MCPRequestServer,
+  SandboxMode,
   ToolMode,
   ToolRetryInput,
 } from './chat-normalizers.js';
+
+export type { SandboxMode, ToolMode };
 
 export interface ChatRequestBody {
   prompt: string;
@@ -17,6 +20,7 @@ export interface ChatRequestBody {
   modelSettings?: ModelSettings;
   workspaceRoot?: string;
   toolMode?: ToolMode;
+  sandboxMode?: SandboxMode;
   allowedTools?: string[];
   maxLoops?: number;
   traceId?: string;

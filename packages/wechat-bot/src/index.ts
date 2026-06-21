@@ -55,6 +55,13 @@ import {
   type WeClawConfig,
   type WeClawSendResult,
 } from './bridge/weclaw.js';
+import {
+  MessageRouter,
+  createBuiltinHandlers,
+  createTextChannelContext,
+  type HandlerDependencies,
+  type NormalizerInput,
+} from '@los/agent/message-router';
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -285,6 +292,40 @@ async function callLosApi(path: string, body: unknown): Promise<void> {
   }
 }
 
+// ── MessageRouter helpers ───────────────────────────────────────────
+
+function channelToSourceKind(kind: string): 'wx-weixin' | 'wx-web' {
+  switch (kind) {
+    case 'weixin': return 'wx-weixin';
+    case 'web':    return 'wx-web';
+    default:       return 'wx-weixin';
+  }
+}
+
+async function sendTextToChannel(ch: Channel, text: string): Promise<void> {
+  const msg: UnifiedMessage = {
+    id: `router-${Date.now()}`,
+    type: MessageType.TEXT,
+    version: '1.0',
+    text,
+    routing: {
+      priority: MessagePriority.NORMAL,
+      recipient: null,
+      replyTo: null,
+      channel: ch.kind,
+    },
+    metadata: {
+      timestamp: new Date().toISOString(),
+      source: 'message-router',
+      channel: ch.kind,
+    },
+    _internal: { standardizedAt: new Date().toISOString(), compressed: false, size: text.length },
+  };
+  await ch.send(msg);
+}
+
+let messageRouter: MessageRouter; // backward compat, set in main()
+
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -362,6 +403,41 @@ async function main(): Promise<void> {
   console.log(`  WeClaw: ${weclawAvailable ? '✅ active' : '⚠️ offline'}`);
   console.log(`  WxPusher: ${channels.some(c => c.kind === 'weixin') ? '✅ configured' : '⚠️ not configured'}`);
   console.log('');
+
+  // 2.5 Wire MessageRouter — handles inbound commands from all channels
+  const routerChannels = channels.map(ch =>
+    createTextChannelContext(ch.kind, `${ch.kind}-bot`, async (text) => {
+      await sendTextToChannel(ch, text);
+      return { ok: true };
+    }),
+  );
+
+  const router = new MessageRouter({
+    channels: routerChannels,
+    defaultChannelId: routerChannels[0]?.id ?? null,
+    handlers: createBuiltinHandlers({
+      config: {} as any,
+    }),
+  });
+
+  // Register inbound message handlers on each channel
+  for (const ch of channels) {
+    if (ch.capabilities.upCall) {
+      ch.onMessage(async (msg: UnifiedMessage) => {
+        try {
+          const sk = ch.kind === 'weixin' ? 'wx-weixin' as const : 'wx-web' as const;
+          if (sk === 'wx-weixin') {
+            await router.route({ sourceKind: 'wx-weixin', text: msg.text, uid: msg.routing.recipient ?? undefined, metadata: msg.metadata as Record<string, unknown> });
+          } else if (sk === 'wx-web') {
+            await router.route({ sourceKind: 'wx-web', action: msg.text, sessionId: msg.metadata.sessionId ?? '' });
+          }
+        } catch (err) {
+          console.error(`[router] ${ch.kind} failed: ${(err as Error).message}`);
+        }
+      });
+      console.log(`  [${ch.kind}] ✅ inbound handler registered`);
+    }
+  }
 
   // 3. Connect SSE
   connectSSE();
