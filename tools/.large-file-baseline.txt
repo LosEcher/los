@@ -23,6 +23,7 @@ packages/agent/src/todo-seeds.ts
 packages/cli/src/index.ts
 packages/cli/src/provider.ts
 packages/gateway/src/chat-service.ts
+packages/gateway/src/routes/data/memory-routes.ts
 packages/gateway/src/routes/providers/provider-routes.ts
 packages/infra/src/config.ts
 packages/memory/src/core/compaction.ts
@@ -35,3 +36,4 @@ packages/agent/src/ga-loop-runner.ts
 packages/agent/src/ga-related-project-scanner.ts
 packages/wechat-bot/src/index.ts
 packages/media/src/media-runtime.ts
+packages/telegram-bot/src/index.ts

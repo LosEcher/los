@@ -86,7 +86,8 @@ export async function scanFileHotspots(opts: {
   excludePatterns?: string[];
 }): Promise<FileHotspotReport> {
   const root = opts.workspaceRoot || process.cwd();
-  const { glob } = await import('fast-glob');
+  const fastGlob = await import('fast-glob');
+  const glob = fastGlob.default ?? (fastGlob as unknown as { glob: typeof fastGlob.default }).glob;
   const { readFileSync, existsSync } = await import('node:fs');
   const { resolve, relative } = await import('node:path');
 
@@ -130,12 +131,12 @@ export async function scanFileHotspots(opts: {
   const db = getDb();
   const prev = await db.query<{
     id: string;
-    result_summary: unknown;
+    result_summary_json: unknown;
   }>(
-    `SELECT id, result_summary
+    `SELECT id, result_summary_json
      FROM governance_jobs
      WHERE job_type = 'file_size'
-       AND result_summary IS NOT NULL
+       AND result_summary_json IS NOT NULL
      ORDER BY last_run_at DESC
      LIMIT 1`,
     [],
@@ -144,9 +145,9 @@ export async function scanFileHotspots(opts: {
   let previousFiles: Map<string, number> = new Map();
 
   if (prev.rows.length > 0) {
-    const prevSummary = typeof prev.rows[0].result_summary === 'string'
-      ? JSON.parse(prev.rows[0].result_summary)
-      : (prev.rows[0].result_summary as Record<string, unknown>) ?? {};
+    const prevSummary = typeof prev.rows[0].result_summary_json === 'string'
+      ? JSON.parse(prev.rows[0].result_summary_json)
+      : (prev.rows[0].result_summary_json as Record<string, unknown>) ?? {};
     const prevOver400 = (prevSummary.filesOver400 as Array<{ file: string; lines: number }>) ?? [];
     const prevOver600 = (prevSummary.filesOver600 as Array<{ file: string; lines: number }>) ?? [];
     for (const f of [...prevOver400, ...prevOver600]) {

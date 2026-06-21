@@ -139,12 +139,14 @@ export async function persistLoopPrinciples(
     let created = 0;
     for (const p of principles) {
       try {
-        const name = `${p.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const id = `proc-${p.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const name = `${p.name}-${Date.now()}`;
         await db.query(
-          `INSERT INTO procedural_candidates (name, content, severity, status, metadata_json)
-           VALUES ($1, $2, $3, 'candidate', $4::jsonb)
+          `INSERT INTO procedural_candidates (id, name, content, severity, status, compaction_id, session_id, evidence_json)
+           VALUES ($1, $2, $3, $4, 'draft', 'ga-auto', 'ga-system', $5::jsonb)
            ON CONFLICT DO NOTHING`,
           [
+            id,
             name,
             `**Context:** ${p.context}\n\n**Principle:** ${p.principle}\n\n**Evidence:**\n${p.evidence.map(e => `- ${e}`).join('\n')}`,
             p.severity,

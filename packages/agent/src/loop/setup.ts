@@ -20,6 +20,7 @@ import type { MCPServerRegistryRecord } from '../tools/external/mcp-client.js';
 import { listMCPServers } from '../mcp-servers.js';
 import { createSpawnAgentRunner, registerSpawnAgentTool, type ChildAgentRunner } from '../tools/core/agent-tools.js';
 import { createEventEmitter, type SessionEventContext, type SessionEventCallback } from '../event-emitter.js';
+import { appendSessionEvent } from '../session-events.js';
 import {
   buildInitialMessages,
   getDefaultSystemPrompt,
@@ -113,7 +114,7 @@ export function setupAgentRun(
   const signal = config.signal;
 
   // Build initial messages (synchronous; MCP loading happens in async phase)
-  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens, config.contextCompression);
+  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens, config.contextCompression, config.sessionId);
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });

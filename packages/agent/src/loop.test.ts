@@ -137,6 +137,7 @@ function resolveAllowedTools(
 function resolveToolPolicy(
   toolMode: 'all' | 'project-write' | 'read-only',
   retry: AgentConfig['toolRetry'] | undefined,
+  sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox',
 ) {
   const normalizedRetry = retry ? {
     maxAttempts: retry.maxAttempts,
@@ -144,11 +145,22 @@ function resolveToolPolicy(
     maxDelayMs: retry.maxDelayMs,
   } : undefined;
 
-  if (toolMode === 'read-only') {
+  // sandboxMode 'readonly'
+  if (sandboxMode === 'readonly') {
     return { maxRiskLevel: 'L0' as const, allowWrites: false, sandboxAvailable: false, retry: normalizedRetry };
   }
-  if (toolMode === 'project-write') {
+  // sandboxMode 'workspace-write' or toolMode 'project-write'
+  if (sandboxMode === 'workspace-write' || toolMode === 'project-write') {
     return { maxRiskLevel: 'L1' as const, allowWrites: true, sandboxAvailable: false, retry: normalizedRetry };
+  }
+  // sandboxMode 'sandbox' — test env on macOS has sandbox-exec, so sandbox is available
+  if (sandboxMode === 'sandbox') {
+    const sandboxAvailable = true; // test assumes macOS sandbox-exec available
+    return { maxRiskLevel: 'L2' as const, allowWrites: true, sandboxAvailable, retry: normalizedRetry };
+  }
+  // Legacy modes
+  if (toolMode === 'read-only') {
+    return { maxRiskLevel: 'L0' as const, allowWrites: false, sandboxAvailable: false, retry: normalizedRetry };
   }
   return { maxRiskLevel: 'L2' as const, allowWrites: true, sandboxAvailable: true, retry: normalizedRetry };
 }
