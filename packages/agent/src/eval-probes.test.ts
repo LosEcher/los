@@ -196,12 +196,17 @@ function grepInDir(dir: string, pattern: string, maxDepth: number): boolean {
 // Passing pattern: format only changed files unless the operator approves a broad format pass.
 
 test('E01: dirty worktree detection exists as a code path', async () => {
-  // Verify that the safeWorkspacePath utility rejects paths outside workspace
-  // (the formatter anti-pattern starts with unconstrained path operations)
+  // Verify that the safeWorkspacePath utility rejects traversal outside workspace
   const { safeWorkspacePath } = await import('./tools/core/path-safety.js');
-  const valid = safeWorkspacePath('/tmp/test-repo/src/file.ts', '/tmp/test-repo');
-  assert.ok(typeof valid === 'string' || valid === null,
-    'safeWorkspacePath guards filerange boundaries — first layer of E01 prevention');
+  // Using an existing workspace root (ROOT) ensures resolve doesn't throw on nonexistent dirs
+  const valid = safeWorkspacePath(ROOT, 'packages/agent/src/index.ts');
+  assert.ok(typeof valid === 'string' && valid.length > 0,
+    'safeWorkspacePath resolves valid in-tree paths');
+  // The anti-pattern rejection: attempting to escape the workspace
+  assert.throws(() => {
+    safeWorkspacePath(ROOT, '../outside-workspace');
+  }, /traversal denied/i,
+    'E01: path traversal outside workspace is rejected — dirty formatter defense layer');
 });
 
 // ── E05 ───────────────────────────────────────────────────
@@ -253,14 +258,13 @@ test('E06: todo status and execution evidence are separate surfaces', async () =
 
     // But a separate task_run is the execution evidence — todo.done does not imply executed
     const db = getDb();
-    const todoTasks = await db.query<{ id: string }>(
-      'SELECT id FROM task_runs WHERE task_run_id_for_todo = $1', [todoId],
+    // E06 gate: todos and task_runs are separate tables. A todo can be 'done'
+    // while no task_run references it. This separation IS the anti-pattern defense.
+    const taskCount = await db.query<{ cnt: string }>(
+      'SELECT count(*)::text as cnt FROM task_runs WHERE id = $1', [taskRunId],
     );
-    // The test verifies that todo=done can exist WITHOUT a matching task_run
-    // This is the anti-pattern: E06 says "report todo state as planning truth
-    // and execution evidence separately"
-    assert.ok(Array.isArray(todoTasks.rows),
-      'E06: todo done and task_run execution evidence are separate surfaces — verified');
+    assert.ok(Number(taskCount.rows[0]?.cnt ?? '0') === 0,
+      'no task_run for this todo id — todo.done and task execution are separate surfaces');
   } finally {
     await closeDb().catch(() => undefined);
   }
