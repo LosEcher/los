@@ -60,11 +60,9 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
   const gatewayUrl = process.env.GATEWAY_URL;
   const heartbeatViaApi = !!gatewayUrl;
 
-  if (!heartbeatViaApi) {
-    await initDb(config.databaseUrl);
-    await ensureExecutorNodeStore();
-    await ensureArtifactStore();
-  }
+  await initDb(config.databaseUrl);
+  await ensureExecutorNodeStore();
+  await ensureArtifactStore();
 
   const nodeId = config.executor.nodeId ?? process.env.EXECUTOR_NODE_ID ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
