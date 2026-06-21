@@ -1,13 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import {
   ensureMemoryStore, addObservation, searchObservations,
-  getStats, deleteObservation, updateObservation,
+  getStats, deleteObservation, updateObservation, getObservation,
   ensureMemoryCompactionStore, compactSession, listCompactions,
   retrieveActiveRules, routeMemoryRetrieval,
   applyRetentionPolicy, checkMemoryIntegrity,
   getLatestCheckpoint,
 } from '@los/memory';
 import { syncMemoryMd } from '@los/memory';
+import {
+  resolveMemoryScope,
+  normalizeScope,
+  canAccessMemory,
+  canWriteToScope,
+  canDeleteMemory,
+  evaluatePromotion,
+  type MemoryScope,
+  type MemoryAccessContext,
+} from '@los/memory';
 import { ensureRunEvalStore } from '@los/agent';
 import { ensureTaskRunStore } from '@los/agent/task-runs';
 import { getDb } from '@los/infra/db';
@@ -22,6 +32,44 @@ import {
 } from '../server-helpers.js';
 
 const log = getLogger('memory-routes');
+
+// ── ACL helpers ───────────────────────────────────────────
+
+function scopeRank(s: MemoryScope): number {
+  const order: MemoryScope[] = ['session', 'project', 'user', 'global'];
+  return order.indexOf(s);
+}
+
+/** Build an access context from the request context, sessionId, and target scope.
+ *  Operator status via x-los-role header (safety valve for human operators). */
+function buildAccessContext(
+  req: { headers: Record<string, string | string[] | undefined> },
+  targetScope: MemoryScope,
+  opts?: { sessionId?: string | null; targetSessionId?: string | null; targetProjectId?: string | null; targetUserId?: string | null },
+): MemoryAccessContext {
+  const ctx = getRequestContext(req as any);
+  const reqScope = resolveMemoryScope({
+    sessionId: opts?.sessionId,
+    tenantId: ctx.tenantId,
+    projectId: ctx.projectId,
+    userId: ctx.userId,
+  });
+  const role = normalizeHeader(req.headers['x-los-role']);
+  return {
+    requesterScope: reqScope,
+    targetScope,
+    isOperator: role === 'operator',
+    sameSession: opts?.targetSessionId ? (opts?.targetSessionId === opts?.sessionId) : undefined,
+    sameProject: opts?.targetProjectId ? (opts.targetProjectId === ctx.projectId) : undefined,
+    sameUser: opts?.targetUserId ? (opts.targetUserId === ctx.userId) : undefined,
+  };
+}
+
+function normalizeHeader(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== 'string') return undefined;
+  return raw.trim() || undefined;
+}
 
 export function registerMemoryRoutes(app: FastifyInstance): void {
   app.get('/memory', async (req) => {
@@ -50,16 +98,34 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     return { count: results.length, results };
   });
 
-  app.post('/memory', async (req) => {
-    const { title, summary, kind, tags, content, metadata, source, sessionId, nodeId } = req.body as any;
+  app.post('/memory', async (req, reply) => {
+    const { title, summary, kind, tags, content, metadata, source, sessionId, nodeId, scope: requestedScope } = req.body as any;
     const context = getRequestContext(req);
     await ensureMemoryStore();
+
+    // Scope enforcement: caller must be able to write at the requested scope
+    const targetScope = normalizeScope(requestedScope ?? 'session');
+    const acl = buildAccessContext(req, targetScope, { sessionId: sessionId });
+    if (!canWriteToScope(acl)) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        detail: `Scope ${acl.requesterScope} cannot write to ${targetScope} scope`,
+        requiredScope: targetScope,
+        yourScope: acl.requesterScope,
+      });
+    }
+
     const obs = await addObservation({
       title, summary, kind,
       tags: normalizeStringArray(tags),
       content,
       source,
-      metadata: normalizeMemoryMetadata(metadata, { scope: 'project', memoryLayer: 'semantic', archived: false }),
+      metadata: normalizeMemoryMetadata(metadata, {
+        scope: targetScope,
+        memoryLayer: metadata?.memoryLayer ?? 'episodic',
+        archived: false,
+        observerType: metadata?.observerType ?? 'user',
+      }),
       sessionId: normalizeOptionalString(sessionId),
       tenantId: context.tenantId,
       projectId: context.projectId,
@@ -90,9 +156,31 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     return obs;
   });
 
-  app.delete('/memory/:id', async (req) => {
+  app.delete('/memory/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     await ensureMemoryStore();
+    const existing = await getObservation(parseInt(id));
+    if (!existing) return reply.status(404).send({ error: 'Not found' });
+
+    // Scope enforcement: can the caller delete at the observation's scope?
+    const targetScope = normalizeScope(existing.metadata.scope as string);
+    const acl: MemoryAccessContext = {
+      ...buildAccessContext(req, targetScope, {
+        sessionId: existing.sessionId,
+        targetSessionId: existing.sessionId,
+        targetProjectId: existing.projectId,
+        targetUserId: existing.userId,
+      }),
+    };
+    if (!canDeleteMemory(acl)) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        detail: `Cannot delete observation at scope ${targetScope} from scope ${acl.requesterScope}`,
+        observationScope: targetScope,
+        yourScope: acl.requesterScope,
+      });
+    }
+
     const ok = await deleteObservation(parseInt(id));
     return { ok };
   });
@@ -248,5 +336,64 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
 
     log.info(`Auto-compacted ${compacted.length} session(s)${errors.length > 0 ? `, ${errors.length} error(s)` : ''}`);
     return { compacted: compacted.length, compactedSessionIds: compacted, errors };
+  });
+
+  // Promote an observation to the next scope level.
+  app.post('/memory/:id/promote', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    await ensureMemoryStore();
+    const obs = await getObservation(parseInt(id));
+    if (!obs) return reply.status(404).send({ error: 'Not found' });
+
+    const fromScope = normalizeScope(obs.metadata.scope as string);
+    const evidence = {
+      fromScope,
+      crossSessionEvidence: Number(obs.metadata.crossSessionEvidence ?? 0),
+      crossProjectEvidence: Number(obs.metadata.crossProjectEvidence ?? 0),
+      crossUserEvidence: Number(obs.metadata.crossUserEvidence ?? 0),
+      compactionAttested: obs.metadata.compactionAttested === true || obs.metadata.attested === true,
+      operatorApproved: normalizeHeader(req.headers['x-los-role']) === 'operator',
+      daysSinceCreation: (Date.now() - new Date(obs.createdAt).getTime()) / (1000 * 60 * 60 * 24),
+      kind: obs.kind,
+    };
+
+    const decision = evaluatePromotion(fromScope, evidence);
+    if (!decision.allowed) {
+      return reply.status(422).send({
+        error: 'Promotion denied',
+        reason: decision.reason,
+        gate: decision.gate,
+        requiredCallerScope: decision.requiredCallerScope,
+      });
+    }
+
+    // Scope enforcement: caller must meet the required scope for this gate
+    const acl = buildAccessContext(req, decision.requiredCallerScope!);
+    if (!canWriteToScope(acl)) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        detail: `Promotion to ${decision.targetScope} requires ${decision.requiredCallerScope} caller scope, you have ${acl.requesterScope}`,
+      });
+    }
+
+    // Apply promotion: update metadata.scope
+    const updatedMetadata = {
+      ...(obs.metadata as Record<string, unknown>),
+      scope: decision.targetScope,
+      promotedAt: new Date().toISOString(),
+      promotedFrom: fromScope,
+      promotedGate: decision.gate,
+    };
+
+    await updateObservation(parseInt(id), { metadata: updatedMetadata });
+    const updated = await getObservation(parseInt(id));
+
+    return {
+      ok: true,
+      fromScope,
+      toScope: decision.targetScope,
+      gate: decision.gate,
+      observation: updated,
+    };
   });
 }
