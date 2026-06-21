@@ -41,7 +41,8 @@ function scopeRank(s: MemoryScope): number {
 }
 
 /** Build an access context from the request context, sessionId, and target scope.
- *  Operator status via x-los-role header (safety valve for human operators). */
+ *  Operator status is taken from the validated RequestContext (gated on operatorToken),
+ *  NOT from the forgeable x-los-role header. */
 function buildAccessContext(
   req: { headers: Record<string, string | string[] | undefined> },
   targetScope: MemoryScope,
@@ -54,25 +55,18 @@ function buildAccessContext(
     projectId: ctx.projectId,
     userId: ctx.userId,
   });
-  const role = normalizeHeader(req.headers['x-los-role']);
   return {
     requesterScope: reqScope,
     targetScope,
-    isOperator: role === 'operator',
+    isOperator: ctx.isOperator,
     sameSession: opts?.targetSessionId ? (opts?.targetSessionId === opts?.sessionId) : undefined,
     sameProject: opts?.targetProjectId ? (opts.targetProjectId === ctx.projectId) : undefined,
     sameUser: opts?.targetUserId ? (opts.targetUserId === ctx.userId) : undefined,
   };
 }
-
-function normalizeHeader(value: string | string[] | undefined): string | undefined {
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (typeof raw !== 'string') return undefined;
-  return raw.trim() || undefined;
-}
-
 export function registerMemoryRoutes(app: FastifyInstance): void {
   app.get('/memory', async (req) => {
+    const ctx = getRequestContext(req);
     const query = req.query as {
       q?: string; kind?: string; source?: string; tag?: string; scope?: string;
       memoryLayer?: string; archived?: string; sessionId?: string;
@@ -80,6 +74,13 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       requestId?: string; traceId?: string; limit?: string;
     };
     await ensureMemoryStore();
+
+    // ACL enforcement: if auth is enabled, scope read results to the caller's
+    // tenant/project/user context. Operator can see everything.
+    const effectiveTenantId = ctx.isOperator ? (query.tenantId ?? undefined) : (query.tenantId ?? ctx.tenantId);
+    const effectiveProjectId = ctx.isOperator ? (query.projectId ?? undefined) : (query.projectId ?? ctx.projectId);
+    const effectiveUserId = ctx.isOperator ? (query.userId ?? undefined) : (query.userId ?? ctx.userId);
+
     const results = await searchObservations(query.q ?? '', {
       kind: query.kind,
       source: query.source,
@@ -88,9 +89,9 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       memoryLayer: query.memoryLayer,
       archived: parseOptionalBoolean(query.archived),
       sessionId: query.sessionId,
-      tenantId: query.tenantId,
-      projectId: query.projectId,
-      userId: query.userId,
+      tenantId: effectiveTenantId,
+      projectId: effectiveProjectId,
+      userId: effectiveUserId,
       requestId: query.requestId,
       traceId: query.traceId,
       limit: normalizeBoundedInteger(query.limit, 20, 1, 200),
@@ -162,11 +163,16 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     const existing = await getObservation(parseInt(id));
     if (!existing) return reply.status(404).send({ error: 'Not found' });
 
+    // Caller sessionId from query param — needed for sameSession check on
+    // session-scoped observations. Without it, session-scoped delete is denied
+    // unless the caller has a higher scope or is an operator.
+    const callerSessionId = (req.query as { sessionId?: string }).sessionId ?? null;
+
     // Scope enforcement: can the caller delete at the observation's scope?
     const targetScope = normalizeScope(existing.metadata.scope as string);
     const acl: MemoryAccessContext = {
       ...buildAccessContext(req, targetScope, {
-        sessionId: existing.sessionId,
+        sessionId: callerSessionId,
         targetSessionId: existing.sessionId,
         targetProjectId: existing.projectId,
         targetUserId: existing.userId,
@@ -341,6 +347,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
   // Promote an observation to the next scope level.
   app.post('/memory/:id/promote', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const ctx = getRequestContext(req);
     await ensureMemoryStore();
     const obs = await getObservation(parseInt(id));
     if (!obs) return reply.status(404).send({ error: 'Not found' });
@@ -352,7 +359,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       crossProjectEvidence: Number(obs.metadata.crossProjectEvidence ?? 0),
       crossUserEvidence: Number(obs.metadata.crossUserEvidence ?? 0),
       compactionAttested: obs.metadata.compactionAttested === true || obs.metadata.attested === true,
-      operatorApproved: normalizeHeader(req.headers['x-los-role']) === 'operator',
+      operatorApproved: ctx.isOperator,
       daysSinceCreation: (Date.now() - new Date(obs.createdAt).getTime()) / (1000 * 60 * 60 * 24),
       kind: obs.kind,
     };

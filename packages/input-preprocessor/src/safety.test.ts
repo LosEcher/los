@@ -112,6 +112,30 @@ describe('buildSafetyHeader', () => {
     assert.ok(header.length > 0);
     assert.ok(!header.includes('filtered'));
   });
+
+  it('includes compressed count when present', () => {
+    const report = createSafetyReport();
+    report.compressedCount = 15;
+    const header = buildSafetyHeader(report, 'code');
+    assert.ok(header.includes('15'));
+    assert.ok(header.includes('compressed'));
+  });
+
+  it('includes warning count when present', () => {
+    const report = createSafetyReport();
+    report.warnings = ['Warning A', 'Warning B'];
+    report.compressionRatio = 0.8;
+    const header = buildSafetyHeader(report, 'config');
+    assert.ok(header.includes('2 warnings'));
+  });
+
+  it('includes dedup count when present', () => {
+    const report = createSafetyReport();
+    report.deduplicatedCount = 7;
+    const header = buildSafetyHeader(report, 'mixed');
+    assert.ok(header.includes('7'));
+    assert.ok(header.includes('duplicates'));
+  });
 });
 
 describe('shouldSkipProcessing', () => {
@@ -148,6 +172,27 @@ describe('shouldSkipProcessing', () => {
     const reason = shouldSkipProcessing(binaryInput, config);
     assert.ok(reason);
     assert.ok(reason.includes('binary'));
+  });
+
+  it('skips high non-printable ratio input', () => {
+    const config = resolveConfig();
+    // Construct a long string with >30% non-printable characters.
+    const nonPrintable = '\x01\x02\x03\x04\x05\x06\x07\x08';
+    const padding = 'A'.repeat(5);
+    const input = nonPrintable + padding;
+    const reason = shouldSkipProcessing(input, config);
+    assert.ok(reason);
+    assert.ok(reason.includes('non-printable'));
+  });
+
+  it('does not skip low non-printable ratio', () => {
+    const config = resolveConfig();
+    // Single null byte is caught, but a few non-printables in mostly-printable shouldn't trigger.
+    // Our input has \x01 but mostly printable, ratio below 30%.
+    const input = '\x01' + 'A'.repeat(100) + '\nline2';
+    const reason = shouldSkipProcessing(input, config);
+    // Should not be "non-printable ratio" — either null (proceed), or empty/mini/token-budget.
+    assert.ok(!reason || !reason.includes('non-printable'));
   });
 
   it('skips oversized input', () => {
