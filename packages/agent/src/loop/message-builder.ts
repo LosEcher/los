@@ -59,7 +59,7 @@ Rules:
  *   separator and the tool-mode system prompt.
  */
 export function getDefaultSystemPrompt(
-  toolMode: 'all' | 'project-write' | 'read-only',
+  toolMode: 'all' | 'project-write' | 'read-only' | 'architect' | 'editor',
   identityBlock?: string,
 ): string {
   const base = toolMode === 'read-only' ? READ_ONLY_SYSTEM
@@ -71,6 +71,19 @@ export function getDefaultSystemPrompt(
   }
   return base;
 }
+
+/** Architect prompt — reasoning-first, produces a natural-language plan, no tool calls expected. */
+export const ARCHITECT_PROMPT = `You are a software architect. Your role is to analyze the user's request
+and produce a clear, step-by-step plan. Do NOT produce code. Do NOT use tools.
+Instead, describe what files need to change, what edits are needed, and in what order.
+Be specific: mention file paths, function names, and the nature of each change.
+End your response with "---plan-end---" to signal the plan is complete.`;
+
+/** Editor prompt — editing-first, receives an architect's plan and executes it with tools. */
+export const EDITOR_PROMPT = `You are a precise code editor. You have been given a plan by an architect.
+Follow the plan exactly. Use edit tools (write_file, edit_file, patch) to make the changes.
+Do NOT question the plan or suggest alternatives — just execute.
+If you encounter a problem, report it and stop. Do not ask the user for guidance.`;
 
 // ── Message Construction ──────────────────────────────────
 

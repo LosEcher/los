@@ -11,6 +11,21 @@ export interface AgentConfig {
   provider?: string;
   model?: string;
   modelSettings?: ModelSettings;
+  /**
+   * Architect/Editor dual model configuration.
+   * When set, loop.ts runs architect turns (planning) and editor turns (execution)
+   * in alternating fashion. Architect uses a reasoning model, editor uses a cheaper
+   * code-editing model with a simplified prompt.
+   */
+  architectEditor?: {
+    enabled: boolean;
+    /** Provider name for the architect model. Falls back to default provider if unset. */
+    architectProvider?: string;
+    /** Provider name for the editor model. Falls back to default provider if unset. */
+    editorProvider?: string;
+    /** Max architect turns before switching to editor. Default: 2. */
+    maxArchitectTurns?: number;
+  };
   initialMessages?: Message[];
   maxLoops?: number;
   systemPrompt?: string;

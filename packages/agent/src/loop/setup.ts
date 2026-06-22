@@ -100,13 +100,15 @@ export function setupAgentRun(
   const modelProfile = summarizeModelProfile(provider.profile);
   const toolMode = config.toolMode ?? 'project-write';
 
-  // Resolve system prompt. When explicitly provided (e.g., from gateway
-  // memory augmentation), use as-is. Otherwise, resolve agent identity and
-  // compose it with the default tool-mode prompt.
+  // Resolve system prompt. When explicitly provided, use as-is.
+  // For architect-editor mode, the prompt alternates by turn via the promptToolMode
+  // which is set before each turn in loop.ts.
   let systemPrompt = config.systemPrompt;
   if (!systemPrompt) {
     const identityBlock = identityBlockFromConfig(config);
-    systemPrompt = getDefaultSystemPrompt(toolMode, identityBlock || undefined);
+    // Start with architect prompt if architect-editor mode is enabled
+    const initialPromptToolMode = config.architectEditor?.enabled ? 'architect' as const : toolMode;
+    systemPrompt = getDefaultSystemPrompt(initialPromptToolMode, identityBlock || undefined);
   }
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
   const sandboxMode = config.sandboxMode ?? 'workspace-write';
