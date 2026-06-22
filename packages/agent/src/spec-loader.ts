@@ -2,13 +2,16 @@
  * Spec loader — resolves and loads relevant `.los/spec/` files based on the
  * editable surfaces and packages involved in a task.
  *
+ * Also covers the project-level `SKILL.md` and `docs/` governance surfaces —
+ * loaded as additional governance layers alongside per-package specs.
+ *
  * Pattern inspired by Trellis's context injection: per-package specs are
  * organized under `.los/spec/<package>/<layer>/index.md`. The loader maps
  * file paths (from editableSurfaces or workspace files) to spec layers,
  * then loads the matching spec content for context injection.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 
 export interface SpecLayer {
@@ -125,6 +128,48 @@ export function loadAllSpecs(): LoadedSpec[] {
   if (!existsSync(specDir)) return [];
 
   const loaded: LoadedSpec[] = [];
+
+  // Load SKILL.md governance surfaces (project-level + workspace-level)
+  for (const candidate of [
+    resolve(WORKSPACE_ROOT, 'SKILL.md'),
+    resolve(WORKSPACE_ROOT, '..', 'AGENTS.md'),
+  ]) {
+    if (!existsSync(candidate)) continue;
+    try {
+      const content = readFileSync(candidate, 'utf8');
+      const relPath = relative(WORKSPACE_ROOT, candidate);
+      loaded.push({
+        pkg: 'governance',
+        layer: relPath.replace(/\.md$/, '').replace(/[\\/]/g, '-'),
+        specPath: relPath,
+        content: `## Governance Surface: ${relPath}\n\n${content.slice(0, 8000)}`,
+      });
+    } catch { /* skip */ }
+  }
+
+  // Load ADR documents from docs/adr/ (last 5, governance-relevant)
+  const adrDir = resolve(WORKSPACE_ROOT, 'docs', 'adr');
+  if (existsSync(adrDir)) {
+    try {
+      const adrFiles = readdirSync(adrDir)
+        .filter(f => f.endsWith('.md'))
+        .sort()
+        .slice(-5); // latest 5 ADRs
+      for (const adrFile of adrFiles) {
+        const adrPath = resolve(adrDir, adrFile);
+        try {
+          const content = readFileSync(adrPath, 'utf8');
+          loaded.push({
+            pkg: 'governance',
+            layer: `adr-${adrFile.replace(/\.md$/, '')}`,
+            specPath: relative(WORKSPACE_ROOT, adrPath),
+            content: `## ADR: ${adrFile.replace(/^\d+-/, '').replace(/\.md$/, '')}\n\n${content.slice(0, 6000)}`,
+          });
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+
   const layers = [
     ['infra'],
     ['agent', 'loop'],
