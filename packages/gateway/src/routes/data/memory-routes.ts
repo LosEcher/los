@@ -33,13 +33,6 @@ import {
 
 const log = getLogger('memory-routes');
 
-// ── ACL helpers ───────────────────────────────────────────
-
-function scopeRank(s: MemoryScope): number {
-  const order: MemoryScope[] = ['session', 'project', 'user', 'global'];
-  return order.indexOf(s);
-}
-
 /** Build an access context from the request context, sessionId, and target scope.
  *  Operator status is taken from the validated RequestContext (gated on operatorToken),
  *  NOT from the forgeable x-los-role header. */

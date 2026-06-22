@@ -30,7 +30,28 @@ export interface ScanEntry {
   changeType: 'added' | 'modified' | 'unchanged' | 'removed';
 }
 
-const SKIP_DIRS = new Set(['.DS_Store', '@eaDir', '__pycache__', '.git', 'node_modules']);
+const SKIP_DIRS = new Set([
+  '.DS_Store', '@eaDir', '__pycache__', '.git', 'node_modules',
+  // Build output
+  'dist', '.turbo', 'build', 'out', '.next', '.output',
+  // Runtime logs / state (continuously changing files)
+  '.los-runtime',
+  // Python / pipenv
+  '.venv', 'venv', '.pytest_cache', '.mypy_cache', '.tox',
+  // macOS junk
+  '__MACOSX',
+  // IDE
+  '.idea', '.vscode',
+]);
+
+// Files that are always skipped in any directory (by extension or path suffix)
+const SKIP_FILE_PATTERNS = [
+  /\.log$/,
+  /\.tmp$/,
+  /~$/,
+  /\.DS_Store$/,
+  /Thumbs\.db$/,
+];
 
 export function createScanner(store: FileSyncStore, nodeId: string) {
   return {
@@ -161,6 +182,9 @@ async function walkDir(
     }
 
     if (!dirent.isFile()) continue;
+
+    // Skip files matching exclude patterns (logs, temps, etc.)
+    if (SKIP_FILE_PATTERNS.some(p => p.test(dirent.name))) continue;
 
     try {
       const stat = statSync(fullPath);
