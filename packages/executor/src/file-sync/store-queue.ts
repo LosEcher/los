@@ -40,6 +40,9 @@ function toIso(value: Date | string): string {
 
 const QUEUE_STATES = ['ready', 'transferring', 'verifying', 'done', 'retry', 'cooldown', 'reconcile'] as const;
 
+/** Maximum entries per batch INSERT to avoid PostgreSQL bind parameter overflow (65,535 limit). */
+const MAX_BATCH_SIZE = 500;
+
 export async function enqueueItems(
   folderId: string,
   entries: Array<{ filePath: string; size: number; mtimeNs: number }>,
@@ -47,45 +50,54 @@ export async function enqueueItems(
   if (!entries.length) return 0;
   const db = getDb();
   const now = new Date().toISOString();
-  const values: string[] = [];
-  const params: unknown[] = [];
-  let idx = 1;
+  let total = 0;
 
-  for (const e of entries) {
-    const queueId = `queue-${folderId}-${encodeURIComponent(e.filePath)}`;
-    params.push(queueId, folderId, e.filePath, e.size, e.mtimeNs, now, now);
-    values.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, 'ready', 0, null, $${idx + 5}, $${idx + 6})`);
-    idx += 7;
+  // Chunk to avoid PostgreSQL bind message parameter overflow
+  for (let offset = 0; offset < entries.length; offset += MAX_BATCH_SIZE) {
+    const chunk = entries.slice(offset, offset + MAX_BATCH_SIZE);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    for (const e of chunk) {
+      const queueId = `queue-${folderId}-${encodeURIComponent(e.filePath)}`;
+      params.push(queueId, folderId, e.filePath, e.size, e.mtimeNs, now, now);
+      values.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, 'ready', 0, null, $${idx + 5}, $${idx + 6})`);
+      idx += 7;
+    }
+
+    try {
+      const result = await db.query(
+        `INSERT INTO file_sync_queue (queue_id, folder_id, file_path, size, mtime_ns, state, attempts, last_error, created_at, updated_at)
+         VALUES ${values.join(', ')}
+         ON CONFLICT (queue_id) DO UPDATE SET
+           size = EXCLUDED.size,
+           mtime_ns = EXCLUDED.mtime_ns,
+           state = CASE
+             WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN 'ready'
+             ELSE file_sync_queue.state
+           END,
+           attempts = CASE
+             WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN file_sync_queue.attempts
+             ELSE file_sync_queue.attempts
+           END,
+           last_error = CASE
+             WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN NULL
+             ELSE file_sync_queue.last_error
+           END,
+           updated_at = EXCLUDED.updated_at`,
+        params,
+      );
+      total += result.rows.length;
+    } catch (err) {
+      log.warn(`enqueueItems failed for folder ${folderId} (chunk ${Math.floor(offset / MAX_BATCH_SIZE) + 1}): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  try {
-    const result = await db.query(
-      `INSERT INTO file_sync_queue (queue_id, folder_id, file_path, size, mtime_ns, state, attempts, last_error, created_at, updated_at)
-       VALUES ${values.join(', ')}
-       ON CONFLICT (queue_id) DO UPDATE SET
-         size = EXCLUDED.size,
-         mtime_ns = EXCLUDED.mtime_ns,
-         state = CASE
-           WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN 'ready'
-           ELSE file_sync_queue.state
-         END,
-         attempts = CASE
-           WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN file_sync_queue.attempts
-           ELSE file_sync_queue.attempts
-         END,
-         last_error = CASE
-           WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN NULL
-           ELSE file_sync_queue.last_error
-         END,
-         updated_at = EXCLUDED.updated_at`,
-      params,
-    );
-    log.debug(`enqueued ${entries.length} items for folder ${folderId}, affected ${result.rows.length}`);
-    return result.rows.length;
-  } catch (err) {
-    log.warn(`enqueueItems failed for folder ${folderId}: ${err instanceof Error ? err.message : String(err)}`);
-    return 0;
+  if (total > 0) {
+    log.debug(`enqueued ${total} items for folder ${folderId} (${entries.length} total in ${Math.ceil(entries.length / MAX_BATCH_SIZE)} chunk(s))`);
   }
+  return total;
 }
 
 export async function dequeueReadyItems(
