@@ -95,7 +95,6 @@ section "Summary"
 if [ "$ISSUES" -eq 0 ]; then
   green "All route registrations wired — no unwired exports detected"
 else
-  warn "$ISSUES unwired export(s) found — wire to server.ts or remove dead code"
+  red "$ISSUES unwired export(s) found — wire to server.ts or remove dead code"
+  exit 1
 fi
-
-exit 0  # warn only, never block

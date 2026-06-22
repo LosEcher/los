@@ -11,6 +11,9 @@ export interface AgentConfig {
   provider?: string;
   model?: string;
   modelSettings?: ModelSettings;
+  /** Run spec ID for contract lineage and cross-agent correlation (AP6). */
+  runSpecId?: string;
+  /** Trace ID for cross-session correlation (AP6). */
   /**
    * Architect/Editor dual model configuration.
    * When set, loop.ts runs architect turns (planning) and editor turns (execution)
