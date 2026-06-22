@@ -28,6 +28,10 @@ import {
   type ContextFillState,
   formatContextFill,
 } from './context-monitor.js';
+import {
+  evictMessages,
+  type SemanticEvictionConfig,
+} from './semantic-eviction.js';
 import type {
   AgentConfig,
   AgentModelDelta,
@@ -133,6 +137,30 @@ export async function runAgent(
             turn: s.turn,
             payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
           });
+          // Apply semantic eviction at critical fill to free context window
+          if (config.contextCompression?.semanticEviction?.enabled !== false) {
+            const persistedLocs = new Map<string, any[]>();
+            // Derive persisted locations from observation IDs in message metadata
+            for (let j = 0; j < messages.length; j++) {
+              const m = messages[j] as any;
+              if (m.role === 'tool' && m.tool_call_id && m.observation_id) {
+                persistedLocs.set(m.tool_call_id, [{
+                  kind: 'observation' as const,
+                  id: String(m.observation_id),
+                  label: `observation #${m.observation_id}`,
+                }]);
+              }
+            }
+            const evictedMsgs = evictMessages(messages as any[], persistedLocs, {
+              minResultBytes: config.contextCompression?.semanticEviction?.minResultBytes ?? 4096,
+              maxStubChars: config.contextCompression?.semanticEviction?.maxStubChars ?? 200,
+            });
+            if (evictedMsgs !== messages) {
+              messages.length = 0;
+              messages.push(...evictedMsgs as typeof messages);
+              agentLog.info(`Semantic eviction applied at critical fill (${(s.fillPercent * 100).toFixed(1)}%)`);
+            }
+          }
         },
       })
     : null;

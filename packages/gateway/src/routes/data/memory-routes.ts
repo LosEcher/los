@@ -203,6 +203,13 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       tenantId: context.tenantId,
       projectId: context.projectId,
       createdBy: context.userId ?? context.requestId,
+      // Pre/post hooks: checkpoint before compaction, context rebuild after
+      onPreCompact: async (preCtx) => {
+        log.info(`Compaction starting for session ${preCtx.sessionId} (mode=${preCtx.mode}, trigger=${preCtx.trigger ?? 'manual'})`);
+      },
+      onPostCompact: async (postCtx) => {
+        log.info(`Compaction complete for session ${postCtx.sessionId}: ${postCtx.observationCount} obs, ${postCtx.taskRunCount} tasks, ${postCtx.evalCount} evals, ${postCtx.proceduralCandidateCount} candidates, confidence=${postCtx.confidence.toFixed(2)}`);
+      },
     });
     return { compaction };
   });
