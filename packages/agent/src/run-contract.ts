@@ -1,4 +1,4 @@
-export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress';
+export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress' | 'architect-editor';
 
 /**
  * Execution mode controls how much human oversight is required.
@@ -10,6 +10,14 @@ export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' 
  *                Suitable for data migrations, production config changes, destructive ops.
  */
 export type ExecutionMode = 'lightweight' | 'standard' | 'heavyweight';
+
+/**
+ * Architect/Editor turn kind — used when mode='architect-editor'.
+ *
+ * - architect: reasoning-first model produces a natural-language plan.
+ * - editor:    editing-first model translates the plan into tool calls / code edits.
+ */
+export type ArchitectEditorTurn = 'architect' | 'editor';
 
 /** Execution modes that skip the plan_approved human gate. */
 const AUTO_APPROVE_MODES: ReadonlySet<ExecutionMode> = new Set(['lightweight']);
