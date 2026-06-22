@@ -22,6 +22,14 @@ export interface SpawnAgentRunnerOptions {
   modelSettings?: AgentConfig['modelSettings'];
   runContractMetadata?: AgentConfig['runContractMetadata'];
   workspaceRoot?: string;
+  /** Inherit parent traceId for cross-agent tracing (AP6). */
+  traceId?: string;
+  /** Inherit parent requestId for request correlation (AP6). */
+  requestId?: string;
+  /** Inherit parent runSpecId for run-spec lineage (AP6). */
+  runSpecId?: string;
+  /** Inherit parent architect-editor config for dual-model sub-agents (AP6). */
+  architectEditor?: AgentConfig['architectEditor'];
   toolRetry?: {
     maxAttempts?: number;
     baseDelayMs?: number;
@@ -91,7 +99,12 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       provider: request.provider ?? options.provider,
       model: request.model ?? options.model,
       modelSettings: options.modelSettings,
+      // Inherit parent run contract metadata for child run_spec creation
       runContractMetadata: options.runContractMetadata,
+      // Inherit trace/request/dedupe linkage from parent
+      traceId: options.traceId,
+      requestId: options.requestId,
+      runSpecId: options.runSpecId,
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
@@ -101,6 +114,8 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       toolRetry: options.toolRetry,
       signal: options.signal,
       onSessionEvent: options.onSessionEvent,
+      // Inherit architect-editor config from parent if enabled
+      architectEditor: options.architectEditor,
       // Child agents get Minimal identity: a role label only.
       // Per Agent Identity Decision Framework: short-lived, single-purpose,
       // constrained tools — identity should not consume context budget.

@@ -92,8 +92,8 @@ export function registerServerMaintenance(
     clearInterval(retentionTimer);
   });
 
-  // ── Daily governance sweep ─────────────────────────────────────
-  const GOVERNANCE_SWEEP_MS = 24 * 60 * 60 * 1000;
+  // ── Governance sweep (every 6 hours) ──────────────────────────
+  const GOVERNANCE_SWEEP_MS = 6 * 60 * 60 * 1000;
   const runGovernanceMaintenance = async () => {
     log.info('Governance sweep starting...');
     try {

@@ -128,6 +128,11 @@ export function setupAgentRun(
     modelSettings: config.modelSettings,
     runContractMetadata: config.runContractMetadata,
     workspaceRoot: config.workspaceRoot,
+    // AP6: inherit parent trace/request/run-spec for cross-agent correlation
+    traceId: config.traceId,
+    requestId: config.requestId,
+    runSpecId: config.runSpecId,
+    architectEditor: config.architectEditor,
     toolRetry: config.toolRetry,
     signal,
     onSessionEvent: config.onSessionEvent,
