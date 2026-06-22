@@ -33,13 +33,6 @@ import {
 
 const log = getLogger('memory-routes');
 
-// ── ACL helpers ───────────────────────────────────────────
-
-function scopeRank(s: MemoryScope): number {
-  const order: MemoryScope[] = ['session', 'project', 'user', 'global'];
-  return order.indexOf(s);
-}
-
 /** Build an access context from the request context, sessionId, and target scope.
  *  Operator status is taken from the validated RequestContext (gated on operatorToken),
  *  NOT from the forgeable x-los-role header. */
@@ -210,6 +203,13 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       tenantId: context.tenantId,
       projectId: context.projectId,
       createdBy: context.userId ?? context.requestId,
+      // Pre/post hooks: checkpoint before compaction, context rebuild after
+      onPreCompact: async (preCtx) => {
+        log.info(`Compaction starting for session ${preCtx.sessionId} (mode=${preCtx.mode}, trigger=${preCtx.trigger ?? 'manual'})`);
+      },
+      onPostCompact: async (postCtx) => {
+        log.info(`Compaction complete for session ${postCtx.sessionId}: ${postCtx.observationCount} obs, ${postCtx.taskRunCount} tasks, ${postCtx.evalCount} evals, ${postCtx.proceduralCandidateCount} candidates, confidence=${postCtx.confidence.toFixed(2)}`);
+      },
     });
     return { compaction };
   });

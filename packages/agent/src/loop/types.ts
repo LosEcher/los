@@ -104,6 +104,14 @@ export interface ContextCompressionConfig {
   emergencyRatio?: number;
   /** Input preprocessing configuration (log denoising, dedup, etc.). */
   preprocessor?: Partial<PreprocessorConfig>;
+  /** Semantic eviction configuration — mask persisted tool results at critical fill. */
+  semanticEviction?: {
+    enabled?: boolean;
+    /** Minimum result size in bytes to consider for eviction (default: 4096). */
+    minResultBytes?: number;
+    /** Maximum stub length in characters (default: 200). */
+    maxStubChars?: number;
+  };
 }
 
 export interface ToolCallStateTransition {

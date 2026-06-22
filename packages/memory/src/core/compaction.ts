@@ -16,6 +16,7 @@ import {
 } from '../procedures/procedural-candidates.js';
 import { buildTranscriptBrief, type TranscriptBrief } from '../transcript/transcript-brief.js';
 import { collectSymbolSummary } from './compaction-symbol-summary.js';
+import { rowToCompaction, assertRow, normalizeCandidateArray, type CompactionRow } from './compaction-rows.js';
 import {
   normalizeRequired, normalizeLimit, normalizeJsonObject,
   normalizeJsonArray, parseJsonArray, toIsoString,
@@ -71,6 +72,40 @@ export interface CompactSessionInput {
   checkpoint?: boolean;
   /** What triggered this operation (event_count, tool_state_change, time_interval, manual). */
   autoTrigger?: string;
+  /** Force re-compaction even if session already has a compaction record. */
+  force?: boolean;
+  /**
+   * Pre-compaction hook: called before advisory lock is acquired and data is gathered.
+   * Return `false` to abort compaction.
+   */
+  onPreCompact?: (ctx: PreCompactContext) => Promise<boolean | void>;
+  /**
+   * Post-compaction hook: called after compaction is written to DB.
+   */
+  onPostCompact?: (ctx: PostCompactContext) => Promise<void>;
+}
+
+export interface PreCompactContext {
+  sessionId: string;
+  runSpecId?: string | null;
+  mode: 'checkpoint' | 'full';
+  trigger?: string;
+  preCompactAt: string;
+}
+
+export interface PostCompactContext {
+  sessionId: string;
+  compactionId: string;
+  runSpecId?: string | null;
+  observationCount: number;
+  taskRunCount: number;
+  evalCount: number;
+  proceduralCandidateCount: number;
+  confidence: number;
+  evidenceCount: number;
+  mode: 'checkpoint' | 'full';
+  trigger?: string;
+  summary: Record<string, unknown>;
 }
 
 export interface ListCompactionsOptions {
@@ -149,6 +184,26 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   const sessionId = normalizeRequired(input.sessionId, 'sessionId');
   const db = getDb();
   const isCheckpoint = input.checkpoint === true;
+
+  // Pre-compaction hook — allow caller to abort or write checkpoint
+  if (input.onPreCompact) {
+    try {
+      const shouldContinue = await input.onPreCompact({
+        sessionId,
+        runSpecId: input.runSpecId ?? null,
+        mode: isCheckpoint ? 'checkpoint' : 'full',
+        trigger: input.autoTrigger ?? undefined,
+        preCompactAt: new Date().toISOString(),
+      });
+      if (shouldContinue === false) {
+        log.info(`Compaction aborted by pre-compaction hook for session ${sessionId}`);
+        return null;
+      }
+    } catch (err) {
+      log.warn(`Pre-compaction hook failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      // Continue anyway — hooks are advisory
+    }
+  }
 
   // Dedup: skip if this session was already compacted (unless checkpoint mode or force=true)
   if (!isCheckpoint) {
@@ -374,6 +429,28 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     }
   }
 
+  // Post-compaction hook — notify caller that compaction is complete
+  if (input.onPostCompact) {
+    try {
+      await input.onPostCompact({
+        sessionId,
+        compactionId: id,
+        runSpecId: input.runSpecId ?? null,
+        observationCount,
+        taskRunCount,
+        evalCount,
+        proceduralCandidateCount: proceduralCandidates.length,
+        confidence,
+        evidenceCount,
+        mode: isCheckpoint ? 'checkpoint' : 'full',
+        trigger: input.autoTrigger ?? undefined,
+        summary,
+      });
+    } catch (err) {
+      log.warn(`Post-compaction hook failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   return rowToCompaction(assertRow(rows.rows[0]));
 }
 
@@ -511,7 +588,6 @@ export async function listCompactions(options: ListCompactionsOptions = {}): Pro
   const limit = normalizeLimit(options.limit);
   params.push(limit);
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-
   const rows = await getDb().query<CompactionRow>(
     `
     SELECT * FROM memory_compactions
@@ -521,69 +597,5 @@ export async function listCompactions(options: ListCompactionsOptions = {}): Pro
   `,
     params,
   );
-
   return rows.rows.map(rowToCompaction);
-}
-
-type CompactionRow = {
-  id: string;
-  session_id: string;
-  run_spec_id: string | null;
-  tenant_id: string | null;
-  project_id: string | null;
-  summary_json: unknown;
-  observed_patterns_json: unknown;
-  procedural_candidates_json: unknown;
-  confidence: string | number;
-  evidence_count: string | number;
-  created_by: string | null;
-  auto_trigger: string | null;
-  transcript_brief_json: unknown | null;
-  created_at: Date | string;
-};
-
-function rowToCompaction(row: CompactionRow): MemoryCompaction {
-  const summary = normalizeJsonObject(row.summary_json);
-  return {
-    id: row.id,
-    sessionId: row.session_id,
-    runSpecId: row.run_spec_id ?? undefined,
-    tenantId: row.tenant_id ?? undefined,
-    projectId: row.project_id ?? undefined,
-    summary,
-    observedPatterns: normalizeJsonArray(row.observed_patterns_json),
-    proceduralCandidates: normalizeCandidateArray(row.procedural_candidates_json),
-    confidence: Number(row.confidence),
-    evidenceCount: Number(row.evidence_count),
-    createdBy: row.created_by ?? undefined,
-    createdAt: toIsoString(row.created_at),
-    attestedAt: typeof summary.attestedAt === 'string' ? summary.attestedAt : undefined,
-    attestedBy: typeof summary.attestedBy === 'string' ? summary.attestedBy : undefined,
-    checkpoint: typeof summary.checkpoint === 'boolean' ? summary.checkpoint : undefined,
-    autoTrigger: row.auto_trigger ?? undefined,
-    transcriptBrief: row.transcript_brief_json
-      ? normalizeJsonObject(row.transcript_brief_json) as unknown as TranscriptBrief
-      : undefined,
-  };
-}
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('compaction write returned no row');
-  return row;
-}
-
-function normalizeCandidateArray(value: unknown): ProceduralCandidate[] {
-  const raw = normalizeJsonArray(value);
-  return raw.map((item: Record<string, unknown>): ProceduralCandidate => ({
-    name: typeof item.name === 'string' ? item.name : 'unknown',
-    content: typeof item.content === 'string' ? item.content : '',
-    severity: (item.severity === 'info' || item.severity === 'warn' || item.severity === 'error')
-      ? item.severity as 'info' | 'warn' | 'error' : 'info',
-    rationale: typeof item.rationale === 'string' ? item.rationale : '',
-    confidence: typeof item.confidence === 'number' ? item.confidence : 0,
-    status: (item.status === 'draft' || item.status === 'review' || item.status === 'approved' || item.status === 'active' || item.status === 'retired')
-      ? item.status as CandidateStatus : 'draft',
-    supportingSessionIds: Array.isArray(item.supportingSessionIds)
-      ? item.supportingSessionIds.filter((s): s is string => typeof s === 'string')
-      : [],
-  }));
 }

@@ -42,6 +42,7 @@ import { createRateLimiter } from './rate-limit.js';
 import { registerServerMaintenance } from './server-maintenance.js';
 import { registerProviderRoutes } from './routes/providers/provider-routes.js';
 import { registerMemoryRoutes } from './routes/data/memory-routes.js';
+import { registerSecurityRoutes } from './routes/data/security-routes.js';
 import { registerSessionRoutes } from './routes/data/session-routes.js';
 import { registerTraceRoutes } from './routes/data/trace-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/streaming/sse-routes.js';
@@ -252,6 +253,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── Feature routes ─────────────────────────────────
   registerMemoryRoutes(app);
+  registerSecurityRoutes(app);
   registerSessionRoutes(app);
   registerTraceRoutes(app);
   registerSseRoutes(app, service.serviceId);

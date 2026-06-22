@@ -15,6 +15,7 @@ import {
   releaseStreamLease,
   heartbeatStreamLease,
 } from '@los/agent/stream-lease';
+import { computeRetryDelay, retryAfterHeader } from './stream-backoff.js';
 
 interface LiveClient {
   sessionId: string;
@@ -72,7 +73,8 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
         error: 'session_stream_conflict',
         message: lease.reason,
         gateway: lease.previousLease?.gateway ?? null,
-        retryAfterSec: 5,
+        retryAfterSec: Number(retryAfterHeader(computeRetryDelay(1))),
+        retryBackoff: { baseMs: 1000, maxMs: 120000, factor: 2.0, jitter: true },
       }));
       return;
     }

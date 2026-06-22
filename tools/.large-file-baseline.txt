@@ -37,3 +37,5 @@ packages/agent/src/ga-related-project-scanner.ts
 packages/wechat-bot/src/index.ts
 packages/media/src/media-runtime.ts
 packages/telegram-bot/src/index.ts
+packages/agent/src/loop.ts
+packages/memory/src/core/compaction.ts
