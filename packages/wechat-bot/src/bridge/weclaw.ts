@@ -43,9 +43,19 @@ const DEFAULT_CONFIG_DIR = resolve(process.env.HOME ?? '/tmp', '.weclaw');
 // ── Process management ─────────────────────────────────────────────
 
 let weclawProc: ChildProcess | null = null;
+let weclawWasStartedByUs = false;
 
 export function isWeclawRunning(): boolean {
-  return weclawProc !== null && !weclawProc.killed;
+  // 1. Check our own managed child process
+  if (weclawProc !== null && !weclawProc.killed) return true;
+
+  // 2. Check OS process table for any weclaw process
+  try {
+    const out = execSync('pgrep -l weclaw 2>/dev/null || true', { encoding: 'utf-8', timeout: 2000 }).trim();
+    if (out) return true;
+  } catch { /* pgrep not available, fall through */ }
+
+  return false;
 }
 
 export function findWeclawBinary(): string | null {
@@ -105,6 +115,12 @@ export function startWeclaw(config: WeClawConfig = {}): { ok: boolean; pid?: num
     return { ok: false, error: 'weclaw not found. Install: curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh' };
   }
 
+  // Don't spawn a duplicate if weclaw is already running at OS level
+  if (isWeclawRunning()) {
+    log.info('WeClaw already running — skip start');
+    return { ok: true, pid: 0 }; // pid 0 = already running externally
+  }
+
   try {
     const apiAddr = config.apiAddr ?? process.env.WECLAW_API_ADDR ?? DEFAULT_API_ADDR;
     const env = {
@@ -142,9 +158,11 @@ export function startWeclaw(config: WeClawConfig = {}): { ok: boolean; pid?: num
     proc.on('close', (code) => {
       log.info(`[weclaw] exited with code ${code}`);
       weclawProc = null;
+      weclawWasStartedByUs = false;
     });
 
     weclawProc = proc;
+    weclawWasStartedByUs = true;
     log.info(`WeClaw started: pid=${proc.pid}, api=${apiAddr}`);
 
     return { ok: true, pid: proc.pid ?? undefined };
@@ -154,13 +172,19 @@ export function startWeclaw(config: WeClawConfig = {}): { ok: boolean; pid?: num
 }
 
 export function stopWeclaw(): { ok: boolean; error?: string } {
-  if (weclawProc && !weclawProc.killed) {
+  if (weclawProc && !weclawProc.killed && weclawWasStartedByUs) {
     weclawProc.kill('SIGTERM');
     weclawProc = null;
+    weclawWasStartedByUs = false;
     return { ok: true };
   }
 
-  // Fallback: use weclaw stop command
+  // If we didn't start it, don't stop it — another process may be using it
+  if (!weclawWasStartedByUs) {
+    return { ok: true }; // Idempotent — not ours to stop
+  }
+
+  // Fallback: use weclaw stop command (only if we started it)
   try {
     const bin = findWeclawBinary();
     if (bin) {
