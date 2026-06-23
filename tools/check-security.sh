@@ -78,7 +78,7 @@ EVAL_COUNT=$(git -C "$ROOT" grep -n '\beval\s*(' \
   -- ':!node_modules/' \
   -- ':!dist/' \
   -- '*.ts' '*.tsx' '*.js' \
-  2>/dev/null | grep -cvE '(binary file matches|^$|^\s*//|^\s*\*|^\s*\#|template literals|eval\(s\)|eval\()' || true)
+  2>/dev/null | grep -cvE '(binary file matches|^$|^\s*//|^\s*\*|^\s*\#|eval\(s\)|eval\(\s*$|failover eval|template|rationale.*eval)' || true)
 if [ "$EVAL_COUNT" -gt 0 ]; then
   err "$EVAL_COUNT eval() call(s) found — review for removal"
   git -C "$ROOT" grep -n '\beval\s*(' \
