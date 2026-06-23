@@ -90,6 +90,12 @@ BEGIN
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN circuit_opened_at TIMESTAMPTZ;
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'governance_jobs' AND column_name = 'next_run_at'
+  ) THEN
+    ALTER TABLE governance_jobs ADD COLUMN next_run_at TIMESTAMPTZ;
+  END IF;
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gov_jobs_dedupe
@@ -99,6 +105,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_gov_jobs_dedupe
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_type_status ON governance_jobs(job_type, status);
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_cadence ON governance_jobs(cadence, last_run_at);
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_tenant_project ON governance_jobs(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_gov_jobs_next_run ON governance_jobs(next_run_at, status) WHERE next_run_at IS NOT NULL;
 `;
 
 let _initialized = false;
@@ -115,6 +122,7 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     jobType: 'consistency_audit',
     cadence: 'daily',
     dedupeKey: 'gov-job-consistency-audit',
+    initialStaggerMs: 0,
     autoFix: {
       autoFixEnabled: true,
       maxAutoFixAttempts: 3,
@@ -127,31 +135,37 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     jobType: 'hotspot',
     cadence: 'daily',
     dedupeKey: 'gov-job-hotspot',
+    initialStaggerMs: 2 * 60 * 1000,
   },
   {
     jobType: 'architecture_drift',
     cadence: 'weekly',
     dedupeKey: 'gov-job-architecture-drift',
+    initialStaggerMs: 5 * 60 * 1000,
   },
   {
     jobType: 'memory_integrity',
     cadence: 'daily',
     dedupeKey: 'gov-job-memory-integrity',
+    initialStaggerMs: 10 * 60 * 1000,
   },
   {
     jobType: 'memory_retention',
     cadence: 'daily',
     dedupeKey: 'gov-job-memory-retention',
+    initialStaggerMs: 15 * 60 * 1000,
   },
   {
     jobType: 'reflection',
     cadence: 'daily',
     dedupeKey: 'gov-job-reflection',
+    initialStaggerMs: 20 * 60 * 1000,
   },
   {
     jobType: 'branch_cleanup',
     cadence: 'daily',
     dedupeKey: 'gov-job-branch-cleanup',
+    initialStaggerMs: 30 * 60 * 1000,
     autoFix: {
       autoFixEnabled: true,
       maxAutoFixAttempts: 1,
@@ -164,8 +178,9 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     jobType: 'related_project_scan',
     cadence: 'weekly',
     dedupeKey: 'gov-job-related-project-scan',
+    initialStaggerMs: 60 * 60 * 1000,
     autoFix: {
-      autoFixEnabled: false, // informational only, no auto-fix
+      autoFixEnabled: false,
       maxAutoFixAttempts: 0,
       verificationCommands: [],
       stopCondition: 'scan completes successfully',
@@ -176,6 +191,7 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     jobType: 'file_size',
     cadence: 'daily',
     dedupeKey: 'gov-job-file-size',
+    initialStaggerMs: 120 * 60 * 1000,
     autoFix: {
       autoFixEnabled: true,
       maxAutoFixAttempts: 1,
@@ -183,5 +199,23 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
       stopCondition: 'no files exceed 400 lines (or all grandfathered in baseline)',
       escalationCadence: 'immediate',
     },
+  },
+  {
+    jobType: 'supply_chain_audit',
+    cadence: 'weekly',
+    dedupeKey: 'gov-job-supply-chain',
+    initialStaggerMs: 180 * 60 * 1000, // 3h stagger
+  },
+  {
+    jobType: 'static_analysis',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-static-analysis',
+    initialStaggerMs: 4 * 60 * 1000, // 4min stagger — run early
+  },
+  {
+    jobType: 'performance_audit',
+    cadence: 'weekly',
+    dedupeKey: 'gov-job-performance',
+    initialStaggerMs: 6 * 60 * 1000, // 6min stagger
   },
 ];

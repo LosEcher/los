@@ -81,6 +81,7 @@ export function rowToJob(row: GovernanceJobRow): GovernanceJob {
     consecutiveFailures: typeof row.consecutive_failures === 'number' ? row.consecutive_failures : 0,
     circuitState: normalizeCircuitState(row.circuit_state ?? null),
     circuitOpenedAt: row.circuit_opened_at ? toIsoString(row.circuit_opened_at) : undefined,
+    nextRunAt: row.next_run_at ? toIsoString(row.next_run_at) : undefined,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };

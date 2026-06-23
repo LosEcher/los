@@ -26,10 +26,15 @@ export async function createGovernanceJob(
   const db = getDb();
   const id = `govjob-${randomUUID()}`;
 
+  // Compute initial next_run_at: now() + stagger offset (default 0 = immediately due)
+  const staggerMs = typeof input.initialStaggerMs === 'number' && input.initialStaggerMs > 0
+    ? input.initialStaggerMs
+    : 0;
+
   const rows = await db.query<GovernanceJobRow>(
     `INSERT INTO governance_jobs (
-      id, job_type, cadence, status, config_json, auto_fix_config_json, dedupe_key, tenant_id, project_id
-    ) VALUES ($1, $2, $3, $4, $5::jsonb, $9::jsonb, $6, $7, $8)
+      id, job_type, cadence, status, config_json, auto_fix_config_json, dedupe_key, tenant_id, project_id, next_run_at
+    ) VALUES ($1, $2, $3, $4, $5::jsonb, $9::jsonb, $6, $7, $8, now() + ($10 || ' milliseconds')::interval)
     RETURNING *`,
     [
       id,
@@ -41,6 +46,7 @@ export async function createGovernanceJob(
       input.tenantId ?? null,
       input.projectId ?? null,
       input.autoFix ? JSON.stringify(input.autoFix) : null,
+      String(staggerMs),
     ],
   );
 
@@ -144,6 +150,14 @@ export async function updateGovernanceJob(
     params.push(input.dedupeKey);
     sets.push(`dedupe_key = $${params.length}`);
   }
+  if (input.nextRunAt !== undefined) {
+    if (input.nextRunAt === null) {
+      sets.push(`next_run_at = NULL`);
+    } else {
+      params.push(input.nextRunAt);
+      sets.push(`next_run_at = $${params.length}::timestamptz`);
+    }
+  }
 
   const rows = await db.query<GovernanceJobRow>(
     `UPDATE governance_jobs SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
@@ -202,6 +216,38 @@ export async function updateGovernanceJobState(
 }
 
 // ── Due Job Listing ──────────────────────────────────────
+
+/**
+ * Atomically claim the next due governance job using FOR UPDATE SKIP LOCKED.
+ * Used by the PG-queue claim loop — safe across concurrent gateway processes.
+ *
+ * Pattern: single-CTE SELECT + UPDATE, matching file-sync's store-queue.ts:114.
+ */
+export async function claimNextDueJob(): Promise<GovernanceJob | null> {
+  await ensureGovernanceJobStore();
+  const db = getDb();
+
+  const rows = await db.query<GovernanceJobRow>(
+    `WITH selected AS (
+      SELECT id FROM governance_jobs
+      WHERE status = 'active'
+        AND next_run_at <= now()
+      ORDER BY next_run_at ASC, id ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE governance_jobs SET
+      next_run_at = NULL,
+      updated_at = now()
+    FROM selected
+    WHERE governance_jobs.id = selected.id
+    RETURNING governance_jobs.*`,
+  );
+
+  return rows.rows[0] ? rowToJob(rows.rows[0]) : null;
+}
+
+// ── Due Job Listing (traditional, for API / manual sweep) ──
 
 export async function listDueGovernanceJobs(
   options: ListDueGovernanceJobsOptions = {},

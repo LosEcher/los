@@ -14,7 +14,7 @@ import type {
 
 const log = getLogger('governance-jobs');
 
-async function createTodosFromFindings(
+export async function createTodosFromFindings(
   job: GovernanceJob,
   summary: Record<string, unknown>,
   dryRun: boolean,
@@ -373,3 +373,6 @@ export async function runGovernanceSweep(opts?: {
     ...(driftReport ? { drift: driftReport } : {}),
   };
 }
+
+// Re-export wake module for gateway use
+export { runGovernanceSweepLoop, setupGovernanceWake } from './governance-wake.js';

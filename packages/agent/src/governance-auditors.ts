@@ -139,6 +139,9 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'branch_cleanup': return runBranchCleanupAudit();
     case 'file_size': return runFileSizeAudit(job, dryRun);
     case 'related_project_scan': return runRelatedProjectScanAudit();
+    case 'supply_chain_audit': return runSupplyChainAuditWrapper();
+    case 'static_analysis': return runStaticAnalysisAuditWrapper();
+    case 'performance_audit': return runPerformanceAuditWrapper();
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
 }
@@ -224,4 +227,31 @@ async function runBranchCleanupAudit(): Promise<Record<string, unknown>> {
     remoteBranches: branchCount,
     staleCandidateCount: branchCount, // all non-main remote branches are candidates
   };
+}
+
+async function runSupplyChainAuditWrapper(): Promise<Record<string, unknown>> {
+  try {
+    const { runSupplyChainAudit } = await import('./governance-auditors-supply-chain.js');
+    return runSupplyChainAudit();
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runStaticAnalysisAuditWrapper(): Promise<Record<string, unknown>> {
+  try {
+    const { runStaticAnalysisAudit } = await import('./governance-auditors-static-analysis.js');
+    return runStaticAnalysisAudit();
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runPerformanceAuditWrapper(): Promise<Record<string, unknown>> {
+  try {
+    const { runPerformanceAudit } = await import('./governance-auditors-performance.js');
+    return runPerformanceAudit();
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+  }
 }

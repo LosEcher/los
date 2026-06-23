@@ -89,6 +89,9 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
   reflection: [],
   branch_cleanup: [],
   related_project_scan: [],
+  supply_chain_audit: [],
+  static_analysis: [],
+  performance_audit: [],
 };
 
 // ── Core ─────────────────────────────────────────────────

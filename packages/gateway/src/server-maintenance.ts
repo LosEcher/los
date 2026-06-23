@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
-import { ensureGovernanceJobStore, seedGovernanceJobs, runGovernanceSweep } from '@los/agent';
+import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake } from '@los/agent';
 import { listExecutorNodes } from '@los/agent/executor-nodes';
 
 const log = getLogger('gateway');
@@ -92,38 +92,22 @@ export function registerServerMaintenance(
     clearInterval(retentionTimer);
   });
 
-  // ── Governance sweep (every 6 hours) ──────────────────────────
-  const GOVERNANCE_SWEEP_MS = 6 * 60 * 60 * 1000;
-  const runGovernanceMaintenance = async () => {
-    log.info('Governance sweep starting...');
-    try {
-      await ensureGovernanceJobStore();
-      await seedGovernanceJobs();
-      const result = await runGovernanceSweep({ dryRun: false });
-      if (result.jobsRun > 0) {
-        log.info(`Governance sweep: ${result.jobsRun} job(s) run, ${result.findingsCreated} finding(s), ${result.errors.length} error(s)`);
-      }
-      if (result.errors.length > 0) {
-        log.warn(`Governance sweep errors: ${result.errors.join('; ')}`);
-      }
-      // Emit a compact per-job line so the log itself is self-diagnostic
-      if (result.results.length > 0) {
-        const lines = result.results.map(r => {
-          const err = typeof r.summary?.error === 'string' ? ` ERR=${r.summary.error}` : '';
-          return `  ${r.jobType} (${r.durationMs}ms)${err}`;
-        });
-        log.info(`Governance sweep detail:\n${lines.join('\n')}`);
-      }
-    } catch (err) {
-      log.warn(`Governance sweep failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-  const governanceTimeout = setTimeout(runGovernanceMaintenance, 30_000);
-  const governanceTimer = setInterval(runGovernanceMaintenance, GOVERNANCE_SWEEP_MS);
-  app.addHook('onClose', async () => {
-    clearTimeout(governanceTimeout);
-    clearInterval(governanceTimer);
-  });
+  // ── Governance sweep wake (PG-queue claim loop) ──────────
+  // Replaces the old setInterval(6h) sweep. Now uses:
+  //   1. SKIP LOCKED claim loop — one job at a time, no stampede
+  //   2. PG NOTIFY / EventBus for cross-process wake
+  //   3. 10-min fallback interval for robustness
+  const govWakeTimeout = setTimeout(() => {
+    ensureGovernanceJobStore()
+      .then(() => seedGovernanceJobs())
+      .then(() => {
+        log.info('Governance: seeds ensured, starting PG-queue wake');
+        const teardown = setupGovernanceWake();
+        app.addHook('onClose', async () => teardown());
+      })
+      .catch((err) => log.warn(`Governance wake setup failed: ${err instanceof Error ? err.message : String(err)}`));
+  }, 30_000);
+  app.addHook('onClose', async () => clearTimeout(govWakeTimeout));
 
   // ── File-sync orchestration trigger (every 5 minutes) ─────────
   const agentKey = opts?.executorAgentKey;
