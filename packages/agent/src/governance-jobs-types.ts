@@ -1,4 +1,4 @@
-export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan';
+export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan' | 'supply_chain_audit' | 'static_analysis' | 'performance_audit';
 export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly';
 export type GovernanceJobStatus = 'active' | 'paused' | 'retired';
 export type CircuitState = 'closed' | 'half_open' | 'open';
@@ -52,6 +52,8 @@ export interface GovernanceJob {
   circuitState: CircuitState;
   /** When the circuit was last opened (ISO string), for auto-recovery timing */
   circuitOpenedAt?: string;
+  /** Next scheduled run (ISO string). Used by PG-queue claim loop. */
+  nextRunAt?: string;
 }
 
 export interface CreateGovernanceJobInput {
@@ -63,6 +65,8 @@ export interface CreateGovernanceJobInput {
   dedupeKey?: string;
   tenantId?: string;
   projectId?: string;
+  /** Milliseconds to add to now() for the initial next_run_at, spreading first-sweep load. */
+  initialStaggerMs?: number;
 }
 
 export interface UpdateGovernanceJobInput {
@@ -74,6 +78,8 @@ export interface UpdateGovernanceJobInput {
   lastTaskRunId?: string;
   resultSummary?: Record<string, unknown>;
   dedupeKey?: string;
+  /** Next scheduled run timestamp. Set to null to clear. */
+  nextRunAt?: string | null;
 }
 
 export interface UpdateGovernanceJobStateInput {
@@ -133,6 +139,7 @@ export type GovernanceJobRow = {
   consecutive_failures: number | null;
   circuit_state: string | null;
   circuit_opened_at: Date | string | null;
+  next_run_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
 };

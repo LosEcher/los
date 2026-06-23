@@ -37,6 +37,9 @@ export interface EventBusEvents {
     type: string;
     channel: string;
   };
+
+  /** Governance sweep wake signal — emitted by PG LISTEN handler or in-process job completion. */
+  'governance:sweep-wake': {};
 }
 
 type EventKey = keyof EventBusEvents;

@@ -34,7 +34,9 @@ export {
   updateGovernanceJobState,
   deleteGovernanceJob,
   listDueGovernanceJobs,
+  claimNextDueJob,
   seedGovernanceJobs,
 } from './governance-jobs-crud.js';
 
 export { runGovernanceSweep } from './governance-sweeper.js';
+export { runGovernanceSweepLoop, setupGovernanceWake } from './governance-wake.js';

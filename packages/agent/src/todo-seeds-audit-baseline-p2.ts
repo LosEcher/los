@@ -143,4 +143,137 @@ export const AUDIT_BASELINE_P2_TODO_SEED: CreateTodoInput[] = [
     dedupeKey: 'los:todo:research-team-scale', dependsOnIds: [],
     metadata: { needsExternalInfo: true, infoNeeded: 'git shortlog -sn | head -10 + CODEOWNERS' },
   },
+
+  // ════════════════════════════════════════════════════════════
+  // P2 — 2026-06-24 Governance Audit (8 items)
+  // ════════════════════════════════════════════════════════════
+
+  {
+    id: 'todo-los-p2-index-health',
+    title: 'P2-N1 Index health governance job',
+    description:
+      '新建 index_health 审计，查询 pg_stat_user_indexes 分析：\n' +
+      '1. 未使用的索引（idx_scan = 0）\n' +
+      '2. 索引膨胀率\n' +
+      '3. 缺失索引建议（基于 seq_scan 高频表）',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-index-health', dependsOnIds: [],
+    metadata: {
+      files: ['packages/agent/src/governance-auditors-performance.ts'],
+      needsProductionData: true,
+    },
+  },
+  {
+    id: 'todo-los-p2-live-runtime-truth',
+    title: 'P2-N2 Live runtime truth gate',
+    description:
+      '比对运行时配置 vs 声明配置：\n' +
+      '1. gateway health vs SERVER_PORT/SERVER_HOST 声明\n' +
+      '2. executor registry vs executor_nodes 表\n' +
+      '3. PG NOTIFY listener vs session_events channel\n' +
+      '参考 lsclaw 的 check:live-runtime 模式。',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-live-runtime-truth', dependsOnIds: [],
+    metadata: {
+      sourceProject: 'lsclaw',
+      sourceScript: 'check:live-runtime',
+      files: ['tools/check-live-runtime.sh'],
+    },
+  },
+  {
+    id: 'todo-los-p2-code-quality-governance',
+    title: 'P2-N3 Code quality governance — forbidden pattern CI',
+    description:
+      '移植 lsclaw 的 --governance-only forbidden pattern 检测：\n' +
+      '1. 禁止 getRunCached 代替 getRunFresh\n' +
+      '2. 禁止非 execution-store 文件直接调用 transitionExecutionState\n' +
+      '3. 禁止非 gateway 文件引用 Fastify 实例\n' +
+      '4. 自动化扫描替代当前手动 AGENTS.md 文档约定。',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-code-quality-governance', dependsOnIds: ['todo-los-p1-los-ast-rules'],
+    metadata: {
+      sourceProject: 'lsclaw',
+      sourceScript: 'check-code-quality.mjs',
+      files: ['tools/check-code-quality.sh'],
+    },
+  },
+  {
+    id: 'todo-los-p2-dep-freshness',
+    title: 'P2-N4 Dependency freshness 监控',
+    description:
+      '检测超过 N 个月未更新的依赖，识别 abandonware 风险：\n' +
+      '1. npm view <pkg> time 检查 last publish date\n' +
+      '2. 标记超过 18 个月未发布的包\n' +
+      '3. 集成到 supply_chain_audit 结果中',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-dep-freshness', dependsOnIds: ['todo-los-p1-supply-chain-full'],
+    metadata: {
+      files: ['packages/agent/src/governance-auditors-supply-chain.ts'],
+    },
+  },
+  {
+    id: 'todo-los-p2-cross-job-learning',
+    title: 'P2-N5 跨 job 模式学习',
+    description:
+      '扩展 ga-self-improve.ts 支持跨多个 job 的模式分析：\n' +
+      '1. 关联多个 job type 的 findings\n' +
+      '2. 检测跨 job 的重复 escalation pattern\n' +
+      '3. 建议合并/拆分 job type',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-cross-job-learning', dependsOnIds: [],
+    metadata: {
+      files: ['packages/agent/src/ga-self-improve.ts'],
+    },
+  },
+  {
+    id: 'todo-los-p2-auto-candidate-promotion',
+    title: 'P2-N6 Procedural candidate 自动晋升',
+    description:
+      '当 procedural_candidate 满足条件时自动从 approved→active：\n' +
+      '1. 置信度 >= 阈值（如 0.8）\n' +
+      '2. 跨 >= 3 sessions 验证\n' +
+      '3. 无 operator 驳回记录\n' +
+      '当前 lifecycle 完全手动，需要 operator gate 但可自动化常规晋升。',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-auto-candidate-promotion', dependsOnIds: ['todo-los-p2-cross-job-learning'],
+    metadata: {
+      files: ['packages/memory/src/core/compaction.ts'],
+    },
+  },
+  {
+    id: 'todo-los-p2-db-migration-drift',
+    title: 'P2-N7 Migration drift 检测',
+    description:
+      '比对 schema_migrations 表 vs information_schema 的实际 schema：\n' +
+      '1. 检测手写 SQL 添加的列\n' +
+      '2. 检测 migration 文件中声明但未实际创建的表\n' +
+      '3. 检测 migration version 顺序冲突',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-db-migration-drift', dependsOnIds: ['todo-los-p0-schema-consistency'],
+    metadata: {
+      files: ['packages/infra/src/migrate.ts', 'packages/infra/migrations/'],
+    },
+  },
+  {
+    id: 'todo-los-p2-ddl-linting',
+    title: 'P2-N8 DDL linting 集成',
+    description:
+      '集成 pg-lint 或 squawk 到 CI pipeline：\n' +
+      '1. 检测 migration 中的 table lock 风险\n' +
+      '2. 检测缺失的 CONCURRENTLY 索引创建\n' +
+      '3. 检测缺失的事务边界',
+    kind: 'task', status: 'backlog', priority: 'P2',
+    source: 'audit-2026-06-24', stageId: 'p2-planned',
+    dedupeKey: 'los:todo:p2-ddl-linting', dependsOnIds: ['todo-los-p2-db-migration-drift'],
+    metadata: {
+      files: ['packages/infra/migrations/', 'tools/check-ddl.sh'],
+    },
+  },
 ];

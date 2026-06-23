@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/sverweij/dependency-cruiser/main/src/schema/configuration.schema.json",
+  "forbidden": [
+    {
+      "name": "no-circular",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "circular": true
+      },
+      "comment": "Circular dependencies are forbidden — extract shared code to @los/infra or a new shared package"
+    },
+    {
+      "name": "no-cross-package-direct-import",
+      "severity": "warn",
+      "from": { "path": "^packages/(?!infra)" },
+      "to": {
+        "path": "^packages/",
+        "pathNot": "^packages/infra"
+      },
+      "comment": "Packages should import across packages only through @los/infra or their own package internals"
+    }
+  ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules",
+      "dependencyTypes": ["npm", "core", "unknown"]
+    },
+    "exclude": {
+      "path": "node_modules|dist|\\.test\\.|\\.spec\\.|test/"
+    },
+    "tsConfig": {
+      "fileName": "tsconfig.json"
+    },
+    "tsPreCompilationDeps": true,
+    "reporterOptions": {
+      "text": { "highlightFocused": true }
+    }
+  }
+}

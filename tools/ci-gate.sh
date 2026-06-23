@@ -10,6 +10,8 @@
 #
 # Phase order is intentional:
 #   typecheck first  → fastest feedback, no DB needed
+#   security next    → hardcoded secrets, eval(), .env tracking
+#   coupling next     → circular deps, forbidden imports, dep-cruiser
 #   structure next   → catches file-size / flat-dir / route placement
 #   state-machine    → prevents direct status-update bypass
 #   contracts        → bidirectional event ↔ route coverage
@@ -69,7 +71,17 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 2: structure ─────────────────────────────────────
+# ── Phase 2: security ─────────────────────────────────────────
+
+phase_start "Security (hardcoded secrets, eval(), .env tracking, pnpm audit)"
+if ./tools/check-security.sh; then
+  phase_ok "security"
+else
+  phase_fail "security"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 3: structure ─────────────────────────────────────
 
 phase_start "Structure (file-size, flat-dirs, route placement, dual-track)"
 if ./tools/check-structure.sh; then
@@ -79,7 +91,17 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 3: state-machine bypass ──────────────────────────
+# ── Phase 4: coupling ─────────────────────────────────────
+
+phase_start "Coupling (circular deps, forbidden imports, cross-package boundaries)"
+if ./tools/check-coupling.sh; then
+  phase_ok "coupling"
+else
+  phase_fail "coupling"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 4: state-machine bypass ──────────────────────────
 
 phase_start "State-machine bypass guard"
 if ./tools/check-state-machine-bypass.sh; then
@@ -89,7 +111,7 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 4: contracts ─────────────────────────────────────
+# ── Phase 5: contracts ─────────────────────────────────────
 
 phase_start "Contracts (coverage + cross-references)"
 if ./tools/check-contracts.sh; then
@@ -99,7 +121,7 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 5: unwired exports ──────────────────────────────
+# ── Phase 6: unwired exports ──────────────────────────────
 
 phase_start "Unwired exports (implemented-but-not-wired guard)"
 if ./tools/check-unwired-exports.sh; then
@@ -109,7 +131,7 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 6: tests ─────────────────────────────────────────
+# ── Phase 7: tests ─────────────────────────────────────────
 
 phase_start "Tests (turbo test)"
 if pnpm run _test; then
