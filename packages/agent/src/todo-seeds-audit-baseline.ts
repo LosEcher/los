@@ -445,7 +445,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-N2 los-ast 自定义规则：编码 AP1/AP3/AP5',
     description:
       '为 los-ast 编写 los 专属规则，将 AGENTS.md 中的 AP1/AP3/AP5 编码为 AST 规则：\n' +
-      'AP1: 禁止直接 import updateTaskRun/updateTaskRunFields/updateRunSpecStatus\n' +
+      'AP1: Direct calls to updateTaskRun/updateTaskRunFields/updateRunSpecStatus\n' +
       'AP3: 检测 markSucceeded 前缺少 canMarkSucceeded() 调用\n' +
       'AP5: 检测 task phase 前缺少 loadSpecsForFiles() 调用\n' +
       '参考 lsclaw-governance rule pack 的 YAML 格式。',

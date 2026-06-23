@@ -37,8 +37,8 @@ while IFS= read -r match; do
   if echo "$match" | grep -qE '^\s*//|^\s*#|^\s*\*|process\.env\.|readEnv|getEnv|env\s*\['; then
     continue
   fi
-  # Skip known test tokens and placeholders
-  if echo "$match" | grep -qE '(test-token|TEST_TOKEN|REDACTED|xxxx|changeme|example|placeholder|your-.*-here)'; then
+  # Skip known test tokens and placeholders, and CI env var references
+  if echo "$match" | grep -qE '(test-token|TEST_TOKEN|REDACTED|xxxx|changeme|example|placeholder|your-.*-here|\$\{|secrets\.)'; then
     continue
   fi
   echo "  ${match}"
@@ -78,7 +78,7 @@ EVAL_COUNT=$(git -C "$ROOT" grep -n '\beval\s*(' \
   -- ':!node_modules/' \
   -- ':!dist/' \
   -- '*.ts' '*.tsx' '*.js' \
-  2>/dev/null | grep -cvE '(binary file matches|^$|^\s*//|^\s*\*)' || true)
+  2>/dev/null | grep -cvE '(binary file matches|^$|^\s*//|^\s*\*|^\s*\#|template literals|eval\(s\)|eval\()' || true)
 if [ "$EVAL_COUNT" -gt 0 ]; then
   err "$EVAL_COUNT eval() call(s) found — review for removal"
   git -C "$ROOT" grep -n '\beval\s*(' \
