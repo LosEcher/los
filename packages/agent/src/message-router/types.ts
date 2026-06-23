@@ -59,6 +59,7 @@ export type ResolvedIntent =
   | { type: 'steering';   instruction: string; sessionId: string; turnBoundary?: 'immediate' | 'next_turn' }
   | { type: 'status';     sessionId: string }
   | { type: 'todo';       action: 'list' | 'create' | 'show'; todoId?: string; title?: string }
+  | { type: 'governance'; action: 'list' | 'sweep' | 'show'; jobType?: string }
   | { type: 'unknown';    text: string };
 
 // ── Handler pattern ──────────────────────────────────────────────

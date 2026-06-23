@@ -73,6 +73,29 @@ const COMMANDS: Array<{
     pattern: /^#task\s*$/i,
     build: () => ({ type: 'todo', action: 'list' }),
   },
+
+  // ── Governance commands ─────────────────────────────────────
+
+  // #jobs  → governance: list (all jobs)
+  {
+    pattern: /^#jobs\s*$/i,
+    build: () => ({ type: 'governance', action: 'list' }),
+  },
+  // #sweep  → governance: sweep (trigger manual sweep)
+  {
+    pattern: /^#sweep\s*$/i,
+    build: () => ({ type: 'governance', action: 'sweep' }),
+  },
+  // #governance  → governance: list (alias)
+  {
+    pattern: /^#governance\s*$/i,
+    build: () => ({ type: 'governance', action: 'list' }),
+  },
+  // #governance <jobType>  → governance: show
+  {
+    pattern: /^#(?:governance|jobs)\s+(?<job>[a-z_]{3,40})\s*$/i,
+    build: (m) => ({ type: 'governance', action: 'show', jobType: m.groups!.job! }),
+  },
 ];
 
 // ── Phase 1: command parsing ────────────────────────────────────
@@ -123,8 +146,6 @@ function heuristicIntent(text: string): ResolvedIntent {
   // Default: natural language → chat
   return { type: 'chat', prompt: trimmed };
 }
-
-// ── Public API ──────────────────────────────────────────────────
 
 export function resolveIntent(text: string): ResolvedIntent {
   const trimmed = text.trim();
