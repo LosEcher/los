@@ -24,6 +24,9 @@ import {
   codexSupportsOtel,
 } from '@los/agent/runtime-adapter';
 import type { Config } from '@los/infra/config';
+import { listGovernanceJobs } from '../governance-jobs-crud.js';
+import { runGovernanceSweep } from '../governance-sweeper.js';
+import { ensureGovernanceJobStore, seedGovernanceJobs } from '../governance-jobs.js';
 import type {
   HandlerDescriptor,
   HandlerContext,
@@ -235,6 +238,107 @@ function createRuntimeHandler(): HandlerDescriptor {
   };
 }
 
+// ── Governance handler ─────────────────────────────────────────
+
+const KNOWN_JOB_TYPES = [
+  'consistency_audit', 'hotspot', 'architecture_drift',
+  'memory_integrity', 'memory_retention', 'reflection',
+  'branch_cleanup', 'related_project_scan', 'file_size',
+] as const;
+
+function createGovernanceHandler(): HandlerDescriptor {
+  const CIRCUIT_ICON: Record<string, string> = {
+    closed: '🟢', half_open: '🟡', open: '🔴',
+  };
+  const CADENCE_ICON: Record<string, string> = {
+    daily: '📅', hourly: '⏱️', weekly: '📆', manual: '🔧',
+  };
+
+  return {
+    name: 'governance',
+    priority: 45,
+    match: (intent: ResolvedIntent) => intent.type === 'governance',
+    handle: async (ctx) => {
+      const i = ctx.intent;
+      if (i.type !== 'governance') return { handled: false };
+      try {
+        await ensureGovernanceJobStore();
+        await seedGovernanceJobs();
+
+        if (i.action === 'list') {
+          const jobs = await listGovernanceJobs({ limit: 20 });
+          if (jobs.length === 0) {
+            await ctx.reply('No governance jobs configured.');
+            return { handled: true, text: 'No governance jobs.' };
+          }
+          const lines = jobs.map(j => {
+            const ci = CIRCUIT_ICON[j.circuitState] ?? '⚪';
+            const mi = CADENCE_ICON[j.cadence] ?? '';
+            const af = j.autoFix?.autoFixEnabled ? '⚙️' : '👀';
+            const noOp = j.consecutiveNoOps > 0 ? ` noop×${j.consecutiveNoOps}` : '';
+            const fail = j.consecutiveFailures > 0 ? ` fail×${j.consecutiveFailures}` : '';
+            const last = j.lastRunAt
+              ? new Date(j.lastRunAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+              : 'never';
+            return `${ci}${mi}${af} ${j.jobType} | ${j.circuitState}${noOp}${fail} | last: ${last}`;
+          });
+          const text = `📊 Governance (${jobs.length} jobs):\n${lines.join('\n')}`;
+          await ctx.reply(text);
+          return { handled: true, text };
+        }
+
+        if (i.action === 'show' && i.jobType) {
+          const jobs = await listGovernanceJobs({ jobType: i.jobType as any, limit: 5 });
+          if (jobs.length === 0) {
+            const knownList = (KNOWN_JOB_TYPES as readonly string[]).join(', ');
+            await ctx.reply(`Unknown job type "${i.jobType}". Known: ${knownList}`);
+            return { handled: true, text: `Unknown job: ${i.jobType}` };
+          }
+          const j = jobs[0];
+          const ci = CIRCUIT_ICON[j.circuitState] ?? '⚪';
+          const autoFix = j.autoFix;
+          const lastRun = j.lastRunAt ? new Date(j.lastRunAt).toLocaleString('zh-CN') : 'never';
+          const resultKeys = j.resultSummary ? Object.keys(j.resultSummary).join(', ') : 'none';
+          const text = [
+            `${ci} ${j.jobType} (${j.cadence})`,
+            `Circuit: ${j.circuitState} | no-op×${j.consecutiveNoOps} | fail×${j.consecutiveFailures}`,
+            autoFix?.autoFixEnabled
+              ? `AutoFix: ${autoFix.stopCondition ?? 'enabled'} | max attempts: ${autoFix.maxAutoFixAttempts ?? 3}`
+              : 'AutoFix: disabled',
+            `Last run: ${lastRun}`,
+            `Results: ${resultKeys}`,
+            j.dedupeKey ? `Dedupe: ${j.dedupeKey.slice(0, 12)}…` : '',
+          ].filter(Boolean).join('\n');
+          await ctx.reply(text);
+          return { handled: true, text };
+        }
+
+        if (i.action === 'sweep') {
+          await ctx.reply('🔄 Triggering governance sweep...');
+          const result = await runGovernanceSweep({ dryRun: false });
+          const text = [
+            result.dryRun ? '🔍 DRY RUN' : '✅ Sweep complete',
+            `Jobs run: ${result.jobsRun} | Skipped: ${result.jobsSkipped}`,
+            `Findings: ${result.findingsCreated} | Errors: ${result.errors.length}`,
+            ...result.results.slice(0, 5).map(r =>
+              `  ${r.jobType}: ${r.durationMs}ms${(r.summary as Record<string, unknown>)?._gaLoop ? ' [GA]' : ''}`
+            ),
+            result.results.length > 5 ? `  … and ${result.results.length - 5} more` : '',
+          ].filter(Boolean).join('\n');
+          await ctx.reply(text);
+          return { handled: true, text };
+        }
+
+        await ctx.reply('Usage: #jobs | #governance [jobType] | #sweep');
+        return { handled: true };
+      } catch (err) {
+        await ctx.reply(`Governance operation failed: ${(err as Error).message}`);
+        return { handled: true, error: (err as Error).message };
+      }
+    },
+  };
+}
+
 // ── Chat handler (fallback — delegates to onChatIntent) ─────────
 
 function createChatHandler(deps: HandlerDependencies): HandlerDescriptor {
@@ -261,6 +365,7 @@ export function createBuiltinHandlers(deps: HandlerDependencies): HandlerDescrip
     createSteeringHandler(),
     createStatusHandler(),
     createTodoHandler(),
+    createGovernanceHandler(),
     createRuntimeHandler(),
     createChatHandler(deps),
   ];
