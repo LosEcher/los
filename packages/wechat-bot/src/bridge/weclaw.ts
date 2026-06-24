@@ -2,7 +2,7 @@
  * @los/wechat-bot/bridge/weclaw — WeClaw process manager and API client.
  *
  * Manages the WeClaw (fastclaw-ai/weclaw) Go binary lifecycle:
- *   - Install: curl-pipe install script
+ *   - Install: hash-verified install script (NEVER curl-pipe-to-shell blind)
  *   - Start: spawn weclaw start as child process
  *   - Send: HTTP POST to weclaw's API (default 127.0.0.1:18011)
  *
@@ -18,8 +18,10 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, writeFileSync, unlinkSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve, join } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('weclaw-bridge');
@@ -81,13 +83,63 @@ export function findWeclawBinary(): string | null {
   return null;
 }
 
+export const WECLAW_INSTALL_URL_DEFAULT = 'https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh';
+
+/** Compute the sha256 hex digest of an install script's content. */
+export function hashInstallScript(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+/**
+ * Verify a downloaded install script against an expected sha256. Returns an
+ * error string explaining why verification failed, or null when it passes.
+ *
+ * Auto-install is refused unless the operator has pinned the expected hash via
+ * WECLAW_INSTALL_SHA256. This prevents silent supply-chain replacement of the
+ * remote install script (the previous behavior executed `curl ... | sh` with no
+ * verification).
+ */
+export function verifyInstallScript(content: string, expectedHash: string | undefined): string | null {
+  if (!expectedHash) {
+    return 'WECLAW_INSTALL_SHA256 is not set; refusing to auto-install an unpinned install script (supply-chain risk). Pin the hash or install WeClaw manually.';
+  }
+  const actual = hashInstallScript(content);
+  if (actual !== expectedHash) {
+    return `install script sha256 mismatch: expected ${expectedHash}, got ${actual}. Refusing to execute a modified script.`;
+  }
+  return null;
+}
+
 export function installWeclaw(): { ok: boolean; path?: string; error?: string } {
+  const url = process.env.WECLAW_INSTALL_URL ?? WECLAW_INSTALL_URL_DEFAULT;
+  if (!/^https:\/\//.test(url)) {
+    return { ok: false, error: `WECLAW_INSTALL_URL must be an https URL (got: ${url})` };
+  }
+  const expectedHash = process.env.WECLAW_INSTALL_SHA256;
   try {
-    log.info('Installing WeClaw via install script...');
-    execSync(
-      'curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh',
-      { stdio: 'inherit', timeout: 120_000 },
-    );
+    log.info('Downloading WeClaw install script for hash verification...', { url });
+    // Download to memory — never pipe a remote script straight into sh.
+    const script = execSync(`curl -fsSL ${JSON.stringify(url)}`, {
+      encoding: 'utf-8',
+      timeout: 60_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const verifyError = verifyInstallScript(script, expectedHash);
+    if (verifyError) {
+      log.error(verifyError);
+      return { ok: false, error: verifyError };
+    }
+    log.info('Install script hash verified; executing from temp file.');
+
+    // Execute the verified script from a local temp file (not a remote pipe).
+    const dir = mkdtempSync(join(tmpdir(), 'weclaw-install-'));
+    const scriptPath = join(dir, 'install.sh');
+    writeFileSync(scriptPath, script, { mode: 0o700 });
+    try {
+      execSync(`sh ${JSON.stringify(scriptPath)}`, { stdio: 'inherit', timeout: 120_000 });
+    } finally {
+      try { unlinkSync(scriptPath); } catch { /* best-effort cleanup */ }
+    }
     const bin = findWeclawBinary();
     if (bin) {
       log.info(`WeClaw installed: ${bin}`);
@@ -112,7 +164,7 @@ export function startWeclaw(config: WeClawConfig = {}): { ok: boolean; pid?: num
       if (!installed.ok) return { ok: false, error: `install failed: ${installed.error}` };
       return startWeclaw({ ...config, binPath: installed.path });
     }
-    return { ok: false, error: 'weclaw not found. Install: curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh' };
+    return { ok: false, error: 'weclaw not found. Install manually, or set WECLAW_AUTO_INSTALL=1 and WECLAW_INSTALL_SHA256=<sha256 of install.sh> to enable hash-verified auto-install.' };
   }
 
   // Don't spawn a duplicate if weclaw is already running at OS level

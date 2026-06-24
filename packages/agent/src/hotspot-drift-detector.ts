@@ -148,8 +148,11 @@ export async function scanFileHotspots(opts: {
     const prevSummary = typeof prev.rows[0].result_summary_json === 'string'
       ? JSON.parse(prev.rows[0].result_summary_json)
       : (prev.rows[0].result_summary_json as Record<string, unknown>) ?? {};
-    const prevOver400 = (prevSummary.filesOver400 as Array<{ file: string; lines: number }>) ?? [];
-    const prevOver600 = (prevSummary.filesOver600 as Array<{ file: string; lines: number }>) ?? [];
+    const raw400 = prevSummary.filesOver400 ?? [];
+    const raw600 = prevSummary.filesOver600 ?? [];
+    // Backward-compat: old auditor stored .length (number), not array.
+    const prevOver400: Array<{ file: string; lines: number }> = Array.isArray(raw400) ? raw400 : [];
+    const prevOver600: Array<{ file: string; lines: number }> = Array.isArray(raw600) ? raw600 : [];
     for (const f of [...prevOver400, ...prevOver600]) {
       previousFiles.set(f.file, f.lines);
     }

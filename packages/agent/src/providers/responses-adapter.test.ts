@@ -254,3 +254,49 @@ test('streaming captures usage from response.completed', async () => {
   assert.equal(result.usage.completionTokens, 50);
   assert.equal(result.usage.totalTokens, 150);
 });
+
+// ── Finish-reason normalization (truncation detection) ───
+// Regression: Responses API `status: 'incomplete'` must surface as canonical
+// `finishReason: 'length'` so the agent loop detects truncation. Before
+// normalization, the raw status passed through and the loop's
+// `finishReason === 'length'` check missed it, silently completing with
+// truncated text.
+
+test('streaming maps response.status=incomplete to finishReason=length', async () => {
+  const ssePayloads = [
+    JSON.stringify({ type: 'response.created', response: { model: 'gpt-5.5' } }),
+    JSON.stringify({ type: 'response.output_text.delta', delta: 'partial...' }),
+    JSON.stringify({ type: 'response.completed', response: { status: 'incomplete', usage: { input_tokens: 10, output_tokens: 20 } } }),
+  ];
+
+  const res = mockSseResponse(ssePayloads);
+  const result = await readResponsesStreamResponse(res, 'gpt-5.5', 'test', () => {});
+
+  assert.equal(result.finishReason, 'length', 'incomplete status must normalize to length');
+});
+
+test('streaming maps response.status=completed to finishReason=stop', async () => {
+  const ssePayloads = [
+    JSON.stringify({ type: 'response.created', response: { model: 'gpt-5.5' } }),
+    JSON.stringify({ type: 'response.output_text.delta', delta: 'done' }),
+    JSON.stringify({ type: 'response.completed', response: { status: 'completed', usage: { input_tokens: 5, output_tokens: 5 } } }),
+  ];
+
+  const res = mockSseResponse(ssePayloads);
+  const result = await readResponsesStreamResponse(res, 'gpt-5.5', 'test', () => {});
+
+  assert.equal(result.finishReason, 'stop');
+});
+
+test('streaming leaves unknown response.status unchanged for observability', async () => {
+  const ssePayloads = [
+    JSON.stringify({ type: 'response.created', response: { model: 'gpt-5.5' } }),
+    JSON.stringify({ type: 'response.completed', response: { status: 'failed', usage: { input_tokens: 1, output_tokens: 1 } } }),
+  ];
+
+  const res = mockSseResponse(ssePayloads);
+  const result = await readResponsesStreamResponse(res, 'gpt-5.5', 'test', () => {});
+
+  assert.equal(result.finishReason, 'failed');
+});
+

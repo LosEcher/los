@@ -68,7 +68,10 @@ import {
 // WeClaw (primary bidirectional channel)
 const WECLAW_API_ADDR = process.env.WECLAW_API_ADDR;
 const WECLAW_DEFAULT_TO = process.env.WECLAW_DEFAULT_TO;
-const WECLAW_AUTO_INSTALL = process.env.WECLAW_AUTO_INSTALL !== '0';
+// WeClaw auto-install is opt-in (supply-chain safety): only `1` enables it,
+// and installWeclaw() additionally requires WECLAW_INSTALL_SHA256 to pin the
+// install script. Default is off — install WeClaw manually or pin both vars.
+const WECLAW_AUTO_INSTALL = process.env.WECLAW_AUTO_INSTALL === '1';
 
 // WxPusher (fallback notification channel)
 const APP_TOKEN = process.env.WXPUSHER_APP_TOKEN;
@@ -78,6 +81,7 @@ const TOPIC_IDS = (process.env.WXPUSHER_TOPIC_IDS ?? '').split(',').map(s => Num
 // General
 const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:3000';
 const LOS_AUTH_TOKEN = process.env.LOS_AUTH_TOKEN;
+const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEB_PORT = Number(process.env.WEB_PORT ?? 8899);
 const CALLBACK_PORT = Number(process.env.CALLBACK_PORT ?? 0);
 const SSE_RECONNECT_MS = Number(process.env.SSE_RECONNECT_MS ?? 3000);
@@ -90,7 +94,13 @@ const weclawConfig: WeClawConfig = {
 };
 
 function losHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return LOS_AUTH_TOKEN ? { ...extra, 'x-los-auth-token': LOS_AUTH_TOKEN } : extra;
+  let h = extra;
+  if (LOS_AUTH_TOKEN) h = { ...h, 'x-los-auth-token': LOS_AUTH_TOKEN };
+  // Operator token is required by /sessions/:id/operator-events (steering /
+  // approve-deny-escalate) when the gateway has auth enabled. Send it when
+  // configured so the bot's operator actions pass the consent gate.
+  if (LOS_OPERATOR_TOKEN) h = { ...h, 'x-los-operator-token': LOS_OPERATOR_TOKEN };
+  return h;
 }
 
 // ── Channels ───────────────────────────────────────────────────────
@@ -121,6 +131,7 @@ channels.push(createWebChannel({
   port: WEB_PORT,
   losGatewayUrl: LOS_GATEWAY_URL,
   losAuthToken: LOS_AUTH_TOKEN,
+  losOperatorToken: LOS_OPERATOR_TOKEN,
 }));
 
 // ── Delivery dispatcher ────────────────────────────────────────────
@@ -379,8 +390,8 @@ async function main(): Promise<void> {
         console.log(`  [weclaw] ⚠️ install failed: ${installed.error}`);
       }
     } else {
-      console.log('  [weclaw] not found — set WECLAW_AUTO_INSTALL=1 or install manually');
-      console.log('  [weclaw] Install: curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh');
+      console.log('  [weclaw] not found — install manually, or enable hash-verified auto-install:');
+      console.log('  [weclaw]   WECLAW_AUTO_INSTALL=1 + WECLAW_INSTALL_SHA256=<sha256 of install.sh>');
     }
   }
 

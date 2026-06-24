@@ -97,17 +97,24 @@ export function registerServerMaintenance(
   //   1. SKIP LOCKED claim loop — one job at a time, no stampede
   //   2. PG NOTIFY / EventBus for cross-process wake
   //   3. 10-min fallback interval for robustness
+  //
+  // Register onClose hook synchronously (before Fastify.listen) so it
+  // works even when the wake starts asynchronously after listen.
+  let govWakeTeardown: (() => void) | null = null;
+  app.addHook('onClose', async () => {
+    clearTimeout(govWakeTimeout);
+    if (govWakeTeardown) { govWakeTeardown(); govWakeTeardown = null; }
+  });
+
   const govWakeTimeout = setTimeout(() => {
     ensureGovernanceJobStore()
       .then(() => seedGovernanceJobs())
       .then(() => {
         log.info('Governance: seeds ensured, starting PG-queue wake');
-        const teardown = setupGovernanceWake();
-        app.addHook('onClose', async () => teardown());
+        govWakeTeardown = setupGovernanceWake();
       })
       .catch((err) => log.warn(`Governance wake setup failed: ${err instanceof Error ? err.message : String(err)}`));
   }, 30_000);
-  app.addHook('onClose', async () => clearTimeout(govWakeTimeout));
 
   // ── File-sync orchestration trigger (every 5 minutes) ─────────
   const agentKey = opts?.executorAgentKey;

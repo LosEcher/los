@@ -23,6 +23,8 @@ import {
 import { runToolCalls } from './loop/tool-runner.js';
 import { withAbort } from './loop/utils.js';
 import { setupAgentRun, completeAgentSetup } from './loop/setup.js';
+import { runArchitectPhase } from './loop/architect-phase.js';
+import { createProvider } from './providers/index.js';
 import {
   createContextMonitor,
   type ContextFillState,
@@ -97,6 +99,52 @@ export async function runAgent(
     },
   );
   if (phaseResult) return phaseResult;
+
+  // ── Architect/Editor dual-model: architect front-matter ──
+  // When enabled, a reasoning-first architect produces a no-tools plan BEFORE
+  // the editor (this main loop) executes it. The main loop already runs as the
+  // editor (provider + editor system prompt resolved in setup). The plan is
+  // injected as a user message so the editor operates on the architect's output.
+  // See loop/architect-phase.ts and ADR 0007.
+  if (config.architectEditor?.enabled) {
+    const architectProviderName = config.architectEditor.architectProvider ?? config.provider;
+    const architectProvider = createProvider(architectProviderName, {
+      model: config.architectEditor.architectModel,
+      traceId: config.traceId,
+    });
+    const archResult = await runArchitectPhase({
+      provider: architectProvider,
+      prompt,
+      maxArchitectTurns: config.architectEditor.maxArchitectTurns,
+      modelSettings: config.modelSettings,
+      signal,
+      traceId: config.traceId,
+      sessionId: config.sessionId,
+      onDelta: config.onModelDelta
+        ? async (delta) => {
+            await config.onModelDelta?.({ ...delta, turn: 0, provider: architectProvider.name });
+          }
+        : undefined,
+      emitEvent,
+    });
+    if (archResult.truncated) {
+      agentLog.warn(
+        `Architect phase hit maxTurns (${archResult.turns}) without plan-end marker — proceeding with partial plan.`,
+      );
+    }
+    messages.push({
+      role: 'user',
+      content: `The architect has produced the following plan. Execute it now using the available edit tools.\n\n--- Architect Plan ---\n${archResult.plan}\n--- End Plan ---`,
+    });
+    await emitEvent({
+      type: 'architect.plan.injected',
+      payload: {
+        planLength: archResult.plan.length,
+        architectTurns: archResult.turns,
+        truncated: archResult.truncated,
+      },
+    });
+  }
 
   // ── Context fill monitoring ──
   const ctxMon = config.contextMonitor

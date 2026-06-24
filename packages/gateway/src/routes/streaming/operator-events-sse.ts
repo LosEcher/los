@@ -11,6 +11,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { ensureSessionEventStore } from '@los/agent/session-events';
+import { requireOperator } from '../../request-context.js';
 
 type OperatorLiveClient = { reply: any; lastId: number; ended: boolean };
 
@@ -27,6 +28,12 @@ function makeSend(reply: { raw: { write: (chunk: string) => boolean } }) {
 
 export function registerOperatorEvents(app: FastifyInstance): void {
   app.get('/operator/events/live', async (req, reply) => {
+    // Operator consent gate: the live event stream carries operator attention
+    // events across ALL sessions/tenants. Require operator privilege when auth
+    // is enabled so an authenticated non-operator cannot subscribe to other
+    // tenants' operator attention events.
+    if (!(await requireOperator(req, reply))) return;
+
     const lastEventId = req.headers['last-event-id'];
     const since = lastEventId
       ? Math.max(0, Number(lastEventId))

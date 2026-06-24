@@ -12,7 +12,7 @@ import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSessi
 import { claimRunSpec } from '@los/agent/run-specs';
 import { listVerificationRecordsForSession } from '@los/agent';
 import { findRecoverableSessions } from '../../chat-session-helpers.js';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, requireOperator } from '../../request-context.js';
 import { getConfig } from '@los/infra/config';
 import { resolveGatewayServiceIdentity } from '../../server.js';
 import { normalizeBoundedInteger } from '../server-helpers.js';
@@ -32,6 +32,11 @@ export function registerSessionRoutes(app: FastifyInstance): void {
   });
 
   app.post('/sessions/:id/operator-events', async (req, reply) => {
+    // Operator consent gate: steering + followup injection require operator
+    // privilege (x-los-operator-token) when auth is enabled. Without this, any
+    // authenticated user could inject approve/deny/escalate instructions.
+    if (!(await requireOperator(req, reply))) return;
+
     const { id } = req.params as { id: string };
     const body = normalizeOperatorEventBody(req.body);
     if (!body) {
