@@ -31,7 +31,6 @@ import {
   normalizePositiveInteger,
   normalizeRequiredString,
   readJson,
-  readPort,
   sendJson,
 } from './executor-helpers.js';
 
@@ -55,17 +54,19 @@ type ExecutorStreamChunk =
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: string };
 
-export async function startExecutor(port = readPort(), host = process.env.EXECUTOR_HOST ?? '127.0.0.1') {
+export async function startExecutor() {
   const config = await loadConfig();
-  const gatewayUrl = process.env.GATEWAY_URL;
+  const host = config.executor.host;
+  const port = config.executor.port;
+  const gatewayUrl = config.executor.gatewayUrl;
   const heartbeatViaApi = !!gatewayUrl;
 
   await initDb(config.databaseUrl);
   await ensureExecutorNodeStore();
   await ensureArtifactStore();
 
-  const nodeId = config.executor.nodeId ?? process.env.EXECUTOR_NODE_ID ?? `node-${randomUUID()}`;
-  const publicUrl = config.executor.nodeUrl ?? process.env.EXECUTOR_NODE_URL ?? `http://${host}:${port}`;
+  const nodeId = config.executor.nodeId ?? `node-${randomUUID()}`;
+  const publicUrl = config.executor.nodeUrl ?? `http://${host}:${port}`;
   const nodeKind: ExecutorNodeKind = (config.executor.nodeKind as ExecutorNodeKind) ?? 'executor';
   const baseConnectModes: ExecutorNodeConnectMode[] = ['agent_http', 'agent_http_ndjson'];
   const connectModes: ExecutorNodeConnectMode[] = [...baseConnectModes, ...(config.executor.connectModes as ExecutorNodeConnectMode[] ?? [])];
@@ -75,7 +76,7 @@ export async function startExecutor(port = readPort(), host = process.env.EXECUT
     log.warn('Set EXECUTOR_AGENT_KEY in .env (same value for gateway and executor) to use a persistent key.');
     return generated;
   })();
-  const artifactStorageRoot = executorArtifactStorageRoot(nodeId);
+  const artifactStorageRoot = executorArtifactStorageRoot(nodeId, config.executor.artifactRoot);
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
   const fileSyncStore = createFileSyncStore();
 
@@ -333,9 +334,8 @@ function isAuthorized(req: IncomingMessage, agentKey: string | undefined): boole
   return req.headers.authorization === `Bearer ${agentKey}`;
 }
 
-function executorArtifactStorageRoot(nodeId: string): string {
-  const configured = process.env.EXECUTOR_ARTIFACT_ROOT ?? process.env.LOS_EXECUTOR_ARTIFACT_ROOT;
-  if (configured) return resolve(configured);
+function executorArtifactStorageRoot(nodeId: string, artifactRoot?: string): string {
+  if (artifactRoot) return resolve(artifactRoot);
   return resolve(process.cwd(), '.los-runtime', 'executor-artifacts', encodeURIComponent(nodeId));
 }
 

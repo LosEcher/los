@@ -8,19 +8,27 @@
       "to": {
         "circular": true
       },
-      "comment": "Circular dependencies are forbidden — extract shared code to @los/infra or a new shared package"
-    },
-    {
-      "name": "no-cross-package-direct-import",
-      "severity": "warn",
-      "from": { "path": "^packages/(?!infra)" },
-      "to": {
-        "path": "^packages/",
-        "pathNot": "^packages/infra"
-      },
-      "comment": "Packages should import across packages only through @los/infra or their own package internals"
+      "comment": "Circular dependencies are forbidden — extract shared code to @los/infra or a new shared package. Note: dependency-cruiser resolves @los/* workspace imports via node_modules (doNotFollow), so cross-package cycles through @los/* subpath exports may not be detected; intra-package relative-import cycles are caught."
     }
   ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules",
+      "dependencyTypes": ["npm", "core", "unknown"]
+    },
+    "exclude": {
+      "path": "node_modules|dist|\\.test\\.|\\.spec\\.|test/"
+    },
+    "tsConfig": {
+      "fileName": "tsconfig.json"
+    },
+    "tsPreCompilationDeps": true,
+    "reporterOptions": {
+      "text": { "highlightFocused": true }
+    }
+  },
+  "_comment": "The former 'no-cross-package-direct-import' rule was removed: dependency-cruiser could not resolve @los/* workspace imports (couldNotResolve), so the rule was a no-op, and a blanket cross-package ban would wrongly flag legitimate layered deps (gateway->agent, executor->agent, etc.). The real 'cross-cutting concerns through @los/infra' invariant is enforced by tools/check-structure.sh (Direct third-party imports: non-infra packages may not import pg/zod/winston/pino/better-sqlite3 directly) and the 'infra is a leaf' grep in tools/check-coupling.sh. A proper dependency-cruiser layering rule would require @los/* path resolution via a root tsconfig paths map — tracked as a follow-up."
+}
   "options": {
     "doNotFollow": {
       "path": "node_modules",

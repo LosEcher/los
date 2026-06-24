@@ -38,18 +38,25 @@ if command -v npx >/dev/null 2>&1; then
   else
     ok "No circular dependencies detected"
   fi
-
-  if echo "$CRUISER_OUTPUT" | grep -q "no-cross-package-direct-import"; then
-    echo "$CRUISER_OUTPUT" | grep -A2 "no-cross-package-direct-import" | while IFS= read -r line; do
-      if [ -n "$line" ]; then
-        warn "$line"
-      fi
-    done
-  else
-    ok "No cross-package boundary violations"
-  fi
 else
   warn "npx not available — skipping dependency-cruiser check"
+fi
+
+# ── 1b. @los/infra is a leaf (no upward @los/* imports) ─────────
+# infra must not depend on any other @los/* package — it is the foundational
+# cross-cutting layer. Uses grep -rEn (filesystem) rather than `git grep`,
+# which is unreliable in jj-collocated working copies. The broader 'cross-
+# cutting concerns through @los/infra' invariant (no direct pg/zod/winston/
+# pino/better-sqlite3 in non-infra packages) is enforced by check-structure.sh §7.
+header "@los/infra leaf check (no @los/* imports in infra)"
+INFRA_UPWARD=0
+while IFS= read -r match; do
+  err "$match"
+  INFRA_UPWARD=$((INFRA_UPWARD + 1))
+done < <(grep -rEn "from ['\"]@los/(agent|memory|gateway|executor|cli|web|telegram-bot|wechat-bot|media|input-preprocessor)" \
+  "$ROOT/packages/infra/src" --include='*.ts' 2>/dev/null || true)
+if [ "$INFRA_UPWARD" -eq 0 ]; then
+  ok "@los/infra has no upward @los/* imports"
 fi
 
 # ── 2. Forbidden import list check ─────────────────────────────
