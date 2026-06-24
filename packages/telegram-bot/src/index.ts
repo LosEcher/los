@@ -18,10 +18,10 @@
  * Requires:
  *   TELEGRAM_BOT_TOKEN — from @BotFather
  *   TELEGRAM_CHAT_ID    — target chat (can be set via /start)
- *   LOS_GATEWAY_URL     — los gateway base URL (default http://localhost:3000)
+ *   LOS_GATEWAY_URL     — los gateway base URL (default http://localhost:8080)
  *
  * Usage:
- *   TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=123 LOS_GATEWAY_URL=http://localhost:3000 node packages/telegram-bot/src/index.js
+ *   TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=123 LOS_GATEWAY_URL=http://localhost:8080 node packages/telegram-bot/src/index.js
  */
 
 import { createServer } from 'node:http';
@@ -35,7 +35,7 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:3000';
+const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:8080';
 const LOS_AUTH_TOKEN = process.env.LOS_AUTH_TOKEN;
 const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEBHOOK_PORT = Number(process.env.TELEGRAM_WEBHOOK_PORT ?? 0);

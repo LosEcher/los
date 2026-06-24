@@ -20,11 +20,11 @@
  *   WECLAW_DEFAULT_TO     — WeChat user ID for outbound messages
  *   WXPUSHER_APP_TOKEN    — WxPusher appToken (optional fallback)
  *   WXPUSHER_UIDS         — comma-separated UIDs (optional fallback)
- *   LOS_GATEWAY_URL       — los gateway URL (default http://localhost:3000)
+ *   LOS_GATEWAY_URL       — los gateway URL (default http://localhost:8080)
  *   WEB_PORT              — mobile web dashboard port (default 8899)
  *
  * Usage (primary):
- *   WECLAW_DEFAULT_TO="user_id@im.wechat" LOS_GATEWAY_URL=http://localhost:3000 \
+ *   WECLAW_DEFAULT_TO="user_id@im.wechat" LOS_GATEWAY_URL=http://localhost:8080 \
  *   node packages/wechat-bot/src/index.js
  *
  * Then open http://localhost:8899/m/ on your phone.
@@ -79,7 +79,7 @@ const UIDS = (process.env.WXPUSHER_UIDS ?? '').split(',').map(s => s.trim()).fil
 const TOPIC_IDS = (process.env.WXPUSHER_TOPIC_IDS ?? '').split(',').map(s => Number(s.trim())).filter(n => n > 0);
 
 // General
-const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:3000';
+const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:8080';
 const LOS_AUTH_TOKEN = process.env.LOS_AUTH_TOKEN;
 const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEB_PORT = Number(process.env.WEB_PORT ?? 8899);

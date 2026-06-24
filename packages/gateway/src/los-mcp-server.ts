@@ -19,7 +19,7 @@
  *       "los": {
  *         "command": "node",
  *         "args": ["packages/gateway/dist/los-mcp-server.js"],
- *         "env": { "LOS_GATEWAY_URL": "http://localhost:3000" }
+ *         "env": { "LOS_GATEWAY_URL": "http://localhost:8080" }
  *       }
  *     }
  *   }
@@ -29,7 +29,7 @@ import { randomUUID } from 'node:crypto';
 
 // ── Config ─────────────────────────────────────────────────────────
 
-const GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:3000';
+const GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:8080';
 const PROTOCOL_VERSION = '2024-11-05';
 
 // ── Types ──────────────────────────────────────────────────────────
