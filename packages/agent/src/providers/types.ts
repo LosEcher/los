@@ -27,6 +27,9 @@ export interface ProviderResponse {
   text: string;
   toolCalls: ToolCall[];
   reasoningContent?: string;
+  /** The finish reason from the provider. 'stop' = natural end, 'length' = truncated,
+   *  'tool_calls' = model wants to call tools, 'content_filter' = blocked by safety. */
+  finishReason?: 'stop' | 'length' | 'tool_calls' | 'content_filter' | string;
   usage: {
     promptTokens: number;
     completionTokens: number;

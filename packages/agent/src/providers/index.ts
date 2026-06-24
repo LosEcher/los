@@ -196,10 +196,16 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         });
       }
 
+      // Extract finish_reason from the first choice or top-level
+      const finishReason: string | undefined = choice?.finish_reason
+        ?? data?.choices?.[0]?.finish_reason
+        ?? undefined;
+
       return {
         text: msg?.content ?? '',
         toolCalls,
         reasoningContent,
+        finishReason,
         usage: {
           promptTokens: data.usage?.prompt_tokens ?? data.usage?.input_tokens ?? 0,
           completionTokens: data.usage?.completion_tokens ?? data.usage?.output_tokens ?? 0,
@@ -289,6 +295,7 @@ async function readOpenAIStreamResponse(
   let text = '';
   let reasoningContent = '';
   let responseModel = fallbackModel;
+  let finishReason: string | undefined;
   let usage: ProviderResponse['usage'] = { promptTokens: 0, completionTokens: 0 };
 
   while (true) {
@@ -303,6 +310,9 @@ async function readOpenAIStreamResponse(
         responseModel = chunk.model ?? responseModel;
         usage = normalizeOpenAIUsage(chunk.usage, usage);
         const delta = chunk.choices?.[0]?.delta ?? {};
+        // Capture finish_reason from the terminating chunk (may be null on intermediate deltas)
+        const chunkFinishReason: string | undefined = chunk.choices?.[0]?.finish_reason ?? undefined;
+        if (chunkFinishReason) finishReason = chunkFinishReason;
         // Diagnostic: log raw tool-call deltas when LOS_DEBUG_PROVIDER is set
         if (delta.tool_calls?.length) {
           diag(traceId, `[${providerName}] raw tool_call deltas`, {
@@ -353,6 +363,7 @@ async function readOpenAIStreamResponse(
     text,
     toolCalls: mergedToolCalls,
     reasoningContent: reasoningContent || undefined,
+    finishReason,
     usage,
     model: responseModel,
   };

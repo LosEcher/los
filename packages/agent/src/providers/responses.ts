@@ -211,6 +211,7 @@ function parseResponsesSyncResponse(data: any, fallbackModel: string, providerNa
   return {
     text,
     toolCalls: toolCalls.map(tc => repairToolCallArguments(tc, providerName)),
+    finishReason: data.status ?? undefined,
     usage: {
       promptTokens: data.usage?.input_tokens ?? 0,
       completionTokens: data.usage?.output_tokens ?? 0,
@@ -236,6 +237,7 @@ export async function readResponsesStreamResponse(
   let buffer = '';
   let text = '';
   let responseModel = fallbackModel;
+  let finishReason: string | undefined;
   let usage: ProviderResponse['usage'] = { promptTokens: 0, completionTokens: 0 };
 
   while (true) {
@@ -299,10 +301,13 @@ export async function readResponsesStreamResponse(
           continue;
         }
 
-        // response.completed — final usage info
+        // response.completed — final usage info + status (finish_reason)
         if (eventType === 'response.completed') {
           if (event.response?.usage) {
             usage = normalizeResponsesUsage(event.response.usage, usage);
+          }
+          if (event.response?.status) {
+            finishReason = event.response.status;
           }
           continue;
         }
@@ -320,6 +325,7 @@ export async function readResponsesStreamResponse(
   return {
     text,
     toolCalls: toolCalls.map(tc => repairToolCallArguments(tc, providerName)),
+    finishReason,
     usage,
     model: responseModel,
   };
