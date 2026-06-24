@@ -159,6 +159,8 @@ function configForAuth(enabled: boolean): Config {
     },
     executor: {
       enabled: false,
+      host: '127.0.0.1',
+      port: 8090,
       nodeKind: 'executor',
       connectModes: [],
       meshNodes: [],

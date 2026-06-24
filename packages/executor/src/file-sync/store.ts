@@ -63,7 +63,7 @@ export interface FileSyncQueueItem {
   filePath: string;
   size: number;
   mtimeNs: number;
-  state: 'ready' | 'transferring' | 'verifying' | 'done' | 'retry' | 'cooldown' | 'reconcile';
+  state: 'ready' | 'transferring' | 'verifying' | 'done' | 'retry' | 'cooldown' | 'reconcile' | 'dead_letter';
   attempts: number;
   lastError?: string;
   createdAt: string;

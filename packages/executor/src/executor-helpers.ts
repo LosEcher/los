@@ -79,12 +79,6 @@ export function normalizeNodeCommand(value: unknown): NodeCommandName | undefine
   return undefined;
 }
 
-export function readPort(): number {
-  const DEFAULT_PORT = 8090;
-  const raw = Number(process.env.EXECUTOR_PORT ?? DEFAULT_PORT);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_PORT;
-}
-
 export function createAbortError(reason: string): Error {
   const err = new Error(reason);
   err.name = 'AbortError';
