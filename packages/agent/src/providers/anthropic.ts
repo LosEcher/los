@@ -10,6 +10,7 @@ import type {
   ToolCall,
   ToolDef,
 } from './types.js';
+import { normalizeFinishReason } from './types.js';
 
 interface AnthropicConfig {
   name: string;
@@ -165,7 +166,7 @@ export function createAnthropicProvider(cfg: AnthropicConfig): Provider {
         text,
         toolCalls,
         reasoningContent,
-        finishReason: data.stop_reason ?? undefined,
+        finishReason: normalizeFinishReason(data.stop_reason, 'anthropic'),
         usage: {
           promptTokens: data.usage?.input_tokens ?? 0,
           completionTokens: data.usage?.output_tokens ?? 0,

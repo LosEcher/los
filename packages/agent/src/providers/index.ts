@@ -39,6 +39,7 @@ import type {
   ToolCall,
   ToolDef,
 } from './types.js';
+import { normalizeFinishReason } from './types.js';
 
 const log = getLogger('agent');
 
@@ -196,8 +197,10 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         });
       }
 
-      // Extract finish_reason from the first choice or top-level
-      const finishReason: string | undefined = choice?.finish_reason
+      // Extract finish_reason from the first choice or top-level. OpenAI Chat
+      // Completions already speaks the canonical vocabulary; normalize is a
+      // null/empty guard + keeps the contract uniform across adapters.
+      const rawFinishReason: string | undefined = choice?.finish_reason
         ?? data?.choices?.[0]?.finish_reason
         ?? undefined;
 
@@ -205,7 +208,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         text: msg?.content ?? '',
         toolCalls,
         reasoningContent,
-        finishReason,
+        finishReason: normalizeFinishReason(rawFinishReason, 'openai'),
         usage: {
           promptTokens: data.usage?.prompt_tokens ?? data.usage?.input_tokens ?? 0,
           completionTokens: data.usage?.completion_tokens ?? data.usage?.output_tokens ?? 0,
@@ -312,7 +315,7 @@ async function readOpenAIStreamResponse(
         const delta = chunk.choices?.[0]?.delta ?? {};
         // Capture finish_reason from the terminating chunk (may be null on intermediate deltas)
         const chunkFinishReason: string | undefined = chunk.choices?.[0]?.finish_reason ?? undefined;
-        if (chunkFinishReason) finishReason = chunkFinishReason;
+        if (chunkFinishReason) finishReason = normalizeFinishReason(chunkFinishReason, 'openai');
         // Diagnostic: log raw tool-call deltas when LOS_DEBUG_PROVIDER is set
         if (delta.tool_calls?.length) {
           diag(traceId, `[${providerName}] raw tool_call deltas`, {

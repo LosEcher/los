@@ -13,6 +13,7 @@ import type {
   ToolCall,
   ToolDef,
 } from './types.js';
+import { normalizeFinishReason } from './types.js';
 
 interface ResponsesConfig {
   name: string;
@@ -211,7 +212,7 @@ function parseResponsesSyncResponse(data: any, fallbackModel: string, providerNa
   return {
     text,
     toolCalls: toolCalls.map(tc => repairToolCallArguments(tc, providerName)),
-    finishReason: data.status ?? undefined,
+    finishReason: normalizeFinishReason(data.status, 'responses'),
     usage: {
       promptTokens: data.usage?.input_tokens ?? 0,
       completionTokens: data.usage?.output_tokens ?? 0,
@@ -307,7 +308,7 @@ export async function readResponsesStreamResponse(
             usage = normalizeResponsesUsage(event.response.usage, usage);
           }
           if (event.response?.status) {
-            finishReason = event.response.status;
+            finishReason = normalizeFinishReason(event.response.status, 'responses');
           }
           continue;
         }
