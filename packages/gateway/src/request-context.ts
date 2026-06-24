@@ -1,6 +1,6 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { Config } from '@los/infra/config';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { getConfig, type Config } from '@los/infra/config';
 import { getLogger, type Logger } from '@los/infra/logger';
 
 const log = getLogger('request-context');
@@ -95,6 +95,31 @@ export function getRequestContext(req: FastifyRequest): RequestContext {
     isOperator: false,
     log: getGatewayLogger().child({ requestId }),
   };
+}
+
+/**
+ * Enforce operator privilege on an operator-only endpoint (steering, operator
+ * event stream, security scan, etc.). Sends 403 and returns false when the
+ * gateway has auth enabled but the requester is not an operator — i.e. the
+ * `x-los-operator-token` header is missing or does not match the configured
+ * `auth.operatorToken`.
+ *
+ * When auth is disabled (local single-user dev), there is no auth boundary and
+ * the request proceeds (returns true). This mirrors the `auth-middleware`
+ * access gate, which also short-circuits when `auth.enabled === false`.
+ *
+ * Operator privilege is validated in the request-context `onRequest` hook via
+ * `validateOperatorToken` (timing-safe), so `isOperator` cannot be forged by
+ * the caller. Returns true when the handler should proceed.
+ */
+export async function requireOperator(req: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+  if (!getConfig().auth.enabled) return true;
+  const ctx = getRequestContext(req);
+  if (!ctx.isOperator) {
+    await reply.code(403).send({ error: 'operator token required' });
+    return false;
+  }
+  return true;
 }
 
 let _gatewayLogger: Logger | undefined;

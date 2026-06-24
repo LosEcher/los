@@ -37,12 +37,19 @@ if (!BOT_TOKEN) {
 
 const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:3000';
 const LOS_AUTH_TOKEN = process.env.LOS_AUTH_TOKEN;
+const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEBHOOK_PORT = Number(process.env.TELEGRAM_WEBHOOK_PORT ?? 0);
 const POLL_INTERVAL_MS = Number(process.env.TELEGRAM_POLL_INTERVAL ?? 5000);
 const SSE_RECONNECT_MS = Number(process.env.SSE_RECONNECT_MS ?? 3000);
 
 function losHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return LOS_AUTH_TOKEN ? { ...extra, 'x-los-auth-token': LOS_AUTH_TOKEN } : extra;
+  let h = extra;
+  if (LOS_AUTH_TOKEN) h = { ...h, 'x-los-auth-token': LOS_AUTH_TOKEN };
+  // Operator token is required by /sessions/:id/operator-events (steering /
+  // approve-deny-escalate) when the gateway has auth enabled. Send it when
+  // configured so the bot's operator actions pass the consent gate.
+  if (LOS_OPERATOR_TOKEN) h = { ...h, 'x-los-operator-token': LOS_OPERATOR_TOKEN };
+  return h;
 }
 
 // ── Telegram API helpers ───────────────────────────────────────────

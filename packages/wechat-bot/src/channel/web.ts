@@ -26,6 +26,7 @@ export interface WebChannelConfig {
   host?: string;
   losGatewayUrl: string;
   losAuthToken?: string;
+  losOperatorToken?: string;
 }
 
 const WEB_CAPABILITIES: ChannelCapabilities = {
@@ -42,7 +43,7 @@ const WEB_CAPABILITIES: ChannelCapabilities = {
 };
 
 export function createWebChannel(config: WebChannelConfig): Channel {
-  const { port, host = '127.0.0.1', losGatewayUrl, losAuthToken } = config;
+  const { port, host = '127.0.0.1', losGatewayUrl, losAuthToken, losOperatorToken } = config;
   const messageHandlers = new Set<(msg: UnifiedMessage) => void | Promise<void>>();
   let server: ReturnType<typeof createServer> | null = null;
 
@@ -76,21 +77,21 @@ export function createWebChannel(config: WebChannelConfig): Channel {
             switch (action) {
               case 'approve':
                 await fetch(`${losGatewayUrl}/sessions/${sessionId}/operator-events`, {
-                  method: 'POST', headers: losHeaders(losAuthToken),
+                  method: 'POST', headers: losHeaders(losAuthToken, losOperatorToken),
                   body: JSON.stringify({ type: 'steering', instruction: 'Approved via mobile web', turnBoundary: 'immediate', actor: 'mobile-web', reason: 'operator_approval' }),
                 });
                 result = '✅ Approved';
                 break;
               case 'deny':
                 await fetch(`${losGatewayUrl}/sessions/${sessionId}/operator-events`, {
-                  method: 'POST', headers: losHeaders(losAuthToken),
+                  method: 'POST', headers: losHeaders(losAuthToken, losOperatorToken),
                   body: JSON.stringify({ type: 'steering', instruction: 'Denied via mobile web', turnBoundary: 'immediate', actor: 'mobile-web', reason: 'operator_denial' }),
                 });
                 result = '❌ Denied';
                 break;
               case 'escalate':
                 await fetch(`${losGatewayUrl}/sessions/${sessionId}/operator-events`, {
-                  method: 'POST', headers: losHeaders(losAuthToken),
+                  method: 'POST', headers: losHeaders(losAuthToken, losOperatorToken),
                   body: JSON.stringify({ type: 'steering', instruction: 'Escalated via mobile web', turnBoundary: 'immediate', actor: 'mobile-web', reason: 'operator_escalation' }),
                 });
                 result = '↗ Escalated';
@@ -272,6 +273,9 @@ function escapeH(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function losHeaders(token: string | undefined): Record<string, string> {
-  return token ? { 'Content-Type': 'application/json', 'x-los-auth-token': token } : { 'Content-Type': 'application/json' };
+function losHeaders(authToken: string | undefined, operatorToken?: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) h['x-los-auth-token'] = authToken;
+  if (operatorToken) h['x-los-operator-token'] = operatorToken;
+  return h;
 }

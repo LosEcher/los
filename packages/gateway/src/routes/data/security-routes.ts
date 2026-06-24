@@ -13,7 +13,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import { getLogger } from '@los/infra/logger';
-import { getRequestContext } from '../../request-context.js';
+import { requireOperator } from '../../request-context.js';
 import {
   normalizeOptionalString,
   normalizeOptionalNonNegativeInteger,
@@ -88,11 +88,9 @@ async function runSecurityScan(workspaceRoot: string): Promise<{
 
 export function registerSecurityRoutes(app: FastifyInstance): void {
   app.get('/security/scan', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+
     const query = req.query as { path?: string; limit?: string };
-    const ctx = getRequestContext(req);
-    if (!ctx.isOperator) {
-      return reply.status(403).send({ error: 'operator token required' });
-    }
 
     const scanPath = normalizeOptionalString(query.path) ?? resolve(process.cwd());
     const limit = normalizeOptionalNonNegativeInteger(query.limit) ?? 50;
@@ -106,10 +104,8 @@ export function registerSecurityRoutes(app: FastifyInstance): void {
   });
 
   app.get('/security/scan-config', async (req, reply) => {
-    const ctx = getRequestContext(req);
-    if (!ctx.isOperator) {
-      return reply.status(403).send({ error: 'operator token required' });
-    }
+    if (!(await requireOperator(req, reply))) return;
+
     const scanCmd = resolveScanCommand();
     return {
       configured: scanCmd !== null,
