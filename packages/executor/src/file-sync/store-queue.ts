@@ -38,10 +38,18 @@ function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-const QUEUE_STATES = ['ready', 'transferring', 'verifying', 'done', 'retry', 'cooldown', 'reconcile'] as const;
+const QUEUE_STATES = ['ready', 'transferring', 'verifying', 'done', 'retry', 'cooldown', 'reconcile', 'dead_letter'] as const;
 
 /** Maximum entries per batch INSERT to avoid PostgreSQL bind parameter overflow (65,535 limit). */
 const MAX_BATCH_SIZE = 500;
+
+/**
+ * Max transfer attempts before a file is moved to the dead_letter state.
+ * Without this cap, a perpetually-failing file (e.g. unreadable, permission
+ * denied) would be reaped from 'transferring' back to 'ready' and retried
+ * forever. Mirrors the max-retry-then-DLQ pattern used by the task_runs queue.
+ */
+const MAX_ATTEMPTS = 5;
 
 export async function enqueueItems(
   folderId: string,
@@ -74,14 +82,13 @@ export async function enqueueItems(
            size = EXCLUDED.size,
            mtime_ns = EXCLUDED.mtime_ns,
            state = CASE
+             WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' AND file_sync_queue.attempts >= ${MAX_ATTEMPTS} THEN 'dead_letter'
              WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN 'ready'
              ELSE file_sync_queue.state
            END,
-           attempts = CASE
-             WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN file_sync_queue.attempts
-             ELSE file_sync_queue.attempts
-           END,
+           attempts = file_sync_queue.attempts,
            last_error = CASE
+             WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' AND file_sync_queue.attempts >= ${MAX_ATTEMPTS} THEN 'dead_letter: max attempts (' || file_sync_queue.attempts || ') exceeded'
              WHEN file_sync_queue.state IN ('retry','cooldown') AND file_sync_queue.updated_at < now() - interval '15 minutes' THEN NULL
              ELSE file_sync_queue.last_error
            END,
@@ -177,24 +184,62 @@ export async function reapStaleTransferring(
 ): Promise<number> {
   const db = getDb();
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-  const params: unknown[] = [cutoff];
+  const params: unknown[] = [cutoff, MAX_ATTEMPTS];
   let where = "state = 'transferring' AND updated_at < $1";
   if (folderId) {
     params.push(folderId);
     where = `folder_id = $${params.length} AND ${where}`;
   }
 
+  // A stale transfer is reaped back to 'ready' for retry — unless it has
+  // already exhausted MAX_ATTEMPTS, in which case it moves to 'dead_letter'
+  // so a perpetually-failing file does not loop forever.
   const result = await db.query<QueueRow>(
     `UPDATE file_sync_queue
-     SET state = 'ready', last_error = 'stale: no heartbeat within ${maxAgeMs}ms', updated_at = now()
+     SET state = CASE WHEN attempts >= $2 THEN 'dead_letter' ELSE 'ready' END,
+         last_error = CASE WHEN attempts >= $2 THEN 'dead_letter: max attempts (' || attempts || ') exceeded after stale transfer' ELSE 'stale: no heartbeat within ${maxAgeMs}ms' END,
+         updated_at = now()
      WHERE ${where}
      RETURNING *`,
     params,
   );
+  const deadLettered = result.rows.filter(r => r.state === 'dead_letter').length;
   if (result.rows.length > 0) {
-    log.info(`reaped ${result.rows.length} stale transferring items${folderId ? ` for folder ${folderId}` : ''}`);
+    log.info(`reaped ${result.rows.length} stale transferring items${folderId ? ` for folder ${folderId}` : ''}${deadLettered > 0 ? ` (${deadLettered} moved to dead_letter)` : ''}`);
   }
   return result.rows.length;
+}
+
+/**
+ * Refresh the lease on a 'transferring' item so a long transfer is not reaped
+ * by reapStaleTransferring. The transfer loop should call this periodically
+ * (well within maxAgeMs) for transfers that may exceed the stale threshold.
+ * No-op if the item is not currently 'transferring'.
+ */
+export async function heartbeatTransferring(queueId: string): Promise<void> {
+  const db = getDb();
+  await db.query(
+    `UPDATE file_sync_queue SET updated_at = now()
+     WHERE queue_id = $1 AND state = 'transferring'`,
+    [queueId],
+  );
+}
+
+/**
+ * Manually requeue a dead_letter item back to 'ready' for retry, resetting its
+ * error state. Used by operators after fixing the underlying cause (permissions,
+ * disk space, etc.). Does not reset attempts — callers may bump the attempt
+ * budget by resetting attempts to 0 first if they want a fresh retry budget.
+ */
+export async function requeueDeadLetter(queueId: string, resetAttempts = false): Promise<void> {
+  const db = getDb();
+  await db.query(
+    `UPDATE file_sync_queue
+     SET state = 'ready', last_error = NULL, updated_at = now()
+     ${resetAttempts ? ', attempts = 0' : ''}
+     WHERE queue_id = $1 AND state = 'dead_letter'`,
+    [queueId],
+  );
 }
 
 export async function pruneCompletedItems(
