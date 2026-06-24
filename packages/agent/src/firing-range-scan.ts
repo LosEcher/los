@@ -1,18 +1,22 @@
 // Firing-range scanner: runs los static-analysis rules against pi and lsclaw.
 // This is Phase 2 (靶场验证) of the los Bootstrap Capability Roadmap.
 //
-// Usage:
-//   cd /Users/echerlos/projects/los-workspace/projects/los/packages/agent
+// Usage (from the los repo root):
+//   cd packages/agent
 //   node --import tsx --import ./src/test-setup.ts ./src/firing-range-scan.ts
 //
 // Outputs JSON reports to .los-runtime/firing-range/
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { scanProject, loadRuleFiles } from './static-analysis/index.js';
 import type { StaticAnalysisScanResult } from './static-analysis/types.js';
 
 const REPO_ROOT = resolve(import.meta.dirname ?? process.cwd(), '..', '..');
+// los-workspace/projects — sibling repos (pi, lsclaw) are symlinked here on the
+// developer machine. Targets default to these siblings so the script is portable
+// across checkouts; override per target via LOS_FIRING_RANGE_<NAME>_ROOT.
+const WORKSPACE_ROOT = resolve(REPO_ROOT, '..');
 
 const TARGETS: Array<{
   project: string;
@@ -21,12 +25,12 @@ const TARGETS: Array<{
 }> = [
   {
     project: 'pi',
-    rootDir: '/Users/echerlos/syncthing/project/pi',
+    rootDir: process.env.LOS_FIRING_RANGE_PI_ROOT ?? resolve(WORKSPACE_ROOT, 'pi'),
     include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mts', '**/*.mjs', '**/*.cjs', '**/*.cts'],
   },
   {
     project: 'lsclaw',
-    rootDir: '/Users/echerlos/Downloads/projects/lsclaw',
+    rootDir: process.env.LOS_FIRING_RANGE_LSCLAW_ROOT ?? resolve(WORKSPACE_ROOT, 'lsclaw'),
     include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mts', '**/*.mjs', '**/*.cjs', '**/*.cts'],
   },
 ];
@@ -68,6 +72,11 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   for (const target of TARGETS) {
+    if (!existsSync(target.rootDir)) {
+      console.log(`\n=== Skipping ${target.project}: rootDir not found (${target.rootDir}) ===`);
+      console.log(`  Set LOS_FIRING_RANGE_${target.project.toUpperCase()}_ROOT to scan a different path.`);
+      continue;
+    }
     console.log(`\n=== Scanning ${target.project} (${target.rootDir}) ===`);
     const start = Date.now();
     const result = await scanProject({

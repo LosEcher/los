@@ -16,8 +16,9 @@ export const LOS_RUNTIME_CORE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       analysisInputs: [
         'https://deepakness.com/blog/pi-agent-setup/',
-        '/Users/echerlos/syncthing/project/hermes-agent',
-        '/Users/echerlos/syncthing/project/pi',
+        // Workspace-relative analysis sources (override via LOS_ANALYSIS_INPUT_* env if needed).
+        'los-workspace://hermes-agent',
+        'los-workspace://pi',
       ],
       sequence: [
         'child-run-contract-propagation',
