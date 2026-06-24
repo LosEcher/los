@@ -64,6 +64,8 @@ export function getDefaultSystemPrompt(
 ): string {
   const base = toolMode === 'read-only' ? READ_ONLY_SYSTEM
     : toolMode === 'project-write' ? PROJECT_WRITE_SYSTEM
+    : toolMode === 'architect' ? ARCHITECT_PROMPT
+    : toolMode === 'editor' ? EDITOR_PROMPT
     : DEFAULT_SYSTEM;
 
   if (identityBlock) {

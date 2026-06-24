@@ -96,18 +96,27 @@ export function setupAgentRun(
 ): AgentRunSetup {
   const log = config.log ?? getLogger('agent');
   const maxLoops = config.maxLoops ?? 20;
-  const provider = createProvider(config.provider, { model: config.model, traceId: config.traceId });
+  // In architect-editor mode the main ReAct loop IS the editor. The architect
+  // runs as a separate front-matter phase (see loop/architect-phase.ts) before
+  // this loop starts, so resolve the editor provider + editor system prompt.
+  const editorMode = config.architectEditor?.enabled === true;
+  const mainProviderName = editorMode
+    ? (config.architectEditor!.editorProvider ?? config.provider)
+    : config.provider;
+  const provider = createProvider(mainProviderName, {
+    model: editorMode ? config.architectEditor!.editorModel : config.model,
+    traceId: config.traceId,
+  });
   const modelProfile = summarizeModelProfile(provider.profile);
   const toolMode = config.toolMode ?? 'project-write';
 
   // Resolve system prompt. When explicitly provided, use as-is.
-  // For architect-editor mode, the prompt alternates by turn via the promptToolMode
-  // which is set before each turn in loop.ts.
+  // In architect-editor mode the main loop uses the editor prompt; the architect
+  // prompt is applied inside the architect phase, not here.
   let systemPrompt = config.systemPrompt;
   if (!systemPrompt) {
     const identityBlock = identityBlockFromConfig(config);
-    // Start with architect prompt if architect-editor mode is enabled
-    const initialPromptToolMode = config.architectEditor?.enabled ? 'architect' as const : toolMode;
+    const initialPromptToolMode = editorMode ? 'editor' as const : toolMode;
     systemPrompt = getDefaultSystemPrompt(initialPromptToolMode, identityBlock || undefined);
   }
   const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);

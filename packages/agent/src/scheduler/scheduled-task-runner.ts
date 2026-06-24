@@ -144,6 +144,13 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
 
   // B0: enforce phase contract — no execution without approved plan
   const runContract = await readCurrentRunContract(input.runSpecId, running.metadata);
+  // Architect/Editor activation bridge: a run contract with mode='architect-editor'
+  // triggers the dual-model loop (architect plans, editor executes). Provider/model
+  // overrides may be added later via contract metadata; defaults use the run's
+  // provider for both roles. See loop/architect-phase.ts and ADR 0007.
+  const architectEditor = runContract?.mode === 'architect-editor'
+    ? { enabled: true as const }
+    : undefined;
   const execCheck = canStartExecution(runContract);
   if (!execCheck.allowed) {
     await transitionExecutionState({
@@ -194,6 +201,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             traceId,
             toolMode,
             sandboxMode: input.sandboxMode,
+            architectEditor,
             initialMessages: input.initialMessages,
             allowedTools: input.allowedTools,
             toolRetry: input.toolRetry,
@@ -235,6 +243,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           log: input.log,
           toolMode,
           sandboxMode: input.sandboxMode,
+          architectEditor,
           initialMessages: input.initialMessages,
           allowedTools: input.allowedTools,
           toolRetry: input.toolRetry,

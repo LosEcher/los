@@ -26,6 +26,10 @@ export interface AgentConfig {
     architectProvider?: string;
     /** Provider name for the editor model. Falls back to default provider if unset. */
     editorProvider?: string;
+    /** Model override for the architect provider. Falls back to the provider's profile default. */
+    architectModel?: string;
+    /** Model override for the editor provider. Falls back to the provider's profile default. */
+    editorModel?: string;
     /** Max architect turns before switching to editor. Default: 2. */
     maxArchitectTurns?: number;
   };
