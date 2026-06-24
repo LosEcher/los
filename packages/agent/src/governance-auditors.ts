@@ -152,11 +152,15 @@ async function runFileSizeAudit(job: GovernanceJob, dryRun: boolean): Promise<Re
   try {
     const { scanFileHotspots } = await import('./hotspot-drift-detector.js');
     const hotspotReport = await scanFileHotspots({ workspaceRoot: process.cwd() });
+    // Store both the count (for drift metrics) and the file list (for trend detection).
+    // Drift iteration expects filesOver400/filesOver600 to be arrays, not numbers.
     return {
       auditedAt: hotspotReport.scannedAt,
       totalFilesScanned: hotspotReport.totalFilesScanned,
-      filesOver600: hotspotReport.filesOver600.length,
-      filesOver400: hotspotReport.filesOver400.length,
+      filesOver600: hotspotReport.filesOver600.map(f => ({ file: f.file, lines: f.lines, package: f.package, delta: f.delta })),
+      filesOver400: hotspotReport.filesOver400.map(f => ({ file: f.file, lines: f.lines, package: f.package, delta: f.delta })),
+      filesOver600Count: hotspotReport.filesOver600.length,
+      filesOver400Count: hotspotReport.filesOver400.length,
       newCrossers: hotspotReport.newCrossers.length,
       new600Crossers: hotspotReport.new600Crossers.length,
       shrank: hotspotReport.shrank.length,
