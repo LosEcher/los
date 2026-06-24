@@ -165,6 +165,7 @@ export function createAnthropicProvider(cfg: AnthropicConfig): Provider {
         text,
         toolCalls,
         reasoningContent,
+        finishReason: data.stop_reason ?? undefined,
         usage: {
           promptTokens: data.usage?.input_tokens ?? 0,
           completionTokens: data.usage?.output_tokens ?? 0,

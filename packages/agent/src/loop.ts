@@ -267,8 +267,39 @@ export async function runAgent(
     };
     messages.push(assistantMsg);
 
-    // If no tool calls, we're done
+    // If no tool calls, we're done — but first verify it's a genuine finish,
+    // not a truncated response or idle ack from a reasoning-heavy model.
     if (res.toolCalls.length === 0) {
+      // finish_reason='length' means the model was cut off mid-response.
+      // Don't accept this as completion — record the error and continue.
+      if (res.finishReason === 'length') {
+        agentLog.warn(`Turn ${i + 1}: model response truncated (finish_reason=length). ` +
+          `Text length: ${res.text.length}, reasoning: ${(res.reasoningContent ?? '').length}. Continuing loop.`);
+        onSessionError({
+          turn: i + 1,
+          type: 'truncated_response',
+          message: `Model response truncated by token limit (finish_reason=length). Text length: ${res.text.length}. The model may need another turn to complete.`,
+        });
+        await emitEvent({
+          type: 'model.response.truncated',
+          turn: i + 1,
+          model: res.model,
+          payload: {
+            finishReason: res.finishReason,
+            textLength: res.text.length,
+            reasoningLength: (res.reasoningContent ?? '').length,
+          },
+        });
+        // Don't exit — let the loop continue for the model to finish
+        continue;
+      }
+
+      // If reasoning-only (R1-style) with empty/minimal text, warn but still complete.
+      // The model may have genuinely decided no action is needed.
+      if (!res.text || res.text.trim().length === 0) {
+        agentLog.warn(`Turn ${i + 1}: empty text response (reasoning only). ` +
+          `Reasoning length: ${(res.reasoningContent ?? '').length}. Completing.`);
+      }
       const turn: TurnSummary = {
         loopCount: i + 1,
         text: res.text,
