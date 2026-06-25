@@ -60,7 +60,16 @@ export async function applyBranchCleanupFix(
 
     // ── STEP 1: Detached HEAD (reversible, only when working tree clean) ──
     if (summary.detached === true) {
-      if (summary.workingTreeDirty === true) {
+      // Re-verify cleanliness now: the audit ran in a prior call and the tree may
+      // have changed in between. Never checkout across a dirty tree (would risk
+      // carrying uncommitted changes across the switch).
+      let dirtyNow = summary.workingTreeDirty === true;
+      try {
+        dirtyNow = execSyncImpl('git status --porcelain', { timeout: 5000 }).trim().length > 0;
+      } catch {
+        dirtyNow = true; // if status itself fails, treat as dirty (safe default)
+      }
+      if (dirtyNow) {
         detailLines.push('detached HEAD: NOT re-attached — working tree dirty (report-only; commit or stash then checkout main)');
       } else {
         try {
@@ -74,9 +83,12 @@ export async function applyBranchCleanupFix(
 
     // ── STEP 2: Forgejo fast-forward sync (only when drift classified syncable) ──
     if (summary.forgejoSyncEnabled === true && summary.forgejoSyncable === true) {
+      // Push origin/main → forgejo main (refspec), NOT local main: local main may
+      // be stale relative to origin/main, which would push a non-ff and get rejected.
+      // The audit already verified forgejo/main is an ancestor of origin/main.
       try {
-        execSyncImpl('git push forgejo main', { timeout: 30000, stdio: 'pipe' });
-        detailLines.push(`forgejo: pushed main (ff, +${summary.forgejoBehind ?? '?'} commits)`);
+        execSyncImpl('git push forgejo origin/main:main', { timeout: 30000, stdio: 'pipe' });
+        detailLines.push(`forgejo: pushed origin/main → forgejo main (ff, +${summary.forgejoBehind ?? '?'} commits)`);
       } catch (err) {
         // Network/credentials failure — infra, NOT a fix failure. Degrade to report-only.
         // Do NOT throw, do NOT return applied:false. Next audit re-evaluates reachability.
@@ -85,8 +97,10 @@ export async function applyBranchCleanupFix(
     }
 
     // ── STEP 3: Stale origin branch deletion (existing classification logic) ──
+    // Fetch origin only (stale-branch scan is origin-scoped); avoids re-fetching
+    // forgejo, which the audit already fetched moments ago in the same loop iteration.
     try {
-      execSyncImpl('git fetch --all --prune', { timeout: 30000, stdio: 'pipe' });
+      execSyncImpl('git fetch origin --prune', { timeout: 30000, stdio: 'pipe' });
     } catch (err) {
       return { applied: false, detail: `Failed to fetch remote branches: ${err instanceof Error ? err.message : String(err)}` };
     }

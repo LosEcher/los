@@ -299,6 +299,11 @@ export function computeBranchHygieneSummary(exec: BranchHygieneExecFn): Record<s
       const counts = exec('git rev-list --left-right --count forgejo/main...origin/main', { timeout: 5000 })
         .trim()
         .split(/\s+/);
+      // Defend against a malformed single-column output (degenerate repo state):
+      // treat as unreachable rather than silently misclassifying ahead as 0.
+      if (counts.length < 2) {
+        throw new Error(`unexpected rev-list output: "${counts.join(' ')}"`);
+      }
       forgejoBehind = Number.parseInt(counts[0] || '0', 10);
       forgejoAhead = Number.parseInt(counts[1] || '0', 10);
 

@@ -171,33 +171,44 @@ describe('checkHasFindings — branch_cleanup circuit-breaker classification', (
 describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
   it('re-attaches detached HEAD when working tree is clean', async () => {
     const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'checkout main', out: '' }, { match: 'fetch --all --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'git status --porcelain', out: '' }, { match: 'checkout main', out: '' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: true, workingTreeDirty: false, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' }, exec);
     assert.equal(res.applied, true);
     assert.equal(recorded.some(c => c.includes('git checkout main')), true);
   });
 
-  it('does NOT checkout when detached on a dirty tree', async () => {
+  it('does NOT checkout when detached on a dirty tree (re-verified at fix time)', async () => {
     const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'fetch --all --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    // Fix re-runs `git status --porcelain`; even if the audit said clean, a dirty
+    // re-verification must block the checkout. Here the audit says dirty AND re-verify is dirty.
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'git status --porcelain', out: ' M file.ts\n' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: true, workingTreeDirty: true, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' }, exec);
     assert.equal(res.applied, true);
     assert.equal(recorded.some(c => c.includes('git checkout main')), false);
     assert.match(res.detail, /dirty/);
   });
 
-  it('pushes forgejo when syncable and sync enabled', async () => {
+  it('does NOT checkout when audit said clean but tree turned dirty before fix', async () => {
+    // Audit reported workingTreeDirty=false, but the fix-time re-verification sees dirt.
     const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo main', out: '' }, { match: 'fetch --all --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'git status --porcelain', out: ' M file.ts\n' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const res = await applyBranchCleanupFix({ detached: true, workingTreeDirty: false, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' }, exec);
+    assert.equal(recorded.some(c => c.includes('git checkout main')), false);
+    assert.match(res.detail, /dirty/);
+  });
+
+  it('pushes forgejo when syncable and sync enabled (refspec origin/main:main)', async () => {
+    const recorded: string[] = [];
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo', out: '' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: false, forgejoSyncEnabled: true, forgejoSyncable: true, forgejoBehind: 5, forgejoDrift: 'syncable' }, exec);
     assert.equal(res.applied, true);
-    assert.equal(recorded.some(c => c.includes('git push forgejo main')), true);
-    assert.match(res.detail, /pushed main/);
+    assert.equal(recorded.some(c => c.includes('git push forgejo origin/main:main')), true);
+    assert.match(res.detail, /pushed origin\/main/);
   });
 
   it('degrades to report-only (applied:true, no throw) when forgejo push fails', async () => {
     const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo main', error: 'Could not resolve host' }, { match: 'fetch --all --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo', error: 'Could not resolve host' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: false, forgejoSyncEnabled: true, forgejoSyncable: true, forgejoBehind: 5, forgejoDrift: 'syncable' }, exec);
     assert.equal(res.applied, true); // NOT false — infra failure, not fix failure
     assert.match(res.detail, /degraded/i);
@@ -205,14 +216,14 @@ describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
 
   it('never pushes forgejo when drift is non_ff (syncable=false)', async () => {
     const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'fetch --all --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     await applyBranchCleanupFix({ detached: false, forgejoSyncEnabled: true, forgejoSyncable: false, forgejoAhead: 2, forgejoDrift: 'non_ff' }, exec);
     assert.equal(recorded.some(c => c.includes('push forgejo')), false);
   });
 
   it('never pushes forgejo when sync disabled by env', async () => {
     const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'fetch --all --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     await applyBranchCleanupFix({ detached: false, forgejoSyncEnabled: false, forgejoSyncable: true, forgejoDrift: 'disabled' }, exec);
     assert.equal(recorded.some(c => c.includes('push forgejo')), false);
   });
@@ -226,7 +237,7 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
     const recorded: string[] = [];
     const exec = fakeExec([
       { match: 'rev-parse --is-inside-work-tree', out: 'true' },
-      { match: 'fetch --all --prune', out: '' },
+      { match: 'fetch origin --prune', out: '' },
       { match: 'for-each-ref', out: 'origin/feature-old\n' },
       { match: 'rev-list --left-right --count origin/main...origin/feature-old', out: '2 0' },
       { match: 'git cherry origin/main origin/feature-old', out: '- <sha>\n' },
@@ -241,7 +252,7 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
     const recorded: string[] = [];
     const exec = fakeExec([
       { match: 'rev-parse --is-inside-work-tree', out: 'true' },
-      { match: 'fetch --all --prune', out: '' },
+      { match: 'fetch origin --prune', out: '' },
       { match: 'for-each-ref', out: 'origin/feature-active\n' },
       { match: 'rev-list --left-right --count origin/main...origin/feature-active', out: '2 5' },
       { match: 'git cherry origin/main origin/feature-active', out: '+ <sha1>\n+ <sha2>\n' },
