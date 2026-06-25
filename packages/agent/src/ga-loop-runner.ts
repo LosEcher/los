@@ -24,6 +24,7 @@ import { computeNextState, evaluateLoopGate, maybeAutoRecoverPaused } from './ga
 import { applyBranchCleanupFix, applyRelatedProjectScanFix } from './ga-scenario-fixes.js';
 import { applyConsistencyFix, applyHotspotFix } from './ga-loop-fixes.js';
 import { applyFileSizeFix } from './ga-file-size-fix.js';
+import { applyAICodeFix } from './ga-ai-code-fix.js';
 import type {
   GovernanceJob,
   GovernanceJobAutoFixConfig,
@@ -51,6 +52,8 @@ async function applyAutoFix(
       return applyHotspotFix(summary);
     case 'branch_cleanup':
       return applyBranchCleanupFix(summary);
+    case 'ai_code_fix':
+      return applyAICodeFix(job, summary);
     case 'file_size':
       return applyFileSizeFix(summary);
     case 'related_project_scan':
@@ -357,6 +360,10 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       // must not trip the circuit breaker. 'syncable' is auto-fixable; 'non_ff' escalates.
       const driftFinding = drift === 'syncable' || drift === 'non_ff';
       return detached || stale > 0 || driftFinding;
+    }
+    case 'ai_code_fix': {
+      const count = typeof summary.candidateCount === 'number' ? summary.candidateCount : 0;
+      return count > 0;
     }
     case 'related_project_scan': {
       const absorbable = typeof summary.absorbableCount === 'number' ? summary.absorbableCount : 0;
