@@ -163,14 +163,14 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
   },
   {
     jobType: 'branch_cleanup',
-    cadence: 'daily',
+    cadence: 'hourly',
     dedupeKey: 'gov-job-branch-cleanup',
     initialStaggerMs: 30 * 60 * 1000,
     autoFix: {
       autoFixEnabled: true,
       maxAutoFixAttempts: 1,
       verificationCommands: [],
-      stopCondition: 'no stale remote branches remain (classified as delete and removed)',
+      stopCondition: 'no detached HEAD, forgejo/main fast-forward-synced with origin/main, and no stale origin branches classified as delete',
       escalationCadence: 'immediate',
     },
   },

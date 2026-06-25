@@ -311,7 +311,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
  * Determine whether the audit found actionable issues.
  * Each job type has its own threshold for what counts as a "finding."
  */
-function checkHasFindings(jobType: string, summary: Record<string, unknown>): boolean {
+export function checkHasFindings(jobType: string, summary: Record<string, unknown>): boolean {
   switch (jobType) {
     case 'consistency_audit': {
       const tr = summary.todoReconciliation as Record<string, unknown> | undefined;
@@ -347,8 +347,16 @@ function checkHasFindings(jobType: string, summary: Record<string, unknown>): bo
       return tasksWithout > 0;
     }
     case 'branch_cleanup': {
-      const count = typeof summary.staleCandidateCount === 'number' ? summary.staleCandidateCount : 0;
-      return count > 0;
+      const detached = summary.detached === true;
+      // Read staleOriginBranches, falling back to the legacy staleCandidateCount
+      // alias so older persisted summaries (written before this change) still count.
+      const staleRaw = summary.staleOriginBranches ?? summary.staleCandidateCount;
+      const stale = typeof staleRaw === 'number' ? staleRaw : 0;
+      const drift = typeof summary.forgejoDrift === 'string' ? summary.forgejoDrift : 'none';
+      // 'unreachable' and 'disabled' are NOT findings — a forgejo outage or opt-out
+      // must not trip the circuit breaker. 'syncable' is auto-fixable; 'non_ff' escalates.
+      const driftFinding = drift === 'syncable' || drift === 'non_ff';
+      return detached || stale > 0 || driftFinding;
     }
     case 'related_project_scan': {
       const absorbable = typeof summary.absorbableCount === 'number' ? summary.absorbableCount : 0;

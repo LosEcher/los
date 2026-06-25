@@ -1,6 +1,7 @@
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { PROCEDURAL_CANDIDATES_DDL } from '@los/infra/procedural-candidates-ddl';
+import type { ExecSyncOptions } from 'node:child_process';
 import type { GovernanceJob } from './governance-jobs-types.js';
 import { runMemoryIntegrityAudit, runMemoryRetentionAudit } from './governance-auditors-memory.js';
 
@@ -200,37 +201,159 @@ async function runRelatedProjectScanAudit(): Promise<Record<string, unknown>> {
   }
 }
 
-async function runBranchCleanupAudit(): Promise<Record<string, unknown>> {
-  // Branch cleanup audit is a lightweight pre-check: does the repo
-  // have any stale remote branches? The actual fix runs in applyBranchCleanupFix.
+// ── Branch hygiene: exec function type + pure summary builder ────────
+
+/**
+ * Options the branch-hygiene audit/fix pass to the injected exec. Deliberately
+ * narrow (no `encoding` — the real wrapper forces `utf8`) so the type matches
+ * `execSync`'s overloads cleanly and fake execs in tests can ignore it.
+ */
+export type BranchHygieneExecOptions = {
+  timeout?: number;
+  stdio?: ExecSyncOptions['stdio'];
+};
+
+/**
+ * Exec function injected into `computeBranchHygieneSummary` / `applyBranchCleanupFix`
+ * so the logic is unit-testable without touching the network or filesystem.
+ * Implementations should throw on non-zero exit (matching `execSync`), so callers
+ * use try/catch for detection.
+ */
+export type BranchHygieneExecFn = (cmd: string, opts?: BranchHygieneExecOptions) => string;
+
+/**
+ * Forgejo mirror drift classification. Single source of truth consumed by
+ * `applyBranchCleanupFix` (fix action) and `checkHasFindings` (circuit-breaker
+ * impact). `unreachable`/`disabled`/`none` are NOT findings so a forgejo outage
+ * never trips the breaker; `syncable` is auto-fixable; `non_ff` escalates.
+ */
+export type ForgejoDrift = 'none' | 'syncable' | 'non_ff' | 'unreachable' | 'disabled';
+
+/**
+ * Pure branch-hygiene audit. Reads detached-HEAD state, working-tree dirtiness,
+ * forgejo mirror drift, and stale origin branch count. Never throws — any git
+ * failure degrades to a reportable field (e.g. forgejo unreachable → drift
+ * `unreachable`, not an error). Caller injects `exec` (real `execSync` in
+ * production, a fake in tests).
+ */
+export function computeBranchHygieneSummary(exec: BranchHygieneExecFn): Record<string, unknown> {
+  const auditedAt = new Date().toISOString();
+
+  // Gate: is this a git worktree at all?
   try {
-    const { execSync } = await import('node:child_process');
-    execSync('git rev-parse --is-inside-work-tree', { encoding: 'utf8', timeout: 5000 });
+    exec('git rev-parse --is-inside-work-tree', { timeout: 5000 });
   } catch {
-    return { auditedAt: new Date().toISOString(), branchable: false, reason: 'Not a git worktree' };
+    return { auditedAt, branchable: false, reason: 'Not a git worktree' };
   }
 
-  let branchCount = 0;
+  // Detached HEAD: `git symbolic-ref -q HEAD` exits non-zero when detached.
+  let detached = false;
   try {
-    const refsOutput = (await import('node:child_process')).execSync(
-      'git for-each-ref --format=%(refname:short) refs/remotes/origin',
-      { encoding: 'utf8', timeout: 5000 },
-    );
-    branchCount = refsOutput
+    exec('git symbolic-ref -q HEAD', { timeout: 5000 });
+  } catch {
+    detached = true;
+  }
+
+  // Working tree dirty? (gates whether detached-HEAD auto-fix is safe)
+  let workingTreeDirty = false;
+  try {
+    const status = exec('git status --porcelain', { timeout: 5000 });
+    workingTreeDirty = status.trim().length > 0;
+  } catch {
+    workingTreeDirty = false; // assume clean if status itself fails
+  }
+
+  // Forgejo sync env switch — default enabled (opt out with '0' / 'false').
+  const syncFlag = process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC ?? '';
+  const forgejoSyncEnabled = syncFlag !== '0' && syncFlag.toLowerCase() !== 'false';
+
+  // Stale origin branches (coarse count; fix does precise git-cherry classification).
+  let staleOriginBranches = 0;
+  try {
+    const refs = exec('git for-each-ref --format=%(refname:short) refs/remotes/origin', { timeout: 5000 });
+    staleOriginBranches = refs
       .split('\n')
       .map(l => l.trim())
       .filter(b => b && b !== 'origin' && !b.startsWith('origin/HEAD') && b !== 'origin/main')
       .length;
-  } catch {
-    return { auditedAt: new Date().toISOString(), branchable: true, remoteBranches: 0, staleCandidateCount: 0 };
+  } catch { /* leave at 0 */ }
+
+  // Forgejo drift — only evaluated when sync enabled. Any failure → unreachable (not a finding).
+  let forgejoReachable: boolean | null = null;
+  let forgejoBehind: number | null = null;
+  let forgejoAhead: number | null = null;
+  let forgejoFastForwardable: boolean | null = null;
+  let forgejoSyncable: boolean | null = null;
+  let forgejoDrift: ForgejoDrift;
+
+  if (!forgejoSyncEnabled) {
+    forgejoDrift = 'disabled';
+  } else {
+    try {
+      exec('git fetch forgejo --prune', { timeout: 15000, stdio: 'pipe' });
+      // Confirm forgejo/main ref resolved (fetch may succeed but ref may be absent).
+      exec('git rev-parse --verify forgejo/main', { timeout: 5000, stdio: 'pipe' });
+      forgejoReachable = true;
+
+      // `git rev-list --left-right --count forgejo/main...origin/main` → "behind ahead"
+      const counts = exec('git rev-list --left-right --count forgejo/main...origin/main', { timeout: 5000 })
+        .trim()
+        .split(/\s+/);
+      // Defend against a malformed single-column output (degenerate repo state):
+      // treat as unreachable rather than silently misclassifying ahead as 0.
+      if (counts.length < 2) {
+        throw new Error(`unexpected rev-list output: "${counts.join(' ')}"`);
+      }
+      forgejoBehind = Number.parseInt(counts[0] || '0', 10);
+      forgejoAhead = Number.parseInt(counts[1] || '0', 10);
+
+      // ff check: is forgejo/main an ancestor of origin/main? (exit 0 = yes)
+      try {
+        exec('git merge-base --is-ancestor forgejo/main origin/main', { timeout: 5000, stdio: 'pipe' });
+        forgejoFastForwardable = true;
+      } catch {
+        forgejoFastForwardable = false;
+      }
+
+      forgejoSyncable = forgejoFastForwardable === true && (forgejoBehind ?? 0) > 0 && (forgejoAhead ?? 0) === 0;
+
+      if (forgejoBehind === 0 && forgejoAhead === 0) {
+        forgejoDrift = 'none';
+      } else if (forgejoSyncable) {
+        forgejoDrift = 'syncable';
+      } else {
+        forgejoDrift = 'non_ff'; // diverged (ahead > 0) — needs human rebase/reset
+      }
+    } catch {
+      forgejoReachable = false;
+      forgejoDrift = 'unreachable';
+    }
   }
 
   return {
-    auditedAt: new Date().toISOString(),
+    auditedAt,
     branchable: true,
-    remoteBranches: branchCount,
-    staleCandidateCount: branchCount, // all non-main remote branches are candidates
+    detached,
+    workingTreeDirty,
+    forgejoSyncEnabled,
+    forgejoReachable,
+    forgejoBehind,
+    forgejoAhead,
+    forgejoFastForwardable,
+    forgejoSyncable,
+    forgejoDrift,
+    staleOriginBranches,
+    remoteBranches: staleOriginBranches,
+    staleCandidateCount: staleOriginBranches, // alias kept for CLI backward compat
   };
+}
+
+async function runBranchCleanupAudit(): Promise<Record<string, unknown>> {
+  // Inject the real execSync so the pure `computeBranchHygieneSummary` stays testable.
+  const { execSync } = await import('node:child_process');
+  const exec: BranchHygieneExecFn = (cmd, opts) =>
+    execSync(cmd, { encoding: 'utf8', ...opts }) as string;
+  return computeBranchHygieneSummary(exec);
 }
 
 async function runSupplyChainAuditWrapper(): Promise<Record<string, unknown>> {

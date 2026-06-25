@@ -299,7 +299,7 @@ function renderSweep(result: GovernanceSweepResult, json: boolean): void {
     } else if (r.jobType === 'architecture_drift') {
       console.log(`    nodes=${summary.nodeCount ?? '?'} edges=${summary.edgeCount ?? '?'} nodeTypes=${(summary.nodeTypes as string[])?.join(',') ?? '?'}`);
     } else if (r.jobType === 'branch_cleanup') {
-      console.log(`    branchable=${summary.branchable ?? '?'} remoteBranches=${summary.remoteBranches ?? '?'} staleCandidates=${summary.staleCandidateCount ?? '?'}`);
+      console.log(`    detached=${summary.detached ?? '?'} dirty=${summary.workingTreeDirty ?? '?'} staleOrigin=${summary.staleOriginBranches ?? summary.staleCandidateCount ?? '?'} forgejo=${summary.forgejoDrift ?? '?'}(behind=${summary.forgejoBehind ?? '?'} ahead=${summary.forgejoAhead ?? '?'})`);
     } else if (r.jobType === 'related_project_scan') {
       console.log(`    totalProjects=${summary.totalProjects ?? '?'} accessible=${summary.accessibleProjects ?? '?'} withFeatures=${summary.withNewFeatures ?? '?'} absorbable=${summary.absorbableCount ?? '?'}`);
     } else if (r.jobType === 'file_size') {
