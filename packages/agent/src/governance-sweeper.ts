@@ -228,6 +228,11 @@ export async function createTodosFromFindings(
         created += 1;
       }
     }
+
+    if (job.jobType === 'branch_cleanup') {
+      const { createBranchCleanupTodos } = await import('./governance-sweeper-branch-todos.js');
+      created += await createBranchCleanupTodos(job, summary);
+    }
   } catch (err) {
     log.warn(`Failed to create findings todo for ${job.jobType}: ${err instanceof Error ? err.message : String(err)}`);
   }
