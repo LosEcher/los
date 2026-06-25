@@ -258,7 +258,7 @@ function hoursToMs(value: number | undefined): number | undefined {
 async function sweep(parsed: ParsedArgs): Promise<void> {
   const apply = booleanFlag(parsed, 'apply');
   const jobType = stringFlag(parsed, 'job-type');
-  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan', 'file_size'];
+  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan', 'file_size', 'ai_code_fix'];
   const jobTypes = jobType
     ? (jobType.split(',').filter(t => validTypes.includes(t as GovernanceJobType)) as GovernanceJobType[])
     : undefined;
@@ -300,6 +300,8 @@ function renderSweep(result: GovernanceSweepResult, json: boolean): void {
       console.log(`    nodes=${summary.nodeCount ?? '?'} edges=${summary.edgeCount ?? '?'} nodeTypes=${(summary.nodeTypes as string[])?.join(',') ?? '?'}`);
     } else if (r.jobType === 'branch_cleanup') {
       console.log(`    detached=${summary.detached ?? '?'} dirty=${summary.workingTreeDirty ?? '?'} staleOrigin=${summary.staleOriginBranches ?? summary.staleCandidateCount ?? '?'} forgejo=${summary.forgejoDrift ?? '?'}(behind=${summary.forgejoBehind ?? '?'} ahead=${summary.forgejoAhead ?? '?'})`);
+    } else if (r.jobType === 'ai_code_fix') {
+      console.log(`    candidates=${summary.candidateCount ?? '?'} nextTodo=${summary.nextTodoId ?? '-'}`);
     } else if (r.jobType === 'related_project_scan') {
       console.log(`    totalProjects=${summary.totalProjects ?? '?'} accessible=${summary.accessibleProjects ?? '?'} withFeatures=${summary.withNewFeatures ?? '?'} absorbable=${summary.absorbableCount ?? '?'}`);
     } else if (r.jobType === 'file_size') {

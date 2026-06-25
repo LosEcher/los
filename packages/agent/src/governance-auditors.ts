@@ -143,8 +143,14 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'supply_chain_audit': return runSupplyChainAuditWrapper();
     case 'static_analysis': return runStaticAnalysisAuditWrapper();
     case 'performance_audit': return runPerformanceAuditWrapper();
+    case 'ai_code_fix': return runAICodeFixAuditWrapper(job);
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
+}
+
+async function runAICodeFixAuditWrapper(job: GovernanceJob): Promise<Record<string, unknown>> {
+  const { runAICodeFixAudit } = await import('./governance-auditors-ai-code-fix.js');
+  return runAICodeFixAudit(job);
 }
 
 // ... (existing branch_cleanup auditor)

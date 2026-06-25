@@ -175,6 +175,20 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     },
   },
   {
+    jobType: 'ai_code_fix',
+    cadence: 'manual',
+    dedupeKey: 'gov-job-ai-code-fix',
+    initialStaggerMs: 0,
+    autoFix: {
+      autoFixEnabled: true,
+      maxAutoFixAttempts: 1,
+      verificationCommands: ['pnpm run _typecheck'],
+      stopCondition: 'no P1 governance todos with status=backlog (source ga_loop/governance_sweep)',
+      escalationCadence: 'after_retry',
+    },
+    config: { provider: 'deepseek', maxDiffLines: 200, maxLoops: 8 },
+  },
+  {
     jobType: 'related_project_scan',
     cadence: 'weekly',
     dedupeKey: 'gov-job-related-project-scan',
