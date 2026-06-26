@@ -82,16 +82,17 @@ export function fixToolCallPairing(messages: Message[], providerName: string): H
     }
   }
 
-  // Second pass: rebuild.
+  // Second pass: rebuild, reusing pass 1's droppedAssistantCallIds membership
+  // instead of recomputing the allPaired predicate.
   const result: Message[] = [];
   let droppedUnpairedAssistant = 0;
   let droppedOrphanTool = 0;
 
   for (const m of messages) {
     if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
-      const ids = m.tool_calls.map(tc => tc.id).filter(Boolean);
-      const allPaired = ids.length > 0 && ids.every(id => resultIds.has(id));
-      if (!allPaired) {
+      // An assistant is unpaired iff any of its tool_call ids was marked in pass 1.
+      const isUnpaired = m.tool_calls.some(tc => tc.id && droppedAssistantCallIds.has(tc.id));
+      if (isUnpaired) {
         droppedUnpairedAssistant++;
         continue;
       }

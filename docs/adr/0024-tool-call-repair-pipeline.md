@@ -141,7 +141,7 @@ malformed args 场景（lsclaw 验证过）。外部库（如 `jsonrepair`）引
 ```
 请求前  healBeforeSend(messages, profile)          接入点: loop.ts 推 assistant msg 后、provider.chat() 前
   1. shrinkOversizedToolResults            [新·通用]
-  2. fixToolCallPairing + stampMissingIds  [新·通用]  ← 复用 session-trace.validateTraceCompleteness 的检测，从"检测"升级为"修复"
+  2. fixToolCallPairing + stampMissingIds  [新·通用]  ← 消息层配对修复（事件层 `validateTraceCompleteness` 仅检测，不共享 helper）
   3. reasoningRetention(profile)           [新·profile-gated]
        - stripDroppable: lastUser 之前无 tool_calls 的 assistant 轮剥 reasoning
        - stampEmpty: thinking-mode 且 tool_call 轮补空 reasoning_content（防 400）
@@ -156,7 +156,7 @@ malformed args 场景（lsclaw 验证过）。外部库（如 `jsonrepair`）引
 
 Dispatch                                            不动，复用 tool-runner.ts
 
-回合边界  resetStorm()                             接入点: loop.ts 检测新 user turn 处
+回合边界  resetStorm()                             [未接入] StormBreaker 当前 per-runAgent 构造（= 一个 user turn），reset() 留作公共 API 供跨 turn 复用时调用
 ```
 
 ### Gate 映射（用 ModelProfile，不硬编码）
@@ -182,8 +182,7 @@ Dispatch                                            不动，复用 tool-runner.
 - 落点：`providers/repair/healing.ts`
 - 逻辑：带 tool_calls 的 assistant 若缺匹配 tool result → 丢弃该 assistant +
   orphan tool 消息；bare call 补 `stampMissingIds`（`z-ext-{ts}-{seq}`）
-- 关键复用：`session-trace.ts` `validateTraceCompleteness` 已有检测逻辑，
-  提取为共享 helper，从"事后告警"升级为"请求前修复"
+- 关键复用：`session-trace.ts` `validateTraceCompleteness` 已有**事件层**（`SessionEventRecord[]`）的 orphan 检测；本阶段在**消息层**（`Message[]`）做同类检测并升级为修复。两层数据结构不同，未抽共享 helper——`fixToolCallPairing` 独立实现 id 集配对。
 - 规避：session 恢复后 DeepSeek 400 on unpaired（当前 los 只检测不修）
 
 ### 3. Reasoning retention + round-trip（profile-gated，中优先级）
