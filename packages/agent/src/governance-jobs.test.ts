@@ -106,6 +106,40 @@ test('governance jobs: seedGovernanceJobs creates 6 default jobs, idempotent', a
   }
 });
 
+test('governance jobs: seedGovernanceJobs backfills autoFix onto pre-existing jobs', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  try {
+    await ensureGovernanceJobStore();
+    // Wipe consistency_audit seeds so we can plant a stale one without autoFix.
+    await getDb().query("DELETE FROM governance_jobs WHERE job_type = 'consistency_audit'").catch(() => undefined);
+
+    // Plant a pre-existing active job with NO autoFix (simulates a job created
+    // before autoFix was added to the seed). id is server-generated; we use the
+    // returned `stale.id` below.
+    const stale = await createGovernanceJob({
+      jobType: 'consistency_audit',
+      cadence: 'daily',
+      status: 'active',
+      config: {},
+      dedupeKey: `gov-test-stale-${Date.now()}`,
+      // autoFix intentionally omitted
+    });
+    assert.equal(stale.autoFix, undefined, 'stale job should start without autoFix');
+
+    // Re-seed — should detect the mismatch and backfill autoFix from the seed.
+    await seedGovernanceJobs();
+    const reloaded = await getGovernanceJob(stale.id);
+    assert.ok(reloaded?.autoFix, 'autoFix should be backfilled onto stale job');
+    assert.equal(reloaded!.autoFix!.autoFixEnabled, true, 'backfilled autoFixEnabled must match seed');
+
+    await deleteGovernanceJob(stale.id).catch(() => undefined);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
 test('governance jobs: listDueGovernanceJobs filters by cadence到期', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

@@ -38,7 +38,7 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     title: '定期核对 todo 与真实实现的漂移',
     description: '对 ready / in_progress / done todo 做证据核验，发现未更新、重复完成和实现漂移后回写状态或归档。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-05-30',
     stageId: 'todo-governance',
@@ -48,6 +48,10 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: 'todo 未及时更新时，页面看到的是计划真相，不是执行真相。',
       solution: '以任务事件、session_events、requestId/traceId 做核验和自动标注。',
+      evidence: [
+        'packages/agent/src/governance-drift-sweeper.ts — detectGovernanceDrift / sweepGovernanceDrift / sweepWithDriftDetection',
+      ],
+      implementedAt: '2026-06-25',
     },
   },
   {
@@ -55,7 +59,7 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     title: '补租户/项目级 todo 派发接口',
     description: '按 tenantId/projectId/stageId 选择 ready 的 task/batch todo，生成 task_run 并回写 trace/request/task 关联。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-05-30',
     stageId: 'todo-governance',
@@ -65,6 +69,12 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '当前 todo 只能人工改状态，还不能成为真正的派发入口。',
       solution: '在 scheduler 前面加一层可审计的派发门。',
+      evidence: [
+        'packages/gateway/src/routes/data/saas-todo-routes.ts — POST /tenants/:tenantId/projects/:projectId/todos/dispatch (reconcile + create + governance job audit trail)',
+        'packages/gateway/src/routes/data/todo-routes.ts — POST /todos/:id/dispatch (per-todo dispatch with status/kind/dep gates + onTaskEvent callback)',
+        'packages/agent/src/todo-dispatch.ts — dispatchTodo core function shared by both routes and MessageRouter',
+      ],
+      implementedAt: '2026-06-26',
     },
   },
   {
@@ -114,7 +124,7 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     title: '实现周期性治理 sweeper 和租户级调度策略',
     description: '按 tenant/project 周期执行一致性、性能、存储、架构、实现漂移、工具漂移和热点文件检查，写回 todo/task/session 证据。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'governance-jobs',
@@ -125,6 +135,12 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
       problem: '定时任务如果只是 cron 调用，会缺少租户边界、幂等键、执行 lease 和可追溯结果。',
       solution: '定义 governance job policy、周期、lease、dedupeKey、result summary 和 evidence links，再通过 scheduler 执行。',
       cadenceExamples: ['daily consistency audit', 'weekly hotspot audit', 'release-gate drift audit'],
+      evidence: [
+        'packages/agent/src/governance-wake.ts — claimNextDueJob (FOR UPDATE SKIP LOCKED) + PG LISTEN/NOTIFY + EventBus + 10min fallback setInterval',
+        'packages/agent/src/governance-sweeper.ts — runGovernanceSweep cadence-based dispatch + GA loop integration',
+        'packages/agent/src/governance-jobs-schema.ts — 12 SEED_JOBS with cadence/circuit-breaker/dedupeKey',
+      ],
+      implementedAt: '2026-06-21',
     },
   },
   {

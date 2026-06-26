@@ -13,6 +13,8 @@
  *   #task                   → todo: list
  *   #task <id>              → todo: show
  *   #task new <title>       → todo: create
+ *   #run <id>               → todo: dispatch
+ *   #run <id> force         → todo: dispatch (override ready gate)
  *   #claude <prompt>        → runtime: claude-code
  *   #codex <prompt>         → runtime: codex
  */
@@ -57,6 +59,11 @@ const COMMANDS: Array<{
   {
     pattern: /^#codex\s+(?<prompt>.+)$/i,
     build: (m) => ({ type: 'runtime', kind: 'codex', prompt: m.groups!.prompt!.trim() }),
+  },
+  // #run <id>  /  #dispatch <id>  (optional `force` to override ready gate)
+  {
+    pattern: /^#(?:run|dispatch)\s+(?<id>[\w-]{4,64})(?:\s+(?<force>force))?\s*$/i,
+    build: (m) => ({ type: 'todo', action: 'dispatch', todoId: m.groups!.id!, force: !!m.groups!.force }),
   },
   // #task new <title>
   {

@@ -42,7 +42,8 @@
     "./event-bus": "./src/event-bus.ts",
     "./runtime-adapter": "./src/runtime-adapter/index.ts",
     "./pre-action-gate": "./src/pre-action-gate.ts",
-    "./message-router": "./src/message-router/index.ts"
+    "./message-router": "./src/message-router/index.ts",
+    "./todo-dispatch": "./src/todo-dispatch.ts"
   },
   "scripts": {
     "build": "tsc",

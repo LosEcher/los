@@ -1,8 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import {
-  createTaskRun,
-} from '@los/agent/task-runs';
-import { runScheduledAgentTask } from '@los/agent/scheduler';
+import { dispatchTodo, DispatchError } from '@los/agent/todo-dispatch';
 import {
   archiveTodo,
   createTodo,
@@ -16,7 +13,6 @@ import {
   type TodoPriority,
   type TodoStatus,
 } from '@los/agent/todos';
-import { randomUUID } from 'node:crypto';
 import { getRequestContext } from '../../request-context.js';
 import { runIdempotentJson } from '../../idempotency.js';
 
@@ -222,114 +218,20 @@ export function registerTodoRoutes(app: FastifyInstance) {
       reply,
       { route: `/todos/${id}/dispatch`, method: 'POST', body: body ?? {}, context },
       async () => {
-        const todo = await loadTodo(id);
-        if (!todo) {
-          reply.status(404);
-          return { error: 'Not found' };
-        }
-
-        const force = body?.force === true;
-        if (todo.status !== 'ready' && !force) {
-          reply.status(400);
-          return { error: 'todo_not_ready', message: `Todo status is "${todo.status}", must be "ready". Use force=true to override.` };
-        }
-
-        // Kind gate: only task and batch are dispatchable (ADR 0005)
-        if (todo.kind !== 'task' && todo.kind !== 'batch') {
-          reply.status(400);
-          return { error: 'todo_not_dispatchable', message: `Todo kind "${todo.kind}" cannot be dispatched. Only task and batch are eligible.` };
-        }
-
-        // Dependency gate: all dependsOnIds must be done
-        if (todo.dependsOnIds && todo.dependsOnIds.length > 0) {
-          const incomplete: string[] = [];
-          for (const depId of todo.dependsOnIds) {
-            const dep = await loadTodo(depId);
-            if (dep && dep.status !== 'done') incomplete.push(depId);
+        try {
+          const result = await dispatchTodo(id, {
+            force: body?.force === true,
+            toolMode: body?.toolMode as 'read-only' | 'project-write' | 'all' | undefined,
+            workspaceRoot: body?.workspaceRoot as string | undefined,
+          });
+          return result;
+        } catch (err) {
+          if (err instanceof DispatchError) {
+            reply.status(err.status);
+            return { error: err.code, message: err.message, ...(err.detail ?? {}) };
           }
-          if (incomplete.length > 0) {
-            reply.status(400);
-            return {
-              error: 'todo_dependencies_not_met',
-              message: `${incomplete.length} dependencies not done`,
-              incompleteIds: incomplete,
-            };
-          }
+          throw err;
         }
-
-        const sessionId = todo.sessionId ?? `dispatch-${randomUUID()}`;
-        const prompt = todo.description || todo.title;
-
-        // Transition todo to in_progress before firing the scheduler
-        await updateTodo(id, { status: 'in_progress' });
-
-        // Fire-and-forget: runScheduledAgentTask handles the full lifecycle
-        // (create task_run, transition queued→running, execute agent loop).
-        // The onTaskEvent callback updates the todo status asynchronously.
-        const scheduledPromise = runScheduledAgentTask({
-          prompt,
-          sessionId,
-          runSpecId: todo.metadata?.runSpecId as string | undefined,
-          workspaceRoot: (body?.workspaceRoot as string) ?? process.cwd(),
-          toolMode: (['read-only', 'project-write', 'all'].includes(body?.toolMode as string) ? body?.toolMode : 'read-only') as 'read-only' | 'project-write' | 'all',
-          promptPreview: todo.title,
-          tenantId: todo.tenantId,
-          projectId: todo.projectId,
-          userId: todo.userId,
-          metadata: { ...todo.metadata, dispatchSource: 'todo', todoId: id },
-          onTaskEvent: async (event) => {
-            // Map task lifecycle events to todo status transitions
-            if (event.type === 'task.failed' || event.type === 'task.blocked') {
-              await updateTodo(id, {
-                status: 'blocked',
-                taskRunId: event.taskRun.id,
-                sessionId: event.taskRun.sessionId,
-                metadata: {
-                  ...todo.metadata,
-                  dispatchReady: false,
-                  lastRun: {
-                    event: event.type,
-                    status: event.taskRun.status,
-                    sessionId: event.taskRun.sessionId,
-                    taskRunId: event.taskRun.id,
-                    traceId: event.taskRun.traceId,
-                    reason: 'Task execution failed or blocked',
-                    updatedAt: new Date().toISOString(),
-                  },
-                },
-              }).catch(() => undefined);
-            } else if (event.type === 'task.succeeded') {
-              await updateTodo(id, {
-                status: 'done',
-                taskRunId: event.taskRun.id,
-                sessionId: event.taskRun.sessionId,
-              }).catch(() => undefined);
-            } else if (event.type === 'task.cancelled') {
-              await updateTodo(id, {
-                status: 'cancelled',
-                taskRunId: event.taskRun.id,
-                sessionId: event.taskRun.sessionId,
-                metadata: {
-                  ...todo.metadata,
-                  cancelReason: 'Task cancelled during execution',
-                },
-              }).catch(() => undefined);
-            } else if (event.type === 'task.running') {
-              await updateTodo(id, {
-                taskRunId: event.taskRun.id,
-                sessionId: event.taskRun.sessionId,
-              }).catch(() => undefined);
-            }
-          },
-        });
-
-        // Resolve the task_run ID as soon as possible for the response.
-        // runScheduledAgentTask creates the task_run synchronously before
-        // entering the async agent loop, so we can extract it quickly.
-        const result = await scheduledPromise;
-        const taskRun = 'taskRun' in result ? result.taskRun : null;
-
-        return { todo: await loadTodo(id), taskRun, schedulerStatus: result.status };
       },
     );
   });

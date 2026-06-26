@@ -58,7 +58,7 @@ export type ResolvedIntent =
   | { type: 'runtime';    kind: 'claude-code' | 'codex'; prompt: string }
   | { type: 'steering';   instruction: string; sessionId: string; turnBoundary?: 'immediate' | 'next_turn' }
   | { type: 'status';     sessionId: string }
-  | { type: 'todo';       action: 'list' | 'create' | 'show'; todoId?: string; title?: string }
+  | { type: 'todo';       action: 'list' | 'create' | 'show' | 'dispatch'; todoId?: string; title?: string; force?: boolean }
   | { type: 'governance'; action: 'list' | 'sweep' | 'show'; jobType?: string }
   | { type: 'unknown';    text: string };
 

@@ -291,16 +291,17 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
   } catch { /* parse error */ }
 }
 
-async function callLosApi(path: string, body: unknown): Promise<void> {
+async function callLosApi(path: string, body: unknown): Promise<{ ok: boolean; status: number; body: any }> {
   const res = await fetch(`${LOS_GATEWAY_URL}${path}`, {
     method: 'POST',
     headers: losHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
+  const parsed = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const text = await res.text();
-    console.error(`[api] los ${path} error ${res.status}: ${text.slice(0, 200)}`);
+    console.error(`[api] los ${path} error ${res.status}: ${JSON.stringify(parsed).slice(0, 200)}`);
   }
+  return { ok: res.ok, status: res.status, body: parsed };
 }
 
 // ── MessageRouter helpers ───────────────────────────────────────────
@@ -428,6 +429,8 @@ async function main(): Promise<void> {
     defaultChannelId: routerChannels[0]?.id ?? null,
     handlers: createBuiltinHandlers({
       config: {} as any,
+      dispatchTodo: async (todoId, opts) =>
+        callLosApi(`/todos/${encodeURIComponent(todoId)}/dispatch`, { force: opts?.force ?? false }),
     }),
   });
 
