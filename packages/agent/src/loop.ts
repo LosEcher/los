@@ -25,6 +25,7 @@ import { withAbort } from './loop/utils.js';
 import { setupAgentRun, completeAgentSetup } from './loop/setup.js';
 import { runArchitectPhase } from './loop/architect-phase.js';
 import { createProvider } from './providers/index.js';
+import { healBeforeSend, repairToolCalls, StormBreaker, type RepairContext } from './providers/repair-pipeline.js';
 import {
   createContextMonitor,
   type ContextFillState,
@@ -214,6 +215,19 @@ export async function runAgent(
     : null;
 
   try {
+    // ADR 0024: repair pipeline context. The storm breaker persists across
+    // loop iterations (one user turn = one runAgent call) so repeated tool
+    // calls across iterations are detected. isMutating maps to the tool's
+    // `sideEffect` capability flag.
+    const repairCtx: RepairContext = {
+      providerName: provider.name,
+      profile: provider.profile,
+      traceId: config.traceId,
+      stormBreaker: new StormBreaker({
+        isMutating: (name) => tools.getCapability(name)?.sideEffect === true,
+      }),
+    };
+
     for (let i = 0; i < maxLoops; i++) {
     assertNotAborted(signal);
     agentLog.debug(`Turn ${i + 1}/${maxLoops}`);
@@ -228,6 +242,11 @@ export async function runAgent(
         offeredToolCount: toolDefs.length,
       },
     });
+
+    // ADR 0024: pre-send healing — fix unpaired tool_calls / orphan tool
+    // messages (e.g. from a resumed interrupted session) before the provider
+    // rejects them with 400.
+    healBeforeSend(messages, repairCtx);
 
     const modelStartedAt = Date.now();
     const res = await withAbort(
@@ -307,11 +326,16 @@ export async function runAgent(
       });
     }
 
+    // ADR 0024: post-response repair (storm breaking). Suppressed calls are
+    // dropped from both the assistant message and dispatch so tool_call ↔
+    // tool_result pairing stays intact.
+    const repaired = repairToolCalls(res.toolCalls, repairCtx);
+
     // Add assistant message
     const assistantMsg: Message = {
       role: 'assistant',
       content: res.text,
-      tool_calls: res.toolCalls.length > 0 ? res.toolCalls : undefined,
+      tool_calls: repaired.calls.length > 0 ? repaired.calls : undefined,
     };
     messages.push(assistantMsg);
 
@@ -386,7 +410,7 @@ export async function runAgent(
 
     // Execute tool calls
     const { toolResults, toolMessages } = await runToolCalls({
-      toolCalls: res.toolCalls,
+      toolCalls: repaired.calls,
       turn: i + 1,
       tools,
       config,
@@ -400,7 +424,7 @@ export async function runAgent(
     const turn: TurnSummary = {
       loopCount: i + 1,
       text: res.text,
-      toolCalls: res.toolCalls,
+      toolCalls: repaired.calls,
       toolResults,
     };
     turns.push(turn);
@@ -430,6 +454,7 @@ export async function runAgent(
   });
 
   assertNotAborted(signal);
+  healBeforeSend(messages, repairCtx);
   const finalRes = await withAbort(provider.chat(messages, undefined, {
     signal,
     traceId: config.traceId,
