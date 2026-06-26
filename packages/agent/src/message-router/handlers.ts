@@ -4,7 +4,7 @@
  * Five handlers registered by priority:
  *   SteeringHandler (30)  — approve/deny/escalate → recordOperatorSteering
  *   StatusHandler   (30)  — query session state + observability
- *   TodoHandler     (40)  — list/show/create todos
+ *   TodoHandler     (40)  — list/show/create/dispatch todos
  *   RuntimeHandler  (50)  — spawn Claude Code / Codex CLI
  *   ChatHandler     (100) — natural language → fallback to chat
  *
@@ -41,6 +41,13 @@ export interface HandlerDependencies {
   gatewayServiceId?: string;
   /** Chat handler factory — for HTTP sources, delegates back to SSE stream */
   onChatIntent?: (ctx: HandlerContext) => Promise<HandlerResult>;
+  /**
+   * Dispatch a todo by id (triggers a scheduled agent task). Returns the
+   * gateway-style response. Injected by wechat-bot as an HTTP call to the
+   * gateway, and by the gateway in-process router as a direct core call.
+   * If absent, `#run`/`#dispatch` replies with a not-configured message.
+   */
+  dispatchTodo?: (todoId: string, opts?: { force?: boolean }) => Promise<{ ok: boolean; status: number; body: any }>;
 }
 
 // ── Steering handler ────────────────────────────────────────────
@@ -112,7 +119,7 @@ function createStatusHandler(): HandlerDescriptor {
 
 // ── Todo handler ────────────────────────────────────────────────
 
-function createTodoHandler(): HandlerDescriptor {
+function createTodoHandler(deps: HandlerDependencies): HandlerDescriptor {
   return {
     name: 'todo',
     priority: 40,
@@ -151,6 +158,26 @@ function createTodoHandler(): HandlerDescriptor {
           await ctx.reply(text);
           return { handled: true, text };
         }
+        if (i.action === 'dispatch' && i.todoId) {
+          if (!deps.dispatchTodo) {
+            await ctx.reply('⚠️ Todo dispatch not configured. Ask the operator to wire dispatchTodo.');
+            return { handled: true, error: 'dispatch_not_configured' };
+          }
+          await ctx.reply(`🔄 Dispatching todo ${i.todoId.slice(0, 8)}…${i.force ? ' (force)' : ''}`);
+          const result = await deps.dispatchTodo(i.todoId, { force: i.force });
+          const body = (result.body ?? {}) as Record<string, any>;
+          if (!result.ok) {
+            const code = body.error ?? `http_${result.status}`;
+            await ctx.reply(`❌ Dispatch failed (${result.status} ${code}): ${String(body.message ?? 'dispatch failed').slice(0, 160)}`);
+            return { handled: true, error: String(code) };
+          }
+          const taskRun = body.taskRun as { id?: string; sessionId?: string } | undefined;
+          const sessionId = taskRun?.sessionId ?? body.todo?.sessionId;
+          const tr = taskRun?.id ? String(taskRun.id).slice(0, 8) + '…' : 'n/a';
+          const ss = sessionId ? String(sessionId).slice(0, 8) + '…' : 'n/a';
+          await ctx.reply(`✅ Dispatched todo ${i.todoId.slice(0, 8)}…\nTask run: ${tr}\nSession: ${ss}\nScheduler: ${body.schedulerStatus ?? 'unknown'}`);
+          return { handled: true, sessionId: sessionId ?? undefined };
+        }
         if (i.action === 'create' && i.title) {
           const todo = await createTodo({
             title: i.title,
@@ -161,7 +188,7 @@ function createTodoHandler(): HandlerDescriptor {
           await ctx.reply(text);
           return { handled: true, text, sessionId: todo.sessionId ?? undefined };
         }
-        await ctx.reply('Usage: #task | #task <id> | #task new <title>');
+        await ctx.reply('Usage: #task | #task <id> | #task new <title> | #run <id> [force]');
         return { handled: true };
       } catch (err) {
         await ctx.reply(`Todo operation failed: ${(err as Error).message}`);
@@ -364,7 +391,7 @@ export function createBuiltinHandlers(deps: HandlerDependencies): HandlerDescrip
   return [
     createSteeringHandler(),
     createStatusHandler(),
-    createTodoHandler(),
+    createTodoHandler(deps),
     createGovernanceHandler(),
     createRuntimeHandler(),
     createChatHandler(deps),

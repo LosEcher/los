@@ -284,7 +284,32 @@ export async function seedGovernanceJobs(opts?: {
   for (const seed of SEED_JOBS) {
     const existing = await listGovernanceJobs({ jobType: seed.jobType, status: 'active' });
     if (existing.length > 0) {
-      results.push(...existing);
+      // Backfill seed-defined autoFix onto pre-existing jobs that were
+      // created before autoFix was added to the seed (or had it stripped).
+      // Without this, the GA loop sees "No autoFix configured" and can only
+      // escalate drift instead of reconciling it — the self-improvement
+      // loop never closes for jobs seeded early.
+      if (seed.autoFix) {
+        for (const job of existing) {
+          const dbAutoFix = job.autoFix;
+          const seedAutoFix = seed.autoFix;
+          const dbEnabled = dbAutoFix?.autoFixEnabled;
+          if (dbEnabled !== seedAutoFix.autoFixEnabled ||
+              (dbAutoFix?.maxAutoFixAttempts ?? null) !== (seedAutoFix.maxAutoFixAttempts ?? null) ||
+              (dbAutoFix?.stopCondition ?? null) !== (seedAutoFix.stopCondition ?? null)) {
+            try {
+              const updated = await updateGovernanceJob(job.id, { autoFix: seedAutoFix });
+              if (updated) results.push(updated); else results.push(job);
+              continue;
+            } catch (err) {
+              log.warn(`Failed to backfill autoFix for "${seed.dedupeKey}": ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+          results.push(job);
+        }
+      } else {
+        results.push(...existing);
+      }
       continue;
     }
     try {

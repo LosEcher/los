@@ -98,6 +98,41 @@ describe('intent-resolver commands', () => {
     }
   });
 
+  // ── #run / #dispatch ──
+  it('resolves #run with ID as dispatch', () => {
+    const r = resolveIntent('#run todo-los-p0-2');
+    assert.equal(r.type, 'todo');
+    if (r.type === 'todo') {
+      assert.equal(r.action, 'dispatch');
+      assert.equal(r.todoId, 'todo-los-p0-2');
+      assert.equal(r.force, false);
+    }
+  });
+
+  it('resolves #dispatch with ID as dispatch (alias)', () => {
+    const r = resolveIntent('#dispatch todo-los-p0-2');
+    assert.equal(r.type, 'todo');
+    if (r.type === 'todo') {
+      assert.equal(r.action, 'dispatch');
+      assert.equal(r.todoId, 'todo-los-p0-2');
+    }
+  });
+
+  it('resolves #run <id> force as dispatch with force=true', () => {
+    const r = resolveIntent('#run todo-los-p0-2 force');
+    assert.equal(r.type, 'todo');
+    if (r.type === 'todo') {
+      assert.equal(r.action, 'dispatch');
+      assert.equal(r.force, true);
+    }
+  });
+
+  it('resolves #run case-insensitively', () => {
+    const r = resolveIntent('#RUN Todo-Los-P0-2');
+    assert.equal(r.type, 'todo');
+    if (r.type === 'todo') assert.equal(r.action, 'dispatch');
+  });
+
   // ── Case insensitive ──
   it('handles command case-insensitively', () => {
     const r = resolveIntent('#ApprovE session-abc12345');

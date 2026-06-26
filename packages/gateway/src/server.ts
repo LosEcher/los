@@ -69,6 +69,7 @@ import { transitionExecutionState } from '@los/agent/execution-store';
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
 import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
+import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
 
 const log = getLogger('gateway');
 const VERSION = '0.1.0';
@@ -244,7 +245,20 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── MessageRouter (unified inbound routing) ─────────────
   const messageRouter = new MessageRouter({
-    handlers: createBuiltinHandlers({ config }),
+    handlers: createBuiltinHandlers({
+      config,
+      dispatchTodo: async (todoId, opts) => {
+        try {
+          const result = await dispatchTodoCore(todoId, { force: opts?.force });
+          return { ok: true, status: 200, body: result };
+        } catch (err) {
+          if (err instanceof DispatchError) {
+            return { ok: false, status: err.status, body: { error: err.code, message: err.message, ...(err.detail ?? {}) } };
+          }
+          return { ok: false, status: 500, body: { error: 'internal', message: (err as Error).message } };
+        }
+      },
+    }),
     defaultChannelId: 'direct-http',
   });
 
