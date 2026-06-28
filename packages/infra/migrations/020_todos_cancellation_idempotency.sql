@@ -40,11 +40,12 @@ CREATE INDEX IF NOT EXISTS idx_todos_stage ON todos(stage_id);
 CREATE TABLE IF NOT EXISTS todo_dependencies (
   todo_id TEXT NOT NULL,
   depends_on_todo_id TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'blocks',
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  relation_type TEXT NOT NULL DEFAULT 'blocks',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (todo_id, depends_on_todo_id)
+  PRIMARY KEY (todo_id, depends_on_todo_id, relation_type)
 );
+CREATE INDEX IF NOT EXISTS idx_todo_dependencies_todo_id ON todo_dependencies(todo_id);
+CREATE INDEX IF NOT EXISTS idx_todo_dependencies_depends_on ON todo_dependencies(depends_on_todo_id);
 
 CREATE TABLE IF NOT EXISTS cancellation_requests (
   task_run_id TEXT PRIMARY KEY,

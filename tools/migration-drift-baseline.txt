@@ -121,7 +121,6 @@ COLUMNS|[ensure-only] task_runs|prompt_preview|text|NO|''::text
 COLUMNS|[ensure-only] task_runs|status|text|NO|
 COLUMNS|[ensure-only] task_runs|tool_mode|text|NO|
 COLUMNS|[ensure-only] task_runs|workspace_root|text|NO|
-COLUMNS|[ensure-only] todo_dependencies|relation_type|text|NO|'blocks'::text
 COLUMNS|[ensure-only] todos|archived_at|timestamp with time zone|YES|
 COLUMNS|[ensure-only] todos|priority|text|NO|'P2'::text
 COLUMNS|[ensure-only] todos|source|text|NO|'manual'::text
@@ -225,8 +224,6 @@ COLUMNS|[mig-only]    sessions|turns|jsonb|NO|'[]'::jsonb
 COLUMNS|[mig-only]    task_runs|prompt_preview|text|YES|
 COLUMNS|[mig-only]    task_runs|status|text|NO|'queued'::text
 COLUMNS|[mig-only]    task_runs|tool_mode|text|YES|
-COLUMNS|[mig-only]    todo_dependencies|kind|text|NO|'blocks'::text
-COLUMNS|[mig-only]    todo_dependencies|metadata_json|jsonb|NO|'{}'::jsonb
 COLUMNS|[mig-only]    todos|depends_on_ids_json|jsonb|NO|'[]'::jsonb
 COLUMNS|[mig-only]    todos|priority|text|NO|'P1'::text
 COLUMNS|[mig-only]    todos|run_contract_json|jsonb|YES|
@@ -243,10 +240,8 @@ COLUMNS|[mig-only]    verification_records|kind|text|NO|'command'::text
 COLUMNS|[mig-only]    verification_records|metadata_json|jsonb|NO|'{}'::jsonb
 COLUMNS|[mig-only]    verification_records|session_id|text|YES|
 CONSTRAINTS|[ensure-only] mcp_servers|mcp_servers_pkey|PRIMARY KEY (id, tenant_id, project_id)
-CONSTRAINTS|[ensure-only] todo_dependencies|todo_dependencies_pkey|PRIMARY KEY (todo_id, depends_on_todo_id, relation_type)
 CONSTRAINTS|[ensure-only] tool_call_states|tool_call_states_pkey|PRIMARY KEY (id, session_id)
 CONSTRAINTS|[mig-only]    mcp_servers|mcp_servers_pkey|PRIMARY KEY (id)
-CONSTRAINTS|[mig-only]    todo_dependencies|todo_dependencies_pkey|PRIMARY KEY (todo_id, depends_on_todo_id)
 CONSTRAINTS|[mig-only]    tool_call_states|tool_call_states_pkey|PRIMARY KEY (id)
 INDEXES|[ensure-only] executor_nodes|idx_executor_nodes_heartbeat|CREATE INDEX idx_executor_nodes_heartbeat ON public.executor_nodes USING btree (last_heartbeat_at DESC)
 INDEXES|[ensure-only] executor_nodes|idx_executor_nodes_status|CREATE INDEX idx_executor_nodes_status ON public.executor_nodes USING btree (status)
@@ -319,9 +314,6 @@ INDEXES|[ensure-only] task_runs|idx_task_runs_status|CREATE INDEX idx_task_runs_
 INDEXES|[ensure-only] task_runs|idx_task_runs_tenant_project|CREATE INDEX idx_task_runs_tenant_project ON public.task_runs USING btree (tenant_id, project_id)
 INDEXES|[ensure-only] task_runs|idx_task_runs_trace_id|CREATE INDEX idx_task_runs_trace_id ON public.task_runs USING btree (trace_id)
 INDEXES|[ensure-only] task_runs|idx_task_runs_updated|CREATE INDEX idx_task_runs_updated ON public.task_runs USING btree (updated_at DESC)
-INDEXES|[ensure-only] todo_dependencies|idx_todo_dependencies_depends_on|CREATE INDEX idx_todo_dependencies_depends_on ON public.todo_dependencies USING btree (depends_on_todo_id)
-INDEXES|[ensure-only] todo_dependencies|idx_todo_dependencies_todo_id|CREATE INDEX idx_todo_dependencies_todo_id ON public.todo_dependencies USING btree (todo_id)
-INDEXES|[ensure-only] todo_dependencies|todo_dependencies_pkey|CREATE UNIQUE INDEX todo_dependencies_pkey ON public.todo_dependencies USING btree (todo_id, depends_on_todo_id, relation_type)
 INDEXES|[ensure-only] todos|idx_todos_archived|CREATE INDEX idx_todos_archived ON public.todos USING btree (archived_at)
 INDEXES|[ensure-only] todos|idx_todos_batch|CREATE INDEX idx_todos_batch ON public.todos USING btree (batch_key)
 INDEXES|[ensure-only] todos|idx_todos_kind|CREATE INDEX idx_todos_kind ON public.todos USING btree (kind)
@@ -363,5 +355,4 @@ INDEXES|[mig-only]    skills|idx_skills_name|CREATE INDEX idx_skills_name ON pub
 INDEXES|[mig-only]    task_runs|idx_task_runs_dedupe|CREATE INDEX idx_task_runs_dedupe ON public.task_runs USING btree (dedupe_key) WHERE ((dedupe_key IS NOT NULL) AND (status = ANY (ARRAY['queued'::text, 'running'::text])))
 INDEXES|[mig-only]    task_runs|idx_task_runs_session|CREATE INDEX idx_task_runs_session ON public.task_runs USING btree (session_id, created_at)
 INDEXES|[mig-only]    task_runs|idx_task_runs_status|CREATE INDEX idx_task_runs_status ON public.task_runs USING btree (status, completed_at)
-INDEXES|[mig-only]    todo_dependencies|todo_dependencies_pkey|CREATE UNIQUE INDEX todo_dependencies_pkey ON public.todo_dependencies USING btree (todo_id, depends_on_todo_id)
 INDEXES|[mig-only]    tool_call_states|tool_call_states_pkey|CREATE UNIQUE INDEX tool_call_states_pkey ON public.tool_call_states USING btree (id)
