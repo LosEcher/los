@@ -55,6 +55,9 @@ async function applyAutoFix(
       return applyFileSizeFix(summary);
     case 'related_project_scan':
       return applyRelatedProjectScanFix(summary);
+    case 'migration_drift_fix':
+      // Detection-only job — autoFix disabled by seed config. No-op for clarity.
+      return { applied: false, detail: 'detection-only job — autoFix disabled; TODOs surface for a Claude agent to work via /pr-self-merge' };
     default:
       return { applied: false, detail: `No auto-fix strategy for job type: ${job.jobType}` };
   }
@@ -365,6 +368,13 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
     case 'file_size': {
       const count = typeof summary.hotFileCount === 'number' ? summary.hotFileCount : 0;
       return count > 0;
+    }
+    case 'migration_drift_fix': {
+      // fileMissing runs (e.g. prod build without tools/) must NOT count as
+      // findings — otherwise the circuit breaker would trip on a missing file.
+      if (summary.fileMissing === true) return false;
+      const total = typeof summary.totalDrift === 'number' ? summary.totalDrift : 0;
+      return total > 0;
     }
     default:
       return false;
