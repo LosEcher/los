@@ -1,37 +1,6 @@
 COLUMNS|[ensure-only] artifacts|checksum|text|NO|
 COLUMNS|[ensure-only] artifacts|path_policy|text|NO|
 COLUMNS|[ensure-only] artifacts|size_bytes|bigint|NO|
-COLUMNS|[ensure-only] idempotency_keys|expires_at|timestamp with time zone|YES|
-COLUMNS|[ensure-only] idempotency_keys|method|text|NO|
-COLUMNS|[ensure-only] idempotency_keys|project_id|text|NO|'los'::text
-COLUMNS|[ensure-only] idempotency_keys|request_id|text|NO|
-COLUMNS|[ensure-only] idempotency_keys|response_json|jsonb|YES|
-COLUMNS|[ensure-only] idempotency_keys|response_status|integer|YES|
-COLUMNS|[ensure-only] idempotency_keys|status|text|NO|'processing'::text
-COLUMNS|[ensure-only] idempotency_keys|trace_id|text|YES|
-COLUMNS|[ensure-only] idempotency_keys|updated_at|timestamp with time zone|NO|now()
-COLUMNS|[ensure-only] provider_call_telemetry|duration_ms|integer|NO|
-COLUMNS|[ensure-only] provider_call_telemetry|endpoint|text|NO|
-COLUMNS|[ensure-only] provider_call_telemetry|error_code|text|YES|
-COLUMNS|[ensure-only] provider_call_telemetry|error_message|text|YES|
-COLUMNS|[ensure-only] provider_call_telemetry|method|text|NO|'POST'::text
-COLUMNS|[ensure-only] provider_call_telemetry|model|text|NO|
-COLUMNS|[ensure-only] provider_call_telemetry|rate_limit_reset_ms|integer|YES|
-COLUMNS|[ensure-only] provider_call_telemetry|request_payload_size|integer|NO|0
-COLUMNS|[ensure-only] provider_call_telemetry|status|integer|NO|
-COLUMNS|[ensure-only] provider_call_telemetry|stream|boolean|NO|false
-COLUMNS|[ensure-only] provider_call_telemetry|trace_id|text|NO|
-COLUMNS|[ensure-only] provider_call_telemetry|usage_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[ensure-only] provider_compat_evidence|decision|text|NO|
-COLUMNS|[ensure-only] provider_promotion_decisions|action|text|NO|
-COLUMNS|[ensure-only] provider_promotion_decisions|actor|text|YES|
-COLUMNS|[ensure-only] provider_promotion_decisions|evidence_id|text|YES|
-COLUMNS|[ensure-only] provider_promotion_decisions|from_decision|text|NO|
-COLUMNS|[ensure-only] provider_promotion_decisions|probe_id|text|NO|
-COLUMNS|[ensure-only] provider_promotion_decisions|reason|text|NO|
-COLUMNS|[ensure-only] provider_promotion_decisions|status|text|NO|'proposed'::text
-COLUMNS|[ensure-only] provider_promotion_decisions|to_decision|text|NO|
-COLUMNS|[ensure-only] provider_promotion_decisions|updated_at|timestamp with time zone|NO|now()
 COLUMNS|[ensure-only] run_specs|allowed_tools_json|jsonb|NO|'[]'::jsonb
 COLUMNS|[ensure-only] run_specs|gateway_id|text|YES|
 COLUMNS|[ensure-only] run_specs|max_loops|integer|NO|20
@@ -70,9 +39,6 @@ COLUMNS|[ensure-only] task_runs|prompt_preview|text|NO|''::text
 COLUMNS|[ensure-only] task_runs|status|text|NO|
 COLUMNS|[ensure-only] task_runs|tool_mode|text|NO|
 COLUMNS|[ensure-only] task_runs|workspace_root|text|NO|
-COLUMNS|[ensure-only] todos|archived_at|timestamp with time zone|YES|
-COLUMNS|[ensure-only] todos|priority|text|NO|'P2'::text
-COLUMNS|[ensure-only] todos|source|text|NO|'manual'::text
 COLUMNS|[ensure-only] verification_records|check_name|text|NO|
 COLUMNS|[ensure-only] verification_records|command|text|YES|
 COLUMNS|[ensure-only] verification_records|completed_at|timestamp with time zone|YES|
@@ -83,32 +49,6 @@ COLUMNS|[ensure-only] verification_records|skip_reason|text|YES|
 COLUMNS|[mig-only]    artifacts|checksum|text|NO|''::text
 COLUMNS|[mig-only]    artifacts|path_policy|text|NO|'workspace'::text
 COLUMNS|[mig-only]    artifacts|size_bytes|bigint|NO|0
-COLUMNS|[mig-only]    idempotency_keys|consumed_at|timestamp with time zone|NO|now()
-COLUMNS|[mig-only]    idempotency_keys|response_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[mig-only]    idempotency_keys|task_run_id|text|YES|
-COLUMNS|[mig-only]    idempotency_keys|todo_id|text|YES|
-COLUMNS|[mig-only]    provider_call_telemetry|cache_hit_tokens|integer|NO|0
-COLUMNS|[mig-only]    provider_call_telemetry|cache_miss_tokens|integer|NO|0
-COLUMNS|[mig-only]    provider_call_telemetry|completion_tokens|integer|NO|0
-COLUMNS|[mig-only]    provider_call_telemetry|duration_ms|integer|NO|0
-COLUMNS|[mig-only]    provider_call_telemetry|error|text|YES|
-COLUMNS|[mig-only]    provider_call_telemetry|metadata_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[mig-only]    provider_call_telemetry|model|text|YES|
-COLUMNS|[mig-only]    provider_call_telemetry|prompt_tokens|integer|NO|0
-COLUMNS|[mig-only]    provider_call_telemetry|repair_attempted|boolean|NO|false
-COLUMNS|[mig-only]    provider_call_telemetry|repair_successful|boolean|NO|false
-COLUMNS|[mig-only]    provider_call_telemetry|task_run_id|text|YES|
-COLUMNS|[mig-only]    provider_call_telemetry|trace_id|text|YES|
-COLUMNS|[mig-only]    provider_compat_evidence|decision|text|NO|'advisory'::text
-COLUMNS|[mig-only]    provider_compat_evidence|failures_json|jsonb|NO|'[]'::jsonb
-COLUMNS|[mig-only]    provider_compat_evidence|metadata_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[mig-only]    provider_promotion_decisions|decided_at|timestamp with time zone|NO|now()
-COLUMNS|[mig-only]    provider_promotion_decisions|decision_by|text|NO|''::text
-COLUMNS|[mig-only]    provider_promotion_decisions|evidence_ids_json|jsonb|NO|'[]'::jsonb
-COLUMNS|[mig-only]    provider_promotion_decisions|from_state|text|NO|
-COLUMNS|[mig-only]    provider_promotion_decisions|metadata_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[mig-only]    provider_promotion_decisions|reason|text|NO|''::text
-COLUMNS|[mig-only]    provider_promotion_decisions|to_state|text|NO|
 COLUMNS|[mig-only]    run_specs|completed_at|timestamp with time zone|YES|
 COLUMNS|[mig-only]    run_specs|dedupe_key|text|YES|
 COLUMNS|[mig-only]    run_specs|metadata_json|jsonb|NO|'{}'::jsonb
@@ -131,30 +71,11 @@ COLUMNS|[mig-only]    sessions|turns|jsonb|NO|'[]'::jsonb
 COLUMNS|[mig-only]    task_runs|prompt_preview|text|YES|
 COLUMNS|[mig-only]    task_runs|status|text|NO|'queued'::text
 COLUMNS|[mig-only]    task_runs|tool_mode|text|YES|
-COLUMNS|[mig-only]    todos|depends_on_ids_json|jsonb|NO|'[]'::jsonb
-COLUMNS|[mig-only]    todos|priority|text|NO|'P1'::text
-COLUMNS|[mig-only]    todos|run_contract_json|jsonb|YES|
-COLUMNS|[mig-only]    todos|source|text|YES|
 COLUMNS|[mig-only]    verification_records|description|text|NO|''::text
 COLUMNS|[mig-only]    verification_records|evidence|text|YES|
 COLUMNS|[mig-only]    verification_records|kind|text|NO|'command'::text
 COLUMNS|[mig-only]    verification_records|metadata_json|jsonb|NO|'{}'::jsonb
 COLUMNS|[mig-only]    verification_records|session_id|text|YES|
-INDEXES|[ensure-only] idempotency_keys|idx_idempotency_request|CREATE INDEX idx_idempotency_request ON public.idempotency_keys USING btree (request_id)
-INDEXES|[ensure-only] idempotency_keys|idx_idempotency_scope_key|CREATE UNIQUE INDEX idx_idempotency_scope_key ON public.idempotency_keys USING btree (tenant_id, project_id, method, route, idempotency_key)
-INDEXES|[ensure-only] idempotency_keys|idx_idempotency_trace|CREATE INDEX idx_idempotency_trace ON public.idempotency_keys USING btree (trace_id)
-INDEXES|[ensure-only] idempotency_keys|idx_idempotency_updated|CREATE INDEX idx_idempotency_updated ON public.idempotency_keys USING btree (updated_at DESC)
-INDEXES|[ensure-only] provider_call_telemetry|idx_pct_created|CREATE INDEX idx_pct_created ON public.provider_call_telemetry USING btree (created_at DESC)
-INDEXES|[ensure-only] provider_call_telemetry|idx_pct_provider|CREATE INDEX idx_pct_provider ON public.provider_call_telemetry USING btree (provider)
-INDEXES|[ensure-only] provider_call_telemetry|idx_pct_session_id|CREATE INDEX idx_pct_session_id ON public.provider_call_telemetry USING btree (session_id)
-INDEXES|[ensure-only] provider_call_telemetry|idx_pct_status|CREATE INDEX idx_pct_status ON public.provider_call_telemetry USING btree (status)
-INDEXES|[ensure-only] provider_call_telemetry|idx_pct_trace_id|CREATE INDEX idx_pct_trace_id ON public.provider_call_telemetry USING btree (trace_id)
-INDEXES|[ensure-only] provider_compat_evidence|idx_provider_compat_decision|CREATE INDEX idx_provider_compat_decision ON public.provider_compat_evidence USING btree (decision)
-INDEXES|[ensure-only] provider_compat_evidence|idx_provider_compat_target|CREATE INDEX idx_provider_compat_target ON public.provider_compat_evidence USING btree (provider, model, probe_id)
-INDEXES|[ensure-only] provider_compat_evidence|idx_provider_compat_updated|CREATE INDEX idx_provider_compat_updated ON public.provider_compat_evidence USING btree (updated_at DESC)
-INDEXES|[ensure-only] provider_promotion_decisions|idx_provider_promotion_status|CREATE INDEX idx_provider_promotion_status ON public.provider_promotion_decisions USING btree (status)
-INDEXES|[ensure-only] provider_promotion_decisions|idx_provider_promotion_target|CREATE INDEX idx_provider_promotion_target ON public.provider_promotion_decisions USING btree (provider, model, probe_id)
-INDEXES|[ensure-only] provider_promotion_decisions|idx_provider_promotion_updated|CREATE INDEX idx_provider_promotion_updated ON public.provider_promotion_decisions USING btree (updated_at DESC)
 INDEXES|[ensure-only] rules|idx_rules_archived|CREATE INDEX idx_rules_archived ON public.rules USING btree (((metadata_json ->> 'archived'::text)))
 INDEXES|[ensure-only] rules|idx_rules_layer|CREATE INDEX idx_rules_layer ON public.rules USING btree (((metadata_json ->> 'ruleLayer'::text)))
 INDEXES|[ensure-only] rules|idx_rules_scope_name_unique|CREATE UNIQUE INDEX idx_rules_scope_name_unique ON public.rules USING btree (COALESCE((metadata_json ->> 'scope'::text), 'project'::text), name)
@@ -199,29 +120,9 @@ INDEXES|[ensure-only] task_runs|idx_task_runs_status|CREATE INDEX idx_task_runs_
 INDEXES|[ensure-only] task_runs|idx_task_runs_tenant_project|CREATE INDEX idx_task_runs_tenant_project ON public.task_runs USING btree (tenant_id, project_id)
 INDEXES|[ensure-only] task_runs|idx_task_runs_trace_id|CREATE INDEX idx_task_runs_trace_id ON public.task_runs USING btree (trace_id)
 INDEXES|[ensure-only] task_runs|idx_task_runs_updated|CREATE INDEX idx_task_runs_updated ON public.task_runs USING btree (updated_at DESC)
-INDEXES|[ensure-only] todos|idx_todos_archived|CREATE INDEX idx_todos_archived ON public.todos USING btree (archived_at)
-INDEXES|[ensure-only] todos|idx_todos_batch|CREATE INDEX idx_todos_batch ON public.todos USING btree (batch_key)
-INDEXES|[ensure-only] todos|idx_todos_kind|CREATE INDEX idx_todos_kind ON public.todos USING btree (kind)
-INDEXES|[ensure-only] todos|idx_todos_node|CREATE INDEX idx_todos_node ON public.todos USING btree (node_id)
-INDEXES|[ensure-only] todos|idx_todos_parent|CREATE INDEX idx_todos_parent ON public.todos USING btree (parent_id)
-INDEXES|[ensure-only] todos|idx_todos_priority|CREATE INDEX idx_todos_priority ON public.todos USING btree (priority)
-INDEXES|[ensure-only] todos|idx_todos_project_dedupe|CREATE UNIQUE INDEX idx_todos_project_dedupe ON public.todos USING btree (tenant_id, project_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
-INDEXES|[ensure-only] todos|idx_todos_request|CREATE INDEX idx_todos_request ON public.todos USING btree (request_id)
-INDEXES|[ensure-only] todos|idx_todos_session|CREATE INDEX idx_todos_session ON public.todos USING btree (session_id)
-INDEXES|[ensure-only] todos|idx_todos_source|CREATE INDEX idx_todos_source ON public.todos USING btree (source)
-INDEXES|[ensure-only] todos|idx_todos_task_run|CREATE INDEX idx_todos_task_run ON public.todos USING btree (task_run_id)
-INDEXES|[ensure-only] todos|idx_todos_trace|CREATE INDEX idx_todos_trace ON public.todos USING btree (trace_id)
-INDEXES|[ensure-only] todos|idx_todos_updated|CREATE INDEX idx_todos_updated ON public.todos USING btree (updated_at DESC)
 INDEXES|[ensure-only] verification_records|idx_verification_records_session|CREATE INDEX idx_verification_records_session ON public.verification_records USING btree (session_id)
 INDEXES|[ensure-only] verification_records|idx_verification_records_task_run|CREATE INDEX idx_verification_records_task_run ON public.verification_records USING btree (task_run_id)
 INDEXES|[mig-only]    governance_jobs|idx_gov_jobs_cadence_last_run|CREATE INDEX idx_gov_jobs_cadence_last_run ON public.governance_jobs USING btree (cadence, last_run_at)
-INDEXES|[mig-only]    idempotency_keys|idx_idempotency_keys_lookup|CREATE INDEX idx_idempotency_keys_lookup ON public.idempotency_keys USING btree (tenant_id, route, idempotency_key)
-INDEXES|[mig-only]    provider_call_telemetry|idx_provider_call_telemetry_created|CREATE INDEX idx_provider_call_telemetry_created ON public.provider_call_telemetry USING btree (created_at DESC)
-INDEXES|[mig-only]    provider_call_telemetry|idx_provider_call_telemetry_provider|CREATE INDEX idx_provider_call_telemetry_provider ON public.provider_call_telemetry USING btree (provider)
-INDEXES|[mig-only]    provider_compat_evidence|idx_provider_compat_evidence_created|CREATE INDEX idx_provider_compat_evidence_created ON public.provider_compat_evidence USING btree (created_at DESC)
-INDEXES|[mig-only]    provider_compat_evidence|idx_provider_compat_evidence_passed|CREATE INDEX idx_provider_compat_evidence_passed ON public.provider_compat_evidence USING btree (passed)
-INDEXES|[mig-only]    provider_compat_evidence|idx_provider_compat_evidence_provider|CREATE INDEX idx_provider_compat_evidence_provider ON public.provider_compat_evidence USING btree (provider, model)
-INDEXES|[mig-only]    provider_promotion_decisions|idx_provider_promotion_decisions_provider|CREATE INDEX idx_provider_promotion_decisions_provider ON public.provider_promotion_decisions USING btree (provider, model)
 INDEXES|[mig-only]    rules|idx_rules_name|CREATE INDEX idx_rules_name ON public.rules USING btree (name)
 INDEXES|[mig-only]    run_specs|idx_run_specs_session|CREATE INDEX idx_run_specs_session ON public.run_specs USING btree (session_id)
 INDEXES|[mig-only]    scheduler_decisions|idx_scheduler_decisions_graph|CREATE INDEX idx_scheduler_decisions_graph ON public.scheduler_decisions USING btree (graph_id)
