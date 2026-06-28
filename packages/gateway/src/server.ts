@@ -32,7 +32,7 @@ import { registerSaaSTodoRoutes } from './routes/data/saas-todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/orchestration/agent-task-graph-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
-import { ensureIdempotencyStore } from './idempotency.js';
+import { ensureAllStores } from './bootstrap.js';
 import { registerChatRoute } from './chat-route.js';
 import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
@@ -56,17 +56,14 @@ import { registerIntegrationRoutes } from './routes/data/integration-routes.js';
 import { registerCommunicationRoutes } from './routes/data/communication-routes.js';
 import { registerRuntimeAdapterRoutes } from './routes/orchestration/runtime-adapter-routes.js';
 import { registerToolGateRoutes } from './routes/orchestration/tool-gate-routes.js';
-import { ensureTaskRunStore, recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
-import { ensureAgentTaskGraphStore, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
-import { ensureExecutorNodeStore } from '@los/agent/executor-nodes';
-import { ensureRunSpecStore } from '@los/agent/run-specs';
-import { ensureServiceInstanceStore, loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
-import { ensureTodoStore, seedLosPlanningTodos } from '@los/agent/todos';
+import { recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
+import { recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
+import { loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
+import { seedLosPlanningTodos } from '@los/agent/todos';
 import { ensureSkillStore, upsertSkill, loadSkillsFromDir } from '@los/agent/skills';
 import { ensureRuleStore, upsertRule, loadRulesFromDir } from '@los/agent/rules';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
-import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
 import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
 import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
@@ -312,17 +309,12 @@ export async function startServer(port?: number, host?: string) {
     log.warn(`Migration errors: ${migrateResult.errors.join('; ')}`);
   }
 
-  await ensureTodoStore();
-  await ensureIdempotencyStore();
-  await ensureExecutorNodeStore();
-  await ensureServiceInstanceStore();
+  // Materialize every runtime table via ensure*Store in one dependency-safe
+  // pass. This self-heals any migration-vs-ensure drift at startup (no
+  // "first feature use patches the schema" window) and guarantees all 32
+  // tables exist before any request is served. See packages/gateway/src/bootstrap.ts.
+  await ensureAllStores();
   await heartbeatGatewayService(service);
-  await ensureTaskRunStore();
-  await ensureRunSpecStore();
-  await ensureAgentTaskGraphStore();
-  await ensureMemoryStore();
-  await ensureMemoryCompactionStore();
-  await ensureProceduralCandidateStore();
   const recovery = await recoverExpiredTaskRunsWithAdvisoryLock('gateway_startup_recovery');
   if (!recovery.lockAcquired) {
     log.info('Gateway startup recovery skipped because another service owns the advisory lock');
