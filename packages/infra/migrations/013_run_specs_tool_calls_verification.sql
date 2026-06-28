@@ -4,31 +4,36 @@
 
 CREATE TABLE IF NOT EXISTS run_specs (
   id TEXT PRIMARY KEY,
-  session_id TEXT,
+  session_id TEXT NOT NULL,
   tenant_id TEXT,
   project_id TEXT,
   user_id TEXT,
   node_id TEXT,
   request_id TEXT,
   trace_id TEXT,
-  prompt TEXT NOT NULL DEFAULT '',
+  prompt TEXT NOT NULL,
+  system_prompt TEXT,
   provider TEXT,
   model TEXT,
-  tool_mode TEXT NOT NULL DEFAULT 'project-write',
-  status TEXT NOT NULL DEFAULT 'created',
-  phase TEXT,
+  model_settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  workspace_root TEXT NOT NULL,
+  tool_mode TEXT NOT NULL,
+  allowed_tools_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  tool_retry_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  max_loops INTEGER NOT NULL DEFAULT 20,
+  timeout_ms INTEGER,
+  mcp_servers_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  source TEXT,
-  dedupe_key TEXT,
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  gateway_id TEXT,
+  status TEXT NOT NULL DEFAULT 'created',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  started_at TIMESTAMPTZ,
-  completed_at TIMESTAMPTZ
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_run_specs_request_id ON run_specs(request_id);
+CREATE INDEX IF NOT EXISTS idx_run_specs_session_id ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_status ON run_specs(status);
-CREATE INDEX IF NOT EXISTS idx_run_specs_session ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_tenant_project ON run_specs(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_run_specs_trace_id ON run_specs(trace_id);
 
 CREATE TABLE IF NOT EXISTS tool_call_states (
   id TEXT NOT NULL,
