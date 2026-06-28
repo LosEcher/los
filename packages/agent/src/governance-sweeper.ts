@@ -237,6 +237,10 @@ export async function createTodosFromFindings(
       const { createMigrationDriftTodos } = await import('./governance-sweeper-migration-todos.js');
       created += await createMigrationDriftTodos(job, summary);
     }
+    if (job.jobType === 'file_size') {
+      const { createFileSizeTodos } = await import('./governance-sweeper-file-size-todos.js');
+      created += await createFileSizeTodos(job, summary);
+    }
   } catch (err) {
     log.warn(`Failed to create findings todo for ${job.jobType}: ${err instanceof Error ? err.message : String(err)}`);
   }

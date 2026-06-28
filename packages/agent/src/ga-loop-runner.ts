@@ -23,7 +23,6 @@ import { updateGovernanceJob, updateGovernanceJobState } from './governance-jobs
 import { computeNextState, evaluateLoopGate, maybeAutoRecoverPaused } from './ga-circuit-breaker.js';
 import { applyBranchCleanupFix, applyRelatedProjectScanFix } from './ga-scenario-fixes.js';
 import { applyConsistencyFix, applyHotspotFix } from './ga-loop-fixes.js';
-import { applyFileSizeFix } from './ga-file-size-fix.js';
 import type {
   GovernanceJob,
   GovernanceJobAutoFixConfig,
@@ -52,7 +51,8 @@ async function applyAutoFix(
     case 'branch_cleanup':
       return applyBranchCleanupFix(summary);
     case 'file_size':
-      return applyFileSizeFix(summary);
+      // detection-only now (TODO-worklist); autoFix disabled in seed.
+      return { applied: false, detail: 'detection-only job — autoFix disabled; TODOs surface for a Claude agent to extract submodules via /pr-self-merge' };
     case 'related_project_scan':
       return applyRelatedProjectScanFix(summary);
     case 'migration_drift_fix':
@@ -366,8 +366,10 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       return absorbable > 0;
     }
     case 'file_size': {
-      const count = typeof summary.hotFileCount === 'number' ? summary.hotFileCount : 0;
-      return count > 0;
+      // Audit returns filesOver400Count/filesOver600Count (NOT hotFileCount).
+      const c400 = typeof summary.filesOver400Count === 'number' ? summary.filesOver400Count : 0;
+      const c600 = typeof summary.filesOver600Count === 'number' ? summary.filesOver600Count : 0;
+      return c400 > 0 || c600 > 0;
     }
     case 'migration_drift_fix': {
       // fileMissing runs (e.g. prod build without tools/) must NOT count as

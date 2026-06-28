@@ -193,11 +193,11 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     dedupeKey: 'gov-job-file-size',
     initialStaggerMs: 120 * 60 * 1000,
     autoFix: {
-      autoFixEnabled: true,
-      maxAutoFixAttempts: 1,
+      autoFixEnabled: false,
+      maxAutoFixAttempts: 0,
       verificationCommands: [],
-      stopCondition: 'no files exceed 400 lines (or all grandfathered in baseline)',
-      escalationCadence: 'immediate',
+      stopCondition: 'no files exceed 400 lines (all refactored or grandfathered)',
+      escalationCadence: 'never',
     },
   },
   {
