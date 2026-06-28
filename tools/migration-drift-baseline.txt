@@ -1,6 +1,3 @@
-COLUMNS|[ensure-only] artifacts|checksum|text|NO|
-COLUMNS|[ensure-only] artifacts|path_policy|text|NO|
-COLUMNS|[ensure-only] artifacts|size_bytes|bigint|NO|
 COLUMNS|[ensure-only] run_specs|allowed_tools_json|jsonb|NO|'[]'::jsonb
 COLUMNS|[ensure-only] run_specs|gateway_id|text|YES|
 COLUMNS|[ensure-only] run_specs|max_loops|integer|NO|20
@@ -13,8 +10,6 @@ COLUMNS|[ensure-only] run_specs|timeout_ms|integer|YES|
 COLUMNS|[ensure-only] run_specs|tool_mode|text|NO|
 COLUMNS|[ensure-only] run_specs|tool_retry_json|jsonb|NO|'{}'::jsonb
 COLUMNS|[ensure-only] run_specs|workspace_root|text|NO|
-COLUMNS|[ensure-only] scheduler_decisions|graph_id|text|NO|
-COLUMNS|[ensure-only] scheduler_decisions|reason|text|NO|
 COLUMNS|[ensure-only] session_events|cache_hit|boolean|YES|
 COLUMNS|[ensure-only] session_events|cache_key|text|YES|
 COLUMNS|[ensure-only] session_events|id|bigint|NO|nextval('session_events_id_seq'::regclass)
@@ -23,32 +18,10 @@ COLUMNS|[ensure-only] session_events|payload_json|jsonb|NO|'{}'::jsonb
 COLUMNS|[ensure-only] session_events|source|text|NO|'los'::text
 COLUMNS|[ensure-only] session_events|usage_json|jsonb|NO|'{}'::jsonb
 COLUMNS|[ensure-only] session_events|visibility|text|YES|
-COLUMNS|[ensure-only] sessions|messages_json|jsonb|NO|'[]'::jsonb
-COLUMNS|[ensure-only] sessions|metadata_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[ensure-only] sessions|node_id|text|YES|
-COLUMNS|[ensure-only] sessions|turns_json|jsonb|NO|'[]'::jsonb
-COLUMNS|[ensure-only] skills|category|text|NO|'general'::text
-COLUMNS|[ensure-only] skills|description|text|NO|''::text
-COLUMNS|[ensure-only] skills|last_used|timestamp with time zone|YES|
-COLUMNS|[ensure-only] skills|run_mode|text|NO|'manual'::text
-COLUMNS|[ensure-only] skills|source_path|text|NO|''::text
-COLUMNS|[ensure-only] skills|tags_json|jsonb|NO|'[]'::jsonb
-COLUMNS|[ensure-only] skills|usage_count|integer|NO|0
-COLUMNS|[ensure-only] skills|version_hash|text|NO|''::text
 COLUMNS|[ensure-only] task_runs|prompt_preview|text|NO|''::text
 COLUMNS|[ensure-only] task_runs|status|text|NO|
 COLUMNS|[ensure-only] task_runs|tool_mode|text|NO|
 COLUMNS|[ensure-only] task_runs|workspace_root|text|NO|
-COLUMNS|[ensure-only] verification_records|check_name|text|NO|
-COLUMNS|[ensure-only] verification_records|command|text|YES|
-COLUMNS|[ensure-only] verification_records|completed_at|timestamp with time zone|YES|
-COLUMNS|[ensure-only] verification_records|output_summary|text|YES|
-COLUMNS|[ensure-only] verification_records|required|boolean|NO|true
-COLUMNS|[ensure-only] verification_records|session_id|text|NO|
-COLUMNS|[ensure-only] verification_records|skip_reason|text|YES|
-COLUMNS|[mig-only]    artifacts|checksum|text|NO|''::text
-COLUMNS|[mig-only]    artifacts|path_policy|text|NO|'workspace'::text
-COLUMNS|[mig-only]    artifacts|size_bytes|bigint|NO|0
 COLUMNS|[mig-only]    run_specs|completed_at|timestamp with time zone|YES|
 COLUMNS|[mig-only]    run_specs|dedupe_key|text|YES|
 COLUMNS|[mig-only]    run_specs|metadata_json|jsonb|NO|'{}'::jsonb
@@ -58,36 +31,16 @@ COLUMNS|[mig-only]    run_specs|session_id|text|YES|
 COLUMNS|[mig-only]    run_specs|source|text|YES|
 COLUMNS|[mig-only]    run_specs|started_at|timestamp with time zone|YES|
 COLUMNS|[mig-only]    run_specs|tool_mode|text|NO|'project-write'::text
-COLUMNS|[mig-only]    scheduler_decisions|decided_at|timestamp with time zone|NO|now()
-COLUMNS|[mig-only]    scheduler_decisions|graph_id|text|YES|
-COLUMNS|[mig-only]    scheduler_decisions|reason|text|NO|''::text
 COLUMNS|[mig-only]    session_events|id|integer|NO|nextval('session_events_id_seq'::regclass)
 COLUMNS|[mig-only]    session_events|payload|jsonb|NO|'{}'::jsonb
 COLUMNS|[mig-only]    session_events|source|text|YES|
 COLUMNS|[mig-only]    session_events|visibility|text|NO|'public'::text
-COLUMNS|[mig-only]    sessions|messages|jsonb|NO|'[]'::jsonb
-COLUMNS|[mig-only]    sessions|metadata|jsonb|NO|'{}'::jsonb
-COLUMNS|[mig-only]    sessions|turns|jsonb|NO|'[]'::jsonb
 COLUMNS|[mig-only]    task_runs|prompt_preview|text|YES|
 COLUMNS|[mig-only]    task_runs|status|text|NO|'queued'::text
 COLUMNS|[mig-only]    task_runs|tool_mode|text|YES|
-COLUMNS|[mig-only]    verification_records|description|text|NO|''::text
-COLUMNS|[mig-only]    verification_records|evidence|text|YES|
-COLUMNS|[mig-only]    verification_records|kind|text|NO|'command'::text
-COLUMNS|[mig-only]    verification_records|metadata_json|jsonb|NO|'{}'::jsonb
-COLUMNS|[mig-only]    verification_records|session_id|text|YES|
-INDEXES|[ensure-only] rules|idx_rules_archived|CREATE INDEX idx_rules_archived ON public.rules USING btree (((metadata_json ->> 'archived'::text)))
-INDEXES|[ensure-only] rules|idx_rules_layer|CREATE INDEX idx_rules_layer ON public.rules USING btree (((metadata_json ->> 'ruleLayer'::text)))
-INDEXES|[ensure-only] rules|idx_rules_scope_name_unique|CREATE UNIQUE INDEX idx_rules_scope_name_unique ON public.rules USING btree (COALESCE((metadata_json ->> 'scope'::text), 'project'::text), name)
-INDEXES|[ensure-only] rules|idx_rules_scope|CREATE INDEX idx_rules_scope ON public.rules USING btree (((metadata_json ->> 'scope'::text)))
-INDEXES|[ensure-only] rules|idx_rules_severity|CREATE INDEX idx_rules_severity ON public.rules USING btree (severity)
 INDEXES|[ensure-only] run_specs|idx_run_specs_request_id|CREATE INDEX idx_run_specs_request_id ON public.run_specs USING btree (request_id)
 INDEXES|[ensure-only] run_specs|idx_run_specs_session_id|CREATE INDEX idx_run_specs_session_id ON public.run_specs USING btree (session_id)
 INDEXES|[ensure-only] run_specs|idx_run_specs_trace_id|CREATE INDEX idx_run_specs_trace_id ON public.run_specs USING btree (trace_id)
-INDEXES|[ensure-only] scheduler_decisions|idx_scheduler_decisions_graph|CREATE INDEX idx_scheduler_decisions_graph ON public.scheduler_decisions USING btree (graph_id, created_at DESC)
-INDEXES|[ensure-only] scheduler_decisions|idx_scheduler_decisions_kind|CREATE INDEX idx_scheduler_decisions_kind ON public.scheduler_decisions USING btree (kind, created_at DESC)
-INDEXES|[ensure-only] scheduler_decisions|idx_scheduler_decisions_session|CREATE INDEX idx_scheduler_decisions_session ON public.scheduler_decisions USING btree (session_id, created_at DESC)
-INDEXES|[ensure-only] scheduler_decisions|idx_scheduler_decisions_task|CREATE INDEX idx_scheduler_decisions_task ON public.scheduler_decisions USING btree (task_id, created_at DESC)
 INDEXES|[ensure-only] session_events|idx_session_events_cache_key|CREATE INDEX idx_session_events_cache_key ON public.session_events USING btree (cache_key)
 INDEXES|[ensure-only] session_events|idx_session_events_created|CREATE INDEX idx_session_events_created ON public.session_events USING btree (created_at DESC)
 INDEXES|[ensure-only] session_events|idx_session_events_model|CREATE INDEX idx_session_events_model ON public.session_events USING btree (model)
@@ -100,16 +53,6 @@ INDEXES|[ensure-only] session_events|idx_session_events_tenant_project|CREATE IN
 INDEXES|[ensure-only] session_events|idx_session_events_tool_name|CREATE INDEX idx_session_events_tool_name ON public.session_events USING btree (tool_name)
 INDEXES|[ensure-only] session_events|idx_session_events_trace_id|CREATE INDEX idx_session_events_trace_id ON public.session_events USING btree (trace_id)
 INDEXES|[ensure-only] session_events|idx_session_events_type|CREATE INDEX idx_session_events_type ON public.session_events USING btree (type)
-INDEXES|[ensure-only] sessions|idx_sessions_request_id|CREATE INDEX idx_sessions_request_id ON public.sessions USING btree (request_id)
-INDEXES|[ensure-only] sessions|idx_sessions_tenant_project|CREATE INDEX idx_sessions_tenant_project ON public.sessions USING btree (tenant_id, project_id)
-INDEXES|[ensure-only] sessions|idx_sessions_trace_id|CREATE INDEX idx_sessions_trace_id ON public.sessions USING btree (trace_id)
-INDEXES|[ensure-only] sessions|idx_sessions_updated|CREATE INDEX idx_sessions_updated ON public.sessions USING btree (updated_at DESC)
-INDEXES|[ensure-only] skills|idx_skills_archived|CREATE INDEX idx_skills_archived ON public.skills USING btree (((metadata_json ->> 'archived'::text)))
-INDEXES|[ensure-only] skills|idx_skills_category|CREATE INDEX idx_skills_category ON public.skills USING btree (category)
-INDEXES|[ensure-only] skills|idx_skills_enabled|CREATE INDEX idx_skills_enabled ON public.skills USING btree (enabled)
-INDEXES|[ensure-only] skills|idx_skills_layer|CREATE INDEX idx_skills_layer ON public.skills USING btree (((metadata_json ->> 'skillLayer'::text)))
-INDEXES|[ensure-only] skills|idx_skills_scope_name_unique|CREATE UNIQUE INDEX idx_skills_scope_name_unique ON public.skills USING btree (COALESCE((metadata_json ->> 'scope'::text), 'project'::text), name)
-INDEXES|[ensure-only] skills|idx_skills_scope|CREATE INDEX idx_skills_scope ON public.skills USING btree (((metadata_json ->> 'scope'::text)))
 INDEXES|[ensure-only] task_runs|idx_task_runs_active_dedupe|CREATE UNIQUE INDEX idx_task_runs_active_dedupe ON public.task_runs USING btree (dedupe_key) WHERE ((dedupe_key IS NOT NULL) AND (status = ANY (ARRAY['queued'::text, 'running'::text])))
 INDEXES|[ensure-only] task_runs|idx_task_runs_dedupe_key|CREATE INDEX idx_task_runs_dedupe_key ON public.task_runs USING btree (dedupe_key)
 INDEXES|[ensure-only] task_runs|idx_task_runs_lease|CREATE INDEX idx_task_runs_lease ON public.task_runs USING btree (status, lease_expires_at)
@@ -120,16 +63,10 @@ INDEXES|[ensure-only] task_runs|idx_task_runs_status|CREATE INDEX idx_task_runs_
 INDEXES|[ensure-only] task_runs|idx_task_runs_tenant_project|CREATE INDEX idx_task_runs_tenant_project ON public.task_runs USING btree (tenant_id, project_id)
 INDEXES|[ensure-only] task_runs|idx_task_runs_trace_id|CREATE INDEX idx_task_runs_trace_id ON public.task_runs USING btree (trace_id)
 INDEXES|[ensure-only] task_runs|idx_task_runs_updated|CREATE INDEX idx_task_runs_updated ON public.task_runs USING btree (updated_at DESC)
-INDEXES|[ensure-only] verification_records|idx_verification_records_session|CREATE INDEX idx_verification_records_session ON public.verification_records USING btree (session_id)
-INDEXES|[ensure-only] verification_records|idx_verification_records_task_run|CREATE INDEX idx_verification_records_task_run ON public.verification_records USING btree (task_run_id)
 INDEXES|[mig-only]    governance_jobs|idx_gov_jobs_cadence_last_run|CREATE INDEX idx_gov_jobs_cadence_last_run ON public.governance_jobs USING btree (cadence, last_run_at)
-INDEXES|[mig-only]    rules|idx_rules_name|CREATE INDEX idx_rules_name ON public.rules USING btree (name)
 INDEXES|[mig-only]    run_specs|idx_run_specs_session|CREATE INDEX idx_run_specs_session ON public.run_specs USING btree (session_id)
-INDEXES|[mig-only]    scheduler_decisions|idx_scheduler_decisions_graph|CREATE INDEX idx_scheduler_decisions_graph ON public.scheduler_decisions USING btree (graph_id)
-INDEXES|[mig-only]    scheduler_decisions|idx_scheduler_decisions_task|CREATE INDEX idx_scheduler_decisions_task ON public.scheduler_decisions USING btree (task_id)
 INDEXES|[mig-only]    session_events|idx_session_events_session|CREATE INDEX idx_session_events_session ON public.session_events USING btree (session_id, id)
 INDEXES|[mig-only]    session_events|idx_session_events_type|CREATE INDEX idx_session_events_type ON public.session_events USING btree (session_id, type)
-INDEXES|[mig-only]    skills|idx_skills_name|CREATE INDEX idx_skills_name ON public.skills USING btree (name)
 INDEXES|[mig-only]    task_runs|idx_task_runs_dedupe|CREATE INDEX idx_task_runs_dedupe ON public.task_runs USING btree (dedupe_key) WHERE ((dedupe_key IS NOT NULL) AND (status = ANY (ARRAY['queued'::text, 'running'::text])))
 INDEXES|[mig-only]    task_runs|idx_task_runs_session|CREATE INDEX idx_task_runs_session ON public.task_runs USING btree (session_id, created_at)
 INDEXES|[mig-only]    task_runs|idx_task_runs_status|CREATE INDEX idx_task_runs_status ON public.task_runs USING btree (status, completed_at)
