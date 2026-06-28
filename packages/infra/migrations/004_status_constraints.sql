@@ -11,7 +11,7 @@ BEGIN
        SELECT 1
        FROM pg_constraint
        WHERE conname = 'task_runs_status_chk'
-         AND conrelid = 'task_runs'::regclass
+         AND conrelid = to_regclass('public.task_runs')
      ) THEN
     ALTER TABLE task_runs
       ADD CONSTRAINT task_runs_status_chk
@@ -24,7 +24,7 @@ BEGIN
        SELECT 1
        FROM pg_constraint
        WHERE conname = 'run_specs_status_chk'
-         AND conrelid = 'run_specs'::regclass
+         AND conrelid = to_regclass('public.run_specs')
      ) THEN
     ALTER TABLE run_specs
       ADD CONSTRAINT run_specs_status_chk
