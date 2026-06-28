@@ -31,22 +31,32 @@ CREATE INDEX IF NOT EXISTS idx_run_specs_session ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_tenant_project ON run_specs(tenant_id, project_id);
 
 CREATE TABLE IF NOT EXISTS tool_call_states (
-  id TEXT PRIMARY KEY,
-  task_run_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
   run_spec_id TEXT,
-  session_id TEXT,
+  task_run_id TEXT,
+  turn INTEGER NOT NULL DEFAULT 0,
   tool_name TEXT NOT NULL,
-  tool_call_id TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'requested',
-  attempt INTEGER NOT NULL DEFAULT 0,
-  result_summary TEXT,
+  input_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  output_summary TEXT,
   error TEXT,
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  duration_ms INTEGER,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  idempotent BOOLEAN NOT NULL DEFAULT false,
+  retry_policy_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id, session_id)
 );
-CREATE INDEX IF NOT EXISTS idx_tool_call_states_task_run ON tool_call_states(task_run_id);
+CREATE INDEX IF NOT EXISTS idx_tool_call_states_session ON tool_call_states(session_id, turn, id);
 CREATE INDEX IF NOT EXISTS idx_tool_call_states_run_spec ON tool_call_states(run_spec_id);
+CREATE INDEX IF NOT EXISTS idx_tool_call_states_task_run ON tool_call_states(task_run_id);
+CREATE INDEX IF NOT EXISTS idx_tool_call_states_tool ON tool_call_states(tool_name);
 CREATE INDEX IF NOT EXISTS idx_tool_call_states_state ON tool_call_states(state);
 
 CREATE TABLE IF NOT EXISTS verification_records (

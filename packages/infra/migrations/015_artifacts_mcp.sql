@@ -32,15 +32,23 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_deleted ON artifacts(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_artifacts_status ON artifacts(status);
 
 CREATE TABLE IF NOT EXISTS mcp_servers (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  command TEXT NOT NULL,
-  args TEXT NOT NULL DEFAULT '',
+  id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT '',
+  project_id TEXT NOT NULL DEFAULT '',
+  transport TEXT NOT NULL DEFAULT 'stdio',
+  command TEXT,
+  args_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  url TEXT,
   env_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL DEFAULT 'configured',
-  verified_at TIMESTAMPTZ,
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  status TEXT NOT NULL DEFAULT 'unverified',
+  last_error TEXT,
+  tool_count INTEGER NOT NULL DEFAULT 0,
+  tools_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id, tenant_id, project_id)
 );
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant_project ON mcp_servers(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled) WHERE enabled = true;
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_status ON mcp_servers(status);
