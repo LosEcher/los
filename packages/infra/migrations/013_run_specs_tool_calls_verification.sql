@@ -61,17 +61,21 @@ CREATE INDEX IF NOT EXISTS idx_tool_call_states_state ON tool_call_states(state)
 
 CREATE TABLE IF NOT EXISTS verification_records (
   id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
   run_spec_id TEXT,
   task_run_id TEXT,
-  session_id TEXT,
-  kind TEXT NOT NULL DEFAULT 'command',
-  description TEXT NOT NULL DEFAULT '',
+  check_name TEXT NOT NULL,
+  command TEXT,
   status TEXT NOT NULL DEFAULT 'required',
-  evidence TEXT,
+  required BOOLEAN NOT NULL DEFAULT true,
+  skip_reason TEXT,
+  output_summary TEXT,
   error TEXT,
-  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_verification_records_session ON verification_records(session_id);
 CREATE INDEX IF NOT EXISTS idx_verification_records_run_spec ON verification_records(run_spec_id);
+CREATE INDEX IF NOT EXISTS idx_verification_records_task_run ON verification_records(task_run_id);
 CREATE INDEX IF NOT EXISTS idx_verification_records_status ON verification_records(status);

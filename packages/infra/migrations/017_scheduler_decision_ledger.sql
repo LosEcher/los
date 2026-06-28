@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS scheduler_decisions (
   id TEXT PRIMARY KEY,
-  graph_id TEXT,
+  graph_id TEXT NOT NULL,
   task_id TEXT,
   attempt_id TEXT,
   task_run_id TEXT,
@@ -11,17 +11,18 @@ CREATE TABLE IF NOT EXISTS scheduler_decisions (
   session_id TEXT,
   node_id TEXT,
   kind TEXT NOT NULL,
-  reason TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL,
   provider TEXT,
   model TEXT,
   selected_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   skipped_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  decided_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_graph ON scheduler_decisions(graph_id);
-CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_task ON scheduler_decisions(task_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_graph ON scheduler_decisions(graph_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_kind ON scheduler_decisions(kind, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_session ON scheduler_decisions(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_task ON scheduler_decisions(task_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS execution_outbox (
   id BIGSERIAL PRIMARY KEY,
