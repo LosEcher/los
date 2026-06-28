@@ -31,48 +31,15 @@
  */
 import { initDb, getDb, closeDb } from '../packages/infra/src/db.js';
 import { migrateDir } from '../packages/infra/src/migrate.js';
-
-// ── ensure*Store imports (the runtime source of truth) ──
-import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '../packages/memory/src/index.js';
-import { ensureIdempotencyStore } from '../packages/gateway/src/idempotency.js';
-import {
-  ensureTaskRunStore, ensureRunSpecStore, ensureAgentTaskGraphStore,
-  ensureExecutorNodeStore, ensureServiceInstanceStore, ensureTodoStore,
-  ensureSkillStore, ensureRuleStore, ensureSessionStore, ensureSessionEventStore,
-  ensureSchedulerDecisionLedgerStore, ensureStreamCheckpointStore, ensureStreamLeaseStore,
-  ensureVerificationRecordStore, ensureNodeCommandStore,
-  ensureMCPServerStore, ensureRunEvalStore, ensureExternalToolSummaryStore,
-  ensureProviderCompatEvidenceStore, ensureProviderPromotionDecisionStore,
-  ensureCancellationStore, ensureStaticGraphBaselineStore,
-  ensureGovernanceJobStore, ensureDeadLetterStore, ensureArtifactStore,
-} from '../packages/agent/src/index.js';
-// Not re-exported from the agent barrel — import from source.
-import { ensureExecutionStore } from '../packages/agent/src/execution-store.js';
-import { ensureProviderCallTelemetryStore } from '../packages/agent/src/providers/telemetry.js';
-import { ensureToolCallStateStore } from '../packages/agent/src/tool-call-states.js';
+// Single source of truth for the ensure*Store set: import the canonical
+// bootstrap function instead of re-listing all 32 ensure*Store here.
+import { ensureAllStores } from '../packages/gateway/src/bootstrap.js';
 
 const SERVER_URL = process.env.SERVER_URL ?? process.env.DATABASE_URL;
 if (!SERVER_URL) { console.error('SERVER_URL (or DATABASE_URL) env required'); process.exit(2); }
 const MIG_DB = process.env.MIG_DB ?? 'los_drift_mig';
 const ENSURE_DB = process.env.ENSURE_DB ?? 'los_drift_ensure';
 const MIG_DIR = new URL('../packages/infra/migrations/', import.meta.url).pathname;
-
-// ensure*Store functions in dependency-safe order. Only dead_letter_events has
-// inline FK REFERENCES (→ task_runs, run_specs), so it runs after those.
-const ENSURE_FNS: Array<() => Promise<unknown>> = [
-  ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore,
-  ensureTaskRunStore, ensureRunSpecStore, ensureAgentTaskGraphStore,
-  ensureExecutorNodeStore, ensureServiceInstanceStore, ensureTodoStore,
-  ensureSkillStore, ensureRuleStore, ensureSessionStore, ensureSessionEventStore,
-  ensureSchedulerDecisionLedgerStore, ensureStreamCheckpointStore, ensureStreamLeaseStore,
-  ensureToolCallStateStore, ensureVerificationRecordStore, ensureNodeCommandStore,
-  ensureMCPServerStore, ensureRunEvalStore, ensureExternalToolSummaryStore,
-  ensureProviderCompatEvidenceStore, ensureProviderPromotionDecisionStore,
-  ensureCancellationStore, ensureExecutionStore, ensureStaticGraphBaselineStore,
-  ensureGovernanceJobStore, ensureArtifactStore, ensureProviderCallTelemetryStore,
-  ensureIdempotencyStore,
-  ensureDeadLetterStore, // last: inline FK to task_runs + run_specs
-];
 
 // initDb()'s test guard (resolveDatabaseUrlForInit) ignores the explicit URL
 // when NODE_ENV=test / TEST_DATABASE_URL is set, redirecting to the test DB.
@@ -116,13 +83,7 @@ async function bootstrapMig(url: string): Promise<void> {
 
 async function bootstrapEnsure(url: string): Promise<void> {
   await connect(url);
-  for (let i = 0; i < ENSURE_FNS.length; i++) {
-    const fn = ENSURE_FNS[i];
-    if (typeof fn !== 'function') {
-      throw new Error(`ENSURE_FNS[${i}] is not a function (import undefined). Check the export.`);
-    }
-    await fn();
-  }
+  await ensureAllStores();
   await closeDb();
 }
 
