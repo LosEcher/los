@@ -1,5 +1,5 @@
 import { loadConfig } from '@los/infra/config';
-import { initDb, getDb } from '@los/infra/db';
+import { initDb, getDb, resolveDatabaseUrlForInit, isSafeTestDatabaseUrl } from '@los/infra/db';
 
 // Pre-initialize DB and all agent stores before tests run concurrently.
 // This avoids a race where node --test's parallel file execution causes
@@ -10,8 +10,19 @@ import { initDb, getDb } from '@los/infra/db';
 const config = await loadConfig();
 await initDb(config.databaseUrl);
 
-// Drop stale governance_jobs from previous partial test runs
-await getDb().exec('DROP TABLE IF EXISTS governance_jobs CASCADE').catch(() => undefined);
+// Reset governance_jobs for a clean test run — but ONLY on a safe test DB.
+// Dropping on a live/runtime DB destroys the table the gateway sweep loop
+// depends on. Recovery is not automatic: the migration runner skips 007/009
+// (already recorded as applied) and the running gateway's ensure*Store is a
+// no-op once _initialized, so the sweep loop fails every tick until the
+// gateway is restarted (ensure re-runs) or the table is manually restored.
+// The live-DB guard in resolveDatabaseUrlForInit can be bypassed (CI=true or
+// LOS_ALLOW_LIVE_TEST_DB=1), so this guard is the last line of defense.
+const effectiveDbUrl = resolveDatabaseUrlForInit(config.databaseUrl);
+if (effectiveDbUrl && isSafeTestDatabaseUrl(effectiveDbUrl)) {
+  await getDb().exec('DROP TABLE IF EXISTS governance_jobs CASCADE').catch(() => undefined);
+}
+// else: live/runtime DB — do not touch governance_jobs schema or data.
 
 // Import all ensure*Store functions and call them sequentially.
 // Dynamic imports to avoid circular module issues.
