@@ -2,12 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { loadConfig } from '@los/infra/config';
-import { initDb } from '@los/infra/db';
+import { loadConfig, getMigrateDir } from '@los/infra/config';
+import { initDb, getDb } from '@los/infra/db';
+import { migrateDir } from '@los/infra/migrate';
 import { getLogger } from '@los/infra/logger';
 import {
   ensureArtifactStore,
   ensureExecutorNodeStore,
+  ensureTaskRunStore,
   heartbeatTaskRun,
   loadTaskRun,
   runAgent,
@@ -62,8 +64,24 @@ export async function startExecutor() {
   const heartbeatViaApi = !!gatewayUrl;
 
   await initDb(config.databaseUrl);
+
+  // Run ordered migrations before ensure*Store. Executor nodes (especially
+  // remote ones with their own DB) must not rely on the gateway's
+  // ensureAllStores — file_sync_* tables have no ensure*Store, so migration is
+  // their only source. Idempotent; mirrors gateway startup. See
+  // packages/gateway/src/server.ts and docs/architecture/2026-06-28-self-iteration-engineering.md.
+  const migrateResult = await migrateDir(getMigrateDir(config), getDb());
+  if (migrateResult.applied.length > 0) {
+    log.info(`Executor migrations applied: ${migrateResult.applied.join(', ')}`);
+  }
+  if (migrateResult.errors.length > 0) {
+    log.warn(`Executor migration errors: ${migrateResult.errors.join('; ')}`);
+  }
+
   await ensureExecutorNodeStore();
   await ensureArtifactStore();
+  // The executor runs agent tasks (runAgentOnExecutor) → needs task_runs.
+  await ensureTaskRunStore();
 
   const nodeId = config.executor.nodeId ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? `http://${host}:${port}`;
