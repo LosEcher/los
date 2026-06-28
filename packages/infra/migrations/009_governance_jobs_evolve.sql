@@ -52,4 +52,3 @@ ALTER TABLE governance_jobs
 
 -- Add new indexes for sweep query patterns
 CREATE INDEX IF NOT EXISTS idx_gov_jobs_type_status ON governance_jobs(job_type, status);
-CREATE INDEX IF NOT EXISTS idx_gov_jobs_cadence_last_run ON governance_jobs(cadence, last_run_at);
