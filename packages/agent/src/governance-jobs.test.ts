@@ -81,9 +81,9 @@ test('governance jobs: seedGovernanceJobs creates 6 default jobs, idempotent', a
     assert.ok(actualCount >= expectedMin || actualCount === uniqueByType.length,
       `Expected >=${expectedMin} unique job types, got ${actualCount}`);
 
-    // Verify we have between 9-12 unique types (3 new types may not seed durably)
-    assert.ok(uniqueByType.length >= 9 && uniqueByType.length <= 12,
-      `Expected 9-12 unique job types, got ${uniqueByType.length}`);
+    // Verify we have between 9-13 unique types (3 new types may not seed durably)
+    assert.ok(uniqueByType.length >= 9 && uniqueByType.length <= 13,
+      `Expected 9-13 unique job types, got ${uniqueByType.length}`);
 
     // Verify cadences
     const consistencyJob = seeded.find(j => j.jobType === 'consistency_audit')!;
@@ -203,8 +203,8 @@ test('governance jobs: runGovernanceSweep dry-run does not mutate', async () => 
     // Dry run
     const result = await runGovernanceSweep({ dryRun: true });
     assert.equal(result.dryRun, true);
-    assert.equal(result.jobsSkipped, 0); // All 12 should be due (never run)
-    assert.equal(result.jobsRun, 12);
+    assert.equal(result.jobsSkipped, 0); // All 13 should be due (never run)
+    assert.equal(result.jobsRun, 13);
     assert.equal(result.findingsCreated, 0); // No todos in dry-run
 
     // Verify no mutations
