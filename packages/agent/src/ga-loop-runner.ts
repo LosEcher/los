@@ -77,6 +77,11 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
   let escalated = false;
   let escalatedReason: string | undefined;
   let lastError: string | undefined;
+  // hadError = a real throw (audit/verify error). Distinct from `escalated`
+  // (auto-fix couldn't resolve findings after maxAttempts — needs human, NOT a
+  // failure). Only hadError trips the circuit breaker; escalation must stay
+  // visible (it surfaces an operator TODO each sweep until resolved).
+  let hadError = false;
 
   // ── Step 0: Gate check ──────────────────────────────
   const gateDecision = evaluateLoopGate(job);
@@ -241,6 +246,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
       }
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      hadError = true; // verify threw — real error, counts toward circuit breaker
       if (attempt < maxAttempts - 1) {
         phases.push({ phase: 'retry', enteredAt: new Date().toISOString(), attemptNumber: attempt + 1, detail: `Verification failed: ${lastError} — retrying` });
       }
@@ -253,16 +259,23 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     escalatedReason = lastError ?? `Auto-fix did not resolve findings after ${maxAttempts} attempt(s)`;
 
     try {
-      const { createTodo } = await import('./todos.js');
-      await createTodo({
-        title: `GA Loop: ${job.jobType} auto-fix failed after ${maxAttempts} attempt(s)`,
-        description: `The governance auto-fix loop for ${job.jobType} (${job.id}) could not resolve findings after ${maxAttempts} attempts.\n\nLast fix detail: ${[...phases].reverse().find((p: GaLoopPhase) => p.phase === 'verify_result')?.detail ?? 'N/A'}\nLast error: ${lastError ?? 'N/A'}\n\nOperator review required.`,
-        kind: 'task',
-        status: 'backlog',
-        priority: 'P1',
-        source: 'ga_loop',
-        metadata: { loopJobId: job.id, jobType: job.jobType, escalationReason: escalatedReason },
-      });
+      // Dedupe per job: escalation no longer trips the breaker (it needs human,
+      // not retry), so the job runs every sweep and escalates — without dedupe
+      // this would spam a new TODO each sweep. Reuse one TODO per job, reopen
+      // if archived, refresh detail each sweep.
+      const { createTodo, listTodos, updateTodo, unarchiveTodo } = await import('./todos.js');
+      const dedupeKey = `ga-loop-escalation-${job.jobType}`;
+      const title = `GA Loop: ${job.jobType} auto-fix could not resolve findings — operator review required`;
+      const description = `The governance auto-fix loop for ${job.jobType} (${job.id}) could not resolve findings after ${maxAttempts} attempt(s).\n\nLast fix detail: ${[...phases].reverse().find((p: GaLoopPhase) => p.phase === 'verify_result')?.detail ?? 'N/A'}\nLast error: ${lastError ?? 'N/A'}\n\nOperator review required. (This TODO is refreshed each sweep until the finding is resolved; the job is NOT paused because escalation is a needs-human signal, not a failure.)`;
+      const metadata = { loopJobId: job.id, jobType: job.jobType, escalationReason: escalatedReason };
+      const existing = await listTodos({ source: 'ga_loop', limit: 500, includeArchived: true });
+      const ex = existing.find((t) => t.dedupeKey === dedupeKey);
+      if (ex) {
+        if (ex.archivedAt) await unarchiveTodo(ex.id);
+        await updateTodo(ex.id, { title, description, status: 'ready', priority: 'P1', metadata });
+      } else {
+        await createTodo({ title, description, kind: 'task', status: 'ready', priority: 'P1', source: 'ga_loop', dedupeKey, metadata });
+      }
     } catch (err) {
       log.warn(`Failed to create escalation todo: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -271,7 +284,10 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
   }
 
   // ── Step 5: Update state ────────────────────────────
-  const nextState = computeNextState(job, hasFindings && verificationPassed, escalated);
+  // hadFindings = hasFindings (findings existed → not a no-op, even if unresolved
+  // and escalated). hadError = real throw only (escalation is NOT a failure — it
+  // needs human, and must stay visible rather than trip the breaker for 24h).
+  const nextState = computeNextState(job, hasFindings, hadError);
   await updateGovernanceJobState(job.id, nextState);
 
   const finalStatus = nextState.circuitState === 'open' ? 'paused' : job.status;
