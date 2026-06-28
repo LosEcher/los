@@ -2,6 +2,7 @@ import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { PROCEDURAL_CANDIDATES_DDL } from '@los/infra/procedural-candidates-ddl';
 import type { ExecSyncOptions } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import type { GovernanceJob } from './governance-jobs-types.js';
 import { runMemoryIntegrityAudit, runMemoryRetentionAudit } from './governance-auditors-memory.js';
 
@@ -247,12 +248,11 @@ export function computeBranchHygieneSummary(exec: BranchHygieneExecFn): Record<s
     return { auditedAt, branchable: false, reason: 'Not a git worktree' };
   }
 
-  // Detached HEAD: `git symbolic-ref -q HEAD` exits non-zero when detached.
+  // Detached HEAD. Skip in jj-managed repos (.jj): jj colocate always has
+  // detached git HEAD (normal state), and `git checkout main` would disrupt jj.
   let detached = false;
-  try {
-    exec('git symbolic-ref -q HEAD', { timeout: 5000 });
-  } catch {
-    detached = true;
+  if (!existsSync('.jj')) {
+    try { exec('git symbolic-ref -q HEAD', { timeout: 5000 }); } catch { detached = true; }
   }
 
   // Working tree dirty? (gates whether detached-HEAD auto-fix is safe)
