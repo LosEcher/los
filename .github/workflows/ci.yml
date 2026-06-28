@@ -64,3 +64,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run gate
+
+      # Migration-drift gate: bootstrap a fresh DB via migrations only and via
+      # ensure*Store only, then diff. Fails on NEW drift vs the committed
+      # baseline (tools/migration-drift-baseline.txt). Existing drift is
+      # grandfathered until cleaned up. Runs only in CI (needs CREATEDB, which
+      # the postgres:16 service user `los` has).
+      # Unset NODE_ENV/TEST_DATABASE_URL: initDb's test guard would otherwise
+      # ignore the gate's explicit drift-DB URLs and redirect to los_test,
+      # making the gate compare a DB against itself (always green, inert).
+      - run: pnpm check:migration-drift
+        env:
+          NODE_ENV: ''
+          TEST_DATABASE_URL: ''

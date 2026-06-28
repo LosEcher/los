@@ -25,6 +25,8 @@
     "build": "turbo build",
     "check:contracts": "./tools/check-contracts.sh",
     "check:bypass": "./tools/check-state-machine-bypass.sh",
+    "check:migration-drift": "pnpm --filter @los/agent exec node --import tsx ../../tools/check-migration-drift.ts",
+    "check:migration-drift:update-baseline": "pnpm --filter @los/agent exec node --import tsx ../../tools/check-migration-drift.ts --update-baseline",
     "check": "turbo check && ./tools/check-structure.sh && ./tools/check-state-machine-bypass.sh && ./tools/check-contracts.sh && ./tools/check-unwired-exports.sh",
     "gate": "./tools/ci-gate.sh",
     "pre-push": "./tools/ci-gate.sh",
