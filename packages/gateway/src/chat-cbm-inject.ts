@@ -25,6 +25,7 @@ export async function buildCodeStructureBlock(
     if (targetFiles.length === 0) return '';
 
     const cbm = CBMClient.createDefault();
+    cbm.setWorkspaceRoot(workspaceRoot);
     await cbm.connect();
 
     // Resolve symbols in target files

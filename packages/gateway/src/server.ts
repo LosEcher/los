@@ -67,12 +67,30 @@ import { transitionExecutionState } from '@los/agent/execution-store';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
 import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
 import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
+import { getDefaultProjectId, getProject } from './project-store.js';
 
 const log = getLogger('gateway');
 const VERSION = '0.1.0';
 const SERVICE_HEARTBEAT_MS = 10_000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_WORKSPACE_ROOT = resolve(__dirname, '../../..');
+function resolveDefaultWorkspaceRoot(): string {
+  // Priority: LOS_DEFAULT_WORKSPACE_ROOT env → default project binding → build-time fallback
+  if (process.env.LOS_DEFAULT_WORKSPACE_ROOT) {
+    return resolve(process.env.LOS_DEFAULT_WORKSPACE_ROOT);
+  }
+  try {
+    const defaultId = getDefaultProjectId();
+    if (defaultId) {
+      const binding = getProject(defaultId);
+      if (binding?.workspacePath) return binding.workspacePath;
+    }
+  } catch {
+    // project-store may not be available during early bootstrap
+  }
+  return resolve(__dirname, '../../..');
+}
+
+const DEFAULT_WORKSPACE_ROOT = resolveDefaultWorkspaceRoot();
 const WORKSPACE_ROOT = resolve(__dirname, '../../..');
 const WEB_DIST_ROOT = resolve(__dirname, '../../web/dist');
 const WEB_INDEX_PATH = join(WEB_DIST_ROOT, 'index.html');

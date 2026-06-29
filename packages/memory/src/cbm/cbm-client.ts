@@ -95,7 +95,14 @@ export class CBMClient {
     queries: 0, successes: 0, failures: 0, avgLatencyMs: 0, totalBytesReturned: 0, byOperation: {},
   };
 
+  private workspaceRoot?: string;
+
   constructor(private config: MCPServerConfig) {}
+
+  /** Set the workspace root for project-name derivation in queries. */
+  setWorkspaceRoot(workspaceRoot: string): void {
+    this.workspaceRoot = workspaceRoot;
+  }
 
   /** Create a default CBM client targeting the current workspace. */
   static createDefault(opts?: { command?: string; args?: string[] }): CBMClient {
@@ -241,7 +248,7 @@ export class CBMClient {
     try {
       // Ensure project is set for tools that need it
       if (!args.project && tool !== 'get_architecture') {
-        args.project = CBMClient.projectName();
+        args.project = CBMClient.projectName(this.workspaceRoot);
       }
 
       const rawText = await this.client.callTool(tool, args);
@@ -267,9 +274,13 @@ export class CBMClient {
   }
 
   /** Derive a stable CBM project name from the workspace root. */
-  static projectName(): string {
-    // CBM auto-names projects from the repo path.
-    // If the project was already indexed, use the known name.
+  static projectName(workspaceRoot?: string): string {
+    if (workspaceRoot) {
+      // Convert /absolute/path/to/project → absolute-path-to-project
+      // CBM auto-names from repo paths by replacing separators.
+      return workspaceRoot.replace(/^\//, '').replace(/\//g, '-');
+    }
+    // Fall back to the los project name when no workspace is given.
     return 'Users-echerlos-projects-los-workspace-projects-los';
   }
 }

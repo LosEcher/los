@@ -32,7 +32,14 @@ export interface LoadedSpec {
   content: string;
 }
 
-const WORKSPACE_ROOT = resolve(import.meta.dirname ?? __dirname, '..', '..', '..');
+function defaultWorkspaceRoot(): string {
+  // Resolve from LOS_DEFAULT_WORKSPACE_ROOT env var first, then fall back
+  // to the build-time relative path (los monorepo root).
+  if (process.env.LOS_DEFAULT_WORKSPACE_ROOT) {
+    return resolve(process.env.LOS_DEFAULT_WORKSPACE_ROOT);
+  }
+  return resolve(import.meta.dirname ?? __dirname, '..', '..', '..');
+}
 
 /**
  * Map a source file path to the spec layer(s) it belongs to.
@@ -48,37 +55,38 @@ const WORKSPACE_ROOT = resolve(import.meta.dirname ?? __dirname, '..', '..', '..
  *   packages/gateway/src/** or packages/web/** → {pkg: 'gateway', layer: 'web'}
  *   packages/executor/**     → {pkg: 'executor'}
  */
-export function resolveSpecLayer(filePath: string): SpecLayer | null {
+export function resolveSpecLayer(filePath: string, workspaceRoot?: string): SpecLayer | null {
+  const wsRoot = workspaceRoot ?? defaultWorkspaceRoot();
   const normalized = filePath.replace(/\\/g, '/');
 
   if (normalized.includes('packages/infra/')) {
-    return { pkg: 'infra', path: specPath('infra') };
+    return { pkg: 'infra', path: specPath('infra', undefined, wsRoot) };
   }
 
   if (normalized.includes('packages/agent/')) {
     if (normalized.includes('/providers/') || normalized.includes('/provider')) {
-      return { pkg: 'agent', layer: 'provider', path: specPath('agent', 'provider') };
+      return { pkg: 'agent', layer: 'provider', path: specPath('agent', 'provider', wsRoot) };
     }
     if (normalized.includes('/tools/') || normalized.includes('/tool-')) {
-      return { pkg: 'agent', layer: 'tool', path: specPath('agent', 'tool') };
+      return { pkg: 'agent', layer: 'tool', path: specPath('agent', 'tool', wsRoot) };
     }
     // Default agent layer is loop (covers loop.ts, scheduler/, execution-*, run-*, task-*)
-    return { pkg: 'agent', layer: 'loop', path: specPath('agent', 'loop') };
+    return { pkg: 'agent', layer: 'loop', path: specPath('agent', 'loop', wsRoot) };
   }
 
   if (normalized.includes('packages/memory/')) {
-    return { pkg: 'memory', path: specPath('memory') };
+    return { pkg: 'memory', path: specPath('memory', undefined, wsRoot) };
   }
 
   if (normalized.includes('packages/gateway/src/routes/')) {
-    return { pkg: 'gateway', layer: 'route', path: specPath('gateway', 'route') };
+    return { pkg: 'gateway', layer: 'route', path: specPath('gateway', 'route', wsRoot) };
   }
   if (normalized.includes('packages/gateway/') || normalized.includes('packages/web/')) {
-    return { pkg: 'gateway', layer: 'web', path: specPath('gateway', 'web') };
+    return { pkg: 'gateway', layer: 'web', path: specPath('gateway', 'web', wsRoot) };
   }
 
   if (normalized.includes('packages/executor/')) {
-    return { pkg: 'executor', path: specPath('executor') };
+    return { pkg: 'executor', path: specPath('executor', undefined, wsRoot) };
   }
 
   return null;
@@ -90,12 +98,13 @@ export function resolveSpecLayer(filePath: string): SpecLayer | null {
  * Deduplicates by spec path — each spec is loaded at most once.
  * Returns specs sorted by package name for stable context injection.
  */
-export function loadSpecsForFiles(filePaths: string[]): LoadedSpec[] {
+export function loadSpecsForFiles(filePaths: string[], workspaceRoot?: string): LoadedSpec[] {
+  const wsRoot = workspaceRoot ?? defaultWorkspaceRoot();
   const seen = new Set<string>();
   const loaded: LoadedSpec[] = [];
 
   for (const filePath of filePaths) {
-    const layer = resolveSpecLayer(filePath);
+    const layer = resolveSpecLayer(filePath, wsRoot);
     if (!layer || seen.has(layer.path)) continue;
     seen.add(layer.path);
 
@@ -103,7 +112,7 @@ export function loadSpecsForFiles(filePaths: string[]): LoadedSpec[] {
 
     try {
       const content = readFileSync(layer.path, 'utf8');
-      const relativePath = relative(WORKSPACE_ROOT, layer.path);
+      const relativePath = relative(wsRoot, layer.path);
       loaded.push({
         pkg: layer.pkg,
         layer: layer.layer,
@@ -123,21 +132,22 @@ export function loadSpecsForFiles(filePaths: string[]): LoadedSpec[] {
  * Load ALL available specs. Use for governance/audit contexts where the full
  * rule set should be available.
  */
-export function loadAllSpecs(): LoadedSpec[] {
-  const specDir = resolve(WORKSPACE_ROOT, '.los', 'spec');
+export function loadAllSpecs(workspaceRoot?: string): LoadedSpec[] {
+  const wsRoot = workspaceRoot ?? defaultWorkspaceRoot();
+  const specDir = resolve(wsRoot, '.los', 'spec');
   if (!existsSync(specDir)) return [];
 
   const loaded: LoadedSpec[] = [];
 
   // Load SKILL.md governance surfaces (project-level + workspace-level)
   for (const candidate of [
-    resolve(WORKSPACE_ROOT, 'SKILL.md'),
-    resolve(WORKSPACE_ROOT, '..', 'AGENTS.md'),
+    resolve(wsRoot, 'SKILL.md'),
+    resolve(wsRoot, '..', 'AGENTS.md'),
   ]) {
     if (!existsSync(candidate)) continue;
     try {
       const content = readFileSync(candidate, 'utf8');
-      const relPath = relative(WORKSPACE_ROOT, candidate);
+      const relPath = relative(wsRoot, candidate);
       loaded.push({
         pkg: 'governance',
         layer: relPath.replace(/\.md$/, '').replace(/[\\/]/g, '-'),
@@ -148,7 +158,7 @@ export function loadAllSpecs(): LoadedSpec[] {
   }
 
   // Load ADR documents from docs/adr/ (last 5, governance-relevant)
-  const adrDir = resolve(WORKSPACE_ROOT, 'docs', 'adr');
+  const adrDir = resolve(wsRoot, 'docs', 'adr');
   if (existsSync(adrDir)) {
     try {
       const adrFiles = readdirSync(adrDir)
@@ -162,7 +172,7 @@ export function loadAllSpecs(): LoadedSpec[] {
           loaded.push({
             pkg: 'governance',
             layer: `adr-${adrFile.replace(/\.md$/, '')}`,
-            specPath: relative(WORKSPACE_ROOT, adrPath),
+            specPath: relative(wsRoot, adrPath),
             content: `## ADR: ${adrFile.replace(/^\d+-/, '').replace(/\.md$/, '')}\n\n${content.slice(0, 6000)}`,
           });
         } catch { /* skip */ }
@@ -170,7 +180,9 @@ export function loadAllSpecs(): LoadedSpec[] {
     } catch { /* skip */ }
   }
 
-  const layers = [
+  // Discover specs: first try the canonical los-style per-package layout,
+  // then fall back to a generic flat scan for non-los projects.
+  const losLayers = [
     ['infra'],
     ['agent', 'loop'],
     ['agent', 'provider'],
@@ -181,14 +193,16 @@ export function loadAllSpecs(): LoadedSpec[] {
     ['executor'],
   ];
 
-  for (const parts of layers) {
-    const path = specPath(...(parts as [string, ...string[]]));
+  let foundInLosLayout = false;
+  for (const parts of losLayers) {
+    const path = specPath(parts[0], parts.length > 1 ? parts[1] : undefined, wsRoot);
     if (!existsSync(path)) continue;
+    foundInLosLayout = true;
     try {
       loaded.push({
         pkg: parts[0],
         layer: parts.length > 1 ? parts[1] : undefined,
-        specPath: relative(WORKSPACE_ROOT, path),
+        specPath: relative(wsRoot, path),
         content: readFileSync(path, 'utf8'),
       });
     } catch {
@@ -196,11 +210,64 @@ export function loadAllSpecs(): LoadedSpec[] {
     }
   }
 
+  // Generic fallback: if no los-style packages were found, walk .los/spec/
+  // and load every .md file, mapping dir hierarchy to pkg/layer.
+  if (!foundInLosLayout) {
+    const discovered = walkSpecDir(specDir, wsRoot);
+    loaded.push(...discovered);
+  }
+
   return loaded;
 }
 
-function specPath(pkg: string, layer?: string): string {
-  const parts = [WORKSPACE_ROOT, '.los', 'spec', pkg];
+/**
+ * Walk a generic .los/spec/ directory and load all .md files.
+ * Non-los projects use a flat or relaxed hierarchy — every subdirectory
+ * is a "pkg" and every .md inside is a "layer".
+ */
+function walkSpecDir(specDir: string, wsRoot: string): LoadedSpec[] {
+  const loaded: LoadedSpec[] = [];
+  try {
+    const entries = readdirSync(specDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = resolve(specDir, entry.name);
+      if (entry.isDirectory()) {
+        // Directory = pkg
+        try {
+          const pkgFiles = readdirSync(entryPath, { withFileTypes: true });
+          for (const pf of pkgFiles) {
+            if (pf.isFile() && pf.name.endsWith('.md')) {
+              const p = resolve(entryPath, pf.name);
+              try {
+                loaded.push({
+                  pkg: entry.name,
+                  layer: pf.name.replace(/\.md$/, ''),
+                  specPath: relative(wsRoot, p),
+                  content: readFileSync(p, 'utf8'),
+                });
+              } catch { /* skip */ }
+            }
+          }
+        } catch { /* skip */ }
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        // Top-level .md = overview
+        try {
+          loaded.push({
+            pkg: 'project',
+            layer: entry.name.replace(/\.md$/, ''),
+            specPath: relative(wsRoot, entryPath),
+            content: readFileSync(entryPath, 'utf8'),
+          });
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* skip */ }
+  loaded.sort((a, b) => a.specPath.localeCompare(b.specPath));
+  return loaded;
+}
+
+function specPath(pkg: string, layer: string | undefined, wsRoot: string): string {
+  const parts = [wsRoot, '.los', 'spec', pkg];
   if (layer) parts.push(layer);
   parts.push('index.md');
   return resolve(...parts);
