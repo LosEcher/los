@@ -21,12 +21,14 @@ export async function cacheSymbolsForToolCall(
   callId: string,
   tool: string,
   args: Record<string, unknown>,
+  workspaceRoot?: string,
 ): Promise<void> {
   const paths = extractEditedPaths(tool, args);
   if (paths.length === 0) return;
 
   try {
     const cbm = CBMClient.createDefault();
+    if (workspaceRoot) cbm.setWorkspaceRoot(workspaceRoot);
     await cbm.connect();
     const symbols = await cbm.resolveSymbols(paths.map(p => ({ path: p })));
     await cbm.close();
