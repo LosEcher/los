@@ -222,6 +222,17 @@ export async function updateGovernanceJobState(
  * Used by the PG-queue claim loop — safe across concurrent gateway processes.
  *
  * Pattern: single-CTE SELECT + UPDATE, matching file-sync's store-queue.ts:114.
+ *
+ * Orphan reclaim: a job is also claimed if its next_run_at is NULL but its
+ * last_run_at is older than its cadence threshold. This self-heals jobs that
+ * were left at next_run_at=NULL by a crashed/atomic claim that never
+ * rescheduled (the branch_cleanup incident: once next_run_at went NULL, the
+ * `next_run_at <= now()` filter could never match it again). Orphans sort
+ * after normally-due jobs (NULLS LAST) so regular cadence still wins.
+ *
+ * NOTE: the CASE intervals below MUST stay in sync with CADENCE_THRESHOLDS in
+ * governance-jobs-types.ts. Drift is caught by the reclaim test in
+ * governance-jobs.test.ts.
  */
 export async function claimNextDueJob(): Promise<GovernanceJob | null> {
   await ensureGovernanceJobStore();
@@ -231,8 +242,22 @@ export async function claimNextDueJob(): Promise<GovernanceJob | null> {
     `WITH selected AS (
       SELECT id FROM governance_jobs
       WHERE status = 'active'
-        AND next_run_at <= now()
-      ORDER BY next_run_at ASC, id ASC
+        AND (
+          next_run_at <= now()
+          OR (
+            next_run_at IS NULL
+            AND last_run_at IS NOT NULL
+            AND last_run_at < now() - (
+              CASE cadence
+                WHEN 'hourly' THEN interval '55 minutes'
+                WHEN 'daily'  THEN interval '23 hours'
+                WHEN 'weekly' THEN interval '6 days 12 hours'
+                ELSE interval '23 hours'
+              END
+            )
+          )
+        )
+      ORDER BY next_run_at ASC NULLS LAST, id ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )

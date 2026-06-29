@@ -13,6 +13,7 @@ import {
 } from './chat-normalizers.js';
 import { normalizeReplayEvents } from './chat-session-helpers.js';
 import { persistChatError } from './chat-route-persist.js';
+import { resolveProjectIdFromWorkspace } from './project-store.js';
 import {
   completeIdempotencyKey,
   reserveIdempotentRequest,
@@ -153,7 +154,8 @@ export function registerChatRoute(
         mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
         identityName, identityLevel,
         traceId, dedupeKey, sid,
-        tenantId: context.tenantId, projectId: context.projectId,
+        tenantId: context.tenantId,
+        projectId: resolveProjectIdFromWorkspace(workspaceRoot) ?? context.projectId,
         userId: context.userId, requestId: context.requestId,
         runContract: body.runContract,
         config, gatewayServiceId, log: context.log, ctx, send,

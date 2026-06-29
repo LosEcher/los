@@ -309,7 +309,7 @@ function SessionInspector({
       ) : null}
       {verification.data && verification.data.count > 0 ? (
         <div className="fact-list">
-          <Fact label="verification" value={verification.data.records.map(r =>
+          <Fact label="verification" value={(verification.data.records ?? []).map(r =>
             `${r.checkName}: ${r.status}${r.outputSummary ? ` (${r.outputSummary.slice(0, 40)})` : ''}`
           ).join('; ')} />
         </div>
@@ -356,7 +356,7 @@ function SessionInspector({
         </div>
         {(relatedTodos.data ?? []).length === 0 ? (
           <EmptyText text="No linked todos found." />
-        ) : relatedTodos.data!.slice(0, 8).map(todo => (
+        ) : (relatedTodos.data ?? []).slice(0, 8).map(todo => (
           <button className="record-row compact-record" type="button" key={todo.id} onClick={() => onSelectTodo(todo.id)}>
             <span className="row-title">{todo.title}</span>
             <span className={`status-text ${todo.status}`}>{todo.status}</span>

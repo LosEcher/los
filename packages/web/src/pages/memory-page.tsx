@@ -418,7 +418,7 @@ export function MemoryPage() {
         {(compactions.data?.compactions ?? []).length > 0 ? (
           <div className="compaction-list">
             <h4>Recent Compactions</h4>
-            {compactions.data!.compactions.map(c => (
+            {(compactions.data?.compactions ?? []).map(c => (
               <div key={c.id} className="compaction-card">
                 <div className="compaction-meta">
                   <code>{c.id.slice(0, 16)}...</code>

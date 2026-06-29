@@ -6,16 +6,17 @@
 import { getLogger } from '@los/infra/logger';
 import { getDb } from '@los/infra/db';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
-import { claimNextDueJob, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
+import { claimNextDueJob, listDueGovernanceJobs, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { runJobAudit } from './governance-auditors.js';
 import { runGaLoop, maybeAutoRecoverPaused } from './ga-loop-runner.js';
 import { evaluateLoopGate } from './ga-circuit-breaker.js';
 import { createTodosFromFindings } from './governance-sweeper.js';
 import { eventBus } from './event-bus.js';
-import { CADENCE_THRESHOLDS } from './governance-jobs-types.js';
+import { computeNextRunAt } from './governance-jobs-types.js';
+import { appendSessionEvent } from './session-events.js';
+import { randomUUID } from 'node:crypto';
 import type {
   GovernanceJob,
-  GovernanceCadence,
   GovernanceSweepJobResult,
   GovernanceSweepResult,
   GaLoopResult,
@@ -25,12 +26,24 @@ const log = getLogger('governance-jobs');
 
 // ── Single-job runner (extracted for claim loop) ──────────
 
-async function runOneSweepJob(job: GovernanceJob, dryRun: boolean): Promise<{
+async function runOneSweepJob(job: GovernanceJob, dryRun: boolean, sessionId: string): Promise<{
   jobResult: GovernanceSweepJobResult;
   findingsCreated: number;
   error?: string;
 }> {
   const started = Date.now();
+
+  // Best-effort start event — must not abort the sweep
+  try {
+    await appendSessionEvent({
+      sessionId,
+      type: 'governance.job.started',
+      source: 'governance',
+      tenantId: job.tenantId ?? undefined,
+      projectId: job.projectId ?? undefined,
+      payload: { jobId: job.id, jobType: job.jobType, dryRun, hasAutoFix: !!job.autoFix?.autoFixEnabled },
+    });
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   if (maybeAutoRecoverPaused(job)) {
     try {
@@ -49,18 +62,21 @@ async function runOneSweepJob(job: GovernanceJob, dryRun: boolean): Promise<{
   const gateDecision = evaluateLoopGate(job);
   if (gateDecision.action === 'skip') {
     log.info(`GA loop: skipping ${job.jobType} (${job.id}) — ${gateDecision.reason}`);
-    return {
+    const result = {
       jobResult: { jobId: job.id, jobType: job.jobType, summary: { skipped: true, reason: gateDecision.reason }, durationMs: Date.now() - started },
       findingsCreated: 0,
     };
+    emitJobCompleted(sessionId, job, started, result.jobResult, 0, undefined);
+    return result;
   }
 
+  let jobResult: GovernanceSweepJobResult;
   let findingsCreated = 0;
   let error: string | undefined;
 
   try {
     if (job.autoFix?.autoFixEnabled && !dryRun) {
-      const loopResult: GaLoopResult = await runGaLoop({ job, dryRun: false });
+      const loopResult: GaLoopResult = await runGaLoop({ job, dryRun: false, sessionId });
       const summary = loopResult.auditSummary;
 
       if (gateDecision.action === 'downgrade' && gateDecision.newCadence) {
@@ -72,52 +88,71 @@ async function runOneSweepJob(job: GovernanceJob, dryRun: boolean): Promise<{
 
       if (loopResult.fixSucceeded && !loopResult.escalated) findingsCreated += 1;
 
-      return {
-        jobResult: {
-          jobId: job.id, jobType: job.jobType,
-          summary: {
-            ...summary,
-            _gaLoop: {
-              fixApplied: loopResult.fixApplied, fixSucceeded: loopResult.fixSucceeded,
-              verificationPassed: loopResult.verificationPassed, retried: loopResult.retried,
-              escalated: loopResult.escalated,
-              phases: loopResult.phases.map(p => `${p.phase}(${p.attemptNumber})`),
-            },
+      jobResult = {
+        jobId: job.id, jobType: job.jobType,
+        summary: {
+          ...summary,
+          _gaLoop: {
+            fixApplied: loopResult.fixApplied, fixSucceeded: loopResult.fixSucceeded,
+            verificationPassed: loopResult.verificationPassed, retried: loopResult.retried,
+            escalated: loopResult.escalated,
+            phases: loopResult.phases.map(p => `${p.phase}(${p.attemptNumber})`),
           },
-          durationMs: Date.now() - started,
         },
-        findingsCreated,
+        durationMs: Date.now() - started,
       };
+    } else {
+      const summary = await runJobAudit(job, dryRun);
+
+      if (!dryRun && summary && typeof summary.error === 'string') {
+        error = `${job.jobType} (${job.id}): ${summary.error}`;
+        log.warn(`Sweep job internal error: ${error}`);
+      }
+
+      if (!dryRun) {
+        await updateGovernanceJob(job.id, { lastRunAt: new Date().toISOString(), resultSummary: summary });
+      }
+
+      const created = await createTodosFromFindings(job, summary, dryRun);
+      findingsCreated += created;
+
+      jobResult = { jobId: job.id, jobType: job.jobType, summary, durationMs: Date.now() - started };
     }
-
-    const summary = await runJobAudit(job, dryRun);
-
-    if (!dryRun && summary && typeof summary.error === 'string') {
-      error = `${job.jobType} (${job.id}): ${summary.error}`;
-      log.warn(`Sweep job internal error: ${error}`);
-    }
-
-    if (!dryRun) {
-      await updateGovernanceJob(job.id, { lastRunAt: new Date().toISOString(), resultSummary: summary });
-    }
-
-    const created = await createTodosFromFindings(job, summary, dryRun);
-    findingsCreated += created;
-
-    return { jobResult: { jobId: job.id, jobType: job.jobType, summary, durationMs: Date.now() - started }, findingsCreated, error };
   } catch (err) {
     const msg = `${job.jobType} (${job.id}): ${err instanceof Error ? err.message : String(err)}`;
     log.warn(`Sweep job failed: ${msg}`);
-    return {
-      jobResult: { jobId: job.id, jobType: job.jobType, summary: { error: msg }, durationMs: Date.now() - started },
-      findingsCreated: 0, error: msg,
-    };
+    error = msg;
+    jobResult = { jobId: job.id, jobType: job.jobType, summary: { error: msg }, durationMs: Date.now() - started };
+    findingsCreated = 0;
   }
+
+  emitJobCompleted(sessionId, job, started, jobResult, findingsCreated, error);
+  return { jobResult, findingsCreated, error };
 }
 
-function computeNextRunAt(cadence: GovernanceCadence): string {
-  const ms = CADENCE_THRESHOLDS[cadence as keyof typeof CADENCE_THRESHOLDS] ?? 23 * 60 * 60 * 1000;
-  return new Date(Date.now() + ms).toISOString();
+/** Best-effort completion event — must not abort the sweep. */
+async function emitJobCompleted(
+  sessionId: string,
+  job: GovernanceJob,
+  started: number,
+  jobResult: GovernanceSweepJobResult,
+  findingsCreated: number,
+  error: string | undefined,
+): Promise<void> {
+  try {
+    await appendSessionEvent({
+      sessionId,
+      type: 'governance.job.completed',
+      source: 'governance',
+      tenantId: job.tenantId ?? undefined,
+      projectId: job.projectId ?? undefined,
+      payload: {
+        jobId: job.id, jobType: job.jobType, durationMs: Date.now() - started,
+        findingsCreated, hasError: !!error, error,
+        hasFindings: !!jobResult.summary,
+      },
+    });
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 }
 
 // ── Claim loop (PG-queue mode) ────────────────────────────
@@ -126,7 +161,25 @@ export async function runGovernanceSweepLoop(opts?: {
   dryRun?: boolean; tenantId?: string; projectId?: string;
 }): Promise<GovernanceSweepResult> {
   const dryRun = opts?.dryRun !== false;
+  const tenantId = opts?.tenantId;
+  const projectId = opts?.projectId;
   await ensureGovernanceJobStore();
+
+  // Pre-count due jobs for the start event (best-effort)
+  let dueCount = 0;
+  try { dueCount = (await listDueGovernanceJobs({ tenantId, projectId })).length; } catch { /* ok */ }
+
+  const sweepSessionId = `gov-sweep-${randomUUID()}`;
+  try {
+    await appendSessionEvent({
+      sessionId: sweepSessionId,
+      type: 'governance.sweep.started',
+      source: 'governance',
+      tenantId,
+      projectId,
+      payload: { dryRun, jobCount: dueCount },
+    });
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   const results: GovernanceSweepJobResult[] = [];
   const errors: string[] = [];
@@ -137,7 +190,7 @@ export async function runGovernanceSweepLoop(opts?: {
     const job = await claimNextDueJob();
     if (!job) break;
 
-    const { jobResult, findingsCreated: f, error } = await runOneSweepJob(job, dryRun);
+    const { jobResult, findingsCreated: f, error } = await runOneSweepJob(job, dryRun, sweepSessionId);
     results.push(jobResult);
     jobsRun += 1;
     findingsCreated += f;
@@ -153,7 +206,7 @@ export async function runGovernanceSweepLoop(opts?: {
 
     try {
       await getDb().notify('governance_sweep', JSON.stringify({ jobType: job.jobType, jobId: job.id, action: 'job_done' }));
-    } catch { /* best-effort */ }
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
   }
 
   let driftReport: any = null;
@@ -163,6 +216,21 @@ export async function runGovernanceSweepLoop(opts?: {
   } catch (err) {
     log.warn(`Drift sweep failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+
+  // Best-effort completion event
+  try {
+    await appendSessionEvent({
+      sessionId: sweepSessionId,
+      type: 'governance.sweep.completed',
+      source: 'governance',
+      tenantId,
+      projectId,
+      payload: {
+        dryRun, jobsRun, jobsSkipped: 0, findingsCreated,
+        errorCount: errors.length, hasDrift: !!driftReport,
+      },
+    });
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   return {
     dryRun, jobsRun, jobsSkipped: 0, findingsCreated, errors, results,

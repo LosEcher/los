@@ -116,6 +116,39 @@ should too.
 
 **Code**: `pnpm check` (type-check + lint + structure), `pnpm test`
 
+## AP10: Implemented But Not Wired (Orphan Function)
+
+**Symptom**: A function is implemented, exported, and tested, but never called
+from any production entry point (`server.ts`, `runChat()`, `main()`, `startExecutor()`).
+The function exists in the source tree but has zero callers outside of tests.
+
+**Consequence**: The feature looks complete (the code is there, tests pass) but
+does nothing at runtime. Debugging is misleading: you'll check "is the function
+correct?" rather than "is the function called?" The module appears `live` in
+the NAV and `pnpm check` passes, but no production code exercises it.
+
+Real cases in los:
+- `feed-analysis-ingress` whole module (3 functions) — implemented, zero callers
+- `syncMemoryMd()` — implemented with tests, not called from governance sweep
+- `heartbeatAgentTask` / `recoverExpiredAgentTasks` — lease management not wired
+- `writeDeadLetterForExpiredTasks` — dead-letter path never triggered
+- 50+ more functions detected by initial `check-wiring-topology.ts` baseline
+
+**Prevention**: `tools/check-wiring-topology.ts` detects every exported function
+that has zero non-test callers. It runs as part of `pnpm check` and `ci-gate.sh`.
+The baseline file `tools/wiring-topology-baseline.txt` grandfathered existing
+orphans; only NEW orphans block CI. As orphans are wired or removed, shrink the
+baseline with `pnpm check:wiring:update-baseline`.
+
+When implementing a new module:
+1. Write the module + tests (as normal).
+2. Wire the module into an entry point (server.ts, runChat(), governance sweep, etc.).
+3. Run `pnpm check:wiring` — it must pass (no new orphans).
+4. If the export is intentionally internal (helper for same-package use only),
+   prefix it with `_` to suppress the check.
+
+**Code**: `tools/check-wiring-topology.ts`, `tools/wiring-topology-baseline.txt`
+
 ## AP8: Hardcoded Defaults Diverging From Config Schema
 
 **Symptom**: A default value appears in both `config.ts` (Zod schema) and
@@ -131,3 +164,17 @@ default is the authority. Fallback values in other modules must match or be
 removed. Document any intentional differences.
 
 **Code**: `packages/infra/src/config.ts:31`, `db.ts:28`, `.env:1`
+
+## AP9: Hardcoded Agent Identity
+
+**Symptom**: Agent name, role, persona, or identity prose added inline in system
+prompt strings.
+
+**Consequence**: Identity diverges from file-based definitions. Same agent path
+gets different identity depending on which code path built the prompt.
+
+**Prevention**: Route through `resolveAgentIdentity()` → `formatIdentityForPrompt()`.
+Identity files in `.los/identity/<name>/` (project > user > system > built-in).
+ADR 0023 defines the decision matrix.
+
+**Code**: `packages/agent/src/identity-loader.ts`, `docs/adr/0023-agent-identity-decision-framework.md`

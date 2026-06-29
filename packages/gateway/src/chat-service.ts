@@ -168,7 +168,7 @@ export async function runChat(params: {
 
   // ── CBM shadow mode: measure code graph queries without injecting ──
   if ((config.memory as any)?.codeGraph?.shadowMode && (config.memory as any)?.codeGraph?.enabled) {
-    import('./chat-cbm-shadow.js').then(m => m.measureCBMShadow(sid, runSpecId, prompt)).catch(() => undefined);
+    import('./chat-cbm-shadow.js').then(m => m.measureCBMShadow(sid, runSpecId, prompt, workspaceRoot)).catch(() => undefined);
   }
 
   try {
@@ -314,7 +314,7 @@ export async function runChat(params: {
         await emitRunningToolCallUpsert({ send, sessionId: sid, runSpecId, turn, callId, toolName: tool, input: args });
         // Phase 3: resolve CBM symbols for write operations (best-effort, fire-and-forget)
         import('./chat-cbm-symbol-cache.js').then(m =>
-          m.cacheSymbolsForToolCall(callId, tool, args as Record<string, unknown>),
+          m.cacheSymbolsForToolCall(callId, tool, args as Record<string, unknown>, workspaceRoot),
         ).catch(() => undefined);
       },
       onModelDelta: async (delta) => {

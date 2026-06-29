@@ -278,6 +278,10 @@ const prompt = identityBlock + '\n\n' + baseSystemPrompt;
 Spec: `.los/spec/identity/index.md`
 ADR: `docs/adr/0023-agent-identity-decision-framework.md`
 
+### AP10: Implemented But Not Wired
+
+See `docs/governance/anti-patterns.md`.
+
 ### AP4, AP6
 
 See `docs/governance/anti-patterns.md` for dual state machine drift (AP4) and

@@ -15,7 +15,7 @@ import { CBMClient, appendShadowLog } from '@los/memory';
  * Never throws — failures are recorded in the shadow log.
  */
 export async function measureCBMShadow(
-  sid: string, runSpecId: string, prompt: string,
+  sid: string, runSpecId: string, prompt: string, workspaceRoot?: string,
 ): Promise<void> {
   const start = Date.now();
   let success = false;
@@ -24,6 +24,7 @@ export async function measureCBMShadow(
 
   try {
     const cbm = CBMClient.createDefault();
+    if (workspaceRoot) cbm.setWorkspaceRoot(workspaceRoot);
     await cbm.connect();
 
     const targetFiles = extractFilePathsFromPrompt(prompt);

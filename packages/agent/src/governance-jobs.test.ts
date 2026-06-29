@@ -6,6 +6,7 @@ import { closeDb, getDb, initDb } from '@los/infra/db';
 import {
   createGovernanceJob,
   deleteGovernanceJob,
+  claimNextDueJob,
   ensureGovernanceJobStore,
   getGovernanceJob,
   listDueGovernanceJobs,
@@ -13,6 +14,7 @@ import {
   runGovernanceSweep,
   seedGovernanceJobs,
   updateGovernanceJob,
+  updateGovernanceJobState,
 } from './governance-jobs.js';
 
 test('governance jobs: create, get, list, update, delete', async () => {
@@ -236,6 +238,94 @@ test('governance jobs: runGovernanceSweep with jobTypes filter', async () => {
     assert.ok(result.results.some(r => r.jobType === 'consistency_audit'));
 
     await getDb().query("DELETE FROM governance_jobs WHERE dedupe_key LIKE 'gov-job-%'").catch(() => undefined);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('governance jobs: claimNextDueJob reclaims orphaned next_run_at=NULL jobs', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  try {
+    await ensureGovernanceJobStore();
+    // Clean slate — claimNextDueJob picks globally, so isolate from seeds/other tests.
+    await getDb().query('DELETE FROM governance_jobs').catch(() => undefined);
+
+    // Fresh orphan: next_run_at NULL, last_run_at recent → NOT reclaimable.
+    const fresh = await createGovernanceJob({
+      jobType: 'consistency_audit',
+      cadence: 'hourly',
+      dedupeKey: 'test-reclaim-fresh',
+    });
+    await updateGovernanceJob(fresh.id, {
+      lastRunAt: new Date().toISOString(),
+      nextRunAt: null,
+    });
+    const claimedFresh = await claimNextDueJob();
+    assert.equal(claimedFresh, null);
+
+    // Stale orphan: next_run_at NULL, last_run_at 2h ago (hourly threshold 55min) → reclaimed.
+    const stale = await createGovernanceJob({
+      jobType: 'hotspot',
+      cadence: 'hourly',
+      dedupeKey: 'test-reclaim-stale',
+    });
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await updateGovernanceJob(stale.id, { lastRunAt: twoHoursAgo, nextRunAt: null });
+    const claimedStale = await claimNextDueJob();
+    assert.ok(claimedStale, 'expected stale orphan to be reclaimed');
+    assert.equal(claimedStale!.id, stale.id);
+    // Claim atomically nulls next_run_at (held until the loop reschedules).
+    const afterClaim = await getGovernanceJob(stale.id);
+    assert.equal(afterClaim!.nextRunAt, undefined);
+
+    await getDb().query('DELETE FROM governance_jobs').catch(() => undefined);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('governance jobs: manual runGovernanceSweep writes back next_run_at (no dryRun)', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  try {
+    await ensureGovernanceJobStore();
+    await getDb().query("DELETE FROM governance_jobs WHERE dedupe_key LIKE 'gov-job-%' OR dedupe_key LIKE 'test-%'").catch(() => undefined);
+
+    // A due job whose gate SKIPS (half_open, recovery window not elapsed) still
+    // exercises the shared finally that reschedules next_run_at — without
+    // running any real auditor. This is exactly the incident path: a manual
+    // sweep that touches a job must push next_run_at forward so the claim loop
+    // keeps feeding it; otherwise next_run_at stays NULL and the job is orphaned.
+    const job = await createGovernanceJob({
+      jobType: 'consistency_audit',
+      cadence: 'hourly',
+      dedupeKey: 'test-writeback-skip',
+    });
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await updateGovernanceJob(job.id, { lastRunAt: twoHoursAgo, nextRunAt: null });
+    await updateGovernanceJobState(job.id, {
+      circuitState: 'half_open',
+      circuitOpenedAt: new Date().toISOString(),
+      consecutiveFailures: 3,
+    });
+
+    const before = Date.now();
+    const result = await runGovernanceSweep({ dryRun: false, jobTypes: ['consistency_audit'] });
+    // Gate skipped the half_open job → not run, counted as skipped.
+    assert.equal(result.jobsRun, 0);
+    assert.ok(result.jobsSkipped >= 1);
+
+    const after = await getGovernanceJob(job.id);
+    assert.ok(after!.nextRunAt, 'next_run_at must be written back after a manual sweep');
+    const nextMs = new Date(after!.nextRunAt as string).getTime();
+    // hourly cadence → next_run_at ~55min ahead.
+    assert.ok(nextMs > before, 'next_run_at must be in the future');
+    assert.ok(nextMs - before <= 60 * 60 * 1000, 'next_run_at should be roughly one cadence ahead');
+
+    await deleteGovernanceJob(job.id).catch(() => undefined);
   } finally {
     await closeDb().catch(() => undefined);
   }

@@ -16,7 +16,7 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getLogger } from '@los/infra/logger';
 
@@ -35,7 +35,9 @@ interface ProjectsFile {
   defaultProjectId?: string;
 }
 
-const PROJECTS_DIR = join(homedir(), '.los');
+const PROJECTS_DIR = process.env.LOS_PROJECTS_DIR
+  ? resolve(process.env.LOS_PROJECTS_DIR)
+  : join(homedir(), '.los');
 const PROJECTS_PATH = join(PROJECTS_DIR, 'projects.json');
 
 function readProjectsFile(): ProjectsFile {
@@ -139,4 +141,16 @@ export function validateProjectPath(workspacePath: string): { valid: boolean; er
     }
     return { valid: false, error: `Cannot access path: ${e.message}` };
   }
+}
+
+/** Resolve a workspaceRoot to a bound projectId, if one exists.
+ *  Both sides are resolve()-normalized so trailing slashes, symlinks, and
+ *  stray `..` segments don't break the match. */
+export function resolveProjectIdFromWorkspace(workspaceRoot: string): string | null {
+  const normalized = resolve(workspaceRoot);
+  const projects = listProjects();
+  for (const p of projects) {
+    if (resolve(p.workspacePath) === normalized) return p.projectId;
+  }
+  return null;
 }

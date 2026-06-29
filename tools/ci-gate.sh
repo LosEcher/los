@@ -123,8 +123,8 @@ PHASES_RUN=$((PHASES_RUN + 1))
 
 # ── Phase 6: unwired exports ──────────────────────────────
 
-phase_start "Unwired exports (implemented-but-not-wired guard)"
-if ./tools/check-unwired-exports.sh; then
+phase_start "Unwired exports (check-unwired-exports + wiring-topology guard)"
+if ./tools/check-unwired-exports.sh && pnpm --filter @los/gateway exec node --import tsx ../../tools/check-wiring-topology.ts; then
   phase_ok "unwired-exports"
 else
   phase_fail "unwired-exports"

@@ -130,6 +130,10 @@ function buildHeaders(): Record<string, string> {
   if (pid) headers['x-project-id'] = pid;
   const token = getAuthToken();
   if (token) headers['x-los-auth-token'] = token;
+  // Tenant and user are required by request-context when auth is enabled.
+  // Web always identifies as 'local' (single-tenant, single-user UI).
+  headers['x-tenant-id'] = 'local';
+  headers['x-user-id'] = 'local';
   return headers;
 }
 

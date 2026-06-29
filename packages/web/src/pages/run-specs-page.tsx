@@ -124,7 +124,7 @@ export function RunSpecsPage() {
                 <div className="blocker-list">
                   <strong style={{ fontSize: 13 }}>Blockers</strong>
                   <ul style={{ margin: '4px 0 0 16px', fontSize: 13, color: 'var(--text-dim)' }}>
-                    {runState.data.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                    {(runState.data.blockers ?? []).map((b, i) => <li key={i}>{b}</li>)}
                   </ul>
                 </div>
               ) : null}
