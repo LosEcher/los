@@ -172,7 +172,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
         phases, fixApplied: false, fixSucceeded: true, verificationPassed: true,
         retried: false, escalated: false,
       }, job.tenantId, job.projectId);
-    } catch { /* best-effort */ }
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
     return {
       jobId: job.id,
@@ -257,7 +257,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
                 attemptNumber: attempt + 1,
               },
             });
-          } catch { /* best-effort */ }
+          } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
         }
 
         break;
@@ -319,7 +319,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
             fixApplied, fixSucceeded, verificationPassed,
           },
         });
-      } catch { /* best-effort */ }
+      } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
     }
   }
 

@@ -122,7 +122,12 @@ export async function dispatchTodo(
     ?? (todo.metadata?.workspaceRoot as string | undefined)
     ?? process.cwd();
 
-  // Validate foreign workspace when it differs from process.cwd()
+  // Validate foreign workspace when it differs from process.cwd().
+  // NOTE: uses existsSync + execSync (blocking) for simplicity — the foreign
+  // workspace path is only taken for cross-project dispatches (rare), and the
+  // guard ensures domestic dispatches skip this entirely. If cross-project
+  // dispatch latency becomes a concern, migrate to fs.promises.access() +
+  // child_process.exec().
   if (workspaceRoot !== process.cwd()) {
     if (!existsSync(workspaceRoot)) {
       throw new DispatchError(400, 'workspace_not_found',

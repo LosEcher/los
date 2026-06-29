@@ -50,7 +50,7 @@ export async function runGovernanceSweep(opts?: {
       projectId,
       payload: { dryRun, jobCount: dueJobs.length },
     });
-  } catch { /* best-effort */ }
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   const results: GovernanceSweepJobResult[] = [];
   const errors: string[] = [];
@@ -70,7 +70,7 @@ export async function runGovernanceSweep(opts?: {
         projectId: job.projectId ?? undefined,
         payload: { jobId: job.id, jobType: job.jobType, dryRun, hasAutoFix: !!job.autoFix?.autoFixEnabled },
       });
-    } catch { /* best-effort */ }
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
     try {
       // ── Auto-recover paused jobs whose circuit breaker has expired ──
@@ -178,7 +178,7 @@ export async function runGovernanceSweep(opts?: {
           projectId: job.projectId ?? undefined,
           payload: { jobId: job.id, jobType: job.jobType, durationMs: Date.now() - started },
         });
-      } catch { /* best-effort */ }
+      } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
       // Reschedule next_run_at so the claim loop keeps picking this job up.
       // Mirrors runGovernanceSweepLoop (governance-wake.ts): every job we
@@ -219,7 +219,7 @@ export async function runGovernanceSweep(opts?: {
         findingsCreated, errorCount: errors.length, hasDrift: !!driftReport,
       },
     });
-  } catch { /* best-effort */ }
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   return {
     dryRun, jobsRun: results.length, jobsSkipped: dueJobs.length - results.length, findingsCreated, errors, results,

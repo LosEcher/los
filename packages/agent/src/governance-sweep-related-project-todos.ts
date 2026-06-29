@@ -33,7 +33,6 @@ export async function createRelatedProjectScanTodos(
   for (const proj of absorbableProjects) {
     if (!proj.realPath) continue; // skip if path is unavailable
 
-    const caps = (proj.capabilities ?? []).slice(0, 5).join('; ') || proj.role;
     const title = `Cross-project: Absorb capabilities from ${proj.name}`;
     const description = [
       `Related project scan found absorbable capabilities in **${proj.name}** (${proj.role}).`,

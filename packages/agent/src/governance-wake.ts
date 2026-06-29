@@ -43,7 +43,7 @@ async function runOneSweepJob(job: GovernanceJob, dryRun: boolean, sessionId: st
       projectId: job.projectId ?? undefined,
       payload: { jobId: job.id, jobType: job.jobType, dryRun, hasAutoFix: !!job.autoFix?.autoFixEnabled },
     });
-  } catch { /* best-effort */ }
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   if (maybeAutoRecoverPaused(job)) {
     try {
@@ -152,7 +152,7 @@ async function emitJobCompleted(
         hasFindings: !!jobResult.summary,
       },
     });
-  } catch { /* best-effort */ }
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 }
 
 // ── Claim loop (PG-queue mode) ────────────────────────────
@@ -179,7 +179,7 @@ export async function runGovernanceSweepLoop(opts?: {
       projectId,
       payload: { dryRun, jobCount: dueCount },
     });
-  } catch { /* best-effort */ }
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   const results: GovernanceSweepJobResult[] = [];
   const errors: string[] = [];
@@ -206,7 +206,7 @@ export async function runGovernanceSweepLoop(opts?: {
 
     try {
       await getDb().notify('governance_sweep', JSON.stringify({ jobType: job.jobType, jobId: job.id, action: 'job_done' }));
-    } catch { /* best-effort */ }
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
   }
 
   let driftReport: any = null;
@@ -230,7 +230,7 @@ export async function runGovernanceSweepLoop(opts?: {
         errorCount: errors.length, hasDrift: !!driftReport,
       },
     });
-  } catch { /* best-effort */ }
+  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   return {
     dryRun, jobsRun, jobsSkipped: 0, findingsCreated, errors, results,

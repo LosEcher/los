@@ -156,8 +156,15 @@ export const CADENCE_THRESHOLDS: Record<Exclude<GovernanceCadence, 'manual'>, nu
  * (governance-sweeper.ts) so both reschedule identically — a manual sweep
  * that runs a job must also push next_run_at forward, otherwise the job is
  * orphaned at next_run_at=NULL and the claim loop never picks it up again.
+ *
+ * NOTE: Callers must pass the current timestamp as `now` to avoid Date.now()
+ * (app clock) vs PostgreSQL now() (DB clock) source mismatch. The claim loop
+ * (governance-wake.ts) should call getDb().now() and pass the result; the
+ * manual sweep (governance-sweeper.ts) may use Date.now() as a fallback
+ * since it runs on the same event loop — the skew risk is bounded.
  */
-export function computeNextRunAt(cadence: GovernanceCadence): string {
+export function computeNextRunAt(cadence: GovernanceCadence, now?: Date | string | number): string {
   const ms = CADENCE_THRESHOLDS[cadence as keyof typeof CADENCE_THRESHOLDS] ?? 23 * 60 * 60 * 1000;
-  return new Date(Date.now() + ms).toISOString();
+  const nowMs = now ? new Date(now).getTime() : Date.now();
+  return new Date(nowMs + ms).toISOString();
 }
