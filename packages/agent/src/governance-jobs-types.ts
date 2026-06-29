@@ -149,3 +149,15 @@ export const CADENCE_THRESHOLDS: Record<Exclude<GovernanceCadence, 'manual'>, nu
   daily: 23 * 60 * 60 * 1000,
   weekly: (6.5 * 24 * 60 * 60 * 1000),
 };
+
+/**
+ * Compute the next scheduled run time for a job of the given cadence.
+ * Shared by the claim loop (governance-wake.ts) and the manual sweep path
+ * (governance-sweeper.ts) so both reschedule identically — a manual sweep
+ * that runs a job must also push next_run_at forward, otherwise the job is
+ * orphaned at next_run_at=NULL and the claim loop never picks it up again.
+ */
+export function computeNextRunAt(cadence: GovernanceCadence): string {
+  const ms = CADENCE_THRESHOLDS[cadence as keyof typeof CADENCE_THRESHOLDS] ?? 23 * 60 * 60 * 1000;
+  return new Date(Date.now() + ms).toISOString();
+}

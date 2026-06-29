@@ -23,6 +23,7 @@ import { updateGovernanceJob, updateGovernanceJobState } from './governance-jobs
 import { computeNextState, evaluateLoopGate, maybeAutoRecoverPaused } from './ga-circuit-breaker.js';
 import { applyBranchCleanupFix, applyRelatedProjectScanFix } from './ga-scenario-fixes.js';
 import { applyConsistencyFix, applyHotspotFix } from './ga-loop-fixes.js';
+import { appendSessionEvent } from './session-events.js';
 import type {
   GovernanceJob,
   GovernanceJobAutoFixConfig,
@@ -35,6 +36,8 @@ const log = getLogger('ga-loop-runner');
 export interface RunGaLoopOptions {
   job: GovernanceJob;
   dryRun?: boolean;
+  /** Governance sweep session ID for event emission. When provided, fix/escalation events are emitted. */
+  sessionId?: string;
 }
 
 // ── Auto-fix strategy dispatcher ──────────────────────
@@ -238,6 +241,25 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
         fixSucceeded = true;
         verificationPassed = true;
         phases.push({ phase: 'completed', enteredAt: new Date().toISOString(), attemptNumber: attempt + 1, detail: `Verified clean on attempt ${attempt + 1}` });
+
+        // Best-effort fix_applied event — must not abort the sweep
+        if (opts.sessionId) {
+          try {
+            await appendSessionEvent({
+              sessionId: opts.sessionId,
+              type: 'governance.job.fix_applied',
+              source: 'governance',
+              tenantId: job.tenantId ?? undefined,
+              projectId: job.projectId ?? undefined,
+              payload: {
+                jobId: job.id, jobType: job.jobType,
+                fixApplied, fixSucceeded: true, verificationPassed: true,
+                attemptNumber: attempt + 1,
+              },
+            });
+          } catch { /* best-effort */ }
+        }
+
         break;
       }
 
@@ -281,6 +303,24 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     }
 
     phases.push({ phase: 'escalated', enteredAt: new Date().toISOString(), attemptNumber: maxAttempts, detail: escalatedReason });
+
+    // Best-effort escalation event — must not abort the sweep
+    if (opts.sessionId) {
+      try {
+        await appendSessionEvent({
+          sessionId: opts.sessionId,
+          type: 'governance.job.escalated',
+          source: 'governance',
+          tenantId: job.tenantId ?? undefined,
+          projectId: job.projectId ?? undefined,
+          payload: {
+            jobId: job.id, jobType: job.jobType,
+            escalatedReason, maxAttempts,
+            fixApplied, fixSucceeded, verificationPassed,
+          },
+        });
+      } catch { /* best-effort */ }
+    }
   }
 
   // ── Step 5: Update state ────────────────────────────
