@@ -238,7 +238,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
             </button>
           </div>
           <div className="project-browser-roots">
-            {browse.data?.roots.map(root => (
+            {browse.data?.roots?.map(root => (
               <button
                 key={root.label}
                 type="button"
@@ -259,7 +259,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
             <div className="project-browser-list">
               {browse.data?.entries.length === 0 ? (
                 <span className="project-empty">No subfolders</span>
-              ) : browse.data?.entries.map(entry => (
+              ) : (browse.data?.entries ?? []).map(entry => (
                 <div
                   key={entry.path}
                   className={`project-browser-item-row${entry.hidden ? ' hidden' : ''}`}

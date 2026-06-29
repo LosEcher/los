@@ -242,7 +242,7 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
       {runState.data?.blockers.length ? (
         <div className="json-block">
           <strong>Run State Blockers</strong>
-          <pre>{runState.data.blockers.map(blocker => `${blocker.kind}: ${blocker.message}${blocker.ids.length ? ` [${blocker.ids.join(', ')}]` : ''}`).join('\n')}</pre>
+          <pre>{(runState.data.blockers ?? []).map(blocker => `${blocker.kind}: ${blocker.message}${blocker.ids.length ? ` [${blocker.ids.join(', ')}]` : ''}`).join('\n')}</pre>
         </div>
       ) : null}
       {graphCompletion ? <AgentGraphReadModel graph={agentGraph.data} completion={graphCompletion} /> : null}
@@ -260,7 +260,7 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
 
 function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; completion: AgentTaskGraphCompletion }) {
   const attempts = graph
-    ? Object.entries(graph.attemptsByTaskId)
+    ? Object.entries(graph.attemptsByTaskId ?? {})
       .flatMap(([, items]) => items)
       .sort((a, b) => `${a.taskId}:${a.attempt}`.localeCompare(`${b.taskId}:${b.attempt}`))
     : [];
@@ -296,7 +296,7 @@ function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; co
       {graph ? (
         <div className="json-block">
           <strong>Graph Tasks</strong>
-          <pre>{graph.tasks.map(task => `${task.id} | ${task.role} | ${task.status} | attempts ${attempts.filter(attempt => attempt.taskId === task.id).length}/${task.maxAttempts}`).join('\n') || 'none'}</pre>
+          <pre>{(graph.tasks ?? []).map(task => `${task.id} | ${task.role} | ${task.status} | attempts ${attempts.filter(attempt => attempt.taskId === task.id).length}/${task.maxAttempts}`).join('\n') || 'none'}</pre>
         </div>
       ) : null}
       {attempts.length > 0 ? (
