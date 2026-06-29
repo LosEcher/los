@@ -197,6 +197,15 @@ async function runRelatedProjectScanAudit(): Promise<Record<string, unknown>> {
       withNewFeatures: result.projects.filter(p => p.newFeatures && p.newFeatures.length > 0).length,
       absorbableCount: absorbable.length,
       inaccessibleCount: inaccessible.length,
+      absorbableProjects: absorbable.map(p => ({
+        name: p.project.name,
+        workspacePath: p.project.workspacePath,
+        realPath: p.project.realPath,
+        role: p.project.role,
+        capabilities: p.absorbableCapabilities ?? [],
+        recommendation: p.recommendation,
+        lastCommitDate: p.lastCommitDate,
+      })),
     };
   } catch (err) {
     return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };

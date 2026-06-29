@@ -6,6 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { getDb, withDbClient } from '@los/infra/db';
 import { TODO_SCHEMA } from './todo-schema.js';
 import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
@@ -337,13 +339,38 @@ export async function listTodos(options: ListTodosOptions = {}): Promise<TodoRec
 
 export interface SeedLosPlanningTodosOptions {
   overwrite?: boolean;
+  /** If set, also load todo seeds from <workspaceRoot>/.los/todos/seed.json. */
+  workspaceRoot?: string;
+  /** Override the default projectId for seeded todos (default: 'los'). */
+  projectId?: string;
 }
 
 export async function seedLosPlanningTodos(options: SeedLosPlanningTodosOptions = {}): Promise<TodoRecord[]> {
   await ensureTodoStore();
   const out: TodoRecord[] = [];
 
-  const seedIds = LOS_PLANNING_TODO_SEED.map(item => item.id).filter((id): id is string => Boolean(id));
+  // Build the seed list: built-in seeds first, then external seeds from workspace.
+  // External seeds are tagged with the requested projectId; the built-in los
+  // seeds keep their own projectId so cross-project seeding doesn't relabel
+  // los-internal planning todos.
+  const seedItems: CreateTodoInput[] = [...LOS_PLANNING_TODO_SEED];
+  if (options.workspaceRoot) {
+    const externalPath = resolve(options.workspaceRoot, '.los', 'todos', 'seed.json');
+    try {
+      if (existsSync(externalPath)) {
+        const raw = readFileSync(externalPath, 'utf-8');
+        const external = JSON.parse(raw) as CreateTodoInput[];
+        const projectId = options.projectId ?? 'los';
+        for (const item of external) {
+          seedItems.push({ ...item, projectId: item.projectId ?? projectId });
+        }
+      }
+    } catch {
+      // External seed file missing or unreadable — use only built-in seeds
+    }
+  }
+
+  const seedIds = seedItems.map(item => item.id).filter((id): id is string => Boolean(id));
   const existingIds = new Set<string>();
   if (seedIds.length > 0) {
     const db = getDb();
@@ -354,7 +381,7 @@ export async function seedLosPlanningTodos(options: SeedLosPlanningTodosOptions 
     for (const row of existing.rows) existingIds.add(row.id);
   }
 
-  for (const item of LOS_PLANNING_TODO_SEED) {
+  for (const item of seedItems) {
     if (item.id && !options.overwrite && existingIds.has(item.id)) {
       const existing = await loadTodo(item.id);
       if (existing) { out.push(existing); continue; }

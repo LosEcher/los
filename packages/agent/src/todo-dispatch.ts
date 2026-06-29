@@ -20,6 +20,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import type { ScheduledTaskEvent } from './scheduler/types.js';
 import { runScheduledAgentTask } from './scheduler/scheduled-task-runner.js';
 import { loadTodo, updateTodo, type TodoRecord } from './todos.js';
@@ -116,6 +117,28 @@ export async function dispatchTodo(
     ? (opts.toolMode as DispatchToolMode)
     : 'read-only';
 
+  // Resolve workspaceRoot: explicit opt → todo metadata fallback → process.cwd()
+  const workspaceRoot = opts.workspaceRoot
+    ?? (todo.metadata?.workspaceRoot as string | undefined)
+    ?? process.cwd();
+
+  // Validate foreign workspace when it differs from process.cwd()
+  if (workspaceRoot !== process.cwd()) {
+    if (!existsSync(workspaceRoot)) {
+      throw new DispatchError(400, 'workspace_not_found',
+        `Foreign workspace does not exist: ${workspaceRoot}`);
+    }
+    try {
+      const { execSync: exec } = await import('node:child_process');
+      exec('git rev-parse --is-inside-work-tree', {
+        cwd: workspaceRoot, encoding: 'utf8', timeout: 5000,
+      });
+    } catch {
+      throw new DispatchError(400, 'workspace_not_git',
+        `Foreign workspace is not a git repository: ${workspaceRoot}`);
+    }
+  }
+
   // Transition todo to in_progress before firing the scheduler
   await updateTodo(id, { status: 'in_progress' });
 
@@ -126,7 +149,7 @@ export async function dispatchTodo(
     prompt,
     sessionId,
     runSpecId: todo.metadata?.runSpecId as string | undefined,
-    workspaceRoot: opts.workspaceRoot ?? process.cwd(),
+    workspaceRoot,
     toolMode,
     promptPreview: todo.title,
     tenantId: todo.tenantId,
