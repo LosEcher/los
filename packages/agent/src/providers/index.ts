@@ -29,6 +29,31 @@ import { createOpenAIResponsesProvider } from './responses.js';
 import { recordProviderCall } from './telemetry.js';
 import { incrementRepairCounter } from './repair-telemetry.js';
 import { getXaiOAuthCredentialSync, XaiOAuthError } from '../auth/xai-oauth.js';
+
+// Proxy support — when HTTPS_PROXY or HTTP_PROXY is set, route all outbound
+// provider calls through the proxy. Required for api.x.ai on machines where
+// direct TLS is blocked and a local proxy (e.g. Surge) is the only path.
+// Node's internal undici does NOT automatically read these env vars for fetch(),
+// so we set a global dispatcher that tunnels through the proxy.
+let _proxyInit = false;
+export function initGlobalProxy(): void {
+  if (_proxyInit) return;
+  _proxyInit = true;
+  const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (!proxy) return;
+
+  // Dynamic import in ESM context — tsx-transpiled require('undici')
+  // may fail in pnpm workspace symlink chains, but import() always works.
+  import('undici').then(
+    ({ ProxyAgent, setGlobalDispatcher }) => {
+      setGlobalDispatcher(new ProxyAgent({ uri: proxy }));
+      log.info(`Proxy: outbound provider calls routed through ${proxy}`);
+    },
+    () => {
+      log.warn(`Proxy: HTTPS_PROXY=${proxy} is set but undici unavailable`);
+    },
+  );
+}
 import type {
   ChatOptions,
   CreateProviderOptions,
@@ -116,6 +141,7 @@ interface OpenAIConfig {
 }
 
 export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
+  initGlobalProxy();
   const { name, apiKey, profile, traceId } = cfg;
   const { baseUrl, model } = profile;
 

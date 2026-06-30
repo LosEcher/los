@@ -1,7 +1,6 @@
 import { getDb, withDbClient } from '@los/infra/db';
 import { ensureAgentTaskGraphStore, type AgentTaskRecord, type AgentTaskRow, rowToTask } from '../agent-task-graph.js';
-
-export const AGENT_TASK_STARTUP_RECOVERY_LOCK_KEY = 7_602_026_002;
+import { resolveCoordinationBackend } from '../coordination/resolve.js';
 
 export async function heartbeatAgentTask(
   id: string,
@@ -48,37 +47,30 @@ export async function recoverExpiredAgentTasks(reason = 'lease_expired'): Promis
 
 export async function recoverExpiredAgentTasksWithAdvisoryLock(
   reason = 'lease_expired',
-  lockKey = AGENT_TASK_STARTUP_RECOVERY_LOCK_KEY,
 ): Promise<{ lockAcquired: boolean; recovered: AgentTaskRecord[] }> {
   await ensureAgentTaskGraphStore();
-  return await withDbClient(async (client) => {
-    const lock = await client.query<{ acquired: boolean }>(
-      'SELECT pg_try_advisory_lock($1::bigint) AS acquired',
-      [lockKey],
+  const backend = resolveCoordinationBackend();
+  const result = await backend.lock.withLock('agent-task-recovery', async () => {
+    const db = getDb();
+    const rows = await db.query<AgentTaskRow>(
+      `
+      UPDATE agent_tasks
+      SET status = 'queued',
+          claimed_by_node_id = NULL,
+          lease_expires_at = NULL,
+          metadata_json = metadata_json || $1::jsonb,
+          updated_at = now()
+      WHERE status = 'running'
+        AND lease_expires_at IS NOT NULL
+        AND lease_expires_at < now()
+      RETURNING *
+    `,
+      [JSON.stringify({ recoveryReason: reason })],
     );
-    if (lock.rows[0]?.acquired !== true) {
-      return { lockAcquired: false, recovered: [] };
-    }
-
-    try {
-      const rows = await client.query<AgentTaskRow>(
-        `
-        UPDATE agent_tasks
-        SET status = 'queued',
-            claimed_by_node_id = NULL,
-            lease_expires_at = NULL,
-            metadata_json = metadata_json || $1::jsonb,
-            updated_at = now()
-        WHERE status = 'running'
-          AND lease_expires_at IS NOT NULL
-          AND lease_expires_at < now()
-        RETURNING *
-      `,
-        [JSON.stringify({ recoveryReason: reason })],
-      );
-      return { lockAcquired: true, recovered: rows.rows.map(rowToTask) };
-    } finally {
-      await client.query('SELECT pg_advisory_unlock($1::bigint)', [lockKey]).catch(() => undefined);
-    }
+    return rows.rows.map(rowToTask);
   });
+  if (result === null) {
+    return { lockAcquired: false, recovered: [] };
+  }
+  return { lockAcquired: true, recovered: result };
 }

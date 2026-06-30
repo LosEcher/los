@@ -9,6 +9,27 @@ RUNTIME_DIR="${LOS_RUNTIME_DIR:-$ROOT/.los-runtime}"
 # shellcheck source=tools/los-common.sh
 . "$ROOT/tools/los-common.sh"
 
+# ── Load .env into current shell before spawning daemons ──
+_load_dotenv() {
+  local env_file="$ROOT/.env"
+  if [ -f "$env_file" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+  fi
+}
+_load_dotenv
+
+# ── Proxy env export helper (launchctl drops parent env) ─
+_dotenv_proxy_exports() {
+  local exports=""
+  [ -n "${HTTPS_PROXY-}" ] && exports="$exports export HTTPS_PROXY='$HTTPS_PROXY';"
+  [ -n "${HTTP_PROXY-}" ] && exports="$exports export HTTP_PROXY='$HTTP_PROXY';"
+  [ -n "${NO_PROXY-}" ] && exports="$exports export NO_PROXY='$NO_PROXY';"
+  printf '%s' "$exports"
+}
+
 # ── Gateway config ───────────────────────────────────────
 GW_PID_FILE="$RUNTIME_DIR/gateway.pid"
 GW_LOG_FILE="$RUNTIME_DIR/gateway.log"
@@ -25,8 +46,11 @@ gw_launch_command() {
   local node tsx
   node="$(node_bin)"
   tsx="$(tsx_dist gateway)"
-  printf 'cd %s && exec %s --require %s --import %s %s' \
+  printf 'cd %s && %s export SERVER_PORT=%s SERVER_HOST=%s && exec %s --require %s --import %s %s' \
     "$(shell_quote "$ROOT")" \
+    "$(_dotenv_proxy_exports)" \
+    "$(gw_port)" \
+    "$(gw_host)" \
     "$(shell_quote "$node")" \
     "$(shell_quote "$tsx/preflight.cjs")" \
     "$(shell_quote "file://$tsx/loader.mjs")" \
@@ -70,8 +94,9 @@ ex_launch_command() {
   local node tsx
   node="$(node_bin)"
   tsx="$(tsx_dist executor)"
-  printf 'cd %s && export EXECUTOR_HOST=%s && export EXECUTOR_PORT=%s && exec %s %s %s' \
+  printf 'cd %s && %s export EXECUTOR_HOST=%s && export EXECUTOR_PORT=%s && exec %s %s %s' \
     "$(shell_quote "$ROOT")" \
+    "$(_dotenv_proxy_exports)" \
     "$(shell_quote "$(ex_host)")" \
     "$(shell_quote "$(ex_port)")" \
     "$(shell_quote "$node")" \

@@ -219,19 +219,15 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     initialStaggerMs: 6 * 60 * 1000, // 6min stagger
   },
   {
-    // Detection-only: reads tools/migration-drift-baseline.txt and surfaces one
-    // TODO per drifted table. autoFix disabled — a Claude agent works the TODOs
-    // via /pr-self-merge (rewrite migration to match ensure*Store, shrink
-    // baseline). See packages/agent/src/governance-auditors-migration.ts.
-    jobType: 'migration_drift_fix',
+    jobType: 'event_retention',
     cadence: 'daily',
-    dedupeKey: 'gov-job-migration-drift-fix',
-    initialStaggerMs: 90 * 60 * 1000, // 90min — run after the early daily jobs
+    dedupeKey: 'gov-job-event-retention',
+    initialStaggerMs: 200 * 60 * 1000, // 3h20min — run late, after other daily jobs
     autoFix: {
-      autoFixEnabled: false,
-      maxAutoFixAttempts: 0,
+      autoFixEnabled: true,
+      maxAutoFixAttempts: 1,
       verificationCommands: [],
-      stopCondition: 'tools/migration-drift-baseline.txt is empty (0 drift entries)',
+      stopCondition: 'no session_events older than 7 days remain uncompacted',
       escalationCadence: 'never',
     },
   },

@@ -145,6 +145,7 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'static_analysis': return runStaticAnalysisAuditWrapper();
     case 'performance_audit': return runPerformanceAuditWrapper();
     case 'migration_drift_fix': return runMigrationDriftAuditWrapper();
+    case 'event_retention': return runEventRetentionAuditWrapper();
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
 }
@@ -379,6 +380,16 @@ async function runMigrationDriftAuditWrapper(): Promise<Record<string, unknown>>
   try {
     const { runMigrationDriftAudit } = await import('./governance-auditors-migration.js');
     return runMigrationDriftAudit();
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runEventRetentionAuditWrapper(): Promise<Record<string, unknown>> {
+  try {
+    const { runEventRetentionAudit } = await import('./governance-auditors-event-retention.js');
+    const result = await runEventRetentionAudit();
+    return result as Record<string, unknown>;
   } catch (err) {
     return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
   }

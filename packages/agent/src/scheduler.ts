@@ -11,10 +11,12 @@ import {
   claimReadyAgentTasks,
   createAgentTaskAttempt,
   ensureAgentTaskGraphStore,
+  heartbeatAgentTask,
   listAgentTaskAttempts,
   updateAgentTaskStatus,
   type AgentTaskRecord,
 } from './agent-task-graph.js';
+import { startTaskHeartbeat } from './scheduler/task-heartbeat.js';
 import {
   getAgentTaskGraphCompletion,
   type AgentTaskGraphCompletion,
@@ -294,6 +296,12 @@ async function runClaimedAgentGraphTask(
     taskRunId,
   });
 
+  // Heartbeat the agent task lease so it doesn't expire during execution.
+  // Same pattern as task-run heartbeat in startTaskHeartbeat().
+  const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
+  const heartbeatMs = Math.max(1_000, Math.floor(leaseMs / 3));
+  const stopTaskHeartbeat = startTaskHeartbeat(task.id, nodeId, leaseMs, heartbeatMs);
+
   try {
     // Per Agent Identity Decision Framework: planner/executor tasks get standard
     // identity (default). Verifier tasks are handled separately above and get none.
@@ -374,6 +382,7 @@ async function runClaimedAgentGraphTask(
       outputSummary,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
+    stopTaskHeartbeat();
     return { taskId: task.id, taskRunId, attemptId, status: 'succeeded' };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -396,6 +405,7 @@ async function runClaimedAgentGraphTask(
       error: message,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
+    stopTaskHeartbeat();
     return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
   }
 }

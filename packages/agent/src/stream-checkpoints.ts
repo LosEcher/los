@@ -9,7 +9,23 @@
  * data needed for exact stream replay (ADR 0012 Phase 3).
  */
 
+/**
+ * @los/agent/stream-checkpoints — Durable stream event persistence.
+ *
+ * Write path: FileEventLogBackend (~/.los/streams/<sessionId>/events.jsonl)
+ * Read path:  FileEventLogBackend first, PG table as fallback for legacy data.
+ *
+ * The PG stream_checkpoints table is preserved for backward-compatible reads
+ * but new writes go through the event log. This keeps ultra-high-frequency
+ * per-token writes out of PostgreSQL.
+ */
 import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
+import { FileEventLogBackend, setEventLogBaseDir } from './event-log/file-backend.js';
+import type { AppendEventInput } from './event-log/types.js';
+import { randomUUID } from 'node:crypto';
+
+const log = getLogger('stream-checkpoints');
 
 // ── Types ───────────────────────────────────────────────
 
@@ -31,7 +47,23 @@ export interface CreateStreamCheckpointInput {
   payload?: Record<string, unknown>;
 }
 
-// ── Schema ──────────────────────────────────────────────
+// ── Event Log backend ───────────────────────────────────
+
+let _eventLog: FileEventLogBackend | null = null;
+
+function getEventLog(): FileEventLogBackend {
+  if (!_eventLog) {
+    _eventLog = new FileEventLogBackend();
+  }
+  return _eventLog;
+}
+
+export function setStreamCheckpointBaseDir(dir: string): void {
+  setEventLogBaseDir(dir);
+  _eventLog = null; // reset so it picks up the new dir
+}
+
+// ── Schema (PG — kept for legacy reads, NOT used for new writes) ──
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS stream_checkpoints (
@@ -49,57 +81,70 @@ CREATE INDEX IF NOT EXISTS idx_stream_checkpoints_run_spec_id ON stream_checkpoi
 CREATE INDEX IF NOT EXISTS idx_stream_checkpoints_created ON stream_checkpoints(created_at);
 `;
 
-let _initialized = false;
+let _pgReady = false;
 
+/** @deprecated PG table is kept for backward reads only. New data writes through the event log. */
 export async function ensureStreamCheckpointStore(): Promise<void> {
-  if (_initialized) return;
+  if (_pgReady) return;
   const db = getDb();
   await db.exec(SCHEMA);
-  _initialized = true;
+  _pgReady = true;
 }
 
-// ── CRUD ────────────────────────────────────────────────
+// ── Write (Event Log) ───────────────────────────────────
 
 export async function createStreamCheckpoint(
   input: CreateStreamCheckpointInput,
 ): Promise<StreamCheckpointRecord> {
-  await ensureStreamCheckpointStore();
-  const db = getDb();
-  const rows = await db.query<StreamCheckpointRow>(
-    `
-    INSERT INTO stream_checkpoints (session_id, run_spec_id, turn, event_type, payload_json)
-    VALUES ($1, $2, $3, $4, $5::jsonb)
-    RETURNING *
-  `,
-    [
-      input.sessionId,
-      input.runSpecId ?? null,
-      input.turn ?? 0,
-      input.eventType,
-      JSON.stringify(input.payload ?? {}),
-    ],
-  );
-  return rowToRecord(assertRow(rows.rows[0]));
+  const log_ = getEventLog();
+  const event: AppendEventInput = {
+    type: input.eventType,
+    payload: {
+      ...(input.payload ?? {}),
+      _sessionId: input.sessionId,
+      _runSpecId: input.runSpecId ?? undefined,
+      _turn: input.turn ?? 0,
+    },
+    timestamp: new Date().toISOString(),
+  };
+  const ids = await log_.append(input.sessionId, [event]);
+  const id = ids[0]!;
+  return {
+    id,
+    sessionId: input.sessionId,
+    runSpecId: input.runSpecId,
+    turn: input.turn ?? 0,
+    eventType: input.eventType,
+    payload: input.payload ?? {},
+    createdAt: new Date().toISOString(),
+  };
 }
+
+// ── Read (Event Log first, PG fallback) ──────────────────
 
 export async function listStreamCheckpointsSince(
   sessionId: string,
   sinceId: number,
   limit = 200,
 ): Promise<StreamCheckpointRecord[]> {
-  await ensureStreamCheckpointStore();
-  const db = getDb();
-  const rows = await db.query<StreamCheckpointRow>(
-    `
-    SELECT *
-    FROM stream_checkpoints
-    WHERE session_id = $1 AND id > $2
-    ORDER BY id ASC
-    LIMIT $3
-  `,
-    [sessionId, sinceId, limit],
-  );
-  return rows.rows.map(rowToRecord);
+  const log_ = getEventLog();
+  const entries = await log_.read(sessionId, { fromId: sinceId, limit });
+  const results = entries.map(e => ({
+    id: e.id,
+    sessionId: e.stream,
+    runSpecId: (e.payload._runSpecId as string | undefined),
+    turn: (e.payload._turn as number) ?? e.id,
+    eventType: e.type,
+    payload: stripInternal(e.payload),
+    createdAt: e.timestamp,
+  }));
+
+  // If file backend returned nothing, fall back to PG for legacy data
+  if (results.length === 0 && sinceId > 0) {
+    return listStreamCheckpointsSincePg(sessionId, sinceId, limit);
+  }
+
+  return results;
 }
 
 export async function listStreamCheckpointsForRunSpec(
@@ -107,19 +152,67 @@ export async function listStreamCheckpointsForRunSpec(
   sinceId: number,
   limit = 200,
 ): Promise<StreamCheckpointRecord[]> {
-  await ensureStreamCheckpointStore();
-  const db = getDb();
-  const rows = await db.query<StreamCheckpointRow>(
-    `
-    SELECT *
-    FROM stream_checkpoints
-    WHERE run_spec_id = $1 AND id > $2
-    ORDER BY id ASC
-    LIMIT $3
-  `,
-    [runSpecId, sinceId, limit],
-  );
-  return rows.rows.map(rowToRecord);
+  const log_ = getEventLog();
+  // Read all entries and filter by run_spec_id (JSONL doesn't have indexed columns)
+  const entries = await log_.read(runSpecId, { fromId: sinceId, limit: limit * 5 });
+  const results = entries
+    .filter(e => e.payload._runSpecId === runSpecId)
+    .slice(0, limit)
+    .map(e => ({
+      id: e.id,
+      sessionId: e.stream,
+      runSpecId: (e.payload._runSpecId as string | undefined),
+      turn: (e.payload._turn as number) ?? e.id,
+      eventType: e.type,
+      payload: stripInternal(e.payload),
+      createdAt: e.timestamp,
+    }));
+
+  if (results.length === 0 && sinceId > 0) {
+    return listStreamCheckpointsForRunSpecPg(runSpecId, sinceId, limit);
+  }
+
+  return results;
+}
+
+// ── PG fallback readers (legacy data) ────────────────────
+
+async function listStreamCheckpointsSincePg(
+  sessionId: string,
+  sinceId: number,
+  limit = 200,
+): Promise<StreamCheckpointRecord[]> {
+  try {
+    await ensureStreamCheckpointStore();
+    const db = getDb();
+    const rows = await db.query<StreamCheckpointRow>(
+      `SELECT * FROM stream_checkpoints WHERE session_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3`,
+      [sessionId, sinceId, limit],
+    );
+    return rows.rows.map(rowToRecord);
+  } catch (err) {
+    log.warn(`PG fallback read failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+async function listStreamCheckpointsForRunSpecPg(
+  runSpecId: string,
+  sinceId: number,
+  limit = 200,
+): Promise<StreamCheckpointRecord[]> {
+  try {
+    await ensureStreamCheckpointStore();
+    const db = getDb();
+    const rows = await db.query<StreamCheckpointRow>(
+      `SELECT * FROM stream_checkpoints WHERE run_spec_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3`,
+      [runSpecId, sinceId, limit],
+    );
+    return rows.rows.map(rowToRecord);
+  } catch (err) {
+    log.warn(`PG fallback read failed for run_spec ${runSpecId}: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -146,6 +239,11 @@ function rowToRecord(row: StreamCheckpointRow): StreamCheckpointRecord {
   };
 }
 
+function stripInternal(payload: Record<string, unknown>): Record<string, unknown> {
+  const { _sessionId, _runSpecId, _turn, ...rest } = payload;
+  return rest;
+}
+
 function normalizeJsonObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -165,9 +263,4 @@ function normalizeJsonObject(value: unknown): Record<string, unknown> {
 
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('Failed to create stream checkpoint');
-  return row;
 }

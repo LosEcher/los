@@ -222,11 +222,11 @@ start_daemon_nohup() {
   local pid
   if [ -n "$cd_dir" ]; then
     pushd "$cd_dir" >/dev/null
-    nohup /bin/bash -lc "$command" </dev/null >"$log_file" 2>&1 &
+    nohup /bin/bash -c "$command" </dev/null >"$log_file" 2>&1 &
     pid="$!"
     popd >/dev/null
   else
-    nohup /bin/bash -lc "$command" </dev/null >"$log_file" 2>&1 &
+    nohup /bin/bash -c "$command" </dev/null >"$log_file" 2>&1 &
     pid="$!"
   fi
   printf '%s' "$pid"
@@ -239,7 +239,7 @@ start_daemon_launchctl() {
   local label
   label="$(launch_label "$launch_prefix")"
   launch_remove "$launch_prefix"
-  launchctl submit -l "$label" -o "$log_file" -e "$log_file" -- /bin/bash -lc "$command"
+  launchctl submit -l "$label" -o "$log_file" -e "$log_file" -- /bin/bash -c "$command"
 }
 
 # ── Coordinated stop helper ──────────────────────────────

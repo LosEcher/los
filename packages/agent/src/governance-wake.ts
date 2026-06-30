@@ -1,5 +1,5 @@
 /**
- * Governance sweep wake mechanism — PG LISTEN + EventBus + fallback interval.
+ * Governance sweep wake mechanism — coordination.notify + EventBus + fallback interval.
  *
  * Extracted from governance-sweeper.ts to keep both files under 600 lines.
  */
@@ -14,6 +14,7 @@ import { createTodosFromFindings } from './governance-sweeper.js';
 import { eventBus } from './event-bus.js';
 import { computeNextRunAt } from './governance-jobs-types.js';
 import { appendSessionEvent } from './session-events.js';
+import { resolveCoordinationBackend } from './coordination/resolve.js';
 import { randomUUID } from 'node:crypto';
 import type {
   GovernanceJob,
@@ -238,7 +239,7 @@ export async function runGovernanceSweepLoop(opts?: {
   };
 }
 
-// ── Wake mechanism (PG NOTIFY + EventBus + fallback interval) ──
+// ── Wake mechanism (coordination.notify + EventBus + fallback interval) ──
 
 let _wakeSetup = false;
 
@@ -252,35 +253,22 @@ export function setupGovernanceWake(opts?: { tenantId?: string; projectId?: stri
     });
   };
 
+  // In-process EventBus bridge — governance jobs can wake the loop within the
+  // same process without going through PG NOTIFY.
   const unsubEvent = eventBus.on('governance:sweep-wake', runLoop);
 
-  let pgClient: any;
-  let listenSetup = false;
-  const setupListen = async () => {
-    if (listenSetup) return;
-    try {
-      const { getPool } = await import('@los/infra/db');
-      pgClient = await getPool().connect();
-      await pgClient.query('LISTEN governance_sweep');
-      pgClient.on('notification', () => {
-        eventBus.emit('governance:sweep-wake', {} as any);
-      });
-      listenSetup = true;
-      log.info('Governance wake: PG LISTEN active on governance_sweep');
-    } catch (err) {
-      log.warn(`Governance wake LISTEN setup failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const FALLBACK_MS = 10 * 60 * 1000;
-  const fallbackTimer = setInterval(runLoop, FALLBACK_MS);
-
-  setupListen().catch(() => {});
+  // Cross-gateway push via coordination.notify (PG NOTIFY in mesh mode,
+  // EventEmitter in single mode).
+  const backend = resolveCoordinationBackend();
+  const { unsubscribe: unsubNotify } = backend.notify.subscribeWithFallback(
+    'governance_sweep',
+    () => runLoop(),
+    10 * 60 * 1000, // 10-minute fallback interval
+  );
 
   return () => {
     unsubEvent();
-    clearInterval(fallbackTimer);
-    if (pgClient) { pgClient.release().catch(() => {}); }
+    unsubNotify();
     _wakeSetup = false;
   };
 }

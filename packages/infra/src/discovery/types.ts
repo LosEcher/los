@@ -12,6 +12,10 @@ export interface DiscoveredProvider {
   baseUrl?: string;
   defaultModel?: string;
   apiShape?: string;
+  /** Credential class — set to 'oauth' for OAuth-based providers so
+   *  getProviderConfig() resolves tokens at runtime instead of requiring an
+   *  explicit apiKey. */
+  authMode?: 'oauth' | 'api_key';
   available: boolean;
   source: string;
   sourceTool?: string;

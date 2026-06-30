@@ -93,6 +93,7 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
   static_analysis: [],
   performance_audit: [],
   migration_drift_fix: [],
+  event_retention: [],
 };
 
 // ── Core ─────────────────────────────────────────────────
