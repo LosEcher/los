@@ -299,6 +299,7 @@ export function scanEnvKeys(): DiscoveredProvider[] {
     'GROQ_API_KEY':         { name: 'groq',       baseUrl: 'https://api.groq.com/openai/v1',          model: 'llama-3.1-70b-versatile' },
     'TOGETHER_API_KEY':     { name: 'together',   baseUrl: 'https://api.together.xyz/v1',             model: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo' },
     'OPENROUTER_API_KEY':   { name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1',             model: 'openai/gpt-4o' },
+    'XAI_API_KEY':          { name: 'xai',        baseUrl: 'https://api.x.ai/v1',                     model: 'grok-4.3' },
   };
 
   for (const [envKey, info] of Object.entries(keyMap)) {
@@ -394,6 +395,56 @@ export function scanOwnAccounts(): DiscoveredProvider[] {
       } catch { /* skip */ }
     }
   } catch { /* skip */ }
+  return providers;
+}
+
+// ── 6. xAI OAuth tokens (los + Hermes) ──────────────────
+
+export function scanXaiOAuth(): DiscoveredProvider[] {
+  const providers: DiscoveredProvider[] = [];
+
+  try {
+    // Check los's own auth store
+    const losAuthPath = join(homedir(), '.los', 'auth.json');
+    if (existsSync(losAuthPath)) {
+      const store = JSON.parse(readFileSync(losAuthPath, 'utf-8'));
+      const losState = (store?.providers as Record<string, unknown>)?.['xai-oauth'] as Record<string, unknown> | undefined;
+      if (losState?.tokens && (losState.tokens as Record<string, unknown>)?.access_token) {
+        providers.push({
+          name: 'xai',
+          baseUrl: 'https://api.x.ai/v1',
+          defaultModel: 'grok-4.3',
+          available: true,
+          source: 'los/auth.json (xAI OAuth)',
+          importable: true,
+          note: 'SuperGrok / Premium+ OAuth token',
+        });
+      }
+    }
+
+    // Fallback: check Hermes auth store
+    const hermesAuthPath = join(homedir(), '.hermes', 'auth.json');
+    if (existsSync(hermesAuthPath)) {
+      const store = JSON.parse(readFileSync(hermesAuthPath, 'utf-8'));
+      const hermesState = (store?.providers as Record<string, unknown>)?.['xai-oauth'] as Record<string, unknown> | undefined;
+      if (hermesState?.tokens && (hermesState.tokens as Record<string, unknown>)?.access_token) {
+        // Don't duplicate if already found from los store
+        if (!providers.some(p => p.name === 'xai' && p.source === 'los/auth.json (xAI OAuth)')) {
+          providers.push({
+            name: 'xai',
+            baseUrl: 'https://api.x.ai/v1',
+            defaultModel: 'grok-4.3',
+            available: true,
+            source: 'hermes/auth.json (xAI OAuth)',
+            sourceTool: 'hermes',
+            importable: true,
+            note: 'SuperGrok / Premium+ OAuth token (from Hermes)',
+          });
+        }
+      }
+    }
+  } catch { /* auth store corrupt or unavailable */ }
+
   return providers;
 }
 

@@ -43,7 +43,8 @@
     "./runtime-adapter": "./src/runtime-adapter/index.ts",
     "./pre-action-gate": "./src/pre-action-gate.ts",
     "./message-router": "./src/message-router/index.ts",
-    "./todo-dispatch": "./src/todo-dispatch.ts"
+    "./todo-dispatch": "./src/todo-dispatch.ts",
+    "./auth/login": "./src/auth/xai-oauth-login.ts"
   },
   "scripts": {
     "build": "tsc",

@@ -41,3 +41,8 @@ packages/web/src/chat-page.tsx
 packages/web/src/pages/memory-page.tsx
 packages/web/src/pages/sessions-page.tsx
 packages/wechat-bot/src/index.ts
+packages/agent/src/auth/xai-oauth.ts
+packages/agent/src/model-profiles.ts
+packages/agent/src/providers/index.ts
+packages/infra/src/discovery/scanners.ts
+packages/agent/src/auth/xai-oauth-login.ts

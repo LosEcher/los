@@ -43,6 +43,7 @@ import {
   scanEnvKeys,
   scanLocalEndpoints,
   scanOwnAccounts,
+  scanXaiOAuth,
 } from './discovery/scanners.js';
 
 const require = createRequire(import.meta.url);
@@ -105,6 +106,14 @@ export async function discoverAll(): Promise<DiscoveryReport> {
   // Phase 3: Own accounts (sync)
   const ownProviders = scanOwnAccounts();
   for (const p of ownProviders) {
+    if (!providers.some(existing => existing.name === p.name && existing.source === p.source)) {
+      providers.push(p);
+    }
+  }
+
+  // Phase 3.5: xAI OAuth tokens (sync — reads local auth stores)
+  const xaiOAuthProviders = scanXaiOAuth();
+  for (const p of xaiOAuthProviders) {
     if (!providers.some(existing => existing.name === p.name && existing.source === p.source)) {
       providers.push(p);
     }
