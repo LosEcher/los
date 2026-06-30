@@ -143,6 +143,44 @@ Database:
 - `DATABASE_URL=postgres://user:pass@host:5432/los`
 - Local single-node deployments use PostgreSQL too; they are treated as mesh/cloud deployments with one active node.
 
+## Branch Governance
+
+### One Branch, One Intent
+
+A branch MUST serve a single, well-defined intent. Mixing unrelated changes in one
+branch defeats review, makes rollback impossible, and hides risky deletions inside
+innocent-looking commits.
+
+| Prefix | Intent | Example |
+|--------|--------|---------|
+| `feat/` | New capability | `feat/ai-code-fix` |
+| `fix/` | Bug fix | `fix/truncated-response` |
+| `refactor/` | Restructure without behavior change | `refactor/extract-tool-runner` |
+| `chore/` | Dead code removal, dep updates, tooling | `chore/remove-migration-drift` |
+| `docs/` | Documentation only | `docs/governance-update` |
+
+A branch that mixes, for example, a new feature + dead code removal + active
+feature removal → split into separate branches before merge.
+
+### Delete Safety Rule
+
+Before deleting any `.ts`/`.tsx` file that is not a test file, verify:
+1. `grep -rn "<exported-function-name>" packages/ --include='*.ts' --include='*.tsx'`
+   returns NO results outside the file being deleted. Check subpath imports too
+   (`package.json` `"exports"` field, barrel `index.ts` re-exports).
+2. If the file is importable via `@los/<package>/<subpath>`, check that the
+   `package.json` subpath entry is also removed.
+3. Automated guard: `tools/check-delete-safety.sh` runs in CI (Phase 5) and
+   blocks merge when deleted files still have surviving importers in origin/main.
+
+### Pre-Merge Checklist
+
+For any branch touching more than 3 files:
+- [ ] `git diff --stat origin/main...HEAD` — are the changes concentrated on one intent?
+- [ ] Any deleted files? → verify no surviving importers
+- [ ] Any new seed jobs? → verify autoFix is executable, not detection-only
+- [ ] `pnpm gate` passes locally
+
 ## Change Rules
 
 - Keep each commit scoped to one bounded context
