@@ -4,6 +4,8 @@ export interface ModelSettings {
   maxTokens?: number;
   presencePenalty?: number;
   frequencyPenalty?: number;
+  /** xAI Grok / OpenAI reasoning effort. 'none' disables reasoning on models that support it. */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'none';
 }
 
 export function normalizeModelSettings(value: unknown): ModelSettings | undefined {
@@ -27,6 +29,7 @@ export function buildOpenAIModelSettings(settings: ModelSettings | undefined): R
     max_tokens: settings.maxTokens,
     presence_penalty: settings.presencePenalty,
     frequency_penalty: settings.frequencyPenalty,
+    reasoning_effort: settings.reasoningEffort,
   });
 }
 

@@ -223,6 +223,38 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
   claude: anthropicProfile('claude', 'https://api.anthropic.com', 'claude-sonnet-4-20250514'),
   'deepseek-anthropic': anthropicProfile('deepseek-anthropic', 'https://api.deepseek.com/anthropic', 'deepseek-v4-pro'),
   minimax: anthropicProfile('minimax', 'https://api.minimaxi.com/anthropic', 'MiniMax-M3'),
+  xai: {
+    provider: 'xai',
+    protocol: 'openai',
+    apiShape: 'openai-chat-completions',
+    baseUrl: 'https://api.x.ai/v1',
+    model: 'grok-4.3',
+    supportsTools: true,
+    supportsParallelToolCalls: true,
+    supportsReasoning: true,
+    reasoningParam: 'reasoning_effort',
+    modelAliases: [
+      'grok-4.3',
+      'grok-build-0.1',
+      'grok-4.20-0309-reasoning',
+      'grok-4.20-0309-non-reasoning',
+      'grok-code-fast-1',
+      'grok-3-mini',
+      'grok-4-fast',
+    ],
+    supportsToolStreaming: true,
+    cachePolicy: 'prompt-cache-read',
+    toolCallRepair: 'none',
+    maxInputTokens: 1_000_000,
+    usageMapping: OPENAI_USAGE_MAPPING,
+    retryPolicy: DEFAULT_RETRY_POLICY,
+    knownFailurePatterns: [],
+    pricing: {
+      promptTokenCostPer1M: 1.00,
+      completionTokenCostPer1M: 2.00,
+      cacheHitTokenCostPer1M: 0.25,
+    },
+  },
 };
 
 export function resolveModelProfile(

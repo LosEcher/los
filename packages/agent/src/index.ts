@@ -71,6 +71,9 @@ export { runPostExecutionSelfCheck, shouldRunSelfCheck, buildSelfCheckPrompt, pa
 export { reflectOnFailure, formatReflectionSummary, type ReflectionResult } from './reflection.js';
 export { scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFilePath, buildStaticAnalysisPayload, type StaticAnalysisEventPayload, type StaticAnalysisFinding, type StaticAnalysisRule, type StaticAnalysisScanOptions, type StaticAnalysisScanResult, type StaticAnalysisConstraint, type StaticAnalysisRange, type StaticAnalysisPosition } from './static-analysis/index.js';
 
+// ── OAuth ─────────────────────────────────────────────────
+export { resolveXaiOAuthCredential, getXaiOAuthCredentialSync, getXaiOAuthStatus, clearXaiOAuthTokens, loadXaiOAuthState, refreshXaiOAuthToken, XaiOAuthError, type XaiOAuthTokens, type XaiOAuthState, type XaiOAuthCredential, type XaiOAuthStatus, type XaiLoginOptions } from './auth/xai-oauth.js';
+
 // ── Runtime adapter — external agent CLI integration ──────
 export { startOtelBridge, isOtelBridgeRunning, spawnClaudeCode, runClaudeCodeWithBridge, claudeCodeSupportsOtel, claudeSpanToEventType, CLAUDE_CODE_SPAN_NAMES, spawnCodex, codexSupportsOtel, type OtelBridgeConfig, type ClaudeCodeSpawnInput, type CodexSpawnInput, type RuntimeKind, type RuntimeAdapterConfig, type RuntimeHandle } from './runtime-adapter/index.js';
 

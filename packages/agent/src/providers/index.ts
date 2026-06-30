@@ -28,6 +28,7 @@ import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIResponsesProvider } from './responses.js';
 import { recordProviderCall } from './telemetry.js';
 import { incrementRepairCounter } from './repair-telemetry.js';
+import { getXaiOAuthCredentialSync, XaiOAuthError } from '../auth/xai-oauth.js';
 import type {
   ChatOptions,
   CreateProviderOptions,
@@ -77,6 +78,26 @@ export function getProviderConfig(name: string) {
   if (!p || !p.enabled) {
     throw new Error(`Provider '${name}' not configured. Set ${name.toUpperCase()}_API_KEY or add to ~/.los/accounts/`);
   }
+
+  // OAuth credential resolution (xAI Grok SuperGrok / Premium+ subscription).
+  // Access tokens are refreshed preemptively during login and at runtime when
+  // getXaiOAuthCredentialSync() detects they're within the 1-hour skew window.
+  // If the token has expired past the skew window, refresh is attempted via
+  // resolveXaiOAuthCredential() (this throws a clear error on failure).
+  if (!p.apiKey && (p as Record<string, unknown>).authMode === 'oauth') {
+    try {
+      const cred = getXaiOAuthCredentialSync();
+      return { ...p, apiKey: cred.apiKey, baseUrl: cred.baseUrl ?? p.baseUrl };
+    } catch (err) {
+      if (err instanceof XaiOAuthError) {
+        throw new Error(
+          `xAI OAuth: ${err.message} (code: ${err.code})`,
+        );
+      }
+      throw err;
+    }
+  }
+
   if (!p.apiKey) {
     throw new Error(`Provider '${name}' has no API key.`);
   }
