@@ -16,6 +16,7 @@
 #   state-machine    → prevents direct status-update bypass
 #   contracts        → bidirectional event ↔ route coverage
 #   unwired exports  → catches implemented-but-not-wired antipattern
+#   delete-safety     → catches deleted files still imported by surviving code
 #   tests last       → most expensive, only runs if everything else passes
 set -euo pipefail
 
@@ -118,6 +119,16 @@ if ./tools/check-contracts.sh; then
   phase_ok "contracts"
 else
   phase_fail "contracts"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 5: delete-safety ─────────────────────────────────────
+
+phase_start "Delete safety (deleted files still imported by surviving code)"
+if ./tools/check-delete-safety.sh; then
+  phase_ok "delete-safety"
+else
+  phase_fail "delete-safety"
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
