@@ -109,7 +109,7 @@ export function registerServerMaintenance(
   const govWakeTimeout = setTimeout(() => {
     ensureGovernanceJobStore()
       .then(() => seedGovernanceJobs())
-      .then(() => {
+      .then(async () => {
         log.info('Governance: seeds ensured, starting PG-queue wake');
         govWakeTeardown = await setupGovernanceWake();
       })
