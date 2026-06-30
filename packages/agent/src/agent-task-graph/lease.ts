@@ -49,7 +49,7 @@ export async function recoverExpiredAgentTasksWithAdvisoryLock(
   reason = 'lease_expired',
 ): Promise<{ lockAcquired: boolean; recovered: AgentTaskRecord[] }> {
   await ensureAgentTaskGraphStore();
-  const backend = resolveCoordinationBackend();
+  const backend = await resolveCoordinationBackend();
   const result = await backend.lock.withLock('agent-task-recovery', async () => {
     const db = getDb();
     const rows = await db.query<AgentTaskRow>(

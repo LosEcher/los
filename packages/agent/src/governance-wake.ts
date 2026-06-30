@@ -243,7 +243,7 @@ export async function runGovernanceSweepLoop(opts?: {
 
 let _wakeSetup = false;
 
-export function setupGovernanceWake(opts?: { tenantId?: string; projectId?: string }): () => void {
+export async function setupGovernanceWake(opts?: { tenantId?: string; projectId?: string }): Promise<() => void> {
   if (_wakeSetup) return () => {};
   _wakeSetup = true;
 
@@ -259,7 +259,7 @@ export function setupGovernanceWake(opts?: { tenantId?: string; projectId?: stri
 
   // Cross-gateway push via coordination.notify (PG NOTIFY in mesh mode,
   // EventEmitter in single mode).
-  const backend = resolveCoordinationBackend();
+  const backend = await resolveCoordinationBackend();
   const { unsubscribe: unsubNotify } = backend.notify.subscribeWithFallback(
     'governance_sweep',
     () => runLoop(),

@@ -41,7 +41,7 @@ export async function runSyncQueue(options: {
 
   // Use coordination.lock for cross-process advisory lock (mesh mode) or
   // in-process mutex (single mode). Non-blocking — skip if held.
-  const backend = resolveCoordinationBackend();
+  const backend = await resolveCoordinationBackend();
   const result = await backend.lock.withLock(lockKey, () =>
     runCore({ store, folderId, resolvedRoot, nodeId, maxConcurrency, settleWindowMs, maxRetries }),
   );

@@ -188,7 +188,8 @@ test('startup recovery advisory lock skips duplicate recovery owners', async () 
 
     // Pre-acquire the coordination lock to test the "skipped" path.
     // In mesh mode, this uses pg_try_advisory_lock under the hood.
-    const backend = require('./coordination/resolve.js').resolveCoordinationBackend();
+    const { resolveCoordinationBackend } = await import('./coordination/resolve.js');
+    const backend = await resolveCoordinationBackend();
     const releaseLock = await backend.lock.acquire('task-run-recovery');
     try {
       const skipped = await recoverExpiredTaskRunsWithAdvisoryLock('test_lock_skipped');

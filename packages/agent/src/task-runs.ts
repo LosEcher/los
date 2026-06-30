@@ -263,7 +263,7 @@ export async function recoverExpiredTaskRunsWithAdvisoryLock(
   reason = 'lease_expired',
 ): Promise<TaskRunRecoveryResult> {
   await ensureTaskRunStore();
-  const backend = resolveCoordinationBackend();
+  const backend = await resolveCoordinationBackend();
   const result = await backend.lock.withLock('task-run-recovery', async () => {
     const db = getDb();
     const rows = await db.query<TaskRunRow>(

@@ -22,22 +22,22 @@ let _backend: CoordinationBackend | null = null;
  * The backend is resolved once per process. Toggling LOS_MESH_MODE
  * after the first call has no effect.
  */
-export function resolveCoordinationBackend(): CoordinationBackend {
+export async function resolveCoordinationBackend(): Promise<CoordinationBackend> {
   if (_backend) return _backend;
 
   const explicit = readMeshMode();
   if (explicit === 'single') {
-    return initMemory();
+    return await initMemory();
   }
   if (explicit === 'mesh') {
-    return initPg();
+    return await initPg();
   }
 
   // Auto-detect: try PG
   if (pgConfigured()) {
-    return initPg();
+    return await initPg();
   }
-  return initMemory();
+  return await initMemory();
 }
 
 /**
@@ -65,18 +65,15 @@ function pgConfigured(): boolean {
   }
 }
 
-function initMemory(): CoordinationBackend {
-  // Dynamic import to avoid loading pg-backend in single mode
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('./memory-backend.js') as typeof import('./memory-backend.js');
+async function initMemory(): Promise<CoordinationBackend> {
+  const mod = await import('./memory-backend.js');
   _backend = mod.createMemoryCoordinationBackend();
   log.info(`Coordination backend: memory (single-process mode)`);
   return _backend!;
 }
 
-function initPg(): CoordinationBackend {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('./pg-backend.js') as typeof import('./pg-backend.js');
+async function initPg(): Promise<CoordinationBackend> {
+  const mod = await import('./pg-backend.js');
   _backend = mod.createPgCoordinationBackend();
   log.info(`Coordination backend: PostgreSQL (mesh mode)`);
   return _backend!;
