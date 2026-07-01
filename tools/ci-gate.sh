@@ -26,7 +26,18 @@ cd "$ROOT"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
+
+# --no-tests skips Phase 7 (turbo test). Used by CI's gate-fast job so the
+# expensive DB-dependent test phase runs in its own parallel gate-test job
+# (per-package matrix) instead of blocking the fast feedback path.
+SKIP_TESTS=0
+for arg in "$@"; do
+  if [[ "$arg" == "--no-tests" ]]; then
+    SKIP_TESTS=1
+  fi
+done
 
 GATE_FAILURES=0
 START_TIME=$(date +%s)
@@ -144,11 +155,16 @@ PHASES_RUN=$((PHASES_RUN + 1))
 
 # ── Phase 7: tests ─────────────────────────────────────────
 
-phase_start "Tests (turbo test)"
-if pnpm run _test; then
-  phase_ok "tests"
+if [ "$SKIP_TESTS" -eq 1 ]; then
+  printf '\n%b━━━ Phase: Tests (turbo test) ━━━%b\n' "$CYAN" "$NC"
+  printf '    %b⊘ skipped (--no-tests) — run via gate-test job%b\n' "$YELLOW" "$NC"
 else
-  phase_fail "tests"
+  phase_start "Tests (turbo test)"
+  if pnpm run _test; then
+    phase_ok "tests"
+  else
+    phase_fail "tests"
+  fi
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 

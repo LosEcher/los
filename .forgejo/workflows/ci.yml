@@ -7,8 +7,39 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Mirror of .github/workflows/ci.yml — same 3-job split so a DB test hang
+# can no longer burn the whole gate budget and a failing/hanging package
+# surfaces by name. Uses forgejo's own checkout (FORGEJO_TOKEN) and the
+# `postgres` service DNS name (not localhost).
 jobs:
-  gate:
+  gate-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git init .
+          git remote add origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "$FORGEJO_SHA"
+          git checkout --detach FETCH_HEAD
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+
+      - name: Prepare pnpm
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.0.0 --activate
+          pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fast gate (no DB, no tests)
+        run: pnpm run gate -- --no-tests
+
+  gate-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -32,6 +63,18 @@ jobs:
       TEST_DATABASE_URL: postgres://los:los@postgres:5432/los_test
       NODE_ENV: test
 
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - infra
+          - input-preprocessor
+          - web
+          - memory
+          - gateway
+          - executor
+          - agent
+
     steps:
       - name: Checkout
         run: |
@@ -53,5 +96,55 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Gate
-        run: pnpm run gate
+      - name: Test @los/${{ matrix.package }}
+        run: pnpm --filter @los/${{ matrix.package }} test
+        timeout-minutes: 8
+
+  gate-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: los
+          POSTGRES_PASSWORD: los
+          POSTGRES_DB: los_test
+          POSTGRES_HOST_AUTH_METHOD: md5
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 30s
+
+    steps:
+      - name: Checkout
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git init .
+          git remote add origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "$FORGEJO_SHA"
+          git checkout --detach FETCH_HEAD
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+
+      - name: Prepare pnpm
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.0.0 --activate
+          pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Migration-drift gate. Unset NODE_ENV/TEST_DATABASE_URL so initDb's test
+      # guard does not redirect the gate's explicit drift-DB URLs to los_test
+      # (would make the gate compare a DB against itself, always green).
+      - name: Migration drift
+        run: pnpm check:migration-drift
+        env:
+          NODE_ENV: ''
+          TEST_DATABASE_URL: ''
