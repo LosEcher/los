@@ -109,9 +109,9 @@ export function registerServerMaintenance(
   const govWakeTimeout = setTimeout(() => {
     ensureGovernanceJobStore()
       .then(() => seedGovernanceJobs())
-      .then(() => {
+      .then(async () => {
         log.info('Governance: seeds ensured, starting PG-queue wake');
-        govWakeTeardown = setupGovernanceWake();
+        govWakeTeardown = await setupGovernanceWake();
       })
       .catch((err) => log.warn(`Governance wake setup failed: ${err instanceof Error ? err.message : String(err)}`));
   }, 30_000);

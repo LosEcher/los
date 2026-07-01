@@ -123,6 +123,7 @@ export const ConfigSchema = z.object({
     baseUrl: z.string().optional(),
     model: z.string().optional(),
     apiShape: z.string().optional(),
+    authMode: z.string().optional(),
     enabled: z.coerce.boolean().default(true),
     source: z.string().optional(),
     weight: z.coerce.number().default(100),
@@ -364,6 +365,7 @@ async function mergeDiscoveredProviders(
     if (!p.baseUrl && dp.baseUrl) p.baseUrl = dp.baseUrl;
     if (!p.model && dp.defaultModel) p.model = dp.defaultModel;
     if (!p.apiShape && dp.apiShape) p.apiShape = dp.apiShape;
+    if (!p.authMode && dp.authMode) p.authMode = dp.authMode;
     if (p.enabled === undefined) p.enabled = dp.available;
     if (!p.source && dp.source) p.source = dp.source;
   }
@@ -515,13 +517,14 @@ export function printConfigDiagnostics(config: Config): string {
   for (const [name, p] of Object.entries(config.providers)) {
     const source = p.source ?? 'manual';
     const hasKey = typeof p.apiKey === 'string' && p.apiKey.length > 0;
-    const ready = p.enabled && hasKey;
+    const isOAuth = (p as Record<string, unknown>).authMode === 'oauth';
+    const ready = p.enabled && (hasKey || isOAuth);
     const status = ready ? '✓' : '✗';
     const model = p.model ?? '(default)';
 
     // Determine promotion tier
     let tier = '';
-    if (!hasKey) {
+    if (!hasKey && !isOAuth) {
       tier = '[blocked]';
       hasBlockers = true;
       setupActions.push(`    • ${name}: ${p.apiKey ? 'key present but not importable' : `set ${discoverProviderKeyEnv(name)}`}`);

@@ -1,4 +1,9 @@
 /**
+ * @deprecated GA self-improve loop is currently disabled (June 2026).
+ * This module is dead code until the GA loop is re-enabled.
+ * When re-enabled, wire detectHotFiles into the governance sweeper's
+ * file-size check gate and set autoFix=true for CI-blocking enforcement.
+ *
  * File-size loop auto-fix strategy — uses CBM code graph to recommend split points.
  *
  * Phases:

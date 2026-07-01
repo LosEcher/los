@@ -241,6 +241,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
       'grok-code-fast-1',
       'grok-3-mini',
       'grok-4-fast',
+      'grok-composer-2.5-fast',
     ],
     supportsToolStreaming: true,
     cachePolicy: 'prompt-cache-read',

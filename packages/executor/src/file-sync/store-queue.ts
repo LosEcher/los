@@ -183,9 +183,9 @@ export async function reapStaleTransferring(
   folderId?: string,
 ): Promise<number> {
   const db = getDb();
-  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-  const params: unknown[] = [cutoff, MAX_ATTEMPTS];
-  let where = "state = 'transferring' AND updated_at < $1";
+  const staleAgeMs = Math.max(0, maxAgeMs);
+  const params: unknown[] = [staleAgeMs, MAX_ATTEMPTS];
+  let where = "state = 'transferring' AND updated_at <= now() - ($1::double precision * interval '1 millisecond')";
   if (folderId) {
     params.push(folderId);
     where = `folder_id = $${params.length} AND ${where}`;

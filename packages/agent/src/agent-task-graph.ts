@@ -319,7 +319,6 @@ export async function updateAgentTaskStatus(
 }
 
 export {
-  AGENT_TASK_STARTUP_RECOVERY_LOCK_KEY,
   heartbeatAgentTask,
   recoverExpiredAgentTasks,
   recoverExpiredAgentTasksWithAdvisoryLock,

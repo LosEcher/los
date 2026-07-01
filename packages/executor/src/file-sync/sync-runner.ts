@@ -2,9 +2,9 @@
 // States: ready → transferring → verifying → done | retry → cooldown | reconcile
 import { resolve } from 'node:path';
 import { statSync } from 'node:fs';
-import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import type { FileSyncStore } from './store.js';
+import { resolveCoordinationBackend } from '@los/agent/coordination';
 import {
   enqueueItems,
   dequeueReadyItems,
@@ -37,23 +37,19 @@ export async function runSyncQueue(options: {
 }): Promise<SyncRunnerResult> {
   const { store, folderId, localPath, nodeId, maxConcurrency, settleWindowMs, maxRetries } = options;
   const resolvedRoot = resolve(localPath);
-  const db = getDb();
   const lockKey = `file-sync-runner:${folderId}`;
 
-  // Acquire per-folder advisory lock (non-blocking — skip if held)
-  const lockResult = await db.query<{ locked: boolean }>(
-    `SELECT pg_try_advisory_lock(hashtext('${lockKey}')) AS locked`,
+  // Use coordination.lock for cross-process advisory lock (mesh mode) or
+  // in-process mutex (single mode). Non-blocking — skip if held.
+  const backend = await resolveCoordinationBackend();
+  const result = await backend.lock.withLock(lockKey, () =>
+    runCore({ store, folderId, resolvedRoot, nodeId, maxConcurrency, settleWindowMs, maxRetries }),
   );
-  if (!lockResult.rows[0]?.locked) {
+  if (result === null) {
     log.debug(`sync ${folderId}: lock held by another runner, skipping`);
     return { folderId, processed: 0, succeeded: 0, failed: 0, cooldown: 0, reconcile: 0 };
   }
-
-  try {
-    return await runCore({ store, folderId, resolvedRoot, nodeId, maxConcurrency, settleWindowMs, maxRetries });
-  } finally {
-    void db.query(`SELECT pg_advisory_unlock(hashtext('${lockKey}'))`).catch(() => {});
-  }
+  return result;
 }
 
 async function runCore(options: {

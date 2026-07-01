@@ -1,0 +1,37 @@
+name: Audit
+
+on:
+  schedule:
+    - cron: '47 6 * * *'  # daily at 06:47 UTC, off-peak
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit
+        run: |
+          AUDIT_OUTPUT=$(pnpm audit --json 2>/dev/null || true)
+          CRIT_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c '"severity":"critical"' || true)
+          HIGH_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c '"severity":"high"' || true)
+          if [ "$CRIT_COUNT" -gt 0 ]; then
+            echo "::error::$CRIT_COUNT critical vulnerability(s) found"
+            exit 1
+          fi
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "::warning::$HIGH_COUNT high severity vulnerability(s) found"
+          fi
+          echo "audit passed"

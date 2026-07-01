@@ -270,7 +270,8 @@ function createRuntimeHandler(): HandlerDescriptor {
 const KNOWN_JOB_TYPES = [
   'consistency_audit', 'hotspot', 'architecture_drift',
   'memory_integrity', 'memory_retention', 'reflection',
-  'branch_cleanup', 'related_project_scan', 'file_size',
+  'branch_cleanup', 'related_project_scan', 'file_size', 'supply_chain_audit',
+  'static_analysis', 'performance_audit', 'migration_drift_fix', 'event_retention',
 ] as const;
 
 function createGovernanceHandler(): HandlerDescriptor {

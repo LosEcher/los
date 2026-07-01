@@ -49,15 +49,17 @@ function describeSetupAction(provider: DiscoveredProvider): string | null {
 }
 
 export function describeProviderReadiness(provider: DiscoveredProvider): ProviderReadiness {
-  const configuredKey = typeof provider.apiKey === 'string' && provider.apiKey.length > 0;
+  const hasApiKey = typeof provider.apiKey === 'string' && provider.apiKey.length > 0;
+  const isOAuth = provider.authMode === 'oauth';
+  const configuredKey = hasApiKey || isOAuth;
   const ready = provider.available && provider.importable && configuredKey;
   const manualSetupRequired = !ready;
-  const credentialClass = inferCredentialClass(provider);
+  const credentialClass = isOAuth ? 'oauth' : inferCredentialClass(provider);
 
   let promotionState: ProviderReadiness['promotionState'] = 'blocked';
   let blocker: string | null = null;
 
-  if (!configuredKey || !provider.importable) {
+  if ((!configuredKey || !provider.importable) && !isOAuth) {
     promotionState = 'blocked';
     const keyEnv = providerApiKeyEnv(provider.name);
     blocker = `${keyEnv} not set. ${credentialClass === 'oauth' ? 'OAuth required.' : credentialClass === 'local_endpoint' ? 'Local endpoint unreachable.' : `Set ${keyEnv} to unlock ${provider.name}.`}`;

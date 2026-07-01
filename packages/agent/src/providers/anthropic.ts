@@ -27,6 +27,12 @@ interface AnthropicConfig {
  * From lsclaw's `callAnthropic()` and pi's `streamAnthropic()`.
  */
 export function createAnthropicProvider(cfg: AnthropicConfig): Provider {
+  // proxy init — see providers/index.ts:initGlobalProxy for details
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('./index.js') as typeof import('./index.js');
+    (mod as any).initGlobalProxy?.();
+  } catch { /* ok */ }
   const { name, apiKey, profile } = cfg;
   const { baseUrl, model } = profile;
   const API_VERSION = '2023-06-01';

@@ -19,6 +19,7 @@ export function startTaskHeartbeat(
       })
       .catch(() => undefined);
   }, heartbeatMs);
+  (interval as { unref?: () => void }).unref?.();
   void heartbeatTaskRun(taskRunId, { nodeId, leaseMs }).catch(() => undefined);
   return () => clearInterval(interval);
 }

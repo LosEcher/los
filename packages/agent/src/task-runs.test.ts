@@ -12,7 +12,6 @@ import {
   listTaskRuns,
   recoverExpiredTaskRuns,
   recoverExpiredTaskRunsWithAdvisoryLock,
-  TASK_RUN_STARTUP_RECOVERY_LOCK_KEY,
   updateTaskRun,
 } from './task-runs.js';
 
@@ -170,7 +169,6 @@ test('startup recovery advisory lock skips duplicate recovery owners', async () 
   const config = await loadConfig();
   await initDb(config.databaseUrl);
   const id = `task-lock-${Date.now()}`;
-  const lockKey = TASK_RUN_STARTUP_RECOVERY_LOCK_KEY + 101;
   try {
     await ensureTaskRunStore();
     await createTaskRun({
@@ -188,25 +186,23 @@ test('startup recovery advisory lock skips duplicate recovery owners', async () 
       heartbeatAt: new Date(Date.now() - 2_000),
     });
 
-    await withDbClient(async (client) => {
-      const lock = await client.query<{ acquired: boolean }>(
-        'SELECT pg_try_advisory_lock($1::bigint) AS acquired',
-        [lockKey],
-      );
-      assert.equal(lock.rows[0]?.acquired, true);
-      try {
-        const skipped = await recoverExpiredTaskRunsWithAdvisoryLock('test_lock_skipped', lockKey);
-        assert.equal(skipped.lockAcquired, false);
-        assert.equal(skipped.recovered.length, 0);
-      } finally {
-        await client.query('SELECT pg_advisory_unlock($1::bigint)', [lockKey]);
-      }
-    });
+    // Pre-acquire the coordination lock to test the "skipped" path.
+    // In mesh mode, this uses pg_try_advisory_lock under the hood.
+    const { resolveCoordinationBackend } = await import('./coordination/resolve.js');
+    const backend = await resolveCoordinationBackend();
+    const releaseLock = await backend.lock.acquire('task-run-recovery');
+    try {
+      const skipped = await recoverExpiredTaskRunsWithAdvisoryLock('test_lock_skipped');
+      assert.equal(skipped.lockAcquired, false);
+      assert.equal(skipped.recovered.length, 0);
+    } finally {
+      await releaseLock();
+    }
 
     const stillRunning = await loadTaskRun(id);
     assert.equal(stillRunning?.status, 'running');
 
-    const recovered = await recoverExpiredTaskRunsWithAdvisoryLock('test_lock_acquired', lockKey);
+    const recovered = await recoverExpiredTaskRunsWithAdvisoryLock('test_lock_acquired');
     assert.equal(recovered.lockAcquired, true);
     assert.ok(recovered.recovered.some(task => task.id === id && task.status === 'failed'));
 
