@@ -1288,7 +1288,29 @@ function listen(server: ReturnType<typeof createServer>): Promise<void> {
 }
 
 function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
-  return new Promise(resolve => server.close(() => resolve()));
+  // Drop lingering keep-alive connections before close(). Without this,
+  // server.close() waits for keep-alive sockets to time out and the test
+  // runner never exits — an intermittent 8m+ hang reproduced on both
+  // ubuntu CI and macOS (last passing test: "scheduler blocks graph
+  // completion when verifier graph task fails checks"). The 2s backstop
+  // guarantees closeServer can never hang the runner regardless of socket
+  // state. closeAllConnections is Node 18.2+.
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (!done) {
+        done = true;
+        resolve();
+      }
+    };
+    try {
+      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+    } catch {
+      // ignore — close() below still drains
+    }
+    server.close(() => finish());
+    setTimeout(finish, 2000);
+  });
 }
 
 function readRequestBody(req: IncomingMessage): Promise<string> {

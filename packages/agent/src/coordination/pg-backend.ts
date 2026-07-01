@@ -19,6 +19,11 @@ import type {
 
 const log = getLogger('coordination-pg');
 
+type AdvisoryLockClient = {
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  release(): void;
+};
+
 // ── Lock Backend (pg_advisory_lock) ───────────────────────
 
 class PgLockBackend implements LockBackend {
@@ -36,30 +41,33 @@ class PgLockBackend implements LockBackend {
 
   async acquire(key: string): Promise<() => Promise<void>> {
     const lockId = this.hashKey(key);
-    const db = getDb();
-    await db.exec(`SELECT pg_advisory_lock(${lockId})`);
+    const client = await getPool().connect();
+    await client.query(`SELECT pg_advisory_lock($1)`, [lockId]);
     return async () => {
       try {
-        await db.exec(`SELECT pg_advisory_unlock(${lockId})`);
+        await client.query(`SELECT pg_advisory_unlock($1)`, [lockId]);
       } catch {
         // Lock released on connection close anyway
+      } finally {
+        client.release();
       }
     };
   }
 
   async tryAcquire(key: string): Promise<{ release: () => Promise<void> } | null> {
     const lockId = this.hashKey(key);
-    const db = getDb();
-    const rows = await db.query<{ acquired: boolean }>(
-      `SELECT pg_try_advisory_lock(${lockId}) AS acquired`,
+    const client = await getPool().connect();
+    const releaseClient = () => client.release();
+    const rows = await client.query<{ acquired: boolean }>(
+      `SELECT pg_try_advisory_lock($1) AS acquired`,
+      [lockId],
     );
-    if (!rows.rows[0]?.acquired) return null;
+    if (!rows.rows[0]?.acquired) {
+      releaseClient();
+      return null;
+    }
     return {
-      release: async () => {
-        try {
-          await db.exec(`SELECT pg_advisory_unlock(${lockId})`);
-        } catch { /* ok */ }
-      },
+      release: makeAdvisoryLockRelease(client, lockId),
     };
   }
 
@@ -75,6 +83,20 @@ class PgLockBackend implements LockBackend {
       await result.release();
     }
   }
+}
+
+function makeAdvisoryLockRelease(client: AdvisoryLockClient, lockId: number): () => Promise<void> {
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    try {
+      await client.query(`SELECT pg_advisory_unlock($1)`, [lockId]);
+    } catch { /* ok */ }
+    finally {
+      client.release();
+    }
+  };
 }
 
 // ── Lease Backend (PG lease_expires_at column pattern) ─────

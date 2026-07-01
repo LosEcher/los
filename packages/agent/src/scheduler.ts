@@ -382,7 +382,6 @@ async function runClaimedAgentGraphTask(
       outputSummary,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
-    stopTaskHeartbeat();
     return { taskId: task.id, taskRunId, attemptId, status: 'succeeded' };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -405,7 +404,8 @@ async function runClaimedAgentGraphTask(
       error: message,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
-    stopTaskHeartbeat();
     return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
+  } finally {
+    stopTaskHeartbeat();
   }
 }
