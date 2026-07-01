@@ -108,6 +108,9 @@ export async function createStreamCheckpoint(
     timestamp: new Date().toISOString(),
   };
   const ids = await log_.append(input.sessionId, [event]);
+  if (input.runSpecId) {
+    await log_.append(runSpecStream(input.runSpecId), [event]);
+  }
   const id = ids[0]!;
   return {
     id,
@@ -153,14 +156,13 @@ export async function listStreamCheckpointsForRunSpec(
   limit = 200,
 ): Promise<StreamCheckpointRecord[]> {
   const log_ = getEventLog();
-  // Read all entries and filter by run_spec_id (JSONL doesn't have indexed columns)
-  const entries = await log_.read(runSpecId, { fromId: sinceId, limit: limit * 5 });
+  const entries = await log_.read(runSpecStream(runSpecId), { fromId: sinceId, limit: limit * 5 });
   const results = entries
     .filter(e => e.payload._runSpecId === runSpecId)
     .slice(0, limit)
     .map(e => ({
       id: e.id,
-      sessionId: e.stream,
+      sessionId: (e.payload._sessionId as string | undefined) ?? e.stream,
       runSpecId: (e.payload._runSpecId as string | undefined),
       turn: (e.payload._turn as number) ?? e.id,
       eventType: e.type,
@@ -168,7 +170,7 @@ export async function listStreamCheckpointsForRunSpec(
       createdAt: e.timestamp,
     }));
 
-  if (results.length === 0 && sinceId > 0) {
+  if (results.length === 0) {
     return listStreamCheckpointsForRunSpecPg(runSpecId, sinceId, limit);
   }
 
@@ -237,6 +239,10 @@ function rowToRecord(row: StreamCheckpointRow): StreamCheckpointRecord {
     payload: normalizeJsonObject(row.payload_json),
     createdAt: toIsoString(row.created_at),
   };
+}
+
+function runSpecStream(runSpecId: string): string {
+  return `run-spec/${runSpecId}`;
 }
 
 function stripInternal(payload: Record<string, unknown>): Record<string, unknown> {
