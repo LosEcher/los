@@ -152,6 +152,12 @@ jobs:
           --health-retries 5
           --health-start-period 30s
 
+    # DATABASE_URL is the server URL check-migration-drift uses to CREATE
+    # the ephemeral los_drift_mig / los_drift_ensure databases (los is
+    # superuser on the postgres:16 service, so CREATEDB is allowed).
+    env:
+      DATABASE_URL: postgres://los:los@localhost:5432/los_test
+
     steps:
       - uses: actions/checkout@v4
 
