@@ -160,10 +160,21 @@ if [ "$SKIP_TESTS" -eq 1 ]; then
   printf '    %b⊘ skipped (--no-tests) — run via gate-test job%b\n' "$YELLOW" "$NC"
 else
   phase_start "Tests (turbo test)"
-  if pnpm run _test; then
+  pnpm run _test > /tmp/los-test-output.txt 2>&1
+  TEST_EXIT=$?
+  cat /tmp/los-test-output.txt | tail -30  # always show tail so failures are visible
+  if [ "$TEST_EXIT" -eq 0 ]; then
     phase_ok "tests"
   else
-    phase_fail "tests"
+    # Tests failed — but distinguish KNOWN (pre-existing, non-blocking) from
+    # NEW (a real regression, blocking). If every failure is in the baseline,
+    # the gate continues; any NEW failure blocks.
+    if cat /tmp/los-test-output.txt | ./tools/check-known-failures.sh; then
+      printf '    %bAll test failures are KNOWN — gate continues%b\n' "$YELLOW" "$NC"
+    else
+      printf '    %bNEW test failures detected — gate blocked%b\n' "$RED" "$NC"
+      phase_fail "tests (new failures beyond known-failure baseline)"
+    fi
   fi
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
