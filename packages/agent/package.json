@@ -28,6 +28,7 @@
     "./run-evals": "./src/run-evals.ts",
     "./execution-transitions": "./src/execution-transitions.ts",
     "./execution-store": "./src/execution-store.ts",
+    "./ensure-all-stores": "./src/ensure-all-stores.ts",
     "./tool-call-states": "./src/tool-call-states.ts",
     "./mcp-servers": "./src/mcp-servers.ts",
     "./skills": "./src/skills.ts",
