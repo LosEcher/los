@@ -13,13 +13,11 @@ import {
   ensureAgentTaskGraphStore,
   heartbeatAgentTask,
   listAgentTaskAttempts,
-  loadAgentTask,
   updateAgentTaskStatus,
   type AgentTaskRecord,
 } from './agent-task-graph.js';
 import { startTaskHeartbeat } from './scheduler/task-heartbeat.js';
-import { claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun } from './task-runs.js';
-import { buildResumeMessage } from './scheduler/resume-messages.js';
+import { resumeBlockedTaskRunsWithAnswers } from './scheduler/resume-tasks.js';
 import {
   getAgentTaskGraphCompletion,
   type AgentTaskGraphCompletion,
@@ -128,103 +126,8 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
 
 /**
  * Resume blocked task_runs whose `ask` worker message has been answered.
- *
- * For each claimed blocked task_run:
- *   1. transition the original task_run blocked → cancelled (reason: resumed_with_answer)
- *      — createTaskRun does not support upsert, so resume creates a fresh task_run
- *      and the original blocked row is closed out as cancelled.
- *   2. load the agent_task to recover prompt/sessionId/runSpecId
- *   3. runScheduledAgentTask with initialMessages injecting the answer, so the
- *      resumed execution sees "you asked X, the operator answered Y, continue"
- *
- * Note (follow-up): the agent_task row is NOT transitioned here — graph-level
- * state convergence (agent_tasks.status) is left to a follow-up intent. The
- * worker_messages ask row is already marked consumed by claimBlockedTaskRunsWithAnswer.
+ * Extracted to scheduler/resume-tasks.ts (see there for flow + follow-up gaps).
  */
-async function resumeBlockedTaskRunsWithAnswers(
-  input: RunAgentTaskGraphSerialInput,
-  limit: number,
-): Promise<RunAgentTaskGraphSerialResult['executedTasks']> {
-  const claimed = await claimBlockedTaskRunsWithAnswer(limit);
-  if (claimed.length === 0) return [];
-
-  const results: RunAgentTaskGraphSerialResult['executedTasks'] = [];
-  for (const item of claimed) {
-    const { taskRun, answer, question, agentTaskId, dispatchId, provider, model } = item;
-    // 1. close out the original blocked task_run
-    await transitionExecutionState({
-      entityType: 'task_run',
-      entityId: taskRun.id,
-      to: 'cancelled',
-      sessionId: taskRun.sessionId,
-      reason: 'resumed_with_answer',
-    }).catch(() => undefined);
-
-    // 2. load the agent_task for prompt + lineage
-    const agentTask = agentTaskId ? await loadAgentTask(agentTaskId) : null;
-    const prompt = agentTask?.prompt ?? agentTask?.title ?? taskRun.promptPreview;
-    if (!prompt || !agentTask) {
-      // Cannot rebuild the execution without the prompt — leave the task blocked
-      // (un-consume is not possible, but operator can still recover via /runs/:id/recover).
-      results.push({
-        taskId: agentTaskId ?? taskRun.id,
-        attemptId: dispatchId,
-        status: 'failed',
-      });
-      continue;
-    }
-
-    // 3. re-run with the answer injected
-    const resumeMessage = buildResumeMessage(question, answer);
-    const result = await runScheduledAgentTask({
-      prompt,
-      promptPreview: agentTask.title,
-      sessionId: agentTask.sessionId ?? input.sessionId,
-      runSpecId: agentTask.runSpecId ?? input.runSpecId,
-      tenantId: input.tenantId,
-      projectId: input.projectId,
-      userId: input.userId,
-      nodeId: input.nodeId,
-      requestId: input.requestId,
-      traceId: input.traceId,
-      workspaceRoot: input.workspaceRoot,
-      toolMode: input.toolMode,
-      sandboxMode: input.sandboxMode,
-      provider: provider ?? input.provider,
-      model: model ?? input.model,
-      executor: input.executor,
-      mcpServers: input.mcpServers,
-      allowedTools: input.allowedTools,
-      identity: input.identity,
-      initialMessages: [resumeMessage],
-      onSessionEvent: input.onSessionEvent,
-      onToolCallState: input.onToolCallState,
-      onModelDelta: input.onModelDelta,
-      onCheckpoint: input.onCheckpoint,
-      onTaskEvent: input.onTaskEvent,
-      metadata: {
-        ...(input.metadata ?? {}),
-        graphId: input.graphId,
-        agentTaskId: agentTask.id,
-        resumedFromTaskRunId: taskRun.id,
-        resumedAskQuestion: question,
-      },
-    });
-
-    const status: RunAgentTaskGraphSerialResult['executedTasks'][number]['status'] =
-      result.status === 'completed' ? 'succeeded'
-      : result.status === 'blocked' ? 'failed'
-      : result.status === 'cancelled' ? 'cancelled'
-      : 'failed';
-    results.push({
-      taskId: agentTask.id,
-      taskRunId: result.taskRun.id,
-      attemptId: dispatchId,
-      status,
-    });
-  }
-  return results;
-}
 
 async function applyGraphCompletionRunSpecTransition(
   input: RunAgentTaskGraphSerialInput,
@@ -477,6 +380,35 @@ async function runClaimedAgentGraphTask(
         payload: { error: result.reason ?? 'cancelled' },
       }).catch(() => undefined);
       return { taskId: task.id, taskRunId, attemptId, status: 'cancelled' };
+    }
+
+    // Worker-initiated block (ask_coordinator / escalate): runAgent was aborted
+    // mid-loop, task_run is already 'blocked' (the tool transitioned it before
+    // aborting). Mark the agent_task blocked so graph completion does NOT report
+    // success; the dispatch is paused awaiting an operator answer, not done.
+    // No worker_done — the dispatch has not finished. The attempt is recorded as
+    // 'failed' (dispatch interrupted); AgentTaskAttemptStatus has no 'blocked'.
+    if (result.status === 'blocked') {
+      const blockReason = result.reason ?? 'worker_block';
+      await updateAgentTaskStatus(task.id, 'blocked', {
+        taskRunId,
+        attemptId,
+        blockReason,
+      });
+      await createAgentTaskAttempt({
+        id: attemptId,
+        graphId: task.graphId,
+        taskId: task.id,
+        attempt,
+        status: 'failed',
+        provider: selection.provider,
+        model: selection.model,
+        nodeId: result.taskRun.nodeId ?? nodeId,
+        taskRunId,
+        error: `blocked: ${blockReason}`,
+        toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
+      });
+      return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
     }
 
     const outputSummary = result.status === 'completed'

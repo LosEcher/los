@@ -149,10 +149,14 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
   // Answer a worker `ask` message. The operator UI surfaces a worker.ask session
   // event (emitted by the ask_coordinator tool); this route writes the answer onto
-  // the ask row (recordWorkerAnswer), appends a worker.answered session event so
-  // the audit trail records when the answer arrived, and PG-NOTIFYs the scheduler
-  // so its wake loop picks up the blocked task for resume via
-  // claimBlockedTaskRunsWithAnswer.
+  // the ask row (recordWorkerAnswer) and appends a worker.answered session event
+  // for the audit trail.
+  //
+  // Resume is NOT auto-triggered: los has no resident scheduler tick and nothing
+  // LISTENs on 'worker_answer' yet (see scheduler.ts resumeBlockedTaskRunsWithAnswers
+  // follow-up note). The NOTIFY is emitted for a future LISTEN subscriber; today
+  // resume happens on the next runAgentTaskGraphSerial invocation that finds no
+  // ready tasks. Wiring a wake is a separate intent.
   app.post('/runs/:id/answer', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
