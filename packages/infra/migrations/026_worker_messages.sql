@@ -2,7 +2,7 @@
 -- Worker contract layer: structured coordinator↔worker communication.
 --
 --   dispatch_id links worker messages to a specific execution attempt.
---   It matches agent_task_attempts.id (the "dispatchId" in worker contract terms).
+--   It matches task_attempts.id (the "dispatchId" in worker contract terms).
 --   The same task re-dispatched gets a new attempt → new dispatch_id → old messages
 --   are naturally scoped to the stale dispatch.
 --
@@ -11,6 +11,12 @@
 --     escalation   – worker needs human/upstream intervention
 --     ask          – worker is blocked on a coordinator decision
 --     heartbeat    – periodic liveness + phase annotation
+--
+--   Note: dispatch_id lives only on worker_messages. task_runs does NOT carry
+--   a dispatch_id column — the worker_messages rows themselves are the audit
+--   trail and can be joined back to task_runs via task_id. Adding a dead
+--   dispatch_id column to task_runs (with no writer) was considered and
+--   dropped to avoid schema/implementation drift.
 
 CREATE TABLE IF NOT EXISTS worker_messages (
   id TEXT PRIMARY KEY,
@@ -38,11 +44,3 @@ BEGIN
       NOT VALID;
   END IF;
 END $$;
-
--- Add dispatch_id to task_runs so the row carries its active dispatch identity.
--- Nullable: existing rows have null, new rows set it at creation time.
--- No FK: dispatch_id references agent_task_attempts.id but the tables
--- are in different packages and we want loose coupling.
-ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS dispatch_id TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_task_runs_dispatch_id ON task_runs(dispatch_id);

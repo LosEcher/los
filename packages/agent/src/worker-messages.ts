@@ -11,7 +11,7 @@
  *   heartbeat    – periodic liveness ping, optionally with a phase label
  *
  * Coordination model:
- *   - `dispatch_id` = the `agent_task_attempts.id` of the active execution.
+ *   - `dispatch_id` = the `task_attempts.id` of the active execution.
  *   - Each retry creates a new attempt → new dispatch_id → messages from a stale
  *     dispatch never collide with the current one.
  *   - Messages are append-only (no update, no delete). They form an event-sourced
@@ -77,6 +77,20 @@ CREATE TABLE IF NOT EXISTS worker_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'worker_messages_type_chk'
+      AND conrelid = 'worker_messages'::regclass
+  ) THEN
+    ALTER TABLE worker_messages
+      ADD CONSTRAINT worker_messages_type_chk
+      CHECK (type IN ('worker_done', 'escalation', 'ask', 'heartbeat'))
+      NOT VALID;
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_worker_messages_dispatch ON worker_messages(dispatch_id);
 CREATE INDEX IF NOT EXISTS idx_worker_messages_task ON worker_messages(task_id);
 CREATE INDEX IF NOT EXISTS idx_worker_messages_type ON worker_messages(type);
@@ -87,23 +101,11 @@ let _initialized = false;
 export async function ensureWorkerMessageStore(): Promise<void> {
   if (_initialized) return;
   const db = getDb();
+  // SCHEMA carries the CREATE TABLE, CHECK constraint (DO $$ ... NOT VALID),
+  // and indexes in one db.exec — matching the governance-jobs-schema.ts pattern.
+  // Do NOT swallow a failure here: if the CHECK constraint cannot be added the
+  // type contract would be silently unenforced, so let the rejection propagate.
   await db.exec(WORKER_MESSAGE_SCHEMA);
-  // Add the CHECK constraint idempotently (migration 026 also adds it)
-  await db.exec(/* sql */ `
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'worker_messages_type_chk'
-          AND conrelid = 'worker_messages'::regclass
-      ) THEN
-        ALTER TABLE worker_messages
-          ADD CONSTRAINT worker_messages_type_chk
-          CHECK (type IN ('worker_done', 'escalation', 'ask', 'heartbeat'))
-          NOT VALID;
-      END IF;
-    END $$;
-  `).catch(() => {});
   _initialized = true;
 }
 

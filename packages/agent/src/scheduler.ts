@@ -303,11 +303,12 @@ async function runClaimedAgentGraphTask(
     taskRunId,
   });
 
-  // Heartbeat the agent task lease so it doesn't expire during execution.
-  // Same pattern as task-run heartbeat in startTaskHeartbeat().
+  // Heartbeat the task_runs lease so it doesn't expire during execution. The
+  // task_runs row is keyed by `taskRunId` (not task.id, which is the agent-task
+  // id) — passing task.id here would UPDATE zero rows and let the lease lapse.
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
   const heartbeatMs = Math.max(1_000, Math.floor(leaseMs / 3));
-  const stopTaskHeartbeat = startTaskHeartbeat(task.id, nodeId, leaseMs, heartbeatMs, {
+  const stopTaskHeartbeat = startTaskHeartbeat(taskRunId, nodeId, leaseMs, heartbeatMs, {
     dispatchId: attemptId,
     taskId: task.id,
   });
@@ -377,7 +378,18 @@ async function runClaimedAgentGraphTask(
       selection,
       outputSummary,
     });
-    if (recoveryFollowUp) return recoveryFollowUp;
+    if (recoveryFollowUp) {
+      // The dispatch ended as 'failed' (a follow-up attempt was queued for
+      // retry/resume). Emit worker_done so the coordinator sees this dispatch
+      // complete rather than waiting on a worker_done that never arrives.
+      await sendWorkerMessage({
+        dispatchId: attemptId,
+        taskId: task.id,
+        type: 'worker_done',
+        payload: { error: 'recovery_followup_queued', summary: outputSummary },
+      }).catch(() => undefined);
+      return recoveryFollowUp;
+    }
 
     await updateAgentTaskStatus(task.id, 'succeeded', {
       taskRunId,
