@@ -1,13 +1,14 @@
 import { loadConfig } from '@los/infra/config';
 import { initDb, getDb } from '@los/infra/db';
+import { ensureAllAgentStores } from '@los/agent/ensure-all-stores';
 
 // Pre-initialize DB for executor package tests.
-// Follows the same pattern as @los/agent test-setup.ts.
-// loadConfig() discovers DATABASE_URL from .env or TEST_DATABASE_URL,
-// so tests run correctly whether invoked via pnpm test or directly.
+// ensureAllAgentStores() covers all agent-owned stores (including
+// executor_node + artifact which executor tests depend on).
 
 const config = await loadConfig();
 await initDb(config.databaseUrl);
+await ensureAllAgentStores();
 
 // Ensure schema for file-sync tables (created by migration 005).
 // The migration itself only runs via `pnpm --filter @los/infra db:migrate`,
@@ -91,8 +92,3 @@ const statements = MIGRATION_005
 for (const stmt of statements) {
   await db.query(stmt).catch(() => {});
 }
-
-// Also ensure agent-owned stores that the executor depends on
-const { ensureExecutorNodeStore, ensureArtifactStore } = await import('@los/agent');
-await ensureExecutorNodeStore();
-await ensureArtifactStore();

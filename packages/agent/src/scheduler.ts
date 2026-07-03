@@ -42,6 +42,7 @@ import {
 } from './scheduler/tool-call-state-persistence.js';
 import { runScheduledAgentTask } from './scheduler/scheduled-task-runner.js';
 import { runClaimedVerifierGraphTask } from './scheduler/verifier-task.js';
+import { sendWorkerMessage } from './worker-messages.js';
 import type {
   GraphTaskProviderModelSelection,
   RunAgentTaskGraphSerialInput,
@@ -256,6 +257,12 @@ async function runClaimedAgentGraphTask(
       nodeId,
       error: message,
     });
+    await sendWorkerMessage({
+      dispatchId: attemptId,
+      taskId: task.id,
+      type: 'worker_done',
+      payload: { error: message },
+    }).catch(() => undefined);
     return { taskId: task.id, attemptId, status: 'failed' };
   }
 
@@ -300,7 +307,10 @@ async function runClaimedAgentGraphTask(
   // Same pattern as task-run heartbeat in startTaskHeartbeat().
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
   const heartbeatMs = Math.max(1_000, Math.floor(leaseMs / 3));
-  const stopTaskHeartbeat = startTaskHeartbeat(task.id, nodeId, leaseMs, heartbeatMs);
+  const stopTaskHeartbeat = startTaskHeartbeat(task.id, nodeId, leaseMs, heartbeatMs, {
+    dispatchId: attemptId,
+    taskId: task.id,
+  });
 
   try {
     // Per Agent Identity Decision Framework: planner/executor tasks get standard
@@ -344,6 +354,12 @@ async function runClaimedAgentGraphTask(
         error: result.reason,
         toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
       });
+      await sendWorkerMessage({
+        dispatchId: attemptId,
+        taskId: task.id,
+        type: 'worker_done',
+        payload: { error: result.reason ?? 'cancelled' },
+      }).catch(() => undefined);
       return { taskId: task.id, taskRunId, attemptId, status: 'cancelled' };
     }
 
@@ -382,6 +398,12 @@ async function runClaimedAgentGraphTask(
       outputSummary,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
+    await sendWorkerMessage({
+      dispatchId: attemptId,
+      taskId: task.id,
+      type: 'worker_done',
+      payload: { summary: outputSummary },
+    }).catch(() => undefined);
     return { taskId: task.id, taskRunId, attemptId, status: 'succeeded' };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -404,6 +426,12 @@ async function runClaimedAgentGraphTask(
       error: message,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
+    await sendWorkerMessage({
+      dispatchId: attemptId,
+      taskId: task.id,
+      type: 'worker_done',
+      payload: { error: message },
+    }).catch(() => undefined);
     return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
   } finally {
     stopTaskHeartbeat();

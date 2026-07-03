@@ -175,6 +175,12 @@ agent|packages/agent/src/tools/helpers/glob-matcher.ts|globToRegex  # zero calle
 agent|packages/agent/src/tools/helpers/glob-matcher.ts|matchGlobRecursive  # zero callers (orphan)
 agent|packages/agent/src/verification-records.ts|createVerificationRecord  # test-only caller (no production caller)
 agent|packages/agent/src/verification-runner.ts|runVerificationRecord  # zero callers (orphan)
+agent|packages/agent/src/worker-messages.ts|ensureWorkerMessageStore  # test-only caller (no production caller)
+agent|packages/agent/src/worker-messages.ts|ensureWorkerMessageStore  # ensure*Store not called from bootstrap or test-setup
+agent|packages/agent/src/worker-messages.ts|hasWorkerDone  # test-only caller (no production caller)
+agent|packages/agent/src/worker-messages.ts|listMessagesForDispatch  # test-only caller (no production caller)
+agent|packages/agent/src/worker-messages.ts|listMessagesForTask  # test-only caller (no production caller)
+agent|packages/agent/src/worker-messages.ts|WORKER_MESSAGE_SCHEMA  # zero callers (orphan)
 cli|packages/cli/src/run-operations.ts|runCommand  # zero callers (orphan)
 executor|packages/executor/src/executor-helpers.ts|readJson  # zero callers (orphan)
 executor|packages/executor/src/executor-helpers.ts|readOptionalJson  # zero callers (orphan)

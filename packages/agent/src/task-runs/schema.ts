@@ -39,6 +39,7 @@ ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS dispatch_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_task_runs_session_id ON task_runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_trace_id ON task_runs(trace_id);
