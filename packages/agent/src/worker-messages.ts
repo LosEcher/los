@@ -19,13 +19,22 @@
  *
  * Wiring status (as of 2026-07-03):
  *   - `worker_done` is the only type wired to a production caller: `runClaimedAgentGraphTask`
- *     in scheduler.ts emits it at the succeeded/failed/cancelled/error exits.
+ *     in scheduler.ts emits it at the succeeded/failed/cancelled/error/recoveryFollowUp exits.
  *   - `heartbeat` is emitted from `task-heartbeat.ts` via `sendHeartbeat()` when a
  *     dispatch_id is available, alongside the existing DB lease extension.
- *   - `escalation` and `ask` have no production caller yet. They are defined here so
- *     the table shape is stable; wiring them (e.g. coordinator decision loop for
- *     `ask`, human-intervention escalation flow for `escalation`) is tracked as a
- *     follow-up intent — do not assume they are emitted today.
+ *   - `ask` is emitted by the `ask_coordinator` built-in tool (tools/builtin/worker-ask-tools.ts);
+ *     the worker then blocks the task_run and the coordinator answers via
+ *     `recordWorkerAnswer()` (called by the gateway POST /runs/:id/answer route).
+ *   - `escalation` is emitted by the `escalate` built-in tool; the worker blocks the
+ *     task_run and the operator intervenes via the existing recover/steering flow.
+ *
+ * Append-only exception: the `ask` row's `payload.answer` and `payload.consumed_at`
+ * fields are mutable — `recordWorkerAnswer()` UPDATEs the answer field, and
+ * `claimBlockedTaskRunsWithAnswer()` marks `consumed_at` when it resumes. The rest of
+ * the row (type, question, created_at, dispatch_id) is immutable. This keeps the ask
+ * row as the single source for both the question and its answer; consumers do not need
+ * to join a separate answer-message type. The `worker.answered` session event (emitted
+ * by the gateway route) records *when* the answer arrived for the audit trail.
  */
 
 import { getDb } from '@los/infra/db';
@@ -40,7 +49,8 @@ export interface WorkerMessagePayload {
   reason?: string;        // escalation: why intervention is needed
   question?: string;      // ask: the blocking question
   options?: string[];     // ask: allowed answers
-  answer?: string;        // ask: the coordinator's response (set on reply)
+  answer?: string;        // ask: the coordinator's response — set by recordWorkerAnswer() (mutable)
+  consumed_at?: string;   // ask: ISO timestamp when claimBlockedTaskRunsWithAnswer resumed (mutable)
   phase?: string;         // heartbeat: what the worker is currently doing
   error?: string;         // worker_done (failure): error message
   files_modified?: string[]; // worker_done: files touched
@@ -215,6 +225,32 @@ export async function hasWorkerDone(dispatchId: string): Promise<boolean> {
     [dispatchId],
   );
   return parseInt(rows.rows[0]!.count, 10) > 0;
+}
+
+/**
+ * Record the coordinator's answer on an `ask` message. This is the one mutable
+ * operation on the worker_messages table: it UPDATEs the ask row's payload.answer
+ * (see the append-only exception in the module header). Idempotent — answering the
+ * same messageId twice just overwrites the same answer field. Returns the updated
+ * message, or undefined if no matching ask row exists (wrong id / already consumed
+ * is NOT a reason for undefined — only "no such ask row").
+ */
+export async function recordWorkerAnswer(
+  messageId: string,
+  answer: string,
+): Promise<WorkerMessage | undefined> {
+  await ensureWorkerMessageStore();
+  const db = getDb();
+  const rows = await db.query<WorkerMessageRow>(
+    /* sql */ `
+    UPDATE worker_messages
+      SET payload_json = jsonb_set(payload_json, '{answer}', to_jsonb($2::text))
+    WHERE id = $1 AND type = 'ask'
+    RETURNING *
+  `,
+    [messageId, answer],
+  );
+  return rows.rows.length > 0 ? rowToMessage(rows.rows[0]!) : undefined;
 }
 
 /**

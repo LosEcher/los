@@ -53,7 +53,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 --experimental-test-coverage src/*.test.ts src/**/*.test.ts",
+    "test": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 --experimental-test-coverage src/*.test.ts src/**/*.test.ts src/tools/builtin/worker-ask-tools.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {

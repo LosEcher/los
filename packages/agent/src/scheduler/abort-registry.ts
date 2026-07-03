@@ -28,6 +28,23 @@ export function cancelScheduledTask(taskRunId: string, reason = 'cancelled'): bo
   return true;
 }
 
+/**
+ * Abort a scheduled task because a worker tool asked to block (ask_coordinator /
+ * escalate). The `reason` string is stored as the controller's abort reason so
+ * scheduled-task-runner's catch can later distinguish a worker block from a real
+ * cancellation (see isWorkerBlockReason). The AbortError carried on the signal is
+ * tagged with the same reason so it surfaces through runAgent's assertNotAborted.
+ */
+export function abortTaskRunForBlock(taskRunId: string, blockReason: string): boolean {
+  const running = runningTaskControllers.get(taskRunId);
+  if (!running) return false;
+  running.reason = `worker_block:${blockReason}`;
+  if (!running.controller.signal.aborted) {
+    running.controller.abort(createAbortError(`worker_block:${blockReason}`));
+  }
+  return true;
+}
+
 export function linkAbortSignal(source: AbortSignal | undefined, target: AbortController): () => void {
   if (!source) return () => undefined;
   if (source.aborted) {

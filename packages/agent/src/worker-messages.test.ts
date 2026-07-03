@@ -12,6 +12,7 @@ import {
   ensureWorkerMessageStore,
   sendWorkerMessage,
   sendHeartbeat,
+  recordWorkerAnswer,
   listMessagesForDispatch,
   listMessagesForTask,
   hasWorkerDone,
@@ -109,5 +110,43 @@ describe('worker messages', () => {
       ),
       /worker_messages_type_chk|violates check constraint/,
     );
+  });
+
+  it('recordWorkerAnswer updates the ask row payload.answer', async () => {
+    const msg = await sendWorkerMessage({
+      dispatchId: randomUUID(),
+      type: 'ask',
+      payload: { question: 'which branch?' },
+    });
+    const updated = await recordWorkerAnswer(msg.id, 'feat/foo');
+    assert.equal(updated?.id, msg.id);
+    assert.equal(updated?.payload.answer, 'feat/foo');
+    // question is preserved
+    assert.equal(updated?.payload.question, 'which branch?');
+  });
+
+  it('recordWorkerAnswer is idempotent (re-answer overwrites)', async () => {
+    const msg = await sendWorkerMessage({
+      dispatchId: randomUUID(),
+      type: 'ask',
+      payload: { question: 'go?' },
+    });
+    await recordWorkerAnswer(msg.id, 'yes');
+    const second = await recordWorkerAnswer(msg.id, 'no');
+    assert.equal(second?.payload.answer, 'no');
+  });
+
+  it('recordWorkerAnswer returns undefined for non-ask / unknown id', async () => {
+    const done = await sendWorkerMessage({
+      dispatchId: randomUUID(),
+      type: 'worker_done',
+      payload: { summary: 'done' },
+    });
+    // worker_done row is not an ask — answer does not apply
+    const result = await recordWorkerAnswer(done.id, 'x');
+    assert.equal(result, undefined);
+    // unknown id
+    const missing = await recordWorkerAnswer(randomUUID(), 'x');
+    assert.equal(missing, undefined);
   });
 });

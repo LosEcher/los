@@ -216,6 +216,10 @@ export async function completeAgentSetup(
     workspaceRoot: config.workspaceRoot,
     mcpServers: config.mcpServers,
     mcpRegistryRecords,
+    taskRunId: config.taskRunId,
+    dispatchId: config.dispatchId,
+    sessionId: config.sessionId,
+    runSpecId: config.runSpecId,
   });
   setup.mcpCleanup = mcpCleanup;
 

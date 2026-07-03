@@ -98,7 +98,10 @@ export type ScheduledAgentTaskResult =
       status: 'blocked';
       sessionId: string;
       taskRun: TaskRunRecord;
-      result: AgentResult;
+      /** Present when blocked after runAgent returned (e.g. verification gate).
+       *  Absent when the worker blocked mid-execution via ask_coordinator/escalate
+       *  (runAgent was aborted, no result was produced). */
+      result?: AgentResult;
       reason: string;
     };
 
