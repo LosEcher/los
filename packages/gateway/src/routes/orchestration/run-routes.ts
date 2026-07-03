@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
-import { ensureSessionEventStore, listSessionEventsSince } from '@los/agent/session-events';
+import { ensureSessionEventStore, listSessionEventsSince, appendSessionEvent } from '@los/agent/session-events';
 import {
   ensureStreamCheckpointStore,
   listStreamCheckpointsSince,
@@ -14,8 +14,10 @@ import {
   readRuntimeEvidenceGraph,
   readRunStateProjection,
   readToolCallRecoveryForRunSpec,
+  recordWorkerAnswer,
   runVerificationRecordsForRunSpec,
 } from '@los/agent';
+import { getDb } from '@los/infra/db';
 import {
   asRecord,
   normalizeOptionalString,
@@ -143,6 +145,51 @@ export function registerRunRoutes(app: FastifyInstance): void {
       intent: body.intent === 'cancel' ? 'cancel' : 'recover',
       staleMs,
     });
+  });
+
+  // Answer a worker `ask` message. The operator UI surfaces a worker.ask session
+  // event (emitted by the ask_coordinator tool); this route writes the answer onto
+  // the ask row (recordWorkerAnswer), appends a worker.answered session event so
+  // the audit trail records when the answer arrived, and PG-NOTIFYs the scheduler
+  // so its wake loop picks up the blocked task for resume via
+  // claimBlockedTaskRunsWithAnswer.
+  app.post('/runs/:id/answer', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = asRecord(req.body);
+    const messageId = normalizeOptionalString(body.messageId);
+    const answer = normalizeOptionalString(body.answer);
+    if (!messageId) return reply.status(400).send({ error: 'messageId is required' });
+    if (!answer) return reply.status(400).send({ error: 'answer is required' });
+
+    await ensureRunSpecStore();
+    const runSpec = await loadRunSpec(id);
+    if (!runSpec) return reply.status(404).send({ error: 'Run spec not found' });
+
+    const updated = await recordWorkerAnswer(messageId, answer);
+    if (!updated) return reply.status(404).send({ error: 'ask message not found (or not an ask)' });
+
+    await ensureSessionEventStore();
+    await appendSessionEvent({
+      sessionId: runSpec.sessionId,
+      type: 'worker.answered',
+      payload: {
+        messageId,
+        answer,
+        runSpecId: id,
+        dispatchId: updated.dispatchId,
+        taskId: updated.taskId,
+      },
+    }).catch(() => undefined);
+
+    // Wake the scheduler: a blocked task for this run spec may now be resumable.
+    try {
+      const db = getDb();
+      await db.notify('worker_answer', JSON.stringify({ runSpecId: id, messageId }));
+    } catch {
+      // NOTIFY best-effort — scheduler also polls on its normal tick.
+    }
+
+    return { ok: true, messageId, answer };
   });
 
   app.post('/runs/:id/verify', async (req, reply) => {

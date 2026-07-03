@@ -13,6 +13,15 @@ export interface AgentConfig {
   modelSettings?: ModelSettings;
   /** Run spec ID for contract lineage and cross-agent correlation (AP6). */
   runSpecId?: string;
+  /** Task run ID for the current execution. Set by scheduled-task-runner so that
+   *  built-in worker tools (ask_coordinator/escalate) can correlate the worker
+   *  message + blocked transition to this task_run. Undefined for direct runAgent
+   *  calls outside a scheduled task (worker tools will refuse to block in that case). */
+  taskRunId?: string;
+  /** Dispatch ID (= agent_task_attempts.id) for the current graph-path execution.
+   *  Used as the worker_messages.dispatch_id so the coordinator can scope messages
+   *  to a specific dispatch. Undefined for non-graph (direct scheduled) tasks. */
+  dispatchId?: string;
   /** Trace ID for cross-session correlation (AP6). */
   /**
    * Architect/Editor dual model configuration.

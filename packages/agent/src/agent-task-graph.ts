@@ -379,6 +379,13 @@ export async function listAgentTasksForGraph(graphId: string): Promise<AgentTask
   return rows.rows.map(rowToTask);
 }
 
+export async function loadAgentTask(taskId: string): Promise<AgentTaskRecord | null> {
+  await ensureAgentTaskGraphStore();
+  const db = getDb();
+  const rows = await db.query<AgentTaskRow>('SELECT * FROM agent_tasks WHERE id = $1', [taskId]);
+  return rows.rows[0] ? rowToTask(rows.rows[0]) : null;
+}
+
 export async function listAgentTasksForRunSpec(runSpecId: string): Promise<AgentTaskRecord[]> {
   await ensureAgentTaskGraphStore();
   const db = getDb();

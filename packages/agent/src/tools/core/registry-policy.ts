@@ -55,6 +55,18 @@ export interface BuiltinToolOptions {
   workspaceRoot?: string;
   mcpServers?: MCPServerConfig[];
   mcpRegistryRecords?: MCPServerRegistryRecord[];
+  /** Task run ID for the current execution. Threaded from AgentConfig so worker
+   *  tools (ask_coordinator/escalate) can emit worker_messages + transition the
+   *  correct task_run to blocked. Undefined when runAgent is called outside a
+   *  scheduled task — worker tools then refuse to block. */
+  taskRunId?: string;
+  /** Dispatch ID (agent_task_attempts.id) for worker_messages.dispatch_id. */
+  dispatchId?: string;
+  /** Session ID for emitting worker.ask/worker.escalation session events that the
+   *  operator SSE stream surfaces to the UI. */
+  sessionId?: string;
+  /** Run spec ID for event lineage. */
+  runSpecId?: string;
 }
 
 export interface ToolExecutionPolicy {

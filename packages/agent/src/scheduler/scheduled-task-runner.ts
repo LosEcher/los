@@ -18,6 +18,7 @@ import {
   linkAbortSignal,
   registerScheduledTaskController,
 } from './abort-registry.js';
+import { isWorkerBlockReason, workerBlockReasonFrom } from './worker-block-error.js';
 import { clearCancellation } from '../cancellation.js';
 import { canStartExecution, type RunContractMetadata } from '../run-contract.js';
 import { recordSchedulerDecision } from '../scheduler-decision-ledger.js';
@@ -202,6 +203,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             toolMode,
             sandboxMode: input.sandboxMode,
             architectEditor,
+            taskRunId,
+            dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
             initialMessages: input.initialMessages,
             allowedTools: input.allowedTools,
             toolRetry: input.toolRetry,
@@ -244,6 +247,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           toolMode,
           sandboxMode: input.sandboxMode,
           architectEditor,
+          taskRunId,
+          dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
           initialMessages: input.initialMessages,
           allowedTools: input.allowedTools,
           toolRetry: input.toolRetry,
@@ -344,6 +349,27 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const message = err instanceof Error ? err.message : String(err);
     if (isAbortError(err)) {
       const reason = getScheduledTaskAbortReason(taskRunId) ?? message;
+      // Worker-initiated block (ask_coordinator / escalate): the tool already
+      // transitioned the task_run to 'blocked' before aborting, so do NOT
+      // overwrite it with 'cancelled'. Just emit the blocked event and return.
+      if (isWorkerBlockReason(reason)) {
+        const blockReason = workerBlockReasonFrom(reason) ?? 'worker_block';
+        const blocked = await updateTaskRunFields(taskRunId, {
+          metadata: {
+            ...running.metadata,
+            blockReason,
+          },
+        });
+        const finalBlocked = blocked ?? running;
+        await emitTaskEvent(sessionId, 'task.blocked', finalBlocked, { reason: blockReason });
+        await input.onTaskEvent?.({ type: 'task.blocked', taskRun: finalBlocked });
+        return {
+          status: 'blocked',
+          sessionId,
+          taskRun: finalBlocked,
+          reason: blockReason,
+        };
+      }
       await transitionExecutionState({
         entityType: 'task_run',
         entityId: taskRunId,

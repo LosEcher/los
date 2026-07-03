@@ -369,3 +369,6 @@ export async function listTaskRunsByStatus(
   );
   return rows.rows.map(rowToTaskRun);
 }
+
+// Extracted to ./blocked-resume.ts to keep this file under the 400-line gate.
+export { claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun } from './task-runs/blocked-resume.js';

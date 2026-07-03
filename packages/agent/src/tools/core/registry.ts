@@ -25,6 +25,7 @@ import { registerCodeIntelTools } from '../builtin/code-intel.js';
 import { registerEditTools } from '../builtin/edit-tools.js';
 import { registerWebTools } from '../external/web-tools.js';
 import { registerJobTools } from '../builtin/job-tools.js';
+import { registerWorkerAskTools } from '../builtin/worker-ask-tools.js';
 import {
   READ_ONLY_BUILTIN_TOOLS,
   checkCapability,
@@ -306,6 +307,14 @@ export async function registerBuiltinTools(
   registerEditTools(registry, { workspaceRoot });
   registerWebTools(registry);
   registerJobTools(registry, { workspaceRoot });
+  // Worker coordination tools (ask_coordinator / escalate) — only block when
+  // taskRunId is threaded in (scheduled-task path); refuse harmlessly otherwise.
+  registerWorkerAskTools(registry, {
+    taskRunId: options.taskRunId,
+    dispatchId: options.dispatchId,
+    sessionId: options.sessionId,
+    runSpecId: options.runSpecId,
+  });
 
   // ── MCP external tools ───────────────────────────────
   let mcpCleanup: (() => Promise<void>) | undefined;
