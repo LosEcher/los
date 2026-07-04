@@ -23,8 +23,13 @@
  *   - `heartbeat` is emitted from `task-heartbeat.ts` via `sendHeartbeat()` when a
  *     dispatch_id is available, alongside the existing DB lease extension.
  *   - `ask` is emitted by the `ask_coordinator` built-in tool (tools/builtin/worker-ask-tools.ts);
- *     the worker then blocks the task_run and the coordinator answers via
+ *     the worker then blocks the task_run. The coordinator answers via
  *     `recordWorkerAnswer()` (called by the gateway POST /runs/:id/answer route).
+ *     **Resume is not automatic**: claimBlockedTaskRunsWithAnswer picks up
+ *     answered blocked tasks only when runAgentTaskGraphSerial runs and finds
+ *     no ready tasks — los has no resident scheduler tick and the answer route's
+ *     PG NOTIFY has no LISTEN subscriber yet. Wiring a wake (LISTEN worker_answer
+ *     or a resident tick) is tracked as a follow-up.
  *   - `escalation` is emitted by the `escalate` built-in tool; the worker blocks the
  *     task_run and the operator intervenes via the existing recover/steering flow.
  *

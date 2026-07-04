@@ -38,8 +38,10 @@ export interface ClaimedBlockedTaskRun {
  * Concurrency is serialized by the advisory lock, so no FOR UPDATE needed.
  */
 export async function claimBlockedTaskRunsWithAnswer(
-  limit = 10,
+  opts: { graphId?: string; limit?: number } = {},
 ): Promise<ClaimedBlockedTaskRun[]> {
+  const limit = opts.limit ?? 10;
+  const graphId = opts.graphId;
   await ensureTaskRunStore();
   const backend = await resolveCoordinationBackend();
   const result = await backend.lock.withLock('task-run-blocked-resume', async () => {
@@ -89,6 +91,7 @@ export async function claimBlockedTaskRunsWithAnswer(
             AND tr.status = 'blocked'
             AND wm.payload_json->>'answer' IS NOT NULL
             AND wm.payload_json->>'consumed_at' IS NULL
+            ${graphId ? 'AND ta.graph_id = $2' : ''}
           RETURNING wm.id AS ask_message_id, wm.payload_json->>'answer' AS answer, wm.payload_json->>'question' AS question, ta.id AS dispatch_id, ta.graph_id AS graph_id, ta.task_id AS task_id, ta.provider AS ta_provider, ta.model AS ta_model, tr.id AS tr_id
       )
       SELECT tr.*, c.ask_message_id, c.answer, c.question, c.dispatch_id, c.graph_id, c.task_id, c.ta_provider, c.ta_model
@@ -97,7 +100,7 @@ export async function claimBlockedTaskRunsWithAnswer(
         ORDER BY tr.created_at
         LIMIT $1
       `,
-      [limit],
+        graphId ? [limit, graphId] : [limit],
     );
     return rows.rows.map(r => ({
       taskRun: {

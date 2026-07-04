@@ -90,14 +90,23 @@ async function blockTaskRunForWorker(input: {
     }).catch(() => undefined);
   }
 
-  // 3. transition the task_run to blocked (must happen BEFORE the abort)
-  await transitionExecutionState({
-    entityType: 'task_run',
-    entityId: taskRunId,
-    to: 'blocked',
-    reason: blockReason,
-    sessionId,
-  }).catch(() => undefined);
+  // 3. transition the task_run to blocked (must happen BEFORE the abort).
+  // If this fails the task_run is NOT blocked — aborting anyway would leave
+  // task_runs.status != 'blocked' while emitting task.blocked, so
+  // claimBlockedTaskRunsWithAnswer (WHERE status='blocked') would never resume
+  // it. Surface the error instead of swallowing.
+  try {
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'blocked',
+      reason: blockReason,
+      sessionId,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: '', error: `failed to block task_run: ${msg}` };
+  }
 
   // 4. abort the runAgent loop; scheduled-task-runner's catch will see the
   //    worker_block: reason and return {status:'blocked'}

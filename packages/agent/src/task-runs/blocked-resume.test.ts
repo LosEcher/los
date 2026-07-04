@@ -56,7 +56,7 @@ test('claimBlockedTaskRunsWithAnswer claims a blocked task with an answered ask'
     });
 
     // no answer yet → not claimed
-    let claimed = await claimBlockedTaskRunsWithAnswer(10);
+    let claimed = await claimBlockedTaskRunsWithAnswer({ limit: 10 });
     assert.equal(claimed.find(c => c.taskRun.id === taskRunId), undefined,
       'should not claim before answer');
 
@@ -64,7 +64,7 @@ test('claimBlockedTaskRunsWithAnswer claims a blocked task with an answered ask'
     await recordWorkerAnswer(ask.id, 'feat/foo');
 
     // now claimed
-    claimed = await claimBlockedTaskRunsWithAnswer(10);
+    claimed = await claimBlockedTaskRunsWithAnswer({ limit: 10 });
     const hit = claimed.find(c => c.taskRun.id === taskRunId);
     assert.ok(hit, 'should claim after answer');
     assert.equal(hit!.answer, 'feat/foo');
@@ -74,7 +74,7 @@ test('claimBlockedTaskRunsWithAnswer claims a blocked task with an answered ask'
     assert.equal(hit!.graphId, graphId);
 
     // second tick does not double-resume (consumed_at set)
-    const claimedAgain = await claimBlockedTaskRunsWithAnswer(10);
+    const claimedAgain = await claimBlockedTaskRunsWithAnswer({ limit: 10 });
     assert.equal(claimedAgain.find(c => c.taskRun.id === taskRunId), undefined,
       'should not claim a second time');
   } finally {
@@ -111,7 +111,7 @@ test('claimBlockedTaskRunsWithAnswer ignores tasks that are not blocked', async 
     });
     await recordWorkerAnswer(ask.id, 'yes');
 
-    const claimed = await claimBlockedTaskRunsWithAnswer(10);
+    const claimed = await claimBlockedTaskRunsWithAnswer({ limit: 10 });
     assert.equal(claimed.find(c => c.taskRun.id === taskRunId), undefined,
       'running task must not be claimed even with an answered ask');
   } finally {
