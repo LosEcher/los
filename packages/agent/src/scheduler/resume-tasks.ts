@@ -4,8 +4,16 @@
  * Extracted from scheduler.ts to keep that file under the 600-line CI block gate.
  */
 
+import { randomUUID } from 'node:crypto';
 import { transitionExecutionState } from '../execution-store.js';
-import { listAgentTasksForRunSpec, loadAgentTask, updateAgentTaskStatus, type AgentTaskStatus } from '../agent-task-graph.js';
+import {
+  listAgentTasksForRunSpec,
+  loadAgentTask,
+  updateAgentTaskStatus,
+  createAgentTaskAttempt,
+  listAgentTaskAttempts,
+  type AgentTaskStatus,
+} from '../agent-task-graph.js';
 import { claimBlockedTaskRunsWithAnswer } from '../task-runs/blocked-resume.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
 import { buildResumeMessage } from './resume-messages.js';
@@ -22,21 +30,21 @@ import type {
  *   1. transition the original task_run blocked → cancelled (reason: resumed_with_answer)
  *      — createTaskRun does not support upsert, so resume creates a fresh task_run
  *      and the original blocked row is closed out as cancelled.
- *   2. load the agent_task to recover prompt/sessionId/runSpecId
- *   3. runScheduledAgentTask with initialMessages injecting the answer, so the
- *      resumed execution sees "you asked X, the operator answered Y, continue"
+ *   2. transition agent_task blocked → running so graph completion does NOT report
+ *      the graph as blocked while resume is in-flight.
+ *   3. load the agent_task to recover prompt/sessionId/runSpecId
+ *   4. allocate a new task_attempts row as the dispatch anchor — this closes the
+ *      re-block gap: if the resumed execution asks again, worker_messages.dispatch_id
+ *      points to this attempt, and claimBlockedTaskRunsWithAnswer's CTE join works.
+ *   5. runScheduledAgentTask with initialMessages injecting the answer + metadata
+ *      carrying agentTaskAttemptId → dispatchId propagation.
+ *   6. transition agent_task to the terminal status (succeeded/blocked/cancelled/failed).
+ *   7. finalize the attempt with the real taskRunId and terminal status.
  *
- * Known follow-up gaps (NOT closed here — see PR description):
- *   - **Trigger**: this resume only runs when runAgentTaskGraphSerial is invoked
- *     and claimReadyAgentTasks returns empty, OR when the gateway POST /runs/:id/answer
- *     fire-and-forgets resumeAnsweredAsksForRunSpec. The PG NOTIFY emitted by the
- *     answer route has no LISTEN; los has no resident scheduler tick — the direct
- *     call from the gateway is the active trigger in a single-gateway deployment.
- *     A LISTEN worker_answer subscriber is tracked for future multi-gateway mesh.
- *   - **dispatch_id for re-blocked resumed tasks**: resume does not create a
- *     task_attempts row, so a re-blocked resumed task writes worker_messages
- *     with dispatch_id=NULL and is not reclaimable. Fix requires resume to
- *     allocate an attempt id + createAgentTaskAttempt.
+ * Known follow-up gaps (NOT closed here):
+ *   - **Trigger**: resumeAnsweredAsksForRunSpec is the active trigger in a
+ *     single-gateway deployment. A LISTEN worker_answer subscriber is tracked
+ *     for future multi-gateway mesh.
  *   - **Config loss on resume**: resumeAnsweredAsksForRunSpec builds a minimal
  *     {graphId, runSpecId} input; executor/sandboxMode/mcpServers/allowedTools/
  *     identity are undefined, so resume runs on the gateway-local executor with
@@ -101,7 +109,29 @@ export async function resumeBlockedTaskRunsWithAnswers(
       continue;
     }
 
-    // 4. re-run with the answer injected
+    // 4. allocate a new attempt as the dispatch anchor for this resume run.
+    //    The normal path (scheduler.ts runClaimedAgentGraphTask) creates an
+    //    attempt BEFORE runScheduledAgentTask; resume previously skipped this,
+    //    so re-blocked resumed tasks wrote worker_messages with dispatch_id=NULL
+    //    and claimBlockedTaskRunsWithAnswer's CTE join could never find them.
+    //    runScheduledAgentTask creates its own taskRunId internally; we backfill
+    //    the attempt's taskRunId + terminal status in step 5.
+    const attempts = await listAgentTaskAttempts(agentTask.id);
+    const attemptNumber = attempts.length + 1;
+    const resumeAttemptId = `${agentTask.id}-attempt-${attemptNumber}-${randomUUID()}`;
+    const dispatchNodeId = input.nodeId ?? input.executor?.nodeId;
+    await createAgentTaskAttempt({
+      id: resumeAttemptId,
+      graphId: agentTask.graphId,
+      taskId: agentTask.id,
+      attempt: attemptNumber,
+      status: 'running',
+      provider: provider ?? undefined,
+      model: model ?? undefined,
+      nodeId: dispatchNodeId,
+    });
+
+    // 5. re-run with the answer injected
     const resumeMessage = buildResumeMessage(question, answer);
     let result: ScheduledAgentTaskResult;
     try {
@@ -135,6 +165,7 @@ export async function resumeBlockedTaskRunsWithAnswers(
           ...(input.metadata ?? {}),
           graphId: input.graphId,
           agentTaskId: agentTask.id,
+          agentTaskAttemptId: resumeAttemptId,
           resumedFromTaskRunId: taskRun.id,
           resumedAskQuestion: question,
         },
@@ -147,13 +178,24 @@ export async function resumeBlockedTaskRunsWithAnswers(
       // operator can see it and recover via /runs/:id/recover.
       const msg = err instanceof Error ? err.message : String(err);
       await updateAgentTaskStatus(agentTask.id, 'blocked', {
-        dispatchId,
+        dispatchId: resumeAttemptId,
         resumedFromTaskRunId: taskRun.id,
+        error: msg,
+      }).catch(() => undefined);
+      await createAgentTaskAttempt({
+        id: resumeAttemptId,
+        graphId: agentTask.graphId,
+        taskId: agentTask.id,
+        attempt: attemptNumber,
+        status: 'failed',
+        provider: provider ?? undefined,
+        model: model ?? undefined,
+        nodeId: dispatchNodeId,
         error: msg,
       }).catch(() => undefined);
       results.push({
         taskId: agentTask.id,
-        attemptId: dispatchId,
+        attemptId: resumeAttemptId,
         status: 'failed',
       });
       continue;
@@ -166,7 +208,7 @@ export async function resumeBlockedTaskRunsWithAnswers(
       : result.status === 'deduplicated' ? 'succeeded'
       : 'failed';
 
-    // 5. transition agent_task to match the actual outcome, so graph
+    // 6. transition agent_task to match the actual outcome, so graph
     //    completion converges. This mirrors runClaimedAgentGraphTask's
     //    branch for each terminal status.
     //
@@ -190,17 +232,38 @@ export async function resumeBlockedTaskRunsWithAnswers(
       : 'failed';
     await updateAgentTaskStatus(agentTask.id, terminalStatus, {
       taskRunId: result.taskRun.id ?? undefined,
-      dispatchId,
+      dispatchId: resumeAttemptId,
       resumedFromTaskRunId: taskRun.id,
       resumedAskQuestion: question,
       ...('reason' in result && result.status === 'cancelled' ? { cancelReason: result.reason } : {}),
       ...('reason' in result && result.status === 'blocked' ? { blockReason: result.reason } : {}),
     }).catch(() => undefined);
 
+    // 7. finalize the attempt with the real taskRunId and terminal status.
+    //    runScheduledAgentTask creates its own taskRunId internally, so we
+    //    backfill it here (the attempt was created with taskRunId=null in
+    //    step 4). This closes the dispatch chain: agent_task → task_attempts
+    //    → worker_messages(dispatch_id) → task_runs.
+    const attemptFinalStatus = terminalStatus === 'succeeded' ? 'succeeded' as const
+      : terminalStatus === 'cancelled' ? 'cancelled' as const
+      : 'failed' as const;
+    await createAgentTaskAttempt({
+      id: resumeAttemptId,
+      graphId: agentTask.graphId,
+      taskId: agentTask.id,
+      attempt: attemptNumber,
+      status: attemptFinalStatus,
+      provider: provider ?? undefined,
+      model: model ?? undefined,
+      nodeId: dispatchNodeId,
+      taskRunId: 'taskRun' in result ? result.taskRun.id : undefined,
+      ...('reason' in result && result.status === 'blocked' ? { error: `blocked: ${result.reason}` } : {}),
+    }).catch(() => undefined);
+
     results.push({
       taskId: agentTask.id,
       taskRunId: 'taskRun' in result ? result.taskRun.id : undefined,
-      attemptId: dispatchId,
+      attemptId: resumeAttemptId,
       status: executedStatus,
     });
   }
