@@ -5,13 +5,14 @@
  */
 
 import { transitionExecutionState } from '../execution-store.js';
-import { listAgentTasksForRunSpec, loadAgentTask } from '../agent-task-graph.js';
+import { listAgentTasksForRunSpec, loadAgentTask, updateAgentTaskStatus, type AgentTaskStatus } from '../agent-task-graph.js';
 import { claimBlockedTaskRunsWithAnswer } from '../task-runs/blocked-resume.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
 import { buildResumeMessage } from './resume-messages.js';
 import type {
   RunAgentTaskGraphSerialInput,
   RunAgentTaskGraphSerialResult,
+  ScheduledAgentTaskResult,
 } from './types.js';
 
 /**
@@ -27,15 +28,11 @@ import type {
  *
  * Known follow-up gaps (NOT closed here — see PR description):
  *   - **Trigger**: this resume only runs when runAgentTaskGraphSerial is invoked
- *     and claimReadyAgentTasks returns empty. The POST /runs/:id/answer route
- *     writes the answer but does NOT wake the scheduler (PG NOTIFY has no
- *     LISTEN; los has no resident scheduler tick). A separate intent must add
- *     either a LISTEN worker_answer subscriber or a resident resume tick.
- *   - **agent_task state**: the agent_task row is NOT transitioned here — it
- *     stays 'blocked'. graph completion will see blocked agent_tasks and report
- *     the graph as blocked (NOT succeeded — that misreport was fixed by adding
- *     the blocked branch in runClaimedAgentGraphTask). True graph convergence
- *     (agent_task blocked→running on resume) is a follow-up.
+ *     and claimReadyAgentTasks returns empty, OR when the gateway POST /runs/:id/answer
+ *     fire-and-forgets resumeAnsweredAsksForRunSpec. The PG NOTIFY emitted by the
+ *     answer route has no LISTEN; los has no resident scheduler tick — the direct
+ *     call from the gateway is the active trigger in a single-gateway deployment.
+ *     A LISTEN worker_answer subscriber is tracked for future multi-gateway mesh.
  *   - **dispatch_id for re-blocked resumed tasks**: resume does not create a
  *     task_attempts row, so a re-blocked resumed task writes worker_messages
  *     with dispatch_id=NULL and is not reclaimable. Fix requires resume to
@@ -71,12 +68,31 @@ export async function resumeBlockedTaskRunsWithAnswers(
       reason: 'resumed_with_answer',
     }).catch(() => undefined);
 
-    // 2. load the agent_task for prompt + lineage
+    // 2. transition agent_task blocked → running so graph completion does
+    //    NOT report the graph as blocked while resume is in-flight. This
+    //    mirrors runClaimedAgentGraphTask which sets running before the
+    //    dispatch. If this fails (rare, e.g. DB error), leave the task as-is
+    //    — consumed_at is already set, so we still reach the stage 3 results.
+    if (agentTaskId) {
+      await updateAgentTaskStatus(agentTaskId, 'running', {
+        dispatchId,
+        resumedFromTaskRunId: taskRun.id,
+      }).catch(() => undefined);
+    }
+
+    // 3. load the agent_task for prompt + lineage
     const agentTask = agentTaskId ? await loadAgentTask(agentTaskId) : null;
     const prompt = agentTask?.prompt ?? agentTask?.title ?? taskRun.promptPreview;
     if (!prompt || !agentTask) {
-      // Cannot rebuild the execution without the prompt — leave the task blocked
-      // (un-consume is not possible, but operator can still recover via /runs/:id/recover).
+      // Cannot rebuild the execution without the prompt — transition the
+      // agent_task back to blocked so the operator can see it (un-consume
+      // is not possible, but operator can still recover via /runs/:id/recover).
+      if (agentTaskId) {
+        await updateAgentTaskStatus(agentTaskId, 'blocked', {
+          error: 'resume_failed: missing prompt or agent_task',
+          dispatchId,
+        }).catch(() => undefined);
+      }
       results.push({
         taskId: agentTaskId ?? taskRun.id,
         attemptId: dispatchId,
@@ -85,53 +101,107 @@ export async function resumeBlockedTaskRunsWithAnswers(
       continue;
     }
 
-    // 3. re-run with the answer injected
+    // 4. re-run with the answer injected
     const resumeMessage = buildResumeMessage(question, answer);
-    const result = await runScheduledAgentTask({
-      prompt,
-      promptPreview: agentTask.title,
-      sessionId: agentTask.sessionId ?? input.sessionId,
-      runSpecId: agentTask.runSpecId ?? input.runSpecId,
-      tenantId: input.tenantId,
-      projectId: input.projectId,
-      userId: input.userId,
-      nodeId: input.nodeId,
-      requestId: input.requestId,
-      traceId: input.traceId,
-      workspaceRoot: taskRun.workspaceRoot ?? input.workspaceRoot,
-      toolMode: input.toolMode,
-      sandboxMode: input.sandboxMode,
-      provider: provider ?? input.provider,
-      model: model ?? input.model,
-      executor: input.executor,
-      mcpServers: input.mcpServers,
-      allowedTools: input.allowedTools,
-      identity: input.identity,
-      initialMessages: [resumeMessage],
-      onSessionEvent: input.onSessionEvent,
-      onToolCallState: input.onToolCallState,
-      onModelDelta: input.onModelDelta,
-      onCheckpoint: input.onCheckpoint,
-      onTaskEvent: input.onTaskEvent,
-      metadata: {
-        ...(input.metadata ?? {}),
-        graphId: input.graphId,
-        agentTaskId: agentTask.id,
+    let result: ScheduledAgentTaskResult;
+    try {
+      result = await runScheduledAgentTask({
+        prompt,
+        promptPreview: agentTask.title,
+        sessionId: agentTask.sessionId ?? input.sessionId,
+        runSpecId: agentTask.runSpecId ?? input.runSpecId,
+        tenantId: input.tenantId,
+        projectId: input.projectId,
+        userId: input.userId,
+        nodeId: input.nodeId,
+        requestId: input.requestId,
+        traceId: input.traceId,
+        workspaceRoot: taskRun.workspaceRoot ?? input.workspaceRoot,
+        toolMode: input.toolMode,
+        sandboxMode: input.sandboxMode,
+        provider: provider ?? input.provider,
+        model: model ?? input.model,
+        executor: input.executor,
+        mcpServers: input.mcpServers,
+        allowedTools: input.allowedTools,
+        identity: input.identity,
+        initialMessages: [resumeMessage],
+        onSessionEvent: input.onSessionEvent,
+        onToolCallState: input.onToolCallState,
+        onModelDelta: input.onModelDelta,
+        onCheckpoint: input.onCheckpoint,
+        onTaskEvent: input.onTaskEvent,
+        metadata: {
+          ...(input.metadata ?? {}),
+          graphId: input.graphId,
+          agentTaskId: agentTask.id,
+          resumedFromTaskRunId: taskRun.id,
+          resumedAskQuestion: question,
+        },
+      });
+    } catch (err) {
+      // runScheduledAgentTask re-throws non-abort errors (line 462 of
+      // scheduled-task-runner.ts). Without a catch here, the agent_task
+      // would stay 'running' forever (step 2 set it, no lease, consumed_at
+      // already burned — no recovery path). Roll back to blocked so the
+      // operator can see it and recover via /runs/:id/recover.
+      const msg = err instanceof Error ? err.message : String(err);
+      await updateAgentTaskStatus(agentTask.id, 'blocked', {
+        dispatchId,
         resumedFromTaskRunId: taskRun.id,
-        resumedAskQuestion: question,
-      },
-    });
+        error: msg,
+      }).catch(() => undefined);
+      results.push({
+        taskId: agentTask.id,
+        attemptId: dispatchId,
+        status: 'failed',
+      });
+      continue;
+    }
 
-    const status: RunAgentTaskGraphSerialResult['executedTasks'][number]['status'] =
+    const executedStatus: RunAgentTaskGraphSerialResult['executedTasks'][number]['status'] =
       result.status === 'completed' ? 'succeeded'
       : result.status === 'blocked' ? 'failed'
       : result.status === 'cancelled' ? 'cancelled'
+      : result.status === 'deduplicated' ? 'succeeded'
       : 'failed';
+
+    // 5. transition agent_task to match the actual outcome, so graph
+    //    completion converges. This mirrors runClaimedAgentGraphTask's
+    //    branch for each terminal status.
+    //
+    //    - succeeded: graph can proceed to the next task / converge to done.
+    //    - blocked: the resumed task re-blocked (e.g. asked again); graph
+    //      stays blocked awaiting the next answer.
+    //    - cancelled: graph sees a clean cancellation.
+    //    - failed/deduplicated: graph sees a terminal failure (deduplication
+    //      during resume is unexpected — it can happen if a dedupeKey is
+    //      added and a concurrent resume already ran).
+    //    NOTE: returned `status` still uses AgentTaskAttemptStatus for
+    //    compatibility with the caller (scheduler.ts loop); 'blocked' is NOT
+    //    in AgentTaskAttemptStatus, so resume re-uses 'failed' for the
+    //    executedTasks record (the scheduler loop already checks task.status
+    //    !== 'succeeded' to break, and runClaimedAgentGraphTask uses 'failed'
+    //    for the blocked branch — idempotent).
+    const terminalStatus: AgentTaskStatus =
+      result.status === 'completed' ? 'succeeded'
+      : result.status === 'blocked' ? 'blocked'
+      : result.status === 'cancelled' ? 'cancelled'
+      : 'failed';
+    await updateAgentTaskStatus(agentTask.id, terminalStatus, {
+      taskRunId: result.taskRun.id ?? undefined,
+      dispatchId,
+      resumedFromTaskRunId: taskRun.id,
+      resumedAskQuestion: question,
+      ...('reason' in result && result.status === 'cancelled' ? { cancelReason: result.reason } : {}),
+      ...('reason' in result && result.status === 'blocked' ? { blockReason: result.reason } : {}),
+    }).catch(() => undefined);
+
     results.push({
       taskId: agentTask.id,
-      taskRunId: result.taskRun.id,
+      taskRunId: 'taskRun' in result ? result.taskRun.id : undefined,
       attemptId: dispatchId,
-      status,
+      status: executedStatus,
     });
   }
   return results;
