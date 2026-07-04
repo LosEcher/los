@@ -146,6 +146,7 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'performance_audit': return runPerformanceAuditWrapper();
     case 'migration_drift_fix': return runMigrationDriftAuditWrapper();
     case 'event_retention': return runEventRetentionAuditWrapper();
+    case 'code_topology_audit': return runCodeTopologyAuditWrapper(job);
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
 }
@@ -390,6 +391,15 @@ async function runEventRetentionAuditWrapper(): Promise<Record<string, unknown>>
     const { runEventRetentionAudit } = await import('./governance-auditors-event-retention.js');
     const result = await runEventRetentionAudit();
     return result as Record<string, unknown>;
+  } catch (err) {
+    return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runCodeTopologyAuditWrapper(job: GovernanceJob): Promise<Record<string, unknown>> {
+  try {
+    const { runCodeTopologyAudit } = await import('./governance-auditors-code-topology.js');
+    return runCodeTopologyAudit(job);
   } catch (err) {
     return { auditedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
   }

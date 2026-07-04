@@ -61,6 +61,9 @@ async function applyAutoFix(
     case 'migration_drift_fix':
       // Detection-only job — autoFix disabled by seed config. No-op for clarity.
       return { applied: false, detail: 'detection-only job — autoFix disabled; TODOs surface for a Claude agent to work via /pr-self-merge' };
+    case 'code_topology_audit':
+      // detection-only — autoFix disabled in seed.
+      return { applied: false, detail: 'detection-only job — TODOs surface topology clusters for operator review via los chat' };
     default:
       return { applied: false, detail: `No auto-fix strategy for job type: ${job.jobType}` };
   }
@@ -433,6 +436,10 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       if (summary.fileMissing === true) return false;
       const total = typeof summary.totalDrift === 'number' ? summary.totalDrift : 0;
       return total > 0;
+    }
+    case 'code_topology_audit': {
+      const clusters = Array.isArray(summary.clusters) ? summary.clusters as unknown[] : [];
+      return clusters.length > 0;
     }
     default:
       return false;
