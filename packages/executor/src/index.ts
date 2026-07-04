@@ -7,9 +7,6 @@ import { initDb, getDb } from '@los/infra/db';
 import { migrateDir } from '@los/infra/migrate';
 import { getLogger } from '@los/infra/logger';
 import {
-  ensureArtifactStore,
-  ensureExecutorNodeStore,
-  ensureTaskRunStore,
   heartbeatTaskRun,
   loadTaskRun,
   runAgent,
@@ -20,6 +17,7 @@ import {
   type SessionEventRecord,
   type ToolCallStateTransition,
 } from '@los/agent';
+import { ensureAllAgentStores } from '@los/agent/ensure-all-stores';
 import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
@@ -65,7 +63,7 @@ export async function startExecutor() {
 
   await initDb(config.databaseUrl);
 
-  // Run ordered migrations before ensure*Store. Executor nodes (especially
+  // Run ordered migrations before ensureAllStores. Executor nodes (especially
   // remote ones with their own DB) must not rely on the gateway's
   // ensureAllStores — file_sync_* tables have no ensure*Store, so migration is
   // their only source. Idempotent; mirrors gateway startup. See
@@ -78,10 +76,13 @@ export async function startExecutor() {
     log.warn(`Executor migration errors: ${migrateResult.errors.join('; ')}`);
   }
 
-  await ensureExecutorNodeStore();
-  await ensureArtifactStore();
-  // The executor runs agent tasks (runAgentOnExecutor) → needs task_runs.
-  await ensureTaskRunStore();
+  // ensureAllAgentStores covers ALL agent-owned tables (27 stores).
+  // This closes the bootstrap blind spot: remote executor nodes previously
+  // only ensured 3 tables (executor_node, artifact, task_runs), leaving
+  // 24 tables missing. Now remote nodes have a full schema just like the
+  // gateway, which is necessary because runAgent() touches run_specs,
+  // session_events, tool_call_states, verification_records, etc.
+  await ensureAllAgentStores();
 
   const nodeId = config.executor.nodeId ?? `node-${randomUUID()}`;
   const publicUrl = config.executor.nodeUrl ?? `http://${host}:${port}`;

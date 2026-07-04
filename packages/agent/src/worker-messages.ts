@@ -17,21 +17,22 @@
  *   - Messages are append-only (no update, no delete). They form an event-sourced
  *     audit trail of worker↔coordinator interaction.
  *
- * Wiring status (as of 2026-07-03):
- *   - `worker_done` is the only type wired to a production caller: `runClaimedAgentGraphTask`
- *     in scheduler.ts emits it at the succeeded/failed/cancelled/error/recoveryFollowUp exits.
- *   - `heartbeat` is emitted from `task-heartbeat.ts` via `sendHeartbeat()` when a
+ * Wiring status (as of 2026-07-04):
+ *   - `worker_done` → `runClaimedAgentGraphTask` in scheduler.ts emits it at the
+ *     succeeded / failed / cancelled / error / recoveryFollowUp exits.
+ *   - `heartbeat` → `sendHeartbeat()` called from `task-heartbeat.ts` when a
  *     dispatch_id is available, alongside the existing DB lease extension.
- *   - `ask` is emitted by the `ask_coordinator` built-in tool (tools/builtin/worker-ask-tools.ts);
- *     the worker then blocks the task_run. The coordinator answers via
- *     `recordWorkerAnswer()` (called by the gateway POST /runs/:id/answer route).
- *     **Resume is not automatic**: claimBlockedTaskRunsWithAnswer picks up
- *     answered blocked tasks only when runAgentTaskGraphSerial runs and finds
- *     no ready tasks — los has no resident scheduler tick and the answer route's
- *     PG NOTIFY has no LISTEN subscriber yet. Wiring a wake (LISTEN worker_answer
- *     or a resident tick) is tracked as a follow-up.
- *   - `escalation` is emitted by the `escalate` built-in tool; the worker blocks the
- *     task_run and the operator intervenes via the existing recover/steering flow.
+ *   - `ask` → emitted by the `ask_coordinator` built-in tool (worker-ask-tools.ts);
+ *     the worker blocks the task_run. The operator answers via `recordWorkerAnswer()`
+ *     (called by gateway POST /runs/:id/answer). Resume is triggered via:
+ *     (a) fire-and-forget `resumeAnsweredAsksForRunSpec()` in the answer route,
+ *     (b) `resumeBlockedTaskRunsWithAnswers()` in the serial scheduler tick when
+ *     no ready tasks are available,
+ *     (c) PG NOTIFY `worker_answer` listener for multi-gateway mesh (server-maintenance.ts).
+ *   - `escalation` → emitted by the `escalate` built-in tool (worker-ask-tools.ts);
+ *     the worker blocks the task_run; the operator intervenes via the existing
+ *     recover/steering flow.
+ *   - All four message types are wired to production callers.
  *
  * Append-only exception: the `ask` row's `payload.answer` and `payload.consumed_at`
  * fields are mutable — `recordWorkerAnswer()` UPDATEs the answer field, and
