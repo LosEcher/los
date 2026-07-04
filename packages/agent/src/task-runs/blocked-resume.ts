@@ -141,3 +141,59 @@ export async function claimBlockedTaskRunsWithAnswer(
   });
   return result ?? [];
 }
+
+/**
+ * Recover asks whose consumed_at was set but no follow-up task_run was created.
+ *
+ * Crash-window scenario: claimBlockedTaskRunsWithAnswer sets consumed_at in its
+ * CTE, then the process crashes before resumeBlockedTaskRunsWithAnswers calls
+ * runScheduledAgentTask (which internally calls createTaskRun). The consumed_at
+ * timestamp is > 0, so the ask is "already claimed" — but the original task_run
+ * is still blocked (or has been cancelled but no new task_run exists). Without
+ * recovery, the ask is permanently orphaned.
+ *
+ * Recovery strategy: find ask messages with consumed_at set > 60s ago and no
+ * task_run created AFTER the consumed_at timestamp for the same dispatch_id.
+ * Reset consumed_at to NULL so the next claimBlockedTaskRunsWithAnswer tick
+ * re-claims it. The 60s grace window avoids racing with an in-flight resume
+ * that has claimed but hasn't yet created the new task_run.
+ *
+ * Concurrency: serialized by advisory lock to prevent double-recovery.
+ */
+export async function recoverOrphanedConsumedAsks(): Promise<number> {
+  await ensureTaskRunStore();
+  const backend = await resolveCoordinationBackend();
+  const result = await backend.lock.withLock('task-run-blocked-resume', async () => {
+    const db = getDb();
+    const rows = await db.query<{ ask_message_id: string }>(
+      /* sql */ `
+      WITH orphaned AS (
+        SELECT wm.id AS ask_message_id, wm.dispatch_id,
+               (wm.payload_json->>'consumed_at')::timestamptz AS consumed_at
+          FROM worker_messages wm
+          WHERE wm.type = 'ask'
+            AND wm.payload_json->>'answer' IS NOT NULL
+            AND wm.payload_json->>'consumed_at' IS NOT NULL
+            -- Grace window: only recover if consumed > 60s ago
+            AND (wm.payload_json->>'consumed_at')::timestamptz < now() - interval '60 seconds'
+            -- No task_run created for this dispatch AFTER consumed_at.
+            -- task_runs.created_at > consumed_at would mean a resume DID succeed.
+            -- If NOT EXISTS any such row, the resume never happened → orphaned.
+            AND NOT EXISTS (
+              SELECT 1 FROM task_runs tr2, task_attempts ta2
+              WHERE ta2.id = wm.dispatch_id
+                AND tr2.id = ta2.task_run_id
+                AND tr2.created_at > (wm.payload_json->>'consumed_at')::timestamptz
+            )
+      )
+      UPDATE worker_messages wm
+        SET payload_json = jsonb_set(payload_json, '{consumed_at}', 'null'::jsonb)
+        FROM orphaned o
+        WHERE wm.id = o.ask_message_id
+      RETURNING o.ask_message_id
+      `,
+    );
+    return rows.rows.length;
+  });
+  return result ?? 0;
+}

@@ -15,7 +15,7 @@ import {
   type AgentTaskStatus,
 } from '../agent-task-graph.js';
 import { loadRunSpec } from '../run-specs.js';
-import { claimBlockedTaskRunsWithAnswer } from '../task-runs/blocked-resume.js';
+import { claimBlockedTaskRunsWithAnswer, recoverOrphanedConsumedAsks } from '../task-runs/blocked-resume.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
 import { buildResumeMessage } from './resume-messages.js';
 import type {
@@ -56,6 +56,11 @@ export async function resumeBlockedTaskRunsWithAnswers(
   input: RunAgentTaskGraphSerialInput,
   limit: number,
 ): Promise<RunAgentTaskGraphSerialResult['executedTasks']> {
+  // 0. recover orphaned consumed asks (crash window: consumed_at set but no
+  //    follow-up task_run created). Best-effort: if recovery fails, the next
+  //    tick re-attempts.
+  void recoverOrphanedConsumedAsks().catch(() => undefined);
+
   const claimed = await claimBlockedTaskRunsWithAnswer({ graphId: input.graphId, limit });
   if (claimed.length === 0) return [];
 
