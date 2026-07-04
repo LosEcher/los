@@ -10,9 +10,11 @@ import {
   parseSelfCheckResponse,
   shouldRunSelfCheck,
   summarizeAgentContext,
+  buildReviewPacket,
   CONFIDENCE_GATE_THRESHOLD,
   type SelfCheckInput,
   type SelfCheckResult,
+  type ReviewPacket,
 } from './self-check.js';
 import type { AgentResult } from './loop.js';
 import type { Provider, ProviderResponse, Message, ToolDef } from './providers/types.js';
@@ -310,7 +312,85 @@ test('summarizeAgentContext produces non-empty summary', () => {
   const summary = summarizeAgentContext(result);
   assert.ok(summary.includes('1 turns executed'));
   assert.ok(summary.includes('list_dir'));
-  assert.ok(summary.includes('a.ts'));
+});
+
+// ── Unit: buildReviewPacket ──
+
+function makeTurn(loopCount: number, calls: Array<{ name: string; args: Record<string, unknown> }>): AgentResult['turns'][number] {
+  return {
+    loopCount,
+    text: `turn ${loopCount}`,
+    toolCalls: calls.map((c, i) => ({
+      id: `c${loopCount}-${i}`,
+      type: 'function' as const,
+      function: { name: c.name, arguments: JSON.stringify(c.args) },
+    })),
+    toolResults: calls.map(() => 'ok'),
+  };
+}
+
+test('buildReviewPacket extracts filesRead and filesWritten from tool calls', () => {
+  const result: AgentResult = {
+    text: 'done',
+    turns: [
+      makeTurn(1, [
+        { name: 'read_file', args: { path: 'src/a.ts' } },
+        { name: 'read_file', args: { path: 'src/b.ts' } },
+      ]),
+      makeTurn(2, [
+        { name: 'write_file', args: { filePath: 'src/a.ts' } },
+        { name: 'edit_file', args: { file_path: 'src/c.ts' } },
+      ]),
+    ],
+    loopCount: 2,
+    totalTokens: { prompt: 200, completion: 100 },
+    messages: [],
+  };
+
+  const packet = buildReviewPacket(result);
+  assert.equal(packet.filesRead.length, 2, 'should find 2 files read');
+  assert.ok(packet.filesRead.includes('src/a.ts'));
+  assert.ok(packet.filesRead.includes('src/b.ts'));
+  assert.equal(packet.filesWritten.length, 2, 'should find 2 files written');
+  assert.ok(packet.filesWritten.includes('src/a.ts'));
+  assert.ok(packet.filesWritten.includes('src/c.ts'));
+  assert.equal(packet.totalToolCalls, 4);
+  assert.ok(packet.summary.includes('2 turns executed'));
+  assert.ok(packet.summary.includes('src/a.ts'));
+});
+
+test('buildReviewPacket deduplicates repeated file paths', () => {
+  const result: AgentResult = {
+    text: 'done',
+    turns: [
+      makeTurn(1, [
+        { name: 'read_file', args: { path: 'src/a.ts' } },
+        { name: 'read_file', args: { path: 'src/a.ts' } },
+      ]),
+    ],
+    loopCount: 1,
+    totalTokens: { prompt: 100, completion: 50 },
+    messages: [],
+  };
+
+  const packet = buildReviewPacket(result);
+  assert.equal(packet.filesRead.length, 1, 'duplicate paths deduped');
+});
+
+test('buildReviewPacket handles empty turns', () => {
+  const result: AgentResult = {
+    text: 'nothing to do',
+    turns: [],
+    loopCount: 0,
+    totalTokens: { prompt: 10, completion: 5 },
+    messages: [],
+  };
+
+  const packet = buildReviewPacket(result);
+  assert.equal(packet.filesRead.length, 0);
+  assert.equal(packet.filesWritten.length, 0);
+  assert.equal(packet.totalToolCalls, 0);
+  assert.ok(packet.summary.includes('0 turns'));
 });
 
 // ── Unit: provider failure produces safe result ──

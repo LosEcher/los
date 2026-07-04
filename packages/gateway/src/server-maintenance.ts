@@ -6,8 +6,9 @@
 import type { FastifyInstance } from 'fastify';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
-import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake } from '@los/agent';
+import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake, resumeAnsweredAsksForRunSpec } from '@los/agent';
 import { listExecutorNodes } from '@los/agent/executor-nodes';
+import { resolveCoordinationBackend } from '@los/agent/coordination';
 
 const log = getLogger('gateway');
 
@@ -115,6 +116,40 @@ export function registerServerMaintenance(
       })
       .catch((err) => log.warn(`Governance wake setup failed: ${err instanceof Error ? err.message : String(err)}`));
   }, 30_000);
+
+  // ── Worker answer subscriber (PG NOTIFY listener for multi-gateway mesh) ──
+  // The POST /runs/:id/answer route writes the answer + fire-and-forgets
+  // resumeAnsweredAsksForRunSpec directly (active trigger in single-gateway).
+  // This NOTIFY listener catches answers from other gateway processes in a mesh:
+  // the answering gateway publishes 'worker_answer', and every gateway picks
+  // it up to resume blocked tasks in parallel. Falls back to 30s poll interval
+  // if PG LISTEN is unavailable.
+  let unsubWorkerAnswer: (() => void) | null = null;
+  const workerAnswerTimeout = setTimeout(() => {
+    resolveCoordinationBackend().then(backend => {
+      const sub = backend.notify.subscribeWithFallback(
+        'worker_answer',
+        (payload: unknown) => {
+          try {
+            const p = payload as Record<string, unknown>;
+            const runSpecId = typeof p?.runSpecId === 'string' ? p.runSpecId : null;
+            if (runSpecId) {
+              void resumeAnsweredAsksForRunSpec(runSpecId).catch(() => undefined);
+            }
+          } catch {
+            // best-effort: malformed payload is logged at NOTIFY level by pg-backend
+          }
+        },
+        30_000, // poll every 30s as fallback
+      );
+      unsubWorkerAnswer = sub.unsubscribe;
+      log.info('Worker answer: LISTEN on worker_answer channel active');
+    }).catch((err) => log.warn(`Worker answer NOTIFY setup failed: ${err instanceof Error ? err.message : String(err)}`));
+  }, 60_000);
+  app.addHook('onClose', async () => {
+    clearTimeout(workerAnswerTimeout);
+    if (unsubWorkerAnswer) { unsubWorkerAnswer(); unsubWorkerAnswer = null; }
+  });
 
   // ── File-sync orchestration trigger (every 5 minutes) ─────────
   const agentKey = opts?.executorAgentKey;

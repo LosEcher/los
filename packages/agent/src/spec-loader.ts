@@ -32,6 +32,14 @@ export interface LoadedSpec {
   content: string;
 }
 
+export interface LoadSpecsOptions {
+  /** Reduce content for review contexts. 'full' (default) returns entire spec;
+   *  'review' returns only the checklist + quality-check sections, omitting
+   *  detailed coding guidelines that the reviewer doesn't need to re-read.
+   *  Inspired by Superpowers 6 terse reviewer contract (~41% output reduction). */
+  mode?: 'full' | 'review';
+}
+
 function defaultWorkspaceRoot(): string {
   // Resolve from LOS_DEFAULT_WORKSPACE_ROOT env var first, then fall back
   // to the build-time relative path (los monorepo root).
@@ -97,9 +105,18 @@ export function resolveSpecLayer(filePath: string, workspaceRoot?: string): Spec
  *
  * Deduplicates by spec path — each spec is loaded at most once.
  * Returns specs sorted by package name for stable context injection.
+ *
+ * In 'review' mode, content is trimmed to only the checklist and quality-check
+ * sections, omitting detailed coding guidelines. This keeps the reviewer prompt
+ * tight without losing the guardrails.
  */
-export function loadSpecsForFiles(filePaths: string[], workspaceRoot?: string): LoadedSpec[] {
+export function loadSpecsForFiles(
+  filePaths: string[],
+  workspaceRoot?: string,
+  opts?: LoadSpecsOptions,
+): LoadedSpec[] {
   const wsRoot = workspaceRoot ?? defaultWorkspaceRoot();
+  const mode = opts?.mode ?? 'full';
   const seen = new Set<string>();
   const loaded: LoadedSpec[] = [];
 
@@ -111,7 +128,10 @@ export function loadSpecsForFiles(filePaths: string[], workspaceRoot?: string): 
     if (!existsSync(layer.path)) continue;
 
     try {
-      const content = readFileSync(layer.path, 'utf8');
+      let content = readFileSync(layer.path, 'utf8');
+      if (mode === 'review') {
+        content = trimSpecForReview(content);
+      }
       const relativePath = relative(wsRoot, layer.path);
       loaded.push({
         pkg: layer.pkg,
@@ -271,4 +291,43 @@ function specPath(pkg: string, layer: string | undefined, wsRoot: string): strin
   if (layer) parts.push(layer);
   parts.push('index.md');
   return resolve(...parts);
+}
+
+/**
+ * Trim a spec's markdown content to review-relevant sections only:
+ *  - ## Pre-Development Checklist
+ *  - ## Quality Check
+ *
+ * Coding guidelines are skipped — they're for the implementer, not the reviewer.
+ * If neither section is found, returns the first 400 chars as a fallback.
+ * Falls back to full content if the spec has no recognizable headings.
+ */
+export function trimSpecForReview(content: string): string {
+  // Try to extract checklist + quality sections
+  const checklist = extractSection(content, 'Pre-Development Checklist');
+  const quality = extractSection(content, 'Quality Check');
+
+  if (checklist || quality) {
+    const parts: string[] = [];
+    if (checklist) parts.push(`## Pre-Development Checklist\n\n${checklist}`);
+    if (quality) parts.push(`## Quality Check\n\n${quality}`);
+    return parts.join('\n\n');
+  }
+
+  // If no recognized sections, return the first 400 chars
+  const lines = content.split('\n').slice(0, 12).join('\n');
+  return lines.length < content.length ? `${lines}\n\n[... review mode: spec trimmed]` : content;
+}
+
+/** Extract a named ## section from markdown. Returns body text without the heading. */
+function extractSection(content: string, heading: string): string | null {
+  // Match from "## Heading" through to the next "## " or end of string.
+  const regex = new RegExp(`## ${escapeRegExp(heading)}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`, '');
+  const match = content.match(regex);
+  if (!match || !match[1]) return null;
+  return match[1].trim();
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

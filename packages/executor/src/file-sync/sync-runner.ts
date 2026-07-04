@@ -12,6 +12,7 @@ import {
   batchDone,
   getQueueStats,
   reapStaleTransferring,
+  heartbeatTransferring,
   pruneCompletedItems,
 } from './store-queue.js';
 
@@ -106,6 +107,10 @@ async function runCore(options: {
     for (const item of items) {
       const fullPath = resolve(resolvedRoot, item.filePath);
       try {
+        // Refresh heartbeat so long transfers are not reaped by
+        // reapStaleTransferring while the sync cycle is still active.
+        await heartbeatTransferring(item.queueId);
+
         // Quick size check on disk
         const stat = statSync(fullPath);
         const currentSize = stat.size;

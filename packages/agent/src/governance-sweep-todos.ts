@@ -241,6 +241,10 @@ export async function createTodosFromFindings(
       const { createFileSizeTodos } = await import('./governance-sweeper-file-size-todos.js');
       created += await createFileSizeTodos(job, summary);
     }
+    if (job.jobType === 'code_topology_audit') {
+      const { createCodeTopologyTodos } = await import('./governance-sweep-code-topology-todos.js');
+      created += await createCodeTopologyTodos(job, summary);
+    }
   } catch (err) {
     log.warn(`Failed to create findings todo for ${job.jobType}: ${err instanceof Error ? err.message : String(err)}`);
   }

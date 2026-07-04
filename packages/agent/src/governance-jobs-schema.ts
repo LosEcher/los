@@ -231,4 +231,11 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
       escalationCadence: 'never',
     },
   },
+  {
+    jobType: 'code_topology_audit',
+    cadence: 'weekly',
+    dedupeKey: 'gov-job-code-topology',
+    config: { targetRepo: '/Users/echerlos/syncthing/project/lot2extension/go-backend', projectName: 'lot2extension' },
+    initialStaggerMs: 210 * 60 * 1000,
+  },
 ];

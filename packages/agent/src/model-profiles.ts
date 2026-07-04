@@ -1,3 +1,5 @@
+import { resolveProviderDefaults } from './provider-defaults.js';
+
 export type ProviderProtocol = 'openai' | 'anthropic';
 export type ApiShape = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
 export type ToolCallRepairMode = 'none' | 'json-loose';
@@ -262,11 +264,12 @@ export function resolveModelProfile(
   provider: string,
   options: ResolveModelProfileOptions = {},
 ): ModelProfile {
-  const base = MODEL_PROFILES[provider] ?? openAICompatibleProfile(provider, 'https://api.openai.com/v1', options.defaultModel ?? 'gpt-4o');
+  const fallback = resolveProviderDefaults(provider);
+  const base = MODEL_PROFILES[provider] ?? openAICompatibleProfile(provider, fallback.baseUrl, options.defaultModel ?? fallback.defaultModel);
   const resolved = {
     ...base,
     baseUrl: options.baseUrl ?? base.baseUrl,
-    model: options.model ?? base.model ?? options.defaultModel ?? 'gpt-4o',
+    model: options.model ?? base.model ?? options.defaultModel ?? fallback.defaultModel,
     apiShape: options.apiShape ?? base.apiShape,
   };
   return {

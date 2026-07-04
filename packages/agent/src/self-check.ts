@@ -257,14 +257,85 @@ export function shouldRunSelfCheck(
 }
 
 export function summarizeAgentContext(result: AgentResult): string {
+  return buildReviewPacket(result).summary;
+}
+
+export interface ReviewPacket {
+  /** Human-readable summary for the review prompt. */
+  summary: string;
+  /** Files that were read during the session (from read_file / search tools). */
+  filesRead: string[];
+  /** Files that were written or modified (from write_file / edit_file / apply_patch). */
+  filesWritten: string[];
+  /** Total number of tool calls across all turns. */
+  totalToolCalls: number;
+}
+
+/**
+ * Pre-bake a review packet from the agent's tool calls so the reviewer
+ * doesn't need to run git/grep to discover what happened.
+ *
+ * Inspired by Superpowers 6: pre-generating the review "packet" handed to
+ * reviewers cut reviewer token spend by ~10%. The reviewer prompt already
+ * receives the full agent output text; this adds the mechanical context
+ * (file list, tool call counts) that reviewers would otherwise discover
+ * by running git commands. The extraction is zero-cost — it walks tool
+ * call metadata already in memory.
+ */
+export function buildReviewPacket(result: AgentResult): ReviewPacket {
+  const filesRead = new Set<string>();
+  const filesWritten = new Set<string>();
+  let totalToolCalls = 0;
+
+  const READ_TOOLS = new Set(['read_file', 'read_many_files', 'grep', 'search_code', 'list_directory']);
+  const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'apply_patch', 'preview_patch', 'replace_in_file']);
+
+  for (const turn of result.turns) {
+    totalToolCalls += turn.toolCalls.length;
+    for (const tc of turn.toolCalls) {
+      const name = tc.function.name;
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(tc.function.arguments); } catch { /* best-effort */ }
+
+      const path = typeof args.filePath === 'string' ? args.filePath
+        : typeof args.path === 'string' ? args.path
+        : typeof args.file_path === 'string' ? args.file_path
+        : typeof args.target_file === 'string' ? args.target_file
+        : undefined;
+
+      if (path) {
+        if (WRITE_TOOLS.has(name)) filesWritten.add(path);
+        if (READ_TOOLS.has(name)) filesRead.add(path);
+      }
+
+      // Also extract from directory read results
+      if (name === 'list_directory' && typeof args.path === 'string') {
+        filesRead.add(args.path + (args.path.endsWith('/') ? '' : '/'));
+      }
+    }
+  }
+
   const parts: string[] = [];
-  parts.push(`${result.loopCount} turns executed`);
+  parts.push(`${result.loopCount} turns executed, ${totalToolCalls} tool calls`);
+  if (filesRead.size > 0) {
+    parts.push(`Files read (${filesRead.size}):\n  ${[...filesRead].sort().join('\n  ')}`);
+  }
+  if (filesWritten.size > 0) {
+    parts.push(`Files written/modified (${filesWritten.size}):\n  ${[...filesWritten].sort().join('\n  ')}`);
+  }
+
+  // Append per-turn summary (compact: tool names only, no result content)
   for (const turn of result.turns) {
     const toolNames = turn.toolCalls.map(tc => tc.function.name);
-    const toolResults = turn.toolResults.map(r => r.length > 100 ? r.slice(0, 100) + '...' : r);
     parts.push(
-      `Turn ${turn.loopCount}: tools=[${toolNames.join(', ') || 'none'}] results=[${toolResults.join('; ') || 'none'}]`,
+      `Turn ${turn.loopCount}: tools=[${toolNames.join(', ') || 'none'}]`,
     );
   }
-  return parts.join('\n');
+
+  return {
+    summary: parts.join('\n'),
+    filesRead: [...filesRead].sort(),
+    filesWritten: [...filesWritten].sort(),
+    totalToolCalls,
+  };
 }

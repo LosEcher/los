@@ -205,8 +205,8 @@ test('governance jobs: runGovernanceSweep dry-run does not mutate', async () => 
     // Dry run
     const result = await runGovernanceSweep({ dryRun: true });
     assert.equal(result.dryRun, true);
-    assert.equal(result.jobsSkipped, 0); // All 13 should be due (never run)
-    assert.equal(result.jobsRun, 13);
+    assert.equal(result.jobsSkipped, 0); // All 14 should be due (never run)
+    assert.equal(result.jobsRun, 14);
     assert.equal(result.findingsCreated, 0); // No todos in dry-run
 
     // Verify no mutations
