@@ -5,7 +5,7 @@
  */
 
 import { transitionExecutionState } from '../execution-store.js';
-import { loadAgentTask } from '../agent-task-graph.js';
+import { listAgentTasksForRunSpec, loadAgentTask } from '../agent-task-graph.js';
 import { claimBlockedTaskRunsWithAnswer } from '../task-runs/blocked-resume.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
 import { buildResumeMessage } from './resume-messages.js';
@@ -40,6 +40,17 @@ import type {
  *     task_attempts row, so a re-blocked resumed task writes worker_messages
  *     with dispatch_id=NULL and is not reclaimable. Fix requires resume to
  *     allocate an attempt id + createAgentTaskAttempt.
+ *   - **Config loss on resume**: resumeAnsweredAsksForRunSpec builds a minimal
+ *     {graphId, runSpecId} input; executor/sandboxMode/mcpServers/allowedTools/
+ *     identity are undefined, so resume runs on the gateway-local executor with
+ *     default workspace-write sandbox even if the original task ran on a remote
+ *     sandbox executor. Fix requires restoring these from run_spec/task_run
+ *     metadata.
+ *   - **Crash window**: if the gateway restarts between claimBlockedTaskRunsWithAnswer
+ *     (which sets consumed_at) and createTaskRun, the answer is marked consumed
+ *     but no new task_run is created — with no LISTEN/retry tick the answer is
+ *     orphaned. Idempotent resume audit (scan consumed_at set with no matching
+ *     new task_run) is a follow-up.
  */
 export async function resumeBlockedTaskRunsWithAnswers(
   input: RunAgentTaskGraphSerialInput,
@@ -87,7 +98,7 @@ export async function resumeBlockedTaskRunsWithAnswers(
       nodeId: input.nodeId,
       requestId: input.requestId,
       traceId: input.traceId,
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot: taskRun.workspaceRoot ?? input.workspaceRoot,
       toolMode: input.toolMode,
       sandboxMode: input.sandboxMode,
       provider: provider ?? input.provider,
@@ -124,4 +135,29 @@ export async function resumeBlockedTaskRunsWithAnswers(
     });
   }
   return results;
+}
+
+/**
+ * Resume answered `ask`-blocked tasks for a run spec. Intended as the trigger
+ * that closes the ask loop: the gateway POST /runs/:id/answer route writes the
+ * answer, then calls this (fire-and-forget) to resume the blocked task without
+ * waiting for an external runAgentTaskGraphSerial invocation.
+ *
+ * Looks up the graph_id from the run spec's agent_tasks, then delegates to
+ * resumeBlockedTaskRunsWithAnswers with a minimal input (sessionId/workspaceRoot
+ * come from each claimed task_run, not the input). Returns the count resumed.
+ */
+export async function resumeAnsweredAsksForRunSpec(
+  runSpecId: string,
+  limit = 10,
+): Promise<{ resumed: number }> {
+  const tasks = await listAgentTasksForRunSpec(runSpecId);
+  // Pick the graph of a BLOCKED task (not tasks[0], which may be a succeeded
+  // task from an older graph — resuming that graph's empty claim is a wasted
+  // locked round-trip and misses the blocked task on a newer graph).
+  const blockedTask = tasks.find(t => t.status === 'blocked');
+  const graphId = blockedTask?.graphId;
+  if (!graphId) return { resumed: 0 };
+  const results = await resumeBlockedTaskRunsWithAnswers({ graphId, runSpecId } as RunAgentTaskGraphSerialInput, limit);
+  return { resumed: results.length };
 }

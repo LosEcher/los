@@ -16,6 +16,7 @@
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState } from './loop.js';
 export { getDefaultSystemPrompt } from './loop/message-builder.js';
 export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
+export { resumeAnsweredAsksForRunSpec } from './scheduler/resume-tasks.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
 export { MODEL_PROFILES, calculateCost, estimateCost, resolveModelCapabilityProfile, resolveModelProfile, summarizeModelProfile, type ApiShape, type CachePolicy, type CostEstimate, type ModelCapabilityProfile, type ModelExecutionSummary, type ModelPricing, type ModelProfile, type ProviderProtocol, type ResolveModelProfileOptions, type SessionAffinity, type ToolCallRepairMode, type TransportHint, type VisionCapabilityMode } from './model-profiles.js';
