@@ -14,6 +14,7 @@ import {
   listAgentTaskAttempts,
   type AgentTaskStatus,
 } from '../agent-task-graph.js';
+import { loadRunSpec } from '../run-specs.js';
 import { claimBlockedTaskRunsWithAnswer } from '../task-runs/blocked-resume.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
 import { buildResumeMessage } from './resume-messages.js';
@@ -45,12 +46,6 @@ import type {
  *   - **Trigger**: resumeAnsweredAsksForRunSpec is the active trigger in a
  *     single-gateway deployment. A LISTEN worker_answer subscriber is tracked
  *     for future multi-gateway mesh.
- *   - **Config loss on resume**: resumeAnsweredAsksForRunSpec builds a minimal
- *     {graphId, runSpecId} input; executor/sandboxMode/mcpServers/allowedTools/
- *     identity are undefined, so resume runs on the gateway-local executor with
- *     default workspace-write sandbox even if the original task ran on a remote
- *     sandbox executor. Fix requires restoring these from run_spec/task_run
- *     metadata.
  *   - **Crash window**: if the gateway restarts between claimBlockedTaskRunsWithAnswer
  *     (which sets consumed_at) and createTaskRun, the answer is marked consumed
  *     but no new task_run is created — with no LISTEN/retry tick the answer is
@@ -277,8 +272,10 @@ export async function resumeBlockedTaskRunsWithAnswers(
  * waiting for an external runAgentTaskGraphSerial invocation.
  *
  * Looks up the graph_id from the run spec's agent_tasks, then delegates to
- * resumeBlockedTaskRunsWithAnswers with a minimal input (sessionId/workspaceRoot
- * come from each claimed task_run, not the input). Returns the count resumed.
+ * resumeBlockedTaskRunsWithAnswers. Loads run_spec to recover config that
+ * resumeAnsweredAsksForRunSpec's caller cannot supply: allowedTools, mcpServers,
+ * sandboxMode (from toolMode mapping), executor, and identity.
+ * Returns the count resumed.
  */
 export async function resumeAnsweredAsksForRunSpec(
   runSpecId: string,
@@ -291,6 +288,33 @@ export async function resumeAnsweredAsksForRunSpec(
   const blockedTask = tasks.find(t => t.status === 'blocked');
   const graphId = blockedTask?.graphId;
   if (!graphId) return { resumed: 0 };
-  const results = await resumeBlockedTaskRunsWithAnswers({ graphId, runSpecId } as RunAgentTaskGraphSerialInput, limit);
+
+  // Recover config from the run_spec so the resumed execution keeps the
+  // same sandbox, tools, MCP servers, executor, and identity as the original.
+  // loadRunSpec may return null if the run_spec was deleted — resume is
+  // best-effort; the per-item task_run fields (workspaceRoot, provider, model)
+  // already provide a usable fallback.
+  const runSpec = await loadRunSpec(runSpecId).catch(() => null);
+  const input: RunAgentTaskGraphSerialInput = {
+    graphId,
+    runSpecId,
+    nodeId: runSpec?.nodeId,
+    sessionId: tasks[0]?.sessionId,
+    tenantId: tasks[0]?.metadata?.['tenantId'] as string | undefined,
+    projectId: tasks[0]?.metadata?.['projectId'] as string | undefined,
+  };
+  if (runSpec) {
+    input.allowedTools = runSpec.allowedTools.length > 0 ? runSpec.allowedTools : undefined;
+    input.mcpServers = runSpec.mcpServers.length > 0 ? runSpec.mcpServers : undefined;
+    // Map run_spec.toolMode to sandboxMode for backward compat:
+    // 'read-only' → sandboxMode:'readonly', otherwise workspace-write default.
+    if (runSpec.toolMode === 'read-only') input.sandboxMode = 'readonly';
+    // Identity: carry name only (no level override) — the resumed agent gets
+    // the same identity as the original run_spec's agent.
+    if (runSpec.nodeId) {
+      input.identity = { name: runSpec.nodeId };
+    }
+  }
+  const results = await resumeBlockedTaskRunsWithAnswers(input, limit);
   return { resumed: results.length };
 }
