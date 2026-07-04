@@ -15,6 +15,7 @@ import {
   readRunStateProjection,
   readToolCallRecoveryForRunSpec,
   recordWorkerAnswer,
+  resumeAnsweredAsksForRunSpec,
   runVerificationRecordsForRunSpec,
 } from '@los/agent';
 import { getDb } from '@los/infra/db';
@@ -25,6 +26,9 @@ import {
   normalizeBoundedInteger,
   normalizeOptionalNonNegativeInteger,
 } from '../server-helpers.js';
+import { getLogger } from '@los/infra/logger';
+
+const log = getLogger('run-routes');
 
 type StreamReplayItem =
   | { kind: 'stream'; id: number; eventType: string; turn: number; payload: Record<string, unknown>; createdAt: string }
@@ -149,14 +153,11 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
   // Answer a worker `ask` message. The operator UI surfaces a worker.ask session
   // event (emitted by the ask_coordinator tool); this route writes the answer onto
-  // the ask row (recordWorkerAnswer) and appends a worker.answered session event
-  // for the audit trail.
-  //
-  // Resume is NOT auto-triggered: los has no resident scheduler tick and nothing
-  // LISTENs on 'worker_answer' yet (see scheduler.ts resumeBlockedTaskRunsWithAnswers
-  // follow-up note). The NOTIFY is emitted for a future LISTEN subscriber; today
-  // resume happens on the next runAgentTaskGraphSerial invocation that finds no
-  // ready tasks. Wiring a wake is a separate intent.
+  // the ask row (recordWorkerAnswer), appends a worker.answered session event for
+  // the audit trail, and fire-and-forget-triggers resumeAnsweredAsksForRunSpec so
+  // the blocked task is resumed without waiting for an external
+  // runAgentTaskGraphSerial invocation. The PG NOTIFY is kept for future LISTEN
+  // subscribers (e.g. a multi-gateway mesh where another process owns the graph).
   app.post('/runs/:id/answer', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
@@ -185,12 +186,24 @@ export function registerRunRoutes(app: FastifyInstance): void {
       },
     }).catch(() => undefined);
 
-    // Wake the scheduler: a blocked task for this run spec may now be resumable.
+    // Fire-and-forget: resume the blocked task(s) for this run spec. Not awaited
+    // so the operator's POST returns immediately; resume runs in the background.
+    // Errors are logged but do not fail the answer write — the answer is already
+    // persisted. There is no resident retry tick today (follow-up), so a failed
+    // resume leaves the task blocked until the next runAgentTaskGraphSerial
+    // invocation; the log line is the operator's signal to retry manually.
+    void resumeAnsweredAsksForRunSpec(id).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn('resumeAnsweredAsksForRunSpec failed', { runSpecId: id, messageId, err: msg });
+    });
+
+    // PG NOTIFY for future multi-process LISTEN subscribers (no-op today; the
+    // direct call above is the active trigger in a single-gateway deployment).
     try {
       const db = getDb();
       await db.notify('worker_answer', JSON.stringify({ runSpecId: id, messageId }));
     } catch {
-      // NOTIFY best-effort — scheduler also polls on its normal tick.
+      // NOTIFY best-effort.
     }
 
     return { ok: true, messageId, answer };
