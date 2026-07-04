@@ -68,7 +68,7 @@ export async function compatCommand(globalArgs: string[], argv: string[]): Promi
   const summaries: CompatibilityRunSummary[] = [];
   for (const spec of specs) {
     if (!json) console.log(`[compat:start] ${spec.id}`);
-    const summary = await executeCompatibilitySpec(gateway, spec, timeoutMs);
+    const summary = await executeCompatibilitySpec(gateway, spec, timeoutMs, parsed);
     summaries.push(summary);
     await recordCompatibilityEvidence(summary, json);
     renderCompatibilitySummary(summary, json);
@@ -96,6 +96,7 @@ async function executeCompatibilitySpec(
   gateway: string,
   spec: CompatibilityRunSpec,
   timeoutMs: number | undefined,
+  parsed: ParsedArgs,
 ): Promise<CompatibilityRunSummary> {
   const payload: JsonRecord = {
     ...spec.request,
@@ -103,9 +104,12 @@ async function executeCompatibilitySpec(
   };
   removeUndefined(payload);
 
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = authToken(parsed);
+  if (token) headers['x-los-auth-token'] = token;
   const response = await fetch(`${gateway}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   if (!response.ok || !response.body) {
@@ -120,14 +124,17 @@ async function executeCompatibilitySpec(
   const liveSummary = summarizeCompatibilityEvents(spec, events);
   if (!liveSummary.sessionId) return liveSummary;
 
-  const ledgerEvents = await fetchSessionEvents(gateway, liveSummary.sessionId);
+  const ledgerEvents = await fetchSessionEvents(gateway, liveSummary.sessionId, parsed);
   return ledgerEvents.length > 0
     ? summarizeCompatibilityEvents(spec, ledgerEvents)
     : liveSummary;
 }
 
-async function fetchSessionEvents(gateway: string, sessionId: string): Promise<CompatibilitySseEvent[]> {
-  const response = await fetch(`${gateway}/sessions/${encodeURIComponent(sessionId)}/events?limit=1000`);
+async function fetchSessionEvents(gateway: string, sessionId: string, parsed: ParsedArgs): Promise<CompatibilitySseEvent[]> {
+  const headers: Record<string, string> = {};
+  const token = authToken(parsed);
+  if (token) headers['x-los-auth-token'] = token;
+  const response = await fetch(`${gateway}/sessions/${encodeURIComponent(sessionId)}/events?limit=1000`, { headers });
   if (!response.ok) return [];
 
   const body = await response.json() as unknown;
@@ -335,6 +342,10 @@ function removeUndefined(value: JsonRecord): void {
   for (const key of Object.keys(value)) {
     if (value[key] === undefined) delete value[key];
   }
+}
+
+function authToken(p: ParsedArgs): string | undefined {
+  return stringFlag(p, 'auth-token') ?? stringFlag(p, 't') ?? process.env.LOS_AUTH_TOKEN;
 }
 
 function indent(value: string): string {

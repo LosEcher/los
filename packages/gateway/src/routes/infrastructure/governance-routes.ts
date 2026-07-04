@@ -121,9 +121,23 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
   app.post('/governance/jobs/sweep', async (req, reply) => {
     try {
       const dryRun = (req.query as Record<string, string>)?.dryRun === 'true';
+      const force = (req.query as Record<string, string>)?.force === 'true';
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const jobType = typeof body.jobType === 'string' ? body.jobType : undefined;
+      const jobTypes = jobType ? [jobType] : undefined;
       await ensureGovernanceJobStore();
       await seedGovernanceJobs();
-      const result = await runGovernanceSweep({ dryRun });
+      // When force=true, set lastRunAt far in the past so cadence thresholds pass.
+      // This avoids the race with the background wake loop's claimNextDueJob.
+      if (force && jobType) {
+        const { updateGovernanceJob, listGovernanceJobs } = await import('@los/agent');
+        const jobs = await listGovernanceJobs({ jobType: jobType as any, status: 'active', limit: 5 });
+        const past = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        for (const job of jobs) {
+          await updateGovernanceJob(job.id, { lastRunAt: past }).catch(() => undefined);
+        }
+      }
+      const result = await runGovernanceSweep({ dryRun, jobTypes: jobTypes as any });
       return reply.send({
         dryRun: result.dryRun,
         jobsRun: result.jobsRun,

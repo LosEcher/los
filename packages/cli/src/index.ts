@@ -156,9 +156,12 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
     if (sessionId) console.error(`resume session: ${sessionId}`);
   }
 
+  const chatHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  const chatToken = authToken(parsed);
+  if (chatToken) chatHeaders['x-los-auth-token'] = chatToken;
   const response = await fetch(`${gateway}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: chatHeaders,
     body: JSON.stringify(payload),
   });
   if (!response.ok || !response.body) {
@@ -182,14 +185,14 @@ async function listCommand(
 ): Promise<void> {
   const parsed = mergeParsed(parseArgs(globalArgs), parseArgs(argv));
   const json = booleanFlag(parsed, 'json');
-  const value = await getJson(`${gatewayUrl(parsed)}${path}`);
+  const value = await getJson(`${gatewayUrl(parsed)}${path}`, parsed);
   render(value, json);
 }
 
 async function healthCommand(globalArgs: string[], argv: string[]): Promise<void> {
   const parsed = mergeParsed(parseArgs(globalArgs), parseArgs(argv));
   const json = booleanFlag(parsed, 'json');
-  const value = await getJson(`${gatewayUrl(parsed)}/health`);
+  const value = await getJson(`${gatewayUrl(parsed)}/health`, parsed);
   if (json) {
     console.log(JSON.stringify(value));
     return;
@@ -199,19 +202,33 @@ async function healthCommand(globalArgs: string[], argv: string[]): Promise<void
   console.log(`service=${String(record.service ?? 'los')}`);
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
+function authToken(p: ParsedArgs): string | undefined {
+  return stringFlag(p, 'auth-token') ?? stringFlag(p, 't') ?? process.env.LOS_AUTH_TOKEN;
+}
+
+async function getJson(url: string, parsed?: ParsedArgs): Promise<unknown> {
+  const headers: Record<string, string> = {};
+  if (parsed) {
+    const token = authToken(parsed);
+    if (token) headers['x-los-auth-token'] = token;
+  }
+  const response = await fetch(url, { headers });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
   }
   return await response.json() as JsonValue;
 }
 
-async function postJson(url: string, body: JsonRecord): Promise<unknown> {
+async function postJson(url: string, body: JsonRecord, parsed?: ParsedArgs): Promise<unknown> {
   removeUndefined(body);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (parsed) {
+    const token = authToken(parsed);
+    if (token) headers['x-los-auth-token'] = token;
+  }
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   if (!response.ok) {
