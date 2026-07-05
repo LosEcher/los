@@ -99,6 +99,13 @@ jobs:
         run: pnpm --filter @los/${{ matrix.package }} test
         timeout-minutes: 8
 
+  gate-test-input-preprocessor-retired:
+    name: gate-test (input-preprocessor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "@los/input-preprocessor removed (9bb74ed); legacy required-check stub."
+
   gate-drift:
     runs-on: ubuntu-latest
     timeout-minutes: 10
