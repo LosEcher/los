@@ -11,3 +11,10 @@ dist/
 .turbo/
 .reasonix/
 .los-runtime/
+
+# Runtime session streams (per-package and root). Keep .los/spec/ and .los/identity/ tracked.
+.los/streams/
+packages/*/.los/streams/
+
+# TypeScript incremental build info
+*.tsbuildinfo
