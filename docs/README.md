@@ -90,6 +90,10 @@ Use `governance/github-branch-gates.md` when pushing, opening PRs, merging to
 `main`, checking GitHub Actions gate requirements, or separating local gate
 results from GitHub branch protection and ruleset state.
 
+Use `governance/branch-lifecycle.md` when pruning stale remotes after an
+integration merge, aligning forgejo with `origin/main`, or deciding when a
+short-lived branch has met observation metrics and can be deleted.
+
 Use `governance/manual-node-pairing-plan.md` when adapting manual device or
 node-pairing ideas to the existing `los` node registry, probe, and scheduler
 eligibility model.
