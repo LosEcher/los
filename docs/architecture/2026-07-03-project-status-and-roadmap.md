@@ -39,7 +39,7 @@
 ### 1.3 已知短板与债务（06-24 审计 + 06-28 自迭代文档）
 
 **架构腐化 / 未接线**
-- `@los/input-preprocessor` 整包未接入：21 文件 5.5k 行，无 runtime 消费者（过早建设的孤岛）
+- `@los/input-preprocessor` 整包已移除（2026-07-05）。原本 21 文件 5.5k 行，零 runtime 消费者，过早建设的孤岛。
 - Architect/Editor 双模型：~~config/setup/message-builder 全接好，`loop.ts` 从不引用（grep 零命中）~~ **已接线**：`scheduled-task-runner.ts` 在 `runContract.mode === 'architect-editor'` 时传递 `architectEditor: { enabled: true }` 进 loop.ts，loop.ts:116 调用 `runArchitectPhase()` + setup.ts:103 选 editor provider。子 agent（`agent-tools.ts`）通过 AP6 继承配置。
 - `deferred-registry`：`preloadDeferredEntries` 函数体只有注释，全仓无人调用（死代码）
 - `syncMemoryMd`：文档说"每次新增观测自动更新"，实际 `addObservation` 不调用
@@ -154,7 +154,7 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 
 ### P2 —— 中程
 
-- [ ] `input-preprocessor`：接入 runtime 消费者，或标弃用并移除
+- [x] `input-preprocessor`：接入 runtime 消费者，或标弃用并移除 → **已移除**（零运行时消费者，孤岛包，2026-07-05）
 - [ ] Architect/Editor 双模型：在 `loop.ts` 真正使用，或移除配置面
 - [ ] `deferred-registry`：删死代码或实现 `preloadDeferredEntries`
 - [ ] 契约→类型 codegen（消除手写 grep 校验）

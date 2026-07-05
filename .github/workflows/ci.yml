@@ -90,7 +90,6 @@ jobs:
           # Per-step timeout bounds a hang to its own package; fail-fast:false
           # keeps every package running so a hang still names itself.
           - infra
-          - input-preprocessor
           - web
           - memory
           - gateway

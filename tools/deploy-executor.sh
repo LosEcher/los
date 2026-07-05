@@ -160,7 +160,6 @@ DEPLOY_PACKAGES=(
   "packages/agent"
   "packages/memory"
   "packages/web"
-  "packages/input-preprocessor"
 )
 DEPLOY_FILES=(
   "pnpm-workspace.yaml"

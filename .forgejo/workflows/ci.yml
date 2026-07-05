@@ -68,7 +68,6 @@ jobs:
       matrix:
         package:
           - infra
-          - input-preprocessor
           - web
           - memory
           - gateway

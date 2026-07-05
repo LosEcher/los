@@ -125,7 +125,7 @@ export function setupAgentRun(
   const signal = config.signal;
 
   // Build initial messages (synchronous; MCP loading happens in async phase)
-  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens, config.contextCompression, config.sessionId);
+  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens, config.contextCompression);
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });

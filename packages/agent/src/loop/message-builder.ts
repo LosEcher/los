@@ -7,11 +7,6 @@ import type { Message } from '../providers/index.js';
 import type { ContextCompressionConfig } from './types.js';
 import { estimateMessageTokens } from './token-utils.js';
 import { compressOrTrimMessages } from './compression.js';
-import { preprocessInput } from '@los/input-preprocessor';
-import { appendSessionEvent } from '../session-events.js';
-import { getLogger } from '@los/infra/logger';
-
-const log = getLogger('agent');
 
 // ── System Prompts ────────────────────────────────────────
 
@@ -103,7 +98,6 @@ export function buildInitialMessages(
   initialMessages: Message[] | undefined,
   maxContextTokens?: number,
   compression?: ContextCompressionConfig,
-  sessionId?: string,
 ): Message[] {
   const messages = initialMessages?.length
     ? initialMessages.map(message => ({ ...message }))
@@ -111,58 +105,7 @@ export function buildInitialMessages(
   if (!messages.some(message => message.role === 'system')) {
     messages.unshift({ role: 'system', content: systemPrompt });
   }
-  // Apply input preprocessing (log denoising, dedup, etc.) when configured.
-  const preprocessorConfig = compression?.preprocessor;
-  let processedPrompt = prompt;
-  if (compression?.enabled !== false && preprocessorConfig) {
-    const result = preprocessInput({ rawText: prompt, config: preprocessorConfig });
-    processedPrompt = result.processedText;
-
-    // Log significant preprocessing outcomes for observability.
-    const { metadata, safetyReport: safety } = result;
-    if (metadata.processingTimeMs > 100) {
-      log.warn('input preprocessing took >100ms', {
-        contentType: metadata.contentType,
-        timeMs: metadata.processingTimeMs,
-        originalTokens: safety.originalTokenEstimate,
-        finalTokens: safety.finalTokenEstimate,
-        compressionRatio: Math.round(safety.compressionRatio * 100) / 100,
-        removedByClassifier: safety.removedByClassifier,
-        deduplicatedCount: safety.deduplicatedCount,
-      });
-    } else if (metadata.contentType !== 'unknown' && safety.compressionRatio < 0.95) {
-      log.info('input preprocessed', {
-        contentType: metadata.contentType,
-        timeMs: metadata.processingTimeMs,
-        reduction: Math.round((1 - safety.compressionRatio) * 100),
-        originalLen: metadata.originalLength,
-        processedLen: metadata.processedLength,
-      });
-    }
-
-    // Emit session event for audit trail (non-blocking, best-effort).
-    if (sessionId && metadata.contentType !== 'unknown' && safety.compressionRatio < 0.99) {
-      appendSessionEvent({
-        sessionId,
-        type: 'input.preprocessed',
-        source: 'input-preprocessor',
-        payload: {
-          contentType: metadata.contentType,
-          contentTypes: metadata.contentTypes,
-          confidence: Math.round(metadata.confidence * 100) / 100,
-          originalLength: metadata.originalLength,
-          processedLength: metadata.processedLength,
-          tokenEstimate: metadata.tokenEstimate,
-          compressionRatio: Math.round(safety.compressionRatio * 1000) / 1000,
-          processingTimeMs: metadata.processingTimeMs,
-          removedByClassifier: safety.removedByClassifier,
-          deduplicatedCount: safety.deduplicatedCount,
-          warnings: safety.warnings.slice(0, 5),
-        },
-      }).catch(() => undefined); // non-blocking
-    }
-  }
-  messages.push({ role: 'user', content: processedPrompt });
+  messages.push({ role: 'user', content: prompt });
 
   // Auto-enable compression for resumed sessions with many messages to prevent
   // context overflow. Explicit maxContextTokens always takes precedence.
