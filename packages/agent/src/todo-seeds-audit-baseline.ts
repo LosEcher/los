@@ -259,20 +259,6 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
   },
 
   {
-    id: 'todo-los-p1-preprocessor-bench',
-    title: 'P1-5 Input preprocessor benchmark + P1/P2 待办清理',
-    description: '@los/input-preprocessor P0 完成但 14 项 P1/P2 待办未清。需要 benchmark log denoiser token reduction ratio + detector 正则性能。',
-    kind: 'task',
-    status: 'ready',
-    priority: 'P1',
-    source: 'audit-2026-06-21',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-preprocessor-bench',
-    dependsOnIds: [],
-    metadata: { files: ['packages/input-preprocessor/'], targetRatio: 'token reduction > 50%' },
-  },
-
-  {
     id: 'todo-los-p1-memory-perf-baseline',
     title: 'P1-6 Memory FTS EXPLAIN ANALYZE + 性能 baseline + 回归断言',
     description: 'memory/core/store.ts 600 行 FTS 实现无性能基线。需要在 1000/10000/100000 行 observations 规模下 EXPLAIN ANALYZE。',

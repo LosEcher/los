@@ -5,6 +5,7 @@ import { ThemeProvider } from './hooks/useTheme';
 import { App } from './App';
 import './styles/tokens.css';
 import './styles.css';
+import './markdown.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,16 +1,13 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
+  Folder,
   MessageSquarePlus,
   RefreshCcw,
 } from 'lucide-react';
 import {
   getJson,
-  postJson,
-  streamChat,
-  streamRuntime,
-  type ModelSettings,
   type RuntimeKind,
   type SessionDetail,
   type SessionTraceResponse,
@@ -21,32 +18,27 @@ import {
 import {
   buildAdvancedCount,
   buildTodoPrompt,
-  readRunContract,
-  readyStreamRows,
   metadataText,
   buildHistoryRows,
-  streamRow,
-  SUPPRESSED_STREAM_EVENTS,
   mapTraceToMessages,
   type StreamRow,
 } from './chat-helpers.js';
-import {
-  EmptyText,
-  Fact,
-  formatDate,
-  formatTime,
-} from './ui';
+import { EmptyText, Fact } from './ui';
 import { ContextChip } from './chat-ui.js';
 import { ChatComposer } from './chat-composer.js';
-import { buildModelSettingsPayload, buildToolRetryPayload, parseCommaList } from './chat-helpers.js';
 import type { ChatAdvancedSettingsState } from './chat-advanced-settings.js';
-import {
-  readyMessages,
-  ChatMessages,
-  type Message,
-} from './chat-messages.js';
+import { ChatMessages } from './chat-messages.js';
 import { useChatProviders } from './hooks/useChatProviders.js';
 import { useChatSession } from './hooks/useChatSession.js';
+import { mergeLiveToolCalls } from './hooks/useLiveToolCalls.js';
+import { useChatRun } from './hooks/useChatRun.js';
+import {
+  ApprovalCard,
+  ContextNotification,
+  CancelledBanner,
+  AbortConfirmation,
+} from './chat-approval.js';
+import { FilesPanel } from './chat-files-panel.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -63,14 +55,12 @@ export function ChatPage({
   activeTodoContext: TodoItem | null;
   onTodoContextClear: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const [prompt, setPrompt] = useState('');
   const [workspaceRoot, setWorkspaceRoot] = useState(() => {
     try { return localStorage.getItem('los-workspace') ?? ''; } catch { return ''; }
   });
   const [toolMode, setToolMode] = useState<ToolMode>('project-write');
   const [runtimeKind, setRuntimeKind] = useState<RuntimeKind | 'los'>('los');
-  const [maxLoops, setMaxLoops] = useState(20); // default from infra/config.ts, overridden by /settings
+  const [maxLoops, setMaxLoops] = useState(20);
   const [timeoutMs, setTimeoutMs] = useState(120_000);
   const [temperature, setTemperature] = useState('');
   const [topP, setTopP] = useState('');
@@ -82,32 +72,43 @@ export function ChatPage({
   const [toolRetryMaxAttempts, setToolRetryMaxAttempts] = useState('');
   const [toolRetryBaseDelayMs, setToolRetryBaseDelayMs] = useState('');
   const [toolRetryMaxDelayMs, setToolRetryMaxDelayMs] = useState('');
-  const [running, setRunning] = useState(false);
-  const [rows, setRows] = useState<StreamRow[]>(() => readyStreamRows());
-  const [messages, setMessages] = useState<Message[]>(() => readyMessages());
   const [debugMode, setDebugMode] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const branchFromRef = useRef<string | null>(null);
+  const [showFiles, setShowFiles] = useState(false);
 
   const {
     provider, setProvider,
     model, setModel,
-    onboarding,
     modelRoutes,
     providerOptions,
-    selectedRoute,
-    modelOptions,
   } = useChatProviders();
 
   const {
-    sessionId, setSessionId,
+    sessionId: hookSessionId, setSessionId: setHookSessionId,
     taskRunId, setTaskRunId,
     boundTodoId, setBoundTodoId,
     newChatConfirming, setNewChatConfirming,
-    historyLoadedForSession,
     bindTodo,
     startNewChat: startNewChatFromHook,
   } = useChatSession({ selectedSessionId, onSessionSelect, onTodoContextClear });
+
+  const run = useChatRun({
+    workspaceRoot, toolMode, runtimeKind, maxLoops, timeoutMs,
+    systemPrompt, allowedTools,
+    toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs,
+    temperature, topP, maxTokens, presencePenalty, frequencyPenalty,
+    provider, model,
+    activeTodoContext, boundTodoId,
+    onSessionSelect, onBranchConsumed,
+  });
+
+  // Sync hook sessionId with run sessionId
+  useEffect(() => {
+    if (run.sessionId && run.sessionId !== hookSessionId) {
+      setHookSessionId(run.sessionId);
+    }
+  }, [run.sessionId]);
+
+  const sessionId = run.sessionId ?? hookSessionId;
 
   const settings = useQuery({
     queryKey: ['settings'],
@@ -126,69 +127,27 @@ export function ChatPage({
     queryKey: ['chat-session', sessionId],
     queryFn: () => getJson<SessionDetail>(`/sessions/${sessionId}`),
     enabled: Boolean(sessionId),
-    refetchInterval: running ? 4_000 : false,
+    refetchInterval: run.running ? 4_000 : false,
   });
   const sessionTrace = useQuery({
     queryKey: ['chat-session-trace', sessionId],
     queryFn: () => getJson<SessionTraceResponse>(`/sessions/${sessionId}/trace`),
     enabled: Boolean(sessionId),
-    refetchInterval: running ? 4_000 : false,
+    refetchInterval: run.running ? 4_000 : false,
   });
-  // Live event push via EventSource
-  useEffect(() => {
-    if (!sessionId || !running) return;
-    const es = new EventSource(`/sessions/${sessionId}/events/live`);
-    const onSessionEvent = () => {
-      void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
-      void queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
-    };
-    es.addEventListener('session.event', onSessionEvent);
-    es.onerror = () => {
-      es.close();
-      void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
-    };
-    return () => {
-      es.removeEventListener('session.event', onSessionEvent);
-      es.close();
-    };
-  }, [sessionId, running, queryClient]);
   const sessionObservability = useQuery({
     queryKey: ['chat-session-observability', sessionId],
     queryFn: () => getJson<SessionObservability>(`/sessions/${sessionId}/observability`),
     enabled: Boolean(sessionId),
-    refetchInterval: running ? 4_000 : false,
+    refetchInterval: run.running ? 4_000 : false,
   });
 
   const advancedCount = useMemo(() => {
-    return buildAdvancedCount({
-      systemPrompt,
-      allowedTools,
-      maxLoops,
-      timeoutMs,
-      toolRetryMaxAttempts,
-      toolRetryBaseDelayMs,
-      toolRetryMaxDelayMs,
-      temperature,
-      topP,
-      maxTokens,
-      presencePenalty,
-      frequencyPenalty,
-    });
+    return buildAdvancedCount({ systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty });
   }, [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
 
   const advancedState = useMemo((): ChatAdvancedSettingsState => ({
-    systemPrompt,
-    allowedTools,
-    maxLoops,
-    timeoutMs,
-    toolRetryMaxAttempts,
-    toolRetryBaseDelayMs,
-    toolRetryMaxDelayMs,
-    temperature,
-    topP,
-    maxTokens,
-    presencePenalty,
-    frequencyPenalty,
+    systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty,
   }), [systemPrompt, allowedTools, maxLoops, timeoutMs, toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs, temperature, topP, maxTokens, presencePenalty, frequencyPenalty]);
 
   function onAdvancedChange(patch: Partial<ChatAdvancedSettingsState>) {
@@ -207,298 +166,86 @@ export function ChatPage({
   }
   const sessionMetadata = sessionDetail.data?.metadata ?? {};
 
-  // Live trace update: when trace refetches during a run, rebuild messages
+  // Live trace update during run
   useEffect(() => {
-    if (!running) return;
+    if (!run.running) return;
     const trace = sessionTrace.data;
     if (!trace || !Array.isArray(trace.messages) || trace.messages.length === 0) return;
-    setMessages(mapTraceToMessages(trace.messages, sessionId));
-  }, [sessionTrace.data, running, sessionId]);
+    const msgs = mapTraceToMessages(trace.messages, sessionId);
+    mergeLiveToolCalls(msgs, run.liveToolCalls);
+    run.setMessages(msgs);
+  }, [sessionTrace.data, run.running, sessionId, run.liveVersion]);
 
-  // Persist workspaceRoot to localStorage
-  useEffect(() => {
-    try { localStorage.setItem('los-workspace', workspaceRoot); } catch {}
-  }, [workspaceRoot]);
+  useEffect(() => { try { localStorage.setItem('los-workspace', workspaceRoot); } catch {} }, [workspaceRoot]);
 
+  // Session selection
   useEffect(() => {
-    if (running) return;
+    if (run.running) return;
     if (!selectedSessionId || selectedSessionId === sessionId) return;
-    setSessionId(selectedSessionId);
+    setHookSessionId(selectedSessionId);
     setTaskRunId(null);
-    historyLoadedForSession.current = null;
-    setRows([{
-      id: crypto.randomUUID(),
-      event: 'session.loading',
-      message: `Loading session ${selectedSessionId}...`,
-      level: 'normal',
-    }]);
-    setMessages([{
-      id: crypto.randomUUID(),
-      role: 'system' as const,
-      content: `Loading session ${selectedSessionId}...`,
-      eventType: 'session.loading',
-      toolCalls: [],
-    }]);
-  }, [selectedSessionId, sessionId, running]);
+    run.historyLoadedForSession.current = null;
+    run.setRows([{ id: crypto.randomUUID(), event: 'session.loading', message: `Loading session ${selectedSessionId}...`, level: 'normal' }]);
+    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: `Loading session ${selectedSessionId}...`, eventType: 'session.loading', toolCalls: [] }]);
+  }, [selectedSessionId, sessionId, run.running]);
 
-  // When session detail loads for a resumed session, render history in the chat
+  // Session resume
   useEffect(() => {
-    if (running) return;
+    if (run.running) return;
     if (!sessionId || sessionId !== selectedSessionId) return;
-    if (historyLoadedForSession.current === sessionId) return;
+    if (run.historyLoadedForSession.current === sessionId) return;
     const trace = sessionTrace.data;
     if (!trace || !Array.isArray(trace.messages) || trace.messages.length === 0) return;
-    historyLoadedForSession.current = sessionId;
+    run.historyLoadedForSession.current = sessionId;
     const detail = sessionDetail.data;
-    const messages_ = detail?.messages ?? [];
-    const turns_ = detail?.turns ?? [];
-    const historyRows = buildHistoryRows(messages_ as Array<Record<string, unknown>>, turns_ as Array<Record<string, unknown>>);
-    setRows(historyRows);
-    setMessages(mapTraceToMessages(trace.messages, sessionId));
-  }, [sessionDetail.data, sessionTrace.data, sessionId, selectedSessionId, running]);
+    const msgs = detail?.messages ?? [];
+    const turns = detail?.turns ?? [];
+    run.setRows(buildHistoryRows(msgs as Array<Record<string, unknown>>, turns as Array<Record<string, unknown>>));
+    run.setMessages(mapTraceToMessages(trace.messages, sessionId));
+  }, [sessionDetail.data, sessionTrace.data, sessionId, selectedSessionId, run.running]);
 
-  // When branchFromSession is set, prepare chat for a branch
+  // Branch
   useEffect(() => {
-    if (running || !branchFromSession) return;
-    branchFromRef.current = branchFromSession;
-    setSessionId(null);
+    if (run.running || !branchFromSession) return;
+    run.branchFromRef.current = branchFromSession;
+    setHookSessionId(null);
     setTaskRunId(null);
-    historyLoadedForSession.current = null;
-    setRows([{
-      id: crypto.randomUUID(),
-      event: 'session.branch',
-      message: `Branching from ${branchFromSession}. Enter your prompt to start.`,
-      level: 'ok',
-    }]);
-    setMessages([{
-      id: crypto.randomUUID(),
-      role: 'system' as const,
-      content: `Branching from ${branchFromSession}. Enter your prompt to start.`,
-      eventType: 'session.branch',
-      level: 'ok',
-      toolCalls: [],
-    }]);
-    // Load parent session to show history context
-    Promise.all([
-      getJson<SessionDetail>(`/sessions/${branchFromSession}`),
-      getJson<SessionTraceResponse>(`/sessions/${branchFromSession}/trace`),
-    ]).then(([detail, trace]) => {
-      if (detail && Array.isArray(detail.messages) && detail.messages.length > 0) {
-        const msgs = detail.messages as Array<Record<string, unknown>>;
-        const turns = Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [];
-        const historyRows = buildHistoryRows(msgs, turns);
-        setRows(prev => {
-          if (!branchFromRef.current) return prev;
-          return historyRows;
-        });
-        setMessages(prev => {
-          if (!branchFromRef.current) return prev;
-          return trace?.messages ? mapTraceToMessages(trace.messages, sessionId) : prev;
-        });
-      }
-    }).catch(() => undefined);
-  }, [branchFromSession, running]);
+    run.historyLoadedForSession.current = null;
+    run.setRows([{ id: crypto.randomUUID(), event: 'session.branch', message: `Branching from ${branchFromSession}. Enter your prompt to start.`, level: 'ok' }]);
+    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: `Branching from ${branchFromSession}. Enter your prompt to start.`, eventType: 'session.branch', level: 'ok', toolCalls: [] }]);
+    Promise.all([getJson<SessionDetail>(`/sessions/${branchFromSession}`), getJson<SessionTraceResponse>(`/sessions/${branchFromSession}/trace`)])
+      .then(([detail, trace]) => {
+        if (detail && Array.isArray(detail.messages) && detail.messages.length > 0) {
+          const dmsgs = detail.messages as Array<Record<string, unknown>>;
+          const dturns = Array.isArray(detail.turns) ? (detail.turns as Array<Record<string, unknown>>) : [];
+          run.setRows(prev => run.branchFromRef.current ? buildHistoryRows(dmsgs, dturns) : prev);
+          run.setMessages(prev => run.branchFromRef.current ? (trace?.messages ? mapTraceToMessages(trace.messages, sessionId) : prev) : prev);
+        }
+      }).catch(() => undefined);
+  }, [branchFromSession, run.running]);
 
+  // Todo context
   useEffect(() => {
-    if (running || !activeTodoContext || activeTodoContext.id === boundTodoId) return;
+    if (run.running || !activeTodoContext || activeTodoContext.id === boundTodoId) return;
     bindTodo(activeTodoContext);
-    setPrompt(buildTodoPrompt(activeTodoContext));
-    setRows([{
-      id: crypto.randomUUID(),
-      event: 'todo.selected',
-      message: activeTodoContext.title,
-      meta: activeTodoContext.id,
-      level: 'ok',
-    }]);
-    setMessages([{
-      id: crypto.randomUUID(),
-      role: 'system' as const,
-      content: activeTodoContext.title,
-      meta: activeTodoContext.id,
-      level: 'ok',
-      toolCalls: [],
-    }]);
-  }, [activeTodoContext, boundTodoId, running, sessionId]);
+    run.setPrompt(buildTodoPrompt(activeTodoContext));
+    run.setRows([{ id: crypto.randomUUID(), event: 'todo.selected', message: activeTodoContext.title, meta: activeTodoContext.id, level: 'ok' }]);
+    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: activeTodoContext.title, meta: activeTodoContext.id, level: 'ok', toolCalls: [] }]);
+  }, [activeTodoContext, boundTodoId, run.running, sessionId]);
 
-  async function handleSubmit(event: FormEvent) {
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    const text = prompt.trim();
-    if (!text || running) return;
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setPrompt('');
-    setRunning(true);
-    // Preserve history rows if continuing a session, otherwise start fresh
-    setRows(prev => {
-      const hasHistory = prev.length > 0 && prev.some(r => r.event === 'history.end');
-      if (hasHistory) {
-        return [...prev, {
-          id: crypto.randomUUID(),
-          event: '---',
-          message: 'New message below',
-          level: 'normal' as const,
-        }, {
-          id: crypto.randomUUID(),
-          event: 'user',
-          message: text,
-        }];
-      }
-      return [{ id: crypto.randomUUID(), event: 'user', message: text }];
-    });
-    setMessages(prev => {
-      const hasHistory = prev.length > 0 && prev.some(m => m.role === 'separator');
-      const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, toolCalls: [] };
-      if (hasHistory) {
-        return [...prev, {
-          id: crypto.randomUUID(),
-          role: 'separator' as const,
-          content: 'New message below',
-          level: 'normal' as const,
-          toolCalls: [],
-        }, userMsg];
-      }
-      return [userMsg];
-    });
-
-    try {
-      if (runtimeKind === 'los') {
-        // ── los agent (internal ReAct loop) ──
-        const composerPayload = {
-          systemPrompt: systemPrompt.trim() || undefined,
-          allowedTools: parseCommaList(allowedTools),
-          toolRetry: buildToolRetryPayload({
-            maxAttempts: toolRetryMaxAttempts,
-            baseDelayMs: toolRetryBaseDelayMs,
-            maxDelayMs: toolRetryMaxDelayMs,
-          }),
-          modelSettings: buildModelSettingsPayload({
-            temperature,
-            topP,
-            maxTokens,
-            presencePenalty,
-            frequencyPenalty,
-          }),
-        };
-        await streamChat({
-          prompt: text,
-          sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
-          branchFrom: branchFromRef.current ?? undefined,
-          systemPrompt: composerPayload.systemPrompt,
-          provider: provider.trim() || undefined,
-          model: model.trim() || undefined,
-          modelSettings: composerPayload.modelSettings,
-          workspaceRoot: workspaceRoot.trim() || undefined,
-          toolMode,
-          allowedTools: composerPayload.allowedTools,
-          maxLoops,
-          traceId: activeTodoContext?.traceId,
-          dedupeKey: activeTodoContext ? `todo:${activeTodoContext.id}:${Date.now()}` : undefined,
-          timeoutMs,
-          toolRetry: composerPayload.toolRetry,
-          runContract: readRunContract(activeTodoContext),
-          todoId: activeTodoContext?.id,
-        }, controller.signal, ({ event, data }) => {
-          if (event === 'session' && typeof data.sessionId === 'string') {
-            setSessionId(data.sessionId);
-            onSessionSelect(data.sessionId);
-          }
-          if (typeof data.taskRunId === 'string') setTaskRunId(data.taskRunId);
-          if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
-            setRows(prev => [...prev, streamRow(event, data)]);
-          }
-          if (event === 'turn' || event === 'done' || event === 'tool.result' || event === 'tool.call') {
-            void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
-          }
-        });
-      } else {
-        // ── External runtime (Claude Code / Codex CLI) ──
-        setRows(prev => [...prev, {
-          id: crypto.randomUUID(),
-          event: 'runtime.started',
-          message: `Starting ${runtimeKind}...`,
-          level: 'ok' as const,
-        }]);
-        await streamRuntime({
-          kind: runtimeKind,
-          prompt: text,
-          workspaceRoot: workspaceRoot.trim() || undefined,
-          timeoutMs,
-        }, controller.signal, ({ event, data }) => {
-          setRows(prev => [...prev, streamRow(event, data)]);
-          if (event === 'runtime.completed' || event === 'runtime.error') {
-            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-          }
-        });
-      }
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        const errMsg = String((err as Error).message ?? err);
-        setRows(prev => [...prev, {
-          id: crypto.randomUUID(),
-          event: 'error',
-          message: errMsg,
-          level: 'error',
-        }]);
-        setMessages(prev => [...prev, {
-          id: crypto.randomUUID(),
-          role: 'system' as const,
-          content: errMsg,
-          eventType: 'error',
-          level: 'error',
-          toolCalls: [],
-        }]);
-      }
-    } finally {
-      setRunning(false);
-      abortRef.current = null;
-      if (branchFromRef.current) {
-        branchFromRef.current = null;
-        onBranchConsumed();
-      }
-      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      await queryClient.invalidateQueries({ queryKey: ['todos'] });
-      await queryClient.invalidateQueries({ queryKey: ['memory'] });
-      await queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId] });
-      await queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
-      await queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
-    }
-  }
-
-  async function cancelRun() {
-    if (taskRunId) {
-      await postJson(`/tasks/${taskRunId}/cancel`, { reason: 'cancelled_from_web_console' }).catch(() => undefined);
-    }
-    abortRef.current?.abort();
-    setRunning(false);
+    void run.handleSubmit(run.prompt);
   }
 
   function startNewChat() {
-    if (running) return;
-    if (sessionId || taskRunId) {
-      if (!newChatConfirming) {
-        setNewChatConfirming(true);
-        return;
-      }
+    if (run.running) return;
+    if (hookSessionId || taskRunId) {
+      if (!newChatConfirming) { setNewChatConfirming(true); return; }
       setNewChatConfirming(false);
     }
     startNewChatFromHook();
-    setRows([{
-      id: crypto.randomUUID(),
-      event: 'session.new',
-      message: 'New chat is ready.',
-      meta: 'next send will create a new session',
-      level: 'ok',
-    }]);
-    setMessages([{
-      id: crypto.randomUUID(),
-      role: 'system' as const,
-      content: 'New chat is ready.',
-      meta: 'next send will create a new session',
-      level: 'ok',
-      toolCalls: [],
-    }]);
+    run.startNewChat();
   }
 
   return (
@@ -510,11 +257,14 @@ export function ChatPage({
             <p>Current run controls feed Gateway `/chat`; session evidence stays in the ledger.</p>
           </div>
           <div className="toolbar">
-            <button className={`ghost-btn${newChatConfirming ? ' danger' : ''}`} type="button" disabled={running} onClick={startNewChat}>
+            <button className={`ghost-btn${newChatConfirming ? ' danger' : ''}`} type="button" disabled={run.running} onClick={startNewChat}>
               <MessageSquarePlus size={14} /> {newChatConfirming ? 'confirm new?' : 'new chat'}
             </button>
-            <button className="ghost-btn" type="button" onClick={() => { setRows([]); setMessages([]); }}>
+            <button className="ghost-btn" type="button" onClick={() => { run.setRows([]); run.setMessages([]); }}>
               <RefreshCcw size={14} /> clear
+            </button>
+            <button className="ghost-btn" type="button" onClick={() => setShowFiles(!showFiles)}>
+              <Folder size={14} /> files
             </button>
           </div>
         </div>
@@ -530,46 +280,38 @@ export function ChatPage({
               <ContextChip label="model" value={model || 'provider default'} />
             </>
           )}
-          <ContextChip label="task" value={taskRunId ?? (running ? 'starting' : 'idle')} tone={running ? 'warn' : undefined} />
+          <ContextChip label="task" value={taskRunId ?? (run.running ? 'starting' : 'idle')} tone={run.running ? 'warn' : undefined} />
         </div>
 
-        <ChatMessages
-          messages={messages}
-          debugMode={debugMode}
-          onDebugModeChange={setDebugMode}
-        >
-          {rows.length === 0 ? <EmptyText text="No stream events yet." /> : rows.map(row => (
+        <ChatMessages messages={run.messages} debugMode={debugMode} onDebugModeChange={setDebugMode} running={run.running}>
+          {run.contextNotifs.length > 0 && (
+            <div className="context-notif-strip">
+              {run.contextNotifs.map(cn => <ContextNotification key={cn.id} event={cn.event} data={cn.data} />)}
+            </div>
+          )}
+          {run.cancelled && <CancelledBanner />}
+          {run.approvalEvents.length > 0 && (
+            <div className="approval-strip">
+              {run.approvalEvents.map(ae => <ApprovalCard key={ae.id} event={ae} />)}
+            </div>
+          )}
+          {run.rows.length === 0 ? <EmptyText text="No stream events yet." /> : run.rows.map(row => (
             <div className={`stream-row${row.event === '---' || row.event === 'history.end' ? ' stream-separator' : ''}`} data-level={row.level ?? 'normal'} key={row.id}>
               <span className="stream-event">{row.event}</span>
-              <div>
-                <p>{row.message}</p>
-                {row.meta ? <code>{row.meta}</code> : null}
-              </div>
+              <div><p>{row.message}</p>{row.meta ? <code>{row.meta}</code> : null}</div>
             </div>
           ))}
         </ChatMessages>
+
         <ChatComposer
-          prompt={prompt}
-          onPromptChange={setPrompt}
-          onSubmit={handleSubmit}
-          onCancel={cancelRun}
-          running={running}
-          provider={provider}
-          onProviderChange={setProvider}
-          providerOptions={providerOptions}
-          model={model}
-          onModelChange={setModel}
-          modelRoutes={modelRoutes.data}
-          toolMode={toolMode}
-          onToolModeChange={setToolMode}
-          runtimeKind={runtimeKind}
-          onRuntimeKindChange={setRuntimeKind}
-          workspaceRoot={workspaceRoot}
-          onWorkspaceRootChange={setWorkspaceRoot}
-          defaultWorkspace={defaultWorkspace}
-          advancedState={advancedState}
-          onAdvancedChange={onAdvancedChange}
-          advancedCount={advancedCount}
+          prompt={run.prompt} onPromptChange={run.setPrompt} onSubmit={handleSubmit}
+          onCancel={run.requestCancel} running={run.running}
+          provider={provider} onProviderChange={setProvider} providerOptions={providerOptions}
+          model={model} onModelChange={setModel} modelRoutes={modelRoutes.data}
+          toolMode={toolMode} onToolModeChange={setToolMode} runtimeKind={runtimeKind}
+          onRuntimeKindChange={setRuntimeKind} workspaceRoot={workspaceRoot}
+          onWorkspaceRootChange={setWorkspaceRoot} defaultWorkspace={defaultWorkspace}
+          advancedState={advancedState} onAdvancedChange={onAdvancedChange} advancedCount={advancedCount}
         />
       </div>
 
@@ -579,14 +321,24 @@ export function ChatPage({
           <Activity size={16} />
         </div>
         <div className="fact-list compact-facts">
+          <Fact label="connection" value={run.connectionState === 'connected' ? 'WS live' : run.connectionState === 'reconnecting' ? 'reconnecting…' : run.connectionState === 'connecting' ? 'connecting…' : 'polling'} />
           <Fact label="session" value={sessionId ?? 'not started'} />
-          <Fact label="task run" value={taskRunId ?? (running ? 'starting' : 'idle')} />
+          <Fact label="task run" value={taskRunId ?? (run.running ? 'starting' : 'idle')} />
           <Fact label="last provider" value={metadataText(sessionMetadata.provider) ?? 'none'} />
           <Fact label="last model" value={metadataText(sessionMetadata.model) ?? 'none'} />
           <Fact label="settings" value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
           <Fact label="tokens" value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
         </div>
       </aside>
+
+      <FilesPanel workspaceRoot={workspaceRoot} open={showFiles} onClose={() => setShowFiles(false)} />
+
+      {run.showAbortConfirm && (
+        <AbortConfirmation
+          onConfirm={run.confirmCancel} onCancel={run.dismissCancel}
+          elapsedMs={run.runStartRef.current ? Date.now() - run.runStartRef.current : undefined}
+        />
+      )}
     </section>
   );
 }

@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
 const chatComposer = readFileSync(new URL('./chat-composer.tsx', import.meta.url), 'utf8');
+const useChatStream = readFileSync(new URL('./hooks/useChatStream.ts', import.meta.url), 'utf8');
+const useChatRun = readFileSync(new URL('./hooks/useChatRun.ts', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
@@ -20,9 +22,11 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
   assert.match(composer, /label="execution dir"/);
   assert.match(composer, /ChatAdvancedSettings/);
   assert.match(composer, /aria-label="run choices"/);
-  assert.match(chatPage, /refetchInterval: running \? 4_000 : false/);
-  assert.match(chatPage, /addEventListener\('session\.event'/);
-  assert.doesNotMatch(chatPage, /es\.onmessage/);
+  assert.match(chatPage, /refetchInterval: run\.running \? 4_000 : false/);
+  assert.match(useChatRun, /useChatStream/);
+  assert.match(useChatStream, /connectWsStream/);
+  assert.match(useChatStream, /addEventListener\('session\.event'/);
+  assert.doesNotMatch(useChatStream, /es\.onmessage/);
 
   assert.match(inspector, /Run Evidence/);
   assert.doesNotMatch(inspector, /Run Controls/);

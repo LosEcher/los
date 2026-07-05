@@ -90,7 +90,6 @@ jobs:
           # Per-step timeout bounds a hang to its own package; fail-fast:false
           # keeps every package running so a hang still names itself.
           - infra
-          - input-preprocessor
           - web
           - memory
           - gateway
@@ -130,6 +129,14 @@ jobs:
       - name: Test @los/${{ matrix.package }}
         run: pnpm --filter @los/${{ matrix.package }} test
         timeout-minutes: 8
+
+  # Branch protection on GitHub still requires this job name until rules are updated.
+  gate-test-input-preprocessor-retired:
+    name: gate-test (input-preprocessor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "@los/input-preprocessor removed (9bb74ed); legacy required-check stub."
 
   gate-drift:
     runs-on: ubuntu-latest

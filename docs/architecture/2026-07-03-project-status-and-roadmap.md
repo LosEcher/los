@@ -39,7 +39,7 @@
 ### 1.3 已知短板与债务（06-24 审计 + 06-28 自迭代文档）
 
 **架构腐化 / 未接线**
-- `@los/input-preprocessor` 整包未接入：21 文件 5.5k 行，无 runtime 消费者（过早建设的孤岛）
+- `@los/input-preprocessor` 整包已移除（2026-07-05）。原本 21 文件 5.5k 行，零 runtime 消费者，过早建设的孤岛。
 - Architect/Editor 双模型：~~config/setup/message-builder 全接好，`loop.ts` 从不引用（grep 零命中）~~ **已接线**：`scheduled-task-runner.ts` 在 `runContract.mode === 'architect-editor'` 时传递 `architectEditor: { enabled: true }` 进 loop.ts，loop.ts:116 调用 `runArchitectPhase()` + setup.ts:103 选 editor provider。子 agent（`agent-tools.ts`）通过 AP6 继承配置。
 - `deferred-registry`：`preloadDeferredEntries` 函数体只有注释，全仓无人调用（死代码）
 - `syncMemoryMd`：文档说"每次新增观测自动更新"，实际 `addObservation` 不调用
@@ -71,28 +71,9 @@
 
 ## 二、当前进行中（未提交，working tree）
 
-memory ACTIVE 任务：`wire worker_done/heartbeat into scheduler runClaimedAgentGraphTask`。working tree 改动分四块（应作为**三个独立 intent** 提交，见待办 P0）：
+**Web 聊天流式重构**（`feat/web-chat-streaming`）：WS 主通道 + SSE 回退、`useChatRun`/`useChatStream` 抽 hook、虚拟列表与 markdown 渲染、审批条与 files 侧栏。worker-messages / P0–P1 已合入 main（#116、chore/remove-input-preprocessor）。
 
-1. **worker-messages 模块**（新文件 `packages/agent/src/worker-messages.{ts,test.ts}` + `packages/infra/migrations/026_worker_messages.sql`）
-   - `worker_messages` 表 typed CRUD，四类消息：`worker_done` / `escalation` / `ask` / `heartbeat`
-   - `dispatch_id` = `agent_task_attempts.id`；append-only（无 update/delete），事件溯源式审计轨迹
-   - 每次 retry → 新 attempt → 新 dispatch_id，stale 消息不与当前冲突
-
-2. **scheduler 集成**（`packages/agent/src/scheduler.ts` + `scheduler/task-heartbeat.ts`）
-   - `runClaimedAgentGraphTask` 在 succeeded / failed / cancelled / error 四个出口 `sendWorkerMessage({type:'worker_done', ...})`，`.catch(()=>undefined)` 静默降级
-   - `startTaskHeartbeat` 透传 `dispatchId`/`taskId`（为 heartbeat 消息预留）
-   - **缺口**：当前调用点只发 `worker_done`；`escalation` / `ask` / `heartbeat` 三类消息尚无生产调用方 —— 待接入或显式标注"当前仅 worker_done 接线"
-
-3. **test-setup 重构**（抽出 `packages/agent/src/ensure-all-stores.ts`）
-   - `ensureAllAgentStores()` 成为 agent 包所有 `ensure*Store` 的单一入口，依赖安全顺序
-   - `test-setup.ts` 从 79 行手写列表缩到一个函数调用；executor / memory 的 test-setup 同步对齐
-   - 消除 `node --test` 并行文件 `CREATE TABLE` 竞态；新加 store 只改一处
-
-4. **CI 已知失败追踪**（`tools/check-known-failures.sh` + `tools/.known-test-failures.txt` + `docs/governance/pre-existing-failure-tracking.md`）
-   - 把 PR #108 修 agent 测试 hang 之前遗留的预存在失败显式登记，避免 CI 噪音与"新失败被旧失败掩盖"
-   - `ci-gate.sh` 增加该阶段；`wiring-topology-baseline.txt` 更新
-
-**未提交状态**：尚未跑 `pnpm check`，未提交。这是 P0 收尾项。
+提交前：`pnpm check`、`@los/web` test + build。
 
 ---
 
@@ -154,7 +135,7 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 
 ### P2 —— 中程
 
-- [ ] `input-preprocessor`：接入 runtime 消费者，或标弃用并移除
+- [x] `input-preprocessor`：接入 runtime 消费者，或标弃用并移除 → **已移除**（零运行时消费者，孤岛包，2026-07-05）
 - [ ] Architect/Editor 双模型：在 `loop.ts` 真正使用，或移除配置面
 - [ ] `deferred-registry`：删死代码或实现 `preloadDeferredEntries`
 - [ ] 契约→类型 codegen（消除手写 grep 校验）

@@ -143,22 +143,23 @@ done
 
 # ── Version consistency check ──
 
-declare -A contract_versions
+versions_tmp=$(mktemp "${TMPDIR:-/tmp}/los-contract-versions.XXXXXX")
+trap 'rm -f "$versions_tmp"' EXIT
 for name in "${required_contracts[@]}"; do
   file="$CONTRACT_DIR/$name"
   [ -f "$file" ] || continue
   ver=$(grep -E '^version:[[:space:]]+' "$file" | head -1 | sed 's/^version:[[:space:]]*//')
-  contract_versions[$name]="$ver"
+  printf '%s\t%s\n' "$name" "$ver" >> "$versions_tmp"
 done
 
-if [ "${#contract_versions[@]}" -gt 1 ]; then
+if [ -s "$versions_tmp" ]; then
   printf '  contract versions:\n' >&2
-  for name in "${!contract_versions[@]}"; do
-    printf '    %-45s %s\n' "$name" "${contract_versions[$name]}" >&2
-  done
+  while IFS=$'\t' read -r cname cver; do
+    printf '    %-45s %s\n' "$cname" "$cver" >&2
+  done < "$versions_tmp"
 fi
 
-versions_only=$(printf '%s\n' "${contract_versions[@]}" | sort -u)
+versions_only=$(cut -f2 "$versions_tmp" | sort -u)
 version_count=$(echo "$versions_only" | grep -c . || true)
 if [ "$version_count" -gt 1 ]; then
   printf '  contract check warning: %d distinct versions across %d contracts\n' \

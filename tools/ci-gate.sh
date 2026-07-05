@@ -46,15 +46,15 @@ START_TIME=$(date +%s)
 
 phase_start() {
   printf '\n%b━━━ Phase: %s ━━━%b\n' "$CYAN" "$1" "$NC"
-  printf '    start: %(%H:%M:%S)T\n' -1
+  printf '    start: %s\n' "$(date '+%H:%M:%S')"
 }
 
 phase_ok() {
-  printf '    %b✓ %s%b (%(%H:%M:%S)T)\n' "$GREEN" "$1" "$NC" -1
+  printf '    %b✓ %s%b (%s)\n' "$GREEN" "$1" "$NC" "$(date '+%H:%M:%S')"
 }
 
 phase_fail() {
-  printf '    %b✗ %s%b (%(%H:%M:%S)T)\n' "$RED" "$1" "$NC" -1
+  printf '    %b✗ %s%b (%s)\n' "$RED" "$1" "$NC" "$(date '+%H:%M:%S')"
   GATE_FAILURES=$((GATE_FAILURES + 1))
 }
 

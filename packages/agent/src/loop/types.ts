@@ -4,7 +4,6 @@ import type { MCPServerConfig } from '../tools/external/mcp-client.js';
 import type { Logger } from '@los/infra/logger';
 import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
 import type { IdentityLevel } from '../identity-loader.js';
-import type { PreprocessorConfig } from '@los/input-preprocessor';
 
 export interface AgentConfig {
   sessionId?: string;
@@ -133,8 +132,6 @@ export interface ContextCompressionConfig {
   warningRatio?: number;
   aggressiveRatio?: number;
   emergencyRatio?: number;
-  /** Input preprocessing configuration (log denoising, dedup, etc.). */
-  preprocessor?: Partial<PreprocessorConfig>;
   /** Semantic eviction configuration — mask persisted tool results at critical fill. */
   semanticEviction?: {
     enabled?: boolean;

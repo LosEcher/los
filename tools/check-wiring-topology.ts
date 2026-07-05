@@ -42,7 +42,7 @@ const ENTRY_FILES = new Set([
 
 // Packages whose exports MUST be reachable from an entry point.
 // test-setup files are also considered valid callers (they verify the module works).
-const ALL_PACKAGES = ['agent', 'gateway', 'memory', 'executor', 'cli', 'infra', 'input-preprocessor'];
+const ALL_PACKAGES = ['agent', 'gateway', 'memory', 'executor', 'cli', 'infra'];
 
 // ── Helpers ──────────────────────────────────────────────────
 

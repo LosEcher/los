@@ -53,7 +53,7 @@ INFRA_UPWARD=0
 while IFS= read -r match; do
   err "$match"
   INFRA_UPWARD=$((INFRA_UPWARD + 1))
-done < <(grep -rEn "from ['\"]@los/(agent|memory|gateway|executor|cli|web|telegram-bot|wechat-bot|media|input-preprocessor)" \
+done < <(grep -rEn "from ['\"]@los/(agent|memory|gateway|executor|cli|web|telegram-bot|wechat-bot|media)" \
   "$ROOT/packages/infra/src" --include='*.ts' 2>/dev/null || true)
 if [ "$INFRA_UPWARD" -eq 0 ]; then
   ok "@los/infra has no upward @los/* imports"
