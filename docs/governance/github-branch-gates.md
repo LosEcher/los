@@ -1,5 +1,8 @@
 # GitHub Branch And Merge Gates
 
+For day-to-day branch inventory, post-merge prune, and integration-branch
+closeout, see `docs/governance/branch-lifecycle.md`.
+
 ## Observed Current State
 
 Checked on 2026-06-15 from the local `origin` remote
