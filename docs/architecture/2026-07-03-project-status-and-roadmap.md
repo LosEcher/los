@@ -71,28 +71,9 @@
 
 ## 二、当前进行中（未提交，working tree）
 
-memory ACTIVE 任务：`wire worker_done/heartbeat into scheduler runClaimedAgentGraphTask`。working tree 改动分四块（应作为**三个独立 intent** 提交，见待办 P0）：
+**Web 聊天流式重构**（`feat/web-chat-streaming`）：WS 主通道 + SSE 回退、`useChatRun`/`useChatStream` 抽 hook、虚拟列表与 markdown 渲染、审批条与 files 侧栏。worker-messages / P0–P1 已合入 main（#116、chore/remove-input-preprocessor）。
 
-1. **worker-messages 模块**（新文件 `packages/agent/src/worker-messages.{ts,test.ts}` + `packages/infra/migrations/026_worker_messages.sql`）
-   - `worker_messages` 表 typed CRUD，四类消息：`worker_done` / `escalation` / `ask` / `heartbeat`
-   - `dispatch_id` = `agent_task_attempts.id`；append-only（无 update/delete），事件溯源式审计轨迹
-   - 每次 retry → 新 attempt → 新 dispatch_id，stale 消息不与当前冲突
-
-2. **scheduler 集成**（`packages/agent/src/scheduler.ts` + `scheduler/task-heartbeat.ts`）
-   - `runClaimedAgentGraphTask` 在 succeeded / failed / cancelled / error 四个出口 `sendWorkerMessage({type:'worker_done', ...})`，`.catch(()=>undefined)` 静默降级
-   - `startTaskHeartbeat` 透传 `dispatchId`/`taskId`（为 heartbeat 消息预留）
-   - **缺口**：当前调用点只发 `worker_done`；`escalation` / `ask` / `heartbeat` 三类消息尚无生产调用方 —— 待接入或显式标注"当前仅 worker_done 接线"
-
-3. **test-setup 重构**（抽出 `packages/agent/src/ensure-all-stores.ts`）
-   - `ensureAllAgentStores()` 成为 agent 包所有 `ensure*Store` 的单一入口，依赖安全顺序
-   - `test-setup.ts` 从 79 行手写列表缩到一个函数调用；executor / memory 的 test-setup 同步对齐
-   - 消除 `node --test` 并行文件 `CREATE TABLE` 竞态；新加 store 只改一处
-
-4. **CI 已知失败追踪**（`tools/check-known-failures.sh` + `tools/.known-test-failures.txt` + `docs/governance/pre-existing-failure-tracking.md`）
-   - 把 PR #108 修 agent 测试 hang 之前遗留的预存在失败显式登记，避免 CI 噪音与"新失败被旧失败掩盖"
-   - `ci-gate.sh` 增加该阶段；`wiring-topology-baseline.txt` 更新
-
-**未提交状态**：尚未跑 `pnpm check`，未提交。这是 P0 收尾项。
+提交前：`pnpm check`、`@los/web` test + build。
 
 ---
 

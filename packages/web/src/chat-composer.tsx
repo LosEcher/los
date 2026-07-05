@@ -1,10 +1,33 @@
 import { Send, Square, Wrench, Zap } from 'lucide-react';
-import type { FormEvent } from 'react';
+import { type FormEvent, useState, useRef, useEffect, useCallback } from 'react';
 import type { ProviderModelsResponse, RuntimeKind, ToolMode } from './api';
 import { RunField } from './chat-ui.js';
 import { ProjectSelector } from './project-selector.js';
 import { providerRoutesFromModels } from './chat-helpers.js';
 import { ChatAdvancedSettings, type ChatAdvancedSettingsState } from './chat-advanced-settings.js';
+
+// ── Slash commands ────────────────────────────────────
+
+const SLASH_COMMANDS = [
+  { cmd: '/clear', description: 'Start a new chat session' },
+  { cmd: '/debug', description: 'Toggle debug event mode' },
+  { cmd: '/retry', description: 'Retry last turn' },
+  { cmd: '/abort', description: 'Cancel the current run' },
+  { cmd: '/files', description: 'Toggle workspace files panel' },
+  { cmd: '/mode ', description: 'Set tool mode (off/read-only, project-write, all)' },
+  { cmd: '/provider ', description: 'Switch to a specific provider' },
+  { cmd: '/model ', description: 'Switch to a specific model' },
+];
+
+type SlashCommand = { cmd: string; description: string };
+
+function matchCommands(input: string): SlashCommand[] {
+  if (!input.startsWith('/')) return [];
+  const lower = input.toLowerCase();
+  return SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(lower) || c.cmd.toLowerCase().includes(lower));
+}
+
+// ── Composer ──────────────────────────────────────────
 
 export function ChatComposer(props: {
   prompt: string;
@@ -44,6 +67,48 @@ export function ChatComposer(props: {
     }
     return [...ids];
   })();
+
+  // ── Slash command autocomplete ──
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const matches = matchCommands(props.prompt);
+  const visible = showSlashMenu && matches.length > 0;
+
+  const applySlash = useCallback((cmd: string) => {
+    props.onPromptChange(cmd);
+    setShowSlashMenu(false);
+    setSlashIndex(0);
+    textareaRef.current?.focus();
+  }, [props.onPromptChange]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!visible) return;
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      e.preventDefault();
+      const match = matches[slashIndex];
+      if (match) applySlash(match.cmd);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSlashIndex(i => Math.min(i + 1, matches.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSlashIndex(i => Math.max(i - 1, 0));
+    } else if (e.key === 'Escape') {
+      setShowSlashMenu(false);
+    }
+  };
+
+  const handleChange = (value: string) => {
+    props.onPromptChange(value);
+    if (value.startsWith('/') && !value.includes(' ')) {
+      setShowSlashMenu(true);
+      setSlashIndex(0);
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
 
   return (
     <form className="composer" onSubmit={props.onSubmit}>
@@ -109,12 +174,32 @@ export function ChatComposer(props: {
           advancedCount={props.advancedCount}
         />
       </div>
-      <textarea
-        value={props.prompt}
-        onChange={event => props.onPromptChange(event.target.value)}
-        placeholder="Ask los to inspect or prepare a bounded change..."
-        rows={3}
-      />
+      <div className="composer-input-wrap">
+        <textarea
+          ref={textareaRef}
+          value={props.prompt}
+          onChange={event => handleChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask los to inspect or prepare a bounded change... (/ for commands)"
+          rows={3}
+        />
+        {visible && (
+          <div className="slash-menu">
+            {matches.map((c, i) => (
+              <button
+                key={c.cmd}
+                className={`slash-item${i === slashIndex ? ' active' : ''}`}
+                type="button"
+                onMouseDown={e => { e.preventDefault(); applySlash(c.cmd); }}
+                onMouseEnter={() => setSlashIndex(i)}
+              >
+                <strong>{c.cmd}</strong>
+                <span>{c.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="composer-actions">
         <button className="primary-btn" type="submit" disabled={props.running || !props.prompt.trim()}>
           <Send size={15} /> send

@@ -25,7 +25,7 @@ export default defineConfig({
       '/rules': 'http://127.0.0.1:8080',
       '/runs': 'http://127.0.0.1:8080',
       '/services': 'http://127.0.0.1:8080',
-      '/sessions': 'http://127.0.0.1:8080',
+      '/sessions': { target: 'http://127.0.0.1:8080', ws: true },
       '/settings': 'http://127.0.0.1:8080',
       '/skills': 'http://127.0.0.1:8080',
       '/tasks': 'http://127.0.0.1:8080',

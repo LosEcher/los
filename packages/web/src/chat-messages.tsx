@@ -5,6 +5,8 @@
 import { type ReactNode, useState } from 'react';
 import { Wrench } from 'lucide-react';
 import { EmptyText } from './ui.js';
+import { MarkdownBlock } from './markdown-renderer.js';
+import { ChatVirtualScroller } from './chat-virtual-scroller.js';
 
 // ── Types ────────────────────────────────────────────
 
@@ -122,7 +124,7 @@ export function readyMessages(): Message[] {
 
 export function ToolCard({ toolCall }: { toolCall: ToolCall }) {
   return (
-    <details className="tool-card">
+    <details className="tool-card" data-status={toolCall.status}>
       <summary className="tool-card-head">
         <Wrench size={12} />
         <strong>{toolCall.toolName}</strong>
@@ -130,6 +132,9 @@ export function ToolCard({ toolCall }: { toolCall: ToolCall }) {
         {toolCall.status === 'completed' && <span className="tool-status completed">done</span>}
         {toolCall.status === 'error' && <span className="tool-status error">error</span>}
         {toolCall.status === 'denied' && <span className="tool-status error">denied</span>}
+        {toolCall.durationMs !== undefined && (
+          <span className="tool-duration">{formatToolDuration(toolCall.durationMs)}</span>
+        )}
       </summary>
       <div className="tool-card-body">
         {toolCall.argsPreview && (
@@ -155,7 +160,12 @@ export function ToolCard({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-export function MessageBubble({ message }: { message: Message }) {
+function formatToolDuration(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${ms}ms`;
+}
+
+export function MessageBubble({ message, isStreaming }: { message: Message; isStreaming?: boolean }) {
   if (message.role === 'separator') {
     return (
       <div className="chat-separator">
@@ -178,7 +188,7 @@ export function MessageBubble({ message }: { message: Message }) {
   }
 
   return (
-    <div className={`chat-message ${message.role}`}>
+    <div className={`chat-message ${message.role}${isStreaming ? ' streaming' : ''}`}>
       <div className={`chat-bubble chat-bubble-${message.role}`}>
         {message.role === 'assistant' && (
           <div className="chat-bubble-meta">
@@ -201,7 +211,7 @@ export function MessageBubble({ message }: { message: Message }) {
           </details>
         )}
         <div className="chat-bubble-text">
-          {message.content || (message.toolCalls.length > 0 ? null : <span className="chat-empty">(empty)</span>)}
+          {message.content ? <MarkdownBlock content={message.content} /> : (message.toolCalls.length > 0 ? null : <span className="chat-empty">(empty)</span>)}
         </div>
         {message.toolCalls.length > 0 && (
           <div className="chat-tool-calls">
@@ -215,11 +225,12 @@ export function MessageBubble({ message }: { message: Message }) {
   );
 }
 
-export function ChatMessages({ messages, debugMode, onDebugModeChange, children }: {
+export function ChatMessages({ messages, debugMode, onDebugModeChange, children, running }: {
   messages: Message[];
   debugMode: boolean;
   onDebugModeChange: (mode: boolean) => void;
   children?: ReactNode;
+  running?: boolean;
 }) {
   return (
     <>
@@ -240,15 +251,14 @@ export function ChatMessages({ messages, debugMode, onDebugModeChange, children 
       {debugMode ? (
         <div className="stream-list">{children}</div>
       ) : (
-        <div className="stream-list">
-          {messages.length === 0 ? (
-            <EmptyText text="No messages yet." />
-          ) : (
-            messages.map(msg => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))
-          )}
-        </div>
+        <ChatVirtualScroller messages={messages} running={Boolean(running)} debugMode={debugMode}>
+          {index => {
+            const msg = messages[index];
+            if (!msg) return null;
+            const isLastAssistant = msg.role === 'assistant' && !messages.slice(index + 1).some(m => m.role === 'assistant');
+            return <MessageBubble key={msg.id} message={msg} isStreaming={Boolean(running) && isLastAssistant} />;
+          }}
+        </ChatVirtualScroller>
       )}
     </>
   );
