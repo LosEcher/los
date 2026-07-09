@@ -250,3 +250,6 @@ memory|packages/memory/src/procedures/procedural-candidates.ts|listProceduralCan
 memory|packages/memory/src/reflection/self-reflection.ts|countSelfReflectionsInSession  # zero callers (orphan)
 memory|packages/memory/src/reflection/self-reflection.ts|getAgentSelfInsights  # zero callers (orphan)
 memory|packages/memory/src/reflection/self-reflection.ts|listSelfReflections  # zero callers (orphan)
+memory|packages/memory/src/core/entity-store.ts|findCooccurringEntities  # zero callers (orphan) — entity KG not yet wired to gateway
+memory|packages/memory/src/core/entity-store.ts|findRelatedObservations  # zero callers (orphan) — entity KG not yet wired to gateway
+memory|packages/memory/src/core/entity-store.ts|listEntities  # zero callers (orphan) — entity KG not yet wired to gateway
