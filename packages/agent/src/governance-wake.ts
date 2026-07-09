@@ -171,16 +171,23 @@ export async function runGovernanceSweepLoop(opts?: {
   try { dueCount = (await listDueGovernanceJobs({ tenantId, projectId })).length; } catch { /* ok */ }
 
   const sweepSessionId = `gov-sweep-${randomUUID()}`;
-  try {
-    await appendSessionEvent({
-      sessionId: sweepSessionId,
-      type: 'governance.sweep.started',
-      source: 'governance',
-      tenantId,
-      projectId,
-      payload: { dryRun, jobCount: dueCount },
-    });
-  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
+  // No-op heartbeat (10-min fallback with zero due jobs) must not pollute session_events.
+  // Emit lifecycle events only when there is work, findings, or errors.
+  const emitSweepLifecycle = dueCount > 0;
+  if (emitSweepLifecycle) {
+    try {
+      await appendSessionEvent({
+        sessionId: sweepSessionId,
+        type: 'governance.sweep.started',
+        source: 'governance',
+        tenantId,
+        projectId,
+        payload: { dryRun, jobCount: dueCount },
+      });
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
+  } else {
+    log.debug(`Governance sweep no-op: dueCount=0 (session ${sweepSessionId.slice(0, 24)})`);
+  }
 
   const results: GovernanceSweepJobResult[] = [];
   const errors: string[] = [];
@@ -218,20 +225,42 @@ export async function runGovernanceSweepLoop(opts?: {
     log.warn(`Drift sweep failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Best-effort completion event
-  try {
-    await appendSessionEvent({
-      sessionId: sweepSessionId,
-      type: 'governance.sweep.completed',
-      source: 'governance',
-      tenantId,
-      projectId,
-      payload: {
-        dryRun, jobsRun, jobsSkipped: 0, findingsCreated,
-        errorCount: errors.length, hasDrift: !!driftReport,
-      },
-    });
-  } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
+  const hasDriftSignal = !!driftReport && (
+    (typeof driftReport === 'object' && (
+      Number((driftReport as { findingsCreated?: number }).findingsCreated ?? 0) > 0
+      || Number((driftReport as { driftCount?: number }).driftCount ?? 0) > 0
+      || Array.isArray((driftReport as { findings?: unknown[] }).findings)
+        && ((driftReport as { findings: unknown[] }).findings.length > 0)
+    ))
+  );
+  const isNoopSweep = jobsRun === 0 && findingsCreated === 0 && errors.length === 0 && !hasDriftSignal;
+
+  // Pair completion with start, or emit when work appeared despite dueCount=0 (claim race).
+  if (!isNoopSweep) {
+    try {
+      if (!emitSweepLifecycle) {
+        await appendSessionEvent({
+          sessionId: sweepSessionId,
+          type: 'governance.sweep.started',
+          source: 'governance',
+          tenantId,
+          projectId,
+          payload: { dryRun, jobCount: jobsRun, lateStart: true },
+        });
+      }
+      await appendSessionEvent({
+        sessionId: sweepSessionId,
+        type: 'governance.sweep.completed',
+        source: 'governance',
+        tenantId,
+        projectId,
+        payload: {
+          dryRun, jobsRun, jobsSkipped: 0, findingsCreated,
+          errorCount: errors.length, hasDrift: !!driftReport,
+        },
+      });
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
+  }
 
   return {
     dryRun, jobsRun, jobsSkipped: 0, findingsCreated, errors, results,

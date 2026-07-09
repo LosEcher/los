@@ -30,7 +30,7 @@ test('GET /settings returns current config shape', async () => {
         },
       },
       providers: [],
-      memory: { ftsEnabled: true, maxObservations: 10000, selfReflectionEnabled: false },
+      memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false },
       judge: {},
       review: { enabled: false, roles: {} },
       executor: { enabled: false, connectModes: [], meshNodes: [], meshNodeCount: 0 },

@@ -71,7 +71,10 @@ export function registerChatRoute(
     const timeoutMs = normalizePositiveInteger(body.timeoutMs);
     const toolRetry = normalizeToolRetry(body.toolRetry);
     const mcpServers = normalizeMCPServers(body.mcpServers);
-    const persistMemory = body.persistMemory === true;
+    // Explicit body wins; otherwise use config default (true → episodic observations after chat).
+    const persistMemory = typeof body.persistMemory === 'boolean'
+      ? body.persistMemory
+      : config.memory.persistChatDefault !== false;
     const boundTodoId = normalizeOptionalString(body.todoId);
     const branchFrom = normalizeOptionalString(body.branchFrom);
     const branchAtTurn = typeof body.branchAtTurn === 'number' && body.branchAtTurn > 0

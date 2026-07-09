@@ -2,6 +2,10 @@ import type { Message, ToolDef } from '../providers/index.js';
 import type { AgentResult } from './types.js';
 import type { ModelSettings } from '../model-settings.js';
 import { readRunContractMetadata } from '../run-contract.js';
+import {
+  resolveModelDiagnosticSnapshot,
+  type ModelDiagnosticConfig,
+} from '../model-diagnostics.js';
 
 interface PreExecutionDeps {
   provider: { chat: Function; name: string };
@@ -11,6 +15,7 @@ interface PreExecutionDeps {
   signal: AbortSignal | undefined;
   toolMode: string;
   modelSettings: ModelSettings | undefined;
+  modelDiagnostics?: ModelDiagnosticConfig;
 }
 
 /**
@@ -43,9 +48,22 @@ export async function runPreExecutionPhases(
       },
     ];
     const discoveryRes = await deps.provider.chat(discoveryMessages, deps.toolDefs.length > 0 ? deps.toolDefs : undefined, { signal: deps.signal, modelSettings: deps.modelSettings });
+    const discoveryDiagnostic = await resolveModelDiagnosticSnapshot({
+      messages: discoveryMessages,
+      response: discoveryRes,
+      phase: 'planning',
+      turn: 0,
+      provider: deps.provider.name,
+      model: discoveryRes.model,
+      toolCalls: discoveryRes.toolCalls,
+    }, deps.modelDiagnostics);
     await deps.emitEvent({
       type: 'run.discovery_report',
-      payload: { text: discoveryRes.text, textLength: discoveryRes.text.length },
+      payload: {
+        text: discoveryRes.text,
+        textLength: discoveryRes.text.length,
+        diagnostics: discoveryDiagnostic ? { model: discoveryDiagnostic } : undefined,
+      },
     });
     deps.messages.push({ role: 'assistant', content: discoveryRes.text });
     await deps.emitEvent({ type: 'run.discovery_completed', payload: { phase: 'discovery_ready' } });
@@ -71,9 +89,22 @@ export async function runPreExecutionPhases(
       },
     ];
     const planRes = await deps.provider.chat(planMessages, deps.toolDefs.length > 0 ? deps.toolDefs : undefined, { signal: deps.signal, modelSettings: deps.modelSettings });
+    const planDiagnostic = await resolveModelDiagnosticSnapshot({
+      messages: planMessages,
+      response: planRes,
+      phase: 'planning',
+      turn: 0,
+      provider: deps.provider.name,
+      model: planRes.model,
+      toolCalls: planRes.toolCalls,
+    }, deps.modelDiagnostics);
     await deps.emitEvent({
       type: 'run.plan_produced',
-      payload: { text: planRes.text, textLength: planRes.text.length },
+      payload: {
+        text: planRes.text,
+        textLength: planRes.text.length,
+        diagnostics: planDiagnostic ? { model: planDiagnostic } : undefined,
+      },
     });
     deps.messages.push({ role: 'assistant', content: planRes.text });
     await deps.emitEvent({ type: 'run.planning_completed', payload: { phase: 'plan_ready' } });

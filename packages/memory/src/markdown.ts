@@ -2,8 +2,10 @@
  * @los/memory/markdown — MEMORY.md file synchronization.
  *
  * Inspired by JiuwenSwarm's Markdown-file memory.
- * Writes a human-readable MEMORY.md in the workspace root,
- * auto-updated after each new observation.
+ * Writes a human-readable MEMORY.md in the workspace root.
+ *
+ * Auto-updated 60s after each new observation (debounced in addObservation).
+ * Also callable manually via POST /memory/sync-md.
  */
 
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';

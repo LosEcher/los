@@ -92,6 +92,43 @@ test('auth middleware protects settings mutation and operator runtime control pa
   }
 });
 
+test('auth middleware accepts operator token without auth token when operatorToken is set', async () => {
+  const app = Fastify({ logger: false });
+  const cfg = configForAuth(true);
+  cfg.auth.operatorToken = 'operator-secret';
+  await authMiddleware(app, { config: cfg });
+  app.post('/sessions/session-a/operator-events', async () => ({ ok: true }));
+  app.get('/protected', async () => ({ ok: true }));
+
+  try {
+    // operator token should pass through
+    const opOk = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-a/operator-events',
+      headers: { 'x-los-operator-token': 'operator-secret' },
+    });
+    assert.equal(opOk.statusCode, 200);
+
+    // wrong operator token should still 401
+    const opBad = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-a/operator-events',
+      headers: { 'x-los-operator-token': 'wrong-operator' },
+    });
+    assert.equal(opBad.statusCode, 401);
+
+    // operator token also works for general protected paths
+    const genOk = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: { 'x-los-operator-token': 'operator-secret' },
+    });
+    assert.equal(genOk.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test('security headers do not emit CSP unless explicitly configured', async () => {
   const app = Fastify({ logger: false });
   registerSecurityHeaders(app);
@@ -147,6 +184,7 @@ function configForAuth(enabled: boolean): Config {
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,
+      persistChatDefault: true,
       selfReflectionEnabled: false,
       codeGraph: {
         enabled: false,

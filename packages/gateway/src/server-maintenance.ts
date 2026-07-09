@@ -7,7 +7,8 @@ import type { FastifyInstance } from 'fastify';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
 import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake, resumeAnsweredAsksForRunSpec } from '@los/agent';
-import { listExecutorNodes } from '@los/agent/executor-nodes';
+import { listExecutorNodes, markStaleExecutorNodesOffline } from '@los/agent/executor-nodes';
+import { markStaleServiceInstancesOffline } from '@los/agent/service-instances';
 import { resolveCoordinationBackend } from '@los/agent/coordination';
 
 const log = getLogger('gateway');
@@ -29,6 +30,31 @@ export function registerServerMaintenance(
     }).catch((err) => log.warn(`Orphan reaper failed: ${err.message ?? String(err)}`));
   }, ORPHAN_REAPER_MS);
   app.addHook('onClose', async () => clearInterval(orphanReaper));
+
+  // ── Runtime registry freshness reconciliation (60s) ──────────
+  const STALE_RECONCILE_MS = 60_000;
+  const reconcileRuntimeFreshness = async () => {
+    try {
+      const [nodes, services] = await Promise.all([
+        markStaleExecutorNodesOffline(),
+        markStaleServiceInstancesOffline(),
+      ]);
+      if (nodes.updated.length > 0 || services.updated.length > 0) {
+        log.info(
+          `Runtime freshness: marked ${nodes.updated.length} executor node(s) and ` +
+          `${services.updated.length} service instance(s) offline after stale heartbeat`,
+        );
+      }
+    } catch (err) {
+      log.warn(`Runtime freshness reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const staleReconcileTimeout = setTimeout(reconcileRuntimeFreshness, STALE_RECONCILE_MS);
+  const staleReconcileTimer = setInterval(reconcileRuntimeFreshness, STALE_RECONCILE_MS);
+  app.addHook('onClose', async () => {
+    clearTimeout(staleReconcileTimeout);
+    clearInterval(staleReconcileTimer);
+  });
 
   // ── Daily memory maintenance (retention + integrity + auto-compact) ──
   const RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -160,20 +186,24 @@ export function registerServerMaintenance(
         const nodes = await listExecutorNodes();
         let triggered = 0;
         let unreachable = 0;
+        let skippedUnavailable = 0;
+        let skippedOverlapping = 0;
         for (const node of nodes) {
+          if (isRuntimeNodeUnavailableForScan(node)) {
+            skippedUnavailable++;
+            continue;
+          }
           const caps = (node.capabilities ?? {}) as Record<string, unknown>;
           if (!caps.file_sync_scan) continue;
           const cfg = (node.connectConfig ?? {}) as Record<string, unknown>;
           const httpCfg = (cfg.agent_http ?? {}) as Record<string, unknown>;
           const healthUrl = String(httpCfg.healthUrl ?? '').replace(/\/+$/, '');
           if (!healthUrl) continue;
-          const folders = (Array.isArray(caps.file_sync_folders) ? caps.file_sync_folders : []) as unknown[];
+          const allFolders = (Array.isArray(caps.file_sync_folders) ? caps.file_sync_folders : []) as unknown[];
+          const { folders, skipped } = normalizeFileSyncFoldersForScan(allFolders);
+          skippedOverlapping += skipped;
           if (folders.length === 0) continue;
           for (const entry of folders) {
-            const f = entry as Record<string, unknown>;
-            const folderName = typeof f.name === 'string' ? f.name : typeof f.folder === 'string' ? f.folder : null;
-            const mode = typeof f.mode === 'string' ? f.mode : 'incremental';
-            if (!folderName) continue;
             try {
               await fetch(`${healthUrl.replace('/health', '')}/v1/file-sync/scan`, {
                 method: 'POST',
@@ -181,18 +211,21 @@ export function registerServerMaintenance(
                   Authorization: `Bearer ${agentKey}`,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ folder: folderName, mode }),
+                body: JSON.stringify({ folder: entry.folderName, mode: entry.mode }),
                 signal: AbortSignal.timeout(300_000),
               });
               triggered++;
             } catch (err) {
               unreachable++;
-              log.debug(`file-sync trigger: ${node.nodeId}/${folderName} unreachable (${err instanceof Error ? err.message : String(err)})`);
+              log.debug(`file-sync trigger: ${node.nodeId}/${entry.folderName} unreachable (${err instanceof Error ? err.message : String(err)})`);
             }
           }
         }
-        if (triggered > 0 || unreachable > 0) {
-          log.info(`file-sync trigger: ${triggered} scan(s) triggered, ${unreachable} unreachable`);
+        if (triggered > 0 || unreachable > 0 || skippedUnavailable > 0 || skippedOverlapping > 0) {
+          log.info(
+            `file-sync trigger: ${triggered} scan(s) triggered, ${unreachable} unreachable, ` +
+            `${skippedUnavailable} unavailable node(s) skipped, ${skippedOverlapping} overlapping folder(s) skipped`,
+          );
         }
       } catch (err) {
         log.warn(`file-sync trigger sweep failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -205,4 +238,61 @@ export function registerServerMaintenance(
       clearInterval(fileSyncTimer);
     });
   }
+}
+
+type RuntimeNodeForScan = Awaited<ReturnType<typeof listExecutorNodes>>[number];
+
+interface FileSyncFolderForScan {
+  folderName: string;
+  mode: string;
+  path?: string;
+}
+
+function isRuntimeNodeUnavailableForScan(node: RuntimeNodeForScan): boolean {
+  if (node.status !== 'online') return true;
+  return node.execution.blockers.some(blocker => blocker === 'heartbeat:stale' || blocker.startsWith('status:'));
+}
+
+function normalizeFileSyncFoldersForScan(entries: unknown[]): { folders: FileSyncFolderForScan[]; skipped: number } {
+  const parsed = entries
+    .map(parseFileSyncFolder)
+    .filter((entry): entry is FileSyncFolderForScan => Boolean(entry))
+    .sort((a, b) => (a.path?.length ?? Number.MAX_SAFE_INTEGER) - (b.path?.length ?? Number.MAX_SAFE_INTEGER));
+  const folders: FileSyncFolderForScan[] = [];
+  let skipped = 0;
+
+  for (const entry of parsed) {
+    if (folders.some(existing => foldersOverlap(existing, entry))) {
+      skipped++;
+      continue;
+    }
+    folders.push(entry);
+  }
+
+  return { folders, skipped };
+}
+
+function parseFileSyncFolder(entry: unknown): FileSyncFolderForScan | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const record = entry as Record<string, unknown>;
+  const folderName = typeof record.name === 'string'
+    ? record.name.trim()
+    : typeof record.folder === 'string'
+      ? record.folder.trim()
+      : '';
+  if (!folderName) return null;
+  const mode = typeof record.mode === 'string' && record.mode.trim() ? record.mode.trim() : 'incremental';
+  const path = typeof record.path === 'string' && record.path.trim() ? normalizePathForOverlap(record.path) : undefined;
+  return { folderName, mode, path };
+}
+
+function foldersOverlap(existing: FileSyncFolderForScan, next: FileSyncFolderForScan): boolean {
+  if (existing.path && next.path) {
+    return next.path === existing.path || next.path.startsWith(`${existing.path}/`);
+  }
+  return existing.folderName === next.folderName;
+}
+
+function normalizePathForOverlap(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
 }

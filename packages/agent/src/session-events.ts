@@ -26,16 +26,23 @@ export type SessionEventVisibility = 'public' | 'audit' | 'internal';
 
 /** Classify an event type into its visibility tier.
  *  - public: user-facing events (tool calls, model responses, task lifecycle)
- *  - audit:  observability bookmarks (session started, tool catalog)
+ *  - audit:  observability bookmarks (session started, tool catalog, governance)
  *  - internal: state-machine transitions that duplicate richer tool and task events
  */
 export function sessionEventVisibility(type: string): SessionEventVisibility {
   if (type.startsWith('tool_call_state.')) return 'internal';
+  // Governance sweep/job lifecycle is operator audit, not user-facing chat noise.
+  if (type.startsWith('governance.')) return 'audit';
   if (type === 'session.started' || type === 'session.completed' ||
       type === 'tool.catalog' || type === 'model.turn.started') {
     return 'audit';
   }
   return 'public';
+}
+
+export interface ListSessionEventsOptions {
+  /** When false, omit internal-tier rows. Default true (full ledger for tests/SSE). */
+  includeInternal?: boolean;
 }
 
 export interface SessionEventRecord {
@@ -297,11 +304,21 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
   return records;
 }
 
-export async function listSessionEvents(sessionId: string, limit = 200): Promise<SessionEventRecord[]> {
+export async function listSessionEvents(
+  sessionId: string,
+  limit = 200,
+  opts?: ListSessionEventsOptions,
+): Promise<SessionEventRecord[]> {
   await ensureSessionEventStore();
   const db = getDb();
+  const includeInternal = opts?.includeInternal !== false;
   const rows = await db.query<SessionEventRow>(
-    'SELECT * FROM session_events WHERE session_id = $1 ORDER BY id ASC LIMIT $2',
+    includeInternal
+      ? 'SELECT * FROM session_events WHERE session_id = $1 ORDER BY id ASC LIMIT $2'
+      : `SELECT * FROM session_events
+         WHERE session_id = $1
+           AND coalesce(visibility, 'public') <> 'internal'
+         ORDER BY id ASC LIMIT $2`,
     [sessionId, limit],
   );
   return rows.rows.map(rowToSessionEvent);
@@ -337,14 +354,25 @@ export async function listSessionEventsSince(
   sessionId: string,
   sinceId: number,
   limit = 200,
+  opts?: ListSessionEventsOptions,
 ): Promise<SessionEventRecord[]> {
   await ensureSessionEventStore();
   const db = getDb();
+  const includeInternal = opts?.includeInternal !== false;
   const rows = await db.query<SessionEventRow>(
-    `
+    includeInternal
+      ? `
     SELECT *
     FROM session_events
     WHERE session_id = $1 AND id > $2
+    ORDER BY id ASC
+    LIMIT $3
+  `
+      : `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1 AND id > $2
+      AND coalesce(visibility, 'public') <> 'internal'
     ORDER BY id ASC
     LIMIT $3
   `,

@@ -30,6 +30,7 @@ test('provider source metadata survives config validation and diagnostics', () =
 
   assert.equal(config.providers.deepseek.source, 'env:DEEPSEEK_API_KEY');
   assert.equal(config.providers.packycode.source, 'codex/auth.json');
+  assert.equal(config.memory.persistChatDefault, true, 'chat should default to episodic observation write');
 
   const diagnostics = printConfigDiagnostics(config);
   assert.match(diagnostics, /deepseek\s+model=deepseek-v4-flash\s+key=yes ready=yes source=env:DEEPSEEK_API_KEY\s+\[advisory\]/);

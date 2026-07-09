@@ -120,9 +120,27 @@ export function extractLoopPrinciples(result: GaLoopResult): ExtractedPrinciple[
   return principles;
 }
 
+/** Align with @los/memory MIN_CANDIDATE_CONFIDENCE (agent cannot import memory — circular). */
+const MIN_GA_CANDIDATE_CONFIDENCE = 0.5;
+
+function gaConfidence(severity: ExtractedPrinciple['severity']): number {
+  if (severity === 'error') return 0.65;
+  if (severity === 'warning') return 0.55;
+  return 0.4; // info — below threshold, skipped
+}
+
+function gaSeverity(severity: ExtractedPrinciple['severity']): 'info' | 'warn' | 'error' {
+  if (severity === 'error') return 'error';
+  if (severity === 'warning') return 'warn';
+  return 'info';
+}
+
 /**
  * Persist extracted principles to the procedural_candidates table.
  * Returns the number of candidates created.
+ *
+ * Cannot call createProceduralCandidate (@los/memory) — agent↔memory circular dep.
+ * Mirrors its evidence gate: confidence ≥ 0.5, explicit confidence column, stable id.
  */
 export async function persistLoopPrinciples(
   result: GaLoopResult,
@@ -138,24 +156,45 @@ export async function persistLoopPrinciples(
 
     let created = 0;
     for (const p of principles) {
+      const confidence = gaConfidence(p.severity);
+      if (confidence < MIN_GA_CANDIDATE_CONFIDENCE) {
+        log.debug(`Skipping GA principle "${p.name}" — confidence ${confidence} < ${MIN_GA_CANDIDATE_CONFIDENCE}`);
+        continue;
+      }
       try {
-        const id = `proc-${p.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const name = `${p.name}-${Date.now()}`;
+        // Stable id for upsert/dedup (no Date.now in name).
+        const name = p.name.slice(0, 128);
+        const id = `pc-ga-auto-${name.slice(0, 64)}`;
+        const content =
+          `**Context:** ${p.context}\n\n**Principle:** ${p.principle}\n\n**Evidence:**\n${p.evidence.map(e => `- ${e}`).join('\n')}`;
         await db.query(
-          `INSERT INTO procedural_candidates (id, name, content, severity, status, compaction_id, session_id, evidence_json)
-           VALUES ($1, $2, $3, $4, 'draft', 'ga-auto', 'ga-system', $5::jsonb)
-           ON CONFLICT DO NOTHING`,
+          `INSERT INTO procedural_candidates (
+             id, name, content, severity, rationale, confidence, status,
+             compaction_id, session_id, tenant_id, project_id, evidence_json
+           ) VALUES ($1, $2, $3, $4, $5, $6, 'draft', 'ga-auto', 'ga-system', $7, $8, $9::jsonb)
+           ON CONFLICT (id) DO UPDATE SET
+             content = EXCLUDED.content,
+             severity = EXCLUDED.severity,
+             rationale = EXCLUDED.rationale,
+             confidence = GREATEST(procedural_candidates.confidence, EXCLUDED.confidence),
+             evidence_json = EXCLUDED.evidence_json,
+             updated_at = now()`,
           [
             id,
             name,
-            `**Context:** ${p.context}\n\n**Principle:** ${p.principle}\n\n**Evidence:**\n${p.evidence.map(e => `- ${e}`).join('\n')}`,
-            p.severity,
+            content,
+            gaSeverity(p.severity),
+            p.context,
+            confidence,
+            tenantId ?? null,
+            projectId ?? null,
             JSON.stringify({
               source: 'ga_loop',
               jobType: result.jobType,
               jobId: result.jobId,
               relationshipToExisting: p.relationshipToExisting,
               relatedPrinciple: p.relatedPrinciple ?? null,
+              supportingSessionIds: ['ga-system'],
               tenantId: tenantId ?? null,
               projectId: projectId ?? null,
             }),

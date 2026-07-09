@@ -133,3 +133,71 @@ test('procedural candidates: promoteProceduralCandidate returns null for unknown
     await closeDb().catch(() => undefined);
   }
 });
+
+test('procedural candidates: rejects sub-threshold confidence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `pc-conf-${Date.now()}`;
+  const compactionId = randomUUID();
+
+  try {
+    await ensureProceduralCandidateStore();
+    await assert.rejects(
+      () => createProceduralCandidate({
+        name: 'zero-conf',
+        content: 'noise',
+        confidence: 0,
+        compactionId,
+        sessionId,
+      }),
+      /below minimum/,
+    );
+    await assert.rejects(
+      () => createProceduralCandidate({
+        name: 'low-conf',
+        content: 'noise',
+        confidence: 0.49,
+        compactionId,
+        sessionId,
+      }),
+      /below minimum/,
+    );
+  } finally {
+    await getDb().query('DELETE FROM procedural_candidates WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('procedural candidates: upsert on same compactionId+name keeps higher confidence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `pc-upsert-${Date.now()}`;
+  const compactionId = randomUUID();
+
+  try {
+    await ensureProceduralCandidateStore();
+    const first = await createProceduralCandidate({
+      name: 'stable-rule',
+      content: 'v1',
+      confidence: 0.6,
+      compactionId,
+      sessionId,
+    });
+    const second = await createProceduralCandidate({
+      name: 'stable-rule',
+      content: 'v2',
+      confidence: 0.8,
+      compactionId,
+      sessionId,
+    });
+    assert.equal(first.id, second.id);
+    assert.equal(second.content, 'v2');
+    assert.equal(second.confidence, 0.8);
+
+    const listed = await listProceduralCandidates({ sessionId });
+    assert.equal(listed.length, 1);
+  } finally {
+    await getDb().query('DELETE FROM procedural_candidates WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});

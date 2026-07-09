@@ -1,13 +1,13 @@
-# los 项目现状、规划与待办（2026-07-03）
+# los 项目现状、规划与待办
 
-> 审计基线：2026-07-03 工作树（含 worker-messages 集成等未提交改动）
-> 上游文档：`AGENTS.md` / `SKILL.md` / `docs/governance/agent-workflow-roadmap.md` /
-> `docs/governance/2026-06-24-architecture-audit-and-iteration-plan.md` /
-> `docs/architecture/2026-06-28-self-iteration-engineering.md` / ADR 0012、0021、0024
+> **基线刷新**：2026-07-09（运行盘点 + AST/KG/wiring 拓扑）
+> 历史审计：2026-07-03 工作树；上游 `AGENTS.md` / `SKILL.md` / ADR 0012、0020、0021、0024
+>
+> 文档结构：**当前基线 → 已完成并接线 → 待验证 → 真实 open backlog**。过期 checklist 不再当活待办。
 
 ## 一句话结论
 
-项目处于**自我治理基建期**：runtime 内核已成型，当前在补 worker↔coordinator 协调消息层 + CI/治理脚手架，不加新功能。近期主线是"把已实现但未接线的能力接起来，把结构性债务变成自迭代闭环"。
+项目处于**自我治理基建期**：runtime 内核已成型。近期主线是压低账本噪声、打通 episodic 记忆输入、收敛 procedural 候选写路径（ADR 0020），而不是再拆 ReAct loop。
 
 ---
 
@@ -38,12 +38,14 @@
 
 ### 1.3 已知短板与债务（06-24 审计 + 06-28 自迭代文档）
 
-**架构腐化 / 未接线**
-- `@los/input-preprocessor` 整包已移除（2026-07-05）。原本 21 文件 5.5k 行，零 runtime 消费者，过早建设的孤岛。
-- Architect/Editor 双模型：~~config/setup/message-builder 全接好，`loop.ts` 从不引用（grep 零命中）~~ **已接线**：`scheduled-task-runner.ts` 在 `runContract.mode === 'architect-editor'` 时传递 `architectEditor: { enabled: true }` 进 loop.ts，loop.ts:116 调用 `runArchitectPhase()` + setup.ts:103 选 editor provider。子 agent（`agent-tools.ts`）通过 AP6 继承配置。
+**架构腐化 / 未接线（仍 open）**
+- `@los/input-preprocessor` 整包已移除（2026-07-05）。
+- Architect/Editor 双模型：**已接线**（`loop.ts` → `runArchitectPhase`；mode `architect-editor`）。**待验证**：端到端 harness / 调度 run 证据，不是「未实现」。
+- 记忆维护：**已接线**（`server-maintenance.ts` 启动 10s + 每日 retention/integrity/auto-compact）。
 - `deferred-registry`：`preloadDeferredEntries` 函数体只有注释，全仓无人调用（死代码）
-- `syncMemoryMd`：文档说"每次新增观测自动更新"，实际 `addObservation` 不调用
+- `syncMemoryMd`：文档曾写「每次新增观测自动更新」，实际 `addObservation` 不调用
 - `operatorToken`：config schema 定义了，`auth-middleware.ts` 只查 `auth.token`，operator consent 闸门无强制点
+- `memory-lifecycle.ts`（agent）：wiring orphan，**不要**当 P0 接线面
 
 **结构性热点（KG: transitive_loop_depth）**
 - `startExecutor` tld=9 —— 全仓最差热点 + bootstrap 盲点（remote 节点只 ensure 2 表，无 migrateDir/ensureAllStores）
@@ -133,10 +135,18 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 - [x] **SP-Spec 精简注入** — `loadSpecsForFiles({ mode: 'review' })` 只注入 checklist + quality check，省 ~41%
 - [x] **SP-条件模型分层** — `model-tiering.ts` 11/11 测试绿，`scoreComplexity()` 按 prompt/文件数/spec/工具数分层
 
+### P0 —— 2026-07-09 运行面 / 记忆账本（本轮）
+
+- [x] Governance sweep 空转不写 `session_events`（dueCount=0 / noop）
+- [x] `sessionEventVisibility`：`governance.*` → audit；session list 默认隐藏 internal
+- [x] `/chat` 默认 `persistChatDefault=true` 写 episodic observation；openai-compat 保持 false
+- [x] procedural candidate confidence ≥ 0.5；GA 旁路写显式 confidence + upsert；禁止 conf=0 入库
+
 ### P2 —— 中程
 
-- [x] `input-preprocessor`：接入 runtime 消费者，或标弃用并移除 → **已移除**（零运行时消费者，孤岛包，2026-07-05）
-- [ ] Architect/Editor 双模型：在 `loop.ts` 真正使用，或移除配置面
+- [x] `input-preprocessor`：接入 runtime 消费者，或标弃用并移除 → **已移除**（2026-07-05）
+- [x] Architect/Editor 双模型：**已接线** → 剩余项移到「待验证」
+- [ ] ~~Architect/Editor：**待验证** mode 端到端 harness / 调度证据（非实现缺口）~~ → harness 测试已添加（`loop/architect-integration.test.ts`），通过 mock 证明 architect → plan-injection → editor 全路径。调度 run 证据仍需一次真实 provider 运行 [I]
 - [ ] `deferred-registry`：删死代码或实现 `preloadDeferredEntries`
 - [ ] 契约→类型 codegen（消除手写 grep 校验）
 - [ ] `@los/agent/src` 治理文件归子目录（25+ `governance-*`/`ga-*`）
@@ -144,6 +154,8 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 - [ ] 状态枚举单一源（typed enum 替代读侧字符串匹配）
 - [ ] executor `process.env` 旁路 → 走 `@los/infra/config`；补 `config.executor.host/port/artifactRoot`
 - [ ] Stage C eval 语料：E01-E10 选高风险落测试/探针/文档
+- [ ] promote/attest 生产 UI（有 conf≥0.7 跨 session 候选后再做）
+- [ ] `loadSpecsForFiles` 包 cwd 短路径（`src/foo.ts`）
 
 ### P3 —— 安全/卫生
 
@@ -154,6 +166,110 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 - [ ] `operatorToken` 接线到 `auth-middleware`
 - [ ] `syncMemoryMd` 在 `addObservation` 自动调用或从文档撤回
 - [ ] systemd 模板化 + env 文件
+
+---
+
+## 六、IM + Web 交互设计（2026-07-10）
+
+### 6.1 现状摸底（2026-07-10 运行时核实）
+
+**核心运行时**：
+- gateway: pid=73607, port=8080, health=ok, uptime ~20h [E]
+- executor: pid=73506, port=8090, health=ok, nodeId=mbp-executor-1, status=online, candidate=true [E]
+- executor warning: resource:memory_pressure [E]
+
+**IM 通道运行时状态**：
+- WeChat (WeClaw): **installed=true, daemonRunning=false** — 二进制在 `/Users/echerlos/go/bin/weclaw`，账号已绑定（1 个 WeChat 用户），但 daemon 未运行 [E]
+- Telegram: planned，未实现 [E]
+- Web 移动面板: `live=true`，在 `:8899/m/` 运行 [I]
+
+**Provider 状态**：
+- packycode (GPT-5.5)、deepseek-anthropic (v4-pro)、minimax (M3)、custom (GPT-5.5 via Cliproxy)、deepseek (v4-flash)、deepseek (v4-pro) 共 6 个已发现 [E]
+- provider health diagnostics: **空**——无 provider 有健康记录，无 repair 计数器 [E]
+- 记忆观测: **0 条**——persistChatDefault=true 已配置，但历史 session 未被持久化为 episodic observation [E]
+- 最近 session: 2026-07-04 的两次 deepseek run（一次 succeeded, 一次 read-only succeeded），距今 6 天 [E]
+
+**IM 通道**：
+- WeChat：WeClaw（主通道，仅出站）+ WxPusher（回调入站，支持 `#approve`/`#deny` 等命令）+ Web 移动面板（只读 + 操作按钮）
+- Telegram：SSE 消费 + inline keyboard（Approve/Deny/Escalate 按钮）+ 轮询/Webhook 入站
+- 共享 `MessageRouter`（`resolveIntent`），命令词：`#approve` `#deny` `#escalate` `#status` `#task` `#run` `#claude` `#codex` `#jobs` `#sweep` `#governance`
+- 共同问题：只有 session 级 tool steering，无 RunContract 阶段审批概念
+
+**Web 面板**：
+- 19 个页面（chat/sessions/todos/tasks/memory/providers/skills/mcp/services/artifacts/rules/evals/nodes/run-specs/logs/dead-letter/diagnostics/file-sync/communication-accounts/settings）
+- Run Specs 页有 Approve/Reject 按钮（但 payload 与后端期望不匹配：发 `{approved: true}` 但后端期望 `{actor, reason}`）
+- Chat 页 ApprovalCard 只读、AbortConfirmation 可交互
+- Revise Plan / Worker Answer 只有后端路由，无 UI
+- WebSocket operator steering 是占位注释（`ws-routes.ts:182`）
+- Web 无 SSE 实时订阅，靠轮询
+
+### 6.2 交互模型
+
+```
+┌─────────────┐     SSE/WS      ┌─────────────┐
+│  los agent  │ ──operator────▶ │   gateway    │
+│  (runtime)  │   attention     │  (hub)       │
+└─────────────┘                 └──────┬──────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+              ▼                        ▼                        ▼
+        ┌──────────┐           ┌──────────┐            ┌──────────┐
+        │  WeChat  │           │ Telegram │            │   Web    │
+        │ (via IM) │           │  (bot)   │            │ (panel)  │
+        └────┬─────┘           └────┬─────┘            └────┬─────┘
+             │                      │                       │
+             ▼                      ▼                       ▼
+    POST /sessions/:id      POST /sessions/:id      POST /runs/:id
+    /operator-events        /operator-events        /approve|revise-plan
+    (steering)              (steering)              /verify|recover|answer
+```
+
+**三通道分工**：
+| 通道 | 适合 | 不适合 |
+|------|------|--------|
+| WeChat | 快速审批（`#approve abc123`）、告警推送 | 复杂 RunContract 查看、多选操作 |
+| Telegram | 同上 + inline button 更精准 | 同上 |
+| Web | 深度查看 RunContract 全貌、plan/evidence/verification 对比、批量操作 | 移动端即时审批（需开浏览器） |
+
+### 6.3 需补齐的缺口
+
+**P0 — 纠正已有但错误的部分**：
+- [ ] Web Run Specs 页审批 payload：`{approved: true, note}` → `{actor: string, reason: string}`
+- [ ] Chat 页 ApprovalCard 从只读升级为可交互（调用 `POST /sessions/:id/operator-events`）
+- [ ] WebSocket 实现 operator steering（`ws-routes.ts:182` 占位）
+
+**P1 — 补 RunContract IM 命令**：
+- [ ] `resolveIntent` 新增：`#approve-phase <runId>` `#revise-plan <runId>` `#verify-run <runId>`
+- [ ] `OperatorAlert` 接口增加 `runContract` 字段（phase, plan steps, blockers, verification status）
+- [ ] Telegram inline button 增加 "Approve Phase" / "Revise Plan" 按钮
+- [ ] SSE `operator_attention` 事件增加 RunContract 阶段变更类型
+
+**P1 — Web 交互补齐**：
+- [ ] Run Specs 页增加 Revise Plan 面板（调用 `POST /runs/:id/revise-plan`）
+- [ ] Run Specs 页增加 Verify 按钮（已有后端路由）
+- [ ] Worker Answer UI（调用 `POST /runs/:id/answer`）
+- [ ] Web 客户端订阅 `/operator/events/live` SSE（实时推送替代轮询）
+- [ ] Communication Accounts 页绑定审批权限（哪个 WeChat 用户可审批哪些 run）
+
+**P2 — 深度集成**：
+- [ ] RunContract 创建时选通知识别（"审批通知发 WeChat" / "发 Telegram"）
+- [ ] 多步骤 DAG 的每步完成/失败 IM 通知
+- [ ] IM 内直接查看 run evidence 摘要（不切到 Web）
+- [ ] Web 端 RunContract 模板库（常用 contract 一键创建）
+
+### 6.4 判断指标
+
+每个 Stage 完成后检查：
+
+| 指标 | Stage B（当前） | Stage C | Stage D | Stage E |
+|------|----------------|---------|---------|---------|
+| 能否通过 IM 审批一次 run？ | 部分（tool 级可，phase 级不可） | ✅ | ✅ | ✅ |
+| 能否在 Web 查看完整 RunContract？ | ✅（Run Specs 页） | ✅ | ✅ | ✅ |
+| 能否在 Web 审批/修订/验证？ | 部分（approve 可但 payload 错） | ✅ | ✅ | ✅ |
+| Agent 中断后能否从 Web 恢复？ | ❌ | ❌ | ✅ | ✅ |
+| 能否在 Web 查看 DAG 依赖图？ | 部分（Agent Graph 页） | 部分 | 部分 | ✅ |
+| 多 agent 结果能否在 Web 对比？ | ❌ | ❌ | ❌ | ✅ |
 
 ---
 

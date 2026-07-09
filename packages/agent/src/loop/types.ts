@@ -4,6 +4,7 @@ import type { MCPServerConfig } from '../tools/external/mcp-client.js';
 import type { Logger } from '@los/infra/logger';
 import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
 import type { IdentityLevel } from '../identity-loader.js';
+import type { ModelDiagnosticConfig } from '../model-diagnostics.js';
 
 export interface AgentConfig {
   sessionId?: string;
@@ -99,6 +100,8 @@ export interface AgentConfig {
     /** Callback on CRITICAL level crossing */
     onCritical?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
   };
+  /** Advisory model diagnostics. Defaults to heuristic shadow mode when unset. */
+  modelDiagnostics?: ModelDiagnosticConfig;
 }
 
 export interface AgentModelDelta extends ProviderDelta {

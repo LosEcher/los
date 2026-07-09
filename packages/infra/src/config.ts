@@ -133,6 +133,12 @@ export const ConfigSchema = z.object({
   memory: z.object({
     ftsEnabled: z.coerce.boolean().default(true),
     maxObservations: z.coerce.number().default(10000),
+    /**
+     * Default for POST /chat when body.persistMemory is omitted.
+     * true → write episodic observations after successful chat (ADR 0020 input path).
+     * OpenAI-compat route intentionally stays false regardless of this default.
+     */
+    persistChatDefault: z.coerce.boolean().default(true),
     /** Enable agent self-reflection recording. When true, agents persist insights
      *  about their own behavior (strengths, weaknesses, patterns) as observations
      *  with observerType: 'agent_self'. Default: false (opt-in). */
@@ -206,6 +212,7 @@ const ENV_MAP: [string, string][] = [
   ['JUDGE_SYSTEM_PROMPT', 'judge.systemPrompt'],
   ['REVIEW_ENABLED', 'review.enabled'],
   ['MEMORY_FTS_ENABLED', 'memory.ftsEnabled'],
+  ['MEMORY_PERSIST_CHAT_DEFAULT', 'memory.persistChatDefault'],
   ['MEMORY_SELF_REFLECTION_ENABLED', 'memory.selfReflectionEnabled'],
   ['LOS_CODE_GRAPH_ENABLED', 'memory.codeGraph.enabled'],
   ['LOS_CODE_GRAPH_SHADOW_MODE', 'memory.codeGraph.shadowMode'],
@@ -388,7 +395,7 @@ export async function loadConfig(opts?: {
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173' },
     auth: { enabled: false },
     agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
-    memory: { ftsEnabled: true, maxObservations: 10000, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
+    memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},
     databaseUrl: 'postgres://localhost:5432/los',

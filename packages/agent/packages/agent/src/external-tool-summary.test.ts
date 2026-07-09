@@ -94,10 +94,7 @@ test('external tool summary adapter rejects raw transcript-shaped fields', () =>
   );
 });
 
-// FIXME: This test creates its own DB pool via initDb which races with
-// test-setup's ensureAllAgentStores. The store's _initialized flag prevents
-// re-creation on the new pool. Skip until refactored. See PR #120.
-test.skip('external tool summaries persist only redacted external_summary records', async () => {
+test('external tool summaries persist only redacted external_summary records', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
   const id = `external-summary-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -142,5 +139,6 @@ test.skip('external tool summaries persist only redacted external_summary record
     assert.deepEqual(loaded?.labels, ['codex', 'closeout']);
   } finally {
     await getDb().query('DELETE FROM external_tool_summaries WHERE id = $1', [id]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
   }
 });

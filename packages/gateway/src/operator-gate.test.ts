@@ -42,6 +42,7 @@ function buildConfig(opts: { authEnabled: boolean; operatorToken?: string }): Co
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,
+      persistChatDefault: true,
       selfReflectionEnabled: false,
       codeGraph: {
         enabled: false, shadowMode: false, injectArchitecture: false,

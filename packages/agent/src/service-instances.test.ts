@@ -6,6 +6,7 @@ import { loadConfig } from '@los/infra/config';
 import {
   ensureServiceInstanceStore,
   loadServiceInstance,
+  markStaleServiceInstancesOffline,
   upsertServiceInstance,
   upsertServiceInstanceHeartbeat,
 } from './service-instances.js';
@@ -88,6 +89,41 @@ test('service heartbeat preserves draining status until promoted', async () => {
     assert.equal(promoted.readiness.ready, true);
   } finally {
     await getDb().query('DELETE FROM service_instances WHERE service_id = $1', [serviceId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('markStaleServiceInstancesOffline only marks stale online services offline', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = Date.now();
+  const staleServiceId = `test-stale-service-${suffix}`;
+  const freshServiceId = `test-fresh-service-${suffix}`;
+  try {
+    await ensureServiceInstanceStore();
+
+    for (const serviceId of [staleServiceId, freshServiceId]) {
+      await upsertServiceInstanceHeartbeat({
+        serviceId,
+        serviceKind: 'gateway',
+        health: { db_ok: true, schema_ok: true },
+      });
+    }
+    await getDb().query(
+      `UPDATE service_instances SET last_heartbeat_at = now() - interval '2 minutes' WHERE service_id = $1`,
+      [staleServiceId],
+    );
+
+    const result = await markStaleServiceInstancesOffline(60_000);
+    assert.ok(result.updated.some(service => service.serviceId === staleServiceId));
+    assert.ok(!result.updated.some(service => service.serviceId === freshServiceId));
+
+    const stale = await loadServiceInstance(staleServiceId);
+    const fresh = await loadServiceInstance(freshServiceId);
+    assert.equal(stale?.status, 'offline');
+    assert.equal(fresh?.status, 'online');
+  } finally {
+    await getDb().query('DELETE FROM service_instances WHERE service_id = ANY($1)', [[staleServiceId, freshServiceId]]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

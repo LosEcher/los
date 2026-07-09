@@ -27,6 +27,16 @@ export default async function authMiddleware(
 
     if (isPublicPath(req.url, req.method)) return;
 
+    // Operator token (strongest auth path): x-los-operator-token header
+    // When set, grants operator-level access for RunContract phase approvals,
+    // session steering, and other operator-gated actions.
+    if (config.auth.operatorToken) {
+      const opToken = req.headers['x-los-operator-token'];
+      const opNormalized = Array.isArray(opToken) ? opToken[0] : opToken;
+      if (opNormalized === config.auth.operatorToken) return;
+    }
+
+    // Fallback: legacy auth token
     const token = req.headers['x-los-auth-token'];
     const normalized = Array.isArray(token) ? token[0] : token;
 
