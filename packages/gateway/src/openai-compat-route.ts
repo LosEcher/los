@@ -74,6 +74,7 @@ export function registerOpenAICompatibleRoute(
         timeoutMs: undefined,
         toolRetry: undefined,
         mcpServers: undefined,
+        // Intentional: OpenAI-compat is high-volume / IDE traffic — never default-write memory.
         persistMemory: false,
         boundTodoId: undefined,
         branchFrom: undefined,

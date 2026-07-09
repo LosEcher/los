@@ -138,11 +138,14 @@ export function registerSessionRoutes(app: FastifyInstance): void {
 
   app.get('/sessions/:id/events', async (req) => {
     const { id } = req.params as { id: string };
-    const rawLimit = Number((req.query as { limit?: string }).limit ?? 200);
+    const query = req.query as { limit?: string; includeInternal?: string };
+    const rawLimit = Number(query.limit ?? 200);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 10000 ? rawLimit : 200;
+    // Operator UI default: hide internal state-machine noise. Pass includeInternal=1 for full ledger.
+    const includeInternal = query.includeInternal === '1' || query.includeInternal === 'true';
     await ensureSessionEventStore();
-    const events = await listSessionEvents(id, limit);
-    return { sessionId: id, count: events.length, events };
+    const events = await listSessionEvents(id, limit, { includeInternal });
+    return { sessionId: id, count: events.length, events, includeInternal };
   });
 
   app.get('/sessions/:id/observability', async (req) => {

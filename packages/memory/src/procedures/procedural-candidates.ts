@@ -63,22 +63,40 @@ export async function ensureProceduralCandidateStore(): Promise<void> {
   log.info('Procedural candidate store initialized');
 }
 
+/** ADR 0020 evidence gate: sub-threshold candidates stay out of the table. */
+export const MIN_CANDIDATE_CONFIDENCE = 0.5;
+
 export async function createProceduralCandidate(
   input: CreateProceduralCandidateInput,
 ): Promise<ProceduralCandidate> {
   await ensureProceduralCandidateStore();
   const db = getDb();
 
+  const confidence = input.confidence ?? MIN_CANDIDATE_CONFIDENCE;
+  if (!(confidence >= MIN_CANDIDATE_CONFIDENCE)) {
+    throw new Error(
+      `procedural candidate confidence ${confidence} below minimum ${MIN_CANDIDATE_CONFIDENCE}`,
+    );
+  }
+
   const id = `pc-${input.compactionId}-${input.name.slice(0, 64)}`;
   const evidence = {
     supportingSessionIds: input.supportingSessionIds ?? [input.sessionId],
   };
 
+  // Deterministic id → upsert so dual-write / retries do not create junk duplicates.
   const rows = await db.query<CandidateRow>(
     `INSERT INTO procedural_candidates (
       id, name, content, severity, rationale, confidence, status,
       compaction_id, session_id, tenant_id, project_id, evidence_json
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+    ON CONFLICT (id) DO UPDATE SET
+      content = EXCLUDED.content,
+      severity = EXCLUDED.severity,
+      rationale = EXCLUDED.rationale,
+      confidence = GREATEST(procedural_candidates.confidence, EXCLUDED.confidence),
+      evidence_json = EXCLUDED.evidence_json,
+      updated_at = now()
     RETURNING *`,
     [
       id,
@@ -86,7 +104,7 @@ export async function createProceduralCandidate(
       input.content,
       input.severity ?? 'info',
       input.rationale ?? '',
-      input.confidence ?? 0.5,
+      confidence,
       input.status ?? 'draft',
       input.compactionId,
       input.sessionId,

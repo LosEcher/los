@@ -64,6 +64,10 @@ export interface ServiceInstanceUpsertInput extends ServiceInstanceHeartbeatInpu
   lastProbeError?: string | null;
 }
 
+export interface MarkStaleServiceInstancesOfflineResult {
+  updated: ServiceInstanceRecord[];
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS service_instances (
   service_id TEXT PRIMARY KEY,
@@ -186,6 +190,26 @@ export async function loadServiceInstance(serviceId: string): Promise<ServiceIns
   const db = getDb();
   const rows = await db.query<ServiceInstanceRow>('SELECT * FROM service_instances WHERE service_id = $1', [serviceId]);
   return rows.rows[0] ? rowToServiceInstance(rows.rows[0]) : null;
+}
+
+export async function markStaleServiceInstancesOffline(
+  staleMs = SERVICE_INSTANCE_STALE_MS,
+): Promise<MarkStaleServiceInstancesOfflineResult> {
+  await ensureServiceInstanceStore();
+  const db = getDb();
+  const rows = await db.query<ServiceInstanceRow>(
+    `
+    UPDATE service_instances
+       SET status = 'offline',
+           rollout_message = COALESCE(rollout_message, 'heartbeat stale; marked offline by gateway maintenance'),
+           updated_at = now()
+     WHERE status = 'online'
+       AND last_heartbeat_at < now() - ($1::integer * interval '1 millisecond')
+     RETURNING *
+    `,
+    [Math.max(0, Math.floor(staleMs))],
+  );
+  return { updated: rows.rows.map(rowToServiceInstance) };
 }
 
 export function evaluateServiceInstance(service: Omit<ServiceInstanceRecord, 'readiness'>): ServiceInstanceReadiness {

@@ -39,11 +39,16 @@ export async function persistChatSuccess(opts: {
               symbols,
             }));
           }
+          const promptPreview = opts.prompt.trim().slice(0, 200);
+          const answerPreview = opts.result.text.trim().slice(0, 200);
+          if (!promptPreview && !answerPreview) {
+            return undefined;
+          }
           return addObservation({
             title: `Chat session ${opts.sessionId.slice(0, 12)}`,
-            summary: `Prompt: ${opts.prompt.slice(0, 200)} - ${opts.result.text.slice(0, 200)}`,
+            summary: `Prompt: ${promptPreview} - ${answerPreview}`,
             kind: 'note',
-            tags: ['chat', 'session'],
+            tags: ['chat', 'session', 'episodic'],
             source: 'agent',
             sessionId: opts.sessionId,
             tenantId: opts.tenantId,
@@ -52,7 +57,12 @@ export async function persistChatSuccess(opts: {
             nodeId: opts.nodeId ?? undefined,
             requestId: opts.requestId,
             traceId: opts.traceId,
-            metadata: meta,
+            metadata: {
+              ...meta,
+              runSpecId: opts.runSpecId,
+              taskRunId: opts.taskRunId,
+              sourceRoute: 'chat',
+            },
           });
         })
       : Promise.resolve(undefined),

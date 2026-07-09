@@ -366,29 +366,19 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     ],
   );
 
-  // Dual-write to standalone procedural_candidates table (skip for checkpoints)
+  // Dual-write candidates (skip checkpoints + conf < 0.5)
   if (!isCheckpoint && proceduralCandidates.length > 0) {
     await ensureProceduralCandidateStore();
-    await Promise.all(
-      proceduralCandidates.map(c =>
-        createProceduralCandidate({
-          name: c.name,
-          content: c.content,
-          severity: c.severity,
-          rationale: c.rationale,
-          confidence: c.confidence,
-          status: c.status,
-          compactionId: id,
-          sessionId,
-          tenantId: input.tenantId,
-          projectId: input.projectId,
-          supportingSessionIds: c.supportingSessionIds,
-        }).catch(err => {
-          log.warn(`Dual-write candidate "${c.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
-          return null;
-        }),
-      ),
-    );
+    await Promise.all(proceduralCandidates.filter(c => (c.confidence ?? 0) >= 0.5).map(c =>
+      createProceduralCandidate({
+        name: c.name, content: c.content, severity: c.severity, rationale: c.rationale,
+        confidence: c.confidence, status: c.status, compactionId: id, sessionId,
+        tenantId: input.tenantId, projectId: input.projectId, supportingSessionIds: c.supportingSessionIds,
+      }).catch(err => {
+        log.warn(`Dual-write candidate "${c.name}" failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      }),
+    ));
   }
 
   // Classify observations (skip for checkpoints — no pattern extraction)

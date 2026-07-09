@@ -136,6 +136,10 @@ export interface ExecutorNodeProbeInput {
   lastProbeError?: string | null;
 }
 
+export interface MarkStaleExecutorNodesOfflineResult {
+  updated: ExecutorNodeRecord[];
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS executor_nodes (
   node_id TEXT PRIMARY KEY,
@@ -275,6 +279,25 @@ export async function recordExecutorNodeProbe(input: ExecutorNodeProbeInput): Pr
   });
 }
 
+export async function markStaleExecutorNodesOffline(
+  staleMs = EXECUTOR_NODE_STALE_MS,
+): Promise<MarkStaleExecutorNodesOfflineResult> {
+  await ensureExecutorNodeStore();
+  const db = getDb();
+  const rows = await db.query<ExecutorNodeRow>(
+    `
+    UPDATE executor_nodes
+       SET status = 'offline',
+           rollout_message = COALESCE(rollout_message, 'heartbeat stale; marked offline by gateway maintenance'),
+           updated_at = now()
+     WHERE status = 'online'
+       AND last_heartbeat_at < now() - ($1::integer * interval '1 millisecond')
+     RETURNING *
+    `,
+    [Math.max(0, Math.floor(staleMs))],
+  );
+  return { updated: rows.rows.map(rowToExecutorNode) };
+}
 
 function rowToExecutorNode(row: ExecutorNodeRow): ExecutorNodeRecord {
   const record = {

@@ -35,6 +35,10 @@ import {
   evictMessages,
   type SemanticEvictionConfig,
 } from './semantic-eviction.js';
+import {
+  createToolPreflightDiagnostic,
+  resolveModelDiagnosticSnapshot,
+} from './model-diagnostics.js';
 import type {
   AgentConfig,
   AgentModelDelta,
@@ -55,6 +59,19 @@ export type {
   ToolCallStateTransition,
   TurnSummary,
 } from './loop/types.js';
+export type {
+  ModelDiagnosticConfig,
+  ModelDiagnosticConcept,
+  ModelDiagnosticInput,
+  ModelDiagnosticKind,
+  ModelDiagnosticMode,
+  ModelDiagnosticPhase,
+  ModelDiagnosticProbe,
+  ModelDiagnosticRecommendation,
+  ModelDiagnosticRiskLevel,
+  ModelDiagnosticSnapshot,
+  ToolPreflightDiagnostic,
+} from './model-diagnostics.js';
 
 // ── Core Loop ───────────────────────────────────────────
 
@@ -97,6 +114,7 @@ export async function runAgent(
       signal,
       toolMode,
       modelSettings: config.modelSettings,
+      modelDiagnostics: config.modelDiagnostics,
     },
   );
   if (phaseResult) return phaseResult;
@@ -286,6 +304,15 @@ export async function runAgent(
       const fillState = ctxMon.update(res.usage, i + 1, messages.length);
       contextFill = { fillPercent: fillState.fillPercent, level: fillState.level, usedTokens: fillState.usedTokens };
     }
+    const modelDiagnostic = await resolveModelDiagnosticSnapshot({
+      messages,
+      response: res,
+      phase: 'execution',
+      turn: i + 1,
+      provider: provider.name,
+      model: res.model,
+      toolCalls: res.toolCalls,
+    }, config.modelDiagnostics);
 
     await emitEvent({
       type: 'model.response',
@@ -305,6 +332,7 @@ export async function runAgent(
         toolCalls: summarizeToolCalls(res.toolCalls),
         cost: turnCost ?? undefined,
         transport: provider.profile.transportHints?.[0] ?? 'http-stream',
+        diagnostics: modelDiagnostic ? { model: modelDiagnostic } : undefined,
         ...(contextFill ? { contextFill } : {}),
       },
     });
@@ -330,6 +358,16 @@ export async function runAgent(
     // dropped from both the assistant message and dispatch so tool_call ↔
     // tool_result pairing stays intact.
     const repaired = repairToolCalls(res.toolCalls, repairCtx);
+    const toolPreflight = createToolPreflightDiagnostic(modelDiagnostic, repaired.calls);
+    if (toolPreflight &&
+        (toolPreflight.riskLevel !== 'low' || config.modelDiagnostics?.emitLowRiskToolPreflight === true)) {
+      await emitEvent({
+        type: 'tool.preflight_diagnostic',
+        turn: i + 1,
+        model: res.model,
+        payload: { ...toolPreflight },
+      });
+    }
 
     // Add assistant message
     const assistantMsg: Message = {

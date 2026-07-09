@@ -8,6 +8,7 @@ import {
   evaluateExecutorNode,
   loadExecutorNode,
   listExecutorNodes,
+  markStaleExecutorNodesOffline,
   recordExecutorNodeProbe,
   upsertExecutorNode,
   upsertExecutorNodeHeartbeat,
@@ -250,6 +251,43 @@ test('executor heartbeat preserves rollout metadata until updated explicitly', a
     assert.equal(heartbeat.rolloutMessage, 'rolling out 0.2.0');
   } finally {
     await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('markStaleExecutorNodesOffline only marks stale online nodes offline', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = Date.now();
+  const staleNodeId = `test-stale-offline-${suffix}`;
+  const freshNodeId = `test-fresh-online-${suffix}`;
+  try {
+    await ensureExecutorNodeStore();
+
+    for (const nodeId of [staleNodeId, freshNodeId]) {
+      await upsertExecutorNodeHeartbeat({
+        nodeId,
+        nodeKind: 'executor',
+        baseUrl: 'http://127.0.0.1:8090',
+        connectModes: ['agent_http'],
+        capabilities: { run_agent: true },
+      });
+    }
+    await getDb().query(
+      `UPDATE executor_nodes SET last_heartbeat_at = now() - interval '2 minutes' WHERE node_id = $1`,
+      [staleNodeId],
+    );
+
+    const result = await markStaleExecutorNodesOffline(60_000);
+    assert.ok(result.updated.some(node => node.nodeId === staleNodeId));
+    assert.ok(!result.updated.some(node => node.nodeId === freshNodeId));
+
+    const stale = await loadExecutorNode(staleNodeId);
+    const fresh = await loadExecutorNode(freshNodeId);
+    assert.equal(stale?.status, 'offline');
+    assert.equal(fresh?.status, 'online');
+  } finally {
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = ANY($1)', [[staleNodeId, freshNodeId]]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });
