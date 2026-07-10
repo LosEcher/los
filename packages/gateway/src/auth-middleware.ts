@@ -47,7 +47,7 @@ export default async function authMiddleware(
 }
 
 /** Resolve auth token from los header or standard Bearer scheme. */
-export function extractAuthToken(req: FastifyRequest): string | undefined {
+function extractAuthToken(req: FastifyRequest): string | undefined {
   const headerToken = req.headers['x-los-auth-token'];
   const fromHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
   if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader.trim();

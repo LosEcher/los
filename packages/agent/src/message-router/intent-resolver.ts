@@ -33,7 +33,7 @@ const SESSION_ID_RE = /[\w-]{8,64}/;
  * `#approve-phase run-x #verify-run run-x` does not store "#verify-run …"
  * as the approval reason.
  */
-export function normalizeCommandReason(raw: string | undefined): string | undefined {
+function normalizeCommandReason(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   const cut = raw.split(/(?=\s#\w)|(?=^#\w)/m)[0]?.trim() ?? '';
   if (!cut || cut.startsWith('#')) return undefined;
