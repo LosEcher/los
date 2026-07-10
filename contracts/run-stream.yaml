@@ -22,6 +22,7 @@ eventTypes:
   - operator.followup
   - coordinator.intake_resolved
   - coordinator.intake_blocked
+  - coordinator.context_policy_selected
   - task
   - task.created
   - task.deduplicated
@@ -86,6 +87,21 @@ eventPayloads:
     reason: unknown_explicit_project | project_context_conflict | project_workspace_conflict | ambiguous_workspace | unbound_workspace | unknown_default_project | owner_unresolved
     blocker: string
     runSpecId: null
+  coordinator.context_policy_selected:
+    runSpecId: string
+    ownerRepo: string
+    workspaceRoot: string
+    baseSystemPromptSource: request | config | default
+    identityName: string
+    identityLevel: none | minimal | standard | full
+    identityInjected: boolean
+    memoryStatus: applied | not_applied | fallback
+    memoryLayers: string[]
+    activeRuleCount: integer
+    observationCount: integer
+    codeGraphEnabled: boolean
+    codeGraphSelected: boolean
+    codeGraphInjected: boolean
   session.started:
     requestedProvider: string | null
     requestedModel: string | null

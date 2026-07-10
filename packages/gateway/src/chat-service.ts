@@ -10,7 +10,7 @@ import {
 } from './chat-session-helpers.js';
 import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import { recordSessionBranchCreated } from '@los/agent/operator-control';
-import { augmentChatSystemPrompt } from './chat-memory-augment.js';
+import { prepareChatContextPolicy } from './chat-context-policy.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
 import {
   emitRunningToolCallUpsert,
@@ -158,17 +158,13 @@ export async function runChat(params: {
     }).catch(() => undefined);
   }
 
-  const effectiveSystemPrompt = await augmentChatSystemPrompt({
-    systemPrompt,
-    toolMode,
-    sessionId: sid,
-    runSpecId,
-    tenantId,
-    projectId,
-    agentIdentity: identityName,
+  const preparedContext = await prepareChatContextPolicy({
+    sessionId: sid, runSpecId, tenantId, projectId, userId, requestId, traceId,
+    workspaceRoot, toolMode, systemPrompt, identityName,
     identityLevel: identityLevel as IdentityLevel | undefined,
-    workspaceRoot,
   });
+  const effectiveSystemPrompt = preparedContext.systemPrompt;
+  relaySessionEvent(send, preparedContext.event);
 
   // ── CBM shadow mode: measure code graph queries without injecting ──
   if ((config.memory as any)?.codeGraph?.shadowMode && (config.memory as any)?.codeGraph?.enabled) {

@@ -18,6 +18,7 @@ required_contracts=(
   integration-feed-analysis.yaml
   memory.yaml
   task-intake.yaml
+  coordinator-context-policy.yaml
 )
 
 failures=0
@@ -60,6 +61,7 @@ node_command="$CONTRACT_DIR/node-command.yaml"
 artifact_transfer="$CONTRACT_DIR/artifact-transfer.yaml"
 agent_task_graph="$CONTRACT_DIR/agent-task-graph.yaml"
 provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
+coordinator_context_policy="$CONTRACT_DIR/coordinator-context-policy.yaml"
 
 [ -f "$run_spec" ] && {
   require_pattern "$run_spec" 'prompt:' 'prompt field'
@@ -119,6 +121,13 @@ provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
   require_pattern "$provider_compat_evidence" 'provider_compat_evidence\.rows' 'provider compat rows'
   require_pattern "$provider_compat_evidence" 'verified_advisory' 'verified advisory decision'
   require_pattern "$provider_compat_evidence" 'raw transcripts' 'raw transcript redaction'
+}
+
+[ -f "$coordinator_context_policy" ] && {
+  require_pattern "$coordinator_context_policy" 'coordinator\.context_policy_selected' 'context policy event'
+  require_pattern "$coordinator_context_policy" 'baseSystemPromptSource:' 'base prompt source field'
+  require_pattern "$coordinator_context_policy" 'queriedLayers:' 'memory layer evidence'
+  require_pattern "$coordinator_context_policy" 'Never persist system prompt text' 'prompt content exclusion'
 }
 
 integration_feed="$CONTRACT_DIR/integration-feed-analysis.yaml"
