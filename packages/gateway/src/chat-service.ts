@@ -1,21 +1,14 @@
 import { runScheduledAgentTask } from '@los/agent/scheduler';
 import type { Config } from '@los/infra/config';
 import type { Logger } from '@los/infra/logger';
-import {
-  ensureSessionStore,
-  loadSession,
-  saveSession,
-} from '@los/agent/session';
+import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
 import type { Message, CheckpointState, RunContractMetadataInput, IdentityLevel } from '@los/agent';
 import {
   loadResumeState,
   updateBoundTodoFromRun,
   loadBranchSource,
 } from './chat-session-helpers.js';
-import {
-  ensureRunSpecStore,
-  createRunSpec,
-} from '@los/agent/run-specs';
+import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import { recordSessionBranchCreated } from '@los/agent/operator-control';
 import { augmentChatSystemPrompt } from './chat-memory-augment.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
@@ -27,6 +20,7 @@ import {
 } from './chat-live-events.js';
 import { persistChatSuccess } from './chat-route-persist.js';
 import type { MCPRequestServer } from './chat-normalizers.js';
+import { persistChatIntakeEvent } from './chat-intake-events.js';
 
 export type { SendEvent } from './chat-live-events.js';
 
@@ -85,6 +79,9 @@ export async function runChat(params: {
   actorSubject: string;
   requestId: string;
   runContract: RunContractMetadataInput | undefined;
+  intakeResolution: import('@los/agent/task-intake').ProjectOwnerResolution;
+  requestedProjectId: string | undefined;
+  requestedWorkspaceRoot: string | undefined;
   config: Config;
   gatewayServiceId: string | undefined;
   identityName: string | undefined;
@@ -98,7 +95,8 @@ export async function runChat(params: {
     workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
     traceId, dedupeKey, signal, sid, tenantId, projectId, userId, actorSubject, requestId,
-    runContract, config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
+    runContract, intakeResolution, requestedProjectId, requestedWorkspaceRoot,
+    config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
   } = params;
 
   // ── Branch source loading ──
@@ -144,6 +142,10 @@ export async function runChat(params: {
     runContract,
     gatewayId: gatewayServiceId,
   });
+  relaySessionEvent(send, await persistChatIntakeEvent({
+    sessionId: sid, tenantId, userId, requestId, traceId,
+    requestedProjectId, requestedWorkspaceRoot, resolution: intakeResolution, runSpecId,
+  }));
 
   if (boundTodoId) {
     await updateBoundTodoFromRun(boundTodoId, {

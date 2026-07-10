@@ -18,6 +18,7 @@ export interface ChatRequestBody {
   provider?: string;
   model?: string;
   modelSettings?: ModelSettings;
+  projectId?: string;
   workspaceRoot?: string;
   toolMode?: ToolMode;
   sandboxMode?: SandboxMode;

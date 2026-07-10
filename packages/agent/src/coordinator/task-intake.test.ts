@@ -36,6 +36,18 @@ test('unknown explicit project blocks without falling back', () => {
   });
 });
 
+test('body and request-context projects must agree', () => {
+  assert.deepEqual(resolveProjectOwner({
+    bindings,
+    requestedProjectId: 'los',
+    contextProjectId: 'cantool',
+  }), {
+    status: 'blocked',
+    reason: 'project_context_conflict',
+    blocker: 'Body projectId conflicts with x-project-id',
+  });
+});
+
 test('explicit project blocks a conflicting workspace', () => {
   const result = resolveProjectOwner({
     bindings,
@@ -100,6 +112,34 @@ test('configured default resolves only without an explicit workspace', () => {
   assert.equal(result.status, 'resolved');
   assert.equal(result.ownerRepo, 'cantool');
   assert.equal(result.reason, 'configured_default');
+});
+
+test('configured default can pair with a configured workspace', () => {
+  const defaultWorkspaceRoot = join(root, 'configured-only');
+  const result = resolveProjectOwner({
+    bindings,
+    defaultProjectId: 'configured-only',
+    defaultWorkspaceRoot,
+  });
+
+  assert.deepEqual(result, {
+    status: 'resolved',
+    ownerRepo: 'configured-only',
+    workspaceRoot: defaultWorkspaceRoot,
+    reason: 'configured_default',
+  });
+});
+
+test('configured workspace never rescues an explicit unbound workspace', () => {
+  const result = resolveProjectOwner({
+    bindings,
+    workspaceRoot: join(root, 'unknown'),
+    defaultProjectId: 'configured-only',
+    defaultWorkspaceRoot: join(root, 'configured-only'),
+  });
+
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason, 'unbound_workspace');
 });
 
 test('unknown configured default blocks', () => {

@@ -20,6 +20,8 @@ eventTypes:
   - session.branch_created
   - operator.steering
   - operator.followup
+  - coordinator.intake_resolved
+  - coordinator.intake_blocked
   - task
   - task.created
   - task.deduplicated
@@ -68,6 +70,22 @@ commonFields:
     type: string
     format: date-time
 eventPayloads:
+  coordinator.intake_resolved:
+    requestedProjectId: string | null
+    requestedWorkspaceRoot: string | null
+    ownerRepo: string
+    workspaceRoot: string
+    reason: explicit_project | workspace_binding | configured_default
+    blocker: null
+    runSpecId: string
+  coordinator.intake_blocked:
+    requestedProjectId: string | null
+    requestedWorkspaceRoot: string | null
+    ownerRepo: null
+    workspaceRoot: null
+    reason: unknown_explicit_project | project_context_conflict | project_workspace_conflict | ambiguous_workspace | unbound_workspace | unknown_default_project | owner_unresolved
+    blocker: string
+    runSpecId: null
   session.started:
     requestedProvider: string | null
     requestedModel: string | null

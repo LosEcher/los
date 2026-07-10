@@ -13,7 +13,8 @@ import {
 } from './chat-normalizers.js';
 import { normalizeReplayEvents } from './chat-session-helpers.js';
 import { persistChatError } from './chat-route-persist.js';
-import { resolveProjectIdFromWorkspace } from './project-store.js';
+import { getDefaultProjectId, resolveConfiguredProjectOwner } from './project-store.js';
+import { persistChatIntakeEvent } from './chat-intake-events.js';
 import {
   completeIdempotencyKey,
   reserveIdempotentRequest,
@@ -69,7 +70,15 @@ export function registerChatRoute(
     const provider = normalizeOptionalString(body.provider);
     const model = normalizeOptionalString(body.model);
     const modelSettings = normalizeModelSettings(body.modelSettings);
-    const workspaceRoot = normalizeWorkspaceRoot(body.workspaceRoot, defaultWorkspaceRoot);
+    const headerProjectId = normalizeOptionalString(Array.isArray(req.headers['x-project-id'])
+      ? req.headers['x-project-id'][0]
+      : req.headers['x-project-id']);
+    const bodyProjectId = normalizeOptionalString(body.projectId);
+    const requestedProjectId = bodyProjectId ?? headerProjectId;
+    const requestedWorkspace = normalizeOptionalString(body.workspaceRoot);
+    const requestedWorkspaceRoot = requestedWorkspace
+      ? normalizeWorkspaceRoot(requestedWorkspace, defaultWorkspaceRoot)
+      : undefined;
     const toolMode = normalizeToolMode(body.toolMode);
     const allowedTools = normalizeAllowedTools(body.allowedTools);
     const maxLoops = normalizePositiveInteger(body.maxLoops);
@@ -96,6 +105,42 @@ export function registerChatRoute(
     if (!prompt) {
       return reply.status(400).send({ error: 'prompt is required' });
     }
+
+    const sid = branchFrom
+      ? `session-${Date.now()}`
+      : (sessionId ?? `session-${Date.now()}`);
+    const storedDefaultProjectId = getDefaultProjectId();
+    const intakeResolution = resolveConfiguredProjectOwner({
+      requestedProjectId: bodyProjectId,
+      contextProjectId: headerProjectId,
+      workspaceRoot: requestedWorkspaceRoot,
+      defaultProjectId: storedDefaultProjectId ?? config.defaultProjectId,
+      defaultWorkspaceRoot: storedDefaultProjectId ? undefined : defaultWorkspaceRoot,
+    });
+    if (intakeResolution.status === 'blocked') {
+      await persistChatIntakeEvent({
+        sessionId: sid,
+        tenantId: context.tenantId,
+        userId: context.userId,
+        requestId: context.requestId,
+        traceId,
+        requestedProjectId,
+        requestedWorkspaceRoot,
+        resolution: intakeResolution,
+      });
+      const statusCode = intakeResolution.reason === 'project_context_conflict'
+        || intakeResolution.reason === 'project_workspace_conflict'
+        || intakeResolution.reason === 'ambiguous_workspace' ? 409 : 400;
+      return reply.status(statusCode).send({
+        error: 'project owner resolution blocked',
+        reason: intakeResolution.reason,
+        blocker: intakeResolution.blocker,
+        sessionId: sid,
+        requestId: context.requestId,
+      });
+    }
+    const workspaceRoot = intakeResolution.workspaceRoot!;
+    const projectId = intakeResolution.ownerRepo!;
 
     const idempotency = await reserveIdempotentRequest(req, {
       route: '/chat',
@@ -161,9 +206,6 @@ export function registerChatRoute(
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    const sid = branchFrom
-      ? `session-${Date.now()}`
-      : (sessionId ?? `session-${Date.now()}`);
     const ctx: ChatRunContext = { activeTaskRunId: undefined, activeRunSpecId: undefined, lastCheckpoint: null };
 
     try {
@@ -177,10 +219,13 @@ export function registerChatRoute(
         traceId, dedupeKey, sid,
         signal: idempotencyAbort.signal,
         tenantId: context.tenantId,
-        projectId: resolveProjectIdFromWorkspace(workspaceRoot) ?? context.projectId,
+        projectId,
         userId: context.userId, requestId: context.requestId,
         actorSubject: principal.subject,
         runContract: body.runContract,
+        intakeResolution,
+        requestedProjectId,
+        requestedWorkspaceRoot,
         config, gatewayServiceId, log: context.log, ctx, send,
       });
 
@@ -198,7 +243,7 @@ export function registerChatRoute(
         traceId,
         requestId: context.requestId,
         tenantId: context.tenantId,
-        projectId: context.projectId,
+        projectId,
         userId: context.userId,
         activeRunSpecId: ctx.activeRunSpecId ?? null,
         boundTodoId: boundTodoId ?? null,

@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
+import { ensureSessionEventStore, listSessionEvents } from '@los/agent/session-events';
+import { loadConfig } from '@los/infra/config';
+import { closeDb, getDb, initDb } from '@los/infra/db';
 
 import { resolveDirectRunCompletionDecision } from './chat-run-completion.js';
 import { registerChatRoute } from './chat-route.js';
+import { ensureIdempotencyStore } from './idempotency.js';
 
 test('direct chat run completion blocks on unsatisfied required verification records', () => {
   const decision = resolveDirectRunCompletionDecision([
@@ -53,5 +57,70 @@ test('chat route keeps a 1MB request body limit', async () => {
     assert.equal(response.statusCode, 413);
   } finally {
     await app.close();
+  }
+});
+
+test('chat route persists blocked intake before idempotency reservation', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await ensureSessionEventStore();
+  await ensureIdempotencyStore();
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, config, process.cwd());
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-chat-intake-${suffix}`;
+  const idempotencyKey = `chat-intake-${suffix}`;
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      headers: { 'x-idempotency-key': idempotencyKey },
+      payload: { prompt: 'blocked intake', sessionId, projectId: `missing-${suffix}` },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().reason, 'unknown_explicit_project');
+    const events = await listSessionEvents(sessionId);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.type, 'coordinator.intake_blocked');
+    const reservations = await getDb().query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM idempotency_keys WHERE idempotency_key = $1',
+      [idempotencyKey],
+    );
+    assert.equal(reservations.rows[0]?.count, '0');
+  } finally {
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM idempotency_keys WHERE idempotency_key = $1', [idempotencyKey]).catch(() => undefined);
+    await app.close();
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('chat route blocks conflicting body and context project IDs', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await ensureSessionEventStore();
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, config, process.cwd());
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-chat-context-conflict-${suffix}`;
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      headers: { 'x-project-id': 'context-project' },
+      payload: { prompt: 'blocked intake', sessionId, projectId: 'body-project' },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().reason, 'project_context_conflict');
+    const events = await listSessionEvents(sessionId);
+    assert.equal(events[0]?.payload.reason, 'project_context_conflict');
+  } finally {
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await app.close();
+    await closeDb().catch(() => undefined);
   }
 });
