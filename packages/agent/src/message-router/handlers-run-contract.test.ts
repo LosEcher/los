@@ -66,7 +66,7 @@ test('run_contract handler: #approve-phase transitions planning → plan_approve
     });
 
     assert.equal(result.handled, true);
-    assert.match(replies.join('\n'), /Plan approved/);
+    assert.match(replies.join('\n'), /计划已批准/);
     assert.match(replies.join('\n'), /plan_approved/);
 
     const loaded = await loadRunSpec(runId);
@@ -95,7 +95,7 @@ test('run_contract handler: #verify-run missing run reports not found', async ()
       runId: 'run-does-not-exist-zzzz',
     });
     assert.equal(result.handled, true);
-    assert.match(replies.join('\n'), /not found/i);
+    assert.match(replies.join('\n'), /未找到 Run/);
     assert.equal(result.error, 'run_not_found');
   } finally {
     await closeDb().catch(() => undefined);
