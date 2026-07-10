@@ -53,3 +53,42 @@ test('empty model settings are omitted and anthropic keeps its fallback max toke
   assert.deepEqual(buildOpenAIModelSettings(undefined), {});
   assert.deepEqual(buildAnthropicModelSettings(undefined, 8192), { max_tokens: 8192 });
 });
+
+test('normalizeModelSettings retains reasoning effort and thinking aliases', () => {
+  assert.deepEqual(normalizeModelSettings({
+    reasoning_effort: 'XHIGH',
+    thinking: { type: 'disabled' },
+  }), {
+    reasoningEffort: 'xhigh',
+    thinking: 'disabled',
+  });
+  assert.deepEqual(normalizeModelSettings({ thinking: true }), { thinking: 'enabled' });
+});
+
+test('DeepSeek model settings use official thinking and reasoning request fields', () => {
+  assert.deepEqual(buildOpenAIModelSettings({ reasoningEffort: 'xhigh' }, 'deepseek'), {
+    reasoning_effort: 'max',
+  });
+  assert.deepEqual(buildOpenAIModelSettings({ reasoningEffort: 'low' }, 'deepseek'), {
+    reasoning_effort: 'high',
+  });
+  assert.deepEqual(buildOpenAIModelSettings({ reasoningEffort: 'none' }, 'deepseek'), {
+    thinking: { type: 'disabled' },
+  });
+  assert.deepEqual(buildOpenAIModelSettings({
+    reasoningEffort: 'high',
+    thinking: 'enabled',
+  }, 'deepseek'), {
+    reasoning_effort: 'high',
+    thinking: { type: 'enabled' },
+  });
+});
+
+test('generic OpenAI settings do not emit the DeepSeek thinking object', () => {
+  assert.deepEqual(buildOpenAIModelSettings({
+    reasoningEffort: 'high',
+    thinking: 'disabled',
+  }, 'openai'), {
+    reasoning_effort: 'high',
+  });
+});
