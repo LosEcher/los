@@ -11,15 +11,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageRouter } from './router.js';
 import { createBuiltinHandlers } from './handlers.js';
-import type { ChannelContext, NormalizerInput, RouteOptions } from './types.js';
+import type { ChannelContext, NormalizerInput } from './types.js';
 
-const OPERATOR_OPTIONS: RouteOptions = {
-  principal: {
-    kind: 'operator',
-    subject: 'test-operator',
-    authenticatedBy: 'operator_token',
-    capabilities: ['operator:*'],
-  },
+const operatorPrincipal = {
+  kind: 'operator' as const,
+  subject: 'channel:wechat-test',
+  authenticatedBy: 'trusted_channel' as const,
+  capabilities: ['todo:write'] as const,
 };
 
 function buildRouter(opts: { dispatchTodo?: any } = {}) {
@@ -44,7 +42,7 @@ describe('TodoHandler #run / #dispatch', () => {
       sourceKind: 'wx-weixin',
       text: '#run todo-los-p0-2',
     };
-    const result = await router.route(input, OPERATOR_OPTIONS);
+    const result = await router.route(input, { principal: operatorPrincipal });
     assert.equal(result.handled, true);
     assert.equal(result.error, 'dispatch_not_configured');
     assert.ok(delivered.some(t => t.includes('not configured')));
@@ -67,7 +65,10 @@ describe('TodoHandler #run / #dispatch', () => {
     };
     const { router, delivered } = buildRouter({ dispatchTodo });
 
-    const result = await router.route({ sourceKind: 'wx-weixin', text: '#run todo-los-p0-2' }, OPERATOR_OPTIONS);
+    const result = await router.route(
+      { sourceKind: 'wx-weixin', text: '#run todo-los-p0-2' },
+      { principal: operatorPrincipal },
+    );
 
     assert.equal(result.handled, true);
     assert.equal(captured.id, 'todo-los-p0-2');
@@ -85,7 +86,10 @@ describe('TodoHandler #run / #dispatch', () => {
       return { ok: true, status: 200, body: { taskRun: { id: 'tr-aaaaaaaa', sessionId: 's-00000000' } } };
     };
     const { router } = buildRouter({ dispatchTodo });
-    await router.route({ sourceKind: 'wx-weixin', text: '#run todo-los-p0-2 force' }, OPERATOR_OPTIONS);
+    await router.route(
+      { sourceKind: 'wx-weixin', text: '#run todo-los-p0-2 force' },
+      { principal: operatorPrincipal },
+    );
     assert.equal(forceSeen, true);
   });
 
@@ -96,7 +100,10 @@ describe('TodoHandler #run / #dispatch', () => {
       body: { error: 'todo_not_ready', message: 'Todo status is "done"' },
     });
     const { router, delivered } = buildRouter({ dispatchTodo });
-    const result = await router.route({ sourceKind: 'wx-weixin', text: '#dispatch todo-x-1234' }, OPERATOR_OPTIONS);
+    const result = await router.route(
+      { sourceKind: 'wx-weixin', text: '#dispatch todo-x-1234' },
+      { principal: operatorPrincipal },
+    );
     assert.equal(result.handled, true);
     assert.equal(result.error, 'todo_not_ready');
     assert.ok(delivered.some(t => t.includes('Dispatch failed')));

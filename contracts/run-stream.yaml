@@ -170,6 +170,13 @@ operatorControl:
   authentication:
     header: x-los-operator-token
     behaviorWhenAuthDisabled: local_operator
+  requiredPrincipal: operator
+  actorSource: principal.subject
+  anonymousStatus: 401
+  nonOperatorStatus: 403
+  httpRoutes:
+    - method: POST
+      path: /sessions/{sessionId}/operator-events
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

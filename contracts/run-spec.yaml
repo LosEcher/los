@@ -190,6 +190,10 @@ operatorControl:
   authentication:
     header: x-los-operator-token
     behaviorWhenAuthDisabled: local_operator
+  requiredPrincipal: operator
+  actorSource: principal.subject
+  anonymousStatus: 401
+  nonOperatorStatus: 403
   routes:
     - method: POST
       path: /runs/{runSpecId}/recover
@@ -201,6 +205,12 @@ operatorControl:
       path: /runs/{runSpecId}/approve
     - method: POST
       path: /runs/{runSpecId}/revise-plan
+    - method: POST
+      path: /runtimes/{kind}/run
+    - method: POST
+      path: /runtimes/bridge/start
+    - method: POST
+      path: /governance/jobs/sweep
   messageRouterCapabilities:
     run_contract: run:control
     steering: session:steer

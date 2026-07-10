@@ -2,9 +2,12 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getConfig, type Config } from '@los/infra/config';
 import { getLogger, type Logger } from '@los/infra/logger';
-import type { MessagePrincipal } from '@los/agent/message-router';
+import type { MessagePrincipal, OperatorPrincipal } from '@los/agent/message-router';
 
 const log = getLogger('request-context');
+const LOCAL_OPERATOR_SUBJECT = 'operator:local';
+const SHARED_OPERATOR_SUBJECT = 'operator:shared-token';
+const SHARED_ACCESS_SUBJECT = 'authenticated:shared-token';
 
 export interface RequestContext {
   requestId: string;
@@ -15,6 +18,8 @@ export interface RequestContext {
   /** Whether the requester has been authenticated as an operator
    *  (validated against auth.operatorToken, not a forgeable header). */
   isOperator: boolean;
+  /** Whether the requester supplied any validated gateway credential. */
+  isAuthenticated: boolean;
   /** Request-scoped child logger with requestId and traceId bound. */
   log: Logger;
 }
@@ -36,6 +41,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
       req.headers['x-los-operator-token'],
       config.auth.operatorToken,
     );
+    const isAuthenticated = isOperator || validateAccessToken(req, config.auth.token);
 
     if (config.auth.enabled) {
       const tenantId = normalizeHeader(req.headers['x-tenant-id']);
@@ -53,6 +59,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
         projectId: projectId ?? 'unknown',
         userId: userId ?? 'unknown',
         isOperator,
+        isAuthenticated,
         log: getGatewayLogger().child({ requestId, traceId }),
       };
 
@@ -73,6 +80,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
         projectId,
         userId,
         isOperator,
+        isAuthenticated: true,
         log: getGatewayLogger().child({ requestId, traceId }),
       };
 
@@ -94,6 +102,7 @@ export function getRequestContext(req: FastifyRequest): RequestContext {
     projectId: 'los',
     userId: 'local-user',
     isOperator: false,
+    isAuthenticated: false,
     log: getGatewayLogger().child({ requestId }),
   };
 }
@@ -121,7 +130,7 @@ export async function requireOperator(req: FastifyRequest, reply: FastifyReply):
   return true;
 }
 
-export function hasOperatorAccess(req: FastifyRequest): boolean {
+function hasOperatorAccess(req: FastifyRequest): boolean {
   return !getConfig().auth.enabled || getRequestContext(req).isOperator;
 }
 
@@ -135,7 +144,7 @@ export function getMessagePrincipal(req: FastifyRequest): MessagePrincipal {
   if (!getConfig().auth.enabled) {
     return {
       kind: 'operator',
-      subject: ctx.userId || 'local-operator',
+      subject: LOCAL_OPERATOR_SUBJECT,
       authenticatedBy: 'auth_disabled',
       capabilities: ['operator:*'],
       ...common,
@@ -144,19 +153,36 @@ export function getMessagePrincipal(req: FastifyRequest): MessagePrincipal {
   if (ctx.isOperator) {
     return {
       kind: 'operator',
-      subject: ctx.userId || 'operator',
+      subject: SHARED_OPERATOR_SUBJECT,
       authenticatedBy: 'operator_token',
       capabilities: ['operator:*'],
       ...common,
     };
   }
+  if (!ctx.isAuthenticated) {
+    return {
+      kind: 'anonymous',
+      subject: 'anonymous',
+      authenticatedBy: 'none',
+      capabilities: [],
+      ...common,
+    };
+  }
   return {
     kind: 'authenticated',
-    subject: ctx.userId || 'authenticated-user',
+    subject: SHARED_ACCESS_SUBJECT,
     authenticatedBy: 'access_token',
     capabilities: [],
     ...common,
   };
+}
+
+export function getOperatorPrincipal(req: FastifyRequest): OperatorPrincipal {
+  const principal = getMessagePrincipal(req);
+  if (principal.kind !== 'operator') {
+    throw new Error('operator principal required');
+  }
+  return principal;
 }
 
 let _gatewayLogger: Logger | undefined;
@@ -192,4 +218,19 @@ function validateOperatorToken(
   const b = Buffer.from(configuredToken);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+function validateAccessToken(req: FastifyRequest, configuredToken: string | undefined): boolean {
+  if (!configuredToken) return false;
+  const headerToken = normalizeHeader(req.headers['x-los-auth-token']);
+  const authorization = normalizeHeader(req.headers.authorization);
+  const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  return validateToken(headerToken ?? bearer, configuredToken);
+}
+
+function validateToken(provided: string | undefined, configuredToken: string): boolean {
+  if (!provided) return false;
+  const actual = Buffer.from(provided);
+  const expected = Buffer.from(configuredToken);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

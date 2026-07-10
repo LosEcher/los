@@ -32,6 +32,7 @@ export function registerOpenAICompatibleRoute(
   app.post('/v1/chat/completions', async (req: any, reply: any) => {
     const body = req.body as OpenAIChatRequest;
     const context = getRequestContext(req);
+    const principal = getMessagePrincipal(req);
     const sid = `chat-${body.model ?? 'openai'}-${Date.now()}`;
     const traceId = `trace-${context.requestId}`;
 
@@ -56,7 +57,16 @@ export function registerOpenAICompatibleRoute(
           // Single-turn only so normalizer/rawText is exactly the command line.
           messages: [{ role: 'user', content: lastUserTurn }],
           model: body.model,
-        }, { principal: getMessagePrincipal(req) });
+        }, { principal });
+        if (result.error === 'operator_required') {
+          return reply.status(403).send({
+            error: {
+              message: result.text ?? 'Operator authorization required for this command.',
+              type: 'insufficient_permissions',
+              code: 'operator_required',
+            },
+          });
+        }
         const text = result.handled
           ? (result.text ?? 'ok')
           : (result.error ?? '命令未处理');
@@ -123,6 +133,7 @@ export function registerOpenAICompatibleRoute(
         tenantId: context.tenantId,
         projectId: context.projectId,
         userId: context.userId,
+        actorSubject: principal.subject,
         requestId: context.requestId,
         runContract: undefined,
         config,

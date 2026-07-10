@@ -58,7 +58,7 @@ test('POST /sessions/:id/operator-events persists steering and followup events',
     });
     assert.equal(steering.statusCode, 200);
     assert.equal(steering.json().event.type, 'operator.steering');
-    assert.equal(steering.json().event.payload.actor, 'operator-route');
+    assert.equal(steering.json().event.payload.actor, 'operator:local');
 
     const followup = await app.inject({
       method: 'POST',

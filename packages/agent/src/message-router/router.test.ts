@@ -59,31 +59,17 @@ describe('MessageRouter', () => {
     assert.equal(result.intent.type, 'steering');
   });
 
-  it('rejects effectful commands without an operator principal', async () => {
-    let called = false;
-    const router = new MessageRouter({
-      handlers: [{
-        name: 'test-steering',
-        priority: 1,
-        match: intent => intent.type === 'steering',
-        handle: async () => {
-          called = true;
-          return { handled: true };
-        },
-      }],
-    });
-    const result = await router.route({ sourceKind: 'http-chat', prompt: '#approve session-abc12345' });
-    assert.equal(result.error, 'operator_required');
-    assert.equal(called, false);
-  });
-
-  it('fails closed for every effectful intent class', async () => {
+  it('enforces anonymous/authenticated/operator states for every effectful intent', async () => {
+    const writes: string[] = [];
     const router = new MessageRouter({
       handlers: [{
         name: 'effectful',
         priority: 1,
         match: () => true,
-        handle: async () => ({ handled: true, text: 'executed' }),
+        handle: async (ctx) => {
+          writes.push(ctx.principal.subject);
+          return { handled: true, text: 'executed' };
+        },
       }],
     });
     const prompts = [
@@ -94,28 +80,34 @@ describe('MessageRouter', () => {
       '#sweep',
       '#codex inspect workspace',
     ];
-    for (const prompt of prompts) {
-      const result = await router.route({ sourceKind: 'http-chat', prompt });
-      assert.equal(result.error, 'operator_required', prompt);
-      assert.notEqual(result.text, 'executed', prompt);
-    }
-  });
+    const authenticatedPrincipal = {
+      kind: 'authenticated' as const,
+      subject: 'authenticated:shared-token',
+      authenticatedBy: 'access_token' as const,
+      capabilities: [] as const,
+    };
 
-  it('allows only the capability required by the effectful intent', async () => {
-    const router = new MessageRouter({ handlers: [stubSteeringHandler()] });
-    const result = await router.route(
-      { sourceKind: 'http-chat', prompt: '#approve session-abc12345' },
-      {
-        principal: {
-          kind: 'operator',
-          subject: 'steering-operator',
-          authenticatedBy: 'trusted_channel',
-          capabilities: ['session:steer'],
-        },
-      },
-    );
-    assert.equal(result.handled, true);
-    assert.equal(result.error, undefined);
+    for (const prompt of prompts) {
+      writes.length = 0;
+      const anonymous = await router.route({ sourceKind: 'http-chat', prompt });
+      assert.equal(anonymous.error, 'operator_required', `${prompt} anonymous`);
+      assert.deepEqual(writes, [], `${prompt} anonymous writes`);
+
+      const authenticated = await router.route(
+        { sourceKind: 'http-chat', prompt },
+        { principal: authenticatedPrincipal },
+      );
+      assert.equal(authenticated.error, 'operator_required', `${prompt} authenticated`);
+      assert.deepEqual(writes, [], `${prompt} authenticated writes`);
+
+      const operator = await router.route(
+        { sourceKind: 'http-chat', prompt },
+        { principal: operatorPrincipal },
+      );
+      assert.equal(operator.error, undefined, `${prompt} operator`);
+      assert.equal(operator.text, 'executed', `${prompt} operator`);
+      assert.deepEqual(writes, ['test-operator'], `${prompt} operator writes`);
+    }
   });
 
   it('routes plain text through chat handler', async () => {

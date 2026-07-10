@@ -76,7 +76,7 @@ test('POST /runs/:id/approve approves plan_approved transition', async () => {
     const events = await listSessionEvents(sessionId);
     const approvalEvent = events.find((e) => e.type === 'run.plan_approved');
     assert.ok(approvalEvent, 'run.plan_approved event should be emitted');
-    assert.equal(approvalEvent.payload?.actor, 'gateway-tester');
+    assert.equal(approvalEvent.payload?.actor, 'operator:local');
     assert.equal(approvalEvent.payload?.reason, 'approved via integration test');
   } finally {
     await app.close();
@@ -235,7 +235,7 @@ test('POST /runs/:id/revise-plan increments revision and resets phase', async ()
     assert.ok(revisedEvent, 'run.plan_revised event should be emitted');
     assert.equal(revisedEvent.payload?.planRevision, 2);
     assert.equal(revisedEvent.payload?.previousRevision, 1);
-    assert.equal(revisedEvent.payload?.actor, 'gateway-tester');
+    assert.equal(revisedEvent.payload?.actor, 'operator:local');
   } finally {
     await app.close();
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);

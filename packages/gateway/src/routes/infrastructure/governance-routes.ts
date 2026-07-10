@@ -16,6 +16,7 @@ import {
   seedGovernanceJobs,
   runGovernanceSweep,
 } from '@los/agent';
+import { requireOperator } from '../../request-context.js';
 
 const KNOWN_JOB_TYPES = [
   'consistency_audit', 'hotspot', 'architecture_drift',
@@ -67,8 +68,6 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
   // ── GET /governance/jobs ────────────────────────────
   app.get('/governance/jobs', async (_req, reply) => {
     try {
-      await ensureGovernanceJobStore();
-      await seedGovernanceJobs();
       const jobs = await listGovernanceJobs({ limit: 50 });
       return reply.send({
         count: jobs.length,
@@ -90,8 +89,6 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
     }
 
     try {
-      await ensureGovernanceJobStore();
-      await seedGovernanceJobs();
       const jobs = await listGovernanceJobs({ jobType: jobType as any, limit: 5 });
       if (jobs.length === 0) {
         return reply.status(404).send({ error: `No governance job found for type: ${jobType}` });
@@ -119,6 +116,7 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
 
   // ── POST /governance/jobs/sweep ──────────────────────
   app.post('/governance/jobs/sweep', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     try {
       const dryRun = (req.query as Record<string, string>)?.dryRun === 'true';
       const force = (req.query as Record<string, string>)?.force === 'true';

@@ -124,15 +124,27 @@ test('request principal distinguishes access token from operator token', async (
   const app = await buildApp(buildConfig({ authEnabled: true, operatorToken: 'op-secret' }));
   app.get('/principal', async req => getMessagePrincipal(req));
   try {
-    const ordinary = await app.inject({ method: 'GET', url: '/principal' });
+    const anonymous = await app.inject({ method: 'GET', url: '/principal' });
+    assert.equal(anonymous.json().kind, 'anonymous');
+    assert.equal(anonymous.json().subject, 'anonymous');
+
+    const ordinary = await app.inject({
+      method: 'GET',
+      url: '/principal',
+      headers: { 'x-los-auth-token': 'test-token', 'x-user-id': 'claimed-user' },
+    });
     assert.equal(ordinary.json().kind, 'authenticated');
+    assert.equal(ordinary.json().subject, 'authenticated:shared-token');
+    assert.equal(ordinary.json().userId, 'claimed-user');
 
     const operator = await app.inject({
       method: 'GET',
       url: '/principal',
-      headers: { 'x-los-operator-token': 'op-secret' },
+      headers: { 'x-los-operator-token': 'op-secret', 'x-user-id': 'forged-operator-name' },
     });
     assert.equal(operator.json().kind, 'operator');
+    assert.equal(operator.json().subject, 'operator:shared-token');
+    assert.equal(operator.json().userId, 'forged-operator-name');
     assert.deepEqual(operator.json().capabilities, ['operator:*']);
   } finally {
     await app.close();
