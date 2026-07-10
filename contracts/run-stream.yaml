@@ -67,6 +67,13 @@ commonFields:
   createdAt:
     type: string
     format: date-time
+eventPayloads:
+  session.started:
+    requestedProvider: string | null
+    requestedModel: string | null
+    effectiveProvider: string
+    effectiveModel: string
+    routeReason: configured_default | explicit_provider | explicit_model | architect_editor_override
 chunks:
   executorNdjson:
     - type: session_event

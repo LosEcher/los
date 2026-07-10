@@ -28,6 +28,7 @@ test('provider compat evidence records verified advisory summaries', async () =>
       traceId: 'trace-provider-evidence',
       requestId: 'request-provider-evidence',
       nodeId: 'node-provider-evidence',
+      routeReason: 'explicit_model',
       reasoningObserved: false,
       toolCalls: ['list_directory', 'read_file'],
       toolResultCount: 2,
@@ -48,6 +49,7 @@ test('provider compat evidence records verified advisory summaries', async () =>
     assert.equal(record.traceId, 'trace-provider-evidence');
     assert.equal(record.requestId, 'request-provider-evidence');
     assert.equal(record.nodeId, 'node-provider-evidence');
+    assert.equal(record.summary.routeReason, 'explicit_model');
 
     const latest = await listLatestProviderCompatEvidence();
     const loaded = latest.find(item => item.provider === provider && item.model === 'model-a');

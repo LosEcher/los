@@ -74,9 +74,11 @@ export function sanitizeProviderCompatEvidence(item: {
 }
 
 export function sanitizeProviderCompatSummary(summary: Record<string, unknown>): Record<string, unknown> {
+  const routeReason = normalizeOptionalString(summary.routeReason);
   return {
     completed: summary.completed === true,
     cancelled: summary.cancelled === true,
+    routeReason: isModelRouteReason(routeReason) ? routeReason : null,
     reasoningObserved: summary.reasoningObserved === true,
     toolCalls: normalizeProviderSummaryStringArray(summary.toolCalls, 12),
     toolResultCount: normalizeNonNegativeNumber(summary.toolResultCount),
@@ -84,6 +86,13 @@ export function sanitizeProviderCompatSummary(summary: Record<string, unknown>):
     deniedToolCount: normalizeNonNegativeNumber(summary.deniedToolCount),
     failures: normalizeProviderSummaryStringArray(summary.failures, 8).map(failure => truncateForHttp(failure, 240)),
   };
+}
+
+function isModelRouteReason(value: string | undefined): boolean {
+  return value === 'configured_default'
+    || value === 'explicit_provider'
+    || value === 'explicit_model'
+    || value === 'architect_editor_override';
 }
 
 export type RunEvalQuery = {

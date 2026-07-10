@@ -53,6 +53,7 @@ test('compatibility harness summarizes SSE evidence', () => {
         nodeId: 'node-1',
         payload: {
           effectiveModel: 'deepseek-v4-pro',
+          routeReason: 'explicit_model',
           modelProfile: {
             protocol: 'openai',
             capabilities: {
@@ -96,6 +97,7 @@ test('compatibility harness summarizes SSE evidence', () => {
   assert.equal(summary.provider, 'deepseek');
   assert.equal(summary.model, 'deepseek-v4-pro');
   assert.equal(summary.effectiveModel, 'deepseek-v4-pro');
+  assert.equal(summary.routeReason, 'explicit_model');
   assert.equal(summary.protocol, 'openai');
   assert.equal(summary.reasoningSupported, true);
   assert.equal(summary.reasoningObserved, true);

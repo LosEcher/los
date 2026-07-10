@@ -5,6 +5,16 @@ import { recordProviderCompatEvidence } from '@los/agent';
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { createServer } from './server.js';
+import { sanitizeProviderCompatSummary } from './routes/providers/provider-helpers.js';
+
+test('provider compat summary only exposes recognized route reasons', () => {
+  assert.equal(sanitizeProviderCompatSummary({
+    routeReason: ' explicit_model ',
+  }).routeReason, 'explicit_model');
+  assert.equal(sanitizeProviderCompatSummary({
+    routeReason: 'risk_escalation',
+  }).routeReason, null);
+});
 
 test('provider compat evidence route exposes bounded operator evidence', async () => {
   const config = await loadConfig();
