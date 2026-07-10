@@ -10,6 +10,7 @@
 
 import { getLogger } from '@los/infra/logger';
 import { createProvider } from '../providers/index.js';
+import { resolveModelRouteDecision, type ModelRouteDecision } from '../providers/model-routing.js';
 import { summarizeModelProfile, type ModelExecutionSummary } from '../model-profiles.js';
 import {
   createToolRegistry,
@@ -46,6 +47,7 @@ export interface AgentRunSetup {
   log: Logger;
   provider: Provider;
   modelProfile: ModelExecutionSummary;
+  modelRoute: ModelRouteDecision;
   toolMode: 'all' | 'project-write' | 'read-only';
   allowedTools: readonly string[] | undefined;
   sandboxMode: 'readonly' | 'workspace-write' | 'sandbox';
@@ -100,14 +102,24 @@ export function setupAgentRun(
   // runs as a separate front-matter phase (see loop/architect-phase.ts) before
   // this loop starts, so resolve the editor provider + editor system prompt.
   const editorMode = config.architectEditor?.enabled === true;
-  const mainProviderName = editorMode
+  const requestedProvider = editorMode
     ? (config.architectEditor!.editorProvider ?? config.provider)
     : config.provider;
-  const provider = createProvider(mainProviderName, {
-    model: editorMode ? config.architectEditor!.editorModel : config.model,
+  const requestedModel = editorMode ? config.architectEditor!.editorModel : config.model;
+  const provider = createProvider(requestedProvider, {
+    model: requestedModel,
     traceId: config.traceId,
   });
   const modelProfile = summarizeModelProfile(provider.profile);
+  const modelRoute = resolveModelRouteDecision({
+    requestedProvider,
+    requestedModel,
+    effectiveProvider: provider.name,
+    effectiveModel: provider.profile.model,
+    architectEditorOverride: editorMode && Boolean(
+      config.architectEditor!.editorProvider || config.architectEditor!.editorModel,
+    ),
+  });
   const toolMode = config.toolMode ?? 'project-write';
 
   // Resolve system prompt. When explicitly provided, use as-is.
@@ -153,6 +165,7 @@ export function setupAgentRun(
     log,
     provider,
     modelProfile,
+    modelRoute,
     toolMode,
     allowedTools,
     sandboxMode,
@@ -236,9 +249,11 @@ export async function completeAgentSetup(
       promptPreview: previewText(prompt),
       promptLength: prompt.length,
       provider: setup.provider.name,
-      requestedProvider: config.provider ?? null,
-      requestedModel: config.model ?? null,
-      effectiveModel: setup.provider.profile.model,
+      requestedProvider: setup.modelRoute.requestedProvider ?? null,
+      requestedModel: setup.modelRoute.requestedModel ?? null,
+      effectiveProvider: setup.modelRoute.effectiveProvider,
+      effectiveModel: setup.modelRoute.effectiveModel,
+      routeReason: setup.modelRoute.reason,
       modelProfile: setup.modelProfile,
       workspaceRoot: config.workspaceRoot ?? null,
       toolMode: setup.toolMode,

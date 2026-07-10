@@ -1,5 +1,6 @@
 import { withInitDb } from '@los/infra/db';
 import { listProviderPromotionDecisions } from './provider-promotion-decisions.js';
+import type { ModelRouteReason } from './providers/model-routing.js';
 
 export type CompatibilityToolMode = 'read-only' | 'project-write';
 
@@ -61,6 +62,7 @@ export interface CompatibilityRunSummary {
   requestId?: string;
   nodeId?: string;
   effectiveModel?: string;
+  routeReason?: ModelRouteReason;
   protocol?: string;
   reasoningSupported?: boolean;
   reasoningObserved: boolean;
@@ -227,6 +229,7 @@ export function summarizeCompatibilityEvents(
   let requestId: string | undefined;
   let nodeId: string | undefined;
   let effectiveModel: string | undefined;
+  let routeReason: ModelRouteReason | undefined;
   let protocol: string | undefined;
   let reasoningSupported: boolean | undefined;
   let reasoningObserved = false;
@@ -254,6 +257,7 @@ export function summarizeCompatibilityEvents(
 
     if (item.event === 'session.started') {
       if (typeof payload.effectiveModel === 'string') effectiveModel = payload.effectiveModel;
+      if (isModelRouteReason(payload.routeReason)) routeReason = payload.routeReason;
       const modelProfile = asRecord(payload.modelProfile);
       if (typeof modelProfile.protocol === 'string') protocol = modelProfile.protocol;
       const capabilities = asRecord(modelProfile.capabilities);
@@ -308,6 +312,7 @@ export function summarizeCompatibilityEvents(
     requestId,
     nodeId,
     effectiveModel,
+    routeReason,
     protocol,
     reasoningSupported,
     reasoningObserved,
@@ -322,6 +327,13 @@ export function summarizeCompatibilityEvents(
     passed: failures.length === 0,
     failures,
   };
+}
+
+function isModelRouteReason(value: unknown): value is ModelRouteReason {
+  return value === 'configured_default'
+    || value === 'explicit_provider'
+    || value === 'explicit_model'
+    || value === 'architect_editor_override';
 }
 
 function firstString(current: string | undefined, ...values: unknown[]): string | undefined {
