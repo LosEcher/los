@@ -27,6 +27,7 @@ import {
   normalizeOptionalNonNegativeInteger,
 } from '../server-helpers.js';
 import { getLogger } from '@los/infra/logger';
+import { requireOperator } from '../../request-context.js';
 
 const log = getLogger('run-routes');
 
@@ -128,6 +129,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
   });
 
   app.post('/runs/:id/recover', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     const staleMs = normalizeOptionalNonNegativeInteger(body.staleMs);
@@ -159,6 +161,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
   // runAgentTaskGraphSerial invocation. The PG NOTIFY is kept for future LISTEN
   // subscribers (e.g. a multi-gateway mesh where another process owns the graph).
   app.post('/runs/:id/answer', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     const messageId = normalizeOptionalString(body.messageId);
@@ -210,6 +213,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
   });
 
   app.post('/runs/:id/verify', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     await ensureRunSpecStore();
@@ -224,6 +228,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
   });
 
   app.post('/runs/:id/approve', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     await ensureRunSpecStore();
@@ -250,6 +255,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
   });
 
   app.post('/runs/:id/revise-plan', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     await ensureRunSpecStore();

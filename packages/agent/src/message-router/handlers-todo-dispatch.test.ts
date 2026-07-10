@@ -11,7 +11,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageRouter } from './router.js';
 import { createBuiltinHandlers } from './handlers.js';
-import type { ChannelContext, NormalizerInput } from './types.js';
+import type { ChannelContext, NormalizerInput, RouteOptions } from './types.js';
+
+const OPERATOR_OPTIONS: RouteOptions = {
+  principal: {
+    kind: 'operator',
+    subject: 'test-operator',
+    authenticatedBy: 'operator_token',
+    capabilities: ['operator:*'],
+  },
+};
 
 function buildRouter(opts: { dispatchTodo?: any } = {}) {
   const delivered: string[] = [];
@@ -35,7 +44,7 @@ describe('TodoHandler #run / #dispatch', () => {
       sourceKind: 'wx-weixin',
       text: '#run todo-los-p0-2',
     };
-    const result = await router.route(input);
+    const result = await router.route(input, OPERATOR_OPTIONS);
     assert.equal(result.handled, true);
     assert.equal(result.error, 'dispatch_not_configured');
     assert.ok(delivered.some(t => t.includes('not configured')));
@@ -58,7 +67,7 @@ describe('TodoHandler #run / #dispatch', () => {
     };
     const { router, delivered } = buildRouter({ dispatchTodo });
 
-    const result = await router.route({ sourceKind: 'wx-weixin', text: '#run todo-los-p0-2' });
+    const result = await router.route({ sourceKind: 'wx-weixin', text: '#run todo-los-p0-2' }, OPERATOR_OPTIONS);
 
     assert.equal(result.handled, true);
     assert.equal(captured.id, 'todo-los-p0-2');
@@ -76,7 +85,7 @@ describe('TodoHandler #run / #dispatch', () => {
       return { ok: true, status: 200, body: { taskRun: { id: 'tr-aaaaaaaa', sessionId: 's-00000000' } } };
     };
     const { router } = buildRouter({ dispatchTodo });
-    await router.route({ sourceKind: 'wx-weixin', text: '#run todo-los-p0-2 force' });
+    await router.route({ sourceKind: 'wx-weixin', text: '#run todo-los-p0-2 force' }, OPERATOR_OPTIONS);
     assert.equal(forceSeen, true);
   });
 
@@ -87,7 +96,7 @@ describe('TodoHandler #run / #dispatch', () => {
       body: { error: 'todo_not_ready', message: 'Todo status is "done"' },
     });
     const { router, delivered } = buildRouter({ dispatchTodo });
-    const result = await router.route({ sourceKind: 'wx-weixin', text: '#dispatch todo-x-1234' });
+    const result = await router.route({ sourceKind: 'wx-weixin', text: '#dispatch todo-x-1234' }, OPERATOR_OPTIONS);
     assert.equal(result.handled, true);
     assert.equal(result.error, 'todo_not_ready');
     assert.ok(delivered.some(t => t.includes('Dispatch failed')));

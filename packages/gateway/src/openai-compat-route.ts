@@ -12,7 +12,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { MessageRouter } from '@los/agent/message-router';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
-import { getRequestContext } from './request-context.js';
+import { getMessagePrincipal, getRequestContext } from './request-context.js';
 
 interface OpenAIChatRequest {
   model?: string;
@@ -56,7 +56,7 @@ export function registerOpenAICompatibleRoute(
           // Single-turn only so normalizer/rawText is exactly the command line.
           messages: [{ role: 'user', content: lastUserTurn }],
           model: body.model,
-        });
+        }, { principal: getMessagePrincipal(req) });
         const text = result.handled
           ? (result.text ?? 'ok')
           : (result.error ?? '命令未处理');

@@ -23,6 +23,36 @@ export type SourceKind =
   | 'wx-weclaw'            // WeClaw (WeChat → OpenAI compat endpoint)
   | 'telegram';            // Telegram callback
 
+export type OperatorCapability =
+  | 'operator:*'
+  | 'run:control'
+  | 'session:steer'
+  | 'todo:write'
+  | 'governance:execute'
+  | 'runtime:execute';
+
+export interface OperatorPrincipal {
+  kind: 'operator';
+  subject: string;
+  authenticatedBy: 'operator_token' | 'trusted_channel' | 'auth_disabled';
+  capabilities: readonly OperatorCapability[];
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+}
+
+export interface NonOperatorPrincipal {
+  kind: 'anonymous' | 'authenticated';
+  subject: string;
+  authenticatedBy: 'none' | 'access_token';
+  capabilities: readonly [];
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+}
+
+export type MessagePrincipal = OperatorPrincipal | NonOperatorPrincipal;
+
 // ── Inbound message (all sources normalize to this) ────────────
 
 export interface InboundMessage {
@@ -69,6 +99,7 @@ export type ResolvedIntent =
 export interface HandlerContext {
   inbound: InboundMessage;
   intent: ResolvedIntent;
+  principal: MessagePrincipal;
   /** Send text back through the originating channel */
   reply: (text: string, opts?: ReplyOptions) => Promise<void>;
   /** SSE event sender — only available for HTTP sources */
@@ -141,4 +172,8 @@ export interface RouteResult {
   text?: string;
   sessionId?: string;
   error?: string;
+}
+
+export interface RouteOptions {
+  principal?: MessagePrincipal;
 }

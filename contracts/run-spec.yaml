@@ -186,6 +186,27 @@ events:
     - session_events
   streams:
     - los.run-stream
+operatorControl:
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
+  routes:
+    - method: POST
+      path: /runs/{runSpecId}/recover
+    - method: POST
+      path: /runs/{runSpecId}/answer
+    - method: POST
+      path: /runs/{runSpecId}/verify
+    - method: POST
+      path: /runs/{runSpecId}/approve
+    - method: POST
+      path: /runs/{runSpecId}/revise-plan
+  messageRouterCapabilities:
+    run_contract: run:control
+    steering: session:steer
+    todo_create_or_dispatch: todo:write
+    governance_sweep: governance:execute
+    runtime: runtime:execute
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

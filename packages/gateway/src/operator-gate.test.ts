@@ -18,7 +18,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import { setConfig, type Config } from '@los/infra/config';
-import { registerRequestContext, requireOperator } from './request-context.js';
+import { getMessagePrincipal, registerRequestContext, requireOperator } from './request-context.js';
 
 function buildConfig(opts: { authEnabled: boolean; operatorToken?: string }): Config {
   return {
@@ -115,6 +115,25 @@ test('operator gate allows valid operator token', async () => {
     });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.json(), { ok: true });
+  } finally {
+    await app.close();
+  }
+});
+
+test('request principal distinguishes access token from operator token', async () => {
+  const app = await buildApp(buildConfig({ authEnabled: true, operatorToken: 'op-secret' }));
+  app.get('/principal', async req => getMessagePrincipal(req));
+  try {
+    const ordinary = await app.inject({ method: 'GET', url: '/principal' });
+    assert.equal(ordinary.json().kind, 'authenticated');
+
+    const operator = await app.inject({
+      method: 'GET',
+      url: '/principal',
+      headers: { 'x-los-operator-token': 'op-secret' },
+    });
+    assert.equal(operator.json().kind, 'operator');
+    assert.deepEqual(operator.json().capabilities, ['operator:*']);
   } finally {
     await app.close();
   }

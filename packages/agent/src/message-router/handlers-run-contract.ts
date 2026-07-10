@@ -30,7 +30,9 @@ export function createRunContractHandler(): HandlerDescriptor {
       const i = ctx.intent;
       if (i.type !== 'run_contract') return { handled: false };
 
-      const actor = ctx.inbound.channelId || `im:${ctx.inbound.sourceKind}`;
+      const actor = ctx.principal.kind === 'operator'
+        ? ctx.principal.subject
+        : `unauthorized:${ctx.inbound.sourceKind}`;
       const reason =
         i.reason
         ?? `MessageRouter ${i.action} via ${ctx.inbound.sourceKind}`;

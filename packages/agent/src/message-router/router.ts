@@ -15,6 +15,8 @@ import type {
   HandlerResult,
   InboundMessage,
   NormalizerInput,
+  OperatorCapability,
+  RouteOptions,
   ResolvedIntent,
   RouteResult,
 } from './types.js';
@@ -64,11 +66,18 @@ export class MessageRouter {
    * Main entry point: normalize → resolve intent → dispatch → deliver.
    * Returns the route result with handler output.
    */
-  async route(input: NormalizerInput): Promise<RouteResult> {
+  async route(input: NormalizerInput, options: RouteOptions = {}): Promise<RouteResult> {
     const inbound = normalizeInboundMessage(input);
     const intent = resolveIntent(inbound.rawText);
     const channel = this.resolveChannel(inbound);
-    const ctx = this.buildContext(inbound, intent, channel);
+    const principal = options.principal ?? anonymousPrincipal();
+    const requiredCapability = operatorCapabilityForIntent(intent);
+    if (requiredCapability && !principalHasCapability(principal, requiredCapability)) {
+      const text = 'Operator authorization required for this command.';
+      if (channel) await channel.send(text).catch(() => undefined);
+      return { handled: true, intent, text, error: 'operator_required' };
+    }
+    const ctx = this.buildContext(inbound, intent, channel, principal);
 
     // Find first matching handler
     const handler = this.handlers.find(h => h.match(intent));
@@ -132,10 +141,12 @@ export class MessageRouter {
     inbound: InboundMessage,
     intent: ResolvedIntent,
     channel: ChannelContext | null,
+    principal: HandlerContext['principal'],
   ): HandlerContext {
     return {
       inbound,
       intent,
+      principal,
       reply: async (text, opts) => {
         if (channel) {
           await channel.send(text, opts);
@@ -144,4 +155,30 @@ export class MessageRouter {
       },
     };
   }
+}
+
+function anonymousPrincipal(): HandlerContext['principal'] {
+  return {
+    kind: 'anonymous',
+    subject: 'anonymous',
+    authenticatedBy: 'none',
+    capabilities: [],
+  };
+}
+
+function operatorCapabilityForIntent(intent: ResolvedIntent): OperatorCapability | undefined {
+  if (intent.type === 'run_contract') return 'run:control';
+  if (intent.type === 'steering') return 'session:steer';
+  if (intent.type === 'runtime') return 'runtime:execute';
+  if (intent.type === 'todo' && (intent.action === 'create' || intent.action === 'dispatch')) return 'todo:write';
+  if (intent.type === 'governance' && intent.action === 'sweep') return 'governance:execute';
+  return undefined;
+}
+
+function principalHasCapability(
+  principal: HandlerContext['principal'],
+  capability: OperatorCapability,
+): boolean {
+  return principal.kind === 'operator'
+    && (principal.capabilities.includes('operator:*') || principal.capabilities.includes(capability));
 }
