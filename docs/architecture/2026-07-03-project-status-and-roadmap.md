@@ -236,8 +236,8 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 
 **P0 — 纠正已有但错误的部分**：
 - [x] Web Run Specs 页审批 payload：`{approved: true, note}` → `{actor: string, reason: string}`（2026-07-10：`buildRunOperatorPayload`；Reject 走 `/recover` cancel）
-- [ ] Chat 页 ApprovalCard 从只读升级为可交互（调用 `POST /sessions/:id/operator-events`）
-- [ ] WebSocket 实现 operator steering（`ws-routes.ts:182` 占位）
+- [x] Chat 页 ApprovalCard 从只读升级为可交互（调用 `POST /sessions/:id/operator-events`）（2026-07-10）
+- [x] WebSocket 实现 operator steering（`ws-routes.ts` steering/cancel + steering.ack）（2026-07-10）
 
 **P1 — 补 RunContract IM 命令**：
 - [x] `resolveIntent` 新增：`#approve-phase <runId>` `#revise-plan <runId>` `#verify-run <runId>`（2026-07-10 + handlers-run-contract）

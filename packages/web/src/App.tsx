@@ -22,7 +22,18 @@ import {
   TerminalSquare,
   Zap,
 } from 'lucide-react';
-import { getJson, setAuthToken, getAuthToken, AuthError, type Health, type SessionSummary, type TodoItem, type MemoryStats } from './api';
+import {
+  getJson,
+  setAuthToken,
+  getAuthToken,
+  setOperatorToken,
+  getOperatorToken,
+  AuthError,
+  type Health,
+  type SessionSummary,
+  type TodoItem,
+  type MemoryStats,
+} from './api';
 import {
   CommunicationAccountsPage,
   DeadLetterPage,
@@ -323,6 +334,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
 function AuthBanner() {
   const [dismissed, setDismissed] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
+  const [operatorInput, setOperatorInput] = useState('');
   const [saved, setSaved] = useState(false);
 
   const settings = useQuery({
@@ -333,33 +345,40 @@ function AuthBanner() {
 
   const authEnabled = settings.data?.auth?.enabled === true;
   const hasToken = Boolean(getAuthToken());
+  const hasOperator = Boolean(getOperatorToken());
 
-  if (!authEnabled || hasToken || dismissed) return null;
+  // Show when auth is on and either auth token or operator token is missing
+  if (!authEnabled || (hasToken && hasOperator) || dismissed) return null;
+
+  function saveTokens() {
+    if (tokenInput.trim()) setAuthToken(tokenInput.trim());
+    if (operatorInput.trim()) setOperatorToken(operatorInput.trim());
+    setSaved(true);
+    setTimeout(() => setDismissed(true), 800);
+  }
 
   return (
     <div className="auth-banner">
-      <span>🔐 Auth is enabled — set your token to access data.</span>
-      <input
-        type="password"
-        value={tokenInput}
-        onChange={e => setTokenInput(e.target.value)}
-        placeholder="Paste auth token…"
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            setAuthToken(tokenInput.trim() || undefined);
-            setSaved(true);
-            setTimeout(() => setDismissed(true), 800);
-          }
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => {
-          setAuthToken(tokenInput.trim() || undefined);
-          setSaved(true);
-          setTimeout(() => setDismissed(true), 800);
-        }}
-      >
+      <span>🔐 Auth enabled — set tokens for data + operator steering.</span>
+      {!hasToken ? (
+        <input
+          type="password"
+          value={tokenInput}
+          onChange={e => setTokenInput(e.target.value)}
+          placeholder="Auth token…"
+          onKeyDown={e => { if (e.key === 'Enter') saveTokens(); }}
+        />
+      ) : null}
+      {!hasOperator ? (
+        <input
+          type="password"
+          value={operatorInput}
+          onChange={e => setOperatorInput(e.target.value)}
+          placeholder="Operator token (steering)…"
+          onKeyDown={e => { if (e.key === 'Enter') saveTokens(); }}
+        />
+      ) : null}
+      <button type="button" onClick={saveTokens}>
         {saved ? '✓ Saved' : 'Save'}
       </button>
       <button type="button" className="auth-dismiss" onClick={() => setDismissed(true)}>

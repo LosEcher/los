@@ -1,9 +1,11 @@
 /**
- * Tool approval notification cards and operator approval UI shell.
- * Renders non-interactive info cards for tool.approved / tool.denied events.
- * When backend approval-gating lands, the interactive modal activates automatically.
+ * Tool approval notification cards and interactive operator steering.
+ * - ApprovalCard: shows tool.approved / tool.denied outcomes
+ * - OperatorSteeringBar: posts approve/deny/escalate via operator-events
  */
-import { Wrench, Check, X, AlertTriangle, Clock } from 'lucide-react';
+import { useState } from 'react';
+import { Wrench, Check, X, AlertTriangle, Clock, ArrowUpRight } from 'lucide-react';
+import { postOperatorSteering } from './api/index.js';
 
 export type ApprovalEvent = {
   id: string;
@@ -17,7 +19,36 @@ export type ApprovalEvent = {
   createdAt: number;
 };
 
-export function ApprovalCard({ event }: { event: ApprovalEvent }) {
+export function ApprovalCard({
+  event,
+  sessionId,
+  onSteered,
+}: {
+  event: ApprovalEvent;
+  sessionId?: string | null;
+  onSteered?: (instruction: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function steer(instruction: 'approve' | 'deny' | 'escalate') {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postOperatorSteering(sessionId, {
+        instruction,
+        reason: `web ApprovalCard ${instruction} for ${event.toolName}`,
+        turnBoundary: 'immediate',
+      });
+      onSteered?.(instruction);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className={`approval-card ${event.allowed ? 'approved' : 'denied'}`}>
       <div className="approval-card-head">
@@ -36,6 +67,69 @@ export function ApprovalCard({ event }: { event: ApprovalEvent }) {
           <code>{event.argsPreview}</code>
         </details>
       ) : null}
+      {sessionId ? (
+        <div className="approval-actions" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="tiny-btn" disabled={busy} onClick={() => void steer('approve')}>
+            <Check size={12} /> Approve
+          </button>
+          <button type="button" className="tiny-btn" disabled={busy} onClick={() => void steer('deny')}>
+            <X size={12} /> Deny
+          </button>
+          <button type="button" className="tiny-btn" disabled={busy} onClick={() => void steer('escalate')}>
+            <ArrowUpRight size={12} /> Escalate
+          </button>
+        </div>
+      ) : null}
+      {error ? <div className="error-banner" style={{ marginTop: 6 }}>{error}</div> : null}
+    </div>
+  );
+}
+
+/** Always-visible session steering when a chat session is active. */
+export function OperatorSteeringBar({
+  sessionId,
+  disabled,
+}: {
+  sessionId: string;
+  disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function steer(instruction: 'approve' | 'deny' | 'escalate') {
+    if (disabled || busy) return;
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await postOperatorSteering(sessionId, {
+        instruction,
+        reason: `web OperatorSteeringBar ${instruction}`,
+        turnBoundary: 'immediate',
+      });
+      setStatus(`sent ${instruction}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="operator-steering-bar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Operator:</span>
+      <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('approve')}>
+        <Check size={12} /> Approve
+      </button>
+      <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('deny')}>
+        <X size={12} /> Deny
+      </button>
+      <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('escalate')}>
+        <ArrowUpRight size={12} /> Escalate
+      </button>
+      {status ? <span style={{ fontSize: 12, color: 'var(--ok, green)' }}>{status}</span> : null}
+      {error ? <span style={{ fontSize: 12, color: 'var(--danger, red)' }}>{error}</span> : null}
     </div>
   );
 }

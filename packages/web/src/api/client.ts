@@ -14,7 +14,9 @@ function checkResponse(res: Response): void {
   if (!res.ok) {
     const err = res.status === 401
       ? new AuthError('Authentication required — set auth token in Settings', res.status)
-      : new Error(`${res.status} ${res.statusText}`);
+      : res.status === 403
+        ? new AuthError('Operator authentication required — set operator token in Settings', res.status)
+        : new Error(`${res.status} ${res.statusText}`);
     throw err;
   }
 }
@@ -130,6 +132,8 @@ function buildHeaders(): Record<string, string> {
   if (pid) headers['x-project-id'] = pid;
   const token = getAuthToken();
   if (token) headers['x-los-auth-token'] = token;
+  const operatorToken = getOperatorToken();
+  if (operatorToken) headers['x-los-operator-token'] = operatorToken;
   // Tenant and user are required by request-context when auth is enabled.
   // Web always identifies as 'local' (single-tenant, single-user UI).
   headers['x-tenant-id'] = 'local';
@@ -181,4 +185,49 @@ export function setAuthToken(token: string | undefined): void {
       localStorage.removeItem(AUTH_TOKEN_KEY);
     }
   } catch { /* ignore */ }
+}
+
+// ── Operator token (steering / RunContract gates) ─────
+
+const OPERATOR_TOKEN_KEY = 'los-operator-token';
+
+export function getOperatorToken(): string | undefined {
+  try {
+    const val = localStorage.getItem(OPERATOR_TOKEN_KEY);
+    return val?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setOperatorToken(token: string | undefined): void {
+  try {
+    if (token) {
+      localStorage.setItem(OPERATOR_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(OPERATOR_TOKEN_KEY);
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Post operator steering / followup for a session.
+ * Requires x-los-operator-token when gateway auth is enabled.
+ */
+export async function postOperatorSteering(
+  sessionId: string,
+  body: {
+    instruction: string;
+    reason?: string;
+    turnBoundary?: 'immediate' | 'next_turn';
+    actor?: string;
+  },
+): Promise<{ ok: boolean }> {
+  return postJson(`/sessions/${encodeURIComponent(sessionId)}/operator-events`, {
+    type: 'steering',
+    instruction: body.instruction,
+    reason: body.reason,
+    turnBoundary: body.turnBoundary ?? 'immediate',
+    actor: body.actor ?? 'web-console',
+  });
 }

@@ -9,6 +9,7 @@ const useChatRun = readFileSync(new URL('./hooks/useChatRun.ts', import.meta.url
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const runSpecsPage = readFileSync(new URL('./pages/run-specs-page.tsx', import.meta.url), 'utf8');
+const chatApproval = readFileSync(new URL('./chat-approval.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
@@ -109,6 +110,14 @@ test('run specs operator actions send actor/reason contract, not approved/note',
   assert.doesNotMatch(runSpecsPage, /approved:\s*true/);
   assert.doesNotMatch(runSpecsPage, /approved:\s*false/);
   assert.doesNotMatch(runSpecsPage, /note:\s*approvalNote/);
+});
+
+test('chat ApprovalCard is interactive via operator-events and WS steering is wired', () => {
+  assert.match(chatApproval, /function OperatorSteeringBar/);
+  assert.match(chatApproval, /postOperatorSteering/);
+  assert.match(chatApproval, /instruction:\s*'approve'/);
+  assert.match(chatPage, /OperatorSteeringBar/);
+  assert.match(chatPage, /sessionId=\{sessionId\}/);
 });
 
 function between(source, start, end) {
