@@ -49,6 +49,13 @@ export function registerChatRoute(
           prompt,
           sessionId: body.sessionId,
         }, { principal: getMessagePrincipal(req) });
+        if (result.error === 'operator_required') {
+          return reply.status(403).send({
+            error: 'operator_required',
+            message: result.text ?? 'Operator authorization required for this command.',
+            intent: result.intent.type,
+          });
+        }
         if (result.handled) {
           return reply.send({ ok: true, text: result.text, sessionId: result.sessionId, intent: result.intent.type });
         }
@@ -66,6 +73,7 @@ export function registerChatRoute(
     const allowedTools = normalizeAllowedTools(body.allowedTools);
     const maxLoops = normalizePositiveInteger(body.maxLoops);
     const context = getRequestContext(req);
+    const principal = getMessagePrincipal(req);
     const traceId = normalizeOptionalString(body.traceId) ?? context.traceId;
     const dedupeKey = normalizeOptionalString(body.dedupeKey);
     const timeoutMs = normalizePositiveInteger(body.timeoutMs);
@@ -160,6 +168,7 @@ export function registerChatRoute(
         tenantId: context.tenantId,
         projectId: resolveProjectIdFromWorkspace(workspaceRoot) ?? context.projectId,
         userId: context.userId, requestId: context.requestId,
+        actorSubject: principal.subject,
         runContract: body.runContract,
         config, gatewayServiceId, log: context.log, ctx, send,
       });

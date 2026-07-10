@@ -6,6 +6,9 @@ import authMiddleware from '../../auth-middleware.js';
 import { registerRequestContext } from '../../request-context.js';
 import { registerRunRoutes } from './run-routes.js';
 import { registerRuntimeAdapterRoutes } from './runtime-adapter-routes.js';
+import { registerGovernanceRoutes } from '../infrastructure/governance-routes.js';
+import { registerProviderEvidenceRoutes } from '../providers/provider-evidence-routes.js';
+import { registerSessionRoutes } from '../data/session-routes.js';
 
 function config(): Config {
   return {
@@ -51,6 +54,9 @@ test('ordinary access token cannot invoke operator write routes', async () => {
   await authMiddleware(app, { config: effectiveConfig });
   registerRunRoutes(app);
   registerRuntimeAdapterRoutes(app);
+  registerGovernanceRoutes(app);
+  registerProviderEvidenceRoutes(app);
+  registerSessionRoutes(app);
 
   try {
     const requests = [
@@ -61,6 +67,10 @@ test('ordinary access token cannot invoke operator write routes', async () => {
       { url: '/runs/run-test/revise-plan', payload: {} },
       { url: '/runtimes/codex/run', payload: { prompt: 'test' } },
       { url: '/runtimes/bridge/start', payload: {} },
+      { url: '/governance/jobs/sweep', payload: {} },
+      { url: '/providers/promotion-decisions', payload: { action: 'promote_required' } },
+      { url: '/providers/promotion-decisions/enforce', payload: { id: 'decision-test' } },
+      { url: '/sessions/session-test/operator-events', payload: { type: 'steering', instruction: 'approve' } },
     ];
     for (const request of requests) {
       const response = await app.inject({

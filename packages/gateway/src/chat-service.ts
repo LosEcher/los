@@ -81,6 +81,7 @@ export async function runChat(params: {
   tenantId: string;
   projectId: string;
   userId: string;
+  actorSubject: string;
   requestId: string;
   runContract: RunContractMetadataInput | undefined;
   config: Config;
@@ -95,7 +96,7 @@ export async function runChat(params: {
     prompt, sessionId, systemPrompt, provider, model, modelSettings,
     workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
-    traceId, dedupeKey, sid, tenantId, projectId, userId, requestId,
+    traceId, dedupeKey, sid, tenantId, projectId, userId, actorSubject, requestId,
     runContract, config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
   } = params;
 
@@ -211,7 +212,7 @@ export async function runChat(params: {
         userId,
         requestId,
         traceId,
-        actor: userId,
+        actor: actorSubject,
         reason: 'chat_branch_created',
       });
       send('session.branched', {

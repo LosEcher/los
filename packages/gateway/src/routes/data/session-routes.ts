@@ -12,7 +12,7 @@ import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSessi
 import { claimRunSpec } from '@los/agent/run-specs';
 import { listVerificationRecordsForSession } from '@los/agent';
 import { findRecoverableSessions } from '../../chat-session-helpers.js';
-import { getRequestContext, requireOperator } from '../../request-context.js';
+import { getOperatorPrincipal, getRequestContext, requireOperator } from '../../request-context.js';
 import { getConfig } from '@los/infra/config';
 import { resolveGatewayServiceIdentity } from '../../server.js';
 import { normalizeBoundedInteger } from '../server-helpers.js';
@@ -36,6 +36,7 @@ export function registerSessionRoutes(app: FastifyInstance): void {
     // privilege (x-los-operator-token) when auth is enabled. Without this, any
     // authenticated user could inject approve/deny/escalate instructions.
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
 
     const { id } = req.params as { id: string };
     const body = normalizeOperatorEventBody(req.body);
@@ -57,7 +58,7 @@ export function registerSessionRoutes(app: FastifyInstance): void {
       userId: context.userId,
       requestId: context.requestId,
       traceId: context.traceId,
-      actor: body.actor ?? context.userId,
+      actor: operator.subject,
       reason: body.reason,
     };
 
@@ -167,7 +168,6 @@ type OperatorEventBody =
       instruction: string;
       runSpecId?: string;
       taskRunId?: string;
-      actor?: string;
       reason?: string;
       turnBoundary?: 'next_turn' | 'immediate';
       drainMode?: 'none' | 'finish_current_tool' | 'finish_current_turn';
@@ -178,7 +178,6 @@ type OperatorEventBody =
       parentSessionId?: string;
       runSpecId?: string;
       taskRunId?: string;
-      actor?: string;
       reason?: string;
     };
 
@@ -192,7 +191,6 @@ function normalizeOperatorEventBody(value: unknown): OperatorEventBody | null {
       instruction: normalizeOptionalString(body.instruction) ?? normalizeOptionalString(body.prompt) ?? '',
       runSpecId: normalizeOptionalString(body.runSpecId),
       taskRunId: normalizeOptionalString(body.taskRunId),
-      actor: normalizeOptionalString(body.actor),
       reason: normalizeOptionalString(body.reason),
       turnBoundary: normalizeTurnBoundary(body.turnBoundary),
       drainMode: normalizeDrainMode(body.drainMode),
@@ -205,7 +203,6 @@ function normalizeOperatorEventBody(value: unknown): OperatorEventBody | null {
       parentSessionId: normalizeOptionalString(body.parentSessionId),
       runSpecId: normalizeOptionalString(body.runSpecId),
       taskRunId: normalizeOptionalString(body.taskRunId),
-      actor: normalizeOptionalString(body.actor),
       reason: normalizeOptionalString(body.reason),
     };
   }

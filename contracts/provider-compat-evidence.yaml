@@ -22,6 +22,21 @@ routes:
     response:
       count: integer
       evidence: provider_compat_evidence.rows
+  - method: POST
+    path: /providers/promotion-decisions
+  - method: POST
+    path: /providers/promotion-decisions/enforce
+operatorControl:
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
+  requiredPrincipal: operator
+  actorSource: principal.subject
+  anonymousStatus: 401
+  nonOperatorStatus: 403
+  routes:
+    - /providers/promotion-decisions
+    - /providers/promotion-decisions/enforce
 fields:
   id: string
   provider: string

@@ -27,7 +27,7 @@ import {
   normalizeOptionalNonNegativeInteger,
 } from '../server-helpers.js';
 import { getLogger } from '@los/infra/logger';
-import { requireOperator } from '../../request-context.js';
+import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
 
 const log = getLogger('run-routes');
 
@@ -130,6 +130,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
   app.post('/runs/:id/recover', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     const staleMs = normalizeOptionalNonNegativeInteger(body.staleMs);
@@ -140,7 +141,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
         action,
         staleMs,
         reason: normalizeOptionalString(body.reason),
-        actor: normalizeOptionalString(body.actor),
+        actor: operator.subject,
         cancelLiveTaskRun: action === 'cancel'
           ? (taskRunId, reason) => cancelScheduledTask(taskRunId, reason)
           : undefined,
@@ -162,6 +163,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
   // subscribers (e.g. a multi-gateway mesh where another process owns the graph).
   app.post('/runs/:id/answer', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     const messageId = normalizeOptionalString(body.messageId);
@@ -183,6 +185,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
       payload: {
         messageId,
         answer,
+        actor: operator.subject,
         runSpecId: id,
         dispatchId: updated.dispatchId,
         taskId: updated.taskId,
@@ -229,6 +232,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
   app.post('/runs/:id/approve', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     await ensureRunSpecStore();
@@ -237,7 +241,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
     try {
       const updated = await approveRunSpecPhase(id, {
-        actor: normalizeOptionalString(body.actor),
+        actor: operator.subject,
         reason: normalizeOptionalString(body.reason),
       });
       return {
@@ -256,6 +260,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
 
   app.post('/runs/:id/revise-plan', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const { id } = req.params as { id: string };
     const body = asRecord(req.body);
     await ensureRunSpecStore();
@@ -265,7 +270,7 @@ export function registerRunRoutes(app: FastifyInstance): void {
     try {
       const updated = await reviseRunSpecPlan(id, {
         plan: Array.isArray(body.plan) ? body.plan as any : undefined,
-        actor: normalizeOptionalString(body.actor),
+        actor: operator.subject,
         reason: normalizeOptionalString(body.reason),
       });
       return {

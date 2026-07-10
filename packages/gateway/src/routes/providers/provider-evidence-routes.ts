@@ -35,6 +35,7 @@ import {
   parseProviderPromotionAction,
   type RunEvalQuery,
 } from './provider-helpers.js';
+import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
 
 export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
   app.get('/onboarding', async () => {
@@ -67,6 +68,8 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
   });
 
   app.post('/providers/promotion-decisions', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const body = asRecord(req.body);
     try {
       const decision = await recordProviderPromotionDecision({
@@ -77,7 +80,7 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
         targetLabel: normalizeOptionalString(body.targetLabel),
         evidenceId: normalizeOptionalString(body.evidenceId),
         reason: normalizeOptionalString(body.reason) ?? '',
-        actor: normalizeOptionalString(body.actor),
+        actor: operator.subject,
       });
       return { decision };
     } catch (err) {
@@ -86,11 +89,13 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
   });
 
   app.post('/providers/promotion-decisions/enforce', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const body = asRecord(req.body);
     try {
       const decision = await enforceProviderPromotionDecision({
         id: normalizeOptionalString(body.id) ?? '',
-        actor: normalizeOptionalString(body.actor),
+        actor: operator.subject,
       });
       return { decision };
     } catch (err) {

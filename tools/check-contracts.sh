@@ -65,6 +65,11 @@ provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
   require_pattern "$run_spec" 'workspaceRoot:' 'workspaceRoot field'
   require_pattern "$run_spec" 'toolMode:' 'toolMode field'
   require_pattern "$run_spec" 'executor:' 'executor field'
+  require_pattern "$run_spec" 'requiredPrincipal:[[:space:]]+operator' 'operator principal requirement'
+  require_pattern "$run_spec" 'actorSource:[[:space:]]+principal\.subject' 'trusted operator actor source'
+  require_pattern "$run_spec" '/runtimes/\{kind\}/run' 'runtime operator route'
+  require_pattern "$run_spec" '/runtimes/bridge/start' 'runtime bridge operator route'
+  require_pattern "$run_spec" '/governance/jobs/sweep' 'governance operator route'
 }
 
 [ -f "$run_stream" ] && {
@@ -72,6 +77,9 @@ provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
   require_pattern "$run_stream" 'task\.running' 'task.running event'
   require_pattern "$run_stream" 'model\.delta' 'model.delta event'
   require_pattern "$run_stream" 'tool\.result' 'tool.result event'
+  require_pattern "$run_stream" 'requiredPrincipal:[[:space:]]+operator' 'stream operator principal requirement'
+  require_pattern "$run_stream" 'actorSource:[[:space:]]+principal\.subject' 'stream actor source'
+  require_pattern "$run_stream" '/sessions/\{sessionId\}/operator-events' 'session operator route'
 }
 
 [ -f "$node_registry" ] && {
@@ -103,6 +111,10 @@ provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
 
 [ -f "$provider_compat_evidence" ] && {
   require_pattern "$provider_compat_evidence" '/providers/compat-evidence' 'provider compat route'
+  require_pattern "$provider_compat_evidence" '/providers/promotion-decisions' 'provider promotion route'
+  require_pattern "$provider_compat_evidence" '/providers/promotion-decisions/enforce' 'provider promotion enforcement route'
+  require_pattern "$provider_compat_evidence" 'requiredPrincipal:[[:space:]]+operator' 'provider operator principal requirement'
+  require_pattern "$provider_compat_evidence" 'actorSource:[[:space:]]+principal\.subject' 'provider actor source'
   require_pattern "$provider_compat_evidence" 'provider_compat_evidence\.rows' 'provider compat rows'
   require_pattern "$provider_compat_evidence" 'verified_advisory' 'verified advisory decision'
   require_pattern "$provider_compat_evidence" 'raw transcripts' 'raw transcript redaction'

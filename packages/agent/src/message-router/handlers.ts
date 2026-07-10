@@ -213,9 +213,6 @@ function createGovernanceHandler(): HandlerDescriptor {
       const i = ctx.intent;
       if (i.type !== 'governance') return { handled: false };
       try {
-        await ensureGovernanceJobStore();
-        await seedGovernanceJobs();
-
         if (i.action === 'list') {
           const jobs = await listGovernanceJobs({ limit: 20 });
           if (jobs.length === 0) {
@@ -265,6 +262,8 @@ function createGovernanceHandler(): HandlerDescriptor {
         }
 
         if (i.action === 'sweep') {
+          await ensureGovernanceJobStore();
+          await seedGovernanceJobs();
           await ctx.reply('🔄 Triggering governance sweep...');
           const result = await runGovernanceSweep({ dryRun: false });
           const text = [

@@ -15,7 +15,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { ensureSessionEventStore, listSessionEventsSince } from '@los/agent/session-events';
-import { recordOperatorSteering } from '@los/agent/operator-control';
 import {
   acquireStreamLease,
   releaseStreamLease,
@@ -24,7 +23,8 @@ import {
 } from '@los/agent/stream-lease';
 import { eventBus } from '@los/agent/event-bus';
 import { computeRetryDelay, retryAfterHeader } from './stream-backoff.js';
-import { hasOperatorAccess } from '../../request-context.js';
+import { handleWsControlMessage } from './ws-control.js';
+import { getMessagePrincipal } from '../../request-context.js';
 
 interface WsClient {
   ws: WebSocket;
@@ -175,54 +175,11 @@ export function registerWsRoutes(app: FastifyInstance, gatewayServiceId: string)
 
     // ── Client messages ──
     socket.on('message', (raw) => {
-      void (async () => {
-        try {
-          const msg = JSON.parse(raw.toString()) as Record<string, unknown>;
-          if (msg.type === 'ping') {
-            wsSend(socket, 'pong', { ts: Date.now() });
-            return;
-          }
-
-          if (msg.type === 'steering' || msg.type === 'cancel') {
-            if (!hasOperatorAccess(req)) {
-              wsSend(socket, 'error', { error: 'operator_required' });
-              return;
-            }
-            const instruction = msg.type === 'cancel'
-              ? 'deny'
-              : typeof msg.instruction === 'string'
-                ? msg.instruction
-                : '';
-            if (!instruction) {
-              wsSend(socket, 'error', { error: 'steering_instruction_required' });
-              return;
-            }
-            const turnBoundary = msg.turnBoundary === 'next_turn' ? 'next_turn' : 'immediate';
-            const reason = typeof msg.reason === 'string' ? msg.reason : `ws ${msg.type}`;
-            try {
-              const event = await recordOperatorSteering({
-                sessionId: id,
-                instruction,
-                turnBoundary,
-                reason,
-                actor: 'ws-client',
-              });
-              wsSend(socket, 'steering.ack', {
-                ok: true,
-                type: msg.type,
-                instruction,
-                eventId: event.id,
-                eventType: event.type,
-              });
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              wsSend(socket, 'error', { error: 'steering_failed', message });
-            }
-          }
-        } catch {
-          // Ignore malformed messages
-        }
-      })();
+      void handleWsControlMessage(raw, {
+        principal: getMessagePrincipal(req),
+        sessionId: id,
+        send: (event, data) => wsSend(socket, event, data),
+      });
     });
 
     socket.on('close', () => {
