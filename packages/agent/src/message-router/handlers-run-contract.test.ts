@@ -90,7 +90,7 @@ test('run_contract handler: #approve-phase transitions planning → plan_approve
     const events = await listSessionEvents(sessionId);
     const approval = events.find((e) => e.type === 'run.plan_approved');
     assert.ok(approval);
-    assert.equal(approval?.payload?.actor, 'wechat-test');
+    assert.equal(approval?.payload?.actor, 'test-operator');
     assert.equal(approval?.payload?.reason, 'approved from IM test');
   } finally {
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
