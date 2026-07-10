@@ -277,8 +277,9 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
 
     // B0: enforce phase contract — no succeeded while verification pending/failed
     const verifyContract = await readCurrentRunContract(input.runSpecId, running.metadata);
-    // Load verification record statuses for this run spec
-    const verifyCheck = await checkVerificationGate(input.runSpecId, verifyContract);
+    const verifyCheck = input.verificationOwner === 'graph'
+      ? { allowed: true }
+      : await checkVerificationGate(input.runSpecId, verifyContract);
     if (!verifyCheck.allowed) {
       await transitionExecutionState({
         entityType: 'task_run',

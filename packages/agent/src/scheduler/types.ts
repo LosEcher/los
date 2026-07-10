@@ -37,6 +37,7 @@ export interface ScheduledAgentTaskInput extends AgentConfig {
   promptPreview?: string;
   metadata?: Record<string, unknown>;
   runContract?: RunContractMetadataInput;
+  verificationOwner?: 'task' | 'graph';
   executor?: ScheduledExecutorConfig;
   onTaskEvent?: (event: ScheduledTaskEvent) => void | Promise<void>;
   /** Context fill monitor — same shape as AgentConfig.contextMonitor */

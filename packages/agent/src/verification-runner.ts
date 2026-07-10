@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process';
-import { appendSessionEvent } from './session-events.js';
 import { loadRunSpec, type RunSpecStatus } from './run-specs.js';
 import { transitionExecutionState } from './execution-store.js';
+import { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 import {
   listVerificationRecordsForRunSpec,
   loadVerificationRecord,
-  updateVerificationRecord,
+  updateVerificationRecordDetails,
   type VerificationRecord,
 } from './verification-records.js';
 
@@ -52,16 +52,20 @@ export interface RunVerificationRecordsForRunSpecResult {
 }
 
 export function resolveVerificationCompletionDecision(
-  verificationRecords: readonly Pick<VerificationRecord, 'id' | 'required' | 'status'>[],
+  verificationRecords: readonly Pick<VerificationRecord, 'id' | 'checkName' | 'required' | 'status'>[],
+  allowedSkippedChecks: readonly string[] = [],
 ): VerificationCompletionDecision {
+  const allowedSkipped = new Set(allowedSkippedChecks);
+  const isSatisfied = (record: Pick<VerificationRecord, 'checkName' | 'status'>): boolean =>
+    record.status === 'succeeded' || (record.status === 'skipped' && allowedSkipped.has(record.checkName));
   const blockedVerificationRecordIds = verificationRecords
-    .filter(record => record.required && record.status !== 'succeeded' && record.status !== 'skipped')
+    .filter(record => record.required && !isSatisfied(record))
     .map(record => record.id);
   const failedVerificationRecordIds = verificationRecords
     .filter(record => record.required && record.status === 'failed')
     .map(record => record.id);
   const pendingVerificationRecordIds = verificationRecords
-    .filter(record => record.required && record.status !== 'succeeded' && record.status !== 'skipped' && record.status !== 'failed')
+    .filter(record => record.required && !isSatisfied(record) && record.status !== 'failed')
     .map(record => record.id);
   return {
     status: blockedVerificationRecordIds.length > 0 ? 'blocked' : 'succeeded',
@@ -77,17 +81,23 @@ export async function runVerificationRecord(
 ): Promise<RunVerificationRecordResult> {
   const initial = await loadVerificationRecord(recordId);
   if (!initial) throw new Error(`Verification record not found: ${recordId}`);
+  if (initial.kind !== 'command' || !initial.command?.trim()) {
+    throw new Error(`Verification record ${recordId} is not an executable command requirement`);
+  }
 
   const cwd = await resolveVerificationCwd(initial, options.cwd);
-  const command = initial.command ?? initial.checkName;
-  await updateVerificationRecord(initial.id, {
-    status: 'running',
+  const command = initial.command;
+  await transitionExecutionState({
+    entityType: 'verification_record',
+    entityId: initial.id,
+    to: 'running',
+    reason: 'verification_command_started',
+    sessionId: initial.sessionId,
+    eventType: 'verification.running',
+  });
+  await updateVerificationRecordDetails(initial.id, {
     error: null,
     outputSummary: `running: ${command}`,
-  });
-  await appendVerificationEvent(initial, 'verification.running', {
-    command,
-    cwd,
   });
 
   const commandResult = await runVerificationCommand(command, {
@@ -97,21 +107,19 @@ export async function runVerificationRecord(
     env: options.env,
   });
   const status = commandResult.exitCode === 0 ? 'succeeded' : 'failed';
-  const record = await updateVerificationRecord(initial.id, {
-    status,
+  await transitionExecutionState({
+    entityType: 'verification_record',
+    entityId: initial.id,
+    to: status,
+    reason: commandResult.error ?? `verification_command_${status}`,
+    sessionId: initial.sessionId,
+    eventType: status === 'succeeded' ? 'verification.succeeded' : 'verification.failed',
+  });
+  const record = await updateVerificationRecordDetails(initial.id, {
     outputSummary: commandResult.outputSummary,
     error: commandResult.error ?? null,
   });
   if (!record) throw new Error(`Verification record disappeared while running: ${recordId}`);
-
-  await appendVerificationEvent(record, status === 'succeeded' ? 'verification.succeeded' : 'verification.failed', {
-    command,
-    cwd,
-    exitCode: commandResult.exitCode,
-    signal: commandResult.signal,
-    durationMs: commandResult.durationMs,
-    error: commandResult.error ?? null,
-  });
 
   const decision = record.runSpecId && options.updateRunSpecStatus !== false
     ? await applyVerificationDecisionForRunSpec(record.runSpecId)
@@ -123,20 +131,26 @@ export async function runVerificationRecordsForRunSpec(
   runSpecId: string,
   options: RunVerificationRecordsForRunSpecOptions = {},
 ): Promise<RunVerificationRecordsForRunSpecResult> {
-  const initialRecords = await listVerificationRecordsForRunSpec(runSpecId);
+  const runSpec = await loadRunSpec(runSpecId);
+  if (!runSpec) throw new Error(`Run spec not found: ${runSpecId}`);
+  const planRevision = runSpec.runContract?.planRevision ?? 1;
+  const initialRecords = await listVerificationRecordsForRunSpec(runSpecId, { planRevision });
   const runnable = initialRecords.filter(record => {
-    if (!record.required) return false;
+    if (!record.required || record.kind !== 'command') return false;
     if (record.status === 'required') return true;
     return options.includeFailed !== false && record.status === 'failed';
   });
 
-  await transitionExecutionState({
-    entityType: 'run_spec',
-    entityId: runSpecId,
-    to: 'running',
-    reason: 'verification_started',
-    sessionId: initialRecords[0]?.sessionId,
-  }).catch(() => undefined);
+  if (runSpec.status === 'created' || runSpec.status === 'blocked') {
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: runSpecId,
+      to: 'running',
+      reason: 'verification_started',
+      sessionId: initialRecords[0]?.sessionId,
+    });
+  }
+  await ensureRunSpecVerificationPhase(runSpecId, 'verification_started', 'los.verification');
   const ranRecordIds: string[] = [];
   for (const record of runnable) {
     await runVerificationRecord(record.id, {
@@ -146,7 +160,7 @@ export async function runVerificationRecordsForRunSpec(
     ranRecordIds.push(record.id);
   }
 
-  const records = await listVerificationRecordsForRunSpec(runSpecId);
+  const records = await listVerificationRecordsForRunSpec(runSpecId, { planRevision });
   const decision = await applyVerificationDecisionForRunSpec(runSpecId, records, options.updateRunSpecStatus !== false);
   return {
     runSpecId,
@@ -161,18 +175,24 @@ async function applyVerificationDecisionForRunSpec(
   records?: readonly VerificationRecord[],
   shouldUpdateStatus = true,
 ): Promise<VerificationCompletionDecision> {
-  const verificationRecords = records ?? await listVerificationRecordsForRunSpec(runSpecId);
-  const decision = resolveVerificationCompletionDecision(verificationRecords);
+  const runSpec = await loadRunSpec(runSpecId);
+  if (!runSpec) throw new Error(`Run spec not found: ${runSpecId}`);
+  const planRevision = runSpec.runContract?.planRevision ?? 1;
+  const verificationRecords = (records ?? await listVerificationRecordsForRunSpec(runSpecId, { planRevision }))
+    .filter((record) => record.planRevision === planRevision);
+  const decision = resolveVerificationCompletionDecision(
+    verificationRecords,
+    runSpec.runContract?.allowedSkippedChecks,
+  );
   if (shouldUpdateStatus) {
-    const runSpec = await loadRunSpec(runSpecId);
-    if (runSpec && runSpec.status !== 'failed' && runSpec.status !== 'cancelled') {
+    if (runSpec.status !== 'failed' && runSpec.status !== 'cancelled') {
       await transitionExecutionState({
         entityType: 'run_spec',
         entityId: runSpecId,
         to: decision.status,
         reason: `verification_decision:${decision.status}`,
         sessionId: runSpec.sessionId,
-      }).catch(() => undefined);
+      });
     }
   }
   return decision;
@@ -251,25 +271,6 @@ async function runVerificationCommand(command: string, input: {
       });
     });
   });
-}
-
-async function appendVerificationEvent(
-  record: VerificationRecord,
-  type: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  await appendSessionEvent({
-    sessionId: record.sessionId,
-    type,
-    payload: {
-      verificationRecordId: record.id,
-      runSpecId: record.runSpecId ?? null,
-      taskRunId: record.taskRunId ?? null,
-      checkName: record.checkName,
-      required: record.required,
-      ...payload,
-    },
-  }).catch(() => undefined);
 }
 
 function boundedOutput(value: string, limit: number): string {

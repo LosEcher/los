@@ -54,7 +54,16 @@ test('run_contract handler: #approve-phase transitions planning → plan_approve
         mode: 'execution',
         goal: 'im approve',
         editableSurfaces: ['src/'],
+        requiredChecks: ['pnpm check'],
         phase: 'planning',
+        plan: [{
+          id: 'step-1',
+          title: 'Approve from IM',
+          description: 'Exercise operator approval through the message router.',
+          dependsOnIds: [],
+          editableSurfaces: ['src/'],
+          completionCriteria: 'The persisted phase becomes plan_approved.',
+        }],
       },
     });
 

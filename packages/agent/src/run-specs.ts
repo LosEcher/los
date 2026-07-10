@@ -8,16 +8,34 @@
  * One run_spec can have multiple task_runs (for retries, failover, replay).
  */
 
-import { getDb } from '@los/infra/db';
+import { getDb, withDbClient } from '@los/infra/db';
 import {
   normalizeRunContractMetadata,
+  shouldSkipPlanApprovalGate,
   validatePhaseTransition,
+  type PlanStep,
   type RunContractMetadata,
   type RunContractMetadataInput,
   type RunPhase,
 } from './run-contract.js';
-import { appendSessionEvent, ensureSessionEventStore } from './session-events.js';
-import { seedVerificationRequirementsForRunSpec } from './verification-records.js';
+import {
+  normalizePlanForPersistence,
+  validatePlanForApproval,
+  validatePlanRevisionPhase,
+  validateVerificationExecutionSupport,
+  validateVerificationMappingForApproval,
+} from './run-plan-validation.js';
+import {
+  ensureExecutionOutboxStore,
+  insertExecutionOutbox,
+  insertSessionEvent,
+} from './execution-persistence.js';
+import { ensureSessionEventStore } from './session-events.js';
+import {
+  ensureVerificationRecordStore,
+  replaceVerificationRequirementsForRunSpec,
+  seedVerificationRequirementsForRunSpec,
+} from './verification-records.js';
 
 // ── Types ───────────────────────────────────────────────
 
@@ -187,7 +205,9 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
   await seedVerificationRequirementsForRunSpec({
     runSpecId: record.id,
     sessionId: record.sessionId,
+    planRevision: runContract?.planRevision ?? 1,
     requiredChecks: runContract?.requiredChecks,
+    verifications: runContract?.verifications,
   });
   return record;
 }
@@ -232,26 +252,6 @@ export async function claimRunSpec(runSpecId: string, gatewayId: string): Promis
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }
 
-export async function updateRunSpecStatus(
-  id: string,
-  status: RunSpecStatus,
-): Promise<RunSpecRecord | null> {
-  // Low-level persistence API. Business workflows should prefer
-  // transitionExecutionState so state, events, and outbox writes stay atomic.
-  await ensureRunSpecStore();
-  const db = getDb();
-  const rows = await db.query<RunSpecRow>(
-    `
-    UPDATE run_specs
-    SET status = $2, updated_at = now()
-    WHERE id = $1
-    RETURNING *
-  `,
-    [id, status],
-  );
-  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
-}
-
 /**
  * Approve a run spec's phase transition to `plan_approved`.
  *
@@ -262,60 +262,86 @@ export async function updateRunSpecStatus(
  */
 export async function approveRunSpecPhase(
   id: string,
-  opts: { actor?: string; reason?: string } = {},
+  opts: { plan?: PlanStep[]; actor?: string; reason?: string } = {},
 ): Promise<RunSpecRecord> {
   await ensureRunSpecStore();
-
-  const record = await loadRunSpec(id);
-  if (!record) throw new Error(`Run spec not found: ${id}`);
-
-  const currentContract: RunContractMetadata = {
-    editableSurfaces: [],
-    requiredChecks: [],
-    allowedSkippedChecks: [],
-    stopConditions: [],
-    evidenceRequired: [],
-    externalEvidenceAllowed: [],
-    rawEvidenceProhibited: [],
-    ...(record.runContract ?? {}),
-  };
-  const currentPhase: RunPhase | undefined = currentContract.phase;
-  const targetPhase: RunPhase = 'plan_approved';
-
-  const error = validatePhaseTransition(currentPhase, targetPhase);
-  if (error) throw new Error(error);
-
-  const now = new Date().toISOString();
-  const updatedContract: RunContractMetadata = {
-    ...currentContract,
-    phase: targetPhase,
-    previousPhase: currentPhase,
-    phaseChangedAt: now,
-  };
-
-  const db = getDb();
-  await db.query(
-    `UPDATE run_specs SET run_contract_json = $2, updated_at = now() WHERE id = $1`,
-    [id, JSON.stringify(updatedContract)],
-  );
-
-  // Record operator approval event
-  await ensureSessionEventStore();
-  await appendSessionEvent({
-    sessionId: record.sessionId,
-    type: 'run.plan_approved',
-    source: 'operator',
-    payload: {
-      runSpecId: id,
-      previousPhase: currentPhase ?? null,
-      phase: targetPhase,
-      actor: opts.actor ?? null,
-      reason: opts.reason ?? null,
-      approvedAt: now,
-    },
+  await Promise.all([ensureSessionEventStore(), ensureExecutionOutboxStore()]);
+  const result = await withDbClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const rows = await client.query<RunSpecRow>('SELECT * FROM run_specs WHERE id = $1 FOR UPDATE', [id]);
+      const row = rows.rows[0];
+      const record = row ? rowToRecord(row) : null;
+      if (!record) throw new Error(`Run spec not found: ${id}`);
+      const currentRawContract = normalizeJsonObject(row!.run_contract_json);
+      const currentContract = completeRunContract(record.runContract);
+      const currentPhase = currentContract.phase;
+      const targetPhase: RunPhase = 'plan_approved';
+      const phaseError = validatePhaseTransition(currentPhase, targetPhase);
+      if (phaseError) throw new Error(phaseError);
+      const plan = opts.plan ?? currentContract.plan;
+      if (!shouldSkipPlanApprovalGate(currentContract)) {
+        const planError = validatePlanForApproval(plan);
+        if (planError) throw new Error(planError);
+        const verificationError = validateVerificationMappingForApproval(currentContract);
+        if (verificationError) throw new Error(verificationError);
+      }
+      const supportError = validateVerificationExecutionSupport(currentContract);
+      if (supportError) throw new Error(supportError);
+      const now = new Date().toISOString();
+      const approvalPatch: Record<string, unknown> = {
+        phase: targetPhase,
+        previousPhase: currentPhase,
+        phaseChangedAt: now,
+      };
+      if (opts.plan) approvalPatch.plan = normalizePlanForPersistence(opts.plan);
+      const updatedRows = await client.query<RunSpecRow>(
+        'UPDATE run_specs SET run_contract_json = run_contract_json || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *',
+        [id, JSON.stringify(approvalPatch)],
+      );
+      const updatedRecord = rowToRecord(assertRow(updatedRows.rows[0]));
+      const updatedContract = completeRunContract(updatedRecord.runContract ?? normalizeRunContractMetadata({
+        ...currentRawContract,
+        ...approvalPatch,
+      }));
+      const event = await insertSessionEvent(client, {
+        sessionId: record.sessionId,
+        tenantId: record.tenantId,
+        projectId: record.projectId,
+        userId: record.userId,
+        nodeId: record.nodeId,
+        requestId: record.requestId,
+        traceId: record.traceId,
+        type: 'run.plan_approved',
+        source: 'operator',
+        payload: {
+          runSpecId: id,
+          previousPhase: currentPhase ?? null,
+          phase: targetPhase,
+          actor: opts.actor ?? null,
+          reason: opts.reason ?? null,
+          approvedAt: now,
+          planRevision: updatedContract.planRevision ?? null,
+          planStepCount: updatedContract.plan?.length ?? 0,
+        },
+      });
+      await insertExecutionOutbox(client, {
+        sessionId: record.sessionId,
+        runSpecId: id,
+        entityType: 'run_spec',
+        entityId: id,
+        eventType: 'run.plan_approved',
+        payload: event.payload ?? {},
+      });
+      await client.query('COMMIT');
+      return { record: updatedRecord, eventId: event.id };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    }
   });
-
-  return (await loadRunSpec(id))!;
+  await notifyRunPlanEvent(result.record.sessionId, result.eventId, 'run.plan_approved');
+  return result.record;
 }
 
 /**
@@ -326,59 +352,112 @@ export async function approveRunSpecPhase(
  */
 export async function reviseRunSpecPlan(
   id: string,
-  opts: { plan?: import('./run-contract.js').PlanStep[]; actor?: string; reason?: string } = {},
+  opts: { plan?: PlanStep[]; actor?: string; reason?: string } = {},
 ): Promise<RunSpecRecord> {
   await ensureRunSpecStore();
-  await ensureSessionEventStore();
-
-  const record = await loadRunSpec(id);
-  if (!record) throw new Error(`Run spec not found: ${id}`);
-
-  const currentContract: RunContractMetadata = {
-    editableSurfaces: [],
-    requiredChecks: [],
-    allowedSkippedChecks: [],
-    stopConditions: [],
-    evidenceRequired: [],
-    externalEvidenceAllowed: [],
-    rawEvidenceProhibited: [],
-    ...(record.runContract ?? {}),
-  };
-
-  const currentRevision = currentContract.planRevision ?? 1;
-  const now = new Date().toISOString();
-  const updatedContract: RunContractMetadata = {
-    ...currentContract,
-    plan: opts.plan ?? currentContract.plan,
-    planRevision: currentRevision + 1,
-    planParentRunSpecId: id,
-    phase: 'planning',
-    previousPhase: currentContract.phase,
-    phaseChangedAt: now,
-  };
-
-  const db = getDb();
-  await db.query(
-    `UPDATE run_specs SET run_contract_json = $2, updated_at = now() WHERE id = $1`,
-    [id, JSON.stringify(updatedContract)],
-  );
-
-  await appendSessionEvent({
-    sessionId: record.sessionId,
-    type: 'run.plan_revised',
-    source: 'operator',
-    payload: {
-      runSpecId: id,
-      planRevision: updatedContract.planRevision,
-      previousRevision: currentRevision,
-      previousPhase: currentContract.phase ?? null,
-      actor: opts.actor ?? null,
-      reason: opts.reason ?? null,
-      revisedAt: now,
-    },
+  await Promise.all([ensureSessionEventStore(), ensureExecutionOutboxStore(), ensureVerificationRecordStore()]);
+  const result = await withDbClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const rows = await client.query<RunSpecRow>('SELECT * FROM run_specs WHERE id = $1 FOR UPDATE', [id]);
+      const row = rows.rows[0];
+      const record = row ? rowToRecord(row) : null;
+      if (!record) throw new Error(`Run spec not found: ${id}`);
+      const currentRawContract = normalizeJsonObject(row!.run_contract_json);
+      const planError = validatePlanForApproval(opts.plan);
+      if (planError) throw new Error(planError);
+      const replacementPlan = normalizePlanForPersistence(opts.plan!);
+      const currentContract = completeRunContract(record.runContract);
+      const phaseError = validatePlanRevisionPhase(currentContract.phase);
+      if (phaseError) throw new Error(phaseError);
+      const currentRevision = currentContract.planRevision ?? 1;
+      const now = new Date().toISOString();
+      const rawPlanHistory = Array.isArray(currentRawContract.planHistory) ? currentRawContract.planHistory : [];
+      const rawPlan = Array.isArray(currentRawContract.plan) ? currentRawContract.plan : currentContract.plan ?? [];
+      const rawRequiredChecks = Array.isArray(currentRawContract.requiredChecks)
+        ? currentRawContract.requiredChecks
+        : currentContract.requiredChecks;
+      const rawVerifications = Array.isArray(currentRawContract.verifications)
+        ? currentRawContract.verifications
+        : currentContract.verifications ?? [];
+      const planHistory = [
+        ...rawPlanHistory,
+        {
+          revision: currentRevision,
+          plan: rawPlan,
+          requiredChecks: rawRequiredChecks,
+          verifications: rawVerifications,
+          supersededAt: now,
+          actor: opts.actor,
+          reason: opts.reason,
+        },
+      ];
+      const updatedContract: RunContractMetadata = {
+        ...currentContract,
+        planHistory: normalizeRunContractMetadata({ planHistory })?.planHistory,
+        plan: replacementPlan,
+        planRevision: currentRevision + 1,
+        planParentRevision: currentRevision,
+        phase: 'planning',
+        previousPhase: currentContract.phase,
+        phaseChangedAt: now,
+      };
+      const updatedRows = await client.query<RunSpecRow>(
+        'UPDATE run_specs SET run_contract_json = run_contract_json || $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *',
+        [id, JSON.stringify({
+          planHistory,
+          plan: replacementPlan,
+          planRevision: currentRevision + 1,
+          planParentRevision: currentRevision,
+          phase: 'planning',
+          previousPhase: currentContract.phase,
+          phaseChangedAt: now,
+        })],
+      );
+      await replaceVerificationRequirementsForRunSpec(client, {
+        runSpecId: id,
+        sessionId: record.sessionId,
+        planRevision: currentRevision + 1,
+        requiredChecks: updatedContract.requiredChecks,
+        verifications: updatedContract.verifications,
+      });
+      const event = await insertSessionEvent(client, {
+        sessionId: record.sessionId,
+        tenantId: record.tenantId,
+        projectId: record.projectId,
+        userId: record.userId,
+        nodeId: record.nodeId,
+        requestId: record.requestId,
+        traceId: record.traceId,
+        type: 'run.plan_revised',
+        source: 'operator',
+        payload: {
+          runSpecId: id,
+          planRevision: updatedContract.planRevision,
+          previousRevision: currentRevision,
+          previousPhase: currentContract.phase ?? null,
+          actor: opts.actor ?? null,
+          reason: opts.reason ?? null,
+          revisedAt: now,
+        },
+      });
+      await insertExecutionOutbox(client, {
+        sessionId: record.sessionId,
+        runSpecId: id,
+        entityType: 'run_spec',
+        entityId: id,
+        eventType: 'run.plan_revised',
+        payload: event.payload ?? {},
+      });
+      await client.query('COMMIT');
+      return { record: rowToRecord(assertRow(updatedRows.rows[0])), eventId: event.id };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    }
   });
-
-  return (await loadRunSpec(id))!;
+  await notifyRunPlanEvent(result.record.sessionId, result.eventId, 'run.plan_revised');
+  return result.record;
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -410,6 +489,18 @@ type RunSpecRow = {
   created_at: Date | string;
   updated_at: Date | string;
 };
+
+function completeRunContract(contract: RunContractMetadata | undefined): RunContractMetadata {
+  return {
+    editableSurfaces: [], requiredChecks: [], allowedSkippedChecks: [], stopConditions: [],
+    evidenceRequired: [], externalEvidenceAllowed: [], rawEvidenceProhibited: [],
+    ...(contract ?? {}),
+  };
+}
+
+async function notifyRunPlanEvent(sessionId: string, eventId: number, type: string): Promise<void> {
+  await getDb().notify('session_events', JSON.stringify({ session_id: sessionId, event_id: eventId, type })).catch(() => undefined);
+}
 
 function rowToRecord(row: RunSpecRow): RunSpecRecord {
   return {

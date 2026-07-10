@@ -1137,14 +1137,14 @@ test('scheduler runs verifier graph tasks through verification records', async (
 
     assert.deepEqual(result.executedTasks.map(task => task.taskId), [`${graphId}-exec`, `${graphId}-verify`]);
     assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded']);
-    assert.equal(result.executedTasks[1]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.equal(result.executedTasks[1]?.verificationRecordId, `verification-${runSpecId}-r1-1`);
     assert.equal(result.completion.status, 'succeeded');
     assert.equal(result.completion.canComplete, true);
     assert.equal((await loadRunSpec(runSpecId))?.status, 'succeeded');
 
     const attempts = await listAgentTaskAttempts(`${graphId}-verify`);
     assert.equal(attempts[0]?.status, 'succeeded');
-    assert.equal(attempts[0]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.equal(attempts[0]?.verificationRecordId, `verification-${runSpecId}-r1-1`);
 
     const events = await listSessionEvents(sessionId, 100);
     assert.ok(events.some(event => event.type === 'verification.succeeded'));
@@ -1250,7 +1250,7 @@ test('scheduler blocks graph completion when verifier graph task fails checks', 
     });
 
     assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'failed']);
-    assert.equal(result.executedTasks[1]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.equal(result.executedTasks[1]?.verificationRecordId, `verification-${runSpecId}-r1-1`);
     assert.equal(result.completion.status, 'blocked');
     assert.equal(result.completion.blockReason, 'verifier_required');
     assert.deepEqual(result.completion.failedVerifierTaskIds, [`${graphId}-verify`]);
@@ -1258,7 +1258,7 @@ test('scheduler blocks graph completion when verifier graph task fails checks', 
 
     const attempts = await listAgentTaskAttempts(`${graphId}-verify`);
     assert.equal(attempts[0]?.status, 'failed');
-    assert.equal(attempts[0]?.verificationRecordId, `verification-${runSpecId}-1`);
+    assert.equal(attempts[0]?.verificationRecordId, `verification-${runSpecId}-r1-1`);
     assert.match(attempts[0]?.outputSummary ?? '', /verification blocked/);
 
     const events = await listSessionEvents(sessionId, 100);

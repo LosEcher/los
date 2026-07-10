@@ -99,15 +99,27 @@ properties:
     description: >
       Operator-provided execution contract. Includes mode, required checks,
       stop conditions, phase lifecycle, plan steps, and verification requirements.
+      Standard and heavyweight approval requires a non-empty structured plan
+      plus at least one required check or verification requirement.
       Phase transitions are enforced: created → discovering → discovery_ready →
-      planning → plan_approved → executing → verifying → succeeded|blocked|failed.
+      planning → plan_approved → executing → verifying → succeeded|blocked|failed|cancelled.
     properties:
       mode:
         type: string
         enum: [audit, execution, closeout, governance]
+      executionMode:
+        type: string
+        enum: [lightweight, standard, heavyweight]
+        default: standard
       phase:
         type: string
-        enum: [created, discovering, discovery_ready, planning, plan_approved, executing, verifying, succeeded, blocked, failed]
+        enum: [created, discovering, discovery_ready, planning, plan_approved, executing, verifying, succeeded, blocked, failed, cancelled]
+      previousPhase:
+        type: string
+        enum: [created, discovering, discovery_ready, planning, plan_approved, executing, verifying, succeeded, blocked, failed, cancelled]
+      phaseChangedAt:
+        type: string
+        format: date-time
       plan:
         type: array
         items:
@@ -130,8 +142,35 @@ properties:
             command: { type: string }
             assertion: { type: string }
             reviewer: { type: string }
+      planRevision:
+        type: integer
+        minimum: 1
+      planParentRevision:
+        type: integer
+        minimum: 1
+      planParentRunSpecId:
+        type: string
+        description: Parent run spec id when lineage crosses distinct runs; same-run revisions use planParentRevision.
+      planHistory:
+        type: array
+        description: Immutable snapshots of superseded plan revisions and verification mappings.
+        items:
+          type: object
+          required: [revision, plan, requiredChecks, verifications, supersededAt]
+          properties:
+            revision: { type: integer, minimum: 1 }
+            plan: { type: array, items: { type: object } }
+            requiredChecks: { type: array, items: { type: string } }
+            verifications: { type: array, items: { type: object } }
+            supersededAt: { type: string, format: date-time }
+            actor: { type: string }
+            reason: { type: string }
       requiredChecks:
         type: array
+        items: { type: string }
+      allowedSkippedChecks:
+        type: array
+        description: Verification requirement ids that may satisfy the success gate with a skipped status.
         items: { type: string }
       stopConditions:
         type: array

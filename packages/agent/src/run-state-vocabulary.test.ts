@@ -101,6 +101,8 @@ function verification(input: Partial<VerificationRecord>): VerificationRecord {
     sessionId: 'session-1',
     runSpecId: 'run-1',
     checkName: 'pnpm check',
+    kind: 'command',
+    planRevision: 1,
     status: 'required',
     required: true,
     createdAt: '2026-06-07T00:00:00.000Z',

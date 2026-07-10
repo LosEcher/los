@@ -20,7 +20,9 @@ export async function checkVerificationGate(
   if (!runSpecId) return { allowed: true };
   let statuses: Array<{ requirementId: string; status: string }> = [];
   try {
-    const records = await listVerificationRecordsForRunSpec(runSpecId);
+    const records = await listVerificationRecordsForRunSpec(runSpecId, {
+      planRevision: contract?.planRevision ?? 1,
+    });
     statuses = records.map((r: { checkName: string; status: string }) => ({ requirementId: r.checkName, status: r.status }));
   } catch {
     // No records yet — allow if no contract verifications defined

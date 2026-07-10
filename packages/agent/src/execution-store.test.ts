@@ -5,11 +5,12 @@ import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { ExecutionTransitionError } from './execution-transitions.js';
 import { ensureExecutionStore, transitionExecutionState } from './execution-store.js';
+import { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 import { createRunSpec, loadRunSpec } from './run-specs.js';
 import { listSessionEvents } from './session-events.js';
 import { createTaskRun, loadTaskRun } from './task-runs.js';
 import { createToolCallState, loadToolCallState } from './tool-call-states.js';
-import { createVerificationRecord, loadVerificationRecord } from './verification-records.js';
+import { createVerificationRecord, listVerificationRecordsForRunSpec, loadVerificationRecord } from './verification-records.js';
 
 test('execution store transitions state and writes event plus outbox in one command', async () => {
   const config = await loadConfig();
@@ -215,6 +216,164 @@ test('execution store supports tool and verification state transitions', async (
     await getDb().query('DELETE FROM verification_records WHERE id = $1', [verificationId]).catch(() => undefined);
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('run spec success is atomic with required verification and phase synchronization', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-success-gate-${suffix}`;
+  const sessionId = `session-success-gate-${suffix}`;
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'enforce success verification gate',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      runContract: {
+        mode: 'execution',
+        phase: 'plan_approved',
+        editableSurfaces: ['packages/agent/src/execution-store.ts'],
+        requiredChecks: ['pnpm check'],
+        planRevision: 2,
+        plan: [{
+          id: 'step-1',
+          title: 'Enforce success gate',
+          description: 'Require persisted verification before success.',
+          dependsOnIds: [],
+          editableSurfaces: ['packages/agent/src/execution-store.ts'],
+          completionCriteria: 'The success transition is transactionally gated.',
+        }],
+      },
+    });
+
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: runSpecId,
+      to: 'running',
+      reason: 'start_verified_run',
+    });
+    assert.equal((await loadRunSpec(runSpecId))?.runContract?.phase, 'executing');
+
+    await assert.rejects(
+      () => transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: runSpecId,
+        to: 'succeeded',
+        reason: 'premature_success',
+      }),
+      /must transition to 'verifying' first/,
+    );
+
+    const blocked = await loadRunSpec(runSpecId);
+    assert.equal(blocked?.status, 'running');
+    assert.equal(blocked?.runContract?.phase, 'executing');
+    assert.equal((await listSessionEvents(sessionId)).some((event) => event.type === 'run_spec.succeeded'), false);
+
+    await ensureRunSpecVerificationPhase(runSpecId, 'begin_verification_test');
+    const oldVerificationId = `verification-${runSpecId}-r1-1`;
+    await createVerificationRecord({
+      id: oldVerificationId,
+      sessionId,
+      runSpecId,
+      checkName: 'pnpm check',
+      command: 'pnpm check',
+      planRevision: 1,
+      status: 'succeeded',
+      required: false,
+    });
+    const attemptedReactivation = await createVerificationRecord({
+      id: oldVerificationId,
+      sessionId,
+      runSpecId,
+      checkName: 'pnpm check',
+      command: 'pnpm check',
+      planRevision: 1,
+      status: 'succeeded',
+      required: true,
+    });
+    assert.equal(attemptedReactivation.required, false);
+    await assert.rejects(
+      () => transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: runSpecId,
+        to: 'succeeded',
+        reason: 'unverified_success',
+      }),
+      /cannot be marked succeeded.*pnpm check/,
+    );
+
+    const [verification] = await listVerificationRecordsForRunSpec(runSpecId, { planRevision: 2 });
+    assert.ok(verification);
+    await transitionExecutionState({
+      entityType: 'verification_record',
+      entityId: verification.id,
+      to: 'running',
+      reason: 'run_required_check',
+    });
+    await transitionExecutionState({
+      entityType: 'verification_record',
+      entityId: verification.id,
+      to: 'succeeded',
+      reason: 'required_check_passed',
+    });
+    await transitionExecutionState({
+      entityType: 'run_spec',
+      entityId: runSpecId,
+      to: 'succeeded',
+      reason: 'verified_success',
+    });
+
+    const succeeded = await loadRunSpec(runSpecId);
+    assert.equal(succeeded?.status, 'succeeded');
+    assert.equal(succeeded?.runContract?.phase, 'succeeded');
+    assert.equal(succeeded?.runContract?.previousPhase, 'verifying');
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('run spec cancellation synchronizes the cancelled contract phase', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-cancel-phase-${suffix}`;
+  const sessionId = `session-cancel-phase-${suffix}`;
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'synchronize cancellation phase',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      runContract: {
+        executionMode: 'lightweight',
+        phase: 'planning',
+        editableSurfaces: [],
+      },
+    });
+    await transitionExecutionState({ entityType: 'run_spec', entityId: runSpecId, to: 'running', reason: 'start_lightweight' });
+    await transitionExecutionState({ entityType: 'run_spec', entityId: runSpecId, to: 'cancelled', reason: 'operator_cancelled' });
+
+    const cancelled = await loadRunSpec(runSpecId);
+    assert.equal(cancelled?.status, 'cancelled');
+    assert.equal(cancelled?.runContract?.phase, 'cancelled');
+    assert.equal(cancelled?.runContract?.previousPhase, 'executing');
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
