@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Play } from 'lucide-react';
+import { Check, X, Play, ShieldCheck } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
-import { Button, DataTable, Fact, StatusPill, EmptyText, Badge } from '../ui.js';
+import { Button, DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
+
+/** Matches gateway POST /runs/:id/approve|recover|verify actor field. */
+const WEB_OPERATOR_ACTOR = 'web-console';
 
 interface RunSpec {
   id: string;
@@ -26,10 +29,22 @@ interface RunStateProjection {
   approvalStatus?: string;
 }
 
+/** Backend contract for operator actions (actor + reason, not approved/note). */
+export function buildRunOperatorPayload(reason: string | undefined, fallbackReason: string): {
+  actor: string;
+  reason: string;
+} {
+  const trimmed = reason?.trim();
+  return {
+    actor: WEB_OPERATOR_ACTOR,
+    reason: trimmed && trimmed.length > 0 ? trimmed : fallbackReason,
+  };
+}
+
 export function RunSpecsPage() {
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [approvalNote, setApprovalNote] = useState('');
+  const [approvalReason, setApprovalReason] = useState('');
   const [showApproval, setShowApproval] = useState(false);
 
   const runs = useQuery({
@@ -44,17 +59,49 @@ export function RunSpecsPage() {
     enabled: Boolean(selectedId),
   });
 
-  // ── Approval actions (scaffold — route tests pending) ─
+  const invalidateRun = () => {
+    qc.invalidateQueries({ queryKey: ['runs'] });
+    qc.invalidateQueries({ queryKey: ['run-state', selectedId] });
+  };
+
+  const closeApprovalForm = () => {
+    setShowApproval(false);
+    setApprovalReason('');
+  };
+
+  // Approve plan phase — POST /runs/:id/approve expects { actor, reason }
   const approveRun = useMutation({
-    mutationFn: (id: string) => postJson(`/runs/${id}/approve`, { approved: true, note: approvalNote.trim() || undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['runs'] }); qc.invalidateQueries({ queryKey: ['run-state', selectedId] }); setShowApproval(false); setApprovalNote(''); },
+    mutationFn: (id: string) =>
+      postJson(`/runs/${id}/approve`, buildRunOperatorPayload(approvalReason, 'operator approved plan')),
+    onSuccess: () => {
+      invalidateRun();
+      closeApprovalForm();
+    },
   });
+
+  // Reject/cancel run — no approve(false) API; recover with intent=cancel
   const rejectRun = useMutation({
-    mutationFn: (id: string) => postJson(`/runs/${id}/approve`, { approved: false, note: approvalNote.trim() || 'operator rejected' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['runs'] }); qc.invalidateQueries({ queryKey: ['run-state', selectedId] }); setShowApproval(false); setApprovalNote(''); },
+    mutationFn: (id: string) =>
+      postJson(`/runs/${id}/recover`, {
+        ...buildRunOperatorPayload(approvalReason, 'operator rejected run'),
+        apply: true,
+        intent: 'cancel',
+      }),
+    onSuccess: () => {
+      invalidateRun();
+      closeApprovalForm();
+    },
+  });
+
+  const verifyRun = useMutation({
+    mutationFn: (id: string) => postJson(`/runs/${id}/verify`, {}),
+    onSuccess: () => {
+      invalidateRun();
+    },
   });
 
   const runList = runs.data ?? [];
+  const busy = approveRun.isPending || rejectRun.isPending || verifyRun.isPending;
 
   return (
     <section className="panel-grid">
@@ -102,7 +149,6 @@ export function RunSpecsPage() {
         />
       </div>
 
-      {/* ── Run State Inspector ───────────────────────────── */}
       <aside className="panel inspector">
         <div className="panel-head compact"><h2>Run State</h2></div>
         {!selectedId ? (
@@ -130,37 +176,49 @@ export function RunSpecsPage() {
               ) : null}
             </div>
 
-            {/* ── Operator Approval Section ──────────────── */}
             <div className="section-divider" />
-            <div className="panel-head compact"><h2>Operator Approval</h2></div>
-            {!showApproval ? (
-              <div style={{ padding: '8px 16px 16px' }}>
-                <Button variant="ghost" onClick={() => setShowApproval(true)}>
-                  <Play size={14} /> Approve / Reject
+            <div className="panel-head compact"><h2>Operator Actions</h2></div>
+            <div style={{ padding: '8px 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {!showApproval ? (
+                  <Button variant="ghost" onClick={() => setShowApproval(true)} disabled={busy}>
+                    <Play size={14} /> Approve / Reject
+                  </Button>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  onClick={() => verifyRun.mutate(selectedId!)}
+                  disabled={busy}
+                >
+                  <ShieldCheck size={14} /> {verifyRun.isPending ? 'Verifying…' : 'Verify'}
                 </Button>
               </div>
-            ) : (
-              <div className="approval-panel">
-                <textarea
-                  rows={2}
-                  placeholder="Approval note (optional)..."
-                  value={approvalNote}
-                  onChange={e => setApprovalNote(e.target.value)}
-                  style={{ width: '100%', marginBottom: 8 }}
-                />
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Button onClick={() => approveRun.mutate(selectedId!)} disabled={approveRun.isPending}>
-                    <Check size={14} /> {approveRun.isPending ? 'Approving…' : 'Approve'}
-                  </Button>
-                  <Button variant="danger" onClick={() => rejectRun.mutate(selectedId!)} disabled={rejectRun.isPending}>
-                    <X size={14} /> {rejectRun.isPending ? 'Rejecting…' : 'Reject'}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setShowApproval(false)}>Cancel</Button>
+
+              {showApproval ? (
+                <div className="approval-panel">
+                  <textarea
+                    rows={2}
+                    placeholder="Reason (optional) — sent as operator reason"
+                    value={approvalReason}
+                    onChange={e => setApprovalReason(e.target.value)}
+                    style={{ width: '100%', marginBottom: 8 }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Button onClick={() => approveRun.mutate(selectedId!)} disabled={busy}>
+                      <Check size={14} /> {approveRun.isPending ? 'Approving…' : 'Approve plan'}
+                    </Button>
+                    <Button variant="danger" onClick={() => rejectRun.mutate(selectedId!)} disabled={busy}>
+                      <X size={14} /> {rejectRun.isPending ? 'Rejecting…' : 'Reject / cancel'}
+                    </Button>
+                    <Button variant="ghost" onClick={closeApprovalForm} disabled={busy}>Cancel</Button>
+                  </div>
                 </div>
-                {approveRun.error ? <div className="error-banner">Approve: {String(approveRun.error)}</div> : null}
-                {rejectRun.error ? <div className="error-banner">Reject: {String(rejectRun.error)}</div> : null}
-              </div>
-            )}
+              ) : null}
+
+              {approveRun.error ? <div className="error-banner">Approve: {String(approveRun.error)}</div> : null}
+              {rejectRun.error ? <div className="error-banner">Reject: {String(rejectRun.error)}</div> : null}
+              {verifyRun.error ? <div className="error-banner">Verify: {String(verifyRun.error)}</div> : null}
+            </div>
           </>
         ) : (
           <EmptyText text="No state data available." />

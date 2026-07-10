@@ -96,10 +96,17 @@ passing the parent's `runContract`.
 without an approved plan and succeed without verification. The Fleet Loop
 invariant is broken.
 
-**Prevention**: Phase D cross-process propagation. Until implemented, document
-that child agents are unconstrained and treat their output as unverified.
+**Prevention / current status (2026-07-10)**:
+- `createSpawnAgentRunner` inherits `runContractMetadata` (deep clone via
+  `inheritRunContractMetadata`), plus `traceId` / `requestId` / `runSpecId`.
+- Scheduler paths pass `runContractMetadata` into child/executor requests.
+- Focused test: `spawn_agent child inherits parent run contract metadata`.
+- Still treat cross-process executor nodes carefully: verify inheritance on
+  every new remote path; do not reintroduce shallow copies that share mutable
+  parent objects.
 
-**Code**: `packages/agent/src/tools/agent-tools.ts:83`, Phase D roadmap
+**Code**: `packages/agent/src/tools/core/agent-tools.ts`,
+`packages/agent/src/loop/setup.ts`, `packages/agent/src/scheduler/`
 
 ## AP7: Delaying Quality Check To The End
 

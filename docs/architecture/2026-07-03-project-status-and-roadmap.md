@@ -235,19 +235,19 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 ### 6.3 需补齐的缺口
 
 **P0 — 纠正已有但错误的部分**：
-- [ ] Web Run Specs 页审批 payload：`{approved: true, note}` → `{actor: string, reason: string}`
+- [x] Web Run Specs 页审批 payload：`{approved: true, note}` → `{actor: string, reason: string}`（2026-07-10：`buildRunOperatorPayload`；Reject 走 `/recover` cancel）
 - [ ] Chat 页 ApprovalCard 从只读升级为可交互（调用 `POST /sessions/:id/operator-events`）
 - [ ] WebSocket 实现 operator steering（`ws-routes.ts:182` 占位）
 
 **P1 — 补 RunContract IM 命令**：
-- [ ] `resolveIntent` 新增：`#approve-phase <runId>` `#revise-plan <runId>` `#verify-run <runId>`
+- [x] `resolveIntent` 新增：`#approve-phase <runId>` `#revise-plan <runId>` `#verify-run <runId>`（2026-07-10 + handlers-run-contract）
 - [ ] `OperatorAlert` 接口增加 `runContract` 字段（phase, plan steps, blockers, verification status）
 - [ ] Telegram inline button 增加 "Approve Phase" / "Revise Plan" 按钮
 - [ ] SSE `operator_attention` 事件增加 RunContract 阶段变更类型
 
 **P1 — Web 交互补齐**：
 - [ ] Run Specs 页增加 Revise Plan 面板（调用 `POST /runs/:id/revise-plan`）
-- [ ] Run Specs 页增加 Verify 按钮（已有后端路由）
+- [x] Run Specs 页增加 Verify 按钮（已有后端路由）（2026-07-10）
 - [ ] Worker Answer UI（调用 `POST /runs/:id/answer`）
 - [ ] Web 客户端订阅 `/operator/events/live` SSE（实时推送替代轮询）
 - [ ] Communication Accounts 页绑定审批权限（哪个 WeChat 用户可审批哪些 run）

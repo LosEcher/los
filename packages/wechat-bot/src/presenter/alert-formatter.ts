@@ -27,6 +27,10 @@ export interface OperatorAlert {
   callId?: string;
   warnings?: string[];
   flaggedFiles?: string[];
+  /** Optional run_spec id for RunContract IM commands (#approve-phase / #verify-run). */
+  runSpecId?: string;
+  /** Optional task_run id (fallback hint when runSpecId is absent). */
+  taskRunId?: string;
   /** Attached media (screenshots, output files, etc.) */
   media?: Array<{ type: 'image' | 'file'; url: string; fileName?: string }>;
 }

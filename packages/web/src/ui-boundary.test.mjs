@@ -8,6 +8,7 @@ const useChatStream = readFileSync(new URL('./hooks/useChatStream.ts', import.me
 const useChatRun = readFileSync(new URL('./hooks/useChatRun.ts', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
+const runSpecsPage = readFileSync(new URL('./pages/run-specs-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
@@ -94,6 +95,20 @@ test('composer run controls are responsive instead of fixed to one crowded grid'
   assert.match(styles, /@media \(max-width: 1080px\)[\s\S]*\.composer-toolbar\s+\{\n\s+flex-wrap: wrap/);
   assert.match(styles, /@media \(max-width: 780px\)[\s\S]*\.composer-advanced-panel\s+\{\n\s+right: 0;\n\s+left: auto;\n\s+grid-template-columns: 1fr/);
   assert.doesNotMatch(styles, /composer-run-panel/);
+});
+
+test('run specs operator actions send actor/reason contract, not approved/note', () => {
+  assert.match(runSpecsPage, /function buildRunOperatorPayload/);
+  assert.match(runSpecsPage, /actor:\s*WEB_OPERATOR_ACTOR/);
+  assert.match(runSpecsPage, /postJson\(`\/runs\/\$\{id\}\/approve`/);
+  assert.match(runSpecsPage, /buildRunOperatorPayload\(approvalReason/);
+  assert.match(runSpecsPage, /postJson\(`\/runs\/\$\{id\}\/recover`/);
+  assert.match(runSpecsPage, /intent:\s*'cancel'/);
+  assert.match(runSpecsPage, /postJson\(`\/runs\/\$\{id\}\/verify`/);
+  // Legacy broken payload must not return
+  assert.doesNotMatch(runSpecsPage, /approved:\s*true/);
+  assert.doesNotMatch(runSpecsPage, /approved:\s*false/);
+  assert.doesNotMatch(runSpecsPage, /note:\s*approvalNote/);
 });
 
 function between(source, start, end) {

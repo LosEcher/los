@@ -89,18 +89,32 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
   });
 }
 
+/** Deep-clone parent runContractMetadata so child mutations cannot widen parent phase/checks (AP6). */
+function inheritRunContractMetadata(
+  parent: SpawnAgentRunnerOptions['runContractMetadata'],
+): SpawnAgentRunnerOptions['runContractMetadata'] {
+  if (!parent) return undefined;
+  try {
+    return structuredClone(parent);
+  } catch {
+    // Fallback for non-cloneable values (functions, etc.)
+    return JSON.parse(JSON.stringify(parent)) as SpawnAgentRunnerOptions['runContractMetadata'];
+  }
+}
+
 export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnAgentRunner {
   return async (request) => {
     const childToolMode = request.toolMode ?? 'read-only';
     const childMaxLoops = Math.max(1, Math.min(request.maxLoops ?? 8, 12));
     const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : undefined;
+    // AP6: full contract inheritance (phase, surfaces, requiredChecks) as an isolated clone
+    const childRunContractMetadata = inheritRunContractMetadata(options.runContractMetadata);
     const childResult = await options.runAgent(request.prompt, {
       sessionId: childSessionId,
       provider: request.provider ?? options.provider,
       model: request.model ?? options.model,
       modelSettings: options.modelSettings,
-      // Inherit parent run contract metadata for child run_spec creation
-      runContractMetadata: options.runContractMetadata,
+      runContractMetadata: childRunContractMetadata,
       // Inherit trace/request/dedupe linkage from parent
       traceId: options.traceId,
       requestId: options.requestId,
