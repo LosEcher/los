@@ -35,11 +35,25 @@ export function registerOperatorEvents(app: FastifyInstance): void {
     if (!(await requireOperator(req, reply))) return;
 
     const lastEventId = req.headers['last-event-id'];
-    const since = lastEventId
+    const query = req.query as { since?: string; tail?: string };
+    const wantTail = query.tail === '1' || query.tail === 'true';
+    let since = lastEventId
       ? Math.max(0, Number(lastEventId))
-      : Math.max(0, Number((req.query as { since?: string }).since ?? 0));
+      : Math.max(0, Number(query.since ?? 0));
 
     await ensureSessionEventStore();
+
+    // tail=1: start from latest event id (no historical flood for bots)
+    if (wantTail && !lastEventId && !query.since) {
+      try {
+        const db = (await import('@los/infra/db')).getDb();
+        const maxRow = await db.query<{ max: string | number | null }>(
+          'SELECT MAX(id) AS max FROM session_events',
+        );
+        const maxId = Number(maxRow.rows[0]?.max ?? 0);
+        if (Number.isFinite(maxId) && maxId > 0) since = maxId;
+      } catch { /* fall through with since=0 */ }
+    }
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -52,7 +66,18 @@ export function registerOperatorEvents(app: FastifyInstance): void {
     let lastId = since;
     let ended = false;
 
-    const OPERATOR_TYPES = ['tool.warned', 'tool.denied', 'operator_attention', 'session.blocked', 'session.error'];
+    // Include run-level attention/recovery so WeChat/Telegram bots see
+    // RunContract gates (not only tool-level warn/deny).
+    const OPERATOR_TYPES = [
+      'tool.warned',
+      'tool.denied',
+      'operator_attention',
+      'run.operator_attention_required',
+      'run.recovery_required',
+      'run.plan_approved',
+      'session.blocked',
+      'session.error',
+    ];
 
     const pollAndSend = async () => {
       if (ended) return;
