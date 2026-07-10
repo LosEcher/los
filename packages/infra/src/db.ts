@@ -20,6 +20,8 @@ export interface DbConnection {
   readonly dbType: 'postgres';
 }
 
+export type DbTransactionClient = PoolClient;
+
 let _pool: Pool | null = null;
 
 export async function initDb(databaseUrl?: string): Promise<DbConnection> {

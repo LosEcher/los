@@ -3,6 +3,8 @@ import {
   ensureSessionEventStore,
   listSessionEvents,
   getSessionObservability,
+  notifySessionEvent,
+  type SessionEventRecord,
 } from '@los/agent/session-events';
 import {
   recordOperatorFollowup,
@@ -13,6 +15,7 @@ import { claimRunSpec } from '@los/agent/run-specs';
 import { listVerificationRecordsForSession } from '@los/agent';
 import { findRecoverableSessions } from '../../chat-session-helpers.js';
 import { getOperatorPrincipal, getRequestContext, requireOperator } from '../../request-context.js';
+import { runIdempotentJson } from '../../idempotency.js';
 import { getConfig } from '@los/infra/config';
 import { resolveGatewayServiceIdentity } from '../../server.js';
 import { normalizeBoundedInteger } from '../server-helpers.js';
@@ -49,33 +52,43 @@ export function registerSessionRoutes(app: FastifyInstance): void {
     if (!session) return reply.status(404).send({ error: 'Session not found' });
 
     const context = getRequestContext(req);
-    const common = {
-      sessionId: id,
-      runSpecId: body.runSpecId,
-      taskRunId: body.taskRunId,
-      tenantId: context.tenantId,
-      projectId: context.projectId,
-      userId: context.userId,
-      requestId: context.requestId,
-      traceId: context.traceId,
-      actor: operator.subject,
-      reason: body.reason,
-    };
 
     try {
-      const event = body.type === 'steering'
-        ? await recordOperatorSteering({
-            ...common,
-            instruction: body.instruction,
-            turnBoundary: body.turnBoundary,
-            drainMode: body.drainMode,
-          })
-        : await recordOperatorFollowup({
-            ...common,
-            prompt: body.prompt,
-            parentSessionId: body.parentSessionId,
-          });
-      return { ok: true, event };
+      return await runIdempotentJson<{ ok: true; event: SessionEventRecord }>(req, reply, {
+        route: '/sessions/:id/operator-events',
+        method: 'POST',
+        body,
+        context,
+        atomicEffect: true,
+        afterCommit: async result => notifySessionEvent(result.event),
+      }, async transaction => {
+        const writeOptions = { client: transaction?.client, notify: false };
+        const common = {
+          sessionId: id,
+          runSpecId: body.runSpecId,
+          taskRunId: body.taskRunId,
+          tenantId: context.tenantId,
+          projectId: context.projectId,
+          userId: context.userId,
+          requestId: context.requestId,
+          traceId: context.traceId,
+          actor: operator.subject,
+          reason: body.reason,
+        };
+        const event = body.type === 'steering'
+          ? await recordOperatorSteering({
+              ...common,
+              instruction: body.instruction,
+              turnBoundary: body.turnBoundary,
+              drainMode: body.drainMode,
+            }, writeOptions)
+          : await recordOperatorFollowup({
+              ...common,
+              prompt: body.prompt,
+              parentSessionId: body.parentSessionId,
+            }, writeOptions);
+        return { ok: true, event };
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(400).send({ error: message });

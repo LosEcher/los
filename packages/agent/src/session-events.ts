@@ -9,7 +9,7 @@
  * This is the durable base layer for later JS/SQL query surfaces.
  */
 
-import { getDb } from '@los/infra/db';
+import { getDb, type DbTransactionClient } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('agent');
@@ -177,11 +177,12 @@ export async function ensureSessionEventStore(): Promise<void> {
   _initialized = true;
 }
 
-export async function appendSessionEvent(input: SessionEventWrite): Promise<SessionEventRecord> {
+export async function appendSessionEvent(
+  input: SessionEventWrite,
+  options: { client?: DbTransactionClient; notify?: boolean } = {},
+): Promise<SessionEventRecord> {
   await ensureSessionEventStore();
-  const db = getDb();
-  const rows = await db.query<SessionEventRow>(
-    `
+  const sql = `
     INSERT INTO session_events (
       session_id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
       turn, type, source, model, tool_name, cache_key, cache_hit,
@@ -189,8 +190,8 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17, $18)
     RETURNING *
-  `,
-    [
+  `;
+  const params = [
       input.sessionId,
       input.tenantId ?? null,
       input.projectId ?? null,
@@ -209,26 +210,30 @@ export async function appendSessionEvent(input: SessionEventWrite): Promise<Sess
       JSON.stringify(redactValue(input.payload ?? {})),
       input.parentEventId ?? null,
       input.visibility ?? sessionEventVisibility(input.type),
-    ],
-  );
+  ];
+  const rows = options.client
+    ? await options.client.query<SessionEventRow>(sql, params)
+    : await getDb().query<SessionEventRow>(sql, params);
   const row = rows.rows[0];
   if (!row) {
     throw new Error('Failed to append session event');
   }
   const record = rowToSessionEvent(row);
 
-  // Notify listeners (real-time push)
+  if (options.notify !== false) await notifySessionEvent(record);
+  return record;
+}
+
+export async function notifySessionEvent(record: SessionEventRecord): Promise<void> {
   try {
-    await db.notify('session_events', JSON.stringify({
+    await getDb().notify('session_events', JSON.stringify({
       session_id: record.sessionId,
       event_id: record.id,
       type: record.type,
     }));
   } catch {
-    // Non-critical — don't block event persistence on notification failure
+    // Non-critical
   }
-
-  return record;
 }
 
 export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<SessionEventRecord[]> {

@@ -119,7 +119,7 @@ export async function persistChatError(opts: {
   workspaceRoot: string;
   toolMode: string;
   runSpecId: string;
-  idempotency: { id: string } | null;
+  idempotency: { id: string; ownerId: string } | null;
 }) {
   if (opts.boundTodoId) {
     await updateBoundTodoFromRun(opts.boundTodoId, {
@@ -184,6 +184,6 @@ export async function persistChatError(opts: {
   }
 
   if (opts.idempotency) {
-    await failIdempotencyKey(opts.idempotency.id, opts.err).catch(() => undefined);
+    await failIdempotencyKey(opts.idempotency.id, opts.err, opts.idempotency.ownerId).catch(() => undefined);
   }
 }

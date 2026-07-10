@@ -17,15 +17,28 @@
  *
  * Requires:
  *   TELEGRAM_BOT_TOKEN — from @BotFather
- *   TELEGRAM_CHAT_ID    — target chat (can be set via /start)
+ *   TELEGRAM_ALLOWED_CHAT_IDS — comma-separated pre-authorized chat IDs
+ *   TELEGRAM_ALLOWED_USER_IDS — comma-separated pre-authorized operator user IDs
  *   LOS_GATEWAY_URL     — los gateway base URL (default http://localhost:8080)
  *
  * Usage:
- *   TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=123 LOS_GATEWAY_URL=http://localhost:8080 node packages/telegram-bot/src/index.js
+ *   TELEGRAM_BOT_TOKEN=xxx TELEGRAM_ALLOWED_CHAT_IDS=123 TELEGRAM_ALLOWED_USER_IDS=456 pnpm dev
  */
 
 import { createServer } from 'node:http';
-import { resolveIntent } from '@los/agent/message-router';
+import {
+  parseAllowedChatIds,
+  parseAllowedUserIds,
+  validateWebhookSecret,
+  validateWebhookUrl,
+} from './ingress-security.js';
+import { createOperatorActionHandler, type TelegramUpdate } from './operator-actions.js';
+import { TelegramActionRegistry } from './action-registry.js';
+import { createTelegramUpdateProcessor, prepareTelegramPolling, runTelegramPollingLoop } from './telegram-updates.js';
+import { createTelegramWebhookHandler, startTelegramWebhook } from './telegram-webhook.js';
+import { ensureTelegramActionStore } from './telegram-action-store.js';
+import { loadConfig } from '@los/infra/config';
+import { initDb } from '@los/infra/db';
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -41,6 +54,26 @@ const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEBHOOK_PORT = Number(process.env.TELEGRAM_WEBHOOK_PORT ?? 0);
 const POLL_INTERVAL_MS = Number(process.env.TELEGRAM_POLL_INTERVAL ?? 5000);
 const SSE_RECONNECT_MS = Number(process.env.SSE_RECONNECT_MS ?? 3000);
+const WEBHOOK_BIND_HOST = '127.0.0.1';
+
+const configuredChatIds = process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? process.env.TELEGRAM_CHAT_ID;
+const authorizedChats = parseAllowedChatIds(configuredChatIds);
+if (authorizedChats.size === 0) {
+  console.error('FATAL: TELEGRAM_ALLOWED_CHAT_IDS must contain at least one pre-authorized chat ID.');
+  process.exit(1);
+}
+const authorizedUsers = parseAllowedUserIds(process.env.TELEGRAM_ALLOWED_USER_IDS);
+if (authorizedUsers.size === 0) {
+  console.error('FATAL: TELEGRAM_ALLOWED_USER_IDS must contain at least one pre-authorized operator user ID.');
+  process.exit(1);
+}
+
+const WEBHOOK_SECRET = WEBHOOK_PORT > 0
+  ? validateWebhookSecret(process.env.TELEGRAM_WEBHOOK_SECRET)
+  : undefined;
+const WEBHOOK_URL = WEBHOOK_PORT > 0
+  ? validateWebhookUrl(process.env.TELEGRAM_WEBHOOK_URL)
+  : undefined;
 
 function losHeaders(extra: Record<string, string> = {}): Record<string, string> {
   let h = extra;
@@ -55,17 +88,6 @@ function losHeaders(extra: Record<string, string> = {}): Record<string, string> 
 // ── Telegram API helpers ───────────────────────────────────────────
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-
-interface TgMessage {
-  message_id: number;
-  chat: { id: number };
-  text?: string;
-  callback_query?: {
-    id: string;
-    message: TgMessage;
-    data: string;
-  };
-}
 
 async function tgApi(method: string, body: Record<string, unknown> = {}): Promise<unknown> {
   const res = await fetch(`${TG_API}/${method}`, {
@@ -97,11 +119,16 @@ async function answerCallback(callbackId: string, text?: string): Promise<void> 
   await tgApi('answerCallbackQuery', { callback_query_id: callbackId, text });
 }
 
-// ── Authorized chat tracking ───────────────────────────────────────
-
-const authorizedChats = new Set<number>();
-const initialChatId = process.env.TELEGRAM_CHAT_ID ? Number(process.env.TELEGRAM_CHAT_ID) : null;
-if (initialChatId) authorizedChats.add(initialChatId);
+const actionRegistry = new TelegramActionRegistry();
+const handleCallback = createOperatorActionHandler({
+  gatewayUrl: LOS_GATEWAY_URL,
+  allowedChatIds: authorizedChats,
+  allowedUserIds: authorizedUsers,
+  actionRegistry,
+  makeHeaders: losHeaders,
+  answerCallback,
+});
+const processUpdate = createTelegramUpdateProcessor({ handleCallback });
 
 // ── Event → Message formatting ─────────────────────────────────────
 
@@ -232,188 +259,58 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       },
     };
 
-    const chatIds = authorizedChats.size > 0
-      ? [...authorizedChats]
-      : [initialChatId].filter(Boolean) as number[];
-
-    if (chatIds.length === 0) {
-      console.log(`No authorized chats — skipping alert for ${sessionId}`);
-      return;
-    }
-
-    for (const chatId of chatIds) {
-      await sendMessage(chatId, formatAlert(alert), [
-        [
-          { text: '✅ Approve', callback_data: `approve:${sessionId}:${alert.payload.callId ?? ''}` },
-          { text: '❌ Deny', callback_data: `deny:${sessionId}:${alert.payload.callId ?? ''}` },
-        ],
-        [
-          { text: '↗ Escalate', callback_data: `escalate:${sessionId}:${alert.payload.callId ?? ''}` },
-        ],
-      ]);
+    const decisionGroupId = actionRegistry.createDecisionGroupId();
+    for (const chatId of authorizedChats) {
+      await sendMessage(
+        chatId,
+        formatAlert(alert),
+        await actionRegistry.createButtons(sessionId, alert.payload.callId ?? '', decisionGroupId),
+      );
     }
   } catch {
     // Parse error — skip
   }
 }
 
-// ── Operator action handlers ────────────────────────────────────────
-
-async function handleApprove(sessionId: string, callId: string): Promise<string> {
-  const res = await fetch(`${LOS_GATEWAY_URL}/sessions/${encodeURIComponent(sessionId)}/operator-events`, {
-    method: 'POST',
-    headers: losHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      type: 'steering',
-      instruction: `Approved via Telegram${callId ? `: callId=${callId}` : ''}`,
-      turnBoundary: 'immediate',
-      actor: 'telegram-bot',
-      reason: 'operator_approval',
-    }),
-  });
-  if (!res.ok) return `Approve failed: ${res.status}`;
-  return '✅ Approved';
-}
-
-async function handleDeny(sessionId: string, callId: string): Promise<string> {
-  const res = await fetch(`${LOS_GATEWAY_URL}/sessions/${encodeURIComponent(sessionId)}/operator-events`, {
-    method: 'POST',
-    headers: losHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      type: 'steering',
-      instruction: `Denied via Telegram${callId ? `: callId=${callId}` : ''}`,
-      turnBoundary: 'immediate',
-      actor: 'telegram-bot',
-      reason: 'operator_denial',
-    }),
-  });
-  if (!res.ok) return `Deny failed: ${res.status}`;
-  return '❌ Denied';
-}
-
-async function handleEscalate(sessionId: string, callId: string): Promise<string> {
-  // Record escalate as operator.followup
-  const res = await fetch(`${LOS_GATEWAY_URL}/sessions/${encodeURIComponent(sessionId)}/operator-events`, {
-    method: 'POST',
-    headers: losHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      type: 'steering',
-      instruction: `Escalated from Telegram: session=${sessionId} callId=${callId}`,
-      turnBoundary: 'immediate',
-      actor: 'telegram-bot',
-      reason: 'operator_escalation',
-    }),
-  });
-  if (!res.ok) return `Escalate failed: ${res.status}`;
-  return '↗ Escalated to operator queue';
-}
-
-// ── Webhook server for Telegram callbacks ───────────────────────────
-
-async function handleCallback(callbackQuery: NonNullable<TgMessage['callback_query']>): Promise<void> {
-  const data = callbackQuery.data;
-  const [action, sessionId, callId] = data.split(':');
-
-  // Check for #command prefix (e.g. someone types "#status abc123" as a message)
-  let response: string;
-  if (data.startsWith('#')) {
-    const intent = resolveIntent(data);
-    response = await handleResolvedIntent(intent, sessionId, callId);
-  } else {
-    switch (action) {
-      case 'approve': response = await handleApprove(sessionId, callId); break;
-      case 'deny': response = await handleDeny(sessionId, callId); break;
-      case 'escalate': response = await handleEscalate(sessionId, callId); break;
-      default: response = `Unknown action: ${action}`;
-    }
-  }
-
-  await answerCallback(callbackQuery.id, response);
-}
-
-async function handleResolvedIntent(
-  intent: ReturnType<typeof resolveIntent>,
-  sessionId: string,
-  callId: string,
-): Promise<string> {
-  switch (intent.type) {
-    case 'steering':
-      return intent.instruction === 'approve' ? await handleApprove(intent.sessionId, callId)
-        : intent.instruction === 'deny' ? await handleDeny(intent.sessionId, callId)
-        : await handleEscalate(intent.sessionId, callId);
-    case 'status':
-      // Fall through to HTTP call for status (telegram-bot doesn't have DB access)
-      return `📊 Status for ${intent.sessionId.slice(0, 8)}… — check the gateway or #status in chat.`;
-    case 'chat':
-      return `💬 To start a chat, use #claude <prompt> or #codex <prompt>.`;
-    case 'runtime':
-      return `🔄 Runtime agents are available via #claude <prompt> or #codex <prompt> in WeChat.`;
-    case 'todo':
-      return `📋 Todo commands are available via #task in WeChat.`;
-    default:
-      return `Unknown intent: ${intent.type}`;
-  }
-}
-
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await ensureTelegramActionStore();
   console.log(`🤖 los Telegram Bot starting`);
   console.log(`   Gateway: ${LOS_GATEWAY_URL}`);
-  console.log(`   Chats: ${authorizedChats.size > 0 ? [...authorizedChats].join(', ') : '(none — waiting for /start)'}`);
+  console.log(`   Chats: ${[...authorizedChats].join(', ')}`);
 
   if (WEBHOOK_PORT > 0) {
-    // Webhook mode: Telegram sends updates to this server
-    const server = createServer(async (req, res) => {
-      if (req.method === 'POST' && req.url === '/telegram-webhook') {
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-
-        if (body.message?.text === '/start') {
-          authorizedChats.add(body.message.chat.id);
-          await sendMessage(body.message.chat.id, '✅ los agent alerts enabled. You will receive operator_attention notifications here.');
-          console.log(`Authorized chat: ${body.message.chat.id}`);
-        } else if (body.callback_query) {
-          await handleCallback(body.callback_query);
-        }
-        res.writeHead(200);
-        res.end('ok');
-        return;
-      }
-      res.writeHead(404);
-      res.end();
+    const server = createServer(createTelegramWebhookHandler({ secret: WEBHOOK_SECRET!, processUpdate }));
+    await startTelegramWebhook({
+      server,
+      port: WEBHOOK_PORT,
+      host: WEBHOOK_BIND_HOST,
+      webhookUrl: WEBHOOK_URL!,
+      secret: WEBHOOK_SECRET!,
+      setWebhook: body => tgApi('setWebhook', body),
     });
-
-    server.listen(WEBHOOK_PORT, () => {
-      console.log(`Webhook listening on port ${WEBHOOK_PORT}`);
-    });
-    await tgApi('setWebhook', { url: `${process.env.WEBHOOK_URL ?? `http://localhost:${WEBHOOK_PORT}`}/telegram-webhook` });
+    console.log(`Webhook listening on http://${WEBHOOK_BIND_HOST}:${WEBHOOK_PORT}`);
   } else {
     // Polling mode: check for updates periodically
     console.log('Polling mode (no webhook port configured)');
+    await prepareTelegramPolling(options => tgApi('deleteWebhook', options));
 
-    const POLL_INTERVAL_MS = Number(process.env.TELEGRAM_POLL_INTERVAL ?? 5000);
-    let lastUpdateId = 0;
-
-    setInterval(async () => {
-      try {
-        const result = await tgApi('getUpdates', { offset: lastUpdateId + 1, timeout: 5 });
-        const updates = (result as any)?.result ?? [];
-        for (const update of updates) {
-          lastUpdateId = Math.max(lastUpdateId, update.update_id);
-          if (update.message?.text === '/start') {
-            authorizedChats.add(update.message.chat.id);
-            await sendMessage(update.message.chat.id, '✅ los agent alerts enabled. You will receive operator_attention notifications here.');
-            console.log(`Authorized chat: ${update.message.chat.id}`);
-          } else if (update.callback_query) {
-            await handleCallback(update.callback_query);
-          }
-        }
-      } catch (err) {
-        // Non-fatal — Telegram API can be flaky
-      }
-    }, POLL_INTERVAL_MS);
+    const pollingAbort = new AbortController();
+    void runTelegramPollingLoop({
+      signal: pollingAbort.signal,
+      intervalMs: POLL_INTERVAL_MS,
+      getUpdates: async offset => {
+        const result = await tgApi('getUpdates', { offset, timeout: 5 });
+        return (result as { result?: TelegramUpdate[] } | null)?.result ?? [];
+      },
+      processUpdate,
+      onError: error => console.error(`Telegram polling error: ${error instanceof Error ? error.message : String(error)}`),
+    });
+    process.once('SIGINT', () => pollingAbort.abort());
+    process.once('SIGTERM', () => pollingAbort.abort());
   }
 
   // Connect SSE event stream
