@@ -18,7 +18,7 @@ import {
   completeIdempotencyKey,
   reserveIdempotentRequest,
 } from './idempotency.js';
-import { getRequestContext } from './request-context.js';
+import { getMessagePrincipal, getRequestContext } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 import type { MessageRouter } from '@los/agent/message-router';
@@ -48,7 +48,7 @@ export function registerChatRoute(
           sourceKind: 'http-chat',
           prompt,
           sessionId: body.sessionId,
-        });
+        }, { principal: getMessagePrincipal(req) });
         if (result.handled) {
           return reply.send({ ok: true, text: result.text, sessionId: result.sessionId, intent: result.intent.type });
         }

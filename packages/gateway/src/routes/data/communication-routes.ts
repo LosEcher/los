@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getRequestContext } from '../../request-context.js';
+import { requireOperator } from '../../request-context.js';
 
 interface WeixinAccount {
   accountId: string;
@@ -110,7 +110,7 @@ export function registerCommunicationRoutes(app: FastifyInstance): void {
   });
 
   app.post('/communication/accounts/weclaw/qr/start', async (req, reply) => {
-    if (!requireOperator(req, reply)) return;
+    if (!(await requireOperator(req, reply))) return;
     const weclaw = findWeclawBinary();
     if (!weclaw) {
       return reply.status(400).send({ ok: false, error: 'weclaw_not_installed' });
@@ -165,7 +165,7 @@ export function registerCommunicationRoutes(app: FastifyInstance): void {
   });
 
   app.post('/communication/accounts/weclaw/send', async (req, reply) => {
-    if (!requireOperator(req, reply)) return;
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as Record<string, unknown> | undefined;
     const to = (body?.to as string) || getDefaultTo() || process.env.WECLAW_DEFAULT_TO;
     const text = (body?.text as string) ?? '';
@@ -184,24 +184,4 @@ export function registerCommunicationRoutes(app: FastifyInstance): void {
       return reply.send({ ok: true, messageId: data?.message_id });
     } catch (err) { return reply.status(502).send({ ok: false, error: (err as Error).message }); }
   });
-}
-
-// ── Operator gate ────────────────────────────────────────────
-
-/**
- * Require operator authentication for sensitive routes.
- * Returns true if the caller is an operator, or sends a 403 and returns false.
- * Uses the validated RequestContext (timing-safe operatorToken), NOT the
- * forgeable x-los-role header.
- */
-function requireOperator(req: unknown, reply: unknown): boolean {
-  const ctx = getRequestContext(req as any);
-  if (!ctx.isOperator) {
-    (reply as any).status(403).send({
-      error: 'Forbidden',
-      detail: 'Operator authentication required for this endpoint',
-    });
-    return false;
-  }
-  return true;
 }

@@ -28,6 +28,12 @@ async function runHandler(intent: ResolvedIntent): Promise<{ replies: string[]; 
   const ctx: HandlerContext = {
     inbound: makeInbound(),
     intent,
+    principal: {
+      kind: 'operator',
+      subject: 'test-operator',
+      authenticatedBy: 'operator_token',
+      capabilities: ['operator:*'],
+    },
     reply: async (text) => { replies.push(text); },
   };
   const result = await handler.handle(ctx);

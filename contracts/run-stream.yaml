@@ -163,6 +163,13 @@ replay:
     - verification_records
   future:
     - SSE reconnect with model.delta replay
+operatorControl:
+  websocketMessages:
+    - steering
+    - cancel
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

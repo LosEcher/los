@@ -20,7 +20,9 @@ export function createSteeringHandler(): HandlerDescriptor {
           sessionId: i.sessionId,
           instruction: i.instruction,
           turnBoundary: i.turnBoundary ?? 'immediate',
-          actor: ctx.inbound.channelId,
+          actor: ctx.principal.kind === 'operator'
+            ? ctx.principal.subject
+            : `unauthorized:${ctx.inbound.sourceKind}`,
           reason: `MessageRouter steering via ${ctx.inbound.sourceKind}`,
         });
         const label = i.instruction === 'approve' ? '✅ 已批准（tool/steering）'

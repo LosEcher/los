@@ -18,6 +18,7 @@ import {
 import { getConfig } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
 import type { MessageRouter } from '@los/agent/message-router';
+import { requireOperator } from '../../request-context.js';
 
 const log = getLogger('runtime-adapter-routes');
 
@@ -37,6 +38,7 @@ export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter
 
   // ── Run external agent ───────────────────────────────────
   app.post('/runtimes/:kind/run', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { kind } = req.params as { kind: string };
     const body = (req.body ?? {}) as RunRuntimeBody;
 
@@ -191,7 +193,8 @@ export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter
   });
 
   // ── OTel bridge management ───────────────────────────────
-  app.post('/runtimes/bridge/start', async (_req, reply) => {
+  app.post('/runtimes/bridge/start', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     if (isOtelBridgeRunning()) {
       return { status: 'already_running' };
     }

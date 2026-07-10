@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getConfig, type Config } from '@los/infra/config';
 import { getLogger, type Logger } from '@los/infra/logger';
+import type { MessagePrincipal } from '@los/agent/message-router';
 
 const log = getLogger('request-context');
 
@@ -113,13 +114,49 @@ export function getRequestContext(req: FastifyRequest): RequestContext {
  * the caller. Returns true when the handler should proceed.
  */
 export async function requireOperator(req: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-  if (!getConfig().auth.enabled) return true;
-  const ctx = getRequestContext(req);
-  if (!ctx.isOperator) {
+  if (!hasOperatorAccess(req)) {
     await reply.code(403).send({ error: 'operator token required' });
     return false;
   }
   return true;
+}
+
+export function hasOperatorAccess(req: FastifyRequest): boolean {
+  return !getConfig().auth.enabled || getRequestContext(req).isOperator;
+}
+
+export function getMessagePrincipal(req: FastifyRequest): MessagePrincipal {
+  const ctx = getRequestContext(req);
+  const common = {
+    tenantId: ctx.tenantId,
+    projectId: ctx.projectId,
+    userId: ctx.userId,
+  };
+  if (!getConfig().auth.enabled) {
+    return {
+      kind: 'operator',
+      subject: ctx.userId || 'local-operator',
+      authenticatedBy: 'auth_disabled',
+      capabilities: ['operator:*'],
+      ...common,
+    };
+  }
+  if (ctx.isOperator) {
+    return {
+      kind: 'operator',
+      subject: ctx.userId || 'operator',
+      authenticatedBy: 'operator_token',
+      capabilities: ['operator:*'],
+      ...common,
+    };
+  }
+  return {
+    kind: 'authenticated',
+    subject: ctx.userId || 'authenticated-user',
+    authenticatedBy: 'access_token',
+    capabilities: [],
+    ...common,
+  };
 }
 
 let _gatewayLogger: Logger | undefined;

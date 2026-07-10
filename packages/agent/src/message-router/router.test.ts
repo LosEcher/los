@@ -13,6 +13,13 @@ import type {
   NormalizerInput,
 } from './types.js';
 
+const operatorPrincipal = {
+  kind: 'operator' as const,
+  subject: 'test-operator',
+  authenticatedBy: 'operator_token' as const,
+  capabilities: ['operator:*'] as const,
+};
+
 function stubSteeringHandler(): HandlerDescriptor {
   return {
     name: 'test-steering',
@@ -46,10 +53,69 @@ describe('MessageRouter', () => {
       sourceKind: 'http-chat',
       prompt: '#approve session-abc12345',
     };
-    const result = await router.route(input);
+    const result = await router.route(input, { principal: operatorPrincipal });
     assert.equal(result.handled, true);
     assert.equal(result.text, 'steered');
     assert.equal(result.intent.type, 'steering');
+  });
+
+  it('rejects effectful commands without an operator principal', async () => {
+    let called = false;
+    const router = new MessageRouter({
+      handlers: [{
+        name: 'test-steering',
+        priority: 1,
+        match: intent => intent.type === 'steering',
+        handle: async () => {
+          called = true;
+          return { handled: true };
+        },
+      }],
+    });
+    const result = await router.route({ sourceKind: 'http-chat', prompt: '#approve session-abc12345' });
+    assert.equal(result.error, 'operator_required');
+    assert.equal(called, false);
+  });
+
+  it('fails closed for every effectful intent class', async () => {
+    const router = new MessageRouter({
+      handlers: [{
+        name: 'effectful',
+        priority: 1,
+        match: () => true,
+        handle: async () => ({ handled: true, text: 'executed' }),
+      }],
+    });
+    const prompts = [
+      '#approve session-abc12345',
+      '#approve-phase run-abc12345',
+      '#task new security task',
+      '#run todo-abc12345',
+      '#sweep',
+      '#codex inspect workspace',
+    ];
+    for (const prompt of prompts) {
+      const result = await router.route({ sourceKind: 'http-chat', prompt });
+      assert.equal(result.error, 'operator_required', prompt);
+      assert.notEqual(result.text, 'executed', prompt);
+    }
+  });
+
+  it('allows only the capability required by the effectful intent', async () => {
+    const router = new MessageRouter({ handlers: [stubSteeringHandler()] });
+    const result = await router.route(
+      { sourceKind: 'http-chat', prompt: '#approve session-abc12345' },
+      {
+        principal: {
+          kind: 'operator',
+          subject: 'steering-operator',
+          authenticatedBy: 'trusted_channel',
+          capabilities: ['session:steer'],
+        },
+      },
+    );
+    assert.equal(result.handled, true);
+    assert.equal(result.error, undefined);
   });
 
   it('routes plain text through chat handler', async () => {

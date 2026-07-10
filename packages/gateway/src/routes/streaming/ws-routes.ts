@@ -24,6 +24,7 @@ import {
 } from '@los/agent/stream-lease';
 import { eventBus } from '@los/agent/event-bus';
 import { computeRetryDelay, retryAfterHeader } from './stream-backoff.js';
+import { hasOperatorAccess } from '../../request-context.js';
 
 interface WsClient {
   ws: WebSocket;
@@ -183,6 +184,10 @@ export function registerWsRoutes(app: FastifyInstance, gatewayServiceId: string)
           }
 
           if (msg.type === 'steering' || msg.type === 'cancel') {
+            if (!hasOperatorAccess(req)) {
+              wsSend(socket, 'error', { error: 'operator_required' });
+              return;
+            }
             const instruction = msg.type === 'cancel'
               ? 'deny'
               : typeof msg.instruction === 'string'
