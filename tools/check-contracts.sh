@@ -17,6 +17,7 @@ required_contracts=(
   todo-dispatch.yaml
   integration-feed-analysis.yaml
   memory.yaml
+  task-intake.yaml
 )
 
 failures=0

@@ -19,6 +19,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, statSync } from 'no
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getLogger } from '@los/infra/logger';
+import { resolveProjectOwner } from '@los/agent/task-intake';
 
 const log = getLogger('project-store');
 
@@ -143,14 +144,13 @@ export function validateProjectPath(workspacePath: string): { valid: boolean; er
   }
 }
 
-/** Resolve a workspaceRoot to a bound projectId, if one exists.
- *  Both sides are resolve()-normalized so trailing slashes, symlinks, and
- *  stray `..` segments don't break the match. */
+/** Resolve a workspaceRoot to the deepest bound project, if one exists.
+ *  Paths are resolve()-normalized so trailing slashes and `..` segments do not
+ *  break the match. Symlink identity remains the caller's responsibility. */
 export function resolveProjectIdFromWorkspace(workspaceRoot: string): string | null {
-  const normalized = resolve(workspaceRoot);
-  const projects = listProjects();
-  for (const p of projects) {
-    if (resolve(p.workspacePath) === normalized) return p.projectId;
-  }
-  return null;
+  const resolution = resolveProjectOwner({
+    bindings: listProjects(),
+    workspaceRoot,
+  });
+  return resolution.status === 'resolved' ? (resolution.ownerRepo ?? null) : null;
 }

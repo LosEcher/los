@@ -1,0 +1,106 @@
+contract: los.task-intake
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Structured intake and deterministic owner-repository resolution before a
+  coordinated project task can enter execution.
+type: object
+input:
+  required:
+    - requestId
+    - goal
+  properties:
+    requestId:
+      type: string
+    goal:
+      type: string
+    requestedProjectId:
+      type: string
+      description: Explicit project selected by the caller.
+    workspaceRoot:
+      type: string
+      description: Explicit workspace path supplied for the task.
+    defaultProjectId:
+      type: string
+      description: Configured default used only when no explicit workspace exists.
+    taskType:
+      type: string
+    editableSurfaces:
+      type: array
+      items: string
+    nonGoals:
+      type: array
+      items: string
+    riskClass:
+      type: string
+    requestedProvider:
+      type: string
+    requestedModel:
+      type: string
+    toolMode:
+      type: string
+      enum: [read-only, project-write, all]
+    verification:
+      type: array
+      items: string
+    stopConditions:
+      type: array
+      items: string
+projectBinding:
+  required:
+    - projectId
+    - workspacePath
+  properties:
+    projectId:
+      type: string
+    workspacePath:
+      type: string
+resolution:
+  required:
+    - status
+    - reason
+  properties:
+    status:
+      type: string
+      enum: [resolved, blocked]
+    ownerRepo:
+      type: string
+    workspaceRoot:
+      type: string
+    reason:
+      type: string
+      enum:
+        - explicit_project
+        - workspace_binding
+        - configured_default
+        - unknown_explicit_project
+        - project_workspace_conflict
+        - ambiguous_workspace
+        - unbound_workspace
+        - unknown_default_project
+        - owner_unresolved
+    blocker:
+      type: string
+resolutionOrder:
+  - Explicit project must exist and agree with an explicit workspace.
+  - Explicit workspace resolves to the deepest matching bound project.
+  - Multiple project IDs bound to the same deepest workspace block as ambiguous.
+  - An unbound explicit workspace blocks and never falls back to the default.
+  - Configured default is considered only when no explicit workspace is present.
+  - Missing or invalid ownership evidence blocks execution.
+security:
+  - Resolution is deterministic and does not call a model.
+  - Paths and project identifiers are decision facts, not credentials or memory.
+  - A blocked resolution cannot authorize project-write or all tool modes.
+sourceOfTruth:
+  - caller request fields
+  - gateway project bindings in ~/.los/projects.json
+references:
+  - docs/adr/0025-conversation-run-coordinator-boundary.md
+  - docs/governance/coordinator-scenario-eval-set.md
+verification:
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm check
+  - ./tools/check-contracts.sh

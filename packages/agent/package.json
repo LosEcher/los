@@ -47,6 +47,7 @@
     "./todo-dispatch": "./src/todo-dispatch.ts",
     "./auth/login": "./src/auth/xai-oauth-login.ts",
     "./coordination": "./src/coordination/index.ts",
+    "./task-intake": "./src/coordinator/task-intake.ts",
     "./event-log": "./src/event-log/index.ts",
     "./object-store": "./src/object-store/index.ts"
   },
