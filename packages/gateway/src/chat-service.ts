@@ -77,6 +77,7 @@ export async function runChat(params: {
   branchAtTurn: number | undefined;
   traceId: string;
   dedupeKey: string | undefined;
+  signal?: AbortSignal;
   sid: string;
   tenantId: string;
   projectId: string;
@@ -96,7 +97,7 @@ export async function runChat(params: {
     prompt, sessionId, systemPrompt, provider, model, modelSettings,
     workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
-    traceId, dedupeKey, sid, tenantId, projectId, userId, actorSubject, requestId,
+    traceId, dedupeKey, signal, sid, tenantId, projectId, userId, actorSubject, requestId,
     runContract, config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
   } = params;
 
@@ -245,6 +246,7 @@ export async function runChat(params: {
       maxLoops,
       traceId,
       dedupeKey,
+      signal,
       tenantId,
       projectId,
       userId,

@@ -175,6 +175,9 @@ importers:
       '@los/agent':
         specifier: workspace:*
         version: link:../agent
+      '@los/infra':
+        specifier: workspace:*
+        version: link:../infra
     devDependencies:
       '@types/node':
         specifier: ^20.0.0

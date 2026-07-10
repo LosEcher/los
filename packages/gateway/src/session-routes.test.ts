@@ -17,6 +17,7 @@ test('POST /sessions/:id/operator-events persists steering and followup events',
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const sessionId = `session-operator-route-${suffix}`;
+  const idempotencyKey = `telegram-callback-${suffix}`;
   const app = await createServer({
     serviceId: `gateway-session-operator-test-${suffix}`,
     bindUrl: 'http://127.0.0.1:0',
@@ -51,6 +52,7 @@ test('POST /sessions/:id/operator-events persists steering and followup events',
         instruction: 'Finish current tool, then stop editing.',
         runSpecId: `run-${suffix}`,
         taskRunId: `task-${suffix}`,
+        actor: 'spoofed-body-actor',
         reason: 'operator correction',
         turnBoundary: 'next_turn',
         drainMode: 'finish_current_tool',
@@ -82,6 +84,40 @@ test('POST /sessions/:id/operator-events persists steering and followup events',
     assert.equal(events[0]?.payload.reason, 'operator correction');
     assert.equal(events[1]?.payload.parentSessionId, `parent-${suffix}`);
 
+    const idempotentPayload = {
+      type: 'steering',
+      instruction: 'Approved via Telegram: callId=call-a',
+      actor: 'spoofed-telegram-bot',
+      reason: 'operator_approval',
+      turnBoundary: 'immediate',
+    };
+    const idempotentHeaders = {
+      'x-idempotency-key': idempotencyKey,
+      'x-user-id': 'telegram:42',
+    };
+    const firstCallback = await app.inject({
+      method: 'POST',
+      url: `/sessions/${sessionId}/operator-events`,
+      headers: idempotentHeaders,
+      payload: idempotentPayload,
+    });
+    const replayedCallback = await app.inject({
+      method: 'POST',
+      url: `/sessions/${sessionId}/operator-events`,
+      headers: idempotentHeaders,
+      payload: idempotentPayload,
+    });
+    assert.equal(firstCallback.statusCode, 200);
+    assert.equal(replayedCallback.statusCode, 200);
+    assert.equal(firstCallback.headers['x-idempotency-status'], 'reserved');
+    assert.equal(replayedCallback.headers['x-idempotency-status'], 'replayed');
+
+    const afterReplay = await listSessionEvents(sessionId);
+    const telegramEvents = afterReplay.filter(event => event.payload.reason === 'operator_approval');
+    assert.equal(telegramEvents.length, 1);
+    assert.equal(telegramEvents[0]?.payload.actor, 'operator:local');
+    assert.equal(telegramEvents[0]?.userId, 'telegram:42');
+
     const missing = await app.inject({
       method: 'POST',
       url: `/sessions/${sessionId}-missing/operator-events`,
@@ -91,6 +127,7 @@ test('POST /sessions/:id/operator-events persists steering and followup events',
   } finally {
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM sessions WHERE id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM idempotency_keys WHERE idempotency_key = $1', [idempotencyKey]).catch(() => undefined);
     await app.close();
     await closeDb().catch(() => undefined);
   }

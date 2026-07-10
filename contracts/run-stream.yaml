@@ -177,6 +177,11 @@ operatorControl:
   httpRoutes:
     - method: POST
       path: /sessions/{sessionId}/operator-events
+  httpOperatorEvents:
+    path: /sessions/:id/operator-events
+    idempotencyHeader: x-idempotency-key
+    actorSource: principal.subject
+    replayBehavior: return_persisted_response_without_duplicate_event
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

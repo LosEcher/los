@@ -34,6 +34,7 @@ import { migrateDir } from '../packages/infra/src/migrate.js';
 // Single source of truth for the ensure*Store set: import the canonical
 // bootstrap function instead of re-listing all 32 ensure*Store here.
 import { ensureAllStores } from '../packages/gateway/src/bootstrap.js';
+import { ensureTelegramActionStore } from '../packages/telegram-bot/src/telegram-action-store.js';
 
 const SERVER_URL = process.env.SERVER_URL ?? process.env.DATABASE_URL;
 if (!SERVER_URL) { console.error('SERVER_URL (or DATABASE_URL) env required'); process.exit(2); }
@@ -84,6 +85,7 @@ async function bootstrapMig(url: string): Promise<void> {
 async function bootstrapEnsure(url: string): Promise<void> {
   await connect(url);
   await ensureAllStores();
+  await ensureTelegramActionStore();
   await closeDb();
 }
 

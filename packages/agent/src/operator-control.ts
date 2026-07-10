@@ -1,4 +1,5 @@
 import { appendSessionEvent, ensureSessionEventStore, type SessionEventRecord } from './session-events.js';
+import type { DbTransactionClient } from '@los/infra/db';
 
 export interface RecordOperatorSteeringInput extends OperatorEventContext {
   instruction: string;
@@ -33,21 +34,32 @@ interface OperatorEventContext {
   reason?: string;
 }
 
-export async function recordOperatorSteering(input: RecordOperatorSteeringInput): Promise<SessionEventRecord> {
+export async function recordOperatorSteering(
+  input: RecordOperatorSteeringInput,
+  options?: OperatorEventWriteOptions,
+): Promise<SessionEventRecord> {
   const instruction = requiredString(input.instruction, 'instruction');
   return await appendOperatorEvent(input, 'operator.steering', {
     instruction,
     turnBoundary: input.turnBoundary ?? 'next_turn',
     drainMode: input.drainMode ?? 'finish_current_turn',
-  });
+  }, options);
 }
 
-export async function recordOperatorFollowup(input: RecordOperatorFollowupInput): Promise<SessionEventRecord> {
+export async function recordOperatorFollowup(
+  input: RecordOperatorFollowupInput,
+  options?: OperatorEventWriteOptions,
+): Promise<SessionEventRecord> {
   const prompt = requiredString(input.prompt, 'prompt');
   return await appendOperatorEvent(input, 'operator.followup', {
     prompt,
     parentSessionId: optionalString(input.parentSessionId) ?? null,
-  });
+  }, options);
+}
+
+interface OperatorEventWriteOptions {
+  client?: DbTransactionClient;
+  notify?: boolean;
 }
 
 export async function recordSessionBranchCreated(input: RecordSessionBranchCreatedInput): Promise<SessionEventRecord> {
@@ -65,6 +77,7 @@ async function appendOperatorEvent(
   context: OperatorEventContext,
   type: 'operator.steering' | 'operator.followup' | 'session.branch_created',
   payload: Record<string, unknown>,
+  options?: OperatorEventWriteOptions,
 ): Promise<SessionEventRecord> {
   await ensureSessionEventStore();
   return await appendSessionEvent({
@@ -86,7 +99,7 @@ async function appendOperatorEvent(
       reason: optionalString(context.reason) ?? null,
       recordedAt: new Date().toISOString(),
     },
-  });
+  }, options);
 }
 
 function requiredString(value: unknown, name: string): string {

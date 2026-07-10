@@ -18,6 +18,7 @@ import {
   completeIdempotencyKey,
   reserveIdempotentRequest,
 } from './idempotency.js';
+import { startIdempotencyLeaseHeartbeat } from './idempotency-execution.js';
 import { getMessagePrincipal, getRequestContext } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
@@ -131,15 +132,24 @@ export function registerChatRoute(
       reply.raw.end();
       return;
     }
+    const activeIdempotency = idempotency?.status === 'reserved' || idempotency?.status === 'reclaimed'
+      ? idempotency
+      : null;
+    const idempotencyAbort = new AbortController();
+    const idempotencyHeartbeat = activeIdempotency
+      ? startIdempotencyLeaseHeartbeat(activeIdempotency, {
+          onLeaseLost: error => idempotencyAbort.abort(error),
+        })
+      : null;
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
-      ...(idempotency ? {
-        'X-Idempotency-Key': idempotency.idempotencyKey,
-        'X-Idempotency-Status': idempotency.status,
+      ...(activeIdempotency ? {
+        'X-Idempotency-Key': activeIdempotency.idempotencyKey,
+        'X-Idempotency-Status': activeIdempotency.status,
       } : {}),
     });
 
@@ -165,6 +175,7 @@ export function registerChatRoute(
         mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
         identityName, identityLevel,
         traceId, dedupeKey, sid,
+        signal: idempotencyAbort.signal,
         tenantId: context.tenantId,
         projectId: resolveProjectIdFromWorkspace(workspaceRoot) ?? context.projectId,
         userId: context.userId, requestId: context.requestId,
@@ -174,10 +185,12 @@ export function registerChatRoute(
       });
 
       // Idempotency completion: all paths
-      if (idempotency) {
-        await completeIdempotencyKey(idempotency.id, 200, { events: cappedReplay() });
+      if (activeIdempotency) {
+        await idempotencyHeartbeat?.stop();
+        await completeIdempotencyKey(activeIdempotency.id, 200, { events: cappedReplay() }, activeIdempotency.ownerId);
       }
     } catch (err: any) {
+      await idempotencyHeartbeat?.stop();
       await persistChatError({
         err,
         sessionId: sid,
@@ -196,7 +209,9 @@ export function registerChatRoute(
         workspaceRoot,
         toolMode,
         runSpecId: ctx.activeRunSpecId ?? `run-${sid}-${Date.now()}`,
-        idempotency: idempotency ? { id: idempotency.id } : null,
+        idempotency: activeIdempotency
+          ? { id: activeIdempotency.id, ownerId: activeIdempotency.ownerId }
+          : null,
       });
       send('error', { message: err?.message ?? String(err) });
     }
