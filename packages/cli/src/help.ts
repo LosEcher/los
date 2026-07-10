@@ -79,7 +79,7 @@ export function printChatHelp(): void {
 
 Examples:
   los chat --provider deepseek --workspace . "inspect this repo"
-  los chat --provider deepseek --model deepseek-reasoner "inspect this repo"
+  los chat --provider deepseek --model deepseek-v4-flash "inspect this repo"
   los chat --provider openai --tool-mode all "run tests and summarize failures"
   los chat --resume session-123 "continue with the next fix"
   echo "review current structure" | los chat --provider deepseek

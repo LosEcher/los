@@ -47,7 +47,7 @@ Run the client CLI:
 
 ```bash
 pnpm run cli -- chat --provider deepseek "inspect the current workspace"
-pnpm run cli -- chat --provider deepseek --model deepseek-reasoner "inspect the current workspace"
+pnpm run cli -- chat --provider deepseek --model deepseek-v4-flash "inspect the current workspace"
 pnpm run cli -- compat
 pnpm run cli -- compat --target openai:gpt-5.5,codex:gpt-5.5 --probe read-context
 pnpm run cli -- sessions

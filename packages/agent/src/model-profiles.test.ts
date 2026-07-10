@@ -77,7 +77,9 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
 
 test('resolveModelCapabilityProfile normalizes model aliases and scheduling-relevant capability flags', () => {
   const deepseek = resolveModelCapabilityProfile(resolveModelProfile('deepseek'));
-  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner']);
+  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-v4-pro']);
+  assert.ok(!deepseek.modelAliases.includes('deepseek-chat'));
+  assert.ok(!deepseek.modelAliases.includes('deepseek-reasoner'));
   assert.equal(deepseek.tools.parallelCalls, false);
   assert.equal(deepseek.tools.repair, 'json-loose');
   assert.equal(deepseek.vision.supported, false);
