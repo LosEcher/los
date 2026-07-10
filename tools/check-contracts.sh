@@ -19,6 +19,7 @@ required_contracts=(
   memory.yaml
   task-intake.yaml
   coordinator-context-policy.yaml
+  coordinator-resume-plan.yaml
 )
 
 failures=0
@@ -62,6 +63,7 @@ artifact_transfer="$CONTRACT_DIR/artifact-transfer.yaml"
 agent_task_graph="$CONTRACT_DIR/agent-task-graph.yaml"
 provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
 coordinator_context_policy="$CONTRACT_DIR/coordinator-context-policy.yaml"
+coordinator_resume_plan="$CONTRACT_DIR/coordinator-resume-plan.yaml"
 
 [ -f "$run_spec" ] && {
   require_pattern "$run_spec" 'prompt:' 'prompt field'
@@ -128,6 +130,13 @@ coordinator_context_policy="$CONTRACT_DIR/coordinator-context-policy.yaml"
   require_pattern "$coordinator_context_policy" 'baseSystemPromptSource:' 'base prompt source field'
   require_pattern "$coordinator_context_policy" 'queriedLayers:' 'memory layer evidence'
   require_pattern "$coordinator_context_policy" 'Never persist system prompt text' 'prompt content exclusion'
+}
+
+[ -f "$coordinator_resume_plan" ] && {
+  require_pattern "$coordinator_resume_plan" 'coordinator\.resume_plan_selected' 'resume plan event'
+  require_pattern "$coordinator_resume_plan" 'candidateRunSpecIds:' 'resume candidate field'
+  require_pattern "$coordinator_resume_plan" 'lastEventId:' 'resume cursor field'
+  require_pattern "$coordinator_resume_plan" 'Never persist prompts' 'resume prompt exclusion'
 }
 
 integration_feed="$CONTRACT_DIR/integration-feed-analysis.yaml"

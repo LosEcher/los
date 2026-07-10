@@ -3,11 +3,7 @@ import type { Config } from '@los/infra/config';
 import type { Logger } from '@los/infra/logger';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
 import type { Message, CheckpointState, RunContractMetadataInput, IdentityLevel } from '@los/agent';
-import {
-  loadResumeState,
-  updateBoundTodoFromRun,
-  loadBranchSource,
-} from './chat-session-helpers.js';
+import { updateBoundTodoFromRun, loadBranchSource } from './chat-session-helpers.js';
 import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import { recordSessionBranchCreated } from '@los/agent/operator-control';
 import { prepareChatContextPolicy } from './chat-context-policy.js';
@@ -21,6 +17,7 @@ import {
 import { persistChatSuccess } from './chat-route-persist.js';
 import type { MCPRequestServer } from './chat-normalizers.js';
 import { persistChatIntakeEvent } from './chat-intake-events.js';
+import { prepareChatResumePlan } from './chat-resume-plan.js';
 
 export type { SendEvent } from './chat-live-events.js';
 
@@ -172,8 +169,13 @@ export async function runChat(params: {
   }
 
   try {
-    const resumeState = resumedSession ? await loadResumeState(sid) : null;
+    const preparedResume = resumedSession ? await prepareChatResumePlan({
+      sessionId: sid, currentRunSpecId: runSpecId, tenantId, projectId,
+      userId, requestId, traceId,
+    }) : null;
+    const resumeState = preparedResume?.resumeState ?? null;
     if (resumedSession) {
+      if (preparedResume) relaySessionEvent(send, preparedResume.event);
       const turnPreviews = resumedSession.turns.map(t => ({
         loop: t.loopCount,
         text: t.text.slice(0, 100),
@@ -189,6 +191,7 @@ export async function runChat(params: {
         activeTaskRuns: resumeState?.activeTaskRuns ?? [],
         lastEventId: resumeState?.lastEventId ?? null,
         recentEventCount: resumeState?.recentEventCount ?? 0,
+        resumePlan: preparedResume?.plan ?? null,
       });
       send('session.resume_state', {
         sessionId: sid,

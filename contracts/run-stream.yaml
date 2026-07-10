@@ -23,6 +23,7 @@ eventTypes:
   - coordinator.intake_resolved
   - coordinator.intake_blocked
   - coordinator.context_policy_selected
+  - coordinator.resume_plan_selected
   - task
   - task.created
   - task.deduplicated
@@ -102,6 +103,20 @@ eventPayloads:
     codeGraphEnabled: boolean
     codeGraphSelected: boolean
     codeGraphInjected: boolean
+  coordinator.resume_plan_selected:
+    currentRunSpecId: string
+    selectedRunSpecId: string | null
+    candidateRunSpecIds: string[]
+    selectionReason: latest_recoverable_run | no_recoverable_run | projection_unavailable
+    phase: created | running | succeeded | failed | cancelled | blocked | null
+    action: none | wait_for_task | recover_tools | cancel_tools | run_verification | inspect_events | operator_attention
+    blockerKinds: string[]
+    activeTaskRunIds: string[]
+    failedTaskRunIds: string[]
+    failedVerificationRecordIds: string[]
+    pendingVerificationRecordIds: string[]
+    recoveryRecommendation: none | resume | retry | cancel | operator_attention
+    lastEventId: integer | null
   session.started:
     requestedProvider: string | null
     requestedModel: string | null
