@@ -27,6 +27,19 @@ import type { ResolvedIntent } from './types.js';
 // loose session-id: 8-64 alphanumeric/hyphen chars
 const SESSION_ID_RE = /[\w-]{8,64}/;
 
+/**
+ * Optional free-text reason after runId. Operators often paste several
+ * #commands in one message; stop reason at the next #token so
+ * `#approve-phase run-x #verify-run run-x` does not store "#verify-run …"
+ * as the approval reason.
+ */
+function normalizeCommandReason(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const cut = raw.split(/(?=\s#\w)|(?=^#\w)/m)[0]?.trim() ?? '';
+  if (!cut || cut.startsWith('#')) return undefined;
+  return cut;
+}
+
 // ── Command patterns ─────────────────────────────────────────────
 
 const COMMANDS: Array<{
@@ -41,7 +54,7 @@ const COMMANDS: Array<{
       type: 'run_contract',
       action: 'approve_phase',
       runId: m.groups!.id!,
-      reason: m.groups!.reason?.trim() || undefined,
+      reason: normalizeCommandReason(m.groups!.reason),
     }),
   },
   {
@@ -50,7 +63,7 @@ const COMMANDS: Array<{
       type: 'run_contract',
       action: 'revise_plan',
       runId: m.groups!.id!,
-      reason: m.groups!.reason?.trim() || undefined,
+      reason: normalizeCommandReason(m.groups!.reason),
     }),
   },
   {

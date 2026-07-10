@@ -10,6 +10,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { MessageRouter } from '@los/agent/message-router';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 import { getRequestContext } from './request-context.js';
 
@@ -26,6 +27,7 @@ export function registerOpenAICompatibleRoute(
   config: ReturnType<typeof import('@los/infra/config').getConfig>,
   defaultWorkspaceRoot: string,
   gatewayServiceId?: string,
+  messageRouter?: MessageRouter,
 ): void {
   app.post('/v1/chat/completions', async (req: any, reply: any) => {
     console.log(`[/v1/chat] incoming req.url=${req.url} headers=${JSON.stringify(req.headers)}`);
@@ -34,14 +36,49 @@ export function registerOpenAICompatibleRoute(
     const sid = `chat-${body.model ?? 'openai'}-${Date.now()}`;
     const traceId = `trace-${context.requestId}`;
 
-    // Convert OpenAI messages into los prompt
+    // Convert OpenAI messages into los prompt.
+    // WeClaw often sends multi-turn history — command detection MUST use only
+    // the last user turn, otherwise "#approve …" buried after history never matches.
     let systemPrompt = '';
-    let userPrompt = '';
+    const userTurns: string[] = [];
     for (const msg of body.messages) {
       if (msg.role === 'system') systemPrompt += msg.content + '\n';
-      else if (msg.role === 'user') userPrompt += msg.content + '\n';
+      else if (msg.role === 'user') userTurns.push(msg.content);
     }
-    const prompt = userPrompt.trim() || 'Hello';
+    const lastUserTurn = (userTurns[userTurns.length - 1] ?? '').trim();
+    const prompt = lastUserTurn || userTurns.join('\n').trim() || 'Hello';
+
+    // Short-path IM commands (no agent loop, no long timeout).
+    if (messageRouter && lastUserTurn.startsWith('#')) {
+      const intent = messageRouter.resolveIntent(lastUserTurn);
+      if (intent.type !== 'chat' && intent.type !== 'unknown') {
+        const result = await messageRouter.route({
+          sourceKind: 'wx-weclaw',
+          // Single-turn only so normalizer/rawText is exactly the command line.
+          messages: [{ role: 'user', content: lastUserTurn }],
+          model: body.model,
+        });
+        const text = result.handled
+          ? (result.text ?? 'ok')
+          : (result.error ?? '命令未处理');
+        return reply.send({
+          id: `chatcmpl-${context.requestId}`,
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: body.model ?? 'los',
+          choices: [{
+            index: 0,
+            message: { role: 'assistant', content: text },
+            finish_reason: result.handled ? 'stop' : 'error',
+          }],
+          usage: {
+            prompt_tokens: lastUserTurn.length,
+            completion_tokens: text.length,
+            total_tokens: lastUserTurn.length + text.length,
+          },
+        });
+      }
+    }
 
     const ctx: ChatRunContext = { activeTaskRunId: undefined, activeRunSpecId: undefined, lastCheckpoint: null };
     let resultText = '';
@@ -68,9 +105,11 @@ export function registerOpenAICompatibleRoute(
         model: body.model ? undefined : config.agent.defaultModel,
         modelSettings: undefined,
         workspaceRoot: defaultWorkspaceRoot,
-        toolMode: 'project-write',
+        // WeChat channel: keep risk low — L2 shell was flooding deny alerts.
+        // Operator can still use CLI/Web with higher toolMode when needed.
+        toolMode: 'read-only',
         allowedTools: undefined,
-        maxLoops: body.max_tokens ? Math.min(body.max_tokens, config.agent.maxLoops) : undefined,
+        maxLoops: Math.min(8, body.max_tokens ? Math.min(body.max_tokens, config.agent.maxLoops) : 8),
         timeoutMs: undefined,
         toolRetry: undefined,
         mcpServers: undefined,

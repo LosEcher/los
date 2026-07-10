@@ -36,14 +36,28 @@ export default async function authMiddleware(
       if (opNormalized === config.auth.operatorToken) return;
     }
 
-    // Fallback: legacy auth token
-    const token = req.headers['x-los-auth-token'];
-    const normalized = Array.isArray(token) ? token[0] : token;
-
-    if (!config.auth.token || normalized !== config.auth.token) {
+    // Auth token: x-los-auth-token OR Authorization: Bearer <token>
+    // Bearer is required for OpenAI-compatible clients (WeClaw HTTP agent,
+    // curl -H "Authorization: Bearer …", etc.) which never set x-los-auth-token.
+    const provided = extractAuthToken(req);
+    if (!config.auth.token || provided !== config.auth.token) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
+}
+
+/** Resolve auth token from los header or standard Bearer scheme. */
+function extractAuthToken(req: FastifyRequest): string | undefined {
+  const headerToken = req.headers['x-los-auth-token'];
+  const fromHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
+  if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader.trim();
+
+  const authorization = req.headers.authorization;
+  const authValue = Array.isArray(authorization) ? authorization[0] : authorization;
+  if (typeof authValue !== 'string') return undefined;
+  const match = authValue.match(/^Bearer\s+(.+)$/i);
+  const bearer = match?.[1]?.trim();
+  return bearer || undefined;
 }
 
 function isPublicPath(url: string | undefined, method: string): boolean {

@@ -162,3 +162,53 @@ Evidence to report:
 
 Stop when the report either has no action with evidence, creates an owning
 follow-up item, or names the blocked verification surface.
+
+## Workflow: Session Closeout And Branch Governance
+
+Trigger at the **end of every support session** that edited the repo, ran a
+feature branch, opened a PR, or left runtime processes/smoke artifacts — not
+only when the operator says “commit.”
+
+Also trigger when the operator asks to close out, ship, clean branches, or
+“is there anything left for VCS.”
+
+Steps:
+
+1. **Inventory**
+   - `jj status` (working copy = change; no staging)
+   - `jj bookmark list` / open PRs (`gh pr list --head <bookmark>`)
+   - `git worktree list` / `jj workspace list` — unexpected extras?
+   - One-intent check: does the dirty set match a single `feat|fix|chore|docs`?
+2. **Decide (explicit judgment — answer yes/no for each)**
+   - Commit now? (bounded, reviewable, checks green or residual named)
+   - Push / open or update PR?
+   - Merge when green (self-merge loop only for operator-owned PRs)?
+   - Prune remote feature branch after MERGED?
+   - Delete/abandon local bookmark after absorbed into `main`?
+   - Leave parked work? → name residual risk + next command, do not invent “done”
+3. **Act only within consent bounds**
+   - Push/PR/merge/delete-remote require operator intent or standing closeout ask
+   - Prefer `jj describe` / `jj commit` / `jj git push --bookmark …`
+   - After merge: fetch, ff `main`, drop feature bookmark; forgejo mirror best-effort
+   - Branch delete rules: `docs/governance/branch-lifecycle.md` (absorption /
+     observation window; squash-merge caveats)
+4. **Evidence before “shipped”**
+   - PR MERGED + head on `origin/main`, or focused test/API row — not chat summary
+   - Smoke ops notes must mark `[E]`/`[I]`/`[U]`; never treat agent ledger prose as DB truth
+
+Evidence to report:
+
+- dirty paths / bookmark / PR number
+- decision table (commit / PR / merge / prune / park)
+- commands run
+- residual risk if anything left open
+
+Stop when: clean `main`-aligned workspace, or every leftover item has an owner
+and a next action.
+
+Related:
+
+- `AGENTS.md` → Session Closeout Gate
+- `docs/governance/branch-lifecycle.md`
+- `tools/branch-closeout.sh`, `tools/branch-prune-origin.sh`
+- skill `pr-self-merge` for operator-owned merge loop

@@ -137,13 +137,22 @@ channels.push(createWebChannel({
 // ── Delivery dispatcher ────────────────────────────────────────────
 
 async function deliverAlert(alert: OperatorAlert): Promise<void> {
+  console.log(
+    `[alert] deliver kind=${alert.kind ?? 'needs_decision'} type=${alert.type} session=${alert.sessionId} run=${alert.runSpecId ?? alert.taskRunId ?? '-'}`,
+  );
+
   // 1. Try WeClaw first (bidirectional WeChat)
   if (weclawAvailable && WECLAW_DEFAULT_TO) {
     const text = formatAlertForWeclaw(alert);
     const result = await weclawSend({ text }, weclawConfig);
-    if (result.ok) return;
+    if (result.ok) {
+      console.log(`[weclaw] sent ok session=${alert.sessionId}`);
+      return;
+    }
     console.error(`[weclaw] send failed: ${result.error}`);
     // Fall through to other channels
+  } else if (!WECLAW_DEFAULT_TO) {
+    console.warn('[weclaw] skip send: WECLAW_DEFAULT_TO unset');
   }
 
   // 2. Fallback: WxPusher + Web channels
@@ -155,6 +164,7 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
         callbackUrl: CALLBACK_PORT > 0 ? `http://localhost:${CALLBACK_PORT}` : '',
       });
       await channel.send(message);
+      console.log(`[${channel.kind}] sent ok session=${alert.sessionId}`);
     } catch (err) {
       console.error(`[${channel.kind}] send failed: ${(err as Error).message}`);
     }
@@ -162,33 +172,49 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
 }
 
 function formatAlertForWeclaw(alert: OperatorAlert): string {
+  const kind = alert.kind ?? 'needs_decision';
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
-  let text = `${icon} Agent needs decision`;
+  const sid = alert.sessionId;
+  const runId = alert.runSpecId ?? alert.taskRunId;
 
-  if (alert.toolName) text += `\nTool: ${alert.toolName}`;
-  if (alert.reason) text += `\nReason: ${alert.reason}`;
+  // tool.denied is already terminal — do not ask operator to approve/deny again.
+  if (kind === 'already_denied') {
+    const lines = [
+      `${icon} 工具已拒绝（无需操作）`,
+      alert.toolName ? `工具: ${alert.toolName}` : '',
+      alert.reason ? `原因: ${alert.reason}` : '',
+      '',
+      `Session: ${sid}`,
+      '说明: 策略已自动拒绝，不会执行。',
+      '查询: ',
+      `#status ${sid}`,
+    ].filter(Boolean);
+    return lines.join('\n');
+  }
 
+  const lines: string[] = [`${icon} 需要你确认`];
+  if (alert.toolName) lines.push(`工具: ${alert.toolName}`);
+  if (alert.reason) lines.push(`原因: ${alert.reason}`);
   if (alert.warnings?.length) {
-    for (const w of alert.warnings.slice(0, 3)) {
-      text += `\n⚠ ${w}`;
-    }
+    for (const w of alert.warnings.slice(0, 3)) lines.push(`注意: ${w}`);
   }
   if (alert.flaggedFiles?.length) {
-    text += `\n📁 ${alert.flaggedFiles.slice(0, 3).join(', ')}`;
+    lines.push(`文件: ${alert.flaggedFiles.slice(0, 3).join(', ')}`);
   }
-
-  // Action commands for WeClaw up-call
-  text += `\n\nSession: ${alert.sessionId.slice(0, 8)}...`;
-  text += `\nReply #approve ${alert.sessionId.slice(0, 8)}`;
-  text += ` or #deny ${alert.sessionId.slice(0, 8)}`;
-  const runHint = (alert.runSpecId ?? alert.taskRunId)?.slice(0, 16);
-  if (runHint) {
-    text += `\nRunContract: #approve-phase ${runHint} | #verify-run ${runHint}`;
+  lines.push('');
+  lines.push(`Session: ${sid}`);
+  if (runId) lines.push(`Run: ${runId}`);
+  lines.push('');
+  if (runId) {
+    lines.push('【计划审批】每次只发一行（不要连粘）:');
+    lines.push(`#approve-phase ${runId}`);
+    lines.push(`#verify-run ${runId}`);
+    lines.push('');
+    lines.push('说明: #approve-phase 只批计划；#verify-run 跑 requiredChecks（空则空跑 succeeded）。');
   }
-  text += ` or #escalate ${alert.sessionId.slice(0, 8)}`;
-  text += ` or #status ${alert.sessionId.slice(0, 8)}`;
-
-  return text;
+  lines.push('【会话级】每次只发一行:');
+  lines.push(`#status ${sid}`);
+  return lines.join('\n');
 }
 
 // ── SSE event consumer ─────────────────────────────────────────────
@@ -275,6 +301,7 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       parsed.type === 'session.error';
 
     if (!isOperatorAttention) return;
+    console.log(`[events] attention type=${parsed.type} session=${parsed.sessionId ?? ''}`);
 
     const sessionId = parsed.sessionId ?? '';
     const dedupKey = `${sessionId}:${parsed.type}`;
@@ -301,13 +328,28 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       || (typeof payload.task_run_id === 'string' && payload.task_run_id)
       || undefined;
 
+    const isDenied = parsed.type === 'tool.denied' || payload.allowed === false;
+    const kind = isDenied
+      ? 'already_denied' as const
+      : (parsed.type === 'run.operator_attention_required' || parsed.type === 'operator_attention' || parsed.type === 'session.blocked')
+        ? 'needs_decision' as const
+        : 'info' as const;
+
+    // Dedup tool.denied more aggressively (same session+tool within window)
+    const toolName = parsed.toolName ?? payload.tool_name;
+    const denyKey = isDenied ? `${sessionId}:denied:${toolName ?? 'tool'}` : dedupKey;
+    if (isDenied && recentAlerts.get(denyKey) && Date.now() - recentAlerts.get(denyKey)! < ALERT_DEDUP_MS) return;
+    if (isDenied) recentAlerts.set(denyKey, Date.now());
+
     const alert: OperatorAlert = {
       sessionId,
       type: parsed.type,
-      toolName: parsed.toolName ?? payload.tool_name,
+      toolName,
       reason: payload.reason ?? payload.error ?? parsed.type,
       severity: parsed.type === 'session.error' || payload.knownFailure ? 'critical' :
+                isDenied ? 'info' :
                 parsed.type === 'tool.warned' ? 'warning' : 'info',
+      kind,
       callId: payload.callId ?? payload.call_id,
       warnings: payload.warnings,
       flaggedFiles: payload.flaggedFiles,

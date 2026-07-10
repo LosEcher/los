@@ -181,6 +181,26 @@ For any branch touching more than 3 files:
 - [ ] Any new seed jobs? → verify autoFix is executable, not detection-only
 - [ ] `pnpm gate` passes locally
 
+### Session Closeout Gate (every support end)
+
+Before ending a session that wrote code or opened a feature branch, **judge**
+whether VCS/branch governance is needed. Do not skip just because the runtime
+smoke “felt done.”
+
+1. **Dirty work?** `jj status` / working-copy changes → commit (one intent),
+   open/update PR, or explicitly park with a named residual risk.
+2. **Open PR / feature bookmark?** If intent is finished → push, merge when
+   green, then delete remote feature branch (see
+   `docs/governance/branch-lifecycle.md`).
+3. **Stale locals/remotes/worktrees?** After merge, prune absorbed
+   `feat/*`/`fix/*` bookmarks; do not leave parallel locals that recreate
+   “what shipped?” confusion. Prefer single `projects/los` worktree.
+4. **Evidence, not chat ledger** — do not mark run/todo complete from agent
+   prose alone; prefer API/DB/`session_events` / focused tests.
+
+Playbook: `docs/governance/branch-lifecycle.md`.  
+Operational checklist: `SKILL.md` → Workflow: Session Closeout And Branch Governance.
+
 ## Change Rules
 
 - Keep each commit scoped to one bounded context

@@ -278,7 +278,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   });
 
   registerChatRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId, chatLimiter.hook, messageRouter);
-  registerOpenAICompatibleRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId);
+  registerOpenAICompatibleRoute(app, config, DEFAULT_WORKSPACE_ROOT, service.serviceId, messageRouter);
 
   // ── Feature routes ─────────────────────────────────
   registerMemoryRoutes(app);

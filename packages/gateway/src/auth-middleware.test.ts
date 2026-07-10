@@ -44,6 +44,21 @@ test('auth middleware requires the configured token outside public paths', async
     });
     assert.equal(valid.statusCode, 200);
 
+    // WeClaw / OpenAI-compatible clients send Authorization: Bearer
+    const bearer = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: { authorization: 'Bearer test-token' },
+    });
+    assert.equal(bearer.statusCode, 200);
+
+    const badBearer = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: { authorization: 'Bearer wrong-token' },
+    });
+    assert.equal(badBearer.statusCode, 401);
+
     const health = await app.inject({ method: 'GET', url: '/health' });
     assert.equal(health.statusCode, 200);
   } finally {

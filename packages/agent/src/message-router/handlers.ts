@@ -4,12 +4,8 @@
  * handlers-run-contract.ts. ChatHandler: HTTP → SSE; bots → onChatIntent.
  */
 
-import { loadSession } from '@los/agent/session';
-import { getSessionObservability } from '@los/agent/session-events';
-import { recordOperatorSteering, recordOperatorFollowup } from '@los/agent/operator-control';
 import { listTodos, loadTodo, createTodo } from '@los/agent/todos';
 import {
-  spawnClaudeCode,
   runClaudeCodeWithBridge,
   claudeCodeSupportsOtel,
   spawnCodex,
@@ -26,6 +22,7 @@ import type {
   ResolvedIntent,
 } from './types.js';
 import { createRunContractHandler } from './handlers-run-contract.js';
+import { createSteeringHandler, createStatusHandler } from './handlers-steering-status.js';
 
 // ── Dependencies (allows test injection) ────────────────────────
 
@@ -41,73 +38,6 @@ export interface HandlerDependencies {
    * If absent, `#run`/`#dispatch` replies with a not-configured message.
    */
   dispatchTodo?: (todoId: string, opts?: { force?: boolean }) => Promise<{ ok: boolean; status: number; body: any }>;
-}
-
-// ── Steering handler ────────────────────────────────────────────
-
-function createSteeringHandler(): HandlerDescriptor {
-  return {
-    name: 'steering',
-    priority: 30,
-    match: (intent: ResolvedIntent) => intent.type === 'steering',
-    handle: async (ctx) => {
-      const i = ctx.intent;
-      if (i.type !== 'steering') return { handled: false };
-      try {
-        await recordOperatorSteering({
-          sessionId: i.sessionId,
-          instruction: i.instruction,
-          turnBoundary: i.turnBoundary ?? 'immediate',
-          actor: ctx.inbound.channelId,
-          reason: `MessageRouter steering via ${ctx.inbound.sourceKind}`,
-        });
-        const label = i.instruction === 'approve' ? '✅ Approved'
-          : i.instruction === 'deny' ? '❌ Denied'
-          : '↗ Escalated';
-        const text = `${label} — session ${i.sessionId.slice(0, 8)}…`;
-        await ctx.reply(text);
-        return { handled: true, text, sessionId: i.sessionId };
-      } catch (err) {
-        await ctx.reply(`Steering failed: ${(err as Error).message}`);
-        return { handled: true, error: (err as Error).message };
-      }
-    },
-  };
-}
-
-// ── Status handler ──────────────────────────────────────────────
-
-function createStatusHandler(): HandlerDescriptor {
-  return {
-    name: 'status',
-    priority: 30,
-    match: (intent: ResolvedIntent) => intent.type === 'status',
-    handle: async (ctx) => {
-      const i = ctx.intent;
-      if (i.type !== 'status') return { handled: false };
-      try {
-        const session = await loadSession(i.sessionId);
-        if (!session) {
-          const text = `No session found for "${i.sessionId.slice(0, 8)}…"`;
-          await ctx.reply(text);
-          return { handled: true, text };
-        }
-        const obs = await getSessionObservability(i.sessionId);
-        const statusText = [
-          `📊 Session ${i.sessionId.slice(0, 8)}…`,
-          `Events: ${obs.eventCount}`,
-          `Turns: ${obs.turnCount}`,
-          `Tokens: in=${obs.totalUsage.promptTokens} out=${obs.totalUsage.completionTokens} (cache: ${obs.totalUsage.cacheHitTokens})`,
-          `First: ${obs.firstEventAt ?? 'unknown'} | Last: ${obs.lastEventAt ?? 'unknown'}`,
-        ].join('\n');
-        await ctx.reply(statusText);
-        return { handled: true, text: statusText, sessionId: i.sessionId };
-      } catch (err) {
-        await ctx.reply(`Status query failed: ${(err as Error).message}`);
-        return { handled: true, error: (err as Error).message };
-      }
-    },
-  };
 }
 
 // ── Todo handler ────────────────────────────────────────────────

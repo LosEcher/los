@@ -18,12 +18,19 @@ import {
   type ChannelKind,
 } from '../channel/types.js';
 
+export type OperatorAlertKind =
+  | 'needs_decision'   // operator must act (attention / blocked)
+  | 'already_denied'   // tool already denied — informational only
+  | 'info';            // other notices
+
 export interface OperatorAlert {
   sessionId: string;
   type: string;
   toolName?: string;
   reason?: string;
   severity: 'critical' | 'warning' | 'info';
+  /** How the bot should phrase the alert (needs action vs FYI). */
+  kind?: OperatorAlertKind;
   callId?: string;
   warnings?: string[];
   flaggedFiles?: string[];
@@ -55,10 +62,16 @@ export function buildAlertMessage(
 
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
   const tool = alert.toolName ? ` \`${alert.toolName}\`` : '';
+  const kind = alert.kind ?? 'needs_decision';
 
-  let text = `${icon} Agent needs decision${tool}`;
+  let text = kind === 'already_denied'
+    ? `${icon} 工具已拒绝（无需操作）${tool}`
+    : `${icon} 需要你确认${tool}`;
   if (alert.reason) {
     text += `\n${alert.reason}`;
+  }
+  if (kind === 'already_denied') {
+    text += '\n策略已自动拒绝，不会执行。';
   }
   if (alert.warnings?.length) {
     text += '\n';
@@ -77,12 +90,14 @@ export function buildAlertMessage(
     fileName: m.fileName,
   }));
 
-  // Build action buttons
-  const actions: MessageAction[] = [
-    { text: '✅ Approve', value: 'approve', type: 'primary' },
-    { text: '❌ Deny', value: 'deny', type: 'danger' },
-    { text: '↗ Escalate', value: 'escalate', type: 'default' },
-  ];
+  // No approve/deny buttons when already denied
+  const actions: MessageAction[] = kind === 'already_denied'
+    ? [{ text: '📊 Status', value: 'status', type: 'default' }]
+    : [
+        { text: '✅ Approve', value: 'approve', type: 'primary' },
+        { text: '❌ Deny', value: 'deny', type: 'danger' },
+        { text: '↗ Escalate', value: 'escalate', type: 'default' },
+      ];
 
   return {
     id: `alert-${randomUUID()}`,
