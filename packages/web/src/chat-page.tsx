@@ -34,6 +34,7 @@ import { mergeLiveToolCalls } from './hooks/useLiveToolCalls.js';
 import { useChatRun } from './hooks/useChatRun.js';
 import {
   ApprovalCard,
+  OperatorSteeringBar,
   ContextNotification,
   CancelledBanner,
   AbortConfirmation,
@@ -290,9 +291,14 @@ export function ChatPage({
             </div>
           )}
           {run.cancelled && <CancelledBanner />}
+          {sessionId ? (
+            <OperatorSteeringBar sessionId={sessionId} disabled={!run.running && run.approvalEvents.length === 0} />
+          ) : null}
           {run.approvalEvents.length > 0 && (
             <div className="approval-strip">
-              {run.approvalEvents.map(ae => <ApprovalCard key={ae.id} event={ae} />)}
+              {run.approvalEvents.map(ae => (
+                <ApprovalCard key={ae.id} event={ae} sessionId={sessionId} />
+              ))}
             </div>
           )}
           {run.rows.length === 0 ? <EmptyText text="No stream events yet." /> : run.rows.map(row => (

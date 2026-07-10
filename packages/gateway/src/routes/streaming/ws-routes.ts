@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { ensureSessionEventStore, listSessionEventsSince } from '@los/agent/session-events';
+import { recordOperatorSteering } from '@los/agent/operator-control';
 import {
   acquireStreamLease,
   releaseStreamLease,
@@ -52,11 +53,10 @@ export function registerWsRoutes(app: FastifyInstance, gatewayServiceId: string)
    *
    * Client → Server messages:
    *   { type: "ping" }
-   *   { type: "pong" } — heartbeat acknowledgment
+   *   { type: "steering", instruction, reason?, turnBoundary? }
+   *   { type: "cancel", reason? } — maps to deny steering
    *
-   * Server → Client messages:
-   *   { event: "session.resumed" | "session.event" | "session.live" |
-   *           "session.completed" | "error", data: {...}, id: number }
+   * Server → Client: session.* events, ping, steering.ack, error
    */
   app.get('/sessions/:id/stream/ws', { websocket: true }, async (socket, req) => {
     const { id } = req.params as { id: string };
@@ -174,15 +174,50 @@ export function registerWsRoutes(app: FastifyInstance, gatewayServiceId: string)
 
     // ── Client messages ──
     socket.on('message', (raw) => {
-      try {
-        const msg = JSON.parse(raw.toString());
-        if (msg.type === 'ping') {
-          wsSend(socket, 'pong', { ts: Date.now() });
+      void (async () => {
+        try {
+          const msg = JSON.parse(raw.toString()) as Record<string, unknown>;
+          if (msg.type === 'ping') {
+            wsSend(socket, 'pong', { ts: Date.now() });
+            return;
+          }
+
+          if (msg.type === 'steering' || msg.type === 'cancel') {
+            const instruction = msg.type === 'cancel'
+              ? 'deny'
+              : typeof msg.instruction === 'string'
+                ? msg.instruction
+                : '';
+            if (!instruction) {
+              wsSend(socket, 'error', { error: 'steering_instruction_required' });
+              return;
+            }
+            const turnBoundary = msg.turnBoundary === 'next_turn' ? 'next_turn' : 'immediate';
+            const reason = typeof msg.reason === 'string' ? msg.reason : `ws ${msg.type}`;
+            try {
+              const event = await recordOperatorSteering({
+                sessionId: id,
+                instruction,
+                turnBoundary,
+                reason,
+                actor: 'ws-client',
+              });
+              wsSend(socket, 'steering.ack', {
+                ok: true,
+                type: msg.type,
+                instruction,
+                eventId: event.id,
+                eventType: event.type,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              wsSend(socket, 'error', { error: 'steering_failed', message });
+            }
+          }
+        } catch {
+          // Ignore malformed messages
         }
-        // Operator steering / cancellation can be added here
-      } catch {
-        // Ignore malformed messages
-      }
+      })();
     });
 
     socket.on('close', () => {
