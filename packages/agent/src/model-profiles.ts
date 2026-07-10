@@ -17,6 +17,8 @@ export interface ModelPricing {
   completionTokenCostPer1M: number;
   /** USD per 1M cache-hit tokens (typically cheaper than prompt). */
   cacheHitTokenCostPer1M: number;
+  /** Whether promptTokens already includes cache-hit tokens. */
+  promptTokensIncludeCacheHits?: boolean;
 }
 
 export interface ModelCapabilityProfile {
@@ -85,6 +87,8 @@ export interface ModelProfile {
   knownFailurePatterns: string[];
   /** Optional pricing data for cost estimation. When absent, cost is not calculated. */
   pricing?: ModelPricing;
+  /** Model-specific pricing overrides resolved after the effective model is selected. */
+  pricingByModel?: Record<string, ModelPricing>;
   /** Transport hints — what transport protocols the provider supports. */
   transportHints?: TransportHint[];
   /** Normalized capability read model for scheduler and compatibility harnesses. */
@@ -135,6 +139,20 @@ const DEFAULT_RETRY_POLICY = {
   retryableStatusCodes: [408, 409, 429, 500, 502, 503, 504],
 };
 
+const DEEPSEEK_V4_FLASH_PRICING: ModelPricing = {
+  promptTokenCostPer1M: 0.14,
+  completionTokenCostPer1M: 0.28,
+  cacheHitTokenCostPer1M: 0.0028,
+  promptTokensIncludeCacheHits: true,
+};
+
+const DEEPSEEK_V4_PRO_PRICING: ModelPricing = {
+  promptTokenCostPer1M: 0.435,
+  completionTokenCostPer1M: 0.87,
+  cacheHitTokenCostPer1M: 0.003625,
+  promptTokensIncludeCacheHits: true,
+};
+
 export const MODEL_PROFILES: Record<string, ModelProfile> = {
   deepseek: {
     provider: 'deepseek',
@@ -154,7 +172,13 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     usageMapping: OPENAI_USAGE_MAPPING,
     retryPolicy: DEFAULT_RETRY_POLICY,
     knownFailurePatterns: ['malformed_tool_call_arguments'],
-    pricing: { promptTokenCostPer1M: 1.10, completionTokenCostPer1M: 4.40, cacheHitTokenCostPer1M: 0.14 },
+    pricing: DEEPSEEK_V4_FLASH_PRICING,
+    pricingByModel: {
+      'deepseek-v4-flash': DEEPSEEK_V4_FLASH_PRICING,
+      'deepseek-v4-pro': DEEPSEEK_V4_PRO_PRICING,
+      'deepseek-chat': DEEPSEEK_V4_FLASH_PRICING,
+      'deepseek-reasoner': DEEPSEEK_V4_FLASH_PRICING,
+    },
     transportHints: ['sse'],
   },
   openai: {
@@ -272,8 +296,12 @@ export function resolveModelProfile(
     model: options.model ?? base.model ?? options.defaultModel ?? fallback.defaultModel,
     apiShape: options.apiShape ?? base.apiShape,
   };
+  const pricing = base.pricingByModel
+    ? base.pricingByModel[resolved.model]
+    : base.pricing;
   return {
     ...resolved,
+    pricing,
     capabilities: resolveModelCapabilityProfile(resolved),
   };
 }
@@ -403,11 +431,16 @@ export function calculateCost(
   usage: { promptTokens: number; completionTokens: number; cacheHitTokens?: number; cacheMissTokens?: number },
   pricing: ModelPricing,
 ): CostEstimate {
-  const promptCost = (usage.promptTokens / 1_000_000) * pricing.promptTokenCostPer1M;
+  const cacheHitTokens = usage.cacheHitTokens ?? 0;
+  const cacheMissTokens = usage.cacheMissTokens ?? 0;
+  const hasCacheBreakdown = cacheHitTokens > 0 || cacheMissTokens > 0;
+  const promptTokens = pricing.promptTokensIncludeCacheHits
+    ? Math.max(0, hasCacheBreakdown ? cacheMissTokens : usage.promptTokens - cacheHitTokens)
+    : usage.promptTokens;
+  const promptCost = (promptTokens / 1_000_000) * pricing.promptTokenCostPer1M;
   const completionCost = (usage.completionTokens / 1_000_000) * pricing.completionTokenCostPer1M;
-  const cacheHitCost = ((usage.cacheHitTokens ?? 0) / 1_000_000) * pricing.cacheHitTokenCostPer1M;
-  // Cache-miss tokens are billed at regular prompt rate and are already included in promptTokens
-  const cacheSavings = ((usage.cacheHitTokens ?? 0) / 1_000_000) * (pricing.promptTokenCostPer1M - pricing.cacheHitTokenCostPer1M);
+  const cacheHitCost = (cacheHitTokens / 1_000_000) * pricing.cacheHitTokenCostPer1M;
+  const cacheSavings = (cacheHitTokens / 1_000_000) * (pricing.promptTokenCostPer1M - pricing.cacheHitTokenCostPer1M);
   return {
     totalCostUsd: promptCost + completionCost + cacheHitCost,
     promptCostUsd: promptCost,

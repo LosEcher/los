@@ -139,6 +139,35 @@ test('calculateCost computes per-component and total cost', () => {
   assert.ok(Math.abs(cost.totalCostUsd - (1.10 + 2.20 + 0.028)) < 0.001);
 });
 
+test('calculateCost does not double bill cache hits included in prompt tokens', () => {
+  const cost = calculateCost(
+    { promptTokens: 1_000_000, completionTokens: 500_000, cacheHitTokens: 200_000, cacheMissTokens: 800_000 },
+    {
+      promptTokenCostPer1M: 0.14,
+      completionTokenCostPer1M: 0.28,
+      cacheHitTokenCostPer1M: 0.0028,
+      promptTokensIncludeCacheHits: true,
+    },
+  );
+  assert.ok(Math.abs(cost.promptCostUsd - 0.112) < 0.0001);
+  assert.ok(Math.abs(cost.cacheHitCostUsd - 0.00056) < 0.0001);
+  assert.ok(Math.abs(cost.totalCostUsd - 0.25256) < 0.0001);
+});
+
+test('calculateCost falls back to prompt tokens when cache breakdown is unavailable', () => {
+  const cost = calculateCost(
+    { promptTokens: 1_000_000, completionTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 },
+    {
+      promptTokenCostPer1M: 0.14,
+      completionTokenCostPer1M: 0.28,
+      cacheHitTokenCostPer1M: 0.0028,
+      promptTokensIncludeCacheHits: true,
+    },
+  );
+  assert.equal(cost.promptCostUsd, 0.14);
+  assert.equal(cost.totalCostUsd, 0.14);
+});
+
 test('calculateCost handles zero usage', () => {
   const cost = calculateCost(
     { promptTokens: 0, completionTokens: 0 },
@@ -165,6 +194,26 @@ test('estimateCost returns cost for priced profiles', () => {
   assert.ok(cost);
   assert.ok(cost.totalCostUsd > 0);
   assert.ok(cost.cacheSavingsUsd > 0);
+});
+
+test('DeepSeek pricing resolves by effective model', () => {
+  const flash = resolveModelProfile('deepseek', { model: 'deepseek-v4-flash' });
+  const pro = resolveModelProfile('deepseek', { model: 'deepseek-v4-pro' });
+  const unknown = resolveModelProfile('deepseek', { model: 'deepseek-v5-preview' });
+
+  assert.deepEqual(flash.pricing, {
+    promptTokenCostPer1M: 0.14,
+    completionTokenCostPer1M: 0.28,
+    cacheHitTokenCostPer1M: 0.0028,
+    promptTokensIncludeCacheHits: true,
+  });
+  assert.deepEqual(pro.pricing, {
+    promptTokenCostPer1M: 0.435,
+    completionTokenCostPer1M: 0.87,
+    cacheHitTokenCostPer1M: 0.003625,
+    promptTokensIncludeCacheHits: true,
+  });
+  assert.equal(unknown.pricing, undefined);
 });
 
 test('openai and codex have pricing data', () => {
