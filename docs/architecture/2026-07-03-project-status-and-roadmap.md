@@ -240,7 +240,7 @@ AST（los-ast）+ KG（codebase-memory）驱动的 **detect → TODO → fix(Cla
 - [ ] WebSocket 实现 operator steering（`ws-routes.ts:182` 占位）
 
 **P1 — 补 RunContract IM 命令**：
-- [ ] `resolveIntent` 新增：`#approve-phase <runId>` `#revise-plan <runId>` `#verify-run <runId>`
+- [x] `resolveIntent` 新增：`#approve-phase <runId>` `#revise-plan <runId>` `#verify-run <runId>`（2026-07-10 + handlers-run-contract）
 - [ ] `OperatorAlert` 接口增加 `runContract` 字段（phase, plan steps, blockers, verification status）
 - [ ] Telegram inline button 增加 "Approve Phase" / "Revise Plan" 按钮
 - [ ] SSE `operator_attention` 事件增加 RunContract 阶段变更类型

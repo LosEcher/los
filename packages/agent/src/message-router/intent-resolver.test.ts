@@ -8,6 +8,52 @@ import { resolveIntent } from './intent-resolver.js';
 
 describe('intent-resolver commands', () => {
   // ── #approve ──
+  // ── RunContract phase commands ──
+  it('resolves #approve-phase with run id and optional reason', () => {
+    const r = resolveIntent('#approve-phase run-abc12345 looks good');
+    assert.equal(r.type, 'run_contract');
+    if (r.type === 'run_contract') {
+      assert.equal(r.action, 'approve_phase');
+      assert.equal(r.runId, 'run-abc12345');
+      assert.equal(r.reason, 'looks good');
+    }
+  });
+
+  it('resolves #approve-phase without reason', () => {
+    const r = resolveIntent('#approve-phase run-xyz-9999');
+    assert.equal(r.type, 'run_contract');
+    if (r.type === 'run_contract') {
+      assert.equal(r.action, 'approve_phase');
+      assert.equal(r.runId, 'run-xyz-9999');
+      assert.equal(r.reason, undefined);
+    }
+  });
+
+  it('does not treat #approve-phase as session steering #approve', () => {
+    const r = resolveIntent('#approve-phase run-not-session');
+    assert.notEqual(r.type, 'steering');
+    assert.equal(r.type, 'run_contract');
+  });
+
+  it('resolves #revise-plan with reason', () => {
+    const r = resolveIntent('#revise-plan run-plan-1 add tests');
+    assert.equal(r.type, 'run_contract');
+    if (r.type === 'run_contract') {
+      assert.equal(r.action, 'revise_plan');
+      assert.equal(r.runId, 'run-plan-1');
+      assert.equal(r.reason, 'add tests');
+    }
+  });
+
+  it('resolves #verify-run', () => {
+    const r = resolveIntent('#verify-run run-verify-1');
+    assert.equal(r.type, 'run_contract');
+    if (r.type === 'run_contract') {
+      assert.equal(r.action, 'verify_run');
+      assert.equal(r.runId, 'run-verify-1');
+    }
+  });
+
   it('resolves #approve with session ID', () => {
     const r = resolveIntent('#approve session-abc12345');
     assert.equal(r.type, 'steering');

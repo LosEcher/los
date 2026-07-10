@@ -60,6 +60,8 @@ export type ResolvedIntent =
   | { type: 'status';     sessionId: string }
   | { type: 'todo';       action: 'list' | 'create' | 'show' | 'dispatch'; todoId?: string; title?: string; force?: boolean }
   | { type: 'governance'; action: 'list' | 'sweep' | 'show'; jobType?: string }
+  /** RunContract phase ops (approve / revise / verify) — distinct from session steering. */
+  | { type: 'run_contract'; action: 'approve_phase' | 'revise_plan' | 'verify_run'; runId: string; reason?: string }
   | { type: 'unknown';    text: string };
 
 // ── Handler pattern ──────────────────────────────────────────────

@@ -6,17 +6,20 @@
  *   Phase 2: NL heuristics (confidence-scored fallback)
  *
  * Commands:
- *   #approve <sessionId>    → steering (approve)
- *   #deny <sessionId>       → steering (deny)
- *   #escalate <sessionId>   → steering (escalate)
- *   #status <sessionId>     → status
- *   #task                   → todo: list
- *   #task <id>              → todo: show
- *   #task new <title>       → todo: create
- *   #run <id>               → todo: dispatch
- *   #run <id> force         → todo: dispatch (override ready gate)
- *   #claude <prompt>        → runtime: claude-code
- *   #codex <prompt>         → runtime: codex
+ *   #approve <sessionId>         → steering (approve)
+ *   #deny <sessionId>            → steering (deny)
+ *   #escalate <sessionId>        → steering (escalate)
+ *   #approve-phase <runId> [reason] → run_contract: approve_phase
+ *   #revise-plan <runId> [reason]   → run_contract: revise_plan
+ *   #verify-run <runId>             → run_contract: verify_run
+ *   #status <sessionId>          → status
+ *   #task                        → todo: list
+ *   #task <id>                   → todo: show
+ *   #task new <title>            → todo: create
+ *   #run <id>                    → todo: dispatch
+ *   #run <id> force              → todo: dispatch (override ready gate)
+ *   #claude <prompt>             → runtime: claude-code
+ *   #codex <prompt>              → runtime: codex
  */
 
 import type { ResolvedIntent } from './types.js';
@@ -30,6 +33,34 @@ const COMMANDS: Array<{
   pattern: RegExp;
   build: (match: RegExpMatchArray) => ResolvedIntent;
 }> = [
+  // RunContract phase commands MUST come before #approve (session steering)
+  // so "#approve-phase …" is not swallowed by the shorter prefix.
+  {
+    pattern: /^#approve-phase\s+(?<id>[\w-]{4,64})(?:\s+(?<reason>.+))?\s*$/i,
+    build: (m) => ({
+      type: 'run_contract',
+      action: 'approve_phase',
+      runId: m.groups!.id!,
+      reason: m.groups!.reason?.trim() || undefined,
+    }),
+  },
+  {
+    pattern: /^#revise-plan\s+(?<id>[\w-]{4,64})(?:\s+(?<reason>.+))?\s*$/i,
+    build: (m) => ({
+      type: 'run_contract',
+      action: 'revise_plan',
+      runId: m.groups!.id!,
+      reason: m.groups!.reason?.trim() || undefined,
+    }),
+  },
+  {
+    pattern: /^#verify-run\s+(?<id>[\w-]{4,64})\s*$/i,
+    build: (m) => ({
+      type: 'run_contract',
+      action: 'verify_run',
+      runId: m.groups!.id!,
+    }),
+  },
   // #approve <sessionId>
   {
     pattern: /^#approve\s+(?<sid>[\w-]{8,64})\s*$/i,

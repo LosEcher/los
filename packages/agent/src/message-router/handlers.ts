@@ -1,15 +1,7 @@
 /**
- * @los/agent/message-router/handlers — Built-in intent handlers.
- *
- * Five handlers registered by priority:
- *   SteeringHandler (30)  — approve/deny/escalate → recordOperatorSteering
- *   StatusHandler   (30)  — query session state + observability
- *   TodoHandler     (40)  — list/show/create/dispatch todos
- *   RuntimeHandler  (50)  — spawn Claude Code / Codex CLI
- *   ChatHandler     (100) — natural language → fallback to chat
- *
- * ChatHandler is a thin adapter — for HTTP sources it delegates to the
- * existing SSE streaming path; for bot sources it invokes runChat() directly.
+ * Built-in intent handlers. Priority: run_contract(25), steering/status(30),
+ * todo(40), governance(45), runtime(50), chat(100). RunContract is in
+ * handlers-run-contract.ts. ChatHandler: HTTP → SSE; bots → onChatIntent.
  */
 
 import { loadSession } from '@los/agent/session';
@@ -33,6 +25,7 @@ import type {
   HandlerResult,
   ResolvedIntent,
 } from './types.js';
+import { createRunContractHandler } from './handlers-run-contract.js';
 
 // ── Dependencies (allows test injection) ────────────────────────
 
@@ -390,6 +383,7 @@ function createChatHandler(deps: HandlerDependencies): HandlerDescriptor {
 
 export function createBuiltinHandlers(deps: HandlerDependencies): HandlerDescriptor[] {
   return [
+    createRunContractHandler(),
     createSteeringHandler(),
     createStatusHandler(),
     createTodoHandler(deps),

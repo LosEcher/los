@@ -181,6 +181,10 @@ function formatAlertForWeclaw(alert: OperatorAlert): string {
   text += `\n\nSession: ${alert.sessionId.slice(0, 8)}...`;
   text += `\nReply #approve ${alert.sessionId.slice(0, 8)}`;
   text += ` or #deny ${alert.sessionId.slice(0, 8)}`;
+  const runHint = (alert.runSpecId ?? alert.taskRunId)?.slice(0, 16);
+  if (runHint) {
+    text += `\nRunContract: #approve-phase ${runHint} | #verify-run ${runHint}`;
+  }
   text += ` or #escalate ${alert.sessionId.slice(0, 8)}`;
   text += ` or #status ${alert.sessionId.slice(0, 8)}`;
 

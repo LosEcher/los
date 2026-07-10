@@ -302,9 +302,38 @@ test('spawn_agent child inherits parent run contract metadata', async () => {
   assert.equal(seenConfig.maxLoops, 12);
   assert.equal(seenConfig.runContractMetadata.runContract.phase, 'executing');
   assert.deepEqual(seenConfig.runContractMetadata.runContract.editableSurfaces, ['packages/agent']);
+  assert.deepEqual(seenConfig.runContractMetadata.runContract.requiredChecks, ['pnpm --filter @los/agent test']);
   assert.equal(seenConfig.allowedTools.includes('spawn_agent'), false);
   assert.equal(seenConfig.allowedTools.includes('run_shell'), false);
   assert.equal(JSON.parse(result.content).childSessionId.startsWith('parent-session:child:'), true);
+
+  // Mutation isolation: child clone must not widen the parent object (AP6)
+  const parentMeta = {
+    runContract: {
+      mode: 'execution' as const,
+      phase: 'executing' as const,
+      editableSurfaces: ['packages/agent'],
+      requiredChecks: ['pnpm --filter @los/agent test'],
+    },
+  };
+  let childConfig: any;
+  const isolator = createSpawnAgentRunner({
+    sessionId: 'parent-session',
+    provider: 'parent-provider',
+    model: 'parent-model',
+    workspaceRoot: '/tmp/los-parent-workspace',
+    runContractMetadata: parentMeta,
+    runAgent: async (_prompt, config) => {
+      childConfig = config;
+      return { text: 'ok', turns: [], loopCount: 1, totalTokens: { prompt: 0, completion: 0 }, messages: [] };
+    },
+  });
+  await isolator({ prompt: 'isolation check' });
+  assert.notEqual(childConfig.runContractMetadata, parentMeta);
+  childConfig.runContractMetadata.runContract.requiredChecks.push('evil');
+  childConfig.runContractMetadata.runContract.phase = 'planning';
+  assert.deepEqual(parentMeta.runContract.requiredChecks, ['pnpm --filter @los/agent test']);
+  assert.equal(parentMeta.runContract.phase, 'executing');
 });
 
 test('tool capability timeout is enforced during execution', async () => {
