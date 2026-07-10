@@ -1,0 +1,69 @@
+contract: los.coordinator-context-policy
+version: 0.1.0
+status: draft
+owner: packages/gateway
+description: >
+  Bounded evidence describing which approved context sources were selected for
+  a coordinated chat run before worker execution.
+type: object
+decision:
+  required:
+    - runSpecId
+    - ownerRepo
+    - workspaceRoot
+    - baseSystemPromptSource
+    - identity
+    - memory
+    - codeGraph
+  properties:
+    runSpecId:
+      type: string
+    ownerRepo:
+      type: string
+    workspaceRoot:
+      type: string
+    baseSystemPromptSource:
+      type: string
+      enum: [request, config, default]
+    identity:
+      properties:
+        name: string
+        level:
+          type: string
+          enum: [none, minimal, standard, full]
+        injected: boolean
+    memory:
+      properties:
+        status:
+          type: string
+          enum: [applied, not_applied, fallback]
+        queriedLayers:
+          type: array
+          items: string
+        activeRuleCount: integer
+        observationCount: integer
+    codeGraph:
+      properties:
+        enabled: boolean
+        selected: boolean
+        injected: boolean
+persistence:
+  eventType: coordinator.context_policy_selected
+  timing: after context augmentation and before scheduler or worker execution
+  visibility: audit
+security:
+  - Persist source names, levels, flags, layers, and counts only.
+  - Never persist system prompt text, identity prose, memory content, observation summaries, or repository documents.
+  - Context retrieval remains owner-repo and project scoped.
+  - This decision does not promote memory or enable automatic model tiering.
+failureHandling:
+  - Best-effort identity or memory failures remain non-fatal and are represented by injected false or memory status fallback when the augmentation path falls back.
+  - not_applied means no memory content reached the prompt; it does not claim that every underlying store was available.
+  - Code graph selection and successful injection are separate facts.
+references:
+  - docs/adr/0025-conversation-run-coordinator-boundary.md
+  - docs/adr/0020-memory-compaction-and-procedural-learning.md
+verification:
+  - pnpm --filter @los/gateway test
+  - pnpm check
+  - ./tools/check-contracts.sh

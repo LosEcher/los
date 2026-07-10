@@ -13,6 +13,7 @@
 import {
   routeMemoryRetrieval,
   augmentSystemPrompt,
+  type MemoryLayer,
 } from '@los/memory';
 import {
   getDefaultSystemPrompt,
@@ -25,6 +26,34 @@ import {
   buildCodeStructureBlock,
   shouldInjectThisSession,
 } from './chat-cbm-inject.js';
+
+export type BaseSystemPromptSource = 'request' | 'config' | 'default';
+export type MemoryContextStatus = 'applied' | 'not_applied' | 'fallback';
+
+export interface ChatContextPolicyDecision {
+  baseSystemPromptSource: BaseSystemPromptSource;
+  identity: {
+    name: string;
+    level: IdentityLevel;
+    injected: boolean;
+  };
+  memory: {
+    status: MemoryContextStatus;
+    queriedLayers: MemoryLayer[];
+    activeRuleCount: number;
+    observationCount: number;
+  };
+  codeGraph: {
+    enabled: boolean;
+    selected: boolean;
+    injected: boolean;
+  };
+}
+
+export interface AugmentedChatSystemPrompt {
+  systemPrompt: string;
+  policy: ChatContextPolicyDecision;
+}
 
 /**
  * Augment the system prompt with agent identity and task-state memory
@@ -43,7 +72,7 @@ export async function augmentChatSystemPrompt(params: {
   identityLevel?: IdentityLevel;
   /** Workspace root for project-level identity file resolution. */
   workspaceRoot?: string;
-}): Promise<string> {
+}): Promise<AugmentedChatSystemPrompt> {
   // ── Resolve base system prompt ─────────────────────────
   // Priority: API body → config.agent.systemPrompt (dead wire → now live) → hardcoded default
   let configSystemPrompt: string | undefined;
@@ -57,11 +86,24 @@ export async function augmentChatSystemPrompt(params: {
     params.systemPrompt
     || configSystemPrompt
     || getDefaultSystemPrompt(params.toolMode as 'all' | 'project-write' | 'read-only');
+  const baseSystemPromptSource: BaseSystemPromptSource = params.systemPrompt
+    ? 'request'
+    : configSystemPrompt ? 'config' : 'default';
 
   // ── Agent identity injection (Phase 0) ─────────────────
   let identityBlock = '';
   const agentName = params.agentIdentity ?? 'default';
   const identityLevel = params.identityLevel ?? 'standard';
+  const codeGraph = (() => {
+    try {
+      return getConfig().memory?.codeGraph;
+    } catch {
+      return undefined;
+    }
+  })();
+  const codeGraphEnabled = codeGraph?.enabled === true;
+  let codeGraphSelected = false;
+  let codeGraphInjected = false;
 
   if (identityLevel !== 'none') {
     try {
@@ -83,31 +125,61 @@ export async function augmentChatSystemPrompt(params: {
       projectId: params.projectId,
     });
     const augmented = augmentSystemPrompt(baseSystemPrompt, retrieval);
+    const activeRuleCount = retrieval.activeRules.length;
+    const observationCount = Object.values(retrieval.observationsByLayer)
+      .reduce((count, observations) => count + observations.length, 0);
 
     // ── Phase 2: CBM code structure injection (A/B alternating) ──
     let promptWithCode = augmented.augmentedPrompt;
-    const codeGraph = getConfig().memory?.codeGraph;
-    if (codeGraph?.enabled && codeGraph?.injectArchitecture && shouldInjectThisSession()) {
+    codeGraphSelected = codeGraphEnabled
+      && codeGraph?.injectArchitecture === true
+      && shouldInjectThisSession();
+    if (codeGraphSelected) {
       const codeBlock = await buildCodeStructureBlock(
         params.systemPrompt ?? '',
         params.workspaceRoot ?? process.cwd(),
-        codeGraph.maxPromptTokens ?? 400,
+        codeGraph?.maxPromptTokens ?? 400,
       );
       if (codeBlock) {
         promptWithCode = augmented.augmentedPrompt + '\n\n' + codeBlock;
+        codeGraphInjected = true;
       }
     }
 
     // Compose: identity block → augmented prompt (base + memory + code context)
-    if (identityBlock) {
-      return identityBlock + '\n\n' + promptWithCode;
-    }
-    return promptWithCode;
+    return buildResult(
+      identityBlock ? identityBlock + '\n\n' + promptWithCode : promptWithCode,
+      {
+        status: activeRuleCount + observationCount > 0 ? 'applied' : 'not_applied',
+        queriedLayers: retrieval.queriedLayers,
+        activeRuleCount,
+        observationCount,
+      },
+    );
   } catch {
     // Memory retrieval is best-effort; fall back to base prompt + identity
-    if (identityBlock) {
-      return identityBlock + '\n\n' + baseSystemPrompt;
-    }
-    return baseSystemPrompt;
+    return buildResult(
+      identityBlock ? identityBlock + '\n\n' + baseSystemPrompt : baseSystemPrompt,
+      { status: 'fallback', queriedLayers: [], activeRuleCount: 0, observationCount: 0 },
+    );
+  }
+
+  function buildResult(
+    systemPrompt: string,
+    memory: ChatContextPolicyDecision['memory'],
+  ): AugmentedChatSystemPrompt {
+    return {
+      systemPrompt,
+      policy: {
+        baseSystemPromptSource,
+        identity: { name: agentName, level: identityLevel, injected: Boolean(identityBlock) },
+        memory,
+        codeGraph: {
+          enabled: codeGraphEnabled,
+          selected: codeGraphSelected,
+          injected: codeGraphInjected,
+        },
+      },
+    };
   }
 }
