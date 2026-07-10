@@ -18,6 +18,8 @@ import type {
   ChannelSendResult,
   UnifiedMessage,
 } from './types.js';
+import { createWxPusherIngress } from './wxpusher-ingress.js';
+import type { Logger } from '@los/infra/logger';
 
 const WXPUSHER_API = 'https://wxpusher.zjiecode.com/api';
 const DEFAULT_CAPABILITIES: ChannelCapabilities = {
@@ -27,7 +29,7 @@ const DEFAULT_CAPABILITIES: ChannelCapabilities = {
   file: false,        // WxPusher doesn't directly support file upload
   actions: false,     // HTML links instead of native buttons
   richText: true,     // HTML (contentType=2)
-  upCall: true,       // WxPusher callback with #commands
+  upCall: false,      // Explicitly enabled only after ingress security config passes
   mobileWeb: true,    // Callback server provides mobile action pages
   maxTextLength: 40000,
   maxMediaSize: 0,    // Not applicable (links only)
@@ -39,73 +41,64 @@ export interface WeixinChannelConfig {
   uids: string[];
   topicIds?: number[];
   callbackPort?: number;
+  callbackHost?: string;
   callbackUrl?: string;
+  upCallEnabled?: boolean;
+  expectedAppId?: number;
+  operatorUids?: string[];
+  callbackProxySecret?: string;
+  callbackToken?: string;
+  callbackMaxAgeMs?: number;
+  callbackMaxFutureSkewMs?: number;
+  callbackMaxBodyBytes?: number;
+  callbackLogger?: Pick<Logger, 'warn'>;
   losGatewayUrl: string;
 }
 
 export function createWeixinChannel(config: WeixinChannelConfig): Channel {
-  const { appToken, uids, topicIds = [], callbackPort = 0, callbackUrl = '', losGatewayUrl } = config;
+  const {
+    appToken,
+    uids,
+    topicIds = [],
+    callbackPort = 0,
+    callbackHost = '127.0.0.1',
+    callbackUrl = '',
+    losGatewayUrl,
+  } = config;
 
   const messageHandlers = new Set<(msg: UnifiedMessage) => void | Promise<void>>();
   let server: ReturnType<typeof createServer> | null = null;
+  if (callbackPort > 0 && !isLoopbackHost(callbackHost)) {
+    throw new Error('WxPusher callback server must bind to an explicit loopback address');
+  }
+  if (config.upCallEnabled === true && callbackPort <= 0) {
+    throw new Error('WxPusher up-call requires WXPUSHER_CALLBACK_PORT');
+  }
+  const ingress = createWxPusherIngress({
+    enabled: config.upCallEnabled,
+    expectedAppId: config.expectedAppId,
+    operatorUids: config.operatorUids,
+    proxySecret: config.callbackProxySecret,
+    callbackToken: config.callbackToken,
+    maxAgeMs: config.callbackMaxAgeMs,
+    maxFutureSkewMs: config.callbackMaxFutureSkewMs,
+    maxBodyBytes: config.callbackMaxBodyBytes,
+    logger: config.callbackLogger,
+    onMessage: async (message) => {
+      for (const handler of messageHandlers) await handler(message);
+    },
+  });
 
   // ── Channel implementation ─────────────────────────────
 
   const channel: Channel = {
     kind: 'weixin' as ChannelKind,
-    capabilities: { ...DEFAULT_CAPABILITIES },
+    capabilities: { ...DEFAULT_CAPABILITIES, upCall: ingress.enabled },
 
     async start() {
       if (callbackPort > 0) {
         server = createServer(async (req, res) => {
-          // ── WxPusher up-call callback ────────────────
-          if (req.method === 'POST' && req.url === '/wxpusher-callback') {
-            const chunks: Buffer[] = [];
-            for await (const chunk of req) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-            try {
-              const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
-                action: string;
-                data: { uid: string; appId: number; appName: string; time: number; content: string };
-              };
-
-              if (body.action === 'send_up_cmd') {
-                const msg: UnifiedMessage = {
-                  id: `wx-up-${Date.now()}`,
-                  type: 'COMMAND',
-                  version: '1.0',
-                  text: body.data.content ?? '',
-                  routing: {
-                    priority: 'NORMAL',
-                    recipient: body.data.uid ?? '',
-                    replyTo: null,
-                    channel: 'weixin',
-                  },
-                  metadata: {
-                    timestamp: new Date().toISOString(),
-                    source: 'wxpusher-callback',
-                    channel: 'weixin',
-                    tags: ['up-call'],
-                  },
-                  _internal: {
-                    standardizedAt: new Date().toISOString(),
-                    compressed: false,
-                    size: 0,
-                  },
-                };
-
-                for (const handler of messageHandlers) {
-                  try { await handler(msg); } catch { /* best-effort */ }
-                }
-              }
-
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: true }));
-            } catch {
-              res.writeHead(400);
-              res.end('invalid json');
-            }
-            return;
-          }
+          if (await ingress.handle(req, res)) return;
 
           // ── Mobile web action pages ──────────────────
           if (req.method === 'GET' && req.url?.startsWith('/m/')) {
@@ -118,10 +111,10 @@ export function createWeixinChannel(config: WeixinChannelConfig): Channel {
           res.end();
         });
 
-        await new Promise<void>((resolve) => server!.listen(callbackPort, resolve));
-        console.log(`[weixin] Callback server on port ${callbackPort}`);
-        if (callbackUrl) {
-          console.log(`[weixin] WxPusher callback URL: ${callbackUrl}/wxpusher-callback`);
+        await new Promise<void>((resolve) => server!.listen(callbackPort, callbackHost, resolve));
+        console.log(`[weixin] Callback server on ${callbackHost}:${callbackPort}`);
+        if (callbackUrl && ingress.enabled) {
+          console.log('[weixin] WxPusher callback endpoint configured (query token redacted)');
         }
       }
       return { ok: true };
@@ -355,6 +348,10 @@ function formatSize(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1';
 }
 
 export { DEFAULT_CAPABILITIES as WEIXIN_CAPABILITIES };

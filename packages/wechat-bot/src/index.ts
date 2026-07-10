@@ -20,6 +20,7 @@
  *   WECLAW_DEFAULT_TO     — WeChat user ID for outbound messages
  *   WXPUSHER_APP_TOKEN    — WxPusher appToken (optional fallback)
  *   WXPUSHER_UIDS         — comma-separated UIDs (optional fallback)
+ *   WXPUSHER_UPCALL_ENABLED — explicit opt-in for authenticated inbound commands
  *   LOS_GATEWAY_URL       — los gateway URL (default http://localhost:8080)
  *   WEB_PORT              — mobile web dashboard port (default 8899)
  *
@@ -62,6 +63,12 @@ import {
   type HandlerDependencies,
   type NormalizerInput,
 } from '@los/agent/message-router';
+import { loadConfig } from '@los/infra/config';
+import { closeDb, initDb } from '@los/infra/db';
+import { ensureWxPusherCallbackClaimStore } from './wxpusher-callback-store.js';
+import { createWxPusherInboundHandler } from './wxpusher-inbound-handler.js';
+
+const runtimeConfig = await loadConfig();
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -77,13 +84,30 @@ const WECLAW_AUTO_INSTALL = process.env.WECLAW_AUTO_INSTALL === '1';
 const APP_TOKEN = process.env.WXPUSHER_APP_TOKEN;
 const UIDS = (process.env.WXPUSHER_UIDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
 const TOPIC_IDS = (process.env.WXPUSHER_TOPIC_IDS ?? '').split(',').map(s => Number(s.trim())).filter(n => n > 0);
+const WXPUSHER_UPCALL_ENABLED = process.env.WXPUSHER_UPCALL_ENABLED === '1';
+const WXPUSHER_APP_ID = process.env.WXPUSHER_APP_ID ? Number(process.env.WXPUSHER_APP_ID) : undefined;
+const WXPUSHER_OPERATOR_UIDS = (process.env.WXPUSHER_OPERATOR_UIDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+const WXPUSHER_CALLBACK_PROXY_SECRET = process.env.WXPUSHER_CALLBACK_PROXY_SECRET;
+const LOS_WXPUSHER_CALLBACK_TOKEN = process.env.LOS_WXPUSHER_CALLBACK_TOKEN;
+const WXPUSHER_CALLBACK_HOST = process.env.WXPUSHER_CALLBACK_HOST ?? '127.0.0.1';
 
 // General
 const LOS_GATEWAY_URL = process.env.LOS_GATEWAY_URL ?? 'http://localhost:8080';
 const LOS_AUTH_TOKEN = process.env.LOS_AUTH_TOKEN;
 const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEB_PORT = Number(process.env.WEB_PORT ?? 8899);
-const CALLBACK_PORT = Number(process.env.CALLBACK_PORT ?? 0);
+const CALLBACK_PORT = Number(process.env.WXPUSHER_CALLBACK_PORT ?? process.env.CALLBACK_PORT ?? 0);
+const CALLBACK_URL = process.env.WXPUSHER_CALLBACK_URL
+  ?? (CALLBACK_PORT > 0 ? `http://${WXPUSHER_CALLBACK_HOST}:${CALLBACK_PORT}` : '');
+const CALLBACK_MAX_AGE_MS = process.env.WXPUSHER_CALLBACK_MAX_AGE_MS
+  ? Number(process.env.WXPUSHER_CALLBACK_MAX_AGE_MS)
+  : undefined;
+const CALLBACK_MAX_FUTURE_SKEW_MS = process.env.WXPUSHER_CALLBACK_MAX_FUTURE_SKEW_MS
+  ? Number(process.env.WXPUSHER_CALLBACK_MAX_FUTURE_SKEW_MS)
+  : undefined;
+const CALLBACK_MAX_BODY_BYTES = process.env.WXPUSHER_CALLBACK_MAX_BODY_BYTES
+  ? Number(process.env.WXPUSHER_CALLBACK_MAX_BODY_BYTES)
+  : undefined;
 const SSE_RECONNECT_MS = Number(process.env.SSE_RECONNECT_MS ?? 3000);
 const ALERT_DEDUP_MS = 60_000;
 
@@ -120,7 +144,16 @@ if (APP_TOKEN && (UIDS.length > 0 || TOPIC_IDS.length > 0)) {
     uids: UIDS,
     topicIds: TOPIC_IDS,
     callbackPort: CALLBACK_PORT,
-    callbackUrl: CALLBACK_PORT > 0 ? `http://localhost:${CALLBACK_PORT}` : '',
+    callbackHost: WXPUSHER_CALLBACK_HOST,
+    callbackUrl: CALLBACK_URL,
+    upCallEnabled: WXPUSHER_UPCALL_ENABLED,
+    expectedAppId: WXPUSHER_APP_ID,
+    operatorUids: WXPUSHER_OPERATOR_UIDS,
+    callbackProxySecret: WXPUSHER_CALLBACK_PROXY_SECRET,
+    callbackToken: LOS_WXPUSHER_CALLBACK_TOKEN,
+    callbackMaxAgeMs: CALLBACK_MAX_AGE_MS,
+    callbackMaxFutureSkewMs: CALLBACK_MAX_FUTURE_SKEW_MS,
+    callbackMaxBodyBytes: CALLBACK_MAX_BODY_BYTES,
     losGatewayUrl: LOS_GATEWAY_URL,
   }));
 }
@@ -161,7 +194,7 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
       const message = buildAlertMessage(alert, {
         targetChannel: channel.kind,
         gatewayUrl: LOS_GATEWAY_URL,
-        callbackUrl: CALLBACK_PORT > 0 ? `http://localhost:${CALLBACK_PORT}` : '',
+        callbackUrl: CALLBACK_URL,
       });
       await channel.send(message);
       console.log(`[${channel.kind}] sent ok session=${alert.sessionId}`);
@@ -413,6 +446,9 @@ let messageRouter: MessageRouter; // backward compat, set in main()
 async function main(): Promise<void> {
   console.log('🤖 los Multi-Channel Bot starting\n');
 
+  await initDb(runtimeConfig.databaseUrl);
+  await ensureWxPusherCallbackClaimStore();
+
   // 1. Initialize WeClaw
   const binary = findWeclawBinary();
   if (binary) {
@@ -503,18 +539,19 @@ async function main(): Promise<void> {
         callLosApi(`/todos/${encodeURIComponent(todoId)}/dispatch`, { force: opts?.force ?? false }),
     }),
   });
+  const wxpusherInboundHandler = createWxPusherInboundHandler(router);
 
   // Register inbound message handlers on each channel
   for (const ch of channels) {
     if (ch.capabilities.upCall) {
+      if (ch.kind === 'weixin') {
+        ch.onMessage(wxpusherInboundHandler);
+        console.log(`  [${ch.kind}] ✅ inbound handler registered`);
+        continue;
+      }
       ch.onMessage(async (msg: UnifiedMessage) => {
         try {
-          const sk = ch.kind === 'weixin' ? 'wx-weixin' as const : 'wx-web' as const;
-          if (sk === 'wx-weixin') {
-            await router.route({ sourceKind: 'wx-weixin', text: msg.text, uid: msg.routing.recipient ?? undefined, metadata: msg.metadata as Record<string, unknown> });
-          } else if (sk === 'wx-web') {
-            await router.route({ sourceKind: 'wx-web', action: msg.text, sessionId: msg.metadata.sessionId ?? '' });
-          }
+          await router.route({ sourceKind: 'wx-web', action: msg.text, sessionId: msg.metadata.sessionId ?? '' });
         } catch (err) {
           console.error(`[router] ${ch.kind} failed: ${(err as Error).message}`);
         }
@@ -534,6 +571,7 @@ async function main(): Promise<void> {
     for (const ch of channels) {
       try { await ch.stop(); } catch { /* best-effort */ }
     }
+    await closeDb().catch(() => undefined);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
