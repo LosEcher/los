@@ -18,12 +18,18 @@ input:
     requestedProjectId:
       type: string
       description: Explicit project selected by the caller.
+    contextProjectId:
+      type: string
+      description: Explicit project carried by the authenticated request context.
     workspaceRoot:
       type: string
       description: Explicit workspace path supplied for the task.
     defaultProjectId:
       type: string
       description: Configured default used only when no explicit workspace exists.
+    defaultWorkspaceRoot:
+      type: string
+      description: Configured workspace paired with the default project when no persisted binding exists.
     taskType:
       type: string
     editableSurfaces:
@@ -75,6 +81,7 @@ resolution:
         - workspace_binding
         - configured_default
         - unknown_explicit_project
+        - project_context_conflict
         - project_workspace_conflict
         - ambiguous_workspace
         - unbound_workspace
@@ -83,12 +90,30 @@ resolution:
     blocker:
       type: string
 resolutionOrder:
+  - Explicit body and request-context project IDs must agree when both are present.
   - Explicit project must exist and agree with an explicit workspace.
   - Explicit workspace resolves to the deepest matching bound project.
   - Multiple project IDs bound to the same deepest workspace block as ambiguous.
   - An unbound explicit workspace blocks and never falls back to the default.
   - Configured default is considered only when no explicit workspace is present.
+  - A configured default project may pair with defaultWorkspaceRoot only when no explicit project or workspace is present.
   - Missing or invalid ownership evidence blocks execution.
+persistence:
+  blocked:
+    eventType: coordinator.intake_blocked
+    timing: before idempotency reservation and execution
+  resolved:
+    eventType: coordinator.intake_resolved
+    timing: after run_spec creation and before worker execution
+  visibility: audit
+  payload:
+    - requestedProjectId
+    - requestedWorkspaceRoot
+    - ownerRepo
+    - workspaceRoot
+    - reason
+    - blocker
+    - runSpecId
 security:
   - Resolution is deterministic and does not call a model.
   - Paths and project identifiers are decision facts, not credentials or memory.

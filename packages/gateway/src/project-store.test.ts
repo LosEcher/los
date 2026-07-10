@@ -6,12 +6,11 @@ import { join } from 'node:path';
 
 import {
   bindProject,
-  resolveProjectIdFromWorkspace,
+  resolveConfiguredProjectOwner,
   unbindProject,
 } from './project-store.js';
 
-/** Reverse-lookup must map a bound workspace path back to its projectId. */
-test('resolveProjectIdFromWorkspace returns the bound projectId', () => {
+test('resolveConfiguredProjectOwner returns the bound project', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'los-projects-'));
   const prev = process.env.LOS_PROJECTS_DIR;
   process.env.LOS_PROJECTS_DIR = tmp;
@@ -21,12 +20,8 @@ test('resolveProjectIdFromWorkspace returns the bound projectId', () => {
       displayName: 'pi-test',
       workspacePath: join(tmp, 'pi'),
     });
-    assert.equal(
-      resolveProjectIdFromWorkspace(join(tmp, 'pi')),
-      'pi-test',
-    );
-    // Unbound path returns null.
-    assert.equal(resolveProjectIdFromWorkspace(join(tmp, 'other')), null);
+    assert.equal(resolveConfiguredProjectOwner({ workspaceRoot: join(tmp, 'pi') }).ownerRepo, 'pi-test');
+    assert.equal(resolveConfiguredProjectOwner({ workspaceRoot: join(tmp, 'other') }).status, 'blocked');
   } finally {
     unbindProject('pi-test');
     process.env.LOS_PROJECTS_DIR = prev;
@@ -35,7 +30,7 @@ test('resolveProjectIdFromWorkspace returns the bound projectId', () => {
 });
 
 /** Path normalization: trailing slash and `.` segments must still match. */
-test('resolveProjectIdFromWorkspace normalizes paths before matching', () => {
+test('resolveConfiguredProjectOwner normalizes paths before matching', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'los-projects-'));
   const prev = process.env.LOS_PROJECTS_DIR;
   process.env.LOS_PROJECTS_DIR = tmp;
@@ -47,7 +42,7 @@ test('resolveProjectIdFromWorkspace normalizes paths before matching', () => {
     });
     // Trailing slash + /. segment should still resolve to the same project.
     assert.equal(
-      resolveProjectIdFromWorkspace(`${join(tmp, 'proj')}/./`),
+      resolveConfiguredProjectOwner({ workspaceRoot: `${join(tmp, 'proj')}/./` }).ownerRepo,
       'norm-test',
     );
   } finally {
@@ -57,7 +52,7 @@ test('resolveProjectIdFromWorkspace normalizes paths before matching', () => {
   }
 });
 
-test('resolveProjectIdFromWorkspace maps nested paths to the deepest binding', () => {
+test('resolveConfiguredProjectOwner maps nested paths to the deepest binding', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'los-projects-'));
   const prev = process.env.LOS_PROJECTS_DIR;
   process.env.LOS_PROJECTS_DIR = tmp;
@@ -73,7 +68,7 @@ test('resolveProjectIdFromWorkspace maps nested paths to the deepest binding', (
       workspacePath: join(tmp, 'project', 'docs'),
     });
     assert.equal(
-      resolveProjectIdFromWorkspace(join(tmp, 'project', 'docs', 'adr')),
+      resolveConfiguredProjectOwner({ workspaceRoot: join(tmp, 'project', 'docs', 'adr') }).ownerRepo,
       'nested-project',
     );
   } finally {

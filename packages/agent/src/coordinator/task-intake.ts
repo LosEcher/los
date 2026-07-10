@@ -5,6 +5,7 @@ export type ProjectOwnerResolutionReason =
   | 'workspace_binding'
   | 'configured_default'
   | 'unknown_explicit_project'
+  | 'project_context_conflict'
   | 'project_workspace_conflict'
   | 'ambiguous_workspace'
   | 'unbound_workspace'
@@ -19,8 +20,10 @@ export interface ProjectOwnerBinding {
 export interface ResolveProjectOwnerInput {
   bindings: readonly ProjectOwnerBinding[];
   requestedProjectId?: string;
+  contextProjectId?: string;
   workspaceRoot?: string;
   defaultProjectId?: string;
+  defaultWorkspaceRoot?: string;
 }
 
 export interface ProjectOwnerResolution {
@@ -34,18 +37,25 @@ export interface ProjectOwnerResolution {
 export function resolveProjectOwner(input: ResolveProjectOwnerInput): ProjectOwnerResolution {
   const bindings = normalizeBindings(input.bindings);
   const requestedProjectId = normalizeOptionalString(input.requestedProjectId);
+  const contextProjectId = normalizeOptionalString(input.contextProjectId);
   const workspaceRoot = normalizeOptionalPath(input.workspaceRoot);
   const defaultProjectId = normalizeOptionalString(input.defaultProjectId);
+  const defaultWorkspaceRoot = normalizeOptionalPath(input.defaultWorkspaceRoot);
 
-  if (requestedProjectId) {
-    const binding = bindings.find(item => item.projectId === requestedProjectId);
+  if (requestedProjectId && contextProjectId && requestedProjectId !== contextProjectId) {
+    return blocked('project_context_conflict', 'Body projectId conflicts with x-project-id');
+  }
+
+  const explicitProjectId = requestedProjectId ?? contextProjectId;
+  if (explicitProjectId) {
+    const binding = bindings.find(item => item.projectId === explicitProjectId);
     if (!binding) {
-      return blocked('unknown_explicit_project', `Project is not bound: ${requestedProjectId}`);
+      return blocked('unknown_explicit_project', `Project is not bound: ${explicitProjectId}`);
     }
     if (workspaceRoot && !isPathWithin(binding.workspacePath, workspaceRoot)) {
       return blocked(
         'project_workspace_conflict',
-        `Workspace is outside the requested project: ${requestedProjectId}`,
+        `Workspace is outside the requested project: ${explicitProjectId}`,
       );
     }
     return resolved('explicit_project', binding, workspaceRoot ?? binding.workspacePath);
@@ -68,10 +78,16 @@ export function resolveProjectOwner(input: ResolveProjectOwnerInput): ProjectOwn
 
   if (defaultProjectId) {
     const binding = bindings.find(item => item.projectId === defaultProjectId);
-    if (!binding) {
-      return blocked('unknown_default_project', `Default project is not bound: ${defaultProjectId}`);
+    if (binding) {
+      return resolved('configured_default', binding, binding.workspacePath);
     }
-    return resolved('configured_default', binding, binding.workspacePath);
+    if (defaultWorkspaceRoot) {
+      return resolved('configured_default', {
+        projectId: defaultProjectId,
+        workspacePath: defaultWorkspaceRoot,
+      }, defaultWorkspaceRoot);
+    }
+    return blocked('unknown_default_project', `Default project is not bound: ${defaultProjectId}`);
   }
 
   return blocked('owner_unresolved', 'No project or workspace ownership evidence was provided');
