@@ -30,7 +30,6 @@ export function registerOpenAICompatibleRoute(
   messageRouter?: MessageRouter,
 ): void {
   app.post('/v1/chat/completions', async (req: any, reply: any) => {
-    console.log(`[/v1/chat] incoming req.url=${req.url} headers=${JSON.stringify(req.headers)}`);
     const body = req.body as OpenAIChatRequest;
     const context = getRequestContext(req);
     const sid = `chat-${body.model ?? 'openai'}-${Date.now()}`;

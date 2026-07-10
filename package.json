@@ -12,6 +12,8 @@
     "stop": "./tools/los.sh stop",
     "restart": "./tools/los.sh restart",
     "doctor": "./tools/los.sh doctor",
+    "auth:locate": "node tools/rotate-local-auth-token.mjs --check",
+    "auth:rotate": "node tools/rotate-local-auth-token.mjs",
     "executor:help": "bash ./tools/executor.sh help",
     "executor:status": "bash ./tools/executor.sh status",
     "executor:start": "bash ./tools/executor.sh start",
