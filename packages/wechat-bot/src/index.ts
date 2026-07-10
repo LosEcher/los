@@ -195,14 +195,17 @@ function formatAlertForWeclaw(alert: OperatorAlert): string {
 
 const recentAlerts = new Map<string, number>();
 let sseAbort: AbortController | null = null;
+/** Skip historical catch-up after connect; only live events after operator.ready. */
+let sseLive = false;
 
 async function connectSSE(): Promise<void> {
   if (sseAbort) sseAbort.abort();
   sseAbort = new AbortController();
+  sseLive = false;
 
   try {
-    // Try the session-aware SSE endpoint first
-    const url = `${LOS_GATEWAY_URL}/operator/events/live`;
+    // tail=1 starts from latest event id (no historical flood to WeChat).
+    const url = `${LOS_GATEWAY_URL}/operator/events/live?tail=1`;
     console.log(`[events] SSE connecting: ${url}`);
 
     const res = await fetch(url, {
@@ -236,7 +239,12 @@ async function connectSSE(): Promise<void> {
         } else if (line.startsWith('data: ')) {
           currentData = line.slice(6).trim();
         } else if (line === '' && currentData) {
-          await handleSSEEvent(currentEvent, currentData);
+          if (currentEvent === 'operator.ready') {
+            sseLive = true;
+            console.log('[events] SSE live — listening for new operator attention');
+          } else if (sseLive) {
+            await handleSSEEvent(currentEvent, currentData);
+          }
           currentEvent = '';
           currentData = '';
         }
@@ -260,6 +268,8 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       parsed.type === 'tool.warned' ||
       parsed.type === 'tool.denied' ||
       parsed.type === 'operator_attention' ||
+      parsed.type === 'run.operator_attention_required' ||
+      parsed.type === 'run.recovery_required' ||
       (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
       parsed.type === 'session.blocked' ||
       parsed.type === 'session.error';
@@ -279,6 +289,18 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       }
     }
 
+    const runSpecId =
+      (typeof payload.runSpecId === 'string' && payload.runSpecId)
+      || (typeof payload.run_spec_id === 'string' && payload.run_spec_id)
+      || (typeof payload.entityId === 'string' && String(payload.entityType ?? '').includes('run')
+        ? payload.entityId
+        : undefined)
+      || undefined;
+    const taskRunId =
+      (typeof payload.taskRunId === 'string' && payload.taskRunId)
+      || (typeof payload.task_run_id === 'string' && payload.task_run_id)
+      || undefined;
+
     const alert: OperatorAlert = {
       sessionId,
       type: parsed.type,
@@ -289,6 +311,8 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       callId: payload.callId ?? payload.call_id,
       warnings: payload.warnings,
       flaggedFiles: payload.flaggedFiles,
+      runSpecId,
+      taskRunId,
     };
 
     await deliverAlert(alert);
