@@ -19,6 +19,24 @@ describe('intent-resolver commands', () => {
     }
   });
 
+  it('strips trailing #commands from approve-phase reason (multi-command paste)', () => {
+    const r = resolveIntent('#approve-phase run-abc12345 smoke ok #verify-run run-abc12345');
+    assert.equal(r.type, 'run_contract');
+    if (r.type === 'run_contract') {
+      assert.equal(r.action, 'approve_phase');
+      assert.equal(r.runId, 'run-abc12345');
+      assert.equal(r.reason, 'smoke ok');
+    }
+  });
+
+  it('drops reason that is only a pasted next command', () => {
+    const r = resolveIntent('#approve-phase run-abc12345 #verify-run run-abc12345');
+    assert.equal(r.type, 'run_contract');
+    if (r.type === 'run_contract') {
+      assert.equal(r.reason, undefined);
+    }
+  });
+
   it('resolves #approve-phase without reason', () => {
     const r = resolveIntent('#approve-phase run-xyz-9999');
     assert.equal(r.type, 'run_contract');
