@@ -163,7 +163,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsTools: true,
     supportsParallelToolCalls: false,
     supportsReasoning: true,
-    reasoningParam: 'reasoning_content',
+    reasoningParam: 'reasoning_effort',
     modelAliases: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     supportsToolStreaming: true,
     sessionAffinity: 'provider',

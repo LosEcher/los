@@ -154,7 +154,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         model,
         messages,
         stream: Boolean(options.onDelta),
-        ...buildOpenAIModelSettings(options.modelSettings),
+        ...buildOpenAIModelSettings(options.modelSettings, profile.provider),
       };
       if (options.onDelta) {
         body.stream_options = { include_usage: true };

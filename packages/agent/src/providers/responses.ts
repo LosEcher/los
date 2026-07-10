@@ -87,7 +87,7 @@ export function createOpenAIResponsesProvider(cfg: ResponsesConfig): Provider {
         model,
         input,
         stream: Boolean(options.onDelta),
-        ...buildOpenAIModelSettings(options.modelSettings),
+        ...buildOpenAIModelSettings(options.modelSettings, profile.provider),
       };
 
       if (tools?.length) {

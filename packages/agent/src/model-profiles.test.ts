@@ -66,7 +66,7 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
   assert.equal(summary.cachePolicy, 'prompt-cache-read');
   assert.equal(summary.toolCallRepair, 'json-loose');
   assert.equal(summary.capabilities.reasoning.supported, true);
-  assert.equal(summary.capabilities.reasoning.parameter, 'reasoning_content');
+  assert.equal(summary.capabilities.reasoning.parameter, 'reasoning_effort');
   assert.equal(summary.capabilities.cache.promptCacheRead, true);
   assert.equal(summary.capabilities.session.affinity, 'provider');
   assert.equal(summary.capabilities.session.sticky, true);
