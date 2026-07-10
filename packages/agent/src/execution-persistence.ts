@@ -1,5 +1,6 @@
+import { getDb } from '@los/infra/db';
 import type { ExecutionEntityType, ExecutionStateByEntity } from './execution-transitions.js';
-import type { RunContractMetadata } from './run-contract.js';
+import type { RunContractMetadata, RunPhase } from './run-contract.js';
 import type { SessionEventRecord, SessionEventVisibility } from './session-events.js';
 import { readRunContractMetadata } from './run-contract.js';
 import { normalizeJsonObject } from './executor-node-utils.js';
@@ -7,6 +8,34 @@ import { normalizeJsonObject } from './executor-node-utils.js';
 export type TransactionClient = {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
 };
+
+const EXECUTION_OUTBOX_SCHEMA = `
+CREATE TABLE IF NOT EXISTS execution_outbox (
+  id BIGSERIAL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  run_spec_id TEXT,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  published_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_unpublished ON execution_outbox(created_at, id)
+  WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_session ON execution_outbox(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_run_spec ON execution_outbox(run_spec_id, id);
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_entity ON execution_outbox(entity_type, entity_id, id);
+`;
+
+let executionOutboxInitialized = false;
+
+export async function ensureExecutionOutboxStore(): Promise<void> {
+  if (executionOutboxInitialized) return;
+  await getDb().exec(EXECUTION_OUTBOX_SCHEMA);
+  executionOutboxInitialized = true;
+}
 
 export type ExecutionEntityRow = {
   id: string;
@@ -105,11 +134,20 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
   client: TransactionClient,
   input: { entityType: T; entityId: string; to: ExecutionStateByEntity[T]; sessionId?: string; nodeId?: string; attempt?: number },
   entity: ExecutionEntityContext,
-): Promise<void> {
+): Promise<RunContractMetadata | undefined> {
   switch (input.entityType) {
-    case 'run_spec':
-      await client.query('UPDATE run_specs SET status = $2, updated_at = now() WHERE id = $1', [input.entityId, input.to]);
-      return;
+    case 'run_spec': {
+      const synchronized = synchronizeRunContractPhase(entity.contract, input.to as string);
+      await client.query(
+        `UPDATE run_specs
+         SET status = $2,
+             run_contract_json = CASE WHEN $3::jsonb IS NULL THEN run_contract_json ELSE run_contract_json || $3::jsonb END,
+             updated_at = now()
+         WHERE id = $1`,
+        [input.entityId, input.to, synchronized.patch ? JSON.stringify(synchronized.patch) : null],
+      );
+      return synchronized.contract;
+    }
     case 'task_run':
       await client.query(`
         UPDATE task_runs SET status = $2, node_id = COALESCE($3, node_id), updated_at = now(),
@@ -118,7 +156,7 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
           lease_expires_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN NULL ELSE lease_expires_at END
         WHERE id = $1
       `, [input.entityId, input.to, input.nodeId ?? entity.nodeId ?? null]);
-      return;
+      return undefined;
     case 'tool_call_state':
       await client.query(`
         UPDATE tool_call_states SET state = $3, attempt = COALESCE($4, attempt),
@@ -127,7 +165,7 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
           updated_at = now()
         WHERE id = $1 AND session_id = $2
       `, [input.entityId, input.sessionId, input.to, input.attempt ?? null]);
-      return;
+      return undefined;
     case 'verification_record':
       await client.query(`
         UPDATE verification_records SET status = $2,
@@ -136,10 +174,30 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
           updated_at = now()
         WHERE id = $1
       `, [input.entityId, input.to]);
-      return;
+      return undefined;
     default:
       throw new Error(`Unknown execution entity type: ${input.entityType}`);
   }
+}
+
+function synchronizeRunContractPhase(
+  contract: RunContractMetadata | undefined,
+  status: string,
+): { contract: RunContractMetadata | undefined; patch?: Pick<RunContractMetadata, 'phase' | 'previousPhase' | 'phaseChangedAt'> } {
+  if (!contract?.phase) return { contract };
+  const phase = runPhaseForStatus(status, contract.phase);
+  if (!phase || phase === contract.phase) return { contract };
+  const patch = { phase, previousPhase: contract.phase, phaseChangedAt: new Date().toISOString() };
+  return { contract: { ...contract, ...patch }, patch };
+}
+
+function runPhaseForStatus(status: string, currentPhase: RunPhase): RunPhase | undefined {
+  if (status === 'running') return currentPhase === 'blocked' || currentPhase === 'verifying' ? 'verifying' : 'executing';
+  if (status === 'blocked') return 'blocked';
+  if (status === 'succeeded') return 'succeeded';
+  if (status === 'failed') return 'failed';
+  if (status === 'cancelled') return 'cancelled';
+  return undefined;
 }
 
 export async function insertSessionEvent(client: TransactionClient, input: {

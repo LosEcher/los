@@ -42,6 +42,15 @@ test('POST /runs/:id/approve approves plan_approved transition', async () => {
         goal: 'test approval via gateway',
         editableSurfaces: ['src/'],
         phase: 'planning',
+        requiredChecks: ['pnpm check'],
+        plan: [{
+          id: 'step-1',
+          title: 'Approve gateway plan',
+          description: 'Exercise the gateway approval path.',
+          dependsOnIds: [],
+          editableSurfaces: ['src/'],
+          completionCriteria: 'The plan is approved and persisted.',
+        }],
       },
     });
 
@@ -187,7 +196,8 @@ test('POST /runs/:id/revise-plan increments revision and resets phase', async ()
         goal: 'original plan',
         editableSurfaces: ['src/'],
         phase: 'plan_approved',
-        plan: [{ id: 'step-1', title: 'Original', description: '', dependsOnIds: [], editableSurfaces: [], completionCriteria: '' }],
+        requiredChecks: ['pnpm check'],
+        plan: [{ id: 'step-1', title: 'Original', description: 'Original plan.', dependsOnIds: [], editableSurfaces: [], completionCriteria: 'Original plan completes.' }],
         planRevision: 1,
       },
     });
@@ -197,8 +207,8 @@ test('POST /runs/:id/revise-plan increments revision and resets phase', async ()
       url: `/runs/${runSpecId}/revise-plan`,
       payload: {
         plan: [
-          { id: 'step-1', title: 'Updated', description: '', dependsOnIds: [], editableSurfaces: [], completionCriteria: '' },
-          { id: 'step-2', title: 'New step', description: '', dependsOnIds: [], editableSurfaces: [], completionCriteria: '' },
+          { id: 'step-1', title: 'Updated', description: 'Updated plan.', dependsOnIds: [], editableSurfaces: [], completionCriteria: 'Updated plan completes.' },
+          { id: 'step-2', title: 'New step', description: 'Expanded scope.', dependsOnIds: ['step-1'], editableSurfaces: [], completionCriteria: 'Expanded scope completes.' },
         ],
         actor: 'gateway-tester',
         reason: 'scope increased',
@@ -216,7 +226,8 @@ test('POST /runs/:id/revise-plan increments revision and resets phase', async ()
     const loaded = await loadRunSpec(runSpecId);
     assert.equal(loaded?.runContract?.planRevision, 2);
     assert.equal(loaded?.runContract?.phase, 'planning');
-    assert.equal(loaded?.runContract?.planParentRunSpecId, runSpecId);
+    assert.equal(loaded?.runContract?.planParentRunSpecId, undefined);
+    assert.equal(loaded?.runContract?.planParentRevision, 1);
 
     // Verify session event
     const events = await listSessionEvents(sessionId);

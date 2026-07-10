@@ -1,3 +1,6 @@
+import type { PlanRevisionSnapshot, PlanStep, VerificationRequirement } from './run-plan-types.js';
+export type { PlanRevisionSnapshot, PlanStep, VerificationRequirement } from './run-plan-types.js';
+
 export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress' | 'architect-editor';
 
 /**
@@ -31,7 +34,7 @@ export const HEAVYWEIGHT_CONFIDENCE_THRESHOLD = 0.9;
  *   created → discovering → discovery_ready
  *          → planning    → plan_approved
  *          → executing   → verifying
- *          → succeeded | blocked | failed
+ *          → succeeded | blocked | failed | cancelled
  *
  * Iteration = create a new plan revision or task attempt with links to the
  * failed verification evidence. Never silently loop inside one opaque agent call.
@@ -46,56 +49,26 @@ export type RunPhase =
   | 'verifying'
   | 'succeeded'
   | 'blocked'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 /** Terminal phases — no further transitions allowed. */
-const TERMINAL_PHASES: ReadonlySet<RunPhase> = new Set(['succeeded', 'failed']);
+const TERMINAL_PHASES: ReadonlySet<RunPhase> = new Set(['succeeded', 'failed', 'cancelled']);
 
 /** Legal phase transitions. Every transition not in this map is rejected. */
 const PHASE_TRANSITIONS: ReadonlyMap<RunPhase, ReadonlySet<RunPhase>> = new Map([
-  ['created',         new Set(['discovering', 'planning', 'executing', 'failed'])],
-  ['discovering',     new Set(['discovery_ready', 'failed'])],
-  ['discovery_ready', new Set(['planning', 'failed'])],
-  ['planning',        new Set(['plan_approved', 'failed'])],
-  ['plan_approved',   new Set(['executing', 'failed'])],
-  ['executing',       new Set(['verifying', 'failed'])],
-  ['verifying',       new Set(['succeeded', 'blocked', 'failed'])],
-  ['blocked',         new Set(['verifying', 'failed'])],
+  ['created',         new Set(['discovering', 'planning', 'executing', 'failed', 'cancelled'])],
+  ['discovering',     new Set(['discovery_ready', 'failed', 'cancelled'])],
+  ['discovery_ready', new Set(['planning', 'failed', 'cancelled'])],
+  ['planning',        new Set(['plan_approved', 'failed', 'cancelled'])],
+  ['plan_approved',   new Set(['executing', 'failed', 'cancelled'])],
+  ['executing',       new Set(['verifying', 'failed', 'cancelled'])],
+  ['verifying',       new Set(['succeeded', 'blocked', 'failed', 'cancelled'])],
+  ['blocked',         new Set(['verifying', 'failed', 'cancelled'])],
   ['succeeded',       new Set()],
   ['failed',          new Set()],
+  ['cancelled',       new Set()],
 ]);
-
-/**
- * Plan step — a unit of intended work. Not every plan step is an executable
- * verification command. Use `VerificationRequirement` for checks that map to
- * an actual command, assertion, or structured operator-review gate.
- */
-export interface PlanStep {
-  id: string;
-  title: string;
-  description: string;
-  dependsOnIds: string[];
-  editableSurfaces: string[];
-  completionCriteria: string;
-}
-
-/**
- * Verification requirement — an executable check, structured assertion, or
- * operator-review gate that must pass before the run can succeed.
- * Only explicitly executable assertions become command-backed
- * `verification_records`.
- */
-export interface VerificationRequirement {
-  id: string;
-  kind: 'command' | 'assertion' | 'operator_review';
-  description: string;
-  /** Shell command for `command` kind. */
-  command?: string;
-  /** Structured condition for `assertion` kind. */
-  assertion?: string;
-  /** Who must approve for `operator_review` kind. */
-  reviewer?: string;
-}
 
 /**
  * Lifecycle hooks attached to a task/run. Each hook is a shell command or script
@@ -145,6 +118,10 @@ export interface RunContractMetadata {
   verifications?: VerificationRequirement[];
   /** Plan revision number. Starts at 1. Incremented on each plan revision. */
   planRevision?: number;
+  /** Previous revision number within this run spec. */
+  planParentRevision?: number;
+  /** Immutable snapshots of superseded plans and their verification mapping. */
+  planHistory?: PlanRevisionSnapshot[];
   /** Run spec id of the parent plan (for revision lineage). */
   planParentRunSpecId?: string;
   /**
@@ -239,19 +216,24 @@ export function canMarkSucceeded(
   contract: RunContractMetadata | undefined,
   verificationStatuses: Array<{ requirementId: string; status: string }>,
 ): { allowed: boolean; reason?: string } {
-  const required = contract?.verifications ?? [];
-  if (required.length === 0) return { allowed: true };
+  const requiredIds = new Set([
+    ...(contract?.requiredChecks ?? []),
+    ...(contract?.verifications ?? []).map((requirement) => requirement.id),
+  ]);
+  if (requiredIds.size === 0) return { allowed: true };
+  const allowedSkippedChecks = new Set(contract?.allowedSkippedChecks ?? []);
 
-  const pending = required.filter(
-    (r) => !verificationStatuses.some(
-      (s) => s.requirementId === r.id && (s.status === 'succeeded' || s.status === 'skipped'),
+  const pending = [...requiredIds].filter(
+    (requirementId) => !verificationStatuses.some(
+      (status) => status.requirementId === requirementId
+        && (status.status === 'succeeded' || (status.status === 'skipped' && allowedSkippedChecks.has(requirementId))),
     ),
   );
 
   if (pending.length > 0) {
     return {
       allowed: false,
-      reason: `${pending.length} verification(s) still pending or failed: ${pending.map((p) => p.id).join(', ')}`,
+      reason: `${pending.length} verification(s) still pending or failed: ${pending.join(', ')}`,
     };
   }
   return { allowed: true };
@@ -275,18 +257,17 @@ export function validatePhaseStatusConsistency(
   if (!phase) return null;
 
   const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled']);
-  const terminalPhases = new Set(['succeeded', 'failed']);
+  const terminalPhases = new Set(['succeeded', 'failed', 'cancelled']);
   const statusIsTerminal = runSpecStatus ? terminalStatuses.has(runSpecStatus) : false;
   const phaseIsTerminal = terminalPhases.has(phase);
 
   // If phase is terminal but status isn't, that's a drift
-  if (phaseIsTerminal && !statusIsTerminal) {
-    return `run_contract.phase is '${phase}' but run_spec.status is '${runSpecStatus ?? 'unknown'}' (expected terminal)`;
+  if (phaseIsTerminal && runSpecStatus !== phase) {
+    return `run_contract.phase is '${phase}' but run_spec.status is '${runSpecStatus ?? 'unknown'}' (expected '${phase}')`;
   }
 
-  // If status is succeeded but phase says we never left executing, that's a drift
-  if (runSpecStatus === 'succeeded' && !phaseIsTerminal && phase !== 'verifying') {
-    return `run_spec.status is 'succeeded' but run_contract.phase is '${phase}' (expected 'succeeded', 'failed', or 'verifying')`;
+  if (statusIsTerminal && phase !== runSpecStatus) {
+    return `run_spec.status is '${runSpecStatus}' but run_contract.phase is '${phase}' (expected '${runSpecStatus}')`;
   }
 
   // If status is running but phase is a pre-execution state, that's suspicious
@@ -299,6 +280,7 @@ export function validatePhaseStatusConsistency(
 
 export type RunContractMetadataInput = Partial<{
   mode: unknown;
+  executionMode: unknown;
   goal: unknown;
   editableSurfaces: unknown;
   ownerLayer: unknown;
@@ -319,7 +301,9 @@ export type RunContractMetadataInput = Partial<{
   plan: unknown;
   verifications: unknown;
   planRevision: unknown;
+  planParentRevision: unknown;
   planParentRunSpecId: unknown;
+  planHistory: unknown;
   contextFiles: unknown;
   hooks: unknown;
   selfCheckEnabled: unknown;
@@ -366,6 +350,9 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
   const mode = normalizeRunContractMode(raw.mode);
   if (mode) out.mode = mode;
 
+  const executionMode = normalizeExecutionMode(raw.executionMode);
+  if (executionMode) out.executionMode = executionMode;
+
   const phase = normalizeRunPhase(raw.phase);
   if (phase) out.phase = phase;
 
@@ -374,6 +361,7 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
 
   setString(out, 'phaseChangedAt' as any, raw.phaseChangedAt);
   setNumber(out, 'planRevision', raw.planRevision, 1);
+  setNumber(out, 'planParentRevision', raw.planParentRevision, 1);
   setString(out, 'planParentRunSpecId' as any, raw.planParentRunSpecId);
   setString(out, 'goal', raw.goal);
   setString(out, 'ownerLayer', raw.ownerLayer);
@@ -387,6 +375,8 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
   if (plan) out.plan = plan;
   const verifications = normalizeVerificationRequirements(raw.verifications);
   if (verifications) out.verifications = verifications;
+  const planHistory = normalizePlanHistory(raw.planHistory);
+  if (planHistory) out.planHistory = planHistory;
 
   const contextFiles = normalizeContextFiles(raw.contextFiles);
   if (contextFiles) out.contextFiles = contextFiles;
@@ -425,12 +415,17 @@ function normalizeRunContractMode(value: unknown): RunContractMode | undefined {
   return undefined;
 }
 
+function normalizeExecutionMode(value: unknown): ExecutionMode | undefined {
+  if (value === 'lightweight' || value === 'standard' || value === 'heavyweight') return value;
+  return undefined;
+}
+
 function setString(target: RunContractMetadata, key: StringField, value: unknown): void {
   const normalized = normalizeString(value);
   if (normalized) target[key] = normalized;
 }
 
-function setNumber(target: RunContractMetadata, key: 'planRevision', value: unknown, _fallback: number): void {
+function setNumber(target: RunContractMetadata, key: 'planRevision' | 'planParentRevision', value: unknown, _fallback: number): void {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     target[key] = Math.max(1, Math.floor(value));
   } else if (typeof value === 'string' && value.trim()) {
@@ -467,10 +462,11 @@ function normalizeStringArray(value: unknown): string[] {
 }
 
 function hasRunContractValue(contract: RunContractMetadata): boolean {
-  if (contract.mode || contract.goal || contract.ownerLayer || contract.workspaceRoot || contract.provider || contract.model || contract.toolMode || contract.commitBoundary) return true;
+  if (contract.mode || contract.executionMode || contract.goal || contract.ownerLayer || contract.workspaceRoot || contract.provider || contract.model || contract.toolMode || contract.commitBoundary) return true;
   if (contract.phase) return true;
   if (contract.plan && contract.plan.length > 0) return true;
   if (contract.verifications && contract.verifications.length > 0) return true;
+  if (contract.planHistory && contract.planHistory.length > 0) return true;
   if (contract.contextFiles && contract.contextFiles.length > 0) return true;
   if (contract.hooks && (contract.hooks.afterCreate || contract.hooks.afterStart || contract.hooks.afterFinish || contract.hooks.afterArchive)) return true;
   if (contract.selfCheckEnabled !== undefined) return true;
@@ -480,7 +476,7 @@ function hasRunContractValue(contract: RunContractMetadata): boolean {
 
 function normalizeRunPhase(value: unknown): RunPhase | undefined {
   if (typeof value !== 'string') return undefined;
-  const phases: RunPhase[] = ['created', 'discovering', 'discovery_ready', 'planning', 'plan_approved', 'executing', 'verifying', 'succeeded', 'blocked', 'failed'];
+  const phases: RunPhase[] = ['created', 'discovering', 'discovery_ready', 'planning', 'plan_approved', 'executing', 'verifying', 'succeeded', 'blocked', 'failed', 'cancelled'];
   return phases.includes(value as RunPhase) ? (value as RunPhase) : undefined;
 }
 
@@ -523,6 +519,29 @@ function normalizeVerificationRequirements(value: unknown): VerificationRequirem
   return reqs.length > 0 ? reqs : undefined;
 }
 
+function normalizePlanHistory(value: unknown): PlanRevisionSnapshot[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const history: PlanRevisionSnapshot[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    const revision = Number(raw.revision);
+    const plan = normalizePlanSteps(raw.plan);
+    const supersededAt = normalizeString(raw.supersededAt);
+    if (!Number.isInteger(revision) || revision < 1 || !plan || !supersededAt) continue;
+    history.push({
+      revision,
+      plan,
+      requiredChecks: normalizeStringArray(raw.requiredChecks),
+      verifications: normalizeVerificationRequirements(raw.verifications) ?? [],
+      supersededAt,
+      actor: normalizeString(raw.actor),
+      reason: normalizeString(raw.reason),
+    });
+  }
+  return history.length > 0 ? history : undefined;
+}
+
 function normalizeContextFiles(value: unknown): ContextFileEntry[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const entries: ContextFileEntry[] = [];
@@ -541,7 +560,7 @@ function normalizeContextFiles(value: unknown): ContextFileEntry[] | undefined {
 function normalizeContextFilePhases(value: unknown): RunPhase[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const phases: RunPhase[] = [];
-  const valid = new Set<RunPhase>(['created', 'discovering', 'discovery_ready', 'planning', 'plan_approved', 'executing', 'verifying', 'succeeded', 'blocked', 'failed']);
+  const valid = new Set<RunPhase>(['created', 'discovering', 'discovery_ready', 'planning', 'plan_approved', 'executing', 'verifying', 'succeeded', 'blocked', 'failed', 'cancelled']);
   for (const item of value) {
     if (typeof item === 'string' && valid.has(item as RunPhase)) {
       phases.push(item as RunPhase);

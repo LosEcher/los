@@ -1,7 +1,7 @@
 import type { RunSpecStatus } from '@los/agent/run-specs';
 import { loadRunSpec } from '@los/agent/run-specs';
 import type { VerificationRecord } from '@los/agent';
-import { listVerificationRecordsForRunSpec, resolveVerificationCompletionDecision } from '@los/agent';
+import { ensureRunSpecVerificationPhase, listVerificationRecordsForRunSpec, resolveVerificationCompletionDecision } from '@los/agent';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 
@@ -23,9 +23,10 @@ export interface ApplyDirectRunCompletionStatusInput {
 }
 
 export function resolveDirectRunCompletionDecision(
-  verificationRecords: readonly Pick<VerificationRecord, 'id' | 'required' | 'status'>[],
+  verificationRecords: readonly Pick<VerificationRecord, 'id' | 'checkName' | 'required' | 'status'>[],
+  allowedSkippedChecks: readonly string[] = [],
 ): DirectRunCompletionDecision {
-  const decision = resolveVerificationCompletionDecision(verificationRecords);
+  const decision = resolveVerificationCompletionDecision(verificationRecords, allowedSkippedChecks);
   return {
     status: decision.status,
     blockedVerificationRecordIds: decision.blockedVerificationRecordIds,
@@ -35,9 +36,14 @@ export function resolveDirectRunCompletionDecision(
 export async function applyDirectRunCompletionStatus(
   input: ApplyDirectRunCompletionStatusInput,
 ): Promise<DirectRunCompletionDecision> {
-  const verificationRecords = await listVerificationRecordsForRunSpec(input.runSpecId);
-  const decision = resolveDirectRunCompletionDecision(verificationRecords);
   const runSpec = await loadRunSpec(input.runSpecId);
+  const verificationRecords = await listVerificationRecordsForRunSpec(input.runSpecId, {
+    planRevision: runSpec?.runContract?.planRevision ?? 1,
+  });
+  const decision = resolveDirectRunCompletionDecision(
+    verificationRecords,
+    runSpec?.runContract?.allowedSkippedChecks,
+  );
   if (runSpec?.status === 'created') {
     await transitionExecutionState({
       entityType: 'run_spec',
@@ -49,6 +55,7 @@ export async function applyDirectRunCompletionStatus(
       nodeId: input.nodeId,
     });
   }
+  await ensureRunSpecVerificationPhase(input.runSpecId, 'direct_run_completion', 'los.gateway');
   await transitionExecutionState({
     entityType: 'run_spec',
     entityId: input.runSpecId,

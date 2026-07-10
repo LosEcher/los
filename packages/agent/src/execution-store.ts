@@ -10,12 +10,13 @@ import { ensureSessionEventStore, type SessionEventRecord } from './session-even
 import { ensureTaskRunStore } from './task-runs.js';
 import { ensureToolCallStateStore } from './tool-call-states.js';
 import { ensureVerificationRecordStore } from './verification-records.js';
-import { validatePhaseStatusConsistency } from './run-contract.js';
+import { canMarkSucceeded, canStartExecution, validatePhaseStatusConsistency } from './run-contract.js';
 import {
   loadExecutionEntity,
   updateExecutionEntity,
   insertSessionEvent,
   insertExecutionOutbox,
+  ensureExecutionOutboxStore,
 } from './execution-persistence.js';
 import { getLogger } from '@los/infra/logger';
 import { eventBus } from './event-bus.js';
@@ -63,25 +64,12 @@ export interface TransitionExecutionStateResult<T extends ExecutionEntityType = 
   outboxId: number;
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS execution_outbox (
-  id BIGSERIAL PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  run_spec_id TEXT,
-  entity_type TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  event_type TEXT NOT NULL,
-  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  published_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_unpublished ON execution_outbox(created_at, id)
-  WHERE published_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_session ON execution_outbox(session_id, id);
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_run_spec ON execution_outbox(run_spec_id, id);
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_entity ON execution_outbox(entity_type, entity_id, id);
-`;
+export class _RunSuccessGateError extends Error {
+  constructor(runSpecId: string, reason: string) {
+    super(`Run spec ${runSpecId} cannot be marked succeeded: ${reason}`);
+    this.name = 'RunSuccessGateError';
+  }
+}
 
 let _initialized = false;
 
@@ -94,7 +82,7 @@ export async function ensureExecutionStore(): Promise<void> {
     ensureVerificationRecordStore(),
     ensureSessionEventStore(),
   ]);
-  await getDb().exec(SCHEMA);
+  await ensureExecutionOutboxStore();
   _initialized = true;
 }
 
@@ -116,7 +104,33 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
         to: input.to,
       });
 
-      await updateExecutionEntity(client, {
+      if (input.entityType === 'run_spec' && input.to === 'running' && entity.state !== 'blocked' && entity.contract?.phase) {
+        const startDecision = canStartExecution(entity.contract);
+        if (!startDecision.allowed) {
+          throw new Error(`Run spec ${input.entityId} cannot start: ${startDecision.reason}`);
+        }
+      }
+      if (input.entityType === 'run_spec' && input.to === 'succeeded') {
+        if (entity.contract?.phase && entity.contract.phase !== 'verifying') {
+          throw new _RunSuccessGateError(input.entityId, `phase '${entity.contract.phase}' must transition to 'verifying' first`);
+        }
+        const planRevision = entity.contract?.planRevision ?? 1;
+        const verificationRows = await client.query<{ check_name: string; status: string }>(
+          `SELECT check_name, status FROM verification_records
+           WHERE run_spec_id = $1 AND plan_revision = $2 AND required = TRUE
+           FOR UPDATE`,
+          [input.entityId, planRevision],
+        );
+        const successDecision = canMarkSucceeded(
+          entity.contract,
+          verificationRows.rows.map((row) => ({ requirementId: row.check_name, status: row.status })),
+        );
+        if (!successDecision.allowed) {
+          throw new _RunSuccessGateError(input.entityId, successDecision.reason ?? 'verification gate rejected success');
+        }
+      }
+
+      const updatedContract = await updateExecutionEntity(client, {
         entityType: input.entityType,
         entityId: input.entityId,
         to: input.to,
@@ -162,8 +176,8 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
 
       await client.query('COMMIT');
 
-      if (input.entityType === 'run_spec' && entity.contract) {
-        const drift = validatePhaseStatusConsistency(input.to as string, entity.contract);
+      if (input.entityType === 'run_spec' && updatedContract) {
+        const drift = validatePhaseStatusConsistency(input.to as string, updatedContract);
         if (drift) {
           log.warn(`Phase/status drift on run_spec ${input.entityId}: ${drift}`);
         }

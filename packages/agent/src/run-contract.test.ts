@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  canMarkSucceeded,
   mergeRunContractMetadata,
   normalizeRunContractMetadata,
   readRunContractMetadata,
 } from './run-contract.js';
+import { normalizePlanForPersistence, validatePlanForApproval } from './run-plan-validation.js';
 
 test('normalizeRunContractMetadata trims, deduplicates, and rejects invalid mode', () => {
   const contract = normalizeRunContractMetadata({
@@ -30,6 +32,22 @@ test('normalizeRunContractMetadata trims, deduplicates, and rejects invalid mode
 
   const invalid = normalizeRunContractMetadata({ mode: 'yolo' });
   assert.equal(invalid, undefined);
+});
+
+test('executionMode persists and skipped checks require explicit allowance', () => {
+  const contract = normalizeRunContractMetadata({
+    executionMode: 'heavyweight',
+    requiredChecks: ['pnpm check'],
+  });
+  assert.equal(contract?.executionMode, 'heavyweight');
+  assert.equal(canMarkSucceeded(contract, [{ requirementId: 'pnpm check', status: 'skipped' }]).allowed, false);
+
+  const allowed = normalizeRunContractMetadata({
+    executionMode: 'standard',
+    requiredChecks: ['pnpm check'],
+    allowedSkippedChecks: ['pnpm check'],
+  });
+  assert.equal(canMarkSucceeded(allowed, [{ requirementId: 'pnpm check', status: 'skipped' }]).allowed, true);
 });
 
 test('mergeRunContractMetadata stores contract under metadata.runContract', () => {
@@ -188,4 +206,15 @@ test('E21 — selfCheckResult pass-through preserves audit trail', () => {
   // Non-object selfCheckResult should be undefined
   const empty = normalizeRunContractMetadata({ selfCheckResult: 'not-an-object' });
   assert.equal(empty?.selfCheckResult, undefined);
+});
+
+test('plan validation compares canonical ids and dependencies', () => {
+  const plan = [
+    { id: 'step-1', title: 'First', description: 'First step.', dependsOnIds: [], editableSurfaces: [' src/a.ts '], completionCriteria: 'Done.' },
+    { id: ' step-1 ', title: 'Duplicate', description: 'Duplicate step.', dependsOnIds: [' step-1 '], editableSurfaces: [], completionCriteria: 'Done.' },
+  ];
+  assert.match(validatePlanForApproval(plan) ?? '', /duplicated/);
+  const normalized = normalizePlanForPersistence([plan[0]!]);
+  assert.equal(normalized[0]?.id, 'step-1');
+  assert.deepEqual(normalized[0]?.editableSurfaces, ['src/a.ts']);
 });

@@ -26,7 +26,8 @@ import {
   readToolCallRecoveryForRunSpec,
   type ToolCallRecoveryDecision,
 } from './tool-call-recovery.js';
-import { transitionExecutionState } from './execution-store.js';
+import { _RunSuccessGateError, transitionExecutionState } from './execution-store.js';
+import { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 import { type RunSpecStatus } from './run-specs.js';
 import { cancelScheduledTask } from './scheduler/abort-registry.js';
 import {
@@ -71,7 +72,7 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
       reason: 'graph_serial_start',
       sessionId: input.sessionId,
       nodeId: input.nodeId,
-    }).catch(() => undefined);
+    });
   }
 
   const maxTasks = normalizePositiveInteger(input.maxTasks) ?? 50;
@@ -173,16 +174,32 @@ async function applyGraphCompletionRunSpecTransition(
     return recovery;
   }
 
-  const status = runSpecStatusForGraphCompletion(completion);
+  let status = runSpecStatusForGraphCompletion(completion);
   if (status) {
-    await transitionExecutionState({
-      entityType: 'run_spec',
-      entityId: input.runSpecId,
-      to: status,
-      reason: `graph_completion:${completion.status}`,
-      sessionId: input.sessionId,
-      nodeId: input.nodeId,
-    }).catch(() => undefined);
+    try {
+      if (status === 'succeeded') {
+        await ensureRunSpecVerificationPhase(input.runSpecId, `graph_completion:${completion.status}`, 'los.scheduler');
+      }
+      await transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: input.runSpecId,
+        to: status,
+        reason: `graph_completion:${completion.status}`,
+        sessionId: input.sessionId,
+        nodeId: input.nodeId,
+      });
+    } catch (error) {
+      if (!(error instanceof _RunSuccessGateError) || status !== 'succeeded') throw error;
+      status = 'blocked';
+      await transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: input.runSpecId,
+        to: status,
+        reason: error.message,
+        sessionId: input.sessionId,
+        nodeId: input.nodeId,
+      });
+    }
   }
 
   if (status === 'blocked' && input.sessionId) {
@@ -342,6 +359,7 @@ async function runClaimedAgentGraphTask(
       taskRunId,
       runSpecId,
       sessionId,
+      verificationOwner: input.requireVerifier ? 'graph' : 'task',
       dedupeKey: undefined,
       metadata: {
         ...(input.metadata ?? {}),

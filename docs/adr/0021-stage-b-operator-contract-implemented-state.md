@@ -39,13 +39,15 @@ evidence status.
 | `commitBoundary` | `string` | Trimmed |
 | `externalEvidenceAllowed` | `string[]` | Deduped, trimmed, comma-split |
 | `rawEvidenceProhibited` | `string[]` | Deduped, trimmed, comma-split |
-| `phase` | `RunPhase` (10 values) | Validated against enum |
+| `phase` | `RunPhase` (11 values) | Validated against enum |
 | `previousPhase` | `RunPhase` | Validated against enum |
 | `phaseChangedAt` | `string` (ISO-8601) | Pass-through |
 | `plan` | `PlanStep[]` | Normalized with fallback ids |
 | `verifications` | `VerificationRequirement[]` | Kind-guarded (command/assertion/operator_review) |
 | `planRevision` | `number` | Integer >=1 |
-| `planParentRunSpecId` | `string` | Pass-through |
+| `planParentRevision` | `number` | Previous revision number within the same run spec |
+| `planHistory` | `PlanRevisionSnapshot[]` | Immutable snapshots of superseded plans and verification mappings |
+| `planParentRunSpecId` | `string` | Reserved for lineage across distinct run specs |
 
 **Key functions exported:**
 
@@ -56,7 +58,7 @@ evidence status.
 | `readRunContractMetadata(metadata)` | Extract contract from metadata bag |
 | `validatePhaseTransition(from, to)` | Reject illegal transitions; block terminal-phase mutation |
 | `canStartExecution(contract)` | Gate: phase must be `plan_approved` or `executing` |
-| `canMarkSucceeded(contract, verificationStatuses)` | Gate: all verifications must be succeeded/skipped |
+| `canMarkSucceeded(contract, verificationStatuses)` | Gate: all required verifications must succeed or be explicitly allowlisted as skipped |
 
 **Evidence**:
 - Test: `packages/agent/src/run-contract.test.ts` (E14 empty-contract, E15 tool-recovery types, E16 verification shapes)
@@ -69,18 +71,20 @@ evidence status.
 
 **Source**: `packages/agent/src/run-contract.ts`
 
-10-state lifecycle with validated transition map:
+11-state lifecycle with validated transition map:
 
 ```
 created → discovering → discovery_ready
        → planning    → plan_approved
        → executing   → verifying
-       → succeeded | blocked | failed
+       → succeeded | blocked | failed | cancelled
 ```
 
-Legal transitions enforced by `PHASE_TRANSITIONS` map. Terminal phases
-(`succeeded`, `failed`) reject all further transitions. `blocked` can transition
-back to `verifying` or `failed`.
+Legal transitions are enforced by `PHASE_TRANSITIONS`. Terminal phases
+(`succeeded`, `failed`, `cancelled`) reject all further transitions. `blocked`
+can transition back to `verifying`, `failed`, or `cancelled`. A run-spec status
+transition to `succeeded` is rejected unless the contract phase is already
+`verifying`.
 
 **Evidence**:
 - Test: `packages/agent/src/scheduler.test.ts` ("scheduler phase gate reads current run spec contract" — plan_approved allows execution, planning blocks it)
@@ -96,8 +100,11 @@ Pre-execution: After `task.running` transition, the scheduler reads the live
 is not `plan_approved`.
 
 Pre-completion: Before `task.succeeded`, calls `checkVerificationGate()` which
-loads `verification_records` and validates via `canMarkSucceeded()`. Blocks
-completion when required verifications are pending or failed.
+loads current-revision `verification_records` and validates via
+`canMarkSucceeded()`. Completion is blocked when required verifications are
+pending, failed, or skipped without an explicit `allowedSkippedChecks` entry.
+The run spec must also transition to `verifying` before its status may become
+`succeeded`.
 
 **Evidence**:
 - Test: `packages/agent/src/scheduler.test.ts` (phase gate test)
@@ -113,14 +120,14 @@ CLI: `los run approve <id>`
 Behavior:
 1. Loads current run spec
 2. Validates `currentPhase → plan_approved` transition via `validatePhaseTransition()`
-3. Persists new phase in `run_contract_json`
-4. Records `run.plan_approved` session event with actor, reason, previousPhase, approvedAt
+3. Requires a normalized structured plan plus verification mapping for standard/heavyweight execution
+4. Persists the plan before setting `phase: plan_approved`
+5. Atomically records `run.plan_approved` in `session_events` and `execution_outbox`
 
 **Evidence**:
-- Test: Indirect — scheduler phase gate test proves the enforcement side
-- Smoke: Managed by scheduler phase gate enforcement. Approval events and phase enforcement are verified through the B0 scheduler test suite.
-- No direct unit test for `approveRunSpecPhase()`
-- No gateway route integration test for `POST /runs/:id/approve`
+- Test: `packages/agent/src/run-specs.test.ts` (approval, validation, concurrency, persistence)
+- Test: `packages/gateway/src/routes/run-routes.test.ts` (approve route success and errors)
+- Test: `packages/agent/src/scheduler.test.ts` (live phase enforcement)
 
 ### 5. Plan Revision
 
@@ -132,14 +139,16 @@ CLI: `los run revise-plan <id> --plan '[...]' --reason "..."`
 Behavior:
 1. Loads current run spec
 2. Increments `planRevision` (starts at 1)
-3. Sets `planParentRunSpecId` for lineage tracking
-4. Resets phase to `planning`
-5. Records `run.plan_revised` session event with planRevision, previousRevision, actor, reason
+3. Appends the superseded plan and verification mapping to immutable `planHistory`
+4. Sets `planParentRevision` to the previous revision; it does not self-reference `planParentRunSpecId`
+5. Marks prior verification records non-required and creates revision-scoped replacements
+6. Resets phase to `planning`
+7. Atomically records `run.plan_revised` in `session_events` and `execution_outbox`
 
 **Evidence**:
-- No direct unit test for `reviseRunSpecPlan()`
-- No gateway route integration test for `POST /runs/:id/revise-plan`
-- CLI surface is wired (`los run revise-plan`) but not tested end-to-end
+- Test: `packages/agent/src/run-specs.test.ts` (revision increment, lineage, phase guards)
+- Test: `packages/gateway/src/routes/run-routes.test.ts` (revise route success and errors)
+- CLI surface is wired (`los run revise-plan`); no CLI end-to-end test exists yet
 
 ### 6. Plan Steps & Verification Requirements
 
@@ -149,13 +158,17 @@ Behavior:
 editableSurfaces, completionCriteria). Not every plan step is an executable
 verification command.
 
-`VerificationRequirement`: executable check with three kinds:
+`VerificationRequirement`: required evidence with three kinds:
 - `command` — shell command with stdout/exit-code validation
-- `assertion` — structured condition
-- `operator_review` — human approval gate with reviewer field
+- `assertion` — structured condition, never interpreted as a shell command
+- `operator_review` — human approval shape with reviewer field, never auto-executed
 
 Plan steps and verification requirements are intentionally separate types.
-No automatic step-to-verification mapping exists yet.
+No automatic step-to-verification mapping exists yet. Verification records
+persist `kind`, `assertion`, `reviewer`, and `plan_revision`; record ids include
+the revision (`verification-<run>-r<revision>-<index>`). Until an authenticated
+completion/rejection surface exists, plan approval rejects `assertion` and
+`operator_review` requirements instead of approving a permanently blocked run.
 
 **Evidence**:
 - Test: `packages/agent/src/run-contract.test.ts` (E16 verification shapes with operator_review)
@@ -216,20 +229,20 @@ Also stored in:
 - Mode, goal, editableSurfaces, requiredChecks, stopConditions, evidenceRequired
 - Plan steps (id, title, description, dependsOnIds, editableSurfaces, completionCriteria)
 - Verification requirements (id, kind, description, command, assertion, reviewer)
-- planRevision, planParentRunSpecId
+- planRevision, planParentRevision, planHistory, planParentRunSpecId
 
 ## Gaps — Capabilities Without Test or Smoke Evidence
 
 | Capability | Unit Test | Gateway Test | Smoke |
 |------------|-----------|-------------|-------|
-| `approveRunSpecPhase()` | Scheduler phase gate (indirect) | Via phase enforcement | Confirmed implemented in runtime |
-| `reviseRunSpecPlan()` | Plan revision test suite | Via phase enforcement | Confirmed implemented in runtime |
-| `POST /runs/:id/approve` | N/A | Via scheduler verification | Confirmed implemented in runtime |
-| `POST /runs/:id/revise-plan` | N/A | Via scheduler verification | Confirmed implemented in runtime |
+| `approveRunSpecPhase()` | Direct approval and concurrency tests | Route integration test | Confirmed implemented in runtime |
+| `reviseRunSpecPlan()` | Direct revision and lineage tests | Route integration test | Confirmed implemented in runtime |
+| `POST /runs/:id/approve` | N/A | Success and error cases | Confirmed implemented in runtime |
+| `POST /runs/:id/revise-plan` | N/A | Success and error cases | Confirmed implemented in runtime |
 | Phase state machine (`validatePhaseTransition`) | Via canStartExecution only | None | B0 smoke (indirect) |
-| `canMarkSucceeded()` | Via verification-records test only | None | B0 smoke (indirect) |
-| Plan revision lineage (parent/child) | None | None | None |
-| Verification `operator_review` kind routing | N/A | None | None |
+| `canMarkSucceeded()` | Direct contract and scheduler tests | Direct completion tests | B0 smoke (indirect) |
+| Same-run plan revision lineage | Direct revision tests | Revise route test | None |
+| Verification `operator_review` completion routing | Approval rejects unsupported kind | None | None |
 | Basic run contract propagation to child/executor runs | `registry.test.ts`, `scheduler.test.ts` | N/A | Confirmed for `spawn_agent` child config and executor request config |
 
 ## Gaps — Design Intent Not Yet Implemented
