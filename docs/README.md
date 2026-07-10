@@ -119,6 +119,10 @@ summary input or needs a future ingestion ADR.
 Use `governance/eval-backlog.md` when turning repeated agent failure modes into
 review checklists, tests, harness probes, operation smokes, or runtime metrics.
 
+Use `governance/coordinator-scenario-eval-set.md` for the fixed owner-routing,
+artifact, review, code, recovery, verification, and memory scenarios required
+before coordinator automation or model tiering can be considered.
+
 ## Documentation Rules
 
 1. Keep project-specific runtime contracts in this repo, not in global
