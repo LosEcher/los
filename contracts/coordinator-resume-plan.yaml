@@ -1,0 +1,72 @@
+contract: los.coordinator-resume-plan
+version: 0.1.0
+status: draft
+owner: packages/gateway
+description: >
+  Bounded evidence describing which prior run was selected when a chat session
+  resumes and which recovery-grade action its persisted state recommends.
+type: object
+decision:
+  required:
+    - currentRunSpecId
+    - candidateRunSpecIds
+    - selectionReason
+    - action
+    - blockerKinds
+    - lastEventId
+  properties:
+    currentRunSpecId:
+      type: string
+    selectedRunSpecId:
+      type: [string, "null"]
+    candidateRunSpecIds:
+      type: array
+      items: string
+    selectionReason:
+      type: string
+      enum: [latest_recoverable_run, no_recoverable_run, projection_unavailable]
+    phase:
+      type: [string, "null"]
+      enum: [created, running, succeeded, failed, cancelled, blocked, null]
+    action:
+      type: string
+      enum: [none, wait_for_task, recover_tools, cancel_tools, run_verification, inspect_events, operator_attention]
+    blockerKinds:
+      type: array
+      items: string
+    activeTaskRunIds:
+      type: array
+      items: string
+    failedTaskRunIds:
+      type: array
+      items: string
+    failedVerificationRecordIds:
+      type: array
+      items: string
+    pendingVerificationRecordIds:
+      type: array
+      items: string
+    recoveryRecommendation:
+      type: string
+      enum: [none, resume, retry, cancel, operator_attention]
+    lastEventId:
+      type: [integer, "null"]
+persistence:
+  eventType: coordinator.resume_plan_selected
+  timing: after current run creation and before scheduler or worker execution
+  visibility: audit
+behavior:
+  - The latest prior run in a recoverable status is selected deterministically.
+  - The action is projected from persisted run, task, tool, and verification state.
+  - This event is audit evidence only and does not execute recovery transitions.
+security:
+  - Persist identifiers, enum values, blocker kinds, and the event cursor only.
+  - Never persist prompts, transcript text, event payloads, tool arguments, verification output, or credentials.
+  - Candidate runs remain scoped to the resumed session.
+references:
+  - docs/adr/0025-conversation-run-coordinator-boundary.md
+  - docs/governance/runtime-evidence-graph.md
+verification:
+  - pnpm --filter @los/gateway test
+  - pnpm check
+  - ./tools/check-contracts.sh
