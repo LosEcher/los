@@ -51,6 +51,9 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0021-stage-b-operator-contract-implemented-state.md` - Stage B operator
   contract current-state declaration: fields, routes, state machines, gates,
   and evidence coverage.
+- `0025-conversation-run-coordinator-boundary.md` - boundary between interactive
+  coordination, persisted run state, bounded workers, GA governance jobs, and
+  operator-gated memory.
 
 ### Operation Smokes
 
