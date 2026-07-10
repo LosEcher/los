@@ -146,7 +146,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsParallelToolCalls: false,
     supportsReasoning: true,
     reasoningParam: 'reasoning_content',
-    modelAliases: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner'],
+    modelAliases: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     supportsToolStreaming: true,
     sessionAffinity: 'provider',
     cachePolicy: 'prompt-cache-read',
