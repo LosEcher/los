@@ -56,3 +56,30 @@ test('resolveProjectIdFromWorkspace normalizes paths before matching', () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('resolveProjectIdFromWorkspace maps nested paths to the deepest binding', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'los-projects-'));
+  const prev = process.env.LOS_PROJECTS_DIR;
+  process.env.LOS_PROJECTS_DIR = tmp;
+  try {
+    bindProject({
+      projectId: 'root-project',
+      displayName: 'root-project',
+      workspacePath: join(tmp, 'project'),
+    });
+    bindProject({
+      projectId: 'nested-project',
+      displayName: 'nested-project',
+      workspacePath: join(tmp, 'project', 'docs'),
+    });
+    assert.equal(
+      resolveProjectIdFromWorkspace(join(tmp, 'project', 'docs', 'adr')),
+      'nested-project',
+    );
+  } finally {
+    unbindProject('nested-project');
+    unbindProject('root-project');
+    process.env.LOS_PROJECTS_DIR = prev;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
