@@ -124,8 +124,25 @@ HTTPS_PROXY= HTTP_PROXY= gh api repos/LosEcher/los/rulesets/17481877 \
 - Do not treat lingering `git branch` names as source of truth; trust
   `origin/main` and PR state.
 
+## Session End Check (Agents)
+
+At the end of **every** support session that touched this repo, agents must
+run the judgment in `SKILL.md` → **Workflow: Session Closeout And Branch
+Governance** and the short gate in root `AGENTS.md` → **Session Closeout Gate**.
+
+Minimum questions (yes/no, with evidence):
+
+1. Uncommitted work that belongs on a PR?
+2. Feature bookmark / remote branch still needed?
+3. Stale worktrees or parallel locals to drop after merge?
+4. Any “done” claim that is only chat text (upgrade to `[E]` or retract)?
+
+Do not treat “smoke passed in chat” as permission to skip branch hygiene.
+
 ## Related
 
 - `docs/governance/github-branch-gates.md` — merge gates and `branch-closeout.sh`
 - `tools/branch-closeout.sh` — pre-merge read-only checklist
 - `tools/branch-prune-origin.sh` — post-merge origin prune (dry-run default)
+- `SKILL.md` — Session Closeout And Branch Governance workflow
+- `AGENTS.md` — Session Closeout Gate
