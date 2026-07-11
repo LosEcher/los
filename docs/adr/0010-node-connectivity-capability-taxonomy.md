@@ -201,6 +201,11 @@ Resource pressure closes the loop at selection time:
    `heavy_task_safe` capability is true.
 4. Thresholds are deterministic scheduler policy and require focused tests;
    later runtime configuration must move them into the Zod config authority.
+5. On macOS, `memory_available_mb` comes from the system `memory_pressure`
+   available percentage. Node `os.freemem()` reports only completely unused
+   pages there and must not drive placement because it excludes reclaimable
+   cache and compressed-memory headroom. If that system metric is unavailable,
+   omit `memory_available_mb` instead of publishing a false critical value.
 
 ## Migration Order
 

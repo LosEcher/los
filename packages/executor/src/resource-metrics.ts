@@ -1,5 +1,6 @@
 import { totalmem, freemem } from 'node:os';
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 export interface ResourceMetrics {
   memoryTotalMb?: number;
@@ -16,8 +17,12 @@ export interface ResourceMetrics {
 export function collectResourceMetrics(): ResourceMetrics {
   const metrics: ResourceMetrics = {};
   try {
-    metrics.memoryTotalMb = Math.round(totalmem() / (1024 * 1024));
-    metrics.memoryAvailableMb = Math.round(freemem() / (1024 * 1024));
+    const memoryTotalBytes = totalmem();
+    metrics.memoryTotalMb = Math.round(memoryTotalBytes / (1024 * 1024));
+    const memoryAvailableBytes = resolveAvailableMemoryBytes(memoryTotalBytes);
+    if (memoryAvailableBytes !== undefined) {
+      metrics.memoryAvailableMb = Math.round(memoryAvailableBytes / (1024 * 1024));
+    }
   } catch { /* non-Linux or permission issue */ }
 
   if (process.platform === 'linux') {
@@ -50,6 +55,32 @@ export function collectResourceMetrics(): ResourceMetrics {
     }
   }
   return metrics;
+}
+
+function resolveAvailableMemoryBytes(memoryTotalBytes: number): number | undefined {
+  if (process.platform !== 'darwin') return freemem();
+
+  try {
+    const output = execFileSync('/usr/bin/memory_pressure', [], {
+      encoding: 'utf8',
+      timeout: 1_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return _parseDarwinAvailableMemoryBytes(output, memoryTotalBytes);
+  } catch {
+    return undefined;
+  }
+}
+
+export function _parseDarwinAvailableMemoryBytes(
+  output: string,
+  memoryTotalBytes: number,
+): number | undefined {
+  const match = output.match(/System-wide memory free percentage:\s*(\d+(?:\.\d+)?)%/);
+  if (!match) return undefined;
+  const percentAvailable = Number(match[1]);
+  if (!Number.isFinite(percentAvailable) || percentAvailable < 0 || percentAvailable > 100) return undefined;
+  return Math.round(memoryTotalBytes * percentAvailable / 100);
 }
 
 export function resolveResourceCapabilities(): Partial<Record<string, unknown>> {
