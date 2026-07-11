@@ -13,6 +13,10 @@ function config(): Config {
     databaseUrl: 'postgres://los:los@127.0.0.1:5432/los_test',
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173', localEndpoints: [] },
     auth: { enabled: true, token: 'access-token', operatorToken: 'operator-token' },
+    integrations: { feedAnalysis: {
+      resultReturningEnabled: true, maxInlineBytes: 1048576, maxItems: 500,
+      materialHosts: [], materialFetchTimeoutMs: 10000, executionTimeoutMs: 120000, callbackPollMs: 5000, callbackProfiles: {},
+    } },
     agent: {
       defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20,
       sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false },

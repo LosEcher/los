@@ -11,6 +11,7 @@ test('integration routes: GET /api/integrations/feed-analysis/targets returns ta
   const config = await loadConfig();
   config.auth.enabled = true;
   config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
   await initDb(config.databaseUrl);
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -47,6 +48,7 @@ test('integration routes: targets rejects without auth', async () => {
   const config = await loadConfig();
   config.auth.enabled = true;
   config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
   await initDb(config.databaseUrl);
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -82,6 +84,7 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
   const config = await loadConfig();
   config.auth.enabled = true;
   config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
   await initDb(config.databaseUrl);
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -120,11 +123,11 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
         ],
       },
     });
-    assert.equal(response.statusCode, 200);
+    assert.equal(response.statusCode, 202);
     const body = response.json();
     assert.ok(body.data, 'response should have data envelope');
     assert.ok(body.data.dispatch, 'should have dispatch receipt');
-    assert.equal(body.data.dispatch.status, 'accepted');
+    assert.equal(body.data.dispatch.status, 'queued');
     assert.ok(body.data.dispatch.runId, 'should have runId');
     assert.ok(body.data.dispatch.traceId, 'should have traceId');
     assert.equal(body.data.dispatchState.accepted, true);
@@ -168,7 +171,7 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
         ],
       },
     });
-    assert.equal(replayResponse.statusCode, 200);
+    assert.equal(replayResponse.statusCode, 202);
     const replayBody = replayResponse.json();
     assert.equal(replayBody.data.deduplicated, true);
     assert.equal(replayBody.data.dispatch.id, body.data.dispatch.id);
@@ -182,6 +185,7 @@ test('integration routes: dispatch rejects missing required fields', async () =>
   const config = await loadConfig();
   config.auth.enabled = true;
   config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
   await initDb(config.databaseUrl);
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -203,9 +207,107 @@ test('integration routes: dispatch rejects missing required fields', async () =>
       payload: { sourceSystem: 'lot2extension' },  // missing sourceJobId and deliveryMode
     });
     assert.equal(response.statusCode, 400);
-    assert.match(response.json().error, /required/);
+    assert.equal(response.json().error, 'invalid_request');
+    assert.match(response.json().message, /required/);
   } finally {
     await app.close();
+    await closeDb();
+  }
+});
+
+test('integration routes: cancel is idempotent and result reflects cancellation', async () => {
+  const config = await loadConfig();
+  config.auth.enabled = true;
+  config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const dispatchId = `fa-cancel-route-${suffix}`;
+  await getDb().query(`
+    INSERT INTO feed_analysis_dispatches (
+      id, tenant_id, project_id, source_system, source_job_id, delivery_mode,
+      contract_version, input_digest, idempotency_key, status
+    ) VALUES ($1, 'local', 'los', 'lot2extension', $2, 'result_returning',
+      'feed-analysis-v2', $3, $4, 'accepted')
+  `, [dispatchId, `job-${suffix}`, `digest-${suffix}`, `idem-${suffix}`]);
+  const app = await createServer({
+    serviceId: `integration-cancel-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/integrations/feed-analysis/dispatch/${dispatchId}/cancel`,
+        headers: { authorization: `Bearer ${TEST_TOKEN}` },
+        payload: { reason: 'fixture cancellation' },
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().data.status, 'cancelled');
+    }
+    const resultResponse = await app.inject({
+      method: 'GET',
+      url: `/api/integrations/feed-analysis/dispatch/${dispatchId}/result`,
+      headers: { authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    assert.equal(resultResponse.statusCode, 200);
+    assert.equal(resultResponse.json().data.resultAvailable, false);
+    assert.equal(resultResponse.json().data.status, 'cancelled');
+  } finally {
+    await app.close();
+    await getDb().query('DELETE FROM feed_analysis_dispatches WHERE id=$1', [dispatchId]);
+    await closeDb();
+  }
+});
+
+test('integration routes: callback dead letters can be listed and replayed', async () => {
+  const config = await loadConfig();
+  config.auth.enabled = true;
+  config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const dispatchId = `fa-dead-letter-route-${suffix}`;
+  const eventId = `faevt-route-${suffix}`;
+  const deliveryId = `fadel-route-${suffix}`;
+  await getDb().query(`
+    INSERT INTO feed_analysis_dispatches (
+      id, tenant_id, project_id, source_system, source_job_id, delivery_mode,
+      contract_version, input_digest, idempotency_key, status
+    ) VALUES ($1, 'local', 'los', 'lot2extension', $2, 'result_returning', 'feed-analysis-v2', $3, $4, 'failed')
+  `, [dispatchId, `job-${suffix}`, `digest-${suffix}`, `idem-${suffix}`]);
+  await getDb().query(`
+    INSERT INTO feed_analysis_callback_events (event_id, dispatch_id, sequence, event_version, status, payload_json, payload_digest)
+    VALUES ($1, $2, 1, 'feed-analysis-result-v1', 'failed', '{}'::jsonb, $3)
+  `, [eventId, dispatchId, `event-digest-${suffix}`]);
+  await getDb().query(`
+    INSERT INTO feed_analysis_callback_deliveries (id, event_id, profile_id, status, attempt_count, dead_lettered_at)
+    VALUES ($1, $2, 'fixture', 'dead_letter', 8, now())
+  `, [deliveryId, eventId]);
+  const app = await createServer({
+    serviceId: `integration-dead-letter-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0', publicUrl: 'http://127.0.0.1:0', hostLabel: 'test',
+  });
+  try {
+    const listResponse = await app.inject({
+      method: 'GET', url: '/api/integrations/feed-analysis/callbacks/dead-letter',
+      headers: { authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    assert.equal(listResponse.statusCode, 200);
+    assert.ok(listResponse.json().data.deliveries.some((item: { id: string }) => item.id === deliveryId));
+    const replayResponse = await app.inject({
+      method: 'POST', url: `/api/integrations/feed-analysis/callbacks/${deliveryId}/replay`,
+      headers: { authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    assert.equal(replayResponse.statusCode, 200);
+    assert.equal(replayResponse.json().data.replayed, true);
+  } finally {
+    await app.close();
+    await getDb().query('DELETE FROM feed_analysis_dispatches WHERE id=$1', [dispatchId]);
     await closeDb();
   }
 });
@@ -214,6 +316,7 @@ test('integration routes: GET dispatch returns 404 for unknown id', async () => 
   const config = await loadConfig();
   config.auth.enabled = true;
   config.auth.token = TEST_TOKEN;
+  config.integrations.feedAnalysis.serviceToken = TEST_TOKEN;
   await initDb(config.databaseUrl);
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

@@ -4,19 +4,21 @@
  * Extracted from server.ts to keep both files under 400 lines.
  */
 import type { FastifyInstance } from 'fastify';
+import type { Config } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
 import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake, resumeAnsweredAsksForRunSpec } from '@los/agent';
 import { listExecutorNodes, markStaleExecutorNodesOffline } from '@los/agent/executor-nodes';
 import { markStaleServiceInstancesOffline } from '@los/agent/service-instances';
 import { resolveCoordinationBackend } from '@los/agent/coordination';
+import { processDueFeedAnalysisCallbacks, pruneExpiredFeedAnalysisMaterial } from '@los/agent';
 
 const log = getLogger('gateway');
 
 export function registerServerMaintenance(
   app: FastifyInstance,
   service: { serviceId: string },
-  _config: unknown,
+  config: Config,
   opts?: { executorAgentKey?: string },
 ): void {
   // ── Orphan reaper (30s) ──────────────────────────────────────
@@ -30,6 +32,42 @@ export function registerServerMaintenance(
     }).catch((err) => log.warn(`Orphan reaper failed: ${err.message ?? String(err)}`));
   }, ORPHAN_REAPER_MS);
   app.addHook('onClose', async () => clearInterval(orphanReaper));
+
+  // ── Feed-analysis callback delivery outbox ────────────────
+  const callbackPollMs = config.integrations.feedAnalysis.callbackPollMs;
+  const processFeedAnalysisCallbacks = async () => {
+    try {
+      const result = await processDueFeedAnalysisCallbacks(
+        config.integrations.feedAnalysis.callbackProfiles,
+        { ownerId: service.serviceId },
+      );
+      if (result.claimed > 0) {
+        log.info(
+          `Feed-analysis callbacks: claimed=${result.claimed}, delivered=${result.delivered}, ` +
+          `retried=${result.retried}, deadLettered=${result.deadLettered}`,
+        );
+      }
+    } catch (error) {
+      log.warn(`Feed-analysis callback delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const callbackTimeout = setTimeout(processFeedAnalysisCallbacks, Math.min(1_000, callbackPollMs));
+  const callbackTimer = setInterval(processFeedAnalysisCallbacks, callbackPollMs);
+  app.addHook('onClose', async () => {
+    clearTimeout(callbackTimeout);
+    clearInterval(callbackTimer);
+  });
+
+  const MATERIAL_RETENTION_MS = 60 * 60 * 1000;
+  const pruneFeedAnalysisMaterial = async () => {
+    const pruned = await pruneExpiredFeedAnalysisMaterial().catch(error => {
+      log.warn(`Feed-analysis material retention failed: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    });
+    if (pruned > 0) log.info(`Feed-analysis material retention: pruned ${pruned} bundle(s)`);
+  };
+  const materialRetentionTimer = setInterval(pruneFeedAnalysisMaterial, MATERIAL_RETENTION_MS);
+  app.addHook('onClose', async () => clearInterval(materialRetentionTimer));
 
   // ── Runtime registry freshness reconciliation (60s) ──────────
   const STALE_RECONCILE_MS = 60_000;
