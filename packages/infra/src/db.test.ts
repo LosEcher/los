@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
-import { isSafeTestDatabaseUrl, resolveDatabaseUrlForInit } from './db.js';
+import { _configureTestSchema, _isSafeTestDatabaseUrl, _resolveDatabaseUrlForInit } from './db.js';
 
 describe('DbConnection interface', () => {
   it('defines exec/prepare/transaction/close contract', () => {
@@ -68,21 +68,21 @@ describe('test database guard', () => {
   });
 
   it('accepts clearly named test databases', () => {
-    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los_test'), true);
-    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los-test'), true);
-    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los_test_123'), true);
+    assert.equal(_isSafeTestDatabaseUrl('postgres://localhost:5432/los_test'), true);
+    assert.equal(_isSafeTestDatabaseUrl('postgres://localhost:5432/los-test'), true);
+    assert.equal(_isSafeTestDatabaseUrl('postgres://localhost:5432/los_test_123'), true);
   });
 
   it('rejects live-looking database names for tests', () => {
-    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/los'), false);
-    assert.equal(isSafeTestDatabaseUrl('postgres://localhost:5432/prod'), false);
+    assert.equal(_isSafeTestDatabaseUrl('postgres://localhost:5432/los'), false);
+    assert.equal(_isSafeTestDatabaseUrl('postgres://localhost:5432/prod'), false);
   });
 
   it('uses TEST_DATABASE_URL in test processes', () => {
     process.argv.push('/tmp/db.test.ts');
     process.env.TEST_DATABASE_URL = 'postgres://localhost:5432/los_test';
     assert.equal(
-      resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+      _resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
       'postgres://localhost:5432/los_test',
     );
   });
@@ -94,7 +94,7 @@ describe('test database guard', () => {
     delete process.env.TEST_DATABASE_URL;
     try {
       assert.throws(
-        () => resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+        () => _resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
         /Refusing to run tests against non-test database "los"/,
       );
     } finally {
@@ -107,9 +107,24 @@ describe('test database guard', () => {
     delete process.env.TEST_DATABASE_URL;
     process.env.LOS_ALLOW_LIVE_TEST_DB = '1';
     assert.equal(
-      resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+      _resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
       'postgres://localhost:5432/los',
     );
+  });
+
+  it('derives a safe package and run scoped schema name', () => {
+    process.env.LOS_TEST_RUN_ID = 'root-run-123';
+    assert.equal(_configureTestSchema('@los/gateway'), 'los_test_los_gateway_root_run_123');
+    assert.equal(process.env.LOS_TEST_MODE, '1');
+  });
+
+  it('bounds long schema names deterministically', () => {
+    process.env.LOS_TEST_RUN_ID = 'run'.repeat(40);
+    const first = _configureTestSchema('agent');
+    const second = _configureTestSchema('agent');
+    assert.equal(first, second);
+    assert.ok(first.length <= 63);
+    assert.match(first, /^[a-z][a-z0-9_]+$/);
   });
 });
 

@@ -1,13 +1,16 @@
+import { after } from 'node:test';
 import { loadConfig } from '@los/infra/config';
-import { initDb, getDb } from '@los/infra/db';
+import { _configureTestSchema, _dropConfiguredTestSchema, initDb, getDb } from '@los/infra/db';
 import { ensureAllAgentStores } from '@los/agent/ensure-all-stores';
 
 // Pre-initialize DB for executor package tests.
 // ensureAllAgentStores() covers all agent-owned stores (including
 // executor_node + artifact which executor tests depend on).
 
+_configureTestSchema('executor');
 const config = await loadConfig();
 await initDb(config.databaseUrl);
+after(async () => await _dropConfiguredTestSchema(config.databaseUrl));
 await ensureAllAgentStores();
 
 // Ensure schema for file-sync tables (created by migration 005).
@@ -90,5 +93,5 @@ const statements = MIGRATION_005
   .filter(s => s.length > 0);
 
 for (const stmt of statements) {
-  await db.query(stmt).catch(() => {});
+  await db.query(stmt);
 }
