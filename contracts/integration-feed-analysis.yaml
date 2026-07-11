@@ -1,6 +1,6 @@
 contract: los.integration-feed-analysis
-version: 0.1.0
-status: draft
+version: 0.2.0
+status: implemented
 owner: packages/agent
 description: >
   Feed-analysis integration contract for external systems (e.g. lot2extension)
@@ -38,8 +38,32 @@ routes:
                     type: array
                     items:
                       type: string
+                  contractVersions:
+                    type: array
+                    items:
+                      type: string
+                  supportedOutputs:
+                    type: array
+                    items:
+                      type: string
+                  supportedPlatforms:
+                    type: array
+                    items:
+                      type: string
+                  supportedLocales:
+                    type: array
+                    items:
+                      type: string
                   supportsResultReturning:
                     type: boolean
+                  supportsCallback:
+                    type: boolean
+                  supportsCancellation:
+                    type: boolean
+                  maxInlineBytes:
+                    type: integer
+                  maxItems:
+                    type: integer
                   status:
                     type: string
 
@@ -92,8 +116,60 @@ routes:
           type: string
         callback:
           type: object
+          properties:
+            profileId:
+              type: string
         metadata:
           type: object
+        materialBundle:
+          type: object
+          required:
+            - schemaVersion
+            - bundleId
+            - sourceSystem
+            - items
+          properties:
+            schemaVersion:
+              type: string
+              enum:
+                - material-bundle-v1
+            bundleId:
+              type: string
+            sourceSystem:
+              type: string
+            timeRange:
+              type: object
+            selection:
+              type: object
+            items:
+              type: array
+              maxItems: 500
+              items:
+                type: object
+            requestedOutputs:
+              type: array
+              items:
+                type: string
+            policy:
+              type: object
+        materialBundleRef:
+          type: object
+          required:
+            - bundleId
+            - inputDigest
+            - url
+            - expiresAt
+          properties:
+            bundleId:
+              type: string
+            inputDigest:
+              type: string
+            url:
+              type: string
+            expiresAt:
+              type: string
+            sizeBytes:
+              type: integer
         feedSession:
           type: object
           required:
@@ -179,6 +255,8 @@ routes:
                   type: boolean
                 deliveryMode:
                   type: string
+                errorCode:
+                  type: string
             deduplicated:
               type: boolean
             idempotencyKey:
@@ -230,17 +308,124 @@ routes:
                   type: boolean
                 deliveryMode:
                   type: string
+                errorCode:
+                  type: string
             deduplicated:
               type: boolean
             idempotencyKey:
               type: string
 
+  - method: GET
+    path: /api/integrations/feed-analysis/dispatch/:id/result
+    auth: Bearer token (integration_service_token)
+    description: Read a validated result and its structured artifacts.
+    params:
+      id:
+        type: string
+    response:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - dispatchId
+            - status
+          properties:
+            dispatchId:
+              type: string
+            status:
+              type: string
+            resultAvailable:
+              type: boolean
+            result:
+              type: object
+              properties:
+                schemaVersion:
+                  type: string
+                summary:
+                  type: string
+                artifacts:
+                  type: array
+                  items:
+                    type: object
+                citations:
+                  type: array
+                  items:
+                    type: object
+                warnings:
+                  type: array
+                  items:
+                    type: string
+                workflow:
+                  type: object
+                provider:
+                  type: object
+                usage:
+                  type: object
+                resultDigest:
+                  type: string
+            error:
+              type: object
+
+  - method: POST
+    path: /api/integrations/feed-analysis/dispatch/:id/cancel
+    auth: Bearer token (integration_service_token)
+    description: Idempotently cancel an active feed-analysis dispatch.
+    params:
+      id:
+        type: string
+    request:
+      type: object
+      properties:
+        reason:
+          type: string
+    response:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - dispatchId
+            - status
+            - cancelled
+          properties:
+            dispatchId:
+              type: string
+            status:
+              type: string
+            cancelled:
+              type: boolean
+
+  - method: GET
+    path: /api/integrations/feed-analysis/callbacks/dead-letter
+    auth: Bearer token (integration_service_token)
+    description: List callback deliveries that exhausted retry policy.
+
+  - method: POST
+    path: /api/integrations/feed-analysis/callbacks/:id/replay
+    auth: Bearer token (integration_service_token)
+    description: Replay a dead-lettered callback without changing its event ID or sequence.
+
 sourceOfTruth:
+  - feed_analysis_dispatches (table)
+  - feed_analysis_results (table)
+  - feed_analysis_artifacts (table)
+  - feed_analysis_callback_events (table)
+  - feed_analysis_callback_deliveries (table)
   - run_specs (table)
   - task_runs (table)
   - session_events (table)
 events:
   writes:
+    - feed_analysis_dispatches
+    - feed_analysis_results
+    - feed_analysis_artifacts
+    - feed_analysis_callback_events
+    - feed_analysis_callback_deliveries
     - run_specs
     - task_runs
     - session_events

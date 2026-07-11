@@ -1,0 +1,35 @@
+{
+  "eventId": "faevt-fixture-001",
+  "eventVersion": "feed-analysis-result-v1",
+  "sourceJobId": "fixture-job-001",
+  "dispatchId": "fa-fixture-001",
+  "sequence": 4,
+  "status": "completed",
+  "result": {
+    "schemaVersion": "feed-analysis-result-v1",
+    "summary": "今日关注内容主要集中在 AI 工具。",
+    "artifacts": [
+      {
+        "artifactId": "fa-art-fixture-001",
+        "kind": "platform_draft",
+        "platform": "xiaohongshu",
+        "locale": "zh-CN",
+        "titleCandidates": ["标题一", "标题二"],
+        "body": "正文……",
+        "hashtags": ["#AI工具"],
+        "structuredPayload": {},
+        "citationRefs": ["src_1"],
+        "workflowId": "lot2.daily-content",
+        "workflowVersion": "1.0.0",
+        "promptId": "lot2.daily-content.generate",
+        "promptVersion": "1.0.0",
+        "reviewStatus": "draft"
+      }
+    ],
+    "citations": [{ "id": "src_1", "itemId": "fixture-item-001" }],
+    "warnings": [],
+    "workflow": { "id": "lot2.daily-content", "version": "1.0.0" },
+    "prompt": { "id": "lot2.daily-content.generate", "version": "1.0.0" }
+  },
+  "occurredAt": "2026-07-12T20:00:00Z"
+}
