@@ -15,6 +15,8 @@ import {
 import { writeExecutorNode as execWriteNode, type ExecutorNodeRow } from './executor-node-writer.js';
 
 const EXECUTOR_NODE_STALE_MS = 60_000;
+const MEMORY_PRESSURE_WARNING_RATIO = 0.1;
+const MEMORY_PRESSURE_CRITICAL_RATIO = 0.05;
 
 export type ExecutorNodeStatus = 'online' | 'draining' | 'offline';
 export type ExecutorNodeKind = 'executor' | 'ssh_target' | 'ingress' | 'proxy';
@@ -367,10 +369,13 @@ export function evaluateExecutorNode(node: Omit<ExecutorNodeRecord, 'execution'>
     }
   }
 
-  // Memory pressure warnings
+  // Critical pressure blocks all new work. Warning pressure remains eligible
+  // for lightweight work and is deprioritized during candidate sorting.
   if (node.capacity.memoryAvailableMb !== undefined && node.capacity.memoryTotalMb !== undefined) {
     const ratio = node.capacity.memoryAvailableMb / node.capacity.memoryTotalMb;
-    if (ratio < 0.1) {
+    if (ratio < MEMORY_PRESSURE_CRITICAL_RATIO) {
+      blockers.push('resource:memory_pressure');
+    } else if (ratio < MEMORY_PRESSURE_WARNING_RATIO) {
       warnings.push('resource:memory_pressure');
     }
   }
@@ -405,15 +410,18 @@ function isHeartbeatStale(value: string | undefined): boolean {
 }
 
 /**
- * Sort executor candidates by load: lower queue depth → lower active task count → higher capacity → fresher heartbeat.
- * Preferred nodeId (if specified) always comes first.
+ * Sort executor candidates by pressure, preference, load, capacity, then heartbeat freshness.
+ * Preferred nodeId applies only within the same memory-pressure class.
  */
 export function sortExecutorCandidates(
   candidates: ExecutorNodeRecord[],
   preferredNodeId?: string,
 ): ExecutorNodeRecord[] {
   const sorted = [...candidates].sort((a, b) => {
-    // Preferred node always first
+    const aMemoryPressure = a.execution.warnings.includes('resource:memory_pressure');
+    const bMemoryPressure = b.execution.warnings.includes('resource:memory_pressure');
+    if (aMemoryPressure !== bMemoryPressure) return aMemoryPressure ? 1 : -1;
+    // Preference only applies within the same pressure class.
     if (preferredNodeId) {
       if (a.nodeId === preferredNodeId && b.nodeId !== preferredNodeId) return -1;
       if (b.nodeId === preferredNodeId && a.nodeId !== preferredNodeId) return 1;

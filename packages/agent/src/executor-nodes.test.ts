@@ -10,8 +10,10 @@ import {
   listExecutorNodes,
   markStaleExecutorNodesOffline,
   recordExecutorNodeProbe,
+  sortExecutorCandidates,
   upsertExecutorNode,
   upsertExecutorNodeHeartbeat,
+  type ExecutorNodeRecord,
 } from './executor-nodes.js';
 
 test('executor node registry persists connectivity and capability fields', async () => {
@@ -401,3 +403,51 @@ test('executor node classification rejects stale heartbeat executors', () => {
   assert.equal(stale.candidate, false);
   assert.ok(stale.blockers.includes('heartbeat:stale'));
 });
+
+test('executor node classification blocks critical memory pressure', () => {
+  const execution = evaluateExecutorNode(testExecutorNode({
+    capacity: { memoryTotalMb: 1000, memoryAvailableMb: 40 },
+  }));
+
+  assert.equal(execution.candidate, false);
+  assert.ok(execution.blockers.includes('resource:memory_pressure'));
+});
+
+test('executor candidate sorting deprioritizes warning-level memory pressure', () => {
+  const pressured = executorNodeRecord('pressured', {
+    memoryTotalMb: 1000,
+    memoryAvailableMb: 80,
+  });
+  const healthy = executorNodeRecord('healthy', {
+    memoryTotalMb: 1000,
+    memoryAvailableMb: 500,
+  });
+
+  assert.deepEqual(sortExecutorCandidates([pressured, healthy], pressured.nodeId).map(node => node.nodeId), ['healthy', 'pressured']);
+});
+
+function testExecutorNode(overrides: Partial<ExecutorNodeRecord> = {}): Omit<ExecutorNodeRecord, 'execution'> {
+  const { execution: _execution, ...node } = executorNodeRecord('test-node', overrides.capacity ?? {});
+  return { ...node, ...overrides };
+}
+
+function executorNodeRecord(nodeId: string, capacity: ExecutorNodeRecord['capacity']): ExecutorNodeRecord {
+  const now = new Date().toISOString();
+  const node = {
+    nodeId,
+    nodeKind: 'executor' as const,
+    status: 'online' as const,
+    connectModes: ['agent_http'],
+    connectConfig: {},
+    capacity,
+    capabilities: { run_agent: true },
+    verified: { agent_http: { ok: true, checked_at: now } },
+    queueDepth: 0,
+    activeTaskCount: 0,
+    meshLinks: [],
+    lastHeartbeatAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return { ...node, execution: evaluateExecutorNode(node) };
+}

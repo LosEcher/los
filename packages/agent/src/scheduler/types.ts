@@ -53,6 +53,21 @@ export interface ScheduledExecutorConfig {
   heartbeatMs?: number;
   requiresBuild?: boolean;
   requiresDeploy?: boolean;
+  requiredCapabilities?: readonly ExecutorCapabilityRequirement[];
+}
+
+export type ExecutorCapabilityRequirement =
+  | 'workspace_read'
+  | 'workspace_write'
+  | 'shell'
+  | 'sandbox'
+  | 'network_egress'
+  | 'heavy_task_safe'
+  | 'deploy_safe';
+
+export interface ExecutorPlacementIntent {
+  toolMode?: 'all' | 'project-write' | 'read-only';
+  sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
 }
 
 export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInput, 'prompt' | 'promptPreview' | 'taskRunId' | 'dedupeKey'> {

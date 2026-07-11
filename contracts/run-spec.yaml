@@ -82,6 +82,23 @@ properties:
       heartbeatMs:
         type: integer
         minimum: 1000
+      requiredCapabilities:
+        type: array
+        description: >
+          Capability requirements compiled from run intent before executor
+          selection. The scheduler fails closed when no candidate satisfies
+          every requirement.
+        uniqueItems: true
+        items:
+          type: string
+          enum:
+            - workspace_read
+            - workspace_write
+            - shell
+            - sandbox
+            - network_egress
+            - heavy_task_safe
+            - deploy_safe
   status:
     type: string
     enum:

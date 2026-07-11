@@ -22,7 +22,12 @@ import { isWorkerBlockReason, workerBlockReasonFrom } from './worker-block-error
 import { clearCancellation } from '../cancellation.js';
 import { canStartExecution, type RunContractMetadata } from '../run-contract.js';
 import { recordSchedulerDecision } from '../scheduler-decision-ledger.js';
-import { resolveExecutor, runAgentOnExecutor } from './executor-client.js';
+import {
+  _ExecutorSelectionError,
+  resolveExecutor,
+  runAgentOnExecutor,
+  type ResolvedExecutor,
+} from './executor-client.js';
 import { normalizeOptionalString, normalizePositiveInteger, readObject } from './helpers.js';
 import { emitTaskEvent } from './task-events.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
@@ -43,8 +48,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const toolMode = input.toolMode ?? 'project-write';
   const workspaceRoot = input.workspaceRoot ?? process.cwd();
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
-  const executor = await resolveExecutor(input.executor);
-  const nodeId = executor?.nodeId ?? 'gateway-local';
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
   const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? Math.max(1_000, Math.floor(leaseMs / 3));
 
@@ -62,6 +65,35 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       };
     }
   }
+
+  let executor: ResolvedExecutor | null;
+  try {
+    executor = await resolveExecutor(input.executor, {
+      toolMode,
+      sandboxMode: input.sandboxMode,
+    });
+  } catch (error) {
+    if (error instanceof _ExecutorSelectionError) {
+      const metadata = readObject(input.metadata);
+      await recordSchedulerDecision({
+        graphId: normalizeOptionalString(metadata.graphId) ?? input.runSpecId ?? taskRunId,
+        taskId: normalizeOptionalString(metadata.agentTaskId),
+        taskRunId,
+        runSpecId: input.runSpecId,
+        sessionId,
+        kind: 'executor_selection',
+        selectedIds: [],
+        skipped: error.decision.skipped,
+        reason: 'no_executor_match',
+        metadata: {
+          candidateNodeIds: error.decision.candidateIds,
+          requiredCapabilities: error.decision.requiredCapabilities,
+        },
+      });
+    }
+    throw error;
+  }
+  const nodeId = executor?.nodeId ?? 'gateway-local';
 
   const created = await createTaskRun({
     id: taskRunId,
@@ -99,6 +131,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       metadata: {
         candidateNodeIds: executor.decision.candidateIds,
         executorUrl: executor.url,
+        placementTier: executor.decision.placementTier,
+        requiredCapabilities: executor.decision.requiredCapabilities,
       },
     });
   }

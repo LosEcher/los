@@ -83,6 +83,10 @@ properties:
         type: boolean
       sandbox:
         type: string
+        description: Isolation backend name. `tool_policy` and `native` do not satisfy a sandbox requirement.
+      network_egress:
+        type: boolean
+        description: Whether executor tasks can make policy-approved outbound network connections.
       proxy_egress:
         type: boolean
       ingress_callback:
