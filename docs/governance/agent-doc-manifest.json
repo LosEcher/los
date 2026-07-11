@@ -1,14 +1,18 @@
 {
   "project": "los",
-  "entrypointMaxLines": 220,
+  "entrypointMaxLines": 180,
+  "activeTruthMaxLines": 240,
+  "maxActiveTruthDocuments": 6,
+  "auditClaudeMemory": true,
   "archivePaths": ["docs/archive/", "docs/research/legacy/"],
   "documents": {
     "entrypoint": [
       {
         "path": "AGENTS.md",
-        "maxLines": 220
+        "maxLines": 180
       }
     ],
+    "project-skill": ["SKILL.md"],
     "active-truth": ["docs/README.md"],
     "long-policy": ["docs/governance/anti-patterns.md"],
     "governance": [
@@ -21,6 +25,7 @@
   },
   "mustExist": [
     "AGENTS.md",
+    "SKILL.md",
     "docs/README.md",
     "docs/governance/anti-patterns.md",
     "tools/check-state-machine-bypass.sh"
