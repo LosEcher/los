@@ -39,7 +39,21 @@ export { resolveVerificationCompletionDecision, runVerificationRecord, runVerifi
 export { ensureProviderCompatEvidenceStore, loadProviderCompatEvidence, listProviderCompatEvidence, listLatestProviderCompatEvidence, recordProviderCompatEvidence, recordProviderCompatEvidenceFromSummary, recordProviderCompatEvidenceFromSummaryWithDefaultDb, type ProviderCompatDecision, type ProviderCompatEvidenceRecord, type ListProviderCompatEvidenceOptions, type RecordProviderCompatEvidenceInput } from './provider-compat-evidence.js';
 export { enforceProviderPromotionDecision, ensureProviderPromotionDecisionStore, listProviderPromotionDecisions, recordProviderPromotionDecision, type EnforceProviderPromotionDecisionInput, type ListProviderPromotionDecisionsOptions, type ProviderPromotionDecisionRecord, type ProviderPromotionPolicyAction, type ProviderPromotionPolicyStatus, type RecordProviderPromotionDecisionInput } from './provider-promotion-decisions.js';
 export { ensureExternalToolSummaryStore, importExternalToolSummary, listExternalToolSummaries, normalizeExternalToolSummary, redactExternalSummaryText, type ExternalAgentTool, type ExternalSummaryEvidenceInput, type ExternalSummarySourceKind, type ExternalToolSummaryRecord, type ExternalToolSummary, type ExternalToolSummaryInput, type ListExternalToolSummariesOptions } from './external-tool-summary.js';
-export { listFeedAnalysisTargets, dispatchFeedAnalysisJob, getFeedAnalysisDispatch, type FeedAnalysisTarget, type FeedAnalysisDispatchRequest, type FeedAnalysisDispatchReceipt, type FeedAnalysisDispatchState, type FeedAnalysisDispatchResult } from './integration/feed-analysis-ingress.js';
+export {
+  listFeedAnalysisTargets, dispatchFeedAnalysisJob, getFeedAnalysisDispatch,
+  getFeedAnalysisResult, cancelFeedAnalysisDispatch, FeedAnalysisError,
+  type FeedAnalysisCapabilityOptions, type FeedAnalysisDispatchOptions,
+  type FeedAnalysisTarget, type FeedAnalysisDispatchRequest, type FeedAnalysisDispatchReceipt,
+  type FeedAnalysisDispatchState, type FeedAnalysisDispatchResult, type FeedAnalysisResultResponse,
+  type FeedAnalysisResultEnvelope, type FeedAnalysisArtifact,
+} from './integration/feed-analysis-ingress.js';
+export { ensureFeedAnalysisStore, pruneExpiredFeedAnalysisMaterial } from './integration/feed-analysis-store.js';
+export {
+  processDueFeedAnalysisCallbacks, listFeedAnalysisDeadLetters, replayFeedAnalysisDeadLetter,
+  type FeedAnalysisCallbackProfile,
+  type FeedAnalysisCallbackDeliveryResult,
+  type FeedAnalysisDeadLetterDelivery,
+} from './integration/feed-analysis-callback-outbox.js';
 export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
 export { ensureRunEvalStore, compareRunEvals, listRunEvals, recordFailoverEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type SummarizeRunEvalsOptions } from './run-evals.js';
 export { getEvalBacklogCases, recordEvalBacklogSnapshot, type EvalBacklogCase } from './eval-backlog-runner.js';
