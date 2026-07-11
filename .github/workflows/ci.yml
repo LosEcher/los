@@ -13,9 +13,9 @@ on:
 #
 #   gate-fast  — typecheck/structure/coupling/state-machine/contracts/
 #                delete-safety/unwired. No DB. Fast feedback.
-#   gate-test  — per-package test matrix (postgres service). Each package
-#                gets its own step, timeout, and log group, so a hang
-#                names the offending package and never exceeds its budget.
+#   gate-test  — per-package tests plus a real root `pnpm test` matrix entry
+#                against PostgreSQL. Package jobs isolate failures; the root
+#                entry verifies cross-package parallel execution.
 #   gate-drift — migration-drift gate (own DB env, isolated from NODE_ENV
 #                redirect).
 jobs:
@@ -95,6 +95,7 @@ jobs:
           - gateway
           - executor
           - agent
+          - root
 
     steps:
       - uses: actions/checkout@v4
@@ -127,8 +128,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Test @los/${{ matrix.package }}
+        if: matrix.package != 'root'
         run: pnpm --filter @los/${{ matrix.package }} test
         timeout-minutes: 8
+
+      - name: Test root workspace in parallel
+        if: matrix.package == 'root'
+        run: pnpm test
+        timeout-minutes: 12
 
   # Branch protection on GitHub still requires this job name until rules are updated.
   gate-test-input-preprocessor-retired:

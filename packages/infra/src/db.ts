@@ -7,6 +7,7 @@
  */
 
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { createHash } from 'node:crypto';
 import { getLogger } from './logger.js';
 
 const log = getLogger('db');
@@ -27,7 +28,7 @@ let _pool: Pool | null = null;
 export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   if (_pool) return wrap(_pool);
 
-  const url = resolveDatabaseUrlForInit(databaseUrl);
+  const url = _resolveDatabaseUrlForInit(databaseUrl);
   if (!url) {
     throw new Error(
       'DATABASE_URL is not configured. Set DATABASE_URL=postgres://user:pass@host:5432/db ' +
@@ -38,8 +39,22 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
     throw new Error(`los uses PostgreSQL for persistence. Set DATABASE_URL=postgres://... (got ${url})`);
   }
 
+  const testSchema = resolveConfiguredTestSchema();
+  if (testSchema) {
+    if (!isLikelyTestProcess()) {
+      throw new Error('LOS_TEST_SCHEMA may only be used by a test process');
+    }
+    const bootstrapPool = new Pool({ connectionString: url, max: 1 });
+    try {
+      await bootstrapPool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(testSchema)}`);
+    } finally {
+      await bootstrapPool.end();
+    }
+  }
+
   _pool = new Pool({
     connectionString: url,
+    options: testSchema ? `-c search_path=${testSchema}` : undefined,
     max: 20,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 10000,
@@ -50,7 +65,7 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   return wrap(_pool);
 }
 
-export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefined {
+export function _resolveDatabaseUrlForInit(databaseUrl?: string): string | undefined {
   if (isLikelyTestProcess()) {
     const testUrl = normalizeOptionalString(process.env.TEST_DATABASE_URL);
     if (testUrl) return testUrl;
@@ -59,7 +74,7 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
     if (
       !process.env.CI &&
       candidate
-      && !isSafeTestDatabaseUrl(candidate)
+      && !_isSafeTestDatabaseUrl(candidate)
       && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
     ) {
       throw new Error(
@@ -73,7 +88,7 @@ export function resolveDatabaseUrlForInit(databaseUrl?: string): string | undefi
   return databaseUrl ?? process.env.DATABASE_URL;
 }
 
-export function isSafeTestDatabaseUrl(databaseUrl: string): boolean {
+export function _isSafeTestDatabaseUrl(databaseUrl: string): boolean {
   try {
     const parsed = new URL(databaseUrl);
     const dbName = parsed.pathname.replace(/^\/+/, '').toLowerCase();
@@ -91,6 +106,37 @@ export function isLikelyTestProcess(): boolean {
   return process.argv.some((arg) => /\.(test|spec)\.[cm]?[jt]s$/.test(arg));
 }
 
+export function _configureTestSchema(packageId: string): string {
+  const normalizedPackageId = normalizeTestSchemaPart(packageId);
+  if (!normalizedPackageId) throw new Error('Test schema packageId must contain letters or digits');
+  const runId = normalizeTestSchemaPart(
+    process.env.LOS_TEST_RUN_ID ?? `${process.ppid}-${process.pid}`,
+  );
+  const base = `los_test_${normalizedPackageId}_${runId}`;
+  const schema = base.length <= 63
+    ? base
+    : `${base.slice(0, 54)}_${createHash('sha256').update(base).digest('hex').slice(0, 8)}`;
+  process.env.LOS_TEST_MODE = '1';
+  process.env.LOS_TEST_SCHEMA = schema;
+  return schema;
+}
+
+export async function _dropConfiguredTestSchema(databaseUrl?: string): Promise<void> {
+  const schema = resolveConfiguredTestSchema();
+  if (!schema) return;
+  const url = _resolveDatabaseUrlForInit(databaseUrl);
+  if (!url || (!_isSafeTestDatabaseUrl(url) && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1')) {
+    throw new Error('Refusing to drop a test schema outside a safe test database');
+  }
+  await closeDb();
+  const cleanupPool = new Pool({ connectionString: url, max: 1 });
+  try {
+    await cleanupPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
+  } finally {
+    await cleanupPool.end();
+  }
+}
+
 function redactedDatabaseName(databaseUrl: string): string {
   try {
     const parsed = new URL(databaseUrl);
@@ -104,6 +150,23 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeTestSchemaPart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function resolveConfiguredTestSchema(): string | undefined {
+  const schema = normalizeOptionalString(process.env.LOS_TEST_SCHEMA);
+  if (!schema) return undefined;
+  if (!/^[a-z][a-z0-9_]{0,62}$/.test(schema)) {
+    throw new Error(`Invalid LOS_TEST_SCHEMA identifier: ${schema}`);
+  }
+  return schema;
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function wrap(pool: Pool): DbConnection {

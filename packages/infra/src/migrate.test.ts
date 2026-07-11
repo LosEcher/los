@@ -14,6 +14,25 @@ function dbUrl(): string {
   return process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? 'postgres://localhost:5432/los';
 }
 
+test('test database search path excludes public', async () => {
+  const db = await initDb(dbUrl());
+  const tableName = `schema_probe_${Date.now()}`;
+  try {
+    const paths = await db.query<{ current_schema: string }>('SELECT current_schema()');
+    assert.equal(paths.rows[0]?.current_schema, process.env.LOS_TEST_SCHEMA);
+    await db.exec(`CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY)`);
+    const relations = await db.query<{ isolated: string | null; public_relation: string | null }>(
+      'SELECT to_regclass($1) AS isolated, to_regclass($2) AS public_relation',
+      [tableName, `public.${tableName}`],
+    );
+    assert.equal(relations.rows[0]?.isolated, tableName);
+    assert.equal(relations.rows[0]?.public_relation, null);
+  } finally {
+    await db.exec(`DROP TABLE IF EXISTS ${tableName}`);
+    await closeDb();
+  }
+});
+
 test('migrateDir applies pending migrations in order', async () => {
   const db = await initDb(dbUrl());
   const dir = join(tmpdir(), `los-migration-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);

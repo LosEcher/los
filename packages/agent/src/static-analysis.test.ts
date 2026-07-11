@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 import { loadRuleFiles } from './static-analysis/rule-loader.js';
 import { discoverFiles } from './static-analysis/discover.js';
@@ -61,7 +62,8 @@ test('scanFiles finds issues in a test fixture', async () => {
   const rulesDir = resolve(__dirname, './static-analysis/rules');
   const rules = await loadRuleFiles([`${rulesDir}/languages/typescript/*.yml`]);
 
-  const tmpFile = resolve(__dirname, './static-analysis/__scan_test_fixture__.ts');
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'los-static-analysis-'));
+  const tmpFile = join(fixtureDir, 'fixture.ts');
 
   writeFileSync(
     tmpFile,
@@ -100,7 +102,7 @@ test('scanFiles finds issues in a test fixture', async () => {
       assert.ok(typeof f.severity === 'string');
     }
   } finally {
-    unlinkSync(tmpFile);
+    rmSync(fixtureDir, { recursive: true, force: true });
   }
 });
 

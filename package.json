@@ -35,8 +35,8 @@
     "gate": "./tools/ci-gate.sh",
     "pre-push": "./tools/ci-gate.sh",
     "_typecheck": "turbo check",
-    "_test": "turbo test --concurrency=1",
-    "test": "turbo test --concurrency=1",
+    "_test": "bash ./tools/run-tests.sh",
+    "test": "bash ./tools/run-tests.sh",
     "clean": "turbo clean"
   },
   "devDependencies": {

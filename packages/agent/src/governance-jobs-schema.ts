@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS governance_jobs (
   config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   auto_fix_config_json JSONB,
   last_run_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ,
   last_task_run_id TEXT,
   result_summary_json JSONB,
   dedupe_key TEXT,
@@ -62,37 +63,37 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'governance_jobs' AND column_name = 'auto_fix_config_json'
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'auto_fix_config_json'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN auto_fix_config_json JSONB;
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'governance_jobs' AND column_name = 'consecutive_no_ops'
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'consecutive_no_ops'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN consecutive_no_ops INTEGER NOT NULL DEFAULT 0;
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'governance_jobs' AND column_name = 'consecutive_failures'
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'consecutive_failures'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'governance_jobs' AND column_name = 'circuit_state'
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'circuit_state'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN circuit_state TEXT NOT NULL DEFAULT 'closed';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'governance_jobs' AND column_name = 'circuit_opened_at'
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'circuit_opened_at'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN circuit_opened_at TIMESTAMPTZ;
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'governance_jobs' AND column_name = 'next_run_at'
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'next_run_at'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN next_run_at TIMESTAMPTZ;
   END IF;

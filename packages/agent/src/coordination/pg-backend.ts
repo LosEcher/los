@@ -32,9 +32,12 @@ class PgLockBackend implements LockBackend {
    * Uses a simple djb2-like hash for consistent mapping.
    */
   private hashKey(key: string): number {
+    const lockKey = process.env.LOS_TEST_SCHEMA
+      ? `${process.env.LOS_TEST_SCHEMA}:${key}`
+      : key;
     let hash = 5381;
-    for (let i = 0; i < key.length; i++) {
-      hash = ((hash << 5) + hash + key.charCodeAt(i)) | 0;
+    for (let i = 0; i < lockKey.length; i++) {
+      hash = ((hash << 5) + hash + lockKey.charCodeAt(i)) | 0;
     }
     return hash >>> 0; // unsigned 32-bit → fits in pg bigint
   }

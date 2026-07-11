@@ -201,6 +201,13 @@ P1-V1 双网关/崩溃/长任务验收依赖 P1-O2 与 P1-L3
 
 **归属：单一子代理完整实施；新增 infra 文件需 package-level approval。**
 
+**状态：2026-07-12 已完成。** 测试进程使用 `packageId + testRunId` 独立
+PostgreSQL schema，连接级 `search_path` 不包含 `public`；各包 setup 负责创建和
+清理自己的 schema，Turbo 恢复 package 并发 4，CI matrix 增加真实 root
+`pnpm test`。本地三轮 root test 均为 13/13 packages，通过后又验证两个不同
+UUID 的 root test 同时运行均通过；`public` schema 指纹前后不变且无测试 schema
+残留。操作证据见 `docs/operations/2026-07-12-cross-package-test-schema-isolation.md`。
+
 - namespace 使用 `packageId + testRunId`；连接初始化前固定 `search_path`，不得回退读取 `public`。
 - 每包 setup 只重置自己的 schema；删除单表 DROP 和吞错；gateway 增加统一 setup。
 - 保留包内串行，恢复 Turbo 包级并行；CI 增加真实 root `pnpm test`。
