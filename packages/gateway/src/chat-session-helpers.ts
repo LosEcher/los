@@ -5,7 +5,7 @@
 
 import type { TaskRunRecord } from '@los/agent/task-runs';
 import type { SessionEventRecord } from '@los/agent/session-events';
-import { listTaskRunsForSession } from '@los/agent/task-runs';
+import { listActiveTaskRunsForSession, listTaskRunsForSession } from '@los/agent/task-runs';
 import { listRecentSessionEvents } from '@los/agent/session-events';
 import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
 import { loadSession } from '@los/agent/session';
@@ -30,15 +30,17 @@ export function normalizeReplayEvents(value: unknown): Array<{ event: string; da
 // ── Resume state ─────────────────────────────────────────
 
 export async function loadResumeState(sessionId: string) {
-  const [taskRuns, recentEvents] = await Promise.all([
+  const [taskRuns, activeTaskRuns, recentEvents] = await Promise.all([
     listTaskRunsForSession(sessionId, 10),
+    listActiveTaskRunsForSession(sessionId),
     listRecentSessionEvents(sessionId, 50),
   ]);
   const compactTasks = taskRuns.map(summarizeTaskRunForResume);
+  const compactActiveTasks = activeTaskRuns.map(summarizeTaskRunForResume);
   const compactEvents = recentEvents.map(summarizeEventForResume);
   return {
     recentTaskRuns: compactTasks,
-    activeTaskRuns: compactTasks.filter(task => task.status === 'queued' || task.status === 'running'),
+    activeTaskRuns: compactActiveTasks,
     lastTaskRun: compactTasks[0] ?? null,
     recentEvents: compactEvents,
     recentEventCount: compactEvents.length,

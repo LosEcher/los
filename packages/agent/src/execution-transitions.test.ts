@@ -13,6 +13,7 @@ import {
 test('execution transitions allow conservative run spec lifecycle moves', () => {
   assert.equal(canTransitionExecutionState('run_spec', 'created', 'running'), true);
   assert.equal(canTransitionExecutionState('run_spec', 'running', 'blocked'), true);
+  assert.equal(canTransitionExecutionState('run_spec', 'created', 'blocked'), true);
   assert.equal(canTransitionExecutionState('run_spec', 'blocked', 'running'), true);
   assert.equal(canTransitionExecutionState('run_spec', 'running', 'succeeded'), true);
 

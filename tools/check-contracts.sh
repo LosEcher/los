@@ -20,6 +20,7 @@ required_contracts=(
   task-intake.yaml
   coordinator-context-policy.yaml
   coordinator-resume-plan.yaml
+  coordinator-resume-guard.yaml
 )
 
 failures=0
@@ -64,6 +65,7 @@ agent_task_graph="$CONTRACT_DIR/agent-task-graph.yaml"
 provider_compat_evidence="$CONTRACT_DIR/provider-compat-evidence.yaml"
 coordinator_context_policy="$CONTRACT_DIR/coordinator-context-policy.yaml"
 coordinator_resume_plan="$CONTRACT_DIR/coordinator-resume-plan.yaml"
+coordinator_resume_guard="$CONTRACT_DIR/coordinator-resume-guard.yaml"
 
 [ -f "$run_spec" ] && {
   require_pattern "$run_spec" 'prompt:' 'prompt field'
@@ -137,6 +139,13 @@ coordinator_resume_plan="$CONTRACT_DIR/coordinator-resume-plan.yaml"
   require_pattern "$coordinator_resume_plan" 'candidateRunSpecIds:' 'resume candidate field'
   require_pattern "$coordinator_resume_plan" 'lastEventId:' 'resume cursor field'
   require_pattern "$coordinator_resume_plan" 'Never persist prompts' 'resume prompt exclusion'
+}
+
+[ -f "$coordinator_resume_guard" ] && {
+  require_pattern "$coordinator_resume_guard" 'run\.resume_dispatch_suppressed' 'resume suppression event'
+  require_pattern "$coordinator_resume_guard" 'active_task_present' 'active task guard reason'
+  require_pattern "$coordinator_resume_guard" 'transitionExecutionState' 'state transition boundary'
+  require_pattern "$coordinator_resume_guard" 'Never persist prompts' 'resume guard prompt exclusion'
 }
 
 integration_feed="$CONTRACT_DIR/integration-feed-analysis.yaml"

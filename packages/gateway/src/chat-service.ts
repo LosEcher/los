@@ -17,7 +17,11 @@ import {
 import { persistChatSuccess } from './chat-route-persist.js';
 import type { MCPRequestServer } from './chat-normalizers.js';
 import { persistChatIntakeEvent } from './chat-intake-events.js';
-import { prepareChatResumePlan } from './chat-resume-plan.js';
+import {
+  applyChatResumeDispatchGuard,
+  prepareChatResumePlan,
+  sendChatResumeState,
+} from './chat-resume-plan.js';
 
 export type { SendEvent } from './chat-live-events.js';
 
@@ -174,30 +178,28 @@ export async function runChat(params: {
       userId, requestId, traceId,
     }) : null;
     const resumeState = preparedResume?.resumeState ?? null;
-    if (resumedSession) {
-      if (preparedResume) relaySessionEvent(send, preparedResume.event);
-      const turnPreviews = resumedSession.turns.map(t => ({
-        loop: t.loopCount,
-        text: t.text.slice(0, 100),
-        tools: t.toolCalls.map((tc: any) => tc.function.name),
-        hasReasoning: Boolean(t.reasoningContent),
-      }));
-      send('session.resumed', {
-        sessionId: sid,
-        messageCount: resumedSession.messages.length,
-        turnCount: resumedSession.turns.length,
-        turnPreviews,
-        lastTaskRun: resumeState?.lastTaskRun ?? null,
-        activeTaskRuns: resumeState?.activeTaskRuns ?? [],
-        lastEventId: resumeState?.lastEventId ?? null,
-        recentEventCount: resumeState?.recentEventCount ?? 0,
-        resumePlan: preparedResume?.plan ?? null,
+    if (resumedSession && preparedResume) {
+      relaySessionEvent(send, preparedResume.event);
+      sendChatResumeState(send, resumedSession, preparedResume);
+      const guard = await applyChatResumeDispatchGuard({
+        plan: preparedResume.plan, planEventId: preparedResume.event.id,
+        currentRunSpecId: runSpecId, requestId, traceId,
       });
-      send('session.resume_state', {
-        sessionId: sid,
-        tasks: resumeState?.recentTaskRuns ?? [],
-        recentEvents: resumeState?.recentEvents ?? [],
-      });
+      if (guard.event) relaySessionEvent(send, guard.event);
+      if (guard.disposition === 'suppress') {
+        if (boundTodoId) {
+          await updateBoundTodoFromRun(boundTodoId, {
+            status: 'blocked', sessionId: sid, traceId, requestId, runSpecId,
+            event: 'run.resume_dispatch_suppressed', reason: guard.reason,
+          }).catch(() => undefined);
+        }
+        send('session.blocked', {
+          sessionId: sid, runSpecId, reason: guard.reason,
+          selectedRunSpecId: preparedResume.plan.selectedRunSpecId,
+          activeTaskRunIds: preparedResume.plan.sessionActiveTaskRunIds,
+        });
+        return { status: 'blocked', sessionId: sid, taskRunId: '', traceId };
+      }
     }
 
     if (branchFrom && branchParentForEvent) {
