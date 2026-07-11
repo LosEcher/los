@@ -30,7 +30,7 @@ export interface ExecutionTransitionResult {
 }
 
 const RUN_SPEC_TRANSITIONS = {
-  created: ['running', 'cancelled'],
+  created: ['running', 'cancelled', 'blocked'],
   running: ['succeeded', 'failed', 'cancelled', 'blocked'],
   blocked: ['running', 'failed', 'cancelled'],
   succeeded: [],

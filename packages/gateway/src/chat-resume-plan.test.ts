@@ -44,6 +44,7 @@ test('persists a bounded resume plan from prior run state', async () => {
     assert.equal(prepared.plan.selectionReason, 'latest_recoverable_run');
     assert.equal(prepared.plan.phase, 'created');
     assert.equal(prepared.plan.action, 'wait_for_task');
+    assert.deepEqual(prepared.plan.sessionActiveTaskRunIds, []);
     assert.equal(prepared.event.type, 'coordinator.resume_plan_selected');
     assert.equal(prepared.event.visibility, 'audit');
     assert.equal(prepared.event.payload.currentRunSpecId, currentRunSpecId);

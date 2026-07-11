@@ -1,0 +1,45 @@
+contract: los.coordinator-resume-guard
+version: 0.1.0
+status: draft
+owner: packages/gateway
+description: >
+  Prevent a resumed chat request from dispatching duplicate work while the
+  resumed session still has queued or running task records.
+type: object
+input:
+  required:
+    - currentRunSpecId
+    - selectedRunSpecId
+    - sessionActiveTaskRunIds
+    - planEventId
+decision:
+  dispositions:
+    dispatch:
+      reason: no_active_task
+    suppress:
+      reason: active_task_present
+      transition:
+        entityType: run_spec
+        from: created
+        to: blocked
+        eventType: run.resume_dispatch_suppressed
+        source: coordinator
+behavior:
+  - Suppress when the resumed session has at least one queued or running task.
+  - Route the current run from created to blocked through transitionExecutionState.
+  - Link the blocking transition to coordinator.resume_plan_selected through causationId.
+  - Do not infer lease expiry, cancel work, retry tools, or run verification automatically.
+  - Other resume actions remain advisory until their own execution contracts are accepted.
+operatorPath:
+  inspect: GET /runs/{runSpecId}/state
+  recover: POST /runs/{runSpecId}/recover
+security:
+  - Persist run and task identifiers plus bounded disposition reasons only.
+  - Never persist prompts, transcripts, event payloads, tool arguments, or credentials.
+references:
+  - contracts/coordinator-resume-plan.yaml
+  - docs/adr/0025-conversation-run-coordinator-boundary.md
+verification:
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/agent test
+  - pnpm check

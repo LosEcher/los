@@ -342,6 +342,18 @@ export async function listTaskRunsForSession(sessionId: string, limit = 20): Pro
   return rows.rows.map(rowToTaskRun);
 }
 
+export async function listActiveTaskRunsForSession(sessionId: string): Promise<TaskRunRecord[]> {
+  await ensureTaskRunStore();
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    `SELECT * FROM task_runs
+     WHERE session_id = $1 AND status IN ('queued', 'running')
+     ORDER BY updated_at DESC`,
+    [sessionId],
+  );
+  return rows.rows.map(rowToTaskRun);
+}
+
 export async function listTaskRunsForRunSpec(runSpecId: string): Promise<TaskRunRecord[]> {
   await ensureTaskRunStore();
   const db = getDb();

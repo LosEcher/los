@@ -8,6 +8,7 @@ import {
   ensureTaskRunStore,
   findActiveTaskRunByDedupeKey,
   heartbeatTaskRun,
+  listActiveTaskRunsForSession,
   loadTaskRun,
   listTaskRuns,
   recoverExpiredTaskRuns,
@@ -93,6 +94,7 @@ test('task run lifecycle persists status changes', async () => {
 
     const loaded = await loadTaskRun(id);
     assert.equal(loaded?.status, 'running');
+    assert.ok((await listActiveTaskRunsForSession('session-1')).some(task => task.id === id));
 
     const tasks = await listTaskRuns(10);
     assert.ok(tasks.some(task => task.id === id));
@@ -104,6 +106,7 @@ test('task run lifecycle persists status changes', async () => {
 
     const noActiveDuplicate = await findActiveTaskRunByDedupeKey(`dedupe-${id}`);
     assert.equal(noActiveDuplicate, null);
+    assert.equal((await listActiveTaskRunsForSession('session-1')).some(task => task.id === id), false);
   } finally {
     await closeDb().catch(() => undefined);
   }

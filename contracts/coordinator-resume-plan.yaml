@@ -13,6 +13,7 @@ decision:
     - selectionReason
     - action
     - blockerKinds
+    - sessionActiveTaskRunIds
     - lastEventId
   properties:
     currentRunSpecId:
@@ -35,6 +36,9 @@ decision:
       type: array
       items: string
     activeTaskRunIds:
+      type: array
+      items: string
+    sessionActiveTaskRunIds:
       type: array
       items: string
     failedTaskRunIds:
