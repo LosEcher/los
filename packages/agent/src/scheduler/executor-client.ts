@@ -1,7 +1,11 @@
 import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
-import type { ScheduledExecutorConfig } from './types.js';
+import type {
+  ExecutorCapabilityRequirement,
+  ExecutorPlacementIntent,
+  ScheduledExecutorConfig,
+} from './types.js';
 import { resolveSSHExecutorNodeUrl, resolveSSHExecutor, runAgentOnSSHExecutor, sshExecutorUrlToConnectConfig } from './ssh-client.js';
 
 export type ResolvedExecutor = {
@@ -13,13 +17,26 @@ export type ResolvedExecutor = {
 
 export type ExecutorSelectionDecision = {
   source: 'config_node_url' | 'executor_registry';
+  placementTier?: 'warm' | 'clone' | 'cold' | 'degraded';
+  requiredCapabilities: ExecutorCapabilityRequirement[];
   candidateIds: string[];
-  selectedId: string;
+  selectedId?: string;
   skipped: Array<{ id: string; reason: string; details?: Record<string, unknown> }>;
 };
 
-export async function resolveExecutor(config: ScheduledExecutorConfig | undefined): Promise<ResolvedExecutor | null> {
+export class _ExecutorSelectionError extends Error {
+  constructor(message: string, readonly decision: ExecutorSelectionDecision) {
+    super(message);
+    this.name = 'ExecutorSelectionError';
+  }
+}
+
+export async function resolveExecutor(
+  config: ScheduledExecutorConfig | undefined,
+  intent: ExecutorPlacementIntent = {},
+): Promise<ResolvedExecutor | null> {
   if (!config?.enabled) return null;
+  const requiredCapabilities = _compileExecutorRequirements(config, intent);
 
   if (config.nodeUrls && config.nodeUrls.length > 0) {
     const normalizedUrls = config.nodeUrls.map(normalizeExecutorUrl);
@@ -34,6 +51,8 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
       agentKey: normalizeOptionalString(config.agentKey),
       decision: {
         source: 'config_node_url',
+        placementTier: 'degraded',
+        requiredCapabilities,
         candidateIds: normalizedUrls.filter(Boolean),
         selectedId: nodeId,
         skipped: normalizedUrls
@@ -44,24 +63,41 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
     };
   }
 
-  const candidates = (await listExecutorNodes(100)).filter(node => node.execution.candidate);
+  const nodes = await listExecutorNodes(100);
+  const candidates = nodes.filter(node => node.execution.candidate);
   const preferredNodeId = normalizeOptionalString(config.nodeId);
   const ordered = sortExecutorCandidates(candidates, preferredNodeId);
 
-  const skipped: ExecutorSelectionDecision['skipped'] = [];
+  const skipped: ExecutorSelectionDecision['skipped'] = nodes
+    .filter(node => node.nodeKind === 'executor' && !node.execution.candidate)
+    .map(node => ({
+      id: node.nodeId,
+      reason: node.execution.blockers[0] ?? 'not_candidate',
+      details: { blockers: node.execution.blockers, warnings: node.execution.warnings },
+    }));
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);
     if (!url) {
       skipped.push({ id: node.nodeId, reason: 'missing_agent_http_url' });
       continue;
     }
-    // Constrained executor capability gate — skip if task requires heavy work
-    if (config.requiresBuild && node.capabilities.heavy_task_safe !== true) {
-      skipped.push({ id: node.nodeId, reason: 'capability:heavy_task_safe_false', details: { taskRequiresBuild: true } });
+    const resourceIntensive = requiredCapabilities.includes('heavy_task_safe')
+      || requiredCapabilities.includes('deploy_safe');
+    if (resourceIntensive && node.execution.warnings.includes('resource:memory_pressure')) {
+      skipped.push({
+        id: node.nodeId,
+        reason: 'resource:memory_pressure',
+        details: { requiredCapabilities },
+      });
       continue;
     }
-    if (config.requiresDeploy && node.capabilities.deploy_safe !== true) {
-      skipped.push({ id: node.nodeId, reason: 'capability:deploy_safe_false', details: { taskRequiresDeploy: true } });
+    const missingCapabilities = requiredCapabilities.filter(requirement => !satisfiesCapability(node, requirement));
+    if (missingCapabilities.length > 0) {
+      skipped.push({
+        id: node.nodeId,
+        reason: `capability:${missingCapabilities[0]}_missing`,
+        details: { missingCapabilities },
+      });
       continue;
     }
     return {
@@ -70,6 +106,8 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
       agentKey: normalizeOptionalString(config.agentKey),
       decision: {
         source: 'executor_registry',
+        placementTier: 'warm',
+        requiredCapabilities,
         candidateIds: ordered.map(item => item.nodeId),
         selectedId: node.nodeId,
         skipped,
@@ -77,10 +115,55 @@ export async function resolveExecutor(config: ScheduledExecutorConfig | undefine
     };
   }
 
+  const decision: ExecutorSelectionDecision = {
+    source: 'executor_registry',
+    requiredCapabilities,
+    candidateIds: ordered.map(item => item.nodeId),
+    skipped,
+  };
   if (candidates.length > 0) {
-    throw new Error(`Executor is enabled but no candidate executor node passes capability gates: ${skipped.map(s => `${s.id}:${s.reason}`).join(', ')}`);
+    throw new _ExecutorSelectionError(
+      `Executor is enabled but no candidate executor node passes capability gates: ${skipped.map(s => `${s.id}:${s.reason}`).join(', ')}`,
+      decision,
+    );
   }
-  throw new Error('Executor is enabled but no verified executor node candidate is available');
+  throw new _ExecutorSelectionError(
+    'Executor is enabled but no verified executor node candidate is available',
+    decision,
+  );
+}
+
+export function _compileExecutorRequirements(
+  config: ScheduledExecutorConfig,
+  intent: ExecutorPlacementIntent = {},
+): ExecutorCapabilityRequirement[] {
+  const requirements = new Set<ExecutorCapabilityRequirement>(config.requiredCapabilities ?? []);
+  const sandboxMode = intent.sandboxMode;
+  const toolMode = intent.toolMode ?? 'project-write';
+
+  if (sandboxMode === 'readonly' || (!sandboxMode && toolMode === 'read-only')) {
+    requirements.add('workspace_read');
+  } else {
+    requirements.add('workspace_write');
+  }
+  if (sandboxMode === 'sandbox') {
+    requirements.add('shell');
+    requirements.add('sandbox');
+  } else if (!sandboxMode && toolMode === 'all') {
+    requirements.add('shell');
+  }
+  if (config.requiresBuild) requirements.add('heavy_task_safe');
+  if (config.requiresDeploy) requirements.add('deploy_safe');
+
+  return [...requirements].sort();
+}
+
+function satisfiesCapability(node: ExecutorNodeRecord, requirement: ExecutorCapabilityRequirement): boolean {
+  const value = node.capabilities[requirement];
+  if (requirement !== 'sandbox') return value === true;
+  if (value === true) return true;
+  if (typeof value !== 'string') return false;
+  return value !== 'native' && value !== 'none' && value !== 'tool_policy';
 }
 
 export async function runAgentOnExecutor(

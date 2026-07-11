@@ -64,7 +64,7 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
       connectConfig: {
         agent_http: { baseUrl },
       },
-      capabilities: { run_agent: true },
+      capabilities: { run_agent: true, workspace_write: true },
       verified: {
         agent_http: { ok: true, checked_at: new Date().toISOString() },
       },
@@ -90,6 +90,8 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
     const decisions = await listSchedulerDecisions({ graphId: taskRunId, kind: 'executor_selection' });
     assert.equal(decisions[0]?.reason, 'executor_registry');
     assert.deepEqual(decisions[0]?.selectedIds, [nodeId]);
+    assert.equal(decisions[0]?.metadata.placementTier, 'warm');
+    assert.deepEqual(decisions[0]?.metadata.requiredCapabilities, ['workspace_write']);
   } finally {
     await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [taskRunId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
