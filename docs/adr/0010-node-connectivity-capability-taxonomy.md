@@ -168,6 +168,40 @@ Resource fields carried in `capacity` or heartbeat payload:
 
 不建议先做多节点 claim。
 
+### Capability-driven placement P0 (2026-07-11)
+
+Scheduler placement uses a compiled requirement vector rather than scattered
+task flags:
+
+1. Run intent (`toolMode`, `sandboxMode`, build/deploy hints, explicit executor
+   requirements) compiles to `requiredCapabilities`.
+2. A registry candidate must satisfy every requirement. Missing capabilities
+   are recorded in `scheduler_decisions.skipped_json`; the scheduler does not
+   silently downgrade isolation or network policy.
+3. `sandbox=tool_policy` and `sandbox=native` do not satisfy the `sandbox`
+   requirement because they are policy/path boundaries, not OS isolation.
+4. Existing `requiresBuild` and `requiresDeploy` inputs remain compatibility
+   aliases for `heavy_task_safe` and `deploy_safe`.
+
+Placement cost is evidence, not a new lifecycle state. Executor selection
+records `placementTier` in the existing scheduler decision metadata:
+
+- `warm`: a verified registry candidate is immediately reusable.
+- `degraded`: an explicitly configured URL bypasses registry capability and
+  pressure evidence.
+- `clone` and `cold`: reserved for later workspace-template provisioning; P0
+  must not report these tiers without implementing and measuring those paths.
+
+Resource pressure closes the loop at selection time:
+
+1. Critical memory pressure makes a node ineligible for all new work.
+2. Warning-level memory pressure keeps lightweight work possible but sorts the
+   node after healthy candidates.
+3. Heavy work rejects warning-level pressure even when the node's static
+   `heavy_task_safe` capability is true.
+4. Thresholds are deterministic scheduler policy and require focused tests;
+   later runtime configuration must move them into the Zod config authority.
+
 ## Migration Order
 
 1. 先扩 node registry schema。
