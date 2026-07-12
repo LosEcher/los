@@ -7,10 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Mirror of .github/workflows/ci.yml — same 3-job split so a DB test hang
-# can no longer burn the whole gate budget and a failing/hanging package
-# surfaces by name. Uses forgejo's own checkout (FORGEJO_TOKEN) and the
-# `postgres` service DNS name (not localhost).
+# Primary CI workflow. The 3-job split isolates fast checks, workspace tests,
+# and migration drift. The root test command delegates package concurrency to
+# Turbo so a single Forgejo runner does not repeat checkout and install work.
 jobs:
   gate-fast:
     runs-on: ubuntu-latest
@@ -29,6 +28,7 @@ jobs:
       - name: Prepare pnpm
         run: |
           set -euo pipefail
+          node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
           corepack prepare pnpm@9.0.0 --activate
           pnpm config set store-dir ~/.local/share/pnpm/store
@@ -41,7 +41,7 @@ jobs:
 
   gate-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     services:
       postgres:
@@ -63,17 +63,6 @@ jobs:
       TEST_DATABASE_URL: postgres://los:los@postgres:5432/los_test
       NODE_ENV: test
 
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - infra
-          - web
-          - memory
-          - gateway
-          - executor
-          - agent
-
     steps:
       - name: Checkout
         run: |
@@ -88,6 +77,7 @@ jobs:
       - name: Prepare pnpm
         run: |
           set -euo pipefail
+          node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
           corepack prepare pnpm@9.0.0 --activate
           pnpm config set store-dir ~/.local/share/pnpm/store
@@ -95,16 +85,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test @los/${{ matrix.package }}
-        run: pnpm --filter @los/${{ matrix.package }} test
-        timeout-minutes: 8
-
-  gate-test-input-preprocessor-retired:
-    name: gate-test (input-preprocessor)
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - run: echo "@los/input-preprocessor removed (9bb74ed); legacy required-check stub."
+      - name: Test workspace with Turbo concurrency
+        run: pnpm test
+        timeout-minutes: 20
 
   gate-drift:
     runs-on: ubuntu-latest
@@ -144,6 +127,7 @@ jobs:
       - name: Prepare pnpm
         run: |
           set -euo pipefail
+          node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
           corepack prepare pnpm@9.0.0 --activate
           pnpm config set store-dir ~/.local/share/pnpm/store

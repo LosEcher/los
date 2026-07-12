@@ -4,7 +4,7 @@
  * The audit (`computeBranchHygieneSummary`) and fix (`applyBranchCleanupFix`)
  * accept an injected `exec` function so we can drive them with canned git
  * outputs and assert on the commands issued — never touching a real repo or
- * the LAN forgejo mirror. `checkHasFindings` is exercised directly to lock the
+ * a real mirror. `checkHasFindings` is exercised directly to lock the
  * circuit-breaker classification (unreachable/disabled must NOT be findings).
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -39,24 +39,36 @@ function fakeExec(cmds: FakeCmd[], recorded: string[] = []): BranchHygieneExecFn
   };
 }
 
-/** Default "healthy repo" git responses: worktree, attached, clean, forgejo in sync. */
+/** Default "healthy repo" git responses: worktree, attached, clean, mirror in sync. */
 const healthyCmds: FakeCmd[] = [
   { match: 'rev-parse --is-inside-work-tree', out: 'true' },
   { match: 'symbolic-ref -q HEAD', out: 'refs/heads/main\n' },
   { match: 'git status --porcelain', out: '' },
-  { match: 'git fetch forgejo --prune', out: '' },
-  { match: 'rev-parse --verify forgejo/main', out: '<sha>\n' },
-  { match: 'rev-list --left-right --count forgejo/main...origin/main', out: '0 0' },
-  { match: 'merge-base --is-ancestor forgejo/main origin/main', out: '' },
+  { match: 'git fetch github --prune', out: '' },
+  { match: 'rev-parse --verify github/main', out: '<sha>\n' },
+  { match: 'rev-list --left-right --count github/main...origin/main', out: '0 0' },
+  { match: 'merge-base --is-ancestor github/main origin/main', out: '' },
   { match: 'for-each-ref', out: '' },
 ];
 
-const PREV_SYNC_FLAG = process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC;
+const PREV_PRIMARY_REMOTE = process.env.LOS_BRANCH_GOVERNANCE_PRIMARY_REMOTE;
+const PREV_MIRROR_REMOTE = process.env.LOS_BRANCH_GOVERNANCE_MIRROR_REMOTE;
+const PREV_SYNC_FLAG = process.env.LOS_BRANCH_GOVERNANCE_MIRROR_SYNC;
 
 describe('computeBranchHygieneSummary — audit', () => {
+  beforeEach(() => {
+    process.env.LOS_BRANCH_GOVERNANCE_PRIMARY_REMOTE = 'origin';
+    process.env.LOS_BRANCH_GOVERNANCE_MIRROR_REMOTE = 'github';
+    process.env.LOS_BRANCH_GOVERNANCE_MIRROR_SYNC = '1';
+  });
+
   afterEach(() => {
-    if (PREV_SYNC_FLAG === undefined) delete process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC;
-    else process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC = PREV_SYNC_FLAG;
+    if (PREV_PRIMARY_REMOTE === undefined) delete process.env.LOS_BRANCH_GOVERNANCE_PRIMARY_REMOTE;
+    else process.env.LOS_BRANCH_GOVERNANCE_PRIMARY_REMOTE = PREV_PRIMARY_REMOTE;
+    if (PREV_MIRROR_REMOTE === undefined) delete process.env.LOS_BRANCH_GOVERNANCE_MIRROR_REMOTE;
+    else process.env.LOS_BRANCH_GOVERNANCE_MIRROR_REMOTE = PREV_MIRROR_REMOTE;
+    if (PREV_SYNC_FLAG === undefined) delete process.env.LOS_BRANCH_GOVERNANCE_MIRROR_SYNC;
+    else process.env.LOS_BRANCH_GOVERNANCE_MIRROR_SYNC = PREV_SYNC_FLAG;
   });
 
   it('returns branchable=false when not a git worktree', () => {
@@ -66,15 +78,19 @@ describe('computeBranchHygieneSummary — audit', () => {
     assert.match(String(s.reason), /Not a git worktree/);
   });
 
-  it('reports attached/clean/in-sync as detached=false, forgejoDrift=none', () => {
+  it('reports attached/clean/in-sync with platform-neutral fields and legacy aliases', () => {
     const s = computeBranchHygieneSummary(fakeExec(healthyCmds));
     assert.equal(s.branchable, true);
     assert.equal(s.detached, false);
     assert.equal(s.workingTreeDirty, false);
-    assert.equal(s.forgejoDrift, 'none');
-    assert.equal(s.forgejoBehind, 0);
-    assert.equal(s.forgejoSyncable, false);
-    assert.equal(s.staleOriginBranches, 0);
+    assert.equal(s.primaryRemote, 'origin');
+    assert.equal(s.mirrorRemote, 'github');
+    assert.equal(s.mirrorDrift, 'none');
+    assert.equal(s.mirrorBehind, 0);
+    assert.equal(s.mirrorSyncable, false);
+    assert.equal(s.stalePrimaryBranches, 0);
+    assert.equal(s.forgejoDrift, s.mirrorDrift);
+    assert.equal(s.staleOriginBranches, s.stalePrimaryBranches);
   });
 
   it('detects detached HEAD (symbolic-ref throws)', () => {
@@ -89,51 +105,51 @@ describe('computeBranchHygieneSummary — audit', () => {
     assert.equal(s.workingTreeDirty, true);
   });
 
-  it('classifies forgejo behind + ff-able as syncable', () => {
+  it('classifies mirror behind + ff-able as syncable', () => {
     const cmds = healthyCmds.map(c => {
-      if (c.match === 'rev-list --left-right --count forgejo/main...origin/main') return { match: c.match, out: '5 0' };
+      if (c.match === 'rev-list --left-right --count github/main...origin/main') return { match: c.match, out: '5 0' };
       return c;
     });
     const s = computeBranchHygieneSummary(fakeExec(cmds));
-    assert.equal(s.forgejoDrift, 'syncable');
-    assert.equal(s.forgejoBehind, 5);
-    assert.equal(s.forgejoAhead, 0);
-    assert.equal(s.forgejoSyncable, true);
+    assert.equal(s.mirrorDrift, 'syncable');
+    assert.equal(s.mirrorBehind, 5);
+    assert.equal(s.mirrorAhead, 0);
+    assert.equal(s.mirrorSyncable, true);
   });
 
-  it('classifies forgejo divergence (ahead>0) as non_ff', () => {
+  it('classifies mirror divergence (ahead>0) as non_ff', () => {
     const cmds = healthyCmds.map(c => {
-      if (c.match === 'rev-list --left-right --count forgejo/main...origin/main') return { match: c.match, out: '3 2' };
-      if (c.match === 'merge-base --is-ancestor forgejo/main origin/main') return { match: c.match, error: 'not an ancestor' };
+      if (c.match === 'rev-list --left-right --count github/main...origin/main') return { match: c.match, out: '3 2' };
+      if (c.match === 'merge-base --is-ancestor github/main origin/main') return { match: c.match, error: 'not an ancestor' };
       return c;
     });
     const s = computeBranchHygieneSummary(fakeExec(cmds));
-    assert.equal(s.forgejoDrift, 'non_ff');
-    assert.equal(s.forgejoAhead, 2);
-    assert.equal(s.forgejoSyncable, false);
+    assert.equal(s.mirrorDrift, 'non_ff');
+    assert.equal(s.mirrorAhead, 2);
+    assert.equal(s.mirrorSyncable, false);
   });
 
-  it('classifies forgejo fetch failure as unreachable (NOT a thrown error)', () => {
-    const cmds = healthyCmds.map(c => c.match === 'git fetch forgejo --prune' ? { match: c.match, error: 'Could not resolve host' } : c);
+  it('classifies mirror fetch failure as unreachable (NOT a thrown error)', () => {
+    const cmds = healthyCmds.map(c => c.match === 'git fetch github --prune' ? { match: c.match, error: 'Could not resolve host' } : c);
     const s = computeBranchHygieneSummary(fakeExec(cmds));
-    assert.equal(s.forgejoDrift, 'unreachable');
-    assert.equal(s.forgejoReachable, false);
-    assert.equal(s.forgejoBehind, null);
+    assert.equal(s.mirrorDrift, 'unreachable');
+    assert.equal(s.mirrorReachable, false);
+    assert.equal(s.mirrorBehind, null);
   });
 
   it('classifies env-disabled sync as disabled and skips fetch', () => {
-    process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC = '0';
+    process.env.LOS_BRANCH_GOVERNANCE_MIRROR_SYNC = '0';
     const recorded: string[] = [];
     const s = computeBranchHygieneSummary(fakeExec(healthyCmds, recorded));
-    assert.equal(s.forgejoDrift, 'disabled');
-    assert.equal(s.forgejoSyncEnabled, false);
-    assert.equal(recorded.some(c => c.includes('fetch forgejo')), false);
+    assert.equal(s.mirrorDrift, 'disabled');
+    assert.equal(s.mirrorSyncEnabled, false);
+    assert.equal(recorded.some(c => c.includes('fetch github')), false);
   });
 
   it('counts stale origin branches (non-main remote refs)', () => {
     const cmds = healthyCmds.map(c => c.match === 'for-each-ref' ? { match: c.match, out: 'origin/feature-a\norigin/feature-b\norigin/main\norigin/HEAD -> origin/main\n' } : c);
     const s = computeBranchHygieneSummary(fakeExec(cmds));
-    assert.equal(s.staleOriginBranches, 2);
+    assert.equal(s.stalePrimaryBranches, 2);
     assert.equal(s.staleCandidateCount, 2); // backward-compat alias
   });
 });
@@ -206,6 +222,37 @@ describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
     assert.match(res.detail, /pushed origin\/main/);
   });
 
+  it('pushes the configured primary ref to the configured mirror', async () => {
+    const recorded: string[] = [];
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push github', out: '' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
+    const res = await applyBranchCleanupFix({
+      detached: false,
+      primaryRemote: 'origin',
+      mirrorRemote: 'github',
+      mirrorSyncEnabled: true,
+      mirrorSyncable: true,
+      mirrorBehind: 2,
+      mirrorDrift: 'syncable',
+    }, exec);
+    assert.equal(res.applied, true);
+    assert.equal(recorded.some(c => c.includes('git push github origin/main:main')), true);
+  });
+
+  it('rejects unsafe remote names before running remote commands', async () => {
+    const recorded: string[] = [];
+    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }], recorded);
+    const res = await applyBranchCleanupFix({
+      detached: false,
+      primaryRemote: 'origin; touch /tmp/unsafe',
+      mirrorRemote: 'github',
+      mirrorSyncEnabled: true,
+      mirrorSyncable: true,
+    }, exec);
+    assert.equal(res.applied, false);
+    assert.match(res.detail, /unsafe remote name/);
+    assert.equal(recorded.some(command => command.includes('touch /tmp/unsafe')), false);
+  });
+
   it('degrades to report-only (applied:true, no throw) when forgejo push fails', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo', error: 'Could not resolve host' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
@@ -239,13 +286,30 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
       { match: 'rev-parse --is-inside-work-tree', out: 'true' },
       { match: 'fetch origin --prune', out: '' },
       { match: 'for-each-ref', out: 'origin/feature-old\n' },
-      { match: 'rev-list --left-right --count origin/main...origin/feature-old', out: '2 0' },
-      { match: 'git cherry origin/main origin/feature-old', out: '- <sha>\n' },
+      { match: "rev-list --left-right --count 'origin/main...origin/feature-old'", out: '2 0' },
+      { match: "git cherry 'origin/main' 'origin/feature-old'", out: '- <sha>\n' },
       { match: 'push origin --delete', out: '' },
     ], recorded);
     const res = await applyBranchCleanupFix(baseSummary, exec);
     assert.equal(res.applied, true);
-    assert.equal(recorded.some(c => c.includes('git push origin --delete "feature-old"')), true);
+    assert.equal(recorded.some(c => c.includes("git push origin --delete 'feature-old'")), true);
+  });
+
+  it('shell-quotes remote branch refs before classification and deletion', async () => {
+    const recorded: string[] = [];
+    const exec = fakeExec([
+      { match: 'rev-parse --is-inside-work-tree', out: 'true' },
+      { match: 'fetch origin --prune', out: '' },
+      { match: 'for-each-ref', out: 'origin/feature-$(id)\n' },
+      { match: 'rev-list --left-right --count', out: '2 0' },
+      { match: 'git cherry', out: '- <sha>\n' },
+      { match: 'push origin --delete', out: '' },
+    ], recorded);
+    const res = await applyBranchCleanupFix(baseSummary, exec);
+    assert.equal(res.applied, true);
+    assert.equal(recorded.includes("git rev-list --left-right --count 'origin/main...origin/feature-$(id)'"), true);
+    assert.equal(recorded.includes("git cherry 'origin/main' 'origin/feature-$(id)'"), true);
+    assert.equal(recorded.includes("git push origin --delete 'feature-$(id)'"), true);
   });
 
   it('does NOT delete a branch with unique commits (ahead=5, behind=2 → review)', async () => {
@@ -254,8 +318,8 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
       { match: 'rev-parse --is-inside-work-tree', out: 'true' },
       { match: 'fetch origin --prune', out: '' },
       { match: 'for-each-ref', out: 'origin/feature-active\n' },
-      { match: 'rev-list --left-right --count origin/main...origin/feature-active', out: '2 5' },
-      { match: 'git cherry origin/main origin/feature-active', out: '+ <sha1>\n+ <sha2>\n' },
+      { match: "rev-list --left-right --count 'origin/main...origin/feature-active'", out: '2 5' },
+      { match: "git cherry 'origin/main' 'origin/feature-active'", out: '+ <sha1>\n+ <sha2>\n' },
     ], recorded);
     const res = await applyBranchCleanupFix(baseSummary, exec);
     assert.equal(res.applied, true);

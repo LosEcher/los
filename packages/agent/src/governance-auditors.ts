@@ -235,17 +235,23 @@ export type BranchHygieneExecOptions = {
 export type BranchHygieneExecFn = (cmd: string, opts?: BranchHygieneExecOptions) => string;
 
 /**
- * Forgejo mirror drift classification. Single source of truth consumed by
+ * Optional mirror drift classification. Single source of truth consumed by
  * `applyBranchCleanupFix` (fix action) and `checkHasFindings` (circuit-breaker
- * impact). `unreachable`/`disabled`/`none` are NOT findings so a forgejo outage
+ * impact). `unreachable`/`disabled`/`none` are NOT findings so a mirror outage
  * never trips the breaker; `syncable` is auto-fixable; `non_ff` escalates.
  */
-export type ForgejoDrift = 'none' | 'syncable' | 'non_ff' | 'unreachable' | 'disabled';
+export type MirrorDrift = 'none' | 'syncable' | 'non_ff' | 'unreachable' | 'disabled';
+export type ForgejoDrift = MirrorDrift;
+
+function resolveRemoteName(value: string | undefined, fallback: string): string {
+  const candidate = value?.trim() || fallback;
+  return /^[A-Za-z0-9._-]+$/.test(candidate) ? candidate : fallback;
+}
 
 /**
  * Pure branch-hygiene audit. Reads detached-HEAD state, working-tree dirtiness,
- * forgejo mirror drift, and stale origin branch count. Never throws — any git
- * failure degrades to a reportable field (e.g. forgejo unreachable → drift
+ * optional mirror drift, and stale primary branch count. Never throws — any git
+ * failure degrades to a reportable field (e.g. mirror unreachable → drift
  * `unreachable`, not an error). Caller injects `exec` (real `execSync` in
  * production, a fake in tests).
  */
@@ -275,40 +281,41 @@ export function computeBranchHygieneSummary(exec: BranchHygieneExecFn): Record<s
     workingTreeDirty = false; // assume clean if status itself fails
   }
 
-  // Forgejo sync env switch — default enabled (opt out with '0' / 'false').
-  const syncFlag = process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC ?? '';
-  const forgejoSyncEnabled = syncFlag !== '0' && syncFlag.toLowerCase() !== 'false';
+  const primaryRemote = resolveRemoteName(process.env.LOS_BRANCH_GOVERNANCE_PRIMARY_REMOTE, 'origin');
+  const mirrorRemote = resolveRemoteName(process.env.LOS_BRANCH_GOVERNANCE_MIRROR_REMOTE, 'github');
+  const syncFlag = process.env.LOS_BRANCH_GOVERNANCE_MIRROR_SYNC
+    ?? process.env.LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC
+    ?? '0';
+  const mirrorSyncEnabled = syncFlag !== '0' && syncFlag.toLowerCase() !== 'false';
 
-  // Stale origin branches (coarse count; fix does precise git-cherry classification).
-  let staleOriginBranches = 0;
+  // Stale primary branches (coarse count; fix does precise git-cherry classification).
+  let stalePrimaryBranches = 0;
   try {
-    const refs = exec('git for-each-ref --format=%(refname:short) refs/remotes/origin', { timeout: 5000 });
-    staleOriginBranches = refs
+    const refs = exec(`git for-each-ref --format='%(refname:short)' refs/remotes/${primaryRemote}`, { timeout: 5000 });
+    stalePrimaryBranches = refs
       .split('\n')
       .map(l => l.trim())
-      .filter(b => b && b !== 'origin' && !b.startsWith('origin/HEAD') && b !== 'origin/main')
+      .filter(b => b && b !== primaryRemote && !b.startsWith(`${primaryRemote}/HEAD`) && b !== `${primaryRemote}/main`)
       .length;
   } catch { /* leave at 0 */ }
 
-  // Forgejo drift — only evaluated when sync enabled. Any failure → unreachable (not a finding).
-  let forgejoReachable: boolean | null = null;
-  let forgejoBehind: number | null = null;
-  let forgejoAhead: number | null = null;
-  let forgejoFastForwardable: boolean | null = null;
-  let forgejoSyncable: boolean | null = null;
-  let forgejoDrift: ForgejoDrift;
+  // Optional mirror drift — only evaluated when sync is enabled.
+  let mirrorReachable: boolean | null = null;
+  let mirrorBehind: number | null = null;
+  let mirrorAhead: number | null = null;
+  let mirrorFastForwardable: boolean | null = null;
+  let mirrorSyncable: boolean | null = null;
+  let mirrorDrift: MirrorDrift;
 
-  if (!forgejoSyncEnabled) {
-    forgejoDrift = 'disabled';
+  if (!mirrorSyncEnabled) {
+    mirrorDrift = 'disabled';
   } else {
     try {
-      exec('git fetch forgejo --prune', { timeout: 15000, stdio: 'pipe' });
-      // Confirm forgejo/main ref resolved (fetch may succeed but ref may be absent).
-      exec('git rev-parse --verify forgejo/main', { timeout: 5000, stdio: 'pipe' });
-      forgejoReachable = true;
+      exec(`git fetch ${mirrorRemote} --prune`, { timeout: 15000, stdio: 'pipe' });
+      exec(`git rev-parse --verify ${mirrorRemote}/main`, { timeout: 5000, stdio: 'pipe' });
+      mirrorReachable = true;
 
-      // `git rev-list --left-right --count forgejo/main...origin/main` → "behind ahead"
-      const counts = exec('git rev-list --left-right --count forgejo/main...origin/main', { timeout: 5000 })
+      const counts = exec(`git rev-list --left-right --count ${mirrorRemote}/main...${primaryRemote}/main`, { timeout: 5000 })
         .trim()
         .split(/\s+/);
       // Defend against a malformed single-column output (degenerate repo state):
@@ -316,29 +323,28 @@ export function computeBranchHygieneSummary(exec: BranchHygieneExecFn): Record<s
       if (counts.length < 2) {
         throw new Error(`unexpected rev-list output: "${counts.join(' ')}"`);
       }
-      forgejoBehind = Number.parseInt(counts[0] || '0', 10);
-      forgejoAhead = Number.parseInt(counts[1] || '0', 10);
+      mirrorBehind = Number.parseInt(counts[0] || '0', 10);
+      mirrorAhead = Number.parseInt(counts[1] || '0', 10);
 
-      // ff check: is forgejo/main an ancestor of origin/main? (exit 0 = yes)
       try {
-        exec('git merge-base --is-ancestor forgejo/main origin/main', { timeout: 5000, stdio: 'pipe' });
-        forgejoFastForwardable = true;
+        exec(`git merge-base --is-ancestor ${mirrorRemote}/main ${primaryRemote}/main`, { timeout: 5000, stdio: 'pipe' });
+        mirrorFastForwardable = true;
       } catch {
-        forgejoFastForwardable = false;
+        mirrorFastForwardable = false;
       }
 
-      forgejoSyncable = forgejoFastForwardable === true && (forgejoBehind ?? 0) > 0 && (forgejoAhead ?? 0) === 0;
+      mirrorSyncable = mirrorFastForwardable === true && (mirrorBehind ?? 0) > 0 && (mirrorAhead ?? 0) === 0;
 
-      if (forgejoBehind === 0 && forgejoAhead === 0) {
-        forgejoDrift = 'none';
-      } else if (forgejoSyncable) {
-        forgejoDrift = 'syncable';
+      if (mirrorBehind === 0 && mirrorAhead === 0) {
+        mirrorDrift = 'none';
+      } else if (mirrorSyncable) {
+        mirrorDrift = 'syncable';
       } else {
-        forgejoDrift = 'non_ff'; // diverged (ahead > 0) — needs human rebase/reset
+        mirrorDrift = 'non_ff';
       }
     } catch {
-      forgejoReachable = false;
-      forgejoDrift = 'unreachable';
+      mirrorReachable = false;
+      mirrorDrift = 'unreachable';
     }
   }
 
@@ -347,16 +353,27 @@ export function computeBranchHygieneSummary(exec: BranchHygieneExecFn): Record<s
     branchable: true,
     detached,
     workingTreeDirty,
-    forgejoSyncEnabled,
-    forgejoReachable,
-    forgejoBehind,
-    forgejoAhead,
-    forgejoFastForwardable,
-    forgejoSyncable,
-    forgejoDrift,
-    staleOriginBranches,
-    remoteBranches: staleOriginBranches,
-    staleCandidateCount: staleOriginBranches, // alias kept for CLI backward compat
+    primaryRemote,
+    mirrorRemote,
+    mirrorSyncEnabled,
+    mirrorReachable,
+    mirrorBehind,
+    mirrorAhead,
+    mirrorFastForwardable,
+    mirrorSyncable,
+    mirrorDrift,
+    stalePrimaryBranches,
+    remoteBranches: stalePrimaryBranches,
+    staleCandidateCount: stalePrimaryBranches,
+    // Persisted summaries and older CLI clients still read these aliases.
+    forgejoSyncEnabled: mirrorSyncEnabled,
+    forgejoReachable: mirrorReachable,
+    forgejoBehind: mirrorBehind,
+    forgejoAhead: mirrorAhead,
+    forgejoFastForwardable: mirrorFastForwardable,
+    forgejoSyncable: mirrorSyncable,
+    forgejoDrift: mirrorDrift,
+    staleOriginBranches: stalePrimaryBranches,
   };
 }
 

@@ -171,7 +171,7 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
       autoFixEnabled: true,
       maxAutoFixAttempts: 1,
       verificationCommands: [],
-      stopCondition: 'no detached HEAD, forgejo/main fast-forward-synced with origin/main, and no stale origin branches classified as delete',
+      stopCondition: 'no detached HEAD, optional mirror/main aligned with primary/main, and no stale primary branches classified as delete',
       escalationCadence: 'immediate',
     },
   },

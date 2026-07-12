@@ -9,11 +9,19 @@ import type { BranchHygieneExecFn } from './governance-auditors.js';
 
 const log = getLogger('ga-loop-runner');
 
+function isSafeRemoteName(value: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(value);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 // ── Branch cleanup auto-fix ────────────────────────────
 
 /**
  * Branch auto-fix uses git's CLI to (1) re-attach a detached HEAD, (2) fast-forward
- * the forgejo mirror when safe, and (3) classify and safely delete stale remote
+ * the configured mirror when safe, and (3) classify and safely delete stale primary
  * branches.
  *
  * Detached HEAD: only re-attached when the working tree is clean (never lose work).
@@ -81,38 +89,40 @@ export async function applyBranchCleanupFix(
       }
     }
 
-    // ── STEP 2: Forgejo fast-forward sync (only when drift classified syncable) ──
-    if (summary.forgejoSyncEnabled === true && summary.forgejoSyncable === true) {
-      // Push origin/main → forgejo main (refspec), NOT local main: local main may
-      // be stale relative to origin/main, which would push a non-ff and get rejected.
-      // The audit already verified forgejo/main is an ancestor of origin/main.
+    const primaryRemote = typeof summary.primaryRemote === 'string' ? summary.primaryRemote : 'origin';
+    const mirrorRemote = typeof summary.mirrorRemote === 'string' ? summary.mirrorRemote : 'forgejo';
+    if (!isSafeRemoteName(primaryRemote) || !isSafeRemoteName(mirrorRemote)) {
+      return { applied: false, detail: 'Branch cleanup refused unsafe remote name' };
+    }
+    const mirrorSyncEnabled = summary.mirrorSyncEnabled ?? summary.forgejoSyncEnabled;
+    const mirrorSyncable = summary.mirrorSyncable ?? summary.forgejoSyncable;
+    const mirrorBehind = summary.mirrorBehind ?? summary.forgejoBehind;
+
+    // ── STEP 2: Optional mirror fast-forward sync ──
+    if (mirrorSyncEnabled === true && mirrorSyncable === true) {
       try {
-        execSyncImpl('git push forgejo origin/main:main', { timeout: 30000, stdio: 'pipe' });
-        detailLines.push(`forgejo: pushed origin/main → forgejo main (ff, +${summary.forgejoBehind ?? '?'} commits)`);
+        execSyncImpl(`git push ${mirrorRemote} ${primaryRemote}/main:main`, { timeout: 30000, stdio: 'pipe' });
+        detailLines.push(`${mirrorRemote}: pushed ${primaryRemote}/main → ${mirrorRemote}/main (ff, +${mirrorBehind ?? '?'} commits)`);
       } catch (err) {
-        // Network/credentials failure — infra, NOT a fix failure. Degrade to report-only.
-        // Do NOT throw, do NOT return applied:false. Next audit re-evaluates reachability.
-        detailLines.push(`forgejo: push failed (network/creds) — degraded to report-only this round: ${err instanceof Error ? err.message : String(err)}`);
+        detailLines.push(`${mirrorRemote}: push failed (network/creds) — degraded to report-only this round: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    // ── STEP 3: Stale origin branch deletion (existing classification logic) ──
-    // Fetch origin only (stale-branch scan is origin-scoped); avoids re-fetching
-    // forgejo, which the audit already fetched moments ago in the same loop iteration.
+    // ── STEP 3: Stale primary branch deletion ──
     try {
-      execSyncImpl('git fetch origin --prune', { timeout: 30000, stdio: 'pipe' });
+      execSyncImpl(`git fetch ${primaryRemote} --prune`, { timeout: 30000, stdio: 'pipe' });
     } catch (err) {
       return { applied: false, detail: `Failed to fetch remote branches: ${err instanceof Error ? err.message : String(err)}` };
     }
 
     const refsOutput = execSyncImpl(
-      'git for-each-ref --format=%(refname:short) refs/remotes/origin',
+      `git for-each-ref --format='%(refname:short)' refs/remotes/${primaryRemote}`,
       { timeout: 5000 },
     );
     const branches = refsOutput
       .split('\n')
       .map(l => l.trim())
-      .filter(b => b && b !== 'origin' && !b.startsWith('origin/HEAD') && b !== 'origin/main');
+      .filter(b => b && b !== primaryRemote && !b.startsWith(`${primaryRemote}/HEAD`) && b !== `${primaryRemote}/main`);
 
     if (branches.length === 0) {
       detailLines.push('stale branches: none found');
@@ -123,12 +133,12 @@ export async function applyBranchCleanupFix(
     let deleted = 0;
 
     for (const branch of branches) {
-      const short = branch.replace(/^origin\//, '');
+      const short = branch.slice(primaryRemote.length + 1);
 
       let ahead: number | null = null;
       let behind: number | null = null;
       try {
-        const counts = execSyncImpl(`git rev-list --left-right --count origin/main...${branch}`, {
+        const counts = execSyncImpl(`git rev-list --left-right --count ${shellQuote(`${primaryRemote}/main...${branch}`)}`, {
           timeout: 5000,
         }).trim().split(/\s+/);
         behind = Number.parseInt(counts[0] || '0', 10);
@@ -137,7 +147,7 @@ export async function applyBranchCleanupFix(
 
       let allAbsorbed = false;
       try {
-        const cherryOut = execSyncImpl(`git cherry origin/main ${branch}`, {
+        const cherryOut = execSyncImpl(`git cherry ${shellQuote(`${primaryRemote}/main`)} ${shellQuote(branch)}`, {
           timeout: 5000,
         }).trim();
         const cherryLines = cherryOut.split('\n').filter(Boolean);
@@ -169,7 +179,7 @@ export async function applyBranchCleanupFix(
 
       if (action === 'delete') {
         try {
-          execSyncImpl(`git push origin --delete "${short}"`, { timeout: 15000, stdio: 'pipe' });
+          execSyncImpl(`git push ${primaryRemote} --delete ${shellQuote(short)}`, { timeout: 15000, stdio: 'pipe' });
           deleted += 1;
         } catch (err) {
           classified.push({
