@@ -53,6 +53,7 @@ import type {
 
 export { cancelScheduledTask, persistScheduledToolCallState, runScheduledAgentTask };
 export type {
+  AgentTaskGraphStageOutput,
   RunAgentTaskGraphSerialInput,
   RunAgentTaskGraphSerialResult,
   ScheduledAgentTaskInput,
@@ -107,7 +108,10 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
       continue;
     }
 
-    const executed = await Promise.all(tasks.map(task => runClaimedAgentGraphTask(task, input)));
+    const completedStages = executedTasks
+      .map(task => task.stageOutput)
+      .filter((stage): stage is NonNullable<typeof stage> => Boolean(stage));
+    const executed = await Promise.all(tasks.map(task => runClaimedAgentGraphTask(task, input, completedStages)));
     executedTasks.push(...executed);
     if (executed.some(task => task.status !== 'succeeded' && task.recoveryFollowUpQueued !== true)) break;
   }
@@ -241,6 +245,7 @@ function runSpecStatusForGraphCompletion(completion: AgentTaskGraphCompletion): 
 async function runClaimedAgentGraphTask(
   task: AgentTaskRecord,
   input: RunAgentTaskGraphSerialInput,
+  completedStages: ReadonlyArray<NonNullable<RunAgentTaskGraphSerialResult['executedTasks'][number]['stageOutput']>>,
 ): Promise<RunAgentTaskGraphSerialResult['executedTasks'][number]> {
   if (task.role === 'verifier') {
     return await runClaimedVerifierGraphTask(task, input);
@@ -348,13 +353,16 @@ async function runClaimedAgentGraphTask(
   });
 
   try {
+    const prompt = input.resolveTaskPrompt
+      ? await input.resolveTaskPrompt(task, completedStages)
+      : task.prompt ?? task.title;
     // Per Agent Identity Decision Framework: planner/executor tasks get standard
     // identity (default). Verifier tasks are handled separately above and get none.
     const result = await runScheduledAgentTask({
       ...input,
       provider: selection.provider,
       model: selection.model,
-      prompt: task.prompt ?? task.title,
+      prompt,
       promptPreview: task.title,
       taskRunId,
       runSpecId,
@@ -481,7 +489,21 @@ async function runClaimedAgentGraphTask(
       type: 'worker_done',
       payload: { summary: outputSummary },
     }).catch(() => undefined);
-    return { taskId: task.id, taskRunId, attemptId, status: 'succeeded' };
+    return {
+      taskId: task.id,
+      taskRunId,
+      attemptId,
+      status: 'succeeded',
+      stageOutput: result.status === 'completed' ? {
+        taskId: task.id,
+        title: task.title,
+        outputText: result.result.text,
+        provider: result.taskRun.provider,
+        model: result.taskRun.model,
+        promptTokens: result.result.totalTokens.prompt,
+        completionTokens: result.result.totalTokens.completion,
+      } : undefined,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await updateAgentTaskStatus(task.id, 'failed', {

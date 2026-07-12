@@ -38,6 +38,9 @@ test('integration routes: GET /api/integrations/feed-analysis/targets returns ta
     assert.equal(losTarget.status, 'available');
     assert.ok(losTarget.supportedDeliveryModes.includes('delivery_only'));
     assert.ok(losTarget.supportedDeliveryModes.includes('result_returning'));
+    assert.deepEqual(losTarget.supportedScenarios, ['evidence_batch', 'research_topic']);
+    assert.deepEqual(losTarget.supportedWorkflowProfiles, ['batch_summary', 'daily_content', 'research_deep']);
+    assert.ok(losTarget.supportedPlatforms.includes('zhihu'));
   } finally {
     await app.close();
     await closeDb();

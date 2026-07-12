@@ -401,6 +401,9 @@ test('scheduler runs a single agent task graph with conservative serial claims',
       graphId,
       sessionId,
       workspaceRoot: process.cwd(),
+      resolveTaskPrompt: (task, completedStages) => completedStages.length === 0
+        ? task.prompt ?? task.title
+        : `${task.prompt ?? task.title}\nPrior stage: ${completedStages.at(-1)?.outputText}`,
       executor: {
         enabled: true,
         nodeUrls: [baseUrl],
@@ -411,7 +414,12 @@ test('scheduler runs a single agent task graph with conservative serial claims',
     assert.deepEqual(result.executedTasks.map(task => task.taskId), [`${graphId}-plan`, `${graphId}-exec`]);
     assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded']);
     assert.equal(result.completion.status, 'succeeded');
-    assert.deepEqual(requests.map(request => request.prompt), ['plan prompt', 'exec prompt']);
+    assert.deepEqual(requests.map(request => request.prompt), [
+      'plan prompt',
+      'exec prompt\nPrior stage: completed plan prompt',
+    ]);
+    assert.equal(result.executedTasks[0]?.stageOutput?.outputText, 'completed plan prompt');
+    assert.equal(result.executedTasks[1]?.stageOutput?.promptTokens, 0);
 
     const graph = await readAgentTaskGraph(graphId);
     assert.deepEqual(graph.tasks.map(task => task.status), ['succeeded', 'succeeded']);

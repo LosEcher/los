@@ -15,7 +15,7 @@
 
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState, type ModelDiagnosticConfig, type ModelDiagnosticConcept, type ModelDiagnosticInput, type ModelDiagnosticKind, type ModelDiagnosticMode, type ModelDiagnosticPhase, type ModelDiagnosticProbe, type ModelDiagnosticRecommendation, type ModelDiagnosticRiskLevel, type ModelDiagnosticSnapshot, type ToolPreflightDiagnostic } from './loop.js';
 export { getDefaultSystemPrompt } from './loop/message-builder.js';
-export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
+export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type AgentTaskGraphStageOutput, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
 export { resumeAnsweredAsksForRunSpec } from './scheduler/resume-tasks.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
@@ -45,7 +45,8 @@ export {
   type FeedAnalysisCapabilityOptions, type FeedAnalysisDispatchOptions,
   type FeedAnalysisTarget, type FeedAnalysisDispatchRequest, type FeedAnalysisDispatchReceipt,
   type FeedAnalysisDispatchState, type FeedAnalysisDispatchResult, type FeedAnalysisResultResponse,
-  type FeedAnalysisResultEnvelope, type FeedAnalysisArtifact,
+  type FeedAnalysisResultEnvelope, type FeedAnalysisArtifact, type FeedAnalysisScenario,
+  type FeedAnalysisWorkflowProfile,
 } from './integration/feed-analysis-ingress.js';
 export { ensureFeedAnalysisStore, pruneExpiredFeedAnalysisMaterial } from './integration/feed-analysis-store.js';
 export {

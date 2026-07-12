@@ -145,7 +145,7 @@ export async function createOrLoadFeedAnalysisDispatch(
         input.retentionExpiresAt ?? null,
       ]);
       if (inserted.rows[0]) {
-        await insertCallbackEvent(client, inserted.rows[0], 'accepted');
+        await _insertFeedAnalysisCallbackEvent(client, inserted.rows[0], 'accepted');
         await client.query('COMMIT');
         return { record: rowToDispatch(inserted.rows[0]), deduplicated: false };
       }
@@ -168,7 +168,6 @@ export async function createOrLoadFeedAnalysisDispatch(
     }
   });
 }
-
 export async function loadFeedAnalysisDispatch(id: string): Promise<FeedAnalysisDispatchRecord | null> {
   await ensureFeedAnalysisStore();
   const result = await getDb().query<FeedAnalysisDispatchRow>('SELECT * FROM feed_analysis_dispatches WHERE id=$1', [id]);
@@ -213,7 +212,7 @@ export async function emitFeedAnalysisStatus(
           updated_at=now() WHERE id=$1 RETURNING *
       `, [dispatchId, status, error?.code ?? null, error?.message ?? null]);
       const row = updated.rows[0]!;
-      await insertCallbackEvent(client, row, status, error);
+      await _insertFeedAnalysisCallbackEvent(client, row, status, error);
       await client.query('COMMIT');
       return rowToDispatch(row);
     } catch (cause) {
@@ -260,7 +259,7 @@ export async function saveFeedAnalysisResult(
           error_code=NULL, error_message=NULL, completed_at=now(), updated_at=now()
         WHERE id=$1 RETURNING *
       `, [dispatchId]);
-      await insertCallbackEvent(client, updated.rows[0]!, 'completed', undefined, persisted);
+      await _insertFeedAnalysisCallbackEvent(client, updated.rows[0]!, 'completed', undefined, persisted);
       await client.query('COMMIT');
     } catch (cause) {
       await client.query('ROLLBACK');
@@ -307,19 +306,20 @@ async function insertArtifact(client: DbTransactionClient, dispatchId: string, a
   ]);
 }
 
-async function insertCallbackEvent(
+export async function _insertFeedAnalysisCallbackEvent(
   client: DbTransactionClient,
   row: FeedAnalysisDispatchRow,
-  status: FeedAnalysisStatus,
+  status: FeedAnalysisStatus | 'progress',
   error?: { code: string; message: string },
   result?: FeedAnalysisResultEnvelope,
+  progress?: { stage: string; title?: string; taskRunId?: string },
 ): Promise<void> {
   if (!row.callback_profile_id) return;
   const sequence = Number(row.sequence) + 1;
   const eventId = `faevt-${randomUUID()}`;
   const payload = {
     eventId, eventVersion: _FEED_ANALYSIS_RESULT_VERSION, sourceJobId: row.source_job_id,
-    dispatchId: row.id, sequence, status, result, error, occurredAt: new Date().toISOString(),
+    dispatchId: row.id, sequence, status, result, error, progress, occurredAt: new Date().toISOString(),
   };
   await client.query('UPDATE feed_analysis_dispatches SET sequence=$2 WHERE id=$1', [row.id, sequence]);
   await client.query(`
@@ -357,7 +357,7 @@ function stableStringify(value: unknown): string {
   return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
 }
 
-type FeedAnalysisDispatchRow = {
+export type FeedAnalysisDispatchRow = {
   id: string; tenant_id: string; project_id: string; source_system: string; source_job_id: string;
   source_session_id: string | null; delivery_mode: FeedAnalysisDeliveryMode; input_digest: string;
   idempotency_key: string; requested_outputs_json: unknown; policy_json: unknown; callback_profile_id: string | null;
