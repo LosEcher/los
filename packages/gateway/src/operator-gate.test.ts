@@ -29,6 +29,10 @@ function buildConfig(opts: { authEnabled: boolean; operatorToken?: string }): Co
       token: 'test-token',
       ...(opts.operatorToken ? { operatorToken: opts.operatorToken } : {}),
     },
+    integrations: { feedAnalysis: {
+      resultReturningEnabled: true, maxInlineBytes: 1048576, maxItems: 500,
+      materialHosts: [], materialFetchTimeoutMs: 10000, executionTimeoutMs: 120000, callbackPollMs: 5000, callbackProfiles: {},
+    } },
     agent: {
       defaultProvider: 'deepseek',
       defaultModel: 'deepseek-v4-flash',

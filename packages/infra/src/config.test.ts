@@ -39,3 +39,26 @@ test('provider source metadata survives config validation and diagnostics', () =
   assert.doesNotMatch(diagnostics, /Setup required for blocked providers/);
   assert.doesNotMatch(diagnostics, /set ANTHROPIC_API_KEY/);
 });
+
+test('feed-analysis integration config has bounded defaults and validates callback profiles', () => {
+  const config = ConfigSchema.parse({
+    server: {}, agent: {}, memory: {}, executor: {}, auth: {}, providers: {},
+    integrations: {
+      feedAnalysis: {
+        serviceToken: 'fixture-token',
+        materialHosts: ['materials.example.com'],
+        callbackProfiles: {
+          lot2: {
+            url: 'https://backend.example.com/api/integrations/los/feed-analysis/events',
+            secret: 'fixture-callback-secret-at-least-32-bytes',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(config.integrations.feedAnalysis.maxInlineBytes, 1024 * 1024);
+  assert.equal(config.integrations.feedAnalysis.maxItems, 500);
+  assert.equal(config.integrations.feedAnalysis.callbackProfiles.lot2?.maxAttempts, 8);
+  assert.deepEqual(config.integrations.feedAnalysis.materialHosts, ['materials.example.com']);
+});

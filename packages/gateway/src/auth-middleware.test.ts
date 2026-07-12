@@ -186,6 +186,10 @@ function configForAuth(enabled: boolean): Config {
       enabled,
       token: 'test-token',
     },
+    integrations: { feedAnalysis: {
+      resultReturningEnabled: true, maxInlineBytes: 1048576, maxItems: 500,
+      materialHosts: [], materialFetchTimeoutMs: 10000, executionTimeoutMs: 120000, callbackPollMs: 5000, callbackProfiles: {},
+    } },
     agent: {
       defaultProvider: 'deepseek',
       defaultModel: 'deepseek-v4-flash',

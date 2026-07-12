@@ -1,0 +1,32 @@
+{
+  "sourceSystem": "lot2extension",
+  "sourceJobId": "fixture-job-001",
+  "deliveryMode": "result_returning",
+  "targetKind": "los-ingress",
+  "requestedOutputs": ["daily_digest", "content_brief", "platform_draft"],
+  "callback": { "profileId": "lot2-go-backend" },
+  "materialBundle": {
+    "schemaVersion": "material-bundle-v1",
+    "bundleId": "fixture-bundle-001",
+    "sourceSystem": "lot2extension",
+    "timeRange": {
+      "start": "2026-07-12T00:00:00+08:00",
+      "end": "2026-07-12T23:59:59+08:00"
+    },
+    "selection": { "platforms": ["x"], "manualSelection": true },
+    "items": [
+      {
+        "itemId": "fixture-item-001",
+        "platform": "x",
+        "itemUrl": "https://x.com/example/status/1",
+        "titleOrCaption": "Fixture feed item"
+      }
+    ],
+    "policy": {
+      "locale": "zh-CN",
+      "citationRequired": true,
+      "allowExternalResearch": false,
+      "retentionDays": 30
+    }
+  }
+}

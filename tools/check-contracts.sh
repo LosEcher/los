@@ -157,6 +157,16 @@ memory="$CONTRACT_DIR/memory.yaml"
   require_pattern "$integration_feed" 'sourceSystem' 'sourceSystem field'
   require_pattern "$integration_feed" 'idempotency' 'idempotency support'
   require_pattern "$integration_feed" 'sourceOfTruth' 'sourceOfTruth section'
+  require_pattern "$integration_feed" '/api/integrations/feed-analysis/dispatch/:id/result' 'result route'
+  require_pattern "$integration_feed" '/api/integrations/feed-analysis/dispatch/:id/cancel' 'cancel route'
+  require_pattern "$integration_feed" 'materialBundle' 'material bundle schema'
+  require_pattern "$integration_feed" 'feed_analysis_callback_deliveries' 'callback delivery source'
+  require_pattern "$integration_feed" '/api/integrations/feed-analysis/callbacks/dead-letter' 'callback dead-letter route'
+  require_pattern "$integration_feed" '/api/integrations/feed-analysis/callbacks/:id/replay' 'callback replay route'
+  [ -s "$CONTRACT_DIR/fixtures/feed-analysis-v2-dispatch.json" ] \
+    || fail 'feed-analysis v2 dispatch fixture is missing'
+  [ -s "$CONTRACT_DIR/fixtures/feed-analysis-v2-completed-event.json" ] \
+    || fail 'feed-analysis v2 completed event fixture is missing'
 }
 
 [ -f "$memory" ] && {

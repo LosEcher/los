@@ -1,347 +1,363 @@
-/**
- * @los/agent/integration/feed-analysis-ingress
- *
- * Feed-analysis integration service. Accepts dispatch requests from external
- * systems (lot2extension), creates los run_spec entries, and returns dispatch
- * receipts in the lsclaw-compatible envelope format.
- *
- * Replaces the discontinued lsclaw feed-analysis ingress.
- */
-
 import { randomUUID } from 'node:crypto';
-import { createRunSpec, loadRunSpec, type RunSpecRecord } from '../run-specs.js';
+import { createRunSpec } from '../run-specs.js';
 import { appendSessionEvent } from '../session-events.js';
-import { listTaskRunsForRunSpec } from '../task-runs.js';
-import { runScheduledAgentTask } from '../scheduler.js';
+import { loadTaskRun } from '../task-runs.js';
+import { transitionExecutionState } from '../execution-store.js';
+import { cancelScheduledTask, runScheduledAgentTask } from '../scheduler.js';
+import { requestCancellation } from '../cancellation.js';
+import {
+  _FEED_ANALYSIS_CONTRACT_VERSION,
+  type FeedAnalysisDeliveryMode,
+  type FeedAnalysisDispatchRequest,
+  type FeedAnalysisDispatchResult,
+  type FeedAnalysisDispatchState,
+  type FeedAnalysisResultResponse,
+  type FeedAnalysisStatus,
+  type FeedAnalysisTarget,
+  FeedAnalysisError,
+} from './feed-analysis-types.js';
+import {
+  createOrLoadFeedAnalysisDispatch,
+  emitFeedAnalysisStatus,
+  linkFeedAnalysisExecution,
+  loadFeedAnalysisDispatch,
+  loadFeedAnalysisResult,
+  saveFeedAnalysisResult,
+  updateFeedAnalysisTaskRun,
+  type FeedAnalysisDispatchRecord,
+} from './feed-analysis-store.js';
+import {
+  buildFeedAnalysisWorkflowPrompt,
+  parseFeedAnalysisWorkflowResult,
+  prepareFeedAnalysisInput,
+  type FeedAnalysisWorkflowLimits,
+} from './feed-analysis-workflow.js';
 
-// ── Types ──────────────────────────────────────────────────
-
-export interface FeedAnalysisTarget {
-  kind: string;
-  label: string;
-  supportedDeliveryModes: string[];
-  supportsResultReturning: boolean;
-  status: string;
+export interface FeedAnalysisDispatchOptions extends FeedAnalysisWorkflowLimits {
+  workspaceRoot: string;
+  tenantId?: string;
+  projectId?: string;
+  userId?: string;
+  requestId?: string;
+  provider?: string;
+  model?: string;
+  timeoutMs?: number;
 }
 
-export interface FeedAnalysisDispatchRequest {
-  sourceSystem: string;
-  sourceJobId: string;
-  sourceSessionId?: string;
-  deliveryMode: string;
-  targetKind?: string;
-  payloadVersion?: string;
-  requestedOutputs?: string[];
-  threadId?: string;
-  sessionId?: string;
-  callback?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  feedSession?: {
-    platform: string;
-    pageUrl: string;
-    pageKind?: string;
-    markReason?: string;
-    startedAt?: string;
-    endedAt?: string;
-    extraJson?: Record<string, unknown>;
-  };
-  feedObservations?: Array<{
-    platform: string;
-    itemId: string;
-    itemUrl?: string;
-    titleOrCaption?: string;
-    authorHandle?: string;
-    mediaSummary?: Record<string, unknown>;
-    interactionSummary?: Record<string, unknown>;
-    extraJson?: Record<string, unknown>;
-    visibleAt?: string;
-  }>;
+export interface FeedAnalysisCapabilityOptions {
+  callbackEnabled?: boolean;
+  resultReturningEnabled?: boolean;
+  maxInlineBytes?: number;
+  maxItems?: number;
 }
 
-export interface FeedAnalysisDispatchReceipt {
-  id: string;
-  status: string;
-  runId: string;
-  traceId?: string;
-  threadId?: string;
-  payloadSummary?: Record<string, unknown>;
-}
-
-export interface FeedAnalysisDispatchState {
-  accepted: boolean;
-  queued: boolean;
-  failed: boolean;
-  resultAvailable: boolean;
-  deliveryMode: string;
-}
-
-export interface FeedAnalysisDispatchResult {
-  dispatch: FeedAnalysisDispatchReceipt;
-  dispatchState: FeedAnalysisDispatchState;
-  deduplicated: boolean;
-  idempotencyKey: string;
-}
-
-// ── Constants ──────────────────────────────────────────────
-
-const LOS_TARGET: FeedAnalysisTarget = {
-  kind: 'los-ingress',
-  label: 'los Agent Execution Platform',
-  supportedDeliveryModes: ['delivery_only', 'result_returning'],
-  supportsResultReturning: true,
-  status: 'available',
+const DEFAULT_LIMITS: FeedAnalysisWorkflowLimits = {
+  maxInlineBytes: 1024 * 1024,
+  maxItems: 500,
+  materialHosts: [],
+  materialFetchTimeoutMs: 10_000,
 };
 
-// ── Public API ─────────────────────────────────────────────
-
-export function listFeedAnalysisTargets(): { targets: FeedAnalysisTarget[] } {
-  return { targets: [LOS_TARGET] };
+export function listFeedAnalysisTargets(options: FeedAnalysisCapabilityOptions = {}): { targets: FeedAnalysisTarget[] } {
+  const supportsResultReturning = options.resultReturningEnabled !== false;
+  const deliveryModes: FeedAnalysisDeliveryMode[] = supportsResultReturning
+    ? ['delivery_only', 'result_returning']
+    : ['delivery_only'];
+  return {
+    targets: [{
+      kind: 'los-ingress',
+      label: 'los Agent Execution Platform',
+      contractVersions: [_FEED_ANALYSIS_CONTRACT_VERSION],
+      supportedDeliveryModes: deliveryModes,
+      supportedOutputs: ['daily_digest', 'content_brief', 'platform_draft'],
+      supportedPlatforms: ['xiaohongshu', 'weibo', 'x'],
+      supportedLocales: ['zh-CN'],
+      supportsResultReturning,
+      supportsCallback: options.callbackEnabled === true,
+      supportsCancellation: true,
+      maxInlineBytes: options.maxInlineBytes ?? DEFAULT_LIMITS.maxInlineBytes,
+      maxItems: options.maxItems ?? DEFAULT_LIMITS.maxItems,
+      status: 'available',
+    }],
+  };
 }
 
 export async function dispatchFeedAnalysisJob(
   request: FeedAnalysisDispatchRequest,
   idempotencyKey: string,
-  workspaceRoot: string,
+  options: FeedAnalysisDispatchOptions,
 ): Promise<FeedAnalysisDispatchResult> {
-  const runId = `fa-${randomUUID()}`;
+  const deliveryMode = normalizeDeliveryMode(request.deliveryMode);
+  const sourceSystem = requireString(request.sourceSystem, 'sourceSystem');
+  const sourceJobId = requireString(request.sourceJobId, 'sourceJobId');
+  const prepared = await prepareFeedAnalysisInput({ ...request, sourceSystem, sourceJobId, deliveryMode }, options);
+  const candidateDispatchId = `fa-${randomUUID()}`;
+  const tenantId = options.tenantId ?? 'local';
+  const projectId = options.projectId ?? 'los';
+  const retentionDays = typeof prepared.policy.retentionDays === 'number' ? prepared.policy.retentionDays : 30;
+  const created = await createOrLoadFeedAnalysisDispatch({
+    id: candidateDispatchId,
+    tenantId,
+    projectId,
+    sourceSystem,
+    sourceJobId,
+    sourceSessionId: request.sourceSessionId,
+    deliveryMode,
+    contractVersion: _FEED_ANALYSIS_CONTRACT_VERSION,
+    bundleVersion: prepared.materialBundle.schemaVersion,
+    bundleId: prepared.materialBundle.bundleId,
+    inputDigest: prepared.inputDigest,
+    idempotencyKey,
+    requestedOutputs: prepared.requestedOutputs,
+    policy: prepared.policy,
+    callbackProfileId: normalizeOptionalString(request.callback?.profileId),
+    material: prepared.materialBundle as unknown as Record<string, unknown>,
+    metadata: request.metadata,
+    retentionExpiresAt: new Date(Date.now() + retentionDays * 86_400_000).toISOString(),
+  });
+
+  if (created.deduplicated && created.record.runSpecId) return dispatchToResult(created.record, true, request.threadId);
+  const dispatchId = created.record.id;
+
   const traceId = randomUUID();
   const sessionId = request.sessionId ?? request.sourceSessionId ?? `fa-session-${randomUUID()}`;
-
-  const normalizedRequest = normalizeFeedAnalysisRequest(request);
-
+  const prompt = buildFeedAnalysisWorkflowPrompt(prepared);
   const runSpec = await createRunSpec({
-    id: runId,
+    id: dispatchId,
     sessionId,
+    tenantId,
+    projectId,
+    userId: options.userId,
+    requestId: options.requestId,
     traceId,
-    prompt: buildIngressPrompt(normalizedRequest),
-    workspaceRoot,
+    provider: options.provider,
+    model: options.model,
+    prompt,
+    workspaceRoot: options.workspaceRoot,
     toolMode: 'read-only',
     maxLoops: 1,
+    timeoutMs: options.timeoutMs,
     runContract: {
       mode: 'feed-analysis-ingress',
-      goal: JSON.stringify({
-        sourceSystem: normalizedRequest.sourceSystem,
-        sourceJobId: normalizedRequest.sourceJobId,
-        deliveryMode: normalizedRequest.deliveryMode,
-        targetKind: normalizedRequest.targetKind,
-      }),
+      executionMode: 'lightweight',
+      goal: JSON.stringify({ sourceSystem, sourceJobId, deliveryMode, workflow: 'lot2.daily-content@1.0.0' }),
     },
     modelSettings: {},
   });
 
+  await linkFeedAnalysisExecution({ dispatchId, runSpecId: runSpec.id, sessionId, traceId });
   await appendSessionEvent({
     sessionId,
+    tenantId,
+    projectId,
+    userId: options.userId,
+    requestId: options.requestId,
+    traceId,
     type: 'feed_analysis.dispatch_received',
     payload: {
-      event: 'feed_analysis.dispatch_received',
-      runId: runSpec.id,
-      sourceSystem: normalizedRequest.sourceSystem,
-      sourceJobId: normalizedRequest.sourceJobId,
-      deliveryMode: normalizedRequest.deliveryMode,
-      targetKind: normalizedRequest.targetKind,
-      feedSessionPlatform: normalizedRequest.feedSession?.platform,
-      feedSessionPageUrl: normalizedRequest.feedSession?.pageUrl,
-      observationCount: normalizedRequest.feedObservations?.length ?? 0,
-      idempotencyKey,
+      event: 'feed_analysis.dispatch_received', dispatchId, sourceSystem, sourceJobId, deliveryMode,
+      bundleId: prepared.materialBundle.bundleId, inputDigest: prepared.inputDigest,
+      itemCount: prepared.materialBundle.items.length, requestedOutputs: prepared.requestedOutputs,
     },
   });
 
-  // Fire-and-forget: runScheduledAgentTask creates the task_run and executes
-  // the agent loop. We don't await so the dispatch returns immediately.
-  runScheduledAgentTask({
-    prompt: runSpec.prompt,
+  void executeFeedAnalysisDispatch({
+    dispatchId,
+    prompt,
     sessionId,
-    runSpecId: runSpec.id,
     traceId,
-    workspaceRoot,
-    toolMode: 'read-only' as const,
-    maxLoops: 1,
-  }).catch(() => undefined);
+    workspaceRoot: options.workspaceRoot,
+    tenantId,
+    projectId,
+    userId: options.userId,
+    requestId: options.requestId,
+    provider: options.provider,
+    model: options.model,
+    timeoutMs: options.timeoutMs,
+    deliveryMode,
+    prepared,
+  });
 
-  const dispatchState = buildDispatchState(normalizedRequest.deliveryMode, runSpec);
+  const linked = await loadFeedAnalysisDispatch(dispatchId);
+  if (!linked) throw new Error(`feed-analysis dispatch disappeared: ${dispatchId}`);
+  return dispatchToResult(linked, false, request.threadId);
+}
 
+export async function getFeedAnalysisDispatch(dispatchId: string): Promise<FeedAnalysisDispatchResult | null> {
+  const record = await loadFeedAnalysisDispatch(dispatchId);
+  return record ? dispatchToResult(record, false) : null;
+}
+
+export async function getFeedAnalysisResult(dispatchId: string): Promise<FeedAnalysisResultResponse | null> {
+  const dispatch = await loadFeedAnalysisDispatch(dispatchId);
+  if (!dispatch) return null;
+  const result = dispatch.resultAvailable ? await loadFeedAnalysisResult(dispatchId) : null;
   return {
-    dispatch: {
-      id: runSpec.id,
-      status: 'accepted',
-      runId: runSpec.id,
-      traceId,
-      threadId: normalizedRequest.threadId,
-      payloadSummary: {
-        sourceSystem: normalizedRequest.sourceSystem,
-        sourceJobId: normalizedRequest.sourceJobId,
-        deliveryMode: normalizedRequest.deliveryMode,
-        observationCount: normalizedRequest.feedObservations?.length ?? 0,
-      },
-    },
-    dispatchState,
-    deduplicated: false,
-    idempotencyKey,
+    dispatchId,
+    status: dispatch.status,
+    resultAvailable: Boolean(result),
+    result: result ?? undefined,
+    error: dispatch.errorCode ? { code: dispatch.errorCode, message: dispatch.errorMessage ?? dispatch.errorCode } : undefined,
   };
 }
 
-export async function getFeedAnalysisDispatch(
+export async function cancelFeedAnalysisDispatch(
   dispatchId: string,
-): Promise<FeedAnalysisDispatchResult | null> {
-  const runSpec = await loadRunSpec(dispatchId);
-  if (!runSpec) return null;
+  reason = 'cancelled_by_integration',
+): Promise<{ dispatchId: string; status: FeedAnalysisStatus; cancelled: boolean }> {
+  const dispatch = await loadFeedAnalysisDispatch(dispatchId);
+  if (!dispatch) throw new FeedAnalysisError('dispatch_not_found', 'dispatch not found', 404);
+  if (dispatch.status === 'cancelled') return { dispatchId, status: 'cancelled', cancelled: true };
+  if (dispatch.status === 'completed' || dispatch.status === 'failed') {
+    throw new FeedAnalysisError('invalid_state', `cannot cancel ${dispatch.status} dispatch`, 409);
+  }
 
-  // Only return dispatch envelopes for feed-analysis-ingress runs
-  if (runSpec.runContract?.mode !== 'feed-analysis-ingress') return null;
+  if (dispatch.taskRunId) {
+    const taskRun = await loadTaskRun(dispatch.taskRunId);
+    if (taskRun && (taskRun.status === 'queued' || taskRun.status === 'running')) {
+      cancelScheduledTask(taskRun.id, reason);
+      await requestCancellation(taskRun.id, reason, 'feed-analysis').catch(() => undefined);
+      await transitionExecutionState({
+        entityType: 'task_run', entityId: taskRun.id, to: 'cancelled', sessionId: taskRun.sessionId, reason,
+      }).catch(() => undefined);
+    }
+  }
+  const cancelled = await emitFeedAnalysisStatus(dispatchId, 'cancelled');
+  return { dispatchId, status: cancelled.status, cancelled: true };
+}
 
-  // Derive effective status: prefer the latest task_run status over run_spec
-  const taskRuns = await listTaskRunsForRunSpec(dispatchId);
-  const latestTaskRun = taskRuns.at(-1);
-  const effectiveStatus = latestTaskRun?.status ?? runSpec.status;
+async function executeFeedAnalysisDispatch(input: {
+  dispatchId: string;
+  prompt: string;
+  sessionId: string;
+  traceId: string;
+  workspaceRoot: string;
+  tenantId: string;
+  projectId: string;
+  userId?: string;
+  requestId?: string;
+  provider?: string;
+  model?: string;
+  timeoutMs?: number;
+  deliveryMode: FeedAnalysisDeliveryMode;
+  prepared: Awaited<ReturnType<typeof prepareFeedAnalysisInput>>;
+}): Promise<void> {
+  const startedAt = Date.now();
+  try {
+    const scheduled = await runScheduledAgentTask({
+      prompt: input.prompt,
+      promptPreview: `[feed-analysis ${input.dispatchId}]`,
+      sessionId: input.sessionId,
+      runSpecId: input.dispatchId,
+      traceId: input.traceId,
+      dedupeKey: `feed-analysis:${input.tenantId}:${input.projectId}:${input.dispatchId}`,
+      workspaceRoot: input.workspaceRoot,
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      userId: input.userId,
+      requestId: input.requestId,
+      provider: input.provider,
+      model: input.model,
+      timeoutMs: input.timeoutMs,
+      toolMode: 'read-only',
+      maxLoops: 1,
+      metadata: { feedAnalysisDispatchId: input.dispatchId },
+      runContract: { mode: 'feed-analysis-ingress', executionMode: 'lightweight' },
+      onTaskEvent: async event => {
+        await updateFeedAnalysisTaskRun(input.dispatchId, event.taskRun.id);
+        if (event.type === 'task.running') await emitFeedAnalysisStatus(input.dispatchId, 'processing');
+      },
+    });
+    if (scheduled.status !== 'completed') {
+      if (scheduled.status === 'cancelled') await emitFeedAnalysisStatus(input.dispatchId, 'cancelled');
+      else await emitFeedAnalysisStatus(input.dispatchId, 'failed', {
+        code: 'workflow_incomplete',
+        message: scheduled.status === 'blocked' ? scheduled.reason : 'workflow task was deduplicated unexpectedly',
+      });
+      return;
+    }
+    if (input.deliveryMode === 'delivery_only') {
+      await emitFeedAnalysisStatus(input.dispatchId, 'completed');
+      return;
+    }
+    const result = parseFeedAnalysisWorkflowResult(scheduled.result.text, input.prepared, {
+      provider: scheduled.taskRun.provider,
+      model: scheduled.taskRun.model,
+      promptTokens: scheduled.result.totalTokens.prompt,
+      completionTokens: scheduled.result.totalTokens.completion,
+      durationMs: Date.now() - startedAt,
+    });
+    await saveFeedAnalysisResult(input.dispatchId, result);
+  } catch (error) {
+    const current = await loadFeedAnalysisDispatch(input.dispatchId).catch(() => null);
+    if (current?.status === 'cancelled' || current?.status === 'failed') return;
+    const code = error instanceof FeedAnalysisError ? error.code : 'workflow_failed';
+    const message = error instanceof Error ? error.message : String(error);
+    await emitFeedAnalysisStatus(input.dispatchId, 'failed', { code, message }).catch(() => undefined);
+  }
+}
 
-  const meta = parseRunSpecGoal(runSpec);
-  const deliveryMode = meta.deliveryMode ?? 'delivery_only';
-  const dispatchState = buildDispatchState(deliveryMode, runSpec, effectiveStatus);
-
+function dispatchToResult(
+  record: FeedAnalysisDispatchRecord,
+  deduplicated: boolean,
+  threadId?: string,
+): FeedAnalysisDispatchResult {
   return {
     dispatch: {
-      id: runSpec.id,
-      status: runSpecStatusToDispatchStatus(effectiveStatus),
-      runId: runSpec.id,
-      traceId: runSpec.traceId,
-      threadId: undefined,
+      id: record.id,
+      status: record.status,
+      runId: record.runSpecId,
+      traceId: record.traceId,
+      threadId,
       payloadSummary: {
-        sourceSystem: meta.sourceSystem,
-        sourceJobId: meta.sourceJobId,
-        deliveryMode,
+        sourceSystem: record.sourceSystem,
+        sourceJobId: record.sourceJobId,
+        deliveryMode: record.deliveryMode,
+        requestedOutputs: record.requestedOutputs,
+        inputDigest: record.inputDigest,
       },
     },
-    dispatchState,
-    deduplicated: false,
-    idempotencyKey: '',
+    dispatchState: buildDispatchState(record),
+    deduplicated,
+    idempotencyKey: record.idempotencyKey,
   };
 }
 
-// ── Helpers ────────────────────────────────────────────────
-
-interface ParsedGoal {
-  sourceSystem?: string;
-  sourceJobId?: string;
-  deliveryMode?: string;
-  targetKind?: string;
-}
-
-function parseRunSpecGoal(runSpec: RunSpecRecord): ParsedGoal {
-  try {
-    const goal = runSpec.runContract?.goal;
-    if (goal) return JSON.parse(goal) as ParsedGoal;
-  } catch {
-    // fall through
-  }
-  return {};
-}
-
-interface NormalizedRequest {
-  sourceSystem: string;
-  sourceJobId: string;
-  sourceSessionId?: string;
-  deliveryMode: string;
-  targetKind: string;
-  payloadVersion?: string;
-  requestedOutputs: string[];
-  threadId?: string;
-  sessionId?: string;
-  callback?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  feedSession?: FeedAnalysisDispatchRequest['feedSession'];
-  feedObservations?: FeedAnalysisDispatchRequest['feedObservations'];
-}
-
-function normalizeFeedAnalysisRequest(req: FeedAnalysisDispatchRequest): NormalizedRequest {
-  return {
-    sourceSystem: req.sourceSystem?.trim() || 'unknown',
-    sourceJobId: req.sourceJobId?.trim() || 'unknown',
-    sourceSessionId: req.sourceSessionId?.trim() || undefined,
-    deliveryMode: normalizeDeliveryMode(req.deliveryMode),
-    targetKind: req.targetKind?.trim() || 'los-ingress',
-    payloadVersion: req.payloadVersion?.trim() || undefined,
-    requestedOutputs: Array.isArray(req.requestedOutputs)
-      ? req.requestedOutputs.map(s => s.trim()).filter(Boolean)
-      : [],
-    threadId: req.threadId?.trim() || undefined,
-    sessionId: req.sessionId?.trim() || undefined,
-    callback: req.callback && Object.keys(req.callback).length > 0 ? req.callback : undefined,
-    metadata: req.metadata && Object.keys(req.metadata).length > 0 ? req.metadata : undefined,
-    feedSession: req.feedSession ? {
-      platform: req.feedSession.platform?.trim() || 'unknown',
-      pageUrl: req.feedSession.pageUrl?.trim() || '',
-      pageKind: req.feedSession.pageKind?.trim() || undefined,
-      markReason: req.feedSession.markReason?.trim() || undefined,
-      startedAt: req.feedSession.startedAt?.trim() || undefined,
-      endedAt: req.feedSession.endedAt?.trim() || undefined,
-      extraJson: req.feedSession.extraJson,
-    } : undefined,
-    feedObservations: Array.isArray(req.feedObservations)
-      ? req.feedObservations.filter(o => o && o.platform && o.itemId)
-      : undefined,
-  };
-}
-
-function normalizeDeliveryMode(value: string | undefined): string {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === 'result_returning') return 'result_returning';
-  return 'delivery_only';
-}
-
-function buildDispatchState(
-  deliveryMode: string,
-  runSpec: RunSpecRecord,
-  effectiveStatus?: string,
-): FeedAnalysisDispatchState {
-  const status = effectiveStatus ?? runSpec.status;
-  const isTerminal = ['succeeded', 'failed', 'cancelled', 'blocked'].includes(status);
-  const isRunning = status === 'running';
-
+function buildDispatchState(record: FeedAnalysisDispatchRecord): FeedAnalysisDispatchState {
   return {
     accepted: true,
-    queued: !isRunning && !isTerminal,
-    failed: status === 'failed',
-    resultAvailable: deliveryMode === 'result_returning' && status === 'succeeded',
-    deliveryMode,
+    queued: record.status === 'accepted' || record.status === 'queued',
+    failed: record.status === 'failed',
+    resultAvailable: record.resultAvailable,
+    deliveryMode: record.deliveryMode,
+    errorCode: record.errorCode,
   };
 }
 
-function runSpecStatusToDispatchStatus(status: string): string {
-  switch (status) {
-    case 'created':
-    case 'queued': return 'accepted';
-    case 'running': return 'processing';
-    case 'succeeded': return 'completed';
-    case 'failed': return 'failed';
-    case 'cancelled': return 'cancelled';
-    case 'blocked': return 'failed';
-    default: return status;
-  }
+function normalizeDeliveryMode(value: string): FeedAnalysisDeliveryMode {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'delivery_only' || normalized === 'result_returning') return normalized;
+  throw new FeedAnalysisError('invalid_request', 'deliveryMode must be delivery_only or result_returning', 400);
 }
 
-function buildIngressPrompt(req: NormalizedRequest): string {
-  const parts: string[] = [
-    `[Feed Analysis Ingress] Source: ${req.sourceSystem}`,
-    `Job: ${req.sourceJobId}`,
-    `Delivery mode: ${req.deliveryMode}`,
-  ];
-
-  if (req.feedSession) {
-    parts.push(`Platform: ${req.feedSession.platform}`);
-    parts.push(`Page: ${req.feedSession.pageUrl}`);
-    if (req.feedSession.pageKind) parts.push(`Page kind: ${req.feedSession.pageKind}`);
-    if (req.feedSession.markReason) parts.push(`Mark reason: ${req.feedSession.markReason}`);
-  }
-
-  if (req.feedObservations && req.feedObservations.length > 0) {
-    parts.push(`Observations: ${req.feedObservations.length}`);
-    for (const obs of req.feedObservations.slice(0, 10)) {
-      parts.push(`  - [${obs.platform}] ${obs.itemId} ${obs.titleOrCaption ?? ''}`.trim());
-    }
-    if (req.feedObservations.length > 10) {
-      parts.push(`  ... and ${req.feedObservations.length - 10} more`);
-    }
-  }
-
-  return parts.join('\n');
+function requireString(value: unknown, field: string): string {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) throw new FeedAnalysisError('invalid_request', `${field} is required`, 400);
+  return normalized;
 }
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+export type {
+  FeedAnalysisArtifact,
+  FeedAnalysisDispatchRequest,
+  FeedAnalysisDispatchReceipt,
+  FeedAnalysisDispatchResult,
+  FeedAnalysisDispatchState,
+  FeedAnalysisResultEnvelope,
+  FeedAnalysisResultResponse,
+  FeedAnalysisTarget,
+} from './feed-analysis-types.js';
+export { FeedAnalysisError } from './feed-analysis-types.js';

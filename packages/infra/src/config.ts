@@ -70,6 +70,15 @@ export const ConfigSchema = z.object({
     operatorToken: z.string().optional(),
   }),
 
+  integrations: z.object({ feedAnalysis: z.object({
+      serviceToken: z.string().optional(), resultReturningEnabled: z.coerce.boolean().default(true),
+      maxInlineBytes: z.coerce.number().int().positive().default(1024 * 1024), maxItems: z.coerce.number().int().positive().max(5000).default(500),
+      materialHosts: z.array(z.string()).default([]), materialFetchTimeoutMs: z.coerce.number().int().positive().default(10_000),
+      executionTimeoutMs: z.coerce.number().int().positive().default(120_000), callbackPollMs: z.coerce.number().int().positive().default(5_000),
+      callbackProfiles: z.record(z.string(), z.object({ url: z.string().url(), secret: z.string().min(32),
+        timeoutMs: z.coerce.number().int().positive().default(10_000), maxAttempts: z.coerce.number().int().positive().max(20).default(8) })).default({}),
+    }).default({}) }).default({}),
+
   // Agent
   agent: z.object({
     defaultProvider: z.string().default('deepseek'),
@@ -202,6 +211,10 @@ const ENV_MAP: [string, string][] = [
   ['LOS_AUTH_ENABLED', 'auth.enabled'],
   ['LOS_AUTH_TOKEN', 'auth.token'],
   ['LOS_OPERATOR_TOKEN', 'auth.operatorToken'],
+  ['LOS_FEED_ANALYSIS_TOKEN', 'integrations.feedAnalysis.serviceToken'], ['LOS_FEED_ANALYSIS_RESULT_RETURNING', 'integrations.feedAnalysis.resultReturningEnabled'],
+  ['LOS_FEED_ANALYSIS_MAX_INLINE_BYTES', 'integrations.feedAnalysis.maxInlineBytes'], ['LOS_FEED_ANALYSIS_MAX_ITEMS', 'integrations.feedAnalysis.maxItems'],
+  ['LOS_FEED_ANALYSIS_MATERIAL_HOSTS', 'integrations.feedAnalysis.materialHosts'], ['LOS_FEED_ANALYSIS_MATERIAL_TIMEOUT_MS', 'integrations.feedAnalysis.materialFetchTimeoutMs'],
+  ['LOS_FEED_ANALYSIS_EXECUTION_TIMEOUT_MS', 'integrations.feedAnalysis.executionTimeoutMs'], ['LOS_FEED_ANALYSIS_CALLBACK_POLL_MS', 'integrations.feedAnalysis.callbackPollMs'],
   ['AGENT_DEFAULT_PROVIDER', 'agent.defaultProvider'],
   ['AGENT_DEFAULT_MODEL', 'agent.defaultModel'],
   ['AGENT_MAX_LOOPS', 'agent.maxLoops'],
@@ -325,8 +338,9 @@ function flattenEnv(env: Record<string, string>, sourceLabel = 'env'): Record<st
   for (const [envKey, configPath] of ENV_MAP) {
     const val = env[envKey];
     if (val !== undefined && val !== '') {
-      // Special handling: meshNodes and connectModes are comma-separated
-      if (configPath === 'executor.meshNodes' || configPath === 'executor.connectModes') {
+      // Special handling: selected array values are comma-separated.
+      if (configPath === 'executor.meshNodes' || configPath === 'executor.connectModes'
+          || configPath === 'integrations.feedAnalysis.materialHosts') {
         setNested(result, configPath, val.split(',').map(s => s.trim()).filter(Boolean));
       } else {
         setNested(result, configPath, val);
@@ -394,6 +408,7 @@ export async function loadConfig(opts?: {
   let merged: Record<string, unknown> = {
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173' },
     auth: { enabled: false },
+    integrations: { feedAnalysis: {} },
     agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
     memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
