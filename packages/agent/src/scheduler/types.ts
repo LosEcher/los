@@ -1,5 +1,5 @@
 import type { EditableSurfaceConflictMode } from '../agent-task-editable-surfaces.js';
-import type { AgentTaskAttemptStatus } from '../agent-task-graph.js';
+import type { AgentTaskAttemptStatus, AgentTaskRecord } from '../agent-task-graph.js';
 import type { AgentTaskGraphCompletion } from '../agent-task-graph-read-model.js';
 import type { AgentConfig, AgentResult } from '../loop.js';
 import type { RunContractMetadataInput } from '../run-contract.js';
@@ -76,6 +76,20 @@ export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInp
   maxParallelTasks?: number;
   editableSurfaceMode?: EditableSurfaceConflictMode;
   requireVerifier?: boolean;
+  resolveTaskPrompt?: (
+    task: AgentTaskRecord,
+    completedStages: readonly AgentTaskGraphStageOutput[],
+  ) => string | Promise<string>;
+}
+
+export interface AgentTaskGraphStageOutput {
+  taskId: string;
+  title: string;
+  outputText: string;
+  provider?: string;
+  model?: string;
+  promptTokens: number;
+  completionTokens: number;
 }
 
 export interface RunAgentTaskGraphSerialResult {
@@ -87,6 +101,7 @@ export interface RunAgentTaskGraphSerialResult {
     status: AgentTaskAttemptStatus;
     verificationRecordId?: string;
     recoveryFollowUpQueued?: boolean;
+    stageOutput?: AgentTaskGraphStageOutput;
   }>;
   completion: AgentTaskGraphCompletion;
   recovery?: ToolCallRecoveryDecision;

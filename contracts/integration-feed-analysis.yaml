@@ -46,6 +46,21 @@ routes:
                     type: array
                     items:
                       type: string
+                  supportedScenarios:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        - evidence_batch
+                        - research_topic
+                  supportedWorkflowProfiles:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        - batch_summary
+                        - daily_content
+                        - research_deep
                   supportedPlatforms:
                     type: array
                     items:
@@ -96,6 +111,12 @@ routes:
           description: The upstream job identifier in the source system.
         sourceSessionId:
           type: string
+        scenario:
+          type: string
+          enum:
+            - evidence_batch
+            - research_topic
+          description: Selects the S2 batch or S3 research execution boundary.
         deliveryMode:
           type: string
           enum:
@@ -121,6 +142,53 @@ routes:
               type: string
         metadata:
           type: object
+        collectionSnapshot:
+          type: object
+          required:
+            - snapshotId
+            - observationCount
+          properties:
+            snapshotId:
+              type: string
+            createdAt:
+              type: string
+            observationCount:
+              type: integer
+              minimum: 1
+            dedupePolicy:
+              type: string
+          description: Immutable lot2-owned input snapshot metadata. LOS never mutates or fetches the collection.
+        topic:
+          type: object
+          required:
+            - topicId
+            - title
+          properties:
+            topicId:
+              type: string
+            title:
+              type: string
+            brief:
+              type: string
+            targetPlatforms:
+              type: array
+              items:
+                type: string
+          description: Required context for research_topic dispatches.
+        workflowHint:
+          type: object
+          properties:
+            profile:
+              type: string
+              enum:
+                - batch_summary
+                - daily_content
+                - research_deep
+            maxLoops:
+              type: integer
+              minimum: 1
+              maximum: 5
+          description: Optional bounded execution hint; LOS validates compatibility with scenario and capabilities.
         materialBundle:
           type: object
           required:
@@ -409,6 +477,31 @@ routes:
     path: /api/integrations/feed-analysis/callbacks/:id/replay
     auth: Bearer token (integration_service_token)
     description: Replay a dead-lettered callback without changing its event ID or sequence.
+
+callbacks:
+  path: /api/integrations/los/feed-analysis/events
+  direction: los-to-source-system
+  statuses:
+    - accepted
+    - queued
+    - processing
+    - progress
+    - completed
+    - failed
+    - cancelled
+  progress:
+    description: Ordered research-stage evidence that does not change the dispatch primary status.
+    properties:
+      stage:
+        type: string
+      title:
+        type: string
+      taskRunId:
+        type: string
+  rules:
+    - every event has an immutable event ID and monotonic per-dispatch sequence
+    - completed embeds the validated result and all requested artifacts
+    - progress never makes a result available and never completes the source job
 
 sourceOfTruth:
   - feed_analysis_dispatches (table)

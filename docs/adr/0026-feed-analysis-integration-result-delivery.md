@@ -255,9 +255,22 @@ records the actual workflow, prompt, provider, model, tokens, cost, and elapsed
 time. External research is disabled unless both the request policy and the
 selected workflow allow it.
 
-The first version should run as a bounded sequential workflow. Introduce an
-agent task graph only when stages require independent retries or parallel
-execution; do not add a framework-owned state store.
+Workflow routing now distinguishes three versioned profiles:
+
+1. `batch_summary` for explicit `evidence_batch` snapshots;
+2. `daily_content` for the backward-compatible v2 daily-content path;
+3. `research_deep` for explicit `research_topic` snapshots with topic context.
+
+`research_deep` uses the existing durable agent task graph in conservative
+serial mode: planner, evidence analyst, synthesis, platform writer, and final
+verifier/writer. Full stage output is passed to the next stage in process and
+only a bounded summary is persisted in `task_attempts`; the validated final
+result remains the durable result boundary. This does not introduce a second
+workflow framework or state store. Research stages run with an explicit empty
+tool allowlist, so they cannot inspect the LOS workspace or drift beyond the
+locked material and prior stage outputs. External retrieval remains disabled
+until a dedicated retrieval tool policy and provider harness are approved. The
+other profiles remain bounded single scheduled tasks.
 
 ## Callback Protocol
 
@@ -310,9 +323,14 @@ Expected surfaces:
 
 ```text
 contracts/integration-feed-analysis.yaml
-packages/agent/src/integration/feed-analysis-contract.ts
+packages/agent/src/integration/feed-analysis-ingress.ts
+packages/agent/src/integration/feed-analysis-execution.ts
 packages/agent/src/integration/feed-analysis-store.ts
 packages/agent/src/integration/feed-analysis-workflow.ts
+packages/agent/src/integration/feed-analysis-workflow-profile.ts
+packages/agent/src/integration/feed-analysis-research-graph.ts
+packages/agent/src/integration/feed-analysis-result-contract.ts
+packages/agent/src/integration/feed-analysis-progress.ts
 packages/agent/src/integration/feed-analysis-callback-outbox.ts
 packages/gateway/src/routes/data/integration-routes.ts
 packages/infra/src/config.ts
