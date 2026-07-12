@@ -38,7 +38,7 @@ Environment=NODE_OPTIONS=--max-old-space-size=256
 Environment=EXECUTOR_HOST=0.0.0.0
 Environment=EXECUTOR_PORT=8090
 
-ExecStart=/bin/bash -lc 'cd /opt/los && exec /usr/bin/node /opt/los/node_modules/.pnpm/tsx@*/node_modules/tsx/dist/cli.mjs /opt/los/packages/executor/src/index.ts'
+ExecStart=/opt/los/packages/executor/node_modules/.bin/tsx /opt/los/packages/executor/src/index.ts
 ExecStop=/opt/los/tools/los.sh stop-executor
 ExecReload=/bin/kill -HUP $MAINPID
 

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import executorPackage from '../package.json' with { type: 'json' };
 import { loadConfig, getMigrateDir } from '@los/infra/config';
 import { initDb, getDb } from '@los/infra/db';
 import { migrateDir } from '@los/infra/migrate';
@@ -35,7 +36,6 @@ import {
 } from './executor-helpers.js';
 
 const log = getLogger('executor');
-const VERSION = '0.1.0';
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_HEARTBEAT_MS = 10_000;
 
@@ -59,6 +59,7 @@ export async function startExecutor() {
   const host = config.executor.host;
   const port = config.executor.port;
   const gatewayUrl = config.executor.gatewayUrl;
+  const version = config.executor.version ?? config.server.version ?? executorPackage.version;
   const heartbeatViaApi = !!gatewayUrl;
 
   await initDb(config.databaseUrl);
@@ -88,7 +89,9 @@ export async function startExecutor() {
   const publicUrl = config.executor.nodeUrl ?? `http://${host}:${port}`;
   const nodeKind: ExecutorNodeKind = (config.executor.nodeKind as ExecutorNodeKind) ?? 'executor';
   const baseConnectModes: ExecutorNodeConnectMode[] = ['agent_http', 'agent_http_ndjson'];
-  const connectModes: ExecutorNodeConnectMode[] = [...baseConnectModes, ...(config.executor.connectModes as ExecutorNodeConnectMode[] ?? [])];
+  const connectModes: ExecutorNodeConnectMode[] = [
+    ...new Set([...baseConnectModes, ...(config.executor.connectModes as ExecutorNodeConnectMode[] ?? [])]),
+  ];
   const agentKey = config.executor.agentKey ?? (() => {
     const generated = `los-key-${randomUUID()}`;
     log.warn(`No EXECUTOR_AGENT_KEY configured. Generated ephemeral key: ${generated}`);
@@ -120,10 +123,10 @@ export async function startExecutor() {
   // Fire initial heartbeat without blocking server startup.
   // If the gateway is temporarily unreachable the server still starts,
   // and the interval below will retry every heartbeat interval.
-  heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl, await resolveFileSyncFolders()).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
+  heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, gatewayUrl, await resolveFileSyncFolders()).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
   const nodeHeartbeat = setInterval(() => {
     resolveFileSyncFolders().then(folders =>
-      heartbeatNode(nodeId, publicUrl, nodeKind, connectModes, gatewayUrl, folders).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`))
+      heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, gatewayUrl, folders).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`))
     );
   }, DEFAULT_HEARTBEAT_MS);
 
@@ -135,7 +138,7 @@ export async function startExecutor() {
           status: 'ok',
           nodeId,
           publicUrl,
-          version: VERSION,
+          version,
           nodeKind,
           connectModes,
         });
@@ -277,6 +280,7 @@ async function renewTaskLease(
 async function heartbeatNode(
   nodeId: string,
   baseUrl: string,
+  version: string,
   nodeKind: ExecutorNodeKind,
   connectModes: ExecutorNodeConnectMode[],
   gatewayUrl?: string,
@@ -309,7 +313,7 @@ async function heartbeatNode(
     nodeId,
     baseUrl,
     hostLabel: hostname(),
-    version: VERSION,
+    version,
     nodeKind,
     connectModes,
     connectConfig: {
