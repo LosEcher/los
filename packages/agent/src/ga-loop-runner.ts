@@ -410,12 +410,11 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
     }
     case 'branch_cleanup': {
       const detached = summary.detached === true;
-      // Read staleOriginBranches, falling back to the legacy staleCandidateCount
-      // alias so older persisted summaries (written before this change) still count.
-      const staleRaw = summary.staleOriginBranches ?? summary.staleCandidateCount;
+      const staleRaw = summary.stalePrimaryBranches ?? summary.staleOriginBranches ?? summary.staleCandidateCount;
       const stale = typeof staleRaw === 'number' ? staleRaw : 0;
-      const drift = typeof summary.forgejoDrift === 'string' ? summary.forgejoDrift : 'none';
-      // 'unreachable' and 'disabled' are NOT findings — a forgejo outage or opt-out
+      const driftRaw = summary.mirrorDrift ?? summary.forgejoDrift;
+      const drift = typeof driftRaw === 'string' ? driftRaw : 'none';
+      // 'unreachable' and 'disabled' are NOT findings — a mirror outage or opt-out
       // must not trip the circuit breaker. 'syncable' is auto-fixable; 'non_ff' escalates.
       const driftFinding = drift === 'syncable' || drift === 'non_ff';
       return detached || stale > 0 || driftFinding;
