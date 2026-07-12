@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS feed_analysis_dispatches (
   sequence INTEGER NOT NULL DEFAULT 0, retention_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ,
-  UNIQUE (tenant_id, project_id, source_system, source_job_id)
+  UNIQUE (tenant_id, project_id, source_system, source_job_id), CHECK (delivery_mode IN ('delivery_only','result_returning')), CHECK (status IN ('accepted','queued','processing','result_ready','completed','failed','cancelled'))
 );
 CREATE INDEX IF NOT EXISTS idx_feed_analysis_dispatch_status ON feed_analysis_dispatches(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_feed_analysis_dispatch_run ON feed_analysis_dispatches(run_spec_id);
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS feed_analysis_callback_deliveries (
   next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(), lease_owner TEXT, lease_expires_at TIMESTAMPTZ,
   last_http_status INTEGER, last_error TEXT, delivered_at TIMESTAMPTZ, dead_lettered_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (event_id, profile_id)
+  UNIQUE (event_id, profile_id), CHECK (status IN ('pending', 'delivering', 'delivered', 'dead_letter'))
 );
 CREATE INDEX IF NOT EXISTS idx_feed_analysis_callback_due ON feed_analysis_callback_deliveries(next_attempt_at, created_at) WHERE status = 'pending';
 `;
