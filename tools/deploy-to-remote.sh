@@ -16,12 +16,15 @@
 #   deploy-to-remote.sh <node> logs                # Tail executor journal
 #   deploy-to-remote.sh <node> firewall            # Apply firewall rules
 #   deploy-to-remote.sh <node> cmd "..."           # Run arbitrary command
-#   deploy-to-remote.sh <node> deploy              # sync + install + restart (all-in-one)
+#   deploy-to-remote.sh <node> deploy              # sync + install + install/start service
 #
 # Environment:
 #   LOS_REMOTE_USER=root        # Remote SSH user
 #   LOS_REMOTE_HOME=/opt/los    # Remote los path
 #   LOS_LOW_RESOURCE=1          # Force low-resource mode
+#   LOS_SSH_TRANSPORT=ssh       # Use OpenSSH instead of Tailscale SSH
+#   LOS_SSH_TARGET=node-alias   # OpenSSH config alias or explicit target
+#   LOS_REMOTE_PRIVILEGE=sudo   # Elevate remote deployment commands
 set -euo pipefail
 
 NODE="${1:-}"
@@ -46,8 +49,8 @@ Shortcuts:
   logs                Tail executor journal
   firewall            Apply firewall rules
   cmd "<cmd>"         Run arbitrary command on remote
-  deploy              sync + install + install-service + restart (all-in-one)
-  full-setup          preflight + sync + install + install-service + restart + verify
+  deploy              sync + install + install/start service (all-in-one)
+  full-setup          preflight + sync + install + install/start service + verify
 
 Options:
   --low-resource      Use reduced concurrency for pnpm install (only with 'install')
@@ -60,10 +63,13 @@ fi
 # ── Config ──────────────────────────────────────────────────
 REMOTE_USER="${LOS_REMOTE_USER:-root}"
 REMOTE_HOME="${LOS_REMOTE_HOME:-/opt/los}"
+SSH_TRANSPORT="${LOS_SSH_TRANSPORT:-tailscale}"
+REMOTE_PRIVILEGE="${LOS_REMOTE_PRIVILEGE:-none}"
 LOCAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_BASE="${LOCAL_REPO}/.los-runtime/deploy-logs"
 mkdir -p "$LOG_BASE"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+BUILD_VERSION="${LOS_DEPLOY_VERSION:-$(bash "$LOCAL_REPO/tools/los.sh" build-version)}"
 
 # ── Detect Tailscale hostname ───────────────────────────────
 resolve_ts_host() {
@@ -80,26 +86,50 @@ resolve_ts_host() {
 }
 
 TS_HOST="$(resolve_ts_host "$NODE")"
-TS_SSH="tailscale ssh"
+SSH_TARGET="${LOS_SSH_TARGET:-$REMOTE_USER@$TS_HOST}"
 
 log()      { printf '[deploy:%s] %s\n' "$NODE" "$*" | tee -a "$1"; }
 log_info() { printf '[deploy:%s] %s\n' "$NODE" "$*"; }
 log_warn() { printf '[deploy:%s] WARN: %s\n' "$NODE" "$*"; }
 die()      { printf '[deploy:%s] FATAL: %s\n' "$NODE" "$*"; exit 1; }
 
+case "$SSH_TRANSPORT" in
+  tailscale|ssh) ;;
+  *) die "unsupported LOS_SSH_TRANSPORT '$SSH_TRANSPORT' (expected tailscale or ssh)" ;;
+esac
+
+case "$REMOTE_PRIVILEGE" in
+  none|sudo) ;;
+  *) die "unsupported LOS_REMOTE_PRIVILEGE '$REMOTE_PRIVILEGE' (expected none or sudo)" ;;
+esac
+
 # ── Remote exec helpers ─────────────────────────────────────
+remote_exec() {
+  local remote_command
+  printf -v remote_command '%q ' "$@"
+  if [ "$SSH_TRANSPORT" = "ssh" ]; then
+    ssh "$SSH_TARGET" "$remote_command"
+  else
+    tailscale ssh "$SSH_TARGET" -- "$remote_command"
+  fi
+}
+
 remote_sh() {
-  $TS_SSH "$REMOTE_USER@$TS_HOST" -- "$@"
+  if [ "$REMOTE_PRIVILEGE" = "sudo" ]; then
+    remote_exec sudo -- "$@"
+  else
+    remote_exec "$@"
+  fi
 }
 
 remote_su_sh() {
-  $TS_SSH "$REMOTE_USER@$TS_HOST" -- su - los -c "$*"
+  remote_sh su - los -c "$*"
 }
 
 check_conn() {
-  log_info "checking connectivity to $TS_HOST..."
-  if ! $TS_SSH "$REMOTE_USER@$TS_HOST" -- echo "ok" 2>/dev/null; then
-    die "cannot SSH to $TS_HOST as $REMOTE_USER. Check Tailscale SSH config."
+  log_info "checking $SSH_TRANSPORT connectivity to $SSH_TARGET..."
+  if ! remote_exec echo "ok" >/dev/null 2>&1; then
+    die "cannot connect to $SSH_TARGET with $SSH_TRANSPORT. Check SSH config and authentication."
   fi
   log_info "  connected"
 }
@@ -189,8 +219,9 @@ do_sync() {
   local log_file="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.log"
   log_info "syncing code to $TS_HOST via tar pipe (log: $log_file)"
 
-  # Build list of files to sync: tools, deploy, packages/executor/src,
-  # package.json, pnpm-lock.yaml, pnpm-workspace.yaml, tsconfig files.
+  # Ship every workspace package so frozen-lockfile validation sees the same
+  # manifests as the lockfile. Omitting runtime dependencies left stale source;
+  # omitting unrelated manifests also makes pnpm reject the workspace.
   local tmp_tar="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.tar.gz"
 
   # Create tar from local repo — only ship what the executor needs.
@@ -198,43 +229,55 @@ do_sync() {
     --exclude='node_modules' \
     --exclude='.git' \
     --exclude='.jj' \
+    --exclude='packages/*/.los' \
+    --exclude='packages/*/.los/*' \
     --exclude='.los-runtime' \
     --exclude='tmp' \
     --exclude='dist' \
     --exclude='.tsbuildinfo' \
-    --exclude='packages/gateway' \
-    --exclude='packages/infra' \
-    --exclude='packages/agent' \
-    --exclude='packages/memory' \
-    --exclude='packages/executor/dist' \
-    --exclude='packages/executor/node_modules' \
     tools/ \
     deploy/ \
-    packages/executor/src/ \
-    packages/executor/package.json \
-    packages/executor/tsconfig.json \
+    packages/ \
     contracts/ \
     package.json \
     pnpm-lock.yaml \
     pnpm-workspace.yaml \
-    tsconfig.json \
     tsconfig.base.json \
-    .npmrc \
-    2>/dev/null || true
+    turbo.json
 
   log_info "  tar: $(du -h "$tmp_tar" | cut -f1)"
 
   # Pipe tar to remote and extract
-  cat "$tmp_tar" | $TS_SSH "$REMOTE_USER@$TS_HOST" -- \
-    "mkdir -p $REMOTE_HOME && cd $REMOTE_HOME && tar xzf - && chown -R los:los ." \
+  cat "$tmp_tar" | remote_sh sh -c \
+    "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && chown -R los:los ." \
     >> "$log_file" 2>&1
 
   log_info "  extracted to $REMOTE_HOME"
 
+  remote_sh bash -s "$REMOTE_HOME" "$BUILD_VERSION" <<'STAMP_VERSION' >> "$log_file" 2>&1
+set -euo pipefail
+los_home="$1"
+build_version="$2"
+env_file="$los_home/.env"
+if [ ! -f "$env_file" ]; then
+  echo "WARN: $env_file missing; version stamp deferred until node configuration exists"
+  exit 0
+fi
+for key in LOS_VERSION EXECUTOR_VERSION; do
+  if grep -q "^${key}=" "$env_file"; then
+    sed -i "s|^${key}=.*|${key}=${build_version}|" "$env_file"
+  else
+    printf '%s=%s\n' "$key" "$build_version" >> "$env_file"
+  fi
+done
+echo "version=$build_version"
+STAMP_VERSION
+  log_info "  version: $BUILD_VERSION"
+
   # Sync systemd unit to /etc
-  if $TS_SSH "$REMOTE_USER@$TS_HOST" -- test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
-    $TS_SSH "$REMOTE_USER@$TS_HOST" -- \
-      "cp $REMOTE_HOME/deploy/systemd/los-executor.service /etc/systemd/system/los-executor.service && chmod 644 /etc/systemd/system/los-executor.service" \
+  if remote_sh test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
+    remote_sh sh -c \
+      "cp '$REMOTE_HOME/deploy/systemd/los-executor.service' /etc/systemd/system/los-executor.service && chmod 644 /etc/systemd/system/los-executor.service" \
       >> "$log_file" 2>&1 || log_warn "could not copy systemd unit (may need root)"
   fi
 
@@ -259,8 +302,8 @@ do_install() {
   log_info "installing deps on $TS_HOST (low_resource=$low_resource, log: $log_file)"
 
   if $low_resource; then
-    # Low-resource: use --no-optional, single concurrency, and swap-aware timing
-    remote_su_sh "cd $REMOTE_HOME && NODE_OPTIONS='--max-old-space-size=128' pnpm install --frozen-lockfile --no-optional --workspace-concurrency=1" \
+    # Keep platform optional dependencies: tsx needs esbuild's native binary.
+    remote_su_sh "cd $REMOTE_HOME && CI=true NODE_OPTIONS='--max-old-space-size=128' pnpm install --frozen-lockfile --network-concurrency=1 --child-concurrency=1" \
       >> "$log_file" 2>&1 || {
       log_warn "pnpm install failed — see $log_file"
       log_warn "Diagnose: $0 $NODE cmd 'journalctl -u los-executor -n 20'"
@@ -268,7 +311,7 @@ do_install() {
       return 1
     }
   else
-    remote_su_sh "cd $REMOTE_HOME && pnpm install --frozen-lockfile" \
+    remote_su_sh "cd $REMOTE_HOME && CI=true pnpm install --frozen-lockfile" \
       >> "$log_file" 2>&1 || {
       log_warn "pnpm install failed — see $log_file"
       log_warn "Try low-resource mode: $0 $NODE install --low-resource"
@@ -299,6 +342,7 @@ cp "$UNIT_SRC" "$UNIT_DST"
 chmod 644 "$UNIT_DST"
 systemctl daemon-reload
 systemctl enable los-executor
+install -d -o los -g los "$LOS_HOME/.los-runtime" "$LOS_HOME/tmp"
 echo "service installed and enabled"
 
 # Don't start non-LOS containers. If executor was already running, restart it.
@@ -332,9 +376,14 @@ do_restart() {
 
 # ── Verify ──────────────────────────────────────────────────
 do_verify() {
-  local port="${EXECUTOR_PORT:-8090}"
+  local port="${EXECUTOR_PORT:-}"
   local log_file="$LOG_BASE/${NODE}-verify-${TIMESTAMP}.log"
   log_info "verifying executor on $TS_HOST (log: $log_file)"
+
+  if [ -z "$port" ]; then
+    port=$(remote_sh awk -F= '/^EXECUTOR_PORT=/{print $2; exit}' "$REMOTE_HOME/.env" 2>/dev/null || true)
+  fi
+  port="${port:-8090}"
 
   # 1. Service status
   printf '=== systemd status ===\n' >> "$log_file"
@@ -348,15 +397,25 @@ do_verify() {
 
   # 2. Health endpoint
   printf '\n=== health ===\n' >> "$log_file"
-  local health
-  health=$(remote_sh curl -sf "http://127.0.0.1:$port/health" 2>/dev/null || true)
+  local health=""
+  local attempt
+  for attempt in $(seq 1 30); do
+    health=$(remote_sh curl -sf "http://127.0.0.1:$port/health" 2>/dev/null || true)
+    [ -n "$health" ] && break
+    sleep 1
+  done
   if [ -z "$health" ]; then
-    log_warn "  health endpoint not responding on port $port"
+    log_warn "  health endpoint not responding on port $port after 30 seconds"
     log_warn "Diagnose: $0 $NODE logs"
     return 1
   fi
   printf '%s\n' "$health" >> "$log_file"
   log_info "  health: ok"
+  if ! printf '%s' "$health" | grep -Fq "\"version\":\"$BUILD_VERSION\""; then
+    log_warn "  version mismatch: expected $BUILD_VERSION"
+    return 1
+  fi
+  log_info "  version: $BUILD_VERSION"
 
   # 3. Port listening
   printf '\n=== port listener ===\n' >> "$log_file"
@@ -407,18 +466,17 @@ do_firewall() {
 # ── Arbitrary command ───────────────────────────────────────
 do_cmd() {
   log_info "running on $TS_HOST: ${CMD_ARGS[*]}"
-  remote_sh "${CMD_ARGS[@]}"
+  remote_sh sh -c "${CMD_ARGS[*]}"
 }
 
 # ── Composite: deploy (all-in-one legacy compat) ────────────
 do_deploy() {
-  do_sync && do_install && do_install_service && do_restart
+  do_sync && do_install && do_install_service
 }
 
 # ── Composite: full-setup ───────────────────────────────────
 do_full_setup() {
-  do_preflight || true   # preflight warns but doesn't block full-setup
-  do_sync && do_install && do_install_service && do_restart && do_verify
+  do_preflight && do_sync && do_install && do_install_service && do_verify
 }
 
 # ── Main dispatch ───────────────────────────────────────────

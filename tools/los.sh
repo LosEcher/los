@@ -19,7 +19,36 @@ _load_dotenv() {
     set +a
   fi
 }
+
+resolve_local_runtime_version() {
+  local base revision
+  base="$(node -p "require('$ROOT/packages/executor/package.json').version" 2>/dev/null || printf '0.1.0')"
+  revision="$(
+    cd "$ROOT"
+    {
+      find tools deploy packages contracts \
+        -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los \) -prune -o \
+        -type f ! -name '*.tsbuildinfo' -print
+      printf '%s\n' package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json
+    } | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-12
+  )"
+  if [ -n "$revision" ]; then
+    printf '%s+b%s' "$base" "$revision"
+  else
+    printf '%s' "$base"
+  fi
+}
+
+if [ "${1:-}" = "build-version" ]; then
+  resolve_local_runtime_version
+  printf '\n'
+  exit 0
+fi
+
 _load_dotenv
+
+export LOS_VERSION="${LOS_VERSION:-$(resolve_local_runtime_version)}"
+export EXECUTOR_VERSION="${EXECUTOR_VERSION:-$LOS_VERSION}"
 
 # ── Proxy env export helper (launchctl drops parent env) ─
 _dotenv_proxy_exports() {
@@ -46,9 +75,10 @@ gw_launch_command() {
   local node tsx
   node="$(node_bin)"
   tsx="$(tsx_dist gateway)"
-  printf 'cd %s && %s export SERVER_PORT=%s SERVER_HOST=%s && exec %s --require %s --import %s %s' \
+  printf 'cd %s && %s export LOS_VERSION=%s SERVER_PORT=%s SERVER_HOST=%s && exec %s --require %s --import %s %s' \
     "$(shell_quote "$ROOT")" \
     "$(_dotenv_proxy_exports)" \
+    "$(shell_quote "$LOS_VERSION")" \
     "$(gw_port)" \
     "$(gw_host)" \
     "$(shell_quote "$node")" \
@@ -94,9 +124,11 @@ ex_launch_command() {
   local node tsx
   node="$(node_bin)"
   tsx="$(tsx_dist executor)"
-  printf 'cd %s && %s export EXECUTOR_HOST=%s && export EXECUTOR_PORT=%s && exec %s %s %s' \
+  printf 'cd %s && %s export LOS_VERSION=%s EXECUTOR_VERSION=%s EXECUTOR_HOST=%s EXECUTOR_PORT=%s && exec %s %s %s' \
     "$(shell_quote "$ROOT")" \
     "$(_dotenv_proxy_exports)" \
+    "$(shell_quote "$LOS_VERSION")" \
+    "$(shell_quote "$EXECUTOR_VERSION")" \
     "$(shell_quote "$(ex_host)")" \
     "$(shell_quote "$(ex_port)")" \
     "$(shell_quote "$node")" \
@@ -327,6 +359,7 @@ executor_status() {
 
 unified_status() {
   echo "los status"
+  echo "  version: $LOS_VERSION"
   if is_executor_enabled; then
     echo "  executor: enabled=true"
   else
@@ -469,6 +502,7 @@ show_help() {
 los process helper
 
 Unified commands:
+  build-version Print the deterministic deployable-content version
   start         Start executor (if EXECUTOR_ENABLED=true), then gateway
   stop          Stop gateway first, then executor
   restart       Stop both, then start both
@@ -499,6 +533,7 @@ EOF
 case "${1:-help}" in
   # Unified
   help|-h|--help)     show_help ;;
+  build-version)      resolve_local_runtime_version; printf '\n' ;;
   status)             unified_status ;;
   start)              unified_start ;;
   stop)               unified_stop ;;

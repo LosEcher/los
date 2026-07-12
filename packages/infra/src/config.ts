@@ -37,13 +37,12 @@ function isLikelyTestProcess(): boolean {
 // ── Schema ──────────────────────────────────────────────
 
 export const ConfigSchema = z.object({
-  // Database
   databaseUrl: z.string()
     .refine(v => v.startsWith('postgres://') || v.startsWith('postgresql://'), 'DATABASE_URL must use postgres:// or postgresql://')
     .default('postgres://localhost:5432/los'),
 
-  // Server
   server: z.object({
+    version: z.string().trim().min(1).optional(),
     port: z.coerce.number().default(8080),
     host: z.string().default('127.0.0.1'),
     corsOrigin: z.union([z.string(), z.array(z.string())]).default('http://localhost:5173'),
@@ -61,7 +60,6 @@ export const ConfigSchema = z.object({
     ]),
   }),
 
-  // Auth
   auth: z.object({
     enabled: z.coerce.boolean().default(false),
     token: z.string().optional(),
@@ -79,7 +77,6 @@ export const ConfigSchema = z.object({
         timeoutMs: z.coerce.number().int().positive().default(10_000), maxAttempts: z.coerce.number().int().positive().max(20).default(8) })).default({}),
     }).default({}) }).default({}),
 
-  // Agent
   agent: z.object({
     defaultProvider: z.string().default('deepseek'),
     defaultModel: z.string().default('deepseek-v4-flash'),
@@ -175,6 +172,7 @@ export const ConfigSchema = z.object({
   // Executor
   executor: z.object({
     enabled: z.coerce.boolean().default(false),
+    version: z.string().trim().min(1).optional(),
     agentKey: z.string().optional(),
     nodeId: z.string().optional(),
     nodeUrl: z.string().optional(),
@@ -204,6 +202,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 // ── Discovery ───────────────────────────────────────────
 
 const ENV_MAP: [string, string][] = [
+  ['LOS_VERSION', 'server.version'],
   ['DATABASE_URL', 'databaseUrl'],
   ['SERVER_PORT', 'server.port'],
   ['SERVER_HOST', 'server.host'],
@@ -232,6 +231,7 @@ const ENV_MAP: [string, string][] = [
   ['LOS_CODE_GRAPH_INJECT_ARCH', 'memory.codeGraph.injectArchitecture'],
   ['LOS_CBM_COMMAND', 'memory.codeGraph.cbmCommand'],
   ['EXECUTOR_ENABLED', 'executor.enabled'],
+  ['EXECUTOR_VERSION', 'executor.version'],
   ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'],
   ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],

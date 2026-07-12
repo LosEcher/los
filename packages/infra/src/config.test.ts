@@ -62,3 +62,18 @@ test('feed-analysis integration config has bounded defaults and validates callba
   assert.equal(config.integrations.feedAnalysis.callbackProfiles.lot2?.maxAttempts, 8);
   assert.deepEqual(config.integrations.feedAnalysis.materialHosts, ['materials.example.com']);
 });
+
+test('runtime versions default to the release and allow executor-specific builds', () => {
+  const defaultConfig = ConfigSchema.parse({
+    server: {}, agent: {}, memory: {}, executor: {}, auth: {}, providers: {},
+  });
+  const versionedConfig = ConfigSchema.parse({
+    server: { version: '0.1.0+b123456789abc' },
+    agent: {}, memory: {}, executor: { version: '0.1.0+boracle123456' }, auth: {}, providers: {},
+  });
+
+  assert.equal(defaultConfig.server.version, undefined);
+  assert.equal(defaultConfig.executor.version, undefined);
+  assert.equal(versionedConfig.server.version, '0.1.0+b123456789abc');
+  assert.equal(versionedConfig.executor.version, '0.1.0+boracle123456');
+});

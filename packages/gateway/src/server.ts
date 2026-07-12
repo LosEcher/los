@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import gatewayPackage from '../package.json' with { type: 'json' };
 import { getConfig, setConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb, getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
@@ -70,7 +71,6 @@ import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo
 import { getDefaultProjectId, getProject } from './project-store.js';
 
 const log = getLogger('gateway');
-const VERSION = '0.1.0';
 const SERVICE_HEARTBEAT_MS = 10_000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function resolveDefaultWorkspaceRoot(): string {
@@ -549,7 +549,7 @@ async function heartbeatGatewayService(service: GatewayServiceIdentity): Promise
     hostLabel: service.hostLabel,
     bindUrl: service.bindUrl,
     publicUrl: service.publicUrl,
-    version: VERSION,
+    version: getConfig().server.version ?? gatewayPackage.version,
     role: 'active',
     capabilities: { chat_api: true, web_ui: true, artifact_proxy: true, node_registry: true, service_registry: true },
     health: { db_ok: true, schema_ok: true },

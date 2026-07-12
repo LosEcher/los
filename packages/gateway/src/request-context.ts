@@ -8,6 +8,7 @@ const log = getLogger('request-context');
 const LOCAL_OPERATOR_SUBJECT = 'operator:local';
 const SHARED_OPERATOR_SUBJECT = 'operator:shared-token';
 const SHARED_ACCESS_SUBJECT = 'authenticated:shared-token';
+const CONTEXT_OPTIONAL_INFRA_PATHS = new Set(['/health', '/live', '/ready', '/nodes/heartbeat']);
 
 export interface RequestContext {
   requestId: string;
@@ -48,7 +49,7 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
       const projectId = normalizeHeader(req.headers['x-project-id']);
       const userId = normalizeHeader(req.headers['x-user-id']);
 
-      if (!tenantId || !userId) {
+      if ((!tenantId || !userId) && _requiresActorContext(req.url)) {
         log.warn(`Request missing tenant/user context: tenant=${tenantId ?? '<none>'}, user=${userId ?? '<none>'} (auth enabled, headers required)`);
       }
 
@@ -91,6 +92,12 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
       reply.header('x-user-id', userId);
     }
   });
+}
+
+export function _requiresActorContext(url: string | undefined): boolean {
+  if (!url) return true;
+  const path = url.split('?')[0] || url;
+  return !CONTEXT_OPTIONAL_INFRA_PATHS.has(path);
 }
 
 export function getRequestContext(req: FastifyRequest): RequestContext {
