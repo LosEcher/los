@@ -1,0 +1,47 @@
+name: Audit
+
+on:
+  schedule:
+    - cron: '47 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git init .
+          git remote add origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "$FORGEJO_SHA"
+          git checkout --detach FETCH_HEAD
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+
+      - name: Prepare pnpm
+        run: |
+          set -euo pipefail
+          node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
+          corepack enable
+          corepack prepare pnpm@9.0.0 --activate
+          pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit
+        run: |
+          AUDIT_OUTPUT=$(pnpm audit --json 2>/dev/null || true)
+          CRIT_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c '"severity":"critical"' || true)
+          HIGH_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c '"severity":"high"' || true)
+          if [ "$CRIT_COUNT" -gt 0 ]; then
+            echo "$CRIT_COUNT critical vulnerability(s) found"
+            exit 1
+          fi
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "$HIGH_COUNT high severity vulnerability(s) found"
+          fi
+          echo "audit passed"

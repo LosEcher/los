@@ -1,7 +1,7 @@
 /**
  * Branch-cleanup todo creation — extracted from governance-sweeper.ts to keep
  * that file under the 400-line CI gate. Surfaces non-auto-fixable branch-hygiene
- * findings (non-ff forgejo drift, detached HEAD on a dirty tree, unreachable
+ * findings (non-ff mirror drift, detached HEAD on a dirty tree, unreachable
  * mirror) as operator-visible todos.
  *
  * Note: `unreachable` is surfaced here as a P2 awareness todo even though it is
@@ -18,7 +18,12 @@ export async function createBranchCleanupTodos(
   summary: Record<string, unknown>,
 ): Promise<number> {
   let created = 0;
-  const drift = typeof summary.forgejoDrift === 'string' ? summary.forgejoDrift : 'none';
+  const driftRaw = summary.mirrorDrift ?? summary.forgejoDrift;
+  const drift = typeof driftRaw === 'string' ? driftRaw : 'none';
+  const primaryRemote = typeof summary.primaryRemote === 'string' ? summary.primaryRemote : 'origin';
+  const mirrorRemote = typeof summary.mirrorRemote === 'string' ? summary.mirrorRemote : 'forgejo';
+  const mirrorAhead = summary.mirrorAhead ?? summary.forgejoAhead;
+  const mirrorBehind = summary.mirrorBehind ?? summary.forgejoBehind;
   const detached = summary.detached === true;
   const dirty = summary.workingTreeDirty === true;
 
@@ -37,13 +42,13 @@ export async function createBranchCleanupTodos(
     created += 1;
   };
 
-  // Non-ff forgejo drift → P1: needs human decision (rebase forgejo onto origin, or reset).
+  // Non-ff mirror drift → P1: needs human decision.
   if (drift === 'non_ff') {
     await make({
-      title: 'Governance: forgejo/main diverged from origin/main (non-fast-forward)',
-      description: `Branch cleanup: forgejo/main is ahead by ${summary.forgejoAhead ?? '?'} and behind by ${summary.forgejoBehind ?? '?'} — not fast-forwardable. Manual sync required (rebase forgejo onto origin, or reset forgejo main). Review at ${job.id}.`,
+      title: `Governance: ${mirrorRemote}/main diverged from ${primaryRemote}/main (non-fast-forward)`,
+      description: `Branch cleanup: ${mirrorRemote}/main is ahead by ${mirrorAhead ?? '?'} and behind by ${mirrorBehind ?? '?'} — not fast-forwardable. Manual mirror reconciliation is required. Review at ${job.id}.`,
       priority: 'P1',
-      auditType: 'forgejoNonFf',
+      auditType: 'mirrorNonFf',
     });
   }
 
@@ -57,13 +62,13 @@ export async function createBranchCleanupTodos(
     });
   }
 
-  // Forgejo unreachable → P2 informational so the operator notices the mirror is down.
+  // Mirror unreachable → P2 informational so the operator notices it is down.
   if (drift === 'unreachable') {
     await make({
-      title: 'Governance: forgejo mirror unreachable — branch sync skipped',
-      description: `Branch cleanup: could not reach forgejo remote (network/credentials). Forgejo sync was skipped this round; origin-side cleanup still ran. Check LAN connectivity and forgejo credentials. Review at ${job.id}.`,
+      title: `Governance: ${mirrorRemote} mirror unreachable — branch sync skipped`,
+      description: `Branch cleanup: could not reach ${mirrorRemote} (network/credentials). Mirror sync was skipped; ${primaryRemote}-side cleanup still ran. Review at ${job.id}.`,
       priority: 'P2',
-      auditType: 'forgejoUnreachable',
+      auditType: 'mirrorUnreachable',
     });
   }
 

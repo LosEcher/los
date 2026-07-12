@@ -176,7 +176,7 @@ Steps:
 
 1. **Inventory**
    - `jj status` (working copy = change; no staging)
-   - `jj bookmark list` / open PRs (`gh pr list --head <bookmark>`)
+   - `jj bookmark list` / open Forgejo PRs (web/API; use `tea` when configured)
    - `git worktree list` / `jj workspace list` — unexpected extras?
    - One-intent check: does the dirty set match a single `feat|fix|chore|docs`?
 2. **Decide (explicit judgment — answer yes/no for each)**
@@ -189,11 +189,11 @@ Steps:
 3. **Act only within consent bounds**
    - Push/PR/merge/delete-remote require operator intent or standing closeout ask
    - Prefer `jj describe` / `jj commit` / `jj git push --bookmark …`
-   - After merge: fetch, ff `main`, drop feature bookmark; forgejo mirror best-effort
+   - After merge: fetch Forgejo `origin`, ff `main`, drop feature bookmark; GitHub mirror is optional
    - Branch delete rules: `docs/governance/branch-lifecycle.md` (absorption /
      observation window; squash-merge caveats)
 4. **Evidence before “shipped”**
-   - PR MERGED + head on `origin/main`, or focused test/API row — not chat summary
+   - Forgejo PR MERGED + head on `origin/main`, or focused test/API row — not chat summary
    - Smoke ops notes must mark `[E]`/`[I]`/`[U]`; never treat agent ledger prose as DB truth
 
 Evidence to report:
