@@ -105,3 +105,85 @@ test('provider promotion decisions record proposed required-gate policy changes'
     await closeDb().catch(() => undefined);
   }
 });
+
+test('provider promotion decisions enforce the evidence decision matrix', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const provider = `provider-matrix-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const decisions = ['advisory', 'required', 'blocked'] as const;
+  try {
+    await ensureProviderPromotionDecisionStore();
+    for (const decision of decisions) {
+      await recordProviderCompatEvidence({
+        id: `${provider}-${decision}`,
+        provider,
+        model: `model-${decision}`,
+        probeId: 'read-context',
+        targetLabel: `${provider}:model-${decision}`,
+        decision,
+        passed: true,
+        sessionId: `session-${decision}`,
+        taskRunId: `task-${decision}`,
+      });
+    }
+    await recordProviderCompatEvidence({
+      id: `${provider}-verified-advisory-failed`,
+      provider,
+      model: 'model-verified-advisory-failed',
+      probeId: 'read-context',
+      targetLabel: `${provider}:model-verified-advisory-failed`,
+      decision: 'verified_advisory',
+      passed: false,
+      sessionId: 'session-verified-advisory-failed',
+      taskRunId: 'task-verified-advisory-failed',
+    });
+
+    await assert.rejects(
+      () => recordProviderPromotionDecision({
+        action: 'promote_required',
+        evidenceId: `${provider}-advisory`,
+        reason: 'advisory evidence is not verified',
+      }),
+      /not verified advisory/,
+    );
+
+    const reaffirmed = await recordProviderPromotionDecision({
+      id: `${provider}-reaffirm-required`,
+      action: 'promote_required',
+      evidenceId: `${provider}-required`,
+      reason: 'refresh required target evidence without automatic enforcement',
+    });
+    assert.equal(reaffirmed.status, 'proposed');
+    assert.equal(reaffirmed.fromDecision, 'required');
+    assert.equal(reaffirmed.toDecision, 'required');
+
+    await assert.rejects(
+      () => recordProviderPromotionDecision({
+        action: 'promote_required',
+        evidenceId: `${provider}-verified-advisory-failed`,
+        reason: 'failed verified advisory evidence cannot promote',
+      }),
+      /did not pass/,
+    );
+
+    await assert.rejects(
+      () => recordProviderPromotionDecision({
+        action: 'promote_required',
+        evidenceId: `${provider}-blocked`,
+        reason: 'blocked evidence cannot promote',
+      }),
+      /not verified advisory/,
+    );
+    await assert.rejects(
+      () => recordProviderPromotionDecision({
+        action: 'promote_required',
+        reason: 'promotion without evidence is forbidden',
+      }),
+      /requires evidenceId/,
+    );
+  } finally {
+    await getDb().query('DELETE FROM provider_promotion_decisions WHERE provider = $1', [provider]).catch(() => undefined);
+    await getDb().query('DELETE FROM provider_compat_evidence WHERE provider = $1', [provider]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});

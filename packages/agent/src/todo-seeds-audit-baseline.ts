@@ -224,13 +224,24 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       'ADR 0017 定义了 3 种 target state 但未定义 automated promotion 条件。\n' +
       '需要：补充判定矩阵 + 为 recordProviderPromotionDecision 添加单元测试。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-provider-promotion-docs',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/provider-promotion-decisions.ts', 'docs/adr/0017-advisory-provider-promotion-playbook.md'] },
+    metadata: {
+      files: [
+        'packages/agent/src/provider-promotion-decisions.ts',
+        'packages/agent/src/provider-promotion-decisions.test.ts',
+        'docs/adr/0017-advisory-provider-promotion-playbook.md',
+      ],
+      resolution: 'ADR 0017 now defines the advisory, verified_advisory, required, and blocked evidence decision matrix.',
+      consentBoundary: 'This task records proposals only; it does not enforce a provider promotion or change required compatibility targets.',
+      validation: 'pnpm --filter @los/agent exec node --import tsx --test src/provider-promotion-decisions.test.ts',
+      evidence: ['all evidence decision states covered', 'proposed and enforced policy states remain separate'],
+      statusUpdatedAt: '2026-07-15',
+    },
   },
 
   {
