@@ -404,6 +404,22 @@ test('executor node classification rejects stale heartbeat executors', () => {
   assert.ok(stale.blockers.includes('heartbeat:stale'));
 });
 
+test('executor node classification rejects wildcard routing URLs', () => {
+  const execution = evaluateExecutorNode(testExecutorNode({
+    baseUrl: 'http://0.0.0.0:8091',
+    connectModes: ['agent_http', 'agent_http_ndjson'],
+    connectConfig: {
+      agent_http: { baseUrl: 'http://0.0.0.0:8091' },
+    },
+    verified: {
+      agent_http_ndjson: { ok: true, checked_at: new Date().toISOString() },
+    },
+  }));
+
+  assert.equal(execution.candidate, false);
+  assert.ok(execution.blockers.includes('connect_url:wildcard_host'));
+});
+
 test('executor node classification blocks critical memory pressure', () => {
   const execution = evaluateExecutorNode(testExecutorNode({
     capacity: { memoryTotalMb: 1000, memoryAvailableMb: 40 },

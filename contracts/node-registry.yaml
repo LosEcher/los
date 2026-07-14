@@ -1,5 +1,5 @@
 contract: los.node-registry
-version: 0.1.0
+version: 0.1.1
 status: draft
 owner: packages/agent
 description: >
@@ -163,6 +163,7 @@ executionCandidate:
   blockers:
     - heartbeat:stale
     - connect_mode:missing_agent_http
+    - connect_url:wildcard_host
     - capability:run_agent_missing
     - capability:heavy_task_safe_false
     - resource:memory_pressure
