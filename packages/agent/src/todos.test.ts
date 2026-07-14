@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
-import { createTodo, listTodos, loadTodo, updateTodo } from './todos.js';
+import { createTodo, listTodos, loadTodo, seedLosPlanningTodos, updateTodo } from './todos.js';
 
 test('todos persist run contract metadata without dropping existing metadata', async () => {
   const config = await loadConfig();
@@ -115,5 +118,49 @@ test('todos can be filtered by runtime linkage fields', async () => {
     await getDb().query('DELETE FROM todo_dependencies WHERE todo_id = ANY($1::text[]) OR depends_on_todo_id = ANY($1::text[])', [[linkedId, otherId]]).catch(() => undefined);
     await getDb().query('DELETE FROM todos WHERE id = ANY($1::text[])', [[linkedId, otherId]]).catch(() => undefined);
     await closeDb().catch(() => undefined);
+  }
+});
+
+test('default seeding preserves an existing manually reconciled todo', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const workspaceRoot = mkdtempSync(resolve(tmpdir(), 'los-todo-seed-'));
+  const seedDir = resolve(workspaceRoot, '.los/todos');
+  const id = `todo-seed-preserve-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  mkdirSync(seedDir, { recursive: true });
+  writeFileSync(resolve(seedDir, 'seed.json'), JSON.stringify([{
+    id,
+    title: 'seed preservation test',
+    status: 'backlog',
+    priority: 'P2',
+    metadata: { sourceRevision: 1 },
+  }]));
+
+  try {
+    await seedLosPlanningTodos({ workspaceRoot });
+    await updateTodo(id, {
+      status: 'done',
+      priority: 'P1',
+      metadata: { manuallyReconciled: true },
+    });
+    writeFileSync(resolve(seedDir, 'seed.json'), JSON.stringify([{
+      id,
+      title: 'changed seed must not overwrite',
+      status: 'ready',
+      priority: 'P0',
+      metadata: { sourceRevision: 2 },
+    }]));
+
+    await seedLosPlanningTodos({ workspaceRoot });
+    const preserved = await loadTodo(id);
+    assert.equal(preserved?.title, 'seed preservation test');
+    assert.equal(preserved?.status, 'done');
+    assert.equal(preserved?.priority, 'P1');
+    assert.deepEqual(preserved?.metadata, { manuallyReconciled: true });
+  } finally {
+    await getDb().query('DELETE FROM todo_dependencies WHERE todo_id = $1 OR depends_on_todo_id = $1', [id]).catch(() => undefined);
+    await getDb().query('DELETE FROM todos WHERE id = $1', [id]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });

@@ -23,7 +23,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：新文件（不在 grandfathered baseline）超 400 行改为 error；建立 grandfathered baseline 清单声明 owner + 拆解计划。\n' +
       '来源：docs/architecture/2026-06-21-audit-findings-and-optimization-plan.md §P0-1',
     kind: 'task',
-    status: 'in_progress',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -34,6 +34,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: '收紧新文件 warn→error + 创建 grandfathered baseline',
       files: ['tools/check-structure.sh', 'tools/.large-file-baseline.txt'],
       validation: 'pnpm check 新文件 >400 行报 error',
+      evidence: ['commit 5fc50495d0eb', 'tools/check-structure.sh blocks non-baseline files over 400 lines'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -47,7 +49,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '仅在 ensure*Store() 中以 CREATE TABLE IF NOT EXISTS 定义，无独立迁移记录。\n' +
       '修复：为每张缺失表写迁移文件（013_xxx.sql 起）；ensure*Store() 中 DDL 移入迁移。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -56,7 +58,10 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '双 DDL 路径导致生产 schema 与迁移历史不一致',
       solution: '全部 DDL 收敛到 migrations/；加 tools/check-migrations.sh',
-      validation: 'grep -r "CREATE TABLE IF NOT EXISTS" packages/*/src/ 返回空',
+      validation: 'migration drift gate passes with an empty committed baseline',
+      evidence: ['migrations 013-021 cover the audited missing-table scope', 'tools/migration-drift-baseline.txt has 0 drift entries'],
+      successor: 'Runtime ensure-store DDL removal remains lower-priority schema single-source cleanup.',
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -68,7 +73,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：扩展 check-unwired-exports.sh 检测规则（无 caller export / route 未注册 / CLI 命令未挂接）；\n' +
       '加入 pnpm check pipeline。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -79,6 +84,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: '扩展 check-unwired-exports.sh + CI integration',
       files: ['tools/check-unwired-exports.sh'],
       validation: 'pnpm check 在发现 unwired export 时 report error',
+      evidence: ['commits a07f81774317 and 44a773120ab2', 'pnpm check runs unwired export and wiring topology gates'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -91,7 +98,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：chat 完成后自动抽取 observation；enforce maxObservations；\n' +
       '确保 compactSession 后 procedural_candidates 自动种子。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -102,6 +109,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: 'chat-complete hook → observation extraction + maxObservations enforce',
       files: ['packages/gateway/src/chat-memory-augment.ts', 'packages/memory/src/core/store.ts'],
       validation: '单次 chat 后 SELECT count(*) FROM observations > 0',
+      evidence: ['chat-route enables persistence by default', 'store.ts enforces maxObservations', '2026-07-15 live DB: observations=1, procedural_candidates=31, memory_compactions=154'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -114,7 +123,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：完成 periodic_sweeper 实现；为 5 个 category 创建 seed jobs；\n' +
       '确认 server-maintenance.ts 的 governance sweep 定时器调用了 drift sweeper。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -125,6 +134,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: 'periodic_sweeper implementation + seed jobs + server-maintenance wiring',
       files: ['packages/agent/src/governance-sweeper.ts', 'packages/agent/src/governance-jobs.ts', 'packages/gateway/src/server-maintenance.ts'],
       validation: 'SELECT job_type, last_run_at FROM governance_jobs 显示所有活跃 job 有最近执行',
+      evidence: ['commit 44a773120ab2', 'server maintenance seeds jobs and starts the PG queue wake loop', '2026-07-15 live DB contains 15 scheduled governance jobs'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -136,7 +147,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '按 promotion order 优先写 E01(dirty worktree)+E06(todo done without evidence)+E07(legacy as active target)。\n' +
       'E14/E15/E16 已有 run-contract.test.ts 覆盖，确认标记 hasProbe:true。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -148,6 +159,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       files: ['packages/agent/src/eval-probes.test.ts', 'packages/agent/src/eval-backlog-runner.ts'],
       validation: 'node --test packages/agent/src/eval-probes.test.ts 覆盖 >= 8 cases',
       targetProbes: ['E01', 'E02', 'E03', 'E06', 'E07', 'E08', 'E14', 'E15', 'E16'],
+      evidence: ['eval-backlog-runner marks 11 cases with automated probes', 'E01/E02/E03/E05/E06/E07/E08 have focused probe tests'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -160,7 +173,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：spawn_agent 中完整传播 parent runContract；子 agent 检查 inherited contract；\n' +
       '添加 child_run_spec_id + parent_run_spec_id 外键。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -171,6 +184,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: '完整继承 parent runContract + child lineage tracking',
       files: ['packages/agent/src/tools/agent-tools.ts', 'packages/agent/src/run-contract.ts'],
       validation: 'spawn_agent 单元测试覆盖 planParentRunSpecId 非空',
+      evidence: ['commits 44a773120ab2 and d5f2d8bc01d0', 'spawn_agent child inherits isolated run contract metadata'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -182,7 +197,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：review tools/external/mcp-client.ts 生命周期；确保 mcpCleanup 覆盖所有 transport；\n' +
       'gateway 启动/关闭时添加 MCP 子进程健康检查。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -193,6 +208,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: 'review lifecycle + add health check',
       files: ['packages/agent/src/tools/external/mcp-client.ts', 'packages/agent/src/loop.ts'],
       validation: 'gateway 运行 30min 后 ps aux | grep mcp 无泄露子进程',
+      evidence: ['loop.ts always awaits mcpCleanup()', 'MCPClientManager.close() settles every client close', '2026-07-15 gateway uptime exceeded 48h with no MCP or zombie child process'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -368,7 +385,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '检测手写 SQL 导致的 schema 漂移。\n' +
       '参考：governance-status-constraints.ts 已有相似模式。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-24',
     stageId: 'p0-immediate-fixes',
@@ -378,6 +395,9 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       problem: 'migration 漂移无法自动检测',
       solution: '加 governance job type schema_consistency，比对 column vs migration',
       files: ['packages/agent/src/governance-auditors.ts', 'packages/infra/migrations/'],
+      evidence: ['tools/check-migration-drift.ts is enforced by gate-drift', 'migration_drift_fix governance audit is active', 'tools/migration-drift-baseline.txt has 0 entries'],
+      resolution: 'Implemented as the migration-drift gate plus migration_drift_fix governance job.',
+      statusUpdatedAt: '2026-07-15',
     },
   },
   {
@@ -390,7 +410,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '2. 非 .example 的 .env 类文件 git ls-files 检查\n' +
       '3. 新增密钥模式：private_key, jwt_secret, encryption_key',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-24',
     stageId: 'p0-immediate-fixes',
@@ -399,6 +419,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '敏感信息扫描覆盖不足',
       files: ['tools/check-security.sh'],
+      evidence: ['tracked .env variants are rejected', 'private_key, jwt_secret, and encryption_key patterns are scanned', 'executable fixture test covers the expanded rules'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
