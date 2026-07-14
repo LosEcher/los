@@ -238,13 +238,25 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-2 Tool-call recovery 完整矩阵测试（5 actions × 4 entities）',
     description: 'tool-call-recovery.ts 处理 5 种 action 但无完整测试。需要覆盖 retry/resume/cancel/operator_attention/terminal_failed × 4 entity 类型。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-tool-recovery-matrix',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/tool-call-recovery.ts', 'packages/agent/src/tool-call-recovery.test.ts'] },
+    metadata: {
+      files: ['packages/agent/src/tool-call-recovery.ts', 'packages/agent/src/tool-call-recovery.test.ts', 'packages/agent/src/scheduler.test.ts'],
+      resolution: 'Matrix follows current semantics: retry/resume queue follow-up work; cancel/operator_attention apply direct transitions; terminal_failed is a durable classification.',
+      behaviorFix: 'Retryable failed calls are no longer misclassified as terminal failures.',
+      evidence: [
+        'Focused test isolates retry, resume, cancel, operator_attention, and terminal_failed decisions.',
+        'Durable recovery reads are verified by both run_spec and task_run.',
+        'Cancel/operator-attention assertions cover tool_call_state, task_run, run_spec, and session_event evidence.',
+        'Scheduler integration covers retry follow-up execution; Gateway SSE, Telegram, and WeChat consume operator-attention events.',
+      ],
+      validation: ['node --import tsx --test src/tool-call-recovery.test.ts', 'pnpm check'],
+      statusUpdatedAt: '2026-07-15',
+    },
   },
 
   {
