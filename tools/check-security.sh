@@ -22,7 +22,7 @@ ok()    { echo -e "  ${GREEN}[OK]${NC} $*"; }
 header "Hardcoded secrets scan"
 # Pattern matches keys named secret/token/password/api_key/credential etc.
 # Same regex as packages/agent/src/session-events.ts SECRET_KEY_RE
-SECRET_KEY_PATTERN='(secret|token|password|passphrase|api[-_]?key|authorization|cookie|credential|passwd|pwd)'
+SECRET_KEY_PATTERN='(private[-_]?key|jwt[-_]?secret|encryption[-_]?key|secret|token|password|passphrase|api[-_]?key|authorization|cookie|credential|passwd|pwd)'
 
 # Scan for assignment-like patterns that look like hardcoded secrets:
 #   const x = "actual-value"
@@ -61,7 +61,10 @@ fi
 
 # ── 2. .env file in git tracking ─────────────────────────────
 header ".env file tracking check"
-ENV_FILES=$(git -C "$ROOT" ls-files -- '*.env' '.env' 2>/dev/null | grep -v '.env.example' | grep -v '.env.local' || true)
+ENV_FILES=$(git -C "$ROOT" ls-files 2>/dev/null \
+  | grep -E '(^|/)\.env($|\.)|\.env($|\.)' \
+  | grep -vE '(^|/)\.env\.example$|(^|/)example\.env$|\.env\.example$' \
+  || true)
 if [ -n "$ENV_FILES" ]; then
   while IFS= read -r envfile; do
     if [ -n "$envfile" ]; then

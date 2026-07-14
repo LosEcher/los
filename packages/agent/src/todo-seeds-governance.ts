@@ -82,7 +82,7 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     title: '补 SSE/WS 接入、续传和指数退避策略',
     description: '为 SSE/WS 增加 heartbeat、Last-Event-ID/since 续传、指数退避、jitter、最大退避上限和弱网恢复证据。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P0',
     source: 'analysis-2026-05-30',
     stageId: 'transport-recovery',
@@ -92,6 +92,9 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
       problem: '当前 /chat 只是单次 SSE 流式响应，缺少断线续传、WS 通道、退避和恢复读模型。',
       solution: '参考 vpsagentweb 的 SSE replay、agent reconnect max delay 和 WebSocket 路由经验，先固化传输策略和可验证事件。',
       placement: 'tracking in todos; implementation in gateway transport and scheduler recovery layers.',
+      evidence: ['SSE supports Last-Event-ID/since replay and stream leases', 'WebSocket route and client reconnect path are wired', 'stream-backoff implements capped exponential delay with jitter'],
+      implementedFiles: ['packages/gateway/src/routes/streaming/sse-routes.ts', 'packages/gateway/src/routes/streaming/ws-routes.ts', 'packages/gateway/src/routes/streaming/stream-backoff.ts', 'packages/web/src/api/ws-client.ts'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
   {
