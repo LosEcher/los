@@ -8,6 +8,8 @@ import {
   normalizeJsonArray,
   preferredExecutorMode,
   readVerification,
+  resolveExecutorEndpoint,
+  isWildcardExecutorUrl,
   buildHeartbeatVerification,
   toIsoString,
   assertRow,
@@ -348,6 +350,9 @@ export function evaluateExecutorNode(node: Omit<ExecutorNodeRecord, 'execution'>
   }
   if (!mode) {
     blockers.push('connect_mode:missing_agent_http');
+  }
+  if (mode && isWildcardExecutorUrl(resolveExecutorEndpoint(node.connectConfig, mode, node.baseUrl))) {
+    blockers.push('connect_url:wildcard_host');
   }
   if (node.capabilities.run_agent !== true) {
     blockers.push('capability:run_agent_missing');
