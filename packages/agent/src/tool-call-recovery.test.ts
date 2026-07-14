@@ -7,6 +7,7 @@ import {
   applyToolCallRecoveryTransitionForRunSpec,
   evaluateToolCallRecovery,
   readToolCallRecoveryForRunSpec,
+  readToolCallRecoveryForTaskRun,
 } from './tool-call-recovery.js';
 import { listSessionEvents } from './session-events.js';
 import { createTaskRun, loadTaskRun } from './task-runs.js';
@@ -30,11 +31,76 @@ test('tool call recovery recommends retry, resume, cancel, or operator action fr
   assert.deepEqual(recover.resumeToolCallIds, ['tool-active-stale']);
   assert.deepEqual(recover.retryToolCallIds, ['tool-retryable']);
   assert.deepEqual(recover.operatorAttentionToolCallIds, ['tool-exhausted', 'tool-denied']);
-  assert.deepEqual(recover.terminalFailedToolCallIds, ['tool-retryable', 'tool-exhausted']);
+  assert.deepEqual(recover.terminalFailedToolCallIds, ['tool-exhausted']);
 
   const cancel = evaluateToolCallRecovery(records, { now, intent: 'cancel' });
   assert.equal(cancel.recommendation, 'cancel');
   assert.deepEqual(cancel.cancelToolCallIds, ['tool-active-stale']);
+});
+
+test('tool call recovery covers the isolated five-action decision matrix', () => {
+  const now = '2026-06-06T00:00:00.000Z';
+  const cases = [
+    {
+      name: 'retry',
+      record: toolState({ id: 'tool-retry', state: 'failed', idempotent: true, attempt: 1, maxAttempts: 2 }),
+      options: { now },
+      expected: {
+        recommendation: 'retry', retryToolCallIds: ['tool-retry'], resumeToolCallIds: [], cancelToolCallIds: [],
+        operatorAttentionToolCallIds: [], terminalFailedToolCallIds: [], activeToolCallIds: [],
+      },
+    },
+    {
+      name: 'resume',
+      record: toolState({ id: 'tool-resume', state: 'running', updatedAt: '2026-06-05T23:50:00.000Z' }),
+      options: { now, staleMs: 60_000 },
+      expected: {
+        recommendation: 'resume', retryToolCallIds: [], resumeToolCallIds: ['tool-resume'], cancelToolCallIds: [],
+        operatorAttentionToolCallIds: [], terminalFailedToolCallIds: [], activeToolCallIds: ['tool-resume'],
+      },
+    },
+    {
+      name: 'cancel',
+      record: toolState({ id: 'tool-cancel', state: 'approved' }),
+      options: { now, intent: 'cancel' as const },
+      expected: {
+        recommendation: 'cancel', retryToolCallIds: [], resumeToolCallIds: [], cancelToolCallIds: ['tool-cancel'],
+        operatorAttentionToolCallIds: [], terminalFailedToolCallIds: [], activeToolCallIds: ['tool-cancel'],
+      },
+    },
+    {
+      name: 'operator_attention',
+      record: toolState({ id: 'tool-denied', state: 'denied' }),
+      options: { now },
+      expected: {
+        recommendation: 'operator_attention', retryToolCallIds: [], resumeToolCallIds: [], cancelToolCallIds: [],
+        operatorAttentionToolCallIds: ['tool-denied'], terminalFailedToolCallIds: [], activeToolCallIds: [],
+      },
+    },
+    {
+      name: 'terminal_failed',
+      record: toolState({ id: 'tool-terminal', state: 'failed', idempotent: false, attempt: 1, maxAttempts: 1 }),
+      options: { now },
+      expected: {
+        recommendation: 'operator_attention', retryToolCallIds: [], resumeToolCallIds: [], cancelToolCallIds: [],
+        operatorAttentionToolCallIds: ['tool-terminal'], terminalFailedToolCallIds: ['tool-terminal'], activeToolCallIds: [],
+      },
+    },
+  ] as const;
+
+  for (const matrixCase of cases) {
+    const decision = evaluateToolCallRecovery([matrixCase.record], matrixCase.options);
+    assert.equal(decision.status, 'action_required', matrixCase.name);
+    assert.deepEqual({
+      recommendation: decision.recommendation,
+      retryToolCallIds: decision.retryToolCallIds,
+      resumeToolCallIds: decision.resumeToolCallIds,
+      cancelToolCallIds: decision.cancelToolCallIds,
+      operatorAttentionToolCallIds: decision.operatorAttentionToolCallIds,
+      terminalFailedToolCallIds: decision.terminalFailedToolCallIds,
+      activeToolCallIds: decision.activeToolCallIds,
+    }, matrixCase.expected, matrixCase.name);
+  }
 });
 
 test('tool call recovery stays clean for completed durable state', () => {
@@ -54,6 +120,7 @@ test('tool call recovery reads durable tool_call_states by run spec', async () =
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const sessionId = `session-tool-recovery-${suffix}`;
   const runSpecId = `run-tool-recovery-${suffix}`;
+  const taskRunId = `task-tool-recovery-${suffix}`;
   const failedCallId = `tool-failed-${suffix}`;
   const runningCallId = `tool-running-${suffix}`;
   try {
@@ -61,7 +128,7 @@ test('tool call recovery reads durable tool_call_states by run spec', async () =
       id: failedCallId,
       sessionId,
       runSpecId,
-      taskRunId: `task-${suffix}`,
+      taskRunId,
       turn: 1,
       toolName: 'read_file',
       state: 'requested',
@@ -78,7 +145,7 @@ test('tool call recovery reads durable tool_call_states by run spec', async () =
       id: runningCallId,
       sessionId,
       runSpecId,
-      taskRunId: `task-${suffix}`,
+      taskRunId,
       turn: 2,
       toolName: 'search',
       state: 'running',
@@ -95,6 +162,10 @@ test('tool call recovery reads durable tool_call_states by run spec', async () =
     assert.equal(decision.status, 'action_required');
     assert.deepEqual(decision.retryToolCallIds, [failedCallId]);
     assert.deepEqual(decision.resumeToolCallIds, [runningCallId]);
+    assert.deepEqual(
+      await readToolCallRecoveryForTaskRun(taskRunId, { now: new Date(Date.now() + 10_000), staleMs: 0 }),
+      decision,
+    );
   } finally {
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
@@ -161,7 +232,11 @@ test('tool call recovery applies cancel and operator-attention transitions', asy
     assert.equal((await loadTaskRun(cancelTaskRunId))?.status, 'cancelled');
     assert.equal((await loadToolCallState(cancelCallId, cancelSessionId))?.state, 'skipped');
     const cancelEvents = await listSessionEvents(cancelSessionId, 20);
-    assert.ok(cancelEvents.some(event => event.type === 'run.recovery_cancelled'));
+    const cancelEvent = cancelEvents.find(event =>
+      event.type === 'run.recovery_cancelled' && event.payload.runSpecId === cancelRunSpecId);
+    assert.equal(cancelEvent?.payload.runSpecId, cancelRunSpecId);
+    assert.deepEqual(cancelEvent?.payload.transitionedToolCallIds, [cancelCallId]);
+    assert.deepEqual(cancelEvent?.payload.transitionedTaskRunIds, [cancelTaskRunId]);
 
     await createRunSpec({
       id: attentionRunSpecId,
@@ -209,8 +284,13 @@ test('tool call recovery applies cancel and operator-attention transitions', asy
     assert.equal(attention.decision.recommendation, 'operator_attention');
     assert.deepEqual(attention.decision.operatorAttentionToolCallIds, [attentionCallId]);
     assert.equal((await loadRunSpec(attentionRunSpecId))?.status, 'blocked');
+    assert.equal((await loadTaskRun(attentionTaskRunId))?.status, 'failed');
+    assert.equal((await loadToolCallState(attentionCallId, attentionSessionId))?.state, 'failed');
     const attentionEvents = await listSessionEvents(attentionSessionId, 20);
-    assert.ok(attentionEvents.some(event => event.type === 'run.operator_attention_required'));
+    const attentionEvent = attentionEvents.find(event =>
+      event.type === 'run.operator_attention_required' && event.payload.runSpecId === attentionRunSpecId);
+    assert.equal(attentionEvent?.payload.runSpecId, attentionRunSpecId);
+    assert.equal((attentionEvent?.payload.decision as Record<string, unknown>)?.recommendation, 'operator_attention');
   } finally {
     await getDb().query('DELETE FROM tool_call_states WHERE session_id IN ($1, $2)', [cancelSessionId, attentionSessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE run_spec_id IN ($1, $2)', [cancelRunSpecId, attentionRunSpecId]).catch(() => undefined);
