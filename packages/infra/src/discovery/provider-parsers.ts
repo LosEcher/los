@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import type { CodexRouteConfig, DiscoveredProvider } from './types.js';
 import { parseJsonObject, readString } from './helpers.js';
+import { requireProviderDefaults } from '../provider-defaults.js';
 
 export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
+  const openaiDefaults = requireProviderDefaults('openai');
   const model = toml.match(/^model\s*=\s*"(.+)"$/m)?.[1];
   const providerId = toml.match(/^model_provider\s*=\s*"(.+)"$/m)?.[1];
-  let baseUrl = 'https://api.openai.com/v1';
+  let baseUrl = openaiDefaults.baseUrl;
   let providerName = 'openai';
   let wireApi: string | undefined;
 
@@ -65,7 +67,7 @@ export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredPro
       ? parseCodexRouteConfig(config.config)
       : {
           providerName: 'openai',
-          baseUrl: 'https://api.openai.com/v1',
+          baseUrl: requireProviderDefaults('openai').baseUrl,
           model: undefined,
           wireApi: undefined,
         };
