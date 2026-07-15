@@ -11,6 +11,7 @@
 import { getLogger } from '@los/infra/logger';
 import { createProvider } from '../providers/index.js';
 import { resolveModelRouteDecision, type ModelRouteDecision } from '../providers/model-routing.js';
+import { resolveProviderModelPolicy } from '../providers/provider-policy.js';
 import { summarizeModelProfile, type ModelExecutionSummary } from '../model-profiles.js';
 import {
   createToolRegistry,
@@ -106,19 +107,34 @@ export function setupAgentRun(
     ? (config.architectEditor!.editorProvider ?? config.provider)
     : config.provider;
   const requestedModel = editorMode ? config.architectEditor!.editorModel : config.model;
-  const provider = createProvider(requestedProvider, {
-    model: requestedModel,
+  const architectEditorOverride = editorMode && Boolean(
+    config.architectEditor!.editorProvider || config.architectEditor!.editorModel,
+  );
+  const providerSelection = resolveProviderModelPolicy({
+    explicit: { provider: requestedProvider, model: requestedModel },
+    fallback: {},
+    sources: {
+      evidence: 'configured_default',
+      target: 'configured_default',
+      explicit: architectEditorOverride
+        ? 'architect_editor_override'
+        : requestedModel
+          ? 'explicit_model'
+          : 'explicit_provider',
+      fallback: 'configured_default',
+    },
+  });
+  const provider = createProvider(providerSelection.provider, {
+    model: providerSelection.model,
     traceId: config.traceId,
   });
   const modelProfile = summarizeModelProfile(provider.profile);
   const modelRoute = resolveModelRouteDecision({
-    requestedProvider,
-    requestedModel,
+    requestedProvider: providerSelection.provider,
+    requestedModel: providerSelection.model,
     effectiveProvider: provider.name,
     effectiveModel: provider.profile.model,
-    architectEditorOverride: editorMode && Boolean(
-      config.architectEditor!.editorProvider || config.architectEditor!.editorModel,
-    ),
+    architectEditorOverride,
   });
   const toolMode = config.toolMode ?? 'project-write';
 
