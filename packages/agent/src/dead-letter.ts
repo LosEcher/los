@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { getDb } from '@los/infra/db';
-import { loadTaskRun, type TaskRunRecord } from './task-runs.js';
+import type { TaskRunRecord } from './task-runs.js';
 import { appendSessionEvent, type SessionEventWrite } from './session-events.js';
 
 // ── Types ──────────────────────────────────────────────────
@@ -26,6 +26,9 @@ export interface DeadLetterEventRecord {
   originalError: string | null;
   eventPayload: Record<string, unknown>;
   acknowledgedAt: string | null;
+  requeuedTaskRunId: string | null;
+  requeuedAt: string | null;
+  requeueError: string | null;
   createdAt: string;
 }
 
@@ -46,8 +49,15 @@ CREATE TABLE IF NOT EXISTS dead_letter_events (
   original_error TEXT,
   event_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   acknowledged_at TIMESTAMPTZ,
+  requeued_task_run_id TEXT,
+  requeued_at TIMESTAMPTZ,
+  requeue_error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE dead_letter_events ADD COLUMN IF NOT EXISTS requeued_task_run_id TEXT;
+ALTER TABLE dead_letter_events ADD COLUMN IF NOT EXISTS requeued_at TIMESTAMPTZ;
+ALTER TABLE dead_letter_events ADD COLUMN IF NOT EXISTS requeue_error TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_dead_letter_unacknowledged
   ON dead_letter_events(created_at DESC)
@@ -58,6 +68,16 @@ CREATE INDEX IF NOT EXISTS idx_dead_letter_task_run
 
 CREATE INDEX IF NOT EXISTS idx_dead_letter_reason
   ON dead_letter_events(reason);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dead_letter_requeued_task_run
+  ON dead_letter_events(requeued_task_run_id)
+  WHERE requeued_task_run_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_dead_letter_retryable
+  ON dead_letter_events(created_at)
+  WHERE reason = 'lease_expired'
+    AND acknowledged_at IS NULL
+    AND requeued_task_run_id IS NULL;
 `;
 
 let _initialized = false;
@@ -95,7 +115,7 @@ export async function writeDeadLetterEvent(input: {
       JSON.stringify(input.eventPayload ?? {}),
     ],
   );
-  const record = rowToRecord(assertRow(rows.rows[0]));
+  const record = deadLetterRowToRecord(assertRow(rows.rows[0]));
 
   // Emit operator_attention event
   await appendSessionEvent({
@@ -176,7 +196,7 @@ export async function listDeadLetterEvents(
   `,
     params,
   );
-  return rows.rows.map(rowToRecord);
+  return rows.rows.map(deadLetterRowToRecord);
 }
 
 export async function acknowledgeDeadLetterEvent(id: string): Promise<DeadLetterEventRecord | null> {
@@ -191,12 +211,12 @@ export async function acknowledgeDeadLetterEvent(id: string): Promise<DeadLetter
   `,
     [id],
   );
-  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+  return rows.rows[0] ? deadLetterRowToRecord(rows.rows[0]) : null;
 }
 
 // ── Helpers ────────────────────────────────────────────────
 
-type DeadLetterRow = {
+export type DeadLetterRow = {
   id: string;
   task_run_id: string | null;
   run_spec_id: string | null;
@@ -204,10 +224,13 @@ type DeadLetterRow = {
   original_error: string | null;
   event_payload: Record<string, unknown> | string;
   acknowledged_at: Date | string | null;
+  requeued_task_run_id: string | null;
+  requeued_at: Date | string | null;
+  requeue_error: string | null;
   created_at: Date | string;
 };
 
-function rowToRecord(row: DeadLetterRow): DeadLetterEventRecord {
+export function deadLetterRowToRecord(row: DeadLetterRow): DeadLetterEventRecord {
   return {
     id: row.id,
     taskRunId: row.task_run_id,
@@ -218,6 +241,9 @@ function rowToRecord(row: DeadLetterRow): DeadLetterEventRecord {
       ? JSON.parse(row.event_payload) as Record<string, unknown>
       : row.event_payload,
     acknowledgedAt: row.acknowledged_at ? toIsoString(row.acknowledged_at) : null,
+    requeuedTaskRunId: row.requeued_task_run_id,
+    requeuedAt: row.requeued_at ? toIsoString(row.requeued_at) : null,
+    requeueError: row.requeue_error,
     createdAt: toIsoString(row.created_at),
   };
 }

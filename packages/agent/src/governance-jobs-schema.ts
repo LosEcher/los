@@ -163,6 +163,13 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     initialStaggerMs: 20 * 60 * 1000,
   },
   {
+    jobType: 'dead_letter',
+    cadence: 'hourly',
+    dedupeKey: 'gov-job-dead-letter',
+    initialStaggerMs: 25 * 60 * 1000,
+    config: { requeueLimit: 25 },
+  },
+  {
     jobType: 'branch_cleanup',
     cadence: 'hourly',
     dedupeKey: 'gov-job-branch-cleanup',

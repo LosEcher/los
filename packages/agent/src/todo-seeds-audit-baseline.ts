@@ -346,13 +346,13 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-8 Dead-letter 分类统计 + 自动 re-queue',
     description: 'dead_letter_events 写入后仅被 gateway startup recovery 消费。需要 governance sweep 分类统计 + 对 lease_expired 自动 re-queue。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-dead-letter-classify',
     dependsOnIds: ['todo-los-p0-governance-sweeper'],
-    metadata: { files: ['packages/agent/src/dead-letter.ts', 'packages/cli/src/dead-letter.ts'] },
+    metadata: { files: ['packages/agent/src/dead-letter.ts', 'packages/agent/src/dead-letter-recovery.ts', 'packages/agent/src/dead-letter-governance.ts', 'packages/agent/src/scheduler/scheduled-task-runner.ts', 'packages/gateway/src/routes/orchestration/task-routes.ts', 'packages/cli/src/dead-letter.ts', 'packages/infra/migrations/033_dead_letter_requeue.sql'], resolution: '按 reason 分类统计并暴露 summary；仅 lease_expired 可幂等重入队，使用原 run_spec 创建新 task_run attempt，agent-task graph 任务交由 graph recovery 管理。', validation: ['dead-letter focused test passed', 'gateway route focused test passed', 'pnpm check passed', 'pnpm run gate: 9 phases, 0 failures'], statusUpdatedAt: '2026-07-15' },
   },
 
   {

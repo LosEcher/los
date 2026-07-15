@@ -240,23 +240,7 @@ export async function heartbeatTaskRun(
 
 export async function recoverExpiredTaskRuns(reason = 'lease_expired'): Promise<TaskRunRecord[]> {
   await ensureTaskRunStore();
-  const db = getDb();
-  const rows = await db.query<TaskRunRow>(
-    `
-    UPDATE task_runs
-    SET status = 'failed',
-        metadata_json = metadata_json || $1::jsonb,
-        completed_at = now(),
-        lease_expires_at = NULL,
-        updated_at = now()
-    WHERE status IN ('queued', 'running')
-      AND lease_expires_at IS NOT NULL
-      AND lease_expires_at < now()
-    RETURNING *
-  `,
-    [JSON.stringify({ recoveryReason: reason })],
-  );
-  return rows.rows.map(rowToTaskRun);
+  return recoverExpiredTaskRunsWithStateTransition(reason);
 }
 
 export async function recoverExpiredTaskRunsWithAdvisoryLock(
@@ -265,28 +249,45 @@ export async function recoverExpiredTaskRunsWithAdvisoryLock(
   await ensureTaskRunStore();
   const backend = await resolveCoordinationBackend();
   const result = await backend.lock.withLock('task-run-recovery', async () => {
-    const db = getDb();
-    const rows = await db.query<TaskRunRow>(
-      `
-      UPDATE task_runs
-      SET status = 'failed',
-          metadata_json = metadata_json || $1::jsonb,
-          completed_at = now(),
-          lease_expires_at = NULL,
-          updated_at = now()
-      WHERE status IN ('queued', 'running')
-        AND lease_expires_at IS NOT NULL
-        AND lease_expires_at < now()
-      RETURNING *
-    `,
-      [JSON.stringify({ recoveryReason: reason })],
-    );
-    return rows.rows.map(rowToTaskRun);
+    return recoverExpiredTaskRunsWithStateTransition(reason);
   });
   if (result === null) {
     return { lockAcquired: false, recovered: [] };
   }
   return { lockAcquired: true, recovered: result };
+}
+
+async function recoverExpiredTaskRunsWithStateTransition(reason: string): Promise<TaskRunRecord[]> {
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    `SELECT * FROM task_runs
+     WHERE status IN ('queued', 'running')
+       AND lease_expires_at IS NOT NULL
+       AND lease_expires_at < now()
+     ORDER BY updated_at ASC`,
+  );
+  if (rows.rows.length === 0) return [];
+
+  const { transitionExecutionState } = await import('./execution-store.js');
+  const recovered: TaskRunRecord[] = [];
+  for (const row of rows.rows) {
+    const task = rowToTaskRun(row);
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: task.id,
+      to: 'failed',
+      sessionId: task.sessionId,
+      reason,
+      nodeId: task.nodeId,
+      attempt: task.attempt,
+    });
+    const updated = await updateTaskRunFields(task.id, {
+      metadata: { ...task.metadata, recoveryReason: reason },
+      leaseExpiresAt: null,
+    });
+    if (updated) recovered.push(updated);
+  }
+  return recovered;
 }
 
 export async function loadTaskRun(id: string): Promise<TaskRunRecord | null> {

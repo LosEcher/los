@@ -114,6 +114,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     metadata: input.metadata ?? {},
     runContract: input.runContract,
     status: 'queued',
+    attempt: input.attempt,
   });
   if (executor) {
     const metadata = readObject(input.metadata);

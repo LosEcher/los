@@ -69,6 +69,10 @@ properties:
   maxLoops:
     type: integer
     minimum: 1
+  attempt:
+    type: integer
+    minimum: 1
+    description: Attempt number for a fresh task_run created from retry or recovery.
   executor:
     type: object
     properties:
@@ -228,12 +232,34 @@ operatorControl:
       path: /runtimes/bridge/start
     - method: POST
       path: /governance/jobs/sweep
+    - method: POST
+      path: /tasks/dead-letter/{deadLetterEventId}/retry
   messageRouterCapabilities:
     run_contract: run:control
     steering: session:steer
     todo_create_or_dispatch: todo:write
     governance_sweep: governance:execute
     runtime: runtime:execute
+deadLetterQueue:
+  sources:
+    - dead_letter_events
+    - task_runs
+    - run_specs
+  routes:
+    - method: GET
+      path: /tasks/dead-letter
+    - method: GET
+      path: /tasks/dead-letter/summary
+    - method: POST
+      path: /tasks/dead-letter/{deadLetterEventId}/ack
+    - method: POST
+      path: /tasks/dead-letter/{deadLetterEventId}/retry
+      requiredPrincipal: operator
+  retryPolicy:
+    eligibleReason: lease_expired
+    createsFreshTaskRun: true
+    preservesOriginalTaskRun: true
+    idempotencyField: requeued_task_run_id
 verification:
   - pnpm check
   - ./tools/check-contracts.sh

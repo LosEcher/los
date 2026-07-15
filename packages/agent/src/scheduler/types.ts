@@ -26,6 +26,8 @@ export interface ScheduledTaskEvent {
 export interface ScheduledAgentTaskInput extends AgentConfig {
   prompt: string;
   taskRunId?: string;
+  /** Attempt number when this task is a retry of an earlier task_run. */
+  attempt?: number;
   runSpecId?: string;
   traceId?: string;
   dedupeKey?: string;
