@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadConfig } from '@los/infra/config';
 import type { AgentTaskRecord } from '../agent-task-graph.js';
-import { setupAgentRun } from '../loop/setup.js';
+import { resolveAgentRunProviderModelSelection } from '../loop/provider-selection.js';
 import { resolveGraphTaskProviderModelSelection } from '../scheduler/provider-selection.js';
 import { resolveProviderModelPolicy } from './provider-policy.js';
 
@@ -51,16 +50,9 @@ test('provider policy blocks required targets without passing evidence', () => {
 });
 
 test('chat and scheduler resolve the same provider for the same task input', async () => {
-  await loadConfig();
   const provider = 'deepseek';
   const model = 'deepseek-v4-flash';
-  const chat = setupAgentRun('same task', { provider, model }, async () => ({
-    text: '',
-    turns: [],
-    loopCount: 0,
-    totalTokens: { prompt: 0, completion: 0 },
-    messages: [],
-  }));
+  const chat = resolveAgentRunProviderModelSelection({ provider, model });
   const task: AgentTaskRecord = {
     id: 'same-task',
     graphId: 'same-task-graph',
@@ -79,8 +71,8 @@ test('chat and scheduler resolve the same provider for the same task input', asy
     model,
   });
 
-  assert.equal(chat.modelRoute.effectiveProvider, scheduler.provider);
-  assert.equal(chat.modelRoute.effectiveModel, scheduler.model);
+  assert.equal(chat.provider, scheduler.provider);
+  assert.equal(chat.model, scheduler.model);
 });
 
 test('scheduler preserves input selection when task metadata only names a model', async () => {

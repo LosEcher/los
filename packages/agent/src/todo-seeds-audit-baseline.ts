@@ -285,6 +285,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       files: [
         'packages/agent/src/providers/provider-policy.ts',
         'packages/agent/src/providers/provider-policy.test.ts',
+        'packages/agent/src/loop/provider-selection.ts',
         'packages/agent/src/loop/setup.ts',
         'packages/agent/src/scheduler/provider-selection.ts',
       ],

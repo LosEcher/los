@@ -11,7 +11,6 @@
 import { getLogger } from '@los/infra/logger';
 import { createProvider } from '../providers/index.js';
 import { resolveModelRouteDecision, type ModelRouteDecision } from '../providers/model-routing.js';
-import { resolveProviderModelPolicy } from '../providers/provider-policy.js';
 import { summarizeModelProfile, type ModelExecutionSummary } from '../model-profiles.js';
 import {
   createToolRegistry,
@@ -35,6 +34,7 @@ import {
 import {
   previewText,
 } from './utils.js';
+import { resolveAgentRunProviderModelSelection } from './provider-selection.js';
 import type { Message, Provider, ToolDef } from '../providers/index.js';
 import type { AgentConfig } from './types.js';
 import type { Logger } from '@los/infra/logger';
@@ -103,27 +103,8 @@ export function setupAgentRun(
   // runs as a separate front-matter phase (see loop/architect-phase.ts) before
   // this loop starts, so resolve the editor provider + editor system prompt.
   const editorMode = config.architectEditor?.enabled === true;
-  const requestedProvider = editorMode
-    ? (config.architectEditor!.editorProvider ?? config.provider)
-    : config.provider;
-  const requestedModel = editorMode ? config.architectEditor!.editorModel : config.model;
-  const architectEditorOverride = editorMode && Boolean(
-    config.architectEditor!.editorProvider || config.architectEditor!.editorModel,
-  );
-  const providerSelection = resolveProviderModelPolicy({
-    explicit: { provider: requestedProvider, model: requestedModel },
-    fallback: {},
-    sources: {
-      evidence: 'configured_default',
-      target: 'configured_default',
-      explicit: architectEditorOverride
-        ? 'architect_editor_override'
-        : requestedModel
-          ? 'explicit_model'
-          : 'explicit_provider',
-      fallback: 'configured_default',
-    },
-  });
+  const providerSelection = resolveAgentRunProviderModelSelection(config);
+  const architectEditorOverride = providerSelection.source === 'architect_editor_override';
   const provider = createProvider(providerSelection.provider, {
     model: providerSelection.model,
     traceId: config.traceId,
