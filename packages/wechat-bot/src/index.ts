@@ -165,6 +165,7 @@ channels.push(createWebChannel({
   losGatewayUrl: LOS_GATEWAY_URL,
   losAuthToken: LOS_AUTH_TOKEN,
   losOperatorToken: LOS_OPERATOR_TOKEN,
+  healthSnapshot: () => ({ ready: sseLive, sseConnected: sseLive, weclawAvailable }),
 }));
 
 // ── Delivery dispatcher ────────────────────────────────────────────

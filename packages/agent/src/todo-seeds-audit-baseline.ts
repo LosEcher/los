@@ -332,13 +332,13 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-7 WeChat/Telegram bot 生产就绪（health/retry/docs）',
     description: '两个 bot 均为独立进程，失败模式无文档。需要：health endpoint、重连/重试循环、tools/check-bot-health.sh。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-bot-production',
     dependsOnIds: [],
-    metadata: { files: ['packages/wechat-bot/src/index.ts', 'packages/telegram-bot/src/index.ts'] },
+    metadata: { files: ['packages/wechat-bot/src/index.ts', 'packages/wechat-bot/src/channel/web.ts', 'packages/telegram-bot/src/index.ts', 'packages/telegram-bot/src/health-server.ts', 'tools/check-bot-health.sh', 'docs/operations/bot-health-and-recovery.md'], resolution: 'Both bot processes expose health JSON with SSE readiness separated from liveness; existing reconnect loops remain active and the operator script supports required or optional bot checks.', validation: ['wechat-bot tests: 16/16 passed', 'telegram-bot tests: 29/29 passed', 'mock dual-endpoint check-bot-health.sh passed', 'pnpm check passed'], statusUpdatedAt: '2026-07-15' },
   },
 
   {
