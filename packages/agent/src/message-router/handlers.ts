@@ -195,6 +195,7 @@ const KNOWN_JOB_TYPES = [
   'memory_integrity', 'memory_retention', 'reflection',
   'branch_cleanup', 'related_project_scan', 'file_size', 'supply_chain_audit',
   'static_analysis', 'performance_audit', 'migration_drift_fix', 'event_retention',
+  'dead_letter',
 ] as const;
 
 function createGovernanceHandler(): HandlerDescriptor {

@@ -258,7 +258,7 @@ function hoursToMs(value: number | undefined): number | undefined {
 async function sweep(parsed: ParsedArgs): Promise<void> {
   const apply = booleanFlag(parsed, 'apply');
   const jobType = stringFlag(parsed, 'job-type');
-  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan', 'file_size'];
+  const validTypes: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'related_project_scan', 'file_size', 'supply_chain_audit', 'static_analysis', 'performance_audit', 'migration_drift_fix', 'event_retention', 'code_topology_audit', 'dead_letter'];
   const jobTypes = jobType
     ? (jobType.split(',').filter(t => validTypes.includes(t as GovernanceJobType)) as GovernanceJobType[])
     : undefined;
@@ -304,6 +304,8 @@ function renderSweep(result: GovernanceSweepResult, json: boolean): void {
       console.log(`    totalProjects=${summary.totalProjects ?? '?'} accessible=${summary.accessibleProjects ?? '?'} withFeatures=${summary.withNewFeatures ?? '?'} absorbable=${summary.absorbableCount ?? '?'}`);
     } else if (r.jobType === 'file_size') {
       console.log(`    hotFiles=${summary.hotFileCount ?? '?'} blockFiles=${summary.blockFiles ?? '?'} newOverThreshold=${summary.newOverThreshold ?? '?'}`);
+    } else if (r.jobType === 'dead_letter') {
+      console.log(`    total=${summary.total ?? '?'} unacknowledged=${summary.unacknowledged ?? '?'} retryable=${summary.requeueEligible ?? '?'} requeued=${Array.isArray(summary.requeuedTaskRunIds) ? summary.requeuedTaskRunIds.length : '?'}`);
     }
 
     // Show GA loop phases if present
@@ -336,7 +338,7 @@ Options:
   --stale-ms N            Runtime cleanup stale threshold in milliseconds
   --limit N               Runtime cleanup scan limit, default 500
   --validate --apply      Validate ready status constraints after dirty-row checks
-  --job-type TYPE         Sweep: filter by job type (consistency_audit|hotspot|architecture_drift)
+  --job-type TYPE         Sweep: filter by job type (for example consistency_audit|dead_letter)
   --apply                 Sweep: actually run and record results (default dry-run)
   --json                  Emit JSON report
 

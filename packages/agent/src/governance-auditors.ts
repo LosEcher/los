@@ -147,6 +147,10 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'migration_drift_fix': return runMigrationDriftAuditWrapper();
     case 'event_retention': return runEventRetentionAuditWrapper();
     case 'code_topology_audit': return runCodeTopologyAuditWrapper(job);
+    case 'dead_letter': {
+      const { runDeadLetterGovernance } = await import('./dead-letter-governance.js');
+      return runDeadLetterGovernance({ dryRun, limit: Number(job.config.requeueLimit ?? 25) });
+    }
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }
 }
