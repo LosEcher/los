@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { URL, URLSearchParams } from 'node:url';
+import { requireProviderDefaults } from '@los/infra/provider-defaults';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ export const XAI_OAUTH_SCOPE = 'openid profile email offline_access grok-cli:acc
 export const XAI_OAUTH_REDIRECT_HOST = '127.0.0.1';
 export const XAI_OAUTH_REDIRECT_PORT = 56121;
 export const XAI_OAUTH_REDIRECT_PATH = '/callback';
-const DEFAULT_XAI_OAUTH_BASE_URL = 'https://api.x.ai/v1';
+const DEFAULT_XAI_OAUTH_BASE_URL = requireProviderDefaults('xai').baseUrl;
 
 /**
  * xAI access tokens are ~6h TTL in SuperGrok flows.

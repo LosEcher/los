@@ -21,7 +21,13 @@ import { fileURLToPath } from "node:url";
 import YAML from 'yaml';
 import { getLogger } from './logger.js';
 import { discoverAll, type DiscoveredProvider } from './discovery.js';
+import { listLocalProviderDefaults, providerDefaultsForApiKeyEnv } from './provider-defaults.js';
+import { requireProviderDefaults, resolveProviderDefaults } from './provider-defaults.js';
 const log = getLogger('config');
+
+const DEFAULT_AGENT_PROVIDER = 'deepseek';
+const DEFAULT_AGENT_MODEL = requireProviderDefaults(DEFAULT_AGENT_PROVIDER).defaultModel;
+const DEFAULT_LOCAL_ENDPOINTS = listLocalProviderDefaults();
 
 /**
  * Heuristic to detect node:test runner processes so auth and DB guards
@@ -51,13 +57,7 @@ export const ConfigSchema = z.object({
       checkUrl: z.string(),
       baseUrl: z.string(),
       defaultModel: z.string(),
-    })).default([
-      { name: 'ollama',   checkUrl: 'http://127.0.0.1:11434/api/tags', baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: 'llama3.1' },
-      { name: 'lmstudio', checkUrl: 'http://127.0.0.1:1234/v1/models', baseUrl: 'http://127.0.0.1:1234/v1',   defaultModel: '(auto)' },
-      { name: 'vllm',     checkUrl: 'http://127.0.0.1:8000/v1/models', baseUrl: 'http://127.0.0.1:8000/v1',     defaultModel: '(auto)' },
-      { name: 'llamacpp', checkUrl: 'http://127.0.0.1:8081/v1/models', baseUrl: 'http://127.0.0.1:8081/v1',     defaultModel: '(auto)' },
-      { name: 'localai',  checkUrl: 'http://127.0.0.1:8082/v1/models', baseUrl: 'http://127.0.0.1:8082/v1',     defaultModel: '(auto)' },
-    ]),
+    })).default(DEFAULT_LOCAL_ENDPOINTS),
   }),
 
   auth: z.object({
@@ -78,8 +78,8 @@ export const ConfigSchema = z.object({
     }).default({}) }).default({}),
 
   agent: z.object({
-    defaultProvider: z.string().default('deepseek'),
-    defaultModel: z.string().default('deepseek-v4-flash'),
+    defaultProvider: z.string().default(DEFAULT_AGENT_PROVIDER),
+    defaultModel: z.string().default(DEFAULT_AGENT_MODEL),
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
     systemPrompt: z.string().optional(),
@@ -352,7 +352,7 @@ function flattenEnv(env: Record<string, string>, sourceLabel = 'env'): Record<st
   for (const [key, value] of Object.entries(env)) {
     const match = key.match(/^([A-Z_]+)_API_KEY$/);
     if (match && value) {
-      const provider = match[1].toLowerCase();
+      const provider = providerDefaultsForApiKeyEnv(key)?.name ?? match[1].toLowerCase();
       if (!result.providers) result.providers = {};
       (result.providers as any)[provider] = {
         apiKey: value,
@@ -406,10 +406,10 @@ export async function loadConfig(opts?: {
 
   // Layer 1: Built-in defaults (ensure all schema keys exist)
   let merged: Record<string, unknown> = {
-    server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173' },
+    server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173', localEndpoints: DEFAULT_LOCAL_ENDPOINTS },
     auth: { enabled: false },
     integrations: { feedAnalysis: {} },
-    agent: { defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
+    agent: { defaultProvider: DEFAULT_AGENT_PROVIDER, defaultModel: DEFAULT_AGENT_MODEL, maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
     memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},
@@ -575,15 +575,13 @@ export function printConfigDiagnostics(config: Config): string {
 }
 
 function discoverProviderKeyEnv(name: string): string {
-  const KEY_ENV: Record<string, string> = {
-    anthropic: 'ANTHROPIC_API_KEY',
-    deepseek: 'DEEPSEEK_API_KEY',
+  const sharedCredentialEnv: Record<string, string> = {
     'deepseek-anthropic': 'DEEPSEEK_API_KEY',
-    minimax: 'MINIMAX_API_KEY',
-    openai: 'OPENAI_API_KEY',
     packycode: 'OPENAI_API_KEY',
   };
-  return KEY_ENV[name] ?? `${name.toUpperCase()}_API_KEY`;
+  return resolveProviderDefaults(name)?.apiKeyEnv
+    ?? sharedCredentialEnv[name]
+    ?? `${name.toUpperCase()}_API_KEY`;
 }
 
 export function getMigrateDir(config: Config): string {

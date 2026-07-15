@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { requireProviderDefaults } from './provider-defaults.js';
+import { scanEnvKeys } from './discovery/scanners.js';
 
 import {
   ccSwitchProviderFromRow,
@@ -79,6 +81,28 @@ test('provider API key env names use known provider conventions', () => {
   assert.equal(providerApiKeyEnv('minimax'), 'MINIMAX_API_KEY');
   assert.equal(providerApiKeyEnv('qwen'), 'DASHSCOPE_API_KEY');
   assert.equal(providerApiKeyEnv('local router'), 'LOCAL_ROUTER_API_KEY');
+});
+
+test('environment discovery uses canonical provider routing defaults', () => {
+  const previousApiKey = process.env.DASHSCOPE_API_KEY;
+  const previousBaseUrl = process.env.DASHSCOPE_BASE_URL;
+  const previousModel = process.env.DASHSCOPE_MODEL;
+  process.env.DASHSCOPE_API_KEY = 'test-key';
+  delete process.env.DASHSCOPE_BASE_URL;
+  delete process.env.DASHSCOPE_MODEL;
+  try {
+    const qwen = scanEnvKeys().find(provider => provider.name === 'qwen');
+    const defaults = requireProviderDefaults('qwen');
+    assert.equal(qwen?.baseUrl, defaults.baseUrl);
+    assert.equal(qwen?.defaultModel, defaults.defaultModel);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.DASHSCOPE_API_KEY;
+    else process.env.DASHSCOPE_API_KEY = previousApiKey;
+    if (previousBaseUrl === undefined) delete process.env.DASHSCOPE_BASE_URL;
+    else process.env.DASHSCOPE_BASE_URL = previousBaseUrl;
+    if (previousModel === undefined) delete process.env.DASHSCOPE_MODEL;
+    else process.env.DASHSCOPE_MODEL = previousModel;
+  }
 });
 
 test('Codex route config maps Packy API routes to packycode', () => {

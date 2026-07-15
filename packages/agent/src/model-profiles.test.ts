@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { requireProviderDefaults } from '@los/infra/provider-defaults';
 
 import {
   calculateCost,
@@ -53,6 +54,34 @@ test('model profile registry includes the expected core providers', () => {
   assert.ok(MODEL_PROFILES.packycode);
   assert.ok(MODEL_PROFILES['deepseek-anthropic']);
   assert.ok(MODEL_PROFILES.minimax);
+});
+
+test('known model profiles use the canonical provider URL and model defaults', () => {
+  for (const provider of Object.keys(MODEL_PROFILES)) {
+    const defaults = requireProviderDefaults(provider);
+    const profile = resolveModelProfile(provider);
+    assert.equal(profile.baseUrl, defaults.baseUrl, `${provider} baseUrl drifted from catalog`);
+    assert.equal(profile.model, defaults.defaultModel, `${provider} model drifted from catalog`);
+  }
+});
+
+test('unknown providers require explicit executable routing defaults', () => {
+  assert.throws(
+    () => resolveModelProfile('custom-provider'),
+    /requires explicit baseUrl and model configuration/,
+  );
+  assert.throws(
+    () => resolveModelProfile('custom-provider', { baseUrl: 'https://custom.invalid/v1' }),
+    /requires explicit baseUrl and model configuration/,
+  );
+
+  const custom = resolveModelProfile('custom-provider', {
+    baseUrl: 'https://custom.invalid/v1',
+    model: 'custom-model',
+  });
+  assert.equal(custom.baseUrl, 'https://custom.invalid/v1');
+  assert.equal(custom.model, 'custom-model');
+  assert.notEqual(custom.model, 'gpt-4o');
 });
 
 test('summarizeModelProfile exposes runtime-relevant model capabilities', () => {
