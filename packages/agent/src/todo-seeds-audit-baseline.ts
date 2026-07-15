@@ -316,15 +316,15 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
   {
     id: 'todo-los-p1-memory-perf-baseline',
     title: 'P1-6 Memory FTS EXPLAIN ANALYZE + 性能 baseline + 回归断言',
-    description: 'memory/core/store.ts 600 行 FTS 实现无性能基线。需要在 1000/10000/100000 行 observations 规模下 EXPLAIN ANALYZE。',
+    description: 'memory/core/store.ts FTS 查询缺少性能基线。需要在 1000/10000/100000 行 observations 规模下 EXPLAIN ANALYZE。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-memory-perf-baseline',
     dependsOnIds: ['todo-los-p0-memory-production'],
-    metadata: { files: ['packages/memory/src/core/store.ts'] },
+    metadata: { files: ['packages/memory/src/core/store.ts', 'packages/memory/src/fts-performance.test.ts', 'packages/memory/package.json'], resolution: 'Isolated test-schema benchmark covers 1k/10k/100k observations with the production FTS query; 100k uses idx_obs_search and no query rewrite is needed.', baseline: ['1k: 0.177ms seq scan', '10k: 1.521ms seq scan', '100k: 1.061ms bitmap index scan idx_obs_search'], validation: ['pnpm --filter @los/memory benchmark:fts', 'pnpm --filter @los/memory check', 'pnpm --filter @los/memory test: 74/74 passed'], statusUpdatedAt: '2026-07-15' },
   },
 
   {

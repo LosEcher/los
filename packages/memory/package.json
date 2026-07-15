@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
+    "benchmark:fts": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 src/fts-performance.test.ts",
     "test": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 --experimental-test-coverage src/*.test.ts",
     "clean": "rm -rf dist"
   },
