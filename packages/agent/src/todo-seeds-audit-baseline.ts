@@ -275,13 +275,28 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-3 统一 provider selection 入口（chat + scheduler 走同一条路径）',
     description: 'gateway chat (setup.ts) 与 scheduler graph (scheduler.ts) 的 provider 选择走不同路径，可能导致同一 task 选不同 provider。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-provider-policy-unify',
     dependsOnIds: ['todo-los-p1-provider-promotion-docs'],
-    metadata: { files: ['packages/agent/src/loop/setup.ts', 'packages/agent/src/scheduler/provider-selection.ts'] },
+    metadata: {
+      files: [
+        'packages/agent/src/providers/provider-policy.ts',
+        'packages/agent/src/providers/provider-policy.test.ts',
+        'packages/agent/src/loop/provider-selection.ts',
+        'packages/agent/src/loop/setup.ts',
+        'packages/agent/src/scheduler/provider-selection.ts',
+      ],
+      resolution: 'Chat setup and scheduler graph selection now call the same pure provider policy resolver.',
+      compatibilityBoundary: 'Existing compatibility evidence, required-target blocking, task metadata, and scheduler fallback precedence are preserved.',
+      validation: [
+        'provider-policy focused tests: 4/4 passed',
+        'provider routing and scheduler regression tests: 21/21 passed',
+      ],
+      statusUpdatedAt: '2026-07-15',
+    },
   },
 
   {

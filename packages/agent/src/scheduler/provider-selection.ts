@@ -1,8 +1,8 @@
 import type { AgentTaskRecord } from '../agent-task-graph.js';
 import {
   listLatestProviderCompatEvidence,
-  type ProviderCompatEvidenceRecord,
 } from '../provider-compat-evidence.js';
+import { resolveProviderModelPolicy } from '../providers/provider-policy.js';
 import { normalizeOptionalString, readBoolean, readObject } from './helpers.js';
 import type {
   GraphTaskProviderModelSelection,
@@ -20,70 +20,23 @@ export async function resolveGraphTaskProviderModelSelection(
   const requireProviderCompat = readBoolean(task.metadata.requireProviderCompat)
     ?? readBoolean(runContract.requireProviderCompat)
     ?? false;
-
-  if (targets.length > 0) {
-    const evidence = await listLatestProviderCompatEvidence();
-    const selected = selectProviderModelTargetFromEvidence(targets, evidence);
-    if (selected) {
-      return {
-        provider: selected.target.provider,
-        model: selected.target.model ?? selected.evidence.model,
-        source: 'provider_compat_evidence',
-        evidenceId: selected.evidence.id,
-        targetLabel: targetLabel(selected.target),
-        requireProviderCompat,
-        rejectedTargetLabels: targets
-          .filter(target => targetLabel(target) !== targetLabel(selected.target))
-          .map(targetLabel),
-      };
-    }
-    if (requireProviderCompat) {
-      throw new Error(`graph task ${task.id} requires passing provider compatibility evidence for targets: ${targets.map(targetLabel).join(', ')}`);
-    }
-    const fallback = targets[0];
-    return {
-      provider: fallback?.provider,
-      model: fallback?.model,
-      source: 'graph_task_target',
-      targetLabel: fallback ? targetLabel(fallback) : undefined,
-      requireProviderCompat,
-      rejectedTargetLabels: targets.slice(1).map(targetLabel),
-    };
-  }
-
   const explicit = readProviderModelTarget(task.metadata) ?? readProviderModelTarget(runContract);
-  if (explicit?.provider) {
-    return {
-      provider: explicit.provider,
-      model: explicit.model,
-      source: 'task_metadata',
-      targetLabel: targetLabel(explicit),
-      requireProviderCompat,
-    };
-  }
-
-  return {
-    provider: input.provider,
-    model: input.model,
-    source: 'scheduler_input',
-    targetLabel: targetLabel({ provider: input.provider, model: input.model }),
+  const evidence = targets.length > 0 ? await listLatestProviderCompatEvidence() : [];
+  return resolveProviderModelPolicy({
+    targets,
+    evidence,
     requireProviderCompat,
-  };
-}
-
-function selectProviderModelTargetFromEvidence(
-  targets: readonly GraphTaskRequiredProviderModelTarget[],
-  evidence: readonly ProviderCompatEvidenceRecord[],
-): { target: GraphTaskRequiredProviderModelTarget; evidence: ProviderCompatEvidenceRecord } | undefined {
-  for (const target of targets) {
-    const passed = evidence.find(item => (
-      item.passed
-      && item.provider === target.provider
-      && (!target.model || item.model === target.model)
-    ));
-    if (passed) return { target, evidence: passed };
-  }
-  return undefined;
+    explicit: explicit?.provider ? explicit : undefined,
+    fallback: { provider: input.provider, model: input.model },
+    emptyTargetLabel: 'scheduler-default',
+    contextLabel: `graph task ${task.id}`,
+    sources: {
+      evidence: 'provider_compat_evidence',
+      target: 'graph_task_target',
+      explicit: 'task_metadata',
+      fallback: 'scheduler_input',
+    },
+  });
 }
 
 function readProviderModelTargets(value: unknown): GraphTaskRequiredProviderModelTarget[] {
@@ -108,9 +61,4 @@ function readProviderModelTarget(value: unknown): GraphTaskProviderModelTarget |
   const model = normalizeOptionalString(record.model);
   if (!provider && !model) return undefined;
   return { provider, model };
-}
-
-function targetLabel(target: GraphTaskProviderModelTarget): string {
-  if (!target.provider) return target.model ? `?:${target.model}` : 'scheduler-default';
-  return target.model ? `${target.provider}:${target.model}` : target.provider;
 }
