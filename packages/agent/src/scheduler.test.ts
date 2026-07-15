@@ -344,7 +344,7 @@ test('scheduler runs a single agent task graph with conservative serial claims',
   const graphId = `graph-scheduler-serial-${suffix}`;
   const sessionId = `session-graph-scheduler-serial-${suffix}`;
   const nodeId = `test-graph-serial-executor-${suffix}`;
-  const requests: Array<{ prompt?: unknown }> = [];
+  const requests: Array<{ prompt?: unknown; config?: { identity?: unknown } }> = [];
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
@@ -417,6 +417,10 @@ test('scheduler runs a single agent task graph with conservative serial claims',
     assert.deepEqual(requests.map(request => request.prompt), [
       'plan prompt',
       'exec prompt\nPrior stage: completed plan prompt',
+    ]);
+    assert.deepEqual(requests.map(request => request.config?.identity), [
+      { name: 'default', level: 'standard' },
+      { name: 'default', level: 'standard' },
     ]);
     assert.equal(result.executedTasks[0]?.stageOutput?.outputText, 'completed plan prompt');
     assert.equal(result.executedTasks[1]?.stageOutput?.promptTokens, 0);

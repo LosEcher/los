@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { resolveIdentityLevelForExecutionPath } from './identity-loader.js';
 import { appendSessionEvent } from './session-events.js';
 import {
   claimReadyAgentTasks,
@@ -360,6 +361,10 @@ async function runClaimedAgentGraphTask(
     // identity (default). Verifier tasks are handled separately above and get none.
     const result = await runScheduledAgentTask({
       ...input,
+      identity: input.identity ?? {
+        name: 'default',
+        level: resolveIdentityLevelForExecutionPath('scheduler-graph'),
+      },
       provider: selection.provider,
       model: selection.model,
       prompt,

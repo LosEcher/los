@@ -25,6 +25,25 @@ import { join, resolve } from 'node:path';
 
 export type IdentityLevel = 'none' | 'minimal' | 'standard' | 'full';
 
+export type AgentIdentityExecutionPath =
+  | 'gateway-chat'
+  | 'child-spawned'
+  | 'remote-executor'
+  | 'scheduler-graph'
+  | 'scheduler-verifier'
+  | 'self-check-judge'
+  | 'pre-execution-phase';
+
+const IDENTITY_LEVEL_BY_EXECUTION_PATH: Readonly<Record<AgentIdentityExecutionPath, IdentityLevel>> = {
+  'gateway-chat': 'standard',
+  'child-spawned': 'minimal',
+  'remote-executor': 'minimal',
+  'scheduler-graph': 'standard',
+  'scheduler-verifier': 'none',
+  'self-check-judge': 'none',
+  'pre-execution-phase': 'minimal',
+};
+
 export interface AgentIdentity {
   name: string;
   role: string;
@@ -348,6 +367,12 @@ export function resolveEffectiveIdentityLevel(
   defaultLevel: IdentityLevel,
 ): IdentityLevel {
   return configLevel ?? defaultLevel;
+}
+
+export function resolveIdentityLevelForExecutionPath(
+  path: AgentIdentityExecutionPath,
+): IdentityLevel {
+  return IDENTITY_LEVEL_BY_EXECUTION_PATH[path];
 }
 
 // ── Prompt Formatting ──────────────────────────────────────
