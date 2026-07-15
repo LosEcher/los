@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { resolveIdentityLevelForExecutionPath } from '../../identity-loader.js';
 import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
 import type { AgentConfig, AgentResult } from '../../loop.js';
 import type { ToolRegistry, ToolResult } from './registry.js';
@@ -133,7 +134,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       // Child agents get Minimal identity: a role label only.
       // Per Agent Identity Decision Framework: short-lived, single-purpose,
       // constrained tools — identity should not consume context budget.
-      identity: { name: 'child', level: 'minimal' },
+      identity: { name: 'child', level: resolveIdentityLevelForExecutionPath('child-spawned') },
     });
 
     return {

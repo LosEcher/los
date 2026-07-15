@@ -54,3 +54,28 @@ test('persists bounded context policy evidence without prompt content', async ()
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
   }
 });
+
+test('gateway chat defaults to standard identity from the execution-path policy', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-context-identity-${suffix}`;
+
+  try {
+    const prepared = await prepareChatContextPolicy({
+      sessionId,
+      runSpecId: `run-context-identity-${suffix}`,
+      tenantId: `tenant-${suffix}`,
+      projectId: `project-${suffix}`,
+      userId: `user-${suffix}`,
+      requestId: `request-${suffix}`,
+      traceId: `trace-${suffix}`,
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+    });
+
+    assert.equal(prepared.policy.identity.level, 'standard');
+    assert.equal(prepared.policy.identity.injected, true);
+    assert.ok(prepared.systemPrompt.includes('## Identity'));
+  } finally {
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+  }
+});

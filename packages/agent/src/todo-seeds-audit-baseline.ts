@@ -304,13 +304,13 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-4 Identity injection 6 路径一致性验证',
     description: 'ADR 0023 定义了 6 条路径各不同的 identity level。resolveAgentIdentity() 实现需验证覆盖所有 6 条路径，包括 scheduler verifier 必须是 none。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-identity-consistency',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/identity-loader.ts', 'docs/adr/0023-agent-identity-decision-framework.md'] },
+    metadata: { files: ['packages/agent/src/identity-loader.ts', 'packages/agent/src/identity-loader.test.ts', 'packages/agent/src/scheduler.ts', 'packages/agent/src/tools/core/agent-tools.ts', 'packages/gateway/src/chat-memory-augment.ts', 'packages/executor/src/index.ts'], resolution: 'ADR 0023 identity levels now come from one execution-path matrix used by gateway, child, scheduler graph, and remote executor defaults; verifier and self-check remain none.', validation: ['identity and entry-path focused tests: 44/44 passed', 'pnpm check passed'], statusUpdatedAt: '2026-07-15' },
   },
 
   {

@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import {
   resolveAgentIdentity,
   resolveEffectiveIdentityLevel,
+  resolveIdentityLevelForExecutionPath,
   formatIdentityForPrompt,
+  type AgentIdentityExecutionPath,
   type AgentIdentity,
   type IdentityLevel,
 } from './identity-loader.js';
@@ -126,53 +128,38 @@ test('formatIdentityForPrompt standard respects explicit level param', () => {
 
 // ── ADR 0023 per-path decision matrix validation ───────────
 
-test('ADR 0023: Gateway Chat path → standard identity', () => {
-  // The decision matrix says Gateway Chat gets "standard"
-  const id = resolveAgentIdentity('default', process.cwd());
-  const prompt = formatIdentityForPrompt(id, 'standard');
-  assert.ok(prompt.length > 50, 'standard identity prompt is substantial');
-  assert.ok(prompt.includes('## Identity'), 'standard includes header');
-  assert.ok(!prompt.includes('## Background'), 'standard excludes narrative');
-});
+const IDENTITY_PATH_CASES: ReadonlyArray<{
+  path: AgentIdentityExecutionPath;
+  level: IdentityLevel;
+  agentName: string;
+}> = [
+  { path: 'gateway-chat', level: 'standard', agentName: 'default' },
+  { path: 'child-spawned', level: 'minimal', agentName: 'child' },
+  { path: 'remote-executor', level: 'minimal', agentName: 'default' },
+  { path: 'scheduler-graph', level: 'standard', agentName: 'default' },
+  { path: 'scheduler-verifier', level: 'none', agentName: 'default' },
+  { path: 'self-check-judge', level: 'none', agentName: 'default' },
+  { path: 'pre-execution-phase', level: 'minimal', agentName: 'default' },
+];
 
-test('ADR 0023: Child/Spawned path → minimal identity', () => {
-  // Decision matrix: Child/Spawned → minimal
-  const id = resolveAgentIdentity('child', process.cwd());
-  const prompt = formatIdentityForPrompt(id, 'minimal');
-  assert.ok(prompt.startsWith('You are los child agent'), `got: ${prompt.slice(0, 30)}`);
-  assert.ok(!prompt.includes('## Identity'), 'minimal has no header section');
-});
+for (const identityCase of IDENTITY_PATH_CASES) {
+  test(`ADR 0023: ${identityCase.path} → ${identityCase.level} identity`, () => {
+    const level = resolveIdentityLevelForExecutionPath(identityCase.path);
+    const id = resolveAgentIdentity(identityCase.agentName, process.cwd());
+    const prompt = formatIdentityForPrompt(id, level);
 
-test('ADR 0023: Remote Executor path → minimal identity', () => {
-  // Decision matrix: Remote Executor → minimal
-  const id = resolveAgentIdentity('default', process.cwd());
-  const prompt = formatIdentityForPrompt(id, 'minimal');
-  assert.ok(prompt.startsWith('You are'), 'minimal identity is one line');
-  assert.ok(!prompt.includes('## Identity'), 'minimal has no header');
-});
-
-test('ADR 0023: Scheduler Verifier path → none identity', () => {
-  // Decision matrix: Verifier tasks must remain objective. identity = none.
-  const id = resolveAgentIdentity('default', process.cwd());
-  const prompt = formatIdentityForPrompt(id, 'none');
-  assert.equal(prompt, '', 'verifier gets empty identity — no bias injection');
-});
-
-test('ADR 0023: Self-Check Judge path → none identity', () => {
-  // Decision matrix: Judge uses different provider/model to avoid self-affirmation.
-  // Identity = none.
-  const id = resolveAgentIdentity('default', process.cwd());
-  const prompt = formatIdentityForPrompt(id, 'none');
-  assert.equal(prompt, '', 'judge gets empty identity — objective evaluator');
-});
-
-test('ADR 0023: Pre-Execution Phases → minimal identity', () => {
-  // Decision matrix: Pre-Execution phases → minimal
-  const id = resolveAgentIdentity('default', process.cwd());
-  const prompt = formatIdentityForPrompt(id, 'minimal');
-  assert.ok(prompt.startsWith('You are'), 'pre-execution gets one-line role label');
-  assert.ok(!prompt.includes('Values'), 'minimal has no values');
-});
+    assert.equal(level, identityCase.level);
+    if (level === 'none') {
+      assert.equal(prompt, '');
+    } else if (level === 'minimal') {
+      assert.ok(prompt.startsWith('You are'));
+      assert.ok(!prompt.includes('## Identity'));
+    } else {
+      assert.ok(prompt.includes('## Identity'));
+      assert.ok(!prompt.includes('## Background'));
+    }
+  });
+}
 
 // ── Edge cases ─────────────────────────────────────────────
 

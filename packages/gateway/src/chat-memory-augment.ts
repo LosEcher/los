@@ -18,6 +18,7 @@ import {
 import {
   getDefaultSystemPrompt,
   resolveAgentIdentity,
+  resolveIdentityLevelForExecutionPath,
   formatIdentityForPrompt,
   type IdentityLevel,
 } from '@los/agent';
@@ -93,7 +94,7 @@ export async function augmentChatSystemPrompt(params: {
   // ── Agent identity injection (Phase 0) ─────────────────
   let identityBlock = '';
   const agentName = params.agentIdentity ?? 'default';
-  const identityLevel = params.identityLevel ?? 'standard';
+  const identityLevel = params.identityLevel ?? resolveIdentityLevelForExecutionPath('gateway-chat');
   const codeGraph = (() => {
     try {
       return getConfig().memory?.codeGraph;

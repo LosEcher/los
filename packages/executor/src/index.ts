@@ -10,6 +10,7 @@ import { getLogger } from '@los/infra/logger';
 import {
   heartbeatTaskRun,
   loadTaskRun,
+  resolveIdentityLevelForExecutionPath,
   runAgent,
   type AgentConfig,
   type AgentModelDelta,
@@ -243,6 +244,10 @@ async function runAssignedAgentTask(
     await heartbeatTaskRun(taskRunId, { nodeId, leaseMs });
     const result = await runAgent(prompt, {
       ...(body.config ?? {}),
+      identity: body.config?.identity ?? {
+        name: 'default',
+        level: resolveIdentityLevelForExecutionPath('remote-executor'),
+      },
       signal: controller.signal,
       onSessionEvent: (event) => {
         events.push(event);
