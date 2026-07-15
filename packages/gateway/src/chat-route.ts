@@ -24,6 +24,7 @@ import { getMessagePrincipal, getRequestContext } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 import type { MessageRouter } from '@los/agent/message-router';
+import { validateRunSpecRequest } from '@los/contracts/run-spec';
 
 const CHAT_BODY_LIMIT_BYTES = 1024 * 1024;
 
@@ -38,6 +39,16 @@ export function registerChatRoute(
   app.post('/chat', { bodyLimit: CHAT_BODY_LIMIT_BYTES }, async (req, reply) => {
     if (rateLimitHook) await rateLimitHook(req, reply);
     if (reply.sent) return;
+    const contractValidation = validateRunSpecRequest(req.body);
+    if (!contractValidation.success) {
+      return reply.status(400).send({
+        error: 'invalid_run_spec_request',
+        issues: contractValidation.errors.map(error => ({
+          path: error.instancePath || '/',
+          message: error.message ?? 'is invalid',
+        })),
+      });
+    }
     const body = req.body as ChatRequestBody;
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
 

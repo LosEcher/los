@@ -12,18 +12,27 @@ importers:
         specifier: ^8.5.0
         version: 8.5.0
     devDependencies:
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       turbo:
         specifier: ^2.0.0
         version: 2.9.16
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
 
   packages/agent:
     dependencies:
       '@ast-grep/napi':
         specifier: ^0.40.5
         version: 0.40.5
+      '@los/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@los/infra':
         specifier: workspace:*
         version: link:../infra
@@ -52,6 +61,25 @@ importers:
       '@los/memory':
         specifier: workspace:*
         version: link:../memory
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.4
+      tsx:
+        specifier: ^4.0.0
+        version: 4.22.3
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/contracts:
+    dependencies:
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -93,6 +121,9 @@ importers:
       '@los/agent':
         specifier: workspace:*
         version: link:../agent
+      '@los/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@los/infra':
         specifier: workspace:*
         version: link:../infra

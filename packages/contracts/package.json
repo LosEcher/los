@@ -1,0 +1,27 @@
+{
+  "name": "@los/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./run-spec": "./src/generated/run-spec.ts",
+    "./run-stream": "./src/generated/run-stream.ts"
+  },
+  "scripts": {
+    "generate": "node --import tsx ../../tools/contract-codegen.ts",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test src/*.test.ts ../../tools/contract-checker.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -26,6 +26,7 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "check:contracts": "./tools/check-contracts.sh",
+    "contracts:generate": "pnpm --filter @los/contracts generate",
     "check:bypass": "./tools/check-state-machine-bypass.sh",
     "check:migration-drift": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-migration-drift.ts",
     "check:migration-drift:update-baseline": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-migration-drift.ts --update-baseline",
@@ -40,8 +41,10 @@
     "clean": "turbo clean"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
     "turbo": "^2.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "yaml": "^2.6.0"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {

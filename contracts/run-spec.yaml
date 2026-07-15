@@ -1,11 +1,12 @@
 contract: los.run-spec
-version: 0.1.0
-status: draft
+version: 0.2.0
+status: implemented
 owner: packages/agent
 description: >
   Request contract for a los agent run. Gateway, CLI, and executor nodes use
   this shape before execution-specific callbacks are attached.
 type: object
+schemaDialect: https://json-schema.org/draft/2020-12/schema
 required:
   - prompt
 properties:
@@ -13,11 +14,9 @@ properties:
     type: string
     minLength: 1
   provider:
-    type: string
-    nullable: true
+    type: [string, "null"]
   model:
-    type: string
-    nullable: true
+    type: [string, "null"]
   workspaceRoot:
     type: string
     description: Absolute workspace path resolved by the receiving runtime.
@@ -127,7 +126,7 @@ properties:
     properties:
       mode:
         type: string
-        enum: [audit, execution, closeout, governance]
+        enum: [audit, execution, closeout, governance, feed-analysis-ingress, architect-editor]
       executionMode:
         type: string
         enum: [lightweight, standard, heavyweight]
@@ -149,8 +148,12 @@ properties:
             id: { type: string }
             title: { type: string }
             description: { type: string }
-            dependsOnIds: { type: array; items: { type: string } }
-            editableSurfaces: { type: array; items: { type: string } }
+            dependsOnIds:
+              type: array
+              items: { type: string }
+            editableSurfaces:
+              type: array
+              items: { type: string }
             completionCriteria: { type: string }
       verifications:
         type: array
@@ -158,7 +161,9 @@ properties:
           type: object
           properties:
             id: { type: string }
-            kind: { type: string; enum: [command, assertion, operator_review] }
+            kind:
+              type: string
+              enum: [command, assertion, operator_review]
             description: { type: string }
             command: { type: string }
             assertion: { type: string }
@@ -201,6 +206,7 @@ properties:
         items: { type: string }
       commitBoundary:
         type: string
+additionalProperties: true
 events:
   writes:
     - task_runs

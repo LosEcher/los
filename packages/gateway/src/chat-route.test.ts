@@ -60,6 +60,29 @@ test('chat route keeps a 1MB request body limit', async () => {
   }
 });
 
+test('chat route rejects requests that violate the generated run-spec validator', async () => {
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, {} as any, process.cwd());
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      payload: { prompt: 'invalid contract', toolMode: 'root', timeoutMs: 0 },
+    });
+
+    assert.equal(response.statusCode, 400);
+    const body = response.json();
+    assert.equal(body.error, 'invalid_run_spec_request');
+    assert.deepEqual(body.issues.map((issue: { path: string }) => issue.path).sort(), [
+      '/timeoutMs',
+      '/toolMode',
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
 test('chat route persists blocked intake before idempotency reservation', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
