@@ -70,6 +70,7 @@ export async function claimBlockedTaskRunsWithAnswer(
       started_at?: string;
       completed_at?: string;
       heartbeat_at?: string;
+      lease_version: number | string;
       lease_expires_at?: string;
       ask_message_id: string;
       answer: string;
@@ -127,6 +128,7 @@ export async function claimBlockedTaskRunsWithAnswer(
         startedAt: r.started_at,
         completedAt: r.completed_at,
         heartbeatAt: r.heartbeat_at,
+        leaseVersion: Number(r.lease_version ?? 0),
         leaseExpiresAt: r.lease_expires_at,
       },
       askMessageId: r.ask_message_id,

@@ -13,6 +13,7 @@ import type {
   AgentTaskAttemptStatus,
   AgentTaskEdgeRecord,
   AgentTaskRecord,
+  AgentTaskLeaseFence,
   AgentTaskRole,
   AgentTaskStatus,
   ClaimReadyAgentTasksInput,
@@ -51,6 +52,7 @@ export type {
   AgentTaskAttemptStatus,
   AgentTaskEdgeRecord,
   AgentTaskRecord,
+  AgentTaskLeaseFence,
   AgentTaskRole,
   AgentTaskStatus,
   ClaimReadyAgentTasksInput,
@@ -76,6 +78,7 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   max_attempts INTEGER NOT NULL DEFAULT 1,
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   claimed_by_node_id TEXT,
+  lease_version BIGINT NOT NULL DEFAULT 0,
   lease_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -120,6 +123,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_tasks_lease ON agent_tasks(status, lease_ex
 CREATE INDEX IF NOT EXISTS idx_task_edges_graph_task ON task_edges(graph_id, task_id);
 CREATE INDEX IF NOT EXISTS idx_task_edges_graph_depends ON task_edges(graph_id, depends_on_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(graph_id, task_id, attempt);
+
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS lease_version BIGINT NOT NULL DEFAULT 0;
 `;
 
 let _initialized = false;
@@ -264,6 +269,7 @@ export async function claimReadyAgentTasks(input: ClaimReadyAgentTasksInput): Pr
         UPDATE agent_tasks task
         SET status = 'running',
             claimed_by_node_id = $3,
+            lease_version = lease_version + 1,
             lease_expires_at = now() + ($4::text || ' milliseconds')::interval,
             started_at = COALESCE(started_at, now()),
             updated_at = now()
@@ -299,6 +305,7 @@ export async function updateAgentTaskStatus(
   id: string,
   status: AgentTaskStatus,
   metadata?: Record<string, unknown>,
+  fence?: AgentTaskLeaseFence,
 ): Promise<AgentTaskRecord | null> {
   await ensureAgentTaskGraphStore();
   const db = getDb();
@@ -308,12 +315,51 @@ export async function updateAgentTaskStatus(
     SET status = $2,
         metadata_json = CASE WHEN $3::jsonb IS NULL THEN metadata_json ELSE metadata_json || $3::jsonb END,
         completed_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN now() ELSE completed_at END,
-        lease_expires_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled', 'blocked') THEN NULL ELSE lease_expires_at END,
+        claimed_by_node_id = CASE WHEN $2 IN ('queued', 'succeeded', 'failed', 'cancelled', 'blocked') THEN NULL ELSE claimed_by_node_id END,
+        lease_expires_at = CASE WHEN $2 IN ('queued', 'succeeded', 'failed', 'cancelled', 'blocked') THEN NULL ELSE lease_expires_at END,
         updated_at = now()
     WHERE id = $1
+      AND (
+        $4::text IS NULL
+        OR (
+          claimed_by_node_id = $4
+          AND lease_version = $5
+          AND lease_expires_at > now()
+        )
+      )
     RETURNING *
   `,
-    [id, normalizeTaskStatus(status), metadata ? JSON.stringify(metadata) : null],
+    [
+      id,
+      normalizeTaskStatus(status),
+      metadata ? JSON.stringify(metadata) : null,
+      fence?.nodeId ?? null,
+      fence?.leaseVersion ?? null,
+    ],
+  );
+  return rows.rows[0] ? rowToTask(rows.rows[0]) : null;
+}
+
+export async function claimBlockedAgentTask(
+  id: string,
+  input: { nodeId: string; leaseMs?: number },
+): Promise<AgentTaskRecord | null> {
+  await ensureAgentTaskGraphStore();
+  const leaseMs = Math.max(1_000, Math.min(86_400_000, Math.floor(input.leaseMs ?? 30_000)));
+  const rows = await getDb().query<AgentTaskRow>(
+    `
+    UPDATE agent_tasks
+    SET status = 'running',
+        claimed_by_node_id = $2,
+        lease_version = lease_version + 1,
+        lease_expires_at = now() + ($3::text || ' milliseconds')::interval,
+        completed_at = NULL,
+        updated_at = now()
+    WHERE id = $1
+      AND status = 'blocked'
+    RETURNING *
+  `,
+    [id, input.nodeId, leaseMs],
   );
   return rows.rows[0] ? rowToTask(rows.rows[0]) : null;
 }
@@ -377,13 +423,6 @@ export async function listAgentTasksForGraph(graphId: string): Promise<AgentTask
     [graphId],
   );
   return rows.rows.map(rowToTask);
-}
-
-export async function loadAgentTask(taskId: string): Promise<AgentTaskRecord | null> {
-  await ensureAgentTaskGraphStore();
-  const db = getDb();
-  const rows = await db.query<AgentTaskRow>('SELECT * FROM agent_tasks WHERE id = $1', [taskId]);
-  return rows.rows[0] ? rowToTask(rows.rows[0]) : null;
 }
 
 export async function listAgentTasksForRunSpec(runSpecId: string): Promise<AgentTaskRecord[]> {
@@ -452,4 +491,3 @@ export async function listAgentTaskAttempts(taskId: string): Promise<AgentTaskAt
 
 
 export { rowToTask, type AgentTaskRow } from './agent-task-graph/rows.js';
-

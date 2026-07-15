@@ -4,7 +4,7 @@ import { resolveCoordinationBackend } from '../coordination/resolve.js';
 
 export async function heartbeatAgentTask(
   id: string,
-  input: { nodeId?: string; leaseMs?: number } = {},
+  input: { nodeId: string; leaseVersion: number; leaseMs?: number },
 ): Promise<AgentTaskRecord | null> {
   await ensureAgentTaskGraphStore();
   const db = getDb();
@@ -12,37 +12,23 @@ export async function heartbeatAgentTask(
   const rows = await db.query<AgentTaskRow>(
     `
     UPDATE agent_tasks
-    SET claimed_by_node_id = COALESCE($2, claimed_by_node_id),
-        lease_expires_at = now() + ($3::text || ' milliseconds')::interval,
+    SET lease_expires_at = now() + ($4::text || ' milliseconds')::interval,
         updated_at = now()
     WHERE id = $1
       AND status = 'running'
+      AND claimed_by_node_id = $2
+      AND lease_version = $3
+      AND lease_expires_at > now()
     RETURNING *
   `,
-    [id, input.nodeId ?? null, leaseMs],
+    [id, input.nodeId, input.leaseVersion, leaseMs],
   );
   return rows.rows[0] ? rowToTask(rows.rows[0]) : null;
 }
 
 export async function recoverExpiredAgentTasks(reason = 'lease_expired'): Promise<AgentTaskRecord[]> {
   await ensureAgentTaskGraphStore();
-  const db = getDb();
-  const rows = await db.query<AgentTaskRow>(
-    `
-    UPDATE agent_tasks
-    SET status = 'queued',
-        claimed_by_node_id = NULL,
-        lease_expires_at = NULL,
-        metadata_json = metadata_json || $1::jsonb,
-        updated_at = now()
-    WHERE status = 'running'
-      AND lease_expires_at IS NOT NULL
-      AND lease_expires_at < now()
-    RETURNING *
-  `,
-    [JSON.stringify({ recoveryReason: reason })],
-  );
-  return rows.rows.map(rowToTask);
+  return recoverExpiredAgentTaskRows(reason);
 }
 
 export async function recoverExpiredAgentTasksWithAdvisoryLock(
@@ -50,27 +36,44 @@ export async function recoverExpiredAgentTasksWithAdvisoryLock(
 ): Promise<{ lockAcquired: boolean; recovered: AgentTaskRecord[] }> {
   await ensureAgentTaskGraphStore();
   const backend = await resolveCoordinationBackend();
-  const result = await backend.lock.withLock('agent-task-recovery', async () => {
-    const db = getDb();
-    const rows = await db.query<AgentTaskRow>(
-      `
-      UPDATE agent_tasks
-      SET status = 'queued',
-          claimed_by_node_id = NULL,
-          lease_expires_at = NULL,
-          metadata_json = metadata_json || $1::jsonb,
-          updated_at = now()
-      WHERE status = 'running'
-        AND lease_expires_at IS NOT NULL
-        AND lease_expires_at < now()
-      RETURNING *
-    `,
-      [JSON.stringify({ recoveryReason: reason })],
-    );
-    return rows.rows.map(rowToTask);
-  });
+  const result = await backend.lock.withLock(
+    'agent-task-recovery',
+    () => recoverExpiredAgentTaskRows(reason),
+  );
   if (result === null) {
     return { lockAcquired: false, recovered: [] };
   }
   return { lockAcquired: true, recovered: result };
+}
+
+async function recoverExpiredAgentTaskRows(reason: string): Promise<AgentTaskRecord[]> {
+  const rows = await getDb().query<AgentTaskRow>(
+    `
+    WITH expired AS (
+      SELECT task.id,
+             (SELECT count(*)::integer FROM task_attempts attempt WHERE attempt.task_id = task.id) AS attempt_count
+      FROM agent_tasks task
+      WHERE task.status = 'running'
+        AND task.lease_expires_at IS NOT NULL
+        AND task.lease_expires_at < now()
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE agent_tasks task
+    SET status = CASE WHEN expired.attempt_count >= task.max_attempts THEN 'failed' ELSE 'queued' END,
+        claimed_by_node_id = NULL,
+        lease_expires_at = NULL,
+        completed_at = CASE WHEN expired.attempt_count >= task.max_attempts THEN now() ELSE NULL END,
+        metadata_json = metadata_json || jsonb_build_object(
+          'recoveryReason', $1::text,
+          'leaseRecoveryExhausted', expired.attempt_count >= task.max_attempts,
+          'recoveredAttemptCount', expired.attempt_count
+        ),
+        updated_at = now()
+    FROM expired
+    WHERE task.id = expired.id
+    RETURNING task.*
+  `,
+    [reason],
+  );
+  return rows.rows.map(rowToTask);
 }

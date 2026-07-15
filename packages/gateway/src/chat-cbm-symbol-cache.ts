@@ -247,6 +247,10 @@ export function getSymbolCacheMetrics(): SymbolCacheMetrics {
   return sessionCache.metrics();
 }
 
+export function sweepSymbolCache(): number {
+  return sessionCache.sweepExpired();
+}
+
 function extractEditedPaths(tool: string, args: Record<string, unknown>): string[] {
   const paths: string[] = [];
   if ((tool === 'multi_edit' || tool === 'write_edits') && Array.isArray(args.files)) {

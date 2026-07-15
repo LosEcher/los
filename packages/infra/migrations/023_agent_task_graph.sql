@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   max_attempts INTEGER NOT NULL DEFAULT 1,
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   claimed_by_node_id TEXT,
+  lease_version BIGINT NOT NULL DEFAULT 0,
   lease_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

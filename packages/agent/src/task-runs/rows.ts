@@ -25,6 +25,7 @@ export type TaskRunRow = {
   started_at: Date | string | null;
   completed_at: Date | string | null;
   heartbeat_at: Date | string | null;
+  lease_version: number | string;
   lease_expires_at: Date | string | null;
 };
 
@@ -53,6 +54,7 @@ export function rowToTaskRun(row: TaskRunRow): TaskRunRecord {
     startedAt: row.started_at ? toIsoString(row.started_at) : undefined,
     completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
     heartbeatAt: row.heartbeat_at ? toIsoString(row.heartbeat_at) : undefined,
+    leaseVersion: Number(row.lease_version ?? 0),
     leaseExpiresAt: row.lease_expires_at ? toIsoString(row.lease_expires_at) : undefined,
   };
 }

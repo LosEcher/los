@@ -77,6 +77,7 @@ async function _transitionRunSpecPhase(input: TransitionRunSpecPhaseInput): Prom
         entityType: 'run_spec',
         entityId: input.runSpecId,
         eventType,
+        sessionEventId: event.id,
         payload,
       });
       await client.query('COMMIT');

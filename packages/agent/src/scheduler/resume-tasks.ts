@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { transitionExecutionState } from '../execution-store.js';
 import {
   listAgentTasksForRunSpec,
-  loadAgentTask,
+  claimBlockedAgentTask,
   updateAgentTaskStatus,
   createAgentTaskAttempt,
   listAgentTaskAttempts,
@@ -76,20 +76,16 @@ export async function resumeBlockedTaskRunsWithAnswers(
       reason: 'resumed_with_answer',
     }).catch(() => undefined);
 
-    // 2. transition agent_task blocked → running so graph completion does
-    //    NOT report the graph as blocked while resume is in-flight. This
-    //    mirrors runClaimedAgentGraphTask which sets running before the
-    //    dispatch. If this fails (rare, e.g. DB error), leave the task as-is
-    //    — consumed_at is already set, so we still reach the stage 3 results.
-    if (agentTaskId) {
-      await updateAgentTaskStatus(agentTaskId, 'running', {
-        dispatchId,
-        resumedFromTaskRunId: taskRun.id,
-      }).catch(() => undefined);
-    }
+    // 2. claim the blocked agent_task with a fresh fencing token.
+    const dispatchNodeId = input.nodeId ?? input.executor?.nodeId ?? 'gateway-local';
+    const agentTask = agentTaskId
+      ? await claimBlockedAgentTask(agentTaskId, {
+          nodeId: dispatchNodeId,
+          leaseMs: input.executor?.leaseMs,
+        })
+      : null;
 
-    // 3. load the agent_task for prompt + lineage
-    const agentTask = agentTaskId ? await loadAgentTask(agentTaskId) : null;
+    // 3. recover prompt + lineage from the claimed task.
     const prompt = agentTask?.prompt ?? agentTask?.title ?? taskRun.promptPreview;
     if (!prompt || !agentTask) {
       // Cannot rebuild the execution without the prompt — transition the
@@ -99,7 +95,10 @@ export async function resumeBlockedTaskRunsWithAnswers(
         await updateAgentTaskStatus(agentTaskId, 'blocked', {
           error: 'resume_failed: missing prompt or agent_task',
           dispatchId,
-        }).catch(() => undefined);
+        }, agentTask ? {
+          nodeId: dispatchNodeId,
+          leaseVersion: agentTask.leaseVersion,
+        } : undefined).catch(() => undefined);
       }
       results.push({
         taskId: agentTaskId ?? taskRun.id,
@@ -119,7 +118,6 @@ export async function resumeBlockedTaskRunsWithAnswers(
     const attempts = await listAgentTaskAttempts(agentTask.id);
     const attemptNumber = attempts.length + 1;
     const resumeAttemptId = `${agentTask.id}-attempt-${attemptNumber}-${randomUUID()}`;
-    const dispatchNodeId = input.nodeId ?? input.executor?.nodeId;
     await createAgentTaskAttempt({
       id: resumeAttemptId,
       graphId: agentTask.graphId,
@@ -152,6 +150,8 @@ export async function resumeBlockedTaskRunsWithAnswers(
         provider: provider ?? input.provider,
         model: model ?? input.model,
         executor: input.executor,
+        leaseVersion: agentTask.leaseVersion,
+        agentTaskLease: { taskId: agentTask.id, leaseVersion: agentTask.leaseVersion },
         mcpServers: input.mcpServers,
         allowedTools: input.allowedTools,
         identity: input.identity,
@@ -181,6 +181,9 @@ export async function resumeBlockedTaskRunsWithAnswers(
         dispatchId: resumeAttemptId,
         resumedFromTaskRunId: taskRun.id,
         error: msg,
+      }, {
+        nodeId: dispatchNodeId,
+        leaseVersion: agentTask.leaseVersion,
       }).catch(() => undefined);
       await createAgentTaskAttempt({
         id: resumeAttemptId,
@@ -237,6 +240,9 @@ export async function resumeBlockedTaskRunsWithAnswers(
       resumedAskQuestion: question,
       ...('reason' in result && result.status === 'cancelled' ? { cancelReason: result.reason } : {}),
       ...('reason' in result && result.status === 'blocked' ? { blockReason: result.reason } : {}),
+    }, {
+      nodeId: dispatchNodeId,
+      leaseVersion: agentTask.leaseVersion,
     }).catch(() => undefined);
 
     // 7. finalize the attempt with the real taskRunId and terminal status.

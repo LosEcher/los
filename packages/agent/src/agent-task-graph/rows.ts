@@ -25,6 +25,7 @@ export type AgentTaskRow = {
   max_attempts: number;
   metadata_json: unknown;
   claimed_by_node_id: string | null;
+  lease_version: number | string;
   lease_expires_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -78,6 +79,7 @@ export function rowToTask(row: AgentTaskRow): AgentTaskRecord {
     maxAttempts: row.max_attempts,
     metadata: normalizeJsonObject(row.metadata_json),
     claimedByNodeId: row.claimed_by_node_id ?? undefined,
+    leaseVersion: Number(row.lease_version ?? 0),
     leaseExpiresAt: row.lease_expires_at ? toIsoString(row.lease_expires_at) : undefined,
     startedAt: row.started_at ? toIsoString(row.started_at) : undefined,
     completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,

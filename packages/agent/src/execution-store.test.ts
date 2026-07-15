@@ -60,11 +60,18 @@ test('execution store transitions state and writes event plus outbox in one comm
     const stored = await loadRunSpec(runSpecId);
     assert.equal(stored?.status, 'running');
 
-    const outbox = await getDb().query<{ payload_json: Record<string, unknown>; event_type: string }>(
-      'SELECT event_type, payload_json FROM execution_outbox WHERE id = $1',
+    const outbox = await getDb().query<{
+      payload_json: Record<string, unknown>;
+      event_type: string;
+      session_event_id: string | number | null;
+      legacy: boolean;
+    }>(
+      'SELECT event_type, session_event_id, payload_json, legacy FROM execution_outbox WHERE id = $1',
       [result.outboxId],
     );
     assert.equal(outbox.rows[0]?.event_type, 'run_spec.running');
+    assert.equal(Number(outbox.rows[0]?.session_event_id), result.event.id);
+    assert.equal(outbox.rows[0]?.legacy, false);
     assert.deepEqual(outbox.rows[0]?.payload_json, result.event.payload);
   } finally {
     await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);

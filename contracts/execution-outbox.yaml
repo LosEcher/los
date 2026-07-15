@@ -1,0 +1,54 @@
+contract: los.execution-outbox
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  At-least-once PostgreSQL notification delivery for execution session events.
+  session_events remains the durable replay source; this outbox only wakes
+  cross-gateway consumers.
+type: object
+sourceOfTruth:
+  - execution_outbox
+  - session_events
+delivery:
+  guarantee: at_least_once
+  transport: postgres_notify
+  channel: session_events
+  cursorField: session_event_id
+  duplicatePolicy: consumers_deduplicate_by_session_event_cursor
+claim:
+  ordering:
+    - next_attempt_at ascending
+    - id ascending
+  concurrency: FOR UPDATE SKIP LOCKED
+  fields:
+    - claimed_by
+    - claimed_at
+    - attempts
+  expiry: stale claims become eligible after claim TTL
+retry:
+  strategy: bounded_exponential_backoff
+  fields:
+    - next_attempt_at
+    - last_error
+history:
+  watermark: migration_035_boundary
+  legacyField: legacy
+  behavior: legacy rows remain queryable and are never published
+health:
+  fields:
+    - pendingCount
+    - claimedCount
+    - legacyCount
+    - oldestPendingAt
+    - oldestPendingAgeMs
+    - legacyThroughId
+rules:
+  - execution state, session event, and outbox insert remain one transaction
+  - publisher failure never rolls back an already committed execution transition
+  - publisher claims exclude published and legacy rows
+  - duplicate notifications are allowed and must be cursor-idempotent
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test

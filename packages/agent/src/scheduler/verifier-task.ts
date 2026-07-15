@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
   createAgentTaskAttempt,
+  heartbeatAgentTask,
   listAgentTaskAttempts,
   updateAgentTaskStatus,
   type AgentTaskAttemptStatus,
   type AgentTaskRecord,
 } from '../agent-task-graph.js';
+import { _LeaseLostError } from '../execution-store.js';
 import {
   runVerificationRecordsForRunSpec,
   type RunVerificationRecordsForRunSpecResult,
@@ -24,6 +26,29 @@ export async function runClaimedVerifierGraphTask(
   const nodeId = normalizeOptionalString(input.nodeId)
     ?? normalizeOptionalString(input.executor?.nodeId)
     ?? 'gateway-local';
+  const leaseMs = input.executor?.leaseMs ?? 30_000;
+  const heartbeatMs = input.executor?.heartbeatMs ?? Math.max(1_000, Math.floor(leaseMs / 3));
+  let renewing = false;
+  let leaseLost = false;
+  const renew = async () => {
+    if (renewing || leaseLost) return;
+    renewing = true;
+    try {
+      const heartbeat = await heartbeatAgentTask(task.id, {
+        nodeId,
+        leaseVersion: task.leaseVersion,
+        leaseMs,
+      });
+      if (!heartbeat) leaseLost = true;
+    } catch {
+      leaseLost = true;
+    } finally {
+      renewing = false;
+    }
+  };
+  const interval = setInterval(() => void renew(), heartbeatMs);
+  (interval as { unref?: () => void }).unref?.();
+  void renew();
 
   await createAgentTaskAttempt({
     id: attemptId,
@@ -60,7 +85,11 @@ export async function runClaimedVerifierGraphTask(
       outputSummary,
     };
 
-    await updateAgentTaskStatus(task.id, status, metadata);
+    const updated = await updateAgentTaskStatus(task.id, status, metadata, {
+      nodeId,
+      leaseVersion: task.leaseVersion,
+    });
+    if (!updated || leaseLost) throw new _LeaseLostError('agent_task', task.id);
     await createAgentTaskAttempt({
       id: attemptId,
       graphId: task.graphId,
@@ -80,10 +109,14 @@ export async function runClaimedVerifierGraphTask(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await updateAgentTaskStatus(task.id, 'failed', {
+    const failed = await updateAgentTaskStatus(task.id, 'failed', {
       attemptId,
       error: message,
+    }, {
+      nodeId,
+      leaseVersion: task.leaseVersion,
     });
+    if (!failed) throw new _LeaseLostError('agent_task', task.id);
     await createAgentTaskAttempt({
       id: attemptId,
       graphId: task.graphId,
@@ -94,6 +127,8 @@ export async function runClaimedVerifierGraphTask(
       error: message,
     });
     return { taskId: task.id, attemptId, status: 'failed' };
+  } finally {
+    clearInterval(interval);
   }
 }
 

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   heartbeat_at TIMESTAMPTZ,
+  lease_version BIGINT NOT NULL DEFAULT 0,
   lease_expires_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_active_dedupe ON task_runs(dedupe_key) WHERE dedupe_key IS NOT NULL AND status = ANY (ARRAY['queued', 'running']);

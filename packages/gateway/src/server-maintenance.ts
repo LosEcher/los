@@ -12,6 +12,11 @@ import { listExecutorNodes, markStaleExecutorNodesOffline } from '@los/agent/exe
 import { markStaleServiceInstancesOffline } from '@los/agent/service-instances';
 import { resolveCoordinationBackend } from '@los/agent/coordination';
 import { processDueFeedAnalysisCallbacks, pruneExpiredFeedAnalysisMaterial } from '@los/agent';
+import { publishExecutionOutboxBatch } from '@los/agent/execution-outbox';
+import { reapExpiredExecutionLeases } from './execution-lease-reaper.js';
+import { sweepSymbolCache } from './chat-cbm-symbol-cache.js';
+
+export { reapExpiredExecutionLeases };
 
 const log = getLogger('gateway');
 
@@ -32,6 +37,51 @@ export function registerServerMaintenance(
     }).catch((err) => log.warn(`Orphan reaper failed: ${err.message ?? String(err)}`));
   }, ORPHAN_REAPER_MS);
   app.addHook('onClose', async () => clearInterval(orphanReaper));
+
+  // ── Execution outbox publisher (1s) ────────────────────────
+  const OUTBOX_POLL_MS = 1_000;
+  let outboxPublishing = false;
+  const publishExecutionOutbox = async () => {
+    if (outboxPublishing) return;
+    outboxPublishing = true;
+    try {
+      const result = await publishExecutionOutboxBatch({ ownerId: service.serviceId });
+      if (result.claimed > 0) {
+        log.info(
+          `Execution outbox: claimed=${result.claimed}, published=${result.published}, retried=${result.retried}`,
+        );
+      }
+    } catch (error) {
+      log.warn(`Execution outbox publisher failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      outboxPublishing = false;
+    }
+  };
+  const outboxTimeout = setTimeout(publishExecutionOutbox, 100);
+  const outboxTimer = setInterval(publishExecutionOutbox, OUTBOX_POLL_MS);
+  app.addHook('onClose', async () => {
+    clearTimeout(outboxTimeout);
+    clearInterval(outboxTimer);
+  });
+
+  const symbolCacheSweep = setInterval(() => sweepSymbolCache(), 60_000);
+  app.addHook('onClose', async () => clearInterval(symbolCacheSweep));
+
+  // ── Execution lease reaper (30s) ─────────────────────────────
+  const reapExecutionLeases = () => reapExpiredExecutionLeases('gateway_periodic_reaper')
+    .then((result) => {
+      if (result.taskRuns > 0 || result.agentTasks > 0) {
+        log.info(
+          `Execution lease reaper: taskRuns=${result.taskRuns}, ` +
+          `agentTasks=${result.agentTasks}, exhaustedAgentTasks=${result.exhaustedAgentTasks}`,
+        );
+      }
+    })
+    .catch((error) => log.warn(
+      `Execution lease reaper failed: ${error instanceof Error ? error.message : String(error)}`,
+    ));
+  const executionLeaseReaper = setInterval(reapExecutionLeases, ORPHAN_REAPER_MS);
+  app.addHook('onClose', async () => clearInterval(executionLeaseReaper));
 
   // ── Feed-analysis callback delivery outbox ────────────────
   const callbackPollMs = config.integrations.feedAnalysis.callbackPollMs;

@@ -6,7 +6,7 @@ import { readRunContractMetadata } from './run-contract.js';
 import { normalizeJsonObject } from './executor-node-utils.js';
 
 export type TransactionClient = {
-  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[]; rowCount?: number | null }>;
 };
 
 const EXECUTION_OUTBOX_SCHEMA = `
@@ -17,13 +17,33 @@ CREATE TABLE IF NOT EXISTS execution_outbox (
   entity_type TEXT NOT NULL,
   entity_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
+  session_event_id BIGINT,
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_error TEXT,
+  claimed_by TEXT,
+  claimed_at TIMESTAMPTZ,
+  legacy BOOLEAN NOT NULL DEFAULT FALSE,
   published_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_unpublished ON execution_outbox(created_at, id)
-  WHERE published_at IS NULL;
+ALTER TABLE execution_outbox
+  ADD COLUMN IF NOT EXISTS session_event_id BIGINT,
+  ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS last_error TEXT,
+  ADD COLUMN IF NOT EXISTS claimed_by TEXT,
+  ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS legacy BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE execution_outbox ALTER COLUMN legacy SET DEFAULT FALSE;
+
+DROP INDEX IF EXISTS idx_execution_outbox_unpublished;
+CREATE INDEX idx_execution_outbox_unpublished ON execution_outbox(next_attempt_at, id)
+  WHERE published_at IS NULL AND legacy = FALSE;
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_claim ON execution_outbox(claimed_at, id)
+  WHERE published_at IS NULL AND legacy = FALSE;
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_session ON execution_outbox(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_run_spec ON execution_outbox(run_spec_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_entity ON execution_outbox(entity_type, entity_id, id);
@@ -132,9 +152,9 @@ export async function loadExecutionEntity<T extends ExecutionEntityType>(
 
 export async function updateExecutionEntity<T extends ExecutionEntityType>(
   client: TransactionClient,
-  input: { entityType: T; entityId: string; to: ExecutionStateByEntity[T]; sessionId?: string; nodeId?: string; attempt?: number },
+  input: { entityType: T; entityId: string; to: ExecutionStateByEntity[T]; sessionId?: string; nodeId?: string; attempt?: number; leaseVersion?: number; leaseCondition?: 'active' | 'expired' },
   entity: ExecutionEntityContext,
-): Promise<RunContractMetadata | undefined> {
+): Promise<{ updated: boolean; contract?: RunContractMetadata }> {
   switch (input.entityType) {
     case 'run_spec': {
       const synchronized = synchronizeRunContractPhase(entity.contract, input.to as string);
@@ -146,17 +166,33 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
          WHERE id = $1`,
         [input.entityId, input.to, synchronized.patch ? JSON.stringify(synchronized.patch) : null],
       );
-      return synchronized.contract;
+      return { updated: true, contract: synchronized.contract };
     }
-    case 'task_run':
-      await client.query(`
+    case 'task_run': {
+      const rows = await client.query<{ id: string }>(`
         UPDATE task_runs SET status = $2, node_id = COALESCE($3, node_id), updated_at = now(),
           started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN now() ELSE started_at END,
           completed_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN now() ELSE completed_at END,
           lease_expires_at = CASE WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN NULL ELSE lease_expires_at END
         WHERE id = $1
-      `, [input.entityId, input.to, input.nodeId ?? entity.nodeId ?? null]);
-      return undefined;
+          AND ($4::bigint IS NULL OR (
+            node_id = $3
+            AND lease_version = $4
+            AND CASE WHEN $5 = 'expired'
+              THEN lease_expires_at <= now()
+              ELSE lease_expires_at > now()
+            END
+          ))
+        RETURNING id
+      `, [
+        input.entityId,
+        input.to,
+        input.nodeId ?? entity.nodeId ?? null,
+        input.leaseVersion ?? null,
+        input.leaseCondition ?? 'active',
+      ]);
+      return { updated: rows.rows.length === 1 };
+    }
     case 'tool_call_state':
       await client.query(`
         UPDATE tool_call_states SET state = $3, attempt = COALESCE($4, attempt),
@@ -165,7 +201,7 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
           updated_at = now()
         WHERE id = $1 AND session_id = $2
       `, [input.entityId, input.sessionId, input.to, input.attempt ?? null]);
-      return undefined;
+      return { updated: true };
     case 'verification_record':
       await client.query(`
         UPDATE verification_records SET status = $2,
@@ -174,7 +210,7 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
           updated_at = now()
         WHERE id = $1
       `, [input.entityId, input.to]);
-      return undefined;
+      return { updated: true };
     default:
       throw new Error(`Unknown execution entity type: ${input.entityType}`);
   }
@@ -220,12 +256,22 @@ export async function insertSessionEvent(client: TransactionClient, input: {
 
 export async function insertExecutionOutbox(client: TransactionClient, input: {
   sessionId: string; runSpecId?: string; entityType: ExecutionEntityType;
-  entityId: string; eventType: string; payload: Record<string, unknown>;
+  entityId: string; eventType: string; sessionEventId: number; payload: Record<string, unknown>;
 }): Promise<number> {
   const rows = await client.query<{ id: string | number }>(`
-    INSERT INTO execution_outbox (session_id, run_spec_id, entity_type, entity_id, event_type, payload_json)
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING id
-  `, [input.sessionId, input.runSpecId ?? null, input.entityType, input.entityId, input.eventType, JSON.stringify(input.payload)]);
+    INSERT INTO execution_outbox (
+      session_id, run_spec_id, entity_type, entity_id, event_type, session_event_id, payload_json
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING id
+  `, [
+    input.sessionId,
+    input.runSpecId ?? null,
+    input.entityType,
+    input.entityId,
+    input.eventType,
+    input.sessionEventId,
+    JSON.stringify(input.payload),
+  ]);
   const id = rows.rows[0]?.id;
   if (id === undefined) throw new Error('Failed to insert execution outbox event');
   return Number(id);

@@ -26,6 +26,7 @@ export async function maybeQueueRecoveryFollowUp(input: {
   nodeId: string;
   selection: GraphTaskProviderModelSelection;
   outputSummary: string;
+  leaseFence: { nodeId: string; leaseVersion: number };
 }): Promise<RunAgentTaskGraphSerialResult['executedTasks'][number] | undefined> {
   if (input.attempt >= input.task.maxAttempts) return undefined;
 
@@ -40,14 +41,15 @@ export async function maybeQueueRecoveryFollowUp(input: {
 
   await markToolStatesRetrying(followUpToolStates);
   const error = summarizeRecoveryFollowUp(recovery, input.attempt + 1, input.task.maxAttempts);
-  await updateAgentTaskStatus(input.task.id, 'queued', {
+  const requeued = await updateAgentTaskStatus(input.task.id, 'queued', {
     taskRunId: input.taskRunId,
     attemptId: input.attemptId,
     recoveryRecommendation: recovery.recommendation,
     recoveryFollowUpQueued: true,
     recoveryToolCallIds: followUpToolCallIds,
     recoveryReasons: recovery.reasons,
-  });
+  }, input.leaseFence);
+  if (!requeued) throw new Error(`agent_task ${input.task.id} lease lost`);
   await createAgentTaskAttempt({
     id: input.attemptId,
     graphId: input.task.graphId,

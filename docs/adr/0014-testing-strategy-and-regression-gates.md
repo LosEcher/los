@@ -86,6 +86,12 @@ Current non-test gates:
 4. `packages/agent/src/compat-harness.ts` and `los compat` provide a model and
    provider comparison surface. T-6 verified DeepSeek
    `deepseek-v4-flash/read-context` as the current executable runtime gate.
+5. `packages/gateway/src/execution-reliability.test.ts` is the DB-backed
+   composite reliability harness. It exercises two gateway owners, a task that
+   outlives its initial lease through dual renewal, stale outbox-claim recovery,
+   notification retry, concurrent publisher/reaper exclusion, crash recovery,
+   and stale-owner fencing. It does not replace a live load-balancer or
+   process-kill operation smoke.
 
 ## Decision
 

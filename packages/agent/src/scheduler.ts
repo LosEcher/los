@@ -12,12 +12,10 @@ import {
   claimReadyAgentTasks,
   createAgentTaskAttempt,
   ensureAgentTaskGraphStore,
-  heartbeatAgentTask,
   listAgentTaskAttempts,
   updateAgentTaskStatus,
   type AgentTaskRecord,
 } from './agent-task-graph.js';
-import { startTaskHeartbeat } from './scheduler/task-heartbeat.js';
 import { resumeBlockedTaskRunsWithAnswers } from './scheduler/resume-tasks.js';
 import {
   getAgentTaskGraphCompletion,
@@ -27,7 +25,7 @@ import {
   readToolCallRecoveryForRunSpec,
   type ToolCallRecoveryDecision,
 } from './tool-call-recovery.js';
-import { _RunSuccessGateError, transitionExecutionState } from './execution-store.js';
+import { _LeaseLostError, _RunSuccessGateError, transitionExecutionState } from './execution-store.js';
 import { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 import { type RunSpecStatus } from './run-specs.js';
 import { cancelScheduledTask } from './scheduler/abort-registry.js';
@@ -261,6 +259,7 @@ async function runClaimedAgentGraphTask(
   const nodeId = normalizeOptionalString(input.nodeId)
     ?? normalizeOptionalString(input.executor?.nodeId)
     ?? 'gateway-local';
+  const leaseFence = { nodeId, leaseVersion: task.leaseVersion };
   let selection: GraphTaskProviderModelSelection;
 
   try {
@@ -283,7 +282,7 @@ async function runClaimedAgentGraphTask(
         taskMetadata: task.metadata,
       },
     });
-    await updateAgentTaskStatus(task.id, 'failed', {
+    await updateClaimedAgentTaskStatus(task, nodeId, 'failed', {
       attemptId,
       error: message,
       providerModelSelection: { error: message },
@@ -343,16 +342,6 @@ async function runClaimedAgentGraphTask(
     taskRunId,
   });
 
-  // Heartbeat the task_runs lease so it doesn't expire during execution. The
-  // task_runs row is keyed by `taskRunId` (not task.id, which is the agent-task
-  // id) — passing task.id here would UPDATE zero rows and let the lease lapse.
-  const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
-  const heartbeatMs = Math.max(1_000, Math.floor(leaseMs / 3));
-  const stopTaskHeartbeat = startTaskHeartbeat(taskRunId, nodeId, leaseMs, heartbeatMs, {
-    dispatchId: attemptId,
-    taskId: task.id,
-  });
-
   try {
     const prompt = input.resolveTaskPrompt
       ? await input.resolveTaskPrompt(task, completedStages)
@@ -370,6 +359,8 @@ async function runClaimedAgentGraphTask(
       prompt,
       promptPreview: task.title,
       taskRunId,
+      leaseVersion: task.leaseVersion,
+      agentTaskLease: { taskId: task.id, leaseVersion: task.leaseVersion },
       runSpecId,
       sessionId,
       verificationOwner: input.requireVerifier ? 'graph' : 'task',
@@ -386,7 +377,7 @@ async function runClaimedAgentGraphTask(
     });
 
     if (result.status === 'cancelled') {
-      await updateAgentTaskStatus(task.id, 'cancelled', {
+      await updateClaimedAgentTaskStatus(task, nodeId, 'cancelled', {
         taskRunId,
         attemptId,
         cancelReason: result.reason,
@@ -421,7 +412,7 @@ async function runClaimedAgentGraphTask(
     // 'failed' (dispatch interrupted); AgentTaskAttemptStatus has no 'blocked'.
     if (result.status === 'blocked') {
       const blockReason = result.reason ?? 'worker_block';
-      await updateAgentTaskStatus(task.id, 'blocked', {
+      await updateClaimedAgentTaskStatus(task, nodeId, 'blocked', {
         taskRunId,
         attemptId,
         blockReason,
@@ -455,6 +446,7 @@ async function runClaimedAgentGraphTask(
       nodeId: result.taskRun.nodeId ?? nodeId,
       selection,
       outputSummary,
+      leaseFence,
     });
     if (recoveryFollowUp) {
       // The dispatch ended as 'failed' (a follow-up attempt was queued for
@@ -469,7 +461,7 @@ async function runClaimedAgentGraphTask(
       return recoveryFollowUp;
     }
 
-    await updateAgentTaskStatus(task.id, 'succeeded', {
+    await updateClaimedAgentTaskStatus(task, nodeId, 'succeeded', {
       taskRunId,
       attemptId,
       outputSummary,
@@ -511,7 +503,7 @@ async function runClaimedAgentGraphTask(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await updateAgentTaskStatus(task.id, 'failed', {
+    await updateClaimedAgentTaskStatus(task, nodeId, 'failed', {
       taskRunId,
       attemptId,
       error: message,
@@ -537,7 +529,19 @@ async function runClaimedAgentGraphTask(
       payload: { error: message },
     }).catch(() => undefined);
     return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
-  } finally {
-    stopTaskHeartbeat();
   }
+}
+
+async function updateClaimedAgentTaskStatus(
+  task: AgentTaskRecord,
+  nodeId: string,
+  status: Parameters<typeof updateAgentTaskStatus>[1],
+  metadata: Record<string, unknown>,
+): Promise<AgentTaskRecord> {
+  const updated = await updateAgentTaskStatus(task.id, status, metadata, {
+    nodeId,
+    leaseVersion: task.leaseVersion,
+  });
+  if (!updated) throw new _LeaseLostError('agent_task', task.id);
+  return updated;
 }
