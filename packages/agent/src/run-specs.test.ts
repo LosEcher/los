@@ -14,6 +14,20 @@ import { listVerificationRecordsForRunSpec } from './verification-records.js';
 import { transitionExecutionState } from './execution-store.js';
 import { listSessionEvents } from './session-events.js';
 
+test('createRunSpec rejects input that violates the generated contract before persistence', async () => {
+  await assert.rejects(
+    () => createRunSpec({
+      id: 'invalid-contract',
+      sessionId: 'invalid-contract-session',
+      prompt: 'invalid contract input',
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'project-write',
+      timeoutMs: 0,
+    }),
+    /run-spec contract validation failed: \/timeoutMs must be >= 1/,
+  );
+});
+
 test('run specs persist normalized run contract metadata', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

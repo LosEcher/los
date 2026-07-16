@@ -59,6 +59,7 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.40.5",
+    "@los/contracts": "workspace:*",
     "@los/infra": "workspace:*",
     "fast-glob": "^3.3.3",
     "undici": "^8.5.0",

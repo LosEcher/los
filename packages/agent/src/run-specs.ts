@@ -9,6 +9,7 @@
  */
 
 import { getDb, withDbClient } from '@los/infra/db';
+import { validateRunSpecRequest, type RunSpecRequest } from '@los/contracts/run-spec';
 import {
   normalizeRunContractMetadata,
   shouldSkipPlanApprovalGate,
@@ -81,8 +82,8 @@ export interface CreateRunSpecInput {
   gatewayId?: string;
   prompt: string;
   systemPrompt?: string;
-  provider?: string;
-  model?: string;
+  provider?: RunSpecRequest['provider'];
+  model?: RunSpecRequest['model'];
   modelSettings?: Record<string, unknown>;
   workspaceRoot: string;
   toolMode: string;
@@ -162,6 +163,13 @@ export async function ensureRunSpecStore(): Promise<void> {
 // ── CRUD ────────────────────────────────────────────────
 
 export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecRecord> {
+  const contractValidation = validateRunSpecRequest(input);
+  if (!contractValidation.success) {
+    const details = contractValidation.errors
+      .map(error => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`)
+      .join('; ');
+    throw new Error(`run-spec contract validation failed: ${details}`);
+  }
   await ensureRunSpecStore();
   const db = getDb();
   const runContract = normalizeRunContractMetadata(input.runContract);

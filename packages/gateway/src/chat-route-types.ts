@@ -1,5 +1,6 @@
 import type { ModelSettings } from '@los/agent/model-settings';
 import type { RunContractMetadataInput } from '@los/agent';
+import type { RunSpecRequest } from '@los/contracts/run-spec';
 import type {
   MCPRequestServer,
   SandboxMode,
@@ -10,23 +11,23 @@ import type {
 export type { SandboxMode, ToolMode };
 
 export interface ChatRequestBody {
-  prompt: string;
-  sessionId?: string;
+  prompt: RunSpecRequest['prompt'];
+  sessionId?: RunSpecRequest['sessionId'];
   branchFrom?: string;
   branchAtTurn?: number;
   systemPrompt?: string;
-  provider?: string;
-  model?: string;
+  provider?: RunSpecRequest['provider'];
+  model?: RunSpecRequest['model'];
   modelSettings?: ModelSettings;
-  projectId?: string;
-  workspaceRoot?: string;
+  projectId?: RunSpecRequest['projectId'];
+  workspaceRoot?: RunSpecRequest['workspaceRoot'];
   toolMode?: ToolMode;
   sandboxMode?: SandboxMode;
-  allowedTools?: string[];
-  maxLoops?: number;
-  traceId?: string;
-  dedupeKey?: string;
-  timeoutMs?: number;
+  allowedTools?: RunSpecRequest['allowedTools'];
+  maxLoops?: RunSpecRequest['maxLoops'];
+  traceId?: RunSpecRequest['traceId'];
+  dedupeKey?: RunSpecRequest['dedupeKey'];
+  timeoutMs?: RunSpecRequest['timeoutMs'];
   toolRetry?: ToolRetryInput;
   mcpServers?: MCPRequestServer[];
   runContract?: RunContractMetadataInput;

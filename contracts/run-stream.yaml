@@ -1,11 +1,12 @@
 contract: los.run-stream
-version: 0.1.0
-status: draft
+version: 0.2.0
+status: implemented
 owner: packages/agent
 description: >
   Event contract for active run streaming and replay. HTTP SSE uses event names;
   executor NDJSON uses typed chunks that carry the same session evidence.
 type: stream
+schemaDialect: https://json-schema.org/draft/2020-12/schema
 transport:
   sse:
     contentType: text/event-stream
@@ -18,6 +19,7 @@ eventTypes:
   - session.started
   - session.branched
   - session.branch_created
+  - session.blocked
   - operator.steering
   - operator.followup
   - coordinator.intake_resolved
@@ -47,11 +49,18 @@ eventTypes:
   - error
   - cancelled
   - deduplicated
+  - blocked
 sseProtocol:
   - session.live
   - session.ready
   - session.event
   - session.completed
+live:
+  routes:
+    - method: GET
+      path: /sessions/{sessionId}/events/stream
+    - method: GET
+      path: /sessions/{sessionId}/events/live
 commonFields:
   sessionId:
     type: string
