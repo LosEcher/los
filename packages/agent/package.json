@@ -46,6 +46,7 @@
     "./event-bus": "./src/event-bus.ts",
     "./runtime-adapter": "./src/runtime-adapter/index.ts",
     "./pre-action-gate": "./src/pre-action-gate.ts",
+    "./pre-action-evidence": "./src/pre-action-evidence.ts",
     "./message-router": "./src/message-router/index.ts",
     "./todo-dispatch": "./src/todo-dispatch.ts",
     "./auth/login": "./src/auth/xai-oauth-login.ts",

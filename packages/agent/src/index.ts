@@ -98,7 +98,26 @@ export { resolveXaiOAuthCredential, getXaiOAuthCredentialSync, getXaiOAuthStatus
 export { startOtelBridge, isOtelBridgeRunning, spawnClaudeCode, runClaudeCodeWithBridge, claudeCodeSupportsOtel, claudeSpanToEventType, CLAUDE_CODE_SPAN_NAMES, spawnCodex, codexSupportsOtel, type OtelBridgeConfig, type ClaudeCodeSpawnInput, type CodexSpawnInput, type RuntimeKind, type RuntimeAdapterConfig, type RuntimeHandle } from './runtime-adapter/index.js';
 
 // ── Pre-action gate — reusable by tool gate routes ─────
-export { preActionGate, failureFingerprintFromError, extractFragilitySignal, type PreActionCheck, type PreActionGateConfig } from './pre-action-gate.js';
+export {
+  preActionGate,
+  failureFingerprintForToolCall,
+  failureFingerprintFromError,
+  filePathFromToolArgs,
+  preActionGateConfigFromAgentOptions,
+  extractFragilitySignal,
+  type AgentPreActionGateConfig,
+  type PreActionCheck,
+  type PreActionGateConfig,
+} from './pre-action-gate.js';
+export {
+  _GLOBAL_PRE_ACTION_SESSION_ID,
+  createPreActionFailureEvidence,
+  loadPreActionEvidence,
+  mergePreActionEvidence,
+  _projectPreActionEvidence,
+  type PreActionEvidenceScope,
+  type PreActionFailureEvidence,
+} from './pre-action-evidence.js';
 
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';

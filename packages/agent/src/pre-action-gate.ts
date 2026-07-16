@@ -36,6 +36,19 @@ export interface PreActionGateConfig {
   maxAttemptsBeforeWarn?: number;
 }
 
+export interface AgentPreActionGateConfig {
+  /** Disable the advisory gate entirely. Defaults to enabled. */
+  enabled?: boolean;
+  /** Load persisted evidence for the current session/project. Defaults to true. */
+  loadPersistedEvidence?: boolean;
+  /** Serializable evidence supplied by an executor or focused harness. */
+  evidence?: {
+    fragileFiles?: readonly string[];
+    failureFingerprints?: readonly string[];
+  };
+  maxAttemptsBeforeWarn?: number;
+}
+
 const DEFAULTS = {
   maxAttemptsBeforeWarn: 2,
 } as const;
@@ -44,12 +57,16 @@ const DEFAULTS = {
  * Build a fingerprint string for a tool call to match against known failures.
  * Format: "toolName::argFileOrKey::argValueHash"
  */
-function buildFingerprint(toolName: string, args: Record<string, unknown>): string {
-  const file = typeof args.file_path === 'string' ? args.file_path
+export function filePathFromToolArgs(args: Record<string, unknown>): string | undefined {
+  return typeof args.file_path === 'string' ? args.file_path
     : typeof args.path === 'string' ? args.path
     : typeof args.file === 'string' ? args.file
     : typeof args.target === 'string' ? args.target
-    : '';
+    : undefined;
+}
+
+export function failureFingerprintForToolCall(toolName: string, args: Record<string, unknown>): string {
+  const file = filePathFromToolArgs(args);
 
   if (file) {
     return `${toolName}::${file}`;
@@ -64,6 +81,17 @@ function buildFingerprint(toolName: string, args: Record<string, unknown>): stri
   }
 
   return toolName;
+}
+
+export function preActionGateConfigFromAgentOptions(
+  options: AgentPreActionGateConfig | undefined,
+): PreActionGateConfig | undefined {
+  if (options?.enabled === false) return undefined;
+  return {
+    fragileFiles: new Set(options?.evidence?.fragileFiles ?? []),
+    failureFingerprints: new Set(options?.evidence?.failureFingerprints ?? []),
+    maxAttemptsBeforeWarn: options?.maxAttemptsBeforeWarn ?? DEFAULTS.maxAttemptsBeforeWarn,
+  };
 }
 
 /**
@@ -87,7 +115,7 @@ export function preActionGate(
   let knownFailure = false;
   let fragileFile = false;
 
-  const fingerprint = buildFingerprint(toolName, args);
+  const fingerprint = failureFingerprintForToolCall(toolName, args);
   const maxAttempts = config.maxAttemptsBeforeWarn ?? DEFAULTS.maxAttemptsBeforeWarn;
 
   // Check known failure fingerprints
@@ -139,7 +167,7 @@ export function failureFingerprintFromError(
   args: Record<string, unknown>,
   error: string,
 ): string {
-  return buildFingerprint(toolName, args);
+  return failureFingerprintForToolCall(toolName, args);
 }
 
 /**
@@ -154,7 +182,7 @@ export function extractFragilitySignal(
 
   for (const event of toolEvents) {
     if (!event.ok || event.error) {
-      const fp = buildFingerprint(event.toolName, event.args);
+      const fp = failureFingerprintForToolCall(event.toolName, event.args);
       failureFingerprints.add(fp);
 
       const path = [event.args.file_path, event.args.path, event.args.file, event.args.target]

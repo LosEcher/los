@@ -5,6 +5,7 @@ import type { Logger } from '@los/infra/logger';
 import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
 import type { IdentityLevel } from '../identity-loader.js';
 import type { ModelDiagnosticConfig } from '../model-diagnostics.js';
+import type { AgentPreActionGateConfig } from '../pre-action-gate.js';
 
 export interface AgentConfig {
   sessionId?: string;
@@ -61,6 +62,8 @@ export interface AgentConfig {
     baseDelayMs?: number;
     maxDelayMs?: number;
   };
+  /** Advisory checks against persisted tool-failure and fragile-file evidence. */
+  preActionGate?: AgentPreActionGateConfig;
   signal?: AbortSignal;
   maxContextTokens?: number;
   contextCompression?: ContextCompressionConfig;

@@ -17,7 +17,14 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { preActionGate, type PreActionCheck } from '@los/agent';
+import {
+  createPreActionFailureEvidence,
+  loadPreActionEvidence,
+  preActionGate,
+  type PreActionCheck,
+  type PreActionGateConfig,
+} from '@los/agent';
+import { _GLOBAL_PRE_ACTION_SESSION_ID } from '@los/agent/pre-action-evidence';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { getLogger } from '@los/infra/logger';
 
@@ -38,6 +45,8 @@ interface ToolGateRequest {
   traceId?: string;
   /** Agent kind */
   source?: string;
+  tenantId?: string;
+  projectId?: string;
   /** The risk level the agent itself assigned */
   agentRiskLevel?: 'L0' | 'L1' | 'L2';
   /** Previous attempt count if this is a retry */
@@ -62,14 +71,6 @@ interface ToolGateResponse {
 }
 
 // ── Gate logic ──────────────────────────────────────────────────────
-
-/**
- * Active fragile files and failure fingerprints shared across the process.
- * Populated by the tool-result-feedback endpoint and operator configuration.
- * In production, this should be backed by a persistent store.
- */
-const fragileFiles = new Set<string>();
-const failureFingerprints = new Set<string>();
 
 /** High-risk tool patterns that always require operator approval. */
 const ALWAYS_BLOCK_TOOL_PATTERNS: Array<{
@@ -116,7 +117,7 @@ const ALWAYS_BLOCK_TOOL_PATTERNS: Array<{
   },
 ];
 
-function evaluateToolGate(req: ToolGateRequest): ToolGateResponse {
+async function evaluateToolGate(req: ToolGateRequest): Promise<ToolGateResponse> {
   const { callId, toolName, args, sessionId, source = 'external-agent' } = req;
 
   // 1. Check always-block patterns
@@ -139,28 +140,24 @@ function evaluateToolGate(req: ToolGateRequest): ToolGateResponse {
   }
 
   // 2. Run pre-action gate (fragile files, known failures, sibling warnings)
-  const gateConfig = {
-    fragileFiles: fragileFiles.size > 0 ? fragileFiles : undefined,
-    failureFingerprints: failureFingerprints.size > 0 ? failureFingerprints : undefined,
-    maxAttemptsBeforeWarn: 2,
-  };
-  const preCheck: PreActionCheck = preActionGate(toolName, args, gateConfig);
-
-  // 3. Pre-action gate is advisory — blocks only knownFailure with high confidence
-  if (preCheck.knownFailure && preCheck.failurePatterns.length >= 2) {
-    return {
-      allowed: false,
-      reason: `Known failure pattern matched: ${preCheck.failurePatterns.join(', ')}`,
-      reasonCode: 'known_failure_pattern',
-      warnings: preCheck.warnings,
-      knownFailure: true,
-      flaggedFiles: preCheck.flaggedFiles,
-    };
+  let gateConfig: PreActionGateConfig;
+  let evidenceWarning: string | undefined;
+  try {
+    gateConfig = await loadPreActionEvidence({
+      sessionId,
+      tenantId: req.tenantId,
+      projectId: req.projectId,
+    });
+  } catch (err) {
+    evidenceWarning = 'Persisted pre-action evidence is temporarily unavailable; advisory checks were skipped.';
+    log.warn(`${evidenceWarning} ${(err as Error).message}`);
+    gateConfig = {};
   }
+  const preCheck: PreActionCheck = preActionGate(toolName, args, gateConfig);
 
   return {
     allowed: true,
-    warnings: preCheck.warnings,
+    warnings: evidenceWarning ? [evidenceWarning, ...preCheck.warnings] : preCheck.warnings,
     knownFailure: preCheck.knownFailure,
     flaggedFiles: preCheck.flaggedFiles,
   };
@@ -185,7 +182,7 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
       });
     }
 
-    const decision = evaluateToolGate(body);
+    const decision = await evaluateToolGate(body);
 
     // Record decision as session event for audit
     let auditEventId: number | undefined;
@@ -236,59 +233,56 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
       sessionId: string;
       traceId?: string;
       source?: string;
+      tenantId?: string;
+      projectId?: string;
     };
 
-    if (!body.callId || !body.toolName) {
-      return reply.status(400).send({ error: 'callId and toolName are required' });
+    if (!body.callId || !body.toolName || !body.sessionId) {
+      return reply.status(400).send({ error: 'callId, toolName, and sessionId are required' });
     }
 
-    // Learn from failures: register fingerprints and fragile files
-    if (!body.ok && body.error) {
-      const fp = `${body.toolName}::${JSON.stringify(body.args)}`;
-      failureFingerprints.add(fp);
-      log.info(`Learned failure fingerprint: ${fp}`);
-
-      // Track fragile files
-      const path = body.args.file_path ?? body.args.path ?? body.args.file ?? body.args.target;
-      if (typeof path === 'string') {
-        fragileFiles.add(path);
-      }
-    }
-
-    // Record feedback event
-    if (body.sessionId) {
-      try {
-        await appendSessionEvent({
-          sessionId: body.sessionId,
-          type: body.ok ? 'tool.gate.feedback.ok' : 'tool.gate.feedback.fail',
-          source: body.source ?? 'tool-gate',
-          traceId: body.traceId,
-          toolName: body.toolName,
-          payload: {
-            callId: body.callId,
-            args: body.args,
-            ok: body.ok,
-            error: body.error ?? null,
-          },
-        });
-      } catch (err) {
-        log.warn(`Failed to record tool-feedback event: ${(err as Error).message}`);
-      }
-    }
+    const failureEvidence = !body.ok && body.error
+      ? createPreActionFailureEvidence(body.toolName, body.args, body.error, body.callId)
+      : undefined;
+    await appendSessionEvent({
+      sessionId: body.sessionId,
+      tenantId: body.tenantId,
+      projectId: body.projectId,
+      type: failureEvidence ? 'tool.pre_action.failure' : 'tool.gate.feedback.ok',
+      source: body.source ?? 'tool-gate',
+      traceId: body.traceId,
+      toolName: body.toolName,
+      payload: failureEvidence ? { ...failureEvidence } : {
+        callId: body.callId,
+        args: body.args,
+        ok: body.ok,
+      },
+    });
+    const evidence = await loadPreActionEvidence({
+      sessionId: body.sessionId,
+      tenantId: body.tenantId,
+      projectId: body.projectId,
+    });
 
     return reply.send({
       recorded: true,
-      fragileFiles: fragileFiles.size,
-      failureFingerprints: failureFingerprints.size,
+      fragileFiles: evidence.fragileFiles?.size ?? 0,
+      failureFingerprints: evidence.failureFingerprints?.size ?? 0,
     });
   });
 
   // ── Gate state query ───────────────────────────────────
-  app.get('/operator/tool-gate/state', async () => {
+  app.get('/operator/tool-gate/state', async (req) => {
+    const query = (req.query ?? {}) as {
+      sessionId?: string;
+      tenantId?: string;
+      projectId?: string;
+    };
+    const evidence = await loadPreActionEvidence(query);
     return {
-      fragileFilesCount: fragileFiles.size,
-      fragileFiles: [...fragileFiles].slice(0, 100), // Limit for safety
-      failureFingerprintsCount: failureFingerprints.size,
+      fragileFilesCount: evidence.fragileFiles?.size ?? 0,
+      fragileFiles: [...(evidence.fragileFiles ?? [])].slice(0, 100),
+      failureFingerprintsCount: evidence.failureFingerprints?.size ?? 0,
       alwaysBlockPatterns: ALWAYS_BLOCK_TOOL_PATTERNS.map(p => ({
         tool: p.tool,
         reasonCode: p.reasonCode,
@@ -298,14 +292,23 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
 
   // ── Add/remove fragile files (operator management) ─────
   app.post('/operator/tool-gate/fragile-files', async (req, reply) => {
-    const body = (req.body ?? {}) as { action: 'add' | 'remove'; paths: string[] };
-    if (!body.paths?.length) {
-      return reply.status(400).send({ error: 'paths array is required' });
+    const body = (req.body ?? {}) as {
+      action: 'add' | 'remove';
+      paths: string[];
+      source?: string;
+    };
+    if (!body.paths?.length || (body.action !== 'add' && body.action !== 'remove')) {
+      return reply.status(400).send({ error: 'action and paths array are required' });
     }
     for (const path of body.paths) {
-      if (body.action === 'add') fragileFiles.add(path);
-      else fragileFiles.delete(path);
+      await appendSessionEvent({
+        sessionId: _GLOBAL_PRE_ACTION_SESSION_ID,
+        type: `tool.pre_action.fragile_file.${body.action === 'add' ? 'added' : 'removed'}`,
+        source: body.source ?? 'operator',
+        payload: { path },
+      });
     }
-    return reply.send({ fragileFiles: [...fragileFiles] });
+    const evidence = await loadPreActionEvidence({});
+    return reply.send({ fragileFiles: [...(evidence.fragileFiles ?? [])] });
   });
 }
