@@ -7,13 +7,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Primary CI workflow. The 3-job split isolates fast checks, workspace tests,
-# and migration drift. The root test command delegates package concurrency to
-# Turbo so a single Forgejo runner does not repeat checkout and install work.
+concurrency:
+  group: ci-${{ forgejo.ref }}
+  cancel-in-progress: true
+
+# Primary CI workflow. Pull requests run all three jobs. A main push runs only
+# gate-fast because the protected PR head already passed gate-test and
+# gate-drift; this avoids repeating the two expensive clean-checkout jobs after
+# every merge. The node34 runner has two slots, while the workspace test job
+# limits Turbo package concurrency to two on its three-core host.
 jobs:
   gate-fast:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      TURBO_CONCURRENCY: 1
     steps:
       - name: Checkout
         run: |
@@ -34,12 +42,13 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Fast gate (no DB, no tests)
         run: pnpm run gate -- --no-tests
 
   gate-test:
+    if: forgejo.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -62,6 +71,7 @@ jobs:
       DATABASE_URL: postgres://los:los@postgres:5432/los_test
       TEST_DATABASE_URL: postgres://los:los@postgres:5432/los_test
       NODE_ENV: test
+      LOS_TEST_CONCURRENCY: 2
 
     steps:
       - name: Checkout
@@ -83,13 +93,15 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Test workspace with Turbo concurrency
         run: pnpm test
         timeout-minutes: 20
 
   gate-drift:
+    if: forgejo.event_name != 'push'
+    needs: gate-test
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -133,7 +145,7 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       # Migration-drift gate. Unset NODE_ENV/TEST_DATABASE_URL so initDb's test
       # guard does not redirect the gate's explicit drift-DB URLs to los_test
