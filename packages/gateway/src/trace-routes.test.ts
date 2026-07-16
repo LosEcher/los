@@ -9,7 +9,56 @@ import {
   GOLDEN_SESSION_TRACE_EVENT_WRITES,
   GOLDEN_SESSION_TRACE_MESSAGES_VIEW,
 } from '@los/agent/session-trace-fixtures';
+import { GOLDEN_EXECUTION_OBSERVABILITY_FIXTURES } from '@los/agent/execution-observability-fixtures';
 import { createServer } from './server.js';
+
+test('execution observability route projects persisted versions and waterfall evidence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `execution-observability-route-${suffix}`;
+  const fixture = GOLDEN_EXECUTION_OBSERVABILITY_FIXTURES.find(item => item.name === 'success')!;
+  const app = await createServer({
+    serviceId: `gateway-execution-observability-test-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await ensureSessionEventStore();
+    for (const fixtureEvent of fixture.events) {
+      await appendSessionEvent({
+        sessionId,
+        turn: fixtureEvent.turn,
+        type: fixtureEvent.type,
+        source: fixtureEvent.source,
+        model: fixtureEvent.model,
+        toolName: fixtureEvent.toolName,
+        usage: fixtureEvent.usage,
+        payload: fixtureEvent.payload,
+      });
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${sessionId}/execution-observability`,
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.sessionId, sessionId);
+    assert.equal(body.fingerprint.status, 'known');
+    assert.equal(body.fingerprint.hash, fixture.expected.fingerprint.hash);
+    assert.equal(body.waterfall[0].modelWait.durationMs, 120);
+    assert.equal(body.waterfall[0].toolWait.durationMs, 30);
+    assert.equal(body.waterfall[0].tokens.totalTokens, 15);
+    assert.deepEqual(body.failureFacets, []);
+  } finally {
+    await app.close();
+    await closeDb();
+  }
+});
 
 test('session trace route renders assistant tool cards from ledger', async () => {
   const config = await loadConfig();

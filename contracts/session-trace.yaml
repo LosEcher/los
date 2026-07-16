@@ -83,12 +83,96 @@ routes:
                     type: integer
                     minimum: 1
                     nullable: true
+  - method: GET
+    path: /sessions/{sessionId}/execution-observability
+    response:
+      sessionId: string
+      fingerprint:
+        required: [status, algorithm, hash, components]
+        properties:
+          status:
+            type: string
+            enum: [known, unknown]
+          algorithm:
+            type: string
+            enum: [sha256]
+          hash:
+            type: string
+            nullable: true
+          components:
+            required: [prompt, spec, memory, toolCatalog]
+            properties:
+              prompt: executionVersionEvidence
+              spec: executionVersionEvidence
+              memory: executionVersionEvidence
+              toolCatalog: executionVersionEvidence
+      waterfall:
+        type: array
+        items:
+          required: [turn, modelWait, toolWait, retries, errors, denied, tokens]
+          properties:
+            turn: integer
+            modelWait: executionDurationEvidence
+            toolWait: executionDurationEvidence
+            retries: executionCountEvidence
+            errors: executionCountEvidence
+            denied: executionCountEvidence
+            tokens:
+              required: [prompt, completion, cacheHit, cacheMiss, total, eventIds]
+      failureFacets:
+        type: array
+        items:
+          required: [category, code, eventIds, verificationRecordIds]
+          properties:
+            category:
+              type: string
+              enum: [provider, tool, policy, verification, context, recovery]
+            code: string
+            message:
+              type: string
+              nullable: true
+            eventIds:
+              type: array
+              items: integer
+            verificationRecordIds:
+              type: array
+              items: string
+definitions:
+  executionVersionEvidence:
+    required: [status, value, eventIds]
+    properties:
+      status:
+        type: string
+        enum: [known, unknown]
+      value:
+        type: string
+        nullable: true
+      eventIds:
+        type: array
+        items: integer
+  executionDurationEvidence:
+    required: [durationMs, eventIds]
+    properties:
+      durationMs: integer
+      eventIds:
+        type: array
+        items: integer
+  executionCountEvidence:
+    required: [count, eventIds]
+    properties:
+      count: integer
+      eventIds:
+        type: array
+        items: integer
 projectorRules:
   sourceEvents:
     - session_events
+    - verification_records
   invariant:
     - Every tool.call event MUST have a corresponding tool.result or tool.denied event
     - Tool calls still running when the session completes MUST be marked as error
+    - Fingerprint components MUST use persisted version or hash fields; missing fields remain unknown
+    - Execution observability projection MUST NOT write execution state or create verification records
   governance:
     - Every tool.* event type declared in run-stream.yaml eventTypes MUST have
       a handler in packages/agent/src/session-trace.ts projectSessionTrace()

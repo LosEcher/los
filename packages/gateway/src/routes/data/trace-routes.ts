@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { ensureSessionStore, loadSession } from '@los/agent/session';
 import { ensureSessionEventStore, listSessionEvents, listSessionEventsSince } from '@los/agent/session-events';
 import { projectSessionTrace, type TraceToolCallCard, type TraceTurnProjection } from '@los/agent/session-trace';
-import type { Message, TurnSummary } from '@los/agent';
+import { listVerificationRecordsForSession, type Message, type TurnSummary } from '@los/agent';
+import { projectExecutionObservability } from '@los/agent/execution-observability';
 import { asObject, truncate } from '../../trace-utils.js';
 
 type TraceMessageRole = 'user' | 'assistant' | 'system' | 'separator';
@@ -187,6 +188,16 @@ function buildTraceMessagesFromEvents(args: {
 }
 
 export function registerTraceRoutes(app: FastifyInstance): void {
+  app.get('/sessions/:id/execution-observability', async (req) => {
+    const { id } = req.params as { id: string };
+    await ensureSessionEventStore();
+    const [events, verificationRecords] = await Promise.all([
+      listSessionEvents(id, 10000),
+      listVerificationRecordsForSession(id),
+    ]);
+    return projectExecutionObservability(id, events, verificationRecords);
+  });
+
   app.get('/sessions/:id/trace', async (req, reply) => {
     const { id } = req.params as { id: string };
 
