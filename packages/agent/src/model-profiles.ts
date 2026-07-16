@@ -1,4 +1,7 @@
-import { resolveProviderDefaults } from './provider-defaults.js';
+import {
+  requireProviderDefaults,
+  resolveProviderDefaults,
+} from '@los/infra/provider-defaults';
 
 export type ProviderProtocol = 'openai' | 'anthropic';
 export type ApiShape = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
@@ -158,8 +161,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     provider: 'deepseek',
     protocol: 'openai',
     apiShape: 'openai-chat-completions',
-    baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-v4-flash',
+    baseUrl: requireProviderDefaults('deepseek').baseUrl,
+    model: requireProviderDefaults('deepseek').defaultModel,
     supportsTools: true,
     supportsParallelToolCalls: false,
     supportsReasoning: true,
@@ -185,8 +188,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     provider: 'openai',
     protocol: 'openai',
     apiShape: 'openai-chat-completions',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-5.5',
+    baseUrl: requireProviderDefaults('openai').baseUrl,
+    model: requireProviderDefaults('openai').defaultModel,
     supportsTools: true,
     supportsParallelToolCalls: true,
     supportsReasoning: false,
@@ -203,8 +206,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     provider: 'packycode',
     protocol: 'openai',
     apiShape: 'openai-chat-completions',
-    baseUrl: 'https://www.packyapi.com/v1',
-    model: 'gpt-5.5',
+    baseUrl: requireProviderDefaults('packycode').baseUrl,
+    model: requireProviderDefaults('packycode').defaultModel,
     supportsTools: true,
     supportsParallelToolCalls: false,
     supportsReasoning: false,
@@ -220,8 +223,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     provider: 'codex',
     protocol: 'openai',
     apiShape: 'openai-chat-completions',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-5.5',
+    baseUrl: requireProviderDefaults('codex').baseUrl,
+    model: requireProviderDefaults('codex').defaultModel,
     supportsTools: true,
     supportsParallelToolCalls: true,
     supportsReasoning: true,
@@ -236,25 +239,27 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     knownFailurePatterns: [],
     pricing: { promptTokenCostPer1M: 2.50, completionTokenCostPer1M: 10.00, cacheHitTokenCostPer1M: 1.25 },
   },
-  groq: openAICompatibleProfile('groq', 'https://api.groq.com/openai/v1', 'llama-3.1-70b-versatile'),
-  together: openAICompatibleProfile('together', 'https://api.together.xyz/v1', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'),
-  openrouter: openAICompatibleProfile('openrouter', 'https://openrouter.ai/api/v1', 'openai/gpt-4o'),
-  moonshot: openAICompatibleProfile('moonshot', 'https://api.moonshot.cn/v1', 'moonshot-v1-8k'),
-  zhipu: openAICompatibleProfile('zhipu', 'https://open.bigmodel.cn/api/paas/v4', 'glm-4'),
-  qwen: openAICompatibleProfile('qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-max'),
-  ollama: openAICompatibleProfile('ollama', 'http://127.0.0.1:11434/v1', 'llama3.1'),
-  lmstudio: openAICompatibleProfile('lmstudio', 'http://127.0.0.1:1234/v1', '(auto)'),
-  vllm: openAICompatibleProfile('vllm', 'http://127.0.0.1:8000/v1', '(auto)'),
-  anthropic: anthropicProfile('anthropic', 'https://api.anthropic.com', 'claude-sonnet-4-20250514'),
-  claude: anthropicProfile('claude', 'https://api.anthropic.com', 'claude-sonnet-4-20250514'),
-  'deepseek-anthropic': anthropicProfile('deepseek-anthropic', 'https://api.deepseek.com/anthropic', 'deepseek-v4-pro'),
-  minimax: anthropicProfile('minimax', 'https://api.minimaxi.com/anthropic', 'MiniMax-M3'),
+  groq: canonicalOpenAICompatibleProfile('groq'),
+  together: canonicalOpenAICompatibleProfile('together'),
+  openrouter: canonicalOpenAICompatibleProfile('openrouter'),
+  moonshot: canonicalOpenAICompatibleProfile('moonshot'),
+  zhipu: canonicalOpenAICompatibleProfile('zhipu'),
+  qwen: canonicalOpenAICompatibleProfile('qwen'),
+  ollama: canonicalOpenAICompatibleProfile('ollama'),
+  lmstudio: canonicalOpenAICompatibleProfile('lmstudio'),
+  vllm: canonicalOpenAICompatibleProfile('vllm'),
+  llamacpp: canonicalOpenAICompatibleProfile('llamacpp'),
+  localai: canonicalOpenAICompatibleProfile('localai'),
+  anthropic: canonicalAnthropicProfile('anthropic'),
+  claude: canonicalAnthropicProfile('claude'),
+  'deepseek-anthropic': canonicalAnthropicProfile('deepseek-anthropic'),
+  minimax: canonicalAnthropicProfile('minimax'),
   xai: {
     provider: 'xai',
     protocol: 'openai',
     apiShape: 'openai-chat-completions',
-    baseUrl: 'https://api.x.ai/v1',
-    model: 'grok-4.3',
+    baseUrl: requireProviderDefaults('xai').baseUrl,
+    model: requireProviderDefaults('xai').defaultModel,
     supportsTools: true,
     supportsParallelToolCalls: true,
     supportsReasoning: true,
@@ -288,12 +293,25 @@ export function resolveModelProfile(
   provider: string,
   options: ResolveModelProfileOptions = {},
 ): ModelProfile {
-  const fallback = resolveProviderDefaults(provider);
-  const base = MODEL_PROFILES[provider] ?? openAICompatibleProfile(provider, fallback.baseUrl, options.defaultModel ?? fallback.defaultModel);
+  const canonicalDefaults = resolveProviderDefaults(provider);
+  let base = MODEL_PROFILES[provider];
+  if (!base && canonicalDefaults) {
+    base = openAICompatibleProfile(provider, canonicalDefaults.baseUrl, canonicalDefaults.defaultModel);
+  }
+  if (!base) {
+    const baseUrl = options.baseUrl;
+    const model = options.model ?? options.defaultModel;
+    if (!baseUrl || !model) {
+      throw new Error(
+        `Unknown provider '${provider}' requires explicit baseUrl and model configuration`,
+      );
+    }
+    base = openAICompatibleProfile(provider, baseUrl, model);
+  }
   const resolved = {
     ...base,
     baseUrl: options.baseUrl ?? base.baseUrl,
-    model: options.model ?? base.model ?? options.defaultModel ?? fallback.defaultModel,
+    model: options.model ?? base.model,
     apiShape: options.apiShape ?? base.apiShape,
   };
   const pricing = base.pricingByModel
@@ -381,6 +399,11 @@ function openAICompatibleProfile(provider: string, baseUrl: string, model: strin
   };
 }
 
+function canonicalOpenAICompatibleProfile(provider: string): ModelProfile {
+  const defaults = requireProviderDefaults(provider);
+  return openAICompatibleProfile(provider, defaults.baseUrl, defaults.defaultModel);
+}
+
 function anthropicProfile(provider: string, baseUrl: string, model: string): ModelProfile {
   return {
     provider,
@@ -402,6 +425,11 @@ function anthropicProfile(provider: string, baseUrl: string, model: string): Mod
     knownFailurePatterns: [],
     pricing: { promptTokenCostPer1M: 3.00, completionTokenCostPer1M: 15.00, cacheHitTokenCostPer1M: 0.30 },
   };
+}
+
+function canonicalAnthropicProfile(provider: string): ModelProfile {
+  const defaults = requireProviderDefaults(provider);
+  return anthropicProfile(provider, defaults.baseUrl, defaults.defaultModel);
 }
 
 function uniqueStrings(values: string[]): string[] {

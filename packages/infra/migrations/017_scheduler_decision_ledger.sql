@@ -31,11 +31,18 @@ CREATE TABLE IF NOT EXISTS execution_outbox (
   entity_type TEXT NOT NULL,
   entity_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
+  session_event_id BIGINT,
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_error TEXT,
+  claimed_by TEXT,
+  claimed_at TIMESTAMPTZ,
+  legacy BOOLEAN NOT NULL DEFAULT FALSE,
   published_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_unpublished ON execution_outbox(created_at, id) WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_unpublished ON execution_outbox(next_attempt_at, id) WHERE published_at IS NULL AND legacy = FALSE;
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_session ON execution_outbox(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_run_spec ON execution_outbox(run_spec_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_entity ON execution_outbox(entity_type, entity_id, id);

@@ -75,6 +75,26 @@ Promote an advisory target to required only when all of these are true:
    `DEFAULT_COMPATIBILITY_TARGETS`, `ADVISORY_COMPATIBILITY_TARGETS` when
    needed, ADR 0014, and the relevant operation smoke.
 
+### Promotion Decision Matrix
+
+`recordProviderPromotionDecision()` records a proposed policy change. It never
+automatically changes the required gate set. `enforceProviderPromotionDecision()`
+is a separate operator-controlled step after the code, ADR, harness, and
+operation evidence are ready.
+
+| Evidence decision | Passed | `promote_required` result | Meaning |
+|---|---:|---|---|
+| `advisory` | either | reject | Discovery or an unverified run is not promotion evidence. |
+| `verified_advisory` | `true` | record `proposed`, `verified_advisory → required` | Eligible for operator review; not enforced yet. |
+| `verified_advisory` | `false` | reject | A failed run cannot support promotion. |
+| `required` | `true` | record `proposed`, `required → required` | Idempotent reaffirmation with fresh evidence. |
+| `blocked` | either | reject | Resolve credentials, routing, quota, or compatibility first. |
+
+`demote_advisory` does not require compatibility evidence because it reduces
+the required gate set. It is still recorded as `proposed` and requires the same
+separate enforcement step. No evidence row or proposed decision grants
+permission to promote a provider; operator consent remains mandatory.
+
 One passing run is sufficient to mark a target verified advisory. It is not
 sufficient by itself to make the target required.
 

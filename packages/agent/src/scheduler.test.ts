@@ -344,7 +344,7 @@ test('scheduler runs a single agent task graph with conservative serial claims',
   const graphId = `graph-scheduler-serial-${suffix}`;
   const sessionId = `session-graph-scheduler-serial-${suffix}`;
   const nodeId = `test-graph-serial-executor-${suffix}`;
-  const requests: Array<{ prompt?: unknown }> = [];
+  const requests: Array<{ prompt?: unknown; config?: { identity?: unknown } }> = [];
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
@@ -401,6 +401,9 @@ test('scheduler runs a single agent task graph with conservative serial claims',
       graphId,
       sessionId,
       workspaceRoot: process.cwd(),
+      resolveTaskPrompt: (task, completedStages) => completedStages.length === 0
+        ? task.prompt ?? task.title
+        : `${task.prompt ?? task.title}\nPrior stage: ${completedStages.at(-1)?.outputText}`,
       executor: {
         enabled: true,
         nodeUrls: [baseUrl],
@@ -411,7 +414,16 @@ test('scheduler runs a single agent task graph with conservative serial claims',
     assert.deepEqual(result.executedTasks.map(task => task.taskId), [`${graphId}-plan`, `${graphId}-exec`]);
     assert.deepEqual(result.executedTasks.map(task => task.status), ['succeeded', 'succeeded']);
     assert.equal(result.completion.status, 'succeeded');
-    assert.deepEqual(requests.map(request => request.prompt), ['plan prompt', 'exec prompt']);
+    assert.deepEqual(requests.map(request => request.prompt), [
+      'plan prompt',
+      'exec prompt\nPrior stage: completed plan prompt',
+    ]);
+    assert.deepEqual(requests.map(request => request.config?.identity), [
+      { name: 'default', level: 'standard' },
+      { name: 'default', level: 'standard' },
+    ]);
+    assert.equal(result.executedTasks[0]?.stageOutput?.outputText, 'completed plan prompt');
+    assert.equal(result.executedTasks[1]?.stageOutput?.promptTokens, 0);
 
     const graph = await readAgentTaskGraph(graphId);
     assert.deepEqual(graph.tasks.map(task => task.status), ['succeeded', 'succeeded']);

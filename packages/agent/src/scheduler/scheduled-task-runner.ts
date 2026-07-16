@@ -50,6 +50,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
   const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? Math.max(1_000, Math.floor(leaseMs / 3));
+  const leaseVersion = normalizePositiveInteger(input.leaseVersion) ?? 1;
 
   if (dedupeKey) {
     const existing = await findActiveTaskRunByDedupeKey(dedupeKey);
@@ -114,6 +115,9 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     metadata: input.metadata ?? {},
     runContract: input.runContract,
     status: 'queued',
+    attempt: input.attempt,
+    leaseVersion,
+    leaseExpiresAt: new Date(Date.now() + leaseMs),
   });
   if (executor) {
     const metadata = readObject(input.metadata);
@@ -146,6 +150,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     sessionId,
     reason: 'task_started',
     nodeId,
+    leaseVersion,
   });
   let running = await updateTaskRunFields(taskRunId, {
     nodeId,
@@ -194,6 +199,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       to: 'blocked',
       sessionId,
       reason: execCheck.reason ?? 'b0_phase_gate',
+      nodeId,
+      leaseVersion,
     });
     await updateTaskRunFields(taskRunId, {
       metadata: { ...running.metadata, blockReason: execCheck.reason },
@@ -205,8 +212,12 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const controller = new AbortController();
   const linkedAbortCleanup = linkAbortSignal(input.signal, controller);
   let timeout: NodeJS.Timeout | undefined;
-  const stopHeartbeat = startTaskHeartbeat(taskRunId, nodeId, leaseMs, heartbeatMs);
   const unregisterTaskController = registerScheduledTaskController(taskRunId, controller, 'cancelled');
+  const stopHeartbeat = startTaskHeartbeat(taskRunId, nodeId, leaseVersion, leaseMs, heartbeatMs, {
+    dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
+    taskId: input.agentTaskLease?.taskId,
+    agentTaskLease: input.agentTaskLease,
+  });
   if (timeoutMs) {
     timeout = setTimeout(() => {
       cancelScheduledTask(taskRunId, `timeout:${timeoutMs}ms`);
@@ -217,6 +228,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const result = executor
       ? await runAgentOnExecutor(executor, {
           taskRunId,
+          leaseVersion,
+          agentTaskLease: input.agentTaskLease,
           leaseMs,
           prompt: input.prompt,
           config: {
@@ -321,6 +334,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         to: 'blocked',
         sessionId,
         reason: verifyCheck.reason ?? 'verification_pending',
+        nodeId,
+        leaseVersion,
       });
       const blocked = await updateTaskRunFields(taskRunId, {
         metadata: {
@@ -352,6 +367,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       to: 'succeeded',
       sessionId,
       reason: 'task_completed',
+      nodeId,
+      leaseVersion,
     });
     const succeeded = await updateTaskRunFields(taskRunId, {
       metadata: {
@@ -411,6 +428,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         to: 'cancelled',
         sessionId,
         reason,
+        nodeId,
+        leaseVersion,
       });
       const cancelled = await updateTaskRunFields(taskRunId, {
         metadata: {
@@ -443,6 +462,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       to: 'failed',
       sessionId,
       reason: message,
+      nodeId,
+      leaseVersion,
     });
     const failed = await updateTaskRunFields(taskRunId, {
       metadata: {

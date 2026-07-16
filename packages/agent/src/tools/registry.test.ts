@@ -303,6 +303,7 @@ test('spawn_agent child inherits parent run contract metadata', async () => {
   assert.equal(seenConfig.runContractMetadata.runContract.phase, 'executing');
   assert.deepEqual(seenConfig.runContractMetadata.runContract.editableSurfaces, ['packages/agent']);
   assert.deepEqual(seenConfig.runContractMetadata.runContract.requiredChecks, ['pnpm --filter @los/agent test']);
+  assert.deepEqual(seenConfig.identity, { name: 'child', level: 'minimal' });
   assert.equal(seenConfig.allowedTools.includes('spawn_agent'), false);
   assert.equal(seenConfig.allowedTools.includes('run_shell'), false);
   assert.equal(JSON.parse(result.content).childSessionId.startsWith('parent-session:child:'), true);

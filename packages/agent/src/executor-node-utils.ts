@@ -66,6 +66,30 @@ export function readVerification(verified: Record<string, unknown>, mode: string
   return (value as Record<string, unknown>).ok === true;
 }
 
+export function resolveExecutorEndpoint(
+  connectConfig: Record<string, unknown>,
+  mode: string,
+  baseUrl?: string,
+): string | undefined {
+  const modeConfig = normalizeJsonObject(connectConfig[mode] ?? connectConfig.agent_http);
+  return normalizeOptionalString(modeConfig.baseUrl)
+    ?? normalizeOptionalString(modeConfig.endpoint)
+    ?? baseUrl;
+}
+
+export function isWildcardExecutorUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === '0.0.0.0'
+      || hostname === '[::]'
+      || hostname === '::'
+      || hostname === '0:0:0:0:0:0:0:0';
+  } catch {
+    return false;
+  }
+}
+
 export function buildHeartbeatVerification(
   existing: Record<string, unknown>,
   connectModes: ExecutorNodeConnectMode[],

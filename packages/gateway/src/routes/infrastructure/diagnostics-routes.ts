@@ -11,6 +11,8 @@ import { getDb } from '@los/infra/db';
 import { ensureSessionEventStore } from '@los/agent/session-events';
 import { ensureProviderCallTelemetryStore } from '@los/agent/providers/telemetry';
 import { getRepairCounters } from '@los/agent/providers/repair-telemetry';
+import { readExecutionOutboxHealth } from '@los/agent/execution-outbox';
+import { getSymbolCacheMetrics } from '../../chat-cbm-symbol-cache.js';
 
 // DB columns use snake_case; use Record<string, any> for raw query results.
 type DbRow = Record<string, any>;
@@ -39,6 +41,14 @@ function isValidTraceId(value: string): boolean {
 }
 
 export function registerDiagnosticsRoutes(app: FastifyInstance): void {
+  app.get('/diagnostics/outbox', async () => ({
+    outbox: await readExecutionOutboxHealth(),
+  }));
+
+  app.get('/diagnostics/cbm-cache', async () => ({
+    cache: getSymbolCacheMetrics(),
+  }));
+
   // ── Trace detail ────────────────────────────────────────
   app.get('/diagnostics/:traceId', async (req, reply) => {
     const traceId = (req.params as Record<string, string>).traceId;
@@ -196,6 +206,11 @@ export function registerDiagnosticsRoutes(app: FastifyInstance): void {
        ORDER BY "totalCalls" DESC`,
     );
 
-    return { providers: rows.rows, windowMs: 15 * 60 * 1000, repairCounters: getRepairCounters() };
+    return {
+      providers: rows.rows,
+      windowMs: 15 * 60 * 1000,
+      repairCounters: getRepairCounters(),
+      symbolCache: getSymbolCacheMetrics(),
+    };
   });
 }

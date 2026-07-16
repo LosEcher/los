@@ -82,11 +82,11 @@ export function evaluateToolCallRecovery(
     }
 
     if (state.state === 'failed') {
-      terminalFailedToolCallIds.push(state.id);
       if (state.idempotent && state.attempt < state.maxAttempts) {
         retryToolCallIds.push(state.id);
         reasons.push(`${state.id}: failed idempotent tool can retry attempt ${state.attempt + 1}/${state.maxAttempts}`);
       } else {
+        terminalFailedToolCallIds.push(state.id);
         operatorAttentionToolCallIds.push(state.id);
         reasons.push(`${state.id}: failed tool is not automatically retryable`);
       }

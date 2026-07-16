@@ -27,6 +27,7 @@ export interface WebChannelConfig {
   losGatewayUrl: string;
   losAuthToken?: string;
   losOperatorToken?: string;
+  healthSnapshot?: () => Record<string, unknown>;
 }
 
 const WEB_CAPABILITIES: ChannelCapabilities = {
@@ -43,7 +44,8 @@ const WEB_CAPABILITIES: ChannelCapabilities = {
 };
 
 export function createWebChannel(config: WebChannelConfig): Channel {
-  const { port, host = '127.0.0.1', losGatewayUrl, losAuthToken, losOperatorToken } = config;
+  const { port, host = '127.0.0.1', losGatewayUrl, losAuthToken, losOperatorToken, healthSnapshot } = config;
+  const startedAt = Date.now();
   const messageHandlers = new Set<(msg: UnifiedMessage) => void | Promise<void>>();
   let server: ReturnType<typeof createServer> | null = null;
 
@@ -58,6 +60,17 @@ export function createWebChannel(config: WebChannelConfig): Channel {
     async start() {
       server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
         const url = new URL(req.url ?? '/', `http://${host}:${port}`);
+
+        if (req.method === 'GET' && url.pathname === '/health') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'ok',
+            service: 'wechat-bot',
+            uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+            ...(healthSnapshot?.() ?? { ready: true }),
+          }));
+          return;
+        }
 
         // ── Mobile dashboard ────────────────────────────
         if (req.method === 'GET' && (url.pathname === '/m/' || url.pathname === '/m' || url.pathname === '/')) {

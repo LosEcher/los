@@ -278,7 +278,7 @@ compaction:
     - procedural_candidates (standalone table)
 events:
   emits:
-    - rule_approval
+    - type: rule_approval
       on: candidate promotion
       payload:
         candidateId: string

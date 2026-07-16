@@ -320,7 +320,7 @@ export async function runChat(params: {
         await emitRunningToolCallUpsert({ send, sessionId: sid, runSpecId, turn, callId, toolName: tool, input: args });
         // Phase 3: resolve CBM symbols for write operations (best-effort, fire-and-forget)
         import('./chat-cbm-symbol-cache.js').then(m =>
-          m.cacheSymbolsForToolCall(callId, tool, args as Record<string, unknown>, workspaceRoot),
+          m.cacheSymbolsForToolCall(sid, callId, tool, args as Record<string, unknown>, workspaceRoot),
         ).catch(() => undefined);
       },
       onModelDelta: async (delta) => {

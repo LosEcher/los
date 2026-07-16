@@ -15,7 +15,7 @@
 
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState, type ModelDiagnosticConfig, type ModelDiagnosticConcept, type ModelDiagnosticInput, type ModelDiagnosticKind, type ModelDiagnosticMode, type ModelDiagnosticPhase, type ModelDiagnosticProbe, type ModelDiagnosticRecommendation, type ModelDiagnosticRiskLevel, type ModelDiagnosticSnapshot, type ToolPreflightDiagnostic } from './loop.js';
 export { getDefaultSystemPrompt } from './loop/message-builder.js';
-export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
+export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type AgentTaskGraphStageOutput, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
 export { resumeAnsweredAsksForRunSpec } from './scheduler/resume-tasks.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
@@ -32,7 +32,7 @@ export { ensureRunSpecStore, claimRunSpec, createRunSpec, approveRunSpecPhase, l
 export { canMarkSucceeded, canStartExecution, mergeRunContractMetadata, normalizeRunContractMetadata, readRunContractMetadata, validatePhaseTransition, type PlanRevisionSnapshot, type PlanStep, type RunContractMetadata, type RunContractMetadataInput, type RunContractMode, type RunPhase, type VerificationRequirement } from './run-contract.js';
 export { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, trimSpecForReview, type LoadedSpec, type LoadSpecsOptions, type SpecLayer } from './spec-loader.js';
-export { resolveAgentIdentity, resolveEffectiveIdentityLevel, formatIdentityForPrompt, type AgentIdentity, type IdentityLevel, type IdentityResolveSource } from './identity-loader.js';
+export { resolveAgentIdentity, resolveEffectiveIdentityLevel, resolveIdentityLevelForExecutionPath, formatIdentityForPrompt, type AgentIdentity, type AgentIdentityExecutionPath, type IdentityLevel, type IdentityResolveSource } from './identity-loader.js';
 export { runLifecycleHooks, type RunHookInput, type HookEvent } from './lifecycle-hooks.js';
 export { createVerificationRecord, ensureVerificationRecordStore, listVerificationRecordsForRunSpec, listVerificationRecordsForSession, loadVerificationRecord, seedVerificationRequirementsForRunSpec, type CreateVerificationRecordInput, type VerificationRecord, type VerificationRecordStatus } from './verification-records.js';
 export { resolveVerificationCompletionDecision, runVerificationRecord, runVerificationRecordsForRunSpec, type RunVerificationRecordOptions, type RunVerificationRecordResult, type RunVerificationRecordsForRunSpecOptions, type RunVerificationRecordsForRunSpecResult, type VerificationCommandResult, type VerificationCompletionDecision } from './verification-runner.js';
@@ -45,7 +45,8 @@ export {
   type FeedAnalysisCapabilityOptions, type FeedAnalysisDispatchOptions,
   type FeedAnalysisTarget, type FeedAnalysisDispatchRequest, type FeedAnalysisDispatchReceipt,
   type FeedAnalysisDispatchState, type FeedAnalysisDispatchResult, type FeedAnalysisResultResponse,
-  type FeedAnalysisResultEnvelope, type FeedAnalysisArtifact,
+  type FeedAnalysisResultEnvelope, type FeedAnalysisArtifact, type FeedAnalysisScenario,
+  type FeedAnalysisWorkflowProfile,
 } from './integration/feed-analysis-ingress.js';
 export { ensureFeedAnalysisStore, pruneExpiredFeedAnalysisMaterial } from './integration/feed-analysis-store.js';
 export {
@@ -55,9 +56,10 @@ export {
   type FeedAnalysisDeadLetterDelivery,
 } from './integration/feed-analysis-callback-outbox.js';
 export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
+export { summarizeDeadLetterEvents, requeueDeadLetterEvent, type DeadLetterReasonSummary, type DeadLetterSummary, type DeadLetterRequeueResult, type DeadLetterRequeueOptions } from './dead-letter-recovery.js';
 export { ensureRunEvalStore, compareRunEvals, listRunEvals, recordFailoverEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type SummarizeRunEvalsOptions } from './run-evals.js';
 export { getEvalBacklogCases, recordEvalBacklogSnapshot, type EvalBacklogCase } from './eval-backlog-runner.js';
-export { claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, loadAgentTask, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
+export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskLeaseFence, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
 export { getAgentTaskGraphCompletion, readAgentTaskGraph, summarizeAgentTaskGraph, type AgentTaskGraphBlockReason, type AgentTaskGraphCompletion, type AgentTaskGraphCompletionOptions, type AgentTaskGraphCompletionStatus, type AgentTaskGraphReadModel } from './agent-task-graph-read-model.js';
 export { ensureSchedulerDecisionLedgerStore, listSchedulerDecisions, recordSchedulerDecision, type ListSchedulerDecisionsOptions, type RecordSchedulerDecisionInput, type SchedulerDecisionKind, type SchedulerDecisionRecord } from './scheduler-decision-ledger.js';
 export { buildExecutionStaticGraph, type BuildExecutionStaticGraphOptions, type ExecutionStaticEdge, type ExecutionStaticEdgeKind, type ExecutionStaticGraph, type ExecutionStaticNode, type ExecutionStaticNodeKind } from './execution-static-graph.js';

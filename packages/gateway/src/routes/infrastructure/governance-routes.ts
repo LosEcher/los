@@ -24,6 +24,7 @@ const KNOWN_JOB_TYPES = [
   'branch_cleanup', 'related_project_scan', 'file_size',
   'supply_chain_audit', 'static_analysis', 'performance_audit',
   'migration_drift_fix', 'event_retention', 'code_topology_audit',
+  'dead_letter',
 ] as const;
 
 interface GovernanceJobSummary {

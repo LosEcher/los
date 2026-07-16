@@ -3,7 +3,7 @@ import { createRunSpec } from '../run-specs.js';
 import { appendSessionEvent } from '../session-events.js';
 import { loadTaskRun } from '../task-runs.js';
 import { transitionExecutionState } from '../execution-store.js';
-import { cancelScheduledTask, runScheduledAgentTask } from '../scheduler.js';
+import { cancelScheduledTask } from '../scheduler.js';
 import { requestCancellation } from '../cancellation.js';
 import {
   _FEED_ANALYSIS_CONTRACT_VERSION,
@@ -22,16 +22,14 @@ import {
   linkFeedAnalysisExecution,
   loadFeedAnalysisDispatch,
   loadFeedAnalysisResult,
-  saveFeedAnalysisResult,
-  updateFeedAnalysisTaskRun,
   type FeedAnalysisDispatchRecord,
 } from './feed-analysis-store.js';
 import {
   buildFeedAnalysisWorkflowPrompt,
-  parseFeedAnalysisWorkflowResult,
   prepareFeedAnalysisInput,
   type FeedAnalysisWorkflowLimits,
 } from './feed-analysis-workflow.js';
+import { _executeFeedAnalysisDispatch } from './feed-analysis-execution.js';
 
 export interface FeedAnalysisDispatchOptions extends FeedAnalysisWorkflowLimits {
   workspaceRoot: string;
@@ -70,7 +68,9 @@ export function listFeedAnalysisTargets(options: FeedAnalysisCapabilityOptions =
       contractVersions: [_FEED_ANALYSIS_CONTRACT_VERSION],
       supportedDeliveryModes: deliveryModes,
       supportedOutputs: ['daily_digest', 'content_brief', 'platform_draft'],
-      supportedPlatforms: ['xiaohongshu', 'weibo', 'x'],
+      supportedScenarios: ['evidence_batch', 'research_topic'],
+      supportedWorkflowProfiles: ['batch_summary', 'daily_content', 'research_deep'],
+      supportedPlatforms: ['xiaohongshu', 'zhihu', 'weibo', 'x'],
       supportedLocales: ['zh-CN'],
       supportsResultReturning,
       supportsCallback: options.callbackEnabled === true,
@@ -112,7 +112,13 @@ export async function dispatchFeedAnalysisJob(
     policy: prepared.policy,
     callbackProfileId: normalizeOptionalString(request.callback?.profileId),
     material: prepared.materialBundle as unknown as Record<string, unknown>,
-    metadata: request.metadata,
+    metadata: {
+      ...request.metadata,
+      scenario: prepared.workflow.scenario,
+      workflowProfile: prepared.workflow.profile,
+      collectionSnapshotId: prepared.collectionSnapshot?.snapshotId,
+      topicId: prepared.topic?.topicId,
+    },
     retentionExpiresAt: new Date(Date.now() + retentionDays * 86_400_000).toISOString(),
   });
 
@@ -135,12 +141,19 @@ export async function dispatchFeedAnalysisJob(
     prompt,
     workspaceRoot: options.workspaceRoot,
     toolMode: 'read-only',
-    maxLoops: 1,
+    maxLoops: prepared.workflow.maxLoops,
     timeoutMs: options.timeoutMs,
     runContract: {
       mode: 'feed-analysis-ingress',
-      executionMode: 'lightweight',
-      goal: JSON.stringify({ sourceSystem, sourceJobId, deliveryMode, workflow: 'lot2.daily-content@1.0.0' }),
+      executionMode: prepared.workflow.executionMode,
+      goal: JSON.stringify({
+        sourceSystem,
+        sourceJobId,
+        deliveryMode,
+        scenario: prepared.workflow.scenario,
+        workflow: `${prepared.workflow.workflowId}@${prepared.workflow.workflowVersion}`,
+      }),
+      selfCheckEnabled: false,
     },
     modelSettings: {},
   });
@@ -158,10 +171,12 @@ export async function dispatchFeedAnalysisJob(
       event: 'feed_analysis.dispatch_received', dispatchId, sourceSystem, sourceJobId, deliveryMode,
       bundleId: prepared.materialBundle.bundleId, inputDigest: prepared.inputDigest,
       itemCount: prepared.materialBundle.items.length, requestedOutputs: prepared.requestedOutputs,
+      scenario: prepared.workflow.scenario, workflowProfile: prepared.workflow.profile,
+      collectionSnapshotId: prepared.collectionSnapshot?.snapshotId, topicId: prepared.topic?.topicId,
     },
   });
 
-  void executeFeedAnalysisDispatch({
+  void _executeFeedAnalysisDispatch({
     dispatchId,
     prompt,
     sessionId,
@@ -226,77 +241,6 @@ export async function cancelFeedAnalysisDispatch(
   return { dispatchId, status: cancelled.status, cancelled: true };
 }
 
-async function executeFeedAnalysisDispatch(input: {
-  dispatchId: string;
-  prompt: string;
-  sessionId: string;
-  traceId: string;
-  workspaceRoot: string;
-  tenantId: string;
-  projectId: string;
-  userId?: string;
-  requestId?: string;
-  provider?: string;
-  model?: string;
-  timeoutMs?: number;
-  deliveryMode: FeedAnalysisDeliveryMode;
-  prepared: Awaited<ReturnType<typeof prepareFeedAnalysisInput>>;
-}): Promise<void> {
-  const startedAt = Date.now();
-  try {
-    const scheduled = await runScheduledAgentTask({
-      prompt: input.prompt,
-      promptPreview: `[feed-analysis ${input.dispatchId}]`,
-      sessionId: input.sessionId,
-      runSpecId: input.dispatchId,
-      traceId: input.traceId,
-      dedupeKey: `feed-analysis:${input.tenantId}:${input.projectId}:${input.dispatchId}`,
-      workspaceRoot: input.workspaceRoot,
-      tenantId: input.tenantId,
-      projectId: input.projectId,
-      userId: input.userId,
-      requestId: input.requestId,
-      provider: input.provider,
-      model: input.model,
-      timeoutMs: input.timeoutMs,
-      toolMode: 'read-only',
-      maxLoops: 1,
-      metadata: { feedAnalysisDispatchId: input.dispatchId },
-      runContract: { mode: 'feed-analysis-ingress', executionMode: 'lightweight' },
-      onTaskEvent: async event => {
-        await updateFeedAnalysisTaskRun(input.dispatchId, event.taskRun.id);
-        if (event.type === 'task.running') await emitFeedAnalysisStatus(input.dispatchId, 'processing');
-      },
-    });
-    if (scheduled.status !== 'completed') {
-      if (scheduled.status === 'cancelled') await emitFeedAnalysisStatus(input.dispatchId, 'cancelled');
-      else await emitFeedAnalysisStatus(input.dispatchId, 'failed', {
-        code: 'workflow_incomplete',
-        message: scheduled.status === 'blocked' ? scheduled.reason : 'workflow task was deduplicated unexpectedly',
-      });
-      return;
-    }
-    if (input.deliveryMode === 'delivery_only') {
-      await emitFeedAnalysisStatus(input.dispatchId, 'completed');
-      return;
-    }
-    const result = parseFeedAnalysisWorkflowResult(scheduled.result.text, input.prepared, {
-      provider: scheduled.taskRun.provider,
-      model: scheduled.taskRun.model,
-      promptTokens: scheduled.result.totalTokens.prompt,
-      completionTokens: scheduled.result.totalTokens.completion,
-      durationMs: Date.now() - startedAt,
-    });
-    await saveFeedAnalysisResult(input.dispatchId, result);
-  } catch (error) {
-    const current = await loadFeedAnalysisDispatch(input.dispatchId).catch(() => null);
-    if (current?.status === 'cancelled' || current?.status === 'failed') return;
-    const code = error instanceof FeedAnalysisError ? error.code : 'workflow_failed';
-    const message = error instanceof Error ? error.message : String(error);
-    await emitFeedAnalysisStatus(input.dispatchId, 'failed', { code, message }).catch(() => undefined);
-  }
-}
-
 function dispatchToResult(
   record: FeedAnalysisDispatchRecord,
   deduplicated: boolean,
@@ -315,6 +259,10 @@ function dispatchToResult(
         deliveryMode: record.deliveryMode,
         requestedOutputs: record.requestedOutputs,
         inputDigest: record.inputDigest,
+        scenario: record.metadata.scenario,
+        workflowProfile: record.metadata.workflowProfile,
+        collectionSnapshotId: record.metadata.collectionSnapshotId,
+        topicId: record.metadata.topicId,
       },
     },
     dispatchState: buildDispatchState(record),
@@ -358,6 +306,8 @@ export type {
   FeedAnalysisDispatchState,
   FeedAnalysisResultEnvelope,
   FeedAnalysisResultResponse,
+  FeedAnalysisScenario,
   FeedAnalysisTarget,
+  FeedAnalysisWorkflowProfile,
 } from './feed-analysis-types.js';
 export { FeedAnalysisError } from './feed-analysis-types.js';

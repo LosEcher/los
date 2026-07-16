@@ -8,7 +8,9 @@ export const _FEED_ANALYSIS_PROMPT_VERSION = '1.0.0';
 
 export type FeedAnalysisDeliveryMode = 'delivery_only' | 'result_returning';
 export type FeedAnalysisOutputKind = 'daily_digest' | 'content_brief' | 'platform_draft';
-export type FeedAnalysisPlatform = 'xiaohongshu' | 'weibo' | 'x';
+export type FeedAnalysisPlatform = 'xiaohongshu' | 'zhihu' | 'weibo' | 'x';
+export type FeedAnalysisScenario = 'evidence_batch' | 'research_topic';
+export type FeedAnalysisWorkflowProfile = 'batch_summary' | 'daily_content' | 'research_deep';
 export type FeedAnalysisStatus =
   | 'accepted'
   | 'queued'
@@ -24,6 +26,8 @@ export interface FeedAnalysisTarget {
   contractVersions: string[];
   supportedDeliveryModes: FeedAnalysisDeliveryMode[];
   supportedOutputs: FeedAnalysisOutputKind[];
+  supportedScenarios: FeedAnalysisScenario[];
+  supportedWorkflowProfiles: FeedAnalysisWorkflowProfile[];
   supportedPlatforms: FeedAnalysisPlatform[];
   supportedLocales: string[];
   supportsResultReturning: boolean;
@@ -75,6 +79,7 @@ export interface FeedAnalysisDispatchRequest {
   sourceSystem: string;
   sourceJobId: string;
   sourceSessionId?: string;
+  scenario?: FeedAnalysisScenario | string;
   deliveryMode: FeedAnalysisDeliveryMode | string;
   targetKind?: string;
   payloadVersion?: string;
@@ -83,6 +88,22 @@ export interface FeedAnalysisDispatchRequest {
   sessionId?: string;
   callback?: { profileId?: string };
   metadata?: Record<string, unknown>;
+  collectionSnapshot?: {
+    snapshotId: string;
+    createdAt?: string;
+    observationCount: number;
+    dedupePolicy?: string;
+  };
+  topic?: {
+    topicId: string;
+    title: string;
+    brief?: string;
+    targetPlatforms?: string[];
+  };
+  workflowHint?: {
+    profile?: FeedAnalysisWorkflowProfile | string;
+    maxLoops?: number;
+  };
   materialBundle?: MaterialBundle;
   materialBundleRef?: MaterialBundleRef;
   feedSession?: {

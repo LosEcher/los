@@ -6,7 +6,8 @@ import { cancelScheduledTask } from '@los/agent/scheduler';
 import { requestCancellation } from '@los/agent';
 import { normalizeOptionalString } from '../server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
-import { listDeadLetterEvents, acknowledgeDeadLetterEvent } from '@los/agent';
+import { listDeadLetterEvents, acknowledgeDeadLetterEvent, summarizeDeadLetterEvents, requeueDeadLetterEvent } from '@los/agent';
+import { requireOperator } from '../../request-context.js';
 
 type OrphanClassification = 'stale-gateway' | 'expired-lease' | 'cancelled' | 'none';
 
@@ -156,10 +157,23 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     return await listDeadLetterEvents({ acknowledged, reason: reason as any, limit });
   });
 
+  app.get('/tasks/dead-letter/summary', async () => {
+    return await summarizeDeadLetterEvents();
+  });
+
   app.post('/tasks/dead-letter/:id/ack', async (req, reply) => {
     const { id } = req.params as { id: string };
     const record = await acknowledgeDeadLetterEvent(id);
     if (!record) return reply.status(404).send({ error: 'Dead letter event not found or already acknowledged' });
     return record;
+  });
+
+  app.post('/tasks/dead-letter/:id/retry', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const result = await requeueDeadLetterEvent(id);
+    if (result.status === 'not_found') return reply.status(404).send({ error: result.reason });
+    if (result.status !== 'requeued') return reply.status(409).send({ error: result.reason, event: result.event });
+    return result;
   });
 }

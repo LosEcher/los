@@ -5,7 +5,7 @@ import { runMultiRoleReview, type ReviewRoleConfig } from '../review-runner.js';
 import { reflectOnFailure, formatReflectionSummary } from '../reflection.js';
 import { readCurrentRunContract } from './contract-reader.js';
 import { transitionExecutionState } from '../execution-store.js';
-import { updateTaskRunFields } from '../task-runs.js';
+import { updateTaskRunFields, type TaskRunRecord } from '../task-runs.js';
 import { emitTaskEvent } from './task-events.js';
 import { getConfig } from '@los/infra/config';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
@@ -19,7 +19,7 @@ import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.
 export async function runGoalSelfCheck(
   input: ScheduledAgentTaskInput,
   result: AgentResult,
-  running: { metadata: Record<string, unknown> },
+  running: Pick<TaskRunRecord, 'metadata' | 'nodeId' | 'leaseVersion'>,
   sessionId: string,
   taskRunId: string,
 ): Promise<ScheduledAgentTaskResult | null> {
@@ -98,6 +98,8 @@ export async function runGoalSelfCheck(
           to: 'blocked',
           sessionId,
           reason: 'multi_role_review_failed',
+          nodeId: running.nodeId,
+          leaseVersion: running.leaseVersion,
         });
 
         await updateTaskRunFields(taskRunId, {
@@ -200,6 +202,8 @@ export async function runGoalSelfCheck(
       to: 'blocked',
       sessionId,
       reason: 'goal_self_check_failed',
+      nodeId: running.nodeId,
+      leaseVersion: running.leaseVersion,
     });
     const blocked = await updateTaskRunFields(taskRunId, {
       metadata: {
@@ -256,6 +260,8 @@ export async function runGoalSelfCheck(
       to: 'blocked',
       sessionId,
       reason: 'confidence_gate',
+      nodeId: running.nodeId,
+      leaseVersion: running.leaseVersion,
     });
 
     await updateTaskRunFields(taskRunId, {

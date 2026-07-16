@@ -9,7 +9,8 @@
     "./db": "./src/db.ts",
     "./discovery": "./src/discovery.ts",
     "./migrate": "./src/migrate.ts",
-    "./procedural-candidates-ddl": "./src/procedural-candidates-ddl.ts"
+    "./procedural-candidates-ddl": "./src/procedural-candidates-ddl.ts",
+    "./provider-defaults": "./src/provider-defaults.ts"
   },
   "scripts": {
     "build": "tsc",

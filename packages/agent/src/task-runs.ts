@@ -1,10 +1,3 @@
-/**
- * @los/agent/task-runs — Minimal persistent task lifecycle records.
- *
- * This is the project-task layer above chat sessions:
- * queued -> running -> succeeded/failed/cancelled
- */
-
 import { getDb, withDbClient } from '@los/infra/db';
 import { resolveCoordinationBackend } from './coordination/resolve.js';
 import { mergeRunContractMetadata, type RunContractMetadataInput } from './run-contract.js';
@@ -38,6 +31,7 @@ export interface TaskRunRecord {
   startedAt?: string;
   completedAt?: string;
   heartbeatAt?: string;
+  leaseVersion: number;
   leaseExpiresAt?: string;
 }
 
@@ -61,6 +55,8 @@ export interface CreateTaskRunInput {
   runContract?: RunContractMetadataInput;
   status?: TaskRunStatus;
   attempt?: number;
+  leaseVersion?: number;
+  leaseExpiresAt?: Date | string;
 }
 
 export interface UpdateTaskRunFieldsInput {
@@ -101,9 +97,10 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
       id, session_id, run_spec_id, trace_id, dedupe_key, tenant_id, project_id, user_id, node_id, request_id,
       workspace_root, tool_mode, provider, model,
       status,
-      attempt, prompt_preview, metadata_json, updated_at
+      attempt, prompt_preview, metadata_json, heartbeat_at, lease_version, lease_expires_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb,
+      CASE WHEN $20::timestamptz IS NULL THEN NULL ELSE now() END, $19, $20::timestamptz, now())
     RETURNING *
   `,
     [
@@ -125,6 +122,8 @@ export async function createTaskRun(input: CreateTaskRunInput): Promise<TaskRunR
       input.attempt ?? 1,
       input.promptPreview,
       JSON.stringify(mergeRunContractMetadata(input.metadata, input.runContract)),
+      input.leaseVersion ?? 0,
+      input.leaseExpiresAt ?? null,
     ],
   );
   return rowToTaskRun(assertRow(rows.rows[0]));
@@ -217,7 +216,7 @@ export async function updateTaskRunFields(
 
 export async function heartbeatTaskRun(
   id: string,
-  input: { nodeId?: string; leaseMs?: number } = {},
+  input: { nodeId: string; leaseVersion: number; leaseMs?: number },
 ): Promise<TaskRunRecord | null> {
   await ensureTaskRunStore();
   const db = getDb();
@@ -225,38 +224,24 @@ export async function heartbeatTaskRun(
   const rows = await db.query<TaskRunRow>(
     `
     UPDATE task_runs
-    SET node_id = COALESCE($2, node_id),
-        heartbeat_at = now(),
-        lease_expires_at = now() + ($3::text || ' milliseconds')::interval,
+    SET heartbeat_at = now(),
+        lease_expires_at = now() + ($4::text || ' milliseconds')::interval,
         updated_at = now()
     WHERE id = $1
       AND status IN ('queued', 'running')
+      AND node_id = $2
+      AND lease_version = $3
+      AND lease_expires_at > now()
     RETURNING *
   `,
-    [id, input.nodeId ?? null, leaseMs],
+    [id, input.nodeId, input.leaseVersion, leaseMs],
   );
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
 }
 
 export async function recoverExpiredTaskRuns(reason = 'lease_expired'): Promise<TaskRunRecord[]> {
   await ensureTaskRunStore();
-  const db = getDb();
-  const rows = await db.query<TaskRunRow>(
-    `
-    UPDATE task_runs
-    SET status = 'failed',
-        metadata_json = metadata_json || $1::jsonb,
-        completed_at = now(),
-        lease_expires_at = NULL,
-        updated_at = now()
-    WHERE status IN ('queued', 'running')
-      AND lease_expires_at IS NOT NULL
-      AND lease_expires_at < now()
-    RETURNING *
-  `,
-    [JSON.stringify({ recoveryReason: reason })],
-  );
-  return rows.rows.map(rowToTaskRun);
+  return recoverExpiredTaskRunsWithStateTransition(reason);
 }
 
 export async function recoverExpiredTaskRunsWithAdvisoryLock(
@@ -265,28 +250,52 @@ export async function recoverExpiredTaskRunsWithAdvisoryLock(
   await ensureTaskRunStore();
   const backend = await resolveCoordinationBackend();
   const result = await backend.lock.withLock('task-run-recovery', async () => {
-    const db = getDb();
-    const rows = await db.query<TaskRunRow>(
-      `
-      UPDATE task_runs
-      SET status = 'failed',
-          metadata_json = metadata_json || $1::jsonb,
-          completed_at = now(),
-          lease_expires_at = NULL,
-          updated_at = now()
-      WHERE status IN ('queued', 'running')
-        AND lease_expires_at IS NOT NULL
-        AND lease_expires_at < now()
-      RETURNING *
-    `,
-      [JSON.stringify({ recoveryReason: reason })],
-    );
-    return rows.rows.map(rowToTaskRun);
+    return recoverExpiredTaskRunsWithStateTransition(reason);
   });
   if (result === null) {
     return { lockAcquired: false, recovered: [] };
   }
   return { lockAcquired: true, recovered: result };
+}
+
+async function recoverExpiredTaskRunsWithStateTransition(reason: string): Promise<TaskRunRecord[]> {
+  const db = getDb();
+  const rows = await db.query<TaskRunRow>(
+    `SELECT * FROM task_runs
+     WHERE status IN ('queued', 'running')
+       AND lease_expires_at IS NOT NULL
+       AND lease_expires_at < now()
+     ORDER BY updated_at ASC`,
+  );
+  if (rows.rows.length === 0) return [];
+
+  const { _LeaseLostError, transitionExecutionState } = await import('./execution-store.js');
+  const recovered: TaskRunRecord[] = [];
+  for (const row of rows.rows) {
+    const task = rowToTaskRun(row);
+    try {
+      await transitionExecutionState({
+        entityType: 'task_run',
+        entityId: task.id,
+        to: 'failed',
+        sessionId: task.sessionId,
+        reason,
+        nodeId: task.nodeId,
+        attempt: task.attempt,
+        leaseVersion: task.nodeId ? task.leaseVersion : undefined,
+        leaseCondition: task.nodeId ? 'expired' : undefined,
+      });
+    } catch (error) {
+      if (error instanceof _LeaseLostError) continue;
+      throw error;
+    }
+    const updated = await updateTaskRunFields(task.id, {
+      metadata: { ...task.metadata, recoveryReason: reason },
+      leaseExpiresAt: null,
+    });
+    if (updated) recovered.push(updated);
+  }
+  return recovered;
 }
 
 export async function loadTaskRun(id: string): Promise<TaskRunRecord | null> {

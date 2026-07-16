@@ -21,6 +21,7 @@ The four-layer architecture is fully materialized in the current codebase:
 **Layer 3 — Model Profile:**
 - `packages/agent/src/model-profiles.ts` — 16-field ModelProfile with capability profile, pricing, cache policy, retry policy
 - `packages/agent/src/model-settings.ts` — per-model parameter normalization
+- `packages/infra/src/provider-defaults.ts` — canonical provider URL/model/API-key/local-endpoint defaults consumed by config, discovery, OAuth, and model profiles
 
 **Layer 4 — Harness and Fallback:**
 - `packages/agent/src/compat-harness.ts` — compatibility harness with required gate enforcement

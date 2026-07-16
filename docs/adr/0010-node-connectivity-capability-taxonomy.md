@@ -162,6 +162,25 @@ Resource fields carried in `capacity` or heartbeat payload:
    - `connect_modes` 至少有 `socks5`
    - 只算网络能力，不直接算执行能力
 
+### 7. Runtime build identity
+
+Node `version` must identify the deployed code snapshot, not only the package
+release line. Deployments use SemVer build metadata such as
+`0.1.0+b1a2b3c4d5e6f`; `target_version` uses the same format during a rollout.
+
+The gateway and local executor derive their version from a deterministic digest
+of deployable runtime content when started through `tools/los.sh`. Documentation
+and generated output are excluded, so recording a rollout cannot change the
+recorded runtime identity. Remote deployment stamps the same immutable build
+identifier into the preserved node `.env`. A successful rollout requires
+`/health.version` and `executor_nodes.version` to agree.
+
+Remote executor synchronization must include the executor's workspace runtime
+dependency closure and every workspace manifest covered by `pnpm-lock.yaml`.
+The deployment tool therefore ships `packages/` as a unit: updating only
+`packages/executor` creates a false-success deployment through stale imports,
+while omitting other manifests makes frozen-lockfile validation unreliable.
+
 ## Placement
 
 这条设计应该先落在 `packages/agent/src/executor-nodes.ts` 和 `packages/gateway/src/server.ts` 的读模型里，再落到 `packages/web/src/pages.tsx` 的 Nodes 页面。

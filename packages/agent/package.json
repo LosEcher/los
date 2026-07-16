@@ -28,6 +28,7 @@
     "./run-evals": "./src/run-evals.ts",
     "./execution-transitions": "./src/execution-transitions.ts",
     "./execution-store": "./src/execution-store.ts",
+    "./execution-outbox": "./src/execution-outbox.ts",
     "./ensure-all-stores": "./src/ensure-all-stores.ts",
     "./tool-call-states": "./src/tool-call-states.ts",
     "./mcp-servers": "./src/mcp-servers.ts",
@@ -59,6 +60,7 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.40.5",
+    "@los/contracts": "workspace:*",
     "@los/infra": "workspace:*",
     "fast-glob": "^3.3.3",
     "undici": "^8.5.0",

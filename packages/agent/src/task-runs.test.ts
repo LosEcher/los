@@ -15,6 +15,7 @@ import {
   recoverExpiredTaskRunsWithAdvisoryLock,
   updateTaskRun,
 } from './task-runs.js';
+import { _LeaseLostError, transitionExecutionState } from './execution-store.js';
 
 test('task run lifecycle persists status changes', async () => {
   const config = await loadConfig();
@@ -88,7 +89,11 @@ test('task run lifecycle persists status changes', async () => {
     assert.ok(running?.heartbeatAt);
     assert.ok(running?.leaseExpiresAt);
 
-    const heartbeat = await heartbeatTaskRun(id, { nodeId: 'node-2', leaseMs: 30_000 });
+    const heartbeat = await heartbeatTaskRun(id, {
+      nodeId: 'node-2',
+      leaseVersion: running?.leaseVersion ?? 0,
+      leaseMs: 30_000,
+    });
     assert.equal(heartbeat?.nodeId, 'node-2');
     assert.ok(heartbeat?.heartbeatAt);
 
@@ -108,6 +113,73 @@ test('task run lifecycle persists status changes', async () => {
     assert.equal(noActiveDuplicate, null);
     assert.equal((await listActiveTaskRunsForSession('session-1')).some(task => task.id === id), false);
   } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('task run terminal transitions reject stale lease owners', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const id = `task-lease-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const created = await createTaskRun({
+      id,
+      sessionId: `session-${id}`,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      promptPreview: 'lease test',
+      nodeId: 'node-a',
+      leaseVersion: 7,
+      leaseExpiresAt: new Date(Date.now() + 30_000),
+    });
+    assert.equal(created.leaseVersion, 7);
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: id,
+      to: 'running',
+      reason: 'lease_test_start',
+      nodeId: 'node-a',
+      leaseVersion: 7,
+    });
+    assert.equal((await heartbeatTaskRun(id, {
+      nodeId: 'node-a',
+      leaseVersion: 7,
+      leaseMs: 30_000,
+    }))?.leaseVersion, 7);
+    assert.equal(await heartbeatTaskRun(id, {
+      nodeId: 'node-b',
+      leaseVersion: 7,
+      leaseMs: 30_000,
+    }), null);
+
+    await getDb().query(
+      'UPDATE task_runs SET node_id = $2, lease_version = $3, lease_expires_at = now() + interval \'30 seconds\' WHERE id = $1',
+      [id, 'node-b', 8],
+    );
+    await assert.rejects(
+      () => transitionExecutionState({
+        entityType: 'task_run',
+        entityId: id,
+        to: 'succeeded',
+        reason: 'stale_owner_finish',
+        nodeId: 'node-a',
+        leaseVersion: 7,
+      }),
+      _LeaseLostError,
+    );
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: id,
+      to: 'succeeded',
+      reason: 'current_owner_finish',
+      nodeId: 'node-b',
+      leaseVersion: 8,
+    });
+    assert.equal((await loadTaskRun(id))?.status, 'succeeded');
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE entity_id = $1', [id]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [`session-${id}`]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE id = $1', [id]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

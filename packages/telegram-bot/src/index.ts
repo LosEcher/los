@@ -37,6 +37,7 @@ import { TelegramActionRegistry } from './action-registry.js';
 import { createTelegramUpdateProcessor, prepareTelegramPolling, runTelegramPollingLoop } from './telegram-updates.js';
 import { createTelegramWebhookHandler, startTelegramWebhook } from './telegram-webhook.js';
 import { ensureTelegramActionStore } from './telegram-action-store.js';
+import { startTelegramHealthServer } from './health-server.js';
 import { loadConfig } from '@los/infra/config';
 import { initDb } from '@los/infra/db';
 
@@ -54,6 +55,7 @@ const LOS_OPERATOR_TOKEN = process.env.LOS_OPERATOR_TOKEN;
 const WEBHOOK_PORT = Number(process.env.TELEGRAM_WEBHOOK_PORT ?? 0);
 const POLL_INTERVAL_MS = Number(process.env.TELEGRAM_POLL_INTERVAL ?? 5000);
 const SSE_RECONNECT_MS = Number(process.env.SSE_RECONNECT_MS ?? 3000);
+const HEALTH_PORT = Number(process.env.TELEGRAM_HEALTH_PORT ?? 3002);
 const WEBHOOK_BIND_HOST = '127.0.0.1';
 
 const configuredChatIds = process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? process.env.TELEGRAM_CHAT_ID;
@@ -171,10 +173,12 @@ function formatAlert(event: OperatorAttentionEvent): string {
 // ── SSE event consumer ─────────────────────────────────────────────
 
 let sseAbort: AbortController | null = null;
+let sseConnected = false;
 
 async function connectSSE(): Promise<void> {
   if (sseAbort) sseAbort.abort();
   sseAbort = new AbortController();
+  sseConnected = false;
 
   try {
     const url = `${LOS_GATEWAY_URL}/operator/events/live`;
@@ -190,6 +194,7 @@ async function connectSSE(): Promise<void> {
       setTimeout(connectSSE, SSE_RECONNECT_MS);
       return;
     }
+    sseConnected = true;
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -222,6 +227,7 @@ async function connectSSE(): Promise<void> {
     if (err.name === 'AbortError') return;
     console.error(`SSE error: ${err.message}`);
   }
+  sseConnected = false;
 
   // Reconnect on disconnect
   setTimeout(connectSSE, SSE_RECONNECT_MS);
@@ -281,6 +287,11 @@ async function main(): Promise<void> {
   console.log(`🤖 los Telegram Bot starting`);
   console.log(`   Gateway: ${LOS_GATEWAY_URL}`);
   console.log(`   Chats: ${[...authorizedChats].join(', ')}`);
+  await startTelegramHealthServer({
+    port: HEALTH_PORT,
+    getSnapshot: () => ({ ready: sseConnected, sseConnected, mode: WEBHOOK_PORT > 0 ? 'webhook' : 'polling' }),
+  });
+  console.log(`   Health: http://127.0.0.1:${HEALTH_PORT}/health`);
 
   if (WEBHOOK_PORT > 0) {
     const server = createServer(createTelegramWebhookHandler({ secret: WEBHOOK_SECRET!, processUpdate }));

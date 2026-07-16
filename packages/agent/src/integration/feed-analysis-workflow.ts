@@ -2,11 +2,7 @@ import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 import {
-  _FEED_ANALYSIS_PROMPT_ID,
-  _FEED_ANALYSIS_PROMPT_VERSION,
   _FEED_ANALYSIS_RESULT_VERSION,
-  _FEED_ANALYSIS_WORKFLOW_ID,
-  _FEED_ANALYSIS_WORKFLOW_VERSION,
   _MATERIAL_BUNDLE_VERSION,
   type FeedAnalysisArtifact,
   type FeedAnalysisDispatchRequest,
@@ -17,10 +13,18 @@ import {
   FeedAnalysisError,
 } from './feed-analysis-types.js';
 import { digestJson } from './feed-analysis-store.js';
+import {
+  buildArtifactContractInstructions,
+  readFeedAnalysisWarnings,
+  selectRequestedArtifacts,
+} from './feed-analysis-result-contract.js';
+import {
+  resolveFeedAnalysisWorkflow,
+  type FeedAnalysisWorkflowDescriptor,
+} from './feed-analysis-workflow-profile.js';
 
 const OUTPUTS = new Set<FeedAnalysisOutputKind>(['daily_digest', 'content_brief', 'platform_draft']);
-const PLATFORMS = new Set<FeedAnalysisPlatform>(['xiaohongshu', 'weibo', 'x']);
-
+const PLATFORMS = new Set<FeedAnalysisPlatform>(['xiaohongshu', 'zhihu', 'weibo', 'x']);
 export interface FeedAnalysisWorkflowLimits {
   maxInlineBytes: number;
   maxItems: number;
@@ -33,6 +37,9 @@ export interface PreparedFeedAnalysisInput {
   inputDigest: string;
   requestedOutputs: FeedAnalysisOutputKind[];
   policy: Record<string, unknown>;
+  workflow: FeedAnalysisWorkflowDescriptor;
+  collectionSnapshot?: FeedAnalysisDispatchRequest['collectionSnapshot'];
+  topic?: FeedAnalysisDispatchRequest['topic'];
 }
 
 export async function prepareFeedAnalysisInput(
@@ -57,18 +64,31 @@ export async function prepareFeedAnalysisInput(
   validateMaterialBundle(bundle, request.sourceSystem, limits.maxItems);
   const requestedOutputs = normalizeRequestedOutputs(request.requestedOutputs ?? bundle.requestedOutputs);
   const policy = normalizePolicy(bundle.policy);
+  const workflow = resolveFeedAnalysisWorkflow(
+    request,
+    bundle.items.length,
+    requestedOutputs,
+    policy.allowExternalResearch === true,
+  );
   return {
     materialBundle: bundle,
     inputDigest: digestJson({
       sourceSystem: request.sourceSystem.trim(),
       sourceJobId: request.sourceJobId.trim(),
-      deliveryMode: normalizeDeliveryMode(request.deliveryMode),
+      deliveryMode: request.deliveryMode.trim().toLowerCase(),
       bundle,
       requestedOutputs,
       policy,
+      scenario: workflow.scenario,
+      collectionSnapshot: request.collectionSnapshot,
+      topic: request.topic,
+      workflow: { profile: workflow.profile, maxLoops: workflow.maxLoops },
     }),
     requestedOutputs,
     policy,
+    workflow,
+    collectionSnapshot: request.collectionSnapshot,
+    topic: request.topic,
   };
 }
 
@@ -85,13 +105,26 @@ export function buildFeedAnalysisWorkflowPrompt(input: PreparedFeedAnalysisInput
   }));
   return [
     'Produce a feed-analysis result as strict JSON with no markdown fence.',
+    `Workflow: ${input.workflow.workflowId}@${input.workflow.workflowVersion} (${input.workflow.profile}).`,
+    `Scenario: ${input.workflow.scenario ?? 'legacy_daily_content'}.`,
     `Use schemaVersion "${_FEED_ANALYSIS_RESULT_VERSION}".`,
     `Requested outputs: ${input.requestedOutputs.join(', ') || 'daily_digest'}.`,
     `Locale: ${locale}. External research allowed: ${input.policy.allowExternalResearch === true}.`,
     'Required top-level keys: summary, artifacts, citations, warnings.',
-    'Each artifact requires kind, body, and optional platform/title/titleCandidates/hashtags/citationRefs.',
+    'Top-level summary must be a non-empty string, never an object.',
+    ...buildArtifactContractInstructions(
+      input.requestedOutputs,
+      input.workflow.scenario === 'research_topic' ? input.topic?.targetPlatforms : undefined,
+    ),
+    'Each citation requires a unique id and itemId. Artifact citationRefs must contain citation ids, not item ids.',
     'Use only supplied item IDs in citations. Do not invent URLs or publishing claims.',
-    JSON.stringify({ bundleId: input.materialBundle.bundleId, items }),
+    ...profileInstructions(input.workflow.profile),
+    JSON.stringify({
+      bundleId: input.materialBundle.bundleId,
+      collectionSnapshot: input.collectionSnapshot,
+      topic: input.workflow.scenario === 'research_topic' ? input.topic : undefined,
+      items,
+    }),
   ].join('\n');
 }
 
@@ -107,7 +140,7 @@ export function parseFeedAnalysisWorkflowResult(
     throw new FeedAnalysisError('result_invalid', 'workflow output is not valid JSON', 422);
   }
   const root = readObject(parsed);
-  const summary = readRequiredString(root.summary, 'result summary');
+  const summary = readSummary(root.summary);
   const locale = typeof input.policy.locale === 'string' ? input.policy.locale : 'zh-CN';
   const citations = Array.isArray(root.citations)
     ? root.citations.map(readObject).map((citation, index) => ({
@@ -117,9 +150,13 @@ export function parseFeedAnalysisWorkflowResult(
         title: readString(citation.title),
       }))
     : [];
-  const warnings = readStringArray(root.warnings);
   const rawArtifacts = Array.isArray(root.artifacts) ? root.artifacts : [];
-  const artifacts = rawArtifacts.map((value, index) => normalizeArtifact(value, index, locale));
+  const selectedArtifacts = selectRequestedArtifacts(rawArtifacts, input.requestedOutputs);
+  const warnings = [...readFeedAnalysisWarnings(root.warnings), ...selectedArtifacts.warnings];
+  const artifacts = normalizeCitationRefs(
+    selectedArtifacts.values.map(({ value, index }) => normalizeArtifact(value, index, locale, input.workflow)),
+    citations,
+  );
   assertRequestedArtifacts(input.requestedOutputs, artifacts);
   return {
     schemaVersion: _FEED_ANALYSIS_RESULT_VERSION,
@@ -127,8 +164,8 @@ export function parseFeedAnalysisWorkflowResult(
     artifacts,
     citations,
     warnings,
-    workflow: { id: _FEED_ANALYSIS_WORKFLOW_ID, version: _FEED_ANALYSIS_WORKFLOW_VERSION },
-    prompt: { id: _FEED_ANALYSIS_PROMPT_ID, version: _FEED_ANALYSIS_PROMPT_VERSION },
+    workflow: { id: input.workflow.workflowId, version: input.workflow.workflowVersion },
+    prompt: { id: input.workflow.promptId, version: input.workflow.promptVersion },
     provider: runtime?.provider || runtime?.model ? { name: runtime.provider, model: runtime.model } : undefined,
     usage: {
       promptTokens: runtime?.promptTokens ?? 0,
@@ -138,7 +175,12 @@ export function parseFeedAnalysisWorkflowResult(
   };
 }
 
-function normalizeArtifact(value: unknown, index: number, locale: string): FeedAnalysisArtifact {
+function normalizeArtifact(
+  value: unknown,
+  index: number,
+  locale: string,
+  workflow: FeedAnalysisWorkflowDescriptor,
+): FeedAnalysisArtifact {
   const raw = readObject(value);
   const kind = readString(raw.kind) as FeedAnalysisOutputKind | undefined;
   if (!kind || !OUTPUTS.has(kind)) throw new FeedAnalysisError('result_invalid', `artifact ${index} has invalid kind`, 422);
@@ -160,12 +202,31 @@ function normalizeArtifact(value: unknown, index: number, locale: string): FeedA
     hashtags: readStringArray(raw.hashtags),
     structuredPayload: readObject(raw.structuredPayload),
     citationRefs: readStringArray(raw.citationRefs),
-    workflowId: _FEED_ANALYSIS_WORKFLOW_ID,
-    workflowVersion: _FEED_ANALYSIS_WORKFLOW_VERSION,
-    promptId: _FEED_ANALYSIS_PROMPT_ID,
-    promptVersion: _FEED_ANALYSIS_PROMPT_VERSION,
+    workflowId: workflow.workflowId,
+    workflowVersion: workflow.workflowVersion,
+    promptId: workflow.promptId,
+    promptVersion: workflow.promptVersion,
     reviewStatus: 'draft',
   };
+}
+
+function profileInstructions(profile: FeedAnalysisWorkflowDescriptor['profile']): string[] {
+  if (profile === 'batch_summary') {
+    return [
+      'Synthesize relationships, agreements, contradictions, and missing context across the locked evidence batch.',
+      'Prefer concise batch findings. Do not produce publishing advice unless content_brief was requested.',
+    ];
+  }
+  if (profile === 'research_deep') {
+    return [
+      'Work through bounded stages: research plan, evidence analysis, synthesis, platform adaptation, and final verification.',
+      'Separate evidence-backed claims from hypotheses and explicitly report unresolved conflicts or evidence gaps.',
+      'The final response must still be the requested result JSON only.',
+    ];
+  }
+  return [
+    'Cluster the locked evidence by topic and behavior signal before generating the requested daily content artifacts.',
+  ];
 }
 
 function assertRequestedArtifacts(requested: FeedAnalysisOutputKind[], artifacts: FeedAnalysisArtifact[]): void {
@@ -174,6 +235,24 @@ function assertRequestedArtifacts(requested: FeedAnalysisOutputKind[], artifacts
       throw new FeedAnalysisError('result_invalid', `workflow result is missing requested output ${output}`, 422);
     }
   }
+}
+
+function normalizeCitationRefs(
+  artifacts: FeedAnalysisArtifact[],
+  citations: FeedAnalysisResultEnvelope['citations'],
+): FeedAnalysisArtifact[] {
+  const citationIds = new Set(citations.map(citation => citation.id));
+  const itemIds = new Map(citations.flatMap(citation => citation.itemId ? [[citation.itemId, citation.id]] : []));
+  return artifacts.map(artifact => ({
+    ...artifact,
+    citationRefs: artifact.citationRefs.map(ref => {
+      const normalized = itemIds.get(ref) ?? ref;
+      if (!citationIds.has(normalized)) {
+        throw new FeedAnalysisError('result_invalid', `artifact ${artifact.artifactId} references unknown citation ${ref}`, 422);
+      }
+      return normalized;
+    }),
+  }));
 }
 
 async function fetchMaterialBundle(
@@ -268,10 +347,6 @@ function normalizeRetentionDays(value: unknown): number {
   return Math.max(1, Math.min(90, days));
 }
 
-function normalizeDeliveryMode(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 function assertInlineSize(value: unknown, maxBytes: number): void {
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > maxBytes) {
     throw new FeedAnalysisError('material_too_large', `inline material exceeds ${maxBytes} bytes`, 413);
@@ -303,9 +378,19 @@ function readRequiredString(value: unknown, field: string): string {
   return text;
 }
 
-function readStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(readString).filter((item): item is string => Boolean(item)) : [];
+function readSummary(value: unknown): string {
+  const direct = readString(value);
+  if (direct) return direct;
+  const structured = readObject(value);
+  for (const key of ['text', 'overview', 'keyTheme', 'summary']) {
+    const candidate = readString(structured[key]);
+    if (candidate) return candidate;
+  }
+  throw new FeedAnalysisError('result_invalid', 'result summary is required', 422);
 }
+
+const readStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.map(readString).filter((item): item is string => Boolean(item)) : [];
 
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase();

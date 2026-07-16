@@ -34,6 +34,8 @@ export interface ExecutionEventEnvelope<T extends ExecutionEntityType = Executio
   correlationId?: string;
   nodeId?: string;
   attempt?: number;
+  leaseVersion?: number;
+  leaseCondition?: 'active' | 'expired';
 }
 
 export interface TransitionExecutionStateInput<T extends ExecutionEntityType = ExecutionEntityType> {
@@ -47,6 +49,8 @@ export interface TransitionExecutionStateInput<T extends ExecutionEntityType = E
   correlationId?: string;
   nodeId?: string;
   attempt?: number;
+  leaseVersion?: number;
+  leaseCondition?: 'active' | 'expired';
   eventType?: string;
   source?: string;
   turn?: number;
@@ -68,6 +72,13 @@ export class _RunSuccessGateError extends Error {
   constructor(runSpecId: string, reason: string) {
     super(`Run spec ${runSpecId} cannot be marked succeeded: ${reason}`);
     this.name = 'RunSuccessGateError';
+  }
+}
+
+export class _LeaseLostError extends Error {
+  constructor(entityType: string, entityId: string) {
+    super(`${entityType} ${entityId} lease lost`);
+    this.name = 'LeaseLostError';
   }
 }
 
@@ -130,14 +141,21 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
         }
       }
 
-      const updatedContract = await updateExecutionEntity(client, {
+      if (input.leaseVersion !== undefined && !input.nodeId) {
+        throw new Error('nodeId is required when leaseVersion is provided');
+      }
+      const persistence = await updateExecutionEntity(client, {
         entityType: input.entityType,
         entityId: input.entityId,
         to: input.to,
         sessionId: input.sessionId,
         nodeId: input.nodeId ?? entity.nodeId,
         attempt: input.attempt ?? entity.attempt,
+        leaseVersion: input.leaseVersion,
+        leaseCondition: input.leaseCondition,
       }, entity);
+      if (!persistence.updated) throw new _LeaseLostError(input.entityType, input.entityId);
+      const updatedContract = persistence.contract;
 
       const envelope = stripUndefined({
         entityType: input.entityType,
@@ -150,6 +168,8 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
         correlationId: input.correlationId ?? entity.traceId,
         nodeId: input.nodeId ?? entity.nodeId,
         attempt: input.attempt ?? entity.attempt,
+        leaseVersion: input.leaseVersion,
+        leaseCondition: input.leaseCondition,
       }) as Record<string, unknown> & ExecutionEventEnvelope<T>;
       const eventType = input.eventType ?? executionTransitionEventType(input.entityType, input.to);
       const event = await insertSessionEvent(client, {
@@ -171,6 +191,7 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
         entityType: input.entityType,
         entityId: input.entityId,
         eventType,
+        sessionEventId: event.id,
         payload: envelope,
       });
 

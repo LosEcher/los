@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   heartbeat_at TIMESTAMPTZ,
+  lease_version BIGINT NOT NULL DEFAULT 0,
   lease_expires_at TIMESTAMPTZ
 );
 
@@ -38,6 +39,7 @@ ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS run_spec_id TEXT;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS lease_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_task_runs_session_id ON task_runs(session_id);
@@ -47,6 +49,9 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_tenant_project ON task_runs(tenant_id, 
 CREATE INDEX IF NOT EXISTS idx_task_runs_node_id ON task_runs(node_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_request_id ON task_runs(request_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_lease ON task_runs(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_task_runs_lease_fence
+  ON task_runs(id, node_id, lease_version)
+  WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_active_dedupe

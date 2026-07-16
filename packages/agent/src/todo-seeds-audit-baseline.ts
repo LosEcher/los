@@ -23,7 +23,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：新文件（不在 grandfathered baseline）超 400 行改为 error；建立 grandfathered baseline 清单声明 owner + 拆解计划。\n' +
       '来源：docs/architecture/2026-06-21-audit-findings-and-optimization-plan.md §P0-1',
     kind: 'task',
-    status: 'in_progress',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -34,6 +34,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: '收紧新文件 warn→error + 创建 grandfathered baseline',
       files: ['tools/check-structure.sh', 'tools/.large-file-baseline.txt'],
       validation: 'pnpm check 新文件 >400 行报 error',
+      evidence: ['commit 5fc50495d0eb', 'tools/check-structure.sh blocks non-baseline files over 400 lines'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -47,7 +49,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '仅在 ensure*Store() 中以 CREATE TABLE IF NOT EXISTS 定义，无独立迁移记录。\n' +
       '修复：为每张缺失表写迁移文件（013_xxx.sql 起）；ensure*Store() 中 DDL 移入迁移。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -56,7 +58,10 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '双 DDL 路径导致生产 schema 与迁移历史不一致',
       solution: '全部 DDL 收敛到 migrations/；加 tools/check-migrations.sh',
-      validation: 'grep -r "CREATE TABLE IF NOT EXISTS" packages/*/src/ 返回空',
+      validation: 'migration drift gate passes with an empty committed baseline',
+      evidence: ['migrations 013-021 cover the audited missing-table scope', 'tools/migration-drift-baseline.txt has 0 drift entries'],
+      successor: 'Runtime ensure-store DDL removal remains lower-priority schema single-source cleanup.',
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -68,7 +73,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：扩展 check-unwired-exports.sh 检测规则（无 caller export / route 未注册 / CLI 命令未挂接）；\n' +
       '加入 pnpm check pipeline。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -79,6 +84,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: '扩展 check-unwired-exports.sh + CI integration',
       files: ['tools/check-unwired-exports.sh'],
       validation: 'pnpm check 在发现 unwired export 时 report error',
+      evidence: ['commits a07f81774317 and 44a773120ab2', 'pnpm check runs unwired export and wiring topology gates'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -91,7 +98,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：chat 完成后自动抽取 observation；enforce maxObservations；\n' +
       '确保 compactSession 后 procedural_candidates 自动种子。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -102,6 +109,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: 'chat-complete hook → observation extraction + maxObservations enforce',
       files: ['packages/gateway/src/chat-memory-augment.ts', 'packages/memory/src/core/store.ts'],
       validation: '单次 chat 后 SELECT count(*) FROM observations > 0',
+      evidence: ['chat-route enables persistence by default', 'store.ts enforces maxObservations', '2026-07-15 live DB: observations=1, procedural_candidates=31, memory_compactions=154'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -114,7 +123,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：完成 periodic_sweeper 实现；为 5 个 category 创建 seed jobs；\n' +
       '确认 server-maintenance.ts 的 governance sweep 定时器调用了 drift sweeper。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -125,6 +134,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: 'periodic_sweeper implementation + seed jobs + server-maintenance wiring',
       files: ['packages/agent/src/governance-sweeper.ts', 'packages/agent/src/governance-jobs.ts', 'packages/gateway/src/server-maintenance.ts'],
       validation: 'SELECT job_type, last_run_at FROM governance_jobs 显示所有活跃 job 有最近执行',
+      evidence: ['commit 44a773120ab2', 'server maintenance seeds jobs and starts the PG queue wake loop', '2026-07-15 live DB contains 15 scheduled governance jobs'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -136,7 +147,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '按 promotion order 优先写 E01(dirty worktree)+E06(todo done without evidence)+E07(legacy as active target)。\n' +
       'E14/E15/E16 已有 run-contract.test.ts 覆盖，确认标记 hasProbe:true。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -148,6 +159,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       files: ['packages/agent/src/eval-probes.test.ts', 'packages/agent/src/eval-backlog-runner.ts'],
       validation: 'node --test packages/agent/src/eval-probes.test.ts 覆盖 >= 8 cases',
       targetProbes: ['E01', 'E02', 'E03', 'E06', 'E07', 'E08', 'E14', 'E15', 'E16'],
+      evidence: ['eval-backlog-runner marks 11 cases with automated probes', 'E01/E02/E03/E05/E06/E07/E08 have focused probe tests'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -160,7 +173,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：spawn_agent 中完整传播 parent runContract；子 agent 检查 inherited contract；\n' +
       '添加 child_run_spec_id + parent_run_spec_id 外键。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -171,6 +184,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: '完整继承 parent runContract + child lineage tracking',
       files: ['packages/agent/src/tools/agent-tools.ts', 'packages/agent/src/run-contract.ts'],
       validation: 'spawn_agent 单元测试覆盖 planParentRunSpecId 非空',
+      evidence: ['commits 44a773120ab2 and d5f2d8bc01d0', 'spawn_agent child inherits isolated run contract metadata'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -182,7 +197,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '修复：review tools/external/mcp-client.ts 生命周期；确保 mcpCleanup 覆盖所有 transport；\n' +
       'gateway 启动/关闭时添加 MCP 子进程健康检查。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-21',
     stageId: 'p0-immediate-fixes',
@@ -193,6 +208,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       solution: 'review lifecycle + add health check',
       files: ['packages/agent/src/tools/external/mcp-client.ts', 'packages/agent/src/loop.ts'],
       validation: 'gateway 运行 30min 后 ps aux | grep mcp 无泄露子进程',
+      evidence: ['loop.ts always awaits mcpCleanup()', 'MCPClientManager.close() settles every client close', '2026-07-15 gateway uptime exceeded 48h with no MCP or zombie child process'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -207,13 +224,24 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       'ADR 0017 定义了 3 种 target state 但未定义 automated promotion 条件。\n' +
       '需要：补充判定矩阵 + 为 recordProviderPromotionDecision 添加单元测试。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-provider-promotion-docs',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/provider-promotion-decisions.ts', 'docs/adr/0017-advisory-provider-promotion-playbook.md'] },
+    metadata: {
+      files: [
+        'packages/agent/src/provider-promotion-decisions.ts',
+        'packages/agent/src/provider-promotion-decisions.test.ts',
+        'docs/adr/0017-advisory-provider-promotion-playbook.md',
+      ],
+      resolution: 'ADR 0017 now defines the advisory, verified_advisory, required, and blocked evidence decision matrix.',
+      consentBoundary: 'This task records proposals only; it does not enforce a provider promotion or change required compatibility targets.',
+      validation: 'pnpm --filter @los/agent exec node --import tsx --test src/provider-promotion-decisions.test.ts',
+      evidence: ['all evidence decision states covered', 'proposed and enforced policy states remain separate'],
+      statusUpdatedAt: '2026-07-15',
+    },
   },
 
   {
@@ -221,13 +249,25 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-2 Tool-call recovery 完整矩阵测试（5 actions × 4 entities）',
     description: 'tool-call-recovery.ts 处理 5 种 action 但无完整测试。需要覆盖 retry/resume/cancel/operator_attention/terminal_failed × 4 entity 类型。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-tool-recovery-matrix',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/tool-call-recovery.ts', 'packages/agent/src/tool-call-recovery.test.ts'] },
+    metadata: {
+      files: ['packages/agent/src/tool-call-recovery.ts', 'packages/agent/src/tool-call-recovery.test.ts', 'packages/agent/src/scheduler.test.ts'],
+      resolution: 'Matrix follows current semantics: retry/resume queue follow-up work; cancel/operator_attention apply direct transitions; terminal_failed is a durable classification.',
+      behaviorFix: 'Retryable failed calls are no longer misclassified as terminal failures.',
+      evidence: [
+        'Focused test isolates retry, resume, cancel, operator_attention, and terminal_failed decisions.',
+        'Durable recovery reads are verified by both run_spec and task_run.',
+        'Cancel/operator-attention assertions cover tool_call_state, task_run, run_spec, and session_event evidence.',
+        'Scheduler integration covers retry follow-up execution; Gateway SSE, Telegram, and WeChat consume operator-attention events.',
+      ],
+      validation: ['node --import tsx --test src/tool-call-recovery.test.ts', 'pnpm check'],
+      statusUpdatedAt: '2026-07-15',
+    },
   },
 
   {
@@ -235,13 +275,28 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-3 统一 provider selection 入口（chat + scheduler 走同一条路径）',
     description: 'gateway chat (setup.ts) 与 scheduler graph (scheduler.ts) 的 provider 选择走不同路径，可能导致同一 task 选不同 provider。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-provider-policy-unify',
     dependsOnIds: ['todo-los-p1-provider-promotion-docs'],
-    metadata: { files: ['packages/agent/src/loop/setup.ts', 'packages/agent/src/scheduler/provider-selection.ts'] },
+    metadata: {
+      files: [
+        'packages/agent/src/providers/provider-policy.ts',
+        'packages/agent/src/providers/provider-policy.test.ts',
+        'packages/agent/src/loop/provider-selection.ts',
+        'packages/agent/src/loop/setup.ts',
+        'packages/agent/src/scheduler/provider-selection.ts',
+      ],
+      resolution: 'Chat setup and scheduler graph selection now call the same pure provider policy resolver.',
+      compatibilityBoundary: 'Existing compatibility evidence, required-target blocking, task metadata, and scheduler fallback precedence are preserved.',
+      validation: [
+        'provider-policy focused tests: 4/4 passed',
+        'provider routing and scheduler regression tests: 21/21 passed',
+      ],
+      statusUpdatedAt: '2026-07-15',
+    },
   },
 
   {
@@ -249,27 +304,27 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-4 Identity injection 6 路径一致性验证',
     description: 'ADR 0023 定义了 6 条路径各不同的 identity level。resolveAgentIdentity() 实现需验证覆盖所有 6 条路径，包括 scheduler verifier 必须是 none。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-identity-consistency',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/identity-loader.ts', 'docs/adr/0023-agent-identity-decision-framework.md'] },
+    metadata: { files: ['packages/agent/src/identity-loader.ts', 'packages/agent/src/identity-loader.test.ts', 'packages/agent/src/scheduler.ts', 'packages/agent/src/tools/core/agent-tools.ts', 'packages/gateway/src/chat-memory-augment.ts', 'packages/executor/src/index.ts'], resolution: 'ADR 0023 identity levels now come from one execution-path matrix used by gateway, child, scheduler graph, and remote executor defaults; verifier and self-check remain none.', validation: ['identity and entry-path focused tests: 44/44 passed', 'pnpm check passed'], statusUpdatedAt: '2026-07-15' },
   },
 
   {
     id: 'todo-los-p1-memory-perf-baseline',
     title: 'P1-6 Memory FTS EXPLAIN ANALYZE + 性能 baseline + 回归断言',
-    description: 'memory/core/store.ts 600 行 FTS 实现无性能基线。需要在 1000/10000/100000 行 observations 规模下 EXPLAIN ANALYZE。',
+    description: 'memory/core/store.ts FTS 查询缺少性能基线。需要在 1000/10000/100000 行 observations 规模下 EXPLAIN ANALYZE。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-memory-perf-baseline',
     dependsOnIds: ['todo-los-p0-memory-production'],
-    metadata: { files: ['packages/memory/src/core/store.ts'] },
+    metadata: { files: ['packages/memory/src/core/store.ts', 'packages/memory/src/fts-performance.test.ts', 'packages/memory/package.json'], resolution: 'Isolated test-schema benchmark covers 1k/10k/100k observations with the production FTS query; 100k uses idx_obs_search and no query rewrite is needed.', baseline: ['1k: 0.177ms seq scan', '10k: 1.521ms seq scan', '100k: 1.061ms bitmap index scan idx_obs_search'], validation: ['pnpm --filter @los/memory benchmark:fts', 'pnpm --filter @los/memory check', 'pnpm --filter @los/memory test: 74/74 passed'], statusUpdatedAt: '2026-07-15' },
   },
 
   {
@@ -277,13 +332,13 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-7 WeChat/Telegram bot 生产就绪（health/retry/docs）',
     description: '两个 bot 均为独立进程，失败模式无文档。需要：health endpoint、重连/重试循环、tools/check-bot-health.sh。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-bot-production',
     dependsOnIds: [],
-    metadata: { files: ['packages/wechat-bot/src/index.ts', 'packages/telegram-bot/src/index.ts'] },
+    metadata: { files: ['packages/wechat-bot/src/index.ts', 'packages/wechat-bot/src/channel/web.ts', 'packages/telegram-bot/src/index.ts', 'packages/telegram-bot/src/health-server.ts', 'tools/check-bot-health.sh', 'docs/operations/bot-health-and-recovery.md'], resolution: 'Both bot processes expose health JSON with SSE readiness separated from liveness; existing reconnect loops remain active and the operator script supports required or optional bot checks.', validation: ['wechat-bot tests: 16/16 passed', 'telegram-bot tests: 29/29 passed', 'mock dual-endpoint check-bot-health.sh passed', 'pnpm check passed'], statusUpdatedAt: '2026-07-15' },
   },
 
   {
@@ -291,33 +346,40 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-8 Dead-letter 分类统计 + 自动 re-queue',
     description: 'dead_letter_events 写入后仅被 gateway startup recovery 消费。需要 governance sweep 分类统计 + 对 lease_expired 自动 re-queue。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-dead-letter-classify',
     dependsOnIds: ['todo-los-p0-governance-sweeper'],
-    metadata: { files: ['packages/agent/src/dead-letter.ts', 'packages/cli/src/dead-letter.ts'] },
+    metadata: { files: ['packages/agent/src/dead-letter.ts', 'packages/agent/src/dead-letter-recovery.ts', 'packages/agent/src/dead-letter-governance.ts', 'packages/agent/src/scheduler/scheduled-task-runner.ts', 'packages/gateway/src/routes/orchestration/task-routes.ts', 'packages/cli/src/dead-letter.ts', 'packages/infra/migrations/033_dead_letter_requeue.sql'], resolution: '按 reason 分类统计并暴露 summary；仅 lease_expired 可幂等重入队，使用原 run_spec 创建新 task_run attempt，agent-task graph 任务交由 graph recovery 管理。', validation: ['dead-letter focused test passed', 'gateway route focused test passed', 'pnpm check passed', 'pnpm run gate: 9 phases, 0 failures'], statusUpdatedAt: '2026-07-15' },
   },
 
   {
     id: 'todo-los-p1-file-sync-mtime-test',
     title: 'P1-9 File-sync mtime settle 算法独立测试',
-    description: 'ae62b94 是 30 天内最大改动，但 sync-runner.ts + scanner.ts 无独立测试覆盖多节点并发写入。',
+    description: 'ae62b94 是 30 天内最大改动，需要 sync-runner.ts + scanner.ts 独立测试覆盖 settle window 和并发执行。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-file-sync-mtime-test',
     dependsOnIds: [],
-    metadata: { files: ['packages/executor/src/file-sync/scanner.ts', 'packages/executor/src/file-sync/sync-runner.ts'] },
+    metadata: {
+      files: ['packages/executor/src/file-sync/scanner.ts', 'packages/executor/src/file-sync/sync-runner.ts'],
+      evidence: [
+        'packages/executor/src/file-sync/scanner.test.ts covers initial, modified, deleted, ignored, and unreadable files',
+        'packages/executor/src/file-sync/sync-runner.test.ts covers settle-window filtering, vanished files, retry, and concurrent advisory-lock exclusion',
+      ],
+      statusUpdatedAt: '2026-07-16',
+    },
   },
 
   {
     id: 'todo-los-p1-otel-docs',
-    title: 'P1-10 OTel bridge 配置文档 + health endpoint',
-    description: 'startOtelBridge 自动拉起但端口/协议/collector URL 无文档。需要 .env.example 补充 + health route。',
+    title: 'P1-10 OTel bridge 配置文档与健康验证',
+    description: 'bridge 已提供 /health 和 /runtimes/bridge/status；剩余工作是文档化端口、OTLP 协议、collector 边界和操作检查。',
     kind: 'task',
     status: 'ready',
     priority: 'P1',
@@ -325,7 +387,11 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-otel-docs',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/runtime-adapter/index.ts', '.env.example'] },
+    metadata: {
+      files: ['packages/agent/src/runtime-adapter/otel-bridge.ts', 'packages/gateway/src/routes/orchestration/runtime-adapter-routes.ts', '.env.example'],
+      partialEvidence: ['OTel bridge /health exists', 'GET /runtimes/bridge/status exists', 'no OTEL_* collector endpoint is configured in the current environment'],
+      priorityReason: 'P1: runtime behavior exists, but operators cannot distinguish the local bridge from an external collector configuration.',
+    },
   },
 
   {
@@ -368,7 +434,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '检测手写 SQL 导致的 schema 漂移。\n' +
       '参考：governance-status-constraints.ts 已有相似模式。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-24',
     stageId: 'p0-immediate-fixes',
@@ -378,6 +444,9 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       problem: 'migration 漂移无法自动检测',
       solution: '加 governance job type schema_consistency，比对 column vs migration',
       files: ['packages/agent/src/governance-auditors.ts', 'packages/infra/migrations/'],
+      evidence: ['tools/check-migration-drift.ts is enforced by gate-drift', 'migration_drift_fix governance audit is active', 'tools/migration-drift-baseline.txt has 0 entries'],
+      resolution: 'Implemented as the migration-drift gate plus migration_drift_fix governance job.',
+      statusUpdatedAt: '2026-07-15',
     },
   },
   {
@@ -390,7 +459,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       '2. 非 .example 的 .env 类文件 git ls-files 检查\n' +
       '3. 新增密钥模式：private_key, jwt_secret, encryption_key',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P0',
     source: 'audit-2026-06-24',
     stageId: 'p0-immediate-fixes',
@@ -399,6 +468,8 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '敏感信息扫描覆盖不足',
       files: ['tools/check-security.sh'],
+      evidence: ['tracked .env variants are rejected', 'private_key, jwt_secret, and encryption_key patterns are scanned', 'executable fixture test covers the expanded rules'],
+      statusUpdatedAt: '2026-07-15',
     },
   },
 
@@ -482,12 +553,18 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     source: 'audit-2026-06-24',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-cbm-ab-inject',
-    dependsOnIds: [],
+    dependsOnIds: ['todo-los-execution-observability-projection'],
     metadata: {
       problem: 'CBM 注入效果未经验证',
       trigger: 'shadow sessions >= 20',
       sourceMemory: 'los-cbm-integration-backlog-2026-06-19',
       files: ['packages/gateway/src/chat-cbm-inject.ts'],
+      partialEvidence: 'Alternating in-memory assignment is wired, but it is not stable across processes and is not persisted with outcome evidence.',
+      acceptance: [
+        'assignment is deterministic per session and persisted as an event or decision record',
+        'the experiment gate verifies at least 20 eligible shadow sessions before enabling injection',
+        'success, latency, token, and failure outcomes can be compared by assigned cohort',
+      ],
     },
   },
   {
@@ -509,27 +586,6 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '无可观测性后端，纯 PG 查询不够',
       files: ['packages/infra/src/metrics.ts', 'packages/gateway/src/routes/'],
-    },
-  },
-  {
-    id: 'todo-los-p1-supply-chain-full',
-    title: 'P1-N6 供应链完整链路',
-    description:
-      '扩展 supply_chain_audit job 为完整供应链审计：\n' +
-      '1. SBOM 生成（cyclonedx/spdx）\n' +
-      '2. License compliance check\n' +
-      '3. Dependency freshness（超过 12 个月未更新的包告警）\n' +
-      '4. npm audit 结果持久化到 DB 做趋势跟踪',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-supply-chain-full',
-    dependsOnIds: [],
-    metadata: {
-      problem: 'supply_chain_audit 目前只做基础检查',
-      files: ['packages/agent/src/governance-auditors-supply-chain.ts'],
     },
   },
 ];

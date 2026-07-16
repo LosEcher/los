@@ -170,6 +170,8 @@ export async function runAgentOnExecutor(
   executor: ResolvedExecutor,
   input: {
     taskRunId: string;
+    leaseVersion: number;
+    agentTaskLease?: { taskId: string; leaseVersion: number };
     leaseMs: number;
     prompt: string;
     config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
@@ -202,6 +204,8 @@ export async function runAgentOnExecutor(
     body: JSON.stringify({
       taskRunId: input.taskRunId,
       nodeId: executor.nodeId,
+      leaseVersion: input.leaseVersion,
+      agentTaskLease: input.agentTaskLease,
       leaseMs: input.leaseMs,
       prompt: input.prompt,
       config: input.config,

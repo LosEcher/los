@@ -65,6 +65,10 @@ Use `docs/operations/` for dated runtime evidence. A smoke should record:
 3. process/API/DB status observed;
 4. what was verified and what remains unverified.
 
+Use `operations/node-deployment-runbook.md` for executor bootstrap, rollout,
+rollback, and offline-node reactivation. Keep dated node evidence in a separate
+operation smoke.
+
 ### Governance
 
 Use `docs/governance/` for repeated analysis practices. Start with

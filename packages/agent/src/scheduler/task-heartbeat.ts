@@ -1,4 +1,5 @@
 import { heartbeatTaskRun } from '../task-runs.js';
+import { heartbeatAgentTask } from '../agent-task-graph.js';
 import { cancelScheduledTask } from './abort-registry.js';
 import { pollCancellation } from '../cancellation.js';
 import { sendHeartbeat } from '../worker-messages.js';
@@ -6,12 +7,47 @@ import { sendHeartbeat } from '../worker-messages.js';
 export function startTaskHeartbeat(
   taskRunId: string,
   nodeId: string,
+  leaseVersion: number,
   leaseMs: number,
   heartbeatMs: number,
-  opts?: { dispatchId?: string; taskId?: string },
+  opts?: {
+    dispatchId?: string;
+    taskId?: string;
+    agentTaskLease?: { taskId: string; leaseVersion: number };
+  },
 ): () => void {
+  let stopped = false;
+  let renewing = false;
+  let leaseLost = false;
+
+  const renewLeases = async () => {
+    if (stopped || renewing || leaseLost) return;
+    renewing = true;
+    try {
+      const [taskRun, agentTask] = await Promise.all([
+        heartbeatTaskRun(taskRunId, { nodeId, leaseVersion, leaseMs }),
+        opts?.agentTaskLease
+          ? heartbeatAgentTask(opts.agentTaskLease.taskId, {
+              nodeId,
+              leaseVersion: opts.agentTaskLease.leaseVersion,
+              leaseMs,
+            })
+          : Promise.resolve(true),
+      ]);
+      if (!taskRun || !agentTask) {
+        leaseLost = true;
+        cancelScheduledTask(taskRunId, 'lease_lost');
+      }
+    } catch {
+      leaseLost = true;
+      cancelScheduledTask(taskRunId, 'lease_heartbeat_failed');
+    } finally {
+      renewing = false;
+    }
+  };
+
   const interval = setInterval(() => {
-    heartbeatTaskRun(taskRunId, { nodeId, leaseMs }).catch(() => undefined);
+    void renewLeases();
     // Poll for cross-process cancellation requests
     pollCancellation(taskRunId)
       .then((req) => {
@@ -30,6 +66,9 @@ export function startTaskHeartbeat(
     }
   }, heartbeatMs);
   (interval as { unref?: () => void }).unref?.();
-  void heartbeatTaskRun(taskRunId, { nodeId, leaseMs }).catch(() => undefined);
-  return () => clearInterval(interval);
+  void renewLeases();
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+  };
 }

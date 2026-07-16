@@ -34,6 +34,7 @@ import {
 import {
   previewText,
 } from './utils.js';
+import { resolveAgentRunProviderModelSelection } from './provider-selection.js';
 import type { Message, Provider, ToolDef } from '../providers/index.js';
 import type { AgentConfig } from './types.js';
 import type { Logger } from '@los/infra/logger';
@@ -102,23 +103,19 @@ export function setupAgentRun(
   // runs as a separate front-matter phase (see loop/architect-phase.ts) before
   // this loop starts, so resolve the editor provider + editor system prompt.
   const editorMode = config.architectEditor?.enabled === true;
-  const requestedProvider = editorMode
-    ? (config.architectEditor!.editorProvider ?? config.provider)
-    : config.provider;
-  const requestedModel = editorMode ? config.architectEditor!.editorModel : config.model;
-  const provider = createProvider(requestedProvider, {
-    model: requestedModel,
+  const providerSelection = resolveAgentRunProviderModelSelection(config);
+  const architectEditorOverride = providerSelection.source === 'architect_editor_override';
+  const provider = createProvider(providerSelection.provider, {
+    model: providerSelection.model,
     traceId: config.traceId,
   });
   const modelProfile = summarizeModelProfile(provider.profile);
   const modelRoute = resolveModelRouteDecision({
-    requestedProvider,
-    requestedModel,
+    requestedProvider: providerSelection.provider,
+    requestedModel: providerSelection.model,
     effectiveProvider: provider.name,
     effectiveModel: provider.profile.model,
-    architectEditorOverride: editorMode && Boolean(
-      config.architectEditor!.editorProvider || config.architectEditor!.editorModel,
-    ),
+    architectEditorOverride,
   });
   const toolMode = config.toolMode ?? 'project-write';
 

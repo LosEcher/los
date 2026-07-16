@@ -20,11 +20,17 @@ export interface AgentTaskRecord {
   maxAttempts: number;
   metadata: Record<string, unknown>;
   claimedByNodeId?: string;
+  leaseVersion: number;
   leaseExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+}
+
+export interface AgentTaskLeaseFence {
+  nodeId: string;
+  leaseVersion: number;
 }
 
 export interface AgentTaskAttemptRecord {

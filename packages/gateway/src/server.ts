@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import gatewayPackage from '../package.json' with { type: 'json' };
 import { getConfig, setConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb, getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
@@ -64,13 +65,14 @@ import { ensureSkillStore, upsertSkill, loadSkillsFromDir } from '@los/agent/ski
 import { ensureRuleStore, upsertRule, loadRulesFromDir } from '@los/agent/rules';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
+import { readExecutionOutboxHealth } from '@los/agent/execution-outbox';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
 import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
 import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
 import { getDefaultProjectId, getProject } from './project-store.js';
+import { getSymbolCacheMetrics } from './chat-cbm-symbol-cache.js';
 
 const log = getLogger('gateway');
-const VERSION = '0.1.0';
 const SERVICE_HEARTBEAT_MS = 10_000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function resolveDefaultWorkspaceRoot(): string {
@@ -156,7 +158,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── Health ───────────────────────────────────────────
   app.get('/health', async () => {
-    const current = await loadServiceInstance(service.serviceId).catch(() => null);
+    const [current, outbox] = await Promise.all([
+      loadServiceInstance(service.serviceId).catch(() => null),
+      readExecutionOutboxHealth().catch(() => null),
+    ]);
     return {
       status: 'ok',
       uptime: process.uptime(),
@@ -164,6 +169,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       serviceKind: 'gateway',
       ready: current?.readiness.ready ?? false,
       blockers: current?.readiness.blockers ?? ['service:not_registered'],
+      outbox,
+      cbmSymbolCache: getSymbolCacheMetrics(),
     };
   });
 
@@ -549,7 +556,7 @@ async function heartbeatGatewayService(service: GatewayServiceIdentity): Promise
     hostLabel: service.hostLabel,
     bindUrl: service.bindUrl,
     publicUrl: service.publicUrl,
-    version: VERSION,
+    version: getConfig().server.version ?? gatewayPackage.version,
     role: 'active',
     capabilities: { chat_api: true, web_ui: true, artifact_proxy: true, node_registry: true, service_registry: true },
     health: { db_ok: true, schema_ok: true },

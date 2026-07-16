@@ -1,5 +1,5 @@
 import type { EditableSurfaceConflictMode } from '../agent-task-editable-surfaces.js';
-import type { AgentTaskAttemptStatus } from '../agent-task-graph.js';
+import type { AgentTaskAttemptStatus, AgentTaskRecord } from '../agent-task-graph.js';
 import type { AgentTaskGraphCompletion } from '../agent-task-graph-read-model.js';
 import type { AgentConfig, AgentResult } from '../loop.js';
 import type { RunContractMetadataInput } from '../run-contract.js';
@@ -26,6 +26,14 @@ export interface ScheduledTaskEvent {
 export interface ScheduledAgentTaskInput extends AgentConfig {
   prompt: string;
   taskRunId?: string;
+  /** Attempt number when this task is a retry of an earlier task_run. */
+  attempt?: number;
+  /** Monotonic task_runs fencing token. Graph runs inherit the agent-task version. */
+  leaseVersion?: number;
+  agentTaskLease?: {
+    taskId: string;
+    leaseVersion: number;
+  };
   runSpecId?: string;
   traceId?: string;
   dedupeKey?: string;
@@ -76,6 +84,20 @@ export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInp
   maxParallelTasks?: number;
   editableSurfaceMode?: EditableSurfaceConflictMode;
   requireVerifier?: boolean;
+  resolveTaskPrompt?: (
+    task: AgentTaskRecord,
+    completedStages: readonly AgentTaskGraphStageOutput[],
+  ) => string | Promise<string>;
+}
+
+export interface AgentTaskGraphStageOutput {
+  taskId: string;
+  title: string;
+  outputText: string;
+  provider?: string;
+  model?: string;
+  promptTokens: number;
+  completionTokens: number;
 }
 
 export interface RunAgentTaskGraphSerialResult {
@@ -87,6 +109,7 @@ export interface RunAgentTaskGraphSerialResult {
     status: AgentTaskAttemptStatus;
     verificationRecordId?: string;
     recoveryFollowUpQueued?: boolean;
+    stageOutput?: AgentTaskGraphStageOutput;
   }>;
   completion: AgentTaskGraphCompletion;
   recovery?: ToolCallRecoveryDecision;

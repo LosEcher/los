@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { getConfig } from '../config.js';
 import { getLogger } from '../logger.js';
+import {
+  listLocalProviderDefaults,
+  listProviderDefaults,
+  providerDefaultsForApiKeyEnv,
+  requireProviderDefaults,
+} from '../provider-defaults.js';
 import type { CodexRouteConfig, DiscoveredProvider, DiscoveredTool } from './types.js';
 import { fileAge } from './helpers.js';
 import {
@@ -17,13 +23,14 @@ const require = createRequire(import.meta.url);
 const log = getLogger('discovery');
 
 export function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvider[] } {
+  const codexDefaults = requireProviderDefaults('codex');
   const home = join(homedir(), '.codex');
   const authPath = join(home, 'auth.json');
   const configPath = join(home, 'config.toml');
   const providers: DiscoveredProvider[] = [];
   let route: CodexRouteConfig = {
     providerName: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
+    baseUrl: codexDefaults.baseUrl,
   };
 
   const installed = existsSync(home);
@@ -53,7 +60,7 @@ export function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvid
           name: route.providerName,
           apiKey: auth.OPENAI_API_KEY,
           baseUrl: route.baseUrl,
-          defaultModel: route.model ?? 'gpt-5.5',
+          defaultModel: route.model ?? codexDefaults.defaultModel,
           available: true,
           source: 'codex/auth.json',
           sourceTool: 'codex',
@@ -66,7 +73,7 @@ export function scanCodex(): { tool: DiscoveredTool; providers: DiscoveredProvid
           name: route.providerName,
           apiKey: auth.tokens.access_token,
           baseUrl: route.baseUrl,
-          defaultModel: route.model ?? 'gpt-5.5',
+          defaultModel: route.model ?? codexDefaults.defaultModel,
           available: true,
           source: 'codex/auth.json (ChatGPT OAuth)',
           sourceTool: 'codex',
@@ -237,18 +244,16 @@ export function scanHermes(): { tool: DiscoveredTool; providers: DiscoveredProvi
         const envKey = match[1];
         const value = match[2].trim().replace(/^["']|["']$/g, '');
 
-        // Map env key to provider name
-        const keyMap: Record<string, { name: string; baseUrl?: string; model?: string }> = {
-          'OPENROUTER_API_KEY': { name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o' },
-          'DEEPSEEK_API_KEY': { name: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
-          'OPENAI_API_KEY': { name: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5' },
-          'ANTHROPIC_API_KEY': { name: 'anthropic', baseUrl: 'https://api.anthropic.com' },
-          'MINIMAX_API_KEY': { name: 'minimax', baseUrl: 'https://api.minimaxi.com/anthropic', model: 'MiniMax-M3' },
-          'HF_TOKEN': { name: 'huggingface' },
-          'GROQ_API_KEY': { name: 'groq', baseUrl: 'https://api.groq.com/openai/v1' },
-        };
-
-        const mapped = keyMap[envKey];
+        const catalogEntry = providerDefaultsForApiKeyEnv(envKey);
+        const mapped = catalogEntry
+          ? {
+              name: catalogEntry.name,
+              baseUrl: catalogEntry.defaults.baseUrl,
+              model: catalogEntry.defaults.defaultModel,
+            }
+          : envKey === 'HF_TOKEN'
+            ? { name: 'huggingface' }
+            : undefined;
         if (mapped) {
           providers.push({
             name: mapped.name,
@@ -288,28 +293,16 @@ export function scanHermes(): { tool: DiscoveredTool; providers: DiscoveredProvi
 export function scanEnvKeys(): DiscoveredProvider[] {
   const providers: DiscoveredProvider[] = [];
 
-  const keyMap: Record<string, { name: string; baseUrl: string; model: string }> = {
-    'DEEPSEEK_API_KEY':     { name: 'deepseek',   baseUrl: 'https://api.deepseek.com/v1',           model: 'deepseek-v4-flash' },
-    'OPENAI_API_KEY':       { name: 'openai',     baseUrl: 'https://api.openai.com/v1',             model: 'gpt-5.5' },
-    'ANTHROPIC_API_KEY':    { name: 'anthropic',  baseUrl: 'https://api.anthropic.com',              model: 'claude-sonnet-4-20250514' },
-    'MINIMAX_API_KEY':      { name: 'minimax',    baseUrl: 'https://api.minimaxi.com/anthropic',     model: 'MiniMax-M3' },
-    'MOONSHOT_API_KEY':     { name: 'moonshot',   baseUrl: 'https://api.moonshot.cn/v1',              model: 'moonshot-v1-8k' },
-    'ZHIPU_API_KEY':        { name: 'zhipu',      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   model: 'glm-4' },
-    'DASHSCOPE_API_KEY':    { name: 'qwen',       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
-    'GROQ_API_KEY':         { name: 'groq',       baseUrl: 'https://api.groq.com/openai/v1',          model: 'llama-3.1-70b-versatile' },
-    'TOGETHER_API_KEY':     { name: 'together',   baseUrl: 'https://api.together.xyz/v1',             model: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo' },
-    'OPENROUTER_API_KEY':   { name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1',             model: 'openai/gpt-4o' },
-    'XAI_API_KEY':          { name: 'xai',        baseUrl: 'https://api.x.ai/v1',                     model: 'grok-4.3' },
-  };
-
-  for (const [envKey, info] of Object.entries(keyMap)) {
+  for (const { name, defaults } of listProviderDefaults()) {
+    if (!defaults.apiKeyEnv) continue;
+    const envKey = defaults.apiKeyEnv;
     const value = process.env[envKey];
     if (value) {
       providers.push({
-        name: info.name,
+        name,
         apiKey: value,
-        baseUrl: process.env[`${envKey.replace('_API_KEY', '')}_BASE_URL`] ?? info.baseUrl,
-        defaultModel: process.env[`${envKey.replace('_API_KEY', '')}_MODEL`] ?? info.model,
+        baseUrl: process.env[`${envKey.replace('_API_KEY', '')}_BASE_URL`] ?? defaults.baseUrl,
+        defaultModel: process.env[`${envKey.replace('_API_KEY', '')}_MODEL`] ?? defaults.defaultModel,
         available: true,
         source: `env:${envKey}`,
         importable: true,
@@ -344,13 +337,12 @@ export async function scanLocalEndpoints(): Promise<DiscoveredProvider[]> {
     }));
   } catch {
     // Config not loaded — use built-in defaults
-    endpoints = [
-      { name: 'ollama',   url: 'http://127.0.0.1:11434/api/tags', baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.1' },
-      { name: 'lmstudio', url: 'http://127.0.0.1:1234/v1/models', baseUrl: 'http://127.0.0.1:1234/v1',   model: '(auto)' },
-      { name: 'vllm',     url: 'http://127.0.0.1:8000/v1/models', baseUrl: 'http://127.0.0.1:8000/v1',     model: '(auto)' },
-      { name: 'llamacpp', url: 'http://127.0.0.1:8081/v1/models', baseUrl: 'http://127.0.0.1:8081/v1',     model: '(auto)' },
-      { name: 'localai',  url: 'http://127.0.0.1:8082/v1/models', baseUrl: 'http://127.0.0.1:8082/v1',     model: '(auto)' },
-    ];
+    endpoints = listLocalProviderDefaults().map(entry => ({
+      name: entry.name,
+      url: entry.checkUrl,
+      baseUrl: entry.baseUrl,
+      model: entry.defaultModel,
+    }));
   }
 
   const results: DiscoveredProvider[] = [];
@@ -401,6 +393,7 @@ export function scanOwnAccounts(): DiscoveredProvider[] {
 // ── 6. xAI OAuth tokens (los + Hermes) ──────────────────
 
 export function scanXaiOAuth(): DiscoveredProvider[] {
+  const xaiDefaults = requireProviderDefaults('xai');
   const providers: DiscoveredProvider[] = [];
 
   try {
@@ -412,8 +405,8 @@ export function scanXaiOAuth(): DiscoveredProvider[] {
       if (losState?.tokens && (losState.tokens as Record<string, unknown>)?.access_token) {
         providers.push({
           name: 'xai',
-          baseUrl: 'https://api.x.ai/v1',
-          defaultModel: 'grok-4.3',
+          baseUrl: xaiDefaults.baseUrl,
+          defaultModel: xaiDefaults.defaultModel,
           authMode: 'oauth',
           available: true,
           source: 'los/auth.json (xAI OAuth)',
@@ -433,8 +426,8 @@ export function scanXaiOAuth(): DiscoveredProvider[] {
         if (!providers.some(p => p.name === 'xai' && p.source === 'los/auth.json (xAI OAuth)')) {
           providers.push({
             name: 'xai',
-            baseUrl: 'https://api.x.ai/v1',
-            defaultModel: 'grok-4.3',
+            baseUrl: xaiDefaults.baseUrl,
+            defaultModel: xaiDefaults.defaultModel,
             authMode: 'oauth',
             available: true,
             source: 'hermes/auth.json (xAI OAuth)',
@@ -449,4 +442,3 @@ export function scanXaiOAuth(): DiscoveredProvider[] {
 
   return providers;
 }
-

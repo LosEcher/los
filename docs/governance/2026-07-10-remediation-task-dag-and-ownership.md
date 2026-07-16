@@ -197,6 +197,10 @@ P1-V1 双网关/崩溃/长任务验收依赖 P1-O2 与 P1-L3
 
 ## 5. P1 任务卡：第 1-2 周
 
+> 2026-07-15 的“已完成”表示当前未提交 working change 中的实现与测试已完成。
+> 当时运行中的 gateway/executor 仍是旧 build，`public` schema 也尚未应用
+> migrations 034/035；因此这些状态不表示已 commit、已合并或已部署。
+
 ### P1-T1 跨包测试 schema 隔离
 
 **归属：单一子代理完整实施；新增 infra 文件需 package-level approval。**
@@ -217,6 +221,12 @@ UUID 的 root test 同时运行均通过；`public` schema 指纹前后不变且
 
 **C0 归属主代理，C1/C2 可交同一子代理。**
 
+**状态：2026-07-15 已完成。** ADR 0029 固定 meta-schema、版本与兼容规则；
+`@los/contracts` 从 `run-spec.yaml`、`run-stream.yaml` 生成类型并提供 Ajv runtime
+validator。`tools/check-contracts.ts` 使用标准 YAML parser、meta-schema、JSON
+Schema 编译、route/event AST 对账和 generated drift 检查。聚焦反证已验证删除真实
+route、修改 contract 不生成和非法请求都会失败。
+
 - C0：ADR 决定 OpenAPI 3.1/JSON Schema、生成包、版本和兼容规则。
 - C1：用 YAML parser/meta-schema 替换 grep 主校验；修正失效 SSE 路径；逐 route/event 比较，不能用 wildcard relay 证明覆盖。
 - C2：以 run-spec/run-stream 试点生成 request type、runtime validator 和 event union。
@@ -225,6 +235,13 @@ UUID 的 root test 同时运行均通过；`public` schema 指纹前后不变且
 ### P1-O0/O1/O2 Outbox 可靠通知
 
 **O0 和 O2 归属主代理；O1 可交子代理。**
+
+**状态：2026-07-15 已完成。** ADR 0028、migration 035 和
+`execution-outbox.ts` 已接入 gateway maintenance。历史行由 migration 标记
+`legacy=true`，新行默认 `legacy=false`；publisher 使用 claim TTL、
+`FOR UPDATE SKIP LOCKED`、指数退避和 `session_event_id`。health/diagnostics 已暴露
+积压数量、claim 数量、最老年龄和 legacy 水位；通知失败、stale claim 和双 publisher
+竞争均有 PostgreSQL 测试。
 
 - 决策：建议 outbox 负责事务后可靠通知，`session_events` 负责 durable replay。
 - O1：增加 `session_event_id`、attempt、next attempt、last error；publisher 使用 `FOR UPDATE SKIP LOCKED`，允许重复 notify，由 cursor 幂等。
@@ -235,6 +252,13 @@ UUID 的 root test 同时运行均通过；`public` schema 指纹前后不变且
 
 **L0/L3 归属主代理；L1/L2 可交同一子代理。**
 
+**状态：2026-07-15 已完成。** ADR 0027、migration 034 为 `agent_tasks` 和
+`task_runs` 增加单调 `lease_version`。scheduler 与 executor 同时续两条 lease；
+任一 lease 丢失都会 abort，终态写入要求 owner 与 version 匹配。gateway 周期 reaper
+使用 advisory lock，按 max attempts 重排队或失败，并写入 session event 和 DLQ。
+聚焦测试覆盖长任务不误回收、旧 owner 写入失败、远端 executor lease loss、达到
+上限进入失败/DLQ。
+
 - claim 时递增 `lease_version`；heartbeat 和终态更新必须匹配 `node_id + lease_version`。
 - scheduler 同时续 `task_runs` 与 `agent_tasks`；任一 lease 丢失触发 abort，旧 owner 不能覆盖新 claim。
 - 完成 fencing 后再启用周期 reaper；reaper 统一 max attempts、blocked/DLQ 和 session event。
@@ -244,12 +268,25 @@ UUID 的 root test 同时运行均通过；`public` schema 指纹前后不变且
 
 **归属：独立子代理。**
 
+**状态：2026-07-15 已完成。** `chat-cbm-symbol-cache.ts` 已改为
+`sessionId -> callId`，增加 session token、15 分钟 TTL、session/call 容量上限、
+成功 drain、失败 clear 和每分钟 sweep。`/health` 与 `/diagnostics/cbm-cache` 暴露
+active/cached/pending、cleanup failure、过期、容量驱逐、迟到写入丢弃和解析失败指标；
+聚焦测试覆盖并发 session、失败清理、TTL 与容量驱逐。
+
 - key 改为 `sessionId -> callId`；按 session drain；增加 TTL、容量上限、失败清理和 metrics。
 - 验收：并发 session 不互相 clear；失败 session 最终回收；过期和容量驱逐可观测。
 
 ### P1-PD1 Provider defaults 单源
 
 **归属：子代理实施；DeepSeek 可生成只读差异草案，主代理审核。**
+
+**状态：2026-07-15 已完成。** canonical catalog 位于
+`packages/infra/src/provider-defaults.ts`；config、Codex/cc-switch/Hermes/env/local
+discovery、xAI OAuth 和 model profiles 只从该 catalog 读取 URL/model。unknown
+provider 不再使用 OpenAI/`gpt-4o` 隐式 fallback，必须显式提供 base URL 和 model。
+infra 测试和 model-profile 对账测试验证已知 provider 的 effective defaults 一致，
+默认 DeepSeek provider/model 未改变。
 
 - 现有 `provider-defaults.ts` 只覆盖部分 provider，`model-profiles.ts`、discovery scanner、OAuth scanner 仍重复 URL/model。
 - 补全 catalog；profile/discovery 只引用 canonical defaults；unknown provider fallback 不再静默落到 OpenAI `gpt-4o`。
@@ -261,7 +298,12 @@ UUID 的 root test 同时运行均通过；`public` schema 指纹前后不变且
 2. `P2-S1`：迁移成为 schema 唯一真相，`ensure*Store()` 只做版本检查或调用 migration。
 3. `P2-A1`：按 execution/provider/tooling/governance/integration 拆 agent 内部 bounded context；不先拆服务。
 4. `P2-M1`：修复 answer resume 的 durable wake/retry，并增加 resident recovery evidence。
-5. `P3-V1`：双 gateway、进程崩溃、长任务、通知失败、lease loss 的组合故障测试。
+5. `P1-V1`（旧文误标 `P3-V1`）：**2026-07-15 已完成。**
+   `packages/gateway/src/execution-reliability.test.ts` 以真实 PostgreSQL schema 验证
+   双 gateway owner、长任务双续租、publisher crash/stale claim、通知失败重试、
+   双 publisher/reaper 竞争、进程停止后的 lease 回收和旧 owner fencing。该测试证明
+   DB-backed 多 owner 语义，不证明真实负载均衡器或操作系统级 process-kill failover；
+   后者仍按 ADR 0012 作为 operation smoke 单独管理。
 6. `P3-SEC1`：tenant/user 与已认证身份绑定，完成对外多租户隔离。
 
 ## 7. 子代理实施编排

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # check-delete-safety.sh — Block deletion of .ts/.tsx files that are still imported
-# by surviving code on this branch (HEAD). Compares HEAD imports against deletions
-# since origin/main to detect "deleted live code without rewiring importers".
+# by surviving code in the current tree. Compares current imports against
+# deletions since origin/main to detect "deleted live code without rewiring
+# importers". Using the working tree keeps local jj checks aligned with CI,
+# where HEAD and the working tree are identical.
 #
 # Run from: projects/los/
 # Exit: 0 = safe, 1 = unsafe deletion found (BLOCKS merge)
@@ -19,39 +21,22 @@ red()   { echo -e "  ${RED}✗${NC} $1"; ISSUES=$((ISSUES + 1)); }
 
 # ── Find deleted .ts/.tsx files (non-test) ──────────────────
 
-DELETED=$(git diff --name-only --diff-filter=D origin/main..HEAD 2>/dev/null | grep '\.tsx\?$' | grep -v '\.test\.' | grep -v '\.d\.ts$' || true)
+DELETED=$(git diff --name-only --diff-filter=D origin/main -- 2>/dev/null | grep '\.tsx\?$' | grep -v '\.test\.' | grep -v '\.d\.ts$' || true)
 
 if [ -z "$DELETED" ]; then
   green "No non-test .ts/.tsx files deleted — skip"
   exit 0
 fi
 
-echo "Checking $(echo "$DELETED" | wc -l | tr -d ' ') deleted file(s) against HEAD importers..."
+echo "Checking $(echo "$DELETED" | wc -l | tr -d ' ') deleted file(s) against current importers..."
 
-# ── For each deleted file, check if HEAD has surviving importers ──
+# ── For each deleted file, check if the current tree has surviving importers ──
 
 for deleted_file in $DELETED; do
-  # Package removals: match @los/<pkg> or packages/<pkg>/ imports (avoids false hits on config.ts, index.ts, …)
-  if [[ "$deleted_file" == packages/*/* ]]; then
-    pkg=$(echo "$deleted_file" | cut -d/ -f2)
-    RAW=$(git grep -H -E "@los/${pkg}(['\"]|/)|packages/${pkg}/" HEAD -- '*.ts' '*.tsx' 2>/dev/null \
-      | grep -v '.test.' | grep -v '/dist/' \
-      | cut -d: -f2- \
-      | cut -d: -f1 \
-      | sort -u || true)
-  else
-    modname=$(basename "$deleted_file" .ts)
-    modname="${modname%.tsx}"
-
-    RAW=$(git grep -H "from\s*['\"].*${modname}\.js['\"]" HEAD -- '*.ts' '*.tsx' 2>/dev/null \
-      | grep -v '.test.' | grep -v '/dist/' \
-      | cut -d: -f2- \
-      | cut -d: -f1 \
-      | sort -u || true)
-  fi
+  RAW=$(node "$SCRIPT_DIR/check-delete-importers.mjs" "$deleted_file")
 
   if [ -z "$RAW" ]; then
-    green "$deleted_file — no HEAD importers found"
+    green "$deleted_file — no current importers found"
     continue
   fi
 
@@ -64,7 +49,7 @@ for deleted_file in $DELETED; do
   done
 
   if [ -n "$SURVIVING" ]; then
-    red "$deleted_file — SURVIVING importers on HEAD:"
+    red "$deleted_file — SURVIVING importers in current tree:"
     for imp in $SURVIVING; do
       echo "      $imp"
     done

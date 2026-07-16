@@ -1,5 +1,5 @@
 contract: los.node-registry
-version: 0.1.0
+version: 0.1.1
 status: draft
 owner: packages/agent
 description: >
@@ -39,8 +39,14 @@ properties:
       - offline
   version:
     type: string
+    description: >
+      Immutable runtime build identifier in SemVer build-metadata form, for
+      example 0.1.0+b1a2b3c4d5e6f. The metadata is a digest of deployable
+      runtime content and must identify deployed code, not only the package
+      release line.
   targetVersion:
     type: string
+    description: Runtime build identifier requested by the current rollout.
   rolloutState:
     type: string
     enum:
@@ -157,6 +163,7 @@ executionCandidate:
   blockers:
     - heartbeat:stale
     - connect_mode:missing_agent_http
+    - connect_url:wildcard_host
     - capability:run_agent_missing
     - capability:heavy_task_safe_false
     - resource:memory_pressure

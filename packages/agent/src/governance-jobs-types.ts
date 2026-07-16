@@ -1,4 +1,4 @@
-export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan' | 'supply_chain_audit' | 'static_analysis' | 'performance_audit' | 'migration_drift_fix' | 'event_retention' | 'code_topology_audit';
+export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan' | 'supply_chain_audit' | 'static_analysis' | 'performance_audit' | 'migration_drift_fix' | 'event_retention' | 'code_topology_audit' | 'dead_letter';
 export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly';
 export type GovernanceJobStatus = 'active' | 'paused' | 'retired';
 export type CircuitState = 'closed' | 'half_open' | 'open';
