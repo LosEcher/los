@@ -120,6 +120,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_tasks_graph_status ON agent_tasks(graph_id,
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_run_spec ON agent_tasks(run_spec_id);
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_session ON agent_tasks(session_id);
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_lease ON agent_tasks(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_lease_fence
+  ON agent_tasks(id, claimed_by_node_id, lease_version)
+  WHERE status = 'running';
 CREATE INDEX IF NOT EXISTS idx_task_edges_graph_task ON task_edges(graph_id, task_id);
 CREATE INDEX IF NOT EXISTS idx_task_edges_graph_depends ON task_edges(graph_id, depends_on_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(graph_id, task_id, attempt);

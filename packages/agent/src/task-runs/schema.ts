@@ -49,6 +49,9 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_tenant_project ON task_runs(tenant_id, 
 CREATE INDEX IF NOT EXISTS idx_task_runs_node_id ON task_runs(node_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_request_id ON task_runs(request_id);
 CREATE INDEX IF NOT EXISTS idx_task_runs_lease ON task_runs(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_task_runs_lease_fence
+  ON task_runs(id, node_id, lease_version)
+  WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_active_dedupe
