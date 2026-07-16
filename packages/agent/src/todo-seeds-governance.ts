@@ -151,7 +151,7 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
     title: '治理热点文件、实现漂移和工具层漂移',
     description: '识别超大/高频变更/跨层耦合文件，核对工具能力声明与真实行为，并把漂移结果写入 todo metadata 和 session_events。',
     kind: 'batch',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'analysis-2026-05-30',
     stageId: 'governance-jobs',
@@ -162,6 +162,33 @@ export const LOS_GOVERNANCE_TODO_SEED: CreateTodoInput[] = [
       problem: '历史项目里工具声明、实际实现和热点文件会持续漂移，单次 review 很难长期覆盖。',
       solution: '周期性采集 file churn/size/import boundary/tool capability 与实际执行证据，生成治理 todo 或归档证据。',
       categories: ['implementation_drift', 'tool_drift', 'hotspot_files', 'architecture_drift'],
+      evidence: [
+        'packages/agent/src/hotspot-drift-detector.ts measures file-size trends and tool call/error drift',
+        'packages/agent/src/governance-auditors.ts wires hotspot results into the periodic governance job',
+        'packages/agent/src/governance-sweep-todos.ts projects governance findings into todo metadata',
+      ],
+      statusUpdatedAt: '2026-07-16',
+    },
+  },
+  {
+    id: 'todo-los-p1-supply-chain-full',
+    title: 'P1-N6 供应链完整链路',
+    description:
+      '扩展 supply_chain_audit job 为完整供应链审计：\n' +
+      '1. SBOM 生成（cyclonedx/spdx）\n' +
+      '2. License compliance check\n' +
+      '3. Dependency freshness（超过 12 个月未更新的包告警）\n' +
+      '4. npm audit 结果持久化到 DB 做趋势跟踪',
+    kind: 'task',
+    status: 'backlog',
+    priority: 'P1',
+    source: 'audit-2026-06-24',
+    stageId: 'p1-iteration-fixes',
+    dedupeKey: 'los:todo:p1-supply-chain-full',
+    dependsOnIds: [],
+    metadata: {
+      problem: 'supply_chain_audit 目前只做基础检查',
+      files: ['packages/agent/src/governance-auditors-supply-chain.ts'],
     },
   },
 ];
