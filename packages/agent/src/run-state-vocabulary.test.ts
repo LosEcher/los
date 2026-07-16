@@ -89,6 +89,7 @@ function taskRun(input: Partial<TaskRunRecord>): TaskRunRecord {
     attempt: 1,
     promptPreview: 'test run state',
     metadata: {},
+    leaseVersion: 0,
     createdAt: '2026-06-07T00:00:00.000Z',
     updatedAt: '2026-06-07T00:00:00.000Z',
     ...input,

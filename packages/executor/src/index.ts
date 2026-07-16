@@ -8,8 +8,8 @@ import { initDb, getDb } from '@los/infra/db';
 import { migrateDir } from '@los/infra/migrate';
 import { getLogger } from '@los/infra/logger';
 import {
+  heartbeatAgentTask,
   heartbeatTaskRun,
-  loadTaskRun,
   resolveIdentityLevelForExecutionPath,
   runAgent,
   type AgentConfig,
@@ -25,9 +25,9 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { collectResourceMetrics, resolveResourceCapabilities } from './resource-metrics.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
+import { _renewTaskLease } from './lease-fencing.js';
 import {
   acceptsNdjson,
-  createAbortError,
   normalizeLeaseMs,
   normalizeOptionalString,
   normalizePositiveInteger,
@@ -43,6 +43,8 @@ const DEFAULT_HEARTBEAT_MS = 10_000;
 interface RunAgentRequest {
   taskRunId: string;
   nodeId?: string;
+  leaseVersion?: number;
+  agentTaskLease?: { taskId: string; leaseVersion: number };
   leaseMs?: number;
   prompt: string;
   config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
@@ -228,6 +230,10 @@ async function runAssignedAgentTask(
   const taskRunId = normalizeRequiredString(body.taskRunId, 'taskRunId');
   const prompt = normalizeRequiredString(body.prompt, 'prompt');
   const nodeId = normalizeOptionalString(body.nodeId) ?? defaultNodeId;
+  const leaseVersion = Math.max(1, Math.floor(Number(body.leaseVersion ?? 0)));
+  if (!Number.isFinite(leaseVersion) || leaseVersion < 1) {
+    throw new Error('leaseVersion must be a positive integer');
+  }
   const leaseMs = normalizeLeaseMs(body.leaseMs, DEFAULT_LEASE_MS);
   const events: SessionEventRecord[] = [];
   const deltas: AgentModelDelta[] = [];
@@ -235,13 +241,25 @@ async function runAssignedAgentTask(
 
   const controller = new AbortController();
   const heartbeat = setInterval(() => {
-    renewTaskLease(taskRunId, nodeId, leaseMs, controller).catch((err) => {
+    _renewTaskLease(taskRunId, nodeId, leaseVersion, body.agentTaskLease, leaseMs, controller).catch((err) => {
       log.warn(`task lease heartbeat failed: ${err.message ?? String(err)}`);
     });
   }, Math.max(1_000, Math.floor(leaseMs / 3)));
 
   try {
-    await heartbeatTaskRun(taskRunId, { nodeId, leaseMs });
+    const [initialTaskRunLease, initialAgentTaskLease] = await Promise.all([
+      heartbeatTaskRun(taskRunId, { nodeId, leaseVersion, leaseMs }),
+      body.agentTaskLease
+        ? heartbeatAgentTask(body.agentTaskLease.taskId, {
+            nodeId,
+            leaseVersion: body.agentTaskLease.leaseVersion,
+            leaseMs,
+          })
+        : Promise.resolve(true),
+    ]);
+    if (!initialTaskRunLease || !initialAgentTaskLease) {
+      throw new Error(`execution lease lost before executor start for task run ${taskRunId}`);
+    }
     const result = await runAgent(prompt, {
       ...(body.config ?? {}),
       identity: body.config?.identity ?? {
@@ -266,19 +284,6 @@ async function runAssignedAgentTask(
     return { result, events, deltas, toolCallStates };
   } finally {
     clearInterval(heartbeat);
-  }
-}
-
-async function renewTaskLease(
-  taskRunId: string,
-  nodeId: string,
-  leaseMs: number,
-  controller: AbortController,
-): Promise<void> {
-  const renewed = await heartbeatTaskRun(taskRunId, { nodeId, leaseMs });
-  const taskRun = renewed ?? await loadTaskRun(taskRunId);
-  if (taskRun?.status === 'cancelled' && !controller.signal.aborted) {
-    controller.abort(createAbortError('cancelled_by_scheduler'));
   }
 }
 

@@ -339,6 +339,7 @@ export async function approveRunSpecPhase(
         entityType: 'run_spec',
         entityId: id,
         eventType: 'run.plan_approved',
+        sessionEventId: event.id,
         payload: event.payload ?? {},
       });
       await client.query('COMMIT');
@@ -455,6 +456,7 @@ export async function reviseRunSpecPlan(
         entityType: 'run_spec',
         entityId: id,
         eventType: 'run.plan_revised',
+        sessionEventId: event.id,
         payload: event.payload ?? {},
       });
       await client.query('COMMIT');

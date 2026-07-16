@@ -10,9 +10,11 @@ import {
   editableSurfacesForAgentTask,
   editableSurfacesOverlap,
   ensureAgentTaskGraphStore,
+  heartbeatAgentTask,
   linkAgentTaskDependency,
   listAgentTaskAttempts,
   listBlockedAgentTasks,
+  recoverExpiredAgentTasks,
   selectEditableSurfaceCompatibleTasks,
   updateAgentTaskStatus,
 } from './agent-task-graph.js';
@@ -52,6 +54,51 @@ test('agent task graph claims independent tasks and blocks failed dependencies',
     assert.equal(blockedCompletion.blockReason, 'dependency_failure');
     const afterFailure = await claimReadyAgentTasks({ graphId, limit: 2, nodeId: 'node-a' });
     assert.deepEqual(afterFailure, []);
+  } finally {
+    await cleanupGraph(graphId);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('agent task graph lease version fences stale owners across recovery', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const graphId = `graph-lease-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const taskId = `${graphId}-task`;
+  try {
+    await ensureAgentTaskGraphStore();
+    await createAgentTask({ id: taskId, graphId, role: 'executor', title: 'Lease fenced task' });
+
+    const [first] = await claimReadyAgentTasks({ graphId, nodeId: 'node-a', leaseMs: 30_000 });
+    assert.equal(first?.leaseVersion, 1);
+    assert.equal((await heartbeatAgentTask(taskId, {
+      nodeId: 'node-a',
+      leaseVersion: first!.leaseVersion,
+      leaseMs: 30_000,
+    }))?.claimedByNodeId, 'node-a');
+    assert.equal(await heartbeatAgentTask(taskId, {
+      nodeId: 'node-b',
+      leaseVersion: first!.leaseVersion,
+      leaseMs: 30_000,
+    }), null);
+
+    await getDb().query('UPDATE agent_tasks SET lease_expires_at = now() - interval \'1 second\' WHERE id = $1', [taskId]);
+    assert.equal(await updateAgentTaskStatus(taskId, 'succeeded', {}, {
+      nodeId: 'node-a',
+      leaseVersion: first!.leaseVersion,
+    }), null);
+    assert.equal((await recoverExpiredAgentTasks()).map(task => task.id).includes(taskId), true);
+
+    const [second] = await claimReadyAgentTasks({ graphId, nodeId: 'node-b', leaseMs: 30_000 });
+    assert.equal(second?.leaseVersion, 2);
+    assert.equal(await updateAgentTaskStatus(taskId, 'succeeded', {}, {
+      nodeId: 'node-a',
+      leaseVersion: first!.leaseVersion,
+    }), null);
+    assert.equal((await updateAgentTaskStatus(taskId, 'succeeded', {}, {
+      nodeId: 'node-b',
+      leaseVersion: second!.leaseVersion,
+    }))?.status, 'succeeded');
   } finally {
     await cleanupGraph(graphId);
     await closeDb().catch(() => undefined);
@@ -283,6 +330,7 @@ function taskFixture(id: string, surfaces: string[]) {
     status: 'queued' as const,
     priority: 100,
     maxAttempts: 1,
+    leaseVersion: 0,
     metadata: { runContract: { editableSurfaces: surfaces } },
     createdAt: '2026-06-07T00:00:00.000Z',
     updatedAt: '2026-06-07T00:00:00.000Z',

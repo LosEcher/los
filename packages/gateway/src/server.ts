@@ -65,10 +65,12 @@ import { ensureSkillStore, upsertSkill, loadSkillsFromDir } from '@los/agent/ski
 import { ensureRuleStore, upsertRule, loadRulesFromDir } from '@los/agent/rules';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
+import { readExecutionOutboxHealth } from '@los/agent/execution-outbox';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
 import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
 import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
 import { getDefaultProjectId, getProject } from './project-store.js';
+import { getSymbolCacheMetrics } from './chat-cbm-symbol-cache.js';
 
 const log = getLogger('gateway');
 const SERVICE_HEARTBEAT_MS = 10_000;
@@ -156,7 +158,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── Health ───────────────────────────────────────────
   app.get('/health', async () => {
-    const current = await loadServiceInstance(service.serviceId).catch(() => null);
+    const [current, outbox] = await Promise.all([
+      loadServiceInstance(service.serviceId).catch(() => null),
+      readExecutionOutboxHealth().catch(() => null),
+    ]);
     return {
       status: 'ok',
       uptime: process.uptime(),
@@ -164,6 +169,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       serviceKind: 'gateway',
       ready: current?.readiness.ready ?? false,
       blockers: current?.readiness.blockers ?? ['service:not_registered'],
+      outbox,
+      cbmSymbolCache: getSymbolCacheMetrics(),
     };
   });
 

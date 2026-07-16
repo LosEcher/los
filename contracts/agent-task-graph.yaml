@@ -1,5 +1,5 @@
 contract: los.agent-task-graph
-version: 0.1.0
+version: 0.2.0
 status: draft
 owner: packages/agent
 description: >
@@ -12,6 +12,7 @@ sourceOfTruth:
   - agent_tasks
   - task_edges
   - task_attempts
+  - task_runs
 routes:
   - method: GET
     path: /agent-graphs/{graphId}
@@ -59,6 +60,22 @@ rules:
   - failed or cancelled dependencies block downstream completion
   - terminal task failure requires retry or operator action
   - external tool summaries cannot replace task attempts or verification records
+  - claiming an agent task increments lease_version atomically
+  - a graph task_run inherits the claimed agent task lease_version
+  - heartbeat and terminal writes require the claimed node id, lease_version, and an unexpired lease
+  - losing either the agent_tasks or task_runs lease aborts the active execution
+leasing:
+  fence:
+    ownerField: claimed_by_node_id
+    versionField: lease_version
+    expiryField: lease_expires_at
+  taskRunFence:
+    ownerField: node_id
+    versionField: lease_version
+    expiryField: lease_expires_at
+  recovery:
+    behavior: requeue_agent_task_until_max_attempts_then_fail_and_fail_task_run
+    staleOwnerMayCommit: false
 verification:
   - pnpm --filter @los/agent test
   - pnpm --filter @los/gateway test

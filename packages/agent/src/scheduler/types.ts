@@ -28,6 +28,12 @@ export interface ScheduledAgentTaskInput extends AgentConfig {
   taskRunId?: string;
   /** Attempt number when this task is a retry of an earlier task_run. */
   attempt?: number;
+  /** Monotonic task_runs fencing token. Graph runs inherit the agent-task version. */
+  leaseVersion?: number;
+  agentTaskLease?: {
+    taskId: string;
+    leaseVersion: number;
+  };
   runSpecId?: string;
   traceId?: string;
   dedupeKey?: string;
