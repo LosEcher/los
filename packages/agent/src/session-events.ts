@@ -31,6 +31,7 @@ export type SessionEventVisibility = 'public' | 'audit' | 'internal';
  */
 export function sessionEventVisibility(type: string): SessionEventVisibility {
   if (type.startsWith('tool_call_state.')) return 'internal';
+  if (type.startsWith('tool.pre_action.') || type.startsWith('tool.gate.')) return 'audit';
   // Governance sweep/job lifecycle is operator audit, not user-facing chat noise.
   if (type.startsWith('governance.')) return 'audit';
   if (type.startsWith('coordinator.')) return 'audit';

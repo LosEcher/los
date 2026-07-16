@@ -23,6 +23,14 @@ import { createSpawnAgentRunner, registerSpawnAgentTool, type ChildAgentRunner }
 import { createEventEmitter, type SessionEventContext, type SessionEventCallback } from '../event-emitter.js';
 import { appendSessionEvent } from '../session-events.js';
 import {
+  loadPreActionEvidence,
+  mergePreActionEvidence,
+} from '../pre-action-evidence.js';
+import {
+  preActionGateConfigFromAgentOptions,
+  type PreActionGateConfig,
+} from '../pre-action-gate.js';
+import {
   buildInitialMessages,
   getDefaultSystemPrompt,
 } from './message-builder.js';
@@ -61,6 +69,7 @@ export interface AgentRunSetup {
   emitEvent: EmitEvent;
   messages: Message[];
   maxLoops: number;
+  preActionGateConfig: PreActionGateConfig | undefined;
   counters: {
     totalPromptTokens: number;
     totalCompletionTokens: number;
@@ -150,7 +159,10 @@ export function setupAgentRun(
     traceId: config.traceId,
     requestId: config.requestId,
     runSpecId: config.runSpecId,
+    tenantId: config.tenantId,
+    projectId: config.projectId,
     architectEditor: config.architectEditor,
+    preActionGate: config.preActionGate,
     toolRetry: config.toolRetry,
     signal,
     onSessionEvent: config.onSessionEvent,
@@ -175,6 +187,7 @@ export function setupAgentRun(
     emitEvent,
     messages,
     maxLoops,
+    preActionGateConfig: preActionGateConfigFromAgentOptions(config.preActionGate),
     counters: {
       totalPromptTokens: 0,
       totalCompletionTokens: 0,
@@ -198,6 +211,20 @@ export async function completeAgentSetup(
   config: AgentConfig,
   setup: AgentRunSetup,
 ): Promise<AgentRunSetup> {
+  if (setup.preActionGateConfig && config.preActionGate?.loadPersistedEvidence !== false &&
+      (config.sessionId || config.projectId)) {
+    try {
+      const persistedEvidence = await loadPreActionEvidence({
+        sessionId: config.sessionId,
+        tenantId: config.tenantId,
+        projectId: config.projectId,
+      });
+      mergePreActionEvidence(setup.preActionGateConfig, persistedEvidence);
+    } catch (err: any) {
+      setup.log.warn(`Failed to load pre-action evidence: ${err.message ?? String(err)}`);
+    }
+  }
+
   // Load enabled MCP servers from the persistent registry
   let mcpRegistryRecords: MCPServerRegistryRecord[] | undefined;
   if (config.tenantId || config.projectId) {

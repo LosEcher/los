@@ -20,6 +20,11 @@ test('sessionEventVisibility: coordinator decisions are audit', () => {
   assert.equal(sessionEventVisibility('coordinator.intake_blocked'), 'audit');
 });
 
+test('sessionEventVisibility: pre-action evidence is audit', () => {
+  assert.equal(sessionEventVisibility('tool.pre_action.failure'), 'audit');
+  assert.equal(sessionEventVisibility('tool.gate.feedback.ok'), 'audit');
+});
+
 test('sessionEventVisibility: session bookmarks are audit', () => {
   assert.equal(sessionEventVisibility('session.started'), 'audit');
   assert.equal(sessionEventVisibility('session.completed'), 'audit');
