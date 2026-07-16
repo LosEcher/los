@@ -4,6 +4,8 @@
 > 基于：历史 9 份研究/分析文档 + 2 轮竞品快照 + toolchain-matrix 框架
 > 关联：[[los-competitive-landscape-2026-06]] [[los-mimo-code-analysis]] [[los-cbm-analysis]] [[los-periodic-analysis]]
 
+> 2026-07-16 更新：Grok Build 以公开源码 commit `c1b5909` / `0.1.220-alpha.4` 加入 Tier 0。监督基线和专项分析见 `docs/research/deep-dive-grok-build-agent-runtime-2026-07.md`。
+
 ---
 
 ## 一、历史研究全景盘点
@@ -21,6 +23,7 @@
 | 2026-06-19 | **codebase-memory-mcp** | `projects/los/docs/research/codebase-memory-mcp-analysis.md` | 全架构 7 层分析 | 5 Phase 联动路线图 + 5 个核心算法 + ADR 建议 |
 | 2026-06-19 | **CBM H1-H3 验证** | `projects/los/docs/research/cbm-validation-2026-06-19.md` | 实验验证 | 符号识别 100%、token 节省 10-100x、符号映射 100% |
 | 2026-06-19 | **los 全项目结构化索引** | `docs/structured-project-context-2026-06-19.md` | 项目全景快照 | 362 TS 源文件、67K 行、8 包、12 迁移文件 |
+| 2026-07-16 | **Grok Build** | `docs/research/deep-dive-grok-build-agent-runtime-2026-07.md` | loop/TUI/compaction/goals/subagents 源码追踪 | ACP 是完整 agent 集成候选；LOS 优先修 context fill、eviction 和 projection |
 
 ### 1.2 被分析项目的分类
 
@@ -129,7 +132,7 @@
 
 | Tier | 项目 | 监控频率 | 监控方式 |
 |------|------|:---:|---------|
-| **Tier 0** (核心差异化对手) | Claude Code, Codex CLI | 每月 | release notes diff + changelog 扫描 |
+| **Tier 0** (核心差异化对手) | Claude Code, Codex CLI, Grok Build | 每月 | release notes diff + changelog / 核心调用链扫描 |
 | **Tier 1** (直接可比) | MiMo-Code, Aider, LangGraph | 每月 | release notes + 关键 PR/issue 扫描 |
 | **Tier 2** (方向参考) | Cursor, Windsurf, Devin, OpenCode | 每季 | 产品更新 + 技术博客 |
 | **Tier 3** (趋势信号) | Goose, CrewAI, Continue, Qwen Coder | 每季 | 仅显著版本发布 |
@@ -155,6 +158,16 @@
 - 新增 `competitive_snapshot` governance job type，cadence=monthly
 - Auditor 函数：扫描 Tier 0-2 的 GitHub releases / changelogs → 更新得分矩阵
 - 产出：`docs/research/competitive-snapshot-YYYY-MM.md`
+
+**Grok Build 固定监督源**：
+
+- 本地镜像：`/Users/echerlos/syncthing/project/grok-build`
+- 基线：commit `c1b5909ec707c069f1d21a93917af044e71da0d7`，版本 `0.1.220-alpha.4`
+- 变更源：`crates/codegen/xai-grok-shell/CHANGELOG.md`、`default_models.json`、agent mode 文档
+- 核心路径：session run loop、compaction、goal tracker、subagent、ACP tracker/render
+- 每次输出：版本差异、行为差异、LOS 可吸收项、xAI route/ACP compatibility 风险
+
+当前 `SEED_JOBS` 尚无 `competitive_snapshot`，cadence schema 也没有 `monthly`。在调度实现完成前，`todo-los-framework-reference-watch` 是结构化监督入口；不得把该计划描述为已自动执行。
 
 ### 3.3 维度 2：专项深度吸收（深度优先，按需触发）
 
@@ -199,6 +212,7 @@
 | 3 | **MiMo-Code 上下文重建** | 上下文压缩+重建协议 | P1-4 推进时触发 | ⏳ MiMo P0 已评估 |
 | 4 | **Cursor tab 补全** | inline edit + 预测 UX | los Web UI 重构时触发 | ❌ 未启动 |
 | 5 | **LangGraph DAG 调度** | conditional edge + checkpoint | los agent-task-graph 升级时触发 | ❌ 未启动 |
+| 6 | **Grok Build runtime** | session actor、projection、compaction、goal、subagent、ACP | 已完成首次源码基线；后续按月 diff | ✅ 首次深挖完成 |
 
 ### 3.4 维度 3：集成可行性评估（技术验证）
 

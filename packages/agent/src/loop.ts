@@ -33,6 +33,7 @@ import {
 } from './context-monitor.js';
 import {
   evictMessages,
+  type PersistedToolResultEvidence,
   type SemanticEvictionConfig,
 } from './semantic-eviction.js';
 import {
@@ -85,7 +86,7 @@ export async function runAgent(
   const {
     log: agentLog, provider, modelProfile, toolMode, allowedTools,
     policy, signal, tools, mcpCleanup,
-    toolDefs, toolNames, emitEvent, messages, maxLoops,
+    toolDefs, toolNames, emitEvent, messages, maxLoops, preActionGateConfig,
     counters,
   } = s;
 
@@ -166,6 +167,18 @@ export async function runAgent(
   }
 
   // ── Context fill monitoring ──
+  const persistedToolResults = new Map<string, PersistedToolResultEvidence>();
+  const applyCriticalEviction = (fillPercent: number) => {
+    if (config.contextCompression?.semanticEviction?.enabled === false) return;
+    const evictedMessages = evictMessages(messages, persistedToolResults, {
+      minResultBytes: config.contextCompression?.semanticEviction?.minResultBytes ?? 4096,
+      maxStubChars: config.contextCompression?.semanticEviction?.maxStubChars ?? 200,
+    });
+    if (evictedMessages === messages) return;
+    messages.length = 0;
+    messages.push(...evictedMessages);
+    agentLog.info(`Semantic eviction applied at critical fill (${(fillPercent * 100).toFixed(1)}%)`);
+  };
   const ctxMon = config.contextMonitor
     ? createContextMonitor({
         contextWindowTokens: config.contextMonitor.contextWindowTokens ?? 200_000,
@@ -204,30 +217,7 @@ export async function runAgent(
             turn: s.turn,
             payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
           });
-          // Apply semantic eviction at critical fill to free context window
-          if (config.contextCompression?.semanticEviction?.enabled !== false) {
-            const persistedLocs = new Map<string, any[]>();
-            // Derive persisted locations from observation IDs in message metadata
-            for (let j = 0; j < messages.length; j++) {
-              const m = messages[j] as any;
-              if (m.role === 'tool' && m.tool_call_id && m.observation_id) {
-                persistedLocs.set(m.tool_call_id, [{
-                  kind: 'observation' as const,
-                  id: String(m.observation_id),
-                  label: `observation #${m.observation_id}`,
-                }]);
-              }
-            }
-            const evictedMsgs = evictMessages(messages as any[], persistedLocs, {
-              minResultBytes: config.contextCompression?.semanticEviction?.minResultBytes ?? 4096,
-              maxStubChars: config.contextCompression?.semanticEviction?.maxStubChars ?? 200,
-            });
-            if (evictedMsgs !== messages) {
-              messages.length = 0;
-              messages.push(...evictedMsgs as typeof messages);
-              agentLog.info(`Semantic eviction applied at critical fill (${(s.fillPercent * 100).toFixed(1)}%)`);
-            }
-          }
+          applyCriticalEviction(s.fillPercent);
         },
       })
     : null;
@@ -447,7 +437,7 @@ export async function runAgent(
     }
 
     // Execute tool calls
-    const { toolResults, toolMessages } = await runToolCalls({
+    const { toolResults, toolMessages, persistedToolResults: turnPersistedResults } = await runToolCalls({
       toolCalls: repaired.calls,
       turn: i + 1,
       tools,
@@ -456,8 +446,16 @@ export async function runAgent(
       policy,
       emitEvent,
       onSessionError,
+      preActionGateConfig,
     });
+    for (const [callId, evidence] of turnPersistedResults) {
+      persistedToolResults.set(callId, evidence);
+    }
     messages.push(...toolMessages);
+    const currentFill = ctxMon?.getState();
+    if (currentFill?.level === 'critical') {
+      applyCriticalEviction(currentFill.fillPercent);
+    }
 
     const turn: TurnSummary = {
       loopCount: i + 1,

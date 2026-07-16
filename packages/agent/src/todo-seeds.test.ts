@@ -45,14 +45,13 @@ const EXECUTION_LAB_PRIORITIES = new Map([
   ['todo-los-external-trace-adapters', 'P3'],
 ] as const);
 
-const EXECUTION_LAB_ACTIVE_STATES: ReadonlyMap<string, string> = new Map([
+const EXECUTION_LAB_STATES: ReadonlyMap<string, string> = new Map([
   ['todo-los-execution-lab', 'in_progress'],
-  ['todo-los-execution-observability-projection', 'ready'],
+  ['todo-los-execution-observability-projection', 'done'],
 ] as const);
 
 const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new Map([
   ['todo-los-execution-lab', ['P0', 'in_progress']],
-  ['todo-los-execution-observability-projection', ['P0', 'ready']],
   ['todo-los-multi-gateway-entry', ['P1', 'backlog']],
   ['todo-los-run-spec-stream-replay', ['P1', 'backlog']],
   ['todo-los-execution-experiment-contract', ['P1', 'backlog']],
@@ -99,7 +98,7 @@ test('execution lab seeds preserve the staged priority and dependency contract',
   for (const [id, priority] of EXECUTION_LAB_PRIORITIES) {
     const todo = allById.get(id);
     assert.ok(todo, `${id} is missing`);
-    assert.equal(todo.status, EXECUTION_LAB_ACTIVE_STATES.get(id) ?? 'backlog', `${id} scheduling state drifted`);
+    assert.equal(todo.status, EXECUTION_LAB_STATES.get(id) ?? 'backlog', `${id} scheduling state drifted`);
     assert.equal(todo.priority, priority, `${id} priority drifted`);
     assert.ok(todo.metadata?.priorityReason || id === 'todo-los-execution-lab', `${id} is missing a priority reason`);
 

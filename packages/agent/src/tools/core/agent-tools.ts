@@ -29,8 +29,11 @@ export interface SpawnAgentRunnerOptions {
   requestId?: string;
   /** Inherit parent runSpecId for run-spec lineage (AP6). */
   runSpecId?: string;
+  tenantId?: string;
+  projectId?: string;
   /** Inherit parent architect-editor config for dual-model sub-agents (AP6). */
   architectEditor?: AgentConfig['architectEditor'];
+  preActionGate?: AgentConfig['preActionGate'];
   toolRetry?: {
     maxAttempts?: number;
     baseDelayMs?: number;
@@ -120,6 +123,8 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       traceId: options.traceId,
       requestId: options.requestId,
       runSpecId: options.runSpecId,
+      tenantId: options.tenantId,
+      projectId: options.projectId,
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
@@ -131,6 +136,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       onSessionEvent: options.onSessionEvent,
       // Inherit architect-editor config from parent if enabled
       architectEditor: options.architectEditor,
+      preActionGate: options.preActionGate,
       // Child agents get Minimal identity: a role label only.
       // Per Agent Identity Decision Framework: short-lived, single-purpose,
       // constrained tools — identity should not consume context budget.

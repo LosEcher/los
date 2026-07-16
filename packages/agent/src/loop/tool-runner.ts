@@ -13,9 +13,16 @@
  * independent reads.
  */
 
+import { resolve } from 'node:path';
 import { assertNotAborted, withAbort, inferToolSource, summarizeCapability, previewText } from './utils.js';
 import { applyPhaseGate } from './phase-tool-gate.js';
-import { preActionGate, type PreActionGateConfig } from '../pre-action-gate.js';
+import {
+  preActionGate,
+  preActionGateConfigFromAgentOptions,
+  type PreActionGateConfig,
+} from '../pre-action-gate.js';
+import { createPreActionFailureEvidence } from '../pre-action-evidence.js';
+import type { PersistedToolResultEvidence } from '../semantic-eviction.js';
 import type { ToolRegistry } from '../tools/core/registry.js';
 import type { AgentConfig } from './types.js';
 import type { Message, ToolCall } from '../providers/index.js';
@@ -32,6 +39,7 @@ export interface RunToolCallsInput {
   policy: ReturnType<typeof import('./tool-resolver.js').resolveToolPolicy>;
   emitEvent: EmitEvent;
   onSessionError: (err: SessionErrorRecord) => void;
+  preActionGateConfig?: PreActionGateConfig;
 }
 
 interface ToolCallResult {
@@ -42,18 +50,25 @@ interface ToolCallResult {
   ok: boolean;
   denied: boolean;
   durationMs: number;
+  persistedEvidence?: PersistedToolResultEvidence;
   error?: string;
 }
 
 export async function runToolCalls(input: RunToolCallsInput): Promise<{
   toolResults: string[];
   toolMessages: Message[];
+  persistedToolResults: Map<string, PersistedToolResultEvidence>;
 }> {
   const { toolCalls, turn, tools, config, signal, policy, emitEvent, onSessionError } = input;
+  const preActionGateConfig = input.preActionGateConfig
+    ?? preActionGateConfigFromAgentOptions(config.preActionGate);
 
   // Phase 1: Validate and plan all tool calls (sequential — validation is cheap)
   const plans = toolCalls.map((tc, index) =>
-    prepareToolCall({ index, tc, turn, tools, config, signal, policy, emitEvent, onSessionError })
+    prepareToolCall({
+      index, tc, turn, tools, config, signal, policy, emitEvent, onSessionError,
+      preActionGateConfig,
+    })
   );
 
   // Phase 2: Execute in parallel batches respecting side-effect boundaries
@@ -95,8 +110,13 @@ export async function runToolCalls(input: RunToolCallsInput): Promise<{
     content: r.content.slice(0, 8000),
     tool_call_id: r.callId,
   }));
+  const persistedToolResults = new Map(
+    results
+      .filter((result): result is ToolCallResult & { persistedEvidence: PersistedToolResultEvidence } => Boolean(result.persistedEvidence))
+      .map(result => [result.callId, result.persistedEvidence]),
+  );
 
-  return { toolResults, toolMessages };
+  return { toolResults, toolMessages, persistedToolResults };
 }
 
 interface PreparedToolCall {
@@ -115,8 +135,12 @@ function prepareToolCall(input: {
   policy: ReturnType<typeof import('./tool-resolver.js').resolveToolPolicy>;
   emitEvent: EmitEvent;
   onSessionError: (err: SessionErrorRecord) => void;
+  preActionGateConfig: PreActionGateConfig | undefined;
 }): PreparedToolCall {
-  const { index, tc, turn, tools, config, signal, policy, emitEvent, onSessionError } = input;
+  const {
+    index, tc, turn, tools, config, signal, policy, emitEvent, onSessionError,
+    preActionGateConfig,
+  } = input;
   const fn = tc.function;
 
   return {
@@ -217,13 +241,8 @@ function prepareToolCall(input: {
       ) as ReturnType<typeof tools.evaluateTool>;
 
       // ── Pre-action gate: check known failure patterns ──
-      if (decision.allowed) {
-        const gateConfig: PreActionGateConfig = {
-          fragileFiles: (config as any).fragileFiles,
-          failureFingerprints: (config as any).failureFingerprints,
-          maxAttemptsBeforeWarn: (config as any).maxAttemptsBeforeWarn ?? 2,
-        };
-        const preCheck = preActionGate(fn.name, args, gateConfig);
+      if (decision.allowed && preActionGateConfig) {
+        const preCheck = preActionGate(fn.name, args, preActionGateConfig);
         if (preCheck.warnings.length > 0) {
           await emitEvent({
             type: 'tool.warned',
@@ -320,6 +339,26 @@ function prepareToolCall(input: {
         },
       });
 
+      if (decision.allowed && result.error && preActionGateConfig) {
+        const failureEvidence = createPreActionFailureEvidence(
+          fn.name,
+          args,
+          result.error,
+          tc.id,
+        );
+        preActionGateConfig.failureFingerprints?.add(failureEvidence.fingerprint);
+        if (failureEvidence.filePath) {
+          preActionGateConfig.fragileFiles?.add(failureEvidence.filePath);
+        }
+        await emitEvent({
+          type: 'tool.pre_action.failure',
+          turn,
+          toolName: fn.name,
+          parentEventId: decisionEvent?.id ?? callEvent?.id,
+          payload: failureEvidence,
+        });
+      }
+
       return {
         index,
         callId: tc.id,
@@ -328,8 +367,33 @@ function prepareToolCall(input: {
         ok: !result.error,
         denied: !decision.allowed,
         durationMs: toolDurationMs,
+        persistedEvidence: result.error
+          ? undefined
+          : buildPersistedEvidence(fn.name, args, config.workspaceRoot),
         error: result.error,
       };
     },
+  };
+}
+
+function buildPersistedEvidence(
+  toolName: string,
+  args: Record<string, unknown>,
+  workspaceRoot: string | undefined,
+): PersistedToolResultEvidence | undefined {
+  if (toolName !== 'read_file' && toolName !== 'list_directory' && toolName !== 'directory_tree') {
+    return undefined;
+  }
+  const defaultPath = toolName === 'read_file' ? undefined : '.';
+  const requestedPath = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : defaultPath;
+  if (!requestedPath) return undefined;
+  const absolutePath = resolve(workspaceRoot ?? process.cwd(), requestedPath);
+  return {
+    toolName,
+    locations: [{
+      kind: 'workspace_path',
+      id: absolutePath,
+      label: `${toolName} source ${absolutePath}`,
+    }],
   };
 }

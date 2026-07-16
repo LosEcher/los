@@ -79,6 +79,7 @@ export { ensureExecutorNodeStore, loadExecutorNode, listExecutorNodes, recordExe
 export { clearCancellation, ensureCancellationStore, pollCancellation, requestCancellation, type CancellationRequest } from './cancellation.js';
 export { ensureServiceInstanceStore, evaluateServiceInstance, listServiceInstances, loadServiceInstance, upsertServiceInstance, upsertServiceInstanceHeartbeat, type ServiceInstanceHeartbeatInput, type ServiceInstanceKind, type ServiceInstanceReadiness, type ServiceInstanceRecord, type ServiceInstanceRole, type ServiceInstanceRolloutState, type ServiceInstanceStatus, type ServiceInstanceUpsertInput } from './service-instances.js';
 export { ensureSessionEventStore, appendSessionEvent, appendSessionEvents, listSessionEvents, listRecentSessionEvents, listSessionEventsSince, getSessionObservability, projectSessionObservability, type SessionEventRecord, type SessionEventUsage, type SessionEventWrite, type SessionObservability } from './session-events.js';
+export { projectExecutionObservability, type ExecutionCountEvidence, type ExecutionDurationEvidence, type ExecutionFailureFacet, type ExecutionFailureFacetCategory, type ExecutionFingerprint, type ExecutionFingerprintComponentName, type ExecutionObservabilityProjection, type ExecutionTokenEvidence, type ExecutionTurnWaterfall, type ExecutionVersionEvidence } from './execution-observability.js';
 export { ensureStreamCheckpointStore, createStreamCheckpoint, listStreamCheckpointsSince, listStreamCheckpointsForRunSpec, type StreamCheckpointRecord, type CreateStreamCheckpointInput } from './stream-checkpoints.js';
 export { ensureStreamLeaseStore, acquireStreamLease, releaseStreamLease, heartbeatStreamLease, getActiveLease, type StreamLeaseRecord, type AcquireLeaseInput, type ReconnectInfo } from './stream-lease.js';
 export { ensureTodoStore, archiveTodo, createTodo, updateTodo, loadTodo, listTodos, reopenTodo, seedLosPlanningTodos, unarchiveTodo, type CreateTodoInput, type ListTodosOptions, type TodoKind, type TodoPriority, type TodoRecord, type TodoStatus, type UpdateTodoInput, type SeedLosPlanningTodosOptions } from './todos.js';
@@ -97,7 +98,26 @@ export { resolveXaiOAuthCredential, getXaiOAuthCredentialSync, getXaiOAuthStatus
 export { startOtelBridge, isOtelBridgeRunning, spawnClaudeCode, runClaudeCodeWithBridge, claudeCodeSupportsOtel, claudeSpanToEventType, CLAUDE_CODE_SPAN_NAMES, spawnCodex, codexSupportsOtel, type OtelBridgeConfig, type ClaudeCodeSpawnInput, type CodexSpawnInput, type RuntimeKind, type RuntimeAdapterConfig, type RuntimeHandle } from './runtime-adapter/index.js';
 
 // ── Pre-action gate — reusable by tool gate routes ─────
-export { preActionGate, failureFingerprintFromError, extractFragilitySignal, type PreActionCheck, type PreActionGateConfig } from './pre-action-gate.js';
+export {
+  preActionGate,
+  failureFingerprintForToolCall,
+  failureFingerprintFromError,
+  filePathFromToolArgs,
+  preActionGateConfigFromAgentOptions,
+  extractFragilitySignal,
+  type AgentPreActionGateConfig,
+  type PreActionCheck,
+  type PreActionGateConfig,
+} from './pre-action-gate.js';
+export {
+  _GLOBAL_PRE_ACTION_SESSION_ID,
+  createPreActionFailureEvidence,
+  loadPreActionEvidence,
+  mergePreActionEvidence,
+  _projectPreActionEvidence,
+  type PreActionEvidenceScope,
+  type PreActionFailureEvidence,
+} from './pre-action-evidence.js';
 
 // Re-export ast-grep types for rule authors
 export type { Rule as AstGrepRule } from '@ast-grep/napi';
