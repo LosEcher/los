@@ -34,7 +34,7 @@ export interface ContextMonitorConfig {
 }
 
 export interface ContextFillState {
-  /** Current estimated token usage */
+  /** Current context usage from the latest provider response */
   usedTokens: number;
   /** Maximum context window tokens */
   contextWindowTokens: number;
@@ -50,7 +50,7 @@ export interface ContextFillState {
   cumulativePromptTokens: number;
   /** Cumulative completion tokens */
   cumulativeCompletionTokens: number;
-  /** Estimated total message tokens (prompt + completion + message overhead) */
+  /** Current context tokens (latest prompt + completion, or fallback estimate) */
   estimatedTotalTokens: number;
 }
 
@@ -88,7 +88,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
   const crossed: CrossedLevels = { warn: false, checkpoint: false, critical: false };
   let cumulativePrompt = 0;
   let cumulativeCompletion = 0;
-  let estimatedMessageTokens = 0;
+  let currentContextTokens = 0;
 
   function determineLevel(fillPercent: number): ContextFillLevel {
     if (fillPercent >= criticalThresh) return 'critical';
@@ -120,21 +120,25 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
       completionTokens: number;
       cacheHitTokens?: number;
       cacheMissTokens?: number;
+      totalTokens?: number;
     },
     turn: number,
     /** Optional: known message count to add overhead estimate (~3 tokens/msg) */
     messageCount?: number,
   ): ContextFillState {
-    cumulativePrompt += usage.promptTokens;
-    cumulativeCompletion += usage.completionTokens;
+    const promptTokens = normalizeTokenCount(usage.promptTokens);
+    const completionTokens = normalizeTokenCount(usage.completionTokens);
+    cumulativePrompt += promptTokens;
+    cumulativeCompletion += completionTokens;
 
-    // Message overhead: system + tools + ~3 tokens/msg for roles
-    const msgOverhead = messageCount ? messageCount * 3 : 0;
-    estimatedMessageTokens = cumulativePrompt + cumulativeCompletion + msgOverhead;
+    const reportedTotal = normalizeOptionalTokenCount(usage.totalTokens);
+    const providerContextTokens = reportedTotal ?? promptTokens + completionTokens;
+    const fallbackOverhead = providerContextTokens === 0 && messageCount
+      ? messageCount * 3
+      : 0;
+    currentContextTokens = providerContextTokens + fallbackOverhead;
 
-    // Tool result tokens are already counted in promptTokens via API,
-    // so estimatedMessageTokens includes them.
-    const usedTokens = estimatedMessageTokens;
+    const usedTokens = currentContextTokens;
     const fillPercent = usedTokens / ctxWindow;
 
     const level = determineLevel(fillPercent);
@@ -180,20 +184,20 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     crossed.critical = false;
     cumulativePrompt = 0;
     cumulativeCompletion = 0;
-    estimatedMessageTokens = 0;
+    currentContextTokens = 0;
   }
 
   /** Get current state without updating */
   function getState(): Omit<ContextFillState, 'levelCrossed' | 'turn'> {
-    const fillPercent = estimatedMessageTokens / ctxWindow;
+    const fillPercent = currentContextTokens / ctxWindow;
     return {
-      usedTokens: estimatedMessageTokens,
+      usedTokens: currentContextTokens,
       contextWindowTokens: ctxWindow,
       fillPercent: Math.min(fillPercent, 1.0),
       level: determineLevel(fillPercent),
       cumulativePromptTokens: cumulativePrompt,
       cumulativeCompletionTokens: cumulativeCompletion,
-      estimatedTotalTokens: estimatedMessageTokens,
+      estimatedTotalTokens: currentContextTokens,
     };
   }
 
@@ -210,6 +214,15 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
   }
 
   return { update, reset, getState, formatState, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
+}
+
+function normalizeTokenCount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function normalizeOptionalTokenCount(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return undefined;
+  return value;
 }
 
 /** Convenience export for formatting without a monitor instance */
