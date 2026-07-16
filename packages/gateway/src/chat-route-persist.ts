@@ -7,7 +7,7 @@ import { addObservation, ensureMemoryStore } from '@los/memory';
 import { applyDirectRunCompletionStatus } from './chat-run-completion.js';
 import { updateBoundTodoFromRun } from './chat-session-helpers.js';
 import { failIdempotencyKey } from './idempotency.js';
-import { drainSymbolCache } from './chat-cbm-symbol-cache.js';
+import { clearSymbolCache, drainSymbolCache } from './chat-cbm-symbol-cache.js';
 
 export async function persistChatSuccess(opts: {
   prompt: string;
@@ -24,11 +24,10 @@ export async function persistChatSuccess(opts: {
   userId: string;
   nodeId: string | null;
 }) {
+  const symbolRefs = drainSymbolCache(opts.sessionId);
   const postRun = await Promise.all([
     opts.persistMemory
       ? ensureMemoryStore().then(() => {
-          // Phase 3: drain CBM symbol cache for this session
-          const symbolRefs = drainSymbolCache();
           const meta: Record<string, unknown> = {
             scope: 'task',
             memoryLayer: 'episodic',
@@ -121,6 +120,7 @@ export async function persistChatError(opts: {
   runSpecId: string;
   idempotency: { id: string; ownerId: string } | null;
 }) {
+  clearSymbolCache(opts.sessionId);
   if (opts.boundTodoId) {
     await updateBoundTodoFromRun(opts.boundTodoId, {
       status: 'blocked',
