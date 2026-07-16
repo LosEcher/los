@@ -45,6 +45,49 @@ const EXECUTION_LAB_PRIORITIES = new Map([
   ['todo-los-external-trace-adapters', 'P3'],
 ] as const);
 
+const EXECUTION_LAB_ACTIVE_STATES: ReadonlyMap<string, string> = new Map([
+  ['todo-los-execution-lab', 'in_progress'],
+  ['todo-los-execution-observability-projection', 'ready'],
+] as const);
+
+const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new Map([
+  ['todo-los-execution-lab', ['P0', 'in_progress']],
+  ['todo-los-execution-observability-projection', ['P0', 'ready']],
+  ['todo-los-multi-gateway-entry', ['P1', 'backlog']],
+  ['todo-los-run-spec-stream-replay', ['P1', 'backlog']],
+  ['todo-los-execution-experiment-contract', ['P1', 'backlog']],
+  ['todo-los-execution-pairwise-rubric-eval', ['P1', 'backlog']],
+  ['todo-los-p1-otel-docs', ['P1', 'ready']],
+  ['todo-los-p1-perf-metrics', ['P1', 'backlog']],
+  ['todo-los-p1-cbm-ab-inject', ['P1', 'backlog']],
+  ['todo-los-p1-context-reconstruction', ['P1', 'backlog']],
+  ['todo-los-p1-stale-detection', ['P1', 'backlog']],
+  ['todo-los-p1-test-coverage', ['P1', 'ready']],
+  ['todo-los-p1-supply-chain-full', ['P1', 'backlog']],
+  ['todo-los-p1-turbo-cache', ['P1', 'ready']],
+  ['todo-los-p1-los-ast-rules', ['P1', 'backlog']],
+] as const);
+
+test('active P0/P1 seeds match the reconciled current queue', () => {
+  const active = LOS_PLANNING_TODO_SEED.filter(
+    todo => todo.status !== 'done'
+      && todo.status !== 'cancelled'
+      && (todo.priority === 'P0' || todo.priority === 'P1'),
+  );
+
+  assert.equal(active.length, CURRENT_ACTIVE_P0_P1.size);
+  assert.equal(new Set(active.map(todo => todo.id)).size, active.length);
+
+  for (const todo of active) {
+    assert.ok(todo.id, 'active P0/P1 seed is missing an id');
+    assert.deepEqual(
+      [todo.priority, todo.status],
+      CURRENT_ACTIVE_P0_P1.get(todo.id),
+      `${todo.id} is not in the reconciled current queue`,
+    );
+  }
+});
+
 test('execution lab seeds preserve the staged priority and dependency contract', () => {
   const allById = new Map(LOS_PLANNING_TODO_SEED.map(todo => [todo.id, todo]));
   const executionLabTodos = LOS_PLANNING_TODO_SEED.filter(todo => todo.stageId === 'execution-lab');
@@ -56,7 +99,7 @@ test('execution lab seeds preserve the staged priority and dependency contract',
   for (const [id, priority] of EXECUTION_LAB_PRIORITIES) {
     const todo = allById.get(id);
     assert.ok(todo, `${id} is missing`);
-    assert.equal(todo.status, 'backlog', `${id} should require explicit scheduling`);
+    assert.equal(todo.status, EXECUTION_LAB_ACTIVE_STATES.get(id) ?? 'backlog', `${id} scheduling state drifted`);
     assert.equal(todo.priority, priority, `${id} priority drifted`);
     assert.ok(todo.metadata?.priorityReason || id === 'todo-los-execution-lab', `${id} is missing a priority reason`);
 
@@ -64,4 +107,8 @@ test('execution lab seeds preserve the staged priority and dependency contract',
       assert.ok(allById.has(dependencyId), `${id} depends on missing seed ${dependencyId}`);
     }
   }
+
+  const projection = allById.get('todo-los-execution-observability-projection');
+  assert.equal(projection?.parentId, 'todo-los-execution-lab');
+  assert.ok(!projection?.dependsOnIds?.includes('todo-los-execution-lab'), 'phase parent must not block its child task');
 });

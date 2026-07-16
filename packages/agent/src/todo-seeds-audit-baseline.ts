@@ -358,21 +358,28 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
   {
     id: 'todo-los-p1-file-sync-mtime-test',
     title: 'P1-9 File-sync mtime settle 算法独立测试',
-    description: 'ae62b94 是 30 天内最大改动，但 sync-runner.ts + scanner.ts 无独立测试覆盖多节点并发写入。',
+    description: 'ae62b94 是 30 天内最大改动，需要 sync-runner.ts + scanner.ts 独立测试覆盖 settle window 和并发执行。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-file-sync-mtime-test',
     dependsOnIds: [],
-    metadata: { files: ['packages/executor/src/file-sync/scanner.ts', 'packages/executor/src/file-sync/sync-runner.ts'] },
+    metadata: {
+      files: ['packages/executor/src/file-sync/scanner.ts', 'packages/executor/src/file-sync/sync-runner.ts'],
+      evidence: [
+        'packages/executor/src/file-sync/scanner.test.ts covers initial, modified, deleted, ignored, and unreadable files',
+        'packages/executor/src/file-sync/sync-runner.test.ts covers settle-window filtering, vanished files, retry, and concurrent advisory-lock exclusion',
+      ],
+      statusUpdatedAt: '2026-07-16',
+    },
   },
 
   {
     id: 'todo-los-p1-otel-docs',
-    title: 'P1-10 OTel bridge 配置文档 + health endpoint',
-    description: 'startOtelBridge 自动拉起但端口/协议/collector URL 无文档。需要 .env.example 补充 + health route。',
+    title: 'P1-10 OTel bridge 配置文档与健康验证',
+    description: 'bridge 已提供 /health 和 /runtimes/bridge/status；剩余工作是文档化端口、OTLP 协议、collector 边界和操作检查。',
     kind: 'task',
     status: 'ready',
     priority: 'P1',
@@ -380,7 +387,11 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-otel-docs',
     dependsOnIds: [],
-    metadata: { files: ['packages/agent/src/runtime-adapter/index.ts', '.env.example'] },
+    metadata: {
+      files: ['packages/agent/src/runtime-adapter/otel-bridge.ts', 'packages/gateway/src/routes/orchestration/runtime-adapter-routes.ts', '.env.example'],
+      partialEvidence: ['OTel bridge /health exists', 'GET /runtimes/bridge/status exists', 'no OTEL_* collector endpoint is configured in the current environment'],
+      priorityReason: 'P1: runtime behavior exists, but operators cannot distinguish the local bridge from an external collector configuration.',
+    },
   },
 
   {
@@ -542,12 +553,18 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     source: 'audit-2026-06-24',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-cbm-ab-inject',
-    dependsOnIds: [],
+    dependsOnIds: ['todo-los-execution-observability-projection'],
     metadata: {
       problem: 'CBM 注入效果未经验证',
       trigger: 'shadow sessions >= 20',
       sourceMemory: 'los-cbm-integration-backlog-2026-06-19',
       files: ['packages/gateway/src/chat-cbm-inject.ts'],
+      partialEvidence: 'Alternating in-memory assignment is wired, but it is not stable across processes and is not persisted with outcome evidence.',
+      acceptance: [
+        'assignment is deterministic per session and persisted as an event or decision record',
+        'the experiment gate verifies at least 20 eligible shadow sessions before enabling injection',
+        'success, latency, token, and failure outcomes can be compared by assigned cohort',
+      ],
     },
   },
   {
@@ -569,27 +586,6 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '无可观测性后端，纯 PG 查询不够',
       files: ['packages/infra/src/metrics.ts', 'packages/gateway/src/routes/'],
-    },
-  },
-  {
-    id: 'todo-los-p1-supply-chain-full',
-    title: 'P1-N6 供应链完整链路',
-    description:
-      '扩展 supply_chain_audit job 为完整供应链审计：\n' +
-      '1. SBOM 生成（cyclonedx/spdx）\n' +
-      '2. License compliance check\n' +
-      '3. Dependency freshness（超过 12 个月未更新的包告警）\n' +
-      '4. npm audit 结果持久化到 DB 做趋势跟踪',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-supply-chain-full',
-    dependsOnIds: [],
-    metadata: {
-      problem: 'supply_chain_audit 目前只做基础检查',
-      files: ['packages/agent/src/governance-auditors-supply-chain.ts'],
     },
   },
 ];
