@@ -72,26 +72,34 @@ describe('context-monitor', () => {
     m.update({ promptTokens: 120_000, completionTokens: 0 }, 1);
     assert.equal(count, 1);
     // Stay in warn zone
-    m.update({ promptTokens: 10_000, completionTokens: 0 }, 2);
+    m.update({ promptTokens: 125_000, completionTokens: 0 }, 2);
     assert.equal(count, 1); // not re-fired
   });
 
-  it('tracks cumulative tokens across turns', () => {
+  it('tracks cumulative usage separately from current context fill', () => {
     const m = createContextMonitor({ contextWindowTokens: WINDOW });
     m.update({ promptTokens: 50_000, completionTokens: 5_000 }, 1);
-    const s = m.update({ promptTokens: 50_000, completionTokens: 5_000 }, 2);
-    // 100K prompt + 10K completion = 110K, 55%
-    assert.equal(s.cumulativePromptTokens, 100_000);
+    const s = m.update({ promptTokens: 55_000, completionTokens: 5_000 }, 2);
+    assert.equal(s.cumulativePromptTokens, 105_000);
     assert.equal(s.cumulativeCompletionTokens, 10_000);
-    assert.equal(s.estimatedTotalTokens, 110_000);
+    assert.equal(s.estimatedTotalTokens, 60_000);
+    assert.equal(s.fillPercent, 0.3);
     assert.equal(s.level, 'normal');
   });
 
-  it('includes message overhead in token estimation', () => {
+  it('uses message overhead only when provider usage is unavailable', () => {
     const m = createContextMonitor({ contextWindowTokens: WINDOW });
-    // 100K tokens + 50 messages * 3 = 150 extra
-    const s = m.update({ promptTokens: 100_000, completionTokens: 10_000 }, 2, 50);
-    assert.equal(s.estimatedTotalTokens, 110_000 + 150);
+    const fallback = m.update({ promptTokens: 0, completionTokens: 0 }, 1, 50);
+    assert.equal(fallback.estimatedTotalTokens, 150);
+
+    const reported = m.update({ promptTokens: 100_000, completionTokens: 10_000 }, 2, 50);
+    assert.equal(reported.estimatedTotalTokens, 110_000);
+  });
+
+  it('prefers provider total tokens for current context fill', () => {
+    const m = createContextMonitor({ contextWindowTokens: WINDOW });
+    const s = m.update({ promptTokens: 100_000, completionTokens: 10_000, totalTokens: 115_000 }, 1);
+    assert.equal(s.estimatedTotalTokens, 115_000);
   });
 
   it('reset clears all state', () => {
@@ -112,8 +120,8 @@ describe('context-monitor', () => {
       onCritical: () => events.push('critical'),
     });
     m.update({ promptTokens: 120_000, completionTokens: 0 }, 1);  // 60%
-    m.update({ promptTokens: 30_000, completionTokens: 0 }, 2);    // 75%
-    m.update({ promptTokens: 20_000, completionTokens: 0 }, 3);    // 85%
+    m.update({ promptTokens: 150_000, completionTokens: 0 }, 2);   // 75%
+    m.update({ promptTokens: 170_000, completionTokens: 0 }, 3);   // 85%
     assert.deepEqual(events, ['warn', 'checkpoint', 'critical']);
   });
 
@@ -159,10 +167,10 @@ describe('context-monitor', () => {
     const s1 = m.update({ promptTokens: 50_000, completionTokens: 0 }, 1);
     assert.equal(s1.level, 'warn');
     // 70K / 100K = 70% → checkpoint
-    const s2 = m.update({ promptTokens: 20_000, completionTokens: 0 }, 2);
+    const s2 = m.update({ promptTokens: 70_000, completionTokens: 0 }, 2);
     assert.equal(s2.level, 'checkpoint');
     // 90K / 100K = 90% → critical
-    const s3 = m.update({ promptTokens: 20_000, completionTokens: 0 }, 3);
+    const s3 = m.update({ promptTokens: 90_000, completionTokens: 0 }, 3);
     assert.equal(s3.level, 'critical');
   });
 

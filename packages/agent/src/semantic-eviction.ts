@@ -34,11 +34,16 @@ export interface MaskedToolResult {
 
 export interface PersistentLocation {
   /** Type of persistence backing */
-  kind: 'observation' | 'file_sync_entry' | 'task_run' | 'artifact' | 'checkpoint';
+  kind: 'observation' | 'file_sync_entry' | 'task_run' | 'artifact' | 'checkpoint' | 'workspace_path';
   /** ID for retrieval */
   id: string;
   /** Human-readable description (e.g., "observation #42: file content of src/foo.ts") */
   label: string;
+}
+
+export interface PersistedToolResultEvidence {
+  toolName: string;
+  locations: PersistentLocation[];
 }
 
 export interface SemanticEvictionConfig {
@@ -157,6 +162,7 @@ export function applySemanticEviction(
     if (!isEligibleForEviction(tr.toolName, tr.content, config)) continue;
 
     const locations = tr.locations ?? [];
+    if (locations.length === 0) continue;
     const stub = generateEvictionStub(tr.toolName, tr.toolCallId, tr.content, locations, config);
 
     masked.push({
@@ -191,11 +197,11 @@ export function applySemanticEviction(
  * This can be called mid-loop when context fill hits critical level,
  * or at the start of compaction.
  */
-export function evictMessages(
-  messages: Array<{ role: string; tool_call_id?: string; content?: string | null; name?: string }>,
-  persistedLocations: Map<string, PersistentLocation[]>,
+export function evictMessages<T extends { role: string; tool_call_id?: string; content?: string | null }>(
+  messages: T[],
+  persistedResults: Map<string, PersistedToolResultEvidence>,
   config: SemanticEvictionConfig = {},
-): Array<{ role: string; tool_call_id?: string; content?: string | null; name?: string }> {
+): T[] {
   const toolResults: Array<{
     toolCallId: string;
     toolName: string;
@@ -205,11 +211,12 @@ export function evictMessages(
 
   for (const msg of messages) {
     if (msg.role === 'tool' && msg.tool_call_id && typeof msg.content === 'string') {
+      const evidence = persistedResults.get(msg.tool_call_id);
       toolResults.push({
         toolCallId: msg.tool_call_id,
-        toolName: msg.name ?? 'unknown',
+        toolName: evidence?.toolName ?? 'unknown',
         content: msg.content,
-        locations: persistedLocations.get(msg.tool_call_id),
+        locations: evidence?.locations,
       });
     }
   }
@@ -221,7 +228,7 @@ export function evictMessages(
 
   return messages.map(msg => {
     if (msg.role === 'tool' && msg.tool_call_id && stubMap.has(msg.tool_call_id)) {
-      return { ...msg, content: stubMap.get(msg.tool_call_id)! };
+      return { ...msg, content: stubMap.get(msg.tool_call_id)! } as T;
     }
     return msg;
   });

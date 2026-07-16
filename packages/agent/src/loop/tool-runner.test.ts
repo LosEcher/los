@@ -33,7 +33,14 @@ const DUMMY_TC_STUB: ToolCall = {
  * `parallelizable` capability is controlled per-tool.
  */
 function mockRegistry(
-  tools: Array<{ name: string; parallelizable: boolean; sleepMs: number; onExec?: (name: string) => void; sideEffect?: boolean }>,
+  tools: Array<{
+    name: string;
+    parallelizable: boolean;
+    sleepMs: number;
+    onExec?: (name: string) => void;
+    sideEffect?: boolean;
+    error?: string;
+  }>,
 ): ToolRegistry & { executionOrder: string[] } {
   const order: string[] = [];
   const exe = new Map(tools.map(t => [t.name, t]));
@@ -75,7 +82,9 @@ function mockRegistry(
       t.onExec?.(input.name);
       order.push(input.name);
       await new Promise(r => setTimeout(r, t.sleepMs));
-      return { content: `result:${input.name}` };
+      return t.error
+        ? { content: '', error: t.error }
+        : { content: `result:${input.name}` };
     },
   };
 }
@@ -211,6 +220,47 @@ test('result order matches input order regardless of completion order', async ()
   assert.ok(result.toolResults[2].includes('result:medium'), `got: ${result.toolResults[2]}`);
 });
 
+test('failed tool evidence warns a matching later call in the same loop', async () => {
+  const registry = mockRegistry([
+    { name: 'write', parallelizable: false, sleepMs: 0, sideEffect: true, error: 'typecheck failed' },
+  ]);
+  const events: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const { runToolCalls } = await import('./tool-runner.js');
+  const config = buildConfig({ preActionGate: { enabled: true } });
+  const preActionGateConfig = {
+    fragileFiles: new Set<string>(),
+    failureFingerprints: new Set<string>(),
+  };
+
+  await runToolCalls({
+    toolCalls: [tc('first', 'write', { file_path: 'src/fragile.ts' })],
+    turn: 1,
+    tools: registry,
+    config,
+    signal: undefined,
+    policy: buildPolicy(),
+    emitEvent: async (event) => { events.push(event); },
+    onSessionError: () => {},
+    preActionGateConfig,
+  });
+  await runToolCalls({
+    toolCalls: [tc('second', 'write', { file_path: 'src/fragile.ts' })],
+    turn: 2,
+    tools: registry,
+    config,
+    signal: undefined,
+    policy: buildPolicy(),
+    emitEvent: async (event) => { events.push(event); },
+    onSessionError: () => {},
+    preActionGateConfig,
+  });
+
+  assert.equal(events.some((event) => event.type === 'tool.pre_action.failure'), true);
+  const warned = events.find((event) => event.type === 'tool.warned');
+  assert.equal(warned?.payload?.knownFailure, true);
+  assert.deepEqual(warned?.payload?.flaggedFiles, ['src/fragile.ts']);
+});
+
 test('mixed parallel and non-parallel tools produce correct tool messages', async () => {
   const registry = mockRegistry([
     { name: 'read_file', parallelizable: true, sleepMs: 10 },
@@ -235,6 +285,38 @@ test('mixed parallel and non-parallel tools produce correct tool messages', asyn
   assert.equal(result.toolMessages[0].tool_call_id, 'r1');
   assert.equal(result.toolMessages[1].tool_call_id, 'w1');
   assert.equal(result.toolMessages[2].tool_call_id, 's1');
+});
+
+test('read results expose workspace retrieval evidence for semantic eviction', async () => {
+  const registry = mockRegistry([
+    { name: 'read_file', parallelizable: true, sleepMs: 0 },
+    { name: 'search_content', parallelizable: true, sleepMs: 0 },
+  ]);
+  const { runToolCalls } = await import('./tool-runner.js');
+
+  const result = await runToolCalls({
+    toolCalls: [
+      tc('read-1', 'read_file', { path: 'src/a.ts' }),
+      tc('search-1', 'search_content', { pattern: 'needle' }),
+    ],
+    turn: 1,
+    tools: registry,
+    config: buildConfig({ workspaceRoot: '/workspace' }),
+    signal: undefined,
+    policy: buildPolicy(),
+    emitEvent: mockEmitEvent as any,
+    onSessionError: () => {},
+  });
+
+  assert.deepEqual(result.persistedToolResults.get('read-1'), {
+    toolName: 'read_file',
+    locations: [{
+      kind: 'workspace_path',
+      id: '/workspace/src/a.ts',
+      label: 'read_file source /workspace/src/a.ts',
+    }],
+  });
+  assert.equal(result.persistedToolResults.has('search-1'), false);
 });
 
 test('empty tool calls produce empty results', async () => {
