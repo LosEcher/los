@@ -5,12 +5,12 @@ import type { ExecSyncOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { GovernanceJob } from './governance-jobs-types.js';
 import { runMemoryIntegrityAudit, runMemoryRetentionAudit } from './governance-auditors-memory.js';
+import { reconcilePlanningTodosFromOpenDb } from './governance-reconciliation.js';
+import { readStatusConstraintReportFromOpenDb } from './governance-status-constraints.js';
 
 const log = getLogger('governance-jobs');
 
 async function runConsistencyAudit(): Promise<Record<string, unknown>> {
-  const { reconcilePlanningTodosFromOpenDb } = await import('./governance-reconciliation.js');
-  const { readStatusConstraintReportFromOpenDb } = await import('./governance-status-constraints.js');
   const [todoReport, statusReport] = await Promise.all([
     reconcilePlanningTodosFromOpenDb({ includeArchived: false }),
     readStatusConstraintReportFromOpenDb(),
@@ -149,7 +149,7 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     case 'code_topology_audit': return runCodeTopologyAuditWrapper(job);
     case 'dead_letter': {
       const { runDeadLetterGovernance } = await import('./dead-letter-governance.js');
-      return runDeadLetterGovernance({ dryRun, limit: Number(job.config.requeueLimit ?? 25) });
+      return runDeadLetterGovernance({ dryRun: true, limit: Number(job.config.requeueLimit ?? 25) });
     }
     default: throw new Error(`Unknown job_type: ${job.jobType}`);
   }

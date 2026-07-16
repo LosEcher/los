@@ -11,8 +11,8 @@
  *
  * Auto-fix strategies are per jobType.  Currently implemented:
  *   - consistency_audit: reconcile seed↔DB drift (create missing + update status)
+ *   - dead_letter: requeue eligible lease-expired task runs
  *   - hotspot: cleanup illegal status task_runs + stale fixtures
- *   - branch_cleanup: classify stale remote branches + suggest safe deletions
  *
  * For jobs without autoFix or when dryRun, falls back to the existing
  * createTodosFromFindings path in governance-sweeper.ts.
@@ -22,7 +22,8 @@ import { runJobAudit } from './governance-auditors.js';
 import { updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { computeNextState, evaluateLoopGate, maybeAutoRecoverPaused } from './ga-circuit-breaker.js';
 import { applyBranchCleanupFix, applyRelatedProjectScanFix } from './ga-scenario-fixes.js';
-import { applyConsistencyFix, applyHotspotFix } from './ga-loop-fixes.js';
+import { applyConsistencyFix, applyDeadLetterFix, applyHotspotFix } from './ga-loop-fixes.js';
+import { persistLoopPrinciples } from './ga-self-improve.js';
 import { appendSessionEvent } from './session-events.js';
 import type {
   GovernanceJob,
@@ -40,6 +41,20 @@ export interface RunGaLoopOptions {
   sessionId?: string;
 }
 
+export function buildGaLoopSummary(result: GaLoopResult): Record<string, unknown> {
+  return {
+    ...result.auditSummary,
+    _gaLoop: {
+      fixApplied: result.fixApplied,
+      fixSucceeded: result.fixSucceeded,
+      verificationPassed: result.verificationPassed,
+      retried: result.retried,
+      escalated: result.escalated,
+      phases: result.phases.map(phase => `${phase.phase}(${phase.attemptNumber})`),
+    },
+  };
+}
+
 // ── Auto-fix strategy dispatcher ──────────────────────
 
 async function applyAutoFix(
@@ -49,6 +64,8 @@ async function applyAutoFix(
   switch (job.jobType) {
     case 'consistency_audit':
       return applyConsistencyFix(summary);
+    case 'dead_letter':
+      return applyDeadLetterFix(summary);
     case 'hotspot':
       return applyHotspotFix(summary);
     case 'branch_cleanup':
@@ -150,10 +167,6 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     // No findings — update no-op counter, apply throttle
     const nextState = computeNextState(job, false, false);
     await updateGovernanceJobState(job.id, nextState);
-    await updateGovernanceJob(job.id, {
-      lastRunAt: new Date().toISOString(),
-      resultSummary: auditSummary,
-    });
 
     // Apply any cadence downgrade from no-op throttle
     if (gateDecision.action === 'downgrade' && gateDecision.newCadence) {
@@ -167,17 +180,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
 
     phases.push({ phase: 'completed', enteredAt: new Date().toISOString(), attemptNumber: 0, detail: 'No findings — loop complete' });
 
-    // ── Self-improvement: extract principles from clean run too ──
-    try {
-      const { persistLoopPrinciples } = await import('./ga-self-improve.js');
-      await persistLoopPrinciples({
-        jobId: job.id, jobType: job.jobType, auditSummary,
-        phases, fixApplied: false, fixSucceeded: true, verificationPassed: true,
-        retried: false, escalated: false,
-      }, job.tenantId, job.projectId);
-    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
-
-    return {
+    const loopResult: GaLoopResult = {
       jobId: job.id,
       jobType: job.jobType,
       auditSummary,
@@ -188,6 +191,17 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
       retried: false,
       escalated: false,
     };
+    await updateGovernanceJob(job.id, {
+      lastRunAt: new Date().toISOString(),
+      resultSummary: buildGaLoopSummary(loopResult),
+    });
+
+    // ── Self-improvement: extract principles from clean run too ──
+    try {
+      await persistLoopPrinciples(loopResult, job.tenantId, job.projectId);
+    } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
+
+    return loopResult;
   }
 
   // ── Step 3: Auto-fix (with retry) ───────────────────
@@ -333,14 +347,6 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
   const nextState = computeNextState(job, hasFindings, hadError);
   await updateGovernanceJobState(job.id, nextState);
 
-  const finalStatus = nextState.circuitState === 'open' ? 'paused' : job.status;
-  await updateGovernanceJob(job.id, {
-    lastRunAt: new Date().toISOString(),
-    resultSummary: auditSummary,
-    ...(finalStatus !== job.status ? { status: finalStatus } : {}),
-  });
-
-  // ── Step 6: Self-improvement — extract principles from this run ──
   const loopResult: GaLoopResult = {
     jobId: job.id,
     jobType: job.jobType,
@@ -354,9 +360,15 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
     escalatedReason,
     ...(lastError ? { error: lastError } : {}),
   };
+  const finalStatus = nextState.circuitState === 'open' ? 'paused' : job.status;
+  await updateGovernanceJob(job.id, {
+    lastRunAt: new Date().toISOString(),
+    resultSummary: buildGaLoopSummary(loopResult),
+    ...(finalStatus !== job.status ? { status: finalStatus } : {}),
+  });
 
+  // ── Step 6: Self-improvement — extract principles from this run ──
   try {
-    const { persistLoopPrinciples } = await import('./ga-self-improve.js');
     await persistLoopPrinciples(loopResult, job.tenantId, job.projectId);
   } catch { /* best-effort — self-improvement failures don't block the loop */ }
 
@@ -379,9 +391,8 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       const tr = summary.todoReconciliation as Record<string, unknown> | undefined;
       if (!tr) return false;
       const seedOnly = (tr.seedOnly as number) ?? 0;
-      const dbOnly = (tr.dbOnly as number) ?? 0;
       const statusDrift = (tr.statusDrift as number) ?? 0;
-      return seedOnly > 0 || dbOnly > 0 || statusDrift > 0;
+      return seedOnly > 0 || statusDrift > 0;
     }
     case 'hotspot': {
       const rc = summary.runtimeCleanup as Record<string, unknown> | undefined;
@@ -439,6 +450,11 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
     case 'code_topology_audit': {
       const clusters = Array.isArray(summary.clusters) ? summary.clusters as unknown[] : [];
       return clusters.length > 0;
+    }
+    case 'dead_letter': {
+      const eligible = typeof summary.requeueEligible === 'number' ? summary.requeueEligible : 0;
+      const candidateIds = Array.isArray(summary.candidateIds) ? summary.candidateIds.length : 0;
+      return eligible > 0 || candidateIds > 0;
     }
     default:
       return false;
