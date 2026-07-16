@@ -52,7 +52,8 @@ larger or more valuable than every later item.
 | Order | Todo | State | Why P0 | Completion evidence |
 | --- | --- | --- | --- | --- |
 | 0 | `todo-los-execution-lab` | `in_progress` | Phase container for the work below; it is not dispatchable execution work | All child work is terminal or explicitly deferred with evidence |
-| 1 | `todo-los-execution-observability-projection` | `ready` | Required to compare runs without inventing missing prompt, spec, memory, or tool versions | Golden fixtures for success, provider error, tool denial, verification failure, and recovery; focused projection tests; no state writes |
+| 1 | `todo-los-execution-observability-projection` | `done` | Required to compare runs without inventing missing prompt, spec, memory, or tool versions | Pure read-only projection, five golden fixtures, route coverage, full agent/gateway tests, and `pnpm gate` |
+| 2 | `todo-los-context-engineering-phase` | `in_progress` | Grok comparison exposed context-fill, eviction, and procedural-gate gaps | Fill monitoring, semantic eviction, and pre-action gate are done; compaction lifecycle remains P1 work |
 
 ## P1 Wave 1: Recovery Evidence
 
@@ -89,7 +90,9 @@ larger or more valuable than every later item.
 
 ## Immediate Action
 
-Start `todo-los-execution-observability-projection`. Before implementation:
+The P0 projection and context-engineering child tasks are complete. Select the next P1 only after reconciling dependency readiness; current candidates are recovery evidence, compaction lifecycle, and the execution experiment contract.
+
+Completed implementation used this gate sequence:
 
 1. Reload specs for the exact agent/gateway/web files.
 2. Read AP1, AP2, AP3, AP5, AP7, and AP10 plus ADRs 0002, 0014, 0015, and 0025.
