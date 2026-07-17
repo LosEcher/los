@@ -30,6 +30,27 @@ After seed reconciliation, the active work set is 2 P0 items and 13 P1 items.
 The PostgreSQL ledger must be updated after this change merges; until then, the
 runtime DB still contains the older statuses.
 
+### 2026-07-17 live ledger calibration
+
+The current live PostgreSQL ledger contains 164 active todos. Filtering the
+persisted rows to non-terminal P0/P1 work returns 13 items: one P0 phase
+container, three ready P1 seed tasks, and nine backlog P1 seed tasks. No
+non-terminal P0/P1 DB-only todo or GA finding is present. [E]
+
+One priority mismatch remains outside the current status-only reconciliation:
+the seed defines `todo-los-multi-gateway-entry` as P1 with the current recovery
+smoke title, while PostgreSQL still stores the older P2 priority and title. The
+row therefore does not appear in a live P0/P1 query even though it remains the
+design prerequisite for `todo-los-run-spec-stream-replay`. Current
+`reconcilePlanningTodos()` compares status only; it does not report title,
+priority, kind, source, metadata, or dependency drift. [E]
+
+Do not silently broaden `consistency_audit` ownership to overwrite those
+fields. First define which seed fields are canonical, which fields operators
+may override in PostgreSQL, and which differences are report-only. Until that
+policy exists, treat recovery smoke as the next architecture priority by design
+and the live P2 row as persisted ledger truth. [I]
+
 ## Priority Judgment
 
 P0 is restricted to the Execution Lab phase and its read-only observability
@@ -91,6 +112,13 @@ larger or more valuable than every later item.
 ## Immediate Action
 
 The P0 projection and context-engineering child tasks are complete. Select the next P1 only after reconciling dependency readiness; current candidates are recovery evidence, compaction lifecycle, and the execution experiment contract.
+
+Live dispatch gates currently admit three ready P1 seed tasks because they are
+`kind=task` with completed dependencies: OTel documentation, coverage baseline,
+and Turbo cache documentation. None has a persisted run contract, and the
+default todo dispatch tool mode is read-only, so they are candidates for a new
+bounded operator contract rather than unattended execution. The 41 preserved
+DB-only todos are all ready P2 `governance-file-size` findings. [E]
 
 Completed implementation used this gate sequence:
 
