@@ -255,6 +255,9 @@ that was not captured.
 
 | Sample | PR | Head SHA | Run | Queue | Total | Fast | Test | Drift | Min available MiB | Swap peak delta MiB | Swap +5m delta MiB | Store MiB | Result | Flake class / note |
 | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `1` | `26` | `2d00cc3262a02be175b25f7be053bfa8f3ada36b` | `140` | unknown | 13m15s | 7m47s | 12m21s | 49s | unknown | unknown | unknown | 225 | green | no rerun; runtime memory/swap telemetry not captured |
+| `2` | `27` | `1061be7f6a169726b6a9a11568b29a21898cf7ac` | `142` | 2s | 12m23s | 7m30s | 12m23s | skipped | unknown | unknown | unknown | 225 | failed | code/test failure: timing-sensitive 40ms scheduler concurrency assertion; stabilized in PR `28`; no unchanged-head rerun |
+| `3` | `28` | `a864f9d654fc44e9de79af683cc48ac25589504a` | `143` | 1s | 13m29s | 8m11s | 12m33s | 53s | unknown | unknown | unknown | 225 | green | no rerun; runtime memory/swap telemetry not captured |
 
 ### Rolling Summary
 
@@ -262,7 +265,7 @@ Update this after samples 10 and 20.
 
 | Eligible PRs | Queue P95 | Total P95 | Minimum available memory | Maximum swap peak delta | Maximum swap +5m delta | Flake rate | Judgment |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `0 / 20` | pending | pending | pending | pending | pending | pending | observation started |
+| `3 / 20` | pending | pending | unknown | unknown | unknown | 0 / 3 eligible attempts | two green; one timing-sensitive test failure fixed; resource telemetry not captured |
 
 ## Rollback
 
