@@ -452,6 +452,10 @@ test('scheduler runs independent graph tasks in parallel without editable surfac
   const requests: Array<{ prompt?: unknown }> = [];
   let inFlight = 0;
   let maxInFlight = 0;
+  let releaseParallelBatch: (() => void) | undefined;
+  const parallelBatchReady = new Promise<void>(resolve => {
+    releaseParallelBatch = resolve;
+  });
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
@@ -464,7 +468,8 @@ test('scheduler runs independent graph tasks in parallel without editable surfac
     requests.push(body);
     inFlight += 1;
     maxInFlight = Math.max(maxInFlight, inFlight);
-    await delay(40);
+    if (requests.length === 2) releaseParallelBatch?.();
+    await Promise.race([parallelBatchReady, delay(2_000)]);
     inFlight -= 1;
     sendJson(res, {
       events: [],
