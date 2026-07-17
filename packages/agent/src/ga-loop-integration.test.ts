@@ -9,6 +9,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { applyConsistencyFix, applyDeadLetterFix } from './ga-loop-fixes.js';
+import { checkHasFindings } from './ga-loop-runner.js';
 import { SEED_JOBS } from './governance-jobs-schema.js';
 import { evaluateLoopGate, computeNextState, maybeAutoRecoverPaused } from './ga-circuit-breaker.js';
 import type { GovernanceJob } from './governance-jobs-types.js';
@@ -37,8 +39,21 @@ describe('GA loop seed config', () => {
     assert.equal(seed.autoFix.autoFixEnabled, true);
     assert.equal(seed.autoFix.maxAutoFixAttempts, 3);
     assert.ok(seed.autoFix.verificationCommands);
-    assert.ok(seed.autoFix.stopCondition);
+    assert.match(seed.autoFix.stopCondition ?? '', /DB-only todos are preserved/);
     assert.equal(seed.autoFix.escalationCadence, 'after_retry');
+  });
+
+  it('branch_cleanup seed is report-only', () => {
+    const seed = SEED_JOBS.find(s => s.jobType === 'branch_cleanup');
+    assert.ok(seed);
+    assert.equal(seed.autoFix, undefined);
+  });
+
+  it('dead_letter seed declares its requeue mutation as autoFix', () => {
+    const seed = SEED_JOBS.find(s => s.jobType === 'dead_letter');
+    assert.ok(seed?.autoFix);
+    assert.equal(seed.autoFix.autoFixEnabled, true);
+    assert.equal(seed.autoFix.maxAutoFixAttempts, 1);
   });
 
   it('hotspot seed has no autoFix (manual-only for now)', () => {
@@ -60,6 +75,44 @@ describe('GA loop seed config', () => {
       assert.ok(seed.dedupeKey);
       assert.ok(seed.cadence);
     }
+  });
+});
+
+describe('consistency reconciliation ownership', () => {
+  it('does not treat DB-only todos as a fixable finding', () => {
+    assert.equal(checkHasFindings('consistency_audit', {
+      todoReconciliation: { seedOnly: 0, dbOnly: 4, statusDrift: 0 },
+    }), false);
+  });
+
+  it('preserves DB-only todos when other drift is reconciled', async () => {
+    const result = await applyConsistencyFix({
+      todoReconciliation: { seedOnly: 0, dbOnly: 4, statusDrift: 0 },
+    });
+    assert.equal(result.applied, true);
+    assert.equal(result.detail, 'No drifts to reconcile — already consistent');
+  });
+});
+
+describe('dead-letter governance ownership', () => {
+  it('treats eligible dead letters as fixable findings', () => {
+    assert.equal(checkHasFindings('dead_letter', { requeueEligible: 1, candidateIds: ['dlq-1'] }), true);
+    assert.equal(checkHasFindings('dead_letter', { requeueEligible: 0, candidateIds: [] }), false);
+  });
+
+  it('requeues only candidate ids from the audit summary', async () => {
+    const called: string[] = [];
+    const result = await applyDeadLetterFix({ candidateIds: ['dlq-1', 'dlq-2'] }, async eventId => {
+      called.push(eventId);
+      return eventId === 'dlq-1'
+        ? { status: 'requeued', event: {} as never, taskRunId: 'task-retry-1' }
+        : { status: 'not_eligible', reason: 'run_spec_succeeded' };
+    });
+
+    assert.deepEqual(called, ['dlq-1', 'dlq-2']);
+    assert.equal(result.applied, true);
+    assert.match(result.detail, /Requeued 1\/2/);
+    assert.match(result.detail, /run_spec_succeeded/);
   });
 });
 

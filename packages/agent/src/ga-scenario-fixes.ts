@@ -1,5 +1,5 @@
 /**
- * GA Loop auto-fix strategies for branch cleanup and related project scanning.
+ * GA Loop strategies for branch reporting and related project scanning.
  *
  * Extracted from ga-loop-runner.ts to keep that file under the 600-line CI limit
  * while maintaining full auto-fix coverage.
@@ -17,20 +17,12 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-// ── Branch cleanup auto-fix ────────────────────────────
+// ── Branch cleanup report ─────────────────────────────
 
 /**
- * Branch auto-fix uses git's CLI to (1) re-attach a detached HEAD, (2) fast-forward
- * the configured mirror when safe, and (3) classify and safely delete stale primary
- * branches.
- *
- * Detached HEAD: only re-attached when the working tree is clean (never lose work).
- *
- * Forgejo sync: only `git push forgejo main` when the audit classified drift as
- * `syncable` (ff-able, behind>0, ahead===0) AND env `LOS_BRANCH_GOVERNANCE_FORGEJO_SYNC`
- * is enabled. A push failure (network/creds) is infra, not a fix failure: it degrades
- * to report-only for this round without throwing or marking applied=false — so a forgejo
- * outage never trips the circuit breaker.
+ * Branch governance is report-only. It may fetch remote refs to classify them,
+ * but it never checks out a branch, pushes a mirror, or deletes a remote branch.
+ * Operators apply approved deletions through tools/branch-prune-origin.sh --apply.
  *
  * Stale branch classification (inspired by lsclaw's branch-governance-report.mjs):
  *   - delete: no unique commits remain versus main (ahead=0)
@@ -39,9 +31,6 @@ function shellQuote(value: string): string {
  *   - archive: >30 commits behind or >15 unique commits ahead, needs owner review
  *   - active_review: referenced by an open PR
  *   - review: all other cases needing human judgement
- *
- * For safety, only 'delete' branches are actually deleted. Others are reported
- * as findings for operator review via the escalation todo path.
  *
  * `exec` is injected for testability; production callers omit it and get the
  * real execSync-backed implementation. `applyAutoFix` calls this with a single
@@ -66,27 +55,9 @@ export async function applyBranchCleanupFix(
       return { applied: false, detail: 'Not a git worktree — branch cleanup requires git' };
     }
 
-    // ── STEP 1: Detached HEAD (reversible, only when working tree clean) ──
+    // ── STEP 1: Detached HEAD classification ──────────
     if (summary.detached === true) {
-      // Re-verify cleanliness now: the audit ran in a prior call and the tree may
-      // have changed in between. Never checkout across a dirty tree (would risk
-      // carrying uncommitted changes across the switch).
-      let dirtyNow = summary.workingTreeDirty === true;
-      try {
-        dirtyNow = execSyncImpl('git status --porcelain', { timeout: 5000 }).trim().length > 0;
-      } catch {
-        dirtyNow = true; // if status itself fails, treat as dirty (safe default)
-      }
-      if (dirtyNow) {
-        detailLines.push('detached HEAD: NOT re-attached — working tree dirty (report-only; commit or stash then checkout main)');
-      } else {
-        try {
-          execSyncImpl('git checkout main', { timeout: 10000, stdio: 'pipe' });
-          detailLines.push('detached HEAD: checked out main (jj bookmark may need manual sync in colocate mode)');
-        } catch (err) {
-          detailLines.push(`detached HEAD: checkout main failed — ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+      detailLines.push('detached HEAD: operator action required; governance audit did not run checkout');
     }
 
     const primaryRemote = typeof summary.primaryRemote === 'string' ? summary.primaryRemote : 'origin';
@@ -98,14 +69,12 @@ export async function applyBranchCleanupFix(
     const mirrorSyncable = summary.mirrorSyncable ?? summary.forgejoSyncable;
     const mirrorBehind = summary.mirrorBehind ?? summary.forgejoBehind;
 
-    // ── STEP 2: Optional mirror fast-forward sync ──
+    // ── STEP 2: Optional mirror fast-forward report ────
     if (mirrorSyncEnabled === true && mirrorSyncable === true) {
-      try {
-        execSyncImpl(`git push ${mirrorRemote} ${primaryRemote}/main:main`, { timeout: 30000, stdio: 'pipe' });
-        detailLines.push(`${mirrorRemote}: pushed ${primaryRemote}/main → ${mirrorRemote}/main (ff, +${mirrorBehind ?? '?'} commits)`);
-      } catch (err) {
-        detailLines.push(`${mirrorRemote}: push failed (network/creds) — degraded to report-only this round: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      detailLines.push(
+        `${mirrorRemote}: sync candidate ${primaryRemote}/main → ${mirrorRemote}/main ` +
+        `(+${mirrorBehind ?? '?'} commits); explicit operator push required`,
+      );
     }
 
     // ── STEP 3: Stale primary branch deletion ──
@@ -126,11 +95,11 @@ export async function applyBranchCleanupFix(
 
     if (branches.length === 0) {
       detailLines.push('stale branches: none found');
-      return { applied: true, detail: detailLines.join('\n') };
+      return { applied: false, detail: detailLines.join('\n') };
     }
 
     const classified: { branch: string; action: string; reason: string; ahead: number | null; behind: number | null }[] = [];
-    let deleted = 0;
+    let deleteCandidates = 0;
 
     for (const branch of branches) {
       const short = branch.slice(primaryRemote.length + 1);
@@ -176,26 +145,12 @@ export async function applyBranchCleanupFix(
       }
 
       classified.push({ branch: short, action, reason, ahead, behind });
-
-      if (action === 'delete') {
-        try {
-          execSyncImpl(`git push ${primaryRemote} --delete ${shellQuote(short)}`, { timeout: 15000, stdio: 'pipe' });
-          deleted += 1;
-        } catch (err) {
-          classified.push({
-            branch: short,
-            action: 'delete_failed',
-            reason: `Deletion failed: ${err instanceof Error ? err.message : String(err)}`,
-            ahead: null,
-            behind: null,
-          });
-        }
-      }
+      if (action === 'delete') deleteCandidates += 1;
     }
 
-    const actionable = classified.filter(c => c.action !== 'delete');
+    const actionable = classified;
     detailLines.push(
-      `stale branches: scanned=${branches.length} deleted=${deleted}`,
+      `stale branches: scanned=${branches.length} delete_candidates=${deleteCandidates} deleted=0`,
       `  to extract: ${classified.filter(c => c.action === 'extract').length}`,
       `  to review/archive: ${classified.filter(c => c.action === 'review' || c.action === 'archive').length}`,
     );
@@ -208,7 +163,7 @@ export async function applyBranchCleanupFix(
       detailLines.push('  No manual action needed.');
     }
 
-    return { applied: true, detail: detailLines.join('\n') };
+    return { applied: false, detail: detailLines.join('\n') };
   } catch (err) {
     return { applied: false, detail: `Branch cleanup failed: ${err instanceof Error ? err.message : String(err)}` };
   }

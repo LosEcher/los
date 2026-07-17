@@ -61,10 +61,12 @@ LOS_BRANCH_GOVERNANCE_MIRROR_REMOTE=github
 LOS_BRANCH_GOVERNANCE_MIRROR_SYNC=0
 ```
 
-It audits and safely deletes absorbed branches from the primary remote. Optional
-mirror sync is disabled by default because GitHub protection and credentials may
-reject direct pushes. Enable it only after the mirror account has an explicit,
-audited push path.
+It audits and classifies absorbed branches but does not check out branches, push
+the mirror, or delete remote refs. Apply an approved deletion only through
+`tools/branch-prune-origin.sh --apply`; the script remains dry-run by default.
+Optional mirror inspection is disabled by default. Mirror pushes remain an
+explicit closeout action even when the audit classifies the update as a safe
+fast-forward.
 
 Older persisted summaries keep working through the legacy `forgejo*` and
 `staleOriginBranches` aliases; new summaries use `mirror*` and
