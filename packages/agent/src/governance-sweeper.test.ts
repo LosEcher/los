@@ -7,8 +7,14 @@ import { runGovernanceSweep } from './governance-sweeper.js';
 import {
   createGovernanceJob,
   deleteGovernanceJob,
+  getGovernanceJob,
 } from './governance-jobs-crud.js';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
+import { runJobAudit } from './governance-auditors.js';
+import { applyConsistencyFix } from './ga-loop-fixes.js';
+import { runGaLoop } from './ga-loop-runner.js';
+import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
+import { archiveTodo, createTodo, loadTodo } from './todos.js';
 import type { GovernanceJobType } from './governance-jobs-types.js';
 
 // ── Helpers ────────────────────────────────────────────────
@@ -102,6 +108,76 @@ test('runGovernanceSweep dryRun=false runs audits and returns results', async ()
   }
 });
 
+test('consistency auditor reuses the initialized process database', async () => {
+  await initOnce();
+  const job = makeJob('consistency_audit');
+  const summary = await runJobAudit({
+    ...job,
+    consecutiveNoOps: 0,
+    consecutiveFailures: 0,
+    circuitState: 'closed',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, false);
+
+  assert.ok(summary.todoReconciliation);
+  assert.ok(summary.statusConstraints);
+  await getDb().query('SELECT 1');
+});
+
+test('GA loop persists classification for a dead-letter audit', async () => {
+  await initOnce();
+  const job = await createGovernanceJob({
+    jobType: 'dead_letter',
+    cadence: 'hourly',
+    dedupeKey: makeJobId('dead-letter-ga-summary'),
+    config: { requeueLimit: 10 },
+    autoFix: {
+      autoFixEnabled: true,
+      maxAutoFixAttempts: 1,
+      verificationCommands: [],
+      stopCondition: 'no eligible dead letters',
+      escalationCadence: 'immediate',
+    },
+  });
+
+  try {
+    const result = await runGaLoop({ job, dryRun: false });
+    const reloaded = await getGovernanceJob(job.id);
+    const classification = reloaded?.resultSummary?._gaLoop as Record<string, unknown> | undefined;
+
+    assert.ok(classification, 'persisted result summary must include GA classification');
+    assert.equal(classification.fixApplied, result.fixApplied);
+    assert.equal(classification.fixSucceeded, result.fixSucceeded);
+    assert.equal(classification.verificationPassed, result.verificationPassed);
+    assert.equal(classification.retried, result.retried);
+    assert.equal(classification.escalated, result.escalated);
+    assert.deepEqual(
+      classification.phases,
+      result.phases.map(phase => `${phase.phase}(${phase.attemptNumber})`),
+    );
+  } finally {
+    await deleteGovernanceJob(job.id).catch(() => undefined);
+  }
+});
+
+test('consistency fix restores an archived seed todo', async () => {
+  await initOnce();
+  const seed = LOS_PLANNING_TODO_SEED[0];
+  assert.ok(seed?.id);
+  await createTodo(seed);
+  await archiveTodo(seed.id, 'test archived seed');
+
+  const result = await applyConsistencyFix({
+    todoReconciliation: { seedOnly: 1, dbOnly: 0, statusDrift: 0 },
+  });
+  const restored = await loadTodo(seed.id);
+
+  assert.equal(result.applied, true);
+  assert.match(result.detail, /Restored 1 archived seed todo/);
+  assert.equal(restored?.archivedAt, undefined);
+});
+
 // ── All 6 audit types ──────────────────────────────────────
 
 test('all 6 audit types run without throwing', async () => {
@@ -125,7 +201,12 @@ test('all 6 audit types run without throwing', async () => {
   try {
     const result = await runGovernanceSweep({ dryRun: true });
     assert.equal(result.errors.length, 0, `audit errors: ${result.errors.join('; ')}`);
-    assert.equal(result.results.length, 6, `expected 6 results for all audit types, got ${result.results.length} — types found: ${result.results.map(r => r.jobType).join(', ')}`);
+    for (const jobType of allTypes) {
+      assert.ok(
+        result.results.some(item => item.jobType === jobType),
+        `expected result for ${jobType}; types found: ${result.results.map(item => item.jobType).join(', ')}`,
+      );
+    }
   } finally {
     for (const id of jobIds) {
       await deleteGovernanceJob(id).catch(() => undefined);

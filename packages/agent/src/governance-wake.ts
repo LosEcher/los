@@ -8,7 +8,7 @@ import { getDb } from '@los/infra/db';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
 import { claimNextDueJob, listDueGovernanceJobs, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { runJobAudit } from './governance-auditors.js';
-import { runGaLoop, maybeAutoRecoverPaused } from './ga-loop-runner.js';
+import { buildGaLoopSummary, runGaLoop, maybeAutoRecoverPaused } from './ga-loop-runner.js';
 import { evaluateLoopGate } from './ga-circuit-breaker.js';
 import { createTodosFromFindings } from './governance-sweeper.js';
 import { eventBus } from './event-bus.js';
@@ -91,15 +91,7 @@ async function runOneSweepJob(job: GovernanceJob, dryRun: boolean, sessionId: st
 
       jobResult = {
         jobId: job.id, jobType: job.jobType,
-        summary: {
-          ...summary,
-          _gaLoop: {
-            fixApplied: loopResult.fixApplied, fixSucceeded: loopResult.fixSucceeded,
-            verificationPassed: loopResult.verificationPassed, retried: loopResult.retried,
-            escalated: loopResult.escalated,
-            phases: loopResult.phases.map(p => `${p.phase}(${p.attemptNumber})`),
-          },
-        },
+        summary: buildGaLoopSummary(loopResult),
         durationMs: Date.now() - started,
       };
     } else {

@@ -5,8 +5,47 @@
  * warn threshold. Follows the same pattern as ga-scenario-fixes.ts.
  */
 import { getLogger } from '@los/infra/logger';
+import { requeueDeadLetterEvent, type DeadLetterRequeueResult } from './dead-letter-recovery.js';
+import { reconcilePlanningTodosFromOpenDb } from './governance-reconciliation.js';
+import { loadTodo, seedLosPlanningTodos, unarchiveTodo, updateTodo } from './todos.js';
 
 const log = getLogger('ga-loop-runner');
+
+type DeadLetterRequeue = (eventId: string) => Promise<DeadLetterRequeueResult>;
+
+export async function applyDeadLetterFix(
+  summary: Record<string, unknown>,
+  requeue: DeadLetterRequeue = requeueDeadLetterEvent,
+): Promise<{ applied: boolean; detail: string }> {
+  const candidateIds = Array.isArray(summary.candidateIds)
+    ? summary.candidateIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : [];
+  if (candidateIds.length === 0) {
+    return { applied: false, detail: 'No eligible dead-letter events to requeue' };
+  }
+
+  const requeuedTaskRunIds: string[] = [];
+  const skipped: string[] = [];
+  const errors: string[] = [];
+  for (const eventId of candidateIds) {
+    try {
+      const result = await requeue(eventId);
+      if (result.status === 'requeued') requeuedTaskRunIds.push(result.taskRunId);
+      else skipped.push(`${eventId}:${result.reason}`);
+    } catch (error) {
+      errors.push(`${eventId}:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return {
+    applied: requeuedTaskRunIds.length > 0,
+    detail: [
+      `Requeued ${requeuedTaskRunIds.length}/${candidateIds.length} eligible dead-letter event(s)`,
+      ...(skipped.length > 0 ? [`skipped=${skipped.join(',')}`] : []),
+      ...(errors.length > 0 ? [`errors=${errors.join(',')}`] : []),
+    ].join('; '),
+  };
+}
 
 // ── Consistency audit auto-fix ─────────────────────────
 
@@ -20,7 +59,7 @@ export async function applyConsistencyFix(
   const dbOnly = (todoRecon.dbOnly as number) ?? 0;
   const statusDrift = (todoRecon.statusDrift as number) ?? 0;
 
-  if (seedOnly === 0 && dbOnly === 0 && statusDrift === 0) {
+  if (seedOnly === 0 && statusDrift === 0) {
     return { applied: true, detail: 'No drifts to reconcile — already consistent' };
   }
 
@@ -29,36 +68,34 @@ export async function applyConsistencyFix(
   // Fix 1: Create missing seed todos in DB
   if (seedOnly > 0) {
     try {
-      const { reconcilePlanningTodosFromOpenDb } = await import('./governance-reconciliation.js');
-      // Re-run reconciliation to get fresh items
-      const report = await reconcilePlanningTodosFromOpenDb({ includeArchived: false });
-      for (const item of report.seedOnly) {
-        try {
-          const LOS_PLANNING_TODO_SEED = (await import('./todo-seeds.js')).LOS_PLANNING_TODO_SEED;
-          const seedDef = LOS_PLANNING_TODO_SEED.find(s => s.id === item.id);
-          if (seedDef) {
-            await (await import('./todos.js')).createTodo({
-              ...seedDef,
-              source: 'governance_auto_fix',
-              metadata: { autoFixed: true, fixedAt: new Date().toISOString(), reason: 'seed-only reconciliation' },
-            });
-          }
-        } catch {
-          // individual todo creation failure is non-fatal
+      const before = await reconcilePlanningTodosFromOpenDb({ includeArchived: false });
+      let restored = 0;
+      for (const item of before.seedOnly) {
+        const existing = await loadTodo(item.id);
+        if (existing?.archivedAt) {
+          await unarchiveTodo(item.id);
+          restored += 1;
         }
       }
-      fixes.push(`Created ${seedOnly} missing seed todo(s) in DB`);
+
+      await seedLosPlanningTodos({ overwrite: false });
+      const after = await reconcilePlanningTodosFromOpenDb({ includeArchived: false });
+      const created = Math.max(0, seedOnly - restored - after.seedOnly.length);
+      if (restored > 0) fixes.push(`Restored ${restored} archived seed todo(s)`);
+      if (created > 0) fixes.push(`Created ${created} missing seed todo(s) in DB`);
+      if (after.seedOnly.length > 0) {
+        fixes.push(`${after.seedOnly.length} seed todo(s) remain missing`);
+        return { applied: false, detail: fixes.join('; ') };
+      }
     } catch (err) {
       fixes.push(`Failed to create seed-only todos: ${err instanceof Error ? err.message : String(err)}`);
-      return { applied: true, detail: fixes.join('; ') };
+      return { applied: false, detail: fixes.join('; ') };
     }
   }
 
   // Fix 2: Update status drift (db status → seed status)
   if (statusDrift > 0) {
     try {
-      const { reconcilePlanningTodosFromOpenDb } = await import('./governance-reconciliation.js');
-      const { updateTodo } = await import('./todos.js');
       const report = await reconcilePlanningTodosFromOpenDb({ includeArchived: false });
 
       let fixed = 0;
@@ -77,30 +114,10 @@ export async function applyConsistencyFix(
     }
   }
 
-  // Fix 3: dbOnly items — archive them if they have no active children
+  // DB-only todos may be owned by runtime governance, operators, or external
+  // ingestion. Seed reconciliation must never archive them implicitly.
   if (dbOnly > 0) {
-    try {
-      const { reconcilePlanningTodosFromOpenDb } = await import('./governance-reconciliation.js');
-      const { archiveTodo, loadTodo } = await import('./todos.js');
-      const report = await reconcilePlanningTodosFromOpenDb({ includeArchived: false });
-
-      let archived = 0;
-      for (const item of report.dbOnly) {
-        try {
-          const todo = await loadTodo(item.id);
-          if (todo && !todo.archivedAt) {
-            await archiveTodo(item.id);
-            archived += 1;
-          }
-        } catch {
-          // individual archive failure is non-fatal
-        }
-      }
-      if (archived > 0) fixes.push(`Archived ${archived}/${dbOnly} DB-only todo(s)`);
-      else fixes.push(`DB-only todos (${dbOnly}) left for manual review — may still be active`);
-    } catch (err) {
-      fixes.push(`Failed to archive DB-only todos: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    fixes.push(`Preserved ${dbOnly} DB-only todo(s) with independent ownership`);
   }
 
   return { applied: true, detail: fixes.join('; ') };

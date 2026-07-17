@@ -184,45 +184,35 @@ describe('checkHasFindings — branch_cleanup circuit-breaker classification', (
   });
 });
 
-describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
-  it('re-attaches detached HEAD when working tree is clean', async () => {
+describe('applyBranchCleanupFix — report-only governance', () => {
+  it('reports detached HEAD without checkout', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'git status --porcelain', out: '' }, { match: 'checkout main', out: '' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: true, workingTreeDirty: false, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' }, exec);
-    assert.equal(res.applied, true);
-    assert.equal(recorded.some(c => c.includes('git checkout main')), true);
+    assert.equal(res.applied, false);
+    assert.equal(recorded.some(c => c.includes('git checkout main')), false);
+    assert.match(res.detail, /operator action required/);
   });
 
-  it('does NOT checkout when detached on a dirty tree (re-verified at fix time)', async () => {
+  it('does not inspect or mutate a dirty tree during reporting', async () => {
     const recorded: string[] = [];
-    // Fix re-runs `git status --porcelain`; even if the audit said clean, a dirty
-    // re-verification must block the checkout. Here the audit says dirty AND re-verify is dirty.
     const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'git status --porcelain', out: ' M file.ts\n' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: true, workingTreeDirty: true, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' }, exec);
-    assert.equal(res.applied, true);
+    assert.equal(res.applied, false);
     assert.equal(recorded.some(c => c.includes('git checkout main')), false);
-    assert.match(res.detail, /dirty/);
+    assert.equal(recorded.some(c => c.includes('git status --porcelain')), false);
   });
 
-  it('does NOT checkout when audit said clean but tree turned dirty before fix', async () => {
-    // Audit reported workingTreeDirty=false, but the fix-time re-verification sees dirt.
-    const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'git status --porcelain', out: ' M file.ts\n' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
-    const res = await applyBranchCleanupFix({ detached: true, workingTreeDirty: false, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' }, exec);
-    assert.equal(recorded.some(c => c.includes('git checkout main')), false);
-    assert.match(res.detail, /dirty/);
-  });
-
-  it('pushes forgejo when syncable and sync enabled (refspec origin/main:main)', async () => {
+  it('reports mirror sync without pushing', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo', out: '' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({ detached: false, forgejoSyncEnabled: true, forgejoSyncable: true, forgejoBehind: 5, forgejoDrift: 'syncable' }, exec);
-    assert.equal(res.applied, true);
-    assert.equal(recorded.some(c => c.includes('git push forgejo origin/main:main')), true);
-    assert.match(res.detail, /pushed origin\/main/);
+    assert.equal(res.applied, false);
+    assert.equal(recorded.some(c => c.includes('git push forgejo origin/main:main')), false);
+    assert.match(res.detail, /explicit operator push required/);
   });
 
-  it('pushes the configured primary ref to the configured mirror', async () => {
+  it('does not push the configured primary ref to the configured mirror', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push github', out: '' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
     const res = await applyBranchCleanupFix({
@@ -234,8 +224,8 @@ describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
       mirrorBehind: 2,
       mirrorDrift: 'syncable',
     }, exec);
-    assert.equal(res.applied, true);
-    assert.equal(recorded.some(c => c.includes('git push github origin/main:main')), true);
+    assert.equal(res.applied, false);
+    assert.equal(recorded.some(c => c.includes('git push github origin/main:main')), false);
   });
 
   it('rejects unsafe remote names before running remote commands', async () => {
@@ -253,14 +243,6 @@ describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
     assert.equal(recorded.some(command => command.includes('touch /tmp/unsafe')), false);
   });
 
-  it('degrades to report-only (applied:true, no throw) when forgejo push fails', async () => {
-    const recorded: string[] = [];
-    const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'push forgejo', error: 'Could not resolve host' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
-    const res = await applyBranchCleanupFix({ detached: false, forgejoSyncEnabled: true, forgejoSyncable: true, forgejoBehind: 5, forgejoDrift: 'syncable' }, exec);
-    assert.equal(res.applied, true); // NOT false — infra failure, not fix failure
-    assert.match(res.detail, /degraded/i);
-  });
-
   it('never pushes forgejo when drift is non_ff (syncable=false)', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([{ match: 'rev-parse --is-inside-work-tree', out: 'true' }, { match: 'fetch origin --prune', out: '' }, { match: 'for-each-ref', out: '' }], recorded);
@@ -276,11 +258,11 @@ describe('applyBranchCleanupFix — detached HEAD + forgejo sync', () => {
   });
 });
 
-describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', () => {
+describe('applyBranchCleanupFix — stale origin branch classification', () => {
   // Stale-branch step runs (detached=false, forgejo disabled) so only step 3 fires.
   const baseSummary = { detached: false, workingTreeDirty: false, forgejoSyncEnabled: false, forgejoSyncable: false, forgejoDrift: 'disabled' };
 
-  it('deletes a branch with ahead=0 (no unique commits)', async () => {
+  it('reports a delete candidate without deleting it', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([
       { match: 'rev-parse --is-inside-work-tree', out: 'true' },
@@ -291,11 +273,12 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
       { match: 'push origin --delete', out: '' },
     ], recorded);
     const res = await applyBranchCleanupFix(baseSummary, exec);
-    assert.equal(res.applied, true);
-    assert.equal(recorded.some(c => c.includes("git push origin --delete 'feature-old'")), true);
+    assert.equal(res.applied, false);
+    assert.equal(recorded.some(c => c.includes("git push origin --delete 'feature-old'")), false);
+    assert.match(res.detail, /delete_candidates=1 deleted=0/);
   });
 
-  it('shell-quotes remote branch refs before classification and deletion', async () => {
+  it('shell-quotes remote branch refs before classification', async () => {
     const recorded: string[] = [];
     const exec = fakeExec([
       { match: 'rev-parse --is-inside-work-tree', out: 'true' },
@@ -306,10 +289,10 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
       { match: 'push origin --delete', out: '' },
     ], recorded);
     const res = await applyBranchCleanupFix(baseSummary, exec);
-    assert.equal(res.applied, true);
+    assert.equal(res.applied, false);
     assert.equal(recorded.includes("git rev-list --left-right --count 'origin/main...origin/feature-$(id)'"), true);
     assert.equal(recorded.includes("git cherry 'origin/main' 'origin/feature-$(id)'"), true);
-    assert.equal(recorded.includes("git push origin --delete 'feature-$(id)'"), true);
+    assert.equal(recorded.includes("git push origin --delete 'feature-$(id)'"), false);
   });
 
   it('does NOT delete a branch with unique commits (ahead=5, behind=2 → review)', async () => {
@@ -322,20 +305,17 @@ describe('applyBranchCleanupFix — stale origin branch deletion (preserved)', (
       { match: "git cherry 'origin/main' 'origin/feature-active'", out: '+ <sha1>\n+ <sha2>\n' },
     ], recorded);
     const res = await applyBranchCleanupFix(baseSummary, exec);
-    assert.equal(res.applied, true);
+    assert.equal(res.applied, false);
     assert.equal(recorded.some(c => c.includes('push origin --delete')), false);
     assert.match(res.detail, /review/i);
   });
 });
 
 describe('branch_cleanup seed config', () => {
-  it('cadence is hourly with autoFix enabled', () => {
+  it('cadence is hourly and report-only', () => {
     const seed = SEED_JOBS.find(s => s.jobType === 'branch_cleanup');
     assert.ok(seed);
     assert.equal(seed.cadence, 'hourly');
-    assert.ok(seed.autoFix);
-    assert.equal(seed.autoFix.autoFixEnabled, true);
-    assert.equal(seed.autoFix.maxAutoFixAttempts, 1);
-    assert.equal(seed.autoFix.escalationCadence, 'immediate');
+    assert.equal(seed.autoFix, undefined);
   });
 });

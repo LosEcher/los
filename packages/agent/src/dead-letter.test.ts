@@ -11,6 +11,7 @@ import {
 } from './dead-letter.js';
 import { requeueDeadLetterEvent, summarizeDeadLetterEvents } from './dead-letter-recovery.js';
 import { runDeadLetterGovernance } from './dead-letter-governance.js';
+import { runJobAudit } from './governance-auditors.js';
 
 test('dead-letter summary classifies reasons and lease expiry requeue is idempotent', async () => {
   const config = await loadConfig();
@@ -63,6 +64,20 @@ test('dead-letter summary classifies reasons and lease expiry requeue is idempot
     const dryRun = await runDeadLetterGovernance({ dryRun: true, limit: 10 });
     assert.ok(dryRun.candidateIds.includes(event.id));
     assert.deepEqual(dryRun.requeuedTaskRunIds, []);
+    const audit = await runJobAudit({
+      id: `dead-letter-audit-${suffix}`,
+      jobType: 'dead_letter',
+      cadence: 'hourly',
+      status: 'active',
+      config: { requeueLimit: 10 },
+      consecutiveNoOps: 0,
+      consecutiveFailures: 0,
+      circuitState: 'closed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, false);
+    assert.ok(Array.isArray(audit.candidateIds) && audit.candidateIds.includes(event.id));
+    assert.deepEqual(audit.requeuedTaskRunIds, []);
     const originalTask = await loadTaskRun(taskRunId);
     assert.ok(originalTask);
     const scheduledInputs: Array<{ taskRunId?: string; attempt?: number; prompt: string }> = [];
