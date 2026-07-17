@@ -9,7 +9,9 @@ expensive database jobs after a protected merge to `main`.
 
 This is a bounded capacity increase, not a three-runner deployment. Forgejo CI
 now has successful protected-PR, cold-store, and warm-store evidence for the
-final scheduling and mount configuration.
+final scheduling and mount configuration. Forgejo PR `#25` merged the workflow
+at `c1254d1b`; subsequent `main` run `160` verified the fast-only path. GitHub
+mirror PR `#154` merged the same delivery line at `d6f1ba8f`.
 
 ## Observed Baseline
 
@@ -132,12 +134,25 @@ Verified:
 - a warm install log reported 296 reused packages, zero downloaded packages,
   and a 13.7-second install;
 - the cold run retained more than 2.3 GiB available memory; swap increased by
-  about 125 MiB during the run and stabilized afterward.
+  about 125 MiB during the run and stabilized afterward;
+- `[E]` Forgejo PR `#25` merged to `origin/main=c1254d1b`, with all three
+  required checks green on the exact PR head;
+- `[E]` protected `main` run `160` ran only `gate-fast` and completed in 3
+  minutes 5 seconds; `gate-test` and `gate-drift` were skipped;
+- `[E]` branch protection still has `block_on_outdated_branch=true` after the
+  merge;
+- `[E]` GitHub mirror PR `#154` merged to `github/main=d6f1ba8f`, with all ten
+  mirror checks green;
+- `[E]` `git ls-remote origin refs/heads/main` and
+  `git ls-remote github refs/heads/main` returned those two heads on 2026-07-17;
+- `[E]` the delivery handoff had a clean local jj working copy, `main` pointed
+  to `c1254d1b`, and `jj workspace list` contained only the default workspace
+  before this documentation follow-up.
 
 Not yet verified:
 
-- protected `main` runs only `gate-fast` after this workflow is merged;
-- repeated batches remain free of resource-related flakes over a longer window.
+- `[U]` repeated real pull-request batches remain free of queueing regressions,
+  sustained swap growth, and resource-related flakes over a 10-20 PR window.
 
 ## Acceptance Result
 
@@ -157,6 +172,97 @@ Keep `capacity: 2` while the host retains at least about 1.5 GiB available
 memory without sustained swap growth. The acceptance runs remained above that
 limit. Restore the backup and restart only `forgejo-runner` if later batches
 cross it or introduce resource-related flakes.
+
+## Post-Delivery Todo Ledger
+
+This is the operational follow-up queue for this runner change. It does not
+replace the product P0/P1 queue in
+`docs/governance/2026-07-16-current-p0-p1-queue.md`.
+
+| ID | Priority | State | Work | Completion evidence |
+| --- | --- | --- | --- | --- |
+| `CI-OBS-01` | P0 | observing | Record the next 10-20 real Forgejo PR runs | Interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
+| `CI-NET-01` | P1 | backlog | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS/network identities, then reassess the serial dependency | Both jobs overlap without cross-connecting, followed by three consecutive full green runs before removing `needs: gate-test` |
+| `CI-STORE-01` | P1 | backlog | Add a periodic pnpm store capacity check without restoring `actions/cache` | A documented command and cadence record store size plus filesystem free space; growth has an owner and cleanup decision |
+
+`CI-OBS-01` owns the immediate next action. `CI-NET-01` is the prerequisite for
+any attempt to parallelize the two database jobs. `CI-STORE-01` is independent
+and can be added without changing job execution behavior.
+
+Historical local-only jj changes remain in the repository history. They do not
+dirty the current working copy and are not part of this delivery. Review or
+abandonment is a separate destructive-history decision and requires explicit
+operator scope.
+
+## Observation Protocol
+
+Eligible samples are real pull-request workflows created after PR `#25`.
+Exclude `workflow_dispatch`, protected-`main`, cancelled superseded heads, and
+unchanged reruns from the primary PR denominator. Record excluded runs
+separately when they provide resource or flake evidence.
+
+For each eligible PR, record:
+
+1. PR number, exact head SHA, run id, result, and whether the head was current;
+2. queue time from workflow creation to the first job start;
+3. total workflow duration and each job duration;
+4. minimum host available memory during the run;
+5. swap used before the run, peak swap used, and swap used five minutes after
+   completion; report both peak and post-run deltas;
+6. pnpm store size and host-filesystem free space;
+7. any failed or rerun job, classified as code/test failure, resource failure,
+   network/provider failure, cancellation, or unexplained flake.
+
+Use nearest-rank P95 after the tenth eligible PR and recompute at twenty. Define
+flake rate as unchanged-head attempts that fail and then pass without a code or
+configuration change, divided by all eligible PR attempts. Do not count a
+superseded cancellation as a flake. The PR sample count uses unique heads; the
+attempt-level flake denominator also includes their unchanged reruns.
+
+Keep runner capacity at two throughout the window. Stop the observation window
+and investigate immediately if a run is OOM-killed, exits with resource
+exhaustion, drops below 1.5 GiB available memory, or fails to stabilize swap
+after completion. Do not test three-runner capacity on the current 3-core/6-GB
+host.
+
+On node34, capture store capacity weekly and after every fifth eligible PR:
+
+```bash
+du -sm /home/z/forgejo/runner-data/job-cache/pnpm-store
+df -Pm /home/z/forgejo/runner-data/job-cache/pnpm-store
+```
+
+The initial persistent-store baseline is about 225 MiB. Size growth alone does
+not authorize deletion; record the trend and filesystem pressure before choosing
+a cleanup policy.
+
+### Delivery Evidence Snapshot
+
+These runs establish the starting point but do not count toward the post-merge
+10-20 PR observation denominator.
+
+| Run | Event | Total | `gate-fast` | `gate-test` | `gate-drift` | Memory / swap | Store | Result |
+| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| `155` | protected PR | 11m36s | 7m01s | 10m53s | 42s | not recorded | pre-fill | green |
+| `157` | cold dispatch | 10m54s | not recorded | not recorded | not recorded | available >2.3 GiB; swap +125 MiB and stabilized | ~225 MiB | green |
+| `158` | warm dispatch | 10m57s | not recorded | not recorded | not recorded | not recorded | ~225 MiB | green |
+| `160` | protected `main` | 3m05s | 3m05s | skipped | skipped | not recorded | ~225 MiB | green |
+
+### Eligible PR Log
+
+Append one row per eligible PR. Use `unknown` rather than inferring a metric
+that was not captured.
+
+| Sample | PR | Head SHA | Run | Queue | Total | Fast | Test | Drift | Min available MiB | Swap peak delta MiB | Swap +5m delta MiB | Store MiB | Result | Flake class / note |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+
+### Rolling Summary
+
+Update this after samples 10 and 20.
+
+| Eligible PRs | Queue P95 | Total P95 | Minimum available memory | Maximum swap peak delta | Maximum swap +5m delta | Flake rate | Judgment |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `0 / 20` | pending | pending | pending | pending | pending | pending | observation started |
 
 ## Rollback
 
