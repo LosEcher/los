@@ -33,23 +33,31 @@ runtime DB still contains the older statuses.
 ### 2026-07-17 live ledger calibration
 
 The current live PostgreSQL ledger contains 164 active todos. Filtering the
-persisted rows to non-terminal P0/P1 work returns 13 items: one P0 phase
-container, three ready P1 seed tasks, and nine backlog P1 seed tasks. No
+persisted rows to non-terminal P0/P1 work returns 14 items: one P0 phase
+container, three ready P1 seed tasks, and ten backlog P1 seed tasks. No
 non-terminal P0/P1 DB-only todo or GA finding is present. [E]
 
-One priority mismatch remains outside the current status-only reconciliation:
-the seed defines `todo-los-multi-gateway-entry` as P1 with the current recovery
-smoke title, while PostgreSQL still stores the older P2 priority and title. The
-row therefore does not appear in a live P0/P1 query even though it remains the
-design prerequisite for `todo-los-run-spec-stream-replay`. Current
-`reconcilePlanningTodos()` compares status only; it does not report title,
-priority, kind, source, metadata, or dependency drift. [E]
+Seed reconciliation now has an explicit field ownership policy:
 
-Do not silently broaden `consistency_audit` ownership to overwrite those
-fields. First define which seed fields are canonical, which fields operators
-may override in PostgreSQL, and which differences are report-only. Until that
-policy exists, treat recovery smoke as the next architecture priority by design
-and the live P2 row as persisted ledger truth. [I]
+1. `id` is the seed identity; `tenantId/projectId` select reconciliation scope.
+2. `status` remains the only automatically reconciled field.
+3. `title/priority` are canonical seed planning fields, but differences are
+   report-only and require an explicit operator update.
+4. Description, classification, provenance, hierarchy/dependencies, execution
+   references, and metadata remain operator/runtime-owned and are not compared
+   by seed reconciliation.
+
+`consistency_audit` includes the report-only field count, items, and ownership
+policy in its result summary. These differences do not trigger GA auto-fix or
+the consistency circuit breaker. [E]
+
+After that policy and its regression tests were in place,
+`todo-los-multi-gateway-entry` was explicitly updated through `updateTodo()` to
+the current recovery-smoke title and P1 priority. Its status remained `backlog`,
+and its title/priority drift is now zero. Three unrelated report-only historical
+differences remain for later review: `todo-los-idempotency-keys` priority plus
+the titles of `todo-los-p1-otel-docs` and
+`todo-los-run-spec-stream-replay`. [E]
 
 ## Priority Judgment
 
