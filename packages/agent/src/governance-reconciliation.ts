@@ -2,6 +2,25 @@ import { getDb, withInitDb } from '@los/infra/db';
 import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
 import type { CreateTodoInput, TodoKind, TodoPriority, TodoStatus } from './todo-types.js';
 
+/**
+ * Seed reconciliation deliberately has narrower ownership than todo storage.
+ * Report-only differences require an explicit operator update; they must not
+ * be passed to seedLosPlanningTodos({ overwrite: true }) by an automated sweep.
+ */
+export const _TODO_SEED_RECONCILIATION_OWNERSHIP = {
+  identity: ['id'],
+  scope: ['tenantId', 'projectId'],
+  autoFix: ['status'],
+  reportOnly: ['title', 'priority'],
+  operatorOwned: [
+    'description', 'kind', 'source', 'userId', 'nodeId', 'stageId', 'parentId',
+    'dependsOnIds', 'traceId', 'requestId', 'dedupeKey', 'taskRunId',
+    'sessionId', 'batchKey', 'metadata', 'runContract',
+  ],
+} as const;
+
+export type TodoReportOnlySeedField = typeof _TODO_SEED_RECONCILIATION_OWNERSHIP.reportOnly[number];
+
 export interface GovernanceTodoSnapshot {
   id: string;
   title: string;
@@ -35,6 +54,14 @@ export interface TodoStatusDrift {
   archivedAt?: string;
 }
 
+export interface TodoFieldDrift {
+  id: string;
+  title: string;
+  field: TodoReportOnlySeedField;
+  expectedValue: string;
+  actualValue: string;
+}
+
 export interface TodoReconciliationReport {
   tenantId: string;
   projectId: string;
@@ -45,6 +72,7 @@ export interface TodoReconciliationReport {
   seedOnly: TodoReconciliationItem[];
   dbOnly: TodoReconciliationItem[];
   statusDrift: TodoStatusDrift[];
+  fieldDrift: TodoFieldDrift[];
 }
 
 type TodoDbRow = {
@@ -113,6 +141,7 @@ export function reconcilePlanningTodos(input: {
   const seedOnly: TodoReconciliationItem[] = [];
   const dbOnly: TodoReconciliationItem[] = [];
   const statusDrift: TodoStatusDrift[] = [];
+  const fieldDrift: TodoFieldDrift[] = [];
 
   for (const seed of seeds) {
     const dbTodo = dbById.get(seed.id);
@@ -131,6 +160,16 @@ export function reconcilePlanningTodos(input: {
         expectedStatus: seed.status,
         actualStatus: dbTodo.status,
         archivedAt: dbTodo.archivedAt,
+      });
+    }
+    for (const field of _TODO_SEED_RECONCILIATION_OWNERSHIP.reportOnly) {
+      if (dbTodo[field] === seed[field]) continue;
+      fieldDrift.push({
+        id: seed.id,
+        title: dbTodo.title || seed.title,
+        field,
+        expectedValue: seed[field],
+        actualValue: dbTodo[field],
       });
     }
   }
@@ -156,6 +195,7 @@ export function reconcilePlanningTodos(input: {
     seedOnly: sortItems(seedOnly),
     dbOnly: sortItems(dbOnly),
     statusDrift: statusDrift.sort((a, b) => a.id.localeCompare(b.id)),
+    fieldDrift: fieldDrift.sort((a, b) => a.id.localeCompare(b.id) || a.field.localeCompare(b.field)),
   };
 }
 

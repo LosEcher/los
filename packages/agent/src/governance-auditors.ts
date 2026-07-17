@@ -5,7 +5,7 @@ import type { ExecSyncOptions } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { GovernanceJob } from './governance-jobs-types.js';
 import { runMemoryIntegrityAudit, runMemoryRetentionAudit } from './governance-auditors-memory.js';
-import { reconcilePlanningTodosFromOpenDb } from './governance-reconciliation.js';
+import { _TODO_SEED_RECONCILIATION_OWNERSHIP, reconcilePlanningTodosFromOpenDb } from './governance-reconciliation.js';
 import { readStatusConstraintReportFromOpenDb } from './governance-status-constraints.js';
 
 const log = getLogger('governance-jobs');
@@ -22,6 +22,11 @@ async function runConsistencyAudit(): Promise<Record<string, unknown>> {
       seedOnly: todoReport.seedOnly.length, dbOnly: todoReport.dbOnly.length,
       statusDrift: todoReport.statusDrift.length,
       items: todoReport.statusDrift.map(d => ({ id: d.id, title: d.title, expected: d.expectedStatus, actual: d.actualStatus })),
+      fieldDrift: todoReport.fieldDrift.length,
+      fieldItems: todoReport.fieldDrift.map(d => ({
+        id: d.id, title: d.title, field: d.field, expected: d.expectedValue, actual: d.actualValue,
+      })),
+      fieldOwnership: _TODO_SEED_RECONCILIATION_OWNERSHIP,
     },
     statusConstraints: {
       total: statusReport.constraints.length,
