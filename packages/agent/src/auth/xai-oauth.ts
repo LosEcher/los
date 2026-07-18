@@ -20,6 +20,7 @@
 import { URL, URLSearchParams } from 'node:url';
 import { requireProviderDefaults } from '@los/infra/provider-defaults';
 import { _xaiOAuthStore, type _XaiOAuthStore } from './xai-oauth-store.js';
+import { fetchWithConfiguredProxy } from './proxy-fetch.js';
 import {
   XaiOAuthError,
   type XaiLoginOptions,
@@ -193,7 +194,7 @@ export async function refreshXaiOAuthToken(
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-    response = await fetch(endpoint, {
+    response = await fetchWithConfiguredProxy(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -263,7 +264,7 @@ async function fetchOidcDiscovery(timeoutSeconds: number): Promise<{ token_endpo
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-    response = await fetch(XAI_OAUTH_DISCOVERY_URL, {
+    response = await fetchWithConfiguredProxy(XAI_OAUTH_DISCOVERY_URL, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
