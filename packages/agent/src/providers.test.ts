@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildOpenAICompatUrl } from './providers/index.js';
+import { buildOpenAICompatUrl, createOpenAICompatProvider } from './providers/index.js';
+import { createDeepSeekProvider, createProvider } from './providers/registry.js';
 import { repairJson, repairToolCallArguments } from './providers/openai-utils.js';
 import { validateProviderModelRequest } from './provider-request-validation.js';
 import { mergeToolCallDeltas, mergeSplitToolCalls } from './providers/delta-repair.js';
 import type { ToolCall } from './providers/types.js';
+import { resolveModelProfile } from './model-profiles.js';
+import { _xaiOAuthStore } from './auth/xai-oauth-store.js';
+import { ConfigSchema, getConfig, setConfig } from '@los/infra/config';
 
 test('OpenAI-compatible URLs normalize missing v1 segments', () => {
   assert.equal(
@@ -74,6 +78,119 @@ test('malformed tool argument fixture is repaired without changing its value', (
   }, 'fixture');
   assert.deepEqual(JSON.parse(toolCall.function.arguments), { path: '.', trailing: true });
   assert.equal(toolCall._repair?.repaired, true);
+});
+
+test('OpenAI-compatible transport resolves an OAuth credential before each request', async (t) => {
+  let credentialCalls = 0;
+  let fetchCalls = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    fetchCalls += 1;
+    assert.equal(String(input), 'https://resolved.x.ai/v1/chat/completions');
+    assert.equal(new Headers(init?.headers).get('Authorization'), `Bearer fixture-token-${fetchCalls}`);
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'ok', tool_calls: [] }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      model: 'grok-4.3',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  });
+
+  const provider = createOpenAICompatProvider({
+    name: 'xai',
+    profile: resolveModelProfile('xai', {
+      baseUrl: 'https://configured.invalid/v1',
+      model: 'grok-4.3',
+    }),
+    credentialResolver: async () => {
+      credentialCalls += 1;
+      return { apiKey: `fixture-token-${credentialCalls}`, baseUrl: 'https://resolved.x.ai/v1' };
+    },
+  });
+
+  await provider.chat([{ role: 'user', content: 'first' }]);
+  await provider.chat([{ role: 'user', content: 'second' }]);
+  assert.equal(credentialCalls, 2);
+  assert.equal(fetchCalls, 2);
+});
+
+test('provider registry wires xAI OAuth into the production request path', async (t) => {
+  const previousConfig = getConfig();
+  t.after(() => setConfig(previousConfig));
+  setConfig(ConfigSchema.parse({
+    server: {}, agent: {}, memory: {}, executor: {}, auth: {},
+    providers: {
+      xai: {
+        baseUrl: 'https://configured.invalid/v1',
+        model: 'grok-4.3',
+        authMode: 'oauth',
+        enabled: true,
+      },
+    },
+  }));
+
+  let credentialLoads = 0;
+  t.mock.method(_xaiOAuthStore, 'loadWithSource', () => {
+    credentialLoads += 1;
+    return {
+      source: 'los-auth-store' as const,
+      state: {
+        tokens: {
+          access_token: jwtIn(7200),
+          refresh_token: 'fixture-refresh-token',
+          id_token: 'fixture-id-token',
+          token_type: 'Bearer',
+        },
+        discovery: {
+          authorization_endpoint: 'https://auth.x.ai/authorize',
+          token_endpoint: 'https://auth.x.ai/token',
+        },
+        redirect_uri: 'http://127.0.0.1:56121/callback',
+        auth_mode: 'oauth_pkce' as const,
+      },
+    };
+  });
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    assert.equal(String(input), 'https://api.x.ai/v1/chat/completions');
+    assert.match(new Headers(init?.headers).get('Authorization') ?? '', /^Bearer fixture\./);
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'ok', tool_calls: [] }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      model: 'grok-4.3',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  });
+
+  await createProvider('xai').chat([{ role: 'user', content: 'fixture request' }]);
+  assert.equal(credentialLoads, 1);
+});
+
+test('provider registry rejects OAuth providers without a dedicated resolver', (t) => {
+  const previousConfig = getConfig();
+  t.after(() => setConfig(previousConfig));
+  setConfig(ConfigSchema.parse({
+    server: {}, agent: {}, memory: {}, executor: {}, auth: {},
+    providers: {
+      fixture: {
+        baseUrl: 'https://provider.example/v1',
+        model: 'fixture-model',
+        authMode: 'oauth',
+        enabled: true,
+      },
+      deepseek: {
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
+        authMode: 'oauth',
+        enabled: true,
+      },
+    },
+  }));
+
+  assert.throws(
+    () => createProvider('fixture'),
+    /Provider 'fixture' has no supported OAuth credential resolver/,
+  );
+  assert.throws(
+    () => createDeepSeekProvider(),
+    /Provider 'deepseek' has no supported OAuth credential resolver/,
+  );
 });
 
 // ── mergeToolCallDeltas — Chat Completions streaming delta aggregation ──
@@ -339,3 +456,10 @@ test('mergeSplitToolCalls emits synthetic name for unmatched orphan args', () =>
   // Verify the orphan's original id is preserved
   assert.equal(merged[1].id, 'call_orphan');
 });
+
+function jwtIn(seconds: number): string {
+  const payload = Buffer.from(JSON.stringify({
+    exp: Math.floor(Date.now() / 1000) + seconds,
+  })).toString('base64url');
+  return `fixture.${payload}.signature`;
+}

@@ -63,8 +63,7 @@ function hasFlag(parsed: ParsedArgs, name: string): boolean {
 
 export async function authCommand(_globalArgs: string[], argv: string[]): Promise<void> {
   const parsed = parseArgs(argv);
-  const subcommand = parsed.positionals[0];
-  const provider = parsed.positionals[1] ?? 'xai';
+  const { subcommand, provider } = _resolveAuthRoute(parsed.positionals);
 
   if (!subcommand || subcommand === 'help') {
     printAuthHelp();
@@ -178,9 +177,21 @@ async function authLogout(provider: string): Promise<void> {
     process.exit(2);
   }
 
-  clearXaiOAuthTokens();
+  await clearXaiOAuthTokens();
   console.log('xAI OAuth: Tokens cleared.');
   console.log('Run `los auth xai login` to re-authenticate.');
+}
+
+export function _resolveAuthRoute(positionals: string[]): {
+  subcommand: string | undefined;
+  provider: string;
+} {
+  const [first, second] = positionals;
+  const commands = new Set(['login', 'signin', 'status', 'logout', 'signout', 'help']);
+  if (first && commands.has(first)) {
+    return { subcommand: first, provider: second ?? 'xai' };
+  }
+  return { subcommand: second, provider: first ?? 'xai' };
 }
 
 function decodeJwtExp(accessToken: string): number | undefined {
