@@ -39,8 +39,10 @@ Environment=EXECUTOR_HOST=0.0.0.0
 Environment=EXECUTOR_PORT=8090
 
 ExecStart=/opt/los/packages/executor/node_modules/.bin/tsx /opt/los/packages/executor/src/index.ts
-ExecStop=/opt/los/tools/los.sh stop-executor
 ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+# Must exceed the maximum EXECUTOR_SHUTDOWN_GRACE_MS (600000) plus close overhead.
+TimeoutStopSec=635s
 
 Restart=on-failure
 RestartSec=5

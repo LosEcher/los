@@ -179,6 +179,8 @@ export const ConfigSchema = z.object({
     nodeKind: z.string().optional(),
     host: z.string().default('127.0.0.1'),
     port: z.coerce.number().int().positive().default(8090),
+    /** Time allowed for active executor tasks to finish after SIGTERM before they are aborted. */
+    shutdownGraceMs: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
     /** Gateway URL the executor heartbeats to. When unset, executor heartbeats directly to the database. */
     gatewayUrl: z.string().optional(),
     /** Root directory for executor artifact storage. Defaults to .los-runtime/executor-artifacts/<nodeId>. */
@@ -238,6 +240,7 @@ const ENV_MAP: [string, string][] = [
   ['EXECUTOR_NODE_KIND', 'executor.nodeKind'],
   ['EXECUTOR_HOST', 'executor.host'],
   ['EXECUTOR_PORT', 'executor.port'],
+  ['EXECUTOR_SHUTDOWN_GRACE_MS', 'executor.shutdownGraceMs'],
   ['GATEWAY_URL', 'executor.gatewayUrl'],
   ['EXECUTOR_ARTIFACT_ROOT', 'executor.artifactRoot'],
   ['EXECUTOR_CONNECT_MODES', 'executor.connectModes'],

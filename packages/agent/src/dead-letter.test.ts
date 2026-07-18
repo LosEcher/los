@@ -6,12 +6,23 @@ import { ensureExecutionStore, transitionExecutionState } from './execution-stor
 import { createRunSpec, ensureRunSpecStore, loadRunSpec } from './run-specs.js';
 import { createTaskRun, ensureTaskRunStore, loadTaskRun, updateTaskRunFields } from './task-runs.js';
 import {
+  acknowledgeDeadLetterEvent,
   ensureDeadLetterStore,
   writeDeadLetterEvent,
 } from './dead-letter.js';
 import { requeueDeadLetterEvent, summarizeDeadLetterEvents } from './dead-letter-recovery.js';
 import { runDeadLetterGovernance } from './dead-letter-governance.js';
 import { runJobAudit } from './governance-auditors.js';
+
+test('dead-letter resolution rejects unknown runtime values before persistence', async () => {
+  await assert.rejects(
+    acknowledgeDeadLetterEvent('dlq-invalid', {
+      resolution: 'legacy_acknowledged',
+      actor: 'operator:test',
+    } as unknown as Parameters<typeof acknowledgeDeadLetterEvent>[1]),
+    /dead_letter_resolution_invalid/,
+  );
+});
 
 test('dead-letter summary classifies reasons and lease expiry requeue is idempotent', async () => {
   const config = await loadConfig();

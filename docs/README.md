@@ -72,6 +72,11 @@ Use `operations/node-deployment-runbook.md` for executor bootstrap, rollout,
 rollback, and offline-node reactivation. Keep dated node evidence in a separate
 operation smoke.
 
+Use `operations/database-migrations.md` for migration ownership, startup
+application behavior, drift validation, and failure handling. Use
+`operations/github-mirror-recovery.md` when the secondary GitHub `main` has
+diverged from Forgejo and requires an explicitly approved lease-protected repair.
+
 ### Governance
 
 Use `docs/governance/` for repeated analysis practices. Start with

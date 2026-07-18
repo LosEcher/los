@@ -145,9 +145,9 @@ test('heartbeatTransferring refreshes updated_at on a transferring item', async 
     await enqueueOne(folderId, 'long.txt');
 
     await dequeueReadyItems(folderId, 1); // -> transferring
-    const before = await db.query<{ updated_at: Date }>(`SELECT updated_at FROM file_sync_queue WHERE queue_id = $1`, [queueId]);
     // Force an old updated_at so the heartbeat refresh is observable.
     await db.query(`UPDATE file_sync_queue SET updated_at = now() - interval '1 hour' WHERE queue_id = $1`, [queueId]);
+    const before = await db.query<{ updated_at: Date }>(`SELECT updated_at FROM file_sync_queue WHERE queue_id = $1`, [queueId]);
 
     await heartbeatTransferring(queueId);
     const after = await db.query<{ updated_at: Date }>(`SELECT updated_at FROM file_sync_queue WHERE queue_id = $1`, [queueId]);

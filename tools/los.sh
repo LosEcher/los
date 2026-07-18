@@ -113,6 +113,14 @@ ex_port() { printf '%s' "${EXECUTOR_PORT:-$(read_env_value EXECUTOR_PORT || prin
 ex_url()  { printf 'http://%s:%s' "$(ex_host)" "$(ex_port)"; }
 ex_node_id() { printf '%s' "${EXECUTOR_NODE_ID:-$(read_env_value EXECUTOR_NODE_ID || hostname -s 2>/dev/null || hostname)}"; }
 ex_node_id_arg() { printf '%s' "$(ex_node_id)"; }
+ex_stop_timeout_seconds() {
+  local grace_ms
+  grace_ms="${EXECUTOR_SHUTDOWN_GRACE_MS:-$(read_env_value EXECUTOR_SHUTDOWN_GRACE_MS || printf '120000')}"
+  case "$grace_ms" in
+    ''|*[!0-9]*) grace_ms=120000 ;;
+  esac
+  printf '%s' "$(((grace_ms + 999) / 1000 + 35))"
+}
 
 is_executor_enabled() {
   local val
@@ -313,7 +321,7 @@ start_executor() {
 stop_executor() {
   stop_process \
     "executor" "$EX_PID_FILE" "$(ex_port)" "$(ex_host)" "$(ex_url)" \
-    "$EX_SRC" "$EX_DIST" "$EX_MAINT_FILTER" "$(ex_node_id_arg)" "$EX_LAUNCH_PREFIX" "1"
+    "$EX_SRC" "$EX_DIST" "$EX_MAINT_FILTER" "$(ex_node_id_arg)" "$EX_LAUNCH_PREFIX" "1" "$(ex_stop_timeout_seconds)"
 }
 
 executor_status() {

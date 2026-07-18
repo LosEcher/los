@@ -44,6 +44,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
+      - name: Observe pnpm store capacity
+        run: ./tools/observe-pnpm-store.sh --json
+
       - name: Fast gate (no DB, no tests)
         run: pnpm run gate -- --no-tests
 
@@ -56,9 +59,9 @@ jobs:
       postgres-test:
         image: postgres:16
         env:
-          POSTGRES_USER: los
-          POSTGRES_PASSWORD: los
-          POSTGRES_DB: los_test
+          POSTGRES_USER: los_ci_test
+          POSTGRES_PASSWORD: los-ci-test-only
+          POSTGRES_DB: los_ci_test
           POSTGRES_HOST_AUTH_METHOD: md5
         options: >-
           --health-cmd pg_isready
@@ -68,8 +71,8 @@ jobs:
           --health-start-period 30s
 
     env:
-      DATABASE_URL: postgres://los:los@postgres-test:5432/los_test
-      TEST_DATABASE_URL: postgres://los:los@postgres-test:5432/los_test
+      DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
+      TEST_DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
       NODE_ENV: test
       LOS_TEST_CONCURRENCY: 2
 
@@ -109,9 +112,9 @@ jobs:
       postgres-drift:
         image: postgres:16
         env:
-          POSTGRES_USER: los
-          POSTGRES_PASSWORD: los
-          POSTGRES_DB: los_test
+          POSTGRES_USER: los_ci_drift
+          POSTGRES_PASSWORD: los-ci-drift-only
+          POSTGRES_DB: los_ci_drift
           POSTGRES_HOST_AUTH_METHOD: md5
         options: >-
           --health-cmd pg_isready
@@ -123,7 +126,7 @@ jobs:
     # DATABASE_URL is the server URL check-migration-drift uses to CREATE
     # the ephemeral los_drift_mig / los_drift_ensure databases.
     env:
-      DATABASE_URL: postgres://los:los@postgres-drift:5432/los_test
+      DATABASE_URL: postgres://los_ci_drift:los-ci-drift-only@postgres-drift:5432/los_ci_drift
 
     steps:
       - name: Checkout

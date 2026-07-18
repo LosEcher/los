@@ -7,7 +7,7 @@ import { writeDeadLetterEvent } from '@los/agent/dead-letter';
 import { registerRequestContext } from './request-context.js';
 import { registerTaskRoutes } from './routes/orchestration/task-routes.js';
 
-test('dead-letter routes expose summary and gate retry as an operator action', async () => {
+test('dead-letter routes require an audited operator resolution and gate retry', async () => {
   const originalConfig = getConfig();
   const config = structuredClone(originalConfig);
   config.auth.enabled = true;
@@ -30,6 +30,20 @@ test('dead-letter routes expose summary and gate retry as an operator action', a
     const forbidden = await app.inject({ method: 'POST', url: `/tasks/dead-letter/${event.id}/retry` });
     assert.equal(forbidden.statusCode, 403);
 
+    const forbiddenAck = await app.inject({
+      method: 'POST', url: `/tasks/dead-letter/${event.id}/ack`,
+      payload: { resolution: 'superseded' },
+    });
+    assert.equal(forbiddenAck.statusCode, 403);
+
+    const missingNote = await app.inject({
+      method: 'POST', url: `/tasks/dead-letter/${event.id}/ack`,
+      headers: { 'x-los-operator-token': 'dlq-operator-token' },
+      payload: { resolution: 'accepted_loss' },
+    });
+    assert.equal(missingNote.statusCode, 400);
+    assert.equal(missingNote.json().error, 'dead_letter_resolution_note_required');
+
     const notRetryable = await app.inject({
       method: 'POST',
       url: `/tasks/dead-letter/${event.id}/retry`,
@@ -37,6 +51,16 @@ test('dead-letter routes expose summary and gate retry as an operator action', a
     });
     assert.equal(notRetryable.statusCode, 409);
     assert.equal(notRetryable.json().error, 'reason_not_retryable');
+
+    const acknowledged = await app.inject({
+      method: 'POST', url: `/tasks/dead-letter/${event.id}/ack`,
+      headers: { 'x-los-operator-token': 'dlq-operator-token' },
+      payload: { resolution: 'regression_covered', note: 'covered by malformed-output fixture' },
+    });
+    assert.equal(acknowledged.statusCode, 200);
+    assert.equal(acknowledged.json().resolution, 'regression_covered');
+    assert.equal(acknowledged.json().resolvedBy, 'operator:shared-token');
+    assert.ok(acknowledged.json().resolvedAt);
   } finally {
     await getDb().query('DELETE FROM dead_letter_events WHERE id = $1', [event.id]).catch(() => undefined);
     await app.close();
