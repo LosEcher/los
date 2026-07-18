@@ -2,12 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import { ensureSessionEventStore, listSessionEvents } from '@los/agent/session-events';
-import { loadConfig } from '@los/infra/config';
+import { loadConfig, type Config } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 
 import { resolveDirectRunCompletionDecision } from './chat-run-completion.js';
 import { registerChatRoute } from './chat-route.js';
 import { ensureIdempotencyStore } from './idempotency.js';
+
+function withConfiguredDefaultProvider(config: Config): Config {
+  const provider = config.agent.defaultProvider;
+  return {
+    ...config,
+    providers: {
+      ...config.providers,
+      [provider]: {
+        ...config.providers[provider],
+        enabled: true,
+        model: config.agent.defaultModel,
+      },
+    },
+  };
+}
 
 test('direct chat run completion blocks on unsatisfied required verification records', () => {
   const decision = resolveDirectRunCompletionDecision([
@@ -107,7 +122,7 @@ test('chat route rejects an unknown provider/model before creating a run', async
 });
 
 test('chat route persists blocked intake before idempotency reservation', async () => {
-  const config = await loadConfig();
+  const config = withConfiguredDefaultProvider(await loadConfig());
   await initDb(config.databaseUrl);
   await ensureSessionEventStore();
   await ensureIdempotencyStore();
@@ -122,7 +137,13 @@ test('chat route persists blocked intake before idempotency reservation', async 
       method: 'POST',
       url: '/chat',
       headers: { 'x-idempotency-key': idempotencyKey },
-      payload: { prompt: 'blocked intake', sessionId, projectId: `missing-${suffix}` },
+      payload: {
+        prompt: 'blocked intake',
+        sessionId,
+        projectId: `missing-${suffix}`,
+        provider: config.agent.defaultProvider,
+        model: config.agent.defaultModel,
+      },
     });
 
     assert.equal(response.statusCode, 400);
@@ -144,7 +165,7 @@ test('chat route persists blocked intake before idempotency reservation', async 
 });
 
 test('chat route blocks conflicting body and context project IDs', async () => {
-  const config = await loadConfig();
+  const config = withConfiguredDefaultProvider(await loadConfig());
   await initDb(config.databaseUrl);
   await ensureSessionEventStore();
   const app = Fastify({ logger: false });
@@ -157,7 +178,13 @@ test('chat route blocks conflicting body and context project IDs', async () => {
       method: 'POST',
       url: '/chat',
       headers: { 'x-project-id': 'context-project' },
-      payload: { prompt: 'blocked intake', sessionId, projectId: 'body-project' },
+      payload: {
+        prompt: 'blocked intake',
+        sessionId,
+        projectId: 'body-project',
+        provider: config.agent.defaultProvider,
+        model: config.agent.defaultModel,
+      },
     });
 
     assert.equal(response.statusCode, 409);
