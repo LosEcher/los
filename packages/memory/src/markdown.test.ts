@@ -6,10 +6,11 @@ import { join } from 'node:path';
 
 import { readMemoryMd, syncMemoryMd } from './markdown.js';
 
-test('syncMemoryMd writes bounded recent observations with metadata', () => {
+test('explicit syncMemoryMd writes bounded recent observations with metadata', () => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-memory-md-'));
 
   try {
+    assert.equal(readMemoryMd(workspaceRoot), null);
     syncMemoryMd(workspaceRoot, [
       {
         title: 'Provider readiness classified',
