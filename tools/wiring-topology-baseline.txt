@@ -225,6 +225,11 @@ infra|packages/infra/src/logger.ts|setLogger  # zero callers (orphan)
 infra|packages/infra/src/logger.ts|setLogLevel  # zero callers (orphan)
 infra|packages/infra/src/migrate.ts|loadAppliedMigrations  # test-only caller (no production caller)
 infra|packages/infra/src/procedural-candidates-ddl.ts|PROCEDURAL_CANDIDATES_DDL  # zero callers (orphan)
+infra|packages/infra/src/provider-accounts.ts|createProviderAccount  # test-only caller (no production caller) — ADR 0030 Phase 1 store API; consumer deferred to later phase
+infra|packages/infra/src/provider-accounts.ts|listProviderAccounts  # test-only caller (no production caller) — ADR 0030 Phase 1 store API; consumer deferred to later phase
+infra|packages/infra/src/provider-accounts.ts|loadProviderAccount  # test-only caller (no production caller) — ADR 0030 Phase 1 store API; consumer deferred to later phase
+infra|packages/infra/src/provider-accounts.ts|replaceProviderAccountCredential  # test-only caller (no production caller) — ADR 0030 Phase 1 store API; consumer deferred to later phase
+infra|packages/infra/src/provider-accounts.ts|setProviderAccountState  # test-only caller (no production caller) — ADR 0030 Phase 1 store API; consumer deferred to later phase
 memory|packages/memory/src/cbm/cbm-client.ts|CBMClient  # zero callers (orphan)
 memory|packages/memory/src/cbm/shadow-log.ts|setShadowLogDir  # zero callers (orphan)
 memory|packages/memory/src/core/compaction-rows.ts|normalizeCandidateArray  # zero callers (orphan)

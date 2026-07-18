@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted. Phase 0 credential safety and CLI routing are implemented. Phase 0B
-and Phases 1-4 remain pending and must follow the gates below.
+Accepted. Phase 0 credential safety, CLI routing, and Phase 1 provider-account
+persistence are implemented. Phase 0B and Phases 2-4 remain pending and must
+follow the gates below.
 
 ## Date
 
@@ -149,6 +150,21 @@ are:
 2. environment or external references for API keys;
 3. opaque `secret_ref` values in the account row.
 
+Phase 1 constrains `secret_ref` to a provider-neutral backend reference:
+
+- `local-file:<logical-store>/<entry>` identifies an entry in an approved
+  restricted local store without persisting its filesystem contents;
+- `env:<ENVIRONMENT_VARIABLE>` identifies an environment-backed value;
+- `external:<backend>/<account>` identifies an account owned by an external
+  authenticated tool such as Grok;
+- `adapter:<adapter>/<account>` reserves a stable reference form for an
+  approved future secret adapter.
+
+The reference cannot contain URL authority, query, fragment, or inline secret
+material. `local_node` and `external_backend` references have no `node_id`;
+`named_node` requires one explicit stable node id. The database constraint and
+Zod input schemas enforce the same rule.
+
 An OS keychain can be added later as an adapter. It is not required for the
 first account schema and must not change account identity semantics.
 
@@ -251,8 +267,9 @@ Implementation progress:
    provider-first CLI routing.
 2. Phase 0B remains blocked on operator reauthentication and a live
    `xai:grok-composer-2.5-fast` compatibility probe.
-3. Phases 1-4 remain pending. Phase 1 still requires package-level approval
-   before an infra migration or a new file under `packages/infra/`.
+3. Phase 1 implements `provider_accounts`, the restricted `secret_ref`
+   grammar, generation-fenced credential replacement, state verification
+   fencing, and runtime bootstrap integration. Phases 2-4 remain pending.
 
 ### Phase 0: xAI Credential Safety And CLI Routing
 
@@ -304,6 +321,20 @@ Required evidence:
 4. node-local secret references remain distinguishable from portable external
    references;
 5. focused persistence tests and migration-drift gate.
+
+Implemented on 2026-07-18 after explicit package-level operator approval:
+
+1. `packages/infra/migrations/036_provider_accounts.sql` and
+   `packages/infra/src/provider-accounts.ts` define matching constraints and
+   indexes;
+2. the public infra subpath exposes Zod-validated create, load, list,
+   generation-fenced credential replacement, and state verification writes;
+3. `packages/gateway/src/bootstrap.ts` includes the store in the canonical
+   runtime schema bootstrap used by migration drift checks;
+4. focused infra tests cover stable ids, local/named/external scope,
+   generation conflicts, invalid references, and forbidden credential columns;
+5. the focused infra test suite, contract check, gateway check, and migration
+   drift gate pass without storing or importing credential material.
 
 ### Phase 2: Quota Snapshots
 
@@ -374,23 +405,27 @@ redaction tests, and an operation smoke with persisted provenance.
 
 1. Verify xAI's supported billing or quota API from an official, stable
    contract before implementing a live quota collector.
-2. Decide the first `secret_ref` URI/identifier grammar during Phase 1 without
-   making it provider-specific.
-3. Confirm whether account provenance belongs in public contracts before
+2. Confirm whether account provenance belongs in public contracts before
    changing any route response.
-4. Re-run the dead-letter summary with an authorized operator surface before
+3. Re-run the dead-letter summary with an authorized operator surface before
    making the recovery decision; the counts in this ADR are not execution
    authority.
-5. Define retention and compaction policy for quota snapshots after real sample
+4. Define retention and compaction policy for quota snapshots after real sample
    volume is measured.
 
 ## Verification For This ADR
 
-This change is documentation-only. It requires source-grounded readback and:
+Phase 1 changes persistence and runtime bootstrap behavior. It requires:
 
 ```bash
 ./tools/check-contracts.sh
+pnpm --filter @los/infra check
+pnpm --filter @los/infra test
+pnpm --filter @los/gateway check
+pnpm check:migration-drift
+pnpm check
+pnpm run gate
 ```
 
-No live provider call, database mutation, dead-letter action, or migration is
-part of this ADR change.
+No live provider call, credential import, quota fetch, account selection,
+dead-letter mutation, or replay is part of Phase 1.
