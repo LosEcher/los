@@ -83,6 +83,29 @@ test('chat route rejects requests that violate the generated run-spec validator'
   }
 });
 
+test('chat route rejects an unknown provider/model before creating a run', async () => {
+  const config = await loadConfig();
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, config, process.cwd());
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      payload: { prompt: 'invalid provider', provider: 'deepseek-v4-flash' },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.json(), {
+      error: 'invalid_provider_model',
+      code: 'provider_not_configured',
+      message: "provider 'deepseek-v4-flash' is not configured or disabled",
+    });
+  } finally {
+    await app.close();
+  }
+});
+
 test('chat route persists blocked intake before idempotency reservation', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
