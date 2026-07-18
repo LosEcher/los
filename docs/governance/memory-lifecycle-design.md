@@ -6,23 +6,20 @@
 
 ## 一、当前架构的三个结构性问题
 
-### 问题 1：两套建表机制互相竞争，`procedural_candidates` 漏网
+### 问题 1：迁移与运行时建表职责曾经不明确
 
 ```
 网关启动
-  ├─ migrateDir() → 读 10 个 .sql → 写入 schema_migrations
-  │   └─ 当前状态：schema_migrations 为空 → 迁移 runner 未生效
-  │       （路径解析失败或 SQL 执行错误被静默吞掉）
+  ├─ migrateDir() → 顺序应用 packages/infra/migrations/*.sql
+  │   └─ 写入 schema_migrations，提供可审计的升级历史
   │
   └─ ensure*Store() 逐个调用
       ├─ ensureMemoryStore()           → observations ✅
       ├─ ensureMemoryCompactionStore()  → memory_compactions ✅
-      └─ ensureProceduralCandidateStore() → 没被调用！❌
-          └─ 只在 compaction/retrieval 内部懒加载
-             但 compaction 无人触发 → 表永远不创建
+      └─ ensureProceduralCandidateStore() → 补齐当前代码需要的幂等 schema
 ```
 
-**根因**：`procedural_candidates` 的 DDL 只在两处：migration 006（未生效）+ DDL 常量（懒加载未触发）。其他表有 eager 的 `ensure*Store()` 兜底，这个表没有。
+**当前判断（2026-07-18）**：原文描述的是历史故障，不再是当前启动行为。gateway 与 executor 都先执行 `migrateDir()`，随后执行 owning package 的 `ensureAllStores()` / `ensureAllAgentStores()`。两者暂时承担不同职责，差异由 `pnpm check:migration-drift` 检测。
 
 ### 问题 2：测试数据跑在生产库
 
@@ -62,28 +59,18 @@ db.ts 的安全检查存在（检测非 test 库名时拒绝），但 `LOS_ALLOW
 
 ## 二、改进方案
 
-### 2.1 统一建表：消灭双轨制
+### 2.1 明确迁移与兼容建表的职责
 
-**当前问题**：`migrateDir()` + `ensure*Store()` 两套机制，互相不知道对方的状态。
+**当前问题**：migration 与 `ensure*Store()` 仍可能漂移，但不能通过删除 migration runner 解决。
 
-**方案**：选择一种，废弃另一种。
+**方案**：保留两层启动顺序，并把 migration 作为升级历史的权威记录。
 
-**推荐：保留 `ensure*Store()`，废弃 `migrateDir()`**
+1. `migrateDir()` 负责按版本升级已有数据库，并记录 `schema_migrations`。
+2. `ensureAllStores()` / `ensureAllAgentStores()` 负责当前版本的幂等兼容与测试 bootstrap。
+3. `pnpm check:migration-drift` 只做验证：在两个临时数据库分别运行 migration-only 与 ensure-only，然后比较结构；它不修改业务数据库。
+4. gateway 和 executor 启动失败或 migration 返回错误时必须保留可观测日志，不能把 drift gate 当作迁移命令。
 
-理由：
-- `ensure*Store()` 已经在 20+ 张表上工作正常
-- 每个模块自治，迁移和代码一起演进
-- 不依赖文件系统路径解析
-- 修复只需一步：在 gateway 启动时 eager 调用 `ensureProceduralCandidateStore()`
-
-**具体改动**：
-
-```typescript
-// server.ts — 在所有 ensure*Store() 调用后增加：
-await ensureProceduralCandidateStore();  // 新增：eager 创建
-```
-
-同时删除 `migrateDir()` 调用和 migration SQL 文件（或标记为 deprecated），消除混淆。
+操作与验证细节见 `docs/operations/database-migrations.md`。不要删除 `migrateDir()` 调用或已发布的 migration SQL。
 
 ### 2.2 测试隔离：关闭 `LOS_ALLOW_LIVE_TEST_DB` 后门
 

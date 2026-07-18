@@ -218,6 +218,7 @@ function configForAuth(enabled: boolean): Config {
       enabled: false,
       host: '127.0.0.1',
       port: 8090,
+      shutdownGraceMs: 120_000,
       nodeKind: 'executor',
       connectModes: [],
       meshNodes: [],

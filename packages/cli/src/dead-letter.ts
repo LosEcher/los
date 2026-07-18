@@ -4,7 +4,7 @@
  * Usage:
  *   los tasks dead-letter ls [--acknowledged] [--reason REASON] [--limit N] [--json]
  *   los tasks dead-letter summary [--json]
- *   los tasks dead-letter ack <id>
+ *   los tasks dead-letter ack <id> --resolution RESOLUTION [--note NOTE]
  *   los tasks dead-letter retry <id>
  */
 
@@ -62,9 +62,9 @@ async function listDeadLetter(parsed: ParsedArgs): Promise<void> {
   console.log(`Dead letter events: ${events.length}`);
   for (const event of events) {
     const e = asRecord(event);
-    const ack = e.acknowledgedAt ? ' [acked]' : '';
+    const resolved = e.acknowledgedAt ? ' [resolved]' : '';
     const retry = e.requeuedTaskRunId ? ` requeued=${String(e.requeuedTaskRunId)}` : '';
-    console.log(`  ${String(e.id ?? '?')} reason=${String(e.reason ?? '?')} task=${String(e.taskRunId ?? '?')}${retry}${ack}`);
+    console.log(`  ${String(e.id ?? '?')} reason=${String(e.reason ?? '?')} task=${String(e.taskRunId ?? '?')}${retry}${resolved}`);
     const err = e.originalError;
     if (err) console.log(`    error: ${String(err).slice(0, 120)}`);
   }
@@ -73,13 +73,19 @@ async function listDeadLetter(parsed: ParsedArgs): Promise<void> {
 async function ackDeadLetter(parsed: ParsedArgs): Promise<void> {
   const [id] = parsed.positionals.slice(1);
   if (!id) throw new Error('dead-letter ack requires an event id');
-  const response = await sendJson(`${gatewayUrl(parsed)}/tasks/dead-letter/${id}/ack`, 'POST', null, parsed);
+  const resolution = stringFlag(parsed, 'resolution');
+  if (!resolution) throw new Error('dead-letter ack requires --resolution');
+  const response = await sendJson(`${gatewayUrl(parsed)}/tasks/dead-letter/${id}/ack`, 'POST', {
+    resolution,
+    note: stringFlag(parsed, 'note'),
+    replacementTaskRunId: stringFlag(parsed, 'replacement-task-run'),
+  }, parsed);
   if (booleanFlag(parsed, 'json')) {
     console.log(JSON.stringify(response, null, 2));
     return;
   }
   const r = asRecord(response);
-  console.log(`Acknowledged: ${String(r.id ?? id)}`);
+  console.log(`Resolved: ${String(r.id ?? id)}`);
 }
 
 async function summarizeDeadLetters(parsed: ParsedArgs): Promise<void> {
@@ -117,7 +123,7 @@ Inspect and manage the dead letter queue.
 Usage:
   los tasks dead-letter ls [--acknowledged] [--reason REASON] [--limit N] [--json]
   los tasks dead-letter summary [--json]
-  los tasks dead-letter ack <id>
+  los tasks dead-letter ack <id> --resolution <replaced|superseded|accepted_loss|regression_covered> [--replacement-task-run ID] [--note NOTE] [--operator-token TOKEN]
   los tasks dead-letter retry <id> [--operator-token TOKEN]`);
 }
 
@@ -138,6 +144,8 @@ async function sendJson(url: string, method: string, payload: unknown, parsed: P
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = authToken(parsed);
   if (token) headers['x-los-auth-token'] = token;
+  const operatorToken = stringFlag(parsed, 'operator-token') ?? process.env.LOS_OPERATOR_TOKEN;
+  if (operatorToken) headers['x-los-operator-token'] = operatorToken;
   const response = await fetch(url, {
     method,
     headers,

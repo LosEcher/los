@@ -240,6 +240,8 @@ operatorControl:
       path: /governance/jobs/sweep
     - method: POST
       path: /tasks/dead-letter/{deadLetterEventId}/retry
+    - method: POST
+      path: /tasks/dead-letter/{deadLetterEventId}/ack
   messageRouterCapabilities:
     run_contract: run:control
     steering: session:steer
@@ -258,6 +260,25 @@ deadLetterQueue:
       path: /tasks/dead-letter/summary
     - method: POST
       path: /tasks/dead-letter/{deadLetterEventId}/ack
+      requiredPrincipal: operator
+      request:
+        required:
+          - resolution
+        properties:
+          resolution:
+            enum:
+              - replaced
+              - superseded
+              - accepted_loss
+              - regression_covered
+          replacementTaskRunId:
+            type: string
+          note:
+            type: string
+      behavior:
+        preservesOriginalEvent: true
+        recordsActorFromPrincipal: true
+        replacementRequiredWhen: resolution=replaced
     - method: POST
       path: /tasks/dead-letter/{deadLetterEventId}/retry
       requiredPrincipal: operator

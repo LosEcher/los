@@ -7,7 +7,7 @@ import { requestCancellation } from '@los/agent';
 import { normalizeOptionalString } from '../server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
 import { listDeadLetterEvents, acknowledgeDeadLetterEvent, summarizeDeadLetterEvents, requeueDeadLetterEvent } from '@los/agent';
-import { requireOperator } from '../../request-context.js';
+import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
 
 type OrphanClassification = 'stale-gateway' | 'expired-lease' | 'cancelled' | 'none';
 
@@ -162,8 +162,26 @@ export function registerTaskRoutes(app: FastifyInstance): void {
   });
 
   app.post('/tasks/dead-letter/:id/ack', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
-    const record = await acknowledgeDeadLetterEvent(id);
+    const body = req.body as {
+      resolution?: string;
+      note?: string;
+      replacementTaskRunId?: string;
+    } | undefined;
+    const resolution = normalizeDeadLetterResolution(body?.resolution);
+    if (!resolution) return reply.status(400).send({ error: 'invalid_dead_letter_resolution' });
+    let record;
+    try {
+      record = await acknowledgeDeadLetterEvent(id, {
+        resolution,
+        note: normalizeOptionalString(body?.note),
+        replacementTaskRunId: normalizeOptionalString(body?.replacementTaskRunId),
+        actor: getOperatorPrincipal(req).subject,
+      });
+    } catch (error) {
+      return reply.status(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
     if (!record) return reply.status(404).send({ error: 'Dead letter event not found or already acknowledged' });
     return record;
   });
@@ -176,4 +194,13 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     if (result.status !== 'requeued') return reply.status(409).send({ error: result.reason, event: result.event });
     return result;
   });
+}
+
+function normalizeDeadLetterResolution(
+  value: unknown,
+): 'replaced' | 'superseded' | 'accepted_loss' | 'regression_covered' | undefined {
+  if (value === 'replaced' || value === 'superseded' || value === 'accepted_loss' || value === 'regression_covered') {
+    return value;
+  }
+  return undefined;
 }

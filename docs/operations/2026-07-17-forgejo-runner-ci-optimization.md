@@ -185,7 +185,7 @@ replace the product P0/P1 queue in
 | ID | Priority | State | Work | Completion evidence |
 | --- | --- | --- | --- | --- |
 | `CI-OBS-01` | P0 | observing | Record the next 10-20 real Forgejo PR runs | Interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
-| `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS/network identities, then reassess the serial dependency | Identities are now `postgres-test` and `postgres-drift`; retain `needs: gate-test` until overlapping runs and three consecutive full green runs are evidenced |
+| `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
 | `CI-STORE-01` | P1 | backlog | Add a periodic pnpm store capacity check without restoring `actions/cache` | A documented command and cadence record store size plus filesystem free space; growth has an owner and cleanup decision |
 
 `CI-OBS-01` owns the immediate next action. `CI-NET-01` is the prerequisite for
@@ -231,13 +231,17 @@ host.
 On node34, capture store capacity weekly and after every fifth eligible PR:
 
 ```bash
-du -sm /home/z/forgejo/runner-data/job-cache/pnpm-store
-df -Pm /home/z/forgejo/runner-data/job-cache/pnpm-store
+./tools/observe-pnpm-store.sh --json \
+  --store /home/z/forgejo/runner-data/job-cache/pnpm-store
 ```
 
 The initial persistent-store baseline is about 225 MiB. Size growth alone does
 not authorize deletion; record the trend and filesystem pressure before choosing
-a cleanup policy.
+a cleanup policy. The observer never prunes or deletes store content.
+
+Before removing `gate-drift`'s `needs: gate-test` dependency, manually dispatch
+`.forgejo/workflows/postgres-isolation-canary.yml` on a capacity-2 runner and
+verify that both jobs overlap and report their distinct database/user identity.
 
 ### Delivery Evidence Snapshot
 

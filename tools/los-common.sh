@@ -250,6 +250,7 @@ stop_process() {
   local name="$1" pid_file="$2" port="$3" host="$4" url="$5"
   local src_frag="$6" dist_js_frag="${7:-}" maint_filter="$8" maint_extra="${9:-}" launch_prefix="${10:-com.los}"
   local kill_parent="${11:-0}"
+  local graceful_timeout_sec="${12:-15}"
 
   launch_remove "$launch_prefix"
 
@@ -290,7 +291,7 @@ stop_process() {
   fi
   kill "$pid" >/dev/null 2>&1 || true
 
-  local deadline=$((SECONDS + 15))
+  local deadline=$((SECONDS + graceful_timeout_sec))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local still_alive=0
     is_running "$pid" && still_alive=1

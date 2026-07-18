@@ -1,0 +1,65 @@
+name: PostgreSQL Isolation Canary
+
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+# Manual evidence surface for removing gate-drift's needs: gate-test dependency.
+# Keep both jobs dependency-free so a capacity-2 runner can overlap them.
+jobs:
+  canary-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container: postgres:16
+    services:
+      postgres-canary-a:
+        image: postgres:16
+        env:
+          POSTGRES_USER: los_canary_a
+          POSTGRES_PASSWORD: los-canary-a-only
+          POSTGRES_DB: los_canary_a
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - name: Verify canary A identity
+        env:
+          PGPASSWORD: los-canary-a-only
+        run: |
+          set -euo pipefail
+          observed="$(psql -h postgres-canary-a -U los_canary_a -d los_canary_a -Atc "select current_user || '|' || current_database()")"
+          test "$observed" = "los_canary_a|los_canary_a"
+          psql -h postgres-canary-a -U los_canary_a -d los_canary_a -v ON_ERROR_STOP=1 -c "create table canary_a_only (id integer primary key)"
+          sleep 15
+
+  canary-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container: postgres:16
+    services:
+      postgres-canary-b:
+        image: postgres:16
+        env:
+          POSTGRES_USER: los_canary_b
+          POSTGRES_PASSWORD: los-canary-b-only
+          POSTGRES_DB: los_canary_b
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - name: Verify canary B identity
+        env:
+          PGPASSWORD: los-canary-b-only
+        run: |
+          set -euo pipefail
+          observed="$(psql -h postgres-canary-b -U los_canary_b -d los_canary_b -Atc "select current_user || '|' || current_database()")"
+          test "$observed" = "los_canary_b|los_canary_b"
+          psql -h postgres-canary-b -U los_canary_b -d los_canary_b -v ON_ERROR_STOP=1 -c "create table canary_b_only (id integer primary key)"
+          sleep 15

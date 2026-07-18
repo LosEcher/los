@@ -1469,6 +1469,55 @@ button:disabled {
   background: rgb(40 43 34 / 0.72);
 }
 
+.dead-letter-resolution-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.5fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.dead-letter-row .record-main {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.dead-letter-resolution-form .field {
+  gap: 4px;
+}
+
+.dead-letter-resolution-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 34px;
+}
+
+.dead-letter-resolution-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.dead-letter-resolution-summary strong {
+  color: var(--text);
+}
+
+.dead-letter-resolution-form .field-error {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .dead-letter-resolution-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .row-title,
 .link-cell {
   color: var(--text);

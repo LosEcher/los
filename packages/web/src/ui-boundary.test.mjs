@@ -13,6 +13,7 @@ const viteConfig = readFileSync(new URL('../vite.config.ts', import.meta.url), '
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const runSpecsPage = readFileSync(new URL('./pages/run-specs-page.tsx', import.meta.url), 'utf8');
 const chatApproval = readFileSync(new URL('./chat-approval.tsx', import.meta.url), 'utf8');
+const deadLetterPage = readFileSync(new URL('./pages/dead-letter-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
@@ -137,6 +138,16 @@ test('chat ApprovalCard is interactive via operator-events and WS steering is wi
   assert.match(chatApproval, /instruction:\s*'approve'/);
   assert.match(chatPage, /OperatorSteeringBar/);
   assert.match(chatPage, /sessionId=\{sessionId\}/);
+});
+
+test('dead-letter resolution requires an audited disposition instead of an empty ack', () => {
+  assert.match(deadLetterPage, /type DeadLetterResolution = 'replaced' \| 'superseded' \| 'accepted_loss' \| 'regression_covered'/);
+  assert.match(deadLetterPage, /\/tasks\/dead-letter\?acknowledged=false&limit=200/);
+  assert.match(deadLetterPage, /\/tasks\/dead-letter\?acknowledged=true&limit=200/);
+  assert.match(deadLetterPage, /replacementTaskRunId/);
+  assert.match(deadLetterPage, /reason for accepting data loss/);
+  assert.match(deadLetterPage, /postJson<DeadLetterEvent>\(`\/tasks\/dead-letter\/\$\{id\}\/ack`, body\)/);
+  assert.doesNotMatch(deadLetterPage, /\/ack`, \{\}\)/);
 });
 
 function between(source, start, end) {
