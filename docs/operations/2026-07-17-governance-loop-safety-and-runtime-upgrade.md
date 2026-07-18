@@ -273,10 +273,12 @@ an older same-type job, not the current live reconciliation of `seedOnly=0`,
 because it currently counts jobs with drift rather than the two findings. No
 todo was created and the active todo count remained 164. [E]
 
-This should be a separate bounded governance fix: compare only jobs executed in
-the current sweep (or an explicitly refreshed checkpoint), exclude paused or
-superseded job baselines, and count findings rather than jobs. Add a no-due-job
-fallback regression before changing the long-lived gateway. [I]
+The bounded fix now passes the current sweep's completed job IDs into the drift
+helper, scopes baselines to the same tenant/project and active jobs, and counts
+individual findings. The wake loop skips drift comparison when no job was
+claimed, with a no-due-job regression covering the fallback path. The helper
+is awaited by both manual and loop sweep paths, so a command-line database
+scope cannot close before its comparison finishes. [E]
 
 ## Verification
 
@@ -323,8 +325,8 @@ fallback regression before changing the long-lived gateway. [I]
 | P1 | Resolve 15 unacknowledged dead letters by owner | run same-model xAI compatibility evidence, add provider/model request validation and malformed-arguments fixtures, then decide acknowledgment; never auto-requeue these `unrecoverable_error` rows |
 | P1 | Deliver and observe classified dead-letter GA output | the first safe cycle proved report-only/no-task behavior but exposed missing `_gaLoop`; after rollout, require the persisted classification on a natural zero-eligible cycle |
 | P1 | Extend remote deploy verification grace handling | avoid reporting failure while a constrained node is still completing a bounded graceful stop |
-| P1 | Make the post-sweep drift helper awaitable in command-line runs | the long-lived gateway path is verified; a `withInitDb()` dry-run can still close the DB before the detached helper completes |
-| P1 | Scope post-sweep drift to current work | stop repeated comparison of stale replacement summaries against paused historical jobs; fix finding counts and add a no-due-job fallback regression |
+| P1 | Make the post-sweep drift helper awaitable in command-line runs | implemented; manual and loop sweep paths await the helper and current-job IDs are explicit |
+| P1 | Scope post-sweep drift to current work | implemented; active same-scope baselines only, current-job filtering, finding counts, and no-due-job regression |
 | P1 | Correct the documented infra migration command | `pnpm --filter @los/infra db:migrate` is not currently a package script; document or add the supported `migrateDir()` entrypoint in a separate bounded change |
 
 Keep node34 runner capacity at 2. Its current 3-core/6-GB resource profile and
