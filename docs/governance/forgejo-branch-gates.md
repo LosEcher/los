@@ -29,9 +29,11 @@ three-core host. Do not raise either limit independently; capture CPU, available
 memory, swap, and job duration from a representative PR before changing this
 resource envelope.
 
-`gate-drift` depends on `gate-test`. Both jobs register a PostgreSQL service as
-`postgres` on the runner's fixed Docker network, so they must not overlap and
-create an ambiguous service DNS name.
+`gate-drift` depends on `gate-test` while the isolation change is observed. The
+jobs now register distinct PostgreSQL service DNS names (`postgres-test` and
+`postgres-drift`) on the runner's fixed Docker network. Keep the dependency
+until three consecutive full green runs prove that overlapping jobs cannot
+cross-connect; only then reassess removing `needs: gate-test`.
 
 `.forgejo/workflows/audit.yml` runs the dependency audit daily and manually.
 

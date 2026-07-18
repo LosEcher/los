@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 25
 
     services:
-      postgres:
+      postgres-test:
         image: postgres:16
         env:
           POSTGRES_USER: los
@@ -68,8 +68,8 @@ jobs:
           --health-start-period 30s
 
     env:
-      DATABASE_URL: postgres://los:los@postgres:5432/los_test
-      TEST_DATABASE_URL: postgres://los:los@postgres:5432/los_test
+      DATABASE_URL: postgres://los:los@postgres-test:5432/los_test
+      TEST_DATABASE_URL: postgres://los:los@postgres-test:5432/los_test
       NODE_ENV: test
       LOS_TEST_CONCURRENCY: 2
 
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 10
 
     services:
-      postgres:
+      postgres-drift:
         image: postgres:16
         env:
           POSTGRES_USER: los
@@ -123,7 +123,7 @@ jobs:
     # DATABASE_URL is the server URL check-migration-drift uses to CREATE
     # the ephemeral los_drift_mig / los_drift_ensure databases.
     env:
-      DATABASE_URL: postgres://los:los@postgres:5432/los_test
+      DATABASE_URL: postgres://los:los@postgres-drift:5432/los_test
 
     steps:
       - name: Checkout

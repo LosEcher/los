@@ -85,8 +85,10 @@ critical path instead of treating a rerun as evidence of reliability.
 The first persistent-store trial exposed a separate concurrency issue:
 `gate-test` and `gate-drift` both advertised a service named `postgres` on
 `forgejo_forgejo-net`. The drift process could create a database through one
-service container and reconnect through the other. The final workflow sequences
-the two database jobs while retaining `gate-fast` and `gate-test` overlap.
+service container and reconnect through the other. The workflow now gives the
+jobs distinct service identities (`postgres-test` and `postgres-drift`) while
+retaining the serial dependency until three consecutive full green runs prove
+that the jobs can overlap safely.
 
 ## Repository CI Policy
 
@@ -105,8 +107,9 @@ the two database jobs while retaining `gate-fast` and `gate-test` overlap.
 7. `gate-test` sets `LOS_TEST_CONCURRENCY=2`, and `gate-fast` sets
    `TURBO_CONCURRENCY=1`; local development keeps the existing test default of
    four unless the variable is set.
-8. `gate-drift` waits for `gate-test`, preventing their identically named
-   PostgreSQL service containers from overlapping on the fixed runner network.
+8. `gate-drift` waits for `gate-test` during the observation window; its
+   PostgreSQL service identity is distinct from `postgres-test`, so a later
+   parallelization trial cannot rely on an ambiguous shared DNS name.
 
 The `main` fast-only rule is safe only while Forgejo branch protection requires
 all three PR checks and `block_on_outdated_branch=true`. The API showed required
@@ -182,7 +185,7 @@ replace the product P0/P1 queue in
 | ID | Priority | State | Work | Completion evidence |
 | --- | --- | --- | --- | --- |
 | `CI-OBS-01` | P0 | observing | Record the next 10-20 real Forgejo PR runs | Interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
-| `CI-NET-01` | P1 | backlog | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS/network identities, then reassess the serial dependency | Both jobs overlap without cross-connecting, followed by three consecutive full green runs before removing `needs: gate-test` |
+| `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS/network identities, then reassess the serial dependency | Identities are now `postgres-test` and `postgres-drift`; retain `needs: gate-test` until overlapping runs and three consecutive full green runs are evidenced |
 | `CI-STORE-01` | P1 | backlog | Add a periodic pnpm store capacity check without restoring `actions/cache` | A documented command and cadence record store size plus filesystem free space; growth has an owner and cleanup decision |
 
 `CI-OBS-01` owns the immediate next action. `CI-NET-01` is the prerequisite for
