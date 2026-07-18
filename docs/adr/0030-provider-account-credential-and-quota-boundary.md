@@ -4,7 +4,9 @@
 
 Accepted. Phase 0 credential safety, CLI routing, Phase 1 provider-account
 persistence, and Phase 1A existing-login adoption are implemented. Phase 0B
-and Phases 2-4 remain pending and must follow the gates below.
+retired the unavailable historical composer model as a recovery prerequisite;
+alternate-model recovery evidence and Phases 2-4 remain pending and must
+follow the gates below.
 
 ## Date
 
@@ -265,8 +267,11 @@ Implementation progress:
    serialization, cross-process refresh locking, credential-generation fences,
    malformed-store preservation, async production credential resolution, and
    provider-first CLI routing.
-2. Phase 0B remains blocked on operator reauthentication and a live
-   `xai:grok-composer-2.5-fast` compatibility probe.
+2. Phase 0B no longer treats `xai:grok-composer-2.5-fast` as a recovery
+   prerequisite. The installed Grok CLI rejected that id, the current public
+   xAI model catalog does not list it, and the LOS OAuth-to-public-API probe
+   returned HTTP 401. The historical target is retired unless a future
+   authenticated model listing proves it available again.
 3. Phase 1 implements `provider_accounts`, the restricted `secret_ref`
    grammar, generation-fenced credential replacement, state verification
    fencing, and runtime bootstrap integration. Phases 2-4 remain pending.
@@ -297,18 +302,41 @@ Required evidence:
 After merge, the operator must reauthenticate xAI. The login itself remains an
 interactive operator action and is not performed by tests or migrations.
 
-### Phase 0B: Same-Model Compatibility And Dead-Letter Decision
+### Phase 0B: Original-Model Diagnosis And Alternate-Model Recovery
 
-After reauthentication, run a live compatibility probe against the exact model
-needed for the failed work, currently `grok-composer-2.5-fast`. Record effective
-provider, model, credential class, account provenance when available, task/run
-ids, tool outcomes, and token usage.
+An exact-model probe is a root-cause control, not a requirement that recovered
+work use the historical provider and model. The original target may be retired
+when current model discovery and an explicit live call show that it is no
+longer available. A retirement decision preserves the original provider/model
+as historical provenance and must not be presented as a passing compatibility
+result.
 
-Until that probe passes and the operator makes an explicit recovery decision:
+The 2026-07-18 operation probe retired `grok-composer-2.5-fast` from the current
+recovery path:
+
+1. Grok CLI `0.2.103` listed `grok-4.5` and rejected the historical model id as
+   unknown;
+2. the LOS xAI OAuth credential was discoverable but a public xAI API
+   compatibility request returned HTTP 401;
+3. xAI's current public quickstart requires an API key and lists `grok-4.5`,
+   not the historical composer id;
+4. the existing Grok login successfully completed a bounded `grok-4.5`
+   headless request, but that external runtime is not LOS provider-loop or
+   dead-letter recovery evidence.
+
+Alternate-model recovery must use a new run with an explicitly selected
+provider and model. It must record the original dead-letter id and original
+provider/model together with effective provider/model/account provenance. It
+must not masquerade as an unchanged replay. A representative compatibility
+probe with the same tool shape must pass first; malformed-argument fixtures
+and provider/model request validation remain required for their owning groups.
+
+Until those checks pass and the operator makes an explicit recovery decision:
 
 1. do not acknowledge the 15 identified `unrecoverable_error` entries;
 2. do not replay or requeue them;
-3. do not classify provider readiness as compatibility proof.
+3. do not classify provider readiness as compatibility proof;
+4. do not route a Grok browser or CLI session token through the public xAI API.
 
 ### Phase 1: Provider Account Store
 
@@ -366,8 +394,8 @@ Required behavior:
 
 The initial external runtime uses `grok-4.5`, the default model reported by the
 installed Grok CLI on 2026-07-18. `grok-composer-2.5-fast` was rejected by that
-CLI as an unknown model id and remains only the separate xAI provider target in
-Phase 0B. The runtime uses the Grok CLI's normal headless permission behavior.
+CLI as an unknown model id and is retained only as historical failure
+provenance. The runtime uses the Grok CLI's normal headless permission behavior.
 Read-only operations retain Grok's built-in
 approval rules; operations that require an interactive prompt are denied by
 the headless process. Broader write authority, transcript ingestion, automatic
