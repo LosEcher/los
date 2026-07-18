@@ -7,6 +7,9 @@ const chatComposer = readFileSync(new URL('./chat-composer.tsx', import.meta.url
 const useChatStream = readFileSync(new URL('./hooks/useChatStream.ts', import.meta.url), 'utf8');
 const useChatRun = readFileSync(new URL('./hooks/useChatRun.ts', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
+const providerAccountsPanel = readFileSync(new URL('./pages/provider-accounts-panel.tsx', import.meta.url), 'utf8');
+const apiTypes = readFileSync(new URL('./api/types.ts', import.meta.url), 'utf8');
+const viteConfig = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
 const runSpecsPage = readFileSync(new URL('./pages/run-specs-page.tsx', import.meta.url), 'utf8');
 const chatApproval = readFileSync(new URL('./chat-approval.tsx', import.meta.url), 'utf8');
@@ -56,6 +59,22 @@ test('provider setup fields live on the providers page, not chat', () => {
   assert.doesNotMatch(chatPage, /base url/);
   assert.doesNotMatch(chatPage, /default model/);
   assert.doesNotMatch(chatPage, /Provider Settings/);
+});
+
+test('Grok existing-login adoption stays explicit, redacted, and runtime-gated', () => {
+  assert.match(providersPage, /<ProviderAccountsPanel \/>/);
+  assert.match(providerAccountsPanel, /getJson<ProviderAccountDiscoveryResponse>\('\/providers\/accounts\/discovery'\)/);
+  assert.match(providerAccountsPanel, /postJson<[^>]+>\('\/providers\/accounts\/grok', \{\}\)/);
+  assert.match(providerAccountsPanel, /grok\?\.available && !active/);
+  assert.match(providerAccountsPanel, /No usable login is copied or stored/);
+  assert.doesNotMatch(providerAccountsPanel, /secretRef|auth\.json|access_token|refresh_token/);
+
+  assert.match(chatPage, /providerAccountDiscovery\.data\?\.grok\.available === true/);
+  assert.match(chatPage, /account\.id === 'xai-grok-default' && account\.state === 'active'/);
+  assert.match(chatComposer, /props\.grokRuntimeEnabled \|\| props\.runtimeKind === 'grok'/);
+  assert.match(chatComposer, /Grok \(existing login\)/);
+  assert.match(apiTypes, /export type RuntimeKind = 'claude-code' \| 'codex' \| 'grok'/);
+  assert.match(viteConfig, /'\/runtimes': 'http:\/\/127\.0\.0\.1:8080'/);
 });
 
 test('providers page renders readiness instead of raw discovery booleans', () => {

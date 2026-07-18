@@ -53,6 +53,7 @@ import {
   RefreshQueryButton,
   StatusPill,
 } from '../ui';
+import { ProviderAccountsPanel } from './provider-accounts-panel.js';
 
 type RunStateProjection = {
   phase: string;
@@ -145,6 +146,8 @@ export function ProvidersPage() {
   return (
     <section className="panel-grid provider-grid">
       <div className="panel">
+        <ProviderAccountsPanel />
+        <div className="section-divider" />
         <div className="panel-head">
           <div>
             <h2>Provider Endpoints</h2>

@@ -1,0 +1,104 @@
+contract: los.provider-account-runtime
+version: 0.1.0
+status: implemented
+owner: packages/infra
+description: >
+  Discover and explicitly adopt an existing Grok CLI login as an opaque
+  provider account reference, then run the Grok external runtime without
+  exposing or persisting its credential material.
+type: object
+routes:
+  - method: GET
+    path: /providers/accounts
+    response:
+      accounts: ProviderAccountSummary[]
+  - method: GET
+    path: /providers/accounts/discovery
+    response:
+      grok: GrokAccountCandidate
+  - method: POST
+    path: /providers/accounts/grok
+    response:
+      account: ProviderAccountSummary
+  - method: POST
+    path: /runtimes/grok/run
+    request:
+      prompt: string
+      workspaceRoot: string | null
+      timeoutMs: integer | null
+    response:
+      transport: text/event-stream
+      events:
+        - runtime.started
+        - runtime.process
+        - runtime.output
+        - runtime.completed
+        - runtime.error
+operatorControl:
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
+  requiredPrincipal: operator
+  routes:
+    - POST /providers/accounts/grok
+    - POST /runtimes/grok/run
+accountDiscovery:
+  sources:
+    - GROK_AUTH
+    - GROK_AUTH_PATH
+    - GROK_HOME/auth.json
+    - ~/.grok/auth.json
+  candidateId: xai-grok-default
+  provider: xai
+  authMode: external_ref
+  secretRef: external:grok/default
+  secretScope: external_backend
+  absentBehavior: return available=false and do not create an account
+runtimePolicy:
+  kind: grok
+  command: grok --single
+  defaultModel: grok-4.5
+  accountRequirement: xai-grok-default must exist and be active
+  verifiedAt: null on adoption; set only after a successful Grok runtime exit
+  permissionMode: external CLI defaults; headless approval prompts are denied
+  browserSuppliedEnv: forbidden
+  browserSuppliedExtraArgs: forbidden
+  outputLimitBytes: 65536
+  outputPersistence: forbidden
+fields:
+  ProviderAccountSummary:
+    id: string
+    provider: string
+    authMode: oauth | api_key | external_ref | adapter
+    displayLabel: string
+    state: active | disabled | auth_failed | unavailable
+    credentialGeneration: integer
+    secretScope: local_node | named_node | external_backend
+    nodeId: string | null
+    verifiedAt: date-time | null
+    createdAt: date-time
+    updatedAt: date-time
+  GrokAccountCandidate:
+    candidateId: xai-grok-default
+    provider: xai
+    runtimeKind: grok
+    available: boolean
+    authMode: oidc | external | api_key | legacy | unknown | null
+    sourceKind: inline_env | explicit_path | grok_home | default_home
+    reason: string | null
+redaction:
+  - Never return GROK_AUTH, raw auth file contents, file paths, access tokens,
+    refresh tokens, API keys, cookies, auth snapshots, email, user id, team id,
+    organization id, or raw stderr.
+  - Never copy Grok auth material into PostgreSQL or LOS auth files.
+  - PostgreSQL stores only external:grok/default and non-secret account state.
+  - Runtime output is bounded, redacted in memory, streamed to the operator,
+    and not persisted by this contract.
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/infra test
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/web test
+  - pnpm check
+  - pnpm run gate

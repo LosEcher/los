@@ -3,15 +3,93 @@
  * Extracted from provider-routes.ts to keep each file under 400 lines.
  */
 import type { FastifyInstance } from 'fastify';
-import { discoverAll } from '@los/infra/discovery';
+import { discoverAll, scanGrokAccount, type GrokAccountCandidate } from '@los/infra/discovery';
 import { getConfig, setConfig } from '@los/infra/config';
+import {
+  createProviderAccount,
+  listProviderAccounts,
+  loadProviderAccount,
+  setProviderAccountState,
+  type CreateProviderAccountInput,
+  type ProviderAccountRecord,
+  type SetProviderAccountStateInput,
+} from '@los/infra/provider-accounts';
 import {
   asRecord,
   normalizeOptionalString,
   normalizeOptionalNonNegativeInteger,
 } from '../server-helpers.js';
+import { requireOperator } from '../../request-context.js';
 
-export function registerProviderCrudRoutes(app: FastifyInstance): void {
+const GROK_ACCOUNT_ID = 'xai-grok-default';
+const GROK_SECRET_REF = 'external:grok/default';
+
+export interface ProviderAccountRouteDependencies {
+  scanGrokAccount: () => GrokAccountCandidate;
+  listProviderAccounts: () => Promise<ProviderAccountRecord[]>;
+  loadProviderAccount: (id: string) => Promise<ProviderAccountRecord | null>;
+  createProviderAccount: (input: CreateProviderAccountInput) => Promise<ProviderAccountRecord>;
+  setProviderAccountState: (input: SetProviderAccountStateInput) => Promise<ProviderAccountRecord>;
+}
+
+const DEFAULT_ACCOUNT_DEPENDENCIES: ProviderAccountRouteDependencies = {
+  scanGrokAccount,
+  listProviderAccounts: () => listProviderAccounts(),
+  loadProviderAccount,
+  createProviderAccount,
+  setProviderAccountState,
+};
+
+export function registerProviderCrudRoutes(
+  app: FastifyInstance,
+  accountDeps: ProviderAccountRouteDependencies = DEFAULT_ACCOUNT_DEPENDENCIES,
+): void {
+  app.get('/providers/accounts', async () => ({
+    accounts: (await accountDeps.listProviderAccounts()).map(sanitizeProviderAccount),
+  }));
+
+  app.get('/providers/accounts/discovery', async () => ({
+    grok: accountDeps.scanGrokAccount(),
+  }));
+
+  app.post('/providers/accounts/grok', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const candidate = accountDeps.scanGrokAccount();
+    if (!candidate.available) {
+      return reply.status(404).send({
+        error: 'grok_login_unavailable',
+        reason: candidate.reason,
+      });
+    }
+
+    const existing = await accountDeps.loadProviderAccount(GROK_ACCOUNT_ID);
+    if (existing && !isGrokAccount(existing)) {
+      return reply.status(409).send({
+        error: 'provider_account_conflict',
+        message: `${GROK_ACCOUNT_ID} is already bound to a different credential reference`,
+      });
+    }
+
+    const account = existing
+      ? await accountDeps.setProviderAccountState({
+          id: existing.id,
+          expectedCredentialGeneration: existing.credentialGeneration,
+          state: 'active',
+          verifiedAt: null,
+        })
+      : await accountDeps.createProviderAccount({
+          id: GROK_ACCOUNT_ID,
+          provider: 'xai',
+          authMode: 'external_ref',
+          displayLabel: 'Grok CLI login',
+          secretRef: GROK_SECRET_REF,
+          state: 'active',
+          secretScope: 'external_backend',
+        });
+
+    return reply.status(existing ? 200 : 201).send({ account: sanitizeProviderAccount(account) });
+  });
+
   app.post('/providers', async (req, reply) => {
     const body = asRecord(req.body);
     const name = (typeof body.name === 'string' ? body.name.trim() : '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -128,4 +206,17 @@ export function registerProviderCrudRoutes(app: FastifyInstance): void {
 
     return { provider: providerFilter ?? null, count: results.length, models: results, providers };
   });
+}
+
+function isGrokAccount(account: ProviderAccountRecord): boolean {
+  return account.provider === 'xai'
+    && account.authMode === 'external_ref'
+    && account.secretRef === GROK_SECRET_REF
+    && account.secretScope === 'external_backend'
+    && account.nodeId === undefined;
+}
+
+function sanitizeProviderAccount(account: ProviderAccountRecord): Omit<ProviderAccountRecord, 'secretRef'> {
+  const { secretRef: _secretRef, ...summary } = account;
+  return summary;
 }

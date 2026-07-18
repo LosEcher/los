@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted. Phase 0 credential safety, CLI routing, and Phase 1 provider-account
-persistence are implemented. Phase 0B and Phases 2-4 remain pending and must
-follow the gates below.
+Accepted. Phase 0 credential safety, CLI routing, Phase 1 provider-account
+persistence, and Phase 1A existing-login adoption are implemented. Phase 0B
+and Phases 2-4 remain pending and must follow the gates below.
 
 ## Date
 
@@ -270,6 +270,9 @@ Implementation progress:
 3. Phase 1 implements `provider_accounts`, the restricted `secret_ref`
    grammar, generation-fenced credential replacement, state verification
    fencing, and runtime bootstrap integration. Phases 2-4 remain pending.
+4. Phase 1A discovers and explicitly adopts an existing Grok CLI login as
+   `external:grok/default`. The Grok process remains the only credential owner;
+   LOS does not copy, refresh, return, or persist the external auth material.
 
 ### Phase 0: xAI Credential Safety And CLI Routing
 
@@ -335,6 +338,40 @@ Implemented on 2026-07-18 after explicit package-level operator approval:
    generation conflicts, invalid references, and forbidden credential columns;
 5. the focused infra test suite, contract check, gateway check, and migration
    drift gate pass without storing or importing credential material.
+
+### Phase 1A: Existing Grok Login Adoption
+
+Implemented after operator approval on 2026-07-18. This phase adds a bounded
+bridge from the existing Grok CLI login to LOS Web without treating the Grok
+credential as an xAI API key.
+
+Required behavior:
+
+1. discovery checks `GROK_AUTH`, `GROK_AUTH_PATH`, `GROK_HOME/auth.json`, then
+   `~/.grok/auth.json`, and reports only a redacted availability candidate;
+2. adopting the candidate is an explicit operator write that persists only
+   `external:grok/default` in `provider_accounts`;
+3. the Web runtime invokes the installed Grok CLI, which remains responsible
+   for reading, refreshing, and locking its own auth store;
+4. the Grok runtime is selected explicitly and never becomes silent xAI
+   failover or provider readiness evidence;
+5. browser-supplied environment variables and arbitrary CLI arguments are not
+   accepted by the Grok route;
+6. runtime output is bounded, redacted, streamed to the operator, and not
+   persisted as LOS session replay or compatibility evidence;
+7. a missing, malformed, expired, or unsupported Grok login leaves the
+   candidate unavailable and does not create or mutate an account.
+8. adoption does not claim remote credential verification; `verified_at` is
+   written only after the adopted Grok runtime completes successfully.
+
+The initial external runtime uses `grok-4.5`, the default model reported by the
+installed Grok CLI on 2026-07-18. `grok-composer-2.5-fast` was rejected by that
+CLI as an unknown model id and remains only the separate xAI provider target in
+Phase 0B. The runtime uses the Grok CLI's normal headless permission behavior.
+Read-only operations retain Grok's built-in
+approval rules; operations that require an interactive prompt are denied by
+the headless process. Broader write authority, transcript ingestion, automatic
+account selection, and provider-loop substitution remain out of scope.
 
 ### Phase 2: Quota Snapshots
 
