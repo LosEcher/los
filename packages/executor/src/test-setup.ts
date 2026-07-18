@@ -14,8 +14,8 @@ after(async () => await _dropConfiguredTestSchema(config.databaseUrl));
 await ensureAllAgentStores();
 
 // Ensure schema for file-sync tables (created by migration 005).
-// The migration itself only runs via `pnpm --filter @los/infra db:migrate`,
-// so test-setup ensures the schema exists for tests.
+// Production applies migrations during gateway/executor startup; test setup
+// creates the focused tables so package tests remain isolated.
 const db = getDb();
 const MIGRATION_005 = `
 CREATE TABLE IF NOT EXISTS file_sync_folders (

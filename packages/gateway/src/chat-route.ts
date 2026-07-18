@@ -25,6 +25,7 @@ import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 import type { MessageRouter } from '@los/agent/message-router';
 import { validateRunSpecRequest } from '@los/contracts/run-spec';
+import { validateProviderModelRequest } from '@los/agent';
 
 const CHAT_BODY_LIMIT_BYTES = 1024 * 1024;
 
@@ -80,6 +81,20 @@ export function registerChatRoute(
     const systemPrompt = normalizeOptionalString(body.systemPrompt);
     const provider = normalizeOptionalString(body.provider);
     const model = normalizeOptionalString(body.model);
+    const providerModelValidation = validateProviderModelRequest({
+      provider,
+      model,
+      defaultProvider: config.agent.defaultProvider,
+      defaultModel: config.agent.defaultModel,
+      configuredProviders: config.providers,
+    });
+    if (!providerModelValidation.valid) {
+      return reply.status(400).send({
+        error: 'invalid_provider_model',
+        code: providerModelValidation.code,
+        message: providerModelValidation.message,
+      });
+    }
     const modelSettings = normalizeModelSettings(body.modelSettings);
     const headerProjectId = normalizeOptionalString(Array.isArray(req.headers['x-project-id'])
       ? req.headers['x-project-id'][0]

@@ -25,6 +25,7 @@
 #   LOS_SSH_TRANSPORT=ssh       # Use OpenSSH instead of Tailscale SSH
 #   LOS_SSH_TARGET=node-alias   # OpenSSH config alias or explicit target
 #   LOS_REMOTE_PRIVILEGE=sudo   # Elevate remote deployment commands
+#   LOS_DEPLOY_VERIFY_GRACE_SECONDS=90  # Bounded wait for transitional systemd state
 set -euo pipefail
 
 NODE="${1:-}"
@@ -55,6 +56,9 @@ Shortcuts:
 Options:
   --low-resource      Use reduced concurrency for pnpm install (only with 'install')
 
+Verification:
+  LOS_DEPLOY_VERIFY_GRACE_SECONDS  Wait for transitional systemd state (default: 90s)
+
 Nodes: oracle, tencent-sin, vultr, hh-sgp1, 34 (via tencent-sin relay)
 EOF
   exit 0
@@ -70,6 +74,7 @@ LOG_BASE="${LOCAL_REPO}/.los-runtime/deploy-logs"
 mkdir -p "$LOG_BASE"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BUILD_VERSION="${LOS_DEPLOY_VERSION:-$(bash "$LOCAL_REPO/tools/los.sh" build-version)}"
+VERIFY_GRACE_SECONDS="${LOS_DEPLOY_VERIFY_GRACE_SECONDS:-90}"
 
 # ── Detect Tailscale hostname ───────────────────────────────
 resolve_ts_host() {
@@ -92,6 +97,11 @@ log()      { printf '[deploy:%s] %s\n' "$NODE" "$*" | tee -a "$1"; }
 log_info() { printf '[deploy:%s] %s\n' "$NODE" "$*"; }
 log_warn() { printf '[deploy:%s] WARN: %s\n' "$NODE" "$*"; }
 die()      { printf '[deploy:%s] FATAL: %s\n' "$NODE" "$*"; exit 1; }
+
+case "$VERIFY_GRACE_SECONDS" in
+  ''|*[!0-9]*) die "LOS_DEPLOY_VERIFY_GRACE_SECONDS must be a positive integer" ;;
+esac
+[ "$VERIFY_GRACE_SECONDS" -gt 0 ] || die "LOS_DEPLOY_VERIFY_GRACE_SECONDS must be greater than zero"
 
 case "$SSH_TRANSPORT" in
   tailscale|ssh) ;;
@@ -387,13 +397,31 @@ do_verify() {
 
   # 1. Service status
   printf '=== systemd status ===\n' >> "$log_file"
-  remote_sh systemctl is-active los-executor 2>/dev/null >> "$log_file" || {
+  local service_state=""
+  local previous_service_state=""
+  local service_attempt
+  for service_attempt in $(seq 1 "$VERIFY_GRACE_SECONDS"); do
+    service_state=$(remote_sh systemctl is-active los-executor 2>/dev/null || true)
+    if [ "$service_state" != "$previous_service_state" ]; then
+      printf 'attempt=%s state=%s\n' "$service_attempt" "${service_state:-unknown}" >> "$log_file"
+      previous_service_state="$service_state"
+    fi
+    [ "$service_state" = "active" ] && break
+    [ "$service_state" = "failed" ] && break
+    sleep 1
+  done
+  if [ "$service_state" != "active" ]; then
     log_warn "service not active"
+    log_warn "last systemd state: ${service_state:-unknown} (waited ${VERIFY_GRACE_SECONDS}s)"
     log_warn "Diagnose: $0 $NODE logs"
     log_warn "Or: $0 $NODE cmd 'systemctl status los-executor'"
     return 1
-  }
-  log_info "  service: active"
+  fi
+  if [ "$service_attempt" -gt 1 ]; then
+    log_info "  service: active (after ${service_attempt}s verification grace)"
+  else
+    log_info "  service: active"
+  fi
 
   # 2. Health endpoint
   printf '\n=== health ===\n' >> "$log_file"

@@ -324,10 +324,10 @@ scope cannot close before its comparison finishes. [E]
 | P1 | Define seed-owned todo field drift policy | decide canonical versus operator-overridable title, priority, kind, source, metadata, and dependencies; then reconcile the live multi-gateway P2 row without broad overwrite |
 | P1 | Resolve 15 unacknowledged dead letters by owner | run same-model xAI compatibility evidence, add provider/model request validation and malformed-arguments fixtures, then decide acknowledgment; never auto-requeue these `unrecoverable_error` rows |
 | P1 | Deliver and observe classified dead-letter GA output | the first safe cycle proved report-only/no-task behavior but exposed missing `_gaLoop`; after rollout, require the persisted classification on a natural zero-eligible cycle |
-| P1 | Extend remote deploy verification grace handling | avoid reporting failure while a constrained node is still completing a bounded graceful stop |
+| Done | Extend remote deploy verification grace handling | `deploy-to-remote.sh verify` now waits up to 90 seconds for transitional systemd states before failing; `failed`, timeout, health, and version errors remain fatal |
 | P1 | Make the post-sweep drift helper awaitable in command-line runs | implemented; manual and loop sweep paths await the helper and current-job IDs are explicit |
 | P1 | Scope post-sweep drift to current work | implemented; active same-scope baselines only, current-job filtering, finding counts, and no-due-job regression |
-| P1 | Correct the documented infra migration command | `pnpm --filter @los/infra db:migrate` is not currently a package script; document or add the supported `migrateDir()` entrypoint in a separate bounded change |
+| Done | Correct the documented infra migration command | Migrations are applied by gateway/executor startup through `migrateDir()`; `pnpm check:migration-drift` is validation-only and there is no standalone `@los/infra db:migrate` package script |
 
 Keep node34 runner capacity at 2. Its current 3-core/6-GB resource profile and
 high swap use do not support a third concurrent runner. [E]

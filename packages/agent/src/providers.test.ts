@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildOpenAICompatUrl } from './providers/index.js';
+import { repairJson, repairToolCallArguments } from './providers/openai-utils.js';
+import { validateProviderModelRequest } from './provider-request-validation.js';
 import { mergeToolCallDeltas, mergeSplitToolCalls } from './providers/delta-repair.js';
 import type { ToolCall } from './providers/types.js';
 
@@ -25,6 +27,53 @@ test('OpenAI-compatible URLs do not duplicate existing v1 segments', () => {
     buildOpenAICompatUrl('http://127.0.0.1:11434/v1/', 'models'),
     'http://127.0.0.1:11434/v1/models',
   );
+});
+
+test('provider/model validation rejects historical routing aliases', () => {
+  const configuredProviders = {
+    deepseek: { enabled: true, model: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com/v1' },
+    xai: { enabled: true, model: 'grok-4.3', baseUrl: 'https://api.x.ai/v1' },
+  };
+  const unknownProvider = validateProviderModelRequest({
+    provider: 'deepseek-v4-flash', model: undefined,
+    defaultProvider: 'deepseek', configuredProviders,
+  });
+  assert.equal(unknownProvider.valid, false);
+  if (!unknownProvider.valid) assert.equal(unknownProvider.code, 'provider_not_configured');
+
+  const missingProvider = validateProviderModelRequest({
+    provider: undefined, model: 'grok-4.3',
+    defaultProvider: 'deepseek', configuredProviders,
+  });
+  assert.equal(missingProvider.valid, false);
+  if (!missingProvider.valid) assert.equal(missingProvider.code, 'provider_required_for_model');
+
+  assert.equal(validateProviderModelRequest({
+    provider: 'xai', model: 'grok-composer-2.5-fast',
+    defaultProvider: 'deepseek', configuredProviders,
+  }).valid, true);
+
+  const unknownModel = validateProviderModelRequest({
+    provider: 'xai', model: 'missing-model',
+    defaultProvider: 'deepseek', configuredProviders,
+  });
+  assert.equal(unknownModel.valid, false);
+  if (!unknownModel.valid) assert.equal(unknownModel.code, 'model_not_configured');
+});
+
+test('malformed tool argument fixture is repaired without changing its value', () => {
+  const malformed = '{path: ".", trailing: true,}';
+  const repaired = repairJson(malformed);
+  assert.deepEqual(repaired.steps, ['trailing-commas', 'unquoted-keys']);
+  assert.deepEqual(JSON.parse(repaired.result!), { path: '.', trailing: true });
+
+  const toolCall = repairToolCallArguments({
+    id: 'fixture-malformed-arguments',
+    type: 'function',
+    function: { name: 'read_file', arguments: malformed },
+  }, 'fixture');
+  assert.deepEqual(JSON.parse(toolCall.function.arguments), { path: '.', trailing: true });
+  assert.equal(toolCall._repair?.repaired, true);
 });
 
 // ── mergeToolCallDeltas — Chat Completions streaming delta aggregation ──
