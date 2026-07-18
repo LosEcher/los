@@ -54,6 +54,9 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0025-conversation-run-coordinator-boundary.md` - boundary between interactive
   coordination, persisted run state, bounded workers, GA governance jobs, and
   operator-gated memory.
+- `0030-provider-account-credential-and-quota-boundary.md` - provider account
+  identity, credential refresh safety, quota snapshots, explicit selection,
+  and effective-call provenance.
 
 ### Operation Smokes
 
