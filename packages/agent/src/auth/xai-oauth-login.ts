@@ -4,8 +4,8 @@
  * This file contains the login ceremony: OIDC discovery, PKCE generation,
  * browser open, loopback HTTP server, token exchange, and token persistence.
  *
- * All runtime credential resolution (refresh, status, config integration)
- * lives in xai-oauth.ts alongside the auth store and types.
+ * Runtime credential resolution lives in xai-oauth.ts; the store and shared
+ * types live in the adjacent xai-oauth-store.ts and xai-oauth-types.ts modules.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -492,6 +492,5 @@ export async function xaiOAuthLogin(options: XaiLoginOptions = {}): Promise<XaiO
     auth_mode: 'oauth_pkce',
   };
 
-  saveXaiOAuthState(oauthState);
-  return oauthState;
+  return await saveXaiOAuthState(oauthState);
 }

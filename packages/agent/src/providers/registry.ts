@@ -4,12 +4,20 @@ import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIResponsesProvider } from './responses.js';
 import { getProviderConfig, createOpenAICompatProvider, diag } from './index.js';
 import type { Provider, CreateProviderOptions } from './types.js';
+import { resolveXaiOAuthCredential } from '../auth/xai-oauth.js';
 
 export function createProvider(name?: string, options: CreateProviderOptions = {}): Provider {
   const config = getConfig();
   const providerName = name ?? config.agent.defaultProvider;
 
   const p = getProviderConfig(providerName);
+  let credentialResolver: typeof resolveXaiOAuthCredential | undefined;
+  if (!p.apiKey && p.authMode === 'oauth') {
+    if (providerName !== 'xai') {
+      throw new Error(`Provider '${providerName}' has no supported OAuth credential resolver.`);
+    }
+    credentialResolver = () => resolveXaiOAuthCredential();
+  }
   const apiShapeOverride = (options.apiShape ?? (p as Record<string, unknown>).apiShape) as ApiShape | undefined;
   const profile = resolveModelProfile(providerName, {
     baseUrl: options.baseUrl ?? p.baseUrl,
@@ -24,6 +32,7 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
   } as Record<string, unknown>);
 
   if (profile.protocol === 'anthropic') {
+    if (credentialResolver) throw new Error(`Provider '${providerName}' OAuth is not supported by the Anthropic transport.`);
     return createAnthropicProvider({
       name: providerName,
       apiKey: p.apiKey!,
@@ -33,6 +42,7 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
   }
 
   if (profile.apiShape === 'openai-responses') {
+    if (credentialResolver) throw new Error(`Provider '${providerName}' OAuth is not supported by the Responses transport.`);
     return createOpenAIResponsesProvider({
       name: providerName,
       apiKey: p.apiKey!,
@@ -43,9 +53,10 @@ export function createProvider(name?: string, options: CreateProviderOptions = {
 
   return createOpenAICompatProvider({
     name: providerName,
-    apiKey: p.apiKey!,
+    apiKey: p.apiKey,
     profile,
     traceId: options.traceId,
+    credentialResolver,
   });
 }
 

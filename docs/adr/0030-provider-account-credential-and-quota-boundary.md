@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Runtime implementation is pending and must follow the phases below.
+Accepted. Phase 0 credential safety and CLI routing are implemented. Phase 0B
+and Phases 1-4 remain pending and must follow the gates below.
 
 ## Date
 
@@ -17,7 +18,7 @@ The existing xAI OAuth implementation also has a narrower correctness gap that
 must be fixed before adding account selection or using xAI to assess existing
 dead letters.
 
-Current source and runtime observations are:
+At ADR acceptance, the source and runtime observations were:
 
 1. `resolveXaiOAuthCredential()` can refresh an expiring token, but the
    production provider factory calls `getXaiOAuthCredentialSync()` instead.
@@ -241,6 +242,17 @@ id remain valid and explicitly mean `unknown`, not the current account.
 Each phase is one jj change, one short-lived bookmark, and one Forgejo PR. The
 exact PR head must pass required CI before merge. GitHub mirror updates remain
 ordinary non-force pushes only.
+
+Implementation progress:
+
+1. Phase 0 implements the atomic restricted auth store, in-process refresh
+   serialization, cross-process refresh locking, credential-generation fences,
+   malformed-store preservation, async production credential resolution, and
+   provider-first CLI routing.
+2. Phase 0B remains blocked on operator reauthentication and a live
+   `xai:grok-composer-2.5-fast` compatibility probe.
+3. Phases 1-4 remain pending. Phase 1 still requires package-level approval
+   before an infra migration or a new file under `packages/infra/`.
 
 ### Phase 0: xAI Credential Safety And CLI Routing
 
