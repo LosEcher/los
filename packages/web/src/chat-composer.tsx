@@ -48,6 +48,7 @@ export function ChatComposer(props: {
 
   runtimeKind: RuntimeKind | 'los';
   onRuntimeKindChange: (value: RuntimeKind | 'los') => void;
+  grokRuntimeEnabled: boolean;
 
   workspaceRoot: string;
   onWorkspaceRootChange: (value: string) => void;
@@ -123,6 +124,11 @@ export function ChatComposer(props: {
             <option value="los">los agent</option>
             <option value="claude-code">Claude Code</option>
             <option value="codex">Codex</option>
+            {props.grokRuntimeEnabled || props.runtimeKind === 'grok' ? (
+              <option value="grok" disabled={!props.grokRuntimeEnabled}>
+                {props.grokRuntimeEnabled ? 'Grok (existing login)' : 'Grok (unavailable)'}
+              </option>
+            ) : null}
           </select>
         </RunField>
         {props.runtimeKind === 'los' ? (

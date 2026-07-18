@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { requireProviderDefaults } from './provider-defaults.js';
-import { scanEnvKeys } from './discovery/scanners.js';
+import { scanEnvKeys, scanGrokAccount } from './discovery/scanners.js';
 
 import {
   ccSwitchProviderFromRow,
@@ -179,4 +182,69 @@ base_url = "https://www.packyapi.com/v1"
   assert.equal(provider?.apiKey, 'packy-key');
   assert.equal(provider?.baseUrl, 'https://www.packyapi.com/v1');
   assert.equal(provider?.source, 'cc-switch/codex/PackyCode');
+});
+
+test('Grok account discovery reports a redacted usable external login', () => {
+  const candidate = scanGrokAccount({
+    env: {
+      GROK_AUTH: JSON.stringify({
+        key: 'fixture-token-must-not-leak',
+        refresh_token: 'fixture-refresh-must-not-leak',
+        auth_mode: 'oidc',
+        email: 'fixture@example.test',
+        expires_at: '2026-08-18T00:00:00.000Z',
+      }),
+    },
+    nowMs: Date.parse('2026-07-18T00:00:00.000Z'),
+    cliInstalled: true,
+  });
+
+  assert.deepEqual(candidate, {
+    candidateId: 'xai-grok-default',
+    provider: 'xai',
+    runtimeKind: 'grok',
+    available: true,
+    cliInstalled: true,
+    authMode: 'oidc',
+    sourceKind: 'inline_env',
+    reason: null,
+  });
+  const serialized = JSON.stringify(candidate);
+  assert.doesNotMatch(serialized, /fixture-token|fixture-refresh|fixture@example/);
+});
+
+test('Grok account discovery reads the default store and rejects expired credentials', () => {
+  const homeDir = mkdtempSync(join(tmpdir(), 'los-grok-discovery-'));
+  const grokHome = join(homeDir, '.grok');
+  mkdirSync(grokHome);
+  writeFileSync(join(grokHome, 'auth.json'), JSON.stringify({
+    'https://accounts.x.ai/sign-in': {
+      key: 'expired-fixture-token',
+      auth_mode: 'oidc',
+      expires_at: '2026-07-17T00:00:00.000Z',
+    },
+  }));
+  try {
+    const candidate = scanGrokAccount({
+      env: {},
+      homeDir,
+      nowMs: Date.parse('2026-07-18T00:00:00.000Z'),
+      cliInstalled: true,
+    });
+    assert.equal(candidate.available, false);
+    assert.equal(candidate.authMode, 'oidc');
+    assert.equal(candidate.sourceKind, 'default_home');
+    assert.equal(candidate.reason, 'grok_auth_expired');
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('Grok account discovery fails closed for malformed auth JSON', () => {
+  const candidate = scanGrokAccount({
+    env: { GROK_AUTH: '{not-json' },
+    cliInstalled: true,
+  });
+  assert.equal(candidate.available, false);
+  assert.equal(candidate.reason, 'grok_auth_malformed');
 });

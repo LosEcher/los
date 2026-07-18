@@ -2829,6 +2829,126 @@ button:disabled {
   align-items: center;
 }
 
+.provider-account-band {
+  container-type: inline-size;
+  padding: 16px;
+}
+
+.provider-account-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.provider-account-heading h2 {
+  margin: 2px 0 0;
+  font-size: 15px;
+}
+
+.provider-account-row {
+  display: grid;
+  grid-template-columns: 28px minmax(160px, 0.8fr) minmax(260px, 1.4fr) minmax(120px, auto);
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.provider-account-icon {
+  display: grid;
+  place-items: center;
+  color: var(--warn);
+}
+
+.provider-account-row[data-ready="true"] .provider-account-icon {
+  color: var(--ok);
+}
+
+.provider-account-primary,
+.provider-account-facts {
+  min-width: 0;
+}
+
+.provider-account-primary {
+  display: grid;
+  gap: 3px;
+}
+
+.provider-account-primary strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.provider-account-primary span,
+.provider-account-facts span,
+.provider-account-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.provider-account-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+}
+
+.provider-account-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.provider-account-action {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.provider-account-action .btn {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.provider-account-note {
+  margin: 9px 0 0 40px;
+  line-height: 1.45;
+}
+
+@container (max-width: 720px) {
+  .provider-account-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+  }
+
+  .provider-account-facts {
+    grid-column: 2 / -1;
+  }
+
+  .provider-account-action {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
+@container (max-width: 480px) {
+  .provider-account-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .provider-account-action {
+    grid-column: 2;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+
+  .provider-account-note {
+    margin-left: 0;
+  }
+}
+
 .error-banner {
   color: var(--err);
   font-size: 12px;

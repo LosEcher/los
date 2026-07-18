@@ -27,7 +27,7 @@ export const SUPPRESSED_STREAM_EVENTS = new Set([
 
 // Runtime SSE events visible in the stream UI
 const VISIBLE_RUNTIME_EVENTS = new Set([
-  'runtime.started', 'runtime.process', 'runtime.completed', 'runtime.error',
+  'runtime.started', 'runtime.process', 'runtime.output', 'runtime.completed', 'runtime.error',
 ]);
 
 export function readyStreamRows(): StreamRow[] {
@@ -278,6 +278,7 @@ export function streamRow(event: string, data: Record<string, unknown>): StreamR
   if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? 'task event'), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
   if (event === 'runtime.started') return { id: crypto.randomUUID(), event, message: `Runtime started: ${String(data.kind ?? '?')}`, meta: `session ${String(data.sessionId ?? '?').slice(0, 8)}…`, level: 'ok' };
   if (event === 'runtime.process') return { id: crypto.randomUUID(), event, message: 'Runtime process spawned', meta: `pid ${data.pid ?? '?'}`, level: 'normal' };
+  if (event === 'runtime.output') return { id: crypto.randomUUID(), event, message: String(data.text ?? ''), meta: data.truncated ? `truncated at ${data.capturedBytes ?? '?'} bytes` : `${data.capturedBytes ?? 0} bytes`, level: data.truncated ? 'warn' : 'normal' };
   if (event === 'runtime.completed') return { id: crypto.randomUUID(), event, message: `Runtime completed with exit ${data.exitCode ?? '?'}`, meta: data.status === 'success' ? 'OK' : 'FAILED', level: data.status === 'success' ? 'ok' : 'error' };
   if (event === 'runtime.error') return { id: crypto.randomUUID(), event, message: `Runtime error: ${String(data.error ?? 'unknown')}`, level: 'error' };
   return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };

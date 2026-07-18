@@ -59,6 +59,7 @@ export {
   ccSwitchProviderFromRow,
   parseCodexRouteConfig,
 } from './discovery/provider-parsers.js';
+export { scanGrokAccount } from './discovery/scanners.js';
 export type {
   DiscoveredProvider,
   DiscoveredTool,
@@ -66,6 +67,9 @@ export type {
   ProviderPromotionState,
   ProviderReadiness,
   ProviderReadinessSummary,
+  GrokAccountAuthMode,
+  GrokAccountCandidate,
+  GrokAccountSourceKind,
 } from './discovery/types.js';
 
 // ── Tool Scanners ───────────────────────────────────────
@@ -223,4 +227,3 @@ export async function printOnboardingReport(): Promise<string> {
   lines.push('');
   return lines.join('\n');
 }
-

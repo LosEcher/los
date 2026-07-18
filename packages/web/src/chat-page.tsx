@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import {
   getJson,
+  type ProviderAccountDiscoveryResponse,
+  type ProviderAccountsResponse,
   type RuntimeKind,
   type SessionDetail,
   type SessionTraceResponse,
@@ -116,6 +118,18 @@ export function ChatPage({
     queryFn: () => getJson<Record<string, unknown>>('/settings'),
     staleTime: 60_000,
   });
+  const providerAccounts = useQuery({
+    queryKey: ['provider-accounts'],
+    queryFn: () => getJson<ProviderAccountsResponse>('/providers/accounts'),
+    staleTime: 20_000,
+  });
+  const providerAccountDiscovery = useQuery({
+    queryKey: ['provider-account-discovery'],
+    queryFn: () => getJson<ProviderAccountDiscoveryResponse>('/providers/accounts/discovery'),
+    staleTime: 20_000,
+  });
+  const grokRuntimeEnabled = providerAccountDiscovery.data?.grok.available === true
+    && providerAccounts.data?.accounts.some(account => account.id === 'xai-grok-default' && account.state === 'active') === true;
   const configMaxLoops = (settings.data as Record<string, Record<string, unknown>> | undefined)?.agent?.maxLoops;
   const defaultMaxLoops = typeof configMaxLoops === 'number' ? configMaxLoops : 20;
   const workspaceInfo = useQuery({
@@ -315,7 +329,7 @@ export function ChatPage({
           provider={provider} onProviderChange={setProvider} providerOptions={providerOptions}
           model={model} onModelChange={setModel} modelRoutes={modelRoutes.data}
           toolMode={toolMode} onToolModeChange={setToolMode} runtimeKind={runtimeKind}
-          onRuntimeKindChange={setRuntimeKind} workspaceRoot={workspaceRoot}
+          onRuntimeKindChange={setRuntimeKind} grokRuntimeEnabled={grokRuntimeEnabled} workspaceRoot={workspaceRoot}
           onWorkspaceRootChange={setWorkspaceRoot} defaultWorkspace={defaultWorkspace}
           advancedState={advancedState} onAdvancedChange={onAdvancedChange} advancedCount={advancedCount}
         />

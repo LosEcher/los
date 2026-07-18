@@ -173,6 +173,34 @@ export type ProviderModelsResponse = {
   models?: ProviderModelRecord[];
 };
 
+export type ProviderAccountSummary = {
+  id: string;
+  provider: string;
+  authMode: 'oauth' | 'api_key' | 'external_ref' | 'adapter';
+  displayLabel: string;
+  state: 'active' | 'disabled' | 'auth_failed' | 'unavailable';
+  credentialGeneration: number;
+  secretScope: 'local_node' | 'named_node' | 'external_backend';
+  nodeId?: string;
+  verifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GrokAccountCandidate = {
+  candidateId: 'xai-grok-default';
+  provider: 'xai';
+  runtimeKind: 'grok';
+  available: boolean;
+  cliInstalled: boolean;
+  authMode: 'oidc' | 'external' | 'api_key' | 'legacy' | 'unknown' | null;
+  sourceKind: 'inline_env' | 'explicit_path' | 'grok_home' | 'default_home';
+  reason: string | null;
+};
+
+export type ProviderAccountsResponse = { accounts: ProviderAccountSummary[] };
+export type ProviderAccountDiscoveryResponse = { grok: GrokAccountCandidate };
+
 export type LogFile = {
   name: string;
   path: string;
@@ -306,7 +334,7 @@ export type StreamEvent = {
 
 // ── Runtime kinds ────────────────────────────────────
 
-export type RuntimeKind = 'claude-code' | 'codex';
+export type RuntimeKind = 'claude-code' | 'codex' | 'grok';
 
 export type RuntimePayload = {
   kind: RuntimeKind;
