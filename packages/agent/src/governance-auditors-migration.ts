@@ -108,6 +108,7 @@ function ensureSourceFor(table: string): string {
     provider_call_telemetry: 'ensureProviderCallTelemetryStore (@los/agent/providers/telemetry)',
     provider_compat_evidence: 'ensureProviderCompatEvidenceStore (@los/agent/provider-compat-evidence)',
     provider_promotion_decisions: 'ensureProviderPromotionDecisionStore (@los/agent/provider-promotion-decisions)',
+    provider_accounts: 'ensureProviderAccountStore (@los/infra/provider-accounts)',
     run_evals: 'ensureRunEvalStore (@los/agent/run-evals)',
     run_specs: 'ensureRunSpecStore (@los/agent/run-specs)',
     scheduler_decisions: 'ensureSchedulerDecisionLedgerStore (@los/agent/scheduler-decision-ledger)',

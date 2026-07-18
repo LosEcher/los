@@ -34,6 +34,7 @@ import { ensureProviderCallTelemetryStore } from '@los/agent/providers/telemetry
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { getLogger } from '@los/infra/logger';
+import { ensureProviderAccountStore } from '@los/infra/provider-accounts';
 
 const log = getLogger('bootstrap');
 
@@ -63,6 +64,7 @@ export async function ensureAllStores(): Promise<void> {
   await ensureExternalToolSummaryStore();
   await ensureProviderCompatEvidenceStore();
   await ensureProviderPromotionDecisionStore();
+  await ensureProviderAccountStore();
   await ensureCancellationStore();
   await ensureExecutionStore();
   await ensureStaticGraphBaselineStore();
