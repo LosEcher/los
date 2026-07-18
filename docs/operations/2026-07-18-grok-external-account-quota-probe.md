@@ -169,9 +169,10 @@ probe.
    unauthorized, stale, and multi-bucket responses.
 3. The internal billing endpoint needs an independently approved stability and
    ownership decision before it becomes a maintained adapter.
-4. `grok-composer-2.5-fast` remains absent from the current model lists. No
-   same-model compatibility result was produced, so the 15 unacknowledged
-   `unrecoverable_error` dead letters remain untouched.
+4. Follow-up evidence in
+   `2026-07-18-xai-dead-letter-model-routing-probe.md` passed the exact composer
+   target through the separate LOS xAI provider path. The Grok CLI model list
+   remains different, and the 16 `unrecoverable_error` rows remain untouched
+   until replacement results are verified.
 5. A future Grok ACP spike must separately prove read-context, cancellation,
    tool denial, event projection, and credential provenance.
-
