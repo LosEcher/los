@@ -280,6 +280,16 @@ claimed, with a no-due-job regression covering the fallback path. The helper
 is awaited by both manual and loop sweep paths, so a command-line database
 scope cannot close before its comparison finishes. [E]
 
+Post-observation evidence on `2026-07-18` satisfies the clean-cycle stop
+condition. The active job `govjob-f83e4335-7a24-4d57-bdcc-829477f0acc8`
+persisted `seedOnly=0`, `statusDrift=0`, and `dbOnly=42` at
+`2026-07-18T00:46:55Z`, with `consecutiveNoOps=3`, zero consecutive failures,
+and a closed circuit. `computeNextState()` increments `consecutiveNoOps` only
+when a round has no findings and resets it when findings return, so the counter
+proves at least three consecutive clean rounds rather than repeated reads of
+one summary. DB-only records remain present. The paused historical job is left
+unchanged because retiring it is a separate runtime state decision. [E]
+
 ## Verification
 
 - branch and loop focused tests: 43 passed, 0 failed. [E]
@@ -320,7 +330,7 @@ scope cannot close before its comparison finishes. [E]
 | P0 | Observe 10-20 real Forgejo PRs under runner capacity 2 | record queue time, total P95, minimum available memory, swap peak and +5m delta, pnpm store size, and unchanged-head flake rate |
 | P1 | Isolate PostgreSQL DNS/network per CI job | prove test and drift jobs cannot resolve or share another job's PostgreSQL service before removing the drift dependency |
 | P1 | Add periodic pnpm store capacity checks | record weekly and every fifth eligible PR; do not re-enable unstable `actions/cache` |
-| P1 | Observe two clean `consistency_audit` cycles | require `seedOnly=0`, `statusDrift=0`, and DB-only preservation before retiring the paused historical jobs |
+| Done | Observe two clean `consistency_audit` cycles | active job now has `consecutiveNoOps=3`; latest summary is `seedOnly=0`, `statusDrift=0`, `dbOnly=42`, with DB-only records preserved |
 | P1 | Define seed-owned todo field drift policy | decide canonical versus operator-overridable title, priority, kind, source, metadata, and dependencies; then reconcile the live multi-gateway P2 row without broad overwrite |
 | P1 | Resolve 15 unacknowledged dead letters by owner | run same-model xAI compatibility evidence, add provider/model request validation and malformed-arguments fixtures, then decide acknowledgment; never auto-requeue these `unrecoverable_error` rows |
 | P1 | Deliver and observe classified dead-letter GA output | the first safe cycle proved report-only/no-task behavior but exposed missing `_gaLoop`; after rollout, require the persisted classification on a natural zero-eligible cycle |
