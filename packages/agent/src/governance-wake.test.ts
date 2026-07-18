@@ -28,6 +28,7 @@ test('runGovernanceSweepLoop with zero due jobs does not write sweep session eve
 
   const result = await runGovernanceSweepLoop({ dryRun: true });
   assert.equal(result.jobsRun, 0);
+  assert.equal('drift' in result, false, 'no-due fallback must not scan stale drift baselines');
 
   const after = await getDb().query<{ cnt: string }>(
     `SELECT COUNT(*)::text AS cnt FROM session_events

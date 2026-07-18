@@ -8,11 +8,13 @@ import {
   createGovernanceJob,
   deleteGovernanceJob,
   getGovernanceJob,
+  updateGovernanceJob,
 } from './governance-jobs-crud.js';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
 import { runJobAudit } from './governance-auditors.js';
 import { applyConsistencyFix } from './ga-loop-fixes.js';
 import { runGaLoop } from './ga-loop-runner.js';
+import { sweepGovernanceDrift } from './governance-drift-sweeper.js';
 import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
 import { archiveTodo, createTodo, loadTodo } from './todos.js';
 import type { GovernanceJobType } from './governance-jobs-types.js';
@@ -247,6 +249,50 @@ test('reflection audit runs and produces result summary', async () => {
     assert.ok(result.results.length >= 0);
   } finally {
     await deleteGovernanceJob(job.id).catch(() => undefined);
+  }
+});
+
+test('post-sweep drift compares current jobs only and counts findings', async () => {
+  await initOnce();
+  const scope = `drift-test-${Date.now()}`;
+  const baseline = await createGovernanceJob({
+    jobType: 'consistency_audit', cadence: 'hourly', tenantId: scope, projectId: scope,
+    dedupeKey: `${scope}-baseline`,
+  });
+  const pausedBaseline = await createGovernanceJob({
+    jobType: 'consistency_audit', cadence: 'hourly', status: 'paused', tenantId: scope, projectId: scope,
+    dedupeKey: `${scope}-paused`,
+  });
+  const current = await createGovernanceJob({
+    jobType: 'consistency_audit', cadence: 'hourly', tenantId: scope, projectId: scope,
+    dedupeKey: `${scope}-current`,
+  });
+
+  try {
+    const old = new Date(Date.now() - 60_000).toISOString();
+    const recent = new Date(Date.now() - 10_000).toISOString();
+    const summary = (seedOnly: number, dbOnly: number) => ({
+      todoReconciliation: { seedOnly, dbOnly, statusDrift: 0 },
+    });
+    await updateGovernanceJob(baseline.id, { lastRunAt: old, resultSummary: summary(0, 0) });
+    await updateGovernanceJob(pausedBaseline.id, { lastRunAt: recent, resultSummary: summary(99, 99) });
+    await updateGovernanceJob(current.id, { lastRunAt: recent, resultSummary: summary(6, 41) });
+
+    const report = await sweepGovernanceDrift({
+      dryRun: true,
+      tenantId: scope,
+      projectId: scope,
+      jobIds: [current.id],
+    });
+
+    assert.equal(report.jobsChecked, 1);
+    assert.equal(report.jobsWithDrift, 1);
+    assert.equal(report.totalFindings, 2, 'count individual drift findings, not jobs');
+    assert.equal(report.findings[current.id]?.length, 2);
+  } finally {
+    await deleteGovernanceJob(current.id).catch(() => undefined);
+    await deleteGovernanceJob(pausedBaseline.id).catch(() => undefined);
+    await deleteGovernanceJob(baseline.id).catch(() => undefined);
   }
 });
 
