@@ -55,7 +55,7 @@ fields:
   summary:
     completed: boolean
     cancelled: boolean
-    routeReason: configured_default | explicit_provider | explicit_model | architect_editor_override | null
+    routeReason: configured_default | explicit_provider | explicit_model | architect_editor_override | explicit_fallback_policy | null
     reasoningObserved: boolean
     toolCalls: string[]
     toolResultCount: integer

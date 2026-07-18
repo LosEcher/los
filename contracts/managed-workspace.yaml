@@ -1,0 +1,64 @@
+contract: los.managed-workspace
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Operator-gated jj workspace isolation for existing agent graph tasks. The
+  managed workspace ledger and artifact-backed backups are durable evidence;
+  filesystem state alone is not authoritative.
+type: object
+sourceOfTruth:
+  - managed_workspaces
+  - managed_workspace_events
+  - agent_tasks.metadata_json.managedWorkspaceId
+  - artifacts
+vcs:
+  supported:
+    - jj
+  baseRevision: '@-'
+  managedRoot: sibling .los-managed-workspaces directory outside the source repository
+routes:
+  - method: GET
+    path: /agent-graphs/{graphId}/workspace-plan
+    auth: access
+    description: Dry-run workspace allocation for queued executor tasks with declared editable surfaces.
+  - method: POST
+    path: /agent-graphs/{graphId}/workspaces
+    auth: operator
+    description: Create managed jj workspaces and assign them to selected graph tasks.
+  - method: GET
+    path: /managed-workspaces
+    auth: access
+  - method: GET
+    path: /managed-workspaces/{workspaceId}
+    auth: access
+  - method: POST
+    path: /managed-workspaces/{workspaceId}/backup
+    auth: operator
+    description: Persist the workspace diff through the artifact store and record its artifact id.
+  - method: POST
+    path: /managed-workspaces/{workspaceId}/release
+    auth: operator
+    description: Require exact id confirmation, create a backup, forget the jj workspace, and remove only its managed directory.
+statuses:
+  - creating
+  - active
+  - backup_ready
+  - released
+  - failed
+rules:
+  - Every mutating route requires validated operator privilege.
+  - A workspace can only be assigned to a queued executor task in the requested graph.
+  - Parallel allocation requires non-empty declared editable surfaces.
+  - The source project must be an existing configured project binding and a jj repository.
+  - Managed paths are derived by the server and must remain under the sibling managed root.
+  - Release requires confirm equal to workspaceId and a successful artifact backup in the same operation.
+  - Release removes task workspace metadata so the scheduler cannot reuse a deleted path.
+  - Scheduler task status and run status still use their existing state machines.
+  - Automatic merge, conflict resolution, remote handoff, and cross-host workspaces are outside version 0.1.0.
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/cli test
+  - pnpm check

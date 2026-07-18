@@ -1,0 +1,84 @@
+contract: los.programmatic-agent-interface
+version: 0.1.0
+status: implemented
+owner: packages/cli
+description: >
+  A stdio MCP adapter that lets external editors and agents invoke the
+  existing LOS HTTP run and operator-control surfaces without creating an
+  alternate execution state machine or evidence store.
+type: object
+transport:
+  protocol: MCP over newline-delimited JSON-RPC 2.0
+  protocolVersion: 2024-11-05
+  entrypoints:
+    sourceCheckout: bin/los mcp serve
+    packageBinary: los-mcp
+  stdout: protocol messages only
+  stderr: bounded operational diagnostics only
+tools:
+  - name: los_run
+    purpose: submit a run through POST /chat and project the terminal SSE result
+    requiredInput: [prompt, projectId]
+    defaultToolMode: read-only
+    writeRule: project-write requires an operator credential in the adapter process
+    output:
+      - sessionId
+      - runSpecId
+      - taskRunId
+      - traceId
+      - requestId
+      - status
+      - runSpecStatus
+      - text
+      - eventTypes
+  - name: los_run_state
+    purpose: read the recovery-grade state projection through GET /runs/{runSpecId}/state
+    requiredInput: [runSpecId, projectId]
+  - name: los_run_replay
+    purpose: read bounded persisted replay through GET /runs/{runSpecId}/stream
+    requiredInput: [runSpecId, projectId]
+  - name: los_operator_control
+    purpose: persist steering or follow-up through POST /sessions/{sessionId}/operator-events
+    requiredInput: [sessionId, projectId, type]
+    operatorCredentialRequired: true
+identityAndScope:
+  headers:
+    access: x-los-auth-token
+    operator: x-los-operator-token
+    tenant: x-tenant-id
+    project: x-project-id
+    user: x-user-id
+  defaults:
+    tenantId: local
+    userId: mcp-client
+  rules:
+    - projectId is explicit on every tool call.
+    - The adapter forwards the operator header only for operator-controlled writes.
+    - The adapter never derives an operator actor from tool arguments.
+    - Gateway request context and persisted run/session/task evidence remain authoritative.
+safety:
+  - Raw credentials are read from process environment or CLI flags and never returned in MCP content.
+  - los_run rejects project-write when the adapter has no operator credential.
+  - all tool mode is not exposed by the MCP adapter.
+  - Tool output is bounded and does not return raw credentials or request headers.
+  - Unknown tools and invalid arguments return MCP errors without calling the gateway.
+sourceOfTruth:
+  execution: POST /chat
+  state: run_specs, task_runs, session_events, tool_call_states, verification_records
+  control: POST /sessions/{sessionId}/operator-events
+  replay: GET /runs/{runSpecId}/stream
+nonGoals:
+  - A second scheduler or run state machine inside the MCP process.
+  - ACP or a new JSON-RPC gateway route.
+  - Direct PostgreSQL writes from the MCP adapter.
+  - Automatic operator promotion based on MCP client identity.
+references:
+  - docs/adr/0009-client-first-execution-and-node-binaries.md
+  - docs/adr/0025-conversation-run-coordinator-boundary.md
+  - docs/adr/0031-programmatic-agent-interface-over-mcp.md
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/cli test
+  - pnpm --filter @los/cli check
+  - deterministic MCP stdio probe
+  - pnpm check
