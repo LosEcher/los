@@ -23,9 +23,9 @@ external cache action before repository checks can start. Turbo `test` remains
 uncached and every package test command executes on every PR.
 
 The node34 runner currently exposes two job slots. `gate-test` sets
-`LOS_TEST_CONCURRENCY=3`, while `gate-fast` sets `TURBO_CONCURRENCY=1`. The two
-overlapping jobs therefore advertise at most four Turbo package tasks, with the
-test suite's package-level work capped at three. This is the current compromise
+`LOS_TEST_CONCURRENCY=4`, while `gate-fast` sets `TURBO_CONCURRENCY=1`. The two
+overlapping jobs therefore advertise at most five Turbo package tasks, with the
+test suite's package-level work capped at four. This is the current compromise
 for the expanded workspace suite and the runner's execution window; revisit it
 only with CPU, available memory, swap, and job-duration evidence from a
 representative PR batch.
