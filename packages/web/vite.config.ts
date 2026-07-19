@@ -13,6 +13,7 @@ export default defineConfig({
       // Keep in sync with gateway route registrations in server.ts.
       '/artifacts': 'http://127.0.0.1:8080',
       '/chat': 'http://127.0.0.1:8080',
+      '/communication': 'http://127.0.0.1:8080',
       '/health': 'http://127.0.0.1:8080',
       '/logs': 'http://127.0.0.1:8080',
       '/mcp-servers': 'http://127.0.0.1:8080',

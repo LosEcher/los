@@ -1,4 +1,4 @@
-import { getRunJson, postRunJson, type RunRequestAuth } from './run-http.js';
+import { requestCliJson, resolveCliRequestAuth, type CliRequestAuth } from './cli-http.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -35,12 +35,12 @@ async function runOperationCommand(
   const json = booleanFlag(parsed, 'json');
   const auth = requestAuth(parsed);
   if (subcommand === 'inspect') {
-    const value = await getRunJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/inspect`, auth);
+    const value = await requestCliJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/inspect`, { auth });
     renderRunInspect(value, json);
     return;
   }
   if (subcommand === 'state') {
-    const value = await getRunJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/state`, auth);
+    const value = await requestCliJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/state`, { auth });
     renderRunState(value, json);
     return;
   }
@@ -77,9 +77,9 @@ async function runOperationCommand(
     const since = numberFlag(parsed, 'since') ?? 0;
     const streamSince = numberFlag(parsed, 'stream-since') ?? 0;
     const limit = numberFlag(parsed, 'limit') ?? 500;
-    const value = await getRunJson(
+    const value = await requestCliJson(
       `${gateway}/runs/${encodeURIComponent(runSpecId)}/stream?since=${since}&streamSince=${streamSince}&limit=${limit}`,
-      auth,
+      { auth },
     );
     renderRunReplay(value, json);
     return;
@@ -93,11 +93,18 @@ async function runOperationCommand(
   renderRunVerify(value, json);
 }
 
-function requestAuth(parsed: ParsedArgs): RunRequestAuth {
-  return {
-    authToken: stringFlag(parsed, 'auth-token') ?? stringFlag(parsed, 't') ?? process.env.LOS_AUTH_TOKEN,
-    operatorToken: stringFlag(parsed, 'operator-token') ?? process.env.LOS_OPERATOR_TOKEN,
-  };
+function requestAuth(parsed: ParsedArgs): CliRequestAuth {
+  return resolveCliRequestAuth(parsed.flags);
+}
+
+async function postRunJson(url: string, body: JsonRecord, auth: CliRequestAuth): Promise<unknown> {
+  return await requestCliJson(url, {
+    method: 'POST',
+    auth,
+    operatorWrite: true,
+    json: true,
+    body: JSON.stringify(body),
+  });
 }
 
 function renderRunInspect(value: unknown, json: boolean): void {

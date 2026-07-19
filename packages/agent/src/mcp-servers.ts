@@ -6,6 +6,15 @@
  */
 
 import { getDb } from '@los/infra/db';
+import {
+  mcpDistributionVersionHash,
+  mcpVersionSnapshot,
+  normalizeMCPAuthConfig,
+  normalizeMCPToolPolicy,
+  type MCPAuthConfig,
+  type MCPToolPolicy,
+} from './mcp-distribution-policy.js';
+import { _MCP_SERVER_SCHEMA } from './mcp-server-schema.js';
 
 // ── Types ───────────────────────────────────────────────
 
@@ -21,6 +30,11 @@ export interface MCPServerRecord {
   args: string[];
   url?: string;
   env: Record<string, string>;
+  sourceUri: string;
+  versionHash: string;
+  pinnedVersionHash?: string;
+  authConfig: MCPAuthConfig;
+  toolPolicy: MCPToolPolicy;
   enabled: boolean;
   status: MCPServerStatus;
   lastError?: string;
@@ -45,6 +59,12 @@ export interface UpsertMCPServerInput {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  sourceUri?: string;
+  versionHash?: string;
+  pinnedVersionHash?: string | null;
+  authConfig?: MCPAuthConfig;
+  toolPolicy?: MCPToolPolicy;
+  allowPinnedUpdate?: boolean;
   enabled?: boolean;
 }
 
@@ -61,42 +81,12 @@ export interface ListMCPServersOptions {
   enabled?: boolean;
 }
 
-// ── Schema ──────────────────────────────────────────────
-
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS mcp_servers (
-  id TEXT NOT NULL,
-  tenant_id TEXT NOT NULL DEFAULT '',
-  project_id TEXT NOT NULL DEFAULT '',
-  transport TEXT NOT NULL DEFAULT 'stdio',
-  command TEXT,
-  args_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-  url TEXT,
-  env_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  enabled BOOLEAN NOT NULL DEFAULT true,
-  status TEXT NOT NULL DEFAULT 'unverified',
-  last_error TEXT,
-  tool_count INTEGER NOT NULL DEFAULT 0,
-  tools_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (id, tenant_id, project_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant_project
-  ON mcp_servers(tenant_id, project_id);
-CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled
-  ON mcp_servers(enabled) WHERE enabled = true;
-CREATE INDEX IF NOT EXISTS idx_mcp_servers_status
-  ON mcp_servers(status);
-`;
-
 let _initialized = false;
 
 export async function ensureMCPServerStore(): Promise<void> {
   if (_initialized) return;
   const db = getDb();
-  await db.exec(SCHEMA);
+  await db.exec(_MCP_SERVER_SCHEMA);
   _initialized = true;
 }
 
@@ -105,13 +95,36 @@ export async function ensureMCPServerStore(): Promise<void> {
 export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPServerRecord> {
   await ensureMCPServerStore();
   const db = getDb();
+  const tenantId = normalizeScopeValue(input.tenantId);
+  const projectId = normalizeScopeValue(input.projectId);
+  const existing = await loadMCPServer(input.id, tenantId, projectId);
+  const authConfig = normalizeMCPAuthConfig(input.authConfig);
+  const toolPolicy = normalizeMCPToolPolicy(input.toolPolicy);
+  const env = input.env ?? {};
+  const versionHash = mcpDistributionVersionHash({
+    id: input.id,
+    transport: input.transport,
+    command: input.command,
+    args: input.args,
+    url: input.url,
+    envKeys: Object.keys(env),
+    sourceUri: input.sourceUri,
+    authConfig,
+    toolPolicy,
+  });
+  if (input.versionHash && input.versionHash !== versionHash) throw new Error('MCP versionHash must match inspected configuration');
+  if (existing?.pinnedVersionHash && existing.pinnedVersionHash !== versionHash && input.allowPinnedUpdate !== true) {
+    throw new Error(`MCP server is pinned to version ${existing.pinnedVersionHash}`);
+  }
   const rows = await db.query<MCPServerRow>(
     `
     INSERT INTO mcp_servers (
       id, tenant_id, project_id, transport, command, args_json, url,
-      env_json, enabled, status, updated_at
+      env_json, enabled, status, source_uri, version_hash, pinned_version_hash,
+      auth_json, tool_policy_json, distribution_json, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9, 'unverified', now())
+    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9, 'unverified',
+      $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, now())
     ON CONFLICT (id, tenant_id, project_id)
     DO UPDATE SET
       transport = EXCLUDED.transport,
@@ -120,22 +133,43 @@ export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPS
       url = EXCLUDED.url,
       env_json = EXCLUDED.env_json,
       enabled = EXCLUDED.enabled,
+      status = 'unverified',
+      last_error = NULL,
+      source_uri = EXCLUDED.source_uri,
+      version_hash = EXCLUDED.version_hash,
+      pinned_version_hash = CASE WHEN $12::text IS NULL THEN mcp_servers.pinned_version_hash ELSE EXCLUDED.pinned_version_hash END,
+      auth_json = EXCLUDED.auth_json,
+      tool_policy_json = EXCLUDED.tool_policy_json,
+      distribution_json = EXCLUDED.distribution_json,
       updated_at = now()
     RETURNING *
   `,
     [
       input.id,
-      normalizeScopeValue(input.tenantId),
-      normalizeScopeValue(input.projectId),
+      tenantId,
+      projectId,
       input.transport,
       input.command ?? null,
       JSON.stringify(input.args ?? []),
       input.url ?? null,
-      JSON.stringify(input.env ?? {}),
-      input.enabled ?? true,
+      JSON.stringify(env),
+      input.enabled ?? false,
+      input.sourceUri ?? '',
+      versionHash,
+      input.pinnedVersionHash ?? null,
+      JSON.stringify(authConfig),
+      JSON.stringify(toolPolicy),
+      JSON.stringify({ inspected: true, envKeys: Object.keys(env).sort() }),
     ],
   );
-  return rowToRecord(assertRow(rows.rows[0]));
+  const record = rowToRecord(assertRow(rows.rows[0]));
+  await db.query(
+    `INSERT INTO mcp_server_versions (id, tenant_id, project_id, version_hash, snapshot_json)
+     VALUES ($1, $2, $3, $4, $5::jsonb)
+     ON CONFLICT (id, tenant_id, project_id, version_hash) DO NOTHING`,
+    [record.id, tenantId, projectId, record.versionHash, JSON.stringify(mcpVersionSnapshot({ ...record, envKeys: Object.keys(record.env).sort() }))],
+  );
+  return record;
 }
 
 export async function loadMCPServer(
@@ -258,6 +292,12 @@ type MCPServerRow = {
   last_error: string | null;
   tool_count: number;
   tools_json: unknown;
+  source_uri: string;
+  version_hash: string;
+  pinned_version_hash: string | null;
+  auth_json: unknown;
+  tool_policy_json: unknown;
+  distribution_json: unknown;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -272,6 +312,11 @@ function rowToRecord(row: MCPServerRow): MCPServerRecord {
     args: normalizeJsonArray(row.args_json).map(String),
     url: row.url ?? undefined,
     env: normalizeEnvObject(row.env_json),
+    sourceUri: row.source_uri,
+    versionHash: row.version_hash,
+    pinnedVersionHash: row.pinned_version_hash ?? undefined,
+    authConfig: normalizeMCPAuthConfig(row.auth_json),
+    toolPolicy: normalizeMCPToolPolicy(row.tool_policy_json),
     enabled: row.enabled,
     status: row.status as MCPServerStatus,
     lastError: row.last_error ?? undefined,

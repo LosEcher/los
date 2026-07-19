@@ -174,7 +174,7 @@ export async function runAgentOnExecutor(
     agentTaskLease?: { taskId: string; leaseVersion: number };
     leaseMs: number;
     prompt: string;
-    config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
+    config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
     onSessionEvent?: AgentConfig['onSessionEvent'];
     onModelDelta?: AgentConfig['onModelDelta'];

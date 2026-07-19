@@ -117,7 +117,7 @@ export function OperatorSteeringBar({
   }
 
   return (
-    <div className="operator-steering-bar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0' }}>
+    <div className="operator-steering-bar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 16px' }}>
       <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Operator:</span>
       <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('approve')}>
         <Check size={12} /> Approve

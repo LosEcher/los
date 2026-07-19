@@ -21,6 +21,7 @@ import {
   Skull,
   TerminalSquare,
   Zap,
+  Wrench,
 } from 'lucide-react';
 import {
   getJson,
@@ -45,6 +46,7 @@ import {
   RunSpecsPage,
   SessionsPage,
   SettingsPage,
+  SetupPage,
   TasksPage,
 } from './pages';
 import { ChatPage } from './chat-page';
@@ -78,6 +80,7 @@ type PageId =
   | 'file-sync'
   | 'run-specs'
   | 'communication-accounts'
+  | 'setup'
   | 'settings';
 
 type NavAudience = 'workspace' | 'configure' | 'operations';
@@ -104,7 +107,8 @@ const NAV: NavItem[] = [
   { id: 'communication-accounts', label: 'Communications', icon: MessageSquare, status: 'live', audience: 'workspace', section: 'Communication' },
 
   // ── Configure (setup, rarely changed) ────────────────────
-  { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure', section: 'Configure' },
+  { id: 'setup', label: 'Setup', icon: Wrench, status: 'live', audience: 'configure', section: 'Configure' },
+  { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure' },
   { id: 'skills', label: 'Skills', icon: Zap, status: 'live', audience: 'configure' },
   { id: 'rules', label: 'Rules', icon: Shield, status: 'live', audience: 'configure' },
   { id: 'mcp', label: 'MCP', icon: Server, status: 'live', audience: 'configure' },
@@ -315,6 +319,7 @@ export function App() {
         {page === 'communication-accounts' && <CommunicationAccountsPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
+        {page === 'setup' && <SetupPage />}
       </main>
     </div>
   );

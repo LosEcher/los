@@ -298,23 +298,32 @@ export function ChatPage({
           <ContextChip label="task" value={taskRunId ?? (run.running ? 'starting' : 'idle')} tone={run.running ? 'warn' : undefined} />
         </div>
 
-        <ChatMessages messages={run.messages} debugMode={debugMode} onDebugModeChange={setDebugMode} running={run.running}>
-          {run.contextNotifs.length > 0 && (
-            <div className="context-notif-strip">
-              {run.contextNotifs.map(cn => <ContextNotification key={cn.id} event={cn.event} data={cn.data} />)}
-            </div>
+        <ChatMessages
+          messages={run.messages}
+          debugMode={debugMode}
+          onDebugModeChange={setDebugMode}
+          running={run.running}
+          notices={(
+            <>
+              {run.contextNotifs.length > 0 && (
+                <div className="context-notif-strip">
+                  {run.contextNotifs.map(cn => <ContextNotification key={cn.id} event={cn.event} data={cn.data} />)}
+                </div>
+              )}
+              {run.cancelled && <CancelledBanner />}
+              {sessionId ? (
+                <OperatorSteeringBar sessionId={sessionId} disabled={!run.running && run.approvalEvents.length === 0} />
+              ) : null}
+              {run.approvalEvents.length > 0 && (
+                <div className="approval-strip">
+                  {run.approvalEvents.map(ae => (
+                    <ApprovalCard key={ae.id} event={ae} sessionId={sessionId} />
+                  ))}
+                </div>
+              )}
+            </>
           )}
-          {run.cancelled && <CancelledBanner />}
-          {sessionId ? (
-            <OperatorSteeringBar sessionId={sessionId} disabled={!run.running && run.approvalEvents.length === 0} />
-          ) : null}
-          {run.approvalEvents.length > 0 && (
-            <div className="approval-strip">
-              {run.approvalEvents.map(ae => (
-                <ApprovalCard key={ae.id} event={ae} sessionId={sessionId} />
-              ))}
-            </div>
-          )}
+        >
           {run.rows.length === 0 ? <EmptyText text="No stream events yet." /> : run.rows.map(row => (
             <div className={`stream-row${row.event === '---' || row.event === 'history.end' ? ' stream-separator' : ''}`} data-level={row.level ?? 'normal'} key={row.id}>
               <span className="stream-event">{row.event}</span>

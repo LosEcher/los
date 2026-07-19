@@ -1,0 +1,89 @@
+contract: los.skill-mcp-distribution
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Auditable distribution lifecycle for file-backed skills and persistent MCP
+  server registrations. Sources and content-derived versions are inspectable
+  before apply, updates retain rollback history, pins prevent unreviewed drift,
+  and MCP authentication remains separate from per-tool execution policy.
+type: object
+routes:
+  skills:
+    - method: POST
+      path: /skills/import/inspect
+      behavior: read files and compare versions without writing PostgreSQL
+    - method: POST
+      path: /skills/import/apply
+      behavior: apply only the exact name/version pairs returned by inspect
+    - method: GET
+      path: /skills/:name/history
+    - method: POST
+      path: /skills/:name/pin
+    - method: POST
+      path: /skills/:name/rollback
+  mcpServers:
+    - method: POST
+      path: /mcp-servers/inspect
+      behavior: normalize and hash a registration without writing PostgreSQL or starting a process
+    - method: POST
+      path: /mcp-servers
+      behavior: apply only when inspectedVersionHash matches the normalized registration
+    - method: GET
+      path: /mcp-servers/:id/history
+    - method: POST
+      path: /mcp-servers/:id/pin
+    - method: POST
+      path: /mcp-servers/:id/rollback
+versioning:
+  algorithm: sha256
+  encoding: lowercase hexadecimal
+  skills: hash canonical source path, metadata, and content
+  mcpServers: hash normalized transport, connection metadata, auth config, and tool policy
+  history: immutable snapshots keyed by scoped entity id and version hash
+  pinBehavior: an update whose version differs from pinnedVersionHash is rejected with 409
+skillImport:
+  inspectActions:
+    - create
+    - update
+    - unchanged
+  applyPrecondition: every selected name/versionHash pair must still match a fresh inspect
+  legacyLoadFromDir: preview-only; callers must use /skills/import/apply to write
+mcpAuthentication:
+  shape:
+    mode: none | credential_ref | oauth
+    credentialRef: opaque string | null
+  separation: authConfig and toolPolicy are independent persisted objects
+  secretStorage: raw access tokens, refresh tokens, cookies, API keys, and OAuth payloads are forbidden
+  responseRedaction: API responses expose envKeys but never env values
+  currentExecution:
+    stdioWithoutAuth: supported after explicit verification and enablement
+    credentialRef: fail-closed until a credential resolver is implemented
+    oauth: fail-closed until OAuth transport and credential resolution are implemented
+    sse: fail-closed
+    streamableHttp: fail-closed
+mcpToolPolicy:
+  shape:
+    allow: string[]
+    deny: string[]
+    riskLevel: L0 | L1 | L2
+  behavior:
+    - deny takes precedence
+    - a non-empty allow list excludes tools not named in it
+    - accepted tools are registered with the configured risk level
+registrationSafety:
+  defaultEnabled: false
+  executionEligibility:
+    - enabled is true
+    - status is connected
+    - pinnedVersionHash is empty or equals versionHash
+    - transport is stdio
+    - auth mode is none
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/web test
+  - pnpm check
+  - deterministic stdio MCP probe
+  - pnpm run gate

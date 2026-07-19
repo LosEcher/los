@@ -20,6 +20,7 @@ export interface SpawnAgentRunnerOptions {
   sessionId?: string;
   provider?: string;
   model?: string;
+  providerFallback?: AgentConfig['providerFallback'];
   modelSettings?: AgentConfig['modelSettings'];
   runContractMetadata?: AgentConfig['runContractMetadata'];
   workspaceRoot?: string;
@@ -41,6 +42,7 @@ export interface SpawnAgentRunnerOptions {
   };
   signal?: AbortSignal;
   onSessionEvent?: (event: import('../../session-events.js').SessionEventRecord) => void | Promise<void>;
+  onProviderFallback?: AgentConfig['onProviderFallback'];
 }
 
 const SUBAGENT_PROJECT_WRITE_TOOLS = [
@@ -113,10 +115,12 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
     const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : undefined;
     // AP6: full contract inheritance (phase, surfaces, requiredChecks) as an isolated clone
     const childRunContractMetadata = inheritRunContractMetadata(options.runContractMetadata);
+    const childOverridesRoute = Boolean(request.provider || request.model);
     const childResult = await options.runAgent(request.prompt, {
       sessionId: childSessionId,
       provider: request.provider ?? options.provider,
       model: request.model ?? options.model,
+      providerFallback: childOverridesRoute ? undefined : options.providerFallback,
       modelSettings: options.modelSettings,
       runContractMetadata: childRunContractMetadata,
       // Inherit trace/request/dedupe linkage from parent
@@ -134,6 +138,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       toolRetry: options.toolRetry,
       signal: options.signal,
       onSessionEvent: options.onSessionEvent,
+      onProviderFallback: options.onProviderFallback,
       // Inherit architect-editor config from parent if enabled
       architectEditor: options.architectEditor,
       preActionGate: options.preActionGate,

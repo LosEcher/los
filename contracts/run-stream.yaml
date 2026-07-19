@@ -1,5 +1,5 @@
 contract: los.run-stream
-version: 0.2.0
+version: 0.3.0
 status: implemented
 owner: packages/agent
 description: >
@@ -22,6 +22,7 @@ eventTypes:
   - session.blocked
   - operator.steering
   - operator.followup
+  - operator.control.consumed
   - coordinator.intake_resolved
   - coordinator.intake_blocked
   - coordinator.context_policy_selected
@@ -38,6 +39,8 @@ eventTypes:
   - task.recovery_followup_queued
   - model.delta
   - model.response
+  - provider.fallback.selected
+  - provider.fallback.exhausted
   - tool.planned
   - tool.approved
   - tool.denied
@@ -82,6 +85,17 @@ commonFields:
     type: string
     format: date-time
 eventPayloads:
+  operator.control.consumed:
+    sourceEventId: integer
+    controlType: operator.steering | operator.followup
+    boundary: before_turn | after_completion
+    turn: integer
+    cursor: integer
+    consumerRunSpecId: string | null
+    consumerTaskRunId: string | null
+    turnBoundary: next_turn | immediate | null
+    drainMode: none | finish_current_tool | finish_current_turn | null
+    consumedAt: string
   coordinator.intake_resolved:
     requestedProjectId: string | null
     requestedWorkspaceRoot: string | null
@@ -142,7 +156,28 @@ eventPayloads:
     requestedModel: string | null
     effectiveProvider: string
     effectiveModel: string
-    routeReason: configured_default | explicit_provider | explicit_model | architect_editor_override
+    routeReason: configured_default | explicit_provider | explicit_model | architect_editor_override | explicit_fallback_policy
+  provider.fallback.selected:
+    policyMode: explicit_ordered
+    callIndex: integer
+    switchIndex: integer
+    failureClass: transport | rate_limit | provider_unavailable
+    errorCode: string | null
+    errorMessage: string
+    fromProvider: string
+    fromModel: string
+    toProvider: string
+    toModel: string
+    compatibilityEvidenceId: string | null
+  provider.fallback.exhausted:
+    policyMode: explicit_ordered
+    callIndex: integer
+    switchCount: integer
+    failureClass: transport | rate_limit | provider_unavailable
+    errorCode: string | null
+    errorMessage: string
+    provider: string
+    model: string
 chunks:
   executorNdjson:
     - type: session_event
@@ -240,6 +275,16 @@ replay:
   future:
     - SSE reconnect with model.delta replay
 operatorControl:
+  consumption:
+    owner: packages/agent/src/loop.ts
+    sourceOfTruth: session_events
+    cursor: source event id, tracked independently for steering and follow-up
+    idempotency: one operator.control.consumed event per source event and session
+    steeringBoundary: before the next model turn, after any in-flight model or tool call returns
+    followupBoundary: after the current model response would otherwise complete the run
+    immediateBehavior: applies at the next safe loop boundary; it does not interrupt an in-flight provider or tool call
+    recoveryBehavior: persisted consumption evidence prevents another gateway or executor from consuming the same source event
+    executorBehavior: gateway-local and remote executors consume through the shared PostgreSQL session_events ledger
   websocketMessages:
     - steering
     - cancel

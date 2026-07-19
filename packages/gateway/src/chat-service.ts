@@ -2,7 +2,7 @@ import { runScheduledAgentTask } from '@los/agent/scheduler';
 import type { Config } from '@los/infra/config';
 import type { Logger } from '@los/infra/logger';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
-import type { Message, CheckpointState, RunContractMetadataInput, IdentityLevel } from '@los/agent';
+import type { Message, CheckpointState, RunContractMetadataInput, IdentityLevel, ProviderFallbackPolicy } from '@los/agent';
 import { updateBoundTodoFromRun, loadBranchSource } from './chat-session-helpers.js';
 import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import { recordSessionBranchCreated } from '@los/agent/operator-control';
@@ -24,7 +24,6 @@ import {
 } from './chat-resume-plan.js';
 
 export type { SendEvent } from './chat-live-events.js';
-
 export interface ChatRunContext {
   activeTaskRunId: string | undefined;
   activeRunSpecId: string | undefined;
@@ -57,6 +56,7 @@ export async function runChat(params: {
   systemPrompt: string | undefined;
   provider: string | undefined;
   model: string | undefined;
+  providerFallback: ProviderFallbackPolicy | undefined;
   modelSettings: Record<string, unknown> | undefined;
   workspaceRoot: string;
   toolMode: string;
@@ -92,7 +92,7 @@ export async function runChat(params: {
   send: SendEvent;
 }): Promise<ChatResult> {
   const {
-    prompt, sessionId, systemPrompt, provider, model, modelSettings,
+    prompt, sessionId, systemPrompt, provider, model, providerFallback, modelSettings,
     workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
     traceId, dedupeKey, signal, sid, tenantId, projectId, userId, actorSubject, requestId,
@@ -237,6 +237,7 @@ export async function runChat(params: {
       runSpecId,
       provider,
       model,
+      providerFallback,
       modelSettings,
       systemPrompt: effectiveSystemPrompt,
       workspaceRoot,
@@ -268,6 +269,7 @@ export async function runChat(params: {
       metadata: {
         maxLoops: maxLoops ?? config.agent.maxLoops,
         model,
+        providerFallback,
         modelSettings,
         allowedTools,
         timeoutMs,

@@ -5,7 +5,10 @@ import { recordProviderCompatEvidence } from '@los/agent';
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { createServer } from './server.js';
-import { sanitizeProviderCompatSummary } from './routes/providers/provider-helpers.js';
+import {
+  sanitizeProviderCompatSummary,
+  sanitizeProviderDiscovery,
+} from './routes/providers/provider-helpers.js';
 
 test('provider compat summary only exposes recognized route reasons', () => {
   assert.equal(sanitizeProviderCompatSummary({
@@ -14,6 +17,33 @@ test('provider compat summary only exposes recognized route reasons', () => {
   assert.equal(sanitizeProviderCompatSummary({
     routeReason: 'risk_escalation',
   }).routeReason, null);
+});
+
+test('onboarding provider summary uses the persisted evidence decision and pass state', () => {
+  const summary = sanitizeProviderDiscovery({
+    name: 'provider-a',
+    available: true,
+    source: 'test',
+    importable: true,
+  }, [{
+    provider: 'provider-a',
+    model: 'model-a',
+    decision: 'verified_advisory',
+    passed: true,
+  }]);
+
+  assert.deepEqual(summary.compatEvidence, {
+    count: 1,
+    latestVerdict: 'verified_advisory',
+    latestDecision: 'verified_advisory',
+    latestPassed: true,
+    latest: {
+      provider: 'provider-a',
+      model: 'model-a',
+      decision: 'verified_advisory',
+      passed: true,
+    },
+  });
 });
 
 test('provider compat evidence route exposes bounded operator evidence', async () => {

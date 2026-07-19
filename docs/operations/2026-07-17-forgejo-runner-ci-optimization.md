@@ -197,6 +197,20 @@ dirty the current working copy and are not part of this delivery. Review or
 abandonment is a separate destructive-history decision and requires explicit
 operator scope.
 
+## 2026-07-19 jj Runtime Follow-up
+
+The expanded agent suite includes a managed-workspace test that creates a real
+temporary jj repository. Forgejo run `185`, job `667`, exposed the missing
+runner dependency as `spawn jj ENOENT`; package concurrency was not the cause.
+
+The `gate-test` job now targets an `ubuntu-jj` runner label. On node34 that
+label maps to the host-local `los-ci:node22-jj0.39.0` image built from
+`.forgejo/images/node22-jj/Dockerfile`. The image pins the Jujutsu release URL
+and SHA-256 checksum, and `gate-test` verifies `jj --version` before running the
+workspace suite. Building the image requires access to the upstream release
+asset, but normal Forgejo CI execution does not depend on GitHub after the
+image is provisioned.
+
 ## Observation Protocol
 
 Eligible samples are real pull-request workflows created after PR `#25`.

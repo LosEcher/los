@@ -57,6 +57,10 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0030-provider-account-credential-and-quota-boundary.md` - provider account
   identity, credential refresh safety, quota snapshots, explicit selection,
   and effective-call provenance.
+- `0031-programmatic-agent-interface-over-mcp.md` - supported stdio MCP client
+  adapter over the existing run, replay, and operator-control contracts.
+- `0032-managed-jj-workspace-operations.md` - operator-gated jj workspace
+  allocation and artifact-backed cleanup evidence for graph tasks.
 
 ### Operation Smokes
 
@@ -76,6 +80,10 @@ Use `operations/database-migrations.md` for migration ownership, startup
 application behavior, drift validation, and failure handling. Use
 `operations/github-mirror-recovery.md` when the secondary GitHub `main` has
 diverged from Forgejo and requires an explicitly approved lease-protected repair.
+
+Use `operations/programmatic-agent-interface.md` for external agent access and
+`operations/managed-workspaces.md` for operator-gated jj workspace allocation,
+backup evidence, and release.
 
 ### Governance
 
@@ -100,6 +108,10 @@ a future ADR.
 Use `governance/hermes-web-ui-reference-plan.md` when comparing Hermes Web UI
 patterns against `los` and deciding which UX, run-state, node-pairing,
 provider-evidence, or harness ideas should become local work items.
+
+Use `governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
+for the verified LOS capability map, concrete CLI/Web/MCP/channel/workspace
+operator paths, and the current boundary against pi and Hermes Agent.
 
 Use `governance/github-branch-gates.md` when pushing, opening PRs, merging to
 `main`, checking GitHub Actions gate requirements, or separating local gate

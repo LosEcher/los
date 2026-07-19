@@ -31,6 +31,7 @@ import { registerRuleRoutes } from './routes/tools/rule-routes.js';
 import { registerTodoRoutes } from './routes/data/todo-routes.js';
 import { registerSaaSTodoRoutes } from './routes/data/saas-todo-routes.js';
 import { registerAgentTaskGraphRoutes } from './routes/orchestration/agent-task-graph-routes.js';
+import { registerManagedWorkspaceRoutes } from './routes/orchestration/managed-workspace-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
 import { ensureAllStores } from './bootstrap.js';
@@ -257,6 +258,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerTodoRoutes(app);
   registerSaaSTodoRoutes(app);
   registerAgentTaskGraphRoutes(app);
+  registerManagedWorkspaceRoutes(app, { artifactStorageRoot: ARTIFACT_STORAGE_ROOT });
   registerDiagnosticsRoutes(app);
   registerGovernanceRoutes(app);
   registerNodeRoutes(app);

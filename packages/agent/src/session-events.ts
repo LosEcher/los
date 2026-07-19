@@ -168,6 +168,9 @@ CREATE INDEX IF NOT EXISTS idx_session_events_model ON session_events(model);
 CREATE INDEX IF NOT EXISTS idx_session_events_tool_name ON session_events(tool_name);
 CREATE INDEX IF NOT EXISTS idx_session_events_cache_key ON session_events(cache_key);
 CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_operator_control_consumed
+  ON session_events(session_id, parent_event_id)
+  WHERE type = 'operator.control.consumed' AND parent_event_id IS NOT NULL;
 `;
 
 let _initialized = false;

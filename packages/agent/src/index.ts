@@ -33,6 +33,18 @@ export { ensureRunSpecStore, claimRunSpec, createRunSpec, approveRunSpecPhase, l
 export { canMarkSucceeded, canStartExecution, mergeRunContractMetadata, normalizeRunContractMetadata, readRunContractMetadata, validatePhaseTransition, type PlanRevisionSnapshot, type PlanStep, type RunContractMetadata, type RunContractMetadataInput, type RunContractMode, type RunPhase, type VerificationRequirement } from './run-contract.js';
 export { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, trimSpecForReview, type LoadedSpec, type LoadSpecsOptions, type SpecLayer } from './spec-loader.js';
+export {
+  createProviderFallbackRouter,
+  normalizeProviderFallbackPolicy,
+  prepareProviderFallbackPolicy,
+  resolveProviderFallbackInitialTarget,
+  type PreparedProviderFallbackTarget,
+  type ProviderFallbackEvidence,
+  type ProviderFallbackEvent,
+  type ProviderFallbackFailureClass,
+  type ProviderFallbackPolicy,
+  type ProviderFallbackTarget,
+} from './providers/provider-fallback.js';
 export { resolveAgentIdentity, resolveEffectiveIdentityLevel, resolveIdentityLevelForExecutionPath, formatIdentityForPrompt, type AgentIdentity, type AgentIdentityExecutionPath, type IdentityLevel, type IdentityResolveSource } from './identity-loader.js';
 export { runLifecycleHooks, type RunHookInput, type HookEvent } from './lifecycle-hooks.js';
 export { createVerificationRecord, ensureVerificationRecordStore, listVerificationRecordsForRunSpec, listVerificationRecordsForSession, loadVerificationRecord, seedVerificationRequirementsForRunSpec, type CreateVerificationRecordInput, type VerificationRecord, type VerificationRecordStatus } from './verification-records.js';
@@ -60,7 +72,8 @@ export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEve
 export { summarizeDeadLetterEvents, requeueDeadLetterEvent, type DeadLetterReasonSummary, type DeadLetterSummary, type DeadLetterRequeueResult, type DeadLetterRequeueOptions } from './dead-letter-recovery.js';
 export { ensureRunEvalStore, compareRunEvals, listRunEvals, recordFailoverEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type SummarizeRunEvalsOptions } from './run-evals.js';
 export { getEvalBacklogCases, recordEvalBacklogSnapshot, type EvalBacklogCase } from './eval-backlog-runner.js';
-export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskLeaseFence, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
+export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, editableSurfacesForAgentTask, editableSurfacesOverlap, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskLeaseFence, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
+export { backupManagedWorkspace, createManagedWorkspace, ensureManagedWorkspaceStore, listManagedWorkspaces, loadManagedWorkspace, loadManagedWorkspaceDetail, releaseManagedWorkspace, workspaceRootForTask, type CreateManagedWorkspaceInput, type ListManagedWorkspacesOptions, type ManagedWorkspaceDetail, type ManagedWorkspaceEvent, type ManagedWorkspaceRecord, type ManagedWorkspaceRuntimeOptions, type ManagedWorkspaceStatus } from './managed-workspaces.js';
 export { getAgentTaskGraphCompletion, readAgentTaskGraph, summarizeAgentTaskGraph, type AgentTaskGraphBlockReason, type AgentTaskGraphCompletion, type AgentTaskGraphCompletionOptions, type AgentTaskGraphCompletionStatus, type AgentTaskGraphReadModel } from './agent-task-graph-read-model.js';
 export { ensureSchedulerDecisionLedgerStore, listSchedulerDecisions, recordSchedulerDecision, type ListSchedulerDecisionsOptions, type RecordSchedulerDecisionInput, type SchedulerDecisionKind, type SchedulerDecisionRecord } from './scheduler-decision-ledger.js';
 export { buildExecutionStaticGraph, type BuildExecutionStaticGraphOptions, type ExecutionStaticEdge, type ExecutionStaticEdgeKind, type ExecutionStaticGraph, type ExecutionStaticNode, type ExecutionStaticNodeKind } from './execution-static-graph.js';

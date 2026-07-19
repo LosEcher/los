@@ -225,10 +225,11 @@ export function MessageBubble({ message, isStreaming }: { message: Message; isSt
   );
 }
 
-export function ChatMessages({ messages, debugMode, onDebugModeChange, children, running }: {
+export function ChatMessages({ messages, debugMode, onDebugModeChange, notices, children, running }: {
   messages: Message[];
   debugMode: boolean;
   onDebugModeChange: (mode: boolean) => void;
+  notices?: ReactNode;
   children?: ReactNode;
   running?: boolean;
 }) {
@@ -247,6 +248,8 @@ export function ChatMessages({ messages, debugMode, onDebugModeChange, children,
           <span>debug events</span>
         </label>
       </div>
+
+      {notices}
 
       {debugMode ? (
         <div className="stream-list">{children}</div>

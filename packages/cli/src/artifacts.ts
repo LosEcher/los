@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { fetchCliResponse, requestCliJson, resolveCliRequestAuth } from './cli-http.js';
 import { resolveClientPath } from './client-path.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -48,7 +49,7 @@ async function listArtifacts(parsed: ParsedArgs): Promise<void> {
   if (booleanFlag(parsed, 'include-deleted')) params.set('includeDeleted', 'true');
 
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const value = await getJson(`${gatewayUrl(parsed)}/artifacts${suffix}`);
+  const value = await getJson(`${gatewayUrl(parsed)}/artifacts${suffix}`, parsed);
   renderArtifactList(value, booleanFlag(parsed, 'json'));
 }
 
@@ -90,7 +91,7 @@ async function putArtifact(parsed: ParsedArgs, rest: string[]): Promise<void> {
   const value = await sendJson(`${gatewayUrl(parsed)}/artifacts`, {
     method: 'POST',
     body: payload,
-  });
+  }, parsed);
   renderArtifactPut(value, booleanFlag(parsed, 'json'));
 }
 
@@ -101,12 +102,14 @@ async function getArtifact(parsed: ParsedArgs, rest: string[]): Promise<void> {
   const output = stringFlag(parsed, 'output') ?? stringFlag(parsed, 'o');
   const json = booleanFlag(parsed, 'json');
   if (json && !output) {
-    const value = await getJson(`${gatewayUrl(parsed)}/artifacts/${encodeURIComponent(artifactId)}`);
+    const value = await getJson(`${gatewayUrl(parsed)}/artifacts/${encodeURIComponent(artifactId)}`, parsed);
     console.log(JSON.stringify(value));
     return;
   }
 
-  const response = await fetch(`${gatewayUrl(parsed)}/artifacts/${encodeURIComponent(artifactId)}/content`);
+  const response = await fetchCliResponse(`${gatewayUrl(parsed)}/artifacts/${encodeURIComponent(artifactId)}/content`, {
+    auth: resolveCliRequestAuth(parsed.flags),
+  });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
   }
@@ -137,30 +140,21 @@ async function deleteArtifact(parsed: ParsedArgs, rest: string[]): Promise<void>
   const value = await sendJson(`${gatewayUrl(parsed)}/artifacts/${encodeURIComponent(artifactId)}`, {
     method: 'DELETE',
     body: { reason: stringFlag(parsed, 'reason') },
-  });
+  }, parsed);
   renderArtifactDelete(value, booleanFlag(parsed, 'json'));
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  }
-  return await response.json() as unknown;
+async function getJson(url: string, parsed: ParsedArgs): Promise<unknown> {
+  return await requestCliJson(url, { auth: resolveCliRequestAuth(parsed.flags) });
 }
 
-async function sendJson(url: string, input: { method: string; body: JsonRecord }): Promise<unknown> {
-  const response = await fetch(url, {
+async function sendJson(url: string, input: { method: string; body: JsonRecord }, parsed: ParsedArgs): Promise<unknown> {
+  return await requestCliJson(url, {
     method: input.method,
-    headers: { 'Content-Type': 'application/json' },
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(input.body),
   });
-  const text = await response.text();
-  const value = text ? JSON.parse(text) as unknown : {};
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${text}`);
-  }
-  return value;
 }
 
 function renderArtifactList(value: unknown, json: boolean): void {
@@ -208,6 +202,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     h: 'help',
     o: 'output',
     s: 'session',
+    t: 'auth-token',
     w: 'workspace',
   };
   const booleanFlags = new Set(['help', 'h', 'json', 'include-deleted']);
@@ -334,6 +329,7 @@ Usage:
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
   --node-id ID            Executor node id that owns the artifact
   --session, -s ID        Session id used for artifact session events
   --task TASK             Task run id

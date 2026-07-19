@@ -11,6 +11,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import { getLogger } from '@los/infra/logger';
+import type { MCPToolPolicy } from '../../mcp-distribution-policy.js';
 
 const log = getLogger('agent');
 
@@ -20,6 +21,8 @@ export interface MCPServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  serverId?: string;
+  toolPolicy?: MCPToolPolicy;
 }
 
 export interface MCPToolDef {
@@ -304,6 +307,7 @@ export interface MCPServerRegistryRecord {
   args: string[];
   url?: string;
   env: Record<string, string>;
+  toolPolicy?: MCPToolPolicy;
 }
 
 /**
@@ -316,6 +320,8 @@ export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServ
       command: record.command,
       args: record.args.length > 0 ? record.args : undefined,
       env: Object.keys(record.env).length > 0 ? record.env : undefined,
+      serverId: record.id,
+      toolPolicy: record.toolPolicy,
     };
   }
   // SSE / streamable-http remote servers are not yet implemented;
@@ -328,27 +334,29 @@ export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServ
 export class MCPToolBridge {
   private clients: MCPClient[] = [];
   private toolToClient = new Map<string, MCPClient>();
+  private clientConfig = new Map<MCPClient, MCPServerConfig>();
 
   async connect(servers: MCPServerConfig[]): Promise<void> {
     const results = await Promise.allSettled(
       servers.map(async (config) => {
         const client = new MCPClient(config);
         await client.connect();
-        return client;
+        return { client, config };
       }),
     );
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
-        this.clients.push(result.value);
-        for (const tool of result.value.getTools()) {
+        this.clients.push(result.value.client);
+        this.clientConfig.set(result.value.client, result.value.config);
+        for (const tool of result.value.client.getTools()) {
           if (this.toolToClient.has(tool.name)) {
             log.warn(
               `MCP tool name conflict: "${tool.name}" already registered from another server; skipping duplicate`,
             );
             continue;
           }
-          this.toolToClient.set(tool.name, result.value);
+          this.toolToClient.set(tool.name, result.value.client);
         }
       } else {
         const reason = result.reason?.message ?? String(result.reason);
@@ -369,9 +377,15 @@ export class MCPToolBridge {
     return this.toolToClient.get(toolName);
   }
 
+  getServerConfig(toolName: string): MCPServerConfig | undefined {
+    const client = this.toolToClient.get(toolName);
+    return client ? this.clientConfig.get(client) : undefined;
+  }
+
   async close(): Promise<void> {
     await Promise.allSettled(this.clients.map(c => c.close()));
     this.clients = [];
     this.toolToClient.clear();
+    this.clientConfig.clear();
   }
 }

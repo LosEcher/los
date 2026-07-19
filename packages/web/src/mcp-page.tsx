@@ -1,8 +1,10 @@
-import { type FormEvent, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
-  Plus,
+  Pin,
+  PinOff,
+  Power,
   RefreshCcw,
   RotateCcw,
   Server,
@@ -13,21 +15,19 @@ import {
   getJson,
   postJson,
   type MCPServer,
+  type MCPHistoryResponse,
   type MCPServerListResponse,
   type MCPServerVerifyResponse,
-  type MCPTransport,
 } from './api';
 import {
   DataTable,
   Definition,
   EmptyText,
   Fact,
-  Field,
   formatDate,
   StatusPill,
 } from './ui';
-
-const TRANSPORTS: MCPTransport[] = ['stdio', 'sse', 'streamable-http'];
+import { MCPServerCreate } from './mcp-server-create';
 
 export function MCPServersPage() {
   const queryClient = useQueryClient();
@@ -107,6 +107,10 @@ function MCPServerInspector({
   onSelect: (id: string | null) => void;
 }) {
   const queryClient = useQueryClient();
+  const history = useQuery({
+    queryKey: ['mcp-server-history', server.id],
+    queryFn: () => getJson<MCPHistoryResponse>(`/mcp-servers/${encodeURIComponent(server.id)}/history`),
+  });
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteJson(`/mcp-servers/${id}`),
@@ -130,6 +134,27 @@ function MCPServerInspector({
     },
   });
 
+  const enable = useMutation({
+    mutationFn: (enabled: boolean) => postJson<MCPServer>(`/mcp-servers/${encodeURIComponent(server.id)}/enable`, { enabled }),
+    onSuccess: onRefresh,
+  });
+
+  const pin = useMutation({
+    mutationFn: (pinned: boolean) => postJson<MCPServer>(`/mcp-servers/${encodeURIComponent(server.id)}/pin`, { pinned }),
+    onSuccess: () => {
+      onRefresh();
+      queryClient.invalidateQueries({ queryKey: ['mcp-server-history', server.id] });
+    },
+  });
+
+  const rollback = useMutation({
+    mutationFn: (versionHash: string) => postJson<MCPServer>(`/mcp-servers/${encodeURIComponent(server.id)}/rollback`, { versionHash }),
+    onSuccess: () => {
+      onRefresh();
+      queryClient.invalidateQueries({ queryKey: ['mcp-server-history', server.id] });
+    },
+  });
+
   return (
     <>
       <div className="panel-head compact">
@@ -141,11 +166,19 @@ function MCPServerInspector({
         <Fact label="status" value={server.status} />
         <Fact label="tools" value={String(server.toolCount)} />
         <Fact label="enabled" value={String(server.enabled)} />
+        <Fact label="source" value={server.sourceUri || 'manual'} />
+        <Fact label="version" value={server.versionHash.slice(0, 12)} />
+        <Fact label="pinned" value={server.pinnedVersionHash?.slice(0, 12) || 'no'} />
+        <Fact label="auth" value={server.authConfig.mode} />
+        <Fact label="risk" value={server.toolPolicy.riskLevel} />
         <Fact label="updated" value={formatDate(server.updatedAt)} />
       </div>
       {server.command ? <Fact label="command" value={server.command} /> : null}
       {server.url ? <Fact label="url" value={server.url} /> : null}
       {server.args.length > 0 ? <Fact label="args" value={server.args.join(' ')} /> : null}
+      {server.authConfig.credentialRef ? <Fact label="credential ref" value={server.authConfig.credentialRef} /> : null}
+      {server.toolPolicy.allow.length > 0 ? <Fact label="allowed tools" value={server.toolPolicy.allow.join(', ')} /> : null}
+      {server.toolPolicy.deny.length > 0 ? <Fact label="denied tools" value={server.toolPolicy.deny.join(', ')} /> : null}
       {server.lastError ? (
         <div className="definition-list">
           <Definition term="last error" text={server.lastError} />
@@ -166,6 +199,23 @@ function MCPServerInspector({
           onClick={() => verify.mutate(server.id)}
         >
           <CheckCircle2 size={14} /> verify
+        </button>
+        <button
+          className="ghost-btn"
+          type="button"
+          disabled={enable.isPending || (!server.enabled && server.status !== 'connected')}
+          onClick={() => enable.mutate(!server.enabled)}
+        >
+          <Power size={14} /> {server.enabled ? 'disable' : 'enable'}
+        </button>
+        <button
+          className="ghost-btn"
+          type="button"
+          disabled={pin.isPending}
+          onClick={() => pin.mutate(!server.pinnedVersionHash)}
+        >
+          {server.pinnedVersionHash ? <PinOff size={14} /> : <Pin size={14} />}
+          {server.pinnedVersionHash ? 'unpin' : 'pin'}
         </button>
         <button
           className="ghost-btn"
@@ -196,91 +246,24 @@ function MCPServerInspector({
           <pre>{JSON.stringify(reload.data, null, 2)}</pre>
         </div>
       ) : null}
-    </>
-  );
-}
-
-function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void }) {
-  const [id, setId] = useState('');
-  const [transport, setTransport] = useState<MCPTransport>('stdio');
-  const [command, setCommand] = useState('');
-  const [url, setUrl] = useState('');
-  const [args, setArgs] = useState('');
-  const [env, setEnv] = useState('');
-  const [enabled, setEnabled] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!id.trim()) return;
-    setBusy(true);
-    setError('');
-    try {
-      const body: Record<string, unknown> = {
-        id: id.trim(),
-        transport,
-        enabled,
-      };
-      if (transport === 'stdio') {
-        body.command = command.trim() || undefined;
-        body.args = args.trim() ? args.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-      } else {
-        body.url = url.trim() || undefined;
-      }
-      if (env.trim()) {
-        try { body.env = JSON.parse(env.trim()); } catch { setError('env must be valid JSON'); setBusy(false); return; }
-      }
-      const created = await postJson<MCPServer>('/mcp-servers', body);
-      setId(''); setCommand(''); setUrl(''); setArgs(''); setEnv('');
-      onCreated(created.id);
-    } catch (err) {
-      setError(String((err as Error).message ?? err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="panel-head compact">
-        <h2>Add MCP Server</h2>
-      </div>
-      <form className="stack-form" onSubmit={handleSubmit}>
-        <Field label="server id">
-          <input value={id} onChange={e => setId(e.target.value)} placeholder="my-mcp-server" />
-        </Field>
-        <Field label="transport">
-          <select value={transport} onChange={e => setTransport(e.target.value as MCPTransport)}>
-            {TRANSPORTS.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </Field>
-        {transport === 'stdio' ? (
-          <>
-            <Field label="command">
-              <input value={command} onChange={e => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-filesystem" />
-            </Field>
-            <Field label="args (comma-separated)">
-              <input value={args} onChange={e => setArgs(e.target.value)} placeholder="/path/to/allowed" />
-            </Field>
-          </>
-        ) : (
-          <Field label="url">
-            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="http://localhost:3001/mcp" />
-          </Field>
-        )}
-        <Field label="env (JSON)">
-          <textarea value={env} onChange={e => setEnv(e.target.value)} rows={3} placeholder='{"API_KEY": "..."}' />
-        </Field>
-        <label className="toolbar-toggle">
-          <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-          enabled
-        </label>
-        {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-btn" type="submit" disabled={!id.trim() || busy}>
-          <Plus size={14} /> register
-        </button>
-      </form>
+      {(history.data?.versions.length ?? 0) > 1 ? (
+        <div className="definition-list">
+          {history.data!.versions.map(version => (
+            <div className="definition" key={version.versionHash}>
+              <strong>{version.versionHash.slice(0, 12)}</strong>
+              {version.versionHash === server.versionHash ? <span>current</span> : (
+                <button
+                  className="icon-btn"
+                  type="button"
+                  title="Rollback to this version"
+                  disabled={rollback.isPending || Boolean(server.pinnedVersionHash && server.pinnedVersionHash !== version.versionHash)}
+                  onClick={() => rollback.mutate(version.versionHash)}
+                ><RotateCcw size={14} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }

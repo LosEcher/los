@@ -14,6 +14,7 @@ import {
   recoverExpiredTaskRuns,
   recoverExpiredTaskRunsWithAdvisoryLock,
   updateTaskRun,
+  updateTaskRunFields,
 } from './task-runs.js';
 import { _LeaseLostError, transitionExecutionState } from './execution-store.js';
 
@@ -88,6 +89,16 @@ test('task run lifecycle persists status changes', async () => {
     assert.ok(running?.startedAt);
     assert.ok(running?.heartbeatAt);
     assert.ok(running?.leaseExpiresAt);
+
+    const rerouted = await updateTaskRunFields(id, {
+      provider: 'xai',
+      model: 'grok-test',
+      metadata: { ...running!.metadata, routeReason: 'explicit_fallback_policy' },
+    });
+    assert.equal(rerouted?.status, 'running');
+    assert.equal(rerouted?.provider, 'xai');
+    assert.equal(rerouted?.model, 'grok-test');
+    assert.equal(rerouted?.metadata.routeReason, 'explicit_fallback_policy');
 
     const heartbeat = await heartbeatTaskRun(id, {
       nodeId: 'node-2',
