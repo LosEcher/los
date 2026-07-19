@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, GitCompare, TrendingDown, TrendingUp, Zap, Plus } from 'lucide-react';
+import { BarChart3, CalendarDays, GitCompare, TrendingDown, TrendingUp, Zap, Plus } from 'lucide-react';
 import { getJson, postJson } from './api';
-import { Button, DataTable, EmptyText, Fact, Field, StatusPill, formatDate } from './ui';
+import { DailyQualityView } from './pages/daily-quality-view.js';
+import { Button, DataTable, EmptyText, Field } from './ui';
 
 interface EvalSummaryGroup {
   key: string;
@@ -50,7 +51,7 @@ interface EvalComparison {
   };
 }
 
-type ViewMode = 'summary' | 'compare';
+type ViewMode = 'summary' | 'compare' | 'daily';
 
 export function EvalsPage() {
   const qc = useQueryClient();
@@ -135,9 +136,16 @@ export function EvalsPage() {
           >
             <GitCompare size={14} /> Compare
           </button>
+          <button
+            type="button"
+            className={`toolbar-tab ${mode === 'daily' ? 'active' : ''}`}
+            onClick={() => setMode('daily')}
+          >
+            <CalendarDays size={14} /> Daily Quality
+          </button>
         </div>
 
-        <div className="toolbar-filters">
+        {mode !== 'daily' ? <div className="toolbar-filters">
           <input
             className="filter-input"
             placeholder="Run spec ID..."
@@ -156,19 +164,19 @@ export function EvalsPage() {
             value={model}
             onChange={e => setModel(e.target.value)}
           />
-        </div>
+        </div> : null}
 
-        <div className="toolbar-actions">
+        {mode !== 'daily' ? <div className="toolbar-actions">
           <Button variant="ghost" onClick={() => backlogSnapshot.mutate()} title="Record a snapshot of current eval backlog">
             <Zap size={14} /> {backlogSnapshot.isPending ? 'Recording…' : 'Record Backlog Snapshot'}
           </Button>
           <Button variant="ghost" onClick={() => setShowRecordForm(v => !v)} title="Manually record a single eval">
             <Plus size={14} /> Record Eval
           </Button>
-        </div>
+        </div> : null}
       </div>
 
-      {showRecordForm ? (
+      {showRecordForm && mode !== 'daily' ? (
         <div className="provider-edit-panel">
           <div className="provider-edit-grid">
             <Field label="provider"><input value={recordProvider} onChange={e => setRecordProvider(e.target.value)} placeholder="e.g. deepseek" /></Field>
@@ -191,6 +199,7 @@ export function EvalsPage() {
       ) : null}
 
       {mode === 'summary' && <EvalSummaryView data={summary.data} loading={summary.isLoading} />}
+      {mode === 'daily' && <DailyQualityView />}
       {mode === 'compare' && (
         <EvalCompareView
           data={compare.data}
