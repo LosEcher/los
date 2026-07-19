@@ -1,6 +1,3 @@
-packages/telegram-bot/src/index.ts
-packages/web/src/chat-page.tsx
-packages/infra/src/config.ts
 packages/media/src/media-runtime.ts
 packages/wechat-bot/src/index.ts
 packages/agent/src/executor-nodes.ts
@@ -30,7 +27,6 @@ packages/cli/src/provider.ts
 packages/web/src/pages/memory-page.tsx
 packages/web/src/pages/sessions-page.tsx
 packages/gateway/src/server.ts
-packages/gateway/src/chat-service.ts
 packages/infra/src/discovery/scanners.ts
 packages/memory/src/core/compaction.ts
 packages/memory/src/core/store.ts

@@ -16,6 +16,7 @@ import {
   Network,
   ScrollText,
   Server,
+  Scale,
   Settings,
   Shield,
   Skull,
@@ -58,6 +59,7 @@ import { ArtifactsPage } from './artifact-page';
 import { SkillsPage } from './skills-page';
 import { RulesPage } from './rules-page';
 import { EvalsPage } from './evals-page';
+import { PairwiseEvalsPage } from './pairwise-evals-page';
 import { formatDuration, StatusPill, type StatusState } from './ui';
 
 type PageId =
@@ -73,6 +75,7 @@ type PageId =
   | 'artifacts'
   | 'rules'
   | 'evals'
+  | 'pairwise'
   | 'nodes'
   | 'logs'
   | 'dead-letter'
@@ -117,6 +120,7 @@ const NAV: NavItem[] = [
   // ── Operations (debug / incident investigation) ──────────
   { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live', audience: 'operations', section: 'Operations' },
   { id: 'evals', label: 'Evals', icon: BarChart3, status: 'live', audience: 'operations' },
+  { id: 'pairwise', label: 'Pairwise', icon: Scale, status: 'live', audience: 'operations' },
   { id: 'run-specs', label: 'Run Specs', icon: ScrollText, status: 'live', audience: 'operations' },
   { id: 'nodes', label: 'Nodes', icon: Network, status: 'live', audience: 'operations' },
   { id: 'services', label: 'Services', icon: Activity, status: 'live', audience: 'operations' },
@@ -311,6 +315,7 @@ export function App() {
         {page === 'artifacts' && <ArtifactsPage />}
         {page === 'rules' && <RulesPage />}
         {page === 'evals' && <EvalsPage />}
+        {page === 'pairwise' && <PairwiseEvalsPage />}
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}
         {page === 'diagnostics' && <DiagnosticsPage />}

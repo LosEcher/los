@@ -19,6 +19,7 @@ import {
   ensureAgentTaskGraphStore, ensureArtifactStore, ensureCancellationStore,
   ensureDeadLetterStore, ensureExecutorNodeStore,
   ensureExternalToolSummaryStore, ensureGovernanceJobStore, ensureMCPServerStore,
+  ensureExecutionExperimentStore,
   ensureNodeCommandStore, ensureProviderCompatEvidenceStore,
   ensureProviderPromotionDecisionStore, ensureRunEvalStore, ensureRunSpecStore,
   ensureSchedulerDecisionLedgerStore, ensureServiceInstanceStore, ensureSessionEventStore,
@@ -63,6 +64,7 @@ export async function ensureAllStores(): Promise<void> {
   await ensureNodeCommandStore();
   await ensureMCPServerStore();
   await ensureRunEvalStore();
+  await ensureExecutionExperimentStore();
   await ensureExternalToolSummaryStore();
   await ensureProviderCompatEvidenceStore();
   await ensureProviderPromotionDecisionStore();

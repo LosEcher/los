@@ -23,6 +23,7 @@ export default defineConfig({
       '/onboarding': 'http://127.0.0.1:8080',
       '/projects': 'http://127.0.0.1:8080',
       '/providers': 'http://127.0.0.1:8080',
+      '/run-evals': 'http://127.0.0.1:8080',
       '/rules': 'http://127.0.0.1:8080',
       '/runs': 'http://127.0.0.1:8080',
       '/runtimes': 'http://127.0.0.1:8080',

@@ -1,4 +1,4 @@
-# Current P0/P1 Queue (2026-07-16)
+# Current P0/P1 Queue (2026-07-19)
 
 ## Purpose
 
@@ -59,6 +59,32 @@ differences remain for later review: `todo-los-idempotency-keys` priority plus
 the titles of `todo-los-p1-otel-docs` and
 `todo-los-run-spec-stream-replay`. [E]
 
+### 2026-07-19 post-merge ledger calibration
+
+The live PostgreSQL ledger now contains 179 rows, of which 82 are non-terminal:
+36 `backlog`, 45 `ready`, and 1 `in_progress`. Filtering those rows to active
+P0/P1 work returns 17 items: one active P0 phase and sixteen P1 tasks. [E]
+
+The active P1 set includes the three previously admitted ready seed tasks
+(`todo-los-p1-otel-docs`, `todo-los-p1-test-coverage`, and
+`todo-los-p1-turbo-cache`) plus two ready file-size findings and one backlog
+governance reflection finding that are DB-owned runtime work:
+
+| Todo | State | Ownership note |
+| --- | --- | --- |
+| `todo-120765c8-8926-485b-a9cf-e32e78bc55aa` | `ready` | Extract a submodule from `packages/gateway/src/chat-service.ts` |
+| `todo-47bf8a56-ea57-4028-b58a-6804495fc58d` | `ready` | Extract a submodule from `packages/infra/src/config.ts` |
+| `todo-8864a76d-84ea-46f2-9f83-43573972f11f` | `backlog` | Governance reflection metadata is missing for one blocked/failed task |
+
+These three rows are not present in the built-in planning seed and must not be
+deleted or overwritten by seed reconciliation. Their status and ownership stay
+in the PostgreSQL ledger until the owning task records completion evidence. [E]
+
+The historical `todo-los-context-engineering-phase` row remains
+`in_progress` but is archived (`archivedAt=2026-06-23`); it is therefore not
+part of the active P0 count. This is a preserved historical row, not a newly
+dispatchable P0 task. [E]
+
 ## Priority Judgment
 
 P0 is restricted to the Execution Lab phase and its read-only observability
@@ -82,21 +108,21 @@ larger or more valuable than every later item.
 | --- | --- | --- | --- | --- |
 | 0 | `todo-los-execution-lab` | `in_progress` | Phase container for the work below; it is not dispatchable execution work | All child work is terminal or explicitly deferred with evidence |
 | 1 | `todo-los-execution-observability-projection` | `done` | Required to compare runs without inventing missing prompt, spec, memory, or tool versions | Pure read-only projection, five golden fixtures, route coverage, full agent/gateway tests, and `pnpm gate` |
-| 2 | `todo-los-context-engineering-phase` | `in_progress` | Grok comparison exposed context-fill, eviction, and procedural-gate gaps | Fill monitoring, semantic eviction, and pre-action gate are done; compaction lifecycle remains P1 work |
+| 2 | `todo-los-context-engineering-phase` | `archived / in_progress` | Historical phase row retained for audit continuity | Excluded from active P0 dispatch because it is archived; remaining compaction work is represented by the current P1 items |
 
 ## P1 Wave 1: Recovery Evidence
 
 | Order | Todo | State | Priority reason | Completion evidence |
 | --- | --- | --- | --- | --- |
-| 2 | `todo-los-multi-gateway-entry` | `backlog` | The P1 replay claim cannot be verified in one process | Two gateways share PostgreSQL; drain and ready routing work; interrupted chat replays through the second gateway |
-| 3 | `todo-los-run-spec-stream-replay` | `backlog` | The read model exists, but cross-process interruption recovery is unverified | Operation smoke fixes run id, cursor, `Last-Event-ID`, and idempotency replay behavior |
+| 2 | `todo-los-multi-gateway-entry` | `done` | The P1 replay claim cannot be verified in one process | Drain/promote smoke plus repeatable active-session failover harness: stale gateway fencing, run claim, and replay evidence |
+| 3 | `todo-los-run-spec-stream-replay` | `done` | The read model exists, but cross-process interruption recovery is unverified | Operation smoke fixes run id, cursor, `Last-Event-ID`, and idempotency replay behavior; active-session regression test covers the interrupted path |
 
 ## P1 Wave 2: Controlled Experiments
 
 | Order | Todo | State | Priority reason | Completion evidence |
 | --- | --- | --- | --- | --- |
 | 4 | `todo-los-execution-experiment-contract` | `backlog` | Adds new provenance and lifecycle semantics, so it must follow the P0 projection and remain contract-first | ADR, contract, generated types, migration, store, API, and AP2/AP3 harness |
-| 5 | `todo-los-execution-pairwise-rubric-eval` | `backlog` | A candidate cannot be judged against a baseline without immutable experiment provenance | Baseline/candidate pair, rubric revision snapshot, separate human/judge/deterministic sources, and evidence-linked UI/API |
+| 5 | `todo-los-execution-pairwise-rubric-eval` | `done` | A candidate cannot be judged against a baseline without immutable experiment provenance | Baseline/candidate pair, rubric revision snapshot, separate human/judge/deterministic sources, filtered API, dedicated Pairwise UI, and operator-gated Web e2e |
 
 ## P1 Wave 3: Operational Observability
 
@@ -119,14 +145,17 @@ larger or more valuable than every later item.
 
 ## Immediate Action
 
-The P0 projection and context-engineering child tasks are complete. Select the next P1 only after reconciling dependency readiness; current candidates are recovery evidence, compaction lifecycle, and the execution experiment contract.
+The active P0 container remains open for Execution Lab child work. Select the next
+P1 only after reconciling dependency readiness; the current highest-value path is
+recovery evidence, followed by the execution experiment contract. The three ready
+seed tasks remain bounded operator-contract candidates rather than unattended
+dispatch work.
 
-Live dispatch gates currently admit three ready P1 seed tasks because they are
-`kind=task` with completed dependencies: OTel documentation, coverage baseline,
-and Turbo cache documentation. None has a persisted run contract, and the
-default todo dispatch tool mode is read-only, so they are candidates for a new
-bounded operator contract rather than unattended execution. The 41 preserved
-DB-only todos are all ready P2 `governance-file-size` findings. [E]
+Live dispatch gates currently admit five ready P1 tasks: OTel documentation,
+coverage baseline, Turbo cache documentation, and the two file-size findings.
+None has a persisted run contract, and the default todo dispatch tool mode is
+read-only, so they are candidates for a new bounded operator contract rather
+than unattended execution. The separate reflection finding remains backlog. [E]
 
 Completed implementation used this gate sequence:
 
@@ -138,10 +167,10 @@ Completed implementation used this gate sequence:
 
 ## Remaining Verification
 
-After this calibration change merges:
+After this calibration change:
 
-1. Seed missing todos without `overwrite=true`.
-2. Update PostgreSQL statuses only for ids backed by the evidence recorded here.
-3. Re-query the DB and require the active P0/P1 set to match the seed work set.
+1. Keep seed reconciliation status-only and scoped by `tenantId/projectId`.
+2. Do not update or archive the three DB-owned rows without owner evidence.
+3. Re-query the DB after each bounded task and record the resulting status here.
 4. Preserve any DB-only todo that has independent runtime ownership; do not
    delete or overwrite it merely because it is absent from the built-in seed.

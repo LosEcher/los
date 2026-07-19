@@ -58,6 +58,7 @@
     "./task-intake": "./src/coordinator/task-intake.ts",
     "./event-log": "./src/event-log/index.ts",
     "./object-store": "./src/object-store/index.ts"
+    ,"./execution-experiments": "./src/execution-experiments.ts"
   },
   "scripts": {
     "build": "tsc",

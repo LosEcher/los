@@ -7,13 +7,15 @@ export type ExecutionEntityType =
   | 'run_spec'
   | 'task_run'
   | 'tool_call_state'
-  | 'verification_record';
+  | 'verification_record'
+  | 'execution_experiment';
 
 export type ExecutionStateByEntity = {
   run_spec: RunSpecStatus;
   task_run: TaskRunStatus;
   tool_call_state: ToolCallStateType;
   verification_record: VerificationRecordStatus;
+  execution_experiment: 'draft' | 'approved' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
 };
 
 export type ExecutionState = ExecutionStateByEntity[ExecutionEntityType];
@@ -66,11 +68,20 @@ const VERIFICATION_RECORD_TRANSITIONS = {
   skipped: [],
 } satisfies Record<VerificationRecordStatus, VerificationRecordStatus[]>;
 
+const EXECUTION_EXPERIMENT_TRANSITIONS = {
+  draft: ['approved', 'cancelled'],
+  approved: ['running', 'cancelled'],
+  running: ['succeeded', 'failed', 'cancelled', 'blocked'],
+  blocked: ['running', 'failed', 'cancelled'],
+  succeeded: [], failed: [], cancelled: [],
+} satisfies Record<ExecutionStateByEntity['execution_experiment'], ExecutionStateByEntity['execution_experiment'][]>;
+
 const TERMINAL_STATES = {
   run_spec: ['succeeded', 'failed', 'cancelled'],
   task_run: ['succeeded', 'failed', 'cancelled'],
   tool_call_state: ['succeeded', 'denied', 'skipped'],
   verification_record: ['succeeded', 'skipped'],
+  execution_experiment: ['succeeded', 'failed', 'cancelled'],
 } satisfies {
   [K in ExecutionEntityType]: ExecutionStateByEntity[K][];
 };
@@ -148,5 +159,7 @@ function transitionTargets<T extends ExecutionEntityType>(
       return TOOL_CALL_STATE_TRANSITIONS[from as ToolCallStateType] as ExecutionStateByEntity[T][];
     case 'verification_record':
       return VERIFICATION_RECORD_TRANSITIONS[from as VerificationRecordStatus] as ExecutionStateByEntity[T][];
+    case 'execution_experiment':
+      return EXECUTION_EXPERIMENT_TRANSITIONS[from as ExecutionStateByEntity['execution_experiment']] as ExecutionStateByEntity[T][];
   }
 }

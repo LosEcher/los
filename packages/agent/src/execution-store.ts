@@ -10,7 +10,7 @@ import { ensureSessionEventStore, type SessionEventRecord } from './session-even
 import { ensureTaskRunStore } from './task-runs.js';
 import { ensureToolCallStateStore } from './tool-call-states.js';
 import { ensureVerificationRecordStore } from './verification-records.js';
-import { canMarkSucceeded, canStartExecution, validatePhaseStatusConsistency } from './run-contract.js';
+import { canMarkSucceeded, canStartExecution, readRunContractMetadata, validatePhaseStatusConsistency } from './run-contract.js';
 import {
   loadExecutionEntity,
   updateExecutionEntity,
@@ -139,6 +139,23 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
         if (!successDecision.allowed) {
           throw new _RunSuccessGateError(input.entityId, successDecision.reason ?? 'verification gate rejected success');
         }
+      }
+      if (input.entityType === 'execution_experiment' && input.to === 'succeeded') {
+        if (!entity.candidateRunSpecId) throw new Error(`Experiment ${input.entityId} has no candidate run spec`);
+        const candidate = await client.query<{ status: string; run_contract_json: unknown }>(
+          `SELECT status, run_contract_json FROM run_specs WHERE id = $1 FOR UPDATE`, [entity.candidateRunSpecId],
+        );
+        const candidateRow = candidate.rows[0];
+        if (!candidateRow || candidateRow.status !== 'succeeded') {
+          throw new _RunSuccessGateError(input.entityId, 'candidate run spec is not succeeded');
+        }
+        const required = await client.query<{ check_name: string; status: string }>(
+          `SELECT check_name, status FROM verification_records WHERE run_spec_id = $1 AND required = TRUE`,
+          [entity.candidateRunSpecId],
+        );
+        const contract = readRunContractMetadata({ runContract: candidateRow.run_contract_json });
+        const successDecision = canMarkSucceeded(contract, required.rows.map(row => ({ requirementId: row.check_name, status: row.status })));
+        if (!successDecision.allowed) throw new _RunSuccessGateError(input.entityId, successDecision.reason ?? 'candidate verification gate rejected success');
       }
 
       if (input.leaseVersion !== undefined && !input.nodeId) {

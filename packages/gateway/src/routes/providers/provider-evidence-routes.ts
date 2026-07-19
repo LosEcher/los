@@ -16,6 +16,8 @@ import {
   listExternalToolSummaries,
   recordEvalBacklogSnapshot,
   getEvalBacklogCases,
+  listPairwiseRunEvals,
+  recordPairwiseRunEval,
   recordRunEval,
   compareRunEvals,
   summarizeRunEvals,
@@ -154,6 +156,67 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
     const query = parseRunEvalQuery(req.query as RunEvalQuery);
     const evals = await listRunEvals(query);
     return { count: evals.length, evals };
+  });
+
+  app.get('/run-evals/pairwise', async (req) => {
+    const query = req.query as { pairId?: string; experimentId?: string; verdict?: string; limit?: string };
+    const verdict = normalizeOptionalString(query.verdict);
+    const allowedVerdicts = new Set(['baseline', 'candidate', 'tie', 'inconclusive']);
+    const evals = await listPairwiseRunEvals({
+      pairId: normalizeOptionalString(query.pairId),
+      experimentId: normalizeOptionalString(query.experimentId),
+      verdict: verdict && allowedVerdicts.has(verdict) ? verdict as never : undefined,
+      limit: normalizeBoundedInteger(query.limit, 100, 1, 500),
+    });
+    return { count: evals.length, evals };
+  });
+
+  app.get('/run-evals/pairwise/:pairId', async (req, reply) => {
+    const pairId = normalizeOptionalString((req.params as { pairId?: string }).pairId);
+    if (!pairId) return reply.status(400).send({ error: 'pairId is required' });
+    try {
+      const evals = await listPairwiseRunEvals(pairId);
+      return { count: evals.length, evals };
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/run-evals/pairwise', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const body = asRecord(req.body);
+    const metrics = asRecord(body.metrics);
+    const success = parseOptionalBoolean(metrics.success);
+    try {
+      const evaluation = await recordPairwiseRunEval({
+        id: normalizeOptionalString(body.id),
+        pairId: normalizeOptionalString(body.pairId),
+        experimentId: normalizeOptionalString(body.experimentId) ?? '',
+        baselineRunSpecId: normalizeOptionalString(body.baselineRunSpecId) ?? '',
+        candidateRunSpecId: normalizeOptionalString(body.candidateRunSpecId) ?? '',
+        rubricRevision: normalizeOptionalString(body.rubricRevision) ?? '',
+        rubricSnapshot: asRecord(body.rubricSnapshot) as never,
+        verdict: normalizeOptionalString(body.verdict) as never,
+        human: body.human === undefined ? undefined : asRecord(body.human) as never,
+        judge: body.judge === undefined ? undefined : asRecord(body.judge) as never,
+        deterministic: body.deterministic === undefined ? undefined : asRecord(body.deterministic) as never,
+        runSpecId: normalizeOptionalString(metrics.runSpecId),
+        sessionId: normalizeOptionalString(metrics.sessionId),
+        taskRunId: normalizeOptionalString(metrics.taskRunId),
+        provider: normalizeOptionalString(metrics.provider),
+        model: normalizeOptionalString(metrics.model),
+        success,
+        latencyMs: normalizeOptionalNonNegativeInteger(metrics.latencyMs),
+        retryCount: normalizeOptionalNonNegativeInteger(metrics.retryCount),
+        toolErrorCount: normalizeOptionalNonNegativeInteger(metrics.toolErrorCount),
+        verificationStatus: normalizeOptionalString(metrics.verificationStatus),
+        modelCost: normalizeOptionalNonNegativeNumber(metrics.modelCost),
+        summary: asRecord(metrics.summary),
+      });
+      return reply.status(201).send({ eval: evaluation });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.post('/run-evals', async (req, reply) => {
