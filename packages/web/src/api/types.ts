@@ -141,6 +141,14 @@ export type ProviderDiscoveryProvider = Record<string, unknown> & {
   model?: string;
   hasApiKey?: boolean;
   readiness?: ProviderReadiness;
+  compatEvidence?: {
+    count?: number;
+    latestVerdict?: string | null;
+    latestDecision?: string | null;
+    latestPassed?: boolean | null;
+    latest?: Record<string, unknown> | null;
+  };
+  compatibilityEvidence?: Array<Record<string, unknown>>;
 };
 
 export type ProviderDiscovery = {

@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
 const chatComposer = readFileSync(new URL('./chat-composer.tsx', import.meta.url), 'utf8');
+const chatMessages = readFileSync(new URL('./chat-messages.tsx', import.meta.url), 'utf8');
 const useChatStream = readFileSync(new URL('./hooks/useChatStream.ts', import.meta.url), 'utf8');
 const useChatRun = readFileSync(new URL('./hooks/useChatRun.ts', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
@@ -15,6 +16,11 @@ const runSpecsPage = readFileSync(new URL('./pages/run-specs-page.tsx', import.m
 const chatApproval = readFileSync(new URL('./chat-approval.tsx', import.meta.url), 'utf8');
 const deadLetterPage = readFileSync(new URL('./pages/dead-letter-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+const setupPage = readFileSync(new URL('./pages/setup-page.tsx', import.meta.url), 'utf8');
+const skillsPage = readFileSync(new URL('./skills-page.tsx', import.meta.url), 'utf8');
+const mcpPage = readFileSync(new URL('./mcp-page.tsx', import.meta.url), 'utf8');
+const mcpCreate = readFileSync(new URL('./mcp-server-create.tsx', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
   const composer = between(chatComposer, '<form className="composer"', '</form>');
@@ -138,6 +144,8 @@ test('chat ApprovalCard is interactive via operator-events and WS steering is wi
   assert.match(chatApproval, /instruction:\s*'approve'/);
   assert.match(chatPage, /OperatorSteeringBar/);
   assert.match(chatPage, /sessionId=\{sessionId\}/);
+  assert.match(chatPage, /notices=\{/);
+  assert.match(chatMessages, /\{notices\}[\s\S]*\{debugMode \?/);
 });
 
 test('dead-letter resolution requires an audited disposition instead of an empty ack', () => {
@@ -148,6 +156,36 @@ test('dead-letter resolution requires an audited disposition instead of an empty
   assert.match(deadLetterPage, /reason for accepting data loss/);
   assert.match(deadLetterPage, /postJson<DeadLetterEvent>\(`\/tasks\/dead-letter\/\$\{id\}\/ack`, body\)/);
   assert.doesNotMatch(deadLetterPage, /\/ack`, \{\}\)/);
+});
+
+test('setup readiness is wired, redacted, and keeps discovery separate from compatibility', () => {
+  assert.match(app, /id: 'setup'/);
+  assert.match(app, /page === 'setup' && <SetupPage/);
+  assert.match(setupPage, /Promise\.allSettled/);
+  assert.match(setupPage, /compatibility evidence is still required/);
+  assert.match(setupPage, /Provider discovery and compatibility evidence are separate checks/);
+  assert.match(setupPage, /Hermes \$\{hermes\?\.installed/);
+  assert.doesNotMatch(setupPage, /apiKey|credentialPath|workspacePath|weclawBinary/);
+  assert.match(styles, /\.setup-row[\s\S]*grid-template-columns/);
+  assert.match(styles, /@media \(max-width: 780px\)[\s\S]*\.setup-row/);
+});
+
+test('skill and MCP distribution require inspect before apply and expose rollback controls', () => {
+  const mcpSurface = mcpPage + mcpCreate;
+  assert.match(skillsPage, /'\/skills\/import\/inspect'/);
+  assert.match(skillsPage, /'\/skills\/import\/apply'/);
+  assert.match(skillsPage, /\/pin`/);
+  assert.match(skillsPage, /\/rollback`/);
+  assert.match(skillsPage, /pinnedVersionHash/);
+
+  assert.match(mcpSurface, /'\/mcp-servers\/inspect'/);
+  assert.match(mcpSurface, /inspectedVersionHash/);
+  assert.match(mcpSurface, /\/enable`/);
+  assert.match(mcpSurface, /\/pin`/);
+  assert.match(mcpSurface, /\/rollback`/);
+  assert.match(mcpSurface, /credential ref/);
+  assert.match(mcpSurface, /allowed tools/);
+  assert.doesNotMatch(mcpSurface, /env \(JSON\)|API_KEY/);
 });
 
 function between(source, start, end) {

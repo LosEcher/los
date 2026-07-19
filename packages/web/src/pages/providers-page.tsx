@@ -164,8 +164,10 @@ export function ProvidersPage() {
             const state = providerReadinessLabel(readiness);
             const detail = providerReadinessDetail(provider, readiness);
             const compatEvidence = Array.isArray(provider.compatibilityEvidence)
-              ? provider.compatibilityEvidence as Array<Record<string, unknown>>
-              : [];
+              ? provider.compatibilityEvidence
+              : provider.compatEvidence?.latest
+                ? [provider.compatEvidence.latest]
+                : [];
             const latestEvidence = compatEvidence[0];
             const promotionState = metadataText(provider.promotionState);
             const name = metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`;

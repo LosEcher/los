@@ -362,6 +362,79 @@ p {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
 }
 
+.setup-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+}
+
+.setup-list {
+  display: grid;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 72px auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 68px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgb(57 61 49 / 0.62);
+}
+
+.setup-row:last-child {
+  border-bottom: 0;
+}
+
+.setup-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.setup-copy strong {
+  font-size: 13px;
+}
+
+.setup-copy span,
+.setup-boundary-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.setup-state {
+  color: var(--faint);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.setup-icon.ready {
+  color: var(--ok);
+}
+
+.setup-icon.action {
+  color: var(--warn);
+}
+
+.setup-icon.optional,
+.setup-icon.unknown {
+  color: var(--faint);
+}
+
+.setup-error {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 16px;
+  color: var(--danger);
+}
+
+.setup-boundary-note {
+  margin: 0 16px 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 .panel {
   border: 1px solid var(--line);
   background: rgb(23 24 19 / 0.88);
@@ -2082,6 +2155,19 @@ button:disabled {
   .sidebar {
     position: static;
     min-height: auto;
+  }
+
+  .setup-row {
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+  }
+
+  .setup-row .setup-state {
+    display: none;
+  }
+
+  .setup-row .ghost-btn {
+    grid-column: 2 / -1;
+    justify-self: start;
   }
 
   .nav-list {
