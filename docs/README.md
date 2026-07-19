@@ -61,6 +61,12 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   adapter over the existing run, replay, and operator-control contracts.
 - `0032-managed-jj-workspace-operations.md` - operator-gated jj workspace
   allocation and artifact-backed cleanup evidence for graph tasks.
+- `0033-web-first-work-item-read-model.md` - Work Item fact-source, run-lineage,
+  Inbox projection, and Web-first API ownership boundaries.
+- `0034-user-scheduled-work-state-and-claim-policy.md` - user schedule ownership,
+  trigger presets, atomic claim, lease recovery, approval, and circuit policy.
+- `0037-daily-agent-quality-snapshots.md` - project-scoped daily quality
+  snapshots, UTC idempotency, separated metrics, and 28-day evidence rules.
 
 ### Operation Smokes
 
@@ -112,6 +118,15 @@ provider-evidence, or harness ideas should become local work items.
 Use `governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
 for the verified LOS capability map, concrete CLI/Web/MCP/channel/workspace
 operator paths, and the current boundary against pi and Hermes Agent.
+
+Use `governance/2026-07-19-web-first-daily-agent-workflow-design.md` for the
+Web-first daily workflow, Work Item and Inbox model, user schedule ownership,
+and the adaptation boundaries for CanTool and lot2extension.
+
+The daily Web operator path starts at `Inbox`, continues through `Work`, and
+uses `Schedules` for daily/weekly/interval/once read-only work. Schedule writes
+require operator credentials; next-occurrence preview, definition reads, and
+run history remain separate from task-run and verification success evidence.
 
 Use `governance/github-branch-gates.md` when pushing, opening PRs, merging to
 `main`, checking GitHub Actions gate requirements, or separating local gate

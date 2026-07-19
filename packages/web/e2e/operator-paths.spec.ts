@@ -186,6 +186,63 @@ test('shows setup gaps and routes each operator to the owning surface', async ({
   ]);
 });
 
+test('uses Inbox and Work for plan review and structured creation', async ({ page }, testInfo) => {
+  await seedTokens(page);
+  const records = await mockGateway(page);
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible();
+  await expect(page.getByText('Review the structured plan')).toBeVisible();
+  await page.getByRole('button', { name: 'Review plan' }).click();
+  await expect(page).toHaveURL(/#work$/);
+  await expect(page.getByRole('heading', { name: 'Inspect the Web-first plan' })).toBeVisible();
+  await expect(page.getByText('Persist the structured contract')).toBeVisible();
+
+  await page.getByLabel('Approval reason').fill('scope and checks reviewed in Work');
+  await page.getByRole('button', { name: 'Approve plan' }).click();
+  await expect.poll(() => records.some(record => record.path === '/runs/run-work-e2e/approve')).toBe(true);
+  const approval = records.find(record => record.path === '/runs/run-work-e2e/approve')!;
+  expect(approval.body).toEqual({ actor: 'web-console', reason: 'scope and checks reviewed in Work' });
+
+  await page.getByRole('button', { name: /Review completed Web changes/ }).click();
+  await expect(page.getByRole('heading', { name: 'Verification and changes' })).toBeVisible();
+  await expect(page.getByText('web focused tests')).toBeVisible();
+  await expect(page.getByText('14 tests passed')).toBeVisible();
+  await expect(page.getByText('artifact-diff-web-e2e')).toBeVisible();
+  await page.getByLabel('Decision reason').fill('required verification and diff backup reviewed');
+  await page.getByRole('button', { name: 'Accept result' }).click();
+  await expect.poll(() => records.some(record => record.path === '/work-items/work-e2e-review/result-decision')).toBe(true);
+  const resultDecision = records.find(record => record.path === '/work-items/work-e2e-review/result-decision')!;
+  expect(resultDecision.headers['x-los-operator-token']).toBe(OPERATOR_TOKEN);
+  expect(resultDecision.body).toEqual({
+    decision: 'accepted',
+    reason: 'required verification and diff backup reviewed',
+    closeoutReport: { dirtyPaths: [], checks: ['web focused tests'] },
+  });
+
+  await page.getByRole('button', { name: 'New work' }).click();
+  await page.getByLabel('Goal', { exact: true }).fill('Create a bounded daily workflow task');
+  await page.getByLabel('Editable surfaces').fill('packages/web/src/pages');
+  await page.getByLabel('Required checks').fill('pnpm --filter @los/web test');
+  await page.getByLabel('Stop conditions').fill('scope expands');
+  await page.getByLabel('Evidence required').fill('focused test output');
+  await page.getByRole('button', { name: 'Create work' }).click();
+  await expect.poll(() => records.some(record => record.path === '/work-items' && record.method === 'POST')).toBe(true);
+  const create = records.find(record => record.path === '/work-items' && record.method === 'POST')!;
+  expect(create.body).toMatchObject({
+    goal: 'Create a bounded daily workflow task',
+    mode: 'execution',
+    toolMode: 'read-only',
+    editableSurfaces: ['packages/web/src/pages'],
+    requiredChecks: ['pnpm --filter @los/web test'],
+    stopConditions: ['scope expands'],
+    evidenceRequired: ['focused test output'],
+  });
+  await expect(page.getByRole('heading', { name: 'Create a bounded daily workflow task' })).toBeVisible();
+  await assertViewportIsOperable(page, [page.getByRole('button', { name: 'Start in Chat' })]);
+  await page.screenshot({ path: testInfo.outputPath('web-first.png'), fullPage: true });
+});
+
 function requestRecord(request: Request, url: URL): RequestRecord {
   let body: Record<string, unknown> | undefined;
   try { body = request.postDataJSON() as Record<string, unknown>; } catch { /* no JSON body */ }
@@ -197,10 +254,22 @@ function isAsset(path: string): boolean {
 }
 
 function requiresOperator(path: string): boolean {
-  return path.endsWith('/operator-events') || /\/runs\/[^/]+\/(approve|recover|verify)$/.test(path);
+  return path.endsWith('/operator-events')
+    || /\/runs\/[^/]+\/(approve|recover|verify)$/.test(path)
+    || /\/work-items\/[^/]+\/result-decision$/.test(path);
 }
 
 function responseFor(path: string, search: string, method: string): unknown {
+  if (path === '/inbox') return { count: 1, results: [inboxEntry()] };
+  if (path === '/work-items' && method === 'POST') return workItem('work-e2e-created', false);
+  if (path === '/work-items') return { count: 2, results: [workItem('work-e2e-1', true), reviewWorkItem()] };
+  if (path === '/work-items/work-e2e-created') return workItem('work-e2e-created', false);
+  if (path === '/work-items/work-e2e-1') return workItem('work-e2e-1', true);
+  if (path === '/work-items/work-e2e-review') return reviewWorkItem();
+  if (path === '/work-items/work-e2e-review/result-decision') return reviewWorkItem();
+  if (path === '/runs/run-work-e2e/inspect') return {
+    nodes: [{ kind: 'run_spec', record: { runContract: { ...workItem('work-e2e-1', true).runContractDraft, phase: 'planning', plan: [{ id: 'step-1', title: 'Persist the structured contract' }] } } }],
+  };
   if (path === '/sessions') return [sessionSummary()];
   if (path === '/sessions/session-main' || path === '/sessions/session-e2e') return sessionDetail(path.slice('/sessions/'.length));
   if (path.endsWith('/trace')) return { sessionId: path.split('/')[2], messageCount: 0, turnCount: 0, messages: [] };
@@ -243,6 +312,64 @@ function observability(sessionId: string) {
 
 function runSpec() {
   return { id: 'run-e2e-0001', sessionId: 'session-main', status: 'pending', prompt: 'bounded operator action', provider: 'mock', model: 'mock-1', createdAt: NOW, updatedAt: NOW };
+}
+
+function inboxEntry() {
+  return {
+    id: 'work-item-work-e2e-1', sourceKind: 'work_item', workItemId: 'work-e2e-1',
+    title: 'Review the structured plan', projectId: 'los', sessionId: 'session-main',
+    runSpecId: 'run-work-e2e', attentionState: 'approval_required', nextAction: 'review_plan', updatedAt: NOW,
+  };
+}
+
+function workItem(id: string, withRun: boolean) {
+  const goal = withRun ? 'Inspect the Web-first plan' : 'Create a bounded daily workflow task';
+  return {
+    id, title: goal, description: goal, goal, tenantId: 'local', projectId: 'los', status: 'backlog',
+    priority: 'P2', source: 'web-work-item', attentionState: withRun ? 'approval_required' : 'none',
+    nextAction: withRun ? 'review_plan' : 'start', links: [], createdAt: NOW, updatedAt: NOW,
+    runContractDraft: {
+      mode: 'execution', phase: 'created', goal, editableSurfaces: ['packages/web/src/pages'],
+      requiredChecks: ['pnpm --filter @los/web test'], allowedSkippedChecks: [], stopConditions: ['scope expands'],
+      evidenceRequired: ['focused test output'], externalEvidenceAllowed: [], rawEvidenceProhibited: [], toolMode: 'read-only',
+    },
+    evidence: {
+      latestRunSpecId: withRun ? 'run-work-e2e' : undefined, latestSessionId: withRun ? 'session-main' : undefined,
+      runSpecStatus: withRun ? 'created' : undefined, verificationRequired: 1, verificationSucceeded: 0,
+      verificationSkipped: 0, verificationFailed: 0, verificationPending: 1,
+    },
+    verificationRecords: [],
+    changes: { hasReviewableDiff: false, workspaces: [] },
+  };
+}
+
+function reviewWorkItem() {
+  const item = workItem('work-e2e-review', true);
+  return {
+    ...item,
+    title: 'Review completed Web changes',
+    goal: 'Review completed Web changes',
+    status: 'in_progress',
+    attentionState: 'review_ready',
+    nextAction: 'review_changes',
+    evidence: {
+      ...item.evidence,
+      runSpecStatus: 'succeeded',
+      verificationSucceeded: 1,
+      verificationPending: 0,
+    },
+    verificationRecords: [{
+      id: 'verification-web-e2e', checkName: 'web focused tests', kind: 'command', status: 'succeeded', required: true,
+      command: 'pnpm --filter @los/web test', outputSummary: '14 tests passed', updatedAt: NOW, completedAt: NOW,
+    }],
+    changes: {
+      hasReviewableDiff: true,
+      workspaces: [{
+        workspaceId: 'workspace-web-e2e', status: 'backup_ready', baseRevision: '91df23c4',
+        backupArtifactId: 'artifact-diff-web-e2e', updatedAt: NOW,
+      }],
+    },
+  };
 }
 
 async function json(route: Parameters<Page['route']>[1] extends (route: infer R) => unknown ? R : never, body: unknown, status = 200) {

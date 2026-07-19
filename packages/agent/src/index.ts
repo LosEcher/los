@@ -98,6 +98,14 @@ export { projectExecutionObservability, type ExecutionCountEvidence, type Execut
 export { ensureStreamCheckpointStore, createStreamCheckpoint, listStreamCheckpointsSince, listStreamCheckpointsForRunSpec, type StreamCheckpointRecord, type CreateStreamCheckpointInput } from './stream-checkpoints.js';
 export { ensureStreamLeaseStore, acquireStreamLease, releaseStreamLease, heartbeatStreamLease, getActiveLease, type StreamLeaseRecord, type AcquireLeaseInput, type ReconnectInfo } from './stream-lease.js';
 export { ensureTodoStore, archiveTodo, createTodo, updateTodo, loadTodo, listTodos, reopenTodo, seedLosPlanningTodos, unarchiveTodo, type CreateTodoInput, type ListTodosOptions, type TodoKind, type TodoPriority, type TodoRecord, type TodoStatus, type UpdateTodoInput, type SeedLosPlanningTodosOptions } from './todos.js';
+export {
+  ensureScheduledWorkStore, createScheduledWorkItem, loadScheduledWorkItem, listScheduledWorkItems,
+  updateScheduledWorkItem, listScheduledWorkItemRuns, loadScheduledWorkItemRun,
+  claimDueScheduledWorkItems, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
+  previewScheduledOccurrences, runScheduledWorkTick, triggerScheduledWorkItem, setupScheduledWorkWake,
+  type ScheduledWorkItem, type ScheduledWorkItemRun, type ScheduledWorkTrigger,
+  type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
+} from './scheduled-work/index.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
 export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureSkillStore, upsertSkill, loadSkill, listSkills, deleteSkill, incrementSkillUsage, skillDirForScope, syncSkillsToDir, loadSkillsFromDir, type SkillRecord, type SkillRunMode, type SkillScope, type SkillLayer, type UpsertSkillInput } from './skills.js';
@@ -156,3 +164,9 @@ export type { Rule as AstGrepRule } from '@ast-grep/napi';
 //   See package.json "exports" for subpath access.
 
 export { runStorageDoctor, selfHeal, type DoctorReport, type CheckResult } from "./storage-doctor.js";
+export {
+  captureDailyAgentQuality, ensureDailyAgentQualityStore,
+  getDailyAgentQualityBaseline, listDailyAgentQualityScopes,
+  type DailyAgentQualityBaseline, type DailyAgentQualityEvidenceWindow,
+  type DailyAgentQualitySnapshot,
+} from './daily-agent-quality/index.js';

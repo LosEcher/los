@@ -28,11 +28,14 @@ import {
   ensureTodoStore, ensureVerificationRecordStore, ensureRuleStore,
   ensureManagedWorkspaceStore,
   ensureFeedAnalysisStore,
+  ensureScheduledWorkStore,
+  ensureDailyAgentQualityStore,
 } from '@los/agent';
 // Not in the @los/agent barrel (intentionally internal) — use subpath exports.
 import { ensureExecutionStore } from '@los/agent/execution-store';
 import { ensureToolCallStateStore } from '@los/agent/tool-call-states';
 import { ensureProviderCallTelemetryStore } from '@los/agent/providers/telemetry';
+import { ensureWorkItemStore } from '@los/agent/work-items';
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { getLogger } from '@los/infra/logger';
@@ -52,6 +55,9 @@ export async function ensureAllStores(): Promise<void> {
   await ensureExecutorNodeStore();
   await ensureServiceInstanceStore();
   await ensureTodoStore();
+  await ensureWorkItemStore();
+  await ensureScheduledWorkStore();
+  await ensureDailyAgentQualityStore();
   await ensureSkillStore();
   await ensureRuleStore();
   await ensureSessionStore();

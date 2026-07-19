@@ -43,6 +43,9 @@ export async function ensureAllAgentStores(): Promise<void> {
     import('./static-graph-baselines.js'),
     import('./worker-messages.js'),
     import('./integration/feed-analysis-store.js'),
+    import('./work-items/store.js'),
+    import('./scheduled-work/schema.js'),
+    import('./daily-agent-quality/schema.js'),
   ]);
 
   const ensureFns = [
@@ -76,6 +79,9 @@ export async function ensureAllAgentStores(): Promise<void> {
     'ensureStaticGraphBaselineStore',
     'ensureWorkerMessageStore',
     'ensureFeedAnalysisStore',
+    'ensureWorkItemStore',
+    'ensureScheduledWorkStore',
+    'ensureDailyAgentQualityStore',
   ];
 
   for (let i = 0; i < stores.length; i++) {

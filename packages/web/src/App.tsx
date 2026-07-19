@@ -6,15 +6,18 @@ import {
   BarChart3,
   Boxes,
   Brain,
+  BriefcaseBusiness,
   Bug,
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Inbox,
   ListChecks,
   MemoryStick,
   MessageSquare,
   Network,
   ScrollText,
+  CalendarClock,
   Server,
   Scale,
   Settings,
@@ -26,15 +29,11 @@ import {
 } from 'lucide-react';
 import {
   getJson,
-  setAuthToken,
-  getAuthToken,
-  setOperatorToken,
-  getOperatorToken,
-  AuthError,
   type Health,
   type SessionSummary,
   type TodoItem,
   type MemoryStats,
+  type WorkItemProjection,
 } from './api';
 import {
   CommunicationAccountsPage,
@@ -49,6 +48,9 @@ import {
   SettingsPage,
   SetupPage,
   TasksPage,
+  InboxPage,
+  WorkPage,
+  SchedulesPage,
 } from './pages';
 import { ChatPage } from './chat-page';
 import { NodesPage } from './nodes-page';
@@ -61,8 +63,12 @@ import { RulesPage } from './rules-page';
 import { EvalsPage } from './evals-page';
 import { PairwiseEvalsPage } from './pairwise-evals-page';
 import { formatDuration, StatusPill, type StatusState } from './ui';
+import { AuthBanner } from './auth-banner';
 
 type PageId =
+  | 'inbox'
+  | 'work'
+  | 'schedules'
   | 'chat'
   | 'sessions'
   | 'todos'
@@ -100,6 +106,9 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   // ── Workspace (daily workflow) ──────────────────────────
+  { id: 'inbox', label: 'Inbox', icon: Inbox, status: 'live', audience: 'workspace' },
+  { id: 'work', label: 'Work', icon: BriefcaseBusiness, status: 'live', audience: 'workspace' },
+  { id: 'schedules', label: 'Schedules', icon: CalendarClock, status: 'live', audience: 'workspace' },
   { id: 'chat', label: 'Chat', icon: MessageSquare, status: 'live', audience: 'workspace' },
   { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live', audience: 'workspace' },
   { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
@@ -132,13 +141,15 @@ const NAV: NavItem[] = [
 
 function pageFromHash(): PageId {
   const raw = window.location.hash.replace(/^#/, '');
-  return NAV.find(n => n.id === raw)?.id ?? 'chat';
+  return NAV.find(n => n.id === raw)?.id ?? 'inbox';
 }
 
 export function App() {
   const [page, setPage] = useState<PageId>(pageFromHash);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
+  const [selectedRunSpecId, setSelectedRunSpecId] = useState<string | null>(null);
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
 
@@ -222,6 +233,20 @@ export function App() {
     setSelectedSessionId(todo.sessionId ?? null);
     navigate('chat');
   };
+  const openWork = (id: string) => {
+    setSelectedWorkItemId(id);
+    navigate('work');
+  };
+  const openRun = (id: string) => {
+    setSelectedRunSpecId(id);
+    navigate('run-specs');
+  };
+  const startWork = (item: WorkItemProjection) => {
+    setSelectedWorkItemId(item.id);
+    setActiveTodoContext(workItemAsTodo(item));
+    setSelectedSessionId(null);
+    navigate('chat');
+  };
 
   return (
     <div className="app-shell">
@@ -303,6 +328,9 @@ export function App() {
           </div>
         </header>
 
+        {page === 'inbox' && <InboxPage onOpenWork={openWork} onOpenRun={openRun} onOpenSession={continueSession} />}
+        {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={setSelectedWorkItemId} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
+        {page === 'schedules' && <SchedulesPage />}
         {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} branchFromSession={branchFromSession} onBranchConsumed={() => setBranchFromSession(null)} activeTodoContext={activeTodoContext} onTodoContextClear={() => setActiveTodoContext(null)} />}
         {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} onBranchSession={branchSession} onSelectTodo={openTodo} />}
         {page === 'todos' && <TodosPage selectedTodoId={selectedTodoId} onTodoSelect={setSelectedTodoId} onRunTodo={runTodo} onSelectSession={continueSession} />}
@@ -320,7 +348,7 @@ export function App() {
         {page === 'dead-letter' && <DeadLetterPage />}
         {page === 'diagnostics' && <DiagnosticsPage />}
         {page === 'file-sync' && <FileSyncPage />}
-        {page === 'run-specs' && <RunSpecsPage />}
+        {page === 'run-specs' && <RunSpecsPage selectedRunSpecId={selectedRunSpecId} />}
         {page === 'communication-accounts' && <CommunicationAccountsPage />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
@@ -330,70 +358,31 @@ export function App() {
   );
 }
 
+function workItemAsTodo(item: WorkItemProjection): TodoItem {
+  return {
+    id: item.id,
+    tenantId: item.tenantId,
+    projectId: item.projectId,
+    userId: item.userId,
+    title: item.title,
+    description: item.description,
+    kind: 'task',
+    status: item.status,
+    priority: item.priority,
+    source: item.source,
+    dependsOnIds: [],
+    blockedByIds: [],
+    metadata: { runContract: item.runContractDraft },
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
 function Metric({ label, value, tone }: { label: string; value: string; tone?: 'ok' | 'warn' }) {
   return (
     <div className={`metric ${tone ?? ''}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
-  );
-}
-
-// ── Auth Banner ────────────────────────────────────────────
-
-function AuthBanner() {
-  const [dismissed, setDismissed] = useState(false);
-  const [tokenInput, setTokenInput] = useState('');
-  const [operatorInput, setOperatorInput] = useState('');
-  const [saved, setSaved] = useState(false);
-
-  const settings = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => getJson<{ auth?: { enabled?: boolean } }>('/settings'),
-    staleTime: 60_000,
-  });
-
-  const authEnabled = settings.data?.auth?.enabled === true;
-  const hasToken = Boolean(getAuthToken());
-  const hasOperator = Boolean(getOperatorToken());
-
-  // Show when auth is on and either auth token or operator token is missing
-  if (!authEnabled || (hasToken && hasOperator) || dismissed) return null;
-
-  function saveTokens() {
-    if (tokenInput.trim()) setAuthToken(tokenInput.trim());
-    if (operatorInput.trim()) setOperatorToken(operatorInput.trim());
-    setSaved(true);
-    setTimeout(() => setDismissed(true), 800);
-  }
-
-  return (
-    <div className="auth-banner">
-      <span>🔐 Auth enabled — set tokens for data + operator steering.</span>
-      {!hasToken ? (
-        <input
-          type="password"
-          value={tokenInput}
-          onChange={e => setTokenInput(e.target.value)}
-          placeholder="Auth token…"
-          onKeyDown={e => { if (e.key === 'Enter') saveTokens(); }}
-        />
-      ) : null}
-      {!hasOperator ? (
-        <input
-          type="password"
-          value={operatorInput}
-          onChange={e => setOperatorInput(e.target.value)}
-          placeholder="Operator token (steering)…"
-          onKeyDown={e => { if (e.key === 'Enter') saveTokens(); }}
-        />
-      ) : null}
-      <button type="button" onClick={saveTokens}>
-        {saved ? '✓ Saved' : 'Save'}
-      </button>
-      <button type="button" className="auth-dismiss" onClick={() => setDismissed(true)}>
-        ×
-      </button>
     </div>
   );
 }
