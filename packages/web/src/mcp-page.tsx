@@ -70,7 +70,7 @@ export function MCPServersPage() {
               <span>{server.transport}</span>
               <span className={`status-text ${server.status}`}>{server.status}</span>
               <span>{server.enabled ? 'enabled' : 'disabled'}</span>
-              <span>{server.toolCount} tools</span>
+              <span>{capabilityCountLabel(server)}</span>
               <span>{formatDate(server.updatedAt)}</span>
             </button>
           )}
@@ -171,6 +171,22 @@ function MCPServerInspector({
         <Fact label="pinned" value={server.pinnedVersionHash?.slice(0, 12) || 'no'} />
         <Fact label="auth" value={server.authConfig.mode} />
         <Fact label="risk" value={server.toolPolicy.riskLevel} />
+        <Fact label="adapter" value={server.adapterConfig.kind} />
+        {server.adapterConfig.kind === 'cantool' ? (
+          <>
+            <Fact label="provider location" value={server.adapterConfig.providerLocation} />
+            <Fact label="data grant owner" value={server.adapterConfig.dataGrantOwner} />
+            <Fact label="session binding" value={server.adapterConfig.sessionBinding} />
+          </>
+        ) : null}
+        {server.adapterEvidence?.serverVersion ? <Fact label="server version" value={server.adapterEvidence.serverVersion} /> : null}
+        {server.adapterEvidence?.protocolVersion ? <Fact label="protocol" value={server.adapterEvidence.protocolVersion} /> : null}
+        {server.adapterEvidence?.capabilitySummary ? (
+          <Fact
+            label="capabilities"
+            value={`${server.adapterEvidence.capabilitySummary.available} available / ${server.adapterEvidence.capabilitySummary.blocked} blocked`}
+          />
+        ) : null}
         <Fact label="updated" value={formatDate(server.updatedAt)} />
       </div>
       {server.command ? <Fact label="command" value={server.command} /> : null}
@@ -187,7 +203,11 @@ function MCPServerInspector({
       {server.tools.length > 0 ? (
         <div className="definition-list">
           {server.tools.map(tool => (
-            <Definition key={tool.name} term={tool.name} text={tool.description ?? 'no description'} />
+            <Definition
+              key={tool.name}
+              term={tool.name}
+              text={capabilityDescription(tool)}
+            />
           ))}
         </div>
       ) : null}
@@ -266,4 +286,16 @@ function MCPServerInspector({
       ) : null}
     </>
   );
+}
+
+function capabilityCountLabel(server: MCPServer): string {
+  const summary = server.adapterEvidence?.capabilitySummary;
+  return summary ? `${summary.available}/${summary.projected} available` : `${server.toolCount} tools`;
+}
+
+function capabilityDescription(tool: MCPServer['tools'][number]): string {
+  const capability = tool.capability;
+  if (!capability) return tool.description ?? 'no description';
+  const status = capability.availability === 'available' ? 'available' : `blocked: ${capability.reason}`;
+  return `${status} | ${capability.dataClassification} | ${tool.description ?? 'no description'}`;
 }

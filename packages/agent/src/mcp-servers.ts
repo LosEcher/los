@@ -11,75 +11,36 @@ import {
   mcpVersionSnapshot,
   normalizeMCPAuthConfig,
   normalizeMCPToolPolicy,
-  type MCPAuthConfig,
-  type MCPToolPolicy,
 } from './mcp-distribution-policy.js';
 import { _MCP_SERVER_SCHEMA } from './mcp-server-schema.js';
+import {
+  normalizeCanToolPolicy,
+  normalizeMCPAdapterConfig,
+} from './cantool-capability-adapter.js';
+import {
+  _assertMCPServerRow,
+  _normalizeMCPScopeValue,
+  _rowToMCPServerRecord,
+  type ListMCPServersOptions,
+  type MCPServerRecord,
+  type MCPServerRow,
+  type MCPTransport,
+  type UpdateMCPServerStatusInput,
+  type UpsertMCPServerInput,
+} from './mcp-server-record.js';
+
+export type {
+  ListMCPServersOptions,
+  MCPAdapterEvidence,
+  MCPRegisteredTool,
+  MCPServerRecord,
+  MCPServerStatus,
+  MCPTransport,
+  UpdateMCPServerStatusInput,
+  UpsertMCPServerInput,
+} from './mcp-server-record.js';
 
 // ── Types ───────────────────────────────────────────────
-
-export type MCPTransport = 'stdio' | 'sse' | 'streamable-http';
-export type MCPServerStatus = 'unverified' | 'connected' | 'error' | 'disabled';
-
-export interface MCPServerRecord {
-  id: string;
-  tenantId?: string;
-  projectId?: string;
-  transport: MCPTransport;
-  command?: string;
-  args: string[];
-  url?: string;
-  env: Record<string, string>;
-  sourceUri: string;
-  versionHash: string;
-  pinnedVersionHash?: string;
-  authConfig: MCPAuthConfig;
-  toolPolicy: MCPToolPolicy;
-  enabled: boolean;
-  status: MCPServerStatus;
-  lastError?: string;
-  toolCount: number;
-  tools: MCPRegisteredTool[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MCPRegisteredTool {
-  name: string;
-  description?: string;
-  inputSchema: Record<string, unknown>;
-}
-
-export interface UpsertMCPServerInput {
-  id: string;
-  tenantId?: string;
-  projectId?: string;
-  transport: MCPTransport;
-  command?: string;
-  args?: string[];
-  url?: string;
-  env?: Record<string, string>;
-  sourceUri?: string;
-  versionHash?: string;
-  pinnedVersionHash?: string | null;
-  authConfig?: MCPAuthConfig;
-  toolPolicy?: MCPToolPolicy;
-  allowPinnedUpdate?: boolean;
-  enabled?: boolean;
-}
-
-export interface UpdateMCPServerStatusInput {
-  status?: MCPServerStatus;
-  lastError?: string | null;
-  toolCount?: number;
-  tools?: MCPRegisteredTool[];
-}
-
-export interface ListMCPServersOptions {
-  tenantId?: string;
-  projectId?: string;
-  enabled?: boolean;
-}
 
 let _initialized = false;
 
@@ -95,11 +56,15 @@ export async function ensureMCPServerStore(): Promise<void> {
 export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPServerRecord> {
   await ensureMCPServerStore();
   const db = getDb();
-  const tenantId = normalizeScopeValue(input.tenantId);
-  const projectId = normalizeScopeValue(input.projectId);
+  const tenantId = _normalizeMCPScopeValue(input.tenantId);
+  const projectId = _normalizeMCPScopeValue(input.projectId);
   const existing = await loadMCPServer(input.id, tenantId, projectId);
   const authConfig = normalizeMCPAuthConfig(input.authConfig);
-  const toolPolicy = normalizeMCPToolPolicy(input.toolPolicy);
+  const adapterConfig = normalizeMCPAdapterConfig(input.adapterConfig);
+  const requestedToolPolicy = normalizeMCPToolPolicy(input.toolPolicy);
+  const toolPolicy = adapterConfig.kind === 'cantool'
+    ? normalizeCanToolPolicy(requestedToolPolicy)
+    : requestedToolPolicy;
   const env = input.env ?? {};
   const versionHash = mcpDistributionVersionHash({
     id: input.id,
@@ -111,6 +76,7 @@ export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPS
     sourceUri: input.sourceUri,
     authConfig,
     toolPolicy,
+    adapterConfig,
   });
   if (input.versionHash && input.versionHash !== versionHash) throw new Error('MCP versionHash must match inspected configuration');
   if (existing?.pinnedVersionHash && existing.pinnedVersionHash !== versionHash && input.allowPinnedUpdate !== true) {
@@ -159,10 +125,10 @@ export async function upsertMCPServer(input: UpsertMCPServerInput): Promise<MCPS
       input.pinnedVersionHash ?? null,
       JSON.stringify(authConfig),
       JSON.stringify(toolPolicy),
-      JSON.stringify({ inspected: true, envKeys: Object.keys(env).sort() }),
+      JSON.stringify({ inspected: true, envKeys: Object.keys(env).sort(), adapterConfig }),
     ],
   );
-  const record = rowToRecord(assertRow(rows.rows[0]));
+  const record = _rowToMCPServerRecord(_assertMCPServerRow(rows.rows[0]));
   await db.query(
     `INSERT INTO mcp_server_versions (id, tenant_id, project_id, version_hash, snapshot_json)
      VALUES ($1, $2, $3, $4, $5::jsonb)
@@ -186,9 +152,9 @@ export async function loadMCPServer(
       AND tenant_id = $2
       AND project_id = $3
     `,
-    [id, normalizeScopeValue(tenantId), normalizeScopeValue(projectId)],
+    [id, _normalizeMCPScopeValue(tenantId), _normalizeMCPScopeValue(projectId)],
   );
-  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+  return rows.rows[0] ? _rowToMCPServerRecord(rows.rows[0]) : null;
 }
 
 export async function listMCPServers(
@@ -219,7 +185,7 @@ export async function listMCPServers(
     `SELECT * FROM mcp_servers ${where} ORDER BY id ASC`,
     params,
   );
-  return rows.rows.map(rowToRecord);
+  return rows.rows.map(_rowToMCPServerRecord);
 }
 
 export async function deleteMCPServer(
@@ -237,7 +203,7 @@ export async function deleteMCPServer(
       AND project_id = $3
     RETURNING id
   `,
-    [id, normalizeScopeValue(tenantId), normalizeScopeValue(projectId)],
+    [id, _normalizeMCPScopeValue(tenantId), _normalizeMCPScopeValue(projectId)],
   );
   return rows.rows.length > 0;
 }
@@ -257,6 +223,9 @@ export async function updateMCPServerStatus(
         last_error = $5,
         tool_count = COALESCE($6, tool_count),
         tools_json = CASE WHEN $7::jsonb IS NOT NULL THEN $7::jsonb ELSE tools_json END,
+        distribution_json = CASE WHEN $8::jsonb IS NOT NULL
+          THEN distribution_json || jsonb_build_object('adapterEvidence', $8::jsonb)
+          ELSE distribution_json END,
         updated_at = now()
     WHERE id = $1
       AND tenant_id = $2
@@ -265,125 +234,14 @@ export async function updateMCPServerStatus(
   `,
     [
       id,
-      normalizeScopeValue(tenantId),
-      normalizeScopeValue(projectId),
+      _normalizeMCPScopeValue(tenantId),
+      _normalizeMCPScopeValue(projectId),
       input.status ?? null,
       input.lastError ?? null,
       input.toolCount ?? null,
       input.tools ? JSON.stringify(input.tools) : null,
+      input.adapterEvidence ? JSON.stringify(input.adapterEvidence) : null,
     ],
   );
-  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
-}
-
-// ── Helpers ─────────────────────────────────────────────
-
-type MCPServerRow = {
-  id: string;
-  tenant_id: string | null;
-  project_id: string | null;
-  transport: string;
-  command: string | null;
-  args_json: unknown;
-  url: string | null;
-  env_json: unknown;
-  enabled: boolean;
-  status: string;
-  last_error: string | null;
-  tool_count: number;
-  tools_json: unknown;
-  source_uri: string;
-  version_hash: string;
-  pinned_version_hash: string | null;
-  auth_json: unknown;
-  tool_policy_json: unknown;
-  distribution_json: unknown;
-  created_at: Date | string;
-  updated_at: Date | string;
-};
-
-function rowToRecord(row: MCPServerRow): MCPServerRecord {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id || undefined,
-    projectId: row.project_id || undefined,
-    transport: row.transport as MCPTransport,
-    command: row.command ?? undefined,
-    args: normalizeJsonArray(row.args_json).map(String),
-    url: row.url ?? undefined,
-    env: normalizeEnvObject(row.env_json),
-    sourceUri: row.source_uri,
-    versionHash: row.version_hash,
-    pinnedVersionHash: row.pinned_version_hash ?? undefined,
-    authConfig: normalizeMCPAuthConfig(row.auth_json),
-    toolPolicy: normalizeMCPToolPolicy(row.tool_policy_json),
-    enabled: row.enabled,
-    status: row.status as MCPServerStatus,
-    lastError: row.last_error ?? undefined,
-    toolCount: row.tool_count,
-    tools: normalizeToolArray(row.tools_json),
-    createdAt: toIsoString(row.created_at),
-    updatedAt: toIsoString(row.updated_at),
-  };
-}
-
-function normalizeScopeValue(value: string | undefined): string {
-  return value?.trim() ?? '';
-}
-
-function normalizeJsonArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch { return []; }
-  }
-  return [];
-}
-
-function normalizeEnvObject(value: unknown): Record<string, string> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (typeof v === 'string') env[k] = v;
-    }
-    return env;
-  }
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const env: Record<string, string> = {};
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          if (typeof v === 'string') env[k] = v;
-        }
-        return env;
-      }
-    } catch { return {}; }
-  }
-  return {};
-}
-
-function normalizeToolArray(value: unknown): MCPRegisteredTool[] {
-  const raw = normalizeJsonArray(value);
-  return raw
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
-    .map(item => ({
-      name: String(item.name ?? ''),
-      description: typeof item.description === 'string' ? item.description : undefined,
-      inputSchema: item.inputSchema && typeof item.inputSchema === 'object'
-        ? (item.inputSchema as Record<string, unknown>)
-        : { type: 'object' },
-    }))
-    .filter(t => t.name);
-}
-
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function assertRow<T>(row: T | undefined): T {
-  if (!row) throw new Error('Failed to upsert MCP server');
-  return row;
+  return rows.rows[0] ? _rowToMCPServerRecord(rows.rows[0]) : null;
 }

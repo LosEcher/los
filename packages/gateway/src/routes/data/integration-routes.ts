@@ -13,7 +13,7 @@ import {
   type FeedAnalysisDispatchRequest,
 } from '@los/agent';
 import { runIdempotentJson } from '../../idempotency.js';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, type RequestContext } from '../../request-context.js';
 
 /**
  * Gateway routes for the feed-analysis integration.
@@ -37,7 +37,7 @@ export function registerIntegrationRoutes(app: FastifyInstance, config: Config, 
     }
 
     const idempotencyKey = extractIdempotencyKey(req);
-    const context = getRequestContext(req);
+    const context = normalizeIntegrationContext(req, getRequestContext(req), config, body.sourceSystem);
     const callbackProfileId = body.callback?.profileId?.trim();
     if (body.deliveryMode === 'result_returning' && !config.integrations.feedAnalysis.resultReturningEnabled) {
       return reply.status(422).send(wrapError('capability_unsupported', 'result_returning is disabled'));
@@ -186,6 +186,26 @@ function verifyIntegrationAuth(
   }
 
   return null;
+}
+
+function normalizeIntegrationContext(
+  req: { headers: Record<string, unknown> },
+  context: RequestContext,
+  config: Config,
+  sourceSystem: string,
+): RequestContext {
+  const actor = normalizeHeader(req.headers['x-actor-id']);
+  return {
+    ...context,
+    tenantId: context.tenantId === 'unknown' ? 'local' : context.tenantId,
+    projectId: context.projectId === 'unknown' ? config.defaultProjectId ?? 'los' : context.projectId,
+    userId: context.userId === 'unknown' ? actor ?? `integration:${sourceSystem}` : context.userId,
+  };
+}
+
+function normalizeHeader(value: unknown): string | undefined {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
 }
 
 function extractIdempotencyKey(req: { headers: Record<string, unknown> }): string | undefined {

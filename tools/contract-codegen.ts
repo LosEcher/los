@@ -16,15 +16,19 @@ type Schema = {
 export interface GeneratedContractFiles {
   runSpec: string;
   runStream: string;
+  executionExperiment: string;
+  executionPairwiseEval: string;
 }
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GENERATED_DIR = resolve(ROOT, 'packages/contracts/src/generated');
 
 export async function generateContractFiles(root = ROOT): Promise<GeneratedContractFiles> {
-  const [runSpecText, runStreamText] = await Promise.all([
+  const [runSpecText, runStreamText, executionExperimentText, executionPairwiseEvalText] = await Promise.all([
     readFile(resolve(root, 'contracts/run-spec.yaml'), 'utf8'),
     readFile(resolve(root, 'contracts/run-stream.yaml'), 'utf8'),
+    readFile(resolve(root, 'contracts/execution-experiment.yaml'), 'utf8'),
+    readFile(resolve(root, 'contracts/execution-pairwise-eval.yaml'), 'utf8'),
   ]);
   const runSpec = YAML.parse(runSpecText) as Schema & { contract: string; version: string };
   const runStream = YAML.parse(runStreamText) as {
@@ -34,10 +38,16 @@ export async function generateContractFiles(root = ROOT): Promise<GeneratedContr
     sseProtocol: string[];
   };
 
+  const executionExperiment = YAML.parse(executionExperimentText) as Schema & { contract: string; version: string };
+  const executionPairwiseEval = YAML.parse(executionPairwiseEvalText) as Schema & { contract: string; version: string };
   const schema = pickJsonSchema(runSpec);
+  const executionExperimentSchema = pickJsonSchema(executionExperiment);
+  const executionPairwiseEvalSchema = pickJsonSchema(executionPairwiseEval);
   return {
     runSpec: renderRunSpec(runSpec.contract, runSpec.version, schema),
     runStream: renderRunStream(runStream),
+    executionExperiment: renderObjectContract(executionExperiment.contract, executionExperiment.version, executionExperimentSchema, 'ExecutionExperimentRequest', 'EXECUTION_EXPERIMENT'),
+    executionPairwiseEval: renderObjectContract(executionPairwiseEval.contract, executionPairwiseEval.version, executionPairwiseEvalSchema, 'ExecutionPairwiseEvalRequest', 'EXECUTION_PAIRWISE_EVAL'),
   };
 }
 
@@ -48,6 +58,8 @@ export async function writeGeneratedContractFiles(root = ROOT): Promise<void> {
   await Promise.all([
     writeFile(resolve(directory, 'run-spec.ts'), generated.runSpec),
     writeFile(resolve(directory, 'run-stream.ts'), generated.runStream),
+    writeFile(resolve(directory, 'execution-experiment.ts'), generated.executionExperiment),
+    writeFile(resolve(directory, 'execution-pairwise-eval.ts'), generated.executionPairwiseEval),
   ]);
 }
 
@@ -90,6 +102,21 @@ export const RUN_STREAM_SSE_EVENTS = ${JSON.stringify(contract.sseProtocol, null
 export type RunStreamEventType = typeof RUN_STREAM_EVENT_TYPES[number];
 export type RunStreamSseEventType = typeof RUN_STREAM_SSE_EVENTS[number];
 export type RunStreamWireEventType = RunStreamEventType | RunStreamSseEventType;
+`;
+}
+
+function renderObjectContract(contract: string, version: string, schema: Schema, typeName: string, constantPrefix: string): string {
+  return `${header(contract, version)}import { createContractValidator } from '../runtime.js';
+
+export const ${constantPrefix}_CONTRACT = ${JSON.stringify(contract)};
+export const ${constantPrefix}_VERSION = ${JSON.stringify(version)};
+export const ${constantPrefix}_SCHEMA = ${JSON.stringify(schema)} as const;
+
+export type ${typeName} = ${schemaToType(schema)};
+
+export const validate${typeName} = createContractValidator<${typeName}>(
+  ${constantPrefix}_SCHEMA,
+);
 `;
 }
 

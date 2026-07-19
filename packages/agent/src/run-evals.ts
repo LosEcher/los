@@ -4,10 +4,16 @@ import { RUN_EVAL_SCHEMA } from './run-evals/schema.js';
 import type {
   CompareRunEvalsOptions,
   ListRunEvalsOptions,
+  RecordPairwiseRunEvalInput,
   RecordRunEvalInput,
   RunEvalComparison,
+  RunEvalCriterionScore,
+  RunEvalEvidenceChannel,
   RunEvalFailoverScope,
+  RunEvalPairwiseVerdict,
   RunEvalRecord,
+  RunEvalRubricCriterion,
+  RunEvalRubricSnapshot,
   RunEvalSummary,
   RunEvalVerificationStatus,
   SummarizeRunEvalsOptions,
@@ -16,15 +22,23 @@ import type {
 export type {
   CompareRunEvalsOptions,
   ListRunEvalsOptions,
+  RecordPairwiseRunEvalInput,
   RecordRunEvalInput,
   RunEvalComparison,
+  RunEvalCriterionScore,
+  RunEvalEvidenceChannel,
   RunEvalFailoverScope,
+  RunEvalPairwiseVerdict,
   RunEvalRecord,
+  RunEvalRubricCriterion,
+  RunEvalRubricSnapshot,
   RunEvalSummary,
   RunEvalSummaryGroup,
   RunEvalVerificationStatus,
   SummarizeRunEvalsOptions,
 } from './run-evals/types.js';
+
+export { listPairwiseRunEvals, recordPairwiseRunEval } from './run-evals/pairwise.js';
 
 import {
   addOptionalClause,

@@ -3,8 +3,12 @@ export * from './types-executor-nodes.js';
 export * from './types-sessions.js';
 export * from './types-mcp.js';
 export * from './types-agent-task-graph.js';
+export * from './types-work-items.js';
+export * from './types-scheduled-work.js';
+export * from './types-daily-agent-quality.js';
 import type { ToolRetry, MCPServerPayload } from './types-mcp.js';
 import type { ToolMode } from './types-sessions.js';
+import type { TodoPriority, TodoStatus } from './types-work-items.js';
 
 export type TaskRun = {
   id: string;
@@ -55,8 +59,6 @@ export type SshConfigImportResponse = {
 };
 
 export type TodoKind = 'problem' | 'solution' | 'plan' | 'phase' | 'task' | 'batch';
-export type TodoStatus = 'backlog' | 'ready' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
-export type TodoPriority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export type TodoItem = {
   id: string;

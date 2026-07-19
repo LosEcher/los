@@ -7,6 +7,36 @@ export type RunEvalVerificationStatus =
   | 'skipped';
 
 export type RunEvalFailoverScope = 'service' | 'executor';
+export type RunEvalPairwiseVerdict = 'baseline' | 'candidate' | 'tie' | 'inconclusive';
+export type RunEvalEvidenceSource = 'human' | 'judge' | 'deterministic';
+
+export interface RunEvalCriterionScore {
+  criterionId: string;
+  score: number;
+  note?: string;
+}
+
+export interface RunEvalEvidenceChannel {
+  source: string;
+  verdict?: RunEvalPairwiseVerdict;
+  criterionScores?: RunEvalCriterionScore[];
+  note?: string;
+  confidence?: number;
+  verificationStatus?: RunEvalVerificationStatus;
+}
+
+export interface RunEvalRubricCriterion {
+  id: string;
+  label: string;
+  description?: string;
+  maxScore: number;
+}
+
+export interface RunEvalRubricSnapshot {
+  id: string;
+  revision: string;
+  criteria: RunEvalRubricCriterion[];
+}
 
 export interface RunEvalRecord {
   id: string;
@@ -24,6 +54,17 @@ export interface RunEvalRecord {
   userFeedback?: string;
   failureClass?: string;
   failoverScope?: RunEvalFailoverScope;
+  evaluationKind: 'single' | 'pairwise';
+  pairId?: string;
+  experimentId?: string;
+  baselineRunSpecId?: string;
+  candidateRunSpecId?: string;
+  rubricRevision?: string;
+  rubricSnapshot?: RunEvalRubricSnapshot;
+  human?: RunEvalEvidenceChannel;
+  judge?: RunEvalEvidenceChannel;
+  deterministic?: RunEvalEvidenceChannel;
+  pairwiseVerdict?: RunEvalPairwiseVerdict;
   summary: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -45,6 +86,32 @@ export interface RecordRunEvalInput {
   userFeedback?: string;
   failureClass?: string;
   failoverScope?: RunEvalFailoverScope | string;
+  summary?: Record<string, unknown>;
+}
+
+export interface RecordPairwiseRunEvalInput {
+  id?: string;
+  pairId?: string;
+  experimentId: string;
+  baselineRunSpecId: string;
+  candidateRunSpecId: string;
+  rubricRevision: string;
+  rubricSnapshot: RunEvalRubricSnapshot;
+  verdict: RunEvalPairwiseVerdict;
+  human?: RunEvalEvidenceChannel;
+  judge?: RunEvalEvidenceChannel;
+  deterministic?: RunEvalEvidenceChannel;
+  runSpecId?: string;
+  sessionId?: string;
+  taskRunId?: string;
+  provider?: string;
+  model?: string;
+  success?: boolean;
+  latencyMs?: number;
+  retryCount?: number;
+  toolErrorCount?: number;
+  verificationStatus?: RunEvalVerificationStatus | string;
+  modelCost?: number;
   summary?: Record<string, unknown>;
 }
 

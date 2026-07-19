@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Config } from '@los/infra/config';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
-import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake, resumeAnsweredAsksForRunSpec } from '@los/agent';
+import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake, resumeAnsweredAsksForRunSpec, setupScheduledWorkWake } from '@los/agent';
 import { listExecutorNodes, markStaleExecutorNodesOffline } from '@los/agent/executor-nodes';
 import { markStaleServiceInstancesOffline } from '@los/agent/service-instances';
 import { resolveCoordinationBackend } from '@los/agent/coordination';
@@ -15,6 +15,7 @@ import { processDueFeedAnalysisCallbacks, pruneExpiredFeedAnalysisMaterial } fro
 import { publishExecutionOutboxBatch } from '@los/agent/execution-outbox';
 import { reapExpiredExecutionLeases } from './execution-lease-reaper.js';
 import { sweepSymbolCache } from './chat-cbm-symbol-cache.js';
+import { registerDailyAgentQualityMaintenance } from './daily-agent-quality-maintenance.js';
 
 export { reapExpiredExecutionLeases };
 
@@ -26,6 +27,10 @@ export function registerServerMaintenance(
   config: Config,
   opts?: { executorAgentKey?: string },
 ): void {
+  registerDailyAgentQualityMaintenance(app, config.defaultProjectId ?? 'los');
+  const stopScheduledWork = setupScheduledWorkWake({ ownerId: service.serviceId });
+  app.addHook('onClose', async () => stopScheduledWork());
+
   // ── Orphan reaper (30s) ──────────────────────────────────────
   const ORPHAN_REAPER_MS = 30_000;
   const orphanReaper = setInterval(() => {

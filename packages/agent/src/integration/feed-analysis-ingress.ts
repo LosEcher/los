@@ -30,6 +30,7 @@ import {
   type FeedAnalysisWorkflowLimits,
 } from './feed-analysis-workflow.js';
 import { _executeFeedAnalysisDispatch } from './feed-analysis-execution.js';
+import { ensureFeedAnalysisWorkItem } from './feed-analysis-work-item.js';
 
 export interface FeedAnalysisDispatchOptions extends FeedAnalysisWorkflowLimits {
   workspaceRoot: string;
@@ -122,7 +123,10 @@ export async function dispatchFeedAnalysisJob(
     retentionExpiresAt: new Date(Date.now() + retentionDays * 86_400_000).toISOString(),
   });
 
-  if (created.deduplicated && created.record.runSpecId) return dispatchToResult(created.record, true, request.threadId);
+  if (created.deduplicated && created.record.runSpecId) {
+    const workItemId = await ensureFeedAnalysisWorkItem(created.record);
+    return dispatchToResult({ ...created.record, workItemId }, true, request.threadId);
+  }
   const dispatchId = created.record.id;
 
   const traceId = randomUUID();
@@ -159,6 +163,9 @@ export async function dispatchFeedAnalysisJob(
   });
 
   await linkFeedAnalysisExecution({ dispatchId, runSpecId: runSpec.id, sessionId, traceId });
+  const linkedForWorkItem = await loadFeedAnalysisDispatch(dispatchId);
+  if (!linkedForWorkItem) throw new Error(`feed-analysis dispatch disappeared: ${dispatchId}`);
+  const workItemId = await ensureFeedAnalysisWorkItem(linkedForWorkItem);
   await appendSessionEvent({
     sessionId,
     tenantId,
@@ -195,7 +202,7 @@ export async function dispatchFeedAnalysisJob(
 
   const linked = await loadFeedAnalysisDispatch(dispatchId);
   if (!linked) throw new Error(`feed-analysis dispatch disappeared: ${dispatchId}`);
-  return dispatchToResult(linked, false, request.threadId);
+  return dispatchToResult({ ...linked, workItemId }, false, request.threadId);
 }
 
 export async function getFeedAnalysisDispatch(dispatchId: string): Promise<FeedAnalysisDispatchResult | null> {
@@ -250,6 +257,7 @@ function dispatchToResult(
     dispatch: {
       id: record.id,
       status: record.status,
+      workItemId: record.workItemId,
       runId: record.runSpecId,
       traceId: record.traceId,
       threadId,

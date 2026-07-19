@@ -8,6 +8,7 @@ const TRANSPORTS: MCPTransport[] = ['stdio', 'sse', 'streamable-http'];
 export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void }) {
   const [id, setId] = useState('');
   const [transport, setTransport] = useState<MCPTransport>('stdio');
+  const [adapterKind, setAdapterKind] = useState<'generic' | 'cantool'>('generic');
   const [command, setCommand] = useState('');
   const [url, setUrl] = useState('');
   const [args, setArgs] = useState('');
@@ -34,6 +35,7 @@ export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void
         deny: denyTools.split(',').map(s => s.trim()).filter(Boolean),
         riskLevel,
       },
+      adapterConfig: { kind: adapterKind },
     };
   }
 
@@ -80,6 +82,23 @@ export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void
             {TRANSPORTS.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </Field>
+        <Field label="capability adapter">
+          <select
+            value={adapterKind}
+            onChange={e => {
+              const value = e.target.value as typeof adapterKind;
+              setAdapterKind(value);
+              if (value === 'cantool') {
+                setTransport('stdio');
+                setAuthMode('none');
+                setRiskLevel('L0');
+              }
+            }}
+          >
+            <option value="generic">generic MCP</option>
+            <option value="cantool">CanTool local read-only</option>
+          </select>
+        </Field>
         <Field label="source URI"><input value={sourceUri} onChange={e => setSourceUri(e.target.value)} placeholder="catalog:team/server@1.0.0" /></Field>
         {transport === 'stdio' ? (
           <>
@@ -106,6 +125,7 @@ export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void
           <div className="definition-list">
             <Definition term="version" text={inspection.versionHash.slice(0, 12)} />
             <Definition term="execution" text={inspection.executionSupported ? 'supported' : inspection.blockers.join('; ')} />
+            <Definition term="adapter" text={adapterKind === 'cantool' ? 'CanTool reviewed capabilities only' : 'generic MCP tool policy'} />
           </div>
         ) : null}
         {error ? <p className="form-error">{error}</p> : null}

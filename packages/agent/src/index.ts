@@ -70,7 +70,8 @@ export {
 } from './integration/feed-analysis-callback-outbox.js';
 export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DeadLetterResolution, type ResolveDeadLetterInput, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
 export { summarizeDeadLetterEvents, requeueDeadLetterEvent, type DeadLetterReasonSummary, type DeadLetterSummary, type DeadLetterRequeueResult, type DeadLetterRequeueOptions } from './dead-letter-recovery.js';
-export { ensureRunEvalStore, compareRunEvals, listRunEvals, recordFailoverEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type SummarizeRunEvalsOptions } from './run-evals.js';
+export { ensureRunEvalStore, compareRunEvals, listRunEvals, listPairwiseRunEvals, recordFailoverEval, recordPairwiseRunEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordPairwiseRunEvalInput, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type RunEvalEvidenceChannel, type RunEvalRubricSnapshot, type RunEvalRubricCriterion, type RunEvalCriterionScore, type RunEvalPairwiseVerdict, type SummarizeRunEvalsOptions } from './run-evals.js';
+export { ensureExecutionExperimentStore, createExecutionExperiment, loadExecutionExperiment, setExecutionExperimentCandidate, approveExecutionExperiment, transitionExecutionExperiment, type ExecutionExperimentRecord, type ExecutionExperimentStatus, type ExecutionExperimentSource, type ExecutionExperimentConfigDiff, type CreateExecutionExperimentInput } from './execution-experiments.js';
 export { getEvalBacklogCases, recordEvalBacklogSnapshot, type EvalBacklogCase } from './eval-backlog-runner.js';
 export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, editableSurfacesForAgentTask, editableSurfacesOverlap, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskLeaseFence, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
 export { backupManagedWorkspace, createManagedWorkspace, ensureManagedWorkspaceStore, listManagedWorkspaces, loadManagedWorkspace, loadManagedWorkspaceDetail, releaseManagedWorkspace, workspaceRootForTask, type CreateManagedWorkspaceInput, type ListManagedWorkspacesOptions, type ManagedWorkspaceDetail, type ManagedWorkspaceEvent, type ManagedWorkspaceRecord, type ManagedWorkspaceRuntimeOptions, type ManagedWorkspaceStatus } from './managed-workspaces.js';
@@ -87,7 +88,7 @@ export { runGaLoop, type RunGaLoopOptions } from './ga-loop-runner.js';
 export { evaluateLoopGate, computeNextState, maybeAutoRecoverPaused, type ThrottleDecision } from './ga-circuit-breaker.js';
 export { scanRelatedProjects, formatScanReport, RELATED_PROJECTS, type RelatedProject, type ProjectScanResult } from './ga-related-project-scanner.js';
 export { ensureStaticGraphBaselineStore, captureStaticGraphBaseline, getLatestBaseline, getBaseline, deleteBaseline, diffBaselines, summarizeBaselineDiff, type StaticGraphBaseline, type BaselineDiff, type CaptureBaselineInput } from './static-graph-baselines.js';
-export { ensureTaskRunStore, createTaskRun, findActiveTaskRunByDedupeKey, updateTaskRunFields, heartbeatTaskRun, recoverExpiredTaskRuns, recoverExpiredTaskRunsWithAdvisoryLock, loadTaskRun, listTaskRuns, listTaskRunsByStatus, listTaskRunsForSession, listTaskRunsForRunSpec, claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun, type CreateTaskRunInput, type TaskRunRecoveryResult, type TaskRunRecord, type TaskRunStatus, type UpdateTaskRunFieldsInput } from './task-runs.js';
+export { ensureTaskRunStore, createTaskRun, findActiveTaskRunByDedupeKey, updateTaskRunFields, heartbeatTaskRun, recoverExpiredTaskRuns, recoverExpiredTaskRunsWithAdvisoryLock, recoverActiveTaskRunsForGateway, loadTaskRun, listTaskRuns, listTaskRunsByStatus, listTaskRunsForSession, listTaskRunsForRunSpec, claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun, type CreateTaskRunInput, type TaskRunRecoveryResult, type TaskRunRecord, type TaskRunStatus, type UpdateTaskRunFieldsInput } from './task-runs.js';
 export { ensureWorkerMessageStore, sendWorkerMessage, sendHeartbeat, recordWorkerAnswer, listMessagesForDispatch, listMessagesForTask, hasWorkerDone, type WorkerMessage, type WorkerMessageType, type WorkerMessagePayload, type SendWorkerMessageInput } from './worker-messages.js';
 export { ensureExecutorNodeStore, loadExecutorNode, listExecutorNodes, recordExecutorNodeProbe, upsertExecutorNode, upsertExecutorNodeHeartbeat, type ExecutorNodeHeartbeatInput, type ExecutorNodeConnectMode, type ExecutorNodeKind, type ExecutorNodeProbeInput, type ExecutorNodeRecord, type ExecutorNodeStatus, type ExecutorNodeUpsertInput } from './executor-nodes.js';
 export { clearCancellation, ensureCancellationStore, pollCancellation, requestCancellation, type CancellationRequest } from './cancellation.js';
@@ -97,6 +98,14 @@ export { projectExecutionObservability, type ExecutionCountEvidence, type Execut
 export { ensureStreamCheckpointStore, createStreamCheckpoint, listStreamCheckpointsSince, listStreamCheckpointsForRunSpec, type StreamCheckpointRecord, type CreateStreamCheckpointInput } from './stream-checkpoints.js';
 export { ensureStreamLeaseStore, acquireStreamLease, releaseStreamLease, heartbeatStreamLease, getActiveLease, type StreamLeaseRecord, type AcquireLeaseInput, type ReconnectInfo } from './stream-lease.js';
 export { ensureTodoStore, archiveTodo, createTodo, updateTodo, loadTodo, listTodos, reopenTodo, seedLosPlanningTodos, unarchiveTodo, type CreateTodoInput, type ListTodosOptions, type TodoKind, type TodoPriority, type TodoRecord, type TodoStatus, type UpdateTodoInput, type SeedLosPlanningTodosOptions } from './todos.js';
+export {
+  ensureScheduledWorkStore, createScheduledWorkItem, loadScheduledWorkItem, listScheduledWorkItems,
+  updateScheduledWorkItem, listScheduledWorkItemRuns, loadScheduledWorkItemRun,
+  claimDueScheduledWorkItems, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
+  previewScheduledOccurrences, runScheduledWorkTick, triggerScheduledWorkItem, setupScheduledWorkWake,
+  type ScheduledWorkItem, type ScheduledWorkItemRun, type ScheduledWorkTrigger,
+  type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
+} from './scheduled-work/index.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
 export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureSkillStore, upsertSkill, loadSkill, listSkills, deleteSkill, incrementSkillUsage, skillDirForScope, syncSkillsToDir, loadSkillsFromDir, type SkillRecord, type SkillRunMode, type SkillScope, type SkillLayer, type UpsertSkillInput } from './skills.js';
@@ -155,3 +164,9 @@ export type { Rule as AstGrepRule } from '@ast-grep/napi';
 //   See package.json "exports" for subpath access.
 
 export { runStorageDoctor, selfHeal, type DoctorReport, type CheckResult } from "./storage-doctor.js";
+export {
+  captureDailyAgentQuality, ensureDailyAgentQualityStore,
+  getDailyAgentQualityBaseline, listDailyAgentQualityScopes,
+  type DailyAgentQualityBaseline, type DailyAgentQualityEvidenceWindow,
+  type DailyAgentQualitySnapshot,
+} from './daily-agent-quality/index.js';

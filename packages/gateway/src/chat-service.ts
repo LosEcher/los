@@ -7,13 +7,7 @@ import { updateBoundTodoFromRun, loadBranchSource } from './chat-session-helpers
 import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import { recordSessionBranchCreated } from '@los/agent/operator-control';
 import { prepareChatContextPolicy } from './chat-context-policy.js';
-import { persistStreamCheckpoint } from './chat-stream-persist.js';
-import {
-  emitRunningToolCallUpsert,
-  emitToolCallUpsertFromSessionEvent,
-  relaySessionEvent,
-  type SendEvent,
-} from './chat-live-events.js';
+import { relaySessionEvent, type SendEvent } from './chat-live-events.js';
 import { persistChatSuccess } from './chat-route-persist.js';
 import type { MCPRequestServer } from './chat-normalizers.js';
 import { persistChatIntakeEvent } from './chat-intake-events.js';
@@ -22,6 +16,9 @@ import {
   prepareChatResumePlan,
   sendChatResumeState,
 } from './chat-resume-plan.js';
+import { handleNonCompletedOutcome } from './chat-service-outcomes.js';
+import { createChatTaskHooks } from './chat-service-hooks.js';
+import { linkWorkItemRun } from '@los/agent/work-items';
 
 export type { SendEvent } from './chat-live-events.js';
 export interface ChatRunContext {
@@ -31,9 +28,6 @@ export interface ChatRunContext {
 }
 
 export type ChatStatus = 'completed' | 'deduplicated' | 'cancelled' | 'blocked';
-
-/** Per-session checkpoint counters for mid-session auto-compaction (P0-1). */
-const checkpointTracker = new Map<string, { count: number; lastAt: number }>();
 
 export interface ChatResult {
   status: ChatStatus;
@@ -143,6 +137,16 @@ export async function runChat(params: {
     runContract,
     gatewayId: gatewayServiceId,
   });
+  if (boundTodoId) {
+    await linkWorkItemRun({
+      workItemId: boundTodoId,
+      runSpecId,
+      sessionId: sid,
+      relationKind: relationKindForRun(runContract),
+    }).catch(error => {
+      log.warn('Failed to persist Work Item run lineage', { error, workItemId: boundTodoId, runSpecId });
+    });
+  }
   relaySessionEvent(send, await persistChatIntakeEvent({
     sessionId: sid, tenantId, userId, requestId, traceId,
     requestedProjectId, requestedWorkspaceRoot, resolution: intakeResolution, runSpecId,
@@ -229,8 +233,6 @@ export async function runChat(params: {
       });
     }
 
-    let sentSession = false;
-
     const scheduled = await runScheduledAgentTask({
       prompt,
       sessionId: sid,
@@ -279,241 +281,25 @@ export async function runChat(params: {
         projectId,
         userId,
       },
-      onTaskEvent: (event) => {
-        ctx.activeTaskRunId = event.taskRun.id;
-        if (!sentSession && event.type !== 'task.deduplicated') {
-          sentSession = true;
-          send('session', {
-            sessionId: event.taskRun.sessionId,
-            taskRunId: event.taskRun.id,
-            traceId: event.taskRun.traceId,
-            requestId,
-            nodeId: event.taskRun.nodeId ?? null,
-            dedupeKey: event.taskRun.dedupeKey ?? null,
-            model: event.taskRun.model ?? null,
-          });
-        }
-        send('task', {
-          type: event.type,
-          taskRunId: event.taskRun.id,
-          sessionId: event.taskRun.sessionId,
-          traceId: event.taskRun.traceId,
-          requestId,
-          nodeId: event.taskRun.nodeId ?? null,
-          dedupeKey: event.taskRun.dedupeKey ?? null,
-          status: event.taskRun.status,
-          model: event.taskRun.model ?? null,
-        });
-      },
-      onTurn: async (turn) => {
-        send('turn', {
-          loopCount: turn.loopCount,
-          text: turn.text.slice(0, 200),
-          toolCallCount: turn.toolCalls.length,
-          toolNames: turn.toolCalls.map((tc: any) => tc.function.name),
-          reasoning: turn.reasoningContent?.slice(0, 200),
-        });
-        await persistStreamCheckpoint({
-          sessionId: sid, runSpecId, eventType: 'turn', turn: turn.loopCount,
-          payload: { loopCount: turn.loopCount, textPreview: turn.text.slice(0, 500), toolCallCount: turn.toolCalls.length, toolNames: turn.toolCalls.map((tc: any) => tc.function.name) },
-        });
-      },
-      onToolCall: async (callId, tool, args, turn) => {
-        await emitRunningToolCallUpsert({ send, sessionId: sid, runSpecId, turn, callId, toolName: tool, input: args });
-        // Phase 3: resolve CBM symbols for write operations (best-effort, fire-and-forget)
-        import('./chat-cbm-symbol-cache.js').then(m =>
-          m.cacheSymbolsForToolCall(sid, callId, tool, args as Record<string, unknown>, workspaceRoot),
-        ).catch(() => undefined);
-      },
-      onModelDelta: async (delta) => {
-        send('model.delta', {
-          turn: delta.turn,
-          provider: delta.provider,
-          model: delta.model ?? null,
-          textDelta: delta.textDelta ?? '',
-          reasoningDelta: delta.reasoningDelta ?? '',
-        });
-        await persistStreamCheckpoint({
-          sessionId: sid, runSpecId, eventType: 'model.delta', turn: delta.turn,
-          payload: { provider: delta.provider, model: delta.model ?? null, textDelta: delta.textDelta ?? '', reasoningDelta: delta.reasoningDelta ?? '' },
-        });
-      },
-      onCheckpoint: async (state) => {
-        ctx.lastCheckpoint = state;
-        await ensureSessionStore().catch(() => undefined);
-        await saveSession({
-          id: sid, tenantId, projectId, userId, requestId, traceId,
-          createdAt: resumedSession?.createdAt ?? new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          messages: state.messages,
-          turns: resumedSession ? [...resumedSession.turns, ...state.turns] : state.turns,
-          metadata: {
-            ...(resumedSession?.metadata ?? {}),
-            provider: provider ?? config.agent.defaultProvider,
-            model: model ?? null,
-            workspaceRoot,
-            toolMode,
-            branchFrom: branchFrom ?? null,
-            branchAtTurn: branchAtTurn ?? null,
-          },
-        }).catch(() => undefined);
-      },
-      onSessionEvent: async (event) => {
-        relaySessionEvent(send, event);
-        await emitToolCallUpsertFromSessionEvent({ send, sessionId: sid, runSpecId, event });
-
-        // Auto-trigger memory compaction when a session completes or errors
-        if (event.type === 'session.completed' || event.type === 'session.error') {
-          import('@los/memory').then(({ compactSession }) =>
-            compactSession({ sessionId: sid, runSpecId }).catch(() => undefined)
-          ).catch(() => undefined);
-          checkpointTracker.delete(sid);
-        } else {
-          // Mid-session checkpoint tracking (P0-1: 3 triggers)
-          const ck = checkpointTracker.get(sid) ?? { count: 0, lastAt: Date.now() };
-          ck.count += 1;
-          const isToolTransition = event.type === 'tool_call_state.updated'
-            && ((event.payload as any)?.to === 'succeeded' || (event.payload as any)?.to === 'failed');
-          const timeSinceLast = Date.now() - ck.lastAt;
-          const triggeredByCount = ck.count >= 20;
-          const shouldCheckpoint = triggeredByCount || isToolTransition
-            || timeSinceLast >= 10 * 60 * 1000; // 10-min fallback
-          if (shouldCheckpoint) {
-            ck.count = 0;
-            ck.lastAt = Date.now();
-            const trigger = triggeredByCount ? 'event_count'
-              : isToolTransition ? 'tool_state_change' : 'time_interval';
-            import('@los/memory').then(({ compactSession }) =>
-              compactSession({ sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger }).catch(() => undefined)
-            ).catch(() => undefined);
-          }
-          checkpointTracker.set(sid, ck);
-        }
-      },
+      ...createChatTaskHooks({ sid, runSpecId, requestId, tenantId, projectId, userId, traceId,
+        provider, model, workspaceRoot, toolMode, config, resumedSession, ctx, send }),
     });
 
-    // ── Deduplicated outcome ──
-    if (scheduled.status === 'deduplicated') {
-      send('deduplicated', {
-        sessionId: scheduled.sessionId,
+    if (boundTodoId && 'taskRun' in scheduled && scheduled.taskRun) {
+      await linkWorkItemRun({
+        workItemId: boundTodoId,
+        runSpecId,
         taskRunId: scheduled.taskRun.id,
-        traceId: scheduled.taskRun.traceId,
-        requestId,
-        dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-        status: scheduled.taskRun.status,
+        sessionId: sid,
+        relationKind: relationKindForRun(runContract),
+      }).catch(error => {
+        log.warn('Failed to persist Work Item task lineage', { error, workItemId: boundTodoId, runSpecId });
       });
-      send('done', {
-        deduplicated: true,
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-      });
-      await ensureSessionStore().catch(() => undefined);
-      await saveSession({
-        id: scheduled.sessionId, tenantId, projectId, userId, requestId, traceId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [], turns: [],
-        metadata: {
-          provider: provider ?? config.agent.defaultProvider,
-          model: model ?? null, workspaceRoot, toolMode,
-          deduplicated: true,
-          dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-        },
-      }).catch(() => undefined);
-      return {
-        status: 'deduplicated',
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-        traceId: scheduled.taskRun.traceId,
-      };
     }
 
-    // ── Cancelled outcome ──
-    if (scheduled.status === 'cancelled') {
-      if (boundTodoId) {
-        await updateBoundTodoFromRun(boundTodoId, {
-          status: 'cancelled',
-          sessionId: scheduled.sessionId,
-          taskRunId: scheduled.taskRun.id,
-          traceId: scheduled.taskRun.traceId,
-          requestId,
-          runSpecId,
-          event: 'task.cancelled',
-          reason: scheduled.reason,
-        });
-      }
-      send('cancelled', {
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-        traceId: scheduled.taskRun.traceId,
-        requestId,
-        dedupeKey: scheduled.taskRun.dedupeKey ?? null,
-        reason: scheduled.reason,
-      });
-      send('done', {
-        cancelled: true,
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-        reason: scheduled.reason,
-      });
-      await ensureSessionStore().catch(() => undefined);
-      await saveSession({
-        id: scheduled.sessionId, tenantId, projectId, userId, requestId, traceId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [], turns: [],
-        metadata: {
-          provider: provider ?? config.agent.defaultProvider,
-          model: model ?? null, workspaceRoot, toolMode,
-          cancelled: true, cancelReason: scheduled.reason, prompt,
-        },
-      }).catch(() => undefined);
-      return {
-        status: 'cancelled',
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-        traceId: scheduled.taskRun.traceId,
-        cancelReason: scheduled.reason,
-      };
-    }
-
-    // ── Blocked outcome (self-check failed) ──
-    if (scheduled.status === 'blocked') {
-      // Phase 2: Record self-reflection when the agent has learned about
-      // its own failure patterns. Best-effort — gateway has both @los/agent
-      // and @los/memory, no circular dep.
-      try {
-        const { recordSelfReflection } = await import('@los/memory');
-        const reflectionMeta = (scheduled.taskRun.metadata as Record<string, unknown> | undefined)?.reflection as
-          { summary?: string; recoveryType?: string; recoveryActions?: string[] } | undefined;
-        if (reflectionMeta?.summary) {
-          await recordSelfReflection({
-            agentIdentity: identityName ?? 'default',
-            insight: reflectionMeta.summary,
-            confidence: 0.7,
-            evidenceSessionIds: [sid],
-            category: 'weakness',
-            sessionId: sid,
-            tenantId,
-            projectId,
-          });
-        }
-      } catch { /* Self-reflection recording is best-effort */ }
-
-      send('blocked', {
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-        traceId: scheduled.taskRun.traceId,
-        requestId,
-        reason: scheduled.reason,
-      });
-      return {
-        status: 'blocked',
-        sessionId: scheduled.sessionId,
-        taskRunId: scheduled.taskRun.id,
-        traceId: scheduled.taskRun.traceId,
-        cancelReason: scheduled.reason,
-      };
+    if (scheduled.status !== 'completed') {
+      return await handleNonCompletedOutcome({ scheduled, prompt, provider, model, workspaceRoot, toolMode,
+        boundTodoId, sid, tenantId, projectId, userId, requestId, traceId, runSpecId, config, send, identityName });
     }
 
     // ── Completed outcome ──
@@ -597,4 +383,14 @@ export async function runChat(params: {
     // Re-throw so the route can access ctx for the mutable state.
     throw err;
   }
+}
+
+function relationKindForRun(
+  contract: RunContractMetadataInput | undefined,
+): 'discovery' | 'planning' | 'execution' | 'verification' | 'closeout' {
+  if (contract?.mode === 'closeout') return 'closeout';
+  if (contract?.phase === 'discovering' || contract?.phase === 'discovery_ready') return 'discovery';
+  if (contract?.phase === 'planning' || contract?.phase === 'plan_approved') return 'planning';
+  if (contract?.phase === 'verifying') return 'verification';
+  return 'execution';
 }

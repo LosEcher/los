@@ -7,6 +7,8 @@
     ".": "./src/index.ts",
     "./run-spec": "./src/generated/run-spec.ts",
     "./run-stream": "./src/generated/run-stream.ts"
+    ,"./execution-experiment": "./src/generated/execution-experiment.ts"
+    ,"./execution-pairwise-eval": "./src/generated/execution-pairwise-eval.ts"
   },
   "scripts": {
     "generate": "node --import tsx ../../tools/contract-codegen.ts",

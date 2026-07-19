@@ -20,6 +20,56 @@ export type FeedAnalysisStatus =
   | 'failed'
   | 'cancelled';
 
+export interface FeedAnalysisDispatchRecord {
+  id: string;
+  tenantId: string;
+  projectId: string;
+  sourceSystem: string;
+  sourceJobId: string;
+  sourceSessionId?: string;
+  deliveryMode: FeedAnalysisDeliveryMode;
+  inputDigest: string;
+  idempotencyKey: string;
+  requestedOutputs: string[];
+  policy: Record<string, unknown>;
+  callbackProfileId?: string;
+  material?: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  runSpecId?: string;
+  taskRunId?: string;
+  sessionId?: string;
+  traceId?: string;
+  workItemId?: string;
+  status: FeedAnalysisStatus;
+  resultAvailable: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  sequence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateFeedAnalysisDispatchInput {
+  id: string;
+  tenantId: string;
+  projectId: string;
+  sourceSystem: string;
+  sourceJobId: string;
+  sourceSessionId?: string;
+  deliveryMode: FeedAnalysisDeliveryMode;
+  contractVersion: string;
+  bundleVersion?: string;
+  bundleId?: string;
+  inputDigest: string;
+  idempotencyKey: string;
+  requestedOutputs: string[];
+  policy: Record<string, unknown>;
+  callbackProfileId?: string;
+  material?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  retentionExpiresAt?: string;
+}
+
 export interface FeedAnalysisTarget {
   kind: string;
   label: string;
@@ -169,6 +219,7 @@ export interface FeedAnalysisResultEnvelope {
 export interface FeedAnalysisDispatchReceipt {
   id: string;
   status: FeedAnalysisStatus;
+  workItemId?: string;
   runId?: string;
   traceId?: string;
   threadId?: string;

@@ -1,0 +1,86 @@
+contract: los.daily-agent-quality
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Project-scoped daily snapshots for Inbox aging, scheduled work outcomes,
+  recovery, verification coverage, and provider/model run quality.
+type: object
+routes:
+  - method: GET
+    path: /daily-agent-quality/baseline
+    purpose: Return the latest daily snapshots and 28-day evidence-window status for the request project.
+    query:
+      days: optional integer from 1 to 90; defaults to 28
+    response: DailyAgentQualityBaseline
+  - method: POST
+    path: /daily-agent-quality/capture
+    auth: operator
+    purpose: Capture or replace the request project's snapshot for the current UTC date.
+    response: DailyAgentQualityCaptureResponse
+schemas:
+  DailyAgentQualitySnapshot:
+    required:
+      - id
+      - tenantId
+      - projectId
+      - snapshotDate
+      - capturedAt
+      - windowStart
+      - windowEnd
+      - inbox
+      - schedule
+      - recovery
+      - verification
+      - providerQuality
+    inbox:
+      fields: [actionableCount, approvalRequired, recoveryRequired, verificationBlocked, reviewReady, running, unknown, oldestAgeMs, over24h, over72h]
+    schedule:
+      fields: [runCount, succeeded, noOp, failed, skipped, awaitingApproval, other, noOpRate, failureRate, averageLatenessMs, maxLatenessMs]
+    recovery:
+      fields: [requiredItems, recoveryEvents, retryAttempts, recoveredSuccesses, recoverySuccessRate]
+    verification:
+      fields: [workItems, required, succeeded, skipped, failed, pending, missing, coverage]
+    providerQuality:
+      fields: [evalCount, successCount, failureCount, successRate, averageLatencyMs, averageRetryCount, toolErrorCount, modelCost]
+  DailyAgentQualityEvidenceWindow:
+    required: [status, observedDays, requiredDays, expectedFrom, expectedTo, missingDates]
+    status:
+      enum: [collecting, complete]
+  DailyAgentQualityBaseline:
+    required: [evidenceWindow, snapshots]
+  DailyAgentQualityCaptureResponse:
+    required: [snapshot, evidenceWindow]
+persistence:
+  table: daily_agent_quality_snapshots
+  idempotencyKey: [tenant_id, project_id, snapshot_date]
+  dayBoundary: UTC
+  replacement: latest successful same-day capture wins through PostgreSQL upsert
+collection:
+  automatic: gateway startup delay and daily maintenance timer
+  providerCalls: none
+  stateMutations: snapshot table only
+  evidenceWindow: complete only when the latest required UTC dates have no gaps
+safety:
+  - Metrics remain separated; there is no combined quality or readiness score.
+  - Runtime health, quota, provider readiness, compatibility, and cost are not interchangeable.
+  - Aggregate snapshots contain no prompts, transcripts, credentials, tool inputs, or raw external material.
+  - A first baseline capture is collecting evidence and cannot establish a trend.
+nonGoals:
+  - Reconstructing Inbox state before the first snapshot.
+  - Querying CanTool or lot2extension private persistence.
+  - Triggering provider calls, recovery, verification, schedule runs, or Todo transitions.
+  - Project-local timezone bucketing in version 0.1.0.
+references:
+  - docs/adr/0037-daily-agent-quality-snapshots.md
+  - docs/governance/2026-07-19-web-first-daily-agent-workflow-design.md
+  - contracts/work-item.yaml
+  - contracts/scheduled-work-item.yaml
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/web test
+  - pnpm check:migration-drift
+  - pnpm check
+  - pnpm run gate

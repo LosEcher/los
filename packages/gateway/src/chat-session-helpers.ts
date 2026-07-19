@@ -5,7 +5,7 @@
 
 import type { TaskRunRecord } from '@los/agent/task-runs';
 import type { SessionEventRecord } from '@los/agent/session-events';
-import { listActiveTaskRunsForSession, listTaskRunsForSession } from '@los/agent/task-runs';
+import { listActiveTaskRunsForSession, listTaskRunsForSession, recoverActiveTaskRunsForGateway } from '@los/agent/task-runs';
 import { listRecentSessionEvents } from '@los/agent/session-events';
 import { loadTodo, updateTodo, type TodoStatus } from '@los/agent/todos';
 import { loadSession } from '@los/agent/session';
@@ -242,6 +242,21 @@ export async function reclaimOrphanedRuns(gatewayServiceId: string): Promise<Orp
 
     for (const spec of orphaned) {
       try {
+        const recovered = await recoverActiveTaskRunsForGateway({
+          gatewayId: spec.gatewayId!,
+          runSpecId: spec.id,
+        });
+        if (recovered.length > 0 && (spec.status === 'running' || spec.status === 'blocked')) {
+          const { transitionExecutionState } = await import('@los/agent/execution-store');
+          await transitionExecutionState({
+            entityType: 'run_spec',
+            entityId: spec.id,
+            to: 'failed',
+            sessionId: spec.sessionId,
+            reason: 'gateway_failover_takeover',
+            source: 'gateway.failover',
+          });
+        }
         await claimRunSpec(spec.id, gatewayServiceId);
         claimedRunSpecIds.push(spec.id);
       } catch (err) {

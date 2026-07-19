@@ -1,4 +1,5 @@
 import { contentVersionHash } from './distribution-version.js';
+import type { MCPAdapterConfig } from './cantool-capability-adapter.js';
 
 export type MCPAuthMode = 'none' | 'credential_ref' | 'oauth';
 export type MCPToolRiskLevel = 'L0' | 'L1' | 'L2';
@@ -24,6 +25,7 @@ export interface MCPDistributionConfig {
   sourceUri?: string;
   authConfig?: MCPAuthConfig;
   toolPolicy?: MCPToolPolicy;
+  adapterConfig?: MCPAdapterConfig;
 }
 
 export function normalizeMCPAuthConfig(value: unknown): MCPAuthConfig {
@@ -49,6 +51,7 @@ export function normalizeMCPToolPolicy(value: unknown): MCPToolPolicy {
 }
 
 export function mcpDistributionVersionHash(config: MCPDistributionConfig): string {
+  const adapterConfig = config.adapterConfig ?? { kind: 'generic' as const };
   return contentVersionHash({
     id: config.id,
     transport: config.transport,
@@ -59,6 +62,7 @@ export function mcpDistributionVersionHash(config: MCPDistributionConfig): strin
     sourceUri: config.sourceUri ?? '',
     authConfig: normalizeMCPAuthConfig(config.authConfig),
     toolPolicy: normalizeMCPToolPolicy(config.toolPolicy),
+    ...(adapterConfig.kind === 'cantool' ? { adapterConfig } : {}),
   });
 }
 
@@ -96,6 +100,7 @@ export function mcpVersionSnapshot(record: MCPDistributionConfig & {
     url: record.url, envKeys: record.envKeys ?? [], sourceUri: record.sourceUri,
     versionHash: record.versionHash, authConfig: record.authConfig,
     toolPolicy: record.toolPolicy,
+    ...(record.adapterConfig?.kind === 'cantool' ? { adapterConfig: record.adapterConfig } : {}),
   };
 }
 

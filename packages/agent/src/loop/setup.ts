@@ -274,6 +274,7 @@ export async function completeAgentSetup(
           url: s.url,
           env: s.env,
           toolPolicy: s.toolPolicy,
+          adapterConfig: s.adapterConfig,
         }));
     } catch (err: any) {
       setup.log.warn(`Failed to load MCP servers from registry: ${err.message ?? String(err)}`);

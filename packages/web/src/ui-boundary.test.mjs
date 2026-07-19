@@ -21,6 +21,12 @@ const setupPage = readFileSync(new URL('./pages/setup-page.tsx', import.meta.url
 const skillsPage = readFileSync(new URL('./skills-page.tsx', import.meta.url), 'utf8');
 const mcpPage = readFileSync(new URL('./mcp-page.tsx', import.meta.url), 'utf8');
 const mcpCreate = readFileSync(new URL('./mcp-server-create.tsx', import.meta.url), 'utf8');
+const inboxPage = readFileSync(new URL('./pages/inbox-page.tsx', import.meta.url), 'utf8');
+const workPage = readFileSync(new URL('./pages/work-page.tsx', import.meta.url), 'utf8');
+const workReviewPanel = readFileSync(new URL('./pages/work-review-panel.tsx', import.meta.url), 'utf8');
+const schedulesPage = readFileSync(new URL('./pages/schedules-page.tsx', import.meta.url), 'utf8');
+const evalsPage = readFileSync(new URL('./evals-page.tsx', import.meta.url), 'utf8');
+const dailyQualityView = readFileSync(new URL('./pages/daily-quality-view.tsx', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
   const composer = between(chatComposer, '<form className="composer"', '</form>');
@@ -185,7 +191,90 @@ test('skill and MCP distribution require inspect before apply and expose rollbac
   assert.match(mcpSurface, /\/rollback`/);
   assert.match(mcpSurface, /credential ref/);
   assert.match(mcpSurface, /allowed tools/);
+  assert.match(mcpSurface, /capability adapter/);
+  assert.match(mcpSurface, /CanTool local read-only/);
+  assert.match(mcpSurface, /provider location/);
+  assert.match(mcpSurface, /data grant owner/);
+  assert.match(mcpSurface, /available.*blocked/);
   assert.doesNotMatch(mcpSurface, /env \(JSON\)|API_KEY/);
+});
+
+test('daily workflow opens on Inbox and keeps Inbox, Work, Chat, Sessions first', () => {
+  assert.match(app, /\{ id: 'inbox', label: 'Inbox'/);
+  assert.match(app, /\{ id: 'work', label: 'Work'/);
+  assert.match(app, /\{ id: 'inbox'[^]*\{ id: 'work'[^]*\{ id: 'chat'[^]*\{ id: 'sessions'/);
+  assert.match(app, /\?\.id \?\? 'inbox'/);
+  assert.match(app, /page === 'inbox' && <InboxPage/);
+  assert.match(app, /page === 'work' && <WorkPage/);
+  assert.match(inboxPage, /getJson<InboxResponse>\('\/inbox\?limit=100'\)/);
+});
+
+test('Schedules exposes bounded presets, trigger preview, operator actions, and run history', () => {
+  assert.match(app, /\{ id: 'schedules', label: 'Schedules'/);
+  assert.match(app, /page === 'schedules' && <SchedulesPage/);
+  assert.match(schedulesPage, /getJson<ScheduledWorkListResponse>\('\/scheduled-work-items\?limit=100'\)/);
+  assert.match(schedulesPage, /getJson<ScheduledWorkPreviewResponse>\(previewPath\(trigger\)\)/);
+  assert.match(schedulesPage, /postJson<CreateScheduledWorkResponse>\('\/scheduled-work-items'/);
+  assert.match(schedulesPage, /patchJson<ScheduledWorkItem>\(`\/scheduled-work-items\/\$\{id\}`/);
+  assert.match(schedulesPage, /postJson\(`\/scheduled-work-items\/\$\{id\}\/trigger`/);
+  assert.match(schedulesPage, /postJson\(`\/scheduled-work-item-runs\/\$\{runId\}\/retry`/);
+  assert.match(schedulesPage, /type TriggerPreset = 'daily' \| 'weekly' \| 'interval' \| 'once'/);
+  assert.match(schedulesPage, /preview\.data\?\.occurrences\.map/);
+  assert.match(schedulesPage, /detail\.data\?\.runs\.map/);
+  assert.match(schedulesPage, /validateFeedAnalysisRequest/);
+  assert.match(schedulesPage, /Add at least one material item, observation, or material bundle reference/);
+  assert.match(schedulesPage, /form\.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest\.value/);
+  assert.match(viteConfig, /'\/scheduled-work-items': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.match(viteConfig, /'\/scheduled-work-item-runs': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.match(styles, /@media \(max-width: 780px\)[^]*\.schedule-split/);
+});
+
+test('Daily Quality keeps the 28-day evidence window and metric families separate', () => {
+  assert.match(evalsPage, /<CalendarDays size=\{14\} \/> Daily Quality/);
+  assert.match(evalsPage, /mode === 'daily' && <DailyQualityView \/>/);
+  assert.match(dailyQualityView, /getJson<DailyAgentQualityBaseline>\('\/daily-agent-quality\/baseline\?days=28'\)/);
+  assert.match(dailyQualityView, /postJson<DailyAgentQualityCaptureResponse>\('\/daily-agent-quality\/capture', \{\}\)/);
+  assert.match(dailyQualityView, /28-day evidence window/);
+  assert.match(dailyQualityView, /title="Inbox"/);
+  assert.match(dailyQualityView, /title="Schedules"/);
+  assert.match(dailyQualityView, /title="Recovery"/);
+  assert.match(dailyQualityView, /title="Verification"/);
+  assert.match(dailyQualityView, /title="Provider \/ Model Quality"/);
+  assert.doesNotMatch(dailyQualityView, /combined score|overall score/i);
+  assert.match(viteConfig, /'\/daily-agent-quality': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.match(styles, /@container \(max-width: 560px\)[^]*\.quality-metric-groups/);
+});
+
+test('new Work sends a structured contract draft and does not dispatch directly', () => {
+  assert.match(workPage, /postJson<WorkItemProjection>\('\/work-items', buildCreateWorkItemPayload\(form\)\)/);
+  assert.match(workPage, /mode: form\.mode/);
+  assert.match(workPage, /toolMode: form\.toolMode/);
+  assert.match(workPage, /editableSurfaces: lines\(form\.editableSurfaces\)/);
+  assert.match(workPage, /requiredChecks: lines\(form\.requiredChecks\)/);
+  assert.match(workPage, /stopConditions: lines\(form\.stopConditions\)/);
+  assert.match(workPage, /Creates a draft only\. Execution starts after operator action\./);
+  assert.doesNotMatch(between(workPage, 'function StructuredCreateForm', 'function LineField'), /postJson[^\n]+\/chat/);
+});
+
+test('Work reviews plans in the daily surface and proxies Work Item routes', () => {
+  assert.match(workPage, /getJson<RuntimeInspect>\(`\/runs\/\$\{runSpecId\}\/inspect`\)/);
+  assert.match(workPage, /postJson\(`\/runs\/\$\{id\}\/approve`/);
+  assert.match(workPage, /reason: approvalReason\.trim\(\)/);
+  assert.match(viteConfig, /'\/inbox': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.match(viteConfig, /'\/work-items': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.match(styles, /@media \(max-width: 780px\)[^]*\.daily-split,[^]*\.work-split/);
+});
+
+test('Work result review exposes verification and durable workspace evidence before an operator decision', () => {
+  assert.match(workPage, /<WorkReviewPanel/);
+  assert.match(workPage, /postJson\(`\/work-items\/\$\{item!\.id\}\/result-decision`/);
+  assert.match(workPage, /dirtyPaths: \[\]/);
+  assert.match(workPage, /record\.status === 'succeeded' \|\| record\.status === 'skipped'/);
+  assert.match(workReviewPanel, /item\.verificationRecords\.map/);
+  assert.match(workReviewPanel, /workspace\.backupArtifactId \?\? 'backup required'/);
+  assert.match(workReviewPanel, /onDecision\('revision_requested', reason\)/);
+  assert.match(workReviewPanel, /onDecision\('accepted', reason\)/);
+  assert.match(styles, /\.workspace-record code[^]*overflow-wrap: anywhere/);
 });
 
 function between(source, start, end) {

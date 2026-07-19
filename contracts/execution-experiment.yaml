@@ -1,0 +1,58 @@
+contract: los.execution-experiment
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Immutable provenance and explicit lifecycle for a single-candidate execution
+  experiment derived from a persisted source run.
+type: object
+schemaDialect: https://json-schema.org/draft/2020-12/schema
+required: [id, source, configDiff, status, createdBy]
+properties:
+  id: { type: string, minLength: 1 }
+  tenantId: { type: string }
+  projectId: { type: string }
+  source:
+    type: object
+    required: [sessionId, runSpecId, eventCursor, evidenceHash]
+    additionalProperties: false
+    properties:
+      sessionId: { type: string, minLength: 1 }
+      runSpecId: { type: string, minLength: 1 }
+      eventCursor: { type: integer, minimum: 0 }
+      evidenceHash: { type: string, minLength: 1 }
+      fingerprint:
+        type: object
+        additionalProperties: false
+        properties:
+          prompt: { type: string }
+          spec: { type: string }
+          memory: { type: string }
+          toolCatalog: { type: string }
+  configDiff:
+    type: array
+    items:
+      type: object
+      required: [path, value]
+      additionalProperties: false
+      properties:
+        path: { type: string, minLength: 1 }
+        value: {}
+        inherited: { type: boolean }
+  candidateRunSpecId: { type: string }
+  status:
+    type: string
+    enum: [draft, approved, running, succeeded, failed, cancelled, blocked]
+  createdBy: { type: string, minLength: 1 }
+  approvedBy: { type: string }
+  createdAt: { type: string, format: date-time }
+  updatedAt: { type: string, format: date-time }
+routes:
+  - method: POST
+    path: /execution-experiments
+  - method: GET
+    path: /execution-experiments/{id}
+  - method: POST
+    path: /execution-experiments/{id}/approve
+  - method: POST
+    path: /execution-experiments/{id}/execute

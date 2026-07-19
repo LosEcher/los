@@ -1,0 +1,247 @@
+contract: los.work-item
+version: 0.3.0
+status: implemented
+owner: packages/agent
+description: >
+  Web-first Work Item and Inbox projections over todos, run specs, task runs,
+  sessions, verification records, artifacts, and persisted run lineage.
+type: object
+routes:
+  - method: GET
+    path: /inbox
+    purpose: List actionable work-item and orphan runtime evidence.
+    query:
+      projectId: optional explicit project filter
+      limit: optional bounded result count
+    response: InboxResponse
+  - method: GET
+    path: /work-items
+    purpose: List Work Item projections derived from todos and run lineage.
+    query:
+      projectId: optional explicit project filter
+      status: optional todo status filter
+      limit: optional bounded result count
+    response: WorkItemListResponse
+  - method: GET
+    path: /work-items/{id}
+    purpose: Read one Work Item with run lineage, verification records, managed workspace evidence, and result review.
+    response: WorkItemDetailResponse
+  - method: GET
+    path: /work-items/verification-coverage
+    purpose: Query required verification coverage by project and optional mode.
+    query:
+      projectId: optional explicit project filter
+      mode: optional Work Item mode filter
+    response: VerificationCoverageResponse
+  - method: POST
+    path: /work-items
+    purpose: Persist a todo and structured run-contract draft without dispatching execution.
+    request: CreateWorkItemRequest
+    response: WorkItemDetailResponse
+    statusCode: 201
+  - method: POST
+    path: /work-items/{id}/result-decision
+    auth: operator
+    purpose: Accept a verified result or request a revision without changing execution state.
+    request: WorkItemResultDecisionRequest
+    response: WorkItemDetailResponse
+schemas:
+  CreateWorkItemRequest:
+    required: [projectId, goal, mode, editableSurfaces, requiredChecks, stopConditions]
+    properties:
+      projectId: string
+      title: optional string; defaults to a bounded goal summary
+      goal: non-empty string
+      description: optional string
+      mode:
+        enum: [audit, execution, closeout, governance, feed-analysis-ingress]
+      editableSurfaces:
+        type: array
+        items: string
+      nonGoals:
+        type: array
+        items: string
+      requiredChecks:
+        type: array
+        items: string
+      stopConditions:
+        type: array
+        items: string
+      evidenceRequired:
+        type: array
+        items: string
+      toolMode:
+        enum: [read-only, project-write]
+      priority:
+        enum: [P0, P1, P2, P3]
+  WorkItemProjection:
+    required:
+      - id
+      - title
+      - goal
+      - projectId
+      - status
+      - priority
+      - runContractDraft
+      - attentionState
+      - nextAction
+      - links
+      - evidence
+      - updatedAt
+    attentionState:
+      enum:
+        - approval_required
+        - recovery_required
+        - verification_blocked
+        - review_ready
+        - running
+        - none
+        - unknown
+    nextAction:
+      enum:
+        - review_plan
+        - inspect_verification
+        - recover
+        - inspect_run
+        - review_changes
+        - start
+        - none
+    links:
+      type: array
+      itemFields: [id, relationKind, runSpecId, taskRunId, sessionId, createdAt, updatedAt]
+    evidence:
+      fields:
+        - latestRunSpecId
+        - latestTaskRunId
+        - latestSessionId
+        - runSpecStatus
+        - taskRunStatus
+        - verificationRequired
+        - verificationSucceeded
+        - verificationFailed
+        - verificationPending
+    verificationRecords:
+      type: array
+      itemFields: [id, checkName, kind, status, required, command, assertion, reviewer, skipReason, outputSummary, error, updatedAt, completedAt]
+    changes:
+      fields:
+        - hasReviewableDiff
+        - workspaces
+        - resultReview
+      workspaceItemFields: [workspaceId, status, baseRevision, backupArtifactId, updatedAt, releasedAt]
+    scheduledWork:
+      optional: true
+      fields: [scheduleId, runId, status, summary]
+    feedAnalysis:
+      optional: true
+      description: Feed-analysis connector evidence. Dispatch, LOS run, validated result, and callback delivery remain independent truth surfaces.
+      fields:
+        - dispatchId
+        - sourceSystem
+        - sourceJobId
+        - sourceSessionId
+        - deliveryMode
+        - dispatchStatus
+        - resultAvailable
+        - errorCode
+        - errorMessage
+        - updatedAt
+        - callback
+      callbackFields:
+        - configured
+        - latestStatus
+        - latestEventStatus
+        - latestSequence
+        - eventCount
+        - pendingCount
+        - deliveringCount
+        - deliveredCount
+        - deadLetterCount
+        - latestLatencyMs
+        - deliveredAt
+        - deadLetteredAt
+  WorkItemListResponse:
+    required: [count, results]
+    fields:
+      count: number
+      results: WorkItemProjection[]
+  WorkItemDetailResponse:
+    type: WorkItemProjection
+  VerificationCoverageResponse:
+    required: [projectId, mode, workItems, required, succeeded, skipped, failed, pending, missing, coverage]
+  WorkItemResultDecisionRequest:
+    required: [decision, reason]
+    properties:
+      decision:
+        enum: [accepted, revision_requested]
+      reason: non-empty string
+      closeoutReport:
+        fields: [dirtyPaths, changeId, bookmark, checks, residualRisk]
+  InboxResponse:
+    required: [count, results]
+    fields:
+      count: number
+      results: InboxEntry[]
+  InboxEntry:
+    required: [id, sourceKind, title, attentionState, nextAction, projectId, updatedAt]
+    sourceKind:
+      enum: [work_item, orphan_run, orphan_task, orphan_event]
+    optionalFields: [source, connector]
+    connector:
+      fields: [kind, dispatchStatus, resultAvailable, callbackStatus]
+persistence:
+  factSource: todos
+  lineageTable: work_item_runs
+  lineageOnly: true
+  todoMetadata:
+    key: runContract
+    fields:
+      - mode
+      - phase
+      - goal
+      - editableSurfaces
+      - nonGoals
+      - requiredChecks
+      - stopConditions
+      - evidenceRequired
+      - toolMode
+    resultReview:
+      fields: [decision, actor, reason, decidedAt, closeoutReport]
+  stateRule: Inbox attention states are derived and never written to todos.status.
+  connectorRule: A completed feed-analysis dispatch without a persisted validated result is verification_blocked; callback dead-letter is recovery_required.
+safety:
+  - POST /work-items does not create a run spec or task run.
+  - Read-model routes never mutate execution state.
+  - Execution status changes remain subject to transitionExecutionState().
+  - Plan approval remains subject to approveRunSpecPhase() or reviseRunSpecPlan().
+  - Completion remains subject to canMarkSucceeded() and verification records.
+  - Result acceptance requires a succeeded run, complete required verification, and a backup artifact for every reviewable managed workspace.
+  - Result acceptance may mark the Work Item todo done but never mutates run-spec, task-run, tool-call, or verification state.
+  - Request and response payloads never include auth or operator credentials.
+  - Feed-analysis dispatch, LOS run, result availability, and callback delivery are exposed separately and never collapsed into one status.
+sourceOfTruth:
+  workItem: todos
+  contractDraft: todos.metadata_json.runContract
+  executionInput: run_specs
+  attempts: task_runs
+  interaction: sessions and session_events
+  verification: verification_records
+  artifacts: artifacts
+  lineage: work_item_runs
+nonGoals:
+  - User schedule definitions and triggers.
+  - A replacement execution state machine.
+  - Automatic plan approval, dispatch, recovery, or change acceptance.
+  - Online source editing.
+references:
+  - docs/adr/0033-web-first-work-item-read-model.md
+  - docs/governance/2026-07-19-web-first-daily-agent-workflow-design.md
+  - contracts/run-spec.yaml
+  - contracts/task-intake.yaml
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/web test
+  - pnpm check
+  - pnpm run gate

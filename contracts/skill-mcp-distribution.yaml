@@ -1,5 +1,5 @@
 contract: los.skill-mcp-distribution
-version: 0.1.0
+version: 0.2.0
 status: implemented
 owner: packages/agent
 description: >
@@ -71,6 +71,45 @@ mcpToolPolicy:
     - deny takes precedence
     - a non-empty allow list excludes tools not named in it
     - accepted tools are registered with the configured risk level
+mcpCapabilityAdapter:
+  supportedKinds:
+    - generic
+    - cantool
+  cantool:
+    transport: stdio
+    providerLocation: local
+    providerId: cantool.mcp.local
+    dataGrantOwner: cantool
+    sessionBinding: per_call
+    cancellation: notifications/cancelled with late results discarded
+    resume: new_call_only
+    initialAvailability:
+      available:
+        - runtime and plugin status through agent.resource.read
+        - file index status
+        - explicitly reviewed caller-supplied transforms, calculators, regex, and unit conversion
+      blocked:
+        - clipboard content and search
+        - snippet content and search
+        - file search, recent files, and file excerpts
+        - capabilities missing read-only MCP annotations
+        - capabilities not present in the reviewed adapter map
+    disclosureEvidence:
+      fields:
+        - dataClassification
+        - providerLocation
+        - approvalMode
+        - grantRequired
+        - availability
+        - reason
+        - sessionBinding
+        - cancellation
+        - resume
+      rule: >
+        LOS may record and preflight opaque grant binding evidence, but CanTool
+        remains the authorization owner. The current stdio bridge forwards no
+        grant refs, so local-private capabilities remain blocked even when LOS
+        receives apparently matching grant evidence.
 registrationSafety:
   defaultEnabled: false
   executionEligibility:

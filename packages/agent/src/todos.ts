@@ -317,6 +317,9 @@ export async function listTodos(options: ListTodosOptions = {}): Promise<TodoRec
   if (!options.includeArchived) {
     clauses.push('archived_at IS NULL');
   }
+  if (options.excludeTerminal) {
+    clauses.push("status NOT IN ('done', 'cancelled')");
+  }
 
   params.push(limit);
   const db = getDb();

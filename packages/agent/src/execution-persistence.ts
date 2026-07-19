@@ -71,6 +71,7 @@ export type ExecutionEntityRow = {
   trace_id: string | null;
   attempt: number | null;
   run_contract_json: unknown | null;
+  candidate_run_spec_id?: string | null;
 };
 
 export type ExecutionEntityContext = {
@@ -87,6 +88,7 @@ export type ExecutionEntityContext = {
   traceId?: string;
   attempt?: number;
   contract?: RunContractMetadata;
+  candidateRunSpecId?: string;
 };
 
 type SessionEventRow = {
@@ -144,6 +146,15 @@ export async function loadExecutionEntity<T extends ExecutionEntityType>(
                NULL::text AS tenant_id, NULL::text AS project_id, NULL::text AS user_id,
                NULL::text AS node_id, NULL::text AS request_id, NULL::text AS trace_id, NULL::integer AS attempt
         FROM verification_records WHERE id = $1 FOR UPDATE
+      `, [input.entityId]), input.entityType, input.entityId);
+    case 'execution_experiment':
+      return rowToContext(await loadOne(client, `
+        SELECT id, source_session_id AS session_id, candidate_run_spec_id,
+               source_run_spec_id AS run_spec_id, NULL::text AS task_run_id,
+               status AS state, tenant_id, project_id, NULL::text AS user_id,
+               NULL::text AS node_id, NULL::text AS request_id, NULL::text AS trace_id,
+               NULL::integer AS attempt, NULL::jsonb AS run_contract_json
+        FROM execution_experiments WHERE id = $1 FOR UPDATE
       `, [input.entityId]), input.entityType, input.entityId);
     default:
       throw new Error(`Unknown execution entity type: ${input.entityType}`);
@@ -210,6 +221,9 @@ export async function updateExecutionEntity<T extends ExecutionEntityType>(
           updated_at = now()
         WHERE id = $1
       `, [input.entityId, input.to]);
+      return { updated: true };
+    case 'execution_experiment':
+      await client.query(`UPDATE execution_experiments SET status = $2, updated_at = now() WHERE id = $1`, [input.entityId, input.to]);
       return { updated: true };
     default:
       throw new Error(`Unknown execution entity type: ${input.entityType}`);
@@ -289,7 +303,7 @@ function rowToContext(row: ExecutionEntityRow | null, entityType: ExecutionEntit
     projectId: row.project_id ?? undefined, userId: row.user_id ?? undefined,
     nodeId: row.node_id ?? undefined, requestId: row.request_id ?? undefined,
     traceId: row.trace_id ?? undefined, attempt: row.attempt ?? undefined,
-    contract: parseRunContract(row.run_contract_json),
+    contract: parseRunContract(row.run_contract_json), candidateRunSpecId: row.candidate_run_spec_id ?? undefined,
   };
 }
 
