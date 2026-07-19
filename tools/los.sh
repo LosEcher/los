@@ -162,6 +162,11 @@ start_executor_process() {
   fi
 }
 
+# Channel helpers are kept separate so gateway/executor process management
+# remains readable while all local services still share one operator entrypoint.
+# shellcheck source=tools/los-channels.sh
+. "$ROOT/tools/los-channels.sh"
+
 # ── Agent key check ──────────────────────────────────────
 
 check_agent_key() {
@@ -366,6 +371,7 @@ executor_status() {
 # ── Unified commands ─────────────────────────────────────
 
 unified_status() {
+  local channel_status_code=0
   echo "los status"
   echo "  version: $LOS_VERSION"
   if is_executor_enabled; then
@@ -382,6 +388,9 @@ unified_status() {
     echo "  ── executor ──"
     echo "  disabled"
   fi
+  echo ""
+  channels_status || channel_status_code=$?
+  return "$channel_status_code"
 }
 
 unified_start() {
@@ -400,9 +409,20 @@ unified_start() {
 
   echo "==> starting gateway"
   start_gateway
+
+  echo ""
+  echo "==> starting channels"
+  if ! start_channels; then
+    echo "ERROR: one or more required channels failed; gateway remains healthy" >&2
+    return 1
+  fi
 }
 
 unified_stop() {
+  echo "==> stopping channels"
+  stop_channels || true
+
+  echo ""
   echo "==> stopping gateway"
   stop_gateway || true
 
@@ -503,6 +523,15 @@ doctor_cmd() {
   fi
 }
 
+setup_cmd() {
+  echo "los setup"
+  doctor_cmd
+  echo ""
+  unified_start
+  echo ""
+  "$ROOT/bin/los" setup --gateway "$(gw_url)"
+}
+
 # ── Help ─────────────────────────────────────────────────
 
 show_help() {
@@ -510,13 +539,20 @@ show_help() {
 los process helper
 
 Unified commands:
+  setup         Check prerequisites, start idempotently, and report readiness
   build-version Print the deterministic deployable-content version
-  start         Start executor (if EXECUTOR_ENABLED=true), then gateway
-  stop          Stop gateway first, then executor
+  start         Start executor, gateway, then enabled channels
+  stop          Stop channels, gateway, then executor
   restart       Stop both, then start both
   status        Show gateway and executor health
   doctor        Check runtime prerequisites and config/db access
   help          Show this help
+
+Channel-only:
+  start-channels   Start channels whose mode is optional or required
+  stop-channels    Stop managed channel processes
+  restart-channels Stop, then start enabled channels
+  status-channels  Show WeChat and Telegram process/readiness separately
 
 Executor-only (when EXECUTOR_ENABLED=true):
   start-executor   Start only the executor
@@ -547,6 +583,7 @@ case "${1:-help}" in
   stop)               unified_stop ;;
   restart)            unified_restart ;;
   doctor)             doctor_cmd ;;
+  setup)              setup_cmd ;;
 
   # Gateway-only
   start-gateway)      start_gateway ;;
@@ -559,6 +596,12 @@ case "${1:-help}" in
   status-executor)    executor_status && echo "" && executor_maint_status ;;
   drain-executor)     drain_executor "${2:-}" ;;
   promote-executor)   promote_executor ;;
+
+  # Channel-only
+  start-channels)     start_channels ;;
+  stop-channels)      stop_channels ;;
+  restart-channels)   stop_channels || true; start_channels ;;
+  status-channels)    channels_status ;;
 
   *)
     echo "unknown command: $1"
