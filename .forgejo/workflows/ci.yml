@@ -55,7 +55,7 @@ jobs:
 
   gate-test:
     if: forgejo.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-jj
     timeout-minutes: 25
 
     services:
@@ -97,6 +97,9 @@ jobs:
           corepack enable
           corepack prepare pnpm@9.0.0 --activate
           pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: Verify jj runtime
+        run: jj --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline

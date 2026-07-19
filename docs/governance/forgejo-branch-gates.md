@@ -22,8 +22,10 @@ installation uses `--prefer-offline`. This avoids downloading and executing an
 external cache action before repository checks can start. Turbo `test` remains
 uncached and every package test command executes on every PR.
 
-The node34 runner currently exposes two job slots. `gate-test` sets
-`LOS_TEST_CONCURRENCY=4`, while `gate-fast` sets `TURBO_CONCURRENCY=1`. The two
+The node34 runner currently exposes two job slots. `gate-test` uses the
+`ubuntu-jj` label, backed by the host-local `los-ci:node22-jj0.39.0` image, and
+sets `LOS_TEST_CONCURRENCY=4`; `gate-fast` uses `ubuntu-latest` and sets
+`TURBO_CONCURRENCY=1`. The two
 overlapping jobs therefore advertise at most five Turbo package tasks, with the
 test suite's package-level work capped at four. This is the current compromise
 for the expanded workspace suite and the runner's execution window; revisit it
@@ -39,8 +41,10 @@ cross-connect; only then reassess removing `needs: gate-test`.
 `.forgejo/workflows/audit.yml` runs the dependency audit daily and manually.
 
 Runner requirements are Linux, Git, Bash, Node 22+, Corepack, pnpm 9, service
-containers, and outbound access to the package registry. The PostgreSQL service
-user must be able to create the temporary drift databases.
+containers, and outbound access to the package registry. The `ubuntu-jj` image
+must provide jj 0.39.0 and is built with `tools/build-forgejo-ci-image.sh` before
+the runner label is registered. The PostgreSQL service user must be able to
+create the temporary drift databases.
 
 ## Required Server Policy
 
