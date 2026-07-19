@@ -7,7 +7,7 @@
  * Setup phase (provider, tools, MCP, events, messages) lives in loop/setup.ts.
  */
 
-import { estimateCost } from './model-profiles.js';
+import { estimateCost, summarizeModelProfile } from './model-profiles.js';
 import { runPreExecutionPhases } from './loop/phases.js';
 import {
   compressOrTrimMessages,
@@ -50,6 +50,10 @@ import type {
   TurnSummary,
 } from './loop/types.js';
 import type { Message, ToolCall } from './providers/index.js';
+import {
+  consumeOperatorControlEvents,
+  type OperatorControlCursors,
+} from './operator-control-consumer.js';
 
 export type {
   AgentConfig,
@@ -100,6 +104,7 @@ export async function runAgent(
   } = counters;
 
   const turns: TurnSummary[] = [];
+  let operatorControlCursors: OperatorControlCursors = { steering: 0, followup: 0 };
   const sessionErrors: Array<{ turn: number; type: string; toolName?: string; message: string }> = [];
   const onSessionError = (err: typeof sessionErrors[number]) => { sessionErrors.push(err); };
 
@@ -237,7 +242,20 @@ export async function runAgent(
     };
 
     for (let i = 0; i < maxLoops; i++) {
+    repairCtx.providerName = provider.name;
+    repairCtx.profile = provider.profile;
     assertNotAborted(signal);
+    const steering = await consumeOperatorControlEvents({
+      sessionId: config.sessionId,
+      runSpecId: config.runSpecId,
+      taskRunId: config.taskRunId,
+      turn: i + 1,
+      boundary: 'before_turn',
+      cursors: operatorControlCursors,
+      includeFollowups: false,
+    });
+    operatorControlCursors = steering.cursors;
+    messages.push(...steering.consumed.map(item => item.message));
     agentLog.debug(`Turn ${i + 1}/${maxLoops}`);
     await emitEvent({
       type: 'model.turn.started',
@@ -273,6 +291,8 @@ export async function runAgent(
     );
     const modelDurationMs = Date.now() - modelStartedAt;
     assertNotAborted(signal);
+    repairCtx.providerName = provider.name;
+    repairCtx.profile = provider.profile;
 
     totalPromptTokens += res.usage.promptTokens;
     totalCompletionTokens += res.usage.completionTokens;
@@ -312,7 +332,7 @@ export async function runAgent(
       usage: normalizeUsage(res.usage),
       payload: {
         provider: provider.name,
-        modelProfile,
+        modelProfile: summarizeModelProfile(provider.profile),
         durationMs: modelDurationMs,
         textPreview: previewText(res.text),
         textLength: res.text.length,
@@ -392,6 +412,23 @@ export async function runAgent(
         });
         // Don't exit — let the loop continue for the model to finish
         continue;
+      }
+
+      if (i + 1 < maxLoops) {
+        const queuedControl = await consumeOperatorControlEvents({
+          sessionId: config.sessionId,
+          runSpecId: config.runSpecId,
+          taskRunId: config.taskRunId,
+          turn: i + 1,
+          boundary: 'after_completion',
+          cursors: operatorControlCursors,
+          includeFollowups: true,
+        });
+        operatorControlCursors = queuedControl.cursors;
+        if (queuedControl.consumed.length > 0) {
+          messages.push(...queuedControl.consumed.map(item => item.message));
+          continue;
+        }
       }
 
       // If reasoning-only (R1-style) with empty/minimal text, warn but still complete.

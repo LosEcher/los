@@ -6,11 +6,15 @@ import type { Message, ProviderDelta, ToolCall } from '../providers/index.js';
 import type { IdentityLevel } from '../identity-loader.js';
 import type { ModelDiagnosticConfig } from '../model-diagnostics.js';
 import type { AgentPreActionGateConfig } from '../pre-action-gate.js';
+import type { ProviderFallbackPolicy } from '../providers/provider-fallback.js';
+import type { ProviderFallbackEvent } from '../providers/provider-fallback.js';
 
 export interface AgentConfig {
   sessionId?: string;
   provider?: string;
   model?: string;
+  /** Explicit ordered provider/model policy. No provider switch occurs when unset. */
+  providerFallback?: ProviderFallbackPolicy;
   modelSettings?: ModelSettings;
   /** Run spec ID for contract lineage and cross-agent correlation (AP6). */
   runSpecId?: string;
@@ -82,6 +86,8 @@ export interface AgentConfig {
   log?: Logger;
   onToolCallState?: (transition: ToolCallStateTransition) => void | Promise<void>;
   onSessionEvent?: (event: SessionEventRecord) => void | Promise<void>;
+  /** Scheduler-owned persistence hook for effective provider/model switches. */
+  onProviderFallback?: (event: ProviderFallbackEvent) => void | Promise<void>;
   onTurn?: (turn: TurnSummary) => void | Promise<void>;
   onToolCall?: (callId: string, tool: string, args: Record<string, unknown>, turn: number) => void | Promise<void>;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;

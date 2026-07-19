@@ -40,12 +40,38 @@ export const GOLDEN_SESSION_TRACE_TURNS: TurnSummary[] = [
 
 export const GOLDEN_SESSION_TRACE_EVENT_WRITES: Array<Omit<SessionEventWrite, 'sessionId'>> = [
   {
+    type: 'session.started',
+    payload: {
+      requestedProvider: 'deepseek',
+      requestedModel: 'deepseek-chat',
+      effectiveProvider: 'deepseek',
+      effectiveModel: 'deepseek-chat',
+      routeReason: 'explicit_fallback_policy',
+    },
+  },
+  {
+    type: 'provider.fallback.selected',
+    turn: 1,
+    model: 'grok-4.3',
+    payload: {
+      policyMode: 'explicit_ordered',
+      callIndex: 1,
+      switchIndex: 1,
+      failureClass: 'rate_limit',
+      fromProvider: 'deepseek',
+      fromModel: 'deepseek-chat',
+      toProvider: 'xai',
+      toModel: 'grok-4.3',
+      compatibilityEvidenceId: 'compat-golden-xai',
+    },
+  },
+  {
     type: 'model.response',
     turn: 1,
-    model: 'deepseek-chat',
+    model: 'grok-4.3',
     usage: USAGE,
     payload: {
-      provider: 'deepseek',
+      provider: 'xai',
       durationMs: 321,
       textPreview: '我会先检查 AGENTS.md。',
       reasoningPreview: '需要先读取项目规则。',
@@ -83,8 +109,8 @@ export const GOLDEN_SESSION_TRACE_PROJECTION: SessionTraceProjection = {
   sessionId: GOLDEN_SESSION_TRACE_SESSION_ID,
   turns: [{
     turn: 1,
-    provider: 'deepseek',
-    model: 'deepseek-chat',
+    provider: 'xai',
+    model: 'grok-4.3',
     durationMs: 321,
     usage: USAGE,
     toolCalls: [{
@@ -112,8 +138,8 @@ export const GOLDEN_SESSION_TRACE_MESSAGES_VIEW = [
     role: 'assistant',
     content: '已检查 AGENTS.md，关键规则是先读项目约束再改代码。',
     reasoning: '需要先读取项目规则，再决定是否可以编辑。',
-    provider: 'deepseek',
-    model: 'deepseek-chat',
+    provider: 'xai',
+    model: 'grok-4.3',
     turnIndex: 1,
     totalTurns: 1,
     toolCalls: [{

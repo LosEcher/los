@@ -102,6 +102,93 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
   }
 });
 
+test('scheduler forwards fallback policy and persists the effective route from executor events', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const taskRunId = `task-fallback-${suffix}`;
+  const sessionId = `session-fallback-${suffix}`;
+  const nodeId = `node-fallback-${suffix}`;
+  const requests: Array<Record<string, any>> = [];
+  const server = createServer(async (req, res) => {
+    requests.push(JSON.parse(await readRequestBody(req)));
+    sendJson(res, {
+      events: [{
+        id: 1,
+        sessionId,
+        turn: 1,
+        type: 'provider.fallback.selected',
+        source: 'los',
+        payload: {
+          callIndex: 1,
+          switchIndex: 1,
+          failureClass: 'rate_limit',
+          errorCode: 'PROVIDER_HTTP_ERROR',
+          fromProvider: 'fallback-a',
+          fromModel: 'model-a',
+          toProvider: 'fallback-b',
+          toModel: 'model-b',
+          compatibilityEvidenceId: 'compat-b',
+        },
+        visibility: 'public',
+        createdAt: new Date().toISOString(),
+      }],
+      deltas: [],
+      result: {
+        text: 'fallback executor ok',
+        turns: [],
+        loopCount: 1,
+        totalTokens: { prompt: 1, completion: 1 },
+        messages: [],
+      },
+    });
+  });
+
+  try {
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const result = await runScheduledAgentTask({
+      prompt: 'exercise fallback persistence',
+      taskRunId,
+      sessionId,
+      provider: 'fallback-a',
+      model: 'model-a',
+      providerFallback: {
+        mode: 'explicit_ordered',
+        targets: [
+          { provider: 'fallback-a', model: 'model-a' },
+          { provider: 'fallback-b', model: 'model-b' },
+        ],
+        onFailure: ['rate_limit'],
+        requireCompatibilityEvidence: false,
+        maxSwitches: 1,
+      },
+      workspaceRoot: process.cwd(),
+      executor: {
+        enabled: true,
+        nodeUrls: [`http://127.0.0.1:${address.port}`],
+        nodeId,
+      },
+    });
+
+    assert.equal(result.status, 'completed');
+    assert.equal(requests[0]?.config?.providerFallback?.mode, 'explicit_ordered');
+    assert.equal(result.taskRun.provider, 'fallback-b');
+    assert.equal(result.taskRun.model, 'model-b');
+    assert.deepEqual(result.taskRun.metadata.effectiveRoute, { provider: 'fallback-b', model: 'model-b' });
+    const history = result.taskRun.metadata.providerSwitchHistory as Array<Record<string, unknown>>;
+    assert.equal(history[0]?.compatibilityEvidenceId, 'compat-b');
+    assert.equal(history[0]?.failureClass, 'rate_limit');
+  } finally {
+    await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [taskRunId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 test('scheduler phase gate reads current run spec contract instead of stale task metadata', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
@@ -111,7 +198,12 @@ test('scheduler phase gate reads current run spec contract instead of stale task
   const sessionId = `session-current-contract-${suffix}`;
   const runSpecId = `run-current-contract-${suffix}`;
   const nodeId = `test-current-contract-executor-${suffix}`;
-  const requests: Array<{ config?: { runContractMetadata?: { runContract?: { phase?: unknown; mode?: unknown } } } }> = [];
+  const requests: Array<{
+    config?: {
+      runSpecId?: string;
+      runContractMetadata?: { runContract?: { phase?: unknown; mode?: unknown } };
+    };
+  }> = [];
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
@@ -165,6 +257,7 @@ test('scheduler phase gate reads current run spec contract instead of stale task
 
     assert.equal(result.status, 'completed');
     assert.equal(result.result.text, 'executor ok');
+    assert.equal(requests[0]?.config?.runSpecId, runSpecId);
     assert.equal(requests[0]?.config?.runContractMetadata?.runContract?.mode, 'execution');
     assert.equal(requests[0]?.config?.runContractMetadata?.runContract?.phase, 'plan_approved');
   } finally {

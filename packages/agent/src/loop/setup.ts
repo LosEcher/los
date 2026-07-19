@@ -10,7 +10,14 @@
 
 import { getLogger } from '@los/infra/logger';
 import { createProvider } from '../providers/index.js';
+import {
+  createProviderFallbackRouter,
+  prepareProviderFallbackPolicy,
+  resolveProviderFallbackInitialTarget,
+  type ProviderFallbackEvent,
+} from '../providers/provider-fallback.js';
 import { resolveModelRouteDecision, type ModelRouteDecision } from '../providers/model-routing.js';
+import { listLatestProviderCompatEvidence } from '../provider-compat-evidence.js';
 import { summarizeModelProfile, type ModelExecutionSummary } from '../model-profiles.js';
 import {
   createToolRegistry,
@@ -19,6 +26,7 @@ import {
 } from '../tools/core/registry.js';
 import type { MCPServerRegistryRecord } from '../tools/external/mcp-client.js';
 import { listMCPServers } from '../mcp-servers.js';
+import { mcpServerExecutionBlocker } from '../mcp-distribution-policy.js';
 import { createSpawnAgentRunner, registerSpawnAgentTool, type ChildAgentRunner } from '../tools/core/agent-tools.js';
 import { createEventEmitter, type SessionEventContext, type SessionEventCallback } from '../event-emitter.js';
 import { appendSessionEvent } from '../session-events.js';
@@ -112,7 +120,21 @@ export function setupAgentRun(
   // runs as a separate front-matter phase (see loop/architect-phase.ts) before
   // this loop starts, so resolve the editor provider + editor system prompt.
   const editorMode = config.architectEditor?.enabled === true;
-  const providerSelection = resolveAgentRunProviderModelSelection(config);
+  const requestedProvider = editorMode
+    ? (config.architectEditor?.editorProvider ?? config.provider)
+    : config.provider;
+  const requestedModel = editorMode
+    ? (config.architectEditor?.editorModel ?? config.model)
+    : config.model;
+  const fallbackInitialTarget = resolveProviderFallbackInitialTarget(config.providerFallback, {
+    provider: requestedProvider,
+    model: requestedModel,
+  });
+  const providerSelection = resolveAgentRunProviderModelSelection({
+    ...config,
+    provider: fallbackInitialTarget?.provider ?? config.provider,
+    model: fallbackInitialTarget?.model ?? config.model,
+  });
   const architectEditorOverride = providerSelection.source === 'architect_editor_override';
   const provider = createProvider(providerSelection.provider, {
     model: providerSelection.model,
@@ -125,6 +147,7 @@ export function setupAgentRun(
     effectiveProvider: provider.name,
     effectiveModel: provider.profile.model,
     architectEditorOverride,
+    explicitFallbackPolicy: Boolean(fallbackInitialTarget),
   });
   const toolMode = config.toolMode ?? 'project-write';
 
@@ -152,6 +175,7 @@ export function setupAgentRun(
     sessionId: config.sessionId,
     provider: config.provider,
     model: config.model,
+    providerFallback: config.providerFallback,
     modelSettings: config.modelSettings,
     runContractMetadata: config.runContractMetadata,
     workspaceRoot: config.workspaceRoot,
@@ -166,6 +190,7 @@ export function setupAgentRun(
     toolRetry: config.toolRetry,
     signal,
     onSessionEvent: config.onSessionEvent,
+    onProviderFallback: config.onProviderFallback,
   }));
 
   const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
@@ -211,6 +236,8 @@ export async function completeAgentSetup(
   config: AgentConfig,
   setup: AgentRunSetup,
 ): Promise<AgentRunSetup> {
+  await _applyProviderFallbackToSetup(config, setup);
+
   if (setup.preActionGateConfig && config.preActionGate?.loadPersistedEvidence !== false &&
       (config.sessionId || config.projectId)) {
     try {
@@ -235,13 +262,18 @@ export async function completeAgentSetup(
         enabled: true,
       });
       mcpRegistryRecords = registryServers
-        .filter(s => s.status !== 'disabled')
+        .filter(server => {
+          const blocker = mcpServerExecutionBlocker(server);
+          if (blocker) setup.log.warn(`Skipping MCP server [${server.id}]: ${blocker}`);
+          return !blocker;
+        })
         .map(s => ({
           id: s.id,
           command: s.command,
           args: s.args,
           url: s.url,
           env: s.env,
+          toolPolicy: s.toolPolicy,
         }));
     } catch (err: any) {
       setup.log.warn(`Failed to load MCP servers from registry: ${err.message ?? String(err)}`);
@@ -296,4 +328,71 @@ export async function completeAgentSetup(
   });
 
   return setup;
+}
+
+export async function _applyProviderFallbackToSetup(
+  config: AgentConfig,
+  setup: AgentRunSetup,
+  dependencies: {
+    loadEvidence?: typeof listLatestProviderCompatEvidence;
+    createProvider?: typeof createProvider;
+  } = {},
+): Promise<void> {
+  if (!config.providerFallback) return;
+  const evidence = await (dependencies.loadEvidence ?? listLatestProviderCompatEvidence)();
+  const prepared = prepareProviderFallbackPolicy(config.providerFallback, evidence);
+  if (!prepared) return;
+  const providerFactory = dependencies.createProvider ?? createProvider;
+  setup.provider = createProviderFallbackRouter({
+    prepared,
+    initialProvider: setup.provider,
+    createProvider: providerFactory,
+    traceId: config.traceId,
+    onEvent: async event => {
+      await emitProviderFallbackEvent(setup.emitEvent, event);
+      await config.onProviderFallback?.(event);
+    },
+  });
+}
+
+async function emitProviderFallbackEvent(
+  emitEvent: EmitEvent,
+  event: ProviderFallbackEvent,
+): Promise<void> {
+  if (event.type === 'selected') {
+    await emitEvent({
+      type: 'provider.fallback.selected',
+      turn: event.callIndex,
+      model: event.toModel,
+      payload: {
+        policyMode: 'explicit_ordered',
+        callIndex: event.callIndex,
+        switchIndex: event.switchIndex,
+        failureClass: event.failureClass,
+        errorCode: event.errorCode ?? null,
+        errorMessage: event.errorMessage,
+        fromProvider: event.fromProvider,
+        fromModel: event.fromModel,
+        toProvider: event.toProvider,
+        toModel: event.toModel,
+        compatibilityEvidenceId: event.compatibilityEvidenceId ?? null,
+      },
+    });
+    return;
+  }
+  await emitEvent({
+    type: 'provider.fallback.exhausted',
+    turn: event.callIndex,
+    model: event.fromModel,
+    payload: {
+      policyMode: 'explicit_ordered',
+      callIndex: event.callIndex,
+      switchCount: event.switchIndex,
+      failureClass: event.failureClass,
+      errorCode: event.errorCode ?? null,
+      errorMessage: event.errorMessage,
+      provider: event.fromProvider,
+      model: event.fromModel,
+    },
+  });
 }
