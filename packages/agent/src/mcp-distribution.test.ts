@@ -76,3 +76,25 @@ test('MCP auth and tool policy are separate fail-closed controls', () => {
   assert.equal(isMCPToolAllowed(policy, 'delete'), false);
   assert.equal(isMCPToolAllowed(policy, 'other'), false);
 });
+
+test('CanTool inspect fixes the local adapter identity and narrows policy to reviewed L0 capabilities', () => {
+  const inspection = inspectMCPServer({
+    id: 'cantool-local',
+    transport: 'stdio',
+    command: '/Applications/CanTool.app/Contents/MacOS/cantool',
+    args: ['--mcp-server'],
+    adapterConfig: { kind: 'cantool', providerId: 'cantool.mcp.local', providerLocation: 'local', dataGrantOwner: 'cantool', sessionBinding: 'per_call' },
+  });
+  assert.equal(inspection.normalized.adapterConfig?.kind, 'cantool');
+  assert.equal(inspection.normalized.toolPolicy?.riskLevel, 'L0');
+  assert.equal(inspection.normalized.toolPolicy?.allow.includes('calculator.evaluate'), true);
+  assert.equal(inspection.normalized.toolPolicy?.allow.includes('snippet.search'), false);
+
+  assert.throws(() => inspectMCPServer({
+    id: 'cantool-private',
+    transport: 'stdio',
+    command: 'cantool',
+    adapterConfig: { kind: 'cantool', providerId: 'cantool.mcp.local', providerLocation: 'local', dataGrantOwner: 'cantool', sessionBinding: 'per_call' },
+    toolPolicy: { allow: ['snippet.search'], deny: [], riskLevel: 'L0' },
+  }), /unreviewed capabilities/);
+});

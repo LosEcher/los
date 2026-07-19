@@ -19,6 +19,11 @@ import {
   unpinMCPServerVersion,
 } from '@los/agent/mcp-distribution';
 import type { MCPAuthConfig, MCPToolPolicy } from '@los/agent/mcp-distribution-policy';
+import {
+  projectCanToolCapability,
+  summarizeCanToolCapabilities,
+  type MCPAdapterConfig,
+} from '@los/agent/cantool-capability-adapter';
 import { MCPClient } from '@los/agent';
 import { getLogger } from '@los/infra/logger';
 
@@ -155,13 +160,50 @@ async function verifyRegisteredServer(req: any, reply: any): Promise<unknown> {
   try {
     await client.connect();
     const tools = client.getTools();
+    const identity = client.getServerIdentity();
+    const registeredTools = tools.map(tool => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
+      capability: server.adapterConfig.kind === 'cantool'
+        ? projectCanToolCapability(tool)
+        : undefined,
+    }));
+    const projections = registeredTools.flatMap(tool => tool.capability ? [tool.capability] : []);
     await updateMCPServerStatus(id, {
       status: 'connected',
       lastError: null,
       toolCount: tools.length,
-      tools: tools.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
+      tools: registeredTools,
+      adapterEvidence: {
+        serverName: identity.name,
+        serverVersion: identity.version,
+        protocolVersion: identity.protocolVersion,
+        verifiedAt: new Date().toISOString(),
+        capabilitySummary: projections.length > 0
+          ? summarizeCanToolCapabilities(projections)
+          : undefined,
+      },
     }, query.tenantId, query.projectId);
-    return { ok: true, serverId: id, toolCount: tools.length, tools: tools.map(tool => ({ name: tool.name, description: tool.description })) };
+    return {
+      ok: true,
+      serverId: id,
+      toolCount: tools.length,
+      adapterEvidence: {
+        serverName: identity.name,
+        serverVersion: identity.version,
+        protocolVersion: identity.protocolVersion,
+        capabilitySummary: projections.length > 0 ? summarizeCanToolCapabilities(projections) : undefined,
+      },
+      tools: registeredTools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        capability: tool.capability,
+      })),
+    };
   } catch (error) {
     const message = messageOf(error);
     log.warn(`MCP server verify failed [${id}]: ${message}`);
@@ -187,6 +229,7 @@ function inspectBody(value: unknown) {
     sourceUri: optionalString(body.sourceUri),
     authConfig: body.authConfig as MCPAuthConfig | undefined,
     toolPolicy: body.toolPolicy as MCPToolPolicy | undefined,
+    adapterConfig: body.adapterConfig as MCPAdapterConfig | undefined,
   });
 }
 

@@ -27,6 +27,8 @@ export type MCPServer = {
   pinnedVersionHash?: string;
   authConfig: MCPAuthConfig;
   toolPolicy: MCPToolPolicy;
+  adapterConfig: MCPAdapterConfig;
+  adapterEvidence?: MCPAdapterEvidence;
   enabled: boolean;
   status: MCPServerStatus;
   lastError?: string;
@@ -47,6 +49,45 @@ export type MCPToolPolicy = {
   riskLevel: 'L0' | 'L1' | 'L2';
 };
 
+export type MCPAdapterConfig =
+  | { kind: 'generic' }
+  | {
+      kind: 'cantool';
+      providerId: 'cantool.mcp.local';
+      providerLocation: 'local';
+      dataGrantOwner: 'cantool';
+      sessionBinding: 'per_call';
+    };
+
+export type MCPCapabilityProjection = {
+  capabilityId: string;
+  dataClassification: 'public' | 'caller_supplied' | 'local_metadata' | 'local_private' | 'secret' | 'unknown';
+  providerId: string;
+  providerLocation: 'local';
+  availability: 'available' | 'blocked';
+  reason: string;
+  approvalMode: 'none' | 'cantool_data_grant' | 'not_available';
+  grantRequired: boolean;
+  sessionBinding: 'per_call';
+  cancellation: 'mcp_notification_late_result_discarded';
+  resume: 'new_call_only';
+  readOnly: boolean;
+  idempotent: boolean;
+};
+
+export type MCPAdapterEvidence = {
+  serverName?: string;
+  serverVersion?: string;
+  protocolVersion?: string;
+  verifiedAt: string;
+  capabilitySummary?: {
+    projected: number;
+    available: number;
+    blocked: number;
+    byDataClassification: Record<string, number>;
+  };
+};
+
 export type MCPInspection = {
   normalized: Record<string, unknown>;
   versionHash: string;
@@ -62,8 +103,12 @@ export type MCPHistoryResponse = {
 
 export type MCPRegisteredTool = {
   name: string;
+  title?: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+  capability?: MCPCapabilityProjection;
 };
 
 export type MCPServerListResponse = {
@@ -75,6 +120,7 @@ export type MCPServerVerifyResponse = {
   ok: boolean;
   serverId: string;
   toolCount?: number;
-  tools?: Array<{ name: string; description?: string }>;
+  adapterEvidence?: Omit<MCPAdapterEvidence, 'verifiedAt'>;
+  tools?: Array<{ name: string; description?: string; capability?: MCPCapabilityProjection }>;
   error?: string;
 };

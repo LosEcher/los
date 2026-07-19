@@ -14,6 +14,11 @@ import {
   type MCPAuthConfig,
   type MCPToolPolicy,
 } from './mcp-distribution-policy.js';
+import {
+  normalizeCanToolPolicy,
+  normalizeMCPAdapterConfig,
+  type MCPAdapterConfig,
+} from './cantool-capability-adapter.js';
 
 export interface MCPInspectInput {
   id: string;
@@ -26,6 +31,7 @@ export interface MCPInspectInput {
   sourceUri?: string;
   authConfig?: MCPAuthConfig;
   toolPolicy?: MCPToolPolicy;
+  adapterConfig?: MCPAdapterConfig;
 }
 
 export interface MCPInspection {
@@ -43,7 +49,11 @@ export interface MCPServerVersionRecord {
 
 export function inspectMCPServer(input: MCPInspectInput): MCPInspection {
   const authConfig = normalizeMCPAuthConfig(input.authConfig);
-  const toolPolicy = normalizeMCPToolPolicy(input.toolPolicy);
+  const adapterConfig = normalizeMCPAdapterConfig(input.adapterConfig);
+  const requestedToolPolicy = normalizeMCPToolPolicy(input.toolPolicy);
+  const toolPolicy = adapterConfig.kind === 'cantool'
+    ? normalizeCanToolPolicy(requestedToolPolicy)
+    : requestedToolPolicy;
   const normalized: UpsertMCPServerInput = {
     id: input.id.trim(),
     tenantId: input.tenantId?.trim() || undefined,
@@ -55,6 +65,7 @@ export function inspectMCPServer(input: MCPInspectInput): MCPInspection {
     sourceUri: input.sourceUri?.trim() || `manual:${input.id.trim()}`,
     authConfig,
     toolPolicy,
+    adapterConfig,
     enabled: false,
   };
   if (!normalized.id) throw new Error('id is required');
@@ -67,6 +78,9 @@ export function inspectMCPServer(input: MCPInspectInput): MCPInspection {
   const blockers: string[] = [];
   if (normalized.transport !== 'stdio') blockers.push(`transport ${normalized.transport} is not implemented`);
   if (authConfig.mode !== 'none') blockers.push(`auth mode ${authConfig.mode} has no credential resolver`);
+  if (adapterConfig.kind === 'cantool' && normalized.transport !== 'stdio') {
+    blockers.push('CanTool adapter requires stdio transport');
+  }
   return { normalized: { ...normalized, versionHash }, versionHash, executionSupported: blockers.length === 0, blockers };
 }
 
@@ -137,6 +151,7 @@ export async function rollbackMCPServerVersion(id: string, versionHash: string, 
     sourceUri: optionalString(snapshot.sourceUri),
     authConfig: normalizeMCPAuthConfig(snapshot.authConfig),
     toolPolicy: normalizeMCPToolPolicy(snapshot.toolPolicy),
+    adapterConfig: normalizeMCPAdapterConfig(snapshot.adapterConfig),
     versionHash,
     pinnedVersionHash: current.pinnedVersionHash ?? null,
     allowPinnedUpdate: true,
