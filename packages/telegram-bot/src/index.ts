@@ -90,18 +90,26 @@ function losHeaders(extra: Record<string, string> = {}): Record<string, string> 
 // ── Telegram API helpers ───────────────────────────────────────────
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+let telegramConnected = false;
 
 async function tgApi(method: string, body: Record<string, unknown> = {}): Promise<unknown> {
-  const res = await fetch(`${TG_API}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    console.error(`Telegram API error: ${res.status} ${await res.text()}`);
-    return null;
+  try {
+    const res = await fetch(`${TG_API}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      telegramConnected = false;
+      console.error(`Telegram API error: ${res.status} ${await res.text()}`);
+      return null;
+    }
+    telegramConnected = true;
+    return res.json();
+  } catch (error) {
+    telegramConnected = false;
+    throw error;
   }
-  return res.json();
 }
 
 async function sendMessage(chatId: number | string, text: string, buttons?: Array<Array<{ text: string; callback_data: string }>>): Promise<number | null> {
@@ -289,7 +297,12 @@ async function main(): Promise<void> {
   console.log(`   Chats: ${[...authorizedChats].join(', ')}`);
   await startTelegramHealthServer({
     port: HEALTH_PORT,
-    getSnapshot: () => ({ ready: sseConnected, sseConnected, mode: WEBHOOK_PORT > 0 ? 'webhook' : 'polling' }),
+    getSnapshot: () => ({
+      ready: sseConnected && telegramConnected,
+      sseConnected,
+      telegramConnected,
+      mode: WEBHOOK_PORT > 0 ? 'webhook' : 'polling',
+    }),
   });
   console.log(`   Health: http://127.0.0.1:${HEALTH_PORT}/health`);
 

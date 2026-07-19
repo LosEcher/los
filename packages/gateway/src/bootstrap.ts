@@ -25,6 +25,7 @@ import {
   ensureSessionStore, ensureSkillStore, ensureStaticGraphBaselineStore,
   ensureStreamCheckpointStore, ensureStreamLeaseStore, ensureTaskRunStore,
   ensureTodoStore, ensureVerificationRecordStore, ensureRuleStore,
+  ensureManagedWorkspaceStore,
   ensureFeedAnalysisStore,
 } from '@los/agent';
 // Not in the @los/agent barrel (intentionally internal) — use subpath exports.
@@ -46,6 +47,7 @@ export async function ensureAllStores(): Promise<void> {
   await ensureTaskRunStore();
   await ensureRunSpecStore();
   await ensureAgentTaskGraphStore();
+  await ensureManagedWorkspaceStore();
   await ensureExecutorNodeStore();
   await ensureServiceInstanceStore();
   await ensureTodoStore();

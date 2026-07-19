@@ -157,6 +157,7 @@ if (APP_TOKEN && (UIDS.length > 0 || TOPIC_IDS.length > 0)) {
     losGatewayUrl: LOS_GATEWAY_URL,
   }));
 }
+const wxpusherConfigured = channels.some(channel => channel.kind === 'weixin');
 
 // Web mobile dashboard (always)
 channels.push(createWebChannel({
@@ -165,7 +166,16 @@ channels.push(createWebChannel({
   losGatewayUrl: LOS_GATEWAY_URL,
   losAuthToken: LOS_AUTH_TOKEN,
   losOperatorToken: LOS_OPERATOR_TOKEN,
-  healthSnapshot: () => ({ ready: sseLive, sseConnected: sseLive, weclawAvailable }),
+  healthSnapshot: () => {
+    const externalReady = weclawAvailable || wxpusherConfigured;
+    return {
+      ready: sseLive && externalReady,
+      sseConnected: sseLive,
+      externalReady,
+      weclawAvailable,
+      wxpusherConfigured,
+    };
+  },
 }));
 
 // ── Delivery dispatcher ────────────────────────────────────────────
@@ -520,7 +530,7 @@ async function main(): Promise<void> {
 
   console.log(`\n  Mobile: http://localhost:${WEB_PORT}/m/`);
   console.log(`  WeClaw: ${weclawAvailable ? '✅ active' : '⚠️ offline'}`);
-  console.log(`  WxPusher: ${channels.some(c => c.kind === 'weixin') ? '✅ configured' : '⚠️ not configured'}`);
+  console.log(`  WxPusher: ${wxpusherConfigured ? '✅ configured' : '⚠️ not configured'}`);
   console.log('');
 
   // 2.5 Wire MessageRouter — handles inbound commands from all channels

@@ -1,260 +1,224 @@
-/**
- * @los/gateway/mcp-routes — MCP Server registry REST API.
- *
- * CRUD + verify + reload endpoints for the persistent MCP server registry.
- */
-
+/** Auditable MCP server distribution and lifecycle routes. */
 import type { FastifyInstance } from 'fastify';
 import {
-  ensureMCPServerStore,
-  upsertMCPServer,
-  loadMCPServer,
-  listMCPServers,
   deleteMCPServer,
+  ensureMCPServerStore,
+  listMCPServers,
+  loadMCPServer,
   updateMCPServerStatus,
-  type UpsertMCPServerInput,
+  upsertMCPServer,
+  type MCPServerRecord,
   type MCPTransport,
 } from '@los/agent/mcp-servers';
+import {
+  inspectMCPServer,
+  listMCPServerVersions,
+  pinMCPServerVersion,
+  rollbackMCPServerVersion,
+  setMCPServerEnabled,
+  unpinMCPServerVersion,
+} from '@los/agent/mcp-distribution';
+import type { MCPAuthConfig, MCPToolPolicy } from '@los/agent/mcp-distribution-policy';
 import { MCPClient } from '@los/agent';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('gateway');
 
-export function registerMCPRoutes(app: FastifyInstance): void {
-  // ── List ──────────────────────────────────────────────
+type ScopeQuery = { tenantId?: string; projectId?: string };
 
+export function registerMCPRoutes(app: FastifyInstance): void {
   app.get('/mcp-servers', async (req) => {
-    const query = req.query as {
-      tenantId?: string;
-      projectId?: string;
-      enabled?: string;
-    };
-    await ensureMCPServerStore();
+    const query = req.query as ScopeQuery & { enabled?: string };
     const servers = await listMCPServers({
       tenantId: query.tenantId,
       projectId: query.projectId,
       enabled: query.enabled === 'true' ? true : query.enabled === 'false' ? false : undefined,
     });
-    return { count: servers.length, servers };
+    return { count: servers.length, servers: servers.map(_toPublicMCPServer) };
   });
 
-  // ── Get one ───────────────────────────────────────────
+  app.post('/mcp-servers/inspect', async (req, reply) => {
+    try {
+      const inspection = inspectBody(req.body);
+      return { ...inspection, normalized: toPublicMCPInput(inspection.normalized) };
+    } catch (error) {
+      return reply.status(400).send({ error: messageOf(error) });
+    }
+  });
 
   app.get('/mcp-servers/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const query = req.query as { tenantId?: string; projectId?: string };
-    await ensureMCPServerStore();
+    const query = req.query as ScopeQuery;
     const server = await loadMCPServer(id, query.tenantId, query.projectId);
     if (!server) return reply.status(404).send({ error: 'MCP server not found' });
-    return server;
+    return _toPublicMCPServer(server);
   });
-
-  // ── Create / Update ───────────────────────────────────
 
   app.post('/mcp-servers', async (req, reply) => {
-    const body = req.body as {
-      id?: string;
-      tenantId?: string;
-      projectId?: string;
-      transport?: string;
-      command?: string;
-      args?: string[];
-      url?: string;
-      env?: Record<string, string>;
-      enabled?: boolean;
-    };
-
-    const id = normalizeId(body.id);
-    if (!id) return reply.status(400).send({ error: 'id is required' });
-
-    const transport = normalizeTransport(body.transport);
-    if (!transport) return reply.status(400).send({ error: 'transport must be stdio, sse, or streamable-http' });
-
-    if (transport === 'stdio' && !body.command) {
-      return reply.status(400).send({ error: 'command is required for stdio transport' });
+    const body = req.body as Record<string, unknown>;
+    if (body.env !== undefined) {
+      return reply.status(400).send({ error: 'raw env values are not accepted; use an opaque authConfig.credentialRef' });
     }
-    if ((transport === 'sse' || transport === 'streamable-http') && !body.url) {
-      return reply.status(400).send({ error: 'url is required for sse/streamable-http transport' });
+    try {
+      const inspection = inspectBody(body);
+      const inspectedVersionHash = optionalString(body.inspectedVersionHash);
+      if (!inspectedVersionHash) return reply.status(400).send({ error: 'inspectedVersionHash is required' });
+      if (inspectedVersionHash !== inspection.versionHash) {
+        return reply.status(409).send({ error: 'MCP registration changed after inspect' });
+      }
+      const server = await upsertMCPServer(inspection.normalized);
+      return reply.status(201).send(_toPublicMCPServer(server));
+    } catch (error) {
+      const message = messageOf(error);
+      return reply.status(message.includes('pinned to version') ? 409 : 400).send({ error: message });
     }
-
-    const input: UpsertMCPServerInput = {
-      id,
-      tenantId: body.tenantId,
-      projectId: body.projectId,
-      transport,
-      command: body.command,
-      args: normalizeStringArray(body.args),
-      url: body.url,
-      env: normalizeEnv(body.env),
-      enabled: body.enabled,
-    };
-
-    await ensureMCPServerStore();
-    const server = await upsertMCPServer(input);
-    return reply.status(201).send(server);
   });
 
-  // ── Delete ────────────────────────────────────────────
+  app.get('/mcp-servers/:id/history', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const query = req.query as ScopeQuery;
+    const server = await loadMCPServer(id, query.tenantId, query.projectId);
+    if (!server) return reply.status(404).send({ error: 'MCP server not found' });
+    return {
+      currentVersionHash: server.versionHash,
+      pinnedVersionHash: server.pinnedVersionHash,
+      versions: await listMCPServerVersions(id, query.tenantId, query.projectId),
+    };
+  });
+
+  app.post('/mcp-servers/:id/pin', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as ScopeQuery & { versionHash?: string; pinned?: boolean };
+    try {
+      const server = body.pinned === false
+        ? await unpinMCPServerVersion(id, body.tenantId, body.projectId)
+        : await pinMCPServerVersion(id, body.tenantId, body.projectId, optionalString(body.versionHash));
+      return _toPublicMCPServer(server);
+    } catch (error) {
+      return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
+    }
+  });
+
+  app.post('/mcp-servers/:id/rollback', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as ScopeQuery & { versionHash?: string };
+    const versionHash = optionalString(body.versionHash);
+    if (!versionHash) return reply.status(400).send({ error: 'versionHash is required' });
+    try {
+      return _toPublicMCPServer(await rollbackMCPServerVersion(id, versionHash, body.tenantId, body.projectId));
+    } catch (error) {
+      return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
+    }
+  });
+
+  app.post('/mcp-servers/:id/enable', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as ScopeQuery & { enabled?: boolean };
+    if (typeof body.enabled !== 'boolean') return reply.status(400).send({ error: 'enabled boolean is required' });
+    try {
+      return _toPublicMCPServer(await setMCPServerEnabled(id, body.enabled, body.tenantId, body.projectId));
+    } catch (error) {
+      return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
+    }
+  });
 
   app.delete('/mcp-servers/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const query = req.query as { tenantId?: string; projectId?: string };
-    await ensureMCPServerStore();
+    const query = req.query as ScopeQuery;
     const ok = await deleteMCPServer(id, query.tenantId, query.projectId);
     if (!ok) return reply.status(404).send({ error: 'MCP server not found' });
     return { ok: true };
   });
 
-  // ── Verify (test connection) ──────────────────────────
-
   app.post('/mcp-servers/:id/verify', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const query = req.query as { tenantId?: string; projectId?: string };
-    await ensureMCPServerStore();
-    const server = await loadMCPServer(id, query.tenantId, query.projectId);
-    if (!server) return reply.status(404).send({ error: 'MCP server not found' });
-
-    try {
-      const config = serverToConfig(server);
-      if (!config) {
-        await updateMCPServerStatus(id, {
-          status: 'error',
-          lastError: 'Remote MCP servers (SSE/streamable-http) are not yet supported for verification',
-        }, query.tenantId, query.projectId);
-        return reply.status(400).send({
-          ok: false,
-          serverId: id,
-          error: 'Remote MCP servers are not yet supported for verification',
-        });
-      }
-
-      const client = new MCPClient(config);
-      await client.connect();
-      const tools = client.getTools();
-      await client.close();
-
-      await updateMCPServerStatus(id, {
-        status: 'connected',
-        lastError: null,
-        toolCount: tools.length,
-        tools: tools.map(t => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
-      }, query.tenantId, query.projectId);
-
-      return {
-        ok: true,
-        serverId: id,
-        toolCount: tools.length,
-        tools: tools.map(t => ({ name: t.name, description: t.description })),
-      };
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      log.warn(`MCP server verify failed [${id}]: ${message}`);
-      await updateMCPServerStatus(id, {
-        status: 'error',
-        lastError: message,
-      }, query.tenantId, query.projectId);
-      return {
-        ok: false,
-        serverId: id,
-        error: message,
-      };
-    }
+    return await verifyRegisteredServer(req, reply);
   });
-
-  // ── Reload (rediscover tools) ─────────────────────────
 
   app.post('/mcp-servers/:id/reload', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const query = req.query as { tenantId?: string; projectId?: string };
-    await ensureMCPServerStore();
-    const server = await loadMCPServer(id, query.tenantId, query.projectId);
-    if (!server) return reply.status(404).send({ error: 'MCP server not found' });
-
-    try {
-      const config = serverToConfig(server);
-      if (!config) {
-        return reply.status(400).send({
-          ok: false,
-          error: 'Remote MCP servers are not yet supported for reload',
-        });
-      }
-
-      const client = new MCPClient(config);
-      await client.connect();
-      const tools = client.getTools();
-      await client.close();
-
-      await updateMCPServerStatus(id, {
-        status: 'connected',
-        lastError: null,
-        toolCount: tools.length,
-        tools: tools.map(t => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
-      }, query.tenantId, query.projectId);
-
-      return {
-        ok: true,
-        serverId: id,
-        toolCount: tools.length,
-        tools: tools.map(t => ({ name: t.name, description: t.description })),
-      };
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      await updateMCPServerStatus(id, {
-        status: 'error',
-        lastError: message,
-      }, query.tenantId, query.projectId);
-      return {
-        ok: false,
-        serverId: id,
-        error: message,
-      };
-    }
+    return await verifyRegisteredServer(req, reply);
   });
 }
 
-// ── Helpers ─────────────────────────────────────────────
+async function verifyRegisteredServer(req: any, reply: any): Promise<unknown> {
+  const { id } = req.params as { id: string };
+  const query = req.query as ScopeQuery;
+  await ensureMCPServerStore();
+  const server = await loadMCPServer(id, query.tenantId, query.projectId);
+  if (!server) return reply.status(404).send({ error: 'MCP server not found' });
+  const unsupported = verificationBlocker(server);
+  if (unsupported) {
+    await updateMCPServerStatus(id, { status: 'error', lastError: unsupported }, query.tenantId, query.projectId);
+    return reply.status(400).send({ ok: false, serverId: id, error: unsupported });
+  }
 
-function normalizeId(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
+  const client = new MCPClient({ command: server.command!, args: server.args, env: server.env });
+  try {
+    await client.connect();
+    const tools = client.getTools();
+    await updateMCPServerStatus(id, {
+      status: 'connected',
+      lastError: null,
+      toolCount: tools.length,
+      tools: tools.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
+    }, query.tenantId, query.projectId);
+    return { ok: true, serverId: id, toolCount: tools.length, tools: tools.map(tool => ({ name: tool.name, description: tool.description })) };
+  } catch (error) {
+    const message = messageOf(error);
+    log.warn(`MCP server verify failed [${id}]: ${message}`);
+    await updateMCPServerStatus(id, { status: 'error', lastError: message }, query.tenantId, query.projectId);
+    return { ok: false, serverId: id, error: message };
+  } finally {
+    await client.close();
+  }
 }
 
-function normalizeTransport(value: unknown): MCPTransport | undefined {
-  if (value === 'stdio' || value === 'sse' || value === 'streamable-http') return value;
+function inspectBody(value: unknown) {
+  const body = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const transport = normalizeTransport(body.transport);
+  if (!transport) throw new Error('transport must be stdio, sse, or streamable-http');
+  return inspectMCPServer({
+    id: optionalString(body.id) ?? '',
+    tenantId: optionalString(body.tenantId),
+    projectId: optionalString(body.projectId),
+    transport,
+    command: optionalString(body.command),
+    args: stringArray(body.args),
+    url: optionalString(body.url),
+    sourceUri: optionalString(body.sourceUri),
+    authConfig: body.authConfig as MCPAuthConfig | undefined,
+    toolPolicy: body.toolPolicy as MCPToolPolicy | undefined,
+  });
+}
+
+export function _toPublicMCPServer(server: MCPServerRecord): Omit<MCPServerRecord, 'env'> & { envKeys: string[] } {
+  const { env, ...safe } = server;
+  return { ...safe, envKeys: Object.keys(env).sort() };
+}
+
+function toPublicMCPInput(input: object): Record<string, unknown> {
+  const { env: _env, ...safe } = input as Record<string, unknown>;
+  return safe;
+}
+
+function verificationBlocker(server: MCPServerRecord): string | undefined {
+  if (server.authConfig.mode !== 'none') return `MCP auth mode ${server.authConfig.mode} has no credential resolver`;
+  if (server.transport !== 'stdio') return `Remote MCP transport ${server.transport} is not implemented`;
+  if (!server.command) return 'stdio command is missing';
   return undefined;
 }
 
-function normalizeStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const filtered = value
-    .map(item => typeof item === 'string' ? item.trim() : '')
-    .filter(Boolean);
-  return filtered.length > 0 ? filtered : undefined;
+function normalizeTransport(value: unknown): MCPTransport | undefined {
+  return value === 'stdio' || value === 'sse' || value === 'streamable-http' ? value : undefined;
 }
 
-function normalizeEnv(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof v === 'string') env[k] = v;
-  }
-  return Object.keys(env).length > 0 ? env : undefined;
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function serverToConfig(server: { command?: string; args: string[]; env: Record<string, string> }): { command: string; args?: string[]; env?: Record<string, string> } | null {
-  if (!server.command) return null;
-  return {
-    command: server.command,
-    args: server.args.length > 0 ? server.args : undefined,
-    env: Object.keys(server.env).length > 0 ? server.env : undefined,
-  };
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(item => typeof item === 'string' ? item.trim() : '').filter(Boolean) : [];
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

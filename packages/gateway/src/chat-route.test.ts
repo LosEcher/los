@@ -121,6 +121,97 @@ test('chat route rejects an unknown provider/model before creating a run', async
   }
 });
 
+test('chat route rejects a fallback policy whose first target conflicts with the requested route', async () => {
+  const config = withConfiguredDefaultProvider(await loadConfig());
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, config, process.cwd());
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      payload: {
+        prompt: 'invalid fallback route',
+        provider: config.agent.defaultProvider,
+        model: config.agent.defaultModel,
+        providerFallback: {
+          mode: 'explicit_ordered',
+          targets: [
+            { provider: 'different-provider', model: 'different-model' },
+            { provider: config.agent.defaultProvider, model: config.agent.defaultModel },
+          ],
+        },
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error, 'invalid_provider_fallback');
+    assert.match(response.json().message, /does not match requested provider/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('chat route rejects an unconfigured fallback target before creating a run', async () => {
+  const config = withConfiguredDefaultProvider(await loadConfig());
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, config, process.cwd());
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      payload: {
+        prompt: 'invalid fallback target',
+        providerFallback: {
+          mode: 'explicit_ordered',
+          targets: [
+            { provider: config.agent.defaultProvider, model: config.agent.defaultModel },
+            { provider: 'missing-fallback-provider', model: 'missing-model' },
+          ],
+        },
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.json(), {
+      error: 'invalid_provider_fallback',
+      code: 'provider_not_configured',
+      message: "provider 'missing-fallback-provider' is not configured or disabled",
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test('chat route requires an explicit model for evidence-gated fallback targets', async () => {
+  const config = withConfiguredDefaultProvider(await loadConfig());
+  const app = Fastify({ logger: false });
+  registerChatRoute(app, config, process.cwd());
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      payload: {
+        prompt: 'missing fallback model',
+        providerFallback: {
+          mode: 'explicit_ordered',
+          targets: [
+            { provider: config.agent.defaultProvider },
+            { provider: config.agent.defaultProvider, model: config.agent.defaultModel },
+          ],
+        },
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().code, 'fallback_model_required');
+  } finally {
+    await app.close();
+  }
+});
+
 test('chat route persists blocked intake before idempotency reservation', async () => {
   const config = withConfiguredDefaultProvider(await loadConfig());
   await initDb(config.databaseUrl);

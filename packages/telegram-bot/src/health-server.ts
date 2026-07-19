@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 export interface TelegramHealthSnapshot {
   ready: boolean;
   sseConnected: boolean;
+  telegramConnected: boolean;
   mode: 'polling' | 'webhook';
 }
 

@@ -47,7 +47,7 @@ interface RunAgentRequest {
   agentTaskLease?: { taskId: string; leaseVersion: number };
   leaseMs?: number;
   prompt: string;
-  config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
+  config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
 }
 
 type ExecutorStreamChunk =
