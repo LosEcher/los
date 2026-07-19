@@ -18,6 +18,7 @@ import {
 } from './chat-resume-plan.js';
 import { handleNonCompletedOutcome } from './chat-service-outcomes.js';
 import { createChatTaskHooks } from './chat-service-hooks.js';
+import { linkWorkItemRun } from '@los/agent/work-items';
 
 export type { SendEvent } from './chat-live-events.js';
 export interface ChatRunContext {
@@ -136,6 +137,16 @@ export async function runChat(params: {
     runContract,
     gatewayId: gatewayServiceId,
   });
+  if (boundTodoId) {
+    await linkWorkItemRun({
+      workItemId: boundTodoId,
+      runSpecId,
+      sessionId: sid,
+      relationKind: relationKindForRun(runContract),
+    }).catch(error => {
+      log.warn('Failed to persist Work Item run lineage', { error, workItemId: boundTodoId, runSpecId });
+    });
+  }
   relaySessionEvent(send, await persistChatIntakeEvent({
     sessionId: sid, tenantId, userId, requestId, traceId,
     requestedProjectId, requestedWorkspaceRoot, resolution: intakeResolution, runSpecId,
@@ -274,6 +285,18 @@ export async function runChat(params: {
         provider, model, workspaceRoot, toolMode, config, resumedSession, ctx, send }),
     });
 
+    if (boundTodoId && 'taskRun' in scheduled && scheduled.taskRun) {
+      await linkWorkItemRun({
+        workItemId: boundTodoId,
+        runSpecId,
+        taskRunId: scheduled.taskRun.id,
+        sessionId: sid,
+        relationKind: relationKindForRun(runContract),
+      }).catch(error => {
+        log.warn('Failed to persist Work Item task lineage', { error, workItemId: boundTodoId, runSpecId });
+      });
+    }
+
     if (scheduled.status !== 'completed') {
       return await handleNonCompletedOutcome({ scheduled, prompt, provider, model, workspaceRoot, toolMode,
         boundTodoId, sid, tenantId, projectId, userId, requestId, traceId, runSpecId, config, send, identityName });
@@ -360,4 +383,14 @@ export async function runChat(params: {
     // Re-throw so the route can access ctx for the mutable state.
     throw err;
   }
+}
+
+function relationKindForRun(
+  contract: RunContractMetadataInput | undefined,
+): 'discovery' | 'planning' | 'execution' | 'verification' | 'closeout' {
+  if (contract?.mode === 'closeout') return 'closeout';
+  if (contract?.phase === 'discovering' || contract?.phase === 'discovery_ready') return 'discovery';
+  if (contract?.phase === 'planning' || contract?.phase === 'plan_approved') return 'planning';
+  if (contract?.phase === 'verifying') return 'verification';
+  return 'execution';
 }

@@ -25,6 +25,12 @@ import {
   replayFeedAnalysisDeadLetter,
 } from './integration/feed-analysis-callback-outbox.js';
 import type { FeedAnalysisResultEnvelope } from './integration/feed-analysis-types.js';
+import {
+  ensureFeedAnalysisWorkItem,
+  loadFeedAnalysisEvidenceForWorkItem,
+} from './integration/feed-analysis-work-item.js';
+import { listWorkItemRunLinks } from './work-items/store.js';
+import { loadTodo } from './todos.js';
 
 const LIMITS = {
   maxInlineBytes: 1024 * 1024,
@@ -280,6 +286,7 @@ test('feed analysis store enforces business idempotency and atomically persists 
   await ensureFeedAnalysisStore();
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const dispatchId = `fa-store-${suffix}`;
+  let workItemId: string | undefined;
   const input = {
     id: dispatchId,
     tenantId: 'tenant-test',
@@ -303,6 +310,18 @@ test('feed analysis store enforces business idempotency and atomically persists 
     const replayed = await createOrLoadFeedAnalysisDispatch({ ...input, id: `${dispatchId}-replay` });
     assert.equal(replayed.deduplicated, true);
     assert.equal(replayed.record.id, dispatchId);
+    workItemId = await ensureFeedAnalysisWorkItem({
+      ...created.record,
+      runSpecId: `run-${suffix}`,
+      taskRunId: `task-${suffix}`,
+      sessionId: `session-${suffix}`,
+    });
+    assert.equal(workItemId, `todo-feed-analysis-${dispatchId}`);
+    assert.equal((await loadTodo(workItemId))?.source, 'feed-analysis');
+    const links = await listWorkItemRunLinks(workItemId);
+    assert.equal(links.length, 1);
+    assert.equal(links[0]?.runSpecId, `run-${suffix}`);
+    assert.equal((await ensureFeedAnalysisWorkItem({ ...created.record, workItemId })), workItemId);
 
     await assert.rejects(
       createOrLoadFeedAnalysisDispatch({ ...input, id: `${dispatchId}-conflict`, inputDigest: 'different' }),
@@ -323,11 +342,30 @@ test('feed analysis store enforces business idempotency and atomically persists 
       'SELECT count(*)::text AS count FROM feed_analysis_artifacts WHERE dispatch_id=$1', [dispatchId],
     );
     assert.equal(artifacts.rows[0]?.count, '1');
-    const callbackEvents = await getDb().query<{ status: string; payload_json: { progress?: { stage?: string } } }>(
-      'SELECT status, payload_json FROM feed_analysis_callback_events WHERE dispatch_id=$1 ORDER BY sequence', [dispatchId],
+    const callbackEvents = await getDb().query<{ sequence: number; status: string; payload_json: { progress?: { stage?: string } } }>(
+      'SELECT sequence, status, payload_json FROM feed_analysis_callback_events WHERE dispatch_id=$1 ORDER BY sequence', [dispatchId],
     );
     assert.deepEqual(callbackEvents.rows.map(event => event.status), ['accepted', 'processing', 'progress', 'completed']);
+    assert.deepEqual(callbackEvents.rows.map(event => event.sequence), [1, 2, 3, 4]);
+    assert.equal(new Set(callbackEvents.rows.map(event => event.sequence)).size, callbackEvents.rows.length);
     assert.equal(callbackEvents.rows[2]?.payload_json.progress?.stage, 'analyst');
+    await assert.rejects(
+      emitFeedAnalysisStatus(dispatchId, 'processing'),
+      (error: unknown) => error instanceof Error && error.message.includes('completed to processing'),
+    );
+    await getDb().query(`
+      UPDATE feed_analysis_callback_deliveries d
+      SET status='dead_letter', dead_lettered_at=now(), updated_at=now()
+      FROM feed_analysis_callback_events e
+      WHERE d.event_id=e.event_id AND e.dispatch_id=$1
+    `, [dispatchId]);
+    const evidence = await loadFeedAnalysisEvidenceForWorkItem(workItemId);
+    assert.equal(evidence?.dispatchStatus, 'completed');
+    assert.equal(evidence?.resultAvailable, true);
+    assert.equal(evidence?.callback.eventCount, 4);
+    assert.equal(evidence?.callback.deadLetterCount, 4);
+    assert.equal(evidence?.callback.latestStatus, 'dead_letter');
+    assert.ok(evidence?.callback.deadLetteredAt);
     await getDb().query(
       "UPDATE feed_analysis_dispatches SET retention_expires_at=now()-interval '1 minute' WHERE id=$1",
       [dispatchId],
@@ -339,6 +377,7 @@ test('feed analysis store enforces business idempotency and atomically persists 
     assert.equal(material.rows[0]?.material_json, null);
   } finally {
     await getDb().query('DELETE FROM feed_analysis_dispatches WHERE id=$1', [dispatchId]);
+    if (workItemId) await getDb().query('DELETE FROM todos WHERE id=$1', [workItemId]);
   }
 });
 

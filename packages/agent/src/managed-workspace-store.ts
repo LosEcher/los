@@ -128,6 +128,18 @@ export async function listManagedWorkspaces(options: ListManagedWorkspacesOption
   return rows.rows.map(rowToWorkspace);
 }
 
+export async function listManagedWorkspacesForRunSpec(runSpecId: string): Promise<ManagedWorkspaceRecord[]> {
+  await ensureManagedWorkspaceStore();
+  const rows = await getDb().query<WorkspaceRow>(`
+    SELECT workspace.*
+    FROM managed_workspaces workspace
+    JOIN agent_tasks task ON task.id = workspace.task_id
+    WHERE task.run_spec_id = $1
+    ORDER BY workspace.created_at DESC, workspace.workspace_id ASC
+  `, [runSpecId]);
+  return rows.rows.map(rowToWorkspace);
+}
+
 export async function appendManagedWorkspaceEvent(input: {
   workspaceId: string; eventType: string; actor: string; artifactId?: string;
   payload?: Record<string, unknown>;

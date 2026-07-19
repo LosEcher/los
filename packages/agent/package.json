@@ -36,6 +36,7 @@
     "./mcp-servers": "./src/mcp-servers.ts",
     "./mcp-distribution": "./src/mcp-distribution.ts",
     "./mcp-distribution-policy": "./src/mcp-distribution-policy.ts",
+    "./cantool-capability-adapter": "./src/cantool-capability-adapter.ts",
     "./skills": "./src/skills.ts",
     "./skill-distribution": "./src/skill-distribution.ts",
     "./rules": "./src/rules.ts",
@@ -58,7 +59,10 @@
     "./task-intake": "./src/coordinator/task-intake.ts",
     "./event-log": "./src/event-log/index.ts",
     "./object-store": "./src/object-store/index.ts"
-    ,"./execution-experiments": "./src/execution-experiments.ts"
+    ,"./execution-experiments": "./src/execution-experiments.ts",
+    "./work-items": "./src/work-items/index.ts",
+    "./scheduled-work": "./src/scheduled-work/index.ts",
+    "./daily-agent-quality": "./src/daily-agent-quality/index.ts"
   },
   "scripts": {
     "build": "tsc",

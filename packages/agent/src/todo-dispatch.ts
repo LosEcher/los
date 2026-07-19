@@ -24,6 +24,8 @@ import { existsSync } from 'node:fs';
 import type { ScheduledTaskEvent } from './scheduler/types.js';
 import { runScheduledAgentTask } from './scheduler/scheduled-task-runner.js';
 import { loadTodo, updateTodo, type TodoRecord } from './todos.js';
+import { getLogger } from '@los/infra/logger';
+import { linkWorkItemRun } from './work-items/store.js';
 
 export type DispatchToolMode = 'read-only' | 'project-write' | 'all';
 
@@ -60,6 +62,7 @@ export class DispatchError extends Error {
 }
 
 const VALID_TOOL_MODES: readonly DispatchToolMode[] = ['read-only', 'project-write', 'all'];
+const log = getLogger('todo-dispatch');
 
 /**
  * Dispatch a todo by id: validate gates, transition to in_progress, and fire
@@ -162,6 +165,19 @@ export async function dispatchTodo(
     userId: todo.userId,
     metadata: { ...todo.metadata, dispatchSource: 'todo', todoId: id },
     onTaskEvent: async (event: ScheduledTaskEvent) => {
+      await linkWorkItemRun({
+        workItemId: id,
+        runSpecId: event.taskRun.runSpecId,
+        taskRunId: event.taskRun.id,
+        sessionId: event.taskRun.sessionId,
+        relationKind: 'execution',
+      }).catch(error => {
+        log.warn('Failed to persist Work Item task lineage', {
+          error,
+          workItemId: id,
+          taskRunId: event.taskRun.id,
+        });
+      });
       // Map task lifecycle events to todo status transitions
       if (event.type === 'task.failed' || event.type === 'task.blocked') {
         await updateTodo(id, {
