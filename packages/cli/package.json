@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "bin": {
-    "los": "./dist/index.js"
+    "los": "./dist/index.js",
+    "los-mcp": "./dist/mcp-entry.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc && chmod +x dist/index.js",
+    "build": "tsc && chmod +x dist/index.js dist/mcp-entry.js",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
     "clean": "rm -rf dist"

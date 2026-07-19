@@ -10,11 +10,16 @@ import { governanceCommand } from './governance.js';
 import { printChatHelp, printHelp } from './help.js';
 import { memoryCommand } from './memory.js';
 import { cbmCommand } from './cbm.js';
+import { mcpServeCommand } from './mcp-serve.js';
+import { fetchCliResponse, requestCliJson, resolveCliRequestAuth } from './cli-http.js';
 import { resolveClientPath } from './client-path.js';
 import { nodesCommand } from './node-commands.js';
 import { providerCommand } from './provider.js';
 import { scanCommand } from './scan.js';
+import { setupCommand } from './setup.js';
 import { runCommand as runOperationCommand } from './run-operations.js';
+import { parseProviderFallbackFlags } from './provider-fallback.js';
+import { workspacesCommand } from './workspaces.js';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonRecord = Record<string, unknown>;
@@ -103,12 +108,24 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     await healthCommand(globalArgs, commandArgs);
     return;
   }
+  if (command === 'setup') {
+    await setupCommand(globalArgs, commandArgs);
+    return;
+  }
   if (command === 'scan' || command === 'static-analysis') {
     await scanCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'cbm') {
     await cbmCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'mcp') {
+    await mcpServeCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'workspaces' || command === 'workspace') {
+    await workspacesCommand(globalArgs, commandArgs);
     return;
   }
 
@@ -141,6 +158,7 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
     prompt,
     provider: stringFlag(parsed, 'provider') ?? stringFlag(parsed, 'p'),
     model: stringFlag(parsed, 'model'),
+    providerFallback: parseProviderFallbackFlags(parsed.flags),
     workspaceRoot: workspaceRoot ? resolveClientPath(workspaceRoot) : undefined,
     toolMode: stringFlag(parsed, 'tool-mode') ?? 'project-write',
     maxLoops: numberFlag(parsed, 'max-loops'),
@@ -156,12 +174,10 @@ async function chatCommand(globalArgs: string[], argv: string[]): Promise<void> 
     if (sessionId) console.error(`resume session: ${sessionId}`);
   }
 
-  const chatHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-  const chatToken = authToken(parsed);
-  if (chatToken) chatHeaders['x-los-auth-token'] = chatToken;
-  const response = await fetch(`${gateway}/chat`, {
+  const response = await fetchCliResponse(`${gateway}/chat`, {
     method: 'POST',
-    headers: chatHeaders,
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(payload),
   });
   if (!response.ok || !response.body) {
@@ -202,39 +218,10 @@ async function healthCommand(globalArgs: string[], argv: string[]): Promise<void
   console.log(`service=${String(record.service ?? 'los')}`);
 }
 
-function authToken(p: ParsedArgs): string | undefined {
-  return stringFlag(p, 'auth-token') ?? stringFlag(p, 't') ?? process.env.LOS_AUTH_TOKEN;
-}
-
 async function getJson(url: string, parsed?: ParsedArgs): Promise<unknown> {
-  const headers: Record<string, string> = {};
-  if (parsed) {
-    const token = authToken(parsed);
-    if (token) headers['x-los-auth-token'] = token;
-  }
-  const response = await fetch(url, { headers });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  }
-  return await response.json() as JsonValue;
-}
-
-async function postJson(url: string, body: JsonRecord, parsed?: ParsedArgs): Promise<unknown> {
-  removeUndefined(body);
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (parsed) {
-    const token = authToken(parsed);
-    if (token) headers['x-los-auth-token'] = token;
-  }
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  }
-  return await response.json() as JsonValue;
+  return await requestCliJson(url, {
+    auth: parsed ? resolveCliRequestAuth(parsed.flags) : undefined,
+  }) as JsonValue;
 }
 
 async function readSse(
@@ -296,6 +283,16 @@ function renderStreamEvent(event: string, data: JsonRecord): void {
     console.log(`[model] ${String(data.model ?? payload.provider ?? 'model')}${tokenText} tools=${String(payload.toolCallCount ?? 0)}`);
     const preview = stringValue(payload.textPreview);
     if (preview) console.log(indent(truncate(preview, 600)));
+    return;
+  }
+  if (event === 'provider.fallback.selected') {
+    const payload = asRecord(data.payload ?? data);
+    console.log(`[fallback] ${String(payload.fromProvider ?? '?')}/${String(payload.fromModel ?? '?')} -> ${String(payload.toProvider ?? '?')}/${String(payload.toModel ?? '?')} reason=${String(payload.failureClass ?? '?')} evidence=${String(payload.compatibilityEvidenceId ?? 'none')}`);
+    return;
+  }
+  if (event === 'provider.fallback.exhausted') {
+    const payload = asRecord(data.payload ?? data);
+    console.log(`[fallback exhausted] ${String(payload.provider ?? '?')}/${String(payload.model ?? '?')} reason=${String(payload.failureClass ?? '?')}`);
     return;
   }
   if (event === 'tool.call' || event === 'tool.planned' || event === 'tool.approved' || event === 'tool.denied') {
@@ -374,9 +371,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     h: 'help',
     p: 'provider',
     s: 'session',
+    t: 'auth-token',
     w: 'workspace',
   };
-  const booleanFlags = new Set(['help', 'h', 'json', 'execute', 'version', 'v', 'apply']);
+  const booleanFlags = new Set(['help', 'h', 'json', 'execute', 'version', 'v', 'apply', 'fallback-without-compat-evidence']);
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];

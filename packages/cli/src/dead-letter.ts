@@ -8,6 +8,7 @@
  *   los tasks dead-letter retry <id>
  */
 
+import { requestCliJson, resolveCliRequestAuth } from './cli-http.js';
 import { resolveClientPath } from './client-path.js';
 
 type ParsedArgs = {
@@ -130,30 +131,17 @@ Usage:
 // ── HTTP helpers ───────────────────────────────────────────
 
 async function getJson(url: string, parsed: ParsedArgs): Promise<unknown> {
-  const headers: Record<string, string> = {};
-  const token = authToken(parsed);
-  if (token) headers['x-los-auth-token'] = token;
-  const operatorToken = stringFlag(parsed, 'operator-token') ?? process.env.LOS_OPERATOR_TOKEN;
-  if (operatorToken) headers['x-los-operator-token'] = operatorToken;
-  const response = await fetch(url, { headers });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  return await response.json() as unknown;
+  return await requestCliJson(url, { auth: resolveCliRequestAuth(parsed.flags) });
 }
 
 async function sendJson(url: string, method: string, payload: unknown, parsed: ParsedArgs): Promise<unknown> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = authToken(parsed);
-  if (token) headers['x-los-auth-token'] = token;
-  const operatorToken = stringFlag(parsed, 'operator-token') ?? process.env.LOS_OPERATOR_TOKEN;
-  if (operatorToken) headers['x-los-operator-token'] = operatorToken;
-  const response = await fetch(url, {
+  return await requestCliJson(url, {
     method,
-    headers,
+    auth: resolveCliRequestAuth(parsed.flags),
+    operatorWrite: true,
+    json: true,
     body: payload ? JSON.stringify(payload) : undefined,
   });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text}`);
-  return text ? JSON.parse(text) as unknown : {};
 }
 
 // ── ParsedArgs helpers ─────────────────────────────────────
@@ -195,6 +183,5 @@ function stringFlag(p: ParsedArgs, key: string) { const v = p.flags[key]; return
 function booleanFlag(p: ParsedArgs, key: string) { return p.flags[key] === true || p.flags[key] === 'true' || p.flags[key] === '1'; }
 function hasFlag(p: ParsedArgs, ...keys: string[]) { return keys.some(k => p.flags[k] !== undefined); }
 function gatewayUrl(p: ParsedArgs) { const raw = stringFlag(p, 'gateway') ?? stringFlag(p, 'g') ?? DEFAULT_GATEWAY; return raw.replace(/\/+$/, ''); }
-function authToken(p: ParsedArgs) { return stringFlag(p, 'auth-token') ?? stringFlag(p, 't') ?? process.env.LOS_AUTH_TOKEN; }
 function asRecord(v: unknown) { return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}; }
 function asArray(v: unknown) { return Array.isArray(v) ? v : []; }
