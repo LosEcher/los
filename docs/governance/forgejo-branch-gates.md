@@ -23,11 +23,12 @@ external cache action before repository checks can start. Turbo `test` remains
 uncached and every package test command executes on every PR.
 
 The node34 runner currently exposes two job slots. `gate-test` sets
-`LOS_TEST_CONCURRENCY=2`, while `gate-fast` sets `TURBO_CONCURRENCY=1`. The two
-overlapping jobs therefore start at most three Turbo package tasks on the
-three-core host. Do not raise either limit independently; capture CPU, available
-memory, swap, and job duration from a representative PR before changing this
-resource envelope.
+`LOS_TEST_CONCURRENCY=3`, while `gate-fast` sets `TURBO_CONCURRENCY=1`. The two
+overlapping jobs therefore advertise at most four Turbo package tasks, with the
+test suite's package-level work capped at three. This is the current compromise
+for the expanded workspace suite and the runner's execution window; revisit it
+only with CPU, available memory, swap, and job-duration evidence from a
+representative PR batch.
 
 `gate-drift` depends on `gate-test` while the isolation change is observed. The
 jobs now register distinct PostgreSQL service DNS names (`postgres-test` and
