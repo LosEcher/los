@@ -1,5 +1,5 @@
 contract: los.work-item
-version: 0.3.0
+version: 0.4.0
 status: implemented
 owner: packages/agent
 description: >
@@ -211,6 +211,7 @@ persistence:
   connectorRule: A completed feed-analysis dispatch without a persisted validated result is verification_blocked; callback dead-letter is recovery_required.
 safety:
   - POST /work-items does not create a run spec or task run.
+  - Starting a created Work Item dispatches a read-only planning attempt; it does not dispatch project-write execution.
   - Read-model routes never mutate execution state.
   - Execution status changes remain subject to transitionExecutionState().
   - Plan approval remains subject to approveRunSpecPhase() or reviseRunSpecPlan().
