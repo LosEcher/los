@@ -52,6 +52,11 @@ const EXECUTION_LAB_STATES: ReadonlyMap<string, string> = new Map([
 
 const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new Map([
   ['todo-los-execution-lab', ['P0', 'in_progress']],
+  ['todo-los-daily-agent-product', ['P0', 'in_progress']],
+  ['todo-los-daily-agent-web-work-first-intake', ['P0', 'backlog']],
+  ['todo-los-daily-agent-approval-execution-resume', ['P0', 'backlog']],
+  ['todo-los-daily-agent-verification-revision-loop', ['P0', 'backlog']],
+  ['todo-los-daily-agent-scenario-economics', ['P1', 'backlog']],
   ['todo-los-multi-gateway-entry', ['P1', 'backlog']],
   ['todo-los-run-spec-stream-replay', ['P1', 'backlog']],
   ['todo-los-execution-experiment-contract', ['P1', 'backlog']],
@@ -66,6 +71,29 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-p1-turbo-cache', ['P1', 'ready']],
   ['todo-los-p1-los-ast-rules', ['P1', 'backlog']],
 ] as const);
+
+test('daily agent product seeds preserve the accepted delivery order', () => {
+  const allById = new Map(LOS_PLANNING_TODO_SEED.map(todo => [todo.id, todo]));
+  const phase = allById.get('todo-los-daily-agent-product');
+  const planning = allById.get('todo-los-daily-agent-planning-disposition');
+  const intake = allById.get('todo-los-daily-agent-web-work-first-intake');
+  const execution = allById.get('todo-los-daily-agent-approval-execution-resume');
+  const revision = allById.get('todo-los-daily-agent-verification-revision-loop');
+  const economics = allById.get('todo-los-daily-agent-scenario-economics');
+  const graph = allById.get('todo-los-daily-agent-small-governed-graphs');
+  const hermes = allById.get('todo-los-hermes-product-breadth');
+
+  assert.equal(phase?.status, 'in_progress');
+  assert.equal(planning?.status, 'done');
+  assert.ok(Array.isArray(planning?.metadata?.evidence));
+  assert.deepEqual(intake?.dependsOnIds, [planning?.id]);
+  assert.deepEqual(execution?.dependsOnIds, [planning?.id]);
+  assert.deepEqual(revision?.dependsOnIds, [execution?.id]);
+  assert.deepEqual(economics?.dependsOnIds, [revision?.id]);
+  assert.deepEqual(graph?.dependsOnIds, [economics?.id]);
+  assert.equal(hermes?.stageId, 'hermes-product-breadth');
+  assert.notEqual(hermes?.parentId, phase?.id);
+});
 
 test('active P0/P1 seeds match the reconciled current queue', () => {
   const active = LOS_PLANNING_TODO_SEED.filter(

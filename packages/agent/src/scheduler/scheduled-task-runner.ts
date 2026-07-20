@@ -33,6 +33,12 @@ import { emitTaskEvent } from './task-events.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
 import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
 import { readCurrentRunContract, checkVerificationGate } from './contract-reader.js';
+import {
+  completePlanningDisposition,
+  promptForDisposition,
+  resolveTaskDisposition,
+  validatePlanningDisposition,
+} from './planning-disposition.js';
 import { runGoalSelfCheck } from './goal-self-check-runner.js';
 import { writeDeadLetterEvent } from '../dead-letter.js';
 import {
@@ -51,7 +57,15 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const sessionId = input.sessionId ?? `session-${Date.now()}`;
   const traceId = input.traceId ?? taskRunId;
   const dedupeKey = normalizeOptionalString(input.dedupeKey);
-  const toolMode = input.toolMode ?? 'project-write';
+  const contractMetadata = {
+    ...(input.metadata ?? {}),
+    ...(input.runContract ? { runContract: input.runContract } : {}),
+  };
+  const runContract = await readCurrentRunContract(input.runSpecId, contractMetadata);
+  const disposition = resolveTaskDisposition(input, runContract);
+  const toolMode = disposition === 'planning' ? 'read-only' : (input.toolMode ?? 'project-write');
+  const sandboxMode = disposition === 'planning' ? 'readonly' : input.sandboxMode;
+  const runtimePrompt = promptForDisposition(input.prompt, disposition);
   const workspaceRoot = input.workspaceRoot ?? process.cwd();
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
@@ -84,7 +98,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   try {
     executor = await resolveExecutor(input.executor, {
       toolMode,
-      sandboxMode: input.sandboxMode,
+      sandboxMode,
     });
   } catch (error) {
     if (error instanceof _ExecutorSelectionError) {
@@ -126,7 +140,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     requestId: normalizeOptionalString(input.requestId),
     promptPreview: input.promptPreview ?? input.prompt.slice(0, 200),
     metadata: input.metadata ?? {},
-    runContract: input.runContract,
+    runContract,
     status: 'queued',
     attempt: input.attempt,
     leaseVersion,
@@ -181,8 +195,9 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       allowedTools: input.allowedTools,
       toolRetry: input.toolRetry,
       timeoutMs,
+      disposition,
     },
-    runContract: input.runContract,
+    runContract,
   });
   running ??= await loadTaskRun(taskRunId);
   if (!running) throw new Error(`Task run disappeared after create: ${taskRunId}`);
@@ -226,8 +241,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   };
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
-
-  // Execute afterStart lifecycle hooks (non-blocking)
   if (input.runContract?.hooks) {
     runLifecycleHooks('afterStart', {
       hooks: input.runContract.hooks as import('../run-contract.js').TaskLifecycleHooks,
@@ -236,17 +249,12 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       taskRunId,
     }).catch(() => undefined);
   }
-
-  // B0: enforce phase contract — no execution without approved plan
-  const runContract = await readCurrentRunContract(input.runSpecId, running.metadata);
-  // Architect/Editor activation bridge: a run contract with mode='architect-editor'
-  // triggers the dual-model loop (architect plans, editor executes). Provider/model
-  // overrides may be added later via contract metadata; defaults use the run's
-  // provider for both roles. See loop/architect-phase.ts and ADR 0007.
   const architectEditor = runContract?.mode === 'architect-editor'
     ? { enabled: true as const }
     : undefined;
-  const execCheck = canStartExecution(runContract);
+  const execCheck = disposition === 'planning'
+    ? { allowed: validatePlanningDisposition(runContract) === null, reason: validatePlanningDisposition(runContract) ?? undefined }
+    : canStartExecution(runContract);
   if (!execCheck.allowed) {
     await transitionExecutionState({
       entityType: 'task_run',
@@ -286,7 +294,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           leaseVersion,
           agentTaskLease: input.agentTaskLease,
           leaseMs,
-          prompt: input.prompt,
+          prompt: runtimePrompt,
           config: {
             sessionId,
             runSpecId: input.runSpecId,
@@ -305,7 +313,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             requestId: input.requestId,
             traceId,
             toolMode,
-            sandboxMode: input.sandboxMode,
+            sandboxMode,
+            skipPreExecutionPhases: disposition === 'planning',
             architectEditor,
             taskRunId,
             dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
@@ -332,7 +341,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           onCheckpoint: input.onCheckpoint,
         })
-      : await runAgent(input.prompt, {
+      : await runAgent(runtimePrompt, {
           sessionId,
           runSpecId: input.runSpecId,
           provider: initialProvider,
@@ -351,7 +360,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           traceId,
           log: input.log,
           toolMode,
-          sandboxMode: input.sandboxMode,
+          sandboxMode,
+          skipPreExecutionPhases: disposition === 'planning',
           architectEditor,
           taskRunId,
           dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
@@ -382,7 +392,17 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           contextMonitor: input.contextMonitor,
         });
 
-    // B0: enforce phase contract — no succeeded while verification pending/failed
+    if (disposition === 'planning') {
+      return await completePlanningDisposition({
+        schedulerInput: input,
+        result,
+        running,
+        taskRunId,
+        sessionId,
+        nodeId,
+        leaseVersion,
+      });
+    }
     const verifyContract = await readCurrentRunContract(input.runSpecId, running.metadata);
     const verifyCheck = input.verificationOwner === 'graph'
       ? { allowed: true }
@@ -417,7 +437,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       };
     }
 
-    // B0: post-execution goal self-check — evaluate output against declared goal and stop conditions
     const selfCheckBlock = await runGoalSelfCheck(input, result, running, sessionId, taskRunId);
     if (selfCheckBlock) return selfCheckBlock;
 
@@ -441,7 +460,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     await emitTaskEvent(sessionId, 'task.succeeded', finalTask);
     await input.onTaskEvent?.({ type: 'task.succeeded', taskRun: finalTask });
 
-    // Execute afterFinish lifecycle hooks (non-blocking)
     if (input.runContract?.hooks) {
       runLifecycleHooks('afterFinish', {
         hooks: input.runContract.hooks as any,
@@ -461,9 +479,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const message = err instanceof Error ? err.message : String(err);
     if (isAbortError(err)) {
       const reason = getScheduledTaskAbortReason(taskRunId) ?? message;
-      // Worker-initiated block (ask_coordinator / escalate): the tool already
-      // transitioned the task_run to 'blocked' before aborting, so do NOT
-      // overwrite it with 'cancelled'. Just emit the blocked event and return.
       if (isWorkerBlockReason(reason)) {
         const blockReason = workerBlockReasonFrom(reason) ?? 'worker_block';
         const blocked = await updateTaskRunFields(taskRunId, {
@@ -536,7 +551,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });
     await input.onTaskEvent?.({ type: 'task.failed', taskRun: finalTask });
 
-    // Write to dead-letter queue for unrecoverable errors (non-abort failures)
     if (!isAbortError(err)) {
       writeDeadLetterEvent({
         taskRunId,

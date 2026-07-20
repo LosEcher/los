@@ -92,6 +92,16 @@ export async function listWorkItemRunLinks(workItemId: string): Promise<WorkItem
   return rows.rows.map(rowToLink);
 }
 
+/** Return Work Item lineage for a persisted run spec, newest link first. */
+export async function listWorkItemRunLinksForRunSpec(runSpecId: string): Promise<WorkItemRunLink[]> {
+  await ensureWorkItemStore();
+  const rows = await getDb().query<WorkItemRunRow>(
+    'SELECT * FROM work_item_runs WHERE run_spec_id = $1 ORDER BY updated_at DESC, id DESC',
+    [runSpecId],
+  );
+  return rows.rows.map(rowToLink);
+}
+
 export async function listOrphanRuntimeEvidence(input: {
   projectId?: string;
   limit?: number;

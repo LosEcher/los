@@ -6,6 +6,7 @@ import { CONTEXT_ENGINEERING_TODO_SEED } from './todo-seeds-context-engineering.
 import { _EXECUTION_LAB_TODO_SEED } from './todo-seeds-execution-lab.js';
 import { LOS_GOVERNANCE_TODO_SEED } from './todo-seeds-governance.js';
 import { LOS_RUNTIME_CORE_TODO_SEED } from './todo-seeds-runtime-core.js';
+import { _DAILY_AGENT_PRODUCT_TODO_SEED } from './todo-seeds-daily-agent.js';
 
 export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   {
@@ -573,6 +574,7 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   ...AUDIT_BASELINE_P2_TODO_SEED,
   ...LOS_AGENT_WORKFLOW_TODO_SEED,
   ...LOS_RUNTIME_CORE_TODO_SEED,
+  ..._DAILY_AGENT_PRODUCT_TODO_SEED,
   ...LOS_GOVERNANCE_TODO_SEED,
   ..._EXECUTION_LAB_TODO_SEED,
 ];

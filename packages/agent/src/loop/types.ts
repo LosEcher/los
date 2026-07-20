@@ -74,6 +74,8 @@ export interface AgentConfig {
   mcpServers?: MCPServerConfig[];
   /** Run contract metadata (mode, phase, plan, verifications). Passed from scheduler. */
   runContractMetadata?: Record<string, unknown>;
+  /** Scheduler-owned planning disposition runs the normal read-only tool loop. */
+  skipPreExecutionPhases?: boolean;
   /** Agent identity configuration. When set and systemPrompt is not explicitly provided,
    *  identity is resolved and prepended to the default system prompt. */
   identity?: {

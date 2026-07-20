@@ -110,9 +110,8 @@ export async function runAgent(
 
   // Pre-execution discovery and planning turns moved to loop-phases.ts.
   // Enforcement (B0) is in the scheduler, not here.
-  const phaseResult = await runPreExecutionPhases(
-    config.runContractMetadata ?? {},
-    {
+  const phaseResult = config.skipPreExecutionPhases ? null : await runPreExecutionPhases(
+    config.runContractMetadata ?? {}, {
       provider,
       emitEvent,
       messages,

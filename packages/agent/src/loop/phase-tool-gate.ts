@@ -4,13 +4,14 @@
  *
  * Pattern inspired by Trellis's phase-aware routing:
  *   - discovering: read-only tools only
- *   - planning: read-only + write to plan files
+ *   - planning: read-only tools only
  *   - executing: all tools
  *   - verifying: read-only + bash for lint/test/check
  */
 
 import type { RunPhase } from '../run-contract.js';
 import { readRunContractMetadata } from '../run-contract.js';
+import { READ_ONLY_BUILTIN_TOOLS } from '../tools/core/registry-policy.js';
 
 /** Determine whether a tool is allowed in a given run phase. */
 export function isToolAllowedInPhase(
@@ -57,12 +58,12 @@ export function applyPhaseGate(
   return { allowed: false, reasonCode: 'phase_blocked', reason: check.reason ?? 'phase_blocked' };
 }
 
-const READ_ONLY = new Set(['read', 'glob', 'grep', 'list_files', 'search', 'list', 'ls', 'find']);
-const VERIFY = new Set(['bash', 'run', 'execute_command']);
+const READ_ONLY = new Set<string>(READ_ONLY_BUILTIN_TOOLS);
+const VERIFY = new Set(['run_shell']);
 
 function checkReadPhase(name: string, phase: string): { allowed: boolean; reason?: string } {
-  if (READ_ONLY.has(name) || name === 'write') return { allowed: true }; // write → prd.md
-  return { allowed: false, reason: `Tool '${name}' blocked in ${phase} phase (read-only + plan write)` };
+  if (READ_ONLY.has(name)) return { allowed: true };
+  return { allowed: false, reason: `Tool '${name}' blocked in ${phase} phase (read-only)` };
 }
 
 function checkVerifyPhase(name: string): { allowed: boolean; reason?: string } {
