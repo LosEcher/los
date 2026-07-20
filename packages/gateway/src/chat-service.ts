@@ -19,6 +19,7 @@ import {
 import { handleNonCompletedOutcome } from './chat-service-outcomes.js';
 import { createChatTaskHooks } from './chat-service-hooks.js';
 import { linkWorkItemRun } from '@los/agent/work-items';
+import { prepareChatPlanningDisposition } from './chat-planning-disposition.js';
 
 export type { SendEvent } from './chat-live-events.js';
 export interface ChatRunContext {
@@ -27,7 +28,7 @@ export interface ChatRunContext {
   lastCheckpoint: CheckpointState | null;
 }
 
-export type ChatStatus = 'completed' | 'deduplicated' | 'cancelled' | 'blocked';
+export type ChatStatus = 'completed' | 'awaiting_approval' | 'deduplicated' | 'cancelled' | 'blocked';
 
 export interface ChatResult {
   status: ChatStatus;
@@ -93,6 +94,8 @@ export async function runChat(params: {
     runContract, intakeResolution, requestedProjectId, requestedWorkspaceRoot,
     config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
   } = params;
+  const preparedDisposition = prepareChatPlanningDisposition({ boundTodoId, runContract });
+  const effectiveRunContract = preparedDisposition.runContract;
 
   // ── Branch source loading ──
   let branchSourceMessages: Message[] | null = null;
@@ -134,7 +137,7 @@ export async function runChat(params: {
     maxLoops: maxLoops ?? config.agent.maxLoops,
     timeoutMs,
     mcpServers,
-    runContract,
+    runContract: effectiveRunContract,
     gatewayId: gatewayServiceId,
   });
   if (boundTodoId) {
@@ -142,7 +145,7 @@ export async function runChat(params: {
       workItemId: boundTodoId,
       runSpecId,
       sessionId: sid,
-      relationKind: relationKindForRun(runContract),
+      relationKind: relationKindForRun(effectiveRunContract),
     }).catch(error => {
       log.warn('Failed to persist Work Item run lineage', { error, workItemId: boundTodoId, runSpecId });
     });
@@ -260,7 +263,8 @@ export async function runChat(params: {
       timeoutMs,
       toolRetry,
       mcpServers,
-      runContract,
+      runContract: effectiveRunContract,
+      disposition: preparedDisposition.disposition,
       log,
       executor: {
         enabled: config.executor.enabled,
@@ -291,7 +295,7 @@ export async function runChat(params: {
         runSpecId,
         taskRunId: scheduled.taskRun.id,
         sessionId: sid,
-        relationKind: relationKindForRun(runContract),
+        relationKind: relationKindForRun(effectiveRunContract),
       }).catch(error => {
         log.warn('Failed to persist Work Item task lineage', { error, workItemId: boundTodoId, runSpecId });
       });
