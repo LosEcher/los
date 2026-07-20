@@ -17,7 +17,40 @@ export type RunContractDraft = Record<string, unknown> & {
   externalEvidenceAllowed: string[];
   rawEvidenceProhibited: string[];
   toolMode?: string;
-  plan?: Array<{ id?: string; title?: string; description?: string; status?: string }>;
+  plan?: Array<PlanStepDraft>;
+  verifications?: VerificationRequirementDraft[];
+  planRevision?: number;
+  planParentRevision?: number;
+  planParentRunSpecId?: string;
+  planHistory?: PlanRevisionDraft[];
+};
+
+export type PlanStepDraft = {
+  id?: string;
+  title?: string;
+  description?: string;
+  dependsOnIds?: string[];
+  editableSurfaces?: string[];
+  completionCriteria?: string;
+};
+
+export type VerificationRequirementDraft = {
+  id: string;
+  kind: 'command' | 'assertion' | 'operator_review';
+  description: string;
+  command?: string;
+  assertion?: string;
+  reviewer?: string;
+};
+
+export type PlanRevisionDraft = {
+  revision: number;
+  plan: PlanStepDraft[];
+  requiredChecks: string[];
+  verifications: VerificationRequirementDraft[];
+  supersededAt: string;
+  actor?: string;
+  reason?: string;
 };
 
 export type WorkItemRunLink = {
