@@ -79,6 +79,18 @@ describe('GA loop seed config', () => {
 });
 
 describe('consistency reconciliation ownership', () => {
+  it('reports canonical field drift without treating it as auto-fixable', async () => {
+    const summary = {
+      todoReconciliation: { seedOnly: 0, dbOnly: 0, statusDrift: 0, fieldDrift: 2 },
+    };
+
+    assert.equal(checkHasFindings('consistency_audit', summary), false);
+    assert.deepEqual(await applyConsistencyFix(summary), {
+      applied: true,
+      detail: 'No drifts to reconcile — already consistent',
+    });
+  });
+
   it('does not treat DB-only todos as a fixable finding', () => {
     assert.equal(checkHasFindings('consistency_audit', {
       todoReconciliation: { seedOnly: 0, dbOnly: 4, statusDrift: 0 },

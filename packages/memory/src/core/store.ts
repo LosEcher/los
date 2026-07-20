@@ -8,7 +8,6 @@
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { getConfig } from '@los/infra/config';
-import { scheduleMemoryMdSync } from './memory-md-sync.js';
 // Entity store functions extracted to entity-store.ts to keep this file under 600 lines.
 export { listEntities, findRelatedObservations, findCooccurringEntities } from './entity-store.js';
 export type { EntityNode, EntityCooccurrence, EntitySearchOptions } from './entity-store.js';
@@ -178,12 +177,7 @@ export async function addObservation(obs: {
     VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING *
   `, params);
-  const observation = rowToObservation(rows.rows[0]);
-
-  // Auto-sync MEMORY.md at most every 60s (debounced batch)
-  scheduleMemoryMdSync();
-
-  return observation;
+  return rowToObservation(rows.rows[0]);
 }
 
 export async function getObservation(id: number): Promise<Observation | null> {

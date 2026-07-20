@@ -1,3 +1,5 @@
+import { fetchCliResponse, requestCliJson, resolveCliRequestAuth, type CliRequestAuth } from './cli-http.js';
+
 type JsonRecord = Record<string, unknown>;
 
 type ParsedArgs = {
@@ -37,7 +39,7 @@ export async function nodesCommand(globalArgs: string[], argv: string[]): Promis
 }
 
 async function listNodes(parsed: ParsedArgs): Promise<void> {
-  const value = await getJson(`${gatewayUrl(parsed)}/nodes`);
+  const value = await getJson(`${gatewayUrl(parsed)}/nodes`, requestAuth(parsed));
   renderNodes(value, booleanFlag(parsed, 'json'));
 }
 
@@ -50,7 +52,7 @@ async function listNodeCommands(parsed: ParsedArgs, rest: string[]): Promise<voi
   const path = nodeId
     ? `/nodes/${encodeURIComponent(nodeId)}/commands${suffix}`
     : `/node-commands${suffix}`;
-  const value = await getJson(`${gatewayUrl(parsed)}${path}`);
+  const value = await getJson(`${gatewayUrl(parsed)}${path}`, requestAuth(parsed));
   renderNodeCommands(value, booleanFlag(parsed, 'json'));
 }
 
@@ -76,23 +78,25 @@ async function postNodeCommand(parsed: ParsedArgs, rest: string[]): Promise<void
   const result = await sendJsonAllowError(`${gatewayUrl(parsed)}/nodes/${encodeURIComponent(nodeId)}/commands`, {
     method: 'POST',
     body: payload,
-  });
+  }, requestAuth(parsed));
   renderNodeCommandResponse(result.value, booleanFlag(parsed, 'json'));
   if (!result.ok) process.exitCode = 1;
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  }
-  return await response.json() as unknown;
+async function getJson(url: string, auth: CliRequestAuth): Promise<unknown> {
+  return await requestCliJson(url, { auth });
 }
 
-async function sendJsonAllowError(url: string, input: { method: string; body: JsonRecord }): Promise<{ ok: boolean; value: unknown }> {
-  const response = await fetch(url, {
+async function sendJsonAllowError(
+  url: string,
+  input: { method: string; body: JsonRecord },
+  auth: CliRequestAuth,
+): Promise<{ ok: boolean; value: unknown }> {
+  const response = await fetchCliResponse(url, {
     method: input.method,
-    headers: { 'Content-Type': 'application/json' },
+    auth,
+    operatorWrite: true,
+    json: true,
     body: JSON.stringify(input.body),
   });
   const text = await response.text();
@@ -162,6 +166,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const aliases: Record<string, string> = {
     g: 'gateway',
     h: 'help',
+    t: 'auth-token',
   };
   const booleanFlags = new Set(['help', 'h', 'json']);
 
@@ -228,6 +233,10 @@ function gatewayUrl(parsed: ParsedArgs): string {
   return raw.replace(/\/+$/, '');
 }
 
+function requestAuth(parsed: ParsedArgs): CliRequestAuth {
+  return resolveCliRequestAuth(parsed.flags);
+}
+
 function envServerUrl(): string | undefined {
   if (!process.env.SERVER_HOST && !process.env.SERVER_PORT) return undefined;
   return `http://${process.env.SERVER_HOST ?? '127.0.0.1'}:${process.env.SERVER_PORT ?? '8080'}`;
@@ -291,6 +300,8 @@ Usage:
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
+  --operator-token TOKEN  Operator token, default LOS_OPERATOR_TOKEN
   --reason TEXT           Audit reason stored with the command
   --target-version VER    Required for upgrade
   --requested-by USER     Audit actor

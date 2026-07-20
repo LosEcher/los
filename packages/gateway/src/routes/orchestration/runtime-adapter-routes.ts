@@ -8,15 +8,27 @@
 
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
+  getGrokRuntimeModel,
+  spawnGrok,
   runClaudeCodeWithBridge,
   startOtelBridge,
   isOtelBridgeRunning,
   claudeCodeSupportsOtel,
   type RuntimeKind,
+  type GrokRuntimeHandle,
 } from '@los/agent/runtime-adapter';
 import { getConfig } from '@los/infra/config';
+import { scanGrokAccount, type GrokAccountCandidate } from '@los/infra/discovery';
 import { getLogger } from '@los/infra/logger';
+import {
+  loadProviderAccount,
+  setProviderAccountState,
+  type ProviderAccountRecord,
+  type SetProviderAccountStateInput,
+} from '@los/infra/provider-accounts';
 import type { MessageRouter } from '@los/agent/message-router';
 import { requireOperator } from '../../request-context.js';
 
@@ -24,7 +36,7 @@ const log = getLogger('runtime-adapter-routes');
 
 interface RunRuntimeBody {
   prompt: string;
-  workspaceRoot?: string;
+  workspaceRoot?: string | null;
   sessionId?: string;
   tenantId?: string;
   projectId?: string;
@@ -33,7 +45,30 @@ interface RunRuntimeBody {
   timeoutMs?: number;
 }
 
-export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter?: MessageRouter): void {
+export interface GrokRuntimeRouteDependencies {
+  scanGrokAccount: () => GrokAccountCandidate;
+  loadProviderAccount: (id: string) => Promise<ProviderAccountRecord | null>;
+  setProviderAccountState: (input: SetProviderAccountStateInput) => Promise<ProviderAccountRecord>;
+  spawnGrok: (input: {
+    prompt: string;
+    workspaceRoot: string;
+    sessionId: string;
+    timeoutMs?: number;
+  }) => GrokRuntimeHandle;
+}
+
+const DEFAULT_GROK_DEPENDENCIES: GrokRuntimeRouteDependencies = {
+  scanGrokAccount,
+  loadProviderAccount,
+  setProviderAccountState,
+  spawnGrok,
+};
+
+export function registerRuntimeAdapterRoutes(
+  app: FastifyInstance,
+  messageRouter?: MessageRouter,
+  grokDeps: GrokRuntimeRouteDependencies = DEFAULT_GROK_DEPENDENCIES,
+): void {
   const config = getConfig();
 
   // ── Run external agent ───────────────────────────────────
@@ -64,6 +99,112 @@ export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter
     const workspaceRoot = body.workspaceRoot ?? process.cwd();
     const sessionId = body.sessionId ?? `ext-${kind}-${randomUUID()}`;
     const traceId = randomUUID();
+
+    if (kind === 'grok') {
+      if (Object.hasOwn(body, 'env') || Object.hasOwn(body, 'extraArgs')) {
+        return reply.status(400).send({
+          error: 'grok_runtime_options_forbidden',
+          message: 'Grok runtime does not accept browser-supplied env or extraArgs',
+        });
+      }
+      const validatedWorkspace = validateGrokWorkspace(workspaceRoot);
+      if (!validatedWorkspace.ok) {
+        return reply.status(400).send({ error: 'invalid_workspace', message: validatedWorkspace.message });
+      }
+      if (body.timeoutMs !== undefined && !isGrokTimeout(body.timeoutMs)) {
+        return reply.status(400).send({
+          error: 'invalid_timeout',
+          message: 'timeoutMs must be an integer between 1000 and 600000',
+        });
+      }
+
+      const account = await grokDeps.loadProviderAccount('xai-grok-default');
+      if (!isActiveGrokAccount(account)) {
+        return reply.status(409).send({
+          error: 'grok_account_not_active',
+          message: 'Adopt the discovered Grok CLI login before running this runtime',
+        });
+      }
+      const candidate = grokDeps.scanGrokAccount();
+      if (!candidate.available) {
+        return reply.status(503).send({
+          error: 'grok_login_unavailable',
+          reason: candidate.reason,
+        });
+      }
+
+      const send = setupSSE();
+      send('runtime.started', {
+        kind,
+        sessionId,
+        traceId,
+        workspaceRoot: validatedWorkspace.path,
+        providerAccountId: account.id,
+        model: getGrokRuntimeModel(),
+      });
+
+      try {
+        const handle = grokDeps.spawnGrok({
+          sessionId,
+          workspaceRoot: validatedWorkspace.path,
+          prompt: body.prompt,
+          timeoutMs: body.timeoutMs,
+        });
+        send('runtime.process', {
+          sessionId,
+          pid: handle.pid,
+          providerAccountId: account.id,
+        });
+        const [exit, output] = await Promise.all([handle.exited, handle.output]);
+        if (output.errorCode) {
+          send('runtime.error', {
+            sessionId,
+            traceId,
+            providerAccountId: account.id,
+            error: output.errorCode,
+          });
+        } else {
+          if (exit.exitCode === 0) {
+            try {
+              await grokDeps.setProviderAccountState({
+                id: account.id,
+                expectedCredentialGeneration: account.credentialGeneration,
+                state: 'active',
+                verifiedAt: new Date().toISOString(),
+              });
+            } catch {
+              log.warn(`Could not record Grok verification for account=${account.id}`);
+            }
+          }
+          send('runtime.output', {
+            sessionId,
+            providerAccountId: account.id,
+            text: output.text,
+            capturedBytes: output.capturedBytes,
+            totalBytes: output.totalBytes,
+            truncated: output.truncated,
+          });
+          send('runtime.completed', {
+            sessionId,
+            traceId,
+            providerAccountId: account.id,
+            exitCode: exit.exitCode,
+            signal: exit.signal,
+            status: exit.exitCode === 0 ? 'success' : 'failed',
+          });
+        }
+      } catch {
+        send('runtime.error', {
+          sessionId,
+          traceId,
+          providerAccountId: account.id,
+          error: 'grok_runtime_failed',
+        });
+      } finally {
+        reply.raw.end();
+      }
+      return;
+    }
 
     if (kind === 'claude-code') {
       // Check Claude Code availability
@@ -188,7 +329,7 @@ export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter
 
     return reply.status(400).send({
       error: 'unknown_runtime',
-      message: `Unknown runtime kind: ${kind}. Supported: claude-code, codex`,
+      message: `Unknown runtime kind: ${kind}. Supported: claude-code, codex, grok`,
     });
   });
 
@@ -212,4 +353,30 @@ export function registerRuntimeAdapterRoutes(app: FastifyInstance, messageRouter
       running: isOtelBridgeRunning(),
     };
   });
+}
+
+function isActiveGrokAccount(account: ProviderAccountRecord | null): account is ProviderAccountRecord {
+  return account?.id === 'xai-grok-default'
+    && account.provider === 'xai'
+    && account.authMode === 'external_ref'
+    && account.secretRef === 'external:grok/default'
+    && account.secretScope === 'external_backend'
+    && account.state === 'active';
+}
+
+function validateGrokWorkspace(value: string): { ok: true; path: string } | { ok: false; message: string } {
+  if (typeof value !== 'string' || !value.trim()) {
+    return { ok: false, message: 'workspaceRoot must be a non-empty directory path' };
+  }
+  const path = resolve(value);
+  try {
+    if (!statSync(path).isDirectory()) return { ok: false, message: 'workspaceRoot must be a directory' };
+    return { ok: true, path };
+  } catch {
+    return { ok: false, message: 'workspaceRoot does not exist or is not readable' };
+  }
+}
+
+function isGrokTimeout(value: number): boolean {
+  return Number.isInteger(value) && value >= 1_000 && value <= 600_000;
 }

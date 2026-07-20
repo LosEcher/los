@@ -1,7 +1,9 @@
 /**
  * xAI OAuth PKCE — Grok API access via SuperGrok / Premium+ subscription.
  *
- * Core module: auth store, types, token refresh, credential resolution, status.
+ * Core module: token refresh, credential resolution, and status.
+ * Store and type definitions live in the adjacent xai-oauth-store.ts and
+ * xai-oauth-types.ts modules.
  * The interactive login flow lives in xai-oauth-login.ts (imported by CLI only).
  *
  * Reference implementation: Hermes hermes_cli/auth.py (xAI OAuth path, ~600 lines).
@@ -15,11 +17,27 @@
  * Dependencies: Node.js stdlib only — no new npm packages.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
 import { URL, URLSearchParams } from 'node:url';
 import { requireProviderDefaults } from '@los/infra/provider-defaults';
+import { _xaiOAuthStore, type _XaiOAuthStore } from './xai-oauth-store.js';
+import { fetchWithConfiguredProxy } from './proxy-fetch.js';
+import {
+  XaiOAuthError,
+  type XaiLoginOptions,
+  type XaiOAuthCredential,
+  type XaiOAuthState,
+  type XaiOAuthStatus,
+  type XaiOAuthTokens,
+} from './xai-oauth-types.js';
+
+export {
+  XaiOAuthError,
+  type XaiLoginOptions,
+  type XaiOAuthCredential,
+  type XaiOAuthState,
+  type XaiOAuthStatus,
+  type XaiOAuthTokens,
+} from './xai-oauth-types.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -38,123 +56,22 @@ const DEFAULT_XAI_OAUTH_BASE_URL = requireProviderDefaults('xai').baseUrl;
  */
 const ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 3600;
 
-// ── Types ─────────────────────────────────────────────────
-
-export interface XaiOAuthTokens {
-  access_token: string;
-  refresh_token: string;
-  id_token: string;
-  expires_in?: number;
-  token_type: string;
-}
-
-export interface XaiOAuthState {
-  tokens: XaiOAuthTokens;
-  discovery: { authorization_endpoint: string; token_endpoint: string };
-  redirect_uri: string;
-  last_refresh?: string;
-  auth_mode: 'oauth_pkce';
-  /** Stored when refresh/login fails terminally; cleared on next successful login. */
-  last_auth_error?: {
-    provider: string;
-    code: string;
-    message: string;
-    at: string;
-  };
-}
-
-export interface XaiOAuthCredential {
-  apiKey: string;
-  baseUrl: string;
-  source: 'los-auth-store' | 'hermes-auth-store';
-  lastRefresh?: string;
-}
-
-export interface XaiOAuthStatus {
-  loggedIn: boolean;
-  expiresAt?: string;
-  remainingSeconds?: number;
-  source?: string;
-  error?: string;
-}
-
-export interface XaiLoginOptions {
-  timeoutSeconds?: number;
-  openBrowser?: boolean;
-  manualPaste?: boolean;
-}
-
 // ── Auth Store ────────────────────────────────────────────
-
-function authStorePath(): string {
-  return join(homedir(), '.los', 'auth.json');
-}
-
-function ensureAuthDir(): void {
-  const dir = dirname(authStorePath());
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
-function loadAuthStore(): Record<string, unknown> {
-  const path = authStorePath();
-  if (!existsSync(path)) return {};
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return {};
-  }
-}
-
-function saveAuthStore(store: Record<string, unknown>): void {
-  ensureAuthDir();
-  writeFileSync(authStorePath(), JSON.stringify(store, null, 2) + '\n', 'utf-8');
-}
 
 /**
  * Load the xai-oauth provider state from the local auth store.
- * Checks los's own store first, then falls back to Hermes's auth.json.
+ * Checks LOS's own store first, then reads Hermes as an external fallback.
  */
 export function loadXaiOAuthState(): XaiOAuthState | null {
-  // 1. los own store
-  const store = loadAuthStore();
-  const providers = (store.providers ?? {}) as Record<string, unknown>;
-  const state = providers['xai-oauth'] as XaiOAuthState | undefined;
-  if (state?.tokens?.access_token) return state;
-
-  // 2. Fallback: Hermes auth.json
-  try {
-    const hermesPath = join(homedir(), '.hermes', 'auth.json');
-    if (existsSync(hermesPath)) {
-      const hermesStore = JSON.parse(readFileSync(hermesPath, 'utf-8'));
-      const hermesProviders = (hermesStore.providers ?? {}) as Record<string, unknown>;
-      const hermesState = hermesProviders['xai-oauth'] as XaiOAuthState | undefined;
-      if (hermesState?.tokens?.access_token) {
-        // Migrate to los store on read
-        saveXaiOAuthState(hermesState);
-        return hermesState;
-      }
-    }
-  } catch {
-    // Hermes store unreadable — not an error
-  }
-
-  return null;
+  return _xaiOAuthStore.load();
 }
 
-export function saveXaiOAuthState(state: XaiOAuthState): void {
-  const store = loadAuthStore();
-  const providers = (store.providers ?? {}) as Record<string, unknown>;
-  providers['xai-oauth'] = state;
-  store.providers = providers;
-  saveAuthStore(store);
+export async function saveXaiOAuthState(state: XaiOAuthState): Promise<XaiOAuthState> {
+  return _xaiOAuthStore.save(state);
 }
 
-export function clearXaiOAuthTokens(): void {
-  const store = loadAuthStore();
-  const providers = (store.providers ?? {}) as Record<string, unknown>;
-  delete providers['xai-oauth'];
-  store.providers = providers;
-  saveAuthStore(store);
+export async function clearXaiOAuthTokens(): Promise<boolean> {
+  return _xaiOAuthStore.clear();
 }
 
 // ── JWT Helpers ───────────────────────────────────────────
@@ -277,7 +194,7 @@ export async function refreshXaiOAuthToken(
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-    response = await fetch(endpoint, {
+    response = await fetchWithConfiguredProxy(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -347,7 +264,7 @@ async function fetchOidcDiscovery(timeoutSeconds: number): Promise<{ token_endpo
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-    response = await fetch(XAI_OAUTH_DISCOVERY_URL, {
+    response = await fetchWithConfiguredProxy(XAI_OAUTH_DISCOVERY_URL, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
@@ -390,104 +307,83 @@ async function fetchOidcDiscovery(timeoutSeconds: number): Promise<{ token_endpo
  * 3. Refreshes if needed, writes back to store
  * 4. Returns { apiKey, baseUrl } for the OpenAI-compatible transport
  */
+type XaiRefreshFn = typeof refreshXaiOAuthToken;
+const refreshQueues = new WeakMap<_XaiOAuthStore, Promise<void>>();
+
 export async function resolveXaiOAuthCredential(): Promise<XaiOAuthCredential> {
-  const state = loadXaiOAuthState();
-  if (!state?.tokens?.access_token) {
-    throw new XaiOAuthError(
-      'xAI OAuth not configured. Run `los auth xai login` to authenticate.',
-      'xai_not_configured',
-      true,
-    );
-  }
-
-  const baseUrl = validateInferenceBaseUrl(
-    process.env.XAI_BASE_URL ?? process.env.HERMES_XAI_BASE_URL ?? '',
-    DEFAULT_XAI_OAUTH_BASE_URL,
-  );
-
-  let accessToken = state.tokens.access_token;
-  let { refresh_token: refreshToken } = state.tokens;
-  let lastRefresh = state.last_refresh;
-
-  const needsRefresh = isAccessTokenExpiring(accessToken, ACCESS_TOKEN_REFRESH_SKEW_SECONDS);
-
-  if (needsRefresh) {
-    const tokenEndpoint = state.discovery?.token_endpoint || '';
-    try {
-      const refreshed = await refreshXaiOAuthToken(refreshToken, { tokenEndpoint });
-      accessToken = refreshed.access_token;
-      refreshToken = refreshed.refresh_token;
-      lastRefresh = refreshed.last_refresh;
-
-      const updatedState: XaiOAuthState = {
-        ...state,
-        tokens: {
-          ...state.tokens,
-          access_token: accessToken,
-          refresh_token: refreshToken,
-          id_token: refreshed.id_token || state.tokens.id_token,
-          expires_in: refreshed.expires_in ?? state.tokens.expires_in,
-          token_type: refreshed.token_type || state.tokens.token_type,
-        },
-        last_refresh: lastRefresh,
-        last_auth_error: undefined,
-      };
-      saveXaiOAuthState(updatedState);
-    } catch (err) {
-      if (err instanceof XaiOAuthError && err.isTerminal) {
-        try { clearXaiOAuthTokens(); } catch { /* best-effort */ }
-      }
-      throw err;
-    }
-  }
-
-  return {
-    apiKey: accessToken,
-    baseUrl,
-    source: 'los-auth-store',
-    lastRefresh,
-  };
+  return _resolveXaiOAuthCredential();
 }
 
-/**
- * Synchronous: return the credential if the token is valid, or throw.
- * Does NOT refresh — use resolveXaiOAuthCredential() for the full path.
- */
-export function getXaiOAuthCredentialSync(): XaiOAuthCredential {
-  const state = loadXaiOAuthState();
-  if (!state?.tokens?.access_token) {
-    throw new XaiOAuthError(
-      'xAI OAuth not configured. Run `los auth xai login` to authenticate.',
-      'xai_not_configured',
-      true,
-    );
-  }
+export async function _resolveXaiOAuthCredential(options: {
+  store?: _XaiOAuthStore;
+  refresh?: XaiRefreshFn;
+  baseUrl?: string;
+} = {}): Promise<XaiOAuthCredential> {
+  const store = options.store ?? _xaiOAuthStore;
+  const initial = store.loadWithSource();
+  if (!initial?.state.tokens.access_token) throw notConfiguredError();
 
-  if (isAccessTokenExpiring(state.tokens.access_token, 60)) {
-    throw new XaiOAuthError(
-      'xAI access token is expired or expiring. Call resolveXaiOAuthCredential() to refresh.',
-      'xai_token_expired',
-      true,
-    );
-  }
-
-  const baseUrl = validateInferenceBaseUrl(
+  const baseUrl = options.baseUrl ?? validateInferenceBaseUrl(
     process.env.XAI_BASE_URL ?? process.env.HERMES_XAI_BASE_URL ?? '',
     DEFAULT_XAI_OAUTH_BASE_URL,
   );
+  if (!isAccessTokenExpiring(initial.state.tokens.access_token, ACCESS_TOKEN_REFRESH_SKEW_SECONDS)) {
+    return credentialFromState(initial.state, initial.source, baseUrl);
+  }
 
-  return {
-    apiKey: state.tokens.access_token,
-    baseUrl,
-    source: 'los-auth-store',
-    lastRefresh: state.last_refresh,
-  };
+  return serializeRefresh(store, () => store.withCredentialLock(async () => {
+    const current = store.loadWithSource();
+    if (!current?.state.tokens.access_token) throw notConfiguredError();
+    if (!isAccessTokenExpiring(current.state.tokens.access_token, ACCESS_TOKEN_REFRESH_SKEW_SECONDS)) {
+      return credentialFromState(current.state, current.source, baseUrl);
+    }
+
+    const generation = store.generation(current.state);
+    try {
+      const refreshed = await (options.refresh ?? refreshXaiOAuthToken)(
+        current.state.tokens.refresh_token,
+        { tokenEndpoint: current.state.discovery?.token_endpoint || '' },
+      );
+      const updated = store._saveWhileLocked({
+        ...current.state,
+        tokens: {
+          ...current.state.tokens,
+          access_token: refreshed.access_token,
+          refresh_token: refreshed.refresh_token,
+          id_token: refreshed.id_token || current.state.tokens.id_token,
+          expires_in: refreshed.expires_in ?? current.state.tokens.expires_in,
+          token_type: refreshed.token_type || current.state.tokens.token_type,
+        },
+        last_refresh: refreshed.last_refresh,
+        last_auth_error: undefined,
+      }, { expectedGeneration: generation });
+      return credentialFromState(updated, 'los-auth-store', baseUrl);
+    } catch (error) {
+      if (error instanceof XaiOAuthError && error.isTerminal) {
+        const cleared = store._clearWhileLocked({ expectedGeneration: generation });
+        if (!cleared) {
+          const sibling = store.loadWithSource();
+          if (sibling && !isAccessTokenExpiring(sibling.state.tokens.access_token, 60)) {
+            return credentialFromState(sibling.state, sibling.source, baseUrl);
+          }
+        }
+      }
+      if (error instanceof XaiOAuthError && error.code === 'xai_credential_generation_conflict') {
+        const sibling = store.loadWithSource();
+        if (sibling && !isAccessTokenExpiring(sibling.state.tokens.access_token, 60)) {
+          return credentialFromState(sibling.state, sibling.source, baseUrl);
+        }
+      }
+      throw error;
+    }
+  }));
 }
 
 // ── Status ─────────────────────────────────────────────────
 
 export function getXaiOAuthStatus(): XaiOAuthStatus {
-  const state = loadXaiOAuthState();
+  const loaded = _xaiOAuthStore.loadWithSource();
+  const state = loaded?.state;
   if (!state?.tokens?.access_token) {
     return {
       loggedIn: false,
@@ -502,22 +398,29 @@ export function getXaiOAuthStatus(): XaiOAuthStatus {
     loggedIn: true,
     expiresAt: exp ? new Date(exp * 1000).toISOString() : undefined,
     remainingSeconds: remainingSeconds && remainingSeconds > 0 ? remainingSeconds : 0,
-    source: 'los-auth-store',
+    source: loaded?.source,
   };
 }
 
-// ── Error ──────────────────────────────────────────────────
+function credentialFromState(
+  state: XaiOAuthState,
+  source: XaiOAuthCredential['source'],
+  baseUrl: string,
+): XaiOAuthCredential {
+  return { apiKey: state.tokens.access_token, baseUrl, source, lastRefresh: state.last_refresh };
+}
 
-export class XaiOAuthError extends Error {
-  public readonly code: string;
-  public readonly isTerminal: boolean;
-  public readonly reloginRequired: boolean;
+function notConfiguredError(): XaiOAuthError {
+  return new XaiOAuthError(
+    'xAI OAuth not configured. Run `los auth xai login` to authenticate.',
+    'xai_not_configured',
+    true,
+  );
+}
 
-  constructor(message: string, code: string, reloginRequired = false) {
-    super(message);
-    this.name = 'XaiOAuthError';
-    this.code = code;
-    this.isTerminal = ['xai_oauth_tier_denied', 'xai_refresh_missing_access_token'].includes(code);
-    this.reloginRequired = reloginRequired || this.isTerminal;
-  }
+function serializeRefresh<T>(store: _XaiOAuthStore, action: () => Promise<T>): Promise<T> {
+  const previous = refreshQueues.get(store) ?? Promise.resolve();
+  const next = previous.then(action, action);
+  refreshQueues.set(store, next.then(() => undefined, () => undefined));
+  return next;
 }

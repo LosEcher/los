@@ -7,6 +7,8 @@
 
 import { getLogger } from '@los/infra/logger';
 import type { ToolDef } from '../../providers/index.js';
+import { isMCPToolAllowed, normalizeMCPToolPolicy } from '../../mcp-distribution-policy.js';
+import { projectCanToolCapability } from '../../cantool-capability-adapter.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -334,14 +336,22 @@ export async function registerBuiltinTools(
     await bridge.connect(allMCPConfigs);
 
     const toolDefs = bridge.getToolDefs();
+    let registeredToolCount = 0;
     for (const toolDef of toolDefs) {
       const name = toolDef.name;
       const client = bridge.getClient(name);
       if (!client) continue;
+      const serverConfig = bridge.getServerConfig(name);
+      const toolPolicy = normalizeMCPToolPolicy(serverConfig?.toolPolicy);
+      if (!isMCPToolAllowed(toolPolicy, name)) continue;
+      const adapterProjection = serverConfig?.adapterConfig?.kind === 'cantool'
+        ? projectCanToolCapability(toolDef)
+        : undefined;
+      if (adapterProjection?.availability === 'blocked') continue;
 
       // Determine which server this tool belongs to (for event tracking)
       // Map from the registry records first, then request configs
-      mcpToolServerMap.set(name, 'mcp');
+      mcpToolServerMap.set(name, serverConfig?.serverId ?? 'mcp');
 
       registry.register(
         name,
@@ -362,20 +372,23 @@ export async function registerBuiltinTools(
           },
         },
         {
-          riskLevel: 'L1',
+          riskLevel: toolPolicy.riskLevel,
           permissions: ['mcp:external'],
           timeoutMs: 60_000,
           retryable: false,
-          idempotent: false,
-          costLevel: 'medium',
-          sideEffect: true,
-          tags: ['mcp', 'external'],
+          idempotent: adapterProjection?.idempotent ?? false,
+          costLevel: adapterProjection ? 'low' : 'medium',
+          sideEffect: adapterProjection ? false : true,
+          tags: adapterProjection
+            ? ['mcp', 'external', 'cantool', adapterProjection.dataClassification]
+            : ['mcp', 'external'],
         },
       );
+      registeredToolCount += 1;
     }
 
     log.info(
-      `Registered ${toolDefs.length} MCP tools from ${allMCPConfigs.length} server(s)`,
+      `Registered ${registeredToolCount}/${toolDefs.length} MCP tools from ${allMCPConfigs.length} server(s)`,
     );
 
     mcpCleanup = async () => {

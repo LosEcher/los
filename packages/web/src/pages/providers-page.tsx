@@ -53,6 +53,7 @@ import {
   RefreshQueryButton,
   StatusPill,
 } from '../ui';
+import { ProviderAccountsPanel } from './provider-accounts-panel.js';
 
 type RunStateProjection = {
   phase: string;
@@ -145,6 +146,8 @@ export function ProvidersPage() {
   return (
     <section className="panel-grid provider-grid">
       <div className="panel">
+        <ProviderAccountsPanel />
+        <div className="section-divider" />
         <div className="panel-head">
           <div>
             <h2>Provider Endpoints</h2>
@@ -161,8 +164,10 @@ export function ProvidersPage() {
             const state = providerReadinessLabel(readiness);
             const detail = providerReadinessDetail(provider, readiness);
             const compatEvidence = Array.isArray(provider.compatibilityEvidence)
-              ? provider.compatibilityEvidence as Array<Record<string, unknown>>
-              : [];
+              ? provider.compatibilityEvidence
+              : provider.compatEvidence?.latest
+                ? [provider.compatEvidence.latest]
+                : [];
             const latestEvidence = compatEvidence[0];
             const promotionState = metadataText(provider.promotionState);
             const name = metadataText(provider.name) ?? metadataText(provider.provider) ?? `provider-${index + 1}`;

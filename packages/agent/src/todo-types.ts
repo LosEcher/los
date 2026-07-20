@@ -97,4 +97,5 @@ export interface ListTodosOptions {
   batchKey?: string;
   limit?: number;
   includeArchived?: boolean;
+  excludeTerminal?: boolean;
 }

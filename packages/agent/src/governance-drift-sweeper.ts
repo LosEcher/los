@@ -155,6 +155,8 @@ export async function detectGovernanceDrift(job: {
   id: string;
   jobType: GovernanceJobType;
   resultSummary: Record<string, unknown> | undefined;
+  tenantId?: string;
+  projectId?: string;
 }): Promise<DriftReport | null> {
   if (!job.resultSummary || Object.keys(job.resultSummary).length === 0) {
     return null;
@@ -176,11 +178,14 @@ export async function detectGovernanceDrift(job: {
     FROM governance_jobs
     WHERE job_type = $1
       AND id != $2
+      AND status = 'active'
+      AND tenant_id IS NOT DISTINCT FROM $3
+      AND project_id IS NOT DISTINCT FROM $4
       AND result_summary_json IS NOT NULL
     ORDER BY last_run_at DESC
     LIMIT 1
   `,
-    [job.jobType, job.id],
+    [job.jobType, job.id, job.tenantId ?? null, job.projectId ?? null],
   );
 
   if (prevRows.rows.length === 0) return null;
@@ -244,6 +249,8 @@ export async function sweepGovernanceDrift(opts: {
   dryRun?: boolean;
   tenantId?: string;
   projectId?: string;
+  /** Only compare jobs completed by the current sweep. */
+  jobIds?: string[];
 } = {}): Promise<{
   jobsChecked: number;
   jobsWithDrift: number;
@@ -253,22 +260,37 @@ export async function sweepGovernanceDrift(opts: {
   const db = getDb();
   const dryRun = opts.dryRun !== false;
 
-  // Get jobs that ran in the last hour (recent sweep)
+  if (opts.jobIds?.length === 0) {
+    return { jobsChecked: 0, jobsWithDrift: 0, totalFindings: 0, findings: {} };
+  }
+
+  // A caller that has a current sweep must pass its completed job IDs. The
+  // fallback window is retained for standalone reports, but never used by
+  // the wake loop when no job ran in this cycle.
+  const jobFilter = opts.jobIds && opts.jobIds.length > 0
+    ? 'AND id = ANY($1::text[])'
+    : '';
+  const queryParams = opts.jobIds && opts.jobIds.length > 0 ? [opts.jobIds] : [];
   const rows = await db.query<{
     id: string;
     job_type: GovernanceJobType;
     result_summary_json: unknown;
     last_run_at: string;
+    tenant_id: string | null;
+    project_id: string | null;
   }>(
     `
-    SELECT id, job_type, result_summary_json, last_run_at
+    SELECT id, job_type, result_summary_json, last_run_at, tenant_id, project_id
     FROM governance_jobs
     WHERE result_summary_json IS NOT NULL
       AND last_run_at > now() - INTERVAL '2 hours'
+      ${jobFilter}
+      AND ($2::text IS NULL OR tenant_id = $2)
+      AND ($3::text IS NULL OR project_id = $3)
     ORDER BY last_run_at DESC
     LIMIT 50
   `,
-    [],
+    [queryParams[0] ?? null, opts.tenantId ?? null, opts.projectId ?? null],
   );
 
   const findings: Record<string, DriftFinding[]> = {};
@@ -284,10 +306,14 @@ export async function sweepGovernanceDrift(opts: {
       id: string;
       jobType: GovernanceJobType;
       resultSummary: Record<string, unknown>;
+      tenantId?: string;
+      projectId?: string;
     } = {
       id: row.id,
       jobType: row.job_type,
       resultSummary: summary,
+      tenantId: row.tenant_id ?? undefined,
+      projectId: row.project_id ?? undefined,
     };
 
     try {
@@ -303,7 +329,8 @@ export async function sweepGovernanceDrift(opts: {
     }
   }
 
-  return { jobsChecked, jobsWithDrift, totalFindings: jobsWithDrift, findings };
+  const totalFindings = Object.values(findings).reduce((count, jobFindings) => count + jobFindings.length, 0);
+  return { jobsChecked, jobsWithDrift, totalFindings, findings };
 }
 
 /**
@@ -321,6 +348,11 @@ export async function sweepWithDriftDetection(opts?: {
 }> {
   const { runGovernanceSweep } = await import('./governance-jobs.js');
   const sweep = await runGovernanceSweep(opts);
-  const drift = await sweepGovernanceDrift({ dryRun: opts?.dryRun, tenantId: opts?.tenantId, projectId: opts?.projectId });
+  const drift = await sweepGovernanceDrift({
+    dryRun: opts?.dryRun,
+    tenantId: opts?.tenantId,
+    projectId: opts?.projectId,
+    jobIds: sweep.results.map(result => result.jobId),
+  });
   return { sweep, drift };
 }

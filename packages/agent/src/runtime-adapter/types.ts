@@ -5,7 +5,7 @@
  * a RuntimeKind. Adapters normalize their output into los session_events.
  */
 
-export type RuntimeKind = 'claude-code' | 'codex' | 'gemini' | 'aider' | 'opencode' | 'cursor-agent';
+export type RuntimeKind = 'claude-code' | 'codex' | 'grok' | 'gemini' | 'aider' | 'opencode' | 'cursor-agent';
 
 export interface RuntimeAdapterConfig {
   kind: RuntimeKind;

@@ -132,10 +132,32 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
     assert.ok(body.data.dispatch, 'should have dispatch receipt');
     assert.equal(body.data.dispatch.status, 'queued');
     assert.ok(body.data.dispatch.runId, 'should have runId');
+    assert.ok(body.data.dispatch.workItemId, 'should have workItemId');
     assert.ok(body.data.dispatch.traceId, 'should have traceId');
     assert.equal(body.data.dispatchState.accepted, true);
     assert.equal(body.data.dispatchState.deliveryMode, 'delivery_only');
     assert.equal(body.data.deduplicated, false);
+    const workItem = await getDb().query<{ tenant_id: string; project_id: string; source: string }>(
+      'SELECT tenant_id, project_id, source FROM todos WHERE id=$1',
+      [body.data.dispatch.workItemId],
+    );
+    assert.equal(workItem.rows[0]?.source, 'feed-analysis');
+    assert.equal(workItem.rows[0]?.tenant_id, 'local');
+    assert.equal(workItem.rows[0]?.project_id, 'los');
+    const executionScope = await getDb().query<{ tenant_id: string; project_id: string; user_id: string }>(
+      'SELECT tenant_id, project_id, user_id FROM run_specs WHERE id=$1',
+      [body.data.dispatch.runId],
+    );
+    assert.deepEqual(executionScope.rows[0], {
+      tenant_id: 'local', project_id: 'los', user_id: 'integration:lot2extension',
+    });
+    const lineage = await getDb().query<{ run_spec_id: string; session_id: string }>(
+      'SELECT run_spec_id, session_id FROM work_item_runs WHERE work_item_id=$1',
+      [body.data.dispatch.workItemId],
+    );
+    assert.equal(lineage.rows.length, 1);
+    assert.equal(lineage.rows[0]?.run_spec_id, body.data.dispatch.runId);
+    assert.ok(lineage.rows[0]?.session_id);
 
     // Query dispatch status
     const statusResponse = await app.inject({
@@ -178,6 +200,12 @@ test('integration routes: POST dispatch creates run spec and returns receipt', a
     const replayBody = replayResponse.json();
     assert.equal(replayBody.data.deduplicated, true);
     assert.equal(replayBody.data.dispatch.id, body.data.dispatch.id);
+    assert.equal(replayBody.data.dispatch.workItemId, body.data.dispatch.workItemId);
+    const replayLineage = await getDb().query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM work_item_runs WHERE work_item_id=$1',
+      [body.data.dispatch.workItemId],
+    );
+    assert.equal(replayLineage.rows[0]?.count, '1');
   } finally {
     await app.close();
     await closeDb();

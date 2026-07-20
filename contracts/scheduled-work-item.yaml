@@ -1,0 +1,107 @@
+contract: los.scheduled-work-item
+version: 0.2.0
+status: implemented
+owner: packages/agent
+description: >
+  User-owned recurring Work Item definitions, deterministic trigger previews,
+  atomic due-slot claims, run leases, result projection, and circuit recovery.
+type: object
+routes:
+  - method: GET
+    path: /scheduled-work-items/preview
+    purpose: Preview the next three trigger slots in the requested IANA timezone.
+  - method: GET
+    path: /scheduled-work-items
+    purpose: List schedule definitions for a project.
+  - method: POST
+    path: /scheduled-work-items
+    auth: operator
+    purpose: Create a user schedule from a supported trigger and built-in template.
+  - method: GET
+    path: /scheduled-work-items/{id}
+    purpose: Read one schedule and recent run history.
+  - method: PATCH
+    path: /scheduled-work-items/{id}
+    auth: operator
+    purpose: Change enabled state or bounded policy fields and increment revision.
+  - method: POST
+    path: /scheduled-work-items/{id}/trigger
+    auth: operator
+    purpose: Create one idempotent manual trigger slot and execute it through the runner.
+  - method: POST
+    path: /scheduled-work-item-runs/{id}/retry
+    auth: operator
+    purpose: Retry a failed run when its attempt budget and schedule circuit allow it.
+schemas:
+  ScheduledWorkItem:
+    required: [id, projectId, title, status, trigger, runTemplate, approvalPolicy, concurrencyPolicy, catchUpPolicy, maxLatenessMs, nextRunAt, circuitState, revision]
+    status:
+      enum: [enabled, paused, retired]
+    trigger:
+      kind:
+        enum: [cron, interval, once]
+      expression: string
+      timezone: IANA timezone string
+    runTemplate:
+      templateId:
+        enum: [morning_inbox_digest, runtime_readiness, scheduled_feed_analysis]
+      mode:
+        enum: [audit, governance]
+      goalTemplate: string
+      editableSurfaces: []
+      requiredChecks: string[]
+      toolMode: read-only
+      feedAnalysisRequest:
+        optional: true
+        reference: los.integration-feed-analysis FeedAnalysisDispatchRequest excluding sourceJobId
+        description: Reuses the existing connector request contract; sourceJobId and idempotency key are derived from the scheduled run.
+    approvalPolicy:
+      enum: [read_only_auto, preapproved_scope, each_run]
+    concurrencyPolicy:
+      enum: [skip, queue_one, parallel]
+    catchUpPolicy:
+      enum: [skip, run_once]
+    circuitState:
+      enum: [closed, open, half_open]
+  ScheduledWorkItemRun:
+    required: [id, scheduleId, scheduledFor, status, attemptCount, maxAttempts, createdAt, updatedAt]
+    status:
+      enum: [queued, claimed, running, awaiting_approval, succeeded, no_op, skipped, failed, cancelled]
+    correlationFields: [workItemId, runSpecId, taskRunId]
+persistence:
+  definitionTable: scheduled_work_items
+  runTable: scheduled_work_item_runs
+  dedupeKey: [schedule_id, scheduled_for]
+  claim: PostgreSQL FOR UPDATE SKIP LOCKED in one transaction with next_run_at advancement
+  leaseFields: [claim_owner, lease_expires_at]
+  transitionOwner: packages/agent/src/scheduled-work/store.ts
+policy:
+  cronSyntax: daily or weekly preset expressions only
+  automaticExecution: deterministic built-ins use read_only_auto; scheduled_feed_analysis requires explicit preapproved_scope
+  providerCalls: scheduled_feed_analysis may call the existing feed-analysis dispatch path only under preapproved_scope
+  catchUp: skip records skipped_late; run_once executes one missed slot
+  circuit: failure threshold opens circuit and creates one recovery Work Item
+  noOp: increments consecutive_no_ops but never changes cadence automatically
+safety:
+  - Operator credentials are not persisted in definitions or runs.
+  - Schedule policy may only narrow project/global tool policy.
+  - Trigger success is not agent-run, verification, result, or callback success.
+  - Scheduled feed-analysis requests reuse the integration contract and never persist callback credentials.
+  - Routes never update scheduled run status directly.
+  - P2 does not execute preapproved_scope or each_run without an approval item.
+nonGoals:
+  - Natural-language or arbitrary cron.
+  - Replacing governance_jobs, lot2 scheduler, or browser timers.
+  - Unattended project writes, VCS release, plugin install, credential use, or browser login state.
+references:
+  - docs/adr/0034-user-scheduled-work-state-and-claim-policy.md
+  - docs/governance/2026-07-19-web-first-daily-agent-workflow-design.md
+  - contracts/work-item.yaml
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm --filter @los/web test
+  - pnpm check:migration-drift
+  - pnpm check
+  - pnpm run gate

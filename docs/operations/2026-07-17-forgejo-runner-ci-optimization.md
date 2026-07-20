@@ -85,8 +85,10 @@ critical path instead of treating a rerun as evidence of reliability.
 The first persistent-store trial exposed a separate concurrency issue:
 `gate-test` and `gate-drift` both advertised a service named `postgres` on
 `forgejo_forgejo-net`. The drift process could create a database through one
-service container and reconnect through the other. The final workflow sequences
-the two database jobs while retaining `gate-fast` and `gate-test` overlap.
+service container and reconnect through the other. The workflow now gives the
+jobs distinct service identities (`postgres-test` and `postgres-drift`) while
+retaining the serial dependency until three consecutive full green runs prove
+that the jobs can overlap safely.
 
 ## Repository CI Policy
 
@@ -105,8 +107,9 @@ the two database jobs while retaining `gate-fast` and `gate-test` overlap.
 7. `gate-test` sets `LOS_TEST_CONCURRENCY=2`, and `gate-fast` sets
    `TURBO_CONCURRENCY=1`; local development keeps the existing test default of
    four unless the variable is set.
-8. `gate-drift` waits for `gate-test`, preventing their identically named
-   PostgreSQL service containers from overlapping on the fixed runner network.
+8. `gate-drift` waits for `gate-test` during the observation window; its
+   PostgreSQL service identity is distinct from `postgres-test`, so a later
+   parallelization trial cannot rely on an ambiguous shared DNS name.
 
 The `main` fast-only rule is safe only while Forgejo branch protection requires
 all three PR checks and `block_on_outdated_branch=true`. The API showed required
@@ -182,7 +185,7 @@ replace the product P0/P1 queue in
 | ID | Priority | State | Work | Completion evidence |
 | --- | --- | --- | --- | --- |
 | `CI-OBS-01` | P0 | observing | Record the next 10-20 real Forgejo PR runs | Interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
-| `CI-NET-01` | P1 | backlog | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS/network identities, then reassess the serial dependency | Both jobs overlap without cross-connecting, followed by three consecutive full green runs before removing `needs: gate-test` |
+| `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
 | `CI-STORE-01` | P1 | backlog | Add a periodic pnpm store capacity check without restoring `actions/cache` | A documented command and cadence record store size plus filesystem free space; growth has an owner and cleanup decision |
 
 `CI-OBS-01` owns the immediate next action. `CI-NET-01` is the prerequisite for
@@ -193,6 +196,20 @@ Historical local-only jj changes remain in the repository history. They do not
 dirty the current working copy and are not part of this delivery. Review or
 abandonment is a separate destructive-history decision and requires explicit
 operator scope.
+
+## 2026-07-19 jj Runtime Follow-up
+
+The expanded agent suite includes a managed-workspace test that creates a real
+temporary jj repository. Forgejo run `185`, job `667`, exposed the missing
+runner dependency as `spawn jj ENOENT`; package concurrency was not the cause.
+
+The `gate-test` job now targets an `ubuntu-jj` runner label. On node34 that
+label maps to the host-local `los-ci:node22-jj0.39.0` image built from
+`.forgejo/images/node22-jj/Dockerfile`. The image pins the Jujutsu release URL
+and SHA-256 checksum, and `gate-test` verifies `jj --version` before running the
+workspace suite. Building the image requires access to the upstream release
+asset, but normal Forgejo CI execution does not depend on GitHub after the
+image is provisioned.
 
 ## Observation Protocol
 
@@ -228,13 +245,17 @@ host.
 On node34, capture store capacity weekly and after every fifth eligible PR:
 
 ```bash
-du -sm /home/z/forgejo/runner-data/job-cache/pnpm-store
-df -Pm /home/z/forgejo/runner-data/job-cache/pnpm-store
+./tools/observe-pnpm-store.sh --json \
+  --store /home/z/forgejo/runner-data/job-cache/pnpm-store
 ```
 
 The initial persistent-store baseline is about 225 MiB. Size growth alone does
 not authorize deletion; record the trend and filesystem pressure before choosing
-a cleanup policy.
+a cleanup policy. The observer never prunes or deletes store content.
+
+Before removing `gate-drift`'s `needs: gate-test` dependency, manually dispatch
+`.forgejo/workflows/postgres-isolation-canary.yml` on a capacity-2 runner and
+verify that both jobs overlap and report their distinct database/user identity.
 
 ### Delivery Evidence Snapshot
 

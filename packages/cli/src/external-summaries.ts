@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { requestCliJson, resolveCliRequestAuth } from './cli-http.js';
 import { resolveClientPath } from './client-path.js';
 
 type ParsedArgs = {
@@ -35,7 +36,7 @@ async function listExternalSummaries(parsed: ParsedArgs): Promise<void> {
   addQuery(params, 'limit', stringFlag(parsed, 'limit'));
   if (booleanFlag(parsed, 'include-expired')) params.set('includeExpired', 'true');
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const value = await getJson(`${gatewayUrl(parsed)}/external-summaries${suffix}`);
+  const value = await getJson(`${gatewayUrl(parsed)}/external-summaries${suffix}`, parsed);
   renderExternalSummaryList(value, booleanFlag(parsed, 'json'));
 }
 
@@ -43,25 +44,21 @@ async function importExternalSummary(parsed: ParsedArgs): Promise<void> {
   const file = stringFlag(parsed, 'file') ?? stringFlag(parsed, 'f');
   if (!file) throw new Error('external-summaries import requires --file');
   const payload = JSON.parse(await readFile(resolveClientPath(file), 'utf-8')) as Record<string, unknown>;
-  const response = await sendJson(`${gatewayUrl(parsed)}/external-summaries`, payload);
+  const response = await sendJson(`${gatewayUrl(parsed)}/external-summaries`, payload, parsed);
   renderExternalSummaryImport(response, booleanFlag(parsed, 'json'));
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  return await response.json() as unknown;
+async function getJson(url: string, parsed: ParsedArgs): Promise<unknown> {
+  return await requestCliJson(url, { auth: resolveCliRequestAuth(parsed.flags) });
 }
 
-async function sendJson(url: string, payload: Record<string, unknown>): Promise<unknown> {
-  const response = await fetch(url, {
+async function sendJson(url: string, payload: Record<string, unknown>, parsed: ParsedArgs): Promise<unknown> {
+  return await requestCliJson(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(payload),
   });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text}`);
-  return text ? JSON.parse(text) as unknown : {};
 }
 
 function renderExternalSummaryList(value: unknown, json: boolean): void {
@@ -96,6 +93,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     f: 'file',
     g: 'gateway',
     h: 'help',
+    t: 'auth-token',
   };
   const booleanFlags = new Set(['help', 'h', 'json', 'include-expired']);
 
@@ -190,6 +188,10 @@ Import and list redacted external tool summaries.
 Usage:
   los external-summaries list [--tool NAME] [--source-kind KIND] [--json]
   los external-summaries import --file summary.json [--json]
+
+Options:
+  --gateway, -g URL
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
 
 The import payload must be a bounded summary accepted by the external summary
 adapter. Raw prompts, stdout, stderr, transcripts, cookies, tokens, and auth

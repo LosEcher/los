@@ -191,7 +191,12 @@ export async function runGovernanceSweep(opts?: {
   let driftReport: Awaited<ReturnType<typeof import('./governance-drift-sweeper.js').sweepGovernanceDrift>> | null = null;
   try {
     const { sweepGovernanceDrift: runDrift } = await import('./governance-drift-sweeper.js');
-    driftReport = await runDrift({ dryRun, tenantId, projectId });
+    driftReport = await runDrift({
+      dryRun,
+      tenantId,
+      projectId,
+      jobIds: results.map(result => result.jobId),
+    });
   } catch (err) {
     log.warn(`Drift sweep failed: ${err instanceof Error ? err.message : String(err)}`);
   }

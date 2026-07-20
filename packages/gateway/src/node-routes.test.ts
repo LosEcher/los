@@ -9,6 +9,41 @@ import { loadConfig } from '@los/infra/config';
 import { upsertExecutorNode } from '@los/agent/executor-nodes';
 import { registerNodeRoutes } from './routes/infrastructure/node-routes.js';
 
+test('node heartbeat persists executor draining status and active task count', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const nodeId = `test-heartbeat-draining-${Date.now()}`;
+  const app = Fastify({ logger: false });
+  registerNodeRoutes(app);
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      payload: {
+        nodeId,
+        status: 'draining',
+        activeTaskCount: 2,
+        capabilities: { run_agent: false },
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().status, 'draining');
+
+    const rows = await getDb().query<{ status: string; active_task_count: number }>(
+      'SELECT status, active_task_count FROM executor_nodes WHERE node_id = $1',
+      [nodeId],
+    );
+    assert.equal(rows.rows[0]?.status, 'draining');
+    assert.equal(rows.rows[0]?.active_task_count, 2);
+  } finally {
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await app.close();
+  }
+});
+
 test('node probe verifies non-executor http_health without creating an executor candidate', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

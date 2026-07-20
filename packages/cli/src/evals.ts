@@ -1,3 +1,5 @@
+import { requestCliJson, resolveCliRequestAuth } from './cli-http.js';
+
 type ParsedArgs = {
   flags: Record<string, string | boolean>;
   positionals: string[];
@@ -36,7 +38,7 @@ export async function evalsCommand(globalArgs: string[], argv: string[]): Promis
 async function listEvals(parsed: ParsedArgs): Promise<void> {
   const params = buildEvalQuery(parsed);
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const value = await getJson(`${gatewayUrl(parsed)}/run-evals${suffix}`);
+  const value = await getJson(`${gatewayUrl(parsed)}/run-evals${suffix}`, parsed);
   renderEvalList(value, booleanFlag(parsed, 'json'));
 }
 
@@ -45,7 +47,7 @@ async function summarizeEvals(parsed: ParsedArgs): Promise<void> {
   addQuery(params, 'createdFrom', stringFlag(parsed, 'created-from'));
   addQuery(params, 'createdTo', stringFlag(parsed, 'created-to'));
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const value = await getJson(`${gatewayUrl(parsed)}/run-evals/summary${suffix}`);
+  const value = await getJson(`${gatewayUrl(parsed)}/run-evals/summary${suffix}`, parsed);
   renderEvalSummary(value, booleanFlag(parsed, 'json'));
 }
 
@@ -63,7 +65,7 @@ async function compareEvals(parsed: ParsedArgs): Promise<void> {
   addQuery(params, 'candidateFrom', candidateFrom);
   addQuery(params, 'candidateTo', candidateTo);
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const value = await getJson(`${gatewayUrl(parsed)}/run-evals/compare${suffix}`);
+  const value = await getJson(`${gatewayUrl(parsed)}/run-evals/compare${suffix}`, parsed);
   renderEvalComparison(value, booleanFlag(parsed, 'json'));
 }
 
@@ -91,25 +93,21 @@ async function recordEval(parsed: ParsedArgs): Promise<void> {
     summary: jsonFlag(parsed, 'summary-json'),
   };
   removeUndefined(payload);
-  const value = await sendJson(`${gatewayUrl(parsed)}/run-evals`, payload);
+  const value = await sendJson(`${gatewayUrl(parsed)}/run-evals`, payload, parsed);
   renderEvalRecord(value, booleanFlag(parsed, 'json'));
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  return await response.json() as unknown;
+async function getJson(url: string, parsed: ParsedArgs): Promise<unknown> {
+  return await requestCliJson(url, { auth: resolveCliRequestAuth(parsed.flags) });
 }
 
-async function sendJson(url: string, payload: Record<string, unknown>): Promise<unknown> {
-  const response = await fetch(url, {
+async function sendJson(url: string, payload: Record<string, unknown>, parsed: ParsedArgs): Promise<unknown> {
+  return await requestCliJson(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(payload),
   });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text}`);
-  return text ? JSON.parse(text) as unknown : {};
 }
 
 function renderEvalList(value: unknown, json: boolean): void {
@@ -200,6 +198,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const aliases: Record<string, string> = {
     g: 'gateway',
     h: 'help',
+    t: 'auth-token',
   };
   const booleanFlags = new Set(['help', 'h', 'json']);
 
@@ -354,6 +353,10 @@ Usage:
   los evals summary [--created-from ISO] [--created-to ISO] [--json]
   los evals compare --baseline-from ISO --baseline-to ISO --candidate-from ISO --candidate-to ISO [--json]
   los evals record --run RUN_ID --success true|false [options]
+
+Global options:
+  --gateway, -g URL
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
 
 Record options:
   --id ID

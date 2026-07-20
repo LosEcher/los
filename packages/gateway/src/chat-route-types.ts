@@ -18,6 +18,7 @@ export interface ChatRequestBody {
   systemPrompt?: string;
   provider?: RunSpecRequest['provider'];
   model?: RunSpecRequest['model'];
+  providerFallback?: RunSpecRequest['providerFallback'];
   modelSettings?: ModelSettings;
   projectId?: RunSpecRequest['projectId'];
   workspaceRoot?: RunSpecRequest['workspaceRoot'];

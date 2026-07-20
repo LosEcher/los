@@ -74,6 +74,7 @@ test('runtime versions default to the release and allow executor-specific builds
 
   assert.equal(defaultConfig.server.version, undefined);
   assert.equal(defaultConfig.executor.version, undefined);
+  assert.equal(defaultConfig.executor.shutdownGraceMs, 120_000);
   assert.equal(versionedConfig.server.version, '0.1.0+b123456789abc');
   assert.equal(versionedConfig.executor.version, '0.1.0+boracle123456');
 });

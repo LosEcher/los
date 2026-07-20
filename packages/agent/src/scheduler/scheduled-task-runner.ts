@@ -35,6 +35,12 @@ import { persistScheduledToolCallState } from './tool-call-state-persistence.js'
 import { readCurrentRunContract, checkVerificationGate } from './contract-reader.js';
 import { runGoalSelfCheck } from './goal-self-check-runner.js';
 import { writeDeadLetterEvent } from '../dead-letter.js';
+import {
+  normalizeProviderFallbackPolicy,
+  resolveProviderFallbackInitialTarget,
+  type ProviderFallbackEvent,
+} from '../providers/provider-fallback.js';
+import type { SessionEventRecord } from '../session-events.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
@@ -51,6 +57,13 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
   const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? Math.max(1_000, Math.floor(leaseMs / 3));
   const leaseVersion = normalizePositiveInteger(input.leaseVersion) ?? 1;
+  const providerFallback = normalizeProviderFallbackPolicy(input.providerFallback);
+  const initialFallbackTarget = resolveProviderFallbackInitialTarget(providerFallback, {
+    provider: input.provider,
+    model: input.model,
+  });
+  const initialProvider = initialFallbackTarget?.provider ?? input.provider;
+  const initialModel = initialFallbackTarget?.model ?? input.model;
 
   if (dedupeKey) {
     const existing = await findActiveTaskRunByDedupeKey(dedupeKey);
@@ -104,8 +117,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     dedupeKey,
     workspaceRoot,
     toolMode,
-    provider: input.provider,
-    model: input.model,
+    provider: initialProvider,
+    model: initialModel,
     tenantId: normalizeOptionalString(input.tenantId),
     projectId: normalizeOptionalString(input.projectId),
     userId: normalizeOptionalString(input.userId),
@@ -158,7 +171,11 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     leaseExpiresAt: new Date(Date.now() + leaseMs),
     metadata: {
       ...created.metadata,
-      model: input.model,
+      requestedRoute: { provider: input.provider ?? null, model: input.model ?? null },
+      effectiveRoute: { provider: initialProvider ?? null, model: initialModel ?? null },
+      providerFallback: providerFallback ?? null,
+      providerSwitchHistory: [],
+      model: initialModel,
       maxLoops: input.maxLoops,
       modelSettings: input.modelSettings,
       allowedTools: input.allowedTools,
@@ -169,6 +186,44 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   });
   running ??= await loadTaskRun(taskRunId);
   if (!running) throw new Error(`Task run disappeared after create: ${taskRunId}`);
+  const persistProviderFallbackSelection = async (event: ProviderFallbackEvent): Promise<void> => {
+    if (event.type !== 'selected' || !event.toProvider || !event.toModel) return;
+    const current = running;
+    if (!current) throw new Error(`Task run disappeared during provider fallback: ${taskRunId}`);
+    const existingHistory = Array.isArray(current.metadata.providerSwitchHistory)
+      ? current.metadata.providerSwitchHistory
+      : [];
+    const updated = await updateTaskRunFields(taskRunId, {
+      provider: event.toProvider,
+      model: event.toModel,
+      metadata: {
+        ...current.metadata,
+        effectiveRoute: { provider: event.toProvider, model: event.toModel },
+        providerSwitchHistory: [...existingHistory, {
+          callIndex: event.callIndex,
+          switchIndex: event.switchIndex,
+          failureClass: event.failureClass,
+          errorCode: event.errorCode ?? null,
+          fromProvider: event.fromProvider,
+          fromModel: event.fromModel,
+          toProvider: event.toProvider,
+          toModel: event.toModel,
+          compatibilityEvidenceId: event.compatibilityEvidenceId ?? null,
+        }],
+      },
+    });
+    if (!updated) throw new Error(`Task run disappeared during provider fallback: ${taskRunId}`);
+    running = updated;
+  };
+  const handleSessionEvent = async (event: SessionEventRecord): Promise<void> => {
+    if (executor && event.type === 'provider.fallback.selected') {
+      await persistProviderFallbackSelection({
+        type: 'selected',
+        ...event.payload,
+      } as unknown as ProviderFallbackEvent);
+    }
+    await input.onSessionEvent?.(event);
+  };
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
 
@@ -234,8 +289,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           prompt: input.prompt,
           config: {
             sessionId,
-            provider: input.provider,
-            model: input.model,
+            runSpecId: input.runSpecId,
+            provider: initialProvider,
+            model: initialModel,
+            providerFallback,
             modelSettings: input.modelSettings,
             maxLoops: input.maxLoops,
             systemPrompt: input.systemPrompt,
@@ -262,7 +319,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             },
           },
           signal: controller.signal,
-          onSessionEvent: input.onSessionEvent,
+          onSessionEvent: handleSessionEvent,
           onModelDelta: input.onModelDelta,
           onToolCallState: async (transition) => {
             await persistScheduledToolCallState({
@@ -277,8 +334,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         })
       : await runAgent(input.prompt, {
           sessionId,
-          provider: input.provider,
-          model: input.model,
+          runSpecId: input.runSpecId,
+          provider: initialProvider,
+          model: initialModel,
+          providerFallback,
           modelSettings: input.modelSettings,
           maxLoops: input.maxLoops,
           systemPrompt: input.systemPrompt,
@@ -305,7 +364,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
             ...(runContract ? { runContract } : {}),
           },
           signal: controller.signal,
-          onSessionEvent: input.onSessionEvent,
+          onSessionEvent: handleSessionEvent,
+          onProviderFallback: persistProviderFallbackSelection,
           onTurn: input.onTurn,
           onToolCall: input.onToolCall,
           onToolCallState: async (transition) => {
@@ -485,8 +545,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         originalError: message,
         eventPayload: {
           attempt: finalTask.attempt,
-          provider: input.provider,
-          model: input.model,
+          provider: initialProvider,
+          model: initialModel,
           sessionId,
           promptPreview: input.promptPreview,
         },
@@ -507,8 +567,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         runSpecId: input.runSpecId,
         sessionId,
         taskRunId,
-        provider: input.provider,
-        model: input.model,
+        provider: initialProvider,
+        model: initialModel,
         failureClass: 'executor_failure',
         failoverScope: 'executor',
         errorMessage: message,

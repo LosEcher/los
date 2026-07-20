@@ -10,3 +10,7 @@ export { FileSyncPage } from './file-sync-page.js';
 export { RunSpecsPage } from './run-specs-page.js';
 export { ReservedPage } from './reserved-page.js';
 export { CommunicationAccountsPage } from './communication-accounts-page.js';
+export { SetupPage } from './setup-page.js';
+export { InboxPage } from './inbox-page.js';
+export { WorkPage } from './work-page.js';
+export { SchedulesPage } from './schedules-page.js';

@@ -15,7 +15,10 @@ concurrency:
 # gate-fast because the protected PR head already passed gate-test and
 # gate-drift; this avoids repeating the two expensive clean-checkout jobs after
 # every merge. The node34 runner has two slots, while the workspace test job
-# limits Turbo package concurrency to two on its three-core host.
+# limits Turbo package concurrency to four on its three-core host. gate-fast
+# caps its own Turbo work at one task, so the two jobs stay within the runner's
+# observed capacity while the expanded workspace suite remains below the
+# runner's execution window.
 jobs:
   gate-fast:
     runs-on: ubuntu-latest
@@ -44,21 +47,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
+      - name: Observe pnpm store capacity
+        run: ./tools/observe-pnpm-store.sh --json
+
       - name: Fast gate (no DB, no tests)
         run: pnpm run gate -- --no-tests
 
   gate-test:
     if: forgejo.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-jj
     timeout-minutes: 25
 
     services:
-      postgres:
+      postgres-test:
         image: postgres:16
         env:
-          POSTGRES_USER: los
-          POSTGRES_PASSWORD: los
-          POSTGRES_DB: los_test
+          POSTGRES_USER: los_ci_test
+          POSTGRES_PASSWORD: los-ci-test-only
+          POSTGRES_DB: los_ci_test
           POSTGRES_HOST_AUTH_METHOD: md5
         options: >-
           --health-cmd pg_isready
@@ -68,10 +74,10 @@ jobs:
           --health-start-period 30s
 
     env:
-      DATABASE_URL: postgres://los:los@postgres:5432/los_test
-      TEST_DATABASE_URL: postgres://los:los@postgres:5432/los_test
+      DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
+      TEST_DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
       NODE_ENV: test
-      LOS_TEST_CONCURRENCY: 2
+      LOS_TEST_CONCURRENCY: 4
 
     steps:
       - name: Checkout
@@ -92,6 +98,9 @@ jobs:
           corepack prepare pnpm@9.0.0 --activate
           pnpm config set store-dir ~/.local/share/pnpm/store
 
+      - name: Verify jj runtime
+        run: jj --version
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
@@ -106,12 +115,12 @@ jobs:
     timeout-minutes: 10
 
     services:
-      postgres:
+      postgres-drift:
         image: postgres:16
         env:
-          POSTGRES_USER: los
-          POSTGRES_PASSWORD: los
-          POSTGRES_DB: los_test
+          POSTGRES_USER: los_ci_drift
+          POSTGRES_PASSWORD: los-ci-drift-only
+          POSTGRES_DB: los_ci_drift
           POSTGRES_HOST_AUTH_METHOD: md5
         options: >-
           --health-cmd pg_isready
@@ -123,7 +132,7 @@ jobs:
     # DATABASE_URL is the server URL check-migration-drift uses to CREATE
     # the ephemeral los_drift_mig / los_drift_ensure databases.
     env:
-      DATABASE_URL: postgres://los:los@postgres:5432/los_test
+      DATABASE_URL: postgres://los_ci_drift:los-ci-drift-only@postgres-drift:5432/los_ci_drift
 
     steps:
       - name: Checkout

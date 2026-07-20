@@ -4,8 +4,8 @@
  * Inspired by JiuwenSwarm's Markdown-file memory.
  * Writes a human-readable MEMORY.md in the workspace root.
  *
- * Auto-updated 60s after each new observation (debounced in addObservation).
- * Also callable manually via POST /memory/sync-md.
+ * Written only through an explicit sync request such as POST /memory/sync-md,
+ * which supplies the target workspace and optional project filter.
  */
 
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';

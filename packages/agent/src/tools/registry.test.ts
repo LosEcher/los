@@ -337,6 +337,34 @@ test('spawn_agent child inherits parent run contract metadata', async () => {
   assert.equal(parentMeta.runContract.phase, 'executing');
 });
 
+test('spawn_agent inherits fallback policy unless the child overrides its route', async () => {
+  const seen: any[] = [];
+  const providerFallback = {
+    mode: 'explicit_ordered' as const,
+    targets: [{ provider: 'a', model: 'a-1' }, { provider: 'b', model: 'b-1' }],
+    onFailure: ['rate_limit' as const],
+    requireCompatibilityEvidence: true,
+    maxSwitches: 1,
+  };
+  const runner = createSpawnAgentRunner({
+    provider: 'a',
+    model: 'a-1',
+    providerFallback,
+    runAgent: async (_prompt, config) => {
+      seen.push(config);
+      return { text: 'ok', turns: [], loopCount: 1, totalTokens: { prompt: 0, completion: 0 }, messages: [] };
+    },
+  });
+
+  await runner({ prompt: 'inherit' });
+  await runner({ prompt: 'override', provider: 'c', model: 'c-1' });
+
+  assert.equal(seen[0].providerFallback, providerFallback);
+  assert.equal(seen[1].providerFallback, undefined);
+  assert.equal(seen[1].provider, 'c');
+  assert.equal(seen[1].model, 'c-1');
+});
+
 test('tool capability timeout is enforced during execution', async () => {
   const registry = createToolRegistry();
   registry.register(

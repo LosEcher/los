@@ -43,6 +43,7 @@ import {
 } from './scheduler/tool-call-state-persistence.js';
 import { runScheduledAgentTask } from './scheduler/scheduled-task-runner.js';
 import { runClaimedVerifierGraphTask } from './scheduler/verifier-task.js';
+import { workspaceRootForTask } from './managed-workspaces.js';
 import { sendWorkerMessage } from './worker-messages.js';
 import type {
   GraphTaskProviderModelSelection,
@@ -350,6 +351,7 @@ async function runClaimedAgentGraphTask(
     // identity (default). Verifier tasks are handled separately above and get none.
     const result = await runScheduledAgentTask({
       ...input,
+      workspaceRoot: workspaceRootForTask(task, input.workspaceRoot),
       identity: input.identity ?? {
         name: 'default',
         level: resolveIdentityLevelForExecutionPath('scheduler-graph'),

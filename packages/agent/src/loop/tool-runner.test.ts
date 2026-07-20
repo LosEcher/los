@@ -12,6 +12,7 @@ import type { ToolRegistry, ToolCapability, ToolResult, ToolExecutionDecision } 
 import type { ToolDef, ToolCall, Message } from '../providers/index.js';
 import type { AgentConfig } from './types.js';
 import { resolveToolPolicy } from './tool-resolver.js';
+import { repairToolCallArguments } from '../providers/openai-utils.js';
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -336,6 +337,29 @@ test('empty tool calls produce empty results', async () => {
 
   assert.equal(result.toolResults.length, 0);
   assert.equal(result.toolMessages.length, 0);
+});
+
+test('malformed provider arguments are repaired before entering the tool runner', async () => {
+  const registry = mockRegistry([{ name: 'read_file', parallelizable: true, sleepMs: 0 }]);
+  const { runToolCalls } = await import('./tool-runner.js');
+  const malformed = repairToolCallArguments({
+    id: 'fixture-tool-runner',
+    type: 'function',
+    function: { name: 'read_file', arguments: '{path: ".",}' },
+  }, 'fixture');
+  const result = await runToolCalls({
+    toolCalls: [malformed],
+    turn: 1,
+    tools: registry,
+    config: buildConfig(),
+    signal: undefined,
+    policy: buildPolicy(),
+    emitEvent: mockEmitEvent as any,
+    onSessionError: () => {},
+  });
+
+  assert.equal(result.toolResults.length, 1);
+  assert.ok(result.toolResults[0]?.includes('result:read_file'));
 });
 
 test('all non-parallelizable tools each execute sequentially', async () => {

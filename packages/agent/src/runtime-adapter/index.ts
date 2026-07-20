@@ -22,6 +22,14 @@ export {
 } from './codex.js';
 
 export {
+  spawnGrok,
+  getGrokRuntimeModel,
+  type GrokSpawnInput,
+  type GrokRuntimeHandle,
+  type GrokRuntimeOutput,
+} from './grok.js';
+
+export {
   claudeSpanToEventType,
   CLAUDE_CODE_SPAN_NAMES,
   type RuntimeKind,

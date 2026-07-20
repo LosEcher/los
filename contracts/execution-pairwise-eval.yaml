@@ -1,0 +1,74 @@
+contract: los.execution-pairwise-eval
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Immutable pairwise evaluation evidence linking one execution experiment to
+  its baseline and candidate runs. Human, judge, and deterministic results are
+  stored as separate evidence channels.
+type: object
+required:
+  - experimentId
+  - baselineRunSpecId
+  - candidateRunSpecId
+  - rubricRevision
+  - rubricSnapshot
+  - verdict
+properties:
+  experimentId:
+    type: string
+    minLength: 1
+  baselineRunSpecId:
+    type: string
+    minLength: 1
+  candidateRunSpecId:
+    type: string
+    minLength: 1
+  rubricRevision:
+    type: string
+    minLength: 1
+  rubricSnapshot:
+    type: object
+    required: [id, revision, criteria]
+    properties:
+      id: { type: string, minLength: 1 }
+      revision: { type: string, minLength: 1 }
+      criteria:
+        type: array
+        items:
+          type: object
+          required: [id, label, maxScore]
+          properties:
+            id: { type: string, minLength: 1 }
+            label: { type: string, minLength: 1 }
+            description: { type: string }
+            maxScore: { type: number, minimum: 1 }
+  verdict:
+    enum: [baseline, candidate, tie, inconclusive]
+  human:
+    type: object
+    properties:
+      source: { type: string, minLength: 1 }
+      verdict: { enum: [baseline, candidate, tie, inconclusive] }
+      criterionScores: { type: array, items: { type: object } }
+      note: { type: string }
+  judge:
+    type: object
+    properties:
+      source: { type: string, minLength: 1 }
+      verdict: { enum: [baseline, candidate, tie, inconclusive] }
+      criterionScores: { type: array, items: { type: object } }
+      confidence: { type: number, minimum: 0, maximum: 1 }
+  deterministic:
+    type: object
+    properties:
+      source: { type: string, minLength: 1 }
+      verdict: { enum: [baseline, candidate, tie, inconclusive] }
+      criterionScores: { type: array, items: { type: object } }
+      verificationStatus: { enum: [pending, succeeded, failed, skipped] }
+additionalProperties: false
+verification:
+  - pair references remain immutable after creation
+  - rubricSnapshot.revision equals rubricRevision
+  - human, judge, and deterministic evidence remain separately addressable
+  - ./tools/check-contracts.sh

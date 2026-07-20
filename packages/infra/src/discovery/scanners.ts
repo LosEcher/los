@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { getConfig } from '../config.js';
 import { getLogger } from '../logger.js';
@@ -10,7 +10,14 @@ import {
   providerDefaultsForApiKeyEnv,
   requireProviderDefaults,
 } from '../provider-defaults.js';
-import type { CodexRouteConfig, DiscoveredProvider, DiscoveredTool } from './types.js';
+import type {
+  CodexRouteConfig,
+  DiscoveredProvider,
+  DiscoveredTool,
+  GrokAccountAuthMode,
+  GrokAccountCandidate,
+  GrokAccountSourceKind,
+} from './types.js';
 import { fileAge } from './helpers.js';
 import {
   ccSwitchProviderFromRow,
@@ -441,4 +448,121 @@ export function scanXaiOAuth(): DiscoveredProvider[] {
   } catch { /* auth store corrupt or unavailable */ }
 
   return providers;
+}
+
+// ── 7. Grok CLI external login ──────────────────────────
+
+type GrokScanOptions = {
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
+  nowMs?: number;
+  cliInstalled?: boolean;
+};
+
+export function scanGrokAccount(options: GrokScanOptions = {}): GrokAccountCandidate {
+  const env = options.env ?? process.env;
+  const homeDir = options.homeDir ?? homedir();
+  const nowMs = options.nowMs ?? Date.now();
+  const cliInstalled = options.cliInstalled ?? executableOnPath('grok', env.PATH);
+  const source = resolveGrokAuthSource(env, homeDir);
+  const base = {
+    candidateId: 'xai-grok-default' as const,
+    provider: 'xai' as const,
+    runtimeKind: 'grok' as const,
+    cliInstalled,
+    sourceKind: source.kind,
+  };
+
+  if (!source.raw) {
+    return { ...base, available: false, authMode: null, reason: 'grok_auth_not_found' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source.raw);
+  } catch {
+    return { ...base, available: false, authMode: null, reason: 'grok_auth_malformed' };
+  }
+
+  const entries = grokAuthEntries(parsed, source.kind === 'inline_env');
+  const supported = entries.find(entry => grokAuthMode(entry.auth_mode) !== 'unknown' && hasString(entry.key));
+  if (!supported) {
+    const mode = grokAuthMode(entries[0]?.auth_mode);
+    return {
+      ...base,
+      available: false,
+      authMode: entries.length > 0 ? mode : null,
+      reason: entries.length > 0 && mode === 'unknown'
+        ? 'grok_auth_mode_unsupported'
+        : 'grok_auth_missing_credential',
+    };
+  }
+
+  const authMode = grokAuthMode(supported.auth_mode);
+  if (grokAuthExpired(supported, nowMs)) {
+    return { ...base, available: false, authMode, reason: 'grok_auth_expired' };
+  }
+  if (!cliInstalled) {
+    return { ...base, available: false, authMode, reason: 'grok_cli_not_found' };
+  }
+  return { ...base, available: true, authMode, reason: null };
+}
+
+function resolveGrokAuthSource(
+  env: NodeJS.ProcessEnv,
+  homeDir: string,
+): { kind: GrokAccountSourceKind; raw: string | null } {
+  if (hasString(env.GROK_AUTH)) return { kind: 'inline_env', raw: env.GROK_AUTH };
+  const explicitPath = hasString(env.GROK_AUTH_PATH) ? env.GROK_AUTH_PATH : null;
+  const grokHome = hasString(env.GROK_HOME) ? env.GROK_HOME : null;
+  const kind: GrokAccountSourceKind = explicitPath
+    ? 'explicit_path'
+    : grokHome
+      ? 'grok_home'
+      : 'default_home';
+  const path = explicitPath ?? join(grokHome ?? join(homeDir, '.grok'), 'auth.json');
+  if (!existsSync(path)) return { kind, raw: null };
+  try {
+    return { kind, raw: readFileSync(path, 'utf8') };
+  } catch {
+    return { kind, raw: null };
+  }
+}
+
+function grokAuthEntries(value: unknown, inline: boolean): Array<Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  if (inline && hasString(record.key)) return [record];
+  return Object.values(record).filter(
+    (entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry),
+  );
+}
+
+function grokAuthMode(value: unknown): GrokAccountAuthMode {
+  if (value === 'oidc') return 'oidc';
+  if (value === 'external') return 'external';
+  if (value === 'api_key') return 'api_key';
+  if (value === 'web_login' || value === 'grok') return 'legacy';
+  return 'unknown';
+}
+
+function grokAuthExpired(entry: Record<string, unknown>, nowMs: number): boolean {
+  if (hasString(entry.expires_at)) {
+    const expiresAt = Date.parse(entry.expires_at);
+    return Number.isFinite(expiresAt) && expiresAt <= nowMs;
+  }
+  if (hasString(entry.create_time)) {
+    const createdAt = Date.parse(entry.create_time);
+    return Number.isFinite(createdAt) && createdAt + 30 * 24 * 60 * 60 * 1000 <= nowMs;
+  }
+  return false;
+}
+
+function executableOnPath(command: string, pathValue: string | undefined): boolean {
+  if (!pathValue) return false;
+  return pathValue.split(delimiter).some(dir => existsSync(join(dir, command)));
+}
+
+function hasString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }

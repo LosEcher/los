@@ -2,6 +2,7 @@ export type ModelRouteReason =
   | 'configured_default'
   | 'explicit_provider'
   | 'explicit_model'
+  | 'explicit_fallback_policy'
   | 'architect_editor_override';
 
 export interface ModelRouteDecision {
@@ -18,6 +19,7 @@ export interface ResolveModelRouteDecisionInput {
   effectiveProvider: string;
   effectiveModel: string;
   architectEditorOverride?: boolean;
+  explicitFallbackPolicy?: boolean;
 }
 
 export function resolveModelRouteDecision(
@@ -27,11 +29,13 @@ export function resolveModelRouteDecision(
   const requestedModel = normalizeOptionalString(input.requestedModel);
   const reason: ModelRouteReason = input.architectEditorOverride
     ? 'architect_editor_override'
-    : requestedModel
-      ? 'explicit_model'
-      : requestedProvider
-        ? 'explicit_provider'
-        : 'configured_default';
+    : input.explicitFallbackPolicy
+      ? 'explicit_fallback_policy'
+      : requestedModel
+        ? 'explicit_model'
+        : requestedProvider
+          ? 'explicit_provider'
+          : 'configured_default';
 
   return {
     requestedProvider,

@@ -210,19 +210,23 @@ export async function runGovernanceSweepLoop(opts?: {
   }
 
   let driftReport: any = null;
-  try {
-    const { sweepGovernanceDrift: runDrift } = await import('./governance-drift-sweeper.js');
-    driftReport = await runDrift({ dryRun, tenantId: opts?.tenantId, projectId: opts?.projectId });
-  } catch (err) {
-    log.warn(`Drift sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+  if (jobsRun > 0) {
+    try {
+      const { sweepGovernanceDrift: runDrift } = await import('./governance-drift-sweeper.js');
+      driftReport = await runDrift({
+        dryRun,
+        tenantId: opts?.tenantId,
+        projectId: opts?.projectId,
+        jobIds: results.map(result => result.jobId),
+      });
+    } catch (err) {
+      log.warn(`Drift sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   const hasDriftSignal = !!driftReport && (
     (typeof driftReport === 'object' && (
-      Number((driftReport as { findingsCreated?: number }).findingsCreated ?? 0) > 0
-      || Number((driftReport as { driftCount?: number }).driftCount ?? 0) > 0
-      || Array.isArray((driftReport as { findings?: unknown[] }).findings)
-        && ((driftReport as { findings: unknown[] }).findings.length > 0)
+      Number((driftReport as { totalFindings?: number }).totalFindings ?? 0) > 0
     ))
   );
   const isNoopSweep = jobsRun === 0 && findingsCreated === 0 && errors.length === 0 && !hasDriftSignal;

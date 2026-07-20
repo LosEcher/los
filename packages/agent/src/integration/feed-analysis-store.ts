@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getDb, withDbClient, type DbTransactionClient } from '@los/infra/db';
+import { ensureTodoStore } from '../todos.js';
 import {
   _FEED_ANALYSIS_RESULT_VERSION,
+  type CreateFeedAnalysisDispatchInput,
   type FeedAnalysisArtifact,
   type FeedAnalysisDeliveryMode,
+  type FeedAnalysisDispatchRecord,
   type FeedAnalysisResultEnvelope,
   type FeedAnalysisStatus,
   FeedAnalysisError,
 } from './feed-analysis-types.js';
+
+export type { CreateFeedAnalysisDispatchInput, FeedAnalysisDispatchRecord } from './feed-analysis-types.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS feed_analysis_dispatches (
@@ -18,7 +23,8 @@ CREATE TABLE IF NOT EXISTS feed_analysis_dispatches (
   requested_outputs_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   policy_json JSONB NOT NULL DEFAULT '{}'::jsonb, callback_profile_id TEXT, material_json JSONB,
   metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb, run_spec_id TEXT, task_run_id TEXT,
-  session_id TEXT, trace_id TEXT, status TEXT NOT NULL DEFAULT 'accepted',
+  session_id TEXT, trace_id TEXT, work_item_id TEXT REFERENCES todos(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'accepted',
   result_available BOOLEAN NOT NULL DEFAULT false, error_code TEXT, error_message TEXT,
   sequence INTEGER NOT NULL DEFAULT 0, retention_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -27,6 +33,7 @@ CREATE TABLE IF NOT EXISTS feed_analysis_dispatches (
 );
 CREATE INDEX IF NOT EXISTS idx_feed_analysis_dispatch_status ON feed_analysis_dispatches(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_feed_analysis_dispatch_run ON feed_analysis_dispatches(run_spec_id);
+CREATE INDEX IF NOT EXISTS idx_feed_analysis_dispatch_work_item ON feed_analysis_dispatches(work_item_id);
 CREATE TABLE IF NOT EXISTS feed_analysis_results (
   dispatch_id TEXT PRIMARY KEY REFERENCES feed_analysis_dispatches(id) ON DELETE CASCADE,
   schema_version TEXT NOT NULL, summary TEXT NOT NULL,
@@ -63,59 +70,11 @@ CREATE TABLE IF NOT EXISTS feed_analysis_callback_deliveries (
 CREATE INDEX IF NOT EXISTS idx_feed_analysis_callback_due ON feed_analysis_callback_deliveries(next_attempt_at, created_at) WHERE status = 'pending';
 `;
 
-export interface FeedAnalysisDispatchRecord {
-  id: string;
-  tenantId: string;
-  projectId: string;
-  sourceSystem: string;
-  sourceJobId: string;
-  sourceSessionId?: string;
-  deliveryMode: FeedAnalysisDeliveryMode;
-  inputDigest: string;
-  idempotencyKey: string;
-  requestedOutputs: string[];
-  policy: Record<string, unknown>;
-  callbackProfileId?: string;
-  material?: Record<string, unknown>;
-  metadata: Record<string, unknown>;
-  runSpecId?: string;
-  taskRunId?: string;
-  sessionId?: string;
-  traceId?: string;
-  status: FeedAnalysisStatus;
-  resultAvailable: boolean;
-  errorCode?: string;
-  errorMessage?: string;
-  sequence: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateFeedAnalysisDispatchInput {
-  id: string;
-  tenantId: string;
-  projectId: string;
-  sourceSystem: string;
-  sourceJobId: string;
-  sourceSessionId?: string;
-  deliveryMode: FeedAnalysisDeliveryMode;
-  contractVersion: string;
-  bundleVersion?: string;
-  bundleId?: string;
-  inputDigest: string;
-  idempotencyKey: string;
-  requestedOutputs: string[];
-  policy: Record<string, unknown>;
-  callbackProfileId?: string;
-  material?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  retentionExpiresAt?: string;
-}
-
 let initialized = false;
 
 export async function ensureFeedAnalysisStore(): Promise<void> {
   if (initialized) return;
+  await ensureTodoStore();
   await getDb().exec(SCHEMA);
   initialized = true;
 }
@@ -189,6 +148,14 @@ export async function linkFeedAnalysisExecution(input: {
 export async function updateFeedAnalysisTaskRun(dispatchId: string, taskRunId: string): Promise<void> {
   await ensureFeedAnalysisStore();
   await getDb().query('UPDATE feed_analysis_dispatches SET task_run_id=$2, updated_at=now() WHERE id=$1', [dispatchId, taskRunId]);
+}
+
+export async function linkFeedAnalysisWorkItem(dispatchId: string, workItemId: string): Promise<void> {
+  await ensureFeedAnalysisStore();
+  await getDb().query(
+    'UPDATE feed_analysis_dispatches SET work_item_id=$2, updated_at=now() WHERE id=$1',
+    [dispatchId, workItemId],
+  );
 }
 
 export async function emitFeedAnalysisStatus(
@@ -362,7 +329,8 @@ export type FeedAnalysisDispatchRow = {
   source_session_id: string | null; delivery_mode: FeedAnalysisDeliveryMode; input_digest: string;
   idempotency_key: string; requested_outputs_json: unknown; policy_json: unknown; callback_profile_id: string | null;
   material_json: unknown; metadata_json: unknown; run_spec_id: string | null; task_run_id: string | null;
-  session_id: string | null; trace_id: string | null; status: FeedAnalysisStatus; result_available: boolean;
+  session_id: string | null; trace_id: string | null; work_item_id: string | null;
+  status: FeedAnalysisStatus; result_available: boolean;
   error_code: string | null; error_message: string | null; sequence: number | string;
   created_at: Date | string; updated_at: Date | string;
 };
@@ -376,6 +344,7 @@ function rowToDispatch(row: FeedAnalysisDispatchRow): FeedAnalysisDispatchRecord
     callbackProfileId: row.callback_profile_id ?? undefined, material: readOptionalObject(row.material_json),
     metadata: readObject(row.metadata_json), runSpecId: row.run_spec_id ?? undefined,
     taskRunId: row.task_run_id ?? undefined, sessionId: row.session_id ?? undefined, traceId: row.trace_id ?? undefined,
+    workItemId: row.work_item_id ?? undefined,
     status: row.status, resultAvailable: row.result_available, errorCode: row.error_code ?? undefined,
     errorMessage: row.error_message ?? undefined, sequence: Number(row.sequence),
     createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),

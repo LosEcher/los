@@ -8,6 +8,7 @@ import { registerRunRoutes } from './run-routes.js';
 import { registerRuntimeAdapterRoutes } from './runtime-adapter-routes.js';
 import { registerGovernanceRoutes } from '../infrastructure/governance-routes.js';
 import { registerProviderEvidenceRoutes } from '../providers/provider-evidence-routes.js';
+import { registerProviderCrudRoutes } from '../providers/provider-crud-routes.js';
 import { registerSessionRoutes } from '../data/session-routes.js';
 
 function config(): Config {
@@ -43,7 +44,7 @@ function config(): Config {
         maxPromptTokens: 400,
       },
     },
-    executor: { enabled: false, host: '127.0.0.1', port: 8090, nodeKind: 'executor', connectModes: [], meshNodes: [] },
+    executor: { enabled: false, host: '127.0.0.1', port: 8090, shutdownGraceMs: 120_000, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     profile: 'test',
     defaultProjectId: 'los',
     migrationsDir: 'packages/infra/migrations',
@@ -60,6 +61,7 @@ test('ordinary access token cannot invoke operator write routes', async () => {
   registerRuntimeAdapterRoutes(app);
   registerGovernanceRoutes(app);
   registerProviderEvidenceRoutes(app);
+  registerProviderCrudRoutes(app);
   registerSessionRoutes(app);
 
   try {
@@ -70,10 +72,12 @@ test('ordinary access token cannot invoke operator write routes', async () => {
       { url: '/runs/run-test/approve', payload: {} },
       { url: '/runs/run-test/revise-plan', payload: {} },
       { url: '/runtimes/codex/run', payload: { prompt: 'test' } },
+      { url: '/runtimes/grok/run', payload: { prompt: 'test' } },
       { url: '/runtimes/bridge/start', payload: {} },
       { url: '/governance/jobs/sweep', payload: {} },
       { url: '/providers/promotion-decisions', payload: { action: 'promote_required' } },
       { url: '/providers/promotion-decisions/enforce', payload: { id: 'decision-test' } },
+      { url: '/providers/accounts/grok', payload: {} },
       { url: '/sessions/session-test/operator-events', payload: { type: 'steering', instruction: 'approve' } },
     ];
     for (const request of requests) {

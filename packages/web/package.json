@@ -8,6 +8,7 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "node --test src/*.test.mjs",
+    "test:e2e": "playwright test",
     "preview": "vite preview --host 127.0.0.1 --port 5173",
     "clean": "rm -rf dist"
   },
@@ -23,6 +24,7 @@
     "rehype-highlight": "^7.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

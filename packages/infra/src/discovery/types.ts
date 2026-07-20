@@ -23,6 +23,20 @@ export interface DiscoveredProvider {
   note?: string;
 }
 
+export type GrokAccountAuthMode = 'oidc' | 'external' | 'api_key' | 'legacy' | 'unknown';
+export type GrokAccountSourceKind = 'inline_env' | 'explicit_path' | 'grok_home' | 'default_home';
+
+export interface GrokAccountCandidate {
+  candidateId: 'xai-grok-default';
+  provider: 'xai';
+  runtimeKind: 'grok';
+  available: boolean;
+  cliInstalled: boolean;
+  authMode: GrokAccountAuthMode | null;
+  sourceKind: GrokAccountSourceKind;
+  reason: string | null;
+}
+
 export type ProviderPromotionState =
   | 'blocked'
   | 'advisory'

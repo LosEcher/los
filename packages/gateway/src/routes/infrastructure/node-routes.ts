@@ -95,6 +95,7 @@ export function registerNodeRoutes(app: FastifyInstance): void {
       hostLabel: normalizeOptionalString(body?.hostLabel ?? body?.host_label),
       baseUrl: normalizeOptionalString(body?.baseUrl ?? body?.base_url),
       version: normalizeOptionalString(body?.version),
+      status: hasField(body, 'status') ? normalizeNodeStatus(body?.status) : undefined,
       connectModes: hasField(body, 'connectModes') ? normalizeConnectModes(body?.connectModes) : undefined,
       connectConfig: hasField(body, 'connectConfig') ? normalizeJsonObject(body?.connectConfig) : undefined,
       capacity: hasField(body, 'capacity') ? normalizeJsonObject(body?.capacity) : undefined,

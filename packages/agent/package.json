@@ -34,12 +34,17 @@
     "./ensure-all-stores": "./src/ensure-all-stores.ts",
     "./tool-call-states": "./src/tool-call-states.ts",
     "./mcp-servers": "./src/mcp-servers.ts",
+    "./mcp-distribution": "./src/mcp-distribution.ts",
+    "./mcp-distribution-policy": "./src/mcp-distribution-policy.ts",
+    "./cantool-capability-adapter": "./src/cantool-capability-adapter.ts",
     "./skills": "./src/skills.ts",
+    "./skill-distribution": "./src/skill-distribution.ts",
     "./rules": "./src/rules.ts",
     "./tools": "./src/tools/core/registry.ts",
     "./tools/mcp-client": "./src/tools/external/mcp-client.ts",
     "./cancellation": "./src/cancellation.ts",
     "./agent-task-graph": "./src/agent-task-graph.ts",
+    "./managed-workspaces": "./src/managed-workspaces.ts",
     "./providers/telemetry": "./src/providers/telemetry.ts",
     "./providers/repair-telemetry": "./src/providers/repair-telemetry.ts",
     "./dead-letter": "./src/dead-letter.ts",
@@ -54,6 +59,10 @@
     "./task-intake": "./src/coordinator/task-intake.ts",
     "./event-log": "./src/event-log/index.ts",
     "./object-store": "./src/object-store/index.ts"
+    ,"./execution-experiments": "./src/execution-experiments.ts",
+    "./work-items": "./src/work-items/index.ts",
+    "./scheduled-work": "./src/scheduled-work/index.ts",
+    "./daily-agent-quality": "./src/daily-agent-quality/index.ts"
   },
   "scripts": {
     "build": "tsc",

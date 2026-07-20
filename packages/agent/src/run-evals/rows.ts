@@ -1,4 +1,4 @@
-import type { RunEvalRecord, RunEvalSummary, RunEvalSummaryGroup } from './types.js';
+import type { RunEvalRecord, RunEvalSummary, RunEvalSummaryGroup, RunEvalEvidenceChannel, RunEvalRubricSnapshot } from './types.js';
 import { normalizeCount, normalizeFloat, normalizeOptionalFloat, normalizeFailoverScope, normalizeJsonObject, normalizeVerificationStatus, toIsoString } from './normalizers.js';
 
 export type RunEvalRow = {
@@ -17,6 +17,17 @@ export type RunEvalRow = {
   user_feedback: string | null;
   failure_class: string | null;
   failover_scope: string | null;
+  evaluation_kind: string;
+  pair_id: string | null;
+  experiment_id: string | null;
+  baseline_run_spec_id: string | null;
+  candidate_run_spec_id: string | null;
+  rubric_revision: string | null;
+  rubric_snapshot_json: unknown;
+  human_evidence_json: unknown;
+  judge_evidence_json: unknown;
+  deterministic_evidence_json: unknown;
+  pairwise_verdict: string | null;
   summary_json: unknown;
   created_at: Date | string;
   updated_at: Date | string;
@@ -53,10 +64,32 @@ export function rowToRecord(row: RunEvalRow): RunEvalRecord {
     userFeedback: row.user_feedback ?? undefined,
     failureClass: row.failure_class ?? undefined,
     failoverScope: normalizeFailoverScope(row.failover_scope) ?? undefined,
+    evaluationKind: row.evaluation_kind === 'pairwise' ? 'pairwise' : 'single',
+    pairId: row.pair_id ?? undefined,
+    experimentId: row.experiment_id ?? undefined,
+    baselineRunSpecId: row.baseline_run_spec_id ?? undefined,
+    candidateRunSpecId: row.candidate_run_spec_id ?? undefined,
+    rubricRevision: row.rubric_revision ?? undefined,
+    rubricSnapshot: normalizeOptionalJsonObject(row.rubric_snapshot_json) as RunEvalRubricSnapshot | undefined,
+    human: normalizeOptionalJsonObject(row.human_evidence_json) as RunEvalEvidenceChannel | undefined,
+    judge: normalizeOptionalJsonObject(row.judge_evidence_json) as RunEvalEvidenceChannel | undefined,
+    deterministic: normalizeOptionalJsonObject(row.deterministic_evidence_json) as RunEvalEvidenceChannel | undefined,
+    pairwiseVerdict: normalizePairwiseVerdict(row.pairwise_verdict),
     summary: normalizeJsonObject(row.summary_json),
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
+}
+
+function normalizeOptionalJsonObject(value: unknown): Record<string, unknown> | undefined {
+  const normalized = normalizeJsonObject(value);
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizePairwiseVerdict(value: unknown): RunEvalRecord['pairwiseVerdict'] {
+  return value === 'baseline' || value === 'candidate' || value === 'tie' || value === 'inconclusive'
+    ? value
+    : undefined;
 }
 
 export function aggregateRowToTotals(row: RunEvalAggregateRow | undefined): RunEvalSummary['totals'] {

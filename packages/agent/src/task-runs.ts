@@ -60,6 +60,8 @@ export interface CreateTaskRunInput {
 }
 
 export interface UpdateTaskRunFieldsInput {
+  provider?: string;
+  model?: string;
   metadata?: Record<string, unknown>;
   runContract?: RunContractMetadataInput | null;
   nodeId?: string | null;
@@ -196,6 +198,7 @@ export async function updateTaskRunFields(
   const heartbeatAt = updates.heartbeatAt === undefined ? null : updates.heartbeatAt;
   const leaseExpiresAt = updates.leaseExpiresAt === undefined ? null : updates.leaseExpiresAt;
   const attempt = updates.attempt;
+  const provider = updates.provider === undefined ? null : updates.provider, model = updates.model === undefined ? null : updates.model;
 
   const rows = await db.query<TaskRunRow>(
     `
@@ -205,11 +208,13 @@ export async function updateTaskRunFields(
         heartbeat_at = COALESCE($4::timestamptz, heartbeat_at),
         lease_expires_at = COALESCE($5::timestamptz, lease_expires_at),
         attempt = COALESCE($6, attempt),
+        provider = COALESCE($7, provider),
+        model = COALESCE($8, model),
         updated_at = now()
     WHERE id = $1
     RETURNING *
   `,
-    [id, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt, attempt ?? null],
+    [id, JSON.stringify(metadata), nodeId, heartbeatAt, leaseExpiresAt, attempt ?? null, provider, model],
   );
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
 }
@@ -391,5 +396,5 @@ export async function listTaskRunsByStatus(
   return rows.rows.map(rowToTaskRun);
 }
 
-// Extracted to ./blocked-resume.ts to keep this file under the 400-line gate.
 export { claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun } from './task-runs/blocked-resume.js';
+export { recoverActiveTaskRunsForGateway } from './task-runs/recovery.js';

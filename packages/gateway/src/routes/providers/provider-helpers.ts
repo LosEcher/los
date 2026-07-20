@@ -13,10 +13,14 @@ import {
 import { describeProviderReadiness } from '@los/infra/discovery';
 
 export function sanitizeProviderDiscovery(provider: DiscoveredProvider, compatEvidence: Array<{
-  provider?: string; model?: string; verdict?: string; summary?: Record<string, unknown>;
+  provider?: string;
+  model?: string;
+  decision?: string;
+  passed?: boolean;
+  summary?: Record<string, unknown>;
 }>): Record<string, unknown> {
   const evidenceForProvider = compatEvidence.filter(e => e.provider === provider.name);
-  const latestVerdict = evidenceForProvider.at(0)?.verdict;
+  const latest = evidenceForProvider.at(0);
   const readiness = describeProviderReadiness(provider);
   return {
     name: provider.name,
@@ -27,8 +31,10 @@ export function sanitizeProviderDiscovery(provider: DiscoveredProvider, compatEv
     readiness,
     compatEvidence: {
       count: evidenceForProvider.length,
-      latestVerdict: latestVerdict ?? null,
-      latest: evidenceForProvider.at(0) ?? null,
+      latestVerdict: latest?.decision ?? null,
+      latestDecision: latest?.decision ?? null,
+      latestPassed: latest?.passed ?? null,
+      latest: latest ?? null,
     },
   };
 }
@@ -92,6 +98,7 @@ function isModelRouteReason(value: string | undefined): boolean {
   return value === 'configured_default'
     || value === 'explicit_provider'
     || value === 'explicit_model'
+    || value === 'explicit_fallback_policy'
     || value === 'architect_editor_override';
 }
 

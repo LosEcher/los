@@ -4,8 +4,8 @@
  * This file contains the login ceremony: OIDC discovery, PKCE generation,
  * browser open, loopback HTTP server, token exchange, and token persistence.
  *
- * All runtime credential resolution (refresh, status, config integration)
- * lives in xai-oauth.ts alongside the auth store and types.
+ * Runtime credential resolution lives in xai-oauth.ts; the store and shared
+ * types live in the adjacent xai-oauth-store.ts and xai-oauth-types.ts modules.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -25,6 +25,7 @@ import {
   type XaiOAuthTokens,
   type XaiLoginOptions,
 } from './xai-oauth.js';
+import { fetchWithConfiguredProxy } from './proxy-fetch.js';
 
 // ── OIDC Discovery ────────────────────────────────────────
 
@@ -38,7 +39,7 @@ async function xaiOAuthDiscovery(timeoutSeconds: number = 15): Promise<XaiOAuthD
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-    response = await fetch(XAI_OAUTH_DISCOVERY_URL, {
+    response = await fetchWithConfiguredProxy(XAI_OAUTH_DISCOVERY_URL, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
@@ -264,7 +265,7 @@ async function exchangeCodeForTokens(params: {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(20, timeoutSeconds) * 1000);
-    response = await fetch(tokenEndpoint, {
+    response = await fetchWithConfiguredProxy(tokenEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -492,6 +493,5 @@ export async function xaiOAuthLogin(options: XaiLoginOptions = {}): Promise<XaiO
     auth_mode: 'oauth_pkce',
   };
 
-  saveXaiOAuthState(oauthState);
-  return oauthState;
+  return await saveXaiOAuthState(oauthState);
 }

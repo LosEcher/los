@@ -19,21 +19,27 @@ import {
   ensureAgentTaskGraphStore, ensureArtifactStore, ensureCancellationStore,
   ensureDeadLetterStore, ensureExecutorNodeStore,
   ensureExternalToolSummaryStore, ensureGovernanceJobStore, ensureMCPServerStore,
+  ensureExecutionExperimentStore,
   ensureNodeCommandStore, ensureProviderCompatEvidenceStore,
   ensureProviderPromotionDecisionStore, ensureRunEvalStore, ensureRunSpecStore,
   ensureSchedulerDecisionLedgerStore, ensureServiceInstanceStore, ensureSessionEventStore,
   ensureSessionStore, ensureSkillStore, ensureStaticGraphBaselineStore,
   ensureStreamCheckpointStore, ensureStreamLeaseStore, ensureTaskRunStore,
   ensureTodoStore, ensureVerificationRecordStore, ensureRuleStore,
+  ensureManagedWorkspaceStore,
   ensureFeedAnalysisStore,
+  ensureScheduledWorkStore,
+  ensureDailyAgentQualityStore,
 } from '@los/agent';
 // Not in the @los/agent barrel (intentionally internal) — use subpath exports.
 import { ensureExecutionStore } from '@los/agent/execution-store';
 import { ensureToolCallStateStore } from '@los/agent/tool-call-states';
 import { ensureProviderCallTelemetryStore } from '@los/agent/providers/telemetry';
+import { ensureWorkItemStore } from '@los/agent/work-items';
 import { ensureMemoryStore, ensureMemoryCompactionStore, ensureProceduralCandidateStore } from '@los/memory';
 import { ensureIdempotencyStore } from './idempotency.js';
 import { getLogger } from '@los/infra/logger';
+import { ensureProviderAccountStore } from '@los/infra/provider-accounts';
 
 const log = getLogger('bootstrap');
 
@@ -45,9 +51,13 @@ export async function ensureAllStores(): Promise<void> {
   await ensureTaskRunStore();
   await ensureRunSpecStore();
   await ensureAgentTaskGraphStore();
+  await ensureManagedWorkspaceStore();
   await ensureExecutorNodeStore();
   await ensureServiceInstanceStore();
   await ensureTodoStore();
+  await ensureWorkItemStore();
+  await ensureScheduledWorkStore();
+  await ensureDailyAgentQualityStore();
   await ensureSkillStore();
   await ensureRuleStore();
   await ensureSessionStore();
@@ -60,9 +70,11 @@ export async function ensureAllStores(): Promise<void> {
   await ensureNodeCommandStore();
   await ensureMCPServerStore();
   await ensureRunEvalStore();
+  await ensureExecutionExperimentStore();
   await ensureExternalToolSummaryStore();
   await ensureProviderCompatEvidenceStore();
   await ensureProviderPromotionDecisionStore();
+  await ensureProviderAccountStore();
   await ensureCancellationStore();
   await ensureExecutionStore();
   await ensureStaticGraphBaselineStore();

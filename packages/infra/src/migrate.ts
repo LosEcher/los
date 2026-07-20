@@ -15,8 +15,10 @@
  *
  * Files are sorted lexicographically by filename (which matches seq ordering
  * when using zero-padded numeric prefixes). Each file is executed in a
- * transaction. Applied migrations are recorded in schema_migrations; files
- * with the same seq are skipped on subsequent runs.
+ * Applied migrations are recorded in schema_migrations; files with the same
+ * seq are skipped on subsequent runs. Runtime ensure*Store functions remain a
+ * compatibility bootstrap and are checked against migrations by the drift
+ * gate; they are not replaced by this runner.
  */
 
 import type { DbConnection } from './db.js';

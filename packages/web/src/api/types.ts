@@ -3,8 +3,12 @@ export * from './types-executor-nodes.js';
 export * from './types-sessions.js';
 export * from './types-mcp.js';
 export * from './types-agent-task-graph.js';
+export * from './types-work-items.js';
+export * from './types-scheduled-work.js';
+export * from './types-daily-agent-quality.js';
 import type { ToolRetry, MCPServerPayload } from './types-mcp.js';
 import type { ToolMode } from './types-sessions.js';
+import type { TodoPriority, TodoStatus } from './types-work-items.js';
 
 export type TaskRun = {
   id: string;
@@ -55,8 +59,6 @@ export type SshConfigImportResponse = {
 };
 
 export type TodoKind = 'problem' | 'solution' | 'plan' | 'phase' | 'task' | 'batch';
-export type TodoStatus = 'backlog' | 'ready' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
-export type TodoPriority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export type TodoItem = {
   id: string;
@@ -141,6 +143,14 @@ export type ProviderDiscoveryProvider = Record<string, unknown> & {
   model?: string;
   hasApiKey?: boolean;
   readiness?: ProviderReadiness;
+  compatEvidence?: {
+    count?: number;
+    latestVerdict?: string | null;
+    latestDecision?: string | null;
+    latestPassed?: boolean | null;
+    latest?: Record<string, unknown> | null;
+  };
+  compatibilityEvidence?: Array<Record<string, unknown>>;
 };
 
 export type ProviderDiscovery = {
@@ -172,6 +182,34 @@ export type ProviderModelsResponse = {
   providers?: ProviderModelRoute[];
   models?: ProviderModelRecord[];
 };
+
+export type ProviderAccountSummary = {
+  id: string;
+  provider: string;
+  authMode: 'oauth' | 'api_key' | 'external_ref' | 'adapter';
+  displayLabel: string;
+  state: 'active' | 'disabled' | 'auth_failed' | 'unavailable';
+  credentialGeneration: number;
+  secretScope: 'local_node' | 'named_node' | 'external_backend';
+  nodeId?: string;
+  verifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GrokAccountCandidate = {
+  candidateId: 'xai-grok-default';
+  provider: 'xai';
+  runtimeKind: 'grok';
+  available: boolean;
+  cliInstalled: boolean;
+  authMode: 'oidc' | 'external' | 'api_key' | 'legacy' | 'unknown' | null;
+  sourceKind: 'inline_env' | 'explicit_path' | 'grok_home' | 'default_home';
+  reason: string | null;
+};
+
+export type ProviderAccountsResponse = { accounts: ProviderAccountSummary[] };
+export type ProviderAccountDiscoveryResponse = { grok: GrokAccountCandidate };
 
 export type LogFile = {
   name: string;
@@ -306,7 +344,7 @@ export type StreamEvent = {
 
 // ── Runtime kinds ────────────────────────────────────
 
-export type RuntimeKind = 'claude-code' | 'codex';
+export type RuntimeKind = 'claude-code' | 'codex' | 'grok';
 
 export type RuntimePayload = {
   kind: RuntimeKind;

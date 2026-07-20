@@ -1,7 +1,7 @@
-// Generated from los.run-stream@0.2.0 by tools/contract-codegen.ts. Do not edit.
+// Generated from los.run-stream@0.3.0 by tools/contract-codegen.ts. Do not edit.
 
 export const RUN_STREAM_CONTRACT = "los.run-stream";
-export const RUN_STREAM_VERSION = "0.2.0";
+export const RUN_STREAM_VERSION = "0.3.0";
 export const RUN_STREAM_EVENT_TYPES = [
   "session",
   "session.resumed",
@@ -12,6 +12,7 @@ export const RUN_STREAM_EVENT_TYPES = [
   "session.blocked",
   "operator.steering",
   "operator.followup",
+  "operator.control.consumed",
   "coordinator.intake_resolved",
   "coordinator.intake_blocked",
   "coordinator.context_policy_selected",
@@ -28,6 +29,8 @@ export const RUN_STREAM_EVENT_TYPES = [
   "task.recovery_followup_queued",
   "model.delta",
   "model.response",
+  "provider.fallback.selected",
+  "provider.fallback.exhausted",
   "tool.planned",
   "tool.approved",
   "tool.denied",

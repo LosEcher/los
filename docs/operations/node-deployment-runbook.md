@@ -90,7 +90,11 @@ artifact. The sync must include all workspace manifests covered by
 2. Stop through the owning service manager. For an unmanaged process, verify
    its ancestry, process group, cwd, listener, and operator intent first.
 3. Enable and start `los-executor.service` as user `los`.
-4. Run `verify`; it reads the configured remote port and retries startup health.
+4. Run `verify`; it reads the configured remote port, waits up to 90 seconds
+   for a transitional systemd state such as `deactivating` to become `active`,
+   then retries startup health. Set `LOS_DEPLOY_VERIFY_GRACE_SECONDS` only when
+   a node's measured stop time justifies a different bounded observation window.
+   This grace period does not suppress `failed` states or health/version errors.
 5. Verify all of the following independently:
 
    ```text

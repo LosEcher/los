@@ -113,6 +113,14 @@ ex_port() { printf '%s' "${EXECUTOR_PORT:-$(read_env_value EXECUTOR_PORT || prin
 ex_url()  { printf 'http://%s:%s' "$(ex_host)" "$(ex_port)"; }
 ex_node_id() { printf '%s' "${EXECUTOR_NODE_ID:-$(read_env_value EXECUTOR_NODE_ID || hostname -s 2>/dev/null || hostname)}"; }
 ex_node_id_arg() { printf '%s' "$(ex_node_id)"; }
+ex_stop_timeout_seconds() {
+  local grace_ms
+  grace_ms="${EXECUTOR_SHUTDOWN_GRACE_MS:-$(read_env_value EXECUTOR_SHUTDOWN_GRACE_MS || printf '120000')}"
+  case "$grace_ms" in
+    ''|*[!0-9]*) grace_ms=120000 ;;
+  esac
+  printf '%s' "$(((grace_ms + 999) / 1000 + 35))"
+}
 
 is_executor_enabled() {
   local val
@@ -153,6 +161,11 @@ start_executor_process() {
     start_daemon_nohup "$command" "$EX_LOG_FILE" "$ROOT"
   fi
 }
+
+# Channel helpers are kept separate so gateway/executor process management
+# remains readable while all local services still share one operator entrypoint.
+# shellcheck source=tools/los-channels.sh
+. "$ROOT/tools/los-channels.sh"
 
 # ── Agent key check ──────────────────────────────────────
 
@@ -313,7 +326,7 @@ start_executor() {
 stop_executor() {
   stop_process \
     "executor" "$EX_PID_FILE" "$(ex_port)" "$(ex_host)" "$(ex_url)" \
-    "$EX_SRC" "$EX_DIST" "$EX_MAINT_FILTER" "$(ex_node_id_arg)" "$EX_LAUNCH_PREFIX" "1"
+    "$EX_SRC" "$EX_DIST" "$EX_MAINT_FILTER" "$(ex_node_id_arg)" "$EX_LAUNCH_PREFIX" "1" "$(ex_stop_timeout_seconds)"
 }
 
 executor_status() {
@@ -358,6 +371,7 @@ executor_status() {
 # ── Unified commands ─────────────────────────────────────
 
 unified_status() {
+  local channel_status_code=0
   echo "los status"
   echo "  version: $LOS_VERSION"
   if is_executor_enabled; then
@@ -374,6 +388,9 @@ unified_status() {
     echo "  ── executor ──"
     echo "  disabled"
   fi
+  echo ""
+  channels_status || channel_status_code=$?
+  return "$channel_status_code"
 }
 
 unified_start() {
@@ -392,9 +409,20 @@ unified_start() {
 
   echo "==> starting gateway"
   start_gateway
+
+  echo ""
+  echo "==> starting channels"
+  if ! start_channels; then
+    echo "ERROR: one or more required channels failed; gateway remains healthy" >&2
+    return 1
+  fi
 }
 
 unified_stop() {
+  echo "==> stopping channels"
+  stop_channels || true
+
+  echo ""
   echo "==> stopping gateway"
   stop_gateway || true
 
@@ -495,6 +523,15 @@ doctor_cmd() {
   fi
 }
 
+setup_cmd() {
+  echo "los setup"
+  doctor_cmd
+  echo ""
+  unified_start
+  echo ""
+  "$ROOT/bin/los" setup --gateway "$(gw_url)"
+}
+
 # ── Help ─────────────────────────────────────────────────
 
 show_help() {
@@ -502,13 +539,20 @@ show_help() {
 los process helper
 
 Unified commands:
+  setup         Check prerequisites, start idempotently, and report readiness
   build-version Print the deterministic deployable-content version
-  start         Start executor (if EXECUTOR_ENABLED=true), then gateway
-  stop          Stop gateway first, then executor
+  start         Start executor, gateway, then enabled channels
+  stop          Stop channels, gateway, then executor
   restart       Stop both, then start both
   status        Show gateway and executor health
   doctor        Check runtime prerequisites and config/db access
   help          Show this help
+
+Channel-only:
+  start-channels   Start channels whose mode is optional or required
+  stop-channels    Stop managed channel processes
+  restart-channels Stop, then start enabled channels
+  status-channels  Show WeChat and Telegram process/readiness separately
 
 Executor-only (when EXECUTOR_ENABLED=true):
   start-executor   Start only the executor
@@ -539,6 +583,7 @@ case "${1:-help}" in
   stop)               unified_stop ;;
   restart)            unified_restart ;;
   doctor)             doctor_cmd ;;
+  setup)              setup_cmd ;;
 
   # Gateway-only
   start-gateway)      start_gateway ;;
@@ -551,6 +596,12 @@ case "${1:-help}" in
   status-executor)    executor_status && echo "" && executor_maint_status ;;
   drain-executor)     drain_executor "${2:-}" ;;
   promote-executor)   promote_executor ;;
+
+  # Channel-only
+  start-channels)     start_channels ;;
+  stop-channels)      stop_channels ;;
+  restart-channels)   stop_channels || true; start_channels ;;
+  status-channels)    channels_status ;;
 
   *)
     echo "unknown command: $1"

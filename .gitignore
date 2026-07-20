@@ -11,6 +11,8 @@ dist/
 .turbo/
 .reasonix/
 .los-runtime/
+packages/*/playwright-report/
+packages/*/test-results/
 
 # Runtime session streams (per-package and root). Keep .los/spec/ and .los/identity/ tracked.
 .los/streams/

@@ -10,6 +10,7 @@ import { getDb } from '@los/infra/db';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import { getLogger } from '@los/infra/logger';
+import { contentVersionHash } from './distribution-version.js';
 
 const log = getLogger('skills');
 
@@ -27,6 +28,7 @@ export interface SkillRecord {
   runMode: SkillRunMode;
   sourcePath: string;
   versionHash: string;
+  pinnedVersionHash?: string;
   usageCount: number;
   lastUsed?: string;
   enabled: boolean;
@@ -44,6 +46,8 @@ export interface UpsertSkillInput {
   runMode?: SkillRunMode;
   sourcePath?: string;
   versionHash?: string;
+  pinnedVersionHash?: string | null;
+  allowPinnedUpdate?: boolean;
   enabled?: boolean;
   content?: string;
   tags?: string[];
@@ -58,6 +62,7 @@ interface SkillRow {
   run_mode: string;
   source_path: string;
   version_hash: string;
+  pinned_version_hash: string | null;
   usage_count: number;
   last_used: string | null;
   enabled: boolean;
@@ -79,6 +84,7 @@ CREATE TABLE IF NOT EXISTS skills (
   run_mode TEXT NOT NULL DEFAULT 'manual',
   source_path TEXT NOT NULL DEFAULT '',
   version_hash TEXT NOT NULL DEFAULT '',
+  pinned_version_hash TEXT,
   usage_count INTEGER NOT NULL DEFAULT 0,
   last_used TIMESTAMPTZ,
   enabled BOOLEAN NOT NULL DEFAULT true,
@@ -89,6 +95,7 @@ CREATE TABLE IF NOT EXISTS skills (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE skills ADD COLUMN IF NOT EXISTS id TEXT;
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS pinned_version_hash TEXT;
 UPDATE skills
 SET metadata_json = metadata_json || '{"scope":"project","skillLayer":"project","archived":false}'::jsonb
 WHERE metadata_json->>'scope' IS NULL;
@@ -122,6 +129,15 @@ CREATE INDEX IF NOT EXISTS idx_skills_scope ON skills ((metadata_json->>'scope')
 CREATE INDEX IF NOT EXISTS idx_skills_layer ON skills ((metadata_json->>'skillLayer'));
 CREATE INDEX IF NOT EXISTS idx_skills_archived ON skills ((metadata_json->>'archived'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_scope_name_unique ON skills ((coalesce(metadata_json->>'scope', 'project')), name);
+CREATE TABLE IF NOT EXISTS skill_versions (
+  skill_id TEXT NOT NULL,
+  version_hash TEXT NOT NULL,
+  source_path TEXT NOT NULL DEFAULT '',
+  snapshot_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (skill_id, version_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_created ON skill_versions(skill_id, created_at DESC);
 `;
 
 let _initialized = false;
@@ -141,15 +157,39 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<SkillRecord>
   const db = getDb();
   const metadata = normalizeSkillMetadata(input.metadata);
   const id = scopedId(input.name, String(metadata.scope));
+  const existingRows = await db.query<SkillRow>('SELECT * FROM skills WHERE id = $1', [id]);
+  const existing = existingRows.rows[0];
+  const sourcePath = input.sourcePath ?? '';
+  const content = input.content ?? '';
+  const versionHash = skillVersionHash({
+    name: input.name,
+    category: input.category ?? 'general',
+    description: input.description ?? '',
+    runMode: input.runMode ?? 'manual',
+    sourcePath,
+    content,
+    tags: input.tags ?? [],
+    metadata,
+  });
+  if (input.versionHash && input.versionHash !== versionHash) {
+    throw new Error('Skill versionHash must match the content-derived version');
+  }
+  if (existing?.pinned_version_hash && existing.pinned_version_hash !== versionHash && input.allowPinnedUpdate !== true) {
+    throw new Error(`Skill is pinned to version ${existing.pinned_version_hash}`);
+  }
   const rows = await db.query<SkillRow>(
-    `INSERT INTO skills (id, name, category, description, run_mode, source_path, version_hash, enabled, content, tags_json, metadata_json, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, now())
+    `INSERT INTO skills (id, name, category, description, run_mode, source_path, version_hash, pinned_version_hash, enabled, content, tags_json, metadata_json, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, now())
      ON CONFLICT (id) DO UPDATE SET
        category = EXCLUDED.category,
        description = EXCLUDED.description,
        run_mode = EXCLUDED.run_mode,
        source_path = EXCLUDED.source_path,
        version_hash = EXCLUDED.version_hash,
+       pinned_version_hash = CASE
+         WHEN $8::text IS NULL THEN skills.pinned_version_hash
+         ELSE EXCLUDED.pinned_version_hash
+       END,
        enabled = EXCLUDED.enabled,
        content = EXCLUDED.content,
        tags_json = EXCLUDED.tags_json,
@@ -162,15 +202,23 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<SkillRecord>
       input.category ?? 'general',
       input.description ?? '',
       input.runMode ?? 'manual',
-      input.sourcePath ?? '',
-      input.versionHash ?? '',
+      sourcePath,
+      versionHash,
+      input.pinnedVersionHash ?? null,
       input.enabled ?? true,
-      input.content ?? '',
+      content,
       JSON.stringify(input.tags ?? []),
       JSON.stringify(metadata),
     ],
   );
-  return rowToRecord(assertRow(rows.rows[0]));
+  const record = rowToRecord(assertRow(rows.rows[0]));
+  await db.query(
+    `INSERT INTO skill_versions (skill_id, version_hash, source_path, snapshot_json)
+     VALUES ($1, $2, $3, $4::jsonb)
+     ON CONFLICT (skill_id, version_hash) DO NOTHING`,
+    [record.id, record.versionHash, record.sourcePath, JSON.stringify(skillSnapshot(record))],
+  );
+  return record;
 }
 
 export async function loadSkill(name: string, scope?: SkillScope): Promise<SkillRecord | null> {
@@ -311,6 +359,7 @@ export function loadSkillsFromDir(
     if (parsed) {
       results.push({
         ...parsed,
+        sourcePath: path,
         metadata: normalizeSkillMetadata({
           ...parsed.metadata,
           scope,
@@ -368,6 +417,7 @@ function rowToRecord(row: SkillRow): SkillRecord {
     runMode: row.run_mode as SkillRunMode,
     sourcePath: row.source_path,
     versionHash: row.version_hash,
+    pinnedVersionHash: row.pinned_version_hash ?? undefined,
     usageCount: row.usage_count,
     lastUsed: row.last_used ?? undefined,
     enabled: row.enabled,
@@ -376,6 +426,34 @@ function rowToRecord(row: SkillRow): SkillRecord {
     metadata: normalizeJsonObject(row.metadata_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function skillVersionHash(input: Pick<UpsertSkillInput, 'name' | 'category' | 'description' | 'runMode' | 'sourcePath' | 'content' | 'tags' | 'metadata'>): string {
+  return contentVersionHash({
+    name: input.name,
+    category: input.category ?? 'general',
+    description: input.description ?? '',
+    runMode: input.runMode ?? 'manual',
+    sourcePath: input.sourcePath ?? '',
+    content: input.content ?? '',
+    tags: [...(input.tags ?? [])].sort(),
+    metadata: input.metadata ?? {},
+  });
+}
+
+function skillSnapshot(record: SkillRecord): Record<string, unknown> {
+  return {
+    name: record.name,
+    category: record.category,
+    description: record.description,
+    runMode: record.runMode,
+    sourcePath: record.sourcePath,
+    versionHash: record.versionHash,
+    enabled: record.enabled,
+    content: record.content,
+    tags: record.tags,
+    metadata: record.metadata,
   };
 }
 

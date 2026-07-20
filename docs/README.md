@@ -54,6 +54,19 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0025-conversation-run-coordinator-boundary.md` - boundary between interactive
   coordination, persisted run state, bounded workers, GA governance jobs, and
   operator-gated memory.
+- `0030-provider-account-credential-and-quota-boundary.md` - provider account
+  identity, credential refresh safety, quota snapshots, explicit selection,
+  and effective-call provenance.
+- `0031-programmatic-agent-interface-over-mcp.md` - supported stdio MCP client
+  adapter over the existing run, replay, and operator-control contracts.
+- `0032-managed-jj-workspace-operations.md` - operator-gated jj workspace
+  allocation and artifact-backed cleanup evidence for graph tasks.
+- `0033-web-first-work-item-read-model.md` - Work Item fact-source, run-lineage,
+  Inbox projection, and Web-first API ownership boundaries.
+- `0034-user-scheduled-work-state-and-claim-policy.md` - user schedule ownership,
+  trigger presets, atomic claim, lease recovery, approval, and circuit policy.
+- `0037-daily-agent-quality-snapshots.md` - project-scoped daily quality
+  snapshots, UTC idempotency, separated metrics, and 28-day evidence rules.
 
 ### Operation Smokes
 
@@ -68,6 +81,15 @@ Use `docs/operations/` for dated runtime evidence. A smoke should record:
 Use `operations/node-deployment-runbook.md` for executor bootstrap, rollout,
 rollback, and offline-node reactivation. Keep dated node evidence in a separate
 operation smoke.
+
+Use `operations/database-migrations.md` for migration ownership, startup
+application behavior, drift validation, and failure handling. Use
+`operations/github-mirror-recovery.md` when the secondary GitHub `main` has
+diverged from Forgejo and requires an explicitly approved lease-protected repair.
+
+Use `operations/programmatic-agent-interface.md` for external agent access and
+`operations/managed-workspaces.md` for operator-gated jj workspace allocation,
+backup evidence, and release.
 
 ### Governance
 
@@ -92,6 +114,19 @@ a future ADR.
 Use `governance/hermes-web-ui-reference-plan.md` when comparing Hermes Web UI
 patterns against `los` and deciding which UX, run-state, node-pairing,
 provider-evidence, or harness ideas should become local work items.
+
+Use `governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
+for the verified LOS capability map, concrete CLI/Web/MCP/channel/workspace
+operator paths, and the current boundary against pi and Hermes Agent.
+
+Use `governance/2026-07-19-web-first-daily-agent-workflow-design.md` for the
+Web-first daily workflow, Work Item and Inbox model, user schedule ownership,
+and the adaptation boundaries for CanTool and lot2extension.
+
+The daily Web operator path starts at `Inbox`, continues through `Work`, and
+uses `Schedules` for daily/weekly/interval/once read-only work. Schedule writes
+require operator credentials; next-occurrence preview, definition reads, and
+run history remain separate from task-run and verification success evidence.
 
 Use `governance/github-branch-gates.md` when pushing, opening PRs, merging to
 `main`, checking GitHub Actions gate requirements, or separating local gate

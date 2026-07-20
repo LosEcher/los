@@ -11,6 +11,14 @@ import {
   type SkillRunMode,
   type SkillScope,
 } from '@los/agent/skills';
+import {
+  applyInspectedSkills,
+  inspectSkillDirectory,
+  listSkillVersions,
+  pinSkillVersion,
+  rollbackSkillVersion,
+  unpinSkillVersion,
+} from '@los/agent/skill-distribution';
 
 export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?: string) {
   app.get('/skills', async (req) => {
@@ -93,6 +101,43 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     return { ok: true };
   });
 
+  app.get('/skills/:name/history', async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const query = req.query as { scope?: string };
+    const scope = normalizeScope(query.scope);
+    if (!scope) return reply.status(400).send({ error: 'scope is required' });
+    const skill = await loadSkill(name, scope);
+    if (!skill) return reply.status(404).send({ error: 'Skill not found' });
+    return { currentVersionHash: skill.versionHash, pinnedVersionHash: skill.pinnedVersionHash, versions: await listSkillVersions(name, scope) };
+  });
+
+  app.post('/skills/:name/pin', async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const body = req.body as { scope?: string; versionHash?: string; pinned?: boolean };
+    const scope = normalizeScope(body.scope);
+    if (!scope) return reply.status(400).send({ error: 'scope is required' });
+    try {
+      return body.pinned === false
+        ? await unpinSkillVersion(name, scope)
+        : await pinSkillVersion(name, scope, normalizeOptionalString(body.versionHash));
+    } catch (error) {
+      return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
+    }
+  });
+
+  app.post('/skills/:name/rollback', async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const body = req.body as { scope?: string; versionHash?: string };
+    const scope = normalizeScope(body.scope);
+    const versionHash = normalizeOptionalString(body.versionHash);
+    if (!scope || !versionHash) return reply.status(400).send({ error: 'scope and versionHash are required' });
+    try {
+      return await rollbackSkillVersion(name, scope, versionHash);
+    } catch (error) {
+      return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
+    }
+  });
+
   // ── File Sync ──────────────────────────────────────────
 
   app.post('/skills/sync-to-dir', async (req) => {
@@ -107,27 +152,48 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     return { ok: true, count: skills.length, scope, skillLayer };
   });
 
-  app.post('/skills/load-from-dir', async (req, reply) => {
+  app.post('/skills/import/inspect', async (req) => {
     const body = req.body as { scope?: string; skillLayer?: string; workspaceRoot?: string };
     const layer = normalizeSkillLayer(body.skillLayer);
     const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
     const skillLayer = layer ?? defaultSkillLayer(scope);
     const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
-    const loaded = loadSkillsFromDir(scope, workspaceRoot, skillLayer);
     await ensureSkillStore();
-    const upserted = [];
-    for (const item of loaded) {
-      upserted.push(await upsertSkill({
-        name: item.name,
-        category: item.category,
-        description: item.description,
-        runMode: item.runMode,
-        content: item.content,
-        metadata: item.metadata,
-        enabled: item.enabled,
-      }));
+    const skills = await inspectSkillDirectory(scope, workspaceRoot, skillLayer);
+    return { ok: true, count: skills.length, scope, skillLayer, skills };
+  });
+
+  app.post('/skills/import/apply', async (req, reply) => {
+    const body = req.body as {
+      scope?: string;
+      skillLayer?: string;
+      workspaceRoot?: string;
+      expected?: Array<{ name?: string; versionHash?: string }>;
+    };
+    const layer = normalizeSkillLayer(body.skillLayer);
+    const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
+    const skillLayer = layer ?? defaultSkillLayer(scope);
+    const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
+    const expected = (body.expected ?? [])
+      .map(item => ({ name: normalizeOptionalString(item.name), versionHash: normalizeOptionalString(item.versionHash) }))
+      .filter((item): item is { name: string; versionHash: string } => Boolean(item.name && item.versionHash));
+    if (expected.length === 0) return reply.status(400).send({ error: 'expected inspected name/version pairs are required' });
+    try {
+      const skills = await applyInspectedSkills({ scope, workspaceRoot, layer: skillLayer, expected });
+      return reply.status(201).send({ ok: true, count: skills.length, scope, skillLayer, skills });
+    } catch (error) {
+      return reply.status(409).send({ error: messageOf(error) });
     }
-    return reply.status(201).send({ ok: true, count: upserted.length, scope, skillLayer, skills: upserted });
+  });
+
+  app.post('/skills/load-from-dir', async (req) => {
+    const body = req.body as { scope?: string; skillLayer?: string; workspaceRoot?: string };
+    const layer = normalizeSkillLayer(body.skillLayer);
+    const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
+    const skillLayer = layer ?? defaultSkillLayer(scope);
+    const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
+    const skills = await inspectSkillDirectory(scope, workspaceRoot, skillLayer);
+    return { ok: true, previewOnly: true, count: skills.length, scope, skillLayer, skills };
   });
 }
 
@@ -158,4 +224,8 @@ function defaultSkillLayer(scope: SkillScope): SkillLayer {
 
 function isSafeRegistryName(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value) && value !== '.' && value !== '..';
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

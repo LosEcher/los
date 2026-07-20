@@ -2,6 +2,7 @@ export function printHelp(defaultGateway: string): void {
   console.log(`los client
 
 Usage:
+  los setup [--gateway URL] [--json]
   los chat [options] <prompt>
   los run [options] <prompt>
   los run <inspect|state|recover|verify|approve|revise-plan|replay> <run-id> [options]
@@ -12,17 +13,29 @@ Usage:
   los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
   los nodes <list|commands|command> [options]
+  los workspaces <plan|apply|list|inspect|backup|release> [options]
   los sessions [--gateway URL] [--json]
   los tasks [--gateway URL] [--json]
   los health [--gateway URL] [--json]
+  los mcp serve [--gateway URL]
 
 Global:
   --gateway, -g URL       Gateway URL, default ${defaultGateway}
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
+  --operator-token TOKEN  Operator token for gated writes, default LOS_OPERATOR_TOKEN
   --json                  Emit JSON lines or raw JSON
+
+Setup:
+  Inspect runtime readiness without printing credentials. From a source
+  checkout, run "pnpm run setup" to check prerequisites and start los first.
 
 Chat:
   --provider, -p NAME     Provider endpoint, e.g. deepseek or openai
   --model NAME            Model override for the selected provider
+  --fallback-target LIST  Ordered provider:model targets, comma-separated
+  --fallback-on LIST      transport, rate_limit, provider_unavailable
+  --fallback-max-switches N  Maximum provider switches, 1-4
+  --fallback-without-compat-evidence  Disable the default evidence gate
   --workspace, -w PATH    Workspace root for tools
   --tool-mode MODE        read-only, project-write, or all
   --session, -s ID        Continue writing to a session
@@ -71,6 +84,18 @@ Governance:
 Nodes:
   list | commands | command
   Run "los nodes --help" for node registry and command options.
+
+Workspaces:
+  plan | apply | list | inspect | backup | release
+  Managed jj workspace writes require LOS_OPERATOR_TOKEN. Release requires an
+  exact --confirm value and creates an artifact-backed diff first.
+
+MCP:
+  serve                  Expose LOS run/state/replay/operator tools over stdio
+  LOS_MCP_TENANT_ID      Request tenant, default local
+  LOS_MCP_USER_ID        Request user, default mcp-client
+  Project id is required on every MCP tool call. Runs default to read-only;
+  project-write and operator control require LOS_OPERATOR_TOKEN.
 `);
 }
 
@@ -81,6 +106,7 @@ Examples:
   los chat --provider deepseek --workspace . "inspect this repo"
   los chat --provider deepseek --model deepseek-v4-flash "inspect this repo"
   los chat --provider openai --tool-mode all "run tests and summarize failures"
+  los chat --fallback-target deepseek:deepseek-v4-flash,xai:grok-4.3 "inspect this repo"
   los chat --resume session-123 "continue with the next fix"
   echo "review current structure" | los chat --provider deepseek
 `);

@@ -28,7 +28,6 @@ import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIResponsesProvider } from './responses.js';
 import { recordProviderCall } from './telemetry.js';
 import { incrementRepairCounter } from './repair-telemetry.js';
-import { getXaiOAuthCredentialSync, XaiOAuthError } from '../auth/xai-oauth.js';
 
 // Proxy support — when HTTPS_PROXY or HTTP_PROXY is set, route all outbound
 // provider calls through the proxy. Required for api.x.ai on machines where
@@ -104,26 +103,13 @@ export function getProviderConfig(name: string) {
     throw new Error(`Provider '${name}' not configured. Set ${name.toUpperCase()}_API_KEY or add to ~/.los/accounts/`);
   }
 
-  // OAuth credential resolution (xAI Grok SuperGrok / Premium+ subscription).
-  // Access tokens are refreshed preemptively during login and at runtime when
-  // getXaiOAuthCredentialSync() detects they're within the 1-hour skew window.
-  // If the token has expired past the skew window, refresh is attempted via
-  // resolveXaiOAuthCredential() (this throws a clear error on failure).
-  if (!p.apiKey && (p as Record<string, unknown>).authMode === 'oauth') {
-    try {
-      const cred = getXaiOAuthCredentialSync();
-      return { ...p, apiKey: cred.apiKey, baseUrl: cred.baseUrl ?? p.baseUrl };
-    } catch (err) {
-      if (err instanceof XaiOAuthError) {
-        throw new Error(
-          `xAI OAuth: ${err.message} (code: ${err.code})`,
-        );
-      }
-      throw err;
-    }
-  }
-
   if (!p.apiKey) {
+    // OAuth credentials are resolved lazily by the async transport immediately
+    // before each request, so single-use refresh tokens can be rotated safely.
+    if ((p as Record<string, unknown>).authMode === 'oauth') {
+      if (name === 'xai') return p;
+      throw new Error(`Provider '${name}' has no supported OAuth credential resolver.`);
+    }
     throw new Error(`Provider '${name}' has no API key.`);
   }
   return p;
@@ -135,15 +121,22 @@ export function getProviderConfig(name: string) {
 
 interface OpenAIConfig {
   name: string;
-  apiKey: string;
+  apiKey?: string;
   profile: ModelProfile;
   traceId?: string;
+  credentialResolver?: () => Promise<{ apiKey: string; baseUrl: string }>;
 }
 
 export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
   initGlobalProxy();
   const { name, apiKey, profile, traceId } = cfg;
-  const { baseUrl, model } = profile;
+  const { baseUrl: configuredBaseUrl, model } = profile;
+
+  const resolveCredential = async (): Promise<{ apiKey: string; baseUrl: string }> => {
+    if (cfg.credentialResolver) return cfg.credentialResolver();
+    if (!apiKey) throw new Error(`Provider '${name}' has no API credential.`);
+    return { apiKey, baseUrl: configuredBaseUrl };
+  };
 
   return {
     name,
@@ -168,7 +161,8 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         }
       }
 
-      const chatUrl = buildOpenAICompatUrl(baseUrl, '/chat/completions');
+      const credential = await resolveCredential();
+      const chatUrl = buildOpenAICompatUrl(credential.baseUrl, '/chat/completions');
       const bodyStr = JSON.stringify(body);
       const fetchStart = Date.now();
 
@@ -178,7 +172,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${credential.apiKey}`,
           },
           body: bodyStr,
           signal: options.signal,
@@ -268,7 +262,8 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
     },
 
     async listModels(options: { signal?: AbortSignal } = {}): Promise<ProviderModelInfo[]> {
-      const modelsUrl = buildOpenAICompatUrl(baseUrl, '/models');
+      const credential = await resolveCredential();
+      const modelsUrl = buildOpenAICompatUrl(credential.baseUrl, '/models');
       const fetchStart = Date.now();
 
       let res: Response;
@@ -277,7 +272,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${credential.apiKey}`,
           },
           signal: options.signal,
         });

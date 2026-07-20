@@ -11,6 +11,7 @@ import {
   type CompatibilitySseEvent,
 } from '@los/agent/compat-harness';
 import { recordProviderCompatEvidenceFromSummaryWithDefaultDb } from '@los/agent';
+import { fetchCliResponse, resolveCliRequestAuth } from './cli-http.js';
 import { resolveClientPath } from './client-path.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -104,12 +105,10 @@ async function executeCompatibilitySpec(
   };
   removeUndefined(payload);
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = authToken(parsed);
-  if (token) headers['x-los-auth-token'] = token;
-  const response = await fetch(`${gateway}/chat`, {
+  const response = await fetchCliResponse(`${gateway}/chat`, {
     method: 'POST',
-    headers,
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(payload),
   });
   if (!response.ok || !response.body) {
@@ -131,10 +130,9 @@ async function executeCompatibilitySpec(
 }
 
 async function fetchSessionEvents(gateway: string, sessionId: string, parsed: ParsedArgs): Promise<CompatibilitySseEvent[]> {
-  const headers: Record<string, string> = {};
-  const token = authToken(parsed);
-  if (token) headers['x-los-auth-token'] = token;
-  const response = await fetch(`${gateway}/sessions/${encodeURIComponent(sessionId)}/events?limit=1000`, { headers });
+  const response = await fetchCliResponse(`${gateway}/sessions/${encodeURIComponent(sessionId)}/events?limit=1000`, {
+    auth: resolveCliRequestAuth(parsed.flags),
+  });
   if (!response.ok) return [];
 
   const body = await response.json() as unknown;
@@ -221,6 +219,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const aliases: Record<string, string> = {
     g: 'gateway',
     h: 'help',
+    t: 'auth-token',
     w: 'workspace',
   };
   const booleanFlags = new Set(['help', 'h', 'json', 'execute']);
@@ -344,10 +343,6 @@ function removeUndefined(value: JsonRecord): void {
   }
 }
 
-function authToken(p: ParsedArgs): string | undefined {
-  return stringFlag(p, 'auth-token') ?? stringFlag(p, 't') ?? process.env.LOS_AUTH_TOKEN;
-}
-
 function indent(value: string): string {
   return value.split('\n').map(line => `  ${line}`).join('\n');
 }
@@ -371,6 +366,7 @@ Execute probes through the gateway:
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
   --target NAME[:MODEL]   Provider/model target
   --probe ID              read-context or patch-preview
   --workspace, -w PATH    Workspace root for tools

@@ -8,9 +8,16 @@
  * memory, databases, Composio, etc.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { delimiter, dirname } from 'node:path';
 import { getLogger } from '@los/infra/logger';
+import type { MCPToolPolicy } from '../../mcp-distribution-policy.js';
+import type {
+  MCPAdapterConfig,
+  MCPDiscoveredTool,
+} from '../../cantool-capability-adapter.js';
+import {
+  MCPStdioTransport,
+  type JSONRPCMessage,
+} from './mcp-stdio-transport.js';
 
 const log = getLogger('agent');
 
@@ -20,27 +27,21 @@ export interface MCPServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  serverId?: string;
+  toolPolicy?: MCPToolPolicy;
+  adapterConfig?: MCPAdapterConfig;
 }
 
-export interface MCPToolDef {
-  name: string;
-  description?: string;
-  inputSchema: {
-    type: 'object';
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
+export interface MCPToolDef extends MCPDiscoveredTool {}
+
+export interface MCPServerIdentity {
+  name?: string;
+  version?: string;
+  protocolVersion?: string;
 }
 
-// ── Internal JSON-RPC Types ─────────────────────────────
-
-interface JSONRPCMessage {
-  jsonrpc: '2.0';
-  id?: number | string;
-  method?: string;
-  params?: Record<string, unknown>;
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
+export interface MCPCallOptions {
+  signal?: AbortSignal;
 }
 
 interface MCPToolCallResult {
@@ -52,121 +53,6 @@ interface MCPToolCallResult {
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const REQUEST_TIMEOUT_MS = 60_000;
-const STARTUP_GRACE_MS = 300;
-
-// ── Stdio Transport ─────────────────────────────────────
-
-class MCPStdioTransport {
-  private proc: ChildProcess | null = null;
-  private handlers: Array<(msg: JSONRPCMessage) => void> = [];
-  private buffer = '';
-  private closed = false;
-
-  constructor(
-    private command: string,
-    private args: string[],
-    private env?: Record<string, string>,
-  ) {}
-
-  async start(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.proc = spawn(this.command, this.args, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: buildMCPProcessEnv(this.env),
-      });
-
-      this.proc.stdout!.on('data', (chunk: Buffer) => {
-        if (this.closed) return;
-        this.buffer += chunk.toString('utf-8');
-        const lines = this.buffer.split('\n');
-        this.buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const msg = JSON.parse(trimmed) as JSONRPCMessage;
-            for (const handler of this.handlers) {
-              handler(msg);
-            }
-          } catch {
-            // Non-JSON lines from MCP servers are typically logs; safe to skip
-            log.debug(`MCP [${this.command}] non-JSON: ${trimmed.slice(0, 120)}`);
-          }
-        }
-      });
-
-      this.proc.stderr?.on('data', (data: Buffer) => {
-        log.debug(`MCP stderr [${this.command}]: ${data.toString('utf-8').trim().slice(0, 300)}`);
-      });
-
-      this.proc.on('error', (err) => {
-        if (this.closed) return;
-        reject(new Error(`MCP process error [${this.command}]: ${err.message}`));
-      });
-
-      this.proc.on('exit', (code, signal) => {
-        if (!this.closed) {
-          log.warn(`MCP server [${this.command}] exited code=${code} signal=${signal}`);
-          // Reject all pending handlers
-          for (const handler of this.handlers) {
-            handler({
-              jsonrpc: '2.0',
-              error: { code: -32000, message: `MCP server exited: ${this.command}` },
-            });
-          }
-        }
-      });
-
-      // Grace period for process startup before the handshake
-      setTimeout(() => resolve(), STARTUP_GRACE_MS);
-    });
-  }
-
-  send(msg: JSONRPCMessage): void {
-    if (!this.proc || this.closed) {
-      throw new Error('MCP transport not connected');
-    }
-    this.proc.stdin!.write(JSON.stringify(msg) + '\n');
-  }
-
-  onMessage(handler: (msg: JSONRPCMessage) => void): void {
-    this.handlers.push(handler);
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.handlers = [];
-    if (this.proc) {
-      this.proc.stdin?.end();
-      this.proc.kill('SIGTERM');
-      // Force kill after 2s if still alive
-      setTimeout(() => {
-        if (this.proc && !this.proc.killed) {
-          this.proc.kill('SIGKILL');
-        }
-      }, 2000).unref();
-      this.proc = null;
-    }
-  }
-}
-
-function buildMCPProcessEnv(env?: Record<string, string>): NodeJS.ProcessEnv {
-  const nodeBinDir = dirname(process.execPath);
-  const basePath = process.env.PATH ?? '';
-  const configuredPath = env?.PATH ?? '';
-  const pathEntries = new Set([
-    nodeBinDir,
-    ...configuredPath.split(delimiter).filter(Boolean),
-    ...basePath.split(delimiter).filter(Boolean),
-  ]);
-  return {
-    ...process.env,
-    ...env,
-    PATH: [...pathEntries].join(delimiter),
-  };
-}
-
 // ── MCP Client ──────────────────────────────────────────
 
 export class MCPClient {
@@ -178,6 +64,7 @@ export class MCPClient {
     timer: ReturnType<typeof setTimeout>;
   }>();
   private tools: MCPToolDef[] = [];
+  private serverIdentity: MCPServerIdentity = {};
   private initialized = false;
 
   constructor(private config: MCPServerConfig) {
@@ -199,6 +86,13 @@ export class MCPClient {
       clientInfo: { name: 'los', version: '0.1.0' },
     });
     const serverInfo = (initResult as any)?.serverInfo;
+    this.serverIdentity = {
+      name: typeof serverInfo?.name === 'string' ? serverInfo.name : undefined,
+      version: typeof serverInfo?.version === 'string' ? serverInfo.version : undefined,
+      protocolVersion: typeof (initResult as any)?.protocolVersion === 'string'
+        ? (initResult as any).protocolVersion
+        : undefined,
+    };
     log.info(`MCP connected: ${serverInfo?.name ?? this.config.command} v${serverInfo?.version ?? '?'}`);
 
     // Send initialized notification
@@ -217,14 +111,18 @@ export class MCPClient {
     return this.tools;
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+  getServerIdentity(): MCPServerIdentity {
+    return { ...this.serverIdentity };
+  }
+
+  async callTool(name: string, args: Record<string, unknown>, options: MCPCallOptions = {}): Promise<string> {
     if (!this.initialized) {
       throw new Error(`MCP client not initialized: ${this.config.command}`);
     }
     const result = await this.sendRequest('tools/call', {
       name,
       arguments: args,
-    }) as MCPToolCallResult;
+    }, options) as MCPToolCallResult;
 
     const text = result.content
       .map(c => {
@@ -253,19 +151,40 @@ export class MCPClient {
 
   // ── JSON-RPC helpers ──────────────────────────────────
 
-  private sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    options: MCPCallOptions = {},
+  ): Promise<unknown> {
     const id = ++this.requestId;
+    if (options.signal?.aborted) {
+      return Promise.reject(new Error(`MCP request cancelled: ${method}`));
+    }
     return new Promise((resolve, reject) => {
+      const removeAbortListener = () => options.signal?.removeEventListener('abort', onAbort);
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        removeAbortListener();
         reject(new Error(`MCP request timeout: ${method} (${REQUEST_TIMEOUT_MS}ms)`));
       }, REQUEST_TIMEOUT_MS);
 
+      const onAbort = () => {
+        if (!this.pending.delete(id)) return;
+        clearTimeout(timer);
+        removeAbortListener();
+        this.sendNotification('notifications/cancelled', {
+          requestId: id,
+          reason: 'client_cancelled',
+        });
+        reject(new Error(`MCP request cancelled: ${method}`));
+      };
+
       this.pending.set(id, {
-        resolve: (value) => { clearTimeout(timer); resolve(value); },
-        reject: (err) => { clearTimeout(timer); reject(err); },
+        resolve: (value) => { clearTimeout(timer); removeAbortListener(); resolve(value); },
+        reject: (err) => { clearTimeout(timer); removeAbortListener(); reject(err); },
         timer,
       });
+      options.signal?.addEventListener('abort', onAbort, { once: true });
 
       this.transport.send({ jsonrpc: '2.0', id, method, params });
     });
@@ -304,6 +223,8 @@ export interface MCPServerRegistryRecord {
   args: string[];
   url?: string;
   env: Record<string, string>;
+  toolPolicy?: MCPToolPolicy;
+  adapterConfig?: MCPAdapterConfig;
 }
 
 /**
@@ -316,6 +237,9 @@ export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServ
       command: record.command,
       args: record.args.length > 0 ? record.args : undefined,
       env: Object.keys(record.env).length > 0 ? record.env : undefined,
+      serverId: record.id,
+      toolPolicy: record.toolPolicy,
+      adapterConfig: record.adapterConfig,
     };
   }
   // SSE / streamable-http remote servers are not yet implemented;
@@ -328,27 +252,29 @@ export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServ
 export class MCPToolBridge {
   private clients: MCPClient[] = [];
   private toolToClient = new Map<string, MCPClient>();
+  private clientConfig = new Map<MCPClient, MCPServerConfig>();
 
   async connect(servers: MCPServerConfig[]): Promise<void> {
     const results = await Promise.allSettled(
       servers.map(async (config) => {
         const client = new MCPClient(config);
         await client.connect();
-        return client;
+        return { client, config };
       }),
     );
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
-        this.clients.push(result.value);
-        for (const tool of result.value.getTools()) {
+        this.clients.push(result.value.client);
+        this.clientConfig.set(result.value.client, result.value.config);
+        for (const tool of result.value.client.getTools()) {
           if (this.toolToClient.has(tool.name)) {
             log.warn(
               `MCP tool name conflict: "${tool.name}" already registered from another server; skipping duplicate`,
             );
             continue;
           }
-          this.toolToClient.set(tool.name, result.value);
+          this.toolToClient.set(tool.name, result.value.client);
         }
       } else {
         const reason = result.reason?.message ?? String(result.reason);
@@ -369,9 +295,15 @@ export class MCPToolBridge {
     return this.toolToClient.get(toolName);
   }
 
+  getServerConfig(toolName: string): MCPServerConfig | undefined {
+    const client = this.toolToClient.get(toolName);
+    return client ? this.clientConfig.get(client) : undefined;
+  }
+
   async close(): Promise<void> {
     await Promise.allSettled(this.clients.map(c => c.close()));
     this.clients = [];
     this.toolToClient.clear();
+    this.clientConfig.clear();
   }
 }

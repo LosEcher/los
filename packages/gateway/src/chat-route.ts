@@ -25,6 +25,12 @@ import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 import type { MessageRouter } from '@los/agent/message-router';
 import { validateRunSpecRequest } from '@los/contracts/run-spec';
+import {
+  normalizeProviderFallbackPolicy,
+  resolveProviderFallbackInitialTarget,
+  validateProviderModelRequest,
+  type ProviderFallbackPolicy,
+} from '@los/agent';
 
 const CHAT_BODY_LIMIT_BYTES = 1024 * 1024;
 
@@ -80,6 +86,56 @@ export function registerChatRoute(
     const systemPrompt = normalizeOptionalString(body.systemPrompt);
     const provider = normalizeOptionalString(body.provider);
     const model = normalizeOptionalString(body.model);
+    const providerModelValidation = validateProviderModelRequest({
+      provider,
+      model,
+      defaultProvider: config.agent.defaultProvider,
+      defaultModel: config.agent.defaultModel,
+      configuredProviders: config.providers,
+    });
+    if (!providerModelValidation.valid && (!body.providerFallback || provider || model)) {
+      return reply.status(400).send({
+        error: 'invalid_provider_model',
+        code: providerModelValidation.code,
+        message: providerModelValidation.message,
+      });
+    }
+    let providerFallback: ProviderFallbackPolicy | undefined;
+    try {
+      providerFallback = normalizeProviderFallbackPolicy(body.providerFallback);
+      resolveProviderFallbackInitialTarget(providerFallback, { provider, model });
+    } catch (error) {
+      return reply.status(400).send({
+        error: 'invalid_provider_fallback',
+        code: 'fallback_policy_invalid',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (providerFallback) {
+      for (const target of providerFallback.targets) {
+        if (providerFallback.requireCompatibilityEvidence && !target.model) {
+          return reply.status(400).send({
+            error: 'invalid_provider_fallback',
+            code: 'fallback_model_required',
+            message: `provider fallback target '${target.provider}' must name a model when compatibility evidence is required`,
+          });
+        }
+        const targetValidation = validateProviderModelRequest({
+          provider: target.provider,
+          model: target.model,
+          defaultProvider: config.agent.defaultProvider,
+          defaultModel: config.agent.defaultModel,
+          configuredProviders: config.providers,
+        });
+        if (!targetValidation.valid) {
+          return reply.status(400).send({
+            error: 'invalid_provider_fallback',
+            code: targetValidation.code,
+            message: targetValidation.message,
+          });
+        }
+      }
+    }
     const modelSettings = normalizeModelSettings(body.modelSettings);
     const headerProjectId = normalizeOptionalString(Array.isArray(req.headers['x-project-id'])
       ? req.headers['x-project-id'][0]
@@ -221,7 +277,7 @@ export function registerChatRoute(
 
     try {
       const result = await runChat({
-        prompt, sessionId, systemPrompt, provider, model,
+        prompt, sessionId, systemPrompt, provider, model, providerFallback,
         modelSettings: modelSettings as Record<string, unknown> | undefined,
         workspaceRoot, toolMode, sandboxMode, allowedTools, maxLoops, timeoutMs,
         toolRetry: toolRetry as Record<string, unknown> | undefined,

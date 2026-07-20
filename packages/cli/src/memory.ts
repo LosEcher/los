@@ -1,3 +1,5 @@
+import { requestCliJson, resolveCliRequestAuth } from './cli-http.js';
+
 type ParsedArgs = {
   flags: Record<string, string | boolean>;
   positionals: string[];
@@ -41,13 +43,12 @@ async function compactMemory(parsed: ParsedArgs): Promise<void> {
     runSpecId: stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'),
   };
   removeUndefined(payload);
-  const response = await fetch(`${gatewayUrl(parsed)}/memory/compact`, {
+  const data = await requestCliJson(`${gatewayUrl(parsed)}/memory/compact`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(payload),
-  });
-  const data = await response.json() as Record<string, unknown>;
-  if (!response.ok) throw new Error(String(data.error ?? response.statusText));
+  }) as Record<string, unknown>;
   renderCompaction(data, booleanFlag(parsed, 'json'));
 }
 
@@ -57,9 +58,9 @@ async function listMemoryCompactions(parsed: ParsedArgs): Promise<void> {
   addQuery(params, 'runSpecId', stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'));
   addQuery(params, 'limit', stringFlag(parsed, 'limit'));
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const response = await fetch(`${gatewayUrl(parsed)}/memory/compactions${suffix}`);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const data = await response.json() as Record<string, unknown>;
+  const data = await requestCliJson(`${gatewayUrl(parsed)}/memory/compactions${suffix}`, {
+    auth: resolveCliRequestAuth(parsed.flags),
+  }) as Record<string, unknown>;
   if (booleanFlag(parsed, 'json')) {
     console.log(JSON.stringify(data));
     return;
@@ -97,7 +98,7 @@ function renderCompaction(data: Record<string, unknown>, json: boolean): void {
 function parseArgs(argv: string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {};
   const positionals: string[] = [];
-  const aliases: Record<string, string> = { g: 'gateway', h: 'help' };
+  const aliases: Record<string, string> = { g: 'gateway', h: 'help', t: 'auth-token' };
   const booleanFlags = new Set(['help', 'h', 'json']);
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -172,9 +173,9 @@ async function listActiveRules(parsed: ParsedArgs): Promise<void> {
   addQuery(params, 'runSpecId', stringFlag(parsed, 'run-spec-id') ?? stringFlag(parsed, 'run'));
   addQuery(params, 'limit', stringFlag(parsed, 'limit'));
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const response = await fetch(`${gatewayUrl(parsed)}/memory/active-rules${suffix}`);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const data = await response.json() as Record<string, unknown>;
+  const data = await requestCliJson(`${gatewayUrl(parsed)}/memory/active-rules${suffix}`, {
+    auth: resolveCliRequestAuth(parsed.flags),
+  }) as Record<string, unknown>;
   if (booleanFlag(parsed, 'json')) {
     console.log(JSON.stringify(data));
     return;
@@ -199,13 +200,12 @@ async function retrieveMemory(parsed: ParsedArgs): Promise<void> {
     maxObservationsPerLayer: stringFlag(parsed, 'max-per-layer'),
   };
   removeUndefined(payload);
-  const response = await fetch(`${gatewayUrl(parsed)}/memory/retrieve`, {
+  const data = await requestCliJson(`${gatewayUrl(parsed)}/memory/retrieve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const data = await response.json() as Record<string, unknown>;
+  }) as Record<string, unknown>;
   if (booleanFlag(parsed, 'json')) {
     console.log(JSON.stringify(data));
     return;
@@ -245,5 +245,9 @@ Commands:
   compactions       List memory compaction records
   active-rules      List active procedural rules from compactions
   retrieve          Route memory retrieval by task state
+
+Options:
+  --gateway, -g URL
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
 `);
 }

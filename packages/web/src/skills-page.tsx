@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Plus, Trash2, Upload, Zap } from 'lucide-react';
+import { Download, Eye, Pin, PinOff, Plus, RotateCcw, Trash2, Upload, Zap } from 'lucide-react';
 import { deleteJson, getJson, postJson } from './api';
 import { DataTable, EmptyText, Fact, Field, formatDate, StatusPill } from './ui';
 
@@ -15,6 +15,7 @@ interface SkillRecordApi {
   runMode: string;
   sourcePath: string;
   versionHash: string;
+  pinnedVersionHash?: string;
   usageCount: number;
   lastUsed?: string;
   enabled: boolean;
@@ -25,10 +26,24 @@ interface SkillRecordApi {
   updatedAt: string;
 }
 
+interface SkillImportPreview {
+  name: string;
+  versionHash: string;
+  currentVersionHash?: string;
+  action: 'create' | 'update' | 'unchanged';
+}
+
+interface SkillHistoryResponse {
+  currentVersionHash: string;
+  pinnedVersionHash?: string;
+  versions: Array<{ versionHash: string; sourcePath: string; createdAt: string }>;
+}
+
 export function SkillsPage() {
   const queryClient = useQueryClient();
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [scopeFilter, setScopeFilter] = useState('');
+  const [importPreview, setImportPreview] = useState<SkillImportPreview[]>([]);
 
   const query = new URLSearchParams();
   if (scopeFilter) query.set('scope', scopeFilter);
@@ -46,6 +61,11 @@ export function SkillsPage() {
 
   const list = skills.data ?? [];
   const selected = list.find(s => skillKey(s) === selectedKey) ?? null;
+  const history = useQuery({
+    queryKey: ['skill-history', selected?.name, selected ? scopeValue(selected.metadata) : ''],
+    queryFn: () => getJson<SkillHistoryResponse>(`/skills/${encodeURIComponent(selected!.name)}/history?scope=${encodeURIComponent(scopeValue(selected!.metadata))}`),
+    enabled: Boolean(selected),
+  });
 
   const remove = useMutation({
     mutationFn: (skill: SkillRecordApi) => deleteJson(`/skills/${encodeURIComponent(skill.name)}?scope=${encodeURIComponent(scopeValue(skill.metadata))}`),
@@ -63,14 +83,47 @@ export function SkillsPage() {
     onSuccess: (data: any) => alert(`Synced ${data.count} skills to ${data.scope} dir`),
   });
 
-  const loadFromDir = useMutation({
-    mutationFn: (scope: string) => postJson('/skills/load-from-dir', {
+  const inspectImport = useMutation({
+    mutationFn: (scope: string) => postJson<{ skills: SkillImportPreview[] }>('/skills/import/inspect', {
       scope: scope || 'global',
       workspaceRoot: workspace.data?.workspaceRoot,
     }),
     onSuccess: (data: any) => {
-      alert(`Loaded ${data.count} skills from ${data.scope} dir`);
+      setImportPreview(data.skills ?? []);
+    },
+  });
+
+  const applyImport = useMutation({
+    mutationFn: () => postJson('/skills/import/apply', {
+      scope: scopeFilter || 'global',
+      workspaceRoot: workspace.data?.workspaceRoot,
+      expected: importPreview.map(item => ({ name: item.name, versionHash: item.versionHash })),
+    }),
+    onSuccess: () => {
+      setImportPreview([]);
       queryClient.invalidateQueries({ queryKey: ['skills'] });
+    },
+  });
+
+  const pin = useMutation({
+    mutationFn: (input: { skill: SkillRecordApi; pinned: boolean }) => postJson(`/skills/${encodeURIComponent(input.skill.name)}/pin`, {
+      scope: scopeValue(input.skill.metadata),
+      pinned: input.pinned,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+      queryClient.invalidateQueries({ queryKey: ['skill-history'] });
+    },
+  });
+
+  const rollback = useMutation({
+    mutationFn: (input: { skill: SkillRecordApi; versionHash: string }) => postJson(`/skills/${encodeURIComponent(input.skill.name)}/rollback`, {
+      scope: scopeValue(input.skill.metadata),
+      versionHash: input.versionHash,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+      queryClient.invalidateQueries({ queryKey: ['skill-history'] });
     },
   });
 
@@ -94,11 +147,25 @@ export function SkillsPage() {
             <button className="ghost-btn" type="button" disabled={syncToDir.isPending} onClick={() => syncToDir.mutate(scopeFilter)}>
               <Download size={14} /> sync
             </button>
-            <button className="ghost-btn" type="button" disabled={loadFromDir.isPending} onClick={() => loadFromDir.mutate(scopeFilter)}>
-              <Upload size={14} /> import
+            <button className="ghost-btn" type="button" disabled={inspectImport.isPending} onClick={() => inspectImport.mutate(scopeFilter)}>
+              <Eye size={14} /> inspect
             </button>
+            {importPreview.length > 0 ? (
+              <button className="primary-btn" type="button" disabled={applyImport.isPending} onClick={() => applyImport.mutate()}>
+                <Upload size={14} /> apply {importPreview.filter(item => item.action !== 'unchanged').length}
+              </button>
+            ) : null}
           </div>
         </div>
+        {importPreview.length > 0 ? (
+          <div className="definition-list">
+            {importPreview.map(item => (
+              <div className="definition" key={`${item.name}:${item.versionHash}`}>
+                <strong>{item.action}</strong><span>{item.name} · {item.versionHash.slice(0, 12)}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <DataTable
           loading={skills.isLoading}
           empty="No skills registered. Add your first skill below."
@@ -136,6 +203,7 @@ export function SkillsPage() {
               <Fact label="run mode" value={selected.runMode} />
               <Fact label="source" value={selected.sourcePath || 'none'} />
               <Fact label="version" value={selected.versionHash || 'none'} />
+              <Fact label="pinned" value={selected.pinnedVersionHash?.slice(0, 12) || 'no'} />
               <Fact label="uses" value={String(selected.usageCount)} />
               <Fact label="last used" value={selected.lastUsed ? formatDate(selected.lastUsed) : 'never'} />
               <Fact label="enabled" value={String(selected.enabled)} />
@@ -160,12 +228,39 @@ export function SkillsPage() {
               <button
                 className="ghost-btn"
                 type="button"
+                disabled={pin.isPending}
+                onClick={() => pin.mutate({ skill: selected, pinned: !selected.pinnedVersionHash })}
+              >
+                {selected.pinnedVersionHash ? <PinOff size={14} /> : <Pin size={14} />}
+                {selected.pinnedVersionHash ? 'unpin' : 'pin'}
+              </button>
+              <button
+                className="ghost-btn"
+                type="button"
                 disabled={remove.isPending}
                 onClick={() => remove.mutate(selected)}
               >
                 <Trash2 size={14} /> delete
               </button>
             </div>
+            {(history.data?.versions.length ?? 0) > 1 ? (
+              <div className="definition-list">
+                {history.data!.versions.map(version => (
+                  <div className="definition" key={version.versionHash}>
+                    <strong>{version.versionHash.slice(0, 12)}</strong>
+                    {version.versionHash === selected.versionHash ? <span>current</span> : (
+                      <button
+                        className="icon-btn"
+                        type="button"
+                        title="Rollback to this version"
+                        disabled={rollback.isPending || Boolean(selected.pinnedVersionHash && selected.pinnedVersionHash !== version.versionHash)}
+                        onClick={() => rollback.mutate({ skill: selected, versionHash: version.versionHash })}
+                      ><RotateCcw size={14} /></button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : (
           <SkillCreate

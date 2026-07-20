@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import executorPackage from '../package.json' with { type: 'json' };
@@ -23,9 +22,10 @@ import { ensureAllAgentStores } from '@los/agent/ensure-all-stores';
 import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
-import { collectResourceMetrics, resolveResourceCapabilities } from './resource-metrics.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { _renewTaskLease } from './lease-fencing.js';
+import { heartbeatNode } from './executor-heartbeat.js';
+import { ExecutorRuntimeLifecycle, shutdownExecutor } from './runtime-lifecycle.js';
 import {
   acceptsNdjson,
   normalizeLeaseMs,
@@ -47,7 +47,7 @@ interface RunAgentRequest {
   agentTaskLease?: { taskId: string; leaseVersion: number };
   leaseMs?: number;
   prompt: string;
-  config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
+  config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
 }
 
 type ExecutorStreamChunk =
@@ -64,6 +64,8 @@ export async function startExecutor() {
   const gatewayUrl = config.executor.gatewayUrl;
   const version = config.executor.version ?? config.server.version ?? executorPackage.version;
   const heartbeatViaApi = !!gatewayUrl;
+  const shutdownGraceMs = config.executor.shutdownGraceMs;
+  const lifecycle = new ExecutorRuntimeLifecycle();
 
   await initDb(config.databaseUrl);
 
@@ -126,10 +128,10 @@ export async function startExecutor() {
   // Fire initial heartbeat without blocking server startup.
   // If the gateway is temporarily unreachable the server still starts,
   // and the interval below will retry every heartbeat interval.
-  heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, gatewayUrl, await resolveFileSyncFolders()).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
+  heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, await resolveFileSyncFolders()).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
   const nodeHeartbeat = setInterval(() => {
     resolveFileSyncFolders().then(folders =>
-      heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, gatewayUrl, folders).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`))
+      heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`))
     );
   }, DEFAULT_HEARTBEAT_MS);
 
@@ -144,6 +146,9 @@ export async function startExecutor() {
           version,
           nodeKind,
           connectModes,
+          lifecycle: lifecycle.status,
+          acceptingTasks: lifecycle.acceptingTasks,
+          activeTaskCount: lifecycle.activeTaskCount,
         });
         return;
       }
@@ -162,14 +167,23 @@ export async function startExecutor() {
 
       if (req.method === 'POST' && route.pathname === '/v1/tasks/run-agent') {
         if (!isAuthorized(req, agentKey)) { sendJson(res, 401, { error: 'unauthorized' }); return; }
-        const body = await readJson<RunAgentRequest>(req);
-        if (acceptsNdjson(req)) {
-          await streamAssignedAgentTask(res, body, nodeId);
+        const activeTask = lifecycle.startTask();
+        if (!activeTask) {
+          sendJson(res, 503, { error: 'executor_draining', retryable: true });
           return;
         }
-        const result = await runAssignedAgentTask(body, nodeId);
-        sendJson(res, 200, result);
-        return;
+        try {
+          const body = await readJson<RunAgentRequest>(req);
+          if (acceptsNdjson(req)) {
+            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller);
+            return;
+          }
+          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller);
+          sendJson(res, 200, result);
+          return;
+        } finally {
+          activeTask.finish();
+        }
       }
 
       if (route.pathname.startsWith('/v1/file-sync')) {
@@ -185,22 +199,37 @@ export async function startExecutor() {
   });
 
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
-  server.on('close', () => {
-    clearInterval(nodeHeartbeat);
-    stopPeriodicSync();
-  });
   log.info(`Executor node ${nodeId} listening on ${publicUrl}`);
 
   // Start periodic file-sync scanning for folders registered on this node
   const stopPeriodicSync = startPeriodicSync(nodeId);
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => shutdownPromise ??= shutdownExecutor({
+    server,
+    lifecycle,
+    shutdownGraceMs,
+    stopHeartbeat: () => clearInterval(nodeHeartbeat),
+    stopPeriodicSync,
+    writeHeartbeat: async () => heartbeatNode(
+      nodeId,
+      publicUrl,
+      version,
+      nodeKind,
+      connectModes,
+      lifecycle,
+      gatewayUrl,
+      await resolveFileSyncFolders(),
+    ),
+  });
 
-  return server;
+  return { server, lifecycle, shutdown };
 }
 
 async function streamAssignedAgentTask(
   res: ServerResponse,
   body: RunAgentRequest,
   nodeId: string,
+  controller: AbortController,
 ): Promise<void> {
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson',
@@ -214,7 +243,7 @@ async function streamAssignedAgentTask(
   };
 
   try {
-    await runAssignedAgentTask(body, nodeId, emit);
+    await runAssignedAgentTask(body, nodeId, emit, controller);
   } catch (err: any) {
     emit({ type: 'error', error: err?.message ?? String(err) });
   } finally {
@@ -226,6 +255,7 @@ async function runAssignedAgentTask(
   body: RunAgentRequest,
   defaultNodeId: string,
   emit?: (chunk: ExecutorStreamChunk) => void,
+  controller = new AbortController(),
 ) {
   const taskRunId = normalizeRequiredString(body.taskRunId, 'taskRunId');
   const prompt = normalizeRequiredString(body.prompt, 'prompt');
@@ -239,7 +269,6 @@ async function runAssignedAgentTask(
   const deltas: AgentModelDelta[] = [];
   const toolCallStates: ToolCallStateTransition[] = [];
 
-  const controller = new AbortController();
   const heartbeat = setInterval(() => {
     _renewTaskLease(taskRunId, nodeId, leaseVersion, body.agentTaskLease, leaseMs, controller).catch((err) => {
       log.warn(`task lease heartbeat failed: ${err.message ?? String(err)}`);
@@ -287,81 +316,6 @@ async function runAssignedAgentTask(
   }
 }
 
-async function heartbeatNode(
-  nodeId: string,
-  baseUrl: string,
-  version: string,
-  nodeKind: ExecutorNodeKind,
-  connectModes: ExecutorNodeConnectMode[],
-  gatewayUrl?: string,
-  fileSyncFolders?: Array<{ name: string; localPath: string; mode?: string }>,
-): Promise<void> {
-  const capabilities: Record<string, unknown> = {
-    run_agent: true,
-    stream_ndjson: true,
-    task_lease: true,
-    workspace_read: true,
-    workspace_write: true,
-    artifact_transfer: true,
-    node_command_runner: true,
-    file_sync_scan: true,
-    file_sync_deep_verify: true,
-    shell: true,
-    sandbox: 'tool_policy',
-    ...resolveResourceCapabilities(),
-  };
-  if (fileSyncFolders && fileSyncFolders.length > 0) {
-    capabilities.file_sync_folders = fileSyncFolders.map(f => ({
-      name: f.name,
-      folder: f.name,
-      path: f.localPath,
-      mode: f.mode ?? 'incremental',
-    }));
-  }
-
-  const payload = {
-    nodeId,
-    baseUrl,
-    hostLabel: hostname(),
-    version,
-    nodeKind,
-    connectModes,
-    connectConfig: {
-      agent_http: {
-        baseUrl,
-        runAgentUrl: `${baseUrl}/v1/tasks/run-agent`,
-        healthUrl: `${baseUrl}/health`,
-        artifactsUrl: `${baseUrl}/v1/artifacts`,
-        commandUrl: `${baseUrl}/v1/nodes/${nodeId}/commands`,
-      },
-    },
-    capacity: {
-      pid: process.pid,
-      platform: process.platform,
-      arch: process.arch,
-      ...collectResourceMetrics(),
-    },
-    capabilities,
-    queueDepth: 0,
-    activeTaskCount: 0,
-  };
-
-  if (gatewayUrl) {
-    const res = await fetch(`${gatewayUrl}/nodes/heartbeat`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      throw new Error(`gateway heartbeat returned ${res.status}: ${await res.text()}`);
-    }
-  } else {
-    const { upsertExecutorNodeHeartbeat } = await import('@los/agent');
-    await upsertExecutorNodeHeartbeat(payload);
-  }
-}
-
 function isAuthorized(req: IncomingMessage, agentKey: string | undefined): boolean {
   if (!agentKey) return false;
   return req.headers.authorization === `Bearer ${agentKey}`;
@@ -372,23 +326,29 @@ function executorArtifactStorageRoot(nodeId: string, artifactRoot?: string): str
   return resolve(process.cwd(), '.los-runtime', 'executor-artifacts', encodeURIComponent(nodeId));
 }
 
-let activeServer: Awaited<ReturnType<typeof startExecutor>> | undefined;
+let activeExecutor: Awaited<ReturnType<typeof startExecutor>> | undefined;
+let shutdownRequested = false;
 
 import { pathToFileURL } from 'node:url';
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  startExecutor().then((server) => {
-    activeServer = server;
+  startExecutor().then((executor) => {
+    activeExecutor = executor;
+    if (shutdownRequested) shutdown();
   }).catch((err) => {
     console.error(err);
     process.exit(1);
   });
 
   const shutdown = () => {
-    if (!activeServer) {
-      process.exit(0);
+    shutdownRequested = true;
+    if (!activeExecutor) {
+      return;
     }
-    activeServer.close(() => process.exit(0));
+    activeExecutor.shutdown().then(() => process.exit(0)).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
   };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

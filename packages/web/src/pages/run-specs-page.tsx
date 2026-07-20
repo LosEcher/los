@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Play, ShieldCheck } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
@@ -41,11 +41,15 @@ export function buildRunOperatorPayload(reason: string | undefined, fallbackReas
   };
 }
 
-export function RunSpecsPage() {
+export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string | null }) {
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [approvalReason, setApprovalReason] = useState('');
   const [showApproval, setShowApproval] = useState(false);
+
+  useEffect(() => {
+    if (selectedRunSpecId) setSelectedId(selectedRunSpecId);
+  }, [selectedRunSpecId]);
 
   const runs = useQuery({
     queryKey: ['runs'],

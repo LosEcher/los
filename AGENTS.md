@@ -98,9 +98,11 @@ pnpm build
 pnpm check
 pnpm test
 pnpm run gate
-pnpm --filter @los/infra db:push
-pnpm --filter @los/infra db:migrate
+pnpm check:migration-drift   # validate schema/migration drift; does not apply migrations
 ```
+
+Database migrations are applied during gateway/executor startup through
+`migrateDir()`. There is no standalone `@los/infra db:migrate` package script.
 
 Use the narrowest package or focused test first. Run `pnpm run gate` when a
 change crosses package boundaries or is being prepared for delivery.

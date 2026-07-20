@@ -1,11 +1,13 @@
 contract: los.integration-feed-analysis
-version: 0.2.0
+version: 0.3.0
 status: implemented
 owner: packages/agent
 description: >
   Feed-analysis integration contract for external systems (e.g. lot2extension)
   to dispatch feed-analysis jobs into the los agent execution pipeline.
   Replaces the discontinued lsclaw feed-analysis ingress.
+  Every dispatch is correlated to a LOS Work Item; connector, LOS execution,
+  validated result, and callback delivery statuses remain separate evidence.
 type: object
 routes:
   - method: GET
@@ -94,8 +96,13 @@ routes:
         type: string
       x-tenant-id:
         type: string
+        description: Optional tenant scope; defaults to local for service-token requests.
+      x-project-id:
+        type: string
+        description: Optional Work/Inbox project scope; defaults to the configured LOS project.
       x-actor-id:
         type: string
+        description: Optional source actor identity recorded on the LOS execution.
     request:
       type: object
       required:

@@ -4,6 +4,8 @@
  *   los provider list            Show readiness summary with promotion states
  *   los provider promote <name>  Interactive setup guidance for a blocked provider
  */
+import { requestCliJson, resolveCliRequestAuth } from './cli-http.js';
+
 // ── Types ───────────────────────────────────────────────
 
 type ParsedArgs = {
@@ -60,6 +62,14 @@ interface DiscoveredProvider {
   promotionState?: string;
   credentialClass?: string;
   setupAction?: string | null;
+  compatEvidence?: {
+    count?: number;
+    latestVerdict?: string | null;
+    latestDecision?: string | null;
+    latestPassed?: boolean | null;
+    latest?: Record<string, unknown> | null;
+  };
+  /** Legacy onboarding shape retained for older gateways. */
   compatibilityEvidence?: Array<Record<string, unknown>>;
   readiness?: {
     configuredKey?: boolean;
@@ -72,8 +82,8 @@ interface DiscoveredProvider {
 
 const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
 
-export async function providerCommand(_globalArgs: string[], argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv);
+export async function providerCommand(globalArgs: string[], argv: string[]): Promise<void> {
+  const parsed = mergeParsed(parseArgs(globalArgs), parseArgs(argv));
   const subcommand = parsed.positionals[0];
 
   if (!subcommand || subcommand === 'help') {
@@ -112,11 +122,7 @@ async function listProviders(parsed: ParsedArgs): Promise<void> {
   const json = hasFlag(parsed, 'json');
 
   try {
-    const response = await fetch(`${gateway}/onboarding`);
-    if (!response.ok) {
-      throw new Error(`Gateway returned ${response.status}`);
-    }
-    const report = await response.json() as Record<string, unknown>;
+    const report = await requestCliJson(`${gateway}/onboarding`) as Record<string, unknown>;
     const providers = (report.providers ?? []) as DiscoveredProvider[];
 
     if (json) {
@@ -149,7 +155,7 @@ async function listProviders(parsed: ParsedArgs): Promise<void> {
       if (setupAction) {
         console.log(`    → ${setupAction}`);
       }
-      const evidence = Array.isArray(p.compatibilityEvidence) ? p.compatibilityEvidence : [];
+      const evidence = providerCompatibilityEvidence(p);
       if (evidence.length > 0) {
         for (const item of evidence.slice(0, 3)) {
           const id = stringValue(item.id) ?? '?';
@@ -176,6 +182,12 @@ async function listProviders(parsed: ParsedArgs): Promise<void> {
   }
 }
 
+function providerCompatibilityEvidence(provider: DiscoveredProvider): Array<Record<string, unknown>> {
+  if (Array.isArray(provider.compatibilityEvidence)) return provider.compatibilityEvidence;
+  const latest = provider.compatEvidence?.latest;
+  return latest && typeof latest === 'object' && !Array.isArray(latest) ? [latest] : [];
+}
+
 async function promoteProvider(name: string, parsed: ParsedArgs): Promise<void> {
   const gateway = stringFlag(parsed, 'gateway') ?? stringFlag(parsed, 'g') ?? DEFAULT_GATEWAY;
 
@@ -185,8 +197,7 @@ async function promoteProvider(name: string, parsed: ParsedArgs): Promise<void> 
   // 1. Check current state
   let provider: DiscoveredProvider | undefined;
   try {
-    const response = await fetch(`${gateway}/onboarding`);
-    const report = await response.json() as Record<string, unknown>;
+    const report = await requestCliJson(`${gateway}/onboarding`) as Record<string, unknown>;
     const providers = (report.providers ?? []) as DiscoveredProvider[];
     provider = providers.find(p => p.name === name);
   } catch {
@@ -264,9 +275,10 @@ async function providerPolicy(parsed: ParsedArgs): Promise<void> {
     if (provider) query.set('provider', provider);
     if (model) query.set('model', model);
     const queryString = query.toString();
-    const response = await fetch(`${gateway}/providers/promotion-decisions${queryString ? `?${queryString}` : ''}`);
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-    const body = await response.json();
+    const body = await requestCliJson(
+      `${gateway}/providers/promotion-decisions${queryString ? `?${queryString}` : ''}`,
+      { auth: resolveCliRequestAuth(parsed.values) },
+    );
     renderPolicyDecisionList(body, json);
     return;
   }
@@ -277,16 +289,16 @@ async function providerPolicy(parsed: ParsedArgs): Promise<void> {
       console.error('Usage: los provider policy enforce <decision-id>');
       process.exit(2);
     }
-    const response = await fetch(`${gateway}/providers/promotion-decisions/enforce`, {
+    const body = await requestCliJson(`${gateway}/providers/promotion-decisions/enforce`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      auth: resolveCliRequestAuth(parsed.values),
+      operatorWrite: true,
+      json: true,
       body: JSON.stringify({
         id: decisionId,
         actor: stringFlag(parsed, 'actor') ?? 'cli',
       }),
     });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-    const body = await response.json();
     renderPolicyDecision(body, json);
     return;
   }
@@ -304,9 +316,11 @@ async function providerPolicy(parsed: ParsedArgs): Promise<void> {
     process.exit(2);
   }
 
-  const response = await fetch(`${gateway}/providers/promotion-decisions`, {
+  const body = await requestCliJson(`${gateway}/providers/promotion-decisions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: resolveCliRequestAuth(parsed.values),
+    operatorWrite: true,
+    json: true,
     body: JSON.stringify({
       action: normalizedAction,
       provider: target?.provider,
@@ -318,8 +332,6 @@ async function providerPolicy(parsed: ParsedArgs): Promise<void> {
       actor: stringFlag(parsed, 'actor') ?? 'cli',
     }),
   });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  const body = await response.json();
   renderPolicyDecision(body, json);
 }
 
@@ -413,6 +425,13 @@ function stringFlag(parsed: ParsedArgs, ...names: string[]): string | undefined 
   return undefined;
 }
 
+function mergeParsed(first: ParsedArgs, second: ParsedArgs): ParsedArgs {
+  return {
+    values: { ...first.values, ...second.values },
+    positionals: [...first.positionals, ...second.positionals],
+  };
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
@@ -437,6 +456,10 @@ Commands:
   list      Show all discovered providers with readiness and promotion state
   promote   Interactive setup guidance for a blocked provider (API key entry)
   policy    Record, enforce, or list required-gate promotion/demotion decisions
+
+Options:
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
+  --operator-token TOKEN  Operator token, default LOS_OPERATOR_TOKEN
 
 Examples:
   los provider list

@@ -21,6 +21,7 @@ export { createProvider, createDeepSeekProvider, createOpenAIProvider, type Chat
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
 export { MODEL_PROFILES, calculateCost, estimateCost, resolveModelCapabilityProfile, resolveModelProfile, summarizeModelProfile, type ApiShape, type CachePolicy, type CostEstimate, type ModelCapabilityProfile, type ModelExecutionSummary, type ModelPricing, type ModelProfile, type ProviderProtocol, type ResolveModelProfileOptions, type SessionAffinity, type ToolCallRepairMode, type TransportHint, type VisionCapabilityMode } from './model-profiles.js';
 export { ADVISORY_COMPATIBILITY_TARGETS, DEFAULT_COMPATIBILITY_PROBES, DEFAULT_COMPATIBILITY_TARGETS, createCompatibilityRunSpecs, parseCompatibilityTarget, parseCompatibilityTargets, resolveRequiredCompatibilityTargets, resolveRequiredCompatibilityTargetsWithDefaultDb, selectCompatibilityProbes, summarizeCompatibilityEvents, target, type CompatibilityHarnessOptions, type CompatibilityProbe, type CompatibilityRunSpec, type CompatibilityRunSummary, type CompatibilitySseEvent, type CompatibilityToolMode, type ProviderModelTarget } from './compat-harness.js';
+export { validateProviderModelRequest, type ProviderRequestConfig, type ProviderRequestValidationFailure, type ProviderRequestValidationInput, type ProviderRequestValidationResult, type ProviderRequestValidationSuccess } from './provider-request-validation.js';
 export { createToolRegistry, registerBuiltinTools, READ_ONLY_BUILTIN_TOOLS, setWorkspaceRoot, type ToolRegistry, type ToolRegistryOptions, type BuiltinToolOptions, type ToolCapability, type ToolCostLevel, type ToolExecutionPolicy, type ToolExecutionDecision, type ToolHandler, type ToolInput, type ToolRetryPolicy, type ToolRiskLevel, type ToolResult } from './tools/core/registry.js';
 export { MCPToolBridge, MCPClient, type MCPServerConfig, type MCPToolDef, type MCPServerRegistryRecord, registryRecordToConfig } from './tools/external/mcp-client.js';
 export { ensureMCPServerStore, upsertMCPServer, loadMCPServer, listMCPServers, deleteMCPServer, updateMCPServerStatus, type MCPServerRecord, type MCPTransport, type MCPServerStatus, type MCPRegisteredTool, type UpsertMCPServerInput, type UpdateMCPServerStatusInput, type ListMCPServersOptions } from './mcp-servers.js';
@@ -32,6 +33,18 @@ export { ensureRunSpecStore, claimRunSpec, createRunSpec, approveRunSpecPhase, l
 export { canMarkSucceeded, canStartExecution, mergeRunContractMetadata, normalizeRunContractMetadata, readRunContractMetadata, validatePhaseTransition, type PlanRevisionSnapshot, type PlanStep, type RunContractMetadata, type RunContractMetadataInput, type RunContractMode, type RunPhase, type VerificationRequirement } from './run-contract.js';
 export { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, trimSpecForReview, type LoadedSpec, type LoadSpecsOptions, type SpecLayer } from './spec-loader.js';
+export {
+  createProviderFallbackRouter,
+  normalizeProviderFallbackPolicy,
+  prepareProviderFallbackPolicy,
+  resolveProviderFallbackInitialTarget,
+  type PreparedProviderFallbackTarget,
+  type ProviderFallbackEvidence,
+  type ProviderFallbackEvent,
+  type ProviderFallbackFailureClass,
+  type ProviderFallbackPolicy,
+  type ProviderFallbackTarget,
+} from './providers/provider-fallback.js';
 export { resolveAgentIdentity, resolveEffectiveIdentityLevel, resolveIdentityLevelForExecutionPath, formatIdentityForPrompt, type AgentIdentity, type AgentIdentityExecutionPath, type IdentityLevel, type IdentityResolveSource } from './identity-loader.js';
 export { runLifecycleHooks, type RunHookInput, type HookEvent } from './lifecycle-hooks.js';
 export { createVerificationRecord, ensureVerificationRecordStore, listVerificationRecordsForRunSpec, listVerificationRecordsForSession, loadVerificationRecord, seedVerificationRequirementsForRunSpec, type CreateVerificationRecordInput, type VerificationRecord, type VerificationRecordStatus } from './verification-records.js';
@@ -55,17 +68,19 @@ export {
   type FeedAnalysisCallbackDeliveryResult,
   type FeedAnalysisDeadLetterDelivery,
 } from './integration/feed-analysis-callback-outbox.js';
-export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
+export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DeadLetterResolution, type ResolveDeadLetterInput, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
 export { summarizeDeadLetterEvents, requeueDeadLetterEvent, type DeadLetterReasonSummary, type DeadLetterSummary, type DeadLetterRequeueResult, type DeadLetterRequeueOptions } from './dead-letter-recovery.js';
-export { ensureRunEvalStore, compareRunEvals, listRunEvals, recordFailoverEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type SummarizeRunEvalsOptions } from './run-evals.js';
+export { ensureRunEvalStore, compareRunEvals, listRunEvals, listPairwiseRunEvals, recordFailoverEval, recordPairwiseRunEval, recordRunEval, summarizeRunEvals, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordPairwiseRunEvalInput, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type RunEvalEvidenceChannel, type RunEvalRubricSnapshot, type RunEvalRubricCriterion, type RunEvalCriterionScore, type RunEvalPairwiseVerdict, type SummarizeRunEvalsOptions } from './run-evals.js';
+export { ensureExecutionExperimentStore, createExecutionExperiment, loadExecutionExperiment, setExecutionExperimentCandidate, approveExecutionExperiment, transitionExecutionExperiment, type ExecutionExperimentRecord, type ExecutionExperimentStatus, type ExecutionExperimentSource, type ExecutionExperimentConfigDiff, type CreateExecutionExperimentInput } from './execution-experiments.js';
 export { getEvalBacklogCases, recordEvalBacklogSnapshot, type EvalBacklogCase } from './eval-backlog-runner.js';
-export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskLeaseFence, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
+export { claimBlockedAgentTask, claimReadyAgentTasks, createAgentTask, createAgentTaskAttempt, editableSurfacesForAgentTask, editableSurfacesOverlap, ensureAgentTaskGraphStore, heartbeatAgentTask, linkAgentTaskDependency, listAgentTaskAttempts, listAgentTasksForGraph, listAgentTasksForRunSpec, listBlockedAgentTasks, recoverExpiredAgentTasks, recoverExpiredAgentTasksWithAdvisoryLock, updateAgentTaskStatus, type AgentTaskAttemptRecord, type AgentTaskAttemptStatus, type AgentTaskEdgeRecord, type AgentTaskLeaseFence, type AgentTaskRecord, type AgentTaskRole, type AgentTaskStatus, type ClaimReadyAgentTasksInput, type CreateAgentTaskAttemptInput, type CreateAgentTaskInput, type LinkAgentTaskDependencyInput } from './agent-task-graph.js';
+export { backupManagedWorkspace, createManagedWorkspace, ensureManagedWorkspaceStore, listManagedWorkspaces, loadManagedWorkspace, loadManagedWorkspaceDetail, releaseManagedWorkspace, workspaceRootForTask, type CreateManagedWorkspaceInput, type ListManagedWorkspacesOptions, type ManagedWorkspaceDetail, type ManagedWorkspaceEvent, type ManagedWorkspaceRecord, type ManagedWorkspaceRuntimeOptions, type ManagedWorkspaceStatus } from './managed-workspaces.js';
 export { getAgentTaskGraphCompletion, readAgentTaskGraph, summarizeAgentTaskGraph, type AgentTaskGraphBlockReason, type AgentTaskGraphCompletion, type AgentTaskGraphCompletionOptions, type AgentTaskGraphCompletionStatus, type AgentTaskGraphReadModel } from './agent-task-graph-read-model.js';
 export { ensureSchedulerDecisionLedgerStore, listSchedulerDecisions, recordSchedulerDecision, type ListSchedulerDecisionsOptions, type RecordSchedulerDecisionInput, type SchedulerDecisionKind, type SchedulerDecisionRecord } from './scheduler-decision-ledger.js';
 export { buildExecutionStaticGraph, type BuildExecutionStaticGraphOptions, type ExecutionStaticEdge, type ExecutionStaticEdgeKind, type ExecutionStaticGraph, type ExecutionStaticNode, type ExecutionStaticNodeKind } from './execution-static-graph.js';
 export { readRuntimeEvidenceGraph, type ReadRuntimeEvidenceGraphOptions, type RuntimeEvidenceEdge, type RuntimeEvidenceEdgeKind, type RuntimeEvidenceGraph, type RuntimeEvidenceNode, type RuntimeEvidenceNodeKind, type RuntimeEvidenceRecord } from './runtime-evidence-graph.js';
 export { buildRunStateProjection, readRunStateProjection, type BuildRunStateProjectionInput, type RunStateAction, type RunStateBlocker, type RunStateBlockerKind, type RunStateProjection } from './run-state-vocabulary.js';
-export { reconcilePlanningTodos, reconcilePlanningTodosFromOpenDb, reconcilePlanningTodosWithDefaultDb, type GovernanceTodoSnapshot, type TodoReconciliationItem, type TodoReconciliationOptions, type TodoReconciliationReport, type TodoStatusDrift } from './governance-reconciliation.js';
+export { reconcilePlanningTodos, reconcilePlanningTodosFromOpenDb, reconcilePlanningTodosWithDefaultDb, type GovernanceTodoSnapshot, type TodoFieldDrift, type TodoReconciliationItem, type TodoReconciliationOptions, type TodoReconciliationReport, type TodoReportOnlySeedField, type TodoStatusDrift } from './governance-reconciliation.js';
 export { detectRuntimeCleanup, detectRuntimeCleanupFromOpenDb, detectRuntimeCleanupWithDefaultDb, type RuntimeCleanupCandidate, type RuntimeCleanupOptions, type RuntimeCleanupReport, type RuntimeCleanupRunSpecSnapshot, type RuntimeCleanupTaskRunSnapshot } from './governance-runtime-cleanup.js';
 export { readStatusConstraintReportFromOpenDb, readStatusConstraintReportWithDefaultDb, summarizeStatusConstraintReport, validateStatusConstraintsFromOpenDb, validateStatusConstraintsWithDefaultDb, type StatusConstraintDefinition, type StatusConstraintReport, type StatusConstraintSnapshot, type ValidateStatusConstraintsResult } from './governance-status-constraints.js';
 export { ensureGovernanceJobStore, createGovernanceJob, getGovernanceJob, listGovernanceJobs, listDueGovernanceJobs, updateGovernanceJob, updateGovernanceJobState, deleteGovernanceJob, seedGovernanceJobs, claimNextDueJob, runGovernanceSweep, runGovernanceSweepLoop, setupGovernanceWake, type GovernanceJob, type GovernanceJobType, type GovernanceCadence, type GovernanceJobStatus, type GovernanceJobAutoFixConfig, type CreateGovernanceJobInput, type UpdateGovernanceJobInput, type UpdateGovernanceJobStateInput, type ListGovernanceJobsOptions, type GovernanceSweepResult, type GovernanceSweepJobResult, type GaLoopResult, type GaLoopPhase, type CircuitState } from './governance-jobs.js';
@@ -73,7 +88,7 @@ export { runGaLoop, type RunGaLoopOptions } from './ga-loop-runner.js';
 export { evaluateLoopGate, computeNextState, maybeAutoRecoverPaused, type ThrottleDecision } from './ga-circuit-breaker.js';
 export { scanRelatedProjects, formatScanReport, RELATED_PROJECTS, type RelatedProject, type ProjectScanResult } from './ga-related-project-scanner.js';
 export { ensureStaticGraphBaselineStore, captureStaticGraphBaseline, getLatestBaseline, getBaseline, deleteBaseline, diffBaselines, summarizeBaselineDiff, type StaticGraphBaseline, type BaselineDiff, type CaptureBaselineInput } from './static-graph-baselines.js';
-export { ensureTaskRunStore, createTaskRun, findActiveTaskRunByDedupeKey, updateTaskRunFields, heartbeatTaskRun, recoverExpiredTaskRuns, recoverExpiredTaskRunsWithAdvisoryLock, loadTaskRun, listTaskRuns, listTaskRunsByStatus, listTaskRunsForSession, listTaskRunsForRunSpec, claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun, type CreateTaskRunInput, type TaskRunRecoveryResult, type TaskRunRecord, type TaskRunStatus, type UpdateTaskRunFieldsInput } from './task-runs.js';
+export { ensureTaskRunStore, createTaskRun, findActiveTaskRunByDedupeKey, updateTaskRunFields, heartbeatTaskRun, recoverExpiredTaskRuns, recoverExpiredTaskRunsWithAdvisoryLock, recoverActiveTaskRunsForGateway, loadTaskRun, listTaskRuns, listTaskRunsByStatus, listTaskRunsForSession, listTaskRunsForRunSpec, claimBlockedTaskRunsWithAnswer, type ClaimedBlockedTaskRun, type CreateTaskRunInput, type TaskRunRecoveryResult, type TaskRunRecord, type TaskRunStatus, type UpdateTaskRunFieldsInput } from './task-runs.js';
 export { ensureWorkerMessageStore, sendWorkerMessage, sendHeartbeat, recordWorkerAnswer, listMessagesForDispatch, listMessagesForTask, hasWorkerDone, type WorkerMessage, type WorkerMessageType, type WorkerMessagePayload, type SendWorkerMessageInput } from './worker-messages.js';
 export { ensureExecutorNodeStore, loadExecutorNode, listExecutorNodes, recordExecutorNodeProbe, upsertExecutorNode, upsertExecutorNodeHeartbeat, type ExecutorNodeHeartbeatInput, type ExecutorNodeConnectMode, type ExecutorNodeKind, type ExecutorNodeProbeInput, type ExecutorNodeRecord, type ExecutorNodeStatus, type ExecutorNodeUpsertInput } from './executor-nodes.js';
 export { clearCancellation, ensureCancellationStore, pollCancellation, requestCancellation, type CancellationRequest } from './cancellation.js';
@@ -83,6 +98,14 @@ export { projectExecutionObservability, type ExecutionCountEvidence, type Execut
 export { ensureStreamCheckpointStore, createStreamCheckpoint, listStreamCheckpointsSince, listStreamCheckpointsForRunSpec, type StreamCheckpointRecord, type CreateStreamCheckpointInput } from './stream-checkpoints.js';
 export { ensureStreamLeaseStore, acquireStreamLease, releaseStreamLease, heartbeatStreamLease, getActiveLease, type StreamLeaseRecord, type AcquireLeaseInput, type ReconnectInfo } from './stream-lease.js';
 export { ensureTodoStore, archiveTodo, createTodo, updateTodo, loadTodo, listTodos, reopenTodo, seedLosPlanningTodos, unarchiveTodo, type CreateTodoInput, type ListTodosOptions, type TodoKind, type TodoPriority, type TodoRecord, type TodoStatus, type UpdateTodoInput, type SeedLosPlanningTodosOptions } from './todos.js';
+export {
+  ensureScheduledWorkStore, createScheduledWorkItem, loadScheduledWorkItem, listScheduledWorkItems,
+  updateScheduledWorkItem, listScheduledWorkItemRuns, loadScheduledWorkItemRun,
+  claimDueScheduledWorkItems, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
+  previewScheduledOccurrences, runScheduledWorkTick, triggerScheduledWorkItem, setupScheduledWorkWake,
+  type ScheduledWorkItem, type ScheduledWorkItemRun, type ScheduledWorkTrigger,
+  type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
+} from './scheduled-work/index.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
 export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureSkillStore, upsertSkill, loadSkill, listSkills, deleteSkill, incrementSkillUsage, skillDirForScope, syncSkillsToDir, loadSkillsFromDir, type SkillRecord, type SkillRunMode, type SkillScope, type SkillLayer, type UpsertSkillInput } from './skills.js';
@@ -92,7 +115,7 @@ export { reflectOnFailure, formatReflectionSummary, type ReflectionResult } from
 export { scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFilePath, buildStaticAnalysisPayload, type StaticAnalysisEventPayload, type StaticAnalysisFinding, type StaticAnalysisRule, type StaticAnalysisScanOptions, type StaticAnalysisScanResult, type StaticAnalysisConstraint, type StaticAnalysisRange, type StaticAnalysisPosition } from './static-analysis/index.js';
 
 // ── OAuth ─────────────────────────────────────────────────
-export { resolveXaiOAuthCredential, getXaiOAuthCredentialSync, getXaiOAuthStatus, clearXaiOAuthTokens, loadXaiOAuthState, refreshXaiOAuthToken, XaiOAuthError, type XaiOAuthTokens, type XaiOAuthState, type XaiOAuthCredential, type XaiOAuthStatus, type XaiLoginOptions } from './auth/xai-oauth.js';
+export { resolveXaiOAuthCredential, getXaiOAuthStatus, clearXaiOAuthTokens, loadXaiOAuthState, refreshXaiOAuthToken, XaiOAuthError, type XaiOAuthTokens, type XaiOAuthState, type XaiOAuthCredential, type XaiOAuthStatus, type XaiLoginOptions } from './auth/xai-oauth.js';
 
 // ── Runtime adapter — external agent CLI integration ──────
 export { startOtelBridge, isOtelBridgeRunning, spawnClaudeCode, runClaudeCodeWithBridge, claudeCodeSupportsOtel, claudeSpanToEventType, CLAUDE_CODE_SPAN_NAMES, spawnCodex, codexSupportsOtel, type OtelBridgeConfig, type ClaudeCodeSpawnInput, type CodexSpawnInput, type RuntimeKind, type RuntimeAdapterConfig, type RuntimeHandle } from './runtime-adapter/index.js';
@@ -141,3 +164,9 @@ export type { Rule as AstGrepRule } from '@ast-grep/napi';
 //   See package.json "exports" for subpath access.
 
 export { runStorageDoctor, selfHeal, type DoctorReport, type CheckResult } from "./storage-doctor.js";
+export {
+  captureDailyAgentQuality, ensureDailyAgentQualityStore,
+  getDailyAgentQualityBaseline, listDailyAgentQualityScopes,
+  type DailyAgentQualityBaseline, type DailyAgentQualityEvidenceWindow,
+  type DailyAgentQualitySnapshot,
+} from './daily-agent-quality/index.js';

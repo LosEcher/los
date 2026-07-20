@@ -333,6 +333,7 @@ function isModelRouteReason(value: unknown): value is ModelRouteReason {
   return value === 'configured_default'
     || value === 'explicit_provider'
     || value === 'explicit_model'
+    || value === 'explicit_fallback_policy'
     || value === 'architect_editor_override';
 }
 

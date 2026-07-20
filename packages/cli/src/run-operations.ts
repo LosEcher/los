@@ -1,3 +1,5 @@
+import { requestCliJson, resolveCliRequestAuth, type CliRequestAuth } from './cli-http.js';
+
 type JsonRecord = Record<string, unknown>;
 
 type ParsedArgs = {
@@ -31,42 +33,43 @@ async function runOperationCommand(
 
   const gateway = gatewayUrl(parsed);
   const json = booleanFlag(parsed, 'json');
+  const auth = requestAuth(parsed);
   if (subcommand === 'inspect') {
-    const value = await getJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/inspect`);
+    const value = await requestCliJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/inspect`, { auth });
     renderRunInspect(value, json);
     return;
   }
   if (subcommand === 'state') {
-    const value = await getJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/state`);
+    const value = await requestCliJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/state`, { auth });
     renderRunState(value, json);
     return;
   }
   if (subcommand === 'recover') {
-    const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/recover`, {
+    const value = await postRunJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/recover`, {
       apply: booleanFlag(parsed, 'apply') ? true : undefined,
       intent: stringFlag(parsed, 'intent'),
       reason: stringFlag(parsed, 'reason'),
       actor: stringFlag(parsed, 'actor'),
       staleMs: numberFlag(parsed, 'stale-ms'),
-    });
+    }, auth);
     renderRunRecover(value, json);
     return;
   }
   if (subcommand === 'approve') {
-    const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/approve`, {
+    const value = await postRunJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/approve`, {
       actor: stringFlag(parsed, 'actor'),
       reason: stringFlag(parsed, 'reason'),
-    });
+    }, auth);
     renderRunApprove(value, json);
     return;
   }
   if (subcommand === 'revise-plan') {
     const planArg = stringFlag(parsed, 'plan');
-    const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/revise-plan`, {
+    const value = await postRunJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/revise-plan`, {
       plan: planArg ? JSON.parse(planArg) : undefined,
       actor: stringFlag(parsed, 'actor'),
       reason: stringFlag(parsed, 'reason'),
-    });
+    }, auth);
     renderRunRevisePlan(value, json);
     return;
   }
@@ -74,36 +77,34 @@ async function runOperationCommand(
     const since = numberFlag(parsed, 'since') ?? 0;
     const streamSince = numberFlag(parsed, 'stream-since') ?? 0;
     const limit = numberFlag(parsed, 'limit') ?? 500;
-    const value = await getJson(
+    const value = await requestCliJson(
       `${gateway}/runs/${encodeURIComponent(runSpecId)}/stream?since=${since}&streamSince=${streamSince}&limit=${limit}`,
+      { auth },
     );
     renderRunReplay(value, json);
     return;
   }
-  const value = await postJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/verify`, {
+  const value = await postRunJson(`${gateway}/runs/${encodeURIComponent(runSpecId)}/verify`, {
     cwd: stringFlag(parsed, 'cwd'),
     timeoutMs: numberFlag(parsed, 'timeout-ms'),
     outputLimit: numberFlag(parsed, 'output-limit'),
     includeFailed: booleanFlag(parsed, 'skip-failed') ? false : undefined,
-  });
+  }, auth);
   renderRunVerify(value, json);
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  return await response.json() as unknown;
+function requestAuth(parsed: ParsedArgs): CliRequestAuth {
+  return resolveCliRequestAuth(parsed.flags);
 }
 
-async function postJson(url: string, body: JsonRecord): Promise<unknown> {
-  removeUndefined(body);
-  const response = await fetch(url, {
+async function postRunJson(url: string, body: JsonRecord, auth: CliRequestAuth): Promise<unknown> {
+  return await requestCliJson(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth,
+    operatorWrite: true,
+    json: true,
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  return await response.json() as unknown;
 }
 
 function renderRunInspect(value: unknown, json: boolean): void {
@@ -305,12 +306,6 @@ function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}...`;
 }
 
-function removeUndefined(value: JsonRecord): void {
-  for (const key of Object.keys(value)) {
-    if (value[key] === undefined) delete value[key];
-  }
-}
-
 function renderRunReplay(value: unknown, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(value));
@@ -380,6 +375,8 @@ Examples:
 
 Options:
   --gateway, -g URL       Gateway URL, default ${DEFAULT_GATEWAY}
+  --auth-token, -t TOKEN  Gateway token, default LOS_AUTH_TOKEN
+  --operator-token TOKEN  Operator token, default LOS_OPERATOR_TOKEN
   --json                  Emit raw JSON
   --intent MODE           recover, cancel, or operator-attention
   --apply                 Apply cancel or operator-attention as a recovery transition
