@@ -1,23 +1,19 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
-
 const AUTH_TOKEN = 'e2e-auth-token';
 const OPERATOR_TOKEN = 'e2e-operator-token';
 const NOW = '2026-07-18T08:00:00.000Z';
-
 type RequestRecord = {
   path: string;
   method: string;
   headers: Record<string, string>;
   body?: Record<string, unknown>;
 };
-
 async function seedTokens(page: Page, operatorToken = OPERATOR_TOKEN) {
   await page.addInitScript(({ auth, operator }) => {
     localStorage.setItem('los-auth-token', auth);
     localStorage.setItem('los-operator-token', operator);
   }, { auth: AUTH_TOKEN, operator: operatorToken });
 }
-
 async function mockGateway(page: Page): Promise<RequestRecord[]> {
   const records: RequestRecord[] = [];
   await page.routeWebSocket('**/sessions/*/stream', socket => socket.close());
@@ -53,7 +49,6 @@ async function mockGateway(page: Page): Promise<RequestRecord[]> {
   });
   return records;
 }
-
 test('stores auth tokens and restores protected data after reload', async ({ page }) => {
   const records = await mockGateway(page);
   await page.goto('/#sessions');
@@ -113,7 +108,6 @@ test('runs chat, recovers operator 403, and cancels an active task', async ({ pa
   await expect(page.getByRole('button', { name: 'send' })).toBeVisible();
   await assertViewportIsOperable(page, [prompt]);
 });
-
 test('shows run action errors and retries approve and recovery with operator auth', async ({ page }) => {
   await seedTokens(page, 'wrong-operator-token');
   const records = await mockGateway(page);
@@ -167,14 +161,22 @@ test('continues a session and sends a branch as a new chat', async ({ page }) =>
 
 test('shows setup gaps and routes each operator to the owning surface', async ({ page }) => {
   await seedTokens(page);
-  await mockGateway(page);
+  const records = await mockGateway(page);
   await page.goto('/#setup');
 
   await expect(page.getByRole('heading', { name: 'Runtime Setup' })).toBeVisible();
   await expect(page.locator('.setup-list').getByText('Gateway', { exact: true })).toBeVisible();
   await expect(page.getByText(/compatibility evidence is still required/)).toBeVisible();
+  await expect(page.getByText(/Provider discovery and compatibility evidence are separate checks/)).toBeVisible();
   await expect(page.getByText('No project is bound.')).toBeVisible();
   await expect(page.getByText(/Hermes not detected/)).toBeVisible();
+
+  const readinessPaths = ['/health', '/settings', '/onboarding', '/workspace', '/projects', '/services', '/nodes', '/communication/accounts'];
+  const initialReadinessRequests = records.filter(record => readinessPaths.includes(record.path)).length;
+  await page.getByRole('button', { name: 'Refresh setup status' }).click();
+  await expect.poll(() => records.filter(record => readinessPaths.includes(record.path)).length)
+    .toBe(initialReadinessRequests + readinessPaths.length);
+
   const providers = page.getByRole('button', { name: 'Review Providers' });
   await expect(providers).toBeEnabled();
   await providers.click();
@@ -232,7 +234,7 @@ test('uses Inbox and Work for plan review and structured creation', async ({ pag
   expect(create.body).toMatchObject({
     goal: 'Create a bounded daily workflow task',
     mode: 'execution',
-    toolMode: 'read-only',
+    toolMode: 'project-write',
     editableSurfaces: ['packages/web/src/pages'],
     requiredChecks: ['pnpm --filter @los/web test'],
     stopConditions: ['scope expands'],
@@ -252,7 +254,6 @@ function requestRecord(request: Request, url: URL): RequestRecord {
 function isAsset(path: string): boolean {
   return path === '/' || path === '/src/main.tsx' || path.startsWith('/src/') || path.startsWith('/node_modules/') || path.startsWith('/@') || path.endsWith('.css');
 }
-
 function requiresOperator(path: string): boolean {
   return path.endsWith('/operator-events')
     || /\/runs\/[^/]+\/(approve|recover|verify)$/.test(path)

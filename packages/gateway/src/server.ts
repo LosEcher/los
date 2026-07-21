@@ -76,6 +76,7 @@ import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router'
 import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
 import { getDefaultProjectId, getProject } from './project-store.js';
 import { getSymbolCacheMetrics } from './chat-cbm-symbol-cache.js';
+import { recoverApprovedRunDispatches } from './run-resume-recovery.js';
 
 const log = getLogger('gateway');
 const SERVICE_HEARTBEAT_MS = 10_000;
@@ -390,6 +391,12 @@ export async function startServer(port?: number, host?: string) {
   const agentTaskRecovery = await recoverExpiredAgentTasksWithAdvisoryLock('gateway_startup_recovery');
   if (agentTaskRecovery.lockAcquired && agentTaskRecovery.recovered.length > 0) {
     log.info(`Gateway startup recovered ${agentTaskRecovery.recovered.length} expired agent task(s)`);
+  }
+  const approvedRunRecovery = await recoverApprovedRunDispatches();
+  if (!approvedRunRecovery.lockAcquired) {
+    log.info('Approved run dispatch recovery skipped because another service owns the advisory lock');
+  } else if (approvedRunRecovery.runSpecIds.length > 0) {
+    log.info(`Gateway startup resumed ${approvedRunRecovery.runSpecIds.length} approved run dispatch(es)`);
   }
   await seedLosPlanningTodos();
   await seedSkills(DEFAULT_WORKSPACE_ROOT);

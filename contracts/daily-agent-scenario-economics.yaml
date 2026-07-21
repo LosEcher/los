@@ -1,0 +1,82 @@
+contract: los.daily-agent-scenario-economics
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Fixed Web-first daily-agent scenarios and role-level economics evidence stored
+  in run_evals without enabling automatic model routing.
+type: object
+routes:
+  - method: GET
+    path: /run-evals/scenario-economics/corpus
+    purpose: Return the versioned P0 daily-agent scenario definitions and required roles.
+    response: DailyAgentScenarioCorpus
+  - method: GET
+    path: /run-evals/scenario-economics
+    purpose: Aggregate current corpus evidence by scenario, role, and comparison lane.
+    query:
+      runSpecId: optional run spec identifier
+      createdFrom: optional ISO timestamp
+      createdTo: optional ISO timestamp
+    response: DailyAgentScenarioEconomicsReport
+  - method: POST
+    path: /run-evals/scenario-economics
+    auth: operator
+    purpose: Record one role result for one versioned scenario run in run_evals.
+    response: DailyAgentScenarioEconomicsRecord
+schemas:
+  DailyAgentScenarioCorpus:
+    required: [id, version, scenarios]
+    scenarios:
+      fields: [id, version, title, requiredRoles, acceptanceCriteria]
+  DailyAgentScenarioEconomicsRecord:
+    required:
+      - scenarioId
+      - scenarioVersion
+      - scenarioRunId
+      - lane
+      - role
+      - requestedProvider
+      - requestedModel
+      - effectiveProvider
+      - effectiveModel
+      - routeReason
+      - promptTokens
+      - completionTokens
+      - operatorInterventionCount
+      - hardAssertions
+    lane:
+      enum: [baseline, candidate]
+    role:
+      enum: [planner, worker, reviewer]
+  DailyAgentScenarioEconomicsReport:
+    required: [corpus, evidence, automaticRouting, totals, byScenario, byRole, byLane, byRoute]
+    evidenceStatus:
+      enum: [collecting, ready_for_policy_review]
+    automaticRoutingStatus:
+      enum: [disabled]
+persistence:
+  table: run_evals
+  summaryKind: daily_agent_scenario_economics
+  corpusVersion: 2026-07-21.v3
+  groupingKey: scenarioRunId
+policy:
+  - Requested and effective provider/model values are stored separately.
+  - Candidate comparisons require an explicit provider or model route reason.
+  - Cost, tokens, retries, verification, and operator intervention remain visible by role and scenario.
+  - Automatic routing remains disabled even when evidence is ready for policy review.
+  - Enabling automatic routing requires a separate accepted policy and operator approval.
+safety:
+  - Scenario evidence contains aggregate metrics and bounded assertion results only.
+  - Prompts, transcripts, credentials, tool inputs, and raw provider responses are forbidden.
+  - Runtime health, quota, readiness, compatibility, and model economics remain separate truth surfaces.
+references:
+  - docs/adr/0038-web-first-daily-coding-agent-product-boundary.md
+  - docs/adr/0037-daily-agent-quality-snapshots.md
+  - docs/governance/coordinator-scenario-eval-set.md
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm check
+  - pnpm run gate

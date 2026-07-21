@@ -3,12 +3,12 @@ import { ensureSessionEventStore } from '../session-events.js';
 import { runAgent } from '../loop.js';
 import { recordFailoverEval } from '../run-evals.js';
 import {
-  createTaskRun,
   ensureTaskRunStore,
   findActiveTaskRunByDedupeKey,
   loadTaskRun,
   updateTaskRunFields,
 } from '../task-runs.js';
+import { createTaskRunOrFindActive } from '../task-runs/create-or-find.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { runLifecycleHooks } from '../lifecycle-hooks.js';
 import {
@@ -30,6 +30,7 @@ import {
 } from './executor-client.js';
 import { normalizeOptionalString, normalizePositiveInteger, readObject } from './helpers.js';
 import { emitTaskEvent } from './task-events.js';
+import { reportTaskDeduplicated } from './task-deduplication.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
 import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
 import { readCurrentRunContract, checkVerificationGate } from './contract-reader.js';
@@ -81,17 +82,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
 
   if (dedupeKey) {
     const existing = await findActiveTaskRunByDedupeKey(dedupeKey);
-    if (existing) {
-      await emitTaskEvent(existing.sessionId, 'task.deduplicated', existing, {
-        duplicateTaskRunId: taskRunId,
-      });
-      await input.onTaskEvent?.({ type: 'task.deduplicated', taskRun: existing });
-      return {
-        status: 'deduplicated',
-        sessionId: existing.sessionId,
-        taskRun: existing,
-      };
-    }
+    if (existing) return reportTaskDeduplicated(input, existing, taskRunId);
   }
 
   let executor: ResolvedExecutor | null;
@@ -123,7 +114,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   }
   const nodeId = executor?.nodeId ?? 'gateway-local';
 
-  const created = await createTaskRun({
+  const creation = await createTaskRunOrFindActive({
     id: taskRunId,
     sessionId,
     runSpecId: input.runSpecId,
@@ -146,6 +137,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     leaseVersion,
     leaseExpiresAt: new Date(Date.now() + leaseMs),
   });
+  if (!creation.created) return reportTaskDeduplicated(input, creation.taskRun, taskRunId);
+  const created = creation.taskRun;
   if (executor) {
     const metadata = readObject(input.metadata);
     await recordSchedulerDecision({
