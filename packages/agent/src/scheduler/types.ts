@@ -25,6 +25,7 @@ export interface ScheduledTaskEvent {
 
 export interface ScheduledAgentTaskInput extends AgentConfig {
   prompt: string;
+  disposition?: 'planning' | 'execution';
   taskRunId?: string;
   /** Attempt number when this task is a retry of an earlier task_run. */
   attempt?: number;
@@ -121,6 +122,14 @@ export type ScheduledAgentTaskResult =
       sessionId: string;
       taskRun: TaskRunRecord;
       result: AgentResult;
+    }
+  | {
+      status: 'awaiting_approval';
+      sessionId: string;
+      taskRun: TaskRunRecord;
+      result: AgentResult;
+      planRevision: number;
+      planStepCount: number;
     }
   | {
       status: 'deduplicated';

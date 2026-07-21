@@ -265,6 +265,29 @@ test('Work reviews plans in the daily surface and proxies Work Item routes', () 
   assert.match(styles, /@media \(max-width: 780px\)[^]*\.daily-split,[^]*\.work-split/);
 });
 
+test('project-write chat intake creates and reuses a Work Item before streaming', () => {
+  assert.match(useChatRun, /let resolvedTodo = o\.activeTodoContext \?\? autoWorkItemRef\.current/);
+  assert.match(useChatRun, /postJson<WorkItemProjection>\('\/work-items'/);
+  assert.match(useChatRun, /mode: 'execution'/);
+  assert.match(useChatRun, /toolMode: 'project-write'/);
+  assert.match(useChatRun, /autoWorkItemRef\.current = resolvedTodo/);
+  assert.match(useChatRun, /todoId: resolvedTodo\?\.id/);
+  assert.match(useChatRun, /runContract: readRunContract\(resolvedTodo \?\? null\)/);
+  assert.match(useChatRun, /queryKey: \['work-items'\]/);
+  assert.match(useChatRun, /queryKey: \['inbox'\]/);
+  assert.match(useChatRun, /o\.toolMode === 'project-write'/);
+});
+
+test('Work plan review exposes structured steps, verification mapping, and revision history', () => {
+  assert.match(workPage, /revision \$\{contract\.planRevision\}/);
+  assert.match(workPage, /depends on/);
+  assert.match(workPage, /writable scope/);
+  assert.match(workPage, /done when/);
+  assert.match(workPage, /Verification mapping/);
+  assert.match(workPage, /planHistory/);
+  assert.match(workPage, /Revision history/);
+});
+
 test('Work result review exposes verification and durable workspace evidence before an operator decision', () => {
   assert.match(workPage, /<WorkReviewPanel/);
   assert.match(workPage, /postJson\(`\/work-items\/\$\{item!\.id\}\/result-decision`/);

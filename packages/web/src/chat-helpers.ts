@@ -248,6 +248,13 @@ export function appendLiveSessionEvent(
 }
 
 export function streamRow(event: string, data: Record<string, unknown>): StreamRow {
+  if (event === 'awaiting_approval') return {
+    id: crypto.randomUUID(),
+    event,
+    message: `Plan ready with ${String(data.planStepCount ?? '?')} steps.`,
+    meta: `revision ${String(data.planRevision ?? 1)} · review required before execution`,
+    level: 'warn',
+  };
   if (event === 'done') return { id: crypto.randomUUID(), event, message: typeof data.text === 'string' ? data.text : 'Run completed.', meta: data.sessionId ? `session ${data.sessionId}` : undefined, level: 'ok' };
   if (event === 'error') return { id: crypto.randomUUID(), event, message: String(data.message ?? 'stream error'), level: 'error' };
   if (event === 'session.resumed') {

@@ -49,6 +49,7 @@ export function ChatPage({
   branchFromSession,
   onBranchConsumed,
   activeTodoContext,
+  onTodoContextSet,
   onTodoContextClear,
 }: {
   selectedSessionId: string | null;
@@ -56,6 +57,7 @@ export function ChatPage({
   branchFromSession: string | null;
   onBranchConsumed: () => void;
   activeTodoContext: TodoItem | null;
+  onTodoContextSet: (todo: TodoItem) => void;
   onTodoContextClear: () => void;
 }) {
   const [workspaceRoot, setWorkspaceRoot] = useState(() => {
@@ -101,6 +103,10 @@ export function ChatPage({
     temperature, topP, maxTokens, presencePenalty, frequencyPenalty,
     provider, model,
     activeTodoContext, boundTodoId,
+    onWorkItemBound: (todo) => {
+      bindTodo(todo);
+      onTodoContextSet(todo);
+    },
     onSessionSelect, onBranchConsumed,
   });
 

@@ -249,7 +249,7 @@ export function WorkPage({
                 onDecision={(decision, reason) => review.mutate({ decision, reason })}
               />
 
-              <ContractSection title="Plan" items={(runContract?.plan ?? []).map(step => step.title ?? step.description ?? step.id ?? 'Plan step')} empty="No persisted plan yet." />
+              <PlanReview contract={runContract} />
               <ContractSection title="Editable surfaces" items={runContract?.editableSurfaces ?? []} empty="No writable scope declared." />
               <ContractSection title="Required checks" items={runContract?.requiredChecks ?? []} empty="No checks declared." />
               <ContractSection title="Stop conditions" items={runContract?.stopConditions ?? []} empty="No stop conditions declared." />
@@ -314,6 +314,30 @@ function ContractSection({ title, items, empty }: { title: string; items: string
   return <section className="contract-section"><h3>{title}</h3>{items.length ? <ol>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ol> : <p>{empty}</p>}</section>;
 }
 
+function PlanReview({ contract }: { contract?: RunContractDraft }) {
+  const plan = contract?.plan ?? [];
+  const verifications = contract?.verifications ?? [];
+  return <section className="contract-section plan-review">
+    <div className="contract-section-heading"><h3>Plan review</h3><span>{contract?.planRevision ? `revision ${contract.planRevision}` : 'draft'}</span></div>
+    {plan.length === 0 ? <p>No persisted plan yet.</p> : <ol className="plan-step-list">
+      {plan.map((step, index) => <li key={`${step.id ?? 'step'}-${index}`} className="plan-step">
+        <div className="plan-step-title"><strong>{step.title ?? step.id ?? `Step ${index + 1}`}</strong><span>{step.id ?? `step-${index + 1}`}</span></div>
+        <p>{step.description ?? 'No description recorded.'}</p>
+        <dl className="plan-step-facts">
+          <div><dt>depends on</dt><dd>{step.dependsOnIds?.length ? step.dependsOnIds.join(', ') : 'none'}</dd></div>
+          <div><dt>writable scope</dt><dd>{step.editableSurfaces?.length ? step.editableSurfaces.join(', ') : 'none declared'}</dd></div>
+          <div><dt>done when</dt><dd>{step.completionCriteria ?? 'No completion criterion recorded.'}</dd></div>
+        </dl>
+      </li>)}
+    </ol>}
+    <div className="plan-verification-block">
+      <h4>Verification mapping</h4>
+      {verifications.length === 0 ? <p>No step-level verification mapping recorded.</p> : <ul>{verifications.map(requirement => <li key={requirement.id}><strong>{requirement.id}</strong><span>{requirement.description}</span>{requirement.command ? <code>{requirement.command}</code> : null}</li>)}</ul>}
+    </div>
+    {contract?.planHistory?.length ? <div className="plan-history"><h4>Revision history</h4><ol>{contract.planHistory.map(snapshot => <li key={snapshot.revision}><strong>revision {snapshot.revision}</strong><span>{snapshot.reason ?? 'superseded plan'}</span><time>{formatDate(snapshot.supersededAt)}</time></li>)}</ol></div> : null}
+  </section>;
+}
+
 function Lineage({ item }: { item: WorkItemProjection }) {
   return <section className="contract-section lineage-section"><h3>Lineage</h3><dl><div><dt>work item</dt><dd>{item.id}</dd></div><div><dt>run spec</dt><dd>{item.evidence.latestRunSpecId ?? 'none'}</dd></div><div><dt>task run</dt><dd>{item.evidence.latestTaskRunId ?? 'none'}</dd></div><div><dt>session</dt><dd>{item.evidence.latestSessionId ?? 'none'}</dd></div></dl></section>;
 }
@@ -328,7 +352,7 @@ export function buildCreateWorkItemPayload(form: WorkFormState): CreateWorkItemP
 }
 
 function initialForm(): WorkFormState {
-  return { projectId: getCurrentProjectId() ?? 'los', title: '', goal: '', description: '', mode: 'execution', toolMode: 'read-only', priority: 'P2', editableSurfaces: '', nonGoals: '', requiredChecks: '', stopConditions: '', evidenceRequired: '' };
+  return { projectId: getCurrentProjectId() ?? 'los', title: '', goal: '', description: '', mode: 'execution', toolMode: 'project-write', priority: 'P2', editableSurfaces: '', nonGoals: '', requiredChecks: '', stopConditions: '', evidenceRequired: '' };
 }
 
 function lines(value: string): string[] {

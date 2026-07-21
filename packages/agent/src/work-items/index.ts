@@ -9,10 +9,12 @@ export {
   isWorkItemReviewError,
   reviewWorkItemResult,
 } from './result-review.js';
+export { createWorkItemRevision, type WorkItemRevisionResult } from './revision-loop.js';
 export {
   ensureWorkItemStore,
   linkWorkItemRun,
   listWorkItemRunLinks,
+  listWorkItemRunLinksForRunSpec,
   listOrphanRuntimeEvidence,
 } from './store.js';
 export type {

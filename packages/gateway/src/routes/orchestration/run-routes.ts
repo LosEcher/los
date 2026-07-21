@@ -28,6 +28,8 @@ import {
 } from '../server-helpers.js';
 import { getLogger } from '@los/infra/logger';
 import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
+import { createWorkItemRevision, listWorkItemRunLinksForRunSpec } from '@los/agent/work-items';
+import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
 
 const log = getLogger('run-routes');
 
@@ -222,12 +224,30 @@ export function registerRunRoutes(app: FastifyInstance): void {
     await ensureRunSpecStore();
     const runSpec = await loadRunSpec(id);
     if (!runSpec) return reply.status(404).send({ error: 'Not found' });
-    return await runVerificationRecordsForRunSpec(id, {
+    const verification = await runVerificationRecordsForRunSpec(id, {
       cwd: normalizeOptionalString(body.cwd),
       timeoutMs: normalizeOptionalNonNegativeInteger(body.timeoutMs),
       outputLimit: normalizeOptionalNonNegativeInteger(body.outputLimit),
       includeFailed: body.includeFailed === false ? false : undefined,
     });
+    let recovery: Awaited<ReturnType<typeof createWorkItemRevision>> | undefined;
+    if (verification.decision.status === 'blocked') {
+      const links = await listWorkItemRunLinksForRunSpec(id);
+      if (links[0]) {
+        recovery = await createWorkItemRevision({
+          runSpecId: id,
+          actor: getOperatorPrincipal(req).subject,
+          reason: `Verification failed or remains incomplete: ${verification.decision.blockedVerificationRecordIds.join(', ')}`,
+          trigger: 'verification_failed',
+        }).catch(() => undefined);
+        if (recovery && !recovery.exhausted) {
+          void dispatchPersistedRunSpec(recovery.runSpecId, 'planning').catch((error: unknown) => {
+            log.warn('revision planning dispatch failed', { runSpecId: recovery?.runSpecId, error: error instanceof Error ? error.message : String(error) });
+          });
+        }
+      }
+    }
+    return { ...verification, recovery };
   });
 
   app.post('/runs/:id/approve', async (req, reply) => {
@@ -244,11 +264,26 @@ export function registerRunRoutes(app: FastifyInstance): void {
         actor: operator.subject,
         reason: normalizeOptionalString(body.reason),
       });
+      const dispatch = updated.runContract?.phase === 'plan_approved'
+        ? {
+          status: 'scheduled' as const,
+          planRevision: updated.runContract?.planRevision ?? 1,
+        }
+        : undefined;
+      if (dispatch) {
+        void dispatchPersistedRunSpec(id, 'execution').catch((error: unknown) => {
+          log.warn('approved run dispatch failed', {
+            runSpecId: id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
       return {
         runSpecId: id,
         phase: updated.runContract?.phase,
         previousPhase: updated.runContract?.previousPhase,
         phaseChangedAt: updated.runContract?.phaseChangedAt,
+        dispatch,
       };
     } catch (err: any) {
       return reply.status(400).send({

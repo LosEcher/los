@@ -1,7 +1,7 @@
-// Generated from los.run-stream@0.3.0 by tools/contract-codegen.ts. Do not edit.
+// Generated from los.run-stream@0.4.0 by tools/contract-codegen.ts. Do not edit.
 
 export const RUN_STREAM_CONTRACT = "los.run-stream";
-export const RUN_STREAM_VERSION = "0.3.0";
+export const RUN_STREAM_VERSION = "0.4.0";
 export const RUN_STREAM_EVENT_TYPES = [
   "session",
   "session.resumed",
@@ -18,6 +18,10 @@ export const RUN_STREAM_EVENT_TYPES = [
   "coordinator.context_policy_selected",
   "coordinator.resume_plan_selected",
   "run.resume_dispatch_suppressed",
+  "run.planning_started",
+  "run.plan_draft",
+  "run.plan_produced",
+  "run.planning_completed",
   "task",
   "task.created",
   "task.deduplicated",
@@ -42,7 +46,8 @@ export const RUN_STREAM_EVENT_TYPES = [
   "error",
   "cancelled",
   "deduplicated",
-  "blocked"
+  "blocked",
+  "awaiting_approval"
 ] as const;
 export const RUN_STREAM_SSE_EVENTS = [
   "session.live",

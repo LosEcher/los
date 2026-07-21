@@ -25,6 +25,52 @@ export async function handleNonCompletedOutcome(input: {
   identityName: string | undefined;
 }): Promise<ChatResult> {
   const { scheduled, provider, model, config, send } = input;
+  if (scheduled.status === 'awaiting_approval') {
+    await ensureSessionStore();
+    await saveSession({
+      id: scheduled.sessionId,
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      userId: input.userId,
+      requestId: input.requestId,
+      traceId: scheduled.taskRun.traceId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: scheduled.result.messages,
+      turns: scheduled.result.turns,
+      metadata: {
+        provider: provider ?? config.agent.defaultProvider,
+        model: scheduled.taskRun.model ?? model ?? null,
+        workspaceRoot: input.workspaceRoot,
+        toolMode: 'read-only',
+        taskRunId: scheduled.taskRun.id,
+        runSpecId: input.runSpecId,
+        disposition: 'planning',
+        awaitingApproval: true,
+      },
+    });
+    send('awaiting_approval', {
+      sessionId: scheduled.sessionId,
+      runSpecId: input.runSpecId,
+      taskRunId: scheduled.taskRun.id,
+      traceId: scheduled.taskRun.traceId,
+      planRevision: scheduled.planRevision,
+      planStepCount: scheduled.planStepCount,
+    });
+    send('done', {
+      text: scheduled.result.text,
+      awaitingApproval: true,
+      sessionId: scheduled.sessionId,
+      runSpecId: input.runSpecId,
+      taskRunId: scheduled.taskRun.id,
+    });
+    return {
+      status: 'awaiting_approval',
+      sessionId: scheduled.sessionId,
+      taskRunId: scheduled.taskRun.id,
+      traceId: scheduled.taskRun.traceId,
+    };
+  }
   if (scheduled.status === 'deduplicated') {
     send('deduplicated', {
       sessionId: scheduled.sessionId, taskRunId: scheduled.taskRun.id, traceId: scheduled.taskRun.traceId,
