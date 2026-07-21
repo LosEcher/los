@@ -1,5 +1,5 @@
 contract: los.run-stream
-version: 0.3.0
+version: 0.4.0
 status: implemented
 owner: packages/agent
 description: >
@@ -28,6 +28,10 @@ eventTypes:
   - coordinator.context_policy_selected
   - coordinator.resume_plan_selected
   - run.resume_dispatch_suppressed
+  - run.planning_started
+  - run.plan_draft
+  - run.plan_produced
+  - run.planning_completed
   - task
   - task.created
   - task.deduplicated
@@ -53,6 +57,7 @@ eventTypes:
   - cancelled
   - deduplicated
   - blocked
+  - awaiting_approval
 sseProtocol:
   - session.live
   - session.ready
@@ -151,6 +156,13 @@ eventPayloads:
     commandId: string
     causationId: string
     correlationId: string
+  awaiting_approval:
+    sessionId: string
+    runSpecId: string
+    taskRunId: string
+    traceId: string
+    planRevision: integer
+    planStepCount: integer
   session.started:
     requestedProvider: string | null
     requestedModel: string | null

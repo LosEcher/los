@@ -1,5 +1,5 @@
 contract: los.run-spec
-version: 0.2.0
+version: 0.3.0
 status: implemented
 owner: packages/agent
 description: >
@@ -185,19 +185,22 @@ properties:
         format: date-time
       plan:
         type: array
+        minItems: 1
         items:
           type: object
+          required: [id, title, description, dependsOnIds, editableSurfaces, completionCriteria]
+          additionalProperties: false
           properties:
-            id: { type: string }
-            title: { type: string }
-            description: { type: string }
+            id: { type: string, minLength: 1 }
+            title: { type: string, minLength: 1 }
+            description: { type: string, minLength: 1 }
             dependsOnIds:
               type: array
               items: { type: string }
             editableSurfaces:
               type: array
               items: { type: string }
-            completionCriteria: { type: string }
+            completionCriteria: { type: string, minLength: 1 }
       verifications:
         type: array
         items:
@@ -254,6 +257,7 @@ events:
   writes:
     - task_runs
     - session_events
+    - run.plan_produced
   streams:
     - los.run-stream
 operatorControl:

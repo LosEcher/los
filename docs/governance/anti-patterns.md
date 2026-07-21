@@ -33,13 +33,14 @@ history, never written to `run_contract_json`.
 **Consequence**: When the session ends or context is compacted, the plan is
 lost. The next session starts without the spec context that was agreed upon.
 
-**Prevention**: All plan artifacts must be persisted to
-`run_specs.run_contract_json` via `approveRunSpecPhase()` or
-`reviseRunSpecPlan()`. The B0 scheduler gate enforces `canStartExecution()` so
-the phase must be `plan_approved`.
+**Prevention**: Planning attempts persist draft plan artifacts to
+`run_specs.run_contract_json` through `persistRunSpecPlan()` while the phase
+remains `planning`. Operator approval and later revisions continue through
+`approveRunSpecPhase()` or `reviseRunSpecPlan()`. The B0 scheduler gate enforces
+`canStartExecution()` so execution still requires phase `plan_approved`.
 
-**Code**: `packages/agent/src/run-contract.ts:130`,
-`scheduled-task-runner.ts:113`
+**Code**: `packages/agent/src/run-spec-plans.ts`,
+`packages/agent/src/run-specs.ts`, `scheduled-task-runner.ts`
 
 ## AP3: Marking Task Succeeded Before Verification Completes
 
@@ -52,7 +53,9 @@ verification while the task is already marked succeeded.
 
 **Prevention**: The scheduler's B0 pre-completion gate calls
 `checkVerificationGate()` -> `canMarkSucceeded()` before allowing a `succeeded`
-transition. All required verifications must be `succeeded` or `skipped`.
+transition. All required verifications must be `succeeded` or an explicitly
+allowed `skipped`. Planning attempts awaiting operator approval transition to
+`blocked`, not `succeeded`.
 
 **Code**: `packages/agent/src/run-contract.ts:142`,
 `scheduled-task-runner.ts:223`

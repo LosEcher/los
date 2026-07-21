@@ -99,7 +99,7 @@ export async function runPreExecutionPhases(
       toolCalls: planRes.toolCalls,
     }, deps.modelDiagnostics);
     await deps.emitEvent({
-      type: 'run.plan_produced',
+      type: 'run.plan_draft',
       payload: {
         text: planRes.text,
         textLength: planRes.text.length,

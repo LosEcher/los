@@ -11,7 +11,9 @@ import {
   type RuntimeKind,
   type ToolMode,
   type TodoItem,
+  type WorkItemProjection,
 } from '../api';
+import { getCurrentProjectId } from '../api/client.js';
 import {
   buildHistoryRows,
   buildTodoPrompt,
@@ -57,6 +59,7 @@ export function useChatRun(options: {
   model: string;
   activeTodoContext: TodoItem | null;
   boundTodoId: string | null;
+  onWorkItemBound?: (todo: TodoItem) => void;
   onSessionSelect: (id: string | null) => void;
   onBranchConsumed: () => void;
 }) {
@@ -76,6 +79,7 @@ export function useChatRun(options: {
   const runStartRef = useRef(0);
   const historyLoadedForSession = useRef<string | null>(null);
   const selectedSessionRef = useRef<string | null>(null);
+  const autoWorkItemRef = useRef<TodoItem | null>(null);
   const o = options;
 
   const { liveToolCalls, version: liveVersion, upsertToolCall, reset: resetLiveToolCalls } = useLiveToolCalls();
@@ -154,6 +158,31 @@ export function useChatRun(options: {
 
     try {
       if (o.runtimeKind === 'los') {
+        // Project-write coding turns are Work-first. Keep the created item in a
+        // ref so the next turn reuses it even before React state settles.
+        let resolvedTodo = o.activeTodoContext ?? autoWorkItemRef.current;
+        if (!resolvedTodo && o.toolMode === 'project-write') {
+          const goal = text.trim();
+          const created = await postJson<WorkItemProjection>('/work-items', {
+            projectId: getCurrentProjectId() ?? 'los',
+            title: goal.split(/\r?\n/, 1)[0]?.slice(0, 120) || 'Web coding task',
+            goal,
+            description: goal,
+            mode: 'execution',
+            editableSurfaces: o.workspaceRoot.trim() ? [o.workspaceRoot.trim()] : [],
+            nonGoals: [],
+            requiredChecks: [],
+            stopConditions: [],
+            evidenceRequired: [],
+            toolMode: 'project-write',
+            priority: 'P2',
+          });
+          resolvedTodo = workItemAsTodo(created);
+          autoWorkItemRef.current = resolvedTodo;
+          o.onWorkItemBound?.(resolvedTodo);
+          void queryClient.invalidateQueries({ queryKey: ['work-items'] });
+          void queryClient.invalidateQueries({ queryKey: ['inbox'] });
+        }
         const composerPayload = {
           systemPrompt: o.systemPrompt.trim() || undefined,
           allowedTools: parseCommaList(o.allowedTools),
@@ -172,12 +201,12 @@ export function useChatRun(options: {
           toolMode: o.toolMode,
           allowedTools: composerPayload.allowedTools,
           maxLoops: o.maxLoops,
-          traceId: o.activeTodoContext?.traceId,
-          dedupeKey: o.activeTodoContext ? `todo:${o.activeTodoContext.id}:${Date.now()}` : undefined,
+          traceId: resolvedTodo?.traceId,
+          dedupeKey: resolvedTodo ? `todo:${resolvedTodo.id}:${Date.now()}` : undefined,
           timeoutMs: o.timeoutMs,
           toolRetry: composerPayload.toolRetry,
-          runContract: readRunContract(o.activeTodoContext),
-          todoId: o.activeTodoContext?.id,
+          runContract: readRunContract(resolvedTodo ?? null),
+          todoId: resolvedTodo?.id,
         }, controller.signal, ({ event, data }) => onStreamEvent(event, data));
       } else {
         setRows(prev => [...prev, { id: crypto.randomUUID(), event: 'runtime.started', message: `Starting ${o.runtimeKind}...`, level: 'ok' as const }]);
@@ -223,6 +252,7 @@ export function useChatRun(options: {
     if (running) return;
     setSessionId(null);
     setTaskRunId(null);
+    autoWorkItemRef.current = null;
     setRows([{ id: crypto.randomUUID(), event: 'session.new', message: 'New chat is ready.', meta: 'next send will create a new session', level: 'ok' }]);
     setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: 'New chat is ready.', meta: 'next send will create a new session', level: 'ok', toolCalls: [] }]);
   }
@@ -236,5 +266,25 @@ export function useChatRun(options: {
     historyLoadedForSession, selectedSessionRef,
     handleSubmit, requestCancel, confirmCancel, dismissCancel,
     startNewChat,
+  };
+}
+
+function workItemAsTodo(item: WorkItemProjection): TodoItem {
+  return {
+    id: item.id,
+    tenantId: item.tenantId,
+    projectId: item.projectId,
+    userId: item.userId,
+    title: item.title,
+    description: item.description,
+    kind: 'task',
+    status: item.status,
+    priority: item.priority,
+    source: item.source,
+    dependsOnIds: [],
+    blockedByIds: [],
+    metadata: { runContract: item.runContractDraft },
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
   };
 }

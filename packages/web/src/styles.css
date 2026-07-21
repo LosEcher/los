@@ -2616,6 +2616,34 @@ button:disabled {
 
 .contract-section p { font-size: 12px; color: var(--faint); }
 
+.contract-section-heading,
+.plan-step-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.contract-section-heading span,
+.plan-step-title span { color: var(--faint); font: 10px "IBM Plex Mono", monospace; overflow-wrap: anywhere; }
+.plan-step-list { display: grid; gap: 14px; padding-left: 24px !important; }
+.plan-step { padding-left: 4px; }
+.plan-step-title strong { color: var(--text); font-size: 13px; }
+.plan-step > p { margin: 6px 0 9px; }
+.plan-step-facts { display: grid; gap: 5px; margin: 0; }
+.plan-step-facts > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }
+.plan-step-facts dt,
+.plan-step-facts dd { font-size: 11px; overflow-wrap: anywhere; }
+.plan-step-facts dt { color: var(--faint); }
+.plan-step-facts dd { margin: 0; color: var(--muted); }
+.plan-verification-block,
+.plan-history { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.plan-verification-block h4,
+.plan-history h4 { margin: 0 0 9px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.plan-verification-block ul,
+.plan-history ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.plan-verification-block li,
+.plan-history li { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
+.plan-verification-block li strong,
+.plan-history li strong { color: var(--text); }
+.plan-verification-block code { color: var(--accent); overflow-wrap: anywhere; }
+.plan-history li { grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 9px; }
+.plan-history time { color: var(--faint); font-size: 10px; }
+
 .lineage-section dl { margin: 0; display: grid; gap: 6px; }
 .lineage-section dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; }
 .lineage-section dt { color: var(--faint); font-size: 11px; }

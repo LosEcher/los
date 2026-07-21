@@ -14,6 +14,8 @@ import type { TodoPriority, TodoStatus } from '@los/agent/todos';
 
 import { runIdempotentJson } from '../../idempotency.js';
 import { getRequestContext, requireOperator } from '../../request-context.js';
+import { createWorkItemRevision } from '@los/agent/work-items';
+import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
 
 export function registerWorkItemRoutes(app: FastifyInstance): void {
   app.get('/inbox', async (req) => {
@@ -100,13 +102,26 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
         req,
         reply,
         { route: `/work-items/${id}/result-decision`, method: 'POST', body, context },
-        async () => await reviewWorkItemResult({
-          workItemId: id,
-          decision,
-          actor: context.userId,
-          reason,
-          closeoutReport: normalizeCloseoutReport(body.closeoutReport),
-        }),
+        async () => {
+          const updated = await reviewWorkItemResult({
+            workItemId: id,
+            decision,
+            actor: context.userId,
+            reason,
+            closeoutReport: normalizeCloseoutReport(body.closeoutReport),
+          });
+          if (decision !== 'revision_requested' || !updated.evidence.latestRunSpecId) return updated;
+          const recovery = await createWorkItemRevision({
+            runSpecId: updated.evidence.latestRunSpecId,
+            actor: context.userId,
+            reason,
+            trigger: 'revision_requested',
+          });
+          if (!recovery.exhausted) {
+            void dispatchPersistedRunSpec(recovery.runSpecId, 'planning').catch(() => undefined);
+          }
+          return { ...updated, recovery };
+        },
       );
     } catch (error) {
       if (!isWorkItemReviewError(error)) throw error;

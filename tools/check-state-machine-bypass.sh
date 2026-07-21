@@ -24,6 +24,8 @@ BYPASS_APIS=(
 # - tool-call-state-persistence.ts: scheduler helper that mirrors tool_call_states
 # - scheduled-task-runner.ts: scheduler helper calling updateTaskRunFields for
 #   metadata updates (not status transitions)
+# - planning-disposition.ts: planning completion transitions through the
+#   execution store, then records result metadata without changing status
 ALLOWED_FILES=(
   "packages/agent/src/execution-store.ts"
   "packages/agent/src/execution-transitions.ts"
@@ -34,6 +36,7 @@ ALLOWED_FILES=(
   "packages/agent/src/scheduler/tool-call-state-persistence.ts"
   "packages/agent/src/scheduler/scheduled-task-runner.ts"
   "packages/agent/src/scheduler/goal-self-check-runner.ts"
+  "packages/agent/src/scheduler/planning-disposition.ts"
 )
 
 for api in "${BYPASS_APIS[@]}"; do
