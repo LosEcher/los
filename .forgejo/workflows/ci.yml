@@ -108,6 +108,43 @@ jobs:
         run: pnpm test
         timeout-minutes: 20
 
+      - name: Enforce critical module coverage
+        run: pnpm test:coverage:critical
+        timeout-minutes: 5
+
+  gate-web-e2e:
+    if: forgejo.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git init .
+          git remote add origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "$FORGEJO_SHA"
+          git checkout --detach FETCH_HEAD
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+
+      - name: Prepare pnpm
+        run: |
+          set -euo pipefail
+          node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
+          corepack enable
+          corepack prepare pnpm@9.0.0 --activate
+          pnpm config set store-dir ~/.local/share/pnpm/store
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Install Chromium
+        run: pnpm --filter @los/web exec playwright install --with-deps chromium
+
+      - name: Test Web operator paths
+        run: pnpm --filter @los/web test:e2e
+
   gate-drift:
     if: forgejo.event_name != 'push'
     needs: gate-test

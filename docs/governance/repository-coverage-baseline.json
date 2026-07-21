@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-22",
+  "nodeVersion": "v24.14.0",
+  "command": "pnpm test:coverage:baseline:update",
+  "methodology": "Each package test runs with package-local Node coverage. Static inventory and V8-observed implementation files are recorded separately; unobserved files are not represented as covered.",
+  "regressionTolerancePercent": 0.5,
+  "totals": {
+    "packages": 11,
+    "implementationFiles": 565,
+    "sourceTestFiles": 213,
+    "sourceTestLines": 33461,
+    "observedImplementationFiles": 416
+  },
+  "packages": [
+    {
+      "name": "@los/agent",
+      "path": "packages/agent",
+      "implementationFiles": 309,
+      "sourceTestFiles": 108,
+      "sourceTestLines": 20355,
+      "observedImplementationFiles": 266,
+      "observedFilePercent": 86.08,
+      "coverage": {
+        "lines": 85.8,
+        "branches": 74.23,
+        "functions": 80.03
+      }
+    },
+    {
+      "name": "@los/cli",
+      "path": "packages/cli",
+      "implementationFiles": 22,
+      "sourceTestFiles": 11,
+      "sourceTestLines": 773,
+      "observedImplementationFiles": 11,
+      "observedFilePercent": 50,
+      "coverage": {
+        "lines": 67.19,
+        "branches": 61.95,
+        "functions": 75.13
+      }
+    },
+    {
+      "name": "@los/contracts",
+      "path": "packages/contracts",
+      "implementationFiles": 6,
+      "sourceTestFiles": 1,
+      "sourceTestLines": 57,
+      "observedImplementationFiles": 2,
+      "observedFilePercent": 33.33,
+      "coverage": {
+        "lines": 100,
+        "branches": 85.71,
+        "functions": 100
+      }
+    },
+    {
+      "name": "@los/executor",
+      "path": "packages/executor",
+      "implementationFiles": 18,
+      "sourceTestFiles": 8,
+      "sourceTestLines": 717,
+      "observedImplementationFiles": 10,
+      "observedFilePercent": 55.56,
+      "coverage": {
+        "lines": 78.51,
+        "branches": 77.78,
+        "functions": 70.64
+      }
+    },
+    {
+      "name": "@los/gateway",
+      "path": "packages/gateway",
+      "implementationFiles": 81,
+      "sourceTestFiles": 57,
+      "sourceTestLines": 7376,
+      "observedImplementationFiles": 78,
+      "observedFilePercent": 96.3,
+      "coverage": {
+        "lines": 67.95,
+        "branches": 62.64,
+        "functions": 56.67
+      }
+    },
+    {
+      "name": "@los/infra",
+      "path": "packages/infra",
+      "implementationFiles": 16,
+      "sourceTestFiles": 7,
+      "sourceTestLines": 917,
+      "observedImplementationFiles": 14,
+      "observedFilePercent": 87.5,
+      "coverage": {
+        "lines": 90.85,
+        "branches": 67.72,
+        "functions": 80.52
+      }
+    },
+    {
+      "name": "@los/media",
+      "path": "packages/media",
+      "implementationFiles": 5,
+      "sourceTestFiles": 3,
+      "sourceTestLines": 223,
+      "observedImplementationFiles": 5,
+      "observedFilePercent": 100,
+      "coverage": {
+        "lines": 77.24,
+        "branches": 60.28,
+        "functions": 81.4
+      }
+    },
+    {
+      "name": "@los/memory",
+      "path": "packages/memory",
+      "implementationFiles": 20,
+      "sourceTestFiles": 7,
+      "sourceTestLines": 1505,
+      "observedImplementationFiles": 13,
+      "observedFilePercent": 65,
+      "coverage": {
+        "lines": 81.53,
+        "branches": 68.21,
+        "functions": 75
+      }
+    },
+    {
+      "name": "@los/telegram-bot",
+      "path": "packages/telegram-bot",
+      "implementationFiles": 10,
+      "sourceTestFiles": 7,
+      "sourceTestLines": 767,
+      "observedImplementationFiles": 9,
+      "observedFilePercent": 90,
+      "coverage": {
+        "lines": 95.53,
+        "branches": 81.74,
+        "functions": 95.79
+      }
+    },
+    {
+      "name": "@los/web",
+      "path": "packages/web",
+      "implementationFiles": 66,
+      "sourceTestFiles": 1,
+      "sourceTestLines": 304,
+      "observedImplementationFiles": 0,
+      "observedFilePercent": 0,
+      "coverage": null
+    },
+    {
+      "name": "@los/wechat-bot",
+      "path": "packages/wechat-bot",
+      "implementationFiles": 12,
+      "sourceTestFiles": 3,
+      "sourceTestLines": 467,
+      "observedImplementationFiles": 8,
+      "observedFilePercent": 66.67,
+      "coverage": {
+        "lines": 69.59,
+        "branches": 68.45,
+        "functions": 65.79
+      }
+    }
+  ]
+}

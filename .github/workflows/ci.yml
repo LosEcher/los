@@ -151,6 +151,33 @@ jobs:
         run: pnpm test
         timeout-minutes: 12
 
+      - name: Enforce critical module coverage
+        if: matrix.package == 'agent'
+        run: pnpm test:coverage:critical
+        timeout-minutes: 5
+
+  gate-web-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @los/web exec playwright install --with-deps chromium
+
+      - name: Test Web operator paths
+        run: pnpm --filter @los/web test:e2e
+
   # Branch protection on GitHub still requires this job name until rules are updated.
   gate-test-input-preprocessor-retired:
     name: gate-test (input-preprocessor)
