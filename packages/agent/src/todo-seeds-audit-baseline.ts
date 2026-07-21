@@ -397,15 +397,21 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
   {
     id: 'todo-los-p1-test-coverage',
     title: 'P1-11 Test coverage baseline + 低覆盖模块补充',
-    description: '100 测试文件 / 17k 行测试代码，但整体覆盖率未知。高风险盲区：governance-sweeper/drift-sweeper/wechat-bot/telegram-bot/media。',
+    description: '全仓 coverage baseline 已版本化并可重复校验；media 5/5 实现文件获得 focused tests，governance drift 已完成直接行为覆盖审查。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-test-coverage',
     dependsOnIds: ['todo-los-p0-eval-probes'],
-    metadata: { files: ['packages/*/src/'], targetModules: ['governance-sweeper', 'governance-drift-sweeper', 'wechat-bot', 'telegram-bot', 'media'] },
+    metadata: {
+      files: ['tools/check-repository-coverage-baseline.mjs', 'docs/governance/repository-coverage-baseline.json', 'packages/media/src/*.test.ts', 'packages/agent/src/governance-drift-sweeper.test.ts', 'docs/adr/0014-testing-strategy-and-regression-gates.md'],
+      resolution: 'Baseline separates static source inventory from V8-observed implementation files and fails on inventory/test drift or coverage regression; all packages now expose package-local coverage.',
+      evidence: ['pnpm test:coverage:baseline:update', '@los/media: 9 passed; 5/5 implementation files observed; coverage 77.24/60.28/81.40', 'governance drift focused review: 21 passed; coverage 96.37/73.68/83.33'],
+      residualRisk: 'Web source-boundary tests observe no runtime implementation files; baseline records coverage as null instead of reporting a misleading 100%.',
+      statusUpdatedAt: '2026-07-22',
+    },
   },
 
   {

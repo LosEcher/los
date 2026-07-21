@@ -138,7 +138,7 @@ larger or more valuable than every later item.
 | --- | --- | --- | --- | --- |
 | 9 | `todo-los-p1-context-reconstruction` | `backlog` | Interrupted sessions still lack a complete checkpoint-to-handoff reconstruction protocol | Golden failed-session reconstruction with source event and observation references |
 | 10 | `todo-los-p1-stale-detection` | `backlog` | Compaction candidates lack decay and cross-session aggregation | Deterministic stale score, trigger policy, candidate-only output, and promotion consent boundary |
-| 11 | `todo-los-p1-test-coverage` | `ready` | Tests emit coverage, but no owned baseline artifact identifies high-risk blind spots | Repeatable package coverage report and focused additions for the named high-risk modules |
+| 11 | `todo-los-p1-test-coverage` | `done` | Versioned package-local baseline now separates static inventory from V8-observed sources | Baseline update/check commands pass; media observes 5/5 implementation files; governance drift direct review reaches 96.37/73.68/83.33 line/branch/function coverage |
 | 12 | `todo-los-p1-supply-chain-full` | `backlog` | Current audit covers install scripts, CVEs, and workspace references only | SBOM, license policy, freshness analysis, persisted audit trend, and focused tests |
 | 13 | `todo-los-p1-turbo-cache` | `ready` | CI behavior is observable only from logs and expected cache semantics are undocumented | Documented inputs/outputs, clean and warm-run evidence, and explicit CI cache policy |
 | 14 | `todo-los-p1-los-ast-rules` | `backlog` | AP1/AP3/AP5 checks are split across scripts and human workflow; AP5 is not statically enforced | los-ast rules with positive/negative fixtures and a documented repo gate boundary |
@@ -147,12 +147,12 @@ larger or more valuable than every later item.
 
 The active P0 container remains open for Execution Lab child work. Select the next
 P1 only after reconciling dependency readiness; the current highest-value path is
-recovery evidence, followed by the execution experiment contract. The three ready
+recovery evidence, followed by the execution experiment contract. The remaining ready
 seed tasks remain bounded operator-contract candidates rather than unattended
 dispatch work.
 
-Live dispatch gates currently admit five ready P1 tasks: OTel documentation,
-coverage baseline, Turbo cache documentation, and the two file-size findings.
+Live dispatch gates currently admit four ready P1 tasks: OTel documentation,
+Turbo cache documentation, and the two file-size findings.
 None has a persisted run contract, and the default todo dispatch tool mode is
 read-only, so they are candidates for a new bounded operator contract rather
 than unattended execution. The separate reflection finding remains backlog. [E]
