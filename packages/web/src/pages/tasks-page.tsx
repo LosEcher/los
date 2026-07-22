@@ -50,6 +50,7 @@ import {
   RefreshQueryButton,
   StatusPill,
 } from '../ui';
+import { AgentGraphControl } from './agent-graph-control.js';
 
 type RunStateProjection = {
   phase: string;
@@ -113,6 +114,7 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
             <RefreshQueryButton queryKey={['tasks']} />
           </div>
         </div>
+        <AgentGraphControl />
         <DataTable
           loading={tasks.isLoading}
           empty="No tasks yet."
@@ -337,4 +339,3 @@ type CompactionRecord = {
   createdBy?: string;
   createdAt: string;
 };
-
