@@ -1,8 +1,8 @@
 # Pi Kernel Shadow Semantic Corpus Preregistration
 
 - Date: 2026-07-22
-- Status: preregistered; no observations collected under this revision
-- Candidate: Pi `0.81.1`, execution-kernel protocol `0.1.0`
+- Status: collection complete for two exact candidates; K3 gate failed
+- Candidates: Pi `0.81.1` and `0.81.1+los.1`, execution-kernel protocol `0.1.0`
 - Corpus: `1.1.0`
 - Rubric: `pi-shadow-readonly-v2`
 - Supersedes for future collection: `1.0.1` / `pi-shadow-readonly-v1`
@@ -58,3 +58,15 @@ the package check and root contract check. After collection, the report must
 show every required `1.1.0` cell with zero failures. A ready report still
 requires a separate operator decision, persisted candidate run spec,
 operator-visible rollback, and formal pairwise evidence before K4.
+
+## Collection Result
+
+Candidate `0.81.1` completed 14/17 because each live read-only-tool candidate
+made two brokered reads while LOS made one. Candidate `0.81.1+los.1` then mapped
+the LOS parallel-tool policy and started with zero qualifying observations, but
+also completed 14/17. Its duplicate reads occurred across consecutive turns,
+so the adapter revision did not satisfy `tool_sequence_equal`.
+
+The rubric and prior records were not changed or rerun. K4 remains blocked.
+Detailed fixed-candidate evidence is in
+`docs/operations/2026-07-22-pi-kernel-shadow-adapter-revision-result.md`.

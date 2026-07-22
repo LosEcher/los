@@ -7,7 +7,8 @@
   read-only-tool output-hash assertion. Corpus `1.1.0` / rubric
   `pi-shadow-readonly-v2` completed 14/17 against candidate `0.81.1` and exposed
   three real duplicate-tool failures. Candidate `0.81.1+los.1` maps the LOS
-  parallel-tool policy and has no observations yet. Local, HTTP executor, and SSH
+  parallel-tool policy but also completed 14/17: its three live tool cases made
+  a second narrower read in the next turn. Local, HTTP executor, and SSH
   executor paths still select only the LOS adapter through the fail-closed
   production registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
@@ -199,9 +200,11 @@ state, and isolated lineage; two output hashes matched and one differed because
    candidate `0.81.1`. Its typed candidate values passed, but all three live
    tool scenarios made two real brokered `read_file` calls while LOS made one.
    Candidate `0.81.1+los.1` maps `supportsParallelToolCalls=false` through Pi's
-   provider payload hook and has no observations yet. K4 policy review remains
-   blocked until that candidate is collected and passes. Pi is still absent
-   from the production registry.
+   provider payload hook but also completed 14/17. Its duplicate reads occurred
+   across consecutive turns, so the parallel-call hypothesis did not explain
+   the parity failure. K4 policy review remains blocked pending a deterministic
+   LOS/Pi transport-envelope comparison and a new exact candidate. Pi is still
+   absent from the production registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses

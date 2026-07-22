@@ -153,7 +153,7 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
 | K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
 | K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | complete: input/telemetry live probe and explicit unsupported-semantic decisions | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
-| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | candidate `0.81.1` completed corpus `1.1.0` at 14/17 and exposed duplicate brokered reads; candidate `0.81.1+los.1` maps parallel-tool policy with no observations | gate failed; collect and pass the fixed candidate before K4 |
+| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | candidates `0.81.1` and `0.81.1+los.1` both completed corpus `1.1.0` at 14/17; the adapter revision changed parallel-call policy but Pi still made a second read in the next turn | gate failed; compare LOS/Pi second-turn request envelopes before a new candidate |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
 | K5 Write canary | temporary then managed-workspace project writes | ToolBroker policy, lease fencing, verifier records, reviewed diff | stop on any policy or final-transition bypass |
 | K6 Graph worker | Pi executes bounded worker tasks; verifier remains independent | worker/verifier attempts, graph completion, manual integration review | stop if child contract or editable surfaces are lost |
@@ -244,13 +244,15 @@ sequence, successful tool state, terminal state, and actual input lineage.
 Corpus `1.1.0` / rubric `pi-shadow-readonly-v2` is now preregistered with a
 typed JSON `packageName` comparator. Candidate `0.81.1` completed 14/17: all
 three live tool scenarios produced the expected candidate task value but made
-two actual brokered reads while LOS made one. Candidate `0.81.1+los.1` maps
-`supportsParallelToolCalls=false` through the Pi payload hook and has no
-observations.
+two actual brokered reads while LOS made one. Candidate `0.81.1+los.1` mapped
+`supportsParallelToolCalls=false`, started with zero qualifying observations,
+and also completed 14/17. Its three typed values and terminal assertions passed,
+but each candidate made a full read followed by a narrower read in the next
+turn. The parallel-call hypothesis is therefore falsified as the root cause.
 Corpus `1.0.0` remains persisted but ignored because its lineage assertion was
-not bound to the Pi input. K4 remains
-blocked pending collection of the fixed candidate. The pre-corpus
-smoke remains excluded rather than retroactively labeled. `pnpm --filter
+not bound to the Pi input. K4 remains blocked pending a deterministic LOS/Pi
+transport-envelope comparison and a new exact candidate. The pre-corpus smoke
+remains excluded rather than retroactively labeled. `pnpm --filter
 @los/agent scenario:pi-shadow` reads current status without invoking a provider.
 
 ## Active Work Ledger
@@ -263,7 +265,7 @@ LOS todos. Their status here must not be presented as database todo state.
 | `kernel-k0-decision-record` | complete in this document; not a DB todo | ADR, history record, contract, roadmap, and contract check |
 | `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
 | `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
-| `kernel-k3-shadow` | corrected corpus run complete; gate failed | explicit read-only scheduler shadow, actual candidate lineage, corpus/rubric assertions, 16/17 passing observations, and one immutable live output-hash failure |
+| `kernel-k3-shadow` | two `1.1.0` candidate runs complete; gate failed | both exact candidates remain at 14/17; next owner is deterministic second-turn request-envelope comparison, not live recollection |
 | `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |
@@ -276,6 +278,7 @@ LOS todos. Their status here must not be presented as database todo state.
 - `contracts/execution-pairwise-eval.yaml`
 - `docs/adr/0038-web-first-daily-coding-agent-product-boundary.md`
 - `docs/governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
+- `docs/operations/2026-07-22-pi-kernel-shadow-adapter-revision-result.md`
 - archived `docs/archive/seven-project-boundary-spec.md`
 - Pi AgentHarness lifecycle:
   <https://github.com/earendil-works/pi/blob/main/packages/agent/docs/agent-harness.md>

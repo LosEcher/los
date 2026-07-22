@@ -1,9 +1,9 @@
 # Pi Kernel Parallel Tool Policy Gap
 
 - Date: 2026-07-22
-- Status: adapter fix implemented; new candidate not yet collected
+- Status: adapter revision collected; K3 gate still failed
 - Failed candidate: Pi core `0.81.1`, kernel identity `0.81.1`
-- Fixed candidate: Pi core `0.81.1`, kernel identity `0.81.1+los.1`
+- Adapter-revision candidate: Pi core `0.81.1`, kernel identity `0.81.1+los.1`
 - Corpus: `1.1.0`
 - Rubric: `pi-shadow-readonly-v2`
 
@@ -29,20 +29,19 @@ production run requested it once. This is not projection duplication:
   `tool.completed` events;
 - each production session contained one brokered `read_file` call.
 
-## Root Cause
+## Initial Hypothesis
 
 The DeepSeek model profile declares `supportsParallelToolCalls=false`. The LOS
 provider path maps that capability to `parallel_tool_calls=false` in the
 OpenAI-compatible request body. The Pi input adapter mapped provider, model,
 credential, messages, tools, and sampling settings, but did not map this
 provider capability. Pi therefore used its default OpenAI-compatible payload
-behavior and the live provider returned two identical calls in each sampled
-tool turn.
+behavior. This was treated as the root-cause hypothesis for the duplicate
+reads.
 
-The existing LOS storm breaker is not the parity mechanism for this case: its
-default threshold suppresses the third repeated call, while these responses
-contained two calls in one turn. The missing boundary is provider capability
-mapping before invocation.
+Provider capability mapping before invocation was a real missing boundary, but
+the initial evidence did not establish that both calls came from one provider
+response.
 
 ## Decision
 
@@ -58,12 +57,30 @@ core and `los.1` is the LOS adapter behavior revision. Corpus and rubric remain
 not change. Exact candidate identity keeps the failed `0.81.1` records
 immutable and prevents them from being mixed with the fixed adapter.
 
+## Adapter-Revision Result
+
+Candidate `0.81.1+los.1` started with zero qualifying observations and completed
+the same corpus at 14/17. All 11 deterministic observations and all three live
+no-tool observations passed. All three live read-only-tool observations failed
+only `tool_sequence_equal`.
+
+Persisted kernel and broker events show that Pi made the reads in consecutive
+turns: it first read the full `package.json`, then requested a narrow range.
+The typed production and candidate values were valid and equal in all three
+runs. Mapping `parallel_tool_calls=false` therefore did not close the gap and
+the earlier root-cause claim is falsified.
+
+The detailed evidence and next diagnostic boundary are recorded in
+`docs/operations/2026-07-22-pi-kernel-shadow-adapter-revision-result.md`.
+
 ## Next Verification
 
-1. Commit the adapter revision before collecting evidence.
-2. Confirm the new candidate report contains zero qualifying observations and
-   ignores prior candidates.
-3. Run deterministic collection, then the six fixed live observations.
-4. Require zero failures before K4 policy review.
+1. Keep both failed candidate reports immutable; do not recollect them.
+2. Add a deterministic transport-envelope comparison after one successful tool
+   result.
+3. Identify the exact LOS/Pi turn-boundary difference before changing runtime
+   behavior.
+4. Assign a new exact candidate identity for any adapter behavior change.
+5. Require zero failures before K4 policy review.
 
 Even a passing report does not authorize registry admission or a canary.
