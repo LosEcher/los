@@ -142,6 +142,7 @@ async function* runPiAsKernel(
   };
   activeRuns.set(input.taskRunId, controller);
   const turns: TurnSummary[] = [];
+  const deniedToolCalls = new Set<string>();
   const execution = (async () => {
     try {
       await emit('kernel.started', {
@@ -155,7 +156,7 @@ async function* runPiAsKernel(
         {
           systemPrompt: input.systemPrompt,
           messages: [...priorMessages],
-          tools: createPiTools(input, () => turn),
+          tools: createPiTools(input, () => turn, deniedToolCalls),
         },
         {
           model: input.model,
@@ -166,7 +167,7 @@ async function* runPiAsKernel(
             ? () => turn >= input.maxTurns!
             : undefined,
         },
-        event => projectPiEvent(event, () => turn, value => { turn = value; }, turns, emit),
+        event => projectPiEvent(event, () => turn, value => { turn = value; }, turns, deniedToolCalls, emit),
         controller.signal,
         input.streamFn,
       );
@@ -228,6 +229,7 @@ async function projectPiEvent(
   readTurn: () => number,
   writeTurn: (turn: number) => void,
   turns: TurnSummary[],
+  deniedToolCalls: Set<string>,
   emit: (type: KernelEventType, payload: Record<string, unknown>, context?: Partial<KernelEvent>) => Promise<void>,
 ): Promise<void> {
   if (event.type === 'turn_start') {
@@ -265,7 +267,7 @@ async function projectPiEvent(
       transition: {
         callId: event.toolCallId,
         toolName: event.toolName,
-        state: event.isError ? 'failed' : 'succeeded',
+        state: deniedToolCalls.delete(event.toolCallId) ? 'denied' : event.isError ? 'failed' : 'succeeded',
         turn,
       },
     }, { turn, toolCallId: event.toolCallId });
@@ -277,7 +279,7 @@ async function projectPiEvent(
     await emit('turn.completed', { summary }, { turn });
   }
 }
-function createPiTools(input: PiKernelRunInput, readTurn: () => number): AgentTool[] {
+function createPiTools(input: PiKernelRunInput, readTurn: () => number, deniedToolCalls: Set<string>): AgentTool[] {
   return (input.toolCatalog ?? []).map(descriptor => ({
     name: descriptor.name,
     label: descriptor.name,
@@ -291,6 +293,7 @@ function createPiTools(input: PiKernelRunInput, readTurn: () => number): AgentTo
         arguments: parameters as Record<string, unknown>,
         turn: readTurn(),
       });
+      if ('denied' in result && result.denied === true) deniedToolCalls.add(callId);
       if (result.error) throw new Error(result.error);
       return {
         content: [{ type: 'text', text: result.content }],

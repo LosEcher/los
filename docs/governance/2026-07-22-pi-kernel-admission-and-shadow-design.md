@@ -1,7 +1,7 @@
 # Pi Kernel Admission And Read-Only Shadow Design
 
 - Date: 2026-07-22
-- Status: K3 implemented; initial live evidence complete
+- Status: K3 implemented; scenario corpus preregistered; observations collecting
 - Owner: `packages/agent`
 - Decision source: ADR 0039
 
@@ -53,6 +53,10 @@ K3 adds a scheduler-owned `pi` shadow mode with these constraints:
 6. Pi preparation, provider, tool, interruption, or projection failure produces
    `skipped`, `failed`, or `interrupted` shadow evidence. It does not change the
    production result or task/run state.
+7. A versioned scenario counts only when its actual prompt and allowed tool
+   catalog match the preregistered fixture. The effective route determines the
+   evidence class. Invalid scenario metadata becomes a bounded evidence error
+   and cannot fail production settlement.
 
 ## Admission Decisions
 
@@ -83,8 +87,10 @@ an explicit default-profile restriction before broad promotion.
 
 No new database table is required for K3. Exact candidate events remain in
 `session_events`, provider calls remain in `provider_call_telemetry`, and the
-production comparison bookmark is another audit event. Formal promotion data
-continues through the existing execution experiment and pairwise eval contracts.
+production comparison bookmark is another audit event. K3 does not create a
+candidate `run_spec`, so it also does not manufacture a formal `run_evals`
+pair. Formal promotion data continues through the existing execution experiment
+and pairwise eval contracts once K4 owns a real candidate run spec.
 
 ## Verification
 
@@ -103,8 +109,10 @@ request. Registry admission remains a later decision even if that probe passes.
 
 ## Remaining Verification
 
-- K3 has one real no-tool scheduler record; a preregistered read-only scenario
-  corpus and repeated observations remain.
+- Corpus `1.0.0` and rubric `pi-shadow-readonly-v1` preregister no-tool,
+  read-only tool, broker denial, provider failure, and interruption scenarios.
+  The required 17 observations are still collecting. The earlier live no-tool
+  smoke predates this corpus and is intentionally ignored by readiness.
 - No read-only canary or write canary is authorized.
 - Provider fallback, compaction, and long-context equivalence remain unproven.
 - Web-first manual acceptance and graph integration review remain separate and

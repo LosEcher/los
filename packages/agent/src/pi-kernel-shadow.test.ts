@@ -52,6 +52,40 @@ test('Pi shadow forces derived read-only lineage and persists only bounded compa
   assert.equal(JSON.stringify(writes[0]?.payload).includes('production answer'), false);
 });
 
+test('Pi shadow attaches preregistered scenario assertions to bounded evidence', async () => {
+  const writes: SessionEventWrite[] = [];
+  const input = baseInput();
+  input.shadow.scenario = { id: 'PKS01-no-tool' };
+  input.prompt = 'Return exactly LOS_PI_SHADOW_OK and do not call tools.';
+  input.config.allowedTools = [];
+  const shadow = startPiKernelShadow(input, {
+    runCandidate: async () => ({
+      result: { ...productionResult, text: productionResult.text },
+      events: [event('kernel.finished')],
+    }),
+    appendEvent: async eventInput => { writes.push(eventInput); return {} as never; },
+  });
+
+  const outcome = await shadow.settle(productionResult);
+  assert.equal(outcome.scenarioEvidence?.passed, true);
+  assert.equal(outcome.scenarioEvidence?.evidenceClass, 'deterministic');
+  assert.equal(outcome.scenarioEvidence?.scenarioId, 'PKS01-no-tool');
+  assert.equal(writes[0]?.payload?.scenarioEvidence && typeof writes[0].payload.scenarioEvidence, 'object');
+});
+
+test('Pi shadow contains invalid scenario evidence without affecting settlement', async () => {
+  const input = baseInput();
+  input.shadow.scenario = { id: 'unknown' as 'PKS01-no-tool' };
+  const shadow = startPiKernelShadow(input, {
+    runCandidate: async () => ({ result: productionResult, events: [event('kernel.finished')] }),
+    appendEvent: async () => ({} as never),
+  });
+
+  const outcome = await shadow.settle(productionResult);
+  assert.equal(outcome.status, 'completed');
+  assert.match(outcome.scenarioEvidenceError ?? '', /Unknown Pi kernel shadow scenario/);
+});
+
 test('Pi shadow turns candidate failure and interruption into evidence without throwing', async () => {
   const writes: SessionEventWrite[] = [];
   const failed = startPiKernelShadow(baseInput(), {

@@ -176,9 +176,14 @@ API shape, status, duration, and normalized usage. K3 adds an explicit
 scheduler-owned Pi shadow that forces read-only policy, derives candidate
 session/task/trace lineage, and writes only a bounded hash/count comparison to
 the production session. The first live DeepSeek no-tool scheduler shadow
-completed with equal output hashes and separated evidence. Production
-registration remains blocked on preregistered read-only scenario evidence and
-the later canary decision; Pi is still absent from the production registry.
+completed with equal output hashes and separated evidence. Corpus `1.0.0` now
+preregisters no-tool, read-only-tool, broker-denial, provider-failure, and
+interruption observations against rubric `pi-shadow-readonly-v1`. Readiness is
+keyed by exact kernel and protocol version and cannot trigger registry
+admission. The earlier live smoke predates the corpus and is not retroactively
+counted. Production registration remains blocked on completing these
+observations and a later canary decision; Pi is still absent from the
+production registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses

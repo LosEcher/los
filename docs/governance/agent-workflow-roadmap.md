@@ -237,9 +237,12 @@ fallback, architect-editor, context, model-setting, and child-execution
 semantics now have explicit fail-closed or LOS-owned decisions. K3 adds an
 explicit read-only scheduler shadow with derived evidence lineage; its first
 live no-tool DeepSeek comparison completed with equal output hashes and no
-tools. Pi remains unavailable as a selected production kernel. The current LOS
-loop stays the production baseline until preregistered read-only scenarios,
-canary, pairwise evaluation, and rollback gates pass.
+tools. Corpus `1.0.0` and rubric `pi-shadow-readonly-v1` now preregister five
+scenario families and 17 required observations. The current report is
+`collecting` with zero qualifying observations; the earlier live smoke predates
+the corpus and is not counted. Pi remains unavailable as a selected production
+kernel. The current LOS loop stays the production baseline until the corpus,
+canary, formal pairwise evaluation, and rollback gates pass.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,

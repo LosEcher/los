@@ -6,12 +6,21 @@ import { _createPiExecutionKernel, _getPiExecutionKernelIdentity } from './pi-ex
 import { _preparePiKernelRun } from './pi-kernel-input.js';
 import { evaluatePiKernelShadowAdmission, type PiKernelAdmissionIssue } from './pi-kernel-admission.js';
 import { estimateCost, resolveModelProfile } from './model-profiles.js';
+import {
+  evaluatePiKernelShadowScenario,
+  type PiKernelShadowEvidenceClass,
+  type PiKernelShadowScenarioEvidence,
+  type PiKernelShadowScenarioId,
+} from './pi-kernel-shadow-scenarios.js';
 import type { AgentConfig, AgentResult } from './loop.js';
 
 export interface PiKernelShadowConfig {
   kind: 'pi';
   maxTurns?: number;
   timeoutMs?: number;
+  scenario?: {
+    id: PiKernelShadowScenarioId;
+  };
 }
 
 export interface PiKernelShadowOutcome {
@@ -23,12 +32,16 @@ export interface PiKernelShadowOutcome {
   latencyMs: number;
   eventCounts: Record<string, number>;
   toolCallCount: number;
+  toolNames: string[];
+  toolCompletionStates: string[];
   totalTokens: { prompt: number; completion: number };
   route?: { provider: string; model: string; api: string };
   estimatedCostUsd?: number;
   outputHash?: string;
   admissionIssues?: PiKernelAdmissionIssue[];
   error?: string;
+  scenarioEvidence?: PiKernelShadowScenarioEvidence;
+  scenarioEvidenceError?: string;
 }
 
 export interface PiKernelShadowHandle {
@@ -100,6 +113,32 @@ export function startPiKernelShadow(
         candidate, lineage, candidateRun, admissionIssues,
         latencyMs: Math.max(0, now() - startedAt),
       });
+      if (input.shadow.scenario) {
+        try {
+          outcome.scenarioEvidence = evaluatePiKernelShadowScenario({
+            scenarioId: input.shadow.scenario.id,
+            evidenceClass: inferEvidenceClass(input.config.provider, outcome.route),
+            productionStatus,
+            productionResult,
+            prompt: input.prompt,
+            allowedTools: input.config.allowedTools,
+            productionSessionId: input.productionSessionId,
+            productionTaskRunId: input.productionTaskRunId,
+            productionTraceId: input.productionTraceId,
+            candidateStatus: outcome.status,
+            candidateSessionId: outcome.sessionId,
+            candidateTaskRunId: outcome.taskRunId,
+            candidateTraceId: outcome.traceId,
+            candidateEventCounts: outcome.eventCounts,
+            candidateToolNames: outcome.toolNames,
+            candidateToolCompletionStates: outcome.toolCompletionStates,
+            candidateOutputHash: outcome.outputHash,
+            productionOutputHash: productionResult ? outputHash(productionResult.text) : undefined,
+          });
+        } catch (error) {
+          outcome.scenarioEvidenceError = truncate(error instanceof Error ? error.message : String(error));
+        }
+      }
       await persistComparison(input, outcome, productionResult, productionStatus, dependencies.appendEvent)
         .catch(() => undefined);
       return outcome;
@@ -136,10 +175,13 @@ async function persistComparison(
       candidate: outcome.candidate, candidateSessionId: outcome.sessionId,
       candidateTaskRunId: outcome.taskRunId, candidateTraceId: outcome.traceId,
       status: outcome.status, latencyMs: outcome.latencyMs, eventCounts: outcome.eventCounts,
-      toolCallCount: outcome.toolCallCount, totalTokens: outcome.totalTokens,
+      toolCallCount: outcome.toolCallCount, toolNames: outcome.toolNames,
+      toolCompletionStates: outcome.toolCompletionStates, totalTokens: outcome.totalTokens,
       route: outcome.route ?? null, estimatedCostUsd: outcome.estimatedCostUsd ?? null,
       outputHash: outcome.outputHash ?? null, admissionIssues: outcome.admissionIssues ?? [],
       error: outcome.error ?? null,
+      scenarioEvidence: outcome.scenarioEvidence ?? null,
+      scenarioEvidenceError: outcome.scenarioEvidenceError ?? null,
     },
   });
 }
@@ -215,6 +257,15 @@ function summarizeOutcome(input: {
   const { result, events, error } = input.candidateRun;
   const interrupted = events.some(event => event.type === 'kernel.interrupted');
   const totalTokens = result?.totalTokens ?? usageFromEvents(events);
+  const toolNames = events.flatMap(event => event.type === 'tool.requested'
+    && typeof event.payload.tool === 'string' ? [event.payload.tool] : []);
+  const toolCompletionStates = events.flatMap(event => {
+    if (event.type !== 'tool.completed') return [];
+    const transition = event.payload.transition;
+    if (!transition || typeof transition !== 'object' || Array.isArray(transition)) return [];
+    const state = (transition as Record<string, unknown>).state;
+    return typeof state === 'string' ? [state] : [];
+  });
   const estimatedCostUsd = input.candidateRun.route
     ? estimateCandidateCost(input.candidateRun.route, totalTokens)
     : undefined;
@@ -232,6 +283,8 @@ function summarizeOutcome(input: {
     latencyMs: input.latencyMs,
     eventCounts: countEvents(events),
     toolCallCount: events.filter(event => event.type === 'tool.requested').length,
+    toolNames: toolNames.slice(0, 20),
+    toolCompletionStates: toolCompletionStates.slice(0, 20),
     totalTokens,
     ...(input.candidateRun.route ? { route: input.candidateRun.route } : {}),
     ...(estimatedCostUsd === undefined ? {} : { estimatedCostUsd }),
@@ -283,6 +336,14 @@ function estimateCandidateCost(
   } catch {
     return undefined;
   }
+}
+
+function inferEvidenceClass(
+  configuredProvider: string | undefined,
+  route: { provider: string } | undefined,
+): PiKernelShadowEvidenceClass {
+  const provider = route?.provider ?? configuredProvider ?? '';
+  return provider === 'fixture' ? 'deterministic' : 'live-provider';
 }
 
 function normalizeMaxTurns(value: number | undefined): number {

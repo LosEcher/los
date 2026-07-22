@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  PI_KERNEL_ADMISSION_DECISIONS,
+  _PI_KERNEL_ADMISSION_DECISIONS,
   assertPiKernelInputAdmission,
-  evaluatePiKernelInputAdmission,
+  _evaluatePiKernelInputAdmission,
   evaluatePiKernelShadowAdmission,
 } from './pi-kernel-admission.js';
 
 test('Pi admission reports every unsupported semantic without silently dropping settings', () => {
-  const issues = evaluatePiKernelInputAdmission({
+  const issues = _evaluatePiKernelInputAdmission({
     providerFallback: {
       mode: 'explicit_ordered',
       targets: [{ provider: 'a' }, { provider: 'b' }],
@@ -28,7 +28,7 @@ test('Pi admission reports every unsupported semantic without silently dropping 
     'sampling_settings',
     'reasoning_disablement',
   ]);
-  assert.equal(PI_KERNEL_ADMISSION_DECISIONS.childAgents, 'los_owned');
+  assert.equal(_PI_KERNEL_ADMISSION_DECISIONS.childAgents, 'los_owned');
   assert.throws(() => assertPiKernelInputAdmission({ providerFallback: {
     mode: 'explicit_ordered', targets: [{ provider: 'a' }], onFailure: ['transport'],
     requireCompatibilityEvidence: false, maxSwitches: 0,

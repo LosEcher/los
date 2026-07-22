@@ -15,7 +15,7 @@ export interface PiKernelAdmissionIssue {
   decision: 'implement_before_default' | 'explicitly_disabled' | 'los_owned';
 }
 
-export const PI_KERNEL_ADMISSION_DECISIONS = Object.freeze({
+export const _PI_KERNEL_ADMISSION_DECISIONS = Object.freeze({
   providerFallback: 'implement_before_default',
   architectEditor: 'los_owned',
   contextCompression: 'implement_before_default',
@@ -24,7 +24,7 @@ export const PI_KERNEL_ADMISSION_DECISIONS = Object.freeze({
   childAgents: 'los_owned',
 } as const);
 
-export function evaluatePiKernelInputAdmission(config: AgentConfig): PiKernelAdmissionIssue[] {
+export function _evaluatePiKernelInputAdmission(config: AgentConfig): PiKernelAdmissionIssue[] {
   const issues: PiKernelAdmissionIssue[] = [];
   if (config.providerFallback) {
     issues.push(issue('provider_fallback', 'Pi kernel provider fallback mapping is not implemented', 'implement_before_default'));
@@ -50,7 +50,7 @@ export function evaluatePiKernelShadowAdmission(input: {
   effectiveToolMode: AgentConfig['toolMode'];
   remoteExecutor: boolean;
 }): PiKernelAdmissionIssue[] {
-  const issues = evaluatePiKernelInputAdmission(input.config);
+  const issues = _evaluatePiKernelInputAdmission(input.config);
   if (input.effectiveToolMode !== 'read-only') {
     issues.push(issue('non_read_only_shadow', 'Pi scheduler shadow requires an effective read-only tool mode', 'explicitly_disabled'));
   }
@@ -61,7 +61,7 @@ export function evaluatePiKernelShadowAdmission(input: {
 }
 
 export function assertPiKernelInputAdmission(config: AgentConfig): void {
-  const first = evaluatePiKernelInputAdmission(config)[0];
+  const first = _evaluatePiKernelInputAdmission(config)[0];
   if (first) throw new Error(first.message);
 }
 

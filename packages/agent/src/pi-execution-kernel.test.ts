@@ -94,7 +94,7 @@ test('Pi tool trace delegates execution to LOS ToolBroker and preserves call ide
   assert.equal(readTransition(events).state, 'succeeded');
 });
 
-test('Pi adapter fails closed without ToolBroker and records broker denial as failed tool evidence', async () => {
+test('Pi adapter fails closed without ToolBroker and preserves broker denial evidence', async () => {
   const fixture = createFixtureInput([
     fauxAssistantMessage(fauxToolCall('write_file', { path: 'x' }, { id: 'call-denied' }), {
       stopReason: 'toolUse',
@@ -108,7 +108,7 @@ test('Pi adapter fails closed without ToolBroker and records broker denial as fa
   );
 
   fixture.input.toolBroker = {
-    execute: async request => ({ callId: request.callId, content: '', error: 'policy denied' }),
+    execute: async request => ({ callId: request.callId, content: '', error: 'policy denied', denied: true }),
   };
   const events: KernelEvent[] = [];
   await _consumeExecutionKernel(
@@ -116,7 +116,7 @@ test('Pi adapter fails closed without ToolBroker and records broker denial as fa
     fixture.input,
     event => { events.push(event); },
   );
-  assert.equal(readTransition(events).state, 'failed');
+  assert.equal(readTransition(events).state, 'denied');
 });
 
 test('Pi adapter emits kernel.failed for a provider error', async () => {

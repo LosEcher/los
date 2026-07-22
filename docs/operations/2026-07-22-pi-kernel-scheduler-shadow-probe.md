@@ -47,6 +47,8 @@ failure rates across a task distribution, operator controls, context
 compression, provider fallback, or write safety.
 
 K3 is implemented and has an initial live record, but it is not a promotion
-gate by itself. Pi remains absent from the production kernel registry. The next
-step is a preregistered read-only scenario set and pairwise evidence before an
-explicit read-only canary is considered.
+gate by itself. Pi remains absent from the production kernel registry. Corpus
+`1.0.0` and rubric `pi-shadow-readonly-v1` were registered after this probe, so
+this row remains feasibility evidence and is not retroactively counted. The
+corpus must reach its fixed observation counts before an explicit read-only
+canary is considered.

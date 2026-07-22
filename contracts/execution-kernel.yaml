@@ -48,6 +48,23 @@ interface:
       - candidate writes to the production session or tool-call-state ledger
       - candidate task, run-spec, graph, verification, or final-state transitions
       - project-write, shell, child-agent, or remote-executor shadow execution
+    scenarioEvidence:
+      description: >
+        Optional preregistered K3 evidence attached to the bounded comparison
+        event. The scenario id is valid only when the actual prompt and allowed
+        tool catalog match the versioned corpus definition.
+      required:
+        - corpus version and scenario version
+        - rubric revision
+        - exact candidate kernel and protocol version
+        - deterministic or live-provider evidence class derived from the route
+        - boolean assertions for production completion, candidate terminal,
+          derived lineage, and scenario-specific output/tool semantics
+      aggregation:
+        - count only exact kernel, protocol, corpus, scenario, and rubric versions
+        - reject failed assertions from readiness
+        - never reinterpret records created before scenario preregistration
+        - readiness permits policy review only and never changes registry admission
 schemas:
   KernelIdentity:
     required: [kind, version, protocolVersion]
@@ -145,6 +162,7 @@ invariants:
   - shadow tools are limited to the LOS read-only catalog and execute through ToolBroker
   - shadow kernel and provider evidence use derived lineage, not the production session identifiers
   - shadow failure is comparison evidence and never fails an otherwise valid production attempt
+  - invalid shadow scenario metadata is bounded evidence error and never fails production settlement
 versioning:
   - persist kernel kind, exact version, and protocol version for every attempt
   - an adapter upgrade requires deterministic compatibility traces before canary use
