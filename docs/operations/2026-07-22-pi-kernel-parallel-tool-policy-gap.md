@@ -1,7 +1,7 @@
 # Pi Kernel Parallel Tool Policy Gap
 
 - Date: 2026-07-22
-- Status: adapter revision collected; K3 gate still failed
+- Status: deterministic second-turn probe complete; K3 gate still failed
 - Failed candidate: Pi core `0.81.1`, kernel identity `0.81.1`
 - Adapter-revision candidate: Pi core `0.81.1`, kernel identity `0.81.1+los.1`
 - Corpus: `1.1.0`
@@ -73,14 +73,34 @@ the earlier root-cause claim is falsified.
 The detailed evidence and next diagnostic boundary are recorded in
 `docs/operations/2026-07-22-pi-kernel-shadow-adapter-revision-result.md`.
 
+## Second-Turn Probe Result
+
+The deterministic request-envelope probe now shows that LOS and Pi send the
+same system/user content, message-role sequence, tool call, tool result,
+`parallel_tool_calls=false`, and equivalent tool schema after one successful
+read. `[E]`
+
+The remaining request differences are Pi streaming fields, omitted
+`tool_choice=auto`, explicit `max_completion_tokens=32000`, explicit
+`thinking.disabled`, assistant `null`/empty-string normalization,
+`reasoning_content`, and `strict=false`. `[E]`
+
+This excludes the original parallel-policy hypothesis and several turn-history
+hypotheses, but it does not identify a unique causal field. Explicit reasoning
+disablement and output-limit defaulting are the strongest semantic candidates;
+the other fields remain unisolated protocol candidates. `[I]`
+
+The full probe record is
+`docs/operations/2026-07-22-pi-kernel-second-turn-envelope-probe.md`.
+
 ## Next Verification
 
 1. Keep both failed candidate reports immutable; do not recollect them.
-2. Add a deterministic transport-envelope comparison after one successful tool
-   result.
-3. Identify the exact LOS/Pi turn-boundary difference before changing runtime
-   behavior.
-4. Assign a new exact candidate identity for any adapter behavior change.
+2. Keep the deterministic transport-envelope comparison as a regression test.
+3. Revise the model-setting mapping so unspecified LOS reasoning and output
+   limits remain unspecified, then verify the resulting envelope.
+4. Assign exact identity `0.81.1+los.2` to that behavior change and prove it has
+   zero qualifying observations before collection.
 5. Require zero failures before K4 policy review.
 
 Even a passing report does not authorize registry admission or a canary.

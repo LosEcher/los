@@ -1,7 +1,7 @@
 # Pi Kernel Shadow Adapter Revision Result
 
 - Date: 2026-07-22
-- Status: K3 gate failed; no recollection authorized
+- Status: K3 gate failed; deterministic envelope probe complete; no recollection authorized
 - Candidate: Pi core `0.81.1`, kernel identity `0.81.1+los.1`
 - Protocol: `0.1.0`
 - Corpus: `1.1.0`
@@ -48,11 +48,28 @@ valid provider-contract correction, but it did not remove the observed parity
 failure. The previous claim that missing `parallel_tool_calls=false` was the
 root cause is therefore falsified by the fixed-candidate run. `[E]`
 
-The remaining difference is somewhere in the turn boundary seen by the model:
-the converted message sequence, tool-result envelope, tool schema, prompt, or
-another OpenAI-compatible request field may differ between the LOS and Pi
-paths. Current persisted evidence is intentionally bounded and cannot identify
-which field caused the second request. `[I]`
+The remaining difference is somewhere in the request fields still emitted
+differently by the two paths. Persisted evidence alone cannot identify which
+field caused the second request. `[I]`
+
+## Deterministic Envelope Probe
+
+The follow-up probe captured both real second-turn HTTP request bodies after an
+identical successful `read_file` result. System/user content, role order, tool
+call, tool result, `parallel_tool_calls=false`, and the tool schema after
+normalizing Pi's explicit `strict=false` are equal. `[E]`
+
+Pi additionally sends streaming usage fields, `max_completion_tokens=32000`,
+`thinking.disabled`, empty `reasoning_content`, and explicit tool strictness;
+it omits LOS `tool_choice=auto` and normalizes assistant empty content to
+`null`. `[E]`
+
+The probe excludes several turn-history hypotheses but does not prove a unique
+cause. The strongest semantic candidates are Pi's conversion of unspecified
+reasoning and output-limit settings into explicit defaults. `[I]`
+
+See
+`docs/operations/2026-07-22-pi-kernel-second-turn-envelope-probe.md`.
 
 ## Judgment
 
@@ -61,13 +78,9 @@ read-only canary policy review remains blocked, Pi remains absent from the
 production registry, and these 17 observations must not be deleted, relabeled,
 or replaced by a rerun. `[E]`
 
-The failure also changes the next engineering task. Another live collection is
-not useful until a deterministic transport-envelope probe compares the LOS and
-Pi second-turn requests after one successful tool result. That probe should
-compare system prompt, message roles and content, tool-call/result identifiers,
-tool-result name and content, tool schema, `tool_choice`, and
-`parallel_tool_calls`, while excluding credentials and raw persisted
-transcripts. `[I]`
+Another live collection is not useful until a new adapter candidate preserves
+unspecified LOS reasoning and output-limit semantics and passes the
+deterministic envelope probe. `[I]`
 
 Any behavior-changing adapter fix must use a new exact kernel identity such as
 `0.81.1+los.2`. Corpus `1.1.0` and its rubric may remain unchanged only if the

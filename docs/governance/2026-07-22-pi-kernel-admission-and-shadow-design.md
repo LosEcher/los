@@ -1,8 +1,8 @@
 # Pi Kernel Admission And Read-Only Shadow Design
 
 - Date: 2026-07-22
-- Status: K3 implemented; candidate `0.81.1` failed corpus `1.1.0` at 14/17;
-  candidate `0.81.1+los.1` parallel-tool policy fix has no observations
+- Status: K3 implemented; candidates `0.81.1` and `0.81.1+los.1` both failed
+  corpus `1.1.0` at 14/17; deterministic second-turn probe complete
 - Owner: `packages/agent`
 - Decision source: ADR 0039
 
@@ -123,8 +123,15 @@ request. Registry admission remains a later decision even if that probe passes.
   `pi-shadow-readonly-v2` now preregister a typed JSON `packageName` result
   comparator. Candidate `0.81.1` completed 14/17: its three live tool scenarios
   failed because Pi performed two real brokered reads while LOS performed one.
-  Candidate `0.81.1+los.1` maps the profile's parallel-tool policy and has no
-  observations. Neither revision reinterprets or overwrites earlier evidence.
+  Candidate `0.81.1+los.1` mapped the profile's parallel-tool policy, started
+  with zero qualifying observations, and also completed 14/17. Its three live
+  tool cases made a second narrower read in the next turn. Neither revision
+  reinterprets or overwrites earlier evidence.
+- The deterministic second-turn probe found equal prompt/history, call ids,
+  tool result, parallel policy, and normalized tool schema. Pi additionally
+  sent streaming usage fields, an explicit output limit, explicit reasoning
+  disablement, and several representation defaults. The probe narrows the next
+  adapter hypothesis but does not establish a unique cause.
 - No read-only canary or write canary is authorized.
 - Provider fallback, compaction, and long-context equivalence remain unproven.
 - Web-first manual acceptance and graph integration review remain separate and

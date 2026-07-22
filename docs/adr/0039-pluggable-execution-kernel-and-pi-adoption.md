@@ -8,7 +8,10 @@
   `pi-shadow-readonly-v2` completed 14/17 against candidate `0.81.1` and exposed
   three real duplicate-tool failures. Candidate `0.81.1+los.1` maps the LOS
   parallel-tool policy but also completed 14/17: its three live tool cases made
-  a second narrower read in the next turn. Local, HTTP executor, and SSH
+  a second narrower read in the next turn. A deterministic second-turn envelope
+  probe verified equal prompt/history, tool call/result, and parallel policy,
+  while exposing explicit Pi reasoning/output defaults and protocol-shape
+  differences without proving a unique cause. Local, HTTP executor, and SSH
   executor paths still select only the LOS adapter through the fail-closed
   production registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
@@ -202,9 +205,15 @@ state, and isolated lineage; two output hashes matched and one differed because
    Candidate `0.81.1+los.1` maps `supportsParallelToolCalls=false` through Pi's
    provider payload hook but also completed 14/17. Its duplicate reads occurred
    across consecutive turns, so the parallel-call hypothesis did not explain
-   the parity failure. K4 policy review remains blocked pending a deterministic
-   LOS/Pi transport-envelope comparison and a new exact candidate. Pi is still
-   absent from the production registry.
+   the parity failure. The deterministic second-turn comparison now excludes
+   prompt/history, tool-result, call-id, normalized tool-schema, and parallel-
+   policy drift. Pi additionally sends explicit `thinking.disabled` and a
+   default output limit plus streaming and representation differences; those
+   observations narrow the next hypothesis but do not identify one causal
+   field. K4 policy review remains blocked pending a zero-evidence exact
+   candidate `0.81.1+los.2` that preserves unspecified LOS model settings and
+   passes deterministic verification. Pi is still absent from the production
+   registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses
@@ -360,5 +369,6 @@ The decision is implemented only when:
 - `docs/adr/0038-web-first-daily-coding-agent-product-boundary.md`
 - `docs/governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md`
 - `docs/governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
+- `docs/operations/2026-07-22-pi-kernel-second-turn-envelope-probe.md`
 - Pi `packages/agent/docs/agent-harness.md`, local reference commit
   `304f42d20937ff06e8b63e4e7e330b953dedad76`

@@ -244,11 +244,16 @@ the live read-only-tool output-hash assertion, while tool sequence, successful
 tool state, terminal state, and isolated lineage passed. The report therefore
 remains `collecting`; corpus `1.1.0` / rubric `pi-shadow-readonly-v2` then
 completed 14/17 against candidate `0.81.1`, exposing two real candidate reads
-versus one LOS read in every live tool scenario. Candidate `0.81.1+los.1` maps
-the profile parallel-tool policy and has no observations; the pre-corpus smoke and superseded corpus `1.0.0` remain
-ignored, and K4
-policy review is blocked. Pi remains unavailable as a selected production
-kernel. The current LOS loop stays the production baseline until a
+versus one LOS read in every live tool scenario. Candidate `0.81.1+los.1`
+mapped the profile parallel-tool policy, started with zero observations, and
+also completed 14/17 because each live tool case made a second read in the next
+turn. A deterministic second-turn envelope probe then verified equal
+prompt/history, tool call/result, and parallel policy, while identifying
+explicit Pi reasoning/output defaults and several protocol-shape differences.
+It narrowed the next adapter hypothesis but did not prove one causal field.
+The pre-corpus smoke and superseded corpus `1.0.0` remain ignored, and K4 policy
+review is blocked. Pi remains unavailable as a selected production kernel. The
+current LOS loop stays the production baseline until a
 preregistered evaluation revision, canary, formal pairwise evaluation, and
 rollback gates pass.
 
