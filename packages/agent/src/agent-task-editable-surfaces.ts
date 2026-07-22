@@ -16,7 +16,7 @@ export function selectEditableSurfaceCompatibleTasks(
   for (const task of tasks) {
     if (selected.length >= max) break;
     const surfaces = editableSurfacesForAgentTask(task);
-    if (mode === 'require-declared' && surfaces.length === 0) continue;
+    if (mode === 'require-declared' && task.role === 'executor' && surfaces.length === 0) continue;
     if (surfaces.some(surface => selectedSurfaces.some(existing => editableSurfacesOverlap(existing, surface)))) {
       continue;
     }
