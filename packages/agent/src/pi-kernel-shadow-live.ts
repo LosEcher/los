@@ -6,6 +6,10 @@ import {
   type PiKernelShadowScenarioId,
 } from './pi-kernel-shadow-scenarios.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './scheduler/types.js';
+import {
+  _verifyPiKernelShadowWorkspaceFixture,
+  type PiKernelShadowWorkspaceFixtureEvidence,
+} from './pi-kernel-shadow-workspace-fixture.js';
 
 export interface PiKernelShadowLiveObservation {
   scenarioId: 'PKS01-no-tool' | 'PKS02-read-only-tool';
@@ -18,6 +22,7 @@ export interface PiKernelShadowLiveObservation {
 interface LiveDependencies {
   run?: (input: ScheduledAgentTaskInput) => Promise<ScheduledAgentTaskResult>;
   id?: () => string;
+  afterObservation?: (observation: PiKernelShadowLiveObservation) => Promise<'continue' | 'stop'>;
 }
 
 export async function _collectPiKernelShadowLiveEvidence(
@@ -25,15 +30,25 @@ export async function _collectPiKernelShadowLiveEvidence(
     provider: string;
     model: string;
     counts: Partial<Record<'PKS01-no-tool' | 'PKS02-read-only-tool', number>>;
-    workspaceRoot?: string;
+    workspaceRoot: string;
   },
   dependencies: LiveDependencies = {},
 ): Promise<PiKernelShadowLiveObservation[]> {
   const observations: PiKernelShadowLiveObservation[] = [];
-  for (const scenarioId of liveScenarioIds()) {
+  const plans = await Promise.all(liveScenarioIds().map(async scenarioId => {
+    const scenario = _getPiKernelShadowScenario(scenarioId);
     const count = normalizeCount(input.counts[scenarioId]);
+    const workspaceFixture = count > 0 && scenario.workspaceFixture
+      ? await _verifyPiKernelShadowWorkspaceFixture(scenario.workspaceFixture, input.workspaceRoot)
+      : undefined;
+    return { scenarioId, count, workspaceFixture };
+  }));
+  for (const { scenarioId, count, workspaceFixture } of plans) {
     for (let index = 0; index < count; index++) {
-      observations.push(await collectOne(scenarioId, input, dependencies));
+      const observation = await collectOne(scenarioId, input, workspaceFixture, dependencies);
+      observations.push(observation);
+      if (observation.status !== 'completed') return observations;
+      if (await dependencies.afterObservation?.(observation) === 'stop') return observations;
     }
   }
   return observations;
@@ -42,6 +57,7 @@ export async function _collectPiKernelShadowLiveEvidence(
 async function collectOne(
   scenarioId: 'PKS01-no-tool' | 'PKS02-read-only-tool',
   input: Parameters<typeof _collectPiKernelShadowLiveEvidence>[0],
+  workspaceFixture: PiKernelShadowWorkspaceFixtureEvidence | undefined,
   dependencies: LiveDependencies,
 ): Promise<PiKernelShadowLiveObservation> {
   const scenario = _getPiKernelShadowScenario(scenarioId);
@@ -56,7 +72,7 @@ async function collectOne(
       traceId: `trace-pi-shadow-live-${scenarioId}-${suffix}`,
       provider: input.provider,
       model: input.model,
-      workspaceRoot: input.workspaceRoot ?? process.cwd(),
+      workspaceRoot: input.workspaceRoot,
       toolMode: 'read-only',
       sandboxMode: 'readonly',
       allowedTools: scenario.allowedTools,
@@ -64,7 +80,10 @@ async function collectOne(
       modelSettings: { temperature: 0 },
       skipPreExecutionPhases: true,
       identity: { level: 'none' },
-      executionKernelShadow: { kind: 'pi', maxTurns: 3, scenario: { id: scenarioId } },
+      executionKernelShadow: {
+        kind: 'pi', maxTurns: 3,
+        scenario: { id: scenarioId, ...(workspaceFixture ? { workspaceFixture } : {}) },
+      },
       metadata: {
         evidencePurpose: 'pi-kernel-shadow-live',
         corpusVersion: _PI_KERNEL_SHADOW_CORPUS_VERSION,

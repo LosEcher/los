@@ -51,20 +51,31 @@ interface:
     scenarioEvidence:
       description: >
         Optional preregistered K3 evidence attached to the bounded comparison
-        event. The scenario id is valid only when the actual prompt and allowed
-        tool catalog match the versioned corpus definition.
+        event. The scenario id is valid only when the actual prompt, allowed
+        tool catalog, and any declared workspace fixture match the versioned
+        corpus definition.
       required:
         - corpus version and scenario version
         - rubric revision
         - exact candidate kernel and protocol version
         - deterministic or live-provider evidence class derived from the route
+        - bounded workspace fixture identity and content hashes when declared
         - boolean assertions for production completion, candidate terminal,
           derived lineage, and scenario-specific output/tool semantics
+        - bounded result-envelope shape and text length for typed comparisons
+          without raw candidate or production text
       aggregation:
         - count only exact kernel, protocol, corpus, scenario, and rubric versions
+        - count workspace-bound scenarios only when persisted fixture hashes
+          match the preregistered fixture
         - reject failed assertions from readiness
         - never reinterpret records created before scenario preregistration
         - readiness permits policy review only and never changes registry admission
+    liveCollection:
+      - validate every requested workspace fixture before the first provider call
+      - reject collection when the current corpus already has failing live evidence
+      - persist and re-read evidence after every observation
+      - stop after a non-completed observation or any failing live requirement
 schemas:
   KernelIdentity:
     required: [kind, version, protocolVersion]

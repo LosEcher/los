@@ -12,6 +12,7 @@ import {
   type PiKernelShadowScenarioEvidence,
   type PiKernelShadowScenarioId,
 } from './pi-kernel-shadow-scenarios.js';
+import type { PiKernelShadowWorkspaceFixtureEvidence } from './pi-kernel-shadow-workspace-fixture.js';
 import type { AgentConfig, AgentResult } from './loop.js';
 
 export interface PiKernelShadowConfig {
@@ -20,6 +21,7 @@ export interface PiKernelShadowConfig {
   timeoutMs?: number;
   scenario?: {
     id: PiKernelShadowScenarioId;
+    workspaceFixture?: PiKernelShadowWorkspaceFixtureEvidence;
   };
 }
 
@@ -123,6 +125,7 @@ export function startPiKernelShadow(
             productionResult,
             prompt: input.prompt,
             allowedTools: input.config.allowedTools,
+            workspaceFixture: input.shadow.scenario.workspaceFixture,
             productionSessionId: input.productionSessionId,
             productionTaskRunId: input.productionTaskRunId,
             productionTraceId: input.productionTraceId,

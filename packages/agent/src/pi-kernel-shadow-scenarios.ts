@@ -1,11 +1,22 @@
-import { createHash } from 'node:crypto';
 import { getDb } from '@los/infra/db';
 import { ensureSessionEventStore } from './session-events.js';
 import type { KernelIdentity } from './execution-kernel.js';
 import type { AgentResult } from './loop.js';
+import {
+  _comparePiKernelShadowPackageNameResults,
+  _parsePiKernelShadowResultComparison,
+  _readPiKernelShadowPackageNameValue,
+  type PiKernelShadowResultComparison,
+} from './pi-kernel-shadow-result.js';
+import {
+  _matchesPiKernelShadowWorkspaceFixture,
+  _parsePiKernelShadowWorkspaceFixtureEvidence,
+  type PiKernelShadowWorkspaceFixtureDefinition,
+  type PiKernelShadowWorkspaceFixtureEvidence,
+} from './pi-kernel-shadow-workspace-fixture.js';
 
-export const _PI_KERNEL_SHADOW_CORPUS_VERSION = '1.1.0';
-export const _PI_KERNEL_SHADOW_RUBRIC_REVISION = 'pi-shadow-readonly-v2';
+export const _PI_KERNEL_SHADOW_CORPUS_VERSION = '1.1.2';
+export const _PI_KERNEL_SHADOW_RUBRIC_REVISION = 'pi-shadow-readonly-v4';
 
 export type PiKernelShadowScenarioId =
   | 'PKS01-no-tool'
@@ -24,6 +35,7 @@ export interface PiKernelShadowScenarioDefinition {
   description: string;
   prompt: string;
   allowedTools: string[];
+  workspaceFixture?: PiKernelShadowWorkspaceFixtureDefinition;
   expectedCandidateStatus: PiKernelShadowTerminalStatus;
   allowedEvidenceClasses: PiKernelShadowEvidenceClass[];
   requiredObservations: Partial<Record<PiKernelShadowEvidenceClass, number>>;
@@ -42,11 +54,8 @@ export interface PiKernelShadowScenarioEvidence {
   evidenceClass: PiKernelShadowEvidenceClass;
   passed: boolean;
   assertions: PiKernelShadowScenarioAssertion[];
-  resultComparison?: {
-    kind: 'json_package_name';
-    productionValueHash?: string;
-    candidateValueHash?: string;
-  };
+  workspaceFixture?: PiKernelShadowWorkspaceFixtureEvidence;
+  resultComparison?: PiKernelShadowResultComparison;
 }
 
 export interface PiKernelShadowScenarioReport {
@@ -69,35 +78,38 @@ export interface PiKernelShadowScenarioReport {
 
 export const _PI_KERNEL_SHADOW_SCENARIOS: readonly PiKernelShadowScenarioDefinition[] = Object.freeze([
   {
-    id: 'PKS01-no-tool', version: '1.1.0', family: 'no_tool',
+    id: 'PKS01-no-tool', version: '1.1.2', family: 'no_tool',
     description: 'Both kernels complete a fixed no-tool answer with equal output hashes.',
     prompt: 'Return exactly LOS_PI_SHADOW_OK and do not call tools.', allowedTools: [],
     expectedCandidateStatus: 'completed', allowedEvidenceClasses: ['deterministic', 'live-provider'],
     requiredObservations: { deterministic: 1, 'live-provider': 3 },
   },
   {
-    id: 'PKS02-read-only-tool', version: '1.1.0', family: 'read_only_tool',
+    id: 'PKS02-read-only-tool', version: '1.1.2', family: 'read_only_tool',
     description: 'Both kernels complete the same brokered read-only tool sequence and return the expected typed task value.',
-    prompt: 'Use read_file on package.json, then return one JSON object with exactly one field: {"packageName":"<package name>"}.', allowedTools: ['read_file'],
+    prompt: 'Use read_file on package.json. Your entire final response must be exactly one JSON object with one field: {"packageName":"<package name>"}. Do not use markdown fences or include any other text.', allowedTools: ['read_file'],
+    workspaceFixture: {
+      kind: 'json_string_field', relativePath: 'package.json', field: 'name', expectedValue: '@los/agent',
+    },
     expectedCandidateStatus: 'completed', allowedEvidenceClasses: ['deterministic', 'live-provider'],
     requiredObservations: { deterministic: 1, 'live-provider': 3 },
   },
   {
-    id: 'PKS03-policy-denial', version: '1.1.0', family: 'denied_tool',
+    id: 'PKS03-policy-denial', version: '1.1.2', family: 'denied_tool',
     description: 'A deterministic broker denial remains bounded candidate evidence.',
     prompt: 'Deterministic fixture requests a broker-denied tool.', allowedTools: ['read_file'],
     expectedCandidateStatus: 'completed', allowedEvidenceClasses: ['deterministic'],
     requiredObservations: { deterministic: 3 },
   },
   {
-    id: 'PKS04-provider-failure', version: '1.1.0', family: 'provider_failure',
+    id: 'PKS04-provider-failure', version: '1.1.2', family: 'provider_failure',
     description: 'A deterministic candidate provider failure does not change production completion.',
     prompt: 'Deterministic fixture returns a candidate provider failure.', allowedTools: [],
     expectedCandidateStatus: 'failed', allowedEvidenceClasses: ['deterministic'],
     requiredObservations: { deterministic: 3 },
   },
   {
-    id: 'PKS05-interruption', version: '1.1.0', family: 'interruption_timeout',
+    id: 'PKS05-interruption', version: '1.1.2', family: 'interruption_timeout',
     description: 'A deterministic candidate interruption or timeout does not change production completion.',
     prompt: 'Deterministic fixture interrupts the candidate before completion.', allowedTools: [],
     expectedCandidateStatus: 'interrupted', allowedEvidenceClasses: ['deterministic'],
@@ -118,6 +130,7 @@ export function evaluatePiKernelShadowScenario(input: {
   productionResult?: AgentResult;
   prompt: string;
   allowedTools: readonly string[] | undefined;
+  workspaceFixture?: PiKernelShadowWorkspaceFixtureEvidence;
   productionSessionId: string;
   productionTaskRunId: string;
   productionTraceId: string;
@@ -143,7 +156,8 @@ export function evaluatePiKernelShadowScenario(input: {
   ) ?? [];
   const assertions: PiKernelShadowScenarioAssertion[] = [
     assertion('scenario_contract_match', input.prompt === scenario.prompt
-      && equalStrings([...(input.allowedTools ?? [])], scenario.allowedTools)),
+      && equalStrings([...(input.allowedTools ?? [])], scenario.allowedTools)
+      && _matchesPiKernelShadowWorkspaceFixture(scenario.workspaceFixture, input.workspaceFixture)),
     assertion('production_completed', input.productionStatus === 'completed'),
     assertion('candidate_expected_status', input.candidateStatus === scenario.expectedCandidateStatus),
     assertion('derived_lineage_isolated',
@@ -162,6 +176,7 @@ export function evaluatePiKernelShadowScenario(input: {
     evidenceClass: input.evidenceClass,
     passed: assertions.every(item => item.passed),
     assertions,
+    ...(input.workspaceFixture ? { workspaceFixture: input.workspaceFixture } : {}),
     ...(resultComparison ? { resultComparison } : {}),
   };
 }
@@ -256,12 +271,13 @@ function scenarioAssertions(
     assertion('tool_sequence_equal', equalStrings(input.candidateToolNames, productionToolNames)),
     assertion('candidate_tools_succeeded', input.candidateToolCompletionStates.length === input.candidateToolNames.length
       && input.candidateToolCompletionStates.every(state => state === 'succeeded')),
-    assertion('production_result_envelope_valid', packageNameValue(input.productionText) !== undefined),
-    assertion('candidate_result_envelope_valid', packageNameValue(input.candidateText) !== undefined),
-    assertion('task_value_expected', packageNameValue(input.productionText) === '@los/agent'
-      && packageNameValue(input.candidateText) === '@los/agent'),
-    assertion('task_value_equal', packageNameValue(input.candidateText) !== undefined
-      && packageNameValue(input.candidateText) === packageNameValue(input.productionText)),
+    assertion('production_result_envelope_valid', _readPiKernelShadowPackageNameValue(input.productionText) !== undefined),
+    assertion('candidate_result_envelope_valid', _readPiKernelShadowPackageNameValue(input.candidateText) !== undefined),
+    assertion('task_value_expected', _readPiKernelShadowPackageNameValue(input.productionText) === '@los/agent'
+      && _readPiKernelShadowPackageNameValue(input.candidateText) === '@los/agent'),
+    assertion('task_value_equal', _readPiKernelShadowPackageNameValue(input.candidateText) !== undefined
+      && _readPiKernelShadowPackageNameValue(input.candidateText)
+        === _readPiKernelShadowPackageNameValue(input.productionText)),
     assertion('candidate_finished_event', input.candidateEventCounts['kernel.finished'] === 1),
   ];
   if (id === 'PKS03-policy-denial') return [
@@ -284,33 +300,7 @@ function scenarioResultComparison(
   input: Parameters<typeof evaluatePiKernelShadowScenario>[0],
 ): PiKernelShadowScenarioEvidence['resultComparison'] {
   if (id !== 'PKS02-read-only-tool') return undefined;
-  const productionValue = packageNameValue(input.productionText);
-  const candidateValue = packageNameValue(input.candidateText);
-  return {
-    kind: 'json_package_name',
-    ...(productionValue ? { productionValueHash: valueHash(productionValue) } : {}),
-    ...(candidateValue ? { candidateValueHash: valueHash(candidateValue) } : {}),
-  };
-}
-
-function packageNameValue(text: string | undefined): string | undefined {
-  if (!text) return undefined;
-  let value = text.trim();
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(value);
-  if (fenced) value = fenced[1]!.trim();
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-    const record = parsed as Record<string, unknown>;
-    if (Object.keys(record).length !== 1 || typeof record.packageName !== 'string') return undefined;
-    return record.packageName;
-  } catch {
-    return undefined;
-  }
-}
-
-function valueHash(value: string): string {
-  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+  return _comparePiKernelShadowPackageNameResults(input.productionText, input.candidateText);
 }
 
 function assertion(id: string, passed: boolean): PiKernelShadowScenarioAssertion {
@@ -330,11 +320,13 @@ function parseEvidence(value: unknown): PiKernelShadowScenarioEvidence | undefin
     || (record.evidenceClass !== 'deterministic' && record.evidenceClass !== 'live-provider')
     || typeof record.passed !== 'boolean'
     || !Array.isArray(record.assertions)) return undefined;
+  let scenario: PiKernelShadowScenarioDefinition;
   try {
-    _getPiKernelShadowScenario(record.scenarioId);
+    scenario = _getPiKernelShadowScenario(record.scenarioId);
   } catch {
     return undefined;
   }
+  if (record.scenarioVersion !== scenario.version) return undefined;
   const assertions = record.assertions.flatMap(item => {
     const entry = asRecord(item);
     return typeof entry.id === 'string' && typeof entry.passed === 'boolean'
@@ -343,6 +335,8 @@ function parseEvidence(value: unknown): PiKernelShadowScenarioEvidence | undefin
   });
   if (assertions.length !== record.assertions.length) return undefined;
   if (record.passed !== assertions.every(assertion => assertion.passed)) return undefined;
+  const workspaceFixture = _parsePiKernelShadowWorkspaceFixtureEvidence(record.workspaceFixture);
+  if (!_matchesPiKernelShadowWorkspaceFixture(scenario.workspaceFixture, workspaceFixture)) return undefined;
   return {
     corpusVersion: record.corpusVersion,
     rubricRevision: record.rubricRevision,
@@ -351,6 +345,7 @@ function parseEvidence(value: unknown): PiKernelShadowScenarioEvidence | undefin
     evidenceClass: record.evidenceClass,
     passed: record.passed,
     assertions,
+    ...(workspaceFixture ? { workspaceFixture } : {}),
     ...(parseResultComparison(record.resultComparison) ? {
       resultComparison: parseResultComparison(record.resultComparison),
     } : {}),
@@ -358,15 +353,7 @@ function parseEvidence(value: unknown): PiKernelShadowScenarioEvidence | undefin
 }
 
 function parseResultComparison(value: unknown): PiKernelShadowScenarioEvidence['resultComparison'] {
-  const record = asRecord(value);
-  if (record.kind !== 'json_package_name') return undefined;
-  if (record.productionValueHash !== undefined && typeof record.productionValueHash !== 'string') return undefined;
-  if (record.candidateValueHash !== undefined && typeof record.candidateValueHash !== 'string') return undefined;
-  return {
-    kind: 'json_package_name',
-    ...(typeof record.productionValueHash === 'string' ? { productionValueHash: record.productionValueHash } : {}),
-    ...(typeof record.candidateValueHash === 'string' ? { candidateValueHash: record.candidateValueHash } : {}),
-  };
+  return _parsePiKernelShadowResultComparison(value);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -1,8 +1,9 @@
 # lsclaw To LOS: Pi Kernel Decision Record And Migration Plan
 
 - Date: 2026-07-22
-- Status: active plan; K0-K2 complete; K3 candidate `0.81.1+los.2` passes
-  deterministic evidence 11/11 but has live-provider evidence 0/6; K4 blocked
+- Status: active plan; K0-K2 complete; K3 v3 stopped at 5/6 live with one
+  envelope failure; v4 corpus `1.1.2` passes 11/11 deterministic and 6/6 live
+  evidence; ready for K4 policy review
 - Owner: `packages/agent` execution kernel and LOS governance runtime
 - Decision: `docs/adr/0039-pluggable-execution-kernel-and-pi-adoption.md`
 - Protocol: `contracts/execution-kernel.yaml`
@@ -155,7 +156,7 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
 | K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
 | K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | complete: input/telemetry live probe and explicit unsupported-semantic decisions | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
-| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | candidates `0.81.1` and `0.81.1+los.1` failed at 14/17; `0.81.1+los.2` started at zero evidence, preserves unspecified reasoning/output-limit semantics, and passes deterministic evidence 11/11 | live evidence remains 0/6 and requires operator authorization; K3 remains `collecting` and K4 blocked |
+| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | v2 and v3 failures remain immutable; corpus `1.1.2` / rubric `pi-shadow-readonly-v4` is 17/17 passing, including 11/11 deterministic and 6/6 live evidence | complete for exact candidate `0.81.1+los.3`; permits K4 policy review only and does not authorize registry admission or canary use |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
 | K5 Write canary | temporary then managed-workspace project writes | ToolBroker policy, lease fencing, verifier records, reviewed diff | stop on any policy or final-transition bypass |
 | K6 Graph worker | Pi executes bounded worker tasks; verifier remains independent | worker/verifier attempts, graph completion, manual integration review | stop if child contract or editable surfaces are lost |
@@ -258,9 +259,36 @@ prompt/history, tool call/result, normalized tool schema, and
 and several protocol-shape fields. Exact candidate `0.81.1+los.2` started with
 zero qualifying observations, preserves unspecified reasoning/output-limit
 semantics, and passes the revised envelope plus all 11 deterministic corpus
-requirements. Its six live-provider requirements remain unobserved, so K3
-remains `collecting` and K4 remains blocked. Explicit `thinking='enabled'`
-mapping remains a compatibility gap for broader promotion. The pre-corpus
+requirements. Authorized live collection added three passing no-tool records
+and one failing tool record, then stopped. Both kernels made one successful
+read and returned the same typed value in the failed record; the one-at-a-time
+collector supplied the repository root, so both returned `"los"` instead of
+the preregistered `"@los/agent"`. That v2 report remains immutable at 15/17
+observed, 14 passing, and 1 failing. Corpus `1.1.1` / rubric
+`pi-shadow-readonly-v3` now makes the `packages/agent/package.json` fixture part
+of the contract, verifies it before provider execution, and persists only
+fixture identity/content hashes. The collector validates all batch fixtures
+before its first request, re-reads persisted status after each observation,
+stops on failure or missing persistence, and refuses an already-failing corpus
+without a provider call. Authorized v3 collection produced three passing
+no-tool observations and one passing tool observation. The second tool
+observation used the correct fixture and both kernels made one successful
+`read_file` call, but the Pi final text did not satisfy the preregistered JSON
+result envelope. The report is now 11/11 deterministic, 5/6 live, 16/17
+observed, 15 passing, 1 failing, `ignoredCount=15`, and `collecting`. Collection
+   stopped before the sixth observation, and a repeat `--collect-live` is refused
+   without a provider call. Event lengths and the persisted output hash establish
+   that the candidate returned the correct fenced JSON after a prose prefix;
+   Pi stream aggregation did not duplicate text. Candidate `0.81.1+los.3`,
+   corpus `1.1.2`, and rubric `pi-shadow-readonly-v4` retain the strict
+   comparator, strengthen the PKS02 whole-response instruction, and persist only
+   bounded envelope shape/length diagnostics. The new identity initially read
+   0/17, then deterministic collection completed 11/11 without provider calls.
+   Authorized live collection passed 6/6, making the v4 report 17/17 passing
+   with zero failures and `ready_for_k4_policy_review`. Registry admission and
+   canary use remain separately blocked.
+Explicit `thinking='enabled'` mapping remains a compatibility gap for broader
+promotion. The pre-corpus
 smoke remains excluded rather than retroactively labeled. `pnpm --filter
 @los/agent scenario:pi-shadow` reads current status without invoking a provider.
 
@@ -274,7 +302,7 @@ LOS todos. Their status here must not be presented as database todo state.
 | `kernel-k0-decision-record` | complete in this document; not a DB todo | ADR, history record, contract, roadmap, and contract check |
 | `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
 | `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
-| `kernel-k3-shadow` | `0.81.1+los.2` deterministic evidence complete; live evidence pending authorization | failed candidate records remain immutable; current candidate is 11/11 deterministic, 0/6 live, and `collecting` |
+| `kernel-k3-shadow` | complete for exact v4 identity; K4 review remains separate | v3 remains immutable at 11/11 deterministic, 5/6 live, 16/17 observed with one `prefixed_fenced_json` failure; v4 is 11/11 deterministic, 6/6 live, 17/17 observed, zero failures, and `ready_for_k4_policy_review` |
 | `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |

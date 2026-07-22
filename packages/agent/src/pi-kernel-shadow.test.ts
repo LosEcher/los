@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { resolve } from 'node:path';
 import type { SessionEventWrite } from './session-events.js';
 import type { AgentConfig, AgentResult } from './loop.js';
 import type { KernelEvent } from './execution-kernel.js';
 import { startPiKernelShadow } from './pi-kernel-shadow.js';
+import { _getPiKernelShadowScenario } from './pi-kernel-shadow-scenarios.js';
+import { _verifyPiKernelShadowWorkspaceFixture } from './pi-kernel-shadow-workspace-fixture.js';
 
 const productionResult: AgentResult = {
   text: 'production answer',
@@ -12,6 +15,10 @@ const productionResult: AgentResult = {
   totalTokens: { prompt: 10, completion: 4 },
   messages: [],
 };
+const pks02WorkspaceFixture = await _verifyPiKernelShadowWorkspaceFixture(
+  _getPiKernelShadowScenario('PKS02-read-only-tool').workspaceFixture!,
+  resolve(import.meta.dirname, '..'),
+);
 
 test('Pi shadow forces derived read-only lineage and persists only bounded comparison evidence', async () => {
   const writes: SessionEventWrite[] = [];
@@ -76,8 +83,8 @@ test('Pi shadow attaches preregistered scenario assertions to bounded evidence',
 test('Pi shadow persists only task-value hashes for typed result comparison', async () => {
   const writes: SessionEventWrite[] = [];
   const input = baseInput();
-  input.shadow.scenario = { id: 'PKS02-read-only-tool' };
-  input.prompt = 'Use read_file on package.json, then return one JSON object with exactly one field: {"packageName":"<package name>"}.';
+  input.shadow.scenario = { id: 'PKS02-read-only-tool', workspaceFixture: pks02WorkspaceFixture };
+  input.prompt = _getPiKernelShadowScenario('PKS02-read-only-tool').prompt;
   input.config.allowedTools = ['read_file'];
   const result: AgentResult = {
     ...productionResult,
@@ -194,7 +201,7 @@ function event(type: KernelEvent['type']): KernelEvent {
     sequence: 0,
     type,
     occurredAt: '2026-07-22T00:00:00.000Z',
-    kernel: { kind: 'pi', version: '0.81.1+los.1', protocolVersion: '0.1.0' },
+    kernel: { kind: 'pi', version: '0.81.1+los.3', protocolVersion: '0.1.0' },
     payload: {},
   };
 }

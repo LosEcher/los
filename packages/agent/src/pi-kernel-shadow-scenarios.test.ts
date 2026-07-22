@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { resolve } from 'node:path';
 import {
   _PI_KERNEL_SHADOW_CORPUS_VERSION,
   _PI_KERNEL_SHADOW_RUBRIC_REVISION,
@@ -7,6 +8,7 @@ import {
   evaluatePiKernelShadowScenario,
   _summarizePiKernelShadowScenarioEvidence,
 } from './pi-kernel-shadow-scenarios.js';
+import { _verifyPiKernelShadowWorkspaceFixture } from './pi-kernel-shadow-workspace-fixture.js';
 import type { AgentResult } from './loop.js';
 
 const productionResult: AgentResult = {
@@ -15,6 +17,11 @@ const productionResult: AgentResult = {
   totalTokens: { prompt: 10, completion: 4 },
   messages: [],
 };
+const pks02Scenario = _PI_KERNEL_SHADOW_SCENARIOS[1]!;
+const pks02WorkspaceFixture = await _verifyPiKernelShadowWorkspaceFixture(
+  pks02Scenario.workspaceFixture!,
+  resolve(import.meta.dirname, '..'),
+);
 
 test('Pi shadow corpus preregisters bounded read-only scenario requirements', () => {
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS.map(item => item.id), [
@@ -24,8 +31,11 @@ test('Pi shadow corpus preregisters bounded read-only scenario requirements', ()
     'PKS04-provider-failure',
     'PKS05-interruption',
   ]);
-  assert.ok(_PI_KERNEL_SHADOW_SCENARIOS.every(item => item.version === '1.1.0'));
+  assert.ok(_PI_KERNEL_SHADOW_SCENARIOS.every(item => item.version === '1.1.2'));
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[1]?.allowedTools, ['read_file']);
+  assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[1]?.workspaceFixture, {
+    kind: 'json_string_field', relativePath: 'package.json', field: 'name', expectedValue: '@los/agent',
+  });
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[2]?.allowedEvidenceClasses, ['deterministic']);
 });
 
@@ -75,7 +85,22 @@ test('Pi shadow read-only scenario compares typed task values without persisting
   assert.equal(compared.passed, true);
   assert.equal(compared.assertions.find(item => item.id === 'task_value_equal')?.passed, true);
   assert.equal(compared.resultComparison?.productionValueHash, compared.resultComparison?.candidateValueHash);
+  assert.equal(compared.resultComparison?.productionEnvelopeShape, 'json_object');
+  assert.equal(compared.resultComparison?.candidateEnvelopeShape, 'fenced_json');
   assert.equal(JSON.stringify(compared).includes('@los/agent'), false);
+
+  const prefixedFence = evaluatePiKernelShadowScenario({
+    ...baseEvidence('PKS02-read-only-tool'), scenarioId: 'PKS02-read-only-tool', evidenceClass: 'live-provider',
+    candidateStatus: 'completed', candidateEventCounts: { 'kernel.finished': 1 },
+    candidateToolNames: ['read_file'], candidateToolCompletionStates: ['succeeded'],
+    productionText: '{"packageName":"@los/agent"}',
+    candidateText: 'Here is the result:\n\n```json\n{"packageName":"@los/agent"}\n```',
+  });
+  assert.equal(prefixedFence.passed, false);
+  assert.equal(prefixedFence.resultComparison?.candidateEnvelopeShape, 'prefixed_fenced_json');
+  assert.equal(prefixedFence.resultComparison?.candidateTextLength, 61);
+  assert.equal(prefixedFence.resultComparison?.candidateValueHash, undefined);
+  assert.equal(JSON.stringify(prefixedFence).includes('Here is the result'), false);
 
   const wrongValue = evaluatePiKernelShadowScenario({
     ...baseEvidence('PKS02-read-only-tool'), scenarioId: 'PKS02-read-only-tool', evidenceClass: 'live-provider',
@@ -85,6 +110,16 @@ test('Pi shadow read-only scenario compares typed task values without persisting
   });
   assert.equal(wrongValue.passed, false);
   assert.equal(wrongValue.assertions.find(item => item.id === 'task_value_expected')?.passed, false);
+
+  const missingFixture = evaluatePiKernelShadowScenario({
+    ...baseEvidence('PKS02-read-only-tool'), workspaceFixture: undefined,
+    scenarioId: 'PKS02-read-only-tool', evidenceClass: 'live-provider',
+    candidateStatus: 'completed', candidateEventCounts: { 'kernel.finished': 1 },
+    candidateToolNames: ['read_file'], candidateToolCompletionStates: ['succeeded'],
+    productionText: '{"packageName":"@los/agent"}', candidateText: '{"packageName":"@los/agent"}',
+  });
+  assert.equal(missingFixture.passed, false);
+  assert.equal(missingFixture.assertions.find(item => item.id === 'scenario_contract_match')?.passed, false);
 });
 
 test('Pi shadow report requires every preregistered cell for one exact Pi version', () => {
@@ -101,13 +136,22 @@ test('Pi shadow report requires every preregistered cell for one exact Pi versio
       }
     }
   }
-  payloads.push({ ...payload('PKS01-no-tool', '1.1.0', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
+  payloads.push({ ...payload('PKS01-no-tool', '1.1.2', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
+  payloads.push({
+    candidate: { kind: 'pi', version: '0.81.1+los.1', protocolVersion: '0.1.0' },
+    scenarioEvidence: {
+      corpusVersion: '1.1.0', rubricRevision: 'pi-shadow-readonly-v2',
+      scenarioId: 'PKS01-no-tool', scenarioVersion: '1.1.0', evidenceClass: 'live-provider',
+      passed: true, assertions: [{ id: 'fixture', passed: true }],
+    },
+  });
+  payloads.push(payload('PKS01-no-tool', '1.1.0', 'live-provider', true));
 
-  const identity = { kind: 'pi' as const, version: '0.81.1+los.1', protocolVersion: '0.1.0' };
+  const identity = { kind: 'pi' as const, version: '0.81.1+los.3', protocolVersion: '0.1.0' };
   const report = _summarizePiKernelShadowScenarioEvidence(payloads, identity);
   assert.equal(report.status, 'ready_for_k4_policy_review');
   assert.equal(report.observedCount, 17);
-  assert.equal(report.ignoredCount, 1);
+  assert.equal(report.ignoredCount, 3);
   assert.equal(report.automaticAdmission.status, 'disabled');
 
   const failed = payloads.map(item => structuredClone(item));
@@ -121,7 +165,7 @@ test('Pi shadow report requires every preregistered cell for one exact Pi versio
   const inconsistent = payloads.map(item => structuredClone(item));
   (inconsistent[0]?.scenarioEvidence as Record<string, unknown>).passed = false;
   const rejected = _summarizePiKernelShadowScenarioEvidence(inconsistent, identity);
-  assert.equal(rejected.ignoredCount, 2);
+  assert.equal(rejected.ignoredCount, 4);
 });
 
 function baseEvidence(scenarioId = 'PKS01-no-tool') {
@@ -130,6 +174,7 @@ function baseEvidence(scenarioId = 'PKS01-no-tool') {
     productionStatus: 'completed' as const,
     prompt: scenario.prompt,
     allowedTools: scenario.allowedTools,
+    ...(scenario.workspaceFixture ? { workspaceFixture: pks02WorkspaceFixture } : {}),
     productionSessionId: 'session-main',
     productionTaskRunId: 'task-main',
     productionTraceId: 'trace-main',
@@ -158,12 +203,13 @@ function payload(
   passed: boolean,
 ): Record<string, unknown> {
   return {
-    candidate: { kind: 'pi', version: '0.81.1+los.1', protocolVersion: '0.1.0' },
+    candidate: { kind: 'pi', version: '0.81.1+los.3', protocolVersion: '0.1.0' },
     scenarioEvidence: {
       corpusVersion: _PI_KERNEL_SHADOW_CORPUS_VERSION,
       rubricRevision: _PI_KERNEL_SHADOW_RUBRIC_REVISION,
       scenarioId, scenarioVersion, evidenceClass, passed,
       assertions: [{ id: 'fixture', passed }],
+      ...(scenarioId === 'PKS02-read-only-tool' ? { workspaceFixture: pks02WorkspaceFixture } : {}),
     },
   };
 }

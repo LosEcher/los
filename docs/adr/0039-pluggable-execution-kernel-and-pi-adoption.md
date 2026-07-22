@@ -13,10 +13,29 @@
   while exposing explicit Pi reasoning/output defaults and protocol-shape
   differences without proving a unique cause. Exact candidate `0.81.1+los.2`
   now preserves unspecified LOS reasoning/output-limit settings and passes
-  deterministic evidence 11/11, but live-provider evidence remains 0/6 and the
-  report remains `collecting`. Local, HTTP executor, and SSH
-  executor paths still select only the LOS adapter through the fail-closed
-  production registry. Pi remains comparison-only and is not selectable.
+  deterministic evidence 11/11. Authorized live collection stopped at 4/6:
+  three no-tool records passed, while the first tool record failed only because
+  the collector supplied the repository root and both kernels returned `"los"`
+  instead of the preregistered `"@los/agent"`. That v2 report remains immutable.
+  Corpus `1.1.1` / rubric `pi-shadow-readonly-v3` now verifies the workspace
+  fixture before provider execution, persists only fixture identity/value
+  hashes, and stops the batch after any failed or unpersisted observation. Its
+  authorized live collection produced three passing no-tool observations and
+  one passing tool observation. The second tool observation failed because the
+  Pi final text was not the preregistered single-field JSON result envelope;
+  both kernels still made one successful `read_file` call, and the production
+  result was valid. Collection stopped before the sixth observation. The v3
+  report is 16/17 observed, 15 passing, 1 failing, and `collecting`, with the 15
+  v2 observations ignored by v3 readiness. Event lengths and a hash-matched
+  reconstruction establish the failure as correct fenced JSON preceded by
+  prose, not Pi stream duplication. Candidate `0.81.1+los.3`, corpus `1.1.2`,
+  and rubric `pi-shadow-readonly-v4` keep the strict comparator, strengthen the
+  whole-response instruction, and add bounded envelope shape/length evidence
+  without raw text. The new report passes deterministic evidence 11/11 and
+  live evidence 6/6, for 17/17 passing observations and
+  `ready_for_k4_policy_review`. Local, HTTP executor, and SSH executor paths
+  still select only the LOS adapter through the fail-closed production
+  registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
   selection only
 
@@ -215,10 +234,32 @@ state, and isolated lineage; two output hashes matched and one differed because
    observations narrow the next hypothesis but do not identify one causal
    field. Exact candidate `0.81.1+los.2` started with zero qualifying
    observations, preserves unspecified LOS model settings, and passes all 11
-   deterministic requirements. Its six live-provider requirements remain
-   unobserved, so K4 policy review remains blocked. Explicit
-   `thinking='enabled'` mapping remains a compatibility gap. Pi is still absent
-   from the production registry.
+   deterministic requirements. Live collection produced three passing no-tool
+   records and one operation-input failure before stopping. In the failed
+   record both kernels made one successful read and returned the same typed
+   value, but the collector supplied the repository root rather than the
+   preregistered package workspace. That v2 report is 15/17 observed, 14
+   passing, and 1 failing. Corpus `1.1.1` / rubric
+   `pi-shadow-readonly-v3` preserves those 15 records as ignored evidence and
+   binds `PKS02` to a preflight-verified `packages/agent/package.json` fixture.
+   Only fixture identity/content hashes are persisted. The batch collector now
+   validates all required fixtures before its first request, re-reads the report
+   after every observation, stops on failure or missing persistence, and refuses
+   a corpus that already has a live failure. Authorized v3 collection produced
+   three passing no-tool records and one passing tool record. The next tool
+   record had the correct workspace fixture and one successful `read_file` call
+   on each kernel, but the Pi final text did not satisfy the strict JSON result
+   envelope. `candidate_result_envelope_valid`, `task_value_expected`, and
+   `task_value_equal` failed; collection stopped before the sixth observation.
+   The current v3 report is 11/11 deterministic, 5/6 live, 16/17 observed, 15
+   passing, 1 failing, and `collecting`, so that corpus cannot support K4
+   policy review.
+   Re-running the same live corpus is refused without a provider call. Explicit
+   `thinking='enabled'` mapping remains a compatibility gap. Authorized v4
+   collection then passed all six live observations. The exact v4 identity is
+   now 17/17 passing with zero failures and `ready_for_k4_policy_review`.
+   Automatic admission remains disabled, and Pi is still absent from the
+   production registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses

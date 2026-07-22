@@ -1,9 +1,9 @@
 # Pi Kernel Admission And Read-Only Shadow Design
 
 - Date: 2026-07-22
-- Status: K3 implemented; candidates `0.81.1` and `0.81.1+los.1` both failed
-  corpus `1.1.0` at 14/17; `0.81.1+los.2` passes deterministic evidence 11/11
-  with live-provider evidence 0/6 and remains `collecting`
+- Status: K3 implemented; v3 stopped at 5/6 live with one envelope failure;
+  corpus `1.1.2` / rubric `pi-shadow-readonly-v4` passes 11/11 deterministic
+  and 6/6 live evidence; it is `ready_for_k4_policy_review`
 - Owner: `packages/agent`
 - Decision source: ADR 0039
 
@@ -136,9 +136,43 @@ request. Registry admission remains a later decision even if that probe passes.
 - Exact candidate `0.81.1+los.2` started with zero qualifying observations and
   now preserves unspecified LOS reasoning and output-limit settings. Its
   deterministic envelope and all 11 deterministic corpus requirements pass.
-  The six live-provider requirements remain unobserved, the report remains
-  `collecting`, and automatic admission is disabled. Explicit
+  Authorized live collection produced three passing no-tool observations and
+  one failing tool observation, then stopped before the remaining two. In the
+  failed record both kernels made one successful `read_file` call and returned
+  the same typed value, but the collector used the repository root and both
+  returned `"los"` instead of the preregistered `"@los/agent"`. The immutable
+  report is 15/17 observed, 14 passing, and 1 failing; it remains `collecting`,
+  and automatic admission is disabled. A new corpus must enforce its workspace
+  input before any separately authorized recollection. Explicit
   `thinking='enabled'` mapping remains a separate compatibility gap.
+- Corpus `1.1.1` / rubric `pi-shadow-readonly-v3` preserves those 15 v2 records
+  as ignored evidence. `PKS02` now binds `packages/agent/package.json` field
+  `name` to `"@los/agent"`; the collector verifies the fixture before any
+  provider call, while persisted observations contain only fixture
+  identity/content hashes. The batch path validates every required fixture
+  before its first call, re-reads the report after every observation, stops on
+  failure or missing persistence, and refuses an already-failing live corpus
+  with zero calls. Authorized v3 collection produced three passing no-tool
+  observations and one passing tool observation. The second tool observation
+  passed fixture, lineage, terminal, tool-sequence, tool-state, and production
+  envelope assertions, but failed `candidate_result_envelope_valid`,
+  `task_value_expected`, and `task_value_equal`. Candidate event lengths and a
+  hash-matched reconstruction establish the invalid shape as the correct fenced
+  JSON preceded by prose; Pi stream aggregation did not duplicate the text. The
+  report is 11/11 deterministic, 5/6 live, 16/17 observed, 15
+  passing, 1 failing, `ignoredCount=15`, and `collecting`. Collection stopped
+  before the sixth observation; the same `--collect-live` run is now refused
+  without a provider call.
+- Candidate `0.81.1+los.3`, corpus `1.1.2`, and rubric
+  `pi-shadow-readonly-v4` do not reinterpret the v3 failure. PKS02 now requires
+  the entire final response to be the JSON object and forbids markdown or prose.
+  Typed comparison evidence adds bounded `json_object`, `fenced_json`,
+  `prefixed_fenced_json`, or `other` shape plus text length without persisting
+  raw output. The exact 61-character v3 shape has a deterministic regression.
+  The v4 report began at 0/17 and then collected 11/11 deterministic evidence
+  without a provider call. Authorized live collection passed 6/6, so the exact
+  v4 identity is 17/17 passing with zero failures and
+  `ready_for_k4_policy_review`.
 - No read-only canary or write canary is authorized.
 - Provider fallback, compaction, and long-context equivalence remain unproven.
 - Web-first manual acceptance and graph integration review remain separate and

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import {
   createModels,
   fauxAssistantMessage,
@@ -22,6 +23,7 @@ import {
 } from './pi-kernel-shadow-scenarios.js';
 import type { AgentResult } from './loop.js';
 import type { SessionEventWrite } from './session-events.js';
+import { _verifyPiKernelShadowWorkspaceFixture } from './pi-kernel-shadow-workspace-fixture.js';
 
 export interface PiKernelShadowFixtureObservation {
   scenarioId: PiKernelShadowScenarioId;
@@ -61,8 +63,15 @@ async function collectOne(
   const taskRunId = `task-pi-shadow-fixture-${scenarioId}-${suffix}`;
   const traceId = `trace-pi-shadow-fixture-${scenarioId}-${suffix}`;
   const productionResult = productionFixture(scenarioId);
+  const workspaceRoot = resolve(import.meta.dirname, '..');
+  const workspaceFixture = scenario.workspaceFixture
+    ? await _verifyPiKernelShadowWorkspaceFixture(scenario.workspaceFixture, workspaceRoot)
+    : undefined;
   const shadow = startPiKernelShadow({
-    shadow: { kind: 'pi', maxTurns: 2, scenario: { id: scenarioId } },
+    shadow: {
+      kind: 'pi', maxTurns: 2,
+      scenario: { id: scenarioId, ...(workspaceFixture ? { workspaceFixture } : {}) },
+    },
     prompt: scenario.prompt,
     productionKernel: getLosExecutionKernelIdentity(),
     productionSessionId: sessionId,
@@ -76,7 +85,7 @@ async function collectOne(
       traceId,
       provider: 'fixture',
       model: 'fixture-model',
-      workspaceRoot: process.cwd(),
+      workspaceRoot,
       toolMode: 'read-only',
       sandboxMode: 'readonly',
       allowedTools: scenario.allowedTools,

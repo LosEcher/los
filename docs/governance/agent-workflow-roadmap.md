@@ -253,11 +253,33 @@ explicit Pi reasoning/output defaults and several protocol-shape differences.
 It narrowed the next adapter hypothesis but did not prove one causal field.
 Exact candidate `0.81.1+los.2` then started with zero qualifying observations,
 preserved unspecified reasoning/output-limit semantics, and passed 11/11
-deterministic corpus requirements. Its live-provider evidence remains 0/6, so
-the report is still `collecting`; explicit `thinking='enabled'` mapping remains
-a separate compatibility gap.
-The pre-corpus smoke and superseded corpus `1.0.0` remain ignored, and K4 policy
-review is blocked. Pi remains unavailable as a selected production kernel. The
+deterministic corpus requirements. Authorized live collection added three
+passing no-tool records and one tool record before stopping. The tool record
+failed only because the collector supplied the repository root; both kernels
+made one successful read and returned the same `"los"` value instead of the
+preregistered `"@los/agent"`. That v2 report remains immutable at 15/17
+observed, 14 passing, and 1 failing. Corpus `1.1.1` / rubric
+`pi-shadow-readonly-v3` now verifies the package workspace fixture before any
+provider call, persists only fixture identity/content hashes, and stops live
+collection after failed or unpersisted evidence. Authorized v3 collection
+produced three passing no-tool records and one passing tool record. The second
+tool record used the correct fixture and both kernels completed one successful
+read, but Pi did not return the preregistered single-field JSON result envelope.
+The report is 11/11 deterministic, 5/6 live, 16/17 observed, 15 passing, 1
+failing, `ignoredCount=15`, and `collecting`. Collection stopped before the
+sixth observation, and the same live corpus is not rerunnable. Event lengths
+and a hash-matched reconstruction identify the failure as the correct fenced
+JSON preceded by prose, while excluding Pi stream duplication. Candidate
+`0.81.1+los.3`, corpus `1.1.2`, and rubric `pi-shadow-readonly-v4` retain the
+strict comparator, strengthen the whole-response prompt, and record only
+bounded envelope shape/length diagnostics. The v4 identity started at 0/17 and
+then passed deterministic evidence 11/11 without provider calls. Authorized
+live collection passed 6/6, making the v4 report 17/17 passing with zero
+failures and `ready_for_k4_policy_review`. Explicit
+`thinking='enabled'` mapping remains a separate compatibility gap.
+The pre-corpus smoke and superseded corpus `1.0.0` remain ignored. K4 policy
+review is now eligible, but registry admission and canary use remain blocked.
+Pi remains unavailable as a selected production kernel. The
 current LOS loop stays the production baseline until a
 preregistered evaluation revision, canary, formal pairwise evaluation, and
 rollback gates pass.
