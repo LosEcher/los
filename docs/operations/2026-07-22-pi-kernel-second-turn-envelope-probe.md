@@ -78,15 +78,16 @@ limit. Pi's streaming mechanics may remain if the semantic settings can be
 omitted independently. This is a candidate hypothesis, not an admission
 decision. `[I]`
 
-## Next Action
+## Revision Result
 
-1. Prove that `0.81.1+los.2` has zero qualifying corpus observations before
-   collection. `[E]`
-2. Change only the Pi model-setting mapping needed to preserve unspecified
-   reasoning and output-limit semantics. `[I]`
-3. Re-run this deterministic envelope test and the existing Pi adapter suite
-   before any live-provider request. `[E]`
-4. Start a new live corpus only if the deterministic envelope confirms the
-   intended semantics and the operator authorizes the provider cost. `[I]`
-5. Even a 17/17 result does not authorize registry admission or K4 canary
-   execution. `[E]`
+Exact candidate `0.81.1+los.2` started with zero qualifying observations. Its
+payload policy now removes Pi's reasoning and output-limit defaults when LOS
+does not specify them, and the deterministic envelope and adapter suite pass.
+The persisted report contains 11/11 passing deterministic observations and
+0/6 live-provider observations, so it remains `collecting`. No provider call,
+registry admission, or canary execution was performed. `[E]`
+
+The result and residual explicit-thinking gap are recorded in
+`docs/operations/2026-07-22-pi-kernel-semantic-default-revision-result.md`.
+Live collection still requires operator authorization. Even a future 17/17
+result would authorize K4 policy review only. `[E]`

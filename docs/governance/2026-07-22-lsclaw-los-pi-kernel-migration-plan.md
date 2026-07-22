@@ -1,8 +1,8 @@
 # lsclaw To LOS: Pi Kernel Decision Record And Migration Plan
 
 - Date: 2026-07-22
-- Status: active plan; K0-K2 complete, K3 gate failed after two candidates,
-  deterministic second-turn envelope probe complete
+- Status: active plan; K0-K2 complete; K3 candidate `0.81.1+los.2` passes
+  deterministic evidence 11/11 but has live-provider evidence 0/6; K4 blocked
 - Owner: `packages/agent` execution kernel and LOS governance runtime
 - Decision: `docs/adr/0039-pluggable-execution-kernel-and-pi-adoption.md`
 - Protocol: `contracts/execution-kernel.yaml`
@@ -155,7 +155,7 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
 | K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
 | K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | complete: input/telemetry live probe and explicit unsupported-semantic decisions | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
-| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | candidates `0.81.1` and `0.81.1+los.1` both completed corpus `1.1.0` at 14/17; deterministic envelope comparison excludes prompt/history, tool-result, call-id, and parallel-policy drift | gate failed; create `0.81.1+los.2`, preserve unspecified reasoning/output-limit semantics, and verify deterministically before any live recollection |
+| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | candidates `0.81.1` and `0.81.1+los.1` failed at 14/17; `0.81.1+los.2` started at zero evidence, preserves unspecified reasoning/output-limit semantics, and passes deterministic evidence 11/11 | live evidence remains 0/6 and requires operator authorization; K3 remains `collecting` and K4 blocked |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
 | K5 Write canary | temporary then managed-workspace project writes | ToolBroker policy, lease fencing, verifier records, reviewed diff | stop on any policy or final-transition bypass |
 | K6 Graph worker | Pi executes bounded worker tasks; verifier remains independent | worker/verifier attempts, graph completion, manual integration review | stop if child contract or editable surfaces are lost |
@@ -252,15 +252,16 @@ and also completed 14/17. Its three typed values and terminal assertions passed,
 but each candidate made a full read followed by a narrower read in the next
 turn. The parallel-call hypothesis is therefore falsified as the root cause.
 Corpus `1.0.0` remains persisted but ignored because its lineage assertion was
-not bound to the Pi input. K4 remains blocked pending a new exact candidate that
-passes deterministic verification. The second-turn envelope probe is now
-complete: prompt/history, tool call/result, normalized tool schema,
-and `parallel_tool_calls=false` match, while Pi adds explicit reasoning/output
-defaults and several protocol-shape fields. This narrows but does not prove the
-cause. The next behavior-changing candidate must be `0.81.1+los.2`, start with
-zero qualifying observations, and pass deterministic checks before any live
-recollection. The pre-corpus smoke remains excluded rather than retroactively
-labeled. `pnpm --filter
+not bound to the Pi input. The second-turn envelope probe verified matching
+prompt/history, tool call/result, normalized tool schema, and
+`parallel_tool_calls=false`, while Pi added explicit reasoning/output defaults
+and several protocol-shape fields. Exact candidate `0.81.1+los.2` started with
+zero qualifying observations, preserves unspecified reasoning/output-limit
+semantics, and passes the revised envelope plus all 11 deterministic corpus
+requirements. Its six live-provider requirements remain unobserved, so K3
+remains `collecting` and K4 remains blocked. Explicit `thinking='enabled'`
+mapping remains a compatibility gap for broader promotion. The pre-corpus
+smoke remains excluded rather than retroactively labeled. `pnpm --filter
 @los/agent scenario:pi-shadow` reads current status without invoking a provider.
 
 ## Active Work Ledger
@@ -273,7 +274,7 @@ LOS todos. Their status here must not be presented as database todo state.
 | `kernel-k0-decision-record` | complete in this document; not a DB todo | ADR, history record, contract, roadmap, and contract check |
 | `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
 | `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
-| `kernel-k3-shadow` | two `1.1.0` candidate runs and deterministic envelope probe complete; gate failed | both existing candidates remain at 14/17; next owner is the zero-evidence `0.81.1+los.2` semantic-default adapter revision, not recollection of either failed candidate |
+| `kernel-k3-shadow` | `0.81.1+los.2` deterministic evidence complete; live evidence pending authorization | failed candidate records remain immutable; current candidate is 11/11 deterministic, 0/6 live, and `collecting` |
 | `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |
@@ -288,6 +289,7 @@ LOS todos. Their status here must not be presented as database todo state.
 - `docs/governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
 - `docs/operations/2026-07-22-pi-kernel-shadow-adapter-revision-result.md`
 - `docs/operations/2026-07-22-pi-kernel-second-turn-envelope-probe.md`
+- `docs/operations/2026-07-22-pi-kernel-semantic-default-revision-result.md`
 - archived `docs/archive/seven-project-boundary-spec.md`
 - Pi AgentHarness lifecycle:
   <https://github.com/earendil-works/pi/blob/main/packages/agent/docs/agent-harness.md>

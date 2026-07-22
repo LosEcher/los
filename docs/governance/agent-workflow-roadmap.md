@@ -251,6 +251,11 @@ turn. A deterministic second-turn envelope probe then verified equal
 prompt/history, tool call/result, and parallel policy, while identifying
 explicit Pi reasoning/output defaults and several protocol-shape differences.
 It narrowed the next adapter hypothesis but did not prove one causal field.
+Exact candidate `0.81.1+los.2` then started with zero qualifying observations,
+preserved unspecified reasoning/output-limit semantics, and passed 11/11
+deterministic corpus requirements. Its live-provider evidence remains 0/6, so
+the report is still `collecting`; explicit `thinking='enabled'` mapping remains
+a separate compatibility gap.
 The pre-corpus smoke and superseded corpus `1.0.0` remain ignored, and K4 policy
 review is blocked. Pi remains unavailable as a selected production kernel. The
 current LOS loop stays the production baseline until a

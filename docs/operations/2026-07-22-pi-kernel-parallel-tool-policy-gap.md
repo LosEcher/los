@@ -93,14 +93,18 @@ the other fields remain unisolated protocol candidates. `[I]`
 The full probe record is
 `docs/operations/2026-07-22-pi-kernel-second-turn-envelope-probe.md`.
 
-## Next Verification
+## Follow-Up Result
 
 1. Keep both failed candidate reports immutable; do not recollect them.
 2. Keep the deterministic transport-envelope comparison as a regression test.
-3. Revise the model-setting mapping so unspecified LOS reasoning and output
-   limits remain unspecified, then verify the resulting envelope.
-4. Assign exact identity `0.81.1+los.2` to that behavior change and prove it has
-   zero qualifying observations before collection.
-5. Require zero failures before K4 policy review.
+3. Exact candidate `0.81.1+los.2` started with zero qualifying observations,
+   preserves unspecified reasoning and output limits, and passes all 11
+   deterministic corpus requirements.
+4. Its six live-provider requirements remain unobserved; the report remains
+   `collecting` and requires operator authorization before live collection.
+5. Require zero failures and a separate operator decision before K4 policy
+   review.
 
 Even a passing report does not authorize registry admission or a canary.
+The current result is recorded in
+`docs/operations/2026-07-22-pi-kernel-semantic-default-revision-result.md`.

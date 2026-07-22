@@ -78,14 +78,19 @@ read-only canary policy review remains blocked, Pi remains absent from the
 production registry, and these 17 observations must not be deleted, relabeled,
 or replaced by a rerun. `[E]`
 
-Another live collection is not useful until a new adapter candidate preserves
-unspecified LOS reasoning and output-limit semantics and passes the
-deterministic envelope probe. `[I]`
+Exact candidate `0.81.1+los.2` now preserves unspecified LOS reasoning and
+output-limit semantics and passes the deterministic envelope probe plus all 11
+deterministic corpus requirements. Its six live-provider requirements remain
+unobserved, so the report remains `collecting`. `[E]`
 
-Any behavior-changing adapter fix must use a new exact kernel identity such as
-`0.81.1+los.2`. Corpus `1.1.0` and its rubric may remain unchanged only if the
-scenarios and assertions remain unchanged; the new candidate must start with
-zero qualifying observations. `[E]`
+The behavior-changing adapter fix therefore uses exact kernel identity
+`0.81.1+los.2`. Corpus `1.1.0` and its rubric remain unchanged because the
+scenarios and assertions are unchanged; the new candidate was verified at zero
+qualifying observations before deterministic collection. `[E]`
+
+The new candidate's deterministic result is recorded in
+`docs/operations/2026-07-22-pi-kernel-semantic-default-revision-result.md`.
+Live collection has not been authorized or run. `[E]`
 
 ## Commands
 

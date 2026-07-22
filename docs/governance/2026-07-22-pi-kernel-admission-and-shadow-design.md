@@ -2,7 +2,8 @@
 
 - Date: 2026-07-22
 - Status: K3 implemented; candidates `0.81.1` and `0.81.1+los.1` both failed
-  corpus `1.1.0` at 14/17; deterministic second-turn probe complete
+  corpus `1.1.0` at 14/17; `0.81.1+los.2` passes deterministic evidence 11/11
+  with live-provider evidence 0/6 and remains `collecting`
 - Owner: `packages/agent`
 - Decision source: ADR 0039
 
@@ -132,6 +133,12 @@ request. Registry admission remains a later decision even if that probe passes.
   sent streaming usage fields, an explicit output limit, explicit reasoning
   disablement, and several representation defaults. The probe narrows the next
   adapter hypothesis but does not establish a unique cause.
+- Exact candidate `0.81.1+los.2` started with zero qualifying observations and
+  now preserves unspecified LOS reasoning and output-limit settings. Its
+  deterministic envelope and all 11 deterministic corpus requirements pass.
+  The six live-provider requirements remain unobserved, the report remains
+  `collecting`, and automatic admission is disabled. Explicit
+  `thinking='enabled'` mapping remains a separate compatibility gap.
 - No read-only canary or write canary is authorized.
 - Provider fallback, compaction, and long-context equivalence remain unproven.
 - Web-first manual acceptance and graph integration review remain separate and
