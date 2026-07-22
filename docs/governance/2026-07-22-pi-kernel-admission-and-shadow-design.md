@@ -1,7 +1,8 @@
 # Pi Kernel Admission And Read-Only Shadow Design
 
 - Date: 2026-07-22
-- Status: K3 implemented; corrected corpus `1.0.1` complete; gate failed 16/17
+- Status: K3 implemented; corpus `1.0.1` complete with gate failed 16/17;
+  corpus `1.1.0` semantic comparator preregistered with no observations
 - Owner: `packages/agent`
 - Decision source: ADR 0039
 
@@ -118,9 +119,10 @@ request. Registry admission remains a later decision even if that probe passes.
 - Corpus `1.0.0` was superseded because its lineage assertion checked outcome
   strings rather than the identifiers actually passed into Pi. Its 17 records
   remain persisted and are not reinterpreted as `1.0.1` evidence.
-- The failed observations are immutable evidence. A semantic result comparator
-  or deterministic answer envelope requires a preregistered next revision; it
-  must not reinterpret or overwrite corpus `1.0.1`.
+- The failed observations are immutable evidence. Corpus `1.1.0` and rubric
+  `pi-shadow-readonly-v2` now preregister a typed JSON `packageName` result
+  comparator; it has no observations and must not reinterpret or overwrite
+  corpus `1.0.1`.
 - No read-only canary or write canary is authorized.
 - Provider fallback, compaction, and long-context equivalence remain unproven.
 - Web-first manual acceptance and graph integration review remain separate and

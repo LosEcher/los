@@ -97,12 +97,12 @@ export function startPiKernelShadow(
     effectiveToolMode: input.effectiveToolMode,
     remoteExecutor: input.remoteExecutor,
   });
-  const candidatePromise = admissionIssues.length > 0
+  const candidatePromise: Promise<CandidateRunResult> = admissionIssues.length > 0
     ? Promise.resolve<CandidateRunResult>({ events: [] })
     : (dependencies.runCandidate ?? runCandidate)({
         prompt: input.prompt,
         config: shadowConfig(input, lineage, controller.signal),
-      }).catch(error => ({ events: [], error }));
+      }).catch(error => ({ events: [], error }) satisfies CandidateRunResult);
   let settlement: Promise<PiKernelShadowOutcome> | undefined;
 
   const finish = (productionResult?: AgentResult, productionStatus: 'completed' | 'failed' = 'completed') => {
@@ -136,6 +136,8 @@ export function startPiKernelShadow(
             candidateToolCompletionStates: outcome.toolCompletionStates,
             candidateOutputHash: outcome.outputHash,
             productionOutputHash: productionResult ? outputHash(productionResult.text) : undefined,
+            candidateText: candidateRun.result?.text,
+            productionText: productionResult?.text,
           });
         } catch (error) {
           outcome.scenarioEvidenceError = truncate(error instanceof Error ? error.message : String(error));

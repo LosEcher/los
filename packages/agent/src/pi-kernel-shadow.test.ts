@@ -73,6 +73,36 @@ test('Pi shadow attaches preregistered scenario assertions to bounded evidence',
   assert.equal(writes[0]?.payload?.scenarioEvidence && typeof writes[0].payload.scenarioEvidence, 'object');
 });
 
+test('Pi shadow persists only task-value hashes for typed result comparison', async () => {
+  const writes: SessionEventWrite[] = [];
+  const input = baseInput();
+  input.shadow.scenario = { id: 'PKS02-read-only-tool' };
+  input.prompt = 'Use read_file on package.json, then return one JSON object with exactly one field: {"packageName":"<package name>"}.';
+  input.config.allowedTools = ['read_file'];
+  const result: AgentResult = {
+    ...productionResult,
+    text: '{"packageName":"@los/agent"}',
+    turns: [{
+      loopCount: 1,
+      text: '{"packageName":"@los/agent"}',
+      toolCalls: [{ id: 'read', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
+      toolResults: ['{"name":"@los/agent"}'],
+    }],
+  };
+  const shadow = startPiKernelShadow(input, {
+    runCandidate: async () => ({
+      result: { ...result, text: '```json\n{"packageName":"@los/agent"}\n```' },
+      events: [startedEvent(), toolRequestedEvent(), toolCompletedEvent(), event('kernel.finished')],
+    }),
+    appendEvent: async eventInput => { writes.push(eventInput); return {} as never; },
+  });
+
+  const outcome = await shadow.settle(result);
+  assert.equal(outcome.scenarioEvidence?.passed, true);
+  assert.equal(JSON.stringify(writes[0]?.payload).includes('@los/agent'), false);
+  assert.match(outcome.scenarioEvidence?.resultComparison?.candidateValueHash ?? '', /^sha256:/);
+});
+
 test('Pi shadow contains invalid scenario evidence without affecting settlement', async () => {
   const input = baseInput();
   input.shadow.scenario = { id: 'unknown' as 'PKS01-no-tool' };
@@ -177,6 +207,20 @@ function startedEvent(): KernelEvent {
       taskRunId: 'task-main:shadow:pi',
       traceId: 'trace-main:shadow:pi',
     },
+  };
+}
+
+function toolCompletedEvent(): KernelEvent {
+  return {
+    ...event('tool.completed'),
+    payload: { transition: { toolName: 'read_file', state: 'succeeded' } },
+  };
+}
+
+function toolRequestedEvent(): KernelEvent {
+  return {
+    ...event('tool.requested'),
+    payload: { tool: 'read_file' },
   };
 }
 

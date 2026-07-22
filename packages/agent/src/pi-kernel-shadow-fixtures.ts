@@ -201,7 +201,7 @@ function candidateResponses(scenarioId: PiKernelShadowScenarioId) {
     fauxAssistantMessage(fauxToolCall('read_file', { path: 'package.json' }, { id: 'fixture-read' }), {
       stopReason: 'toolUse',
     }),
-    fauxAssistantMessage('los'),
+    fauxAssistantMessage('{"packageName":"@los/agent"}'),
   ];
   if (scenarioId === 'PKS03-policy-denial') return [
     fauxAssistantMessage(fauxToolCall('read_file', { path: 'package.json' }, { id: 'fixture-denial' }), {
@@ -219,13 +219,13 @@ function fixtureBroker(denied: boolean): ToolBroker {
   return {
     execute: async request => denied
       ? { callId: request.callId, content: '', error: 'deterministic policy denial', denied: true }
-      : { callId: request.callId, content: '{"name":"los"}', denied: false },
+      : { callId: request.callId, content: '{"name":"@los/agent"}', denied: false },
   };
 }
 
 function productionFixture(scenarioId: PiKernelShadowScenarioId): AgentResult {
   const text = scenarioId === 'PKS01-no-tool' ? 'LOS_PI_SHADOW_OK'
-    : scenarioId === 'PKS02-read-only-tool' ? 'los'
+    : scenarioId === 'PKS02-read-only-tool' ? '{"packageName":"@los/agent"}'
     : 'LOS production fixture completed';
   const toolCalls = scenarioId === 'PKS02-read-only-tool'
     ? [{
@@ -236,7 +236,7 @@ function productionFixture(scenarioId: PiKernelShadowScenarioId): AgentResult {
     : [];
   return {
     text,
-    turns: [{ loopCount: 1, text, toolCalls, toolResults: toolCalls.length ? ['{"name":"los"}'] : [] }],
+    turns: [{ loopCount: 1, text, toolCalls, toolResults: toolCalls.length ? ['{"name":"@los/agent"}'] : [] }],
     loopCount: 1,
     totalTokens: { prompt: 1, completion: 1 },
     messages: [{ role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }],

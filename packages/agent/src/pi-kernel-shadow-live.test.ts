@@ -34,7 +34,7 @@ test('live collector admits only fixed local read-only scheduler scenarios', asy
       shadow: { kind: 'pi', maxTurns: 3, scenario: { id: 'PKS01-no-tool' } },
     },
     {
-      prompt: 'Use read_file on package.json, then return exactly the package name.',
+      prompt: 'Use read_file on package.json, then return one JSON object with exactly one field: {"packageName":"<package name>"}.',
       tools: ['read_file'], toolMode: 'read-only', sandboxMode: 'readonly', remote: undefined,
       shadow: { kind: 'pi', maxTurns: 3, scenario: { id: 'PKS02-read-only-tool' } },
     },

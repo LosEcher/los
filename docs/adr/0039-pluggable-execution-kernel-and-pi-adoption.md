@@ -4,7 +4,9 @@
 - Date: 2026-07-22
 - Implementation status: K0-K2 complete; K3 explicit read-only shadow and its
   corrected 17-observation corpus run are complete, but the gate failed on one strict
-  read-only-tool output-hash assertions. Local, HTTP executor, and SSH
+  read-only-tool output-hash assertion. Corpus `1.1.0` / rubric
+  `pi-shadow-readonly-v2` is preregistered to compare a typed task value; no
+  observations have been collected under that revision. Local, HTTP executor, and SSH
   executor paths still select only the LOS adapter through the fail-closed
   production registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
@@ -189,10 +191,11 @@ input evidence and produced 16 passing and one failing
 observations. All deterministic and live no-tool cells passed. All three live
 read-only-tool attempts matched tool sequence, successful tool state, terminal
 state, and isolated lineage; two output hashes matched and one differed because
-the same package name was formatted differently. Corpus `1.0.1` remains immutable;
-K4 policy review is blocked pending a preregistered next evaluation revision or
-an adapter-level determinism decision. Pi is still absent from the production
-registry.
+   the same package name was formatted differently. Corpus `1.0.1` remains immutable.
+   Corpus `1.1.0` / rubric `pi-shadow-readonly-v2` now preregisters a typed JSON
+   task-value comparator and has no observations yet. K4 policy review remains
+   blocked until that revision is collected and passes. Pi is still absent from
+   the production registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses

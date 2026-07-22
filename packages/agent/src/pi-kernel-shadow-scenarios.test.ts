@@ -24,7 +24,7 @@ test('Pi shadow corpus preregisters bounded read-only scenario requirements', ()
     'PKS04-provider-failure',
     'PKS05-interruption',
   ]);
-  assert.ok(_PI_KERNEL_SHADOW_SCENARIOS.every(item => item.version === '1.0.1'));
+  assert.ok(_PI_KERNEL_SHADOW_SCENARIOS.every(item => item.version === '1.1.0'));
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[1]?.allowedTools, ['read_file']);
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[2]?.allowedEvidenceClasses, ['deterministic']);
 });
@@ -64,6 +64,29 @@ test('Pi shadow scenario evaluation binds output, tool, terminal, and lineage as
   );
 });
 
+test('Pi shadow read-only scenario compares typed task values without persisting raw output', () => {
+  const compared = evaluatePiKernelShadowScenario({
+    ...baseEvidence('PKS02-read-only-tool'), scenarioId: 'PKS02-read-only-tool', evidenceClass: 'live-provider',
+    candidateStatus: 'completed', candidateEventCounts: { 'kernel.finished': 1 },
+    candidateToolNames: ['read_file'], candidateToolCompletionStates: ['succeeded'],
+    productionText: '{"packageName":"@los/agent"}',
+    candidateText: '```json\n{"packageName":"@los/agent"}\n```',
+  });
+  assert.equal(compared.passed, true);
+  assert.equal(compared.assertions.find(item => item.id === 'task_value_equal')?.passed, true);
+  assert.equal(compared.resultComparison?.productionValueHash, compared.resultComparison?.candidateValueHash);
+  assert.equal(JSON.stringify(compared).includes('@los/agent'), false);
+
+  const wrongValue = evaluatePiKernelShadowScenario({
+    ...baseEvidence('PKS02-read-only-tool'), scenarioId: 'PKS02-read-only-tool', evidenceClass: 'live-provider',
+    candidateStatus: 'completed', candidateEventCounts: { 'kernel.finished': 1 },
+    candidateToolNames: ['read_file'], candidateToolCompletionStates: ['succeeded'],
+    productionText: '{"packageName":"@los/agent"}', candidateText: '{"packageName":"los"}',
+  });
+  assert.equal(wrongValue.passed, false);
+  assert.equal(wrongValue.assertions.find(item => item.id === 'task_value_expected')?.passed, false);
+});
+
 test('Pi shadow report requires every preregistered cell for one exact Pi version', () => {
   const payloads: Record<string, unknown>[] = [];
   for (const scenario of _PI_KERNEL_SHADOW_SCENARIOS) {
@@ -78,7 +101,7 @@ test('Pi shadow report requires every preregistered cell for one exact Pi versio
       }
     }
   }
-  payloads.push({ ...payload('PKS01-no-tool', '1.0.1', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
+  payloads.push({ ...payload('PKS01-no-tool', '1.1.0', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
 
   const identity = { kind: 'pi' as const, version: '0.81.1', protocolVersion: '0.1.0' };
   const report = _summarizePiKernelShadowScenarioEvidence(payloads, identity);
@@ -105,7 +128,6 @@ function baseEvidence(scenarioId = 'PKS01-no-tool') {
   const scenario = _PI_KERNEL_SHADOW_SCENARIOS.find(item => item.id === scenarioId)!;
   return {
     productionStatus: 'completed' as const,
-    productionResult,
     prompt: scenario.prompt,
     allowedTools: scenario.allowedTools,
     productionSessionId: 'session-main',
@@ -115,6 +137,17 @@ function baseEvidence(scenarioId = 'PKS01-no-tool') {
     candidateTaskRunId: 'task-main:shadow:pi',
     candidateTraceId: 'trace-main:shadow:pi',
     candidateEventLineageMatches: true,
+    productionResult: scenarioId === 'PKS02-read-only-tool'
+      ? {
+          ...productionResult,
+          turns: [{
+            loopCount: 1,
+            text: '{"packageName":"@los/agent"}',
+            toolCalls: [{ id: 'read', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } }],
+            toolResults: ['{"name":"@los/agent"}'],
+          }],
+        }
+      : productionResult,
   };
 }
 
