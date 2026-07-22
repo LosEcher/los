@@ -11,10 +11,10 @@ import {
 import { _consumeExecutionKernel, type KernelEvent } from './execution-kernel.js';
 import { _createPiExecutionKernel } from './pi-execution-kernel.js';
 import {
-  _applyPiProviderPayloadPolicy,
   _preparePiKernelRun,
   _projectPiProviderTelemetry,
 } from './pi-kernel-input.js';
+import { _applyPiProviderPayloadPolicy } from './pi-kernel-payload-policy.js';
 import type { AgentResult } from './loop.js';
 import { resolveModelProfile } from './model-profiles.js';
 
@@ -95,15 +95,33 @@ test('Pi provider stream records LOS-owned call telemetry', async () => {
   }]);
 });
 
-test('Pi provider payload preserves LOS parallel-tool capability policy', () => {
+test('Pi provider payload applies LOS model-setting and parallel-tool policy', () => {
   const deepseek = resolveModelProfile('deepseek', { model: 'deepseek-v4-flash' });
   assert.deepEqual(
-    _applyPiProviderPayloadPolicy({ model: deepseek.model, tools: [{ type: 'function' }] }, deepseek),
+    _applyPiProviderPayloadPolicy({
+      model: deepseek.model,
+      tools: [{ type: 'function' }],
+      max_completion_tokens: 32_000,
+      thinking: { type: 'disabled' },
+    }, deepseek),
     { model: deepseek.model, tools: [{ type: 'function' }], parallel_tool_calls: false },
   );
   assert.deepEqual(
-    _applyPiProviderPayloadPolicy({ model: deepseek.model }, deepseek),
-    { model: deepseek.model },
+    _applyPiProviderPayloadPolicy({
+      model: deepseek.model,
+      tools: [{ type: 'function' }],
+      max_completion_tokens: 4_096,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'low',
+    }, deepseek, { maxTokens: 4_096, reasoningEffort: 'low' }),
+    {
+      model: deepseek.model,
+      tools: [{ type: 'function' }],
+      max_completion_tokens: 4_096,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'low',
+      parallel_tool_calls: false,
+    },
   );
 
   const openai = resolveModelProfile('openai', { model: 'gpt-5.5' });

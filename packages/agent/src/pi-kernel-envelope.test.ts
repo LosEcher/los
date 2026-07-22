@@ -17,7 +17,7 @@ const SYSTEM_PROMPT = 'Use the read_file tool once, then answer with the request
 const TOOL_CALL_ID = 'call-read-package';
 const FINAL_TEXT = '{"packageName":"@los/agent"}';
 
-test('LOS and Pi second-turn provider envelopes expose only preregistered mapping differences', async t => {
+test('Pi second-turn envelope preserves unspecified LOS model settings', async t => {
   const captured: Record<KernelLabel, Envelope[]> = { los: [], pi: [] };
   let activeKernel: KernelLabel = 'los';
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
@@ -79,15 +79,15 @@ test('LOS and Pi second-turn provider envelopes expose only preregistered mappin
   assert.deepEqual(stripToolStrictness(los.tools), stripToolStrictness(pi.tools));
 
   assert.deepEqual(topLevelKeysOnlyIn(los, pi), ['tool_choice']);
-  assert.deepEqual(topLevelKeysOnlyIn(pi, los), ['max_completion_tokens', 'stream_options', 'thinking']);
+  assert.deepEqual(topLevelKeysOnlyIn(pi, los), ['stream_options']);
   assert.equal(los.tool_choice, 'auto');
   assert.equal(pi.tool_choice, undefined);
   assert.equal(los.parallel_tool_calls, false);
   assert.equal(pi.parallel_tool_calls, false);
   assert.equal(los.thinking, undefined);
-  assert.deepEqual(pi.thinking, { type: 'disabled' });
+  assert.equal(pi.thinking, undefined);
   assert.equal(los.max_completion_tokens, undefined);
-  assert.equal(pi.max_completion_tokens, 32_000);
+  assert.equal(pi.max_completion_tokens, undefined);
   assert.equal(los.stream, false);
   assert.equal(pi.stream, true);
   assert.equal(los.stream_options, undefined);

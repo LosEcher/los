@@ -15,12 +15,14 @@ import { createLosToolBroker } from './los-tool-broker.js';
 import { resolveXaiOAuthCredential } from './auth/xai-oauth.js';
 import { completeAgentSetup, setupAgentRun } from './loop/setup.js';
 import type { AgentConfig, AgentResult } from './loop.js';
+import type { ModelSettings } from './model-settings.js';
 import type { ModelProfile } from './model-profiles.js';
 import { getProviderConfig } from './providers/index.js';
 import { recordProviderCall, type ProviderCallTelemetry } from './providers/telemetry.js';
 import type { Message } from './providers/index.js';
 import type { PiKernelRunInput, PiKernelToolDescriptor } from './pi-execution-kernel.js';
 import { assertPiKernelInputAdmission } from './pi-kernel-admission.js';
+import { _applyPiProviderPayloadPolicy } from './pi-kernel-payload-policy.js';
 
 interface PiKernelRouteEvidence {
   provider: string;
@@ -61,6 +63,7 @@ export async function _preparePiKernelRun(
         sessionId: config.sessionId,
         record: dependencies.recordProviderCall ?? recordProviderCall,
       },
+      config.modelSettings,
     );
     const messages = toPiMessages(setup.messages.slice(0, -1), modelRuntime.model, dependencies.now);
     const toolCatalog = toPiToolCatalog(setup);
@@ -118,6 +121,7 @@ async function createPiModelRuntime(
     sessionId?: string;
     record: (telemetry: ProviderCallTelemetry) => Promise<void>;
   },
+  modelSettings: ModelSettings | undefined,
 ): Promise<{
   model: Model<Api>;
   streamFn: PiKernelRunInput['streamFn'];
@@ -173,7 +177,7 @@ async function createPiModelRuntime(
       onPayload: async (payload, payloadModel) => {
         const replaced = await options?.onPayload?.(payload, payloadModel);
         const effective = replaced ?? payload;
-        const governed = _applyPiProviderPayloadPolicy(effective, profile);
+        const governed = _applyPiProviderPayloadPolicy(effective, profile, modelSettings);
         return replaced === undefined && governed === payload ? undefined : governed;
       },
       onResponse: async response => {
@@ -188,17 +192,6 @@ async function createPiModelRuntime(
     streamFn,
     effectiveBaseUrl: pendingCredential.baseUrl ?? profile.baseUrl,
   };
-}
-
-export function _applyPiProviderPayloadPolicy(
-  payload: unknown,
-  profile: ModelProfile,
-): unknown {
-  if (profile.apiShape !== 'openai-chat-completions' || profile.supportsParallelToolCalls) return payload;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
-  const record = payload as Record<string, unknown>;
-  if (!Array.isArray(record.tools) || record.tools.length === 0) return payload;
-  return { ...record, parallel_tool_calls: false };
 }
 
 export function _projectPiProviderTelemetry(

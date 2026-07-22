@@ -22,6 +22,11 @@ import type { AgentResult } from './loop.js';
 const fixedNow = () => new Date('2026-07-22T00:00:00.000Z');
 
 test('Pi deterministic adapter emits a canonical no-tool trace', async () => {
+  assert.deepEqual(_getPiExecutionKernelIdentity(), {
+    kind: 'pi',
+    version: '0.81.1+los.2',
+    protocolVersion: '0.1.0',
+  });
   const { input } = createFixtureInput([
     fauxAssistantMessage('done'),
   ]);
