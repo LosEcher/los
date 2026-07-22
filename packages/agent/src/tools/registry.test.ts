@@ -444,6 +444,41 @@ test('tool retry only applies to retryable and idempotent capabilities', async (
   assert.deepEqual(result.retryErrors, ['temporary read failure']);
 });
 
+test('tool retry stops at max attempts and returns every exhausted failure', async () => {
+  const registry = createToolRegistry({
+    policy: { retry: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 } },
+  });
+  let attempts = 0;
+  registry.register(
+    'exhausted_read',
+    async () => {
+      attempts += 1;
+      return { content: '', error: `temporary failure ${attempts}` };
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'exhausted_read',
+        description: 'Always failing idempotent read',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    { riskLevel: 'L0', retryable: true, idempotent: true, timeoutMs: 1_000 },
+  );
+
+  const result = await registry.execute({ name: 'exhausted_read', arguments: {} });
+
+  assert.equal(attempts, 3);
+  assert.equal(result.error, 'temporary failure 3');
+  assert.equal(result.attempts, 3);
+  assert.equal(result.retried, true);
+  assert.deepEqual(result.retryErrors, [
+    'temporary failure 1',
+    'temporary failure 2',
+    'temporary failure 3',
+  ]);
+});
+
 test('tool retry does not replay non-idempotent capabilities', async () => {
   const registry = createToolRegistry({
     policy: {

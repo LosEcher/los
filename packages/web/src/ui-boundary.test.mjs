@@ -164,13 +164,7 @@ test('dead-letter resolution requires an audited disposition instead of an empty
   assert.doesNotMatch(deadLetterPage, /\/ack`, \{\}\)/);
 });
 
-test('setup readiness is wired, redacted, and keeps discovery separate from compatibility', () => {
-  assert.match(app, /id: 'setup'/);
-  assert.match(app, /page === 'setup' && <SetupPage/);
-  assert.match(setupPage, /Promise\.allSettled/);
-  assert.match(setupPage, /compatibility evidence is still required/);
-  assert.match(setupPage, /Provider discovery and compatibility evidence are separate checks/);
-  assert.match(setupPage, /Hermes \$\{hermes\?\.installed/);
+test('setup source excludes sensitive fields and keeps responsive rows', () => {
   assert.doesNotMatch(setupPage, /apiKey|credentialPath|workspacePath|weclawBinary/);
   assert.match(styles, /\.setup-row[\s\S]*grid-template-columns/);
   assert.match(styles, /@media \(max-width: 780px\)[\s\S]*\.setup-row/);

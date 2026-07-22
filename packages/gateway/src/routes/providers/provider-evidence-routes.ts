@@ -21,6 +21,9 @@ import {
   recordRunEval,
   compareRunEvals,
   summarizeRunEvals,
+  getDailyAgentScenarioCorpus,
+  recordDailyAgentScenarioEconomics,
+  summarizeDailyAgentScenarioEconomics,
 } from '@los/agent';
 import {
   asRecord,
@@ -114,6 +117,67 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
       includeExpired: query.includeExpired === 'true',
     });
     return { count: summaries.length, summaries };
+  });
+
+  app.get('/run-evals/scenario-economics/corpus', async () => {
+    return getDailyAgentScenarioCorpus();
+  });
+
+  app.get('/run-evals/scenario-economics', async (req, reply) => {
+    const query = req.query as { runSpecId?: string; createdFrom?: string; createdTo?: string };
+    try {
+      return await summarizeDailyAgentScenarioEconomics({
+        runSpecId: normalizeOptionalString(query.runSpecId),
+        createdFrom: normalizeOptionalString(query.createdFrom),
+        createdTo: normalizeOptionalString(query.createdTo),
+      });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/run-evals/scenario-economics', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const body = asRecord(req.body);
+    const success = parseOptionalBoolean(body.success);
+    if (success === undefined) return reply.status(422).send({ error: 'success is required' });
+    try {
+      const evaluation = await recordDailyAgentScenarioEconomics({
+        id: normalizeOptionalString(body.id),
+        runSpecId: normalizeOptionalString(body.runSpecId) ?? '',
+        sessionId: normalizeOptionalString(body.sessionId),
+        taskRunId: normalizeOptionalString(body.taskRunId),
+        scenarioId: normalizeOptionalString(body.scenarioId) ?? '',
+        scenarioVersion: normalizeOptionalString(body.scenarioVersion) ?? '',
+        scenarioRunId: normalizeOptionalString(body.scenarioRunId) ?? '',
+        lane: normalizeOptionalString(body.lane) as never,
+        role: normalizeOptionalString(body.role) as never,
+        requestedProvider: body.requestedProvider === null ? null : normalizeOptionalString(body.requestedProvider),
+        requestedModel: body.requestedModel === null ? null : normalizeOptionalString(body.requestedModel),
+        effectiveProvider: normalizeOptionalString(body.effectiveProvider) ?? '',
+        effectiveModel: normalizeOptionalString(body.effectiveModel) ?? '',
+        routeReason: normalizeOptionalString(body.routeReason) as never,
+        success,
+        latencyMs: normalizeOptionalNonNegativeInteger(body.latencyMs),
+        retryCount: normalizeOptionalNonNegativeInteger(body.retryCount),
+        toolErrorCount: normalizeOptionalNonNegativeInteger(body.toolErrorCount),
+        verificationStatus: normalizeOptionalString(body.verificationStatus) as never,
+        modelCost: requiredNonNegativeMetric(body.modelCost, 'modelCost'),
+        promptTokens: requiredNonNegativeMetric(body.promptTokens, 'promptTokens'),
+        completionTokens: requiredNonNegativeMetric(body.completionTokens, 'completionTokens'),
+        operatorInterventionCount: requiredNonNegativeMetric(body.operatorInterventionCount, 'operatorInterventionCount'),
+        operatorWaitMs: normalizeOptionalNonNegativeNumber(body.operatorWaitMs),
+        planningAttemptCount: normalizeOptionalNonNegativeInteger(body.planningAttemptCount),
+        executionAttemptCount: normalizeOptionalNonNegativeInteger(body.executionAttemptCount),
+        revisionCount: normalizeOptionalNonNegativeInteger(body.revisionCount),
+        diffOutcome: normalizeOptionalString(body.diffOutcome) as never,
+        recoveryResult: normalizeOptionalString(body.recoveryResult) as never,
+        hardAssertions: Array.isArray(body.hardAssertions) ? body.hardAssertions.map(asRecord) as never : [],
+      });
+      return reply.status(201).send({ eval: evaluation });
+    } catch (err) {
+      return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.post('/external-summaries', async (req, reply) => {
@@ -280,4 +344,10 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
     }));
     return { count: cases.length, cases, backlogCases: getEvalBacklogCases() };
   });
+}
+
+function requiredNonNegativeMetric(value: unknown, name: string): number {
+  const normalized = normalizeOptionalNonNegativeNumber(value);
+  if (normalized === undefined) throw new Error(`${name} is required`);
+  return normalized;
 }

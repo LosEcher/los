@@ -16,6 +16,7 @@ import {
   updateTaskRun,
   updateTaskRunFields,
 } from './task-runs.js';
+import { createTaskRunOrFindActive } from './task-runs/create-or-find.js';
 import { _LeaseLostError, transitionExecutionState } from './execution-store.js';
 
 test('task run lifecycle persists status changes', async () => {
@@ -124,6 +125,35 @@ test('task run lifecycle persists status changes', async () => {
     assert.equal(noActiveDuplicate, null);
     assert.equal((await listActiveTaskRunsForSession('session-1')).some(task => task.id === id), false);
   } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('concurrent active dedupe creation converges on one task run', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const dedupeKey = `dedupe-race-${suffix}`;
+  const ids = [`task-race-a-${suffix}`, `task-race-b-${suffix}`];
+  try {
+    const results = await Promise.all(ids.map((id) => createTaskRunOrFindActive({
+      id,
+      sessionId: `session-${id}`,
+      dedupeKey,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      promptPreview: 'concurrent dedupe fixture',
+    })));
+
+    assert.equal(results.filter(result => result.created).length, 1);
+    assert.equal(new Set(results.map(result => result.taskRun.id)).size, 1);
+    const rows = await getDb().query<{ id: string }>(
+      `SELECT id FROM task_runs WHERE dedupe_key = $1 AND status IN ('queued', 'running')`,
+      [dedupeKey],
+    );
+    assert.equal(rows.rows.length, 1);
+  } finally {
+    await getDb().query('DELETE FROM task_runs WHERE id = ANY($1::text[])', [ids]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

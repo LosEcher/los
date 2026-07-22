@@ -37,6 +37,29 @@ describe('stream-lease', () => {
     assert.match(result.reason, /gw-1/);
   });
 
+  it('expires a stale owner lease and allows another gateway to take over', async () => {
+    const sessionId = `sess-lease-expired-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await acquireStreamLease({ sessionId, gateway: 'gw-stale' });
+    await getDb().query(
+      "UPDATE stream_leases SET heartbeat_at = now() - interval '2 minutes' WHERE session_id = $1",
+      [sessionId],
+    );
+
+    const result = await acquireStreamLease({ sessionId, gateway: 'gw-takeover', ttlSeconds: 30 });
+
+    assert.equal(result.canTakeover, true);
+    assert.equal(result.previousLease?.gateway, 'gw-stale');
+    assert.equal(result.newLease?.gateway, 'gw-takeover');
+    const states = await getDb().query<{ gateway: string; status: string }>(
+      'SELECT gateway, status FROM stream_leases WHERE session_id = $1 ORDER BY gateway',
+      [sessionId],
+    );
+    assert.deepEqual(states.rows, [
+      { gateway: 'gw-stale', status: 'expired' },
+      { gateway: 'gw-takeover', status: 'active' },
+    ]);
+  });
+
   it('releases a lease', async () => {
     await acquireStreamLease({ sessionId: 'sess-lease-3', gateway: 'gw-1' });
     await releaseStreamLease('sess-lease-3', 'gw-1');

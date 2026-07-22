@@ -25,6 +25,10 @@ export interface PersistedRunDispatchResult {
   error?: string;
 }
 
+export interface PersistedRunDispatchOptions {
+  schedule?: typeof runScheduledAgentTask;
+}
+
 /**
  * Rehydrate a stored run request and send it through the normal scheduler.
  * The dedupe key is revision-scoped so approval and recovery are idempotent.
@@ -32,6 +36,7 @@ export interface PersistedRunDispatchResult {
 export async function dispatchPersistedRunSpec(
   runSpecId: string,
   mode: PersistedRunDispatchMode,
+  options: PersistedRunDispatchOptions = {},
 ): Promise<PersistedRunDispatchResult> {
   const runSpec = await loadRunSpec(runSpecId);
   if (!runSpec) throw new Error(`Run spec not found: ${runSpecId}`);
@@ -77,12 +82,14 @@ export async function dispatchPersistedRunSpec(
         reason: 'persisted_run_resume_started',
       });
     }
-    scheduled = await runScheduledAgentTask({
+    const schedule = options.schedule ?? runScheduledAgentTask;
+    scheduled = await schedule({
       prompt: runSpec.prompt,
       sessionId: runSpec.sessionId,
       runSpecId: runSpec.id,
       provider: runSpec.provider,
       model: runSpec.model,
+      modelSettings: runSpec.modelSettings,
       systemPrompt: runSpec.systemPrompt,
       workspaceRoot: runSpec.workspaceRoot,
       toolMode: runSpec.toolMode as 'all' | 'project-write' | 'read-only',

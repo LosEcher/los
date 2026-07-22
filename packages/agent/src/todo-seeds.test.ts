@@ -15,6 +15,9 @@ const RESOLVED_P0_IDS = [
   'todo-los-p0-schema-consistency',
   'todo-los-p0-check-secrets',
   'todo-los-transport-sse-ws-recovery',
+  'todo-los-daily-agent-web-work-first-intake',
+  'todo-los-daily-agent-approval-execution-resume',
+  'todo-los-daily-agent-verification-revision-loop',
 ] as const;
 
 test('resolved P0 seeds do not regress to active states', () => {
@@ -53,10 +56,6 @@ const EXECUTION_LAB_STATES: ReadonlyMap<string, string> = new Map([
 const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new Map([
   ['todo-los-execution-lab', ['P0', 'in_progress']],
   ['todo-los-daily-agent-product', ['P0', 'in_progress']],
-  ['todo-los-daily-agent-web-work-first-intake', ['P0', 'backlog']],
-  ['todo-los-daily-agent-approval-execution-resume', ['P0', 'backlog']],
-  ['todo-los-daily-agent-verification-revision-loop', ['P0', 'backlog']],
-  ['todo-los-daily-agent-scenario-economics', ['P1', 'backlog']],
   ['todo-los-multi-gateway-entry', ['P1', 'backlog']],
   ['todo-los-run-spec-stream-replay', ['P1', 'backlog']],
   ['todo-los-execution-experiment-contract', ['P1', 'backlog']],
@@ -66,7 +65,6 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-p1-cbm-ab-inject', ['P1', 'backlog']],
   ['todo-los-p1-context-reconstruction', ['P1', 'backlog']],
   ['todo-los-p1-stale-detection', ['P1', 'backlog']],
-  ['todo-los-p1-test-coverage', ['P1', 'ready']],
   ['todo-los-p1-supply-chain-full', ['P1', 'backlog']],
   ['todo-los-p1-turbo-cache', ['P1', 'ready']],
   ['todo-los-p1-los-ast-rules', ['P1', 'backlog']],
@@ -90,7 +88,18 @@ test('daily agent product seeds preserve the accepted delivery order', () => {
   assert.deepEqual(execution?.dependsOnIds, [planning?.id]);
   assert.deepEqual(revision?.dependsOnIds, [execution?.id]);
   assert.deepEqual(economics?.dependsOnIds, [revision?.id]);
-  assert.deepEqual(graph?.dependsOnIds, [economics?.id]);
+  assert.equal(economics?.status, 'done');
+  assert.equal(economics?.metadata?.collectionStatus, 'ready_for_policy_review');
+  assert.ok((economics?.metadata?.evidence as string[]).some(item => item.includes('30/30 completed scenario runs')));
+  assert.deepEqual(graph?.dependsOnIds, [economics?.id, 'todo-los-p1-test-coverage']);
+  assert.equal(graph?.status, 'ready');
+  assert.deepEqual(graph?.metadata?.graphContract, {
+    minWorkers: 2,
+    maxWorkers: 4,
+    editableSurfaceMode: 'strict',
+    verifierRequired: true,
+    integrationOwnerRequired: true,
+  });
   assert.equal(hermes?.stageId, 'hermes-product-breadth');
   assert.notEqual(hermes?.parentId, phase?.id);
 });

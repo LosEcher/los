@@ -28,6 +28,7 @@
     "./stream-lease": "./src/stream-lease.ts",
     "./todo-seeds": "./src/todo-seeds.ts",
     "./run-evals": "./src/run-evals.ts",
+    "./scenario-economics": "./src/scenario-economics.ts",
     "./execution-transitions": "./src/execution-transitions.ts",
     "./execution-store": "./src/execution-store.ts",
     "./execution-outbox": "./src/execution-outbox.ts",
@@ -67,7 +68,8 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 --experimental-test-coverage src/*.test.ts src/**/*.test.ts src/tools/builtin/worker-ask-tools.test.ts",
+    "scenario:daily": "tsx src/scenario-economics-runner.ts",
+    "test": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 --experimental-test-coverage '--test-coverage-include=src/**/*.ts' src/*.test.ts src/**/*.test.ts src/tools/builtin/worker-ask-tools.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {

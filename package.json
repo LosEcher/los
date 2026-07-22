@@ -44,6 +44,10 @@
     "_typecheck": "turbo check",
     "_test": "bash ./tools/run-tests.sh",
     "test": "bash ./tools/run-tests.sh",
+    "test:coverage:baseline": "node ./tools/check-repository-coverage-baseline.mjs",
+    "test:coverage:baseline:update": "node ./tools/check-repository-coverage-baseline.mjs --update",
+    "test:coverage:critical": "node ./tools/check-critical-coverage.mjs",
+    "scenario:daily": "pnpm --filter @los/agent run scenario:daily --",
     "clean": "turbo clean"
   },
   "devDependencies": {

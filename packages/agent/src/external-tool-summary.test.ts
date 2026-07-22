@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadConfig } from '@los/infra/config';
-import { closeDb, getDb, initDb } from '@los/infra/db';
+import { getDb } from '@los/infra/db';
 import {
   importExternalToolSummary,
   listExternalToolSummaries,
@@ -94,12 +93,7 @@ test('external tool summary adapter rejects raw transcript-shaped fields', () =>
   );
 });
 
-// FIXME: This test creates its own DB pool via initDb which races with
-// test-setup's ensureAllAgentStores. The store's _initialized flag prevents
-// re-creation on the new pool. Skip until refactored. See PR #120.
-test.skip('external tool summaries persist only redacted external_summary records', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
+test('external tool summaries persist only redacted external_summary records', async () => {
   const id = `external-summary-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   try {
     const record = await importExternalToolSummary({
@@ -135,7 +129,7 @@ test.skip('external tool summaries persist only redacted external_summary record
     assert.ok(record.sourceHash.length >= 32);
     assert.ok(record.retentionExpiresAt);
 
-    const listed = await listExternalToolSummaries({ tool: 'codex', limit: 10 });
+    const listed = await listExternalToolSummaries({ tool: 'codex', limit: 10, includeExpired: true });
     const loaded = listed.find(item => item.id === id);
     assert.equal(loaded?.evidenceClass, 'external_summary');
     assert.equal(loaded?.source.sourceRef, `operator-note:${id}`);

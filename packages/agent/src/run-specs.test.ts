@@ -307,10 +307,18 @@ test('approveRunSpecPhase serializes concurrent approvals', async () => {
     ]);
     assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
     assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    assert.match(String(rejected?.reason), /Illegal phase transition.*plan_approved.*plan_approved/);
     assert.equal((await loadRunSpec(id))?.runContract?.phase, 'plan_approved');
     const events = await listSessionEvents(sessionId);
     assert.equal(events.filter((event) => event.type === 'run.plan_approved').length, 1);
+    const outbox = await getDb().query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM execution_outbox WHERE run_spec_id = $1 AND event_type = 'run.plan_approved'",
+      [id],
+    );
+    assert.equal(outbox.rows[0]?.count, 1);
   } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE run_spec_id = $1', [id]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [id]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);

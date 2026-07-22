@@ -11,7 +11,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc && chmod +x dist/index.js dist/mcp-entry.js",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
+    "test": "node --import tsx --test --experimental-test-coverage '--test-coverage-include=src/**/*.ts' src/*.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
