@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       // Dev proxy: forward all gateway API calls to the los backend.
       // Keep in sync with gateway route registrations in server.ts.
+      '/agent-graphs': 'http://127.0.0.1:8080',
       '/artifacts': 'http://127.0.0.1:8080',
       '/chat': 'http://127.0.0.1:8080',
       '/communication': 'http://127.0.0.1:8080',
