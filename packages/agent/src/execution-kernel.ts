@@ -93,8 +93,8 @@ export interface KernelToolResult {
   error?: string;
 }
 
-export interface ToolBroker {
-  execute(request: KernelToolRequest): Promise<KernelToolResult>;
+export interface ToolBroker<TResult extends KernelToolResult = KernelToolResult> {
+  execute(request: KernelToolRequest): Promise<TResult>;
 }
 
 export interface ExecutionKernel<TInput extends KernelRunInput = KernelRunInput> {
@@ -175,6 +175,7 @@ export async function _consumeExecutionKernel<TInput extends KernelRunInput, TRe
 export async function runLosExecutionKernel(
   prompt: string,
   agentConfig: AgentConfig,
+  onEvent?: (event: KernelEvent) => void | Promise<void>,
 ): Promise<AgentResult> {
   const taskRunId = requiredKernelContext(agentConfig.taskRunId, 'taskRunId');
   const sessionId = requiredKernelContext(agentConfig.sessionId, 'sessionId');
@@ -190,6 +191,7 @@ export async function runLosExecutionKernel(
       requestId: agentConfig.requestId,
       agentConfig,
     },
+    onEvent,
   );
   return consumed.result;
 }

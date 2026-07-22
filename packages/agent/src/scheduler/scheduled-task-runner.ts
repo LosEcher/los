@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ensureSessionEventStore } from '../session-events.js';
-import {
-  getLosExecutionKernelIdentity,
-  runLosExecutionKernel,
-} from '../execution-kernel.js';
+import { resolveExecutionKernel } from '../execution-kernel-registry.js';
+import { _createKernelEventProjector } from '../kernel-event-projection.js';
 import { recordFailoverEval } from '../run-evals.js';
 import {
   ensureTaskRunStore,
@@ -60,6 +58,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const taskRunId = input.taskRunId ?? `task-${randomUUID()}`;
   const sessionId = input.sessionId ?? `session-${Date.now()}`;
   const traceId = input.traceId ?? taskRunId;
+  const executionKernel = resolveExecutionKernel(input.executionKernelKind);
   const dedupeKey = normalizeOptionalString(input.dedupeKey);
   const contractMetadata = {
     ...(input.metadata ?? {}),
@@ -82,7 +81,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   });
   const initialProvider = initialFallbackTarget?.provider ?? input.provider;
   const initialModel = initialFallbackTarget?.model ?? input.model;
-
   if (dedupeKey) {
     const existing = await findActiveTaskRunByDedupeKey(dedupeKey);
     if (existing) return reportTaskDeduplicated(input, existing, taskRunId);
@@ -116,7 +114,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     throw error;
   }
   const nodeId = executor?.nodeId ?? 'gateway-local';
-
   const creation = await createTaskRunOrFindActive({
     id: taskRunId,
     sessionId,
@@ -192,7 +189,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       toolRetry: input.toolRetry,
       timeoutMs,
       disposition,
-      executionKernel: getLosExecutionKernelIdentity(),
+      requestedExecutionKernel: input.executionKernelKind ?? 'los',
+      executionKernel: executionKernel.identity,
     },
     runContract,
   });
@@ -236,6 +234,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     }
     await input.onSessionEvent?.(event);
   };
+  const projectKernelEvent = _createKernelEventProjector({ sessionId, taskRunId, traceId,
+    runSpecId: input.runSpecId, nodeId, onSessionEvent: handleSessionEvent });
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
   if (input.runContract?.hooks) {
@@ -288,6 +288,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     const result = executor
       ? await runAgentOnExecutor(executor, {
           taskRunId,
+          executionKernelKind: executionKernel.identity.kind,
           leaseVersion,
           agentTaskLease: input.agentTaskLease,
           leaseMs,
@@ -326,6 +327,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           signal: controller.signal,
           onSessionEvent: handleSessionEvent,
+          onKernelEvent: projectKernelEvent,
           onModelDelta: input.onModelDelta,
           onToolCallState: async (transition) => {
             await persistScheduledToolCallState({
@@ -338,7 +340,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           onCheckpoint: input.onCheckpoint,
         })
-      : await runLosExecutionKernel(runtimePrompt, {
+      : await executionKernel.run(runtimePrompt, {
           sessionId,
           runSpecId: input.runSpecId,
           provider: initialProvider,
@@ -387,7 +389,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           onModelDelta: input.onModelDelta,
           onCheckpoint: input.onCheckpoint,
           contextMonitor: input.contextMonitor,
-        });
+        }, projectKernelEvent);
 
     if (disposition === 'planning') {
       return await completePlanningDisposition({
@@ -594,4 +596,4 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     unregisterTaskController();
     clearCancellation(taskRunId).catch(() => undefined);
   }
-}  // end runScheduledAgentTask
+}

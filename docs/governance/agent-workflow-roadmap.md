@@ -217,14 +217,20 @@ Exit criteria:
 
 ### Stage F: Pluggable Execution Kernel And Pi Adoption
 
-Status: architecture decision accepted and K1 foundation started on 2026-07-22.
+Status: architecture decision accepted and K1 completed on 2026-07-22.
 ADR 0039 and `contracts/execution-kernel.yaml` define LOS as the authoritative
 governance harness and Pi as the first external execution-kernel candidate.
 `packages/agent/src/execution-kernel.ts` now wraps the current LOS loop, and the
 gateway-local scheduler path calls it while recording exact kernel provenance.
-Durable kernel-event projection, ToolBroker wiring, registry selection,
-executor parity, and Pi dependency work remain open. The current LOS loop stays
-the production baseline until shadow, canary, pairwise-evaluation, and rollback
+`kernel-event-projection.ts` now persists bounded audit evidence to the existing
+`session_events` ledger without duplicating raw transcript, tool arguments, or
+checkpoint contents. The current loop now executes through `LosToolBroker`,
+preserving phase, pre-action, capability, state, retry, and evidence controls.
+The scheduler and executor resolve the same fail-closed registry, while HTTP
+and SSH transports carry the selected kind and return canonical kernel events
+for scheduler-owned projection. Pi is not installed or registered; that
+dependency and adapter work starts in K2. The current LOS loop stays the
+production baseline until shadow, canary, pairwise-evaluation, and rollback
 gates pass.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,

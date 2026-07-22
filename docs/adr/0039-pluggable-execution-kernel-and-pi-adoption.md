@@ -2,10 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-07-22
-- Implementation status: K0 accepted; K1 LOS adapter foundation wired to the
-  gateway-local scheduler path, with durable kernel provenance. Canonical kernel
-  event persistence, ToolBroker wiring, registry selection, executor parity,
-  and Pi integration remain open.
+- Implementation status: K0 accepted; K1 complete. Local, HTTP executor, and
+  SSH executor paths select the LOS adapter through the same fail-closed
+  registry, carry the requested kernel kind over the executor protocol, and
+  project bounded canonical kernel evidence into `session_events`. The current
+  LOS loop executes tools through `LosToolBroker`. Pi integration remains open.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
   selection only
 
@@ -103,9 +104,20 @@ As of 2026-07-22, `packages/agent/src/execution-kernel.ts` defines the protocol,
 wraps `runAgent()` as the LOS implementation, and is called by the local path in
 `scheduler/scheduled-task-runner.ts`. The adapter preserves the existing loop
 callbacks and emits ordered canonical in-process events. Task metadata records
-the kernel kind, version, and protocol version. Those events are not yet a new
-durable replay surface, and the existing loop still creates its tools directly;
-therefore K1 remains in progress.
+the kernel kind, version, and protocol version. The scheduler-owned
+`kernel-event-projection.ts` persists audit-tier event summaries to the existing
+`session_events` ledger, including sequence, lineage, kernel identity, usage,
+and bounded lifecycle evidence. It does not duplicate raw message deltas, tool
+arguments, or checkpoint contents. The existing loop still builds its governed
+tool catalog, but execution now crosses `LosToolBroker`, which owns capability
+and phase decisions, pre-action checks, state callbacks, canonical events,
+registry invocation, retry evidence, and persisted retrieval evidence.
+`execution-kernel-registry.ts` selects the adapter for both scheduler and
+executor entrypoints; only `los` is registered, it is the explicit default,
+and unknown kinds fail before task-run creation. HTTP and SSH requests carry
+`executionKernelKind`, and both NDJSON readers forward canonical
+`kernel_event` chunks to the scheduler-owned durable projection. These
+properties complete K1; they do not constitute Pi adoption.
 
 Every attempt persists `kernel_kind`, exact `kernel_version`, and
 `kernel_protocol_version`. Provider-native objects and Pi event types remain

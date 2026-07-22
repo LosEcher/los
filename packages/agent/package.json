@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./loop": "./src/loop.ts",
     "./execution-kernel": "./src/execution-kernel.ts",
+    "./execution-kernel-registry": "./src/execution-kernel-registry.ts",
     "./scheduler": "./src/scheduler.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",

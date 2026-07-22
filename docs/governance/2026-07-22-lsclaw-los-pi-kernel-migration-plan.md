@@ -1,7 +1,7 @@
 # lsclaw To LOS: Pi Kernel Decision Record And Migration Plan
 
 - Date: 2026-07-22
-- Status: active plan; K0 accepted and K1 LOS adapter foundation in progress
+- Status: active plan; K0 accepted and K1 LOS adapter baseline complete
 - Owner: `packages/agent` execution kernel and LOS governance runtime
 - Decision: `docs/adr/0039-pluggable-execution-kernel-and-pi-adoption.md`
 - Protocol: `contracts/execution-kernel.yaml`
@@ -151,7 +151,7 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | Phase | Deliverable | Acceptance evidence | Stop condition |
 | --- | --- | --- | --- |
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
-| K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | in progress: local scheduler wired; event persistence, ToolBroker execution, registry, and executor parity remain |
+| K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
 | K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces | no-tool, tool, denial, interrupt, failure, checkpoint, and resume traces | stop on raw Pi event leakage or direct tool authority |
 | K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | canonical event comparison and cost attribution by exact kernel version | stop on duplicate writes or unbounded cost |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
@@ -215,12 +215,15 @@ maintained implementation and sustained evidence against the current Pi
 baseline.
 
 The parent daily-agent product remains `in_progress` while Web-first manual
-acceptance, graph integration review, and the kernel baseline are incomplete.
-K0 has its required documents and a passing contract check. K1 has a tested
-LOS adapter and a gateway-local scheduler call path, but is not complete until
-canonical kernel events have an owned durable projection, tools cross an
-explicit ToolBroker, kernel selection is registry-driven, and executor behavior
-uses or proves parity with the same protocol.
+acceptance and graph integration review are incomplete. K0 has its required
+documents and a passing contract check. K1 has a tested LOS adapter, a
+fail-closed registry used by scheduler and executor entrypoints, HTTP/SSH
+protocol parity, and an owned durable event projection in the existing
+`session_events` ledger. The current loop also crosses an explicit
+`LosToolBroker` without weakening its existing policy, pre-action, state,
+retry, and evidence behavior. Pi is not installed, registered, or selected;
+K2 begins with exact-version and Node-engine compatibility research followed
+by deterministic adapter traces.
 
 ## Active Work Ledger
 
@@ -230,7 +233,7 @@ LOS todos. Their status here must not be presented as database todo state.
 | Work id | Status | Deliverable |
 | --- | --- | --- |
 | `kernel-k0-decision-record` | complete in this document; not a DB todo | ADR, history record, contract, roadmap, and contract check |
-| `kernel-k1-los-adapter` | in progress | TypeScript protocol and gateway-local production-wired `LosKernelAdapter`; durable event, ToolBroker, registry, and executor parity remain |
+| `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
 | `kernel-k2-pi-deterministic` | pending | exact dependency, Node gate, Pi adapter, golden traces |
 | `kernel-k3-shadow` | pending | read-only shadow evidence |
 | `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |

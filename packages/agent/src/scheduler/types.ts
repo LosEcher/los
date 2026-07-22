@@ -25,6 +25,8 @@ export interface ScheduledTaskEvent {
 
 export interface ScheduledAgentTaskInput extends AgentConfig {
   prompt: string;
+  /** LOS-owned execution-kernel adapter. Defaults to `los`; unknown kinds fail closed. */
+  executionKernelKind?: string;
   disposition?: 'planning' | 'execution';
   taskRunId?: string;
   /** Attempt number when this task is a retry of an earlier task_run. */

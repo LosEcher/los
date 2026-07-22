@@ -1,7 +1,7 @@
-// Generated from los.run-stream@0.4.0 by tools/contract-codegen.ts. Do not edit.
+// Generated from los.run-stream@0.5.0 by tools/contract-codegen.ts. Do not edit.
 
 export const RUN_STREAM_CONTRACT = "los.run-stream";
-export const RUN_STREAM_VERSION = "0.4.0";
+export const RUN_STREAM_VERSION = "0.5.0";
 export const RUN_STREAM_EVENT_TYPES = [
   "session",
   "session.resumed",

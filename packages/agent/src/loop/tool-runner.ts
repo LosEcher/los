@@ -13,15 +13,12 @@
  * independent reads.
  */
 
-import { resolve } from 'node:path';
-import { assertNotAborted, withAbort, inferToolSource, summarizeCapability, previewText } from './utils.js';
-import { applyPhaseGate } from './phase-tool-gate.js';
+import { assertNotAborted } from './utils.js';
 import {
-  preActionGate,
   preActionGateConfigFromAgentOptions,
   type PreActionGateConfig,
 } from '../pre-action-gate.js';
-import { createPreActionFailureEvidence } from '../pre-action-evidence.js';
+import { createLosToolBroker } from '../los-tool-broker.js';
 import type { PersistedToolResultEvidence } from '../semantic-eviction.js';
 import type { ToolRegistry } from '../tools/core/registry.js';
 import type { AgentConfig } from './types.js';
@@ -62,12 +59,14 @@ export async function runToolCalls(input: RunToolCallsInput): Promise<{
   const { toolCalls, turn, tools, config, signal, policy, emitEvent, onSessionError } = input;
   const preActionGateConfig = input.preActionGateConfig
     ?? preActionGateConfigFromAgentOptions(config.preActionGate);
+  const broker = createLosToolBroker({
+    tools, config, signal, policy, emitEvent, onSessionError, preActionGateConfig,
+  });
 
   // Phase 1: Validate and plan all tool calls (sequential — validation is cheap)
   const plans = toolCalls.map((tc, index) =>
     prepareToolCall({
-      index, tc, turn, tools, config, signal, policy, emitEvent, onSessionError,
-      preActionGateConfig,
+      index, tc, turn, signal, emitEvent, onSessionError, broker,
     })
   );
 
@@ -76,8 +75,7 @@ export async function runToolCalls(input: RunToolCallsInput): Promise<{
   let batch: Array<() => Promise<ToolCallResult>> = [];
 
   for (const plan of plans) {
-    const capability = tools.getCapability(plan.tc.function.name);
-    const isParallelizable = capability?.parallelizable === true;
+    const isParallelizable = broker.isParallelizable(plan.tc.function.name);
 
     if (isParallelizable) {
       // Defer — will run in parallel with other parallelizable tools
@@ -129,17 +127,13 @@ function prepareToolCall(input: {
   index: number;
   tc: ToolCall;
   turn: number;
-  tools: ToolRegistry;
-  config: AgentConfig;
   signal: AbortSignal | undefined;
-  policy: ReturnType<typeof import('./tool-resolver.js').resolveToolPolicy>;
   emitEvent: EmitEvent;
   onSessionError: (err: SessionErrorRecord) => void;
-  preActionGateConfig: PreActionGateConfig | undefined;
+  broker: ReturnType<typeof createLosToolBroker>;
 }): PreparedToolCall {
   const {
-    index, tc, turn, tools, config, signal, policy, emitEvent, onSessionError,
-    preActionGateConfig,
+    index, tc, turn, signal, emitEvent, onSessionError, broker,
   } = input;
   const fn = tc.function;
 
@@ -195,205 +189,24 @@ function prepareToolCall(input: {
         throw err;
       }
 
-      const capability = tools.getCapability(fn.name);
-      const toolSource = inferToolSource(capability);
-      await config.onToolCall?.(tc.id, fn.name, args, turn);
-
-      await config.onToolCallState?.({
+      const result = await broker.execute({
         callId: tc.id,
-        toolName: fn.name,
-        state: 'requested',
+        name: fn.name,
+        arguments: args,
         turn,
-        input: args,
-        maxAttempts: capability?.retryable ? (policy as any).retry?.maxAttempts : 1,
-        idempotent: capability?.idempotent ?? false,
-        retryPolicy: (policy as any).retry,
       });
-
-      const callEvent = await emitEvent({
-        type: 'tool.call',
-        turn,
-        toolName: fn.name,
-        payload: {
-          callId: tc.id,
-          args,
-          argsLength: fn.arguments.length,
-          source: toolSource,
-        },
-      });
-
-      const planEvent = await emitEvent({
-        type: 'tool.planned',
-        turn,
-        toolName: fn.name,
-        parentEventId: callEvent?.id,
-        payload: {
-          callId: tc.id,
-          capability: summarizeCapability(capability),
-          policy,
-          argsLength: fn.arguments.length,
-          source: toolSource,
-        },
-      });
-
-      const decision = applyPhaseGate(
-        tools.evaluateTool(fn.name), fn.name, config.runContractMetadata,
-      ) as ReturnType<typeof tools.evaluateTool>;
-
-      // ── Pre-action gate: check known failure patterns ──
-      if (decision.allowed && preActionGateConfig) {
-        const preCheck = preActionGate(fn.name, args, preActionGateConfig);
-        if (preCheck.warnings.length > 0) {
-          await emitEvent({
-            type: 'tool.warned',
-            turn,
-            toolName: fn.name,
-            parentEventId: planEvent?.id ?? callEvent?.id,
-            payload: {
-              callId: tc.id,
-              warnings: preCheck.warnings,
-              knownFailure: preCheck.knownFailure,
-              failurePatterns: preCheck.failurePatterns,
-              fragileFile: preCheck.fragileFile,
-              flaggedFiles: preCheck.flaggedFiles,
-            },
-          });
-        }
-      }
-
-      await config.onToolCallState?.({
-        callId: tc.id, toolName: fn.name,
-        state: decision.allowed ? 'approved' : 'denied',
-        turn,
-        error: decision.allowed ? undefined : decision.reason,
-      });
-
-      const decisionEvent = await emitEvent({
-        type: decision.allowed ? 'tool.approved' : 'tool.denied',
-        turn,
-        toolName: fn.name,
-        parentEventId: planEvent?.id ?? callEvent?.id,
-        payload: {
-          callId: tc.id,
-          allowed: decision.allowed,
-          reasonCode: decision.allowed ? undefined : decision.reasonCode,
-          reason: decision.allowed ? undefined : decision.reason,
-          capability: summarizeCapability(decision.capability),
-          policy: decision.policy,
-        },
-      });
-
-      if (decision.allowed) {
-        await config.onToolCallState?.({
-          callId: tc.id, toolName: fn.name, state: 'running', turn,
-        });
-      }
-
-      const toolStartedAt = Date.now();
-      const result = decision.allowed
-        ? await withAbort(
-            tools.execute({ name: fn.name, arguments: args }),
-            signal,
-          )
-        : { content: '', error: decision.reason };
-      const toolDurationMs = Date.now() - toolStartedAt;
-
-      await config.onToolCallState?.({
-        callId: tc.id, toolName: fn.name,
-        state: result.error ? 'failed' : 'succeeded',
-        turn,
-        outputSummary: result.error ? undefined : previewText(result.content, 200),
-        error: result.error,
-        durationMs: toolDurationMs,
-        attempt: result.attempts ?? 1,
-      });
-
-      if (result.error) {
-        onSessionError({
-          turn,
-          type: decision.allowed ? 'tool_execution_error' : 'tool_denied',
-          toolName: fn.name,
-          message: result.error,
-        });
-      }
-
-      const content = result.error ?? result.content;
-      await emitEvent({
-        type: 'tool.result',
-        turn,
-        toolName: fn.name,
-        parentEventId: decisionEvent?.id ?? callEvent?.id,
-        payload: {
-          callId: tc.id,
-          ok: !result.error,
-          denied: !decision.allowed,
-          reasonCode: decision.allowed ? undefined : decision.reasonCode,
-          durationMs: toolDurationMs,
-          attempts: result.attempts ?? 1,
-          retried: result.retried ?? false,
-          retryErrors: result.retryErrors ?? [],
-          contentPreview: previewText(content),
-          contentLength: content.length,
-          errorPreview: result.error ? previewText(result.error) : undefined,
-          source: toolSource,
-        },
-      });
-
-      if (decision.allowed && result.error && preActionGateConfig) {
-        const failureEvidence = createPreActionFailureEvidence(
-          fn.name,
-          args,
-          result.error,
-          tc.id,
-        );
-        preActionGateConfig.failureFingerprints?.add(failureEvidence.fingerprint);
-        if (failureEvidence.filePath) {
-          preActionGateConfig.fragileFiles?.add(failureEvidence.filePath);
-        }
-        await emitEvent({
-          type: 'tool.pre_action.failure',
-          turn,
-          toolName: fn.name,
-          parentEventId: decisionEvent?.id ?? callEvent?.id,
-          payload: failureEvidence,
-        });
-      }
 
       return {
         index,
         callId: tc.id,
         toolName: fn.name,
-        content,
+        content: result.content,
         ok: !result.error,
-        denied: !decision.allowed,
-        durationMs: toolDurationMs,
-        persistedEvidence: result.error
-          ? undefined
-          : buildPersistedEvidence(fn.name, args, config.workspaceRoot),
+        denied: result.denied,
+        durationMs: result.durationMs,
+        persistedEvidence: result.persistedEvidence,
         error: result.error,
       };
     },
-  };
-}
-
-function buildPersistedEvidence(
-  toolName: string,
-  args: Record<string, unknown>,
-  workspaceRoot: string | undefined,
-): PersistedToolResultEvidence | undefined {
-  if (toolName !== 'read_file' && toolName !== 'list_directory' && toolName !== 'directory_tree') {
-    return undefined;
-  }
-  const defaultPath = toolName === 'read_file' ? undefined : '.';
-  const requestedPath = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : defaultPath;
-  if (!requestedPath) return undefined;
-  const absolutePath = resolve(workspaceRoot ?? process.cwd(), requestedPath);
-  return {
-    toolName,
-    locations: [{
-      kind: 'workspace_path',
-      id: absolutePath,
-      label: `${toolName} source ${absolutePath}`,
-    }],
   };
 }
