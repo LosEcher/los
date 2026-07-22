@@ -33,6 +33,21 @@ interface:
     resume:
       input: KernelResumeInput
       output: KernelEventStream
+  shadow:
+    description: >
+      Scheduler-owned comparison mode. The production kernel remains the only
+      source of user output and execution state. A shadow kernel runs with a
+      read-only tool policy and writes evidence under derived shadow lineage.
+    required:
+      - explicit candidate kind
+      - production kernel identity
+      - derived shadow session, task, and trace identifiers
+      - read-only tool mode and readonly sandbox mode
+    forbidden:
+      - candidate output in the user response
+      - candidate writes to the production session or tool-call-state ledger
+      - candidate task, run-spec, graph, verification, or final-state transitions
+      - project-write, shell, child-agent, or remote-executor shadow execution
 schemas:
   KernelIdentity:
     required: [kind, version, protocolVersion]
@@ -126,6 +141,10 @@ invariants:
   - canonical events are persisted before they are exposed as durable replay evidence
   - raw provider events are translated in one adapter and are not interpreted by gateway routes
   - kernel-private checkpoints are versioned and never replace the canonical transcript
+  - shadow execution is explicit opt-in and never changes production output or terminal state
+  - shadow tools are limited to the LOS read-only catalog and execute through ToolBroker
+  - shadow kernel and provider evidence use derived lineage, not the production session identifiers
+  - shadow failure is comparison evidence and never fails an otherwise valid production attempt
 versioning:
   - persist kernel kind, exact version, and protocol version for every attempt
   - an adapter upgrade requires deterministic compatibility traces before canary use

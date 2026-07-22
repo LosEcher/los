@@ -232,11 +232,14 @@ for scheduler-owned projection. K2a now pins Pi `0.81.1`, aligns the Node engine
 floor, and provides an unregistered deterministic adapter with faux-provider
 golden traces. K2b now maps LOS-resolved provider/auth/model inputs, canonical
 history, and the governed tool catalog; a bounded live DeepSeek probe passed.
-The Pi transport also records LOS-owned provider-call telemetry. Pi remains
-unavailable to scheduler requests until unsupported fallback, architect-editor,
-context, and model-setting semantics have explicit decisions and a read-only
-scheduler shadow passes. The current LOS loop stays the production baseline
-until shadow, canary, pairwise-evaluation, and rollback gates pass.
+The Pi transport also records LOS-owned provider-call telemetry. Unsupported
+fallback, architect-editor, context, model-setting, and child-execution
+semantics now have explicit fail-closed or LOS-owned decisions. K3 adds an
+explicit read-only scheduler shadow with derived evidence lineage; its first
+live no-tool DeepSeek comparison completed with equal output hashes and no
+tools. Pi remains unavailable as a selected production kernel. The current LOS
+loop stays the production baseline until preregistered read-only scenarios,
+canary, pairwise evaluation, and rollback gates pass.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,

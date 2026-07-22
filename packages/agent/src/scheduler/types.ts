@@ -5,6 +5,7 @@ import type { AgentConfig, AgentResult } from '../loop.js';
 import type { RunContractMetadataInput } from '../run-contract.js';
 import type { TaskRunRecord } from '../task-runs.js';
 import type { ToolCallRecoveryDecision } from '../tool-call-recovery.js';
+import type { PiKernelShadowConfig } from '../pi-kernel-shadow.js';
 
 export type ScheduledTaskEventType =
   | 'task.created'
@@ -27,6 +28,8 @@ export interface ScheduledAgentTaskInput extends AgentConfig {
   prompt: string;
   /** LOS-owned execution-kernel adapter. Defaults to `los`; unknown kinds fail closed. */
   executionKernelKind?: string;
+  /** Explicit comparison-only kernel. It cannot affect production output or state. */
+  executionKernelShadow?: PiKernelShadowConfig;
   disposition?: 'planning' | 'execution';
   taskRunId?: string;
   /** Attempt number when this task is a retry of an earlier task_run. */

@@ -152,8 +152,8 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | --- | --- | --- | --- |
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
 | K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
-| K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | K2a complete; K2b provider/auth/model/history/tool mapping, provider telemetry, and live no-tool probe complete; unsupported semantic decisions pending | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
-| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | canonical event comparison and cost attribution by exact kernel version | stop on duplicate writes or unbounded cost |
+| K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | complete: input/telemetry live probe and explicit unsupported-semantic decisions | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
+| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | implemented with deterministic isolation tests and an initial live no-tool record; preregistered scenario corpus remains | stop on duplicate writes or unbounded cost |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
 | K5 Write canary | temporary then managed-workspace project writes | ToolBroker policy, lease fencing, verifier records, reviewed diff | stop on any policy or final-transition bypass |
 | K6 Graph worker | Pi executes bounded worker tasks; verifier remains independent | worker/verifier attempts, graph completion, manual integration review | stop if child contract or editable surfaces are lost |
@@ -231,11 +231,15 @@ ToolBroker probe and the bounded live DeepSeek probe both pass; the latter is
 recorded in `docs/operations/2026-07-22-pi-kernel-provider-input-probe.md`.
 The live trace also produced one LOS `provider_call_telemetry` row with the
 effective provider/model, Pi API shape, HTTP status, duration, and normalized
-usage. Pi is still not registered or selectable. Explicit behavior for provider
-fallback, architect-editor, context compression, and unsupported model settings,
-followed by read-only scheduler shadow evidence, remain required before registry
-admission. The existing unknown-`pi` scheduler behavior therefore remains fail
-closed.
+usage. Pi is still not registered or selectable. Explicit admission decisions
+now keep provider fallback, context compression, and unsupported settings fail
+closed, while architect/editor and child agents remain LOS-owned orchestration.
+K3 adds an explicit local read-only scheduler shadow with derived candidate
+lineage and bounded comparison evidence. Its first live no-tool DeepSeek run
+completed with equal output hashes and isolated provider/kernel evidence. The
+existing unknown-`pi` scheduler behavior remains fail closed; registry admission
+waits for preregistered read-only scenario evidence and a separate canary
+decision.
 
 ## Active Work Ledger
 
@@ -246,8 +250,8 @@ LOS todos. Their status here must not be presented as database todo state.
 | --- | --- | --- |
 | `kernel-k0-decision-record` | complete in this document; not a DB todo | ADR, history record, contract, roadmap, and contract check |
 | `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
-| `kernel-k2-pi-deterministic` | K2a complete; K2b input/telemetry complete, admission pending | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, and live no-tool probe; unsupported semantic decisions remain |
-| `kernel-k3-shadow` | pending | read-only shadow evidence |
+| `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
+| `kernel-k3-shadow` | implemented; initial live evidence complete | explicit read-only scheduler shadow, derived candidate lineage, bounded comparison event, deterministic isolation tests, and live no-tool DeepSeek record |
 | `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |

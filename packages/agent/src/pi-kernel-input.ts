@@ -20,6 +20,7 @@ import { getProviderConfig } from './providers/index.js';
 import { recordProviderCall, type ProviderCallTelemetry } from './providers/telemetry.js';
 import type { Message } from './providers/index.js';
 import type { PiKernelRunInput, PiKernelToolDescriptor } from './pi-execution-kernel.js';
+import { assertPiKernelInputAdmission } from './pi-kernel-admission.js';
 
 interface PiKernelRouteEvidence {
   provider: string;
@@ -47,7 +48,7 @@ export async function _preparePiKernelRun(
   config: AgentConfig,
   dependencies: PiKernelInputDependencies = {},
 ): Promise<PreparedPiKernelRun> {
-  assertSupportedConfig(config);
+  assertPiKernelInputAdmission(config);
   const setup = setupAgentRun(prompt, config, unsupportedChildRunner);
   await completeAgentSetup(prompt, config, setup);
 
@@ -320,23 +321,11 @@ function toPiMessages(messages: Message[], model: Model<Api>, now: (() => Date) 
 
 function toPiModelOptions(config: AgentConfig): PiKernelRunInput['modelOptions'] {
   const settings = config.modelSettings;
-  if (settings?.topP !== undefined || settings?.presencePenalty !== undefined || settings?.frequencyPenalty !== undefined) {
-    throw new Error('Pi kernel does not yet map LOS topP or penalty model settings');
-  }
-  if (settings?.thinking === 'disabled' || settings?.reasoningEffort === 'none') {
-    throw new Error('Pi kernel does not yet map explicit reasoning disablement');
-  }
   return {
     temperature: settings?.temperature,
     maxTokens: settings?.maxTokens,
-    reasoning: settings?.reasoningEffort,
+    reasoning: settings?.reasoningEffort === 'none' ? undefined : settings?.reasoningEffort,
   };
-}
-
-function assertSupportedConfig(config: AgentConfig): void {
-  if (config.providerFallback) throw new Error('Pi kernel provider fallback mapping is not implemented');
-  if (config.architectEditor?.enabled) throw new Error('Pi kernel architect-editor mapping is not implemented');
-  if (config.contextCompression?.enabled) throw new Error('Pi kernel context compression mapping is not implemented');
 }
 
 async function unsupportedChildRunner(): Promise<AgentResult> {

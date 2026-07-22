@@ -2,11 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-07-22
-- Implementation status: K0 accepted; K1 complete. Local, HTTP executor, and
-  SSH executor paths select the LOS adapter through the same fail-closed
-  registry, carry the requested kernel kind over the executor protocol, and
-  project bounded canonical kernel evidence into `session_events`. The current
-  LOS loop executes tools through `LosToolBroker`. Pi integration remains open.
+- Implementation status: K0-K2 complete; K3 explicit read-only shadow is
+  implemented with an initial live record. Local, HTTP executor, and SSH
+  executor paths still select only the LOS adapter through the fail-closed
+  production registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
   selection only
 
@@ -173,9 +172,13 @@ that input path and the canonical adapter. The input adapter fails closed on
 provider fallback, architect-editor, context compression, and model settings
 that do not yet have equivalent Pi semantics. The Pi stream wrapper records
 LOS-owned provider-call telemetry with trace/session, effective provider/model,
-API shape, status, duration, and normalized usage. Production registration
-remains blocked on the unsupported semantic decisions and scheduler shadow
-evidence.
+API shape, status, duration, and normalized usage. K3 adds an explicit
+scheduler-owned Pi shadow that forces read-only policy, derives candidate
+session/task/trace lineage, and writes only a bounded hash/count comparison to
+the production session. The first live DeepSeek no-tool scheduler shadow
+completed with equal output hashes and separated evidence. Production
+registration remains blocked on preregistered read-only scenario evidence and
+the later canary decision; Pi is still absent from the production registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses
