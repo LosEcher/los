@@ -92,7 +92,8 @@ test('daily agent product seeds preserve the accepted delivery order', () => {
   assert.equal(economics?.metadata?.collectionStatus, 'ready_for_policy_review');
   assert.ok((economics?.metadata?.evidence as string[]).some(item => item.includes('30/30 completed scenario runs')));
   assert.deepEqual(graph?.dependsOnIds, [economics?.id, 'todo-los-p1-test-coverage']);
-  assert.equal(graph?.status, 'ready');
+  assert.equal(graph?.status, 'done');
+  assert.ok((graph?.metadata?.validation as string[]).some(item => item.includes('pnpm run gate')));
   assert.deepEqual(graph?.metadata?.graphContract, {
     minWorkers: 2,
     maxWorkers: 4,

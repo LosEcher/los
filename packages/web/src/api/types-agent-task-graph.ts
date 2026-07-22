@@ -1,5 +1,5 @@
 export type AgentTaskRole = 'planner' | 'executor' | 'verifier';
-export type AgentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type AgentTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
 export type AgentTaskAttemptStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export type AgentTaskGraphTask = {
@@ -87,6 +87,32 @@ export type AgentTaskGraph = {
   edges: AgentTaskGraphEdge[];
   attemptsByTaskId: Record<string, AgentTaskGraphAttempt[]>;
   completion: AgentTaskGraphCompletion;
+  control?: GovernedAgentTaskGraphControl | null;
+};
+
+export type GovernedAgentTaskGraphControl = {
+  graphId: string;
+  integrationOwner: string;
+  status: 'active' | 'cancelled' | 'integrated';
+  integrationStatus: 'pending_verification' | 'ready' | 'integrated' | 'cancelled';
+  metadata: Record<string, unknown>;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  integratedAt?: string;
+  events: Array<{
+    eventId: string;
+    graphId: string;
+    eventType: string;
+    actor: string;
+    payload: Record<string, unknown>;
+    createdAt: string;
+  }>;
+};
+
+export type GovernedAgentTaskGraphResponse = {
+  graph: AgentTaskGraph;
+  control: GovernedAgentTaskGraphControl;
 };
 
 export type RunSpec = {

@@ -1981,6 +1981,145 @@ button:disabled {
   padding-top: 14px;
 }
 
+.governed-graph-control {
+  margin: 0 0 14px;
+  border-block: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+}
+
+.governed-graph-bar,
+.governed-graph-title,
+.governed-graph-open,
+.governed-graph-create-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.governed-graph-bar {
+  min-height: 44px;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.governed-graph-title {
+  min-width: 0;
+  letter-spacing: .01em;
+}
+
+.governed-graph-form,
+.governed-graph-watch {
+  padding: 12px 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.governed-graph-open {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.governed-graph-fields {
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr);
+}
+
+.governed-worker-list {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.governed-worker-row {
+  display: grid;
+  grid-template-columns: 24px minmax(130px, .8fr) minmax(220px, 1.2fr) 32px;
+  align-items: center;
+  gap: 6px;
+}
+
+.governed-worker-row input {
+  min-width: 0;
+}
+
+.worker-index {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.governed-graph-create-row {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  align-items: end;
+}
+
+.governed-graph-facts {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(100px, 1fr));
+  gap: 8px 16px;
+}
+
+.governed-graph-actions {
+  margin-block: 12px;
+}
+
+.governed-task-lines {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.governed-task-line {
+  display: grid;
+  grid-template-columns: 10px minmax(180px, 1fr) 80px 90px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.governed-task-line > :nth-child(2) {
+  color: var(--text);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.status-dot.running { background: var(--accent); }
+.status-dot.succeeded { background: var(--success); }
+.status-dot.failed,
+.status-dot.cancelled,
+.status-dot.blocked { background: var(--danger); }
+
+@media (max-width: 760px) {
+  .governed-graph-fields,
+  .governed-graph-create-row,
+  .governed-graph-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .governed-worker-row {
+    grid-template-columns: 24px minmax(0, 1fr) 32px;
+  }
+
+  .governed-worker-row > input:nth-of-type(2) {
+    grid-column: 2 / 3;
+  }
+
+  .governed-task-line {
+    grid-template-columns: 10px minmax(0, 1fr) 70px;
+  }
+
+  .governed-task-line > :last-child {
+    grid-column: 2 / 4;
+  }
+}
+
 .graph-read-model > .panel-head,
 .graph-read-model > .mono-chip,
 .graph-read-model > .fact-list {

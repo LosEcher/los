@@ -12,6 +12,7 @@ const providerAccountsPanel = readFileSync(new URL('./pages/provider-accounts-pa
 const apiTypes = readFileSync(new URL('./api/types.ts', import.meta.url), 'utf8');
 const viteConfig = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
 const tasksPage = readFileSync(new URL('./pages/tasks-page.tsx', import.meta.url), 'utf8');
+const agentGraphControl = readFileSync(new URL('./pages/agent-graph-control.tsx', import.meta.url), 'utf8');
 const runSpecsPage = readFileSync(new URL('./pages/run-specs-page.tsx', import.meta.url), 'utf8');
 const chatApproval = readFileSync(new URL('./chat-approval.tsx', import.meta.url), 'utf8');
 const deadLetterPage = readFileSync(new URL('./pages/dead-letter-page.tsx', import.meta.url), 'utf8');
@@ -114,6 +115,17 @@ test('task inspector renders agent graph read model fields', () => {
   assert.match(taskInspector, /blockedTaskIds/);
   assert.match(taskInspector, /Attempt Evidence/);
   assert.doesNotMatch(taskInspector, /JSON\.stringify\(graphResult/);
+});
+
+test('tasks page exposes governed graph create, watch, cancel, and verifier-gated integration', () => {
+  assert.match(tasksPage, /<AgentGraphControl \/>/);
+  assert.match(agentGraphControl, /postJson<GovernedAgentTaskGraphResponse>\('\/agent-graphs'/);
+  assert.match(agentGraphControl, /`\/agent-graphs\/\$\{graphId\}\/watch`/);
+  assert.match(agentGraphControl, /useGraphAction\(graphId, 'run'/);
+  assert.match(agentGraphControl, /useGraphAction\(graphId, 'cancel'/);
+  assert.match(agentGraphControl, /useGraphAction\(graphId, 'integrate'/);
+  assert.match(agentGraphControl, /control\?\.integrationStatus !== 'ready'/);
+  assert.match(viteConfig, /'\/agent-graphs': 'http:\/\/127\.0\.0\.1:8080'/);
 });
 
 test('composer run controls are responsive instead of fixed to one crowded grid', () => {

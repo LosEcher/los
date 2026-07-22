@@ -201,8 +201,9 @@ test('agent task graph editable surface helpers normalize overlaps', () => {
     taskFixture('b', ['packages/agent/src/scheduler.ts']),
     taskFixture('c', ['packages/web']),
     taskFixture('d', []),
+    { ...taskFixture('verify', []), role: 'verifier' as const },
   ], 4, 'require-declared');
-  assert.deepEqual(compatible.map(task => task.id), ['a', 'c']);
+  assert.deepEqual(compatible.map(task => task.id), ['a', 'c', 'verify']);
   assert.deepEqual(editableSurfacesForAgentTask(taskFixture('x', ['packages/agent', 'packages/agent'])), ['packages/agent']);
 });
 
