@@ -24,7 +24,7 @@ test('Pi shadow corpus preregisters bounded read-only scenario requirements', ()
     'PKS04-provider-failure',
     'PKS05-interruption',
   ]);
-  assert.ok(_PI_KERNEL_SHADOW_SCENARIOS.every(item => item.version === '1.0.0'));
+  assert.ok(_PI_KERNEL_SHADOW_SCENARIOS.every(item => item.version === '1.0.1'));
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[1]?.allowedTools, ['read_file']);
   assert.deepEqual(_PI_KERNEL_SHADOW_SCENARIOS[2]?.allowedEvidenceClasses, ['deterministic']);
 });
@@ -78,7 +78,7 @@ test('Pi shadow report requires every preregistered cell for one exact Pi versio
       }
     }
   }
-  payloads.push({ ...payload('PKS01-no-tool', '1.0.0', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
+  payloads.push({ ...payload('PKS01-no-tool', '1.0.1', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
 
   const identity = { kind: 'pi' as const, version: '0.81.1', protocolVersion: '0.1.0' };
   const report = _summarizePiKernelShadowScenarioEvidence(payloads, identity);
@@ -114,6 +114,7 @@ function baseEvidence(scenarioId = 'PKS01-no-tool') {
     candidateSessionId: 'session-main:shadow:pi',
     candidateTaskRunId: 'task-main:shadow:pi',
     candidateTraceId: 'trace-main:shadow:pi',
+    candidateEventLineageMatches: true,
   };
 }
 

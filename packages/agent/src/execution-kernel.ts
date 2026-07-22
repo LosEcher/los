@@ -243,6 +243,7 @@ async function* runLosAgentAsKernel(
     runSpecId: input.runSpecId ?? null,
     taskRunId: input.taskRunId,
     sessionId: input.sessionId,
+    traceId: input.traceId,
   });
 
   const execution = runner(input.prompt, {

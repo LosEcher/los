@@ -3,7 +3,7 @@ import { ensureSessionEventStore } from './session-events.js';
 import type { KernelIdentity } from './execution-kernel.js';
 import type { AgentResult } from './loop.js';
 
-export const _PI_KERNEL_SHADOW_CORPUS_VERSION = '1.0.0';
+export const _PI_KERNEL_SHADOW_CORPUS_VERSION = '1.0.1';
 export const _PI_KERNEL_SHADOW_RUBRIC_REVISION = 'pi-shadow-readonly-v1';
 
 export type PiKernelShadowScenarioId =
@@ -63,35 +63,35 @@ export interface PiKernelShadowScenarioReport {
 
 export const _PI_KERNEL_SHADOW_SCENARIOS: readonly PiKernelShadowScenarioDefinition[] = Object.freeze([
   {
-    id: 'PKS01-no-tool', version: '1.0.0', family: 'no_tool',
+    id: 'PKS01-no-tool', version: '1.0.1', family: 'no_tool',
     description: 'Both kernels complete a fixed no-tool answer with equal output hashes.',
     prompt: 'Return exactly LOS_PI_SHADOW_OK and do not call tools.', allowedTools: [],
     expectedCandidateStatus: 'completed', allowedEvidenceClasses: ['deterministic', 'live-provider'],
     requiredObservations: { deterministic: 1, 'live-provider': 3 },
   },
   {
-    id: 'PKS02-read-only-tool', version: '1.0.0', family: 'read_only_tool',
+    id: 'PKS02-read-only-tool', version: '1.0.1', family: 'read_only_tool',
     description: 'Both kernels complete the same brokered read-only tool sequence.',
     prompt: 'Use read_file on package.json, then return exactly the package name.', allowedTools: ['read_file'],
     expectedCandidateStatus: 'completed', allowedEvidenceClasses: ['deterministic', 'live-provider'],
     requiredObservations: { deterministic: 1, 'live-provider': 3 },
   },
   {
-    id: 'PKS03-policy-denial', version: '1.0.0', family: 'denied_tool',
+    id: 'PKS03-policy-denial', version: '1.0.1', family: 'denied_tool',
     description: 'A deterministic broker denial remains bounded candidate evidence.',
     prompt: 'Deterministic fixture requests a broker-denied tool.', allowedTools: ['read_file'],
     expectedCandidateStatus: 'completed', allowedEvidenceClasses: ['deterministic'],
     requiredObservations: { deterministic: 3 },
   },
   {
-    id: 'PKS04-provider-failure', version: '1.0.0', family: 'provider_failure',
+    id: 'PKS04-provider-failure', version: '1.0.1', family: 'provider_failure',
     description: 'A deterministic candidate provider failure does not change production completion.',
     prompt: 'Deterministic fixture returns a candidate provider failure.', allowedTools: [],
     expectedCandidateStatus: 'failed', allowedEvidenceClasses: ['deterministic'],
     requiredObservations: { deterministic: 3 },
   },
   {
-    id: 'PKS05-interruption', version: '1.0.0', family: 'interruption_timeout',
+    id: 'PKS05-interruption', version: '1.0.1', family: 'interruption_timeout',
     description: 'A deterministic candidate interruption or timeout does not change production completion.',
     prompt: 'Deterministic fixture interrupts the candidate before completion.', allowedTools: [],
     expectedCandidateStatus: 'interrupted', allowedEvidenceClasses: ['deterministic'],
@@ -119,6 +119,7 @@ export function evaluatePiKernelShadowScenario(input: {
   candidateSessionId: string;
   candidateTaskRunId: string;
   candidateTraceId: string;
+  candidateEventLineageMatches: boolean;
   candidateEventCounts: Record<string, number>;
   candidateToolNames: string[];
   candidateToolCompletionStates: string[];
@@ -140,7 +141,8 @@ export function evaluatePiKernelShadowScenario(input: {
     assertion('derived_lineage_isolated',
       input.candidateSessionId === `${input.productionSessionId}:shadow:pi`
       && input.candidateTaskRunId === `${input.productionTaskRunId}:shadow:pi`
-      && input.candidateTraceId === `${input.productionTraceId}:shadow:pi`),
+      && input.candidateTraceId === `${input.productionTraceId}:shadow:pi`
+      && input.candidateEventLineageMatches),
     ...scenarioAssertions(scenario.id, input, productionToolNames),
   ];
   return {

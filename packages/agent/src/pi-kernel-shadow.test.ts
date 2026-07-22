@@ -22,7 +22,7 @@ test('Pi shadow forces derived read-only lineage and persists only bounded compa
       candidateConfig = input.config;
       return {
         result: { ...productionResult, text: 'candidate secret answer', totalTokens: { prompt: 12, completion: 5 } },
-        events: [event('kernel.started'), event('tool.requested'), event('tool.completed'), event('kernel.finished')],
+        events: [startedEvent(), event('tool.requested'), event('tool.completed'), event('kernel.finished')],
         route: { provider: 'deepseek', model: 'deepseek-v4-flash', api: 'openai-completions' },
       };
     },
@@ -61,7 +61,7 @@ test('Pi shadow attaches preregistered scenario assertions to bounded evidence',
   const shadow = startPiKernelShadow(input, {
     runCandidate: async () => ({
       result: { ...productionResult, text: productionResult.text },
-      events: [event('kernel.finished')],
+      events: [startedEvent(), event('kernel.finished')],
     }),
     appendEvent: async eventInput => { writes.push(eventInput); return {} as never; },
   });
@@ -77,7 +77,7 @@ test('Pi shadow contains invalid scenario evidence without affecting settlement'
   const input = baseInput();
   input.shadow.scenario = { id: 'unknown' as 'PKS01-no-tool' };
   const shadow = startPiKernelShadow(input, {
-    runCandidate: async () => ({ result: productionResult, events: [event('kernel.finished')] }),
+    runCandidate: async () => ({ result: productionResult, events: [startedEvent(), event('kernel.finished')] }),
     appendEvent: async () => ({} as never),
   });
 
@@ -89,11 +89,11 @@ test('Pi shadow contains invalid scenario evidence without affecting settlement'
 test('Pi shadow turns candidate failure and interruption into evidence without throwing', async () => {
   const writes: SessionEventWrite[] = [];
   const failed = startPiKernelShadow(baseInput(), {
-    runCandidate: async () => ({ events: [event('kernel.failed')], error: new Error('provider credential leaked? no') }),
+    runCandidate: async () => ({ events: [startedEvent(), event('kernel.failed')], error: new Error('provider credential leaked? no') }),
     appendEvent: async input => { writes.push(input); return {} as never; },
   });
   const interrupted = startPiKernelShadow(baseInput(), {
-    runCandidate: async () => ({ events: [event('kernel.interrupted')] }),
+    runCandidate: async () => ({ events: [startedEvent(), event('kernel.interrupted')] }),
     appendEvent: async input => { writes.push(input); return {} as never; },
   });
 
@@ -109,7 +109,7 @@ test('Pi shadow cancellation aborts the candidate and records failed production 
     runCandidate: async input => {
       candidateSignal = input.config.signal;
       await new Promise<void>(resolve => candidateSignal?.addEventListener('abort', () => resolve(), { once: true }));
-      return { events: [event('kernel.interrupted')] };
+      return { events: [startedEvent(), event('kernel.interrupted')] };
     },
     appendEvent: async input => { writes.push(input); return {} as never; },
   });
@@ -166,6 +166,17 @@ function event(type: KernelEvent['type']): KernelEvent {
     occurredAt: '2026-07-22T00:00:00.000Z',
     kernel: { kind: 'pi', version: '0.81.1', protocolVersion: '0.1.0' },
     payload: {},
+  };
+}
+
+function startedEvent(): KernelEvent {
+  return {
+    ...event('kernel.started'),
+    payload: {
+      sessionId: 'session-main:shadow:pi',
+      taskRunId: 'task-main:shadow:pi',
+      traceId: 'trace-main:shadow:pi',
+    },
   };
 }
 

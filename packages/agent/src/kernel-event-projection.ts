@@ -61,7 +61,7 @@ export function _projectKernelEvent(
 
 function summarizeKernelPayload(event: KernelEvent): Record<string, unknown> {
   const payload = event.payload;
-  if (event.type === 'kernel.started') return pick(payload, ['runSpecId', 'taskRunId', 'sessionId']);
+  if (event.type === 'kernel.started') return pick(payload, ['runSpecId', 'taskRunId', 'sessionId', 'traceId']);
   if (event.type === 'turn.started') return {};
   if (event.type === 'message.delta') {
     const delta = readObject(payload.delta);

@@ -1,7 +1,7 @@
 # Pi Kernel Admission And Read-Only Shadow Design
 
 - Date: 2026-07-22
-- Status: K3 implemented; scenario corpus preregistered; observations collecting
+- Status: K3 implemented; corrected corpus `1.0.1` complete; gate failed 16/17
 - Owner: `packages/agent`
 - Decision source: ADR 0039
 
@@ -109,10 +109,18 @@ request. Registry admission remains a later decision even if that probe passes.
 
 ## Remaining Verification
 
-- Corpus `1.0.0` and rubric `pi-shadow-readonly-v1` preregister no-tool,
-  read-only tool, broker denial, provider failure, and interruption scenarios.
-  The required 17 observations are still collecting. The earlier live no-tool
-  smoke predates this corpus and is intentionally ignored by readiness.
+- Corpus `1.0.1` and rubric `pi-shadow-readonly-v1` completed all 17 fixed
+  observations. Sixteen passed. All three live read-only-tool observations
+  passed tool sequence, tool state, terminal, and actual input-lineage
+  assertions; two output hashes matched and one did not. The report remains
+  `collecting`; the earlier live no-tool smoke and superseded corpus `1.0.0`
+  remain ignored by readiness.
+- Corpus `1.0.0` was superseded because its lineage assertion checked outcome
+  strings rather than the identifiers actually passed into Pi. Its 17 records
+  remain persisted and are not reinterpreted as `1.0.1` evidence.
+- The failed observations are immutable evidence. A semantic result comparator
+  or deterministic answer envelope requires a preregistered next revision; it
+  must not reinterpret or overwrite corpus `1.0.1`.
 - No read-only canary or write canary is authorized.
 - Provider fallback, compaction, and long-context equivalence remain unproven.
 - Web-first manual acceptance and graph integration review remain separate and

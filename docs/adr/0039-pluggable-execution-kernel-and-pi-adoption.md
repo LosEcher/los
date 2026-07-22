@@ -2,8 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-07-22
-- Implementation status: K0-K2 complete; K3 explicit read-only shadow is
-  implemented with an initial live record. Local, HTTP executor, and SSH
+- Implementation status: K0-K2 complete; K3 explicit read-only shadow and its
+  corrected 17-observation corpus run are complete, but the gate failed on one strict
+  read-only-tool output-hash assertions. Local, HTTP executor, and SSH
   executor paths still select only the LOS adapter through the fail-closed
   production registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
@@ -176,14 +177,22 @@ API shape, status, duration, and normalized usage. K3 adds an explicit
 scheduler-owned Pi shadow that forces read-only policy, derives candidate
 session/task/trace lineage, and writes only a bounded hash/count comparison to
 the production session. The first live DeepSeek no-tool scheduler shadow
-completed with equal output hashes and separated evidence. Corpus `1.0.0` now
+completed with equal output hashes and separated evidence. Corpus `1.0.1` now
 preregisters no-tool, read-only-tool, broker-denial, provider-failure, and
 interruption observations against rubric `pi-shadow-readonly-v1`. Readiness is
 keyed by exact kernel and protocol version and cannot trigger registry
 admission. The earlier live smoke predates the corpus and is not retroactively
-counted. Production registration remains blocked on completing these
-observations and a later canary decision; Pi is still absent from the
-production registry.
+counted. Corpus `1.0.0` was retired because its lineage assertion did not bind
+the identifiers actually passed into Pi; its records remain persisted and are
+ignored by the corrected version. Corpus `1.0.1` adds actual session/task/trace
+input evidence and produced 16 passing and one failing
+observations. All deterministic and live no-tool cells passed. All three live
+read-only-tool attempts matched tool sequence, successful tool state, terminal
+state, and isolated lineage; two output hashes matched and one differed because
+the same package name was formatted differently. Corpus `1.0.1` remains immutable;
+K4 policy review is blocked pending a preregistered next evaluation revision or
+an adapter-level determinism decision. Pi is still absent from the production
+registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses

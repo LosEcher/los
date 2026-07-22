@@ -42,6 +42,7 @@ export interface PiKernelShadowOutcome {
   error?: string;
   scenarioEvidence?: PiKernelShadowScenarioEvidence;
   scenarioEvidenceError?: string;
+  candidateEventLineageMatches: boolean;
 }
 
 export interface PiKernelShadowHandle {
@@ -129,6 +130,7 @@ export function startPiKernelShadow(
             candidateSessionId: outcome.sessionId,
             candidateTaskRunId: outcome.taskRunId,
             candidateTraceId: outcome.traceId,
+            candidateEventLineageMatches: outcome.candidateEventLineageMatches,
             candidateEventCounts: outcome.eventCounts,
             candidateToolNames: outcome.toolNames,
             candidateToolCompletionStates: outcome.toolCompletionStates,
@@ -182,6 +184,7 @@ async function persistComparison(
       error: outcome.error ?? null,
       scenarioEvidence: outcome.scenarioEvidence ?? null,
       scenarioEvidenceError: outcome.scenarioEvidenceError ?? null,
+      candidateEventLineageMatches: outcome.candidateEventLineageMatches,
     },
   });
 }
@@ -286,12 +289,25 @@ function summarizeOutcome(input: {
     toolNames: toolNames.slice(0, 20),
     toolCompletionStates: toolCompletionStates.slice(0, 20),
     totalTokens,
+    candidateEventLineageMatches: startedLineageMatches(events, input.lineage),
     ...(input.candidateRun.route ? { route: input.candidateRun.route } : {}),
     ...(estimatedCostUsd === undefined ? {} : { estimatedCostUsd }),
     ...(result ? { outputHash: outputHash(result.text) } : {}),
     ...(input.admissionIssues.length ? { admissionIssues: input.admissionIssues } : {}),
     ...(error ? { error: truncate(error instanceof Error ? error.message : String(error)) } : {}),
   };
+}
+
+function startedLineageMatches(
+  events: KernelEvent[],
+  lineage: ReturnType<typeof derivedLineage>,
+): boolean {
+  const started = events.filter(event => event.type === 'kernel.started');
+  if (started.length !== 1) return false;
+  const payload = started[0]!.payload;
+  return payload.sessionId === lineage.sessionId
+    && payload.taskRunId === lineage.taskRunId
+    && payload.traceId === lineage.traceId;
 }
 
 function derivedLineage(input: PiKernelShadowInput) {

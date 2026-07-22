@@ -141,7 +141,12 @@ test('kernel event projector durably appends canonical evidence to session_event
       type: 'kernel.started',
       occurredAt: '2026-07-22T00:00:00.000Z',
       kernel,
-      payload: { sessionId, taskRunId: context.taskRunId, runSpecId: context.runSpecId },
+      payload: {
+        sessionId,
+        taskRunId: context.taskRunId,
+        runSpecId: context.runSpecId,
+        traceId: context.traceId,
+      },
     });
     await project({
       sequence: 1,

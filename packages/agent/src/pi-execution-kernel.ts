@@ -88,7 +88,6 @@ export function _createPiExecutionKernel(
 export function _getPiExecutionKernelIdentity(): KernelIdentity {
   return { ...PI_KERNEL_IDENTITY };
 }
-
 async function* resumePiKernel(
   input: KernelResumeInput<PiKernelRunInput>,
   activeRuns: Map<string, AbortController>,
@@ -149,6 +148,7 @@ async function* runPiAsKernel(
         runSpecId: input.runSpecId ?? null,
         taskRunId: input.taskRunId,
         sessionId: input.sessionId,
+        traceId: input.traceId,
       });
       const prompt: AgentMessage = { role: 'user', content: input.prompt, timestamp: now().getTime() };
       const messages = await runAgentLoop(
