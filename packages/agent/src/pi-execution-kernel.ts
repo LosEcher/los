@@ -27,7 +27,7 @@ import {
 import type { AgentResult, TurnSummary } from './loop.js';
 import type { Message, ToolCall } from './providers/index.js';
 
-const PI_VERSION = '0.81.1';
+const PI_VERSION = '0.81.1+los.1';
 const PI_CHECKPOINT_CODEC = 'pi-agent-core-messages-v1';
 const PI_KERNEL_IDENTITY: KernelIdentity = Object.freeze({
   kind: 'pi',

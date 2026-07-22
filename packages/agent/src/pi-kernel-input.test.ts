@@ -10,8 +10,13 @@ import {
 } from '@earendil-works/pi-ai';
 import { _consumeExecutionKernel, type KernelEvent } from './execution-kernel.js';
 import { _createPiExecutionKernel } from './pi-execution-kernel.js';
-import { _preparePiKernelRun, _projectPiProviderTelemetry } from './pi-kernel-input.js';
+import {
+  _applyPiProviderPayloadPolicy,
+  _preparePiKernelRun,
+  _projectPiProviderTelemetry,
+} from './pi-kernel-input.js';
 import type { AgentResult } from './loop.js';
+import { resolveModelProfile } from './model-profiles.js';
 
 const fixedNow = () => new Date('2026-07-22T00:00:00.000Z');
 
@@ -88,6 +93,22 @@ test('Pi provider stream records LOS-owned call telemetry', async () => {
     status: 201,
     endpoint: `pi:${model.api}`,
   }]);
+});
+
+test('Pi provider payload preserves LOS parallel-tool capability policy', () => {
+  const deepseek = resolveModelProfile('deepseek', { model: 'deepseek-v4-flash' });
+  assert.deepEqual(
+    _applyPiProviderPayloadPolicy({ model: deepseek.model, tools: [{ type: 'function' }] }, deepseek),
+    { model: deepseek.model, tools: [{ type: 'function' }], parallel_tool_calls: false },
+  );
+  assert.deepEqual(
+    _applyPiProviderPayloadPolicy({ model: deepseek.model }, deepseek),
+    { model: deepseek.model },
+  );
+
+  const openai = resolveModelProfile('openai', { model: 'gpt-5.5' });
+  const payload = { model: openai.model, tools: [{ type: 'function' }] };
+  assert.equal(_applyPiProviderPayloadPolicy(payload, openai), payload);
 });
 
 test('Pi input and adapter form a deterministic scheduler-shaped compatibility probe', async t => {

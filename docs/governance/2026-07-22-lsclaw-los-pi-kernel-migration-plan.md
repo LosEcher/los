@@ -153,7 +153,7 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
 | K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
 | K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | complete: input/telemetry live probe and explicit unsupported-semantic decisions | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
-| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | corpus `1.0.1` completed 16/17; corpus `1.1.0` typed-value comparator preregistered with no observations | gate failed; collect and pass `1.1.0` before K4 |
+| K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | candidate `0.81.1` completed corpus `1.1.0` at 14/17 and exposed duplicate brokered reads; candidate `0.81.1+los.1` maps parallel-tool policy with no observations | gate failed; collect and pass the fixed candidate before K4 |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
 | K5 Write canary | temporary then managed-workspace project writes | ToolBroker policy, lease fencing, verifier records, reviewed diff | stop on any policy or final-transition bypass |
 | K6 Graph worker | Pi executes bounded worker tasks; verifier remains independent | worker/verifier attempts, graph completion, manual integration review | stop if child contract or editable surfaces are lost |
@@ -242,11 +242,14 @@ existing unknown-`pi` scheduler behavior remains fail closed. Corrected corpus
 run failed only byte-level output-hash equality after matching the tool
 sequence, successful tool state, terminal state, and actual input lineage.
 Corpus `1.1.0` / rubric `pi-shadow-readonly-v2` is now preregistered with a
-typed JSON `packageName` comparator; no observation is counted until the
-preregistration commit exists.
+typed JSON `packageName` comparator. Candidate `0.81.1` completed 14/17: all
+three live tool scenarios produced the expected candidate task value but made
+two actual brokered reads while LOS made one. Candidate `0.81.1+los.1` maps
+`supportsParallelToolCalls=false` through the Pi payload hook and has no
+observations.
 Corpus `1.0.0` remains persisted but ignored because its lineage assertion was
 not bound to the Pi input. K4 remains
-blocked pending collection of the preregistered `1.1.0` revision. The pre-corpus
+blocked pending collection of the fixed candidate. The pre-corpus
 smoke remains excluded rather than retroactively labeled. `pnpm --filter
 @los/agent scenario:pi-shadow` reads current status without invoking a provider.
 

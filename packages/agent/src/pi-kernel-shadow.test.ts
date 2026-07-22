@@ -194,7 +194,7 @@ function event(type: KernelEvent['type']): KernelEvent {
     sequence: 0,
     type,
     occurredAt: '2026-07-22T00:00:00.000Z',
-    kernel: { kind: 'pi', version: '0.81.1', protocolVersion: '0.1.0' },
+    kernel: { kind: 'pi', version: '0.81.1+los.1', protocolVersion: '0.1.0' },
     payload: {},
   };
 }

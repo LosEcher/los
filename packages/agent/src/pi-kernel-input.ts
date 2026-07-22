@@ -170,6 +170,12 @@ async function createPiModelRuntime(
     const source = await models.streamSimple(selectedModel, context, {
       ...options,
       sessionId: telemetry.sessionId,
+      onPayload: async (payload, payloadModel) => {
+        const replaced = await options?.onPayload?.(payload, payloadModel);
+        const effective = replaced ?? payload;
+        const governed = _applyPiProviderPayloadPolicy(effective, profile);
+        return replaced === undefined && governed === payload ? undefined : governed;
+      },
       onResponse: async response => {
         status = response.status;
         await options?.onResponse?.(response, selectedModel);
@@ -182,6 +188,17 @@ async function createPiModelRuntime(
     streamFn,
     effectiveBaseUrl: pendingCredential.baseUrl ?? profile.baseUrl,
   };
+}
+
+export function _applyPiProviderPayloadPolicy(
+  payload: unknown,
+  profile: ModelProfile,
+): unknown {
+  if (profile.apiShape !== 'openai-chat-completions' || profile.supportsParallelToolCalls) return payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  if (!Array.isArray(record.tools) || record.tools.length === 0) return payload;
+  return { ...record, parallel_tool_calls: false };
 }
 
 export function _projectPiProviderTelemetry(

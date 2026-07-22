@@ -242,8 +242,10 @@ scenario families and 17 required observations. The first full corpus run is
 complete with 16 passing and one failing observation; the failure is in
 the live read-only-tool output-hash assertion, while tool sequence, successful
 tool state, terminal state, and isolated lineage passed. The report therefore
-remains `collecting`; corpus `1.1.0` / rubric `pi-shadow-readonly-v2` now
-preregister a typed task-value comparator but have no observations; the pre-corpus smoke and superseded corpus `1.0.0` remain
+remains `collecting`; corpus `1.1.0` / rubric `pi-shadow-readonly-v2` then
+completed 14/17 against candidate `0.81.1`, exposing two real candidate reads
+versus one LOS read in every live tool scenario. Candidate `0.81.1+los.1` maps
+the profile parallel-tool policy and has no observations; the pre-corpus smoke and superseded corpus `1.0.0` remain
 ignored, and K4
 policy review is blocked. Pi remains unavailable as a selected production
 kernel. The current LOS loop stays the production baseline until a

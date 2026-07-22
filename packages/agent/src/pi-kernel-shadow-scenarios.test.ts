@@ -103,7 +103,7 @@ test('Pi shadow report requires every preregistered cell for one exact Pi versio
   }
   payloads.push({ ...payload('PKS01-no-tool', '1.1.0', 'live-provider', true), candidate: { kind: 'pi', version: '0.82.0' } });
 
-  const identity = { kind: 'pi' as const, version: '0.81.1', protocolVersion: '0.1.0' };
+  const identity = { kind: 'pi' as const, version: '0.81.1+los.1', protocolVersion: '0.1.0' };
   const report = _summarizePiKernelShadowScenarioEvidence(payloads, identity);
   assert.equal(report.status, 'ready_for_k4_policy_review');
   assert.equal(report.observedCount, 17);
@@ -158,7 +158,7 @@ function payload(
   passed: boolean,
 ): Record<string, unknown> {
   return {
-    candidate: { kind: 'pi', version: '0.81.1', protocolVersion: '0.1.0' },
+    candidate: { kind: 'pi', version: '0.81.1+los.1', protocolVersion: '0.1.0' },
     scenarioEvidence: {
       corpusVersion: _PI_KERNEL_SHADOW_CORPUS_VERSION,
       rubricRevision: _PI_KERNEL_SHADOW_RUBRIC_REVISION,

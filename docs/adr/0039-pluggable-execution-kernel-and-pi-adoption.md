@@ -5,8 +5,9 @@
 - Implementation status: K0-K2 complete; K3 explicit read-only shadow and its
   corrected 17-observation corpus run are complete, but the gate failed on one strict
   read-only-tool output-hash assertion. Corpus `1.1.0` / rubric
-  `pi-shadow-readonly-v2` is preregistered to compare a typed task value; no
-  observations have been collected under that revision. Local, HTTP executor, and SSH
+  `pi-shadow-readonly-v2` completed 14/17 against candidate `0.81.1` and exposed
+  three real duplicate-tool failures. Candidate `0.81.1+los.1` maps the LOS
+  parallel-tool policy and has no observations yet. Local, HTTP executor, and SSH
   executor paths still select only the LOS adapter through the fail-closed
   production registry. Pi remains comparison-only and is not selectable.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
@@ -122,9 +123,11 @@ and unknown kinds fail before task-run creation. HTTP and SSH requests carry
 properties complete K1; they do not constitute Pi adoption.
 
 Every attempt persists `kernel_kind`, exact `kernel_version`, and
-`kernel_protocol_version`. Provider-native objects and Pi event types remain
-inside `PiKernelAdapter`. Gateway routes and Web projections consume only LOS
-events.
+`kernel_protocol_version`. An external kernel version identifies both the
+upstream core and LOS adapter behavior; Pi uses `<core>+los.<revision>` when the
+adapter changes without upgrading the core. Provider-native objects and Pi
+event types remain inside `PiKernelAdapter`. Gateway routes and Web projections
+consume only LOS events.
 
 One LOS component owns each durable write. The adapter may produce an event or
 checkpoint, but it may not write `task_runs`, `run_specs`, `session_events`,
@@ -192,10 +195,13 @@ observations. All deterministic and live no-tool cells passed. All three live
 read-only-tool attempts matched tool sequence, successful tool state, terminal
 state, and isolated lineage; two output hashes matched and one differed because
    the same package name was formatted differently. Corpus `1.0.1` remains immutable.
-   Corpus `1.1.0` / rubric `pi-shadow-readonly-v2` now preregisters a typed JSON
-   task-value comparator and has no observations yet. K4 policy review remains
-   blocked until that revision is collected and passes. Pi is still absent from
-   the production registry.
+   Corpus `1.1.0` / rubric `pi-shadow-readonly-v2` then completed 14/17 against
+   candidate `0.81.1`. Its typed candidate values passed, but all three live
+   tool scenarios made two real brokered `read_file` calls while LOS made one.
+   Candidate `0.81.1+los.1` maps `supportsParallelToolCalls=false` through Pi's
+   provider payload hook and has no observations yet. K4 policy review remains
+   blocked until that candidate is collected and passes. Pi is still absent
+   from the production registry.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses
