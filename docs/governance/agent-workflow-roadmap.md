@@ -230,10 +230,13 @@ The scheduler and executor resolve the same fail-closed registry, while HTTP
 and SSH transports carry the selected kind and return canonical kernel events
 for scheduler-owned projection. K2a now pins Pi `0.81.1`, aligns the Node engine
 floor, and provides an unregistered deterministic adapter with faux-provider
-golden traces. Pi remains unavailable to scheduler requests until K2b maps LOS
-provider/auth/tool-catalog inputs and passes live compatibility evidence. The
-current LOS loop stays the production baseline until shadow, canary,
-pairwise-evaluation, and rollback gates pass.
+golden traces. K2b now maps LOS-resolved provider/auth/model inputs, canonical
+history, and the governed tool catalog; a bounded live DeepSeek probe passed.
+The Pi transport also records LOS-owned provider-call telemetry. Pi remains
+unavailable to scheduler requests until unsupported fallback, architect-editor,
+context, and model-setting semantics have explicit decisions and a read-only
+scheduler shadow passes. The current LOS loop stays the production baseline
+until shadow, canary, pairwise-evaluation, and rollback gates pass.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,

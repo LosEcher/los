@@ -166,8 +166,16 @@ event stream to LOS events, delegates every declared tool to an injected LOS
 `ToolBroker`, and supports exact-version message checkpoints. Deterministic
 faux-provider tests cover no-tool, brokered tool, denial, provider failure,
 interrupt, checkpoint, and resume behavior. The adapter is deliberately not
-registered in the production kernel registry: LOS provider/auth/catalog
-mapping and live compatibility evidence remain K2b work.
+registered in the production kernel registry. K2b now maps the resolved LOS
+profile, credential, canonical history, model limits, and ToolRegistry catalog
+into a single-model Pi runtime. A live no-tool DeepSeek probe passed through
+that input path and the canonical adapter. The input adapter fails closed on
+provider fallback, architect-editor, context compression, and model settings
+that do not yet have equivalent Pi semantics. The Pi stream wrapper records
+LOS-owned provider-call telemetry with trace/session, effective provider/model,
+API shape, status, duration, and normalized usage. Production registration
+remains blocked on the unsupported semantic decisions and scheduler shadow
+evidence.
 
 Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
 consumer callbacks are not producer barriers. The adapter therefore uses

@@ -10,6 +10,7 @@ import {
   type AssistantMessage,
   type Message as PiMessage,
   type Model,
+  type SimpleStreamOptions,
   type TSchema,
   type ToolResultMessage,
 } from '@earendil-works/pi-ai';
@@ -45,6 +46,9 @@ export interface PiKernelRunInput extends KernelRunInput {
   systemPrompt: string;
   model: Model<any>;
   streamFn: StreamFn;
+  initialMessages?: readonly AgentMessage[];
+  maxTurns?: number;
+  modelOptions?: Pick<SimpleStreamOptions, 'temperature' | 'maxTokens' | 'reasoning'>;
   toolCatalog?: readonly PiKernelToolDescriptor[];
   toolBroker?: ToolBroker;
   signal?: AbortSignal;
@@ -71,7 +75,7 @@ export function _createPiExecutionKernel(
       resume: true,
       compaction: false,
     }),
-    run: input => runPiAsKernel(input, [], activeRuns, now),
+    run: input => runPiAsKernel(input, [...(input.initialMessages ?? [])], activeRuns, now),
     interrupt: async input => {
       const controller = activeRuns.get(input.taskRunId);
       if (!controller) return { accepted: false, reason: 'Pi kernel attempt is not active' };
@@ -157,6 +161,10 @@ async function* runPiAsKernel(
           model: input.model,
           convertToLlm: messages => messages.filter(isPiLlmMessage),
           toolExecution: 'parallel',
+          ...input.modelOptions,
+          shouldStopAfterTurn: input.maxTurns
+            ? () => turn >= input.maxTurns!
+            : undefined,
         },
         event => projectPiEvent(event, () => turn, value => { turn = value; }, turns, emit),
         controller.signal,

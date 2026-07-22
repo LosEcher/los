@@ -152,7 +152,7 @@ policy are defined in ADR 0039 and `contracts/execution-kernel.yaml`.
 | --- | --- | --- | --- |
 | K0 Decision | ADR 0039, history record, contract draft | contract check and reviewed diff | complete 2026-07-22 |
 | K1 Protocol | TypeScript kernel/message/event/checkpoint/ToolBroker types plus `LosKernelAdapter` | focused protocol tests and unchanged current behavior through a production entrypoint | complete 2026-07-22: fail-closed registry, local/HTTP/SSH parity, bounded `session_events` projection, and LOS ToolBroker wired |
-| K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces | K2a complete: no-tool, brokered tool, denial, interrupt, provider failure, exact checkpoint, and resume traces; K2b production input mapping remains | stop on raw Pi event leakage or direct tool authority |
+| K2 Pi deterministic adapter | exact Pi versions, Node alignment, faux-provider golden traces, LOS-owned input mapping | K2a complete; K2b provider/auth/model/history/tool mapping, provider telemetry, and live no-tool probe complete; unsupported semantic decisions pending | stop on raw Pi event leakage, direct tool authority, or unowned provider telemetry |
 | K3 Shadow | sampled read-only dual runs; Pi result has no user or project effect | canonical event comparison and cost attribution by exact kernel version | stop on duplicate writes or unbounded cost |
 | K4 Read-only canary | explicit planning/inspection kernel selection | persisted plan/evidence and operator-visible rollback | stop on AP2 or transcript drift |
 | K5 Write canary | temporary then managed-workspace project writes | ToolBroker policy, lease fencing, verifier records, reviewed diff | stop on any policy or final-transition bypass |
@@ -225,9 +225,17 @@ retry, and evidence behavior. K2a pins `@earendil-works/pi-agent-core` and
 `@earendil-works/pi-ai` at `0.81.1`, aligns LOS with Node `>=22.19.0`, and adds
 an unregistered adapter whose deterministic tests cover no-tool, brokered tool,
 denial, provider failure, interrupt, exact-version checkpoint, and resume.
-Pi is still not registered or selectable. K2b must map LOS provider/auth and
-tool-catalog inputs, run live compatibility evidence, and retain the existing
-unknown-`pi` fail-closed scheduler behavior until those checks pass.
+K2b now constructs a single-model Pi runtime from the LOS-resolved provider,
+credential, profile, canonical history, and governed tool catalog. Its mapped
+ToolBroker probe and the bounded live DeepSeek probe both pass; the latter is
+recorded in `docs/operations/2026-07-22-pi-kernel-provider-input-probe.md`.
+The live trace also produced one LOS `provider_call_telemetry` row with the
+effective provider/model, Pi API shape, HTTP status, duration, and normalized
+usage. Pi is still not registered or selectable. Explicit behavior for provider
+fallback, architect-editor, context compression, and unsupported model settings,
+followed by read-only scheduler shadow evidence, remain required before registry
+admission. The existing unknown-`pi` scheduler behavior therefore remains fail
+closed.
 
 ## Active Work Ledger
 
@@ -238,7 +246,7 @@ LOS todos. Their status here must not be presented as database todo state.
 | --- | --- | --- |
 | `kernel-k0-decision-record` | complete in this document; not a DB todo | ADR, history record, contract, roadmap, and contract check |
 | `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
-| `kernel-k2-pi-deterministic` | K2a implemented; K2b pending | exact `0.81.1` dependencies, Node gate, unregistered Pi adapter, and golden traces; production provider/auth/catalog mapping remains |
+| `kernel-k2-pi-deterministic` | K2a complete; K2b input/telemetry complete, admission pending | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, and live no-tool probe; unsupported semantic decisions remain |
 | `kernel-k3-shadow` | pending | read-only shadow evidence |
 | `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
