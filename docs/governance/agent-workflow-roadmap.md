@@ -228,10 +228,12 @@ checkpoint contents. The current loop now executes through `LosToolBroker`,
 preserving phase, pre-action, capability, state, retry, and evidence controls.
 The scheduler and executor resolve the same fail-closed registry, while HTTP
 and SSH transports carry the selected kind and return canonical kernel events
-for scheduler-owned projection. Pi is not installed or registered; that
-dependency and adapter work starts in K2. The current LOS loop stays the
-production baseline until shadow, canary, pairwise-evaluation, and rollback
-gates pass.
+for scheduler-owned projection. K2a now pins Pi `0.81.1`, aligns the Node engine
+floor, and provides an unregistered deterministic adapter with faux-provider
+golden traces. Pi remains unavailable to scheduler requests until K2b maps LOS
+provider/auth/tool-catalog inputs and passes live compatibility evidence. The
+current LOS loop stays the production baseline until shadow, canary,
+pairwise-evaluation, and rollback gates pass.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,

@@ -147,8 +147,8 @@ resolution.
 
 ## Pi Integration Choice
 
-The first adapter will use Pi's low-level agent-loop and provider packages. It
-will not initially adopt the complete `AgentHarness` lifecycle.
+The first adapter uses Pi's low-level agent-loop and provider packages. It does
+not initially adopt the complete `AgentHarness` lifecycle or Pi coding tools.
 
 The local Pi reference at commit `304f42d20937ff06e8b63e4e7e330b953dedad76`
 documents provisional settlement semantics and pending work for lifecycle
@@ -158,9 +158,22 @@ in the first step would make failures harder to classify. The adapter may move
 internally to `AgentHarness` later if its lifecycle becomes migration-ready and
 the canonical LOS protocol remains unchanged.
 
-Pi is an implementation dependency, not the source of LOS contracts. Its
-package versions must be exact, and its Node engine requirement must be checked
-against the LOS runtime before installation.
+Pi is an implementation dependency, not the source of LOS contracts. K2a pins
+`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` to `0.81.1` and
+raises the LOS Node declaration to Pi's required `>=22.19.0`; the verified local
+runtime is Node `24.14.0`. `pi-execution-kernel.ts` translates the low-level Pi
+event stream to LOS events, delegates every declared tool to an injected LOS
+`ToolBroker`, and supports exact-version message checkpoints. Deterministic
+faux-provider tests cover no-tool, brokered tool, denial, provider failure,
+interrupt, checkpoint, and resume behavior. The adapter is deliberately not
+registered in the production kernel registry: LOS provider/auth/catalog
+mapping and live compatibility evidence remain K2b work.
+
+Pi `0.81.1` documents low-level `agentLoop` streams as observational: their
+consumer callbacks are not producer barriers. The adapter therefore uses
+`runAgentLoop` with an awaited event sink and acknowledges each canonical LOS
+event before Pi advances. Tool authority is enforced through the actual Pi
+tool `execute` callback, not inferred from a later event subscription.
 
 ## Checkpoints And Resume
 
