@@ -184,30 +184,77 @@ Exit criteria:
 
 ### Stage E: Controlled Multi-Agent Execution
 
-Status: partially implemented early. The DAG store, dependency claims, bounded
-parallel execution, verifier tasks, provider/model task selection, and
-procedural memory candidates exist. Remaining work is to harden graph-level
-operator UX, provenance display, and eval comparisons before increasing
-autonomy.
+Status: bounded baseline implemented as of 2026-07-22. The runtime supports
+operator-created graphs with 2-4 workers, strict editable-surface ownership,
+bounded parallel execution, dependency blocking, an independent verifier, and
+an explicit integration owner. A persisted local smoke returned HTTP 200 with
+three of three tasks succeeded and one legal graph-owned final transition; see
+`docs/operations/2026-07-22-governed-agent-graph-smoke.md`.
+
+This status does not mean general multi-agent autonomy is complete. Remaining
+work is graph-level provenance display, interrupted-run recovery evidence,
+serial-versus-graph eval comparison, and operator-reviewed live integration
+before increasing scale or reducing consent gates.
 
 Goal: support planner, executor, and verifier roles without turning the runtime
 into unconstrained peer chat.
 
 Required sequencing:
 
-1. finish run specs and state transitions first;
-2. add a minimal DAG only after retry and verification states are observable;
-3. let independent tasks run in parallel;
-4. make verifier tasks capable of blocking completion;
+1. finish run specs and state transitions first — implemented;
+2. add a minimal DAG only after retry and verification states are observable — implemented;
+3. let independent tasks run in parallel — implemented with strict non-overlapping editable surfaces;
+4. make verifier tasks capable of blocking completion — implemented and covered by success/failure regression tests;
 5. use memory compression and procedural rule candidates only with evidence
    pointers and review gates.
 
 Exit criteria:
 
 1. a graph run shows dependencies, attempts, verifier outcomes, and final
-   state;
+   state — satisfied in the gateway read model and persisted smoke evidence;
 2. procedural memory has provenance and owner-layer placement;
 3. autonomy improvements can be compared with eval metrics.
+
+### Stage F: Pluggable Execution Kernel And Pi Adoption
+
+Status: architecture decision accepted and K1 foundation started on 2026-07-22.
+ADR 0039 and `contracts/execution-kernel.yaml` define LOS as the authoritative
+governance harness and Pi as the first external execution-kernel candidate.
+`packages/agent/src/execution-kernel.ts` now wraps the current LOS loop, and the
+gateway-local scheduler path calls it while recording exact kernel provenance.
+Durable kernel-event projection, ToolBroker wiring, registry selection,
+executor parity, and Pi dependency work remain open. The current LOS loop stays
+the production baseline until shadow, canary, pairwise-evaluation, and rollback
+gates pass.
+
+Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
+RunContract, policy, tool execution, durable evidence, recovery, verification,
+or final-transition ownership out of LOS.
+
+Required sequencing:
+
+1. wrap the current loop behind a provider-neutral `ExecutionKernel` protocol;
+2. route all kernel tool requests through an LOS-owned ToolBroker;
+3. add an exact-version Pi adapter with deterministic golden traces;
+4. run read-only shadow and canary comparisons before project writes;
+5. admit managed-workspace and graph-worker execution only after AP, lease,
+   transcript, and verifier parity;
+6. promote Pi by preregistered pairwise evidence, not by dependency wiring;
+7. retain `LosKernelAdapter` as rollback and future replacement candidate.
+
+Exit criteria:
+
+1. gateway and scheduler use no Pi-native event, message, or checkpoint types;
+2. every attempt records exact kernel and protocol provenance;
+3. Pi cannot write LOS state or execute tools outside ToolBroker;
+4. deterministic and real-task pairwise evidence covers completion, recovery,
+   operator intervention, governance violations, cost, and latency;
+5. default promotion has a per-run rollback and an accepted observation window.
+
+The owning migration record is
+`docs/governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md`. The parent
+daily-agent product remains in progress until its existing Web-first acceptance
+and graph integration work plus the kernel baseline are complete.
 
 ## Operating Modes
 

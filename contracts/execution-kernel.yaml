@@ -1,0 +1,138 @@
+contract: los.execution-kernel
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Provider-neutral execution-kernel boundary for running one governed LOS
+  attempt. Kernels own turn execution only; LOS owns durable state, policy,
+  tool brokering, verification, and final execution transitions.
+type: object
+ownership:
+  los:
+    - Work Item and RunContract
+    - task, run, graph, attempt, lease, and fencing state
+    - tenant, identity, workspace, policy, approval, and budget decisions
+    - canonical session events and transcript projection
+    - verification records and final execution transitions
+  kernel:
+    - provider transport and provider message normalization
+    - model turn and tool-call continuation loop
+    - turn-safe steering, follow-up, interrupt, and context transforms
+    - kernel-private checkpoint production
+interface:
+  methods:
+    capabilities:
+      input: KernelCapabilityRequest
+      output: KernelCapabilities
+    run:
+      input: KernelRunInput
+      output: KernelEventStream
+    interrupt:
+      input: KernelInterruptInput
+      output: KernelInterruptResult
+    resume:
+      input: KernelResumeInput
+      output: KernelEventStream
+schemas:
+  KernelIdentity:
+    required: [kind, version, protocolVersion]
+    fields:
+      kind: stable adapter identifier such as pi or los
+      version: exact implementation or package version
+      protocolVersion: execution-kernel contract version
+  KernelRunInput:
+    required:
+      - taskRunId
+      - sessionId
+      - traceId
+      - prompt
+    fields:
+      runSpecId: optional LOS run-spec identifier for bounded lightweight runs
+      taskRunId: LOS attempt identifier
+      sessionId: LOS canonical session identifier
+      requestId: optional request provenance
+      traceId: trace provenance
+      prompt: current invocation text
+      messages: optional canonical LOS messages; no provider-native objects
+      toolCatalog: optional brokered tool definitions and capability metadata
+      limits: optional pre-authorized turn, time, token, and cost ceilings
+      checkpoint: optional opaque kernel checkpoint with codec metadata
+      steeringCursor: optional LOS operator-event cursor
+      metadata: bounded non-secret execution metadata
+  KernelResumeInput:
+    required: [run, checkpoint]
+    fields:
+      run: KernelRunInput
+      checkpoint: opaque kernel checkpoint with kernel identity and codec version
+  KernelInterruptInput:
+    required: [runSpecId, taskRunId, reason]
+    fields:
+      runSpecId: LOS run-spec identifier
+      taskRunId: LOS attempt identifier
+      reason: bounded operator or scheduler reason
+  KernelCapabilities:
+    fields:
+      streaming: boolean
+      typedTools: boolean
+      parallelToolCalls: boolean
+      steering: boolean
+      followUp: boolean
+      interrupt: boolean
+      checkpoint: boolean
+      resume: boolean
+      compaction: boolean
+  KernelEvent:
+    required: [sequence, type, occurredAt, kernel]
+    eventTypes:
+      - kernel.started
+      - turn.started
+      - message.delta
+      - message.completed
+      - tool.requested
+      - tool.completed
+      - usage.recorded
+      - checkpoint.created
+      - turn.completed
+      - kernel.finished
+      - kernel.interrupted
+      - kernel.failed
+    fields:
+      sequence: monotonic sequence within one kernel invocation
+      type: one of eventTypes
+      occurredAt: event timestamp
+      kernel: KernelIdentity
+      turn: optional turn number
+      messageId: optional canonical message identifier
+      toolCallId: optional LOS canonical tool-call identifier
+      payload: bounded event-specific data
+  KernelResult:
+    terminalKinds:
+      - finished
+      - interrupted
+      - failed
+    fields:
+      terminalKind: kernel-local terminal classification
+      finalMessages: canonical LOS messages
+      usage: normalized tokens, cost, and provider cache evidence
+      checkpoint: optional opaque kernel checkpoint
+      error: optional normalized failure
+invariants:
+  - kernels do not write LOS databases or execution state directly
+  - kernels do not resolve tenant, identity, workspace, credentials, or approval policy
+  - every tool request executes through the LOS ToolBroker
+  - only LOS assigns canonical run, task, session, message, and tool-call identifiers
+  - kernel.finished never implies run_spec or task_run succeeded
+  - succeeded remains subject to transitionExecutionState and canMarkSucceeded
+  - canonical events are persisted before they are exposed as durable replay evidence
+  - raw provider events are translated in one adapter and are not interpreted by gateway routes
+  - kernel-private checkpoints are versioned and never replace the canonical transcript
+versioning:
+  - persist kernel kind, exact version, and protocol version for every attempt
+  - an adapter upgrade requires deterministic compatibility traces before canary use
+  - checkpoint compatibility must be declared for every version change
+  - scheduler, gateway, contracts, and ToolBroker must compile without a Pi adapter
+verification:
+  - ./tools/check-contracts.sh
+  - focused execution-kernel protocol tests
+  - deterministic no-tool, tool, interrupt, failure, checkpoint, and resume traces
+  - pairwise baseline and candidate records through los.execution-pairwise-eval

@@ -85,6 +85,11 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
     assert.equal(result.status, 'completed');
     assert.equal(result.taskRun.nodeId, nodeId);
     assert.equal(result.result.text, 'executor ok');
+    assert.deepEqual(result.taskRun.metadata.executionKernel, {
+      kind: 'los',
+      version: '0.1.0',
+      protocolVersion: '0.1.0',
+    });
     assert.equal(requests[0]?.nodeId, nodeId);
 
     const decisions = await listSchedulerDecisions({ graphId: taskRunId, kind: 'executor_selection' });
@@ -1260,6 +1265,13 @@ test('scheduler runs verifier graph tasks through verification records', async (
 
     const events = await listSessionEvents(sessionId, 100);
     assert.ok(events.some(event => event.type === 'verification.succeeded'));
+    const runSpecTransitions = events.filter(event => event.payload.entityType === 'run_spec'
+      && event.payload.entityId === runSpecId);
+    assert.equal(runSpecTransitions.filter(event => event.type === 'run_spec.succeeded').length, 1);
+    assert.ok(runSpecTransitions.some(event => event.type === 'run_spec.succeeded'
+      && event.payload.reason === 'graph_completion:succeeded'));
+    assert.equal(runSpecTransitions.some(event => event.payload.from === 'succeeded'
+      && event.payload.to === 'verifying'), false);
   } finally {
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);

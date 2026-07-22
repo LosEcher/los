@@ -20,6 +20,7 @@ test('buildExecutionStaticGraph extracts core execution entrypoints', () => {
   assert.ok(nodeIds.has('agent-export:runScheduledAgentTask'));
   assert.ok(nodeIds.has('agent-export:claimReadyAgentTasks'));
   assert.ok(nodeIds.has('function:runAgent'));
+  assert.ok(nodeIds.has('function:runLosExecutionKernel'));
   assert.ok(nodeIds.has('function:runScheduledAgentTask'));
   assert.ok(nodeIds.has('runtime-state:session_events'));
   assert.ok(nodeIds.has('runtime-state:tool_call_states'));
@@ -34,7 +35,8 @@ test('buildExecutionStaticGraph records the minimal chat execution call chain', 
   assertEdge(graph, 'gateway-route:POST /chat', 'function:registerChatRoute', 'handled_by');
   assertEdge(graph, 'function:registerChatRoute', 'function:createRunSpec', 'calls');
   assertEdge(graph, 'function:registerChatRoute', 'function:runScheduledAgentTask', 'calls');
-  assertEdge(graph, 'function:runScheduledAgentTask', 'function:runAgent', 'chooses_path');
+  assertEdge(graph, 'function:runScheduledAgentTask', 'function:runLosExecutionKernel', 'chooses_path');
+  assertEdge(graph, 'function:runLosExecutionKernel', 'function:runAgent', 'calls');
   assertEdge(graph, 'function:runAgentOnExecutor', 'executor-endpoint:POST /v1/tasks/run-agent', 'posts_to');
   assertEdge(graph, 'executor-endpoint:POST /v1/tasks/run-agent', 'function:runAssignedAgentTask', 'handled_by');
   assertEdge(graph, 'function:runAssignedAgentTask', 'function:runAgent', 'calls');

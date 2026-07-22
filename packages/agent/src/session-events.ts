@@ -35,6 +35,7 @@ export function sessionEventVisibility(type: string): SessionEventVisibility {
   // Governance sweep/job lifecycle is operator audit, not user-facing chat noise.
   if (type.startsWith('governance.')) return 'audit';
   if (type.startsWith('coordinator.')) return 'audit';
+  if (type.startsWith('kernel.')) return 'audit';
   if (type === 'session.started' || type === 'session.completed' ||
       type === 'tool.catalog' || type === 'model.turn.started') {
     return 'audit';

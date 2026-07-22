@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { ensureSessionEventStore } from '../session-events.js';
-import { runAgent } from '../loop.js';
+import {
+  getLosExecutionKernelIdentity,
+  runLosExecutionKernel,
+} from '../execution-kernel.js';
 import { recordFailoverEval } from '../run-evals.js';
 import {
   ensureTaskRunStore,
@@ -189,6 +192,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       toolRetry: input.toolRetry,
       timeoutMs,
       disposition,
+      executionKernel: getLosExecutionKernelIdentity(),
     },
     runContract,
   });
@@ -334,7 +338,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           onCheckpoint: input.onCheckpoint,
         })
-      : await runAgent(runtimePrompt, {
+      : await runLosExecutionKernel(runtimePrompt, {
           sessionId,
           runSpecId: input.runSpecId,
           provider: initialProvider,
