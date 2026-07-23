@@ -105,14 +105,17 @@ that the jobs can overlap safely.
    weakening lockfile enforcement.
 6. No external cache action or cross-run Turbo cache is used; every test still
    executes.
-7. `gate-fast` sets `TURBO_CONCURRENCY=1` on node34; after it passes,
-   `gate-test` runs on Windows with `LOS_TEST_CONCURRENCY=2`. Local development
-   keeps the existing test default of four unless the variable is set.
+7. `gate-fast` uses node34's pnpm-preloaded `ubuntu-jj` image with
+   `TURBO_CONCURRENCY=1`; after it passes, `gate-test` runs on Windows with
+   `LOS_TEST_CONCURRENCY=2`. Local development keeps the existing test default
+   of four unless the variable is set.
 8. `gate-drift` waits for `gate-test` during the observation window; its
    PostgreSQL service identity is distinct from `postgres-test`, so a later
    parallelization trial cannot rely on an ambiguous shared DNS name.
 9. Web E2E waits for `gate-fast`, then runs on node34 in parallel with the
-   Windows test path.
+   Windows test path. Its `ubuntu-playwright` label uses the prebuilt
+   `los-ci:node22-jj0.39.0-playwright1.61.1` image, so CI no longer downloads
+   Chromium or Debian browser dependencies on every run.
 
 The `main` fast-only rule is safe only while Forgejo branch protection requires
 all three PR checks and `block_on_outdated_branch=true`. The API showed required
@@ -189,13 +192,16 @@ replace the product P0/P1 queue in
 
 | ID | Priority | State | Work | Completion evidence |
 | --- | --- | --- | --- | --- |
-| `CI-OBS-01` | P0 | observing | Record the next 10-20 real Forgejo PR runs | Interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
+| `CI-OBS-01` | P0 | paused | Record the next 10-20 real Forgejo PR runs | Resume only after `CI-HOST-01`; interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
+| `CI-HOST-01` | P0 | decision required | Restore a reliable node34 resource margin without treating the systemd-managed `nmem.service` as an orphan | Operator chooses service scheduling, a tested memory limit, or host separation; then three exact-head canaries retain at least 1.5 GiB available memory and show a stable post-run swap delta |
 | `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
-| `CI-STORE-01` | P1 | backlog | Add a periodic pnpm store capacity check without restoring `actions/cache` | A documented command and cadence record store size plus filesystem free space; growth has an owner and cleanup decision |
+| `CI-STORE-01` | P1 | done | Add a periodic pnpm store capacity check without restoring `actions/cache` | `gate-fast` runs `tools/observe-pnpm-store.sh --json`; the observation protocol records a weekly and every-fifth-eligible-PR cadence without deleting store content |
 
-`CI-OBS-01` owns the immediate next action. `CI-NET-01` is the prerequisite for
-any attempt to parallelize the two database jobs. `CI-STORE-01` is independent
-and can be added without changing job execution behavior.
+`CI-HOST-01` owns the immediate next action because run `222` crossed the
+available-memory stop condition. `CI-OBS-01` resumes after that decision and
+three clean canaries. `CI-NET-01` is the prerequisite for any attempt to
+parallelize the two database jobs. `CI-STORE-01` is complete and does not
+change job execution behavior.
 
 Historical local-only jj changes remain in the repository history. They do not
 dirty the current working copy and are not part of this delivery. Review or
@@ -374,9 +380,46 @@ downloading 76.8 MiB of Debian browser dependencies into the clean container;
 the browser downloads took about 80 seconds and the first 15 tests about 46
 seconds. The immediate correction raises the Web E2E limit to 15 minutes and
 starts it after `gate-fast`, in parallel with the isolated Windows test path.
-A preloaded Playwright image remains a separate follow-up because the first
-bounded pull could not complete its final large layer; adopting it requires an
-image smoke and runner provisioning, not only a YAML image tag.
+A preloaded Playwright image was implemented as a derivative of the existing
+node22/jj/pnpm image. `tools/build-forgejo-playwright-image.sh` builds it and
+runs Node, pnpm, jj, browser-presence, and headless Chromium version smokes
+before the `ubuntu-playwright` runner label is used.
+
+### 2026-07-24 Playwright Image Provisioning
+
+- [E] node34 built
+  `los-ci:node22-jj0.39.0-playwright1.61.1` as image
+  `sha256:1619965ee8252f6bbd97629a96379657aad3293a4dffbae776868868778c3b51`;
+  Docker reports 2,154,892,565 bytes.
+- [E] The image smoke reported Node `v22.23.1`, pnpm `9.0.0`, jj
+  `0.39.0`, and `Google Chrome for Testing 149.0.7827.55`.
+- [E] Playwright `1.61.1` launched that preloaded Chromium against
+  `about:blank` and wrote a non-empty 4,254-byte screenshot.
+- [E] node34 runner configuration was backed up to
+  `/home/z/forgejo/runner-data/config.yaml.bak-20260724-playwright`. It then
+  declared labels `[ubuntu-latest ubuntu-jj ubuntu-playwright docker]` with
+  zero tasks running during the restart.
+- [E] The Windows burst runner remained declared with labels
+  `[win-ci win-ci-jj]`; its Podman VM reported 15 GiB total memory, about
+  14 GiB available, 8 GiB swap, and no swap in use.
+- [E] PR `#54` UI run `222` (API run `247`) executed exact head
+  `377fdaa0ed3ea8f2f2acb64dd6a92a7d2dca6ff6` and completed in 11m26s. All
+  four contexts passed: `gate-fast` in 4m27s, `gate-web-e2e` in 1m17s,
+  `gate-test` in 6m20s, and `gate-drift` in 34s. This verifies the
+  `ubuntu-playwright` label and removes the earlier end-to-end `[U]` gap.
+- [E] During that run, sampled node34 available memory briefly fell to about
+  1.42 GiB, below the 1.5 GiB stop condition, then recovered through roughly
+  1.77-2.56 GiB. The non-CI `nmem-server` process used about 2.0-2.66 GiB
+  during the samples.
+- [E] A post-run audit classified PID `2357055` as the active, enabled
+  `nmem.service` systemd unit (`nowledge-mem`), not an orphan process. The
+  audit later reported about 2.5 GiB available memory, 5.75 of 5.90 GiB swap
+  used, and zero 10-second PSI memory pressure. Because no pre-run swap sample
+  exists for this head, the CI-attributable swap delta remains `[U]`.
+- [E] `CI-OBS-01` is paused at the documented resource threshold. Do not kill
+  `nmem-server` directly; resolve `CI-HOST-01` through an operator-owned
+  service scheduling, memory-limit, or host-separation decision before using
+  this run as a merge-readiness canary.
 
 Because the machine is powered on only when needed, it is not unattended
 always-available capacity. The required `win-ci*` jobs remain queued while its
@@ -455,6 +498,7 @@ that was not captured.
 | `2` | `27` | `1061be7f6a169726b6a9a11568b29a21898cf7ac` | `142` | 2s | 12m23s | 7m30s | 12m23s | skipped | unknown | unknown | unknown | 225 | failed | code/test failure: timing-sensitive 40ms scheduler concurrency assertion; stabilized in PR `28`; no unchanged-head rerun |
 | `3` | `28` | `a864f9d654fc44e9de79af683cc48ac25589504a` | `143` | 1s | 13m29s | 8m11s | 12m33s | 53s | unknown | unknown | unknown | 225 | green | no rerun; runtime memory/swap telemetry not captured |
 | `4` | `53` | `93cd3321e1c0140a5de2d4a52e8e3fc85dd59177` | `210` | 2s | 27m03s | 19m47s | ~27m | cancelled | 360 | unknown | unknown | 357 | failed | resource failure: concurrency 4 plus independent Web E2E exhausted CPU, memory, and swap; operator cancelled after required fast failure |
+| `5` | `54` | `377fdaa0ed3ea8f2f2acb64dd6a92a7d2dca6ff6` | `222` | 1s | 11m26s | 4m27s | 6m20s | 34s | ~1454 | unknown | unknown | unknown | green | Web E2E passed in 1m17s from the prebuilt image; resource stop condition triggered by the available-memory sample, with `nmem.service` using 2.0-2.66 GiB |
 
 ### Rolling Summary
 
@@ -462,7 +506,7 @@ Update this after samples 10 and 20.
 
 | Eligible PRs | Queue P95 | Total P95 | Minimum available memory | Maximum swap peak delta | Maximum swap +5m delta | Flake rate | Judgment |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `4 / 20` | pending | pending | 360 MiB | unknown | unknown | 0 / 4 eligible attempts | two green; one fixed timing-sensitive test failure; one resource stop event under the superseded concurrency envelope |
+| `5 / 20` | pending | pending | 360 MiB | unknown | unknown | 0 / 5 eligible attempts | three green; one fixed timing-sensitive test failure; one superseded-envelope resource failure; observation paused after the new split still crossed the 1.5 GiB available-memory stop condition |
 
 ## Rollback
 

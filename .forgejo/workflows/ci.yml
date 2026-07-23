@@ -15,12 +15,12 @@ concurrency:
 # main push runs only gate-fast because the protected PR head already passed
 # the required test and drift jobs. gate-fast stays on node34 and runs first;
 # gate-test then uses the Windows burst runner. Web E2E runs on node34 in
-# parallel with the Windows test path. This separates Forgejo
-# service capacity from the largest Node/PostgreSQL test workload without
-# making Chromium download latency part of the Windows runner path.
+# parallel with the Windows test path from a Playwright-preloaded image. This
+# separates Forgejo service capacity from the largest Node/PostgreSQL test
+# workload without making Chromium download latency part of the Windows path.
 jobs:
   gate-fast:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-jj
     timeout-minutes: 15
     env:
       TURBO_CONCURRENCY: 1
@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
-          corepack prepare pnpm@9.0.0 --activate
+          test "$(pnpm --version)" = "9.0.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
@@ -115,8 +115,8 @@ jobs:
   gate-web-e2e:
     if: forgejo.event_name != 'push'
     needs: gate-fast
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-playwright
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -134,14 +134,11 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
-          corepack prepare pnpm@9.0.0 --activate
+          test "$(pnpm --version)" = "9.0.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
-
-      - name: Install Chromium
-        run: pnpm --filter @los/web exec playwright install --with-deps chromium
 
       - name: Test Web operator paths
         run: pnpm --filter @los/web test:e2e

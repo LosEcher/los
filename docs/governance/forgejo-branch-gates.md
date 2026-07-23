@@ -25,9 +25,11 @@ installation uses `--prefer-offline`. This avoids downloading and executing an
 external cache action before repository checks can start. Turbo `test` remains
 uncached and every package test command executes on every PR.
 
-The node34 runner keeps `gate-fast` and Web E2E. `gate-fast` uses
-`ubuntu-latest` with `TURBO_CONCURRENCY=1`; Web E2E stays there until Chromium
-is provisioned in a Windows job image. The repo-scoped `win-los-canary` runner
+The node34 runner keeps `gate-fast` and Web E2E. `gate-fast` uses the
+pnpm-preloaded `ubuntu-jj` label with `TURBO_CONCURRENCY=1`; Web E2E uses the
+`ubuntu-playwright` label backed by
+`los-ci:node22-jj0.39.0-playwright1.61.1`, which preloads Chromium and its
+Debian dependencies. The repo-scoped `win-los-canary` runner
 handles `gate-test` through `win-ci-jj` and `gate-drift` through `win-ci`. Both
 labels use the pinned `los-ci:node22-jj0.39.0` image. `gate-test` advertises two
 Turbo package tasks through `LOS_TEST_CONCURRENCY=2` on the effective 8-vCPU,
@@ -52,9 +54,10 @@ Runner requirements are Linux containers, Git, Bash, Node 22+, Corepack, pnpm
 9, service containers, and outbound access to the package registry. The
 Windows labels require the locally provisioned `los-ci:node22-jj0.39.0` and
 `postgres:16` images because its Podman VM cannot reliably pull Docker Hub.
-The CI image must provide jj 0.39.0 and pnpm 9.0.0 and is built with
-`tools/build-forgejo-ci-image.sh`. The PostgreSQL service user must be able to
-create the temporary drift databases.
+The base CI image must provide jj 0.39.0 and pnpm 9.0.0 and is built with
+`tools/build-forgejo-ci-image.sh`. The node34 Playwright derivative is built
+and smoke-tested with `tools/build-forgejo-playwright-image.sh`. The PostgreSQL
+service user must be able to create the temporary drift databases.
 
 The Windows runner configuration must allow and mount its named store:
 
@@ -67,7 +70,8 @@ container:
 
 Windows jobs verify the image-provided pnpm version but do not run
 `corepack prepare`; otherwise a registry timeout can fail the job before the
-preheated package store is used.
+preheated package store is used. The node34 `ubuntu-jj` and
+`ubuntu-playwright` jobs follow the same rule.
 
 `win-los-canary` is a manually enabled burst runner. Start the Windows host,
 Podman machine, and runner before opening or updating a delivery PR; otherwise
