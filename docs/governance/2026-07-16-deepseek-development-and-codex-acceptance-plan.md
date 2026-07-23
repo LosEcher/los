@@ -173,7 +173,7 @@ pnpm check
 
 ### 6.1 Migration drift
 
-1. 先给 `tools/check-migration-drift.ts` 增加普通开发角色可执行的隔离模式，同时保留 CI 的
+1. 先给 `tools/check-migration-drift.mts` 增加普通开发角色可执行的隔离模式，同时保留 CI 的
    双 fresh DB 语义；不能把两边指到同一 DB，也不能用当前 live DB 做 destructive recreate。
 2. 优先方案是显式接收两个预创建 scratch database URL，并校验 database name 不同、
    不是配置中的 live database。若选择 schema 隔离，必须先写 ADR 说明与双 DB 语义等价。
@@ -266,4 +266,3 @@ Codex 对每批按以下顺序验收：
 3. 未执行 live DB seed、archive 或 status 更新。
 4. 未执行双 gateway process-kill/failover smoke。
 5. `loadSpecsForFiles` 本轮工具未暴露；分析按规则降级为直接读取相关 `.los/spec/` 文件。
-

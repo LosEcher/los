@@ -30,8 +30,8 @@ YELLOW='\033[0;33m'
 NC='\033[0m'
 
 # --no-tests skips Phase 7 (turbo test). Used by CI's gate-fast job so the
-# expensive DB-dependent test phase runs in its own parallel gate-test job
-# (per-package matrix) instead of blocking the fast feedback path.
+# expensive DB-dependent workspace test runs in gate-test only after the fast
+# feedback path succeeds.
 SKIP_TESTS=0
 for arg in "$@"; do
   if [[ "$arg" == "--no-tests" ]]; then
