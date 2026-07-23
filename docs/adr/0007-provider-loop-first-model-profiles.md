@@ -2,7 +2,19 @@
 
 ## Status
 
-Implemented (2026-06-15). The core design described here is now the active runtime architecture. All eight sub-tasks listed below have been implemented and verified.
+Implemented (2026-06-15), partially superseded by ADR 0039 (2026-07-22).
+
+The provider/model profile, compatibility harness, and explicit fallback gates
+remain active. ADR 0039 supersedes this ADR's requirement that the built-in LOS
+loop must remain the only core runtime and its assumption that every external
+execution library necessarily owns a competing state machine. The existing
+loop remains the production baseline until the ADR 0039 shadow, canary,
+pairwise-evaluation, and rollback gates pass; this status change does not switch
+the current runtime.
+
+All eight original sub-tasks below were implemented and verified against the
+2026-06-15 architecture. The remaining sections are retained as historical
+decision context and should be read with the supersession note above.
 
 ## Implementation Evidence
 

@@ -6,6 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./loop": "./src/loop.ts",
+    "./execution-kernel": "./src/execution-kernel.ts",
+    "./execution-kernel-registry": "./src/execution-kernel-registry.ts",
     "./scheduler": "./src/scheduler.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
@@ -69,11 +71,14 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "scenario:daily": "tsx src/scenario-economics-runner.ts",
+    "scenario:pi-shadow": "tsx src/pi-kernel-shadow-scenario-runner.ts",
     "test": "node --import tsx --import ./src/test-setup.ts --test --test-concurrency 1 --experimental-test-coverage '--test-coverage-include=src/**/*.ts' src/*.test.ts src/**/*.test.ts src/tools/builtin/worker-ask-tools.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@ast-grep/napi": "^0.40.5",
+    "@earendil-works/pi-agent-core": "0.81.1",
+    "@earendil-works/pi-ai": "0.81.1",
     "@los/contracts": "workspace:*",
     "@los/infra": "workspace:*",
     "fast-glob": "^3.3.3",

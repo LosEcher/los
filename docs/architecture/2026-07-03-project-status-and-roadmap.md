@@ -1,13 +1,13 @@
 # los 项目现状、规划与待办
 
-> **基线刷新**：2026-07-09（运行盘点 + AST/KG/wiring 拓扑）
+> **基线刷新**：2026-07-22（受控 task graph 执行与账本校验；其余盘点项仍以 2026-07-09 为准）
 > 历史审计：2026-07-03 工作树；上游 `AGENTS.md` / `SKILL.md` / ADR 0012、0020、0021、0024
 >
 > 文档结构：**当前基线 → 已完成并接线 → 待验证 → 真实 open backlog**。过期 checklist 不再当活待办。
 
 ## 一句话结论
 
-项目处于**自我治理基建期**：runtime 内核已成型。近期主线是压低账本噪声、打通 episodic 记忆输入、收敛 procedural 候选写路径（ADR 0020），而不是再拆 ReAct loop。
+项目仍处于自我治理基建期，但受控多 agent 已从“仅有 DAG 原语”推进到可执行基线：本地 2-worker + verifier graph 已通过真实 gateway/executor smoke。下一步不是扩大 worker 数量，而是补 graph provenance、恢复证据和串行/并行 eval 对比。
 
 ---
 
@@ -35,6 +35,7 @@
 | Stage A 证据 harness | ✅ 完成 2026-06-10 |
 | Stage B operator 契约层 | ✅ 已实现（ADR 0021）：RunContract 21 字段、RunPhase 10 态、B0/B-completion 闸门、approve/revise/verify/recover 路由 + CLI |
 | Tool-call repair pipeline | ✅ 已实现（ADR 0024）：`healing.ts` 配对修复 + `storm.ts` 风暴抑制，59/59 测试绿 |
+| 受控 task graph 基线 | ✅ 2-4 workers、strict editable surfaces、独立 verifier、显式 integration owner；2026-07-22 live smoke 3/3 succeeded |
 
 ### 1.3 已知短板与债务（06-24 审计 + 06-28 自迭代文档）
 
@@ -71,11 +72,13 @@
 
 ---
 
-## 二、当前进行中（未提交，working tree）
+## 二、当前执行进度（2026-07-22）
 
-**Web 聊天流式重构**（`feat/web-chat-streaming`）：WS 主通道 + SSE 回退、`useChatRun`/`useChatStream` 抽 hook、虚拟列表与 markdown 渲染、审批条与 files 侧栏。worker-messages / P0–P1 已合入 main（#116、chore/remove-input-preprocessor）。
-
-提交前：`pnpm check`、`@los/web` test + build。
+1. 受控 task graph 的 create/watch/cancel/run/integrate 路径、Web 控制面和契约已进入当前 `main` 基线。
+2. 本轮修复 verifier 与 graph scheduler 重复终结 run spec 的状态所有权冲突，并增加唯一最终迁移回归断言。
+3. 本地 gateway/executor 已按工作源码重启；真实只读 graph smoke 返回 HTTP 200，2 个 workers 和 1 个 verifier 全部 succeeded。
+4. `todo-los-daily-agent-small-governed-graphs` 的持久化状态已从 `backlog` 对齐为 `done`；无关 Todo 漂移未自动改写。
+5. `pnpm check` 与 `pnpm run gate`（9 phases、0 failures）均已通过；本轮尚未 commit、push、创建 PR 或部署远端 executor。
 
 ---
 
@@ -89,7 +92,7 @@
 | B operator 契约层 | 执行前明确意图行为 | ✅ 已实现（ADR 0021）—— 见下方剩余项 |
 | C 个人 eval 语料库 | 重复失败模式 → 20-50 窄 eval | 短中程目标；E01-E10 已文档化 |
 | D 状态化 runtime | 中断可检查可恢复 | 部分实现（ADR 0012 Phase 4）；需证 /chat 中断 resume |
-| E 受控多 agent | planner/executor/verifier 角色 | 部分实现（DAG store）；硬化 graph UX/provenance/eval 后再加自治 |
+| E 受控多 agent | planner/executor/verifier 角色 | 受控执行基线已实现；graph provenance、恢复 smoke、eval 对比后再加自治 |
 
 **Stage B 剩余**（ADR 0021）：approve/revise 单测 · gateway 路由集成测 · audit→execution→closeout 端到端 smoke · durable child lineage · active execution resume · phase 拒绝/延迟度量 · Web approval UI · stop-condition 运行时强制 · commit-boundary 自动化。
 

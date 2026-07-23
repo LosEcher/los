@@ -8,7 +8,7 @@
  * with no "first feature use patches the schema" window.
  *
  * This is the single source of truth for the set of ensure*Store functions.
- * tools/check-migration-drift.ts imports ensureAllStores() from here so the
+ * tools/check-migration-drift.mts imports ensureAllStores() from here so the
  * drift gate bootstraps its ensure-only DB with the exact same set.
  *
  * Ordering: only dead_letter_events has an inline FK REFERENCES (→ task_runs,

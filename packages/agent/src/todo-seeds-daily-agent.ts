@@ -75,7 +75,7 @@ export const _DAILY_AGENT_PRODUCT_TODO_SEED: CreateTodoInput[] = [
       ],
       evidence: [
         'contracts/run-spec.yaml@0.3.0',
-        'contracts/run-stream.yaml@0.4.0',
+        'contracts/run-stream.yaml@0.5.0',
         'contracts/work-item.yaml@0.4.0',
         'packages/agent/src/planning-output.test.ts',
         'packages/agent/src/run-spec-plans.test.ts',
