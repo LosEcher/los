@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { ensureSessionEventStore } from '../session-events.js';
-import { runAgent } from '../loop.js';
+import { resolveExecutionKernel } from '../execution-kernel-registry.js';
+import { _createKernelEventProjector } from '../kernel-event-projection.js';
 import { recordFailoverEval } from '../run-evals.js';
+import { startScheduledKernelShadow } from './kernel-shadow.js';
 import {
   ensureTaskRunStore,
   findActiveTaskRunByDedupeKey,
@@ -49,14 +51,13 @@ import {
 } from '../providers/provider-fallback.js';
 import type { SessionEventRecord } from '../session-events.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
-
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
   await ensureTaskRunStore();
   await ensureSessionEventStore();
-
   const taskRunId = input.taskRunId ?? `task-${randomUUID()}`;
   const sessionId = input.sessionId ?? `session-${Date.now()}`;
   const traceId = input.traceId ?? taskRunId;
+  const executionKernel = resolveExecutionKernel(input.executionKernelKind);
   const dedupeKey = normalizeOptionalString(input.dedupeKey);
   const contractMetadata = {
     ...(input.metadata ?? {}),
@@ -79,7 +80,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   });
   const initialProvider = initialFallbackTarget?.provider ?? input.provider;
   const initialModel = initialFallbackTarget?.model ?? input.model;
-
   if (dedupeKey) {
     const existing = await findActiveTaskRunByDedupeKey(dedupeKey);
     if (existing) return reportTaskDeduplicated(input, existing, taskRunId);
@@ -113,7 +113,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     throw error;
   }
   const nodeId = executor?.nodeId ?? 'gateway-local';
-
   const creation = await createTaskRunOrFindActive({
     id: taskRunId,
     sessionId,
@@ -189,6 +188,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       toolRetry: input.toolRetry,
       timeoutMs,
       disposition,
+      requestedExecutionKernel: input.executionKernelKind ?? 'los',
+      executionKernel: executionKernel.identity,
     },
     runContract,
   });
@@ -232,6 +233,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     }
     await input.onSessionEvent?.(event);
   };
+  const projectKernelEvent = _createKernelEventProjector({ sessionId, taskRunId, traceId,
+    runSpecId: input.runSpecId, nodeId, onSessionEvent: handleSessionEvent });
   await emitTaskEvent(sessionId, 'task.running', running);
   await input.onTaskEvent?.({ type: 'task.running', taskRun: running });
   if (input.runContract?.hooks) {
@@ -279,11 +282,13 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       cancelScheduledTask(taskRunId, `timeout:${timeoutMs}ms`);
     }, timeoutMs);
   }
-
+  let kernelShadow: ReturnType<typeof startScheduledKernelShadow>;
   try {
+    kernelShadow = startScheduledKernelShadow({ task: input, prompt: runtimePrompt, productionKernel: executionKernel.identity, sessionId, taskRunId, traceId, toolMode, remoteExecutor: Boolean(executor), config: { ...input, sessionId, taskRunId, traceId, provider: initialProvider, model: initialModel, toolMode, sandboxMode, architectEditor, signal: controller.signal, runContractMetadata: { ...running.metadata, ...(runContract ? { runContract } : {}) } } });
     const result = executor
       ? await runAgentOnExecutor(executor, {
           taskRunId,
+          executionKernelKind: executionKernel.identity.kind,
           leaseVersion,
           agentTaskLease: input.agentTaskLease,
           leaseMs,
@@ -322,6 +327,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           signal: controller.signal,
           onSessionEvent: handleSessionEvent,
+          onKernelEvent: projectKernelEvent,
           onModelDelta: input.onModelDelta,
           onToolCallState: async (transition) => {
             await persistScheduledToolCallState({
@@ -334,7 +340,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           },
           onCheckpoint: input.onCheckpoint,
         })
-      : await runAgent(runtimePrompt, {
+      : await executionKernel.run(runtimePrompt, {
           sessionId,
           runSpecId: input.runSpecId,
           provider: initialProvider,
@@ -383,7 +389,8 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
           onModelDelta: input.onModelDelta,
           onCheckpoint: input.onCheckpoint,
           contextMonitor: input.contextMonitor,
-        });
+        }, projectKernelEvent);
+    await kernelShadow?.settle(result);
 
     if (disposition === 'planning') {
       return await completePlanningDisposition({
@@ -470,6 +477,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await kernelShadow?.cancel(message);
     if (isAbortError(err)) {
       const reason = getScheduledTaskAbortReason(taskRunId) ?? message;
       if (isWorkerBlockReason(reason)) {
@@ -581,7 +589,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         errorMessage: message,
       });
     }
-
     throw err;
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -590,4 +597,4 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     unregisterTaskController();
     clearCancellation(taskRunId).catch(() => undefined);
   }
-}  // end runScheduledAgentTask
+}

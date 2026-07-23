@@ -12,4 +12,5 @@ docker build \
 docker run --rm --platform linux/amd64 "$IMAGE" sh -c '
   node -e "if (Number(process.versions.node.split(\".\")[0]) < 22) process.exit(1)"
   jj --version
+  test "$(pnpm --version)" = "9.0.0"
 '

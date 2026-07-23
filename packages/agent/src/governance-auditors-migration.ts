@@ -3,7 +3,7 @@
  *
  * DETECTION-ONLY. Reads the committed `tools/migration-drift-baseline.txt`
  * (the persisted drift state produced by the migration-drift CI gate,
- * tools/check-migration-drift.ts) and groups it per table so the sweeper can
+ * tools/check-migration-drift.mts) and groups it per table so the sweeper can
  * surface one operator TODO per drifted table. A Claude agent then works the
  * TODOs via /pr-self-merge (rewrite the migration to match ensure*Store,
  * shrink the baseline) — this job never generates SQL, opens PRs, or merges.
@@ -62,7 +62,7 @@ export interface MigrationDriftAuditSummary {
 /**
  * Parse the baseline file content into per-table drift. PURE (no I/O).
  *
- * Line format (see tools/check-migration-drift.ts `diffShared`):
+ * Line format (see tools/check-migration-drift.mts `diffShared`):
  *   `CATEGORY|[dir] table|...signature`
  * where CATEGORY ∈ {COLUMNS,INDEXES,CONSTRAINTS,FUNCTIONS,TRIGGERS}, [dir] is
  * `[mig-only]` or `[ensure-only]` followed by padding to a 13-char prefix

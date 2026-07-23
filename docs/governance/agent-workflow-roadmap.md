@@ -184,30 +184,134 @@ Exit criteria:
 
 ### Stage E: Controlled Multi-Agent Execution
 
-Status: partially implemented early. The DAG store, dependency claims, bounded
-parallel execution, verifier tasks, provider/model task selection, and
-procedural memory candidates exist. Remaining work is to harden graph-level
-operator UX, provenance display, and eval comparisons before increasing
-autonomy.
+Status: bounded baseline implemented as of 2026-07-22. The runtime supports
+operator-created graphs with 2-4 workers, strict editable-surface ownership,
+bounded parallel execution, dependency blocking, an independent verifier, and
+an explicit integration owner. A persisted local smoke returned HTTP 200 with
+three of three tasks succeeded and one legal graph-owned final transition; see
+`docs/operations/2026-07-22-governed-agent-graph-smoke.md`.
+
+This status does not mean general multi-agent autonomy is complete. Remaining
+work is graph-level provenance display, interrupted-run recovery evidence,
+serial-versus-graph eval comparison, and operator-reviewed live integration
+before increasing scale or reducing consent gates.
 
 Goal: support planner, executor, and verifier roles without turning the runtime
 into unconstrained peer chat.
 
 Required sequencing:
 
-1. finish run specs and state transitions first;
-2. add a minimal DAG only after retry and verification states are observable;
-3. let independent tasks run in parallel;
-4. make verifier tasks capable of blocking completion;
+1. finish run specs and state transitions first — implemented;
+2. add a minimal DAG only after retry and verification states are observable — implemented;
+3. let independent tasks run in parallel — implemented with strict non-overlapping editable surfaces;
+4. make verifier tasks capable of blocking completion — implemented and covered by success/failure regression tests;
 5. use memory compression and procedural rule candidates only with evidence
    pointers and review gates.
 
 Exit criteria:
 
 1. a graph run shows dependencies, attempts, verifier outcomes, and final
-   state;
+   state — satisfied in the gateway read model and persisted smoke evidence;
 2. procedural memory has provenance and owner-layer placement;
 3. autonomy improvements can be compared with eval metrics.
+
+### Stage F: Pluggable Execution Kernel And Pi Adoption
+
+Status: architecture decision accepted and K1 completed on 2026-07-22.
+ADR 0039 and `contracts/execution-kernel.yaml` define LOS as the authoritative
+governance harness and Pi as the first external execution-kernel candidate.
+`packages/agent/src/execution-kernel.ts` now wraps the current LOS loop, and the
+gateway-local scheduler path calls it while recording exact kernel provenance.
+`kernel-event-projection.ts` now persists bounded audit evidence to the existing
+`session_events` ledger without duplicating raw transcript, tool arguments, or
+checkpoint contents. The current loop now executes through `LosToolBroker`,
+preserving phase, pre-action, capability, state, retry, and evidence controls.
+The scheduler and executor resolve the same fail-closed registry, while HTTP
+and SSH transports carry the selected kind and return canonical kernel events
+for scheduler-owned projection. K2a now pins Pi `0.81.1`, aligns the Node engine
+floor, and provides an unregistered deterministic adapter with faux-provider
+golden traces. K2b now maps LOS-resolved provider/auth/model inputs, canonical
+history, and the governed tool catalog; a bounded live DeepSeek probe passed.
+The Pi transport also records LOS-owned provider-call telemetry. Unsupported
+fallback, architect-editor, context, model-setting, and child-execution
+semantics now have explicit fail-closed or LOS-owned decisions. K3 adds an
+explicit read-only scheduler shadow with derived evidence lineage; its first
+live no-tool DeepSeek comparison completed with equal output hashes and no
+tools. Corrected corpus `1.0.1` and rubric `pi-shadow-readonly-v1` preregistered five
+scenario families and 17 required observations. The first full corpus run is
+complete with 16 passing and one failing observation; the failure is in
+the live read-only-tool output-hash assertion, while tool sequence, successful
+tool state, terminal state, and isolated lineage passed. The report therefore
+remains `collecting`; corpus `1.1.0` / rubric `pi-shadow-readonly-v2` then
+completed 14/17 against candidate `0.81.1`, exposing two real candidate reads
+versus one LOS read in every live tool scenario. Candidate `0.81.1+los.1`
+mapped the profile parallel-tool policy, started with zero observations, and
+also completed 14/17 because each live tool case made a second read in the next
+turn. A deterministic second-turn envelope probe then verified equal
+prompt/history, tool call/result, and parallel policy, while identifying
+explicit Pi reasoning/output defaults and several protocol-shape differences.
+It narrowed the next adapter hypothesis but did not prove one causal field.
+Exact candidate `0.81.1+los.2` then started with zero qualifying observations,
+preserved unspecified reasoning/output-limit semantics, and passed 11/11
+deterministic corpus requirements. Authorized live collection added three
+passing no-tool records and one tool record before stopping. The tool record
+failed only because the collector supplied the repository root; both kernels
+made one successful read and returned the same `"los"` value instead of the
+preregistered `"@los/agent"`. That v2 report remains immutable at 15/17
+observed, 14 passing, and 1 failing. Corpus `1.1.1` / rubric
+`pi-shadow-readonly-v3` now verifies the package workspace fixture before any
+provider call, persists only fixture identity/content hashes, and stops live
+collection after failed or unpersisted evidence. Authorized v3 collection
+produced three passing no-tool records and one passing tool record. The second
+tool record used the correct fixture and both kernels completed one successful
+read, but Pi did not return the preregistered single-field JSON result envelope.
+The report is 11/11 deterministic, 5/6 live, 16/17 observed, 15 passing, 1
+failing, `ignoredCount=15`, and `collecting`. Collection stopped before the
+sixth observation, and the same live corpus is not rerunnable. Event lengths
+and a hash-matched reconstruction identify the failure as the correct fenced
+JSON preceded by prose, while excluding Pi stream duplication. Candidate
+`0.81.1+los.3`, corpus `1.1.2`, and rubric `pi-shadow-readonly-v4` retain the
+strict comparator, strengthen the whole-response prompt, and record only
+bounded envelope shape/length diagnostics. The v4 identity started at 0/17 and
+then passed deterministic evidence 11/11 without provider calls. Authorized
+live collection passed 6/6, making the v4 report 17/17 passing with zero
+failures and `ready_for_k4_policy_review`. Explicit
+`thinking='enabled'` mapping remains a separate compatibility gap.
+The pre-corpus smoke and superseded corpus `1.0.0` remain ignored. K4 policy
+review is now eligible, but registry admission and canary use remain blocked.
+Pi remains unavailable as a selected production kernel. The
+current LOS loop stays the production baseline until a
+preregistered evaluation revision, canary, formal pairwise evaluation, and
+rollback gates pass.
+
+Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
+RunContract, policy, tool execution, durable evidence, recovery, verification,
+or final-transition ownership out of LOS.
+
+Required sequencing:
+
+1. wrap the current loop behind a provider-neutral `ExecutionKernel` protocol;
+2. route all kernel tool requests through an LOS-owned ToolBroker;
+3. add an exact-version Pi adapter with deterministic golden traces;
+4. run read-only shadow and canary comparisons before project writes;
+5. admit managed-workspace and graph-worker execution only after AP, lease,
+   transcript, and verifier parity;
+6. promote Pi by preregistered pairwise evidence, not by dependency wiring;
+7. retain `LosKernelAdapter` as rollback and future replacement candidate.
+
+Exit criteria:
+
+1. gateway and scheduler use no Pi-native event, message, or checkpoint types;
+2. every attempt records exact kernel and protocol provenance;
+3. Pi cannot write LOS state or execute tools outside ToolBroker;
+4. deterministic and real-task pairwise evidence covers completion, recovery,
+   operator intervention, governance violations, cost, and latency;
+5. default promotion has a per-run rollback and an accepted observation window.
+
+The owning migration record is
+`docs/governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md`. The parent
+daily-agent product remains in progress until its existing Web-first acceptance
+and graph integration work plus the kernel baseline are complete.
 
 ## Operating Modes
 

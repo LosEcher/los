@@ -34,8 +34,8 @@
     "check:contracts": "./tools/check-contracts.sh",
     "contracts:generate": "pnpm --filter @los/contracts generate",
     "check:bypass": "./tools/check-state-machine-bypass.sh",
-    "check:migration-drift": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-migration-drift.ts",
-    "check:migration-drift:update-baseline": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-migration-drift.ts --update-baseline",
+    "check:migration-drift": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-migration-drift.mts",
+    "check:migration-drift:update-baseline": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-migration-drift.mts --update-baseline",
     "check": "turbo check && ./tools/check-structure.sh && ./tools/check-state-machine-bypass.sh && ./tools/check-contracts.sh && ./tools/check-unwired-exports.sh && pnpm check:wiring && pnpm check:channels",
     "check:wiring": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-wiring-topology.ts",
     "check:wiring:update-baseline": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-wiring-topology.ts --update-baseline",
@@ -58,7 +58,7 @@
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   },
   "dependencies": {
     "undici": "^8.5.0"

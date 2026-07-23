@@ -11,18 +11,17 @@ concurrency:
   group: ci-${{ forgejo.ref }}
   cancel-in-progress: true
 
-# Primary CI workflow. Pull requests run all three jobs. A main push runs only
-# gate-fast because the protected PR head already passed gate-test and
-# gate-drift; this avoids repeating the two expensive clean-checkout jobs after
-# every merge. The node34 runner has two slots, while the workspace test job
-# limits Turbo package concurrency to four on its three-core host. gate-fast
-# caps its own Turbo work at one task, so the two jobs stay within the runner's
-# observed capacity while the expanded workspace suite remains below the
-# runner's execution window.
+# Primary CI workflow. Pull requests run three required jobs plus Web E2E. A
+# main push runs only gate-fast because the protected PR head already passed
+# the required test and drift jobs. gate-fast stays on node34 and runs first;
+# gate-test then uses the Windows burst runner. Web E2E runs on node34 in
+# parallel with the Windows test path. This separates Forgejo
+# service capacity from the largest Node/PostgreSQL test workload without
+# making Chromium download latency part of the Windows runner path.
 jobs:
   gate-fast:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       TURBO_CONCURRENCY: 1
     steps:
@@ -55,8 +54,9 @@ jobs:
 
   gate-test:
     if: forgejo.event_name != 'push'
-    runs-on: ubuntu-jj
-    timeout-minutes: 25
+    needs: gate-fast
+    runs-on: win-ci-jj
+    timeout-minutes: 40
 
     services:
       postgres-test:
@@ -77,7 +77,7 @@ jobs:
       DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
       TEST_DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
       NODE_ENV: test
-      LOS_TEST_CONCURRENCY: 4
+      LOS_TEST_CONCURRENCY: 2
 
     steps:
       - name: Checkout
@@ -95,7 +95,7 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
-          corepack prepare pnpm@9.0.0 --activate
+          test "$(pnpm --version)" = "9.0.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Verify jj runtime
@@ -106,16 +106,17 @@ jobs:
 
       - name: Test workspace with Turbo concurrency
         run: pnpm test
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       - name: Enforce critical module coverage
         run: pnpm test:coverage:critical
-        timeout-minutes: 5
+        timeout-minutes: 8
 
   gate-web-e2e:
     if: forgejo.event_name != 'push'
+    needs: gate-fast
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -148,7 +149,7 @@ jobs:
   gate-drift:
     if: forgejo.event_name != 'push'
     needs: gate-test
-    runs-on: ubuntu-latest
+    runs-on: win-ci
     timeout-minutes: 10
 
     services:
@@ -187,7 +188,7 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
-          corepack prepare pnpm@9.0.0 --activate
+          test "$(pnpm --version)" = "9.0.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies

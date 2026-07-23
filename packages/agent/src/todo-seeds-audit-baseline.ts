@@ -450,7 +450,7 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       problem: 'migration 漂移无法自动检测',
       solution: '加 governance job type schema_consistency，比对 column vs migration',
       files: ['packages/agent/src/governance-auditors.ts', 'packages/infra/migrations/'],
-      evidence: ['tools/check-migration-drift.ts is enforced by gate-drift', 'migration_drift_fix governance audit is active', 'tools/migration-drift-baseline.txt has 0 entries'],
+      evidence: ['tools/check-migration-drift.mts is enforced by gate-drift', 'migration_drift_fix governance audit is active', 'tools/migration-drift-baseline.txt has 0 entries'],
       resolution: 'Implemented as the migration-drift gate plus migration_drift_fix governance job.',
       statusUpdatedAt: '2026-07-15',
     },

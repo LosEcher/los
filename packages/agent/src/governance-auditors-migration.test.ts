@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMigrationDriftBaseline, runMigrationDriftAudit } from './governance-auditors-migration.js';
 
-// Sample baseline lines — exact format from tools/check-migration-drift.ts diffShared:
+// Sample baseline lines — exact format from tools/check-migration-drift.mts diffShared:
 // `CATEGORY|[dir] table|...` where [mig-only] has 4 trailing spaces, [ensure-only] has 1.
 const SAMPLE = [
   // artifacts: COLUMNS drift in BOTH directions → P2 (silent-apply class)

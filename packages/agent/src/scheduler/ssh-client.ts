@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import type { AgentResult, AgentConfig, ToolCallStateTransition } from '../loop.js';
+import type { KernelEvent } from '../execution-kernel.js';
 import type { ExecutorNodeRecord } from '../executor-nodes.js';
 
 const log = getLogger('ssh-client');
@@ -240,6 +241,7 @@ export async function runAgentOnSSHExecutor(
   input: {
     taskRunId: string;
     leaseMs: number;
+    executionKernelKind: string;
     prompt: string;
     config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
@@ -247,12 +249,14 @@ export async function runAgentOnSSHExecutor(
     onModelDelta?: AgentConfig['onModelDelta'];
     onToolCallState?: AgentConfig['onToolCallState'];
     onCheckpoint?: AgentConfig['onCheckpoint'];
+    onKernelEvent?: (event: KernelEvent) => void | Promise<void>;
   },
 ): Promise<AgentResult> {
   const payload = {
     taskRunId: input.taskRunId,
     nodeId: sshExecutor.nodeId,
     leaseMs: input.leaseMs,
+    executionKernelKind: input.executionKernelKind,
     prompt: input.prompt,
     config: input.config,
   };
@@ -270,6 +274,7 @@ export async function runAgentOnSSHExecutor(
       event?: unknown;
       delta?: unknown;
       transition?: unknown;
+      kernelEvent?: unknown;
       result?: unknown;
       error?: string;
     };
@@ -286,6 +291,8 @@ export async function runAgentOnSSHExecutor(
       await input.onModelDelta?.(chunk.delta as any);
     } else if (chunk.type === 'tool_call_state') {
       await input.onToolCallState?.(chunk.transition as ToolCallStateTransition);
+    } else if (chunk.type === 'kernel_event') {
+      await input.onKernelEvent?.(chunk.kernelEvent as KernelEvent);
     } else if (chunk.type === 'result') {
       result = chunk.result as AgentResult;
     } else if (chunk.type === 'error') {

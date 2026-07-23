@@ -1,5 +1,6 @@
 import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
+import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
 import type {
   ExecutorCapabilityRequirement,
@@ -173,6 +174,7 @@ export async function runAgentOnExecutor(
     leaseVersion: number;
     agentTaskLease?: { taskId: string; leaseVersion: number };
     leaseMs: number;
+    executionKernelKind: string;
     prompt: string;
     config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
@@ -180,6 +182,7 @@ export async function runAgentOnExecutor(
     onModelDelta?: AgentConfig['onModelDelta'];
     onToolCallState?: AgentConfig['onToolCallState'];
     onCheckpoint?: AgentConfig['onCheckpoint'];
+    onKernelEvent?: (event: KernelEvent) => void | Promise<void>;
   },
 ): Promise<AgentResult> {
   // SSH-backed executors use a different transport (ssh CLI + ndjson stream).
@@ -207,6 +210,7 @@ export async function runAgentOnExecutor(
       leaseVersion: input.leaseVersion,
       agentTaskLease: input.agentTaskLease,
       leaseMs: input.leaseMs,
+      executionKernelKind: input.executionKernelKind,
       prompt: input.prompt,
       config: input.config,
     }),
@@ -235,6 +239,8 @@ export async function runAgentOnExecutor(
   for (const transition of toolCallStates) {
     await input.onToolCallState?.(transition as ToolCallStateTransition);
   }
+  const kernelEvents = Array.isArray(data?.kernelEvents) ? data.kernelEvents : [];
+  for (const event of kernelEvents) await input.onKernelEvent?.(event as KernelEvent);
   if (!data?.result || typeof data.result !== 'object') {
     throw new Error(`Executor ${executor.url} returned no agent result`);
   }
@@ -294,6 +300,7 @@ async function readExecutorStreamResponse(
     onSessionEvent?: AgentConfig['onSessionEvent'];
     onModelDelta?: AgentConfig['onModelDelta'];
     onToolCallState?: AgentConfig['onToolCallState'];
+    onKernelEvent?: (event: KernelEvent) => void | Promise<void>;
   },
 ): Promise<AgentResult> {
   if (!res.ok) {
@@ -317,6 +324,7 @@ async function readExecutorStreamResponse(
       event?: unknown;
       delta?: unknown;
       transition?: unknown;
+      kernelEvent?: unknown;
       result?: unknown;
       error?: string;
     };
@@ -326,6 +334,8 @@ async function readExecutorStreamResponse(
       await input.onModelDelta?.(chunk.delta as any);
     } else if (chunk.type === 'tool_call_state') {
       await input.onToolCallState?.(chunk.transition as ToolCallStateTransition);
+    } else if (chunk.type === 'kernel_event') {
+      await input.onKernelEvent?.(chunk.kernelEvent as KernelEvent);
     } else if (chunk.type === 'result') {
       result = chunk.result as AgentResult;
     } else if (chunk.type === 'error') {

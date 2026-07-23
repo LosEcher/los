@@ -42,10 +42,11 @@ stateful services. Three Node workspaces plus PostgreSQL service containers can
 increase reclaim and I/O wait enough to make nominal parallelism slower or less
 reliable.
 
-Two runner slots are the current limit. The test job caps Turbo at two package
-tasks and the fast job caps it at one. This keeps the combined package-task
-limit aligned with the three-core host while still allowing the drift job or
-non-Turbo fast checks to overlap.
+Two runner slots remain the host-level limit. The 2026-07-17 acceptance run
+allowed the test job's two Turbo tasks to overlap the fast job's single task.
+The 2026-07-23 resource stop event below supersedes that scheduling rule: fast
+and test are now serialized, and each expensive stage advertises only one Turbo
+task so the shared host retains service headroom.
 
 ## Effective Configuration
 
@@ -95,21 +96,23 @@ that the jobs can overlap safely.
 `.forgejo/workflows/ci.yml` applies these rules:
 
 1. A newer run for the same ref cancels the older run.
-2. Pull requests and manual dispatch run `gate-fast`, `gate-test`, and
-   `gate-drift`.
+2. Pull requests and manual dispatch run `gate-fast`, `gate-test`,
+   `gate-drift`, and Web E2E.
 3. A push to protected `main` runs `gate-fast` only.
-4. The runner mounts one persistent pnpm content-addressed store into all job
-   containers.
+4. Each runner mounts its own persistent pnpm content-addressed store into its
+   job containers.
 5. `pnpm install --frozen-lockfile --prefer-offline` consumes that store without
    weakening lockfile enforcement.
 6. No external cache action or cross-run Turbo cache is used; every test still
    executes.
-7. `gate-test` sets `LOS_TEST_CONCURRENCY=2`, and `gate-fast` sets
-   `TURBO_CONCURRENCY=1`; local development keeps the existing test default of
-   four unless the variable is set.
+7. `gate-fast` sets `TURBO_CONCURRENCY=1` on node34; after it passes,
+   `gate-test` runs on Windows with `LOS_TEST_CONCURRENCY=2`. Local development
+   keeps the existing test default of four unless the variable is set.
 8. `gate-drift` waits for `gate-test` during the observation window; its
    PostgreSQL service identity is distinct from `postgres-test`, so a later
    parallelization trial cannot rely on an ambiguous shared DNS name.
+9. Web E2E waits for `gate-fast`, then runs on node34 in parallel with the
+   Windows test path.
 
 The `main` fast-only rule is safe only while Forgejo branch protection requires
 all three PR checks and `block_on_outdated_branch=true`. The API showed required
@@ -157,7 +160,7 @@ Not yet verified:
 - `[U]` repeated real pull-request batches remain free of queueing regressions,
   sustained swap growth, and resource-related flakes over a 10-20 PR window.
 
-## Acceptance Result
+## 2026-07-17 Acceptance Result
 
 The acceptance runs showed:
 
@@ -171,10 +174,12 @@ The acceptance runs showed:
    `gate-test` completes;
 5. all three required PR contexts remain green and mergeable.
 
-Keep `capacity: 2` while the host retains at least about 1.5 GiB available
-memory without sustained swap growth. The acceptance runs remained above that
-limit. Restore the backup and restart only `forgejo-runner` if later batches
-cross it or introduce resource-related flakes.
+These results describe the 2026-07-17 workload. The later resource event below
+showed that the expanded suite no longer fits the same overlap envelope. Keep
+runner capacity at two but serialize fast and test while node34 retains the CI
+workload. Restore the backup and restart only `forgejo-runner` if later batches
+cross the documented resource stop condition or introduce resource-related
+flakes.
 
 ## Post-Delivery Todo Ledger
 
@@ -210,6 +215,176 @@ and SHA-256 checksum, and `gate-test` verifies `jj --version` before running the
 workspace suite. Building the image requires access to the upstream release
 asset, but normal Forgejo CI execution does not depend on GitHub after the
 image is provisioned.
+
+## 2026-07-23 Resource Stop Event
+
+### Observation
+
+PR `#53`, head `93cd3321e1c0140a5de2d4a52e8e3fc85dd59177`, produced UI run
+`210` (API run `235`). `gate-fast` failed after 19m47s while TypeScript builds
+were still running, without a reported type error. `gate-test` continued for
+about 27 minutes; its recorded assertions were passing, but package
+build/coverage work had not completed when the run was cancelled. The Web E2E
+and drift jobs were cancelled after the required fast job had already failed.
+
+During the overlap on node34, the 3-vCPU host reached load averages of
+17.29 / 44.09 / 40.99, available memory fell to 360 MiB, and all 6045 MiB of
+swap was in use. The `gate-test` container alone consumed about 225% CPU,
+952 MiB of memory, and 170 processes. Eight seconds after cancelling the run,
+CI containers had exited and available memory recovered to 1514 MiB, while
+about 6035 MiB of swap remained in use. The pnpm store was 357 MiB and the host
+filesystem still had 53 GiB free, so dependency storage capacity was not the
+bottleneck.
+
+### Judgment
+
+This met the documented resource stop condition. The operator cancelled the
+remaining work after `gate-fast` failed because that exact head could no longer
+be merged. The regression came from combining `LOS_TEST_CONCURRENCY=4` with a
+concurrent `gate-fast` task on a 3-vCPU host, followed by independently
+scheduled Chromium work while `gate-test` was still active. Splitting tests
+into more simultaneous jobs on the same two-slot runner would multiply
+checkout, install, PostgreSQL, and Node process overhead without adding CPU or
+memory.
+
+The first corrective configuration restored `LOS_TEST_CONCURRENCY=2`, retained
+`TURBO_CONCURRENCY=1` for `gate-fast`, and made Web E2E depend on both
+CPU-heavy jobs. While replacement head
+`b2357646b0b98bd5923516a07e9c21da5f9fd740` ran fast and test concurrently,
+both the Forgejo LAN API and the node34 SSH banner were unresponsive within
+their bounded probes. A later SSH attempt took about 35 seconds to return and
+reported load averages of 101.76 / 78.68 / 53.28, only 50 MiB available memory,
+and all 6045 MiB of swap in use; `docker stats` still did not return promptly.
+This confirmed that reducing only the test package limit did not leave enough
+host headroom while the two clean jobs still overlapped.
+
+The second correction made `gate-test` depend on `gate-fast`. This eliminated
+the clean-job overlap: replacement UI run `212` (API run `237`) completed fast
+in 4m27s and then started test at package concurrency two. During test,
+available memory declined from 2681 MiB to 1174 MiB, swap grew from 3099 MiB to
+3940 MiB, load reached 8.77, and the test container reached 225 processes. The
+operator cancelled the run when it crossed the 1.5 GiB stop condition.
+
+The final node34 correction retains that dependency and sets both expensive
+stages to one advertised Turbo task. After they pass, Web E2E may overlap only
+the short drift job. This preserves the existing test and browser coverage,
+fails fast before allocating the test container, and removes duplicate
+clean-job builds from the same CPU window. The bounded timeout increases remain
+in place so a healthy but slower shared runner is not mistaken for a code
+failure.
+
+### Remaining Verification
+
+The replacement exact head must pass `gate-fast`, `gate-test`, `gate-drift`,
+and `gate-web-e2e`. During fast and Web E2E, node34 should retain at least 1.5
+GiB available memory and keep the Forgejo API responsive. During test and
+drift, the Windows Podman VM should avoid swap growth, keep the runner online,
+and retain service-container DNS. Do not increase job or package concurrency,
+or split the test suite into additional concurrent jobs, until that evidence
+is recorded. Moving Web E2E should first provision Chromium in the runner
+image instead of reinstalling it per run.
+
+### Windows Runner Candidate
+
+The online `DESKTOP-R45553O` candidate was inspected through its existing
+`win-los` SSH identity. It has an AMD Ryzen 7 PRO 8845HS with 8 cores / 16
+logical processors, 79.8 GiB of memory with 63.4 GiB free, and a 1.86 TiB
+system disk with 858 GiB free. Tailscale reported a direct LAN path through
+`192.168.31.5`; SSH and RDP were reachable. Its Realtek 2.5GbE adapter is armed
+for wake events.
+
+The host now has a repo-scoped Forgejo runner named `win-los-canary`. Its
+rootful Podman 5.7 VM reports an effective 8 vCPU, about 16 GiB of memory, and
+8 GiB of swap; the 2-GiB value shown by `podman machine list` is stale metadata
+and does not match `podman info` or `free` inside the VM. The runner advertises
+only `win-ci` and `win-ci-jj`, both backed by the pinned
+`los-ci:node22-jj0.39.0` image. It has capacity two, cache actions disabled, and
+an independent persistent pnpm store.
+
+The runner container executes as root because it mounts the rootful
+`/run/podman/podman.sock`; this grants container-administration authority inside
+the Podman VM. The exposure is bounded to this private repository and the two
+repo-scoped labels. Do not register the labels at organization or instance
+scope without revisiting that trust decision.
+
+This candidate is materially better suited to heavy CI than node34 and would
+also separate Forgejo service availability from test resource consumption.
+Forgejo's current runner documentation supports Podman through the runner's
+`docker_host` configuration and supports OCI-backed labels:
+
+- <https://forgejo.org/docs/latest/admin/actions/installation/binary/>
+- <https://forgejo.org/docs/latest/admin/actions/configuration/>
+
+Adopt it in stages:
+
+1. run Forgejo Runner inside the existing rootful Podman VM with the socket
+   authority documented above;
+2. provision the pinned CI image, `postgres:16`, and a persistent pnpm store,
+   then verify Node 22, jj 0.39.0, PostgreSQL health, service DNS, and TCP;
+3. register repo-scoped candidate labels distinct from node34 labels, with
+   runner capacity two and test package concurrency initially capped at two;
+4. manually start or wake the machine before a canary, and prove that the
+   runner and container backend start without an interactive desktop session;
+5. require three unchanged-head canaries with all four jobs green, responsive
+   Forgejo API, stable memory/swap, and recorded durations before merging the
+   required-label change.
+
+Steps 1-3 passed on 2026-07-23. The local service smoke reached PostgreSQL
+`healthy` and resolved `postgres-smoke` from the pinned Node job container.
+Docker Hub was not reachable from the VM, so the CI and PostgreSQL images were
+built or exported from trusted existing hosts and imported over the LAN. npm
+was reachable but showed high latency, and a Playwright Chromium range probe
+through its redirect completed at only about 534 bytes/second. The initial PR
+split therefore sends `gate-test` and `gate-drift` to Windows while retaining
+`gate-fast` and Web E2E on node34. Moving Web E2E requires a pre-provisioned
+Chromium image rather than a per-run browser download.
+
+The first split canary, UI run `214` (API run `239`), passed `gate-fast` in
+4m14s and assigned `gate-test` to `win-los-canary`. The Windows job failed in
+27 seconds before dependency installation because `corepack prepare
+pnpm@9.0.0` attempted to download the package-manager payload from npm. The
+runner also rejected `forgejo-pnpm-store` because its volume allowlist was
+empty. The corrected image embeds pnpm 9.0.0, Windows jobs only verify that
+version, and the runner configuration explicitly allows the named store.
+
+The next split canary, UI run `216` (API run `241`), passed `gate-fast` in
+about 4m03s and `gate-test` in about 7m25s. The Windows test container reused
+all 385 packages from its persistent pnpm store with no package downloads; it
+used about 655-900 MiB, reached about 150 processes, retained about 14.3 GiB
+available memory, and did not use swap. During the same stage, node34 retained
+about 3.9 GiB available memory with load near 0.36, and the Forgejo API, DB,
+and cache stayed responsive. This verifies that the Windows runner is a better
+fit for the workspace test workload and that separating tests removes the
+Forgejo co-host resource contention.
+
+`gate-drift` in that run failed before connecting to PostgreSQL. The root-level
+`tools/check-migration-drift.ts` entry was classified as CommonJS by `tsx`, so
+the transitive `@los/agent` import attempted to `require()` the ESM-only
+`@earendil-works/pi-agent-core` export. Renaming the entry to `.mts` makes its
+ESM format explicit without changing module semantics for every root tool. A
+no-database smoke then loaded the full dependency path and reached the expected
+`SERVER_URL (or DATABASE_URL) env required` guard instead of the package export
+error. A clean Windows drift job remains the required dual-database proof.
+
+UI run `217` (API run `242`) then passed `gate-fast`, `gate-test`, and the real
+dual-database `gate-drift`. Web E2E reused all pnpm packages but timed out at 10
+minutes after 15 of 18 browser cases passed. Its log showed the main delay was
+not Chromium itself: `playwright install --with-deps chromium` spent 7m13s
+downloading 76.8 MiB of Debian browser dependencies into the clean container;
+the browser downloads took about 80 seconds and the first 15 tests about 46
+seconds. The immediate correction raises the Web E2E limit to 15 minutes and
+starts it after `gate-fast`, in parallel with the isolated Windows test path.
+A preloaded Playwright image remains a separate follow-up because the first
+bounded pull could not complete its final large layer; adopting it requires an
+image smoke and runner provisioning, not only a YAML image tag.
+
+Because the machine is powered on only when needed, it is not unattended
+always-available capacity. The required `win-ci*` jobs remain queued while its
+exclusive labels are offline. The initial operating contract is therefore to
+start the Windows host, Podman machine, and runner before opening or updating a
+delivery PR; node34 continues to handle fast and Web E2E but is not a fallback
+for the Windows labels. Wake-on-LAN and boot-time startup can be evaluated
+after the manual canary, but they are not part of this change.
 
 ## Observation Protocol
 
@@ -279,6 +454,7 @@ that was not captured.
 | `1` | `26` | `2d00cc3262a02be175b25f7be053bfa8f3ada36b` | `140` | unknown | 13m15s | 7m47s | 12m21s | 49s | unknown | unknown | unknown | 225 | green | no rerun; runtime memory/swap telemetry not captured |
 | `2` | `27` | `1061be7f6a169726b6a9a11568b29a21898cf7ac` | `142` | 2s | 12m23s | 7m30s | 12m23s | skipped | unknown | unknown | unknown | 225 | failed | code/test failure: timing-sensitive 40ms scheduler concurrency assertion; stabilized in PR `28`; no unchanged-head rerun |
 | `3` | `28` | `a864f9d654fc44e9de79af683cc48ac25589504a` | `143` | 1s | 13m29s | 8m11s | 12m33s | 53s | unknown | unknown | unknown | 225 | green | no rerun; runtime memory/swap telemetry not captured |
+| `4` | `53` | `93cd3321e1c0140a5de2d4a52e8e3fc85dd59177` | `210` | 2s | 27m03s | 19m47s | ~27m | cancelled | 360 | unknown | unknown | 357 | failed | resource failure: concurrency 4 plus independent Web E2E exhausted CPU, memory, and swap; operator cancelled after required fast failure |
 
 ### Rolling Summary
 
@@ -286,7 +462,7 @@ Update this after samples 10 and 20.
 
 | Eligible PRs | Queue P95 | Total P95 | Minimum available memory | Maximum swap peak delta | Maximum swap +5m delta | Flake rate | Judgment |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `3 / 20` | pending | pending | unknown | unknown | unknown | 0 / 3 eligible attempts | two green; one timing-sensitive test failure fixed; resource telemetry not captured |
+| `4 / 20` | pending | pending | 360 MiB | unknown | unknown | 0 / 4 eligible attempts | two green; one fixed timing-sensitive test failure; one resource stop event under the superseded concurrency envelope |
 
 ## Rollback
 

@@ -1,5 +1,5 @@
 /**
- * tools/check-migration-drift.ts
+ * tools/check-migration-drift.mts
  *
  * Authoritative schema-drift gate between the two sources of truth:
  *   - migrations (packages/infra/migrations/*.sql via migrateDir)
@@ -25,9 +25,9 @@
  *
  * Exit 0 = no drift; exit 1 = drift found (prints the per-table diff).
  *
- * Run from packages/agent so tsx + workspace imports resolve:
+ * Run from packages/gateway so tsx + workspace imports resolve:
  *   SERVER_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres \
- *     node --import tsx ../../tools/check-migration-drift.ts
+ *     node --import tsx ../../tools/check-migration-drift.mts
  */
 import { initDb, getDb, closeDb } from '../packages/infra/src/db.js';
 import { migrateDir } from '../packages/infra/src/migrate.js';

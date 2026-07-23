@@ -1,5 +1,5 @@
 contract: los.run-stream
-version: 0.4.0
+version: 0.5.0
 status: implemented
 owner: packages/agent
 description: >
@@ -198,6 +198,8 @@ chunks:
       delta: agent.model_delta
     - type: tool_call_state
       transition: tool_call_states.transition
+    - type: kernel_event
+      kernelEvent: execution-kernel.KernelEvent
     - type: result
       result: agent.result
     - type: error

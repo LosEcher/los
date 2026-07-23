@@ -16,8 +16,32 @@ import { createRunSpec, loadRunSpec } from './run-specs.js';
 import { recordProviderCompatEvidence } from './provider-compat-evidence.js';
 import { listSchedulerDecisions } from './scheduler-decision-ledger.js';
 import { listSessionEvents } from './session-events.js';
+import { loadTaskRun } from './task-runs.js';
 import { loadToolCallState } from './tool-call-states.js';
 import { persistScheduledToolCallState, runAgentTaskGraphSerial, runScheduledAgentTask } from './scheduler.js';
+
+test('scheduler fails closed for an unavailable execution kernel before task creation', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const taskRunId = `task-unknown-kernel-${suffix}`;
+
+  try {
+    await assert.rejects(
+      runScheduledAgentTask({
+        prompt: 'must not run',
+        taskRunId,
+        sessionId: `session-unknown-kernel-${suffix}`,
+        executionKernelKind: 'pi',
+      }),
+      /Unknown execution kernel: pi/,
+    );
+    assert.equal(await loadTaskRun(taskRunId), null);
+  } finally {
+    await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
 
 test('scheduler uses a verified registry executor when nodeUrls is empty', async () => {
   const config = await loadConfig();
@@ -85,7 +109,13 @@ test('scheduler uses a verified registry executor when nodeUrls is empty', async
     assert.equal(result.status, 'completed');
     assert.equal(result.taskRun.nodeId, nodeId);
     assert.equal(result.result.text, 'executor ok');
+    assert.deepEqual(result.taskRun.metadata.executionKernel, {
+      kind: 'los',
+      version: '0.1.0',
+      protocolVersion: '0.1.0',
+    });
     assert.equal(requests[0]?.nodeId, nodeId);
+    assert.equal(requests[0]?.executionKernelKind, 'los');
 
     const decisions = await listSchedulerDecisions({ graphId: taskRunId, kind: 'executor_selection' });
     assert.equal(decisions[0]?.reason, 'executor_registry');
@@ -346,6 +376,7 @@ test('scheduler persists tool call states streamed from executor NDJSON', async 
   const sessionId = `session-ndjson-tool-state-${suffix}`;
   const runSpecId = `run-ndjson-tool-state-${suffix}`;
   const callId = `call-ndjson-tool-state-${suffix}`;
+  let request: Record<string, unknown> = {};
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
@@ -353,8 +384,19 @@ test('scheduler persists tool call states streamed from executor NDJSON', async 
       res.end('not found');
       return;
     }
-    await readRequestBody(req);
+    request = JSON.parse(await readRequestBody(req));
     res.setHeader('content-type', 'application/x-ndjson');
+    const kernel = { kind: 'los', version: '0.1.0', protocolVersion: '0.1.0' };
+    res.write(JSON.stringify({
+      type: 'kernel_event',
+      kernelEvent: {
+        sequence: 0,
+        type: 'kernel.started',
+        occurredAt: '2026-07-22T00:00:00.000Z',
+        kernel,
+        payload: { taskRunId, sessionId, runSpecId },
+      },
+    }) + '\n');
     res.write(JSON.stringify({
       type: 'tool_call_state',
       transition: {
@@ -380,6 +422,23 @@ test('scheduler persists tool call states streamed from executor NDJSON', async 
       },
     }) + '\n');
     res.end(JSON.stringify({
+      type: 'kernel_event',
+      kernelEvent: {
+        sequence: 1,
+        type: 'kernel.finished',
+        occurredAt: '2026-07-22T00:00:01.000Z',
+        kernel,
+        payload: {
+          result: {
+            text: 'executor ok',
+            turns: [],
+            loopCount: 0,
+            totalTokens: { prompt: 0, completion: 0 },
+            messages: [],
+          },
+        },
+      },
+    }) + '\n' + JSON.stringify({
       type: 'result',
       result: {
         text: 'executor ok',
@@ -411,6 +470,7 @@ test('scheduler persists tool call states streamed from executor NDJSON', async 
 
     assert.equal(result.status, 'completed');
     assert.equal(result.result.text, 'executor ok');
+    assert.equal(request.executionKernelKind, 'los');
 
     const loaded = await loadToolCallState(callId, sessionId);
     assert.equal(loaded?.runSpecId, runSpecId);
@@ -420,6 +480,12 @@ test('scheduler persists tool call states streamed from executor NDJSON', async 
     assert.deepEqual(loaded?.inputJson, { path: 'README.md' });
     assert.equal(loaded?.outputSummary, 'executor ok');
     assert.equal(loaded?.durationMs, 7);
+    const kernelEvents = (await listSessionEvents(sessionId, 100))
+      .filter(event => event.type.startsWith('kernel.'));
+    assert.deepEqual(kernelEvents.map(event => event.type), ['kernel.started', 'kernel.finished']);
+    assert.deepEqual(kernelEvents.map(event => event.payload.sequence), [0, 1]);
+    assert.ok(kernelEvents.every(event => event.visibility === 'audit'));
+    assert.ok(kernelEvents.every(event => event.source === 'los.kernel.los'));
   } finally {
     await getDb().query('DELETE FROM tool_call_states WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
@@ -1260,6 +1326,13 @@ test('scheduler runs verifier graph tasks through verification records', async (
 
     const events = await listSessionEvents(sessionId, 100);
     assert.ok(events.some(event => event.type === 'verification.succeeded'));
+    const runSpecTransitions = events.filter(event => event.payload.entityType === 'run_spec'
+      && event.payload.entityId === runSpecId);
+    assert.equal(runSpecTransitions.filter(event => event.type === 'run_spec.succeeded').length, 1);
+    assert.ok(runSpecTransitions.some(event => event.type === 'run_spec.succeeded'
+      && event.payload.reason === 'graph_completion:succeeded'));
+    assert.equal(runSpecTransitions.some(event => event.payload.from === 'succeeded'
+      && event.payload.to === 'verifying'), false);
   } finally {
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);

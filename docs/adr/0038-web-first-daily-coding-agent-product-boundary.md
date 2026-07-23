@@ -60,6 +60,13 @@ bound to a Work Item and run contract before code execution starts. The Web UI
 may make that binding low-friction, but it must not synthesize `plan_approved`
 or treat client state as execution truth.
 
+The product replacement target does not require LOS to implement every model
+turn itself. ADR 0039 defines a pluggable execution-kernel boundary: Pi may
+provide the near-term L1 execution loop while this ADR's Work Item, RunContract,
+operator, verification, recovery, and result-review workflow remains owned by
+LOS. Product acceptance and execution-kernel replacement are evaluated
+separately.
+
 ## Record Ownership
 
 The daily workflow composes existing records instead of adding a second state
@@ -183,6 +190,7 @@ AP2, or AP3. Hermes breadth is evaluated independently.
 - `docs/adr/0025-conversation-run-coordinator-boundary.md`
 - `docs/adr/0033-web-first-work-item-read-model.md`
 - `docs/adr/0037-daily-agent-quality-snapshots.md`
+- `docs/adr/0039-pluggable-execution-kernel-and-pi-adoption.md`
 - `docs/governance/2026-07-19-web-first-daily-agent-workflow-design.md`
 - `docs/governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
 - `contracts/agent-task-graph.yaml`

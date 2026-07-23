@@ -10,7 +10,6 @@ import {
   heartbeatAgentTask,
   heartbeatTaskRun,
   resolveIdentityLevelForExecutionPath,
-  runAgent,
   type AgentConfig,
   type AgentModelDelta,
   type ExecutorNodeConnectMode,
@@ -18,6 +17,7 @@ import {
   type SessionEventRecord,
   type ToolCallStateTransition,
 } from '@los/agent';
+import { resolveExecutionKernel } from '@los/agent/execution-kernel-registry';
 import { ensureAllAgentStores } from '@los/agent/ensure-all-stores';
 import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
@@ -46,6 +46,7 @@ interface RunAgentRequest {
   leaseVersion?: number;
   agentTaskLease?: { taskId: string; leaseVersion: number };
   leaseMs?: number;
+  executionKernelKind?: string;
   prompt: string;
   config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
 }
@@ -54,6 +55,7 @@ type ExecutorStreamChunk =
   | { type: 'session_event'; event: SessionEventRecord }
   | { type: 'model_delta'; delta: AgentModelDelta }
   | { type: 'tool_call_state'; transition: ToolCallStateTransition }
+  | { type: 'kernel_event'; kernelEvent: unknown }
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: string };
 
@@ -268,6 +270,7 @@ async function runAssignedAgentTask(
   const events: SessionEventRecord[] = [];
   const deltas: AgentModelDelta[] = [];
   const toolCallStates: ToolCallStateTransition[] = [];
+  const kernelEvents: unknown[] = [];
 
   const heartbeat = setInterval(() => {
     _renewTaskLease(taskRunId, nodeId, leaseVersion, body.agentTaskLease, leaseMs, controller).catch((err) => {
@@ -289,7 +292,8 @@ async function runAssignedAgentTask(
     if (!initialTaskRunLease || !initialAgentTaskLease) {
       throw new Error(`execution lease lost before executor start for task run ${taskRunId}`);
     }
-    const result = await runAgent(prompt, {
+    const executionKernel = resolveExecutionKernel(body.executionKernelKind);
+    const result = await executionKernel.run(prompt, {
       ...(body.config ?? {}),
       identity: body.config?.identity ?? {
         name: 'default',
@@ -308,9 +312,12 @@ async function runAssignedAgentTask(
         toolCallStates.push(transition);
         emit?.({ type: 'tool_call_state', transition });
       },
+    }, (kernelEvent) => {
+      kernelEvents.push(kernelEvent);
+      emit?.({ type: 'kernel_event', kernelEvent });
     });
     emit?.({ type: 'result', result });
-    return { result, events, deltas, toolCallStates };
+    return { result, events, deltas, toolCallStates, kernelEvents };
   } finally {
     clearInterval(heartbeat);
   }

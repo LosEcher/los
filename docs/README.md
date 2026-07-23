@@ -67,6 +67,11 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   trigger presets, atomic claim, lease recovery, approval, and circuit policy.
 - `0037-daily-agent-quality-snapshots.md` - project-scoped daily quality
   snapshots, UTC idempotency, separated metrics, and 28-day evidence rules.
+- `0038-web-first-daily-coding-agent-product-boundary.md` - Work-first daily
+  coding workflow, product replacement target, and bounded graph delivery.
+- `0039-pluggable-execution-kernel-and-pi-adoption.md` - LOS-owned governance
+  with a provider-neutral execution-kernel protocol, Pi adoption gates, and
+  later replacement criteria.
 
 ### Operation Smokes
 
@@ -118,6 +123,10 @@ provider-evidence, or harness ideas should become local work items.
 Use `governance/2026-07-18-los-pi-harness-capability-and-operability-audit.md`
 for the verified LOS capability map, concrete CLI/Web/MCP/channel/workspace
 operator paths, and the current boundary against pi and Hermes Agent.
+
+Use `governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md` for the
+lsclaw-to-LOS execution history, failed May Pi migration analysis, accepted
+kernel boundary, staged Pi adoption, upgrade policy, and replacement gates.
 
 Use `governance/2026-07-19-web-first-daily-agent-workflow-design.md` for the
 Web-first daily workflow, Work Item and Inbox model, user schedule ownership,

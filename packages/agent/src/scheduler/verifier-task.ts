@@ -66,6 +66,7 @@ export async function runClaimedVerifierGraphTask(
 
     const verification = await runVerificationRecordsForRunSpec(runSpecId, {
       timeoutMs: input.timeoutMs,
+      updateRunSpecStatus: false,
     });
     if (verification.records.length === 0) {
       throw new Error(`verifier task ${task.id} found no verification records for run spec ${runSpecId}`);
