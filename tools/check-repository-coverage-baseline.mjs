@@ -83,10 +83,11 @@ function capturePackage(packageDir) {
     };
   }
   const coverageDir = mkdtempSync(join(tmpdir(), 'los-coverage-'));
+  const testScript = manifest.scripts?.['test:coverage'] ? 'test:coverage' : 'test';
 
   try {
     process.stdout.write(`coverage baseline: ${manifest.name}\n`);
-    const result = spawnSync('pnpm', ['--filter', manifest.name, 'test'], {
+    const result = spawnSync('pnpm', ['--filter', manifest.name, testScript], {
       cwd: repoRoot,
       encoding: 'utf8',
       env: { ...process.env, NODE_V8_COVERAGE: coverageDir },
@@ -124,7 +125,7 @@ function captureBaseline() {
     capturedAt: new Date().toLocaleDateString('en-CA'),
     nodeVersion: process.version,
     command: 'pnpm test:coverage:baseline:update',
-    methodology: 'Each package test runs with package-local Node coverage. Static inventory and V8-observed implementation files are recorded separately; unobserved files are not represented as covered.',
+    methodology: 'Each package runs test:coverage when defined, otherwise test. Static inventory and V8-observed implementation files are recorded separately; unobserved files are not represented as covered.',
     regressionTolerancePercent: coverageTolerance,
     totals: {
       packages: packages.length,
