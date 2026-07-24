@@ -193,15 +193,227 @@ replace the product P0/P1 queue in
 | ID | Priority | State | Work | Completion evidence |
 | --- | --- | --- | --- | --- |
 | `CI-OBS-01` | P0 | paused | Record the next 10-20 real Forgejo PR runs | Resume only after `CI-HOST-01`; interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
-| `CI-HOST-01` | P0 | decision required | Restore a reliable node34 resource margin without treating the systemd-managed `nmem.service` as an orphan | Operator chooses service scheduling, a tested memory limit, or host separation; then three exact-head canaries retain at least 1.5 GiB available memory and show a stable post-run swap delta |
+| `CI-HOST-01` | P0 | decision required | Restore a reliable node34 resource margin without treating the systemd-managed `nmem.service` as an orphan | The 10-GiB expansion alone failed the stable-swap criterion; operator chooses service scheduling, a tested memory limit, or host separation, then three resource-observed exact-head canaries retain at least 1.5 GiB available memory and show a stable post-run swap delta |
 | `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
 | `CI-STORE-01` | P1 | done | Add a periodic pnpm store capacity check without restoring `actions/cache` | `gate-fast` runs `tools/observe-pnpm-store.sh --json`; the observation protocol records a weekly and every-fifth-eligible-PR cadence without deleting store content |
+| `CI-TEST-01` | P1 | done | Compare the pinned Node 22 and Node 24 job images on the same source head and runner | Three warm runs per version completed; median difference was 0.04%, so Node 24 is retained as a compatibility upgrade rather than a performance optimization |
+| `CI-TEST-02` | P1 | in progress | Separate DB-free regression tests, DB integration tests, and coverage collection | Agent and Gateway now have explicit DB-free and isolated-DB lanes plus separate coverage commands; the remaining DB packages still need classification |
+| `CI-TEST-03` | P1 | in progress | Replace per-file migration/store setup with run-scoped provisioning and isolated mutable data | Agent and Gateway provision stores once per run and truncate mutable rows per isolated file; remaining DB packages and repeated CI evidence are pending |
+| `CI-TEST-04` | P2 | backlog | Persist safe build/check caches and shorten the required-job dependency chain | Cache keys include OS, architecture, Node major, lockfile and task inputs; mutable DB, browser profile, coverage, secret, and session state remain uncached; full main/nightly gates detect classifier omissions |
 
 `CI-HOST-01` owns the immediate next action because run `222` crossed the
 available-memory stop condition. `CI-OBS-01` resumes after that decision and
 three clean canaries. `CI-NET-01` is the prerequisite for any attempt to
 parallelize the two database jobs. `CI-STORE-01` is complete and does not
-change job execution behavior.
+change job execution behavior. `CI-TEST-01` can proceed independently on the
+Windows burst runner; it does not resolve node34's `nmem.service` contention or
+authorize higher job concurrency.
+
+## 2026-07-24 Test Runtime Optimization Plan
+
+### Baseline
+
+- [E] Workflow-dispatch run `255` used exact head
+  `5db5df2742c77776e1c0ae5f0483eccaea96cddf` and completed in 11m30s.
+- [E] `gate-fast` took 4m40s. Turbo type-checking took about 3m16s; the
+  security, coupling, and wiring checks took about 23s, 29s, and 17s.
+- [E] `gate-test` took 5m53s. `pnpm test` took 5m33s and critical coverage
+  took about 12s.
+- [E] The Agent package ran 832 tests in 121 files in about 324.2s. The
+  Gateway package ran 126 tests in 57 files in about 170.0s. Agent setup logs
+  contained 227 config loads and 197 PostgreSQL connections; Gateway setup
+  logs contained 118 config loads and 73 PostgreSQL connections.
+- [E] `gate-web-e2e` took 1m15s for 18 tests with one worker. Migration drift's
+  check itself took about 4-5s; job provisioning and its serial dependency
+  accounted for most of its critical-path cost.
+- [E] The Windows host reports Node `v24.16.0`, but the
+  `los-ci:node22-jj0.39.0` job image reports Node `v22.23.1`. The Podman VM
+  reports 15 GiB total memory and 8 GiB swap from inside the VM. The stale
+  2-GiB value in `podman machine list` remains metadata, not effective memory.
+- [E] Both node34 CI images also report Node `v22.23.1`. Node 24 comparison
+  therefore requires a candidate job image; upgrading either host runtime does
+  not change the effective CI Node version.
+
+### Ordered Changes
+
+1. Build a Node 24 candidate from the same jj/pnpm image recipe. Keep existing
+   runner labels on Node 22 and run the candidate explicitly, so rollback is
+   an image selection rather than a host change.
+
+   ```bash
+   FORGEJO_CI_NODE_IMAGE=node:24.16.0-bookworm \
+   FORGEJO_CI_NODE_MAJOR=24 \
+   FORGEJO_CI_IMAGE=los-ci:node24.16.0-jj0.39.0 \
+   FORGEJO_CI_TOOLCHAIN_IMAGE=los-ci:node22-jj0.39.0 \
+   ./tools/build-forgejo-ci-image.sh
+   ```
+
+   The optional toolchain image supplies only the checksum-verified `jj`
+   binary and the pinned pnpm Corepack payload. This avoids external downloads
+   on the network-constrained runners without reusing application dependencies,
+   mutable databases, browser profiles, coverage, secrets, or session data.
+
+2. Compare Node 22 and Node 24 on the same source head. Record cold and warm
+   dependency state separately and use three warm runs for the decision.
+3. After compatibility passes, pin the selected Node 24 patch in the image and
+   verify Node, pnpm, jj, PostgreSQL service DNS, and the full current gate.
+4. Split package scripts into DB-free regression, DB integration, and coverage
+   paths. Preserve the behavior-specific minimum gates in ADR 0014; full
+   repository coverage is not required on every ordinary regression run.
+5. Use Node 24 global test setup to provision migrated external DB resources
+   once per package run. Namespace mutable state by test run, package, and
+   shard; share only schema templates and immutable versioned fixtures.
+6. Add persistent cache only for pnpm content, Turbo build/check outputs, and
+   no-coverage module compilation. Keep test-result caching disabled for
+   stateful DB tests.
+7. Introduce a conservative change classifier and shorter preflight dependency.
+   Run the complete suite on protected main and a scheduled workflow so a
+   classifier omission cannot silently remove coverage.
+
+### Stop Conditions And Initial Targets
+
+- Do not remove `tsx`, raise package or Playwright concurrency, reuse mutable
+  database rows, merge coverage across source heads, or reuse browser auth
+  profiles as part of this work.
+- Stop a phase on a test-count reduction without an explained consolidation,
+  a new unchanged-head flake, schema leakage, PostgreSQL connection growth, or
+  a material memory regression.
+- The first structural target is to reduce Agent/Gateway database setup from
+  hundreds of config/connection events to the number of package shards.
+- The first duration target is a three-run median below 4m for `gate-test`,
+  while retaining all current behavior assertions and critical coverage.
+- Complete each item with a focused check before starting the next item. Only
+  the final cross-package delivery requires the full gate and exact-head
+  canaries.
+
+### Node 22 And Node 24 A/B Result
+
+The Windows Podman runner compared the two pinned job images on exact source
+head `5db5df2742c77776e1c0ae5f0483eccaea96cddf`. Each image used its own source
+volume and `node_modules`, the same persistent pnpm content store, the same
+PostgreSQL 16 service, `LOS_TEST_CONCURRENCY=2`, and a unique
+`LOS_TEST_RUN_ID`. Turbo test-result caching remained disabled.
+
+| Runtime | Run 1 | Run 2 | Run 3 | Median |
+| --- | ---: | ---: | ---: | ---: |
+| Node `22.23.1` | 5m42.467s | 5m32.669s | 5m40.644s | 5m40.644s |
+| Node `24.16.0` | 5m40.151s | 5m40.498s | 5m50.016s | 5m40.498s |
+
+- [E] All six runs completed 16 of 16 Turbo tasks with zero cached tasks and
+  no failures. Every run retained 832 Agent tests (831 passed, one skipped)
+  and 126 passing Gateway tests.
+- [E] Every run retained 227 Agent config loads, 197 Agent PostgreSQL
+  connections, 118 Gateway config loads, and 73 Gateway PostgreSQL
+  connections. The runtime upgrade did not alter the dominant initialization
+  pattern.
+- [E] Sampled test-container memory remained below about 550 MiB. PostgreSQL
+  grew from about 216 MiB after the first run to about 707 MiB during the sixth
+  run while the experiment deliberately retained one service across unique
+  run namespaces. This is evidence for deterministic namespace cleanup, not
+  for increasing test concurrency.
+- [E] The Node 24 image passed Node, pnpm `9.0.0`, jj `0.39.0`, install, and
+  the full workspace test smoke. Its install emitted Node's `DEP0169`
+  deprecation warning from pnpm's use of `url.parse()`; this is a package
+  manager compatibility observation, not a test failure.
+- [J] The median difference is 0.146 seconds, about 0.04 percent. Node 24 is a
+  compatible lifecycle upgrade but not a test-duration optimization. Keep the
+  structural priority on separating ordinary regression from coverage,
+  reducing repeated config and database setup, and cleaning run-scoped data.
+- [J] Do not change the runner label until the Node 24 image is pinned in the
+  repository-owned recipe and a full exact-head gate passes. Keep Node 22 as
+  the rollback image during that canary.
+
+### Agent Database And Test-Lane Result
+
+- [E] Run-scoped Agent schema provisioning with per-file row truncation passed
+  all 832 previously executed tests in 299.10s. The earlier Node comparison
+  median was about 340.5s, so schema reuse alone reduced local Agent duration
+  by about 12% without reusing mutable rows.
+- [E] The explicit shared-process lane contains 69 DB-free files. The isolated
+  PostgreSQL lane contains 52 files and passed 275 tests. The classifier checks
+  all discovered `*.test.ts` files and fails on missing, stale, or duplicate
+  classifications.
+- [E] The combined ordinary Agent command passed all 853 tests in 135.76s with
+  package concurrency still fixed at one. This is about 54% faster than the
+  299.10s isolated coverage-shaped run.
+- [E] Recursive discovery also restored three deep tests that the prior shell
+  glob did not pass to Node: provider repair healing, provider repair storm,
+  and the external MCP client test.
+- [E] The separate coverage command passed 853 tests in 301.44s and reported
+  86.62% line, 75.82% branch, and 81.53% function coverage.
+- [J] Ordinary Agent regression no longer collects full repository coverage.
+  `pnpm --filter @los/agent test:coverage` retains the isolated coverage path,
+  and the repository coverage checker prefers `test:coverage` when a package
+  defines it. Critical coverage remains a separate required Forgejo step.
+- [J] Do not cache stateful DB test results or mutable rows. The next structural
+  step is applying the same explicit classification and run-scoped schema
+  pattern to the remaining DB packages before changing job order or
+  concurrency.
+
+### Gateway Database And Test-Lane Result
+
+- [E] The explicit Gateway shared-process lane contains 18 DB-free files and
+  passed 57 tests in 3.24s. The isolated PostgreSQL lane contains 39 files and
+  passed 97 tests in 104.15s.
+- [E] The combined ordinary Gateway command passed all 154 tests in 108.07s.
+  The previous complete package run took about 170.0s, so the ordinary path is
+  about 36% faster without increasing package or test concurrency.
+- [E] The separate Gateway coverage command passed all 154 tests in 166.87s
+  and reported 70.52% line, 62.62% branch, and 61.23% function coverage. The
+  ordinary command therefore avoids about 59 seconds of instrumentation while
+  preserving the full isolated coverage path for repository baselines.
+- [E] Recursive discovery executes all 57 Gateway test files and restored seven
+  deep route tests that the prior shell glob did not pass to Node, including
+  provider CRUD, WebSocket, MCP, and skill route coverage.
+- [E] The restored provider CRUD test exposed a teardown-order deadlock: the
+  imported package setup attempted to close the PostgreSQL pool before the
+  file-owned Fastify instance released its SSE listener client. Prepared-schema
+  child processes now leave pool shutdown to process exit and global schema
+  teardown; the test file owns only its Fastify lifecycle. The focused file
+  passes 13 tests in 3.59s after the ownership correction.
+- [I] One pre-existing memory-store initialization warning remains visible:
+  concurrent `ensure` calls can race on PostgreSQL type creation inside a test.
+  It did not fail the 154-test run, but it should not be presented as resolved
+  by schema reuse.
+- [J] The 39 isolated files still pay Node process startup, TypeScript loading,
+  config discovery, and row truncation costs. Further improvement should first
+  move demonstrably DB-free files into the explicit shared lane or replace
+  expensive dependencies with focused fakes; it should not reuse mutable rows
+  or raise concurrency.
+
+### Cocoon Reference Assessment
+
+The comparison used `cocoonstack/cocoon` commit
+[`65456b7f35d3b674c0bf35d642e73f44034edb8d`](https://github.com/cocoonstack/cocoon/commit/65456b7f35d3b674c0bf35d642e73f44034edb8d)
+on 2026-07-24.
+
+- [E] Cocoon has 100 Go test files. Fifty-six files use `t.TempDir()`, no test
+  file calls `t.Parallel()`, and no `TestMain` or in-memory SQLite test store is
+  present. `go test ./...` can still run packages concurrently, but stateful
+  tests do not opt into test-level parallelism.
+- [E] Its SQLite contract tests create a store under a test-owned temporary
+  directory and register `t.Cleanup()` to close it. Multi-process tests
+  initialize one store for the scenario and let worker processes only open it.
+  This supports the LOS boundary of reusing immutable schema structure while
+  keeping mutable state scoped to one test run; it does not support sharing
+  mutable rows across tests.
+- [E] Expensive multi-process correctness gates support `testing.Short()`, and
+  constrained CI sets `COCOON_STORM_WORKERS=2` while retaining the full-scale
+  storm for offline execution. LOS can adopt the same distinction for stress
+  scale: bounded PR evidence plus a separately scheduled full stress gate.
+- [E] Cocoon uses recording fake backends for image-pull policy and golden
+  differential traces for storage compatibility. LOS should prefer the same
+  patterns where a Gateway route only needs to prove orchestration decisions
+  or where a store migration must preserve a serialized read model.
+- [E] Cocoon's required CI runs `go test -race -count=1 -cover`; `-count=1`
+  disables test-result reuse, while dependency caching remains separate. Its
+  image workflow uses path-scoped matrices and content caches for immutable
+  build inputs. These boundaries support pnpm/Turbo/build cache reuse, not DB,
+  coverage, browser-profile, or stateful test-result reuse.
+- [J] Cocoon couples race detection and coverage to every ordinary test run.
+  That choice is not adopted here: the measured LOS bottleneck is repeated
+  instrumentation and database setup, so ordinary regression and repository
+  coverage remain separate commands under ADR 0014.
 
 Historical local-only jj changes remain in the repository history. They do not
 dirty the current working copy and are not part of this delivery. Review or
@@ -428,6 +640,72 @@ start the Windows host, Podman machine, and runner before opening or updating a
 delivery PR; node34 continues to handle fast and Web E2E but is not a fallback
 for the Windows labels. Wake-on-LAN and boot-time startup can be evaluated
 after the manual canary, but they are not part of this change.
+
+### 2026-07-24 10-GiB Host And Restart Validation
+
+#### Observation
+
+- [E] node34 recognized 9,945 MiB total memory and 6,045 MiB swap after the
+  operator expanded the VM to 10 GiB.
+- [E] Forgejo port `3022` was initially unavailable because
+  `/etc/systemd/system/iptables-restore.service` restored a Docker DNAT rule
+  for stale container address `172.26.0.2`. The current Forgejo address had
+  changed, so the persisted rule bypassed Docker's generated destination.
+- [E] The host backup set is
+  `/root/iptables-before-forgejo-3022-fix-20260724.save`,
+  `/etc/iptables/rules.v4.bak-20260724-forgejo-dynamic-rules`, and
+  `/etc/systemd/system/iptables-restore.service.bak-20260724-forgejo-dynamic-rules`.
+  The stale restore unit is disabled. `/usr/local/sbin/los-docker-firewall`
+  now owns the `LOS-CONTAINER-FW` policy through
+  `/etc/systemd/system/docker.service.d/los-docker-firewall.conf`; Docker
+  continues to own dynamic container DNAT.
+- [E] A real `systemctl restart docker` changed Forgejo to `172.26.0.3` and
+  regenerated `3022 -> 172.26.0.3:3000` without restoring the stale `.2`
+  destination. The Forgejo API returned HTTP `200` through `127.0.0.1:3022`,
+  `192.168.31.34:3022`, and `100.68.106.96:3022`; the runner re-declared
+  `[ubuntu-latest ubuntu-jj ubuntu-playwright docker]`.
+- [E] Workflow-dispatch runs `252`, `253`, and `254` all executed exact head
+  `5db5df2742c77776e1c0ae5f0483eccaea96cddf`. Each passed `gate-fast`,
+  `gate-test`, `gate-web-e2e`, and `gate-drift`; total durations were 10m56s,
+  10m56s, and 10m32s. Forgejo API probes remained HTTP `200`.
+- [E] Run `252` sampled a minimum 4.80 GiB available memory with 524 KiB swap
+  used. Run `254` sampled a minimum 3.73 GiB available memory with the same
+  swap value. Run `253` had about 4.8 GiB available both before and after the
+  run, no swap delta, and no OOM or Docker error, but its high-load SSH samples
+  were not captured; it is a functional canary, not the third quantitative
+  resource canary.
+- [E] Replacement run `255` also passed all four jobs on the same exact head in
+  11m30s. All SSH samples and API probes succeeded, and available memory stayed
+  above the 1.5-GiB threshold with a sampled minimum of 2.65 GiB. Swap used,
+  however, grew from 524 KiB to 483,844 KiB, a roughly 472-MiB peak delta that
+  remained unchanged more than five minutes after completion.
+- [E] During run `255`, `nmem-server` used about 4.85 GB RSS, 47.6% of host
+  memory, while the Web E2E container used about 1.18 GiB. Effective
+  `vm.swappiness` was `60`; memory PSI remained low and no OOM, runner, Docker,
+  or Forgejo failure was recorded. After CI exited, `nmem-server` later reached
+  about 5.48 GiB RSS while the swap delta remained present.
+
+#### Judgment And Next Action
+
+The Docker/Forgejo restart and firewall persistence fix pass. The 10-GiB host
+expansion also removes the earlier available-memory failure: every observed
+sample stayed above 1.5 GiB and Forgejo remained responsive. It does not close
+`CI-HOST-01`, because the replacement resource canary produced a material swap
+delta and `nmem.service` expanded to use more of the added memory.
+
+Do not merge PR `#54` or resume `CI-OBS-01` from the green workflow results
+alone. The next operator decision remains one of:
+
+1. add a measured systemd `MemoryHigh` and `MemoryMax` boundary for
+   `nmem.service`, with an independent nmem health and data-integrity check;
+2. stop and restart `nmem.service` through systemd around the CI window, with
+   explicit readiness checks before and after;
+3. move either nmem or Forgejo CI to a separate host.
+
+Changing only `vm.swappiness` is not sufficient evidence of restored capacity:
+it can reduce swapping while leaving the same memory contention. After the
+operator chooses one option, rerun three exact-head canaries with uninterrupted
+memory and swap sampling, including the five-minute post-run swap value.
 
 ## Observation Protocol
 
