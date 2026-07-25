@@ -3,6 +3,7 @@ import { loadConfig } from '@los/infra/config';
 import {
   _configureTestSchema,
   _dropConfiguredTestSchema,
+  closeDb,
   getDb,
   initDb,
 } from '@los/infra/db';
@@ -11,12 +12,18 @@ import { ensureAllAgentStores } from '@los/agent/ensure-all-stores';
 _configureTestSchema('gateway');
 const config = await loadConfig();
 await initDb(config.databaseUrl);
+
 const schemaPrepared = process.env.LOS_TEST_SCHEMA_PREPARED === '1';
 if (schemaPrepared) await resetPreparedTestSchema();
+
 after(async () => {
-  if (schemaPrepared) return;
+  if (schemaPrepared) {
+    await closeDb();
+    return;
+  }
   await _dropConfiguredTestSchema(config.databaseUrl);
 });
+
 if (!schemaPrepared) await ensureAllAgentStores();
 
 async function resetPreparedTestSchema(): Promise<void> {
