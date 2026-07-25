@@ -140,7 +140,6 @@ jobs:
 
   gate-drift:
     if: forgejo.event_name != 'push'
-    needs: gate-test
     runs-on: win-ci
     timeout-minutes: 10
 
