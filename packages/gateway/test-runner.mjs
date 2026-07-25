@@ -28,6 +28,8 @@ const sharedProcessTestFiles = [
   'src/tool-call-upsert.test.ts',
 ];
 
+const dbBackedTestFiles = [];
+
 const isolatedDatabaseTestFiles = [
   'src/active-session-failover.test.ts',
   'src/agent-task-graph-routes.test.ts',
@@ -68,6 +70,7 @@ const isolatedDatabaseTestFiles = [
 runPackageTests({
   packageId: 'gateway',
   sharedProcessTestFiles,
+  dbBackedTestFiles,
   isolatedDatabaseTestFiles,
   testSetupFile: './src/test-setup.ts',
   globalSetupFile: './src/test-global-setup.mjs',
