@@ -1,0 +1,117 @@
+import assert from 'node:assert/strict';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const ciGate = fileURLToPath(new URL('./ci-gate.sh', import.meta.url));
+const passingChecks = [
+  'check-security.sh',
+  'check-structure.sh',
+  'check-coupling.sh',
+  'check-state-machine-bypass.sh',
+  'check-contracts.sh',
+  'check-delete-safety.sh',
+  'check-unwired-exports.sh',
+];
+
+test('gate passes when the test command succeeds and removes its temp log', () => {
+  const fixture = runGate('success');
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    assert.match(fixture.result.stdout, /fixture-success-tail/);
+    assert.match(fixture.result.stdout, /GATE PASSED/);
+    assertTempLogRemoved(fixture.tempDirectory);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('gate continues when all test failures are classified as known', () => {
+  const fixture = runGate('known');
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    assert.match(fixture.result.stdout, /fixture-known-tail/);
+    assert.match(fixture.result.stdout, /All test failures are KNOWN/);
+    assert.match(fixture.result.stdout, /GATE PASSED/);
+    assertTempLogRemoved(fixture.tempDirectory);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('gate blocks new test failures after printing the captured log tail', () => {
+  const fixture = runGate('new');
+  try {
+    assert.equal(fixture.result.status, 1, fixture.result.stdout + fixture.result.stderr);
+    assert.match(fixture.result.stdout, /fixture-new-tail/);
+    assert.match(fixture.result.stdout, /NEW test failures detected/);
+    assert.match(fixture.result.stdout, /tests \(new failures beyond known-failure baseline\)/);
+    assert.match(fixture.result.stdout, /GATE FAILED/);
+    assertTempLogRemoved(fixture.tempDirectory);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+function runGate(testCase) {
+  const root = mkdtempSync(join(tmpdir(), 'los-ci-gate-'));
+  const toolsDirectory = join(root, 'tools');
+  const binDirectory = join(root, 'bin');
+  const tempDirectory = join(root, 'tmp');
+  mkdirSync(toolsDirectory);
+  mkdirSync(binDirectory);
+  mkdirSync(tempDirectory);
+  symlinkSync(ciGate, join(toolsDirectory, 'ci-gate.sh'));
+
+  for (const name of passingChecks) {
+    writeExecutable(join(toolsDirectory, name), '#!/usr/bin/env bash\nexit 0\n');
+  }
+  writeExecutable(join(toolsDirectory, 'check-known-failures.sh'), `#!/usr/bin/env bash
+cat >/dev/null
+[ "\${GATE_TEST_CASE:-}" = "known" ]
+`);
+  writeExecutable(join(binDirectory, 'pnpm'), `#!/usr/bin/env bash
+if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "_test" ]; then
+  for index in $(seq 1 35); do
+    printf 'fixture-output-%s\n' "$index"
+  done
+  printf 'fixture-%s-tail\n' "\${GATE_TEST_CASE:-unknown}"
+  if [ "\${GATE_TEST_CASE:-}" = "success" ]; then
+    exit 0
+  fi
+  exit 2
+fi
+exit 0
+`);
+
+  const result = spawnSync('bash', [join(toolsDirectory, 'ci-gate.sh')], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GATE_TEST_CASE: testCase,
+      PATH: `${binDirectory}:${process.env.PATH ?? ''}`,
+      TMPDIR: tempDirectory,
+    },
+  });
+  return { root, tempDirectory, result };
+}
+
+function writeExecutable(path, content) {
+  writeFileSync(path, content, { mode: 0o755 });
+}
+
+function assertTempLogRemoved(tempDirectory) {
+  const leftovers = readdirSync(tempDirectory)
+    .filter((name) => name.startsWith('los-test-output.'));
+  assert.deepEqual(leftovers, []);
+}
