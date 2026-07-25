@@ -34,6 +34,29 @@ runs the complete workspace. `gate-web-e2e` remains visible and runs on every
 pull request, but it is not a GitHub required check. Changing that policy needs
 separate reliability and runner-cost evidence.
 
+The workflow concurrency group is the event type plus pull-request number or
+full ref. A newer head for the same pull request cancels its older run, while
+different pull requests cannot cancel each other. Pushes to `main` cancel an
+older `push` run for `refs/heads/main`; repeated manual dispatches on the same
+selected ref cancel each other. Including the event type prevents a manual
+canary from cancelling a push or pull-request run.
+
+GitHub's heavy jobs remain independent of `gate-fast`. Successful run
+`30167823333` completed in 230 seconds wall time, with `gate-fast` taking 64
+seconds and `gate-test` taking 225 seconds. Adding a fast-gate dependency would
+add about one minute to that successful path without reducing its runner time.
+The concurrency rule instead limits waste after a new PR head supersedes an
+active run. Run `30167769845` is the observed waste sample: before cancellation,
+fast, drift, and Web E2E had completed and the root test command had run for 92
+seconds. It is classified as superseded, not as a test flake.
+
+Forgejo keeps its existing `needs: gate-fast` policy for `gate-test` and Web
+E2E because its local runners have tighter shared-resource constraints. Run
+`257` took about 410 seconds wall time and 484 accumulated runner-seconds; full
+parallelism could reduce a green path by roughly the 158-second fast gate, but
+would not reduce green runner consumption and would spend heavy-job resources
+on every fast failure. One run is insufficient evidence to change that policy.
+
 The single GitHub test job samples its expensive root test command every five
 seconds through `tools/observe-command-resources.mjs`. The JSON record is
 written to the runner temporary directory and copied to the job summary.

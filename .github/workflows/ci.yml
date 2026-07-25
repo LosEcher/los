@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: github-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # CI is split into independent jobs so a hang in the DB-dependent test
 # phase can no longer burn the whole gate budget, and a failing/hanging
 # phase remains distinguishable from fast, Web E2E, and migration checks.

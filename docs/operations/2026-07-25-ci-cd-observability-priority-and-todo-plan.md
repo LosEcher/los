@@ -47,8 +47,11 @@
     `todo-los-execution-experiment-contract`，全部五个依赖均已完成，todo 已从
     `backlog` 转为 `ready`。
 11. `[E]` Forgejo run-artifact 读 API 返回 HTTP 200，但当前账号读取 user/org
-    artifact quota 均为 HTTP 404。常规 Forgejo CI 暂不上传失败包；手动 1 KiB
-    upload/download canary 尚待远端执行。
+    artifact quota 均为 HTTP 404。手动 1 KiB canary run `286` 在上传前 clone
+    `forgejo/upload-artifact@v4` 超时，job `933` 于 301 秒失败且 artifact 为 0；
+    常规 Forgejo CI 继续关闭失败包上传。
+12. `[E]` GitHub run `30167769845` 是 superseded-run 浪费样本：fast、drift、
+    Web E2E 已完成，root test 已执行 92 秒后取消。该 run 不计为 flake。
 
 ## 优先级和依赖
 
@@ -57,8 +60,8 @@
 | 1 | `todo-los-ci-github-single-test-rollout` | `done` | P0 | 无 | Forgejo PR `#64/#65`、GitHub PR `#172` 已交付 |
 | 2 | `todo-los-ci-gate-result-capture` | `done` | P0 | 无 | Forgejo PR `#66` 已交付，focused 3/3 和 root gate 通过 |
 | 3 | `todo-los-ci-github-ruleset-migration` | `done` | P0 | 1 | 双策略面已迁移，exact-head canary 与镜像 merge 已完成 |
-| 4 | `todo-los-ci-failure-evidence-lifecycle` | `in_progress` | P1 | 1 | GitHub 接入待 exact-head 验证；Forgejo canary 和 quota gap 待记录 |
-| 5 | `todo-los-ci-superseded-run-control` | `backlog` | P1 | 1 | 增加 concurrency/cancel，并量化重任务依赖 fast gate 的时间代价 |
+| 4 | `todo-los-ci-failure-evidence-lifecycle` | `done` | P1 | 1 | GitHub failure-only 证据已交付；Forgejo 负向 canary 已记录并保持关闭 |
+| 5 | `todo-los-ci-superseded-run-control` | `in_progress` | P1 | 1 | 加入事件+PR/ref concurrency；交付和远端自动取消证据待完成 |
 | 6 | `todo-los-ci-forgejo-windows-resource-probe` | `backlog` | P1 | 1 | Windows CPU/RSS/page-file 单独建基线 |
 | 7 | `todo-los-ci-resource-baseline` | `backlog` | P1 | 3 | 10 个 unique-head 后再判断 cache/runner 调优 |
 | 8 | `todo-los-p1-turbo-cache` | `backlog` | P1 | 6、7 | 验证 pnpm cache 重复、Turbo key、Playwright 安装和 coverage 拆分 |
