@@ -51,8 +51,8 @@ Current package scripts:
    `tools/check-contracts.sh`.
 3. Root `pnpm test` runs Turbo test without requiring every package to collect
    full coverage. Agent uses an explicit 69-file shared-process lane and a
-   52-file isolated PostgreSQL lane. Gateway uses an 18-file shared-process
-   lane and a 39-file isolated PostgreSQL lane. In both packages, every
+   52-file isolated PostgreSQL lane. Gateway uses a 20-file shared-process
+   lane and a 37-file isolated PostgreSQL lane. In both packages, every
    discovered test file must belong to exactly one lane.
 4. Root `pnpm test:coverage:baseline` uses a package's `test:coverage` script
    when available, otherwise its ordinary `test` script. It fails when the

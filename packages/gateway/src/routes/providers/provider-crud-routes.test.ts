@@ -9,18 +9,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance } from 'fastify';
-
-const { createServer } = await import('../../server.js');
+import Fastify from 'fastify';
+import { loadConfig, setConfig, type Config } from '@los/infra/config';
+import { registerProviderCrudRoutes } from './provider-crud-routes.js';
 
 let app: FastifyInstance;
+let originalConfig: Config;
 
 test.before(async () => {
-  app = await createServer();
+  originalConfig = structuredClone(await loadConfig());
+  app = Fastify({ logger: false });
+  registerProviderCrudRoutes(app);
   await app.ready();
 });
 
 test.after(async () => {
   await app.close();
+  setConfig(originalConfig);
 });
 
 // ── POST /providers ────────────────────────────────────────
