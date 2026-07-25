@@ -27,14 +27,53 @@ import {
 import { MCPClient } from '@los/agent';
 import { getLogger } from '@los/infra/logger';
 
+export type MCPRouteDependencies = {
+  deleteMCPServer: typeof deleteMCPServer;
+  inspectMCPServer: typeof inspectMCPServer;
+  listMCPServerVersions: typeof listMCPServerVersions;
+  listMCPServers: typeof listMCPServers;
+  loadMCPServer: typeof loadMCPServer;
+  pinMCPServerVersion: typeof pinMCPServerVersion;
+  projectCanToolCapability: typeof projectCanToolCapability;
+  rollbackMCPServerVersion: typeof rollbackMCPServerVersion;
+  setMCPServerEnabled: typeof setMCPServerEnabled;
+  summarizeCanToolCapabilities: typeof summarizeCanToolCapabilities;
+  unpinMCPServerVersion: typeof unpinMCPServerVersion;
+  updateMCPServerStatus: typeof updateMCPServerStatus;
+  upsertMCPServer: typeof upsertMCPServer;
+  MCPClient: typeof MCPClient;
+  ensureMCPServerStore: typeof ensureMCPServerStore;
+};
+
+const defaultDependencies: MCPRouteDependencies = {
+  deleteMCPServer,
+  inspectMCPServer,
+  listMCPServerVersions,
+  listMCPServers,
+  loadMCPServer,
+  pinMCPServerVersion,
+  projectCanToolCapability,
+  rollbackMCPServerVersion,
+  setMCPServerEnabled,
+  summarizeCanToolCapabilities,
+  unpinMCPServerVersion,
+  updateMCPServerStatus,
+  upsertMCPServer,
+  MCPClient,
+  ensureMCPServerStore,
+};
+
 const log = getLogger('gateway');
 
 type ScopeQuery = { tenantId?: string; projectId?: string };
 
-export function registerMCPRoutes(app: FastifyInstance): void {
+export function registerMCPRoutes(
+  app: FastifyInstance,
+  deps: MCPRouteDependencies = defaultDependencies,
+): void {
   app.get('/mcp-servers', async (req) => {
     const query = req.query as ScopeQuery & { enabled?: string };
-    const servers = await listMCPServers({
+    const servers = await deps.listMCPServers({
       tenantId: query.tenantId,
       projectId: query.projectId,
       enabled: query.enabled === 'true' ? true : query.enabled === 'false' ? false : undefined,
@@ -44,7 +83,7 @@ export function registerMCPRoutes(app: FastifyInstance): void {
 
   app.post('/mcp-servers/inspect', async (req, reply) => {
     try {
-      const inspection = inspectBody(req.body);
+      const inspection = inspectBody(req.body, deps);
       return { ...inspection, normalized: toPublicMCPInput(inspection.normalized) };
     } catch (error) {
       return reply.status(400).send({ error: messageOf(error) });
@@ -54,7 +93,7 @@ export function registerMCPRoutes(app: FastifyInstance): void {
   app.get('/mcp-servers/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as ScopeQuery;
-    const server = await loadMCPServer(id, query.tenantId, query.projectId);
+    const server = await deps.loadMCPServer(id, query.tenantId, query.projectId);
     if (!server) return reply.status(404).send({ error: 'MCP server not found' });
     return _toPublicMCPServer(server);
   });
@@ -65,13 +104,13 @@ export function registerMCPRoutes(app: FastifyInstance): void {
       return reply.status(400).send({ error: 'raw env values are not accepted; use an opaque authConfig.credentialRef' });
     }
     try {
-      const inspection = inspectBody(body);
+      const inspection = inspectBody(body, deps);
       const inspectedVersionHash = optionalString(body.inspectedVersionHash);
       if (!inspectedVersionHash) return reply.status(400).send({ error: 'inspectedVersionHash is required' });
       if (inspectedVersionHash !== inspection.versionHash) {
         return reply.status(409).send({ error: 'MCP registration changed after inspect' });
       }
-      const server = await upsertMCPServer(inspection.normalized);
+      const server = await deps.upsertMCPServer(inspection.normalized);
       return reply.status(201).send(_toPublicMCPServer(server));
     } catch (error) {
       const message = messageOf(error);
@@ -82,12 +121,12 @@ export function registerMCPRoutes(app: FastifyInstance): void {
   app.get('/mcp-servers/:id/history', async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as ScopeQuery;
-    const server = await loadMCPServer(id, query.tenantId, query.projectId);
+    const server = await deps.loadMCPServer(id, query.tenantId, query.projectId);
     if (!server) return reply.status(404).send({ error: 'MCP server not found' });
     return {
       currentVersionHash: server.versionHash,
       pinnedVersionHash: server.pinnedVersionHash,
-      versions: await listMCPServerVersions(id, query.tenantId, query.projectId),
+      versions: await deps.listMCPServerVersions(id, query.tenantId, query.projectId),
     };
   });
 
@@ -96,8 +135,8 @@ export function registerMCPRoutes(app: FastifyInstance): void {
     const body = req.body as ScopeQuery & { versionHash?: string; pinned?: boolean };
     try {
       const server = body.pinned === false
-        ? await unpinMCPServerVersion(id, body.tenantId, body.projectId)
-        : await pinMCPServerVersion(id, body.tenantId, body.projectId, optionalString(body.versionHash));
+        ? await deps.unpinMCPServerVersion(id, body.tenantId, body.projectId)
+        : await deps.pinMCPServerVersion(id, body.tenantId, body.projectId, optionalString(body.versionHash));
       return _toPublicMCPServer(server);
     } catch (error) {
       return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
@@ -110,7 +149,7 @@ export function registerMCPRoutes(app: FastifyInstance): void {
     const versionHash = optionalString(body.versionHash);
     if (!versionHash) return reply.status(400).send({ error: 'versionHash is required' });
     try {
-      return _toPublicMCPServer(await rollbackMCPServerVersion(id, versionHash, body.tenantId, body.projectId));
+      return _toPublicMCPServer(await deps.rollbackMCPServerVersion(id, versionHash, body.tenantId, body.projectId));
     } catch (error) {
       return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
     }
@@ -121,7 +160,7 @@ export function registerMCPRoutes(app: FastifyInstance): void {
     const body = req.body as ScopeQuery & { enabled?: boolean };
     if (typeof body.enabled !== 'boolean') return reply.status(400).send({ error: 'enabled boolean is required' });
     try {
-      return _toPublicMCPServer(await setMCPServerEnabled(id, body.enabled, body.tenantId, body.projectId));
+      return _toPublicMCPServer(await deps.setMCPServerEnabled(id, body.enabled, body.tenantId, body.projectId));
     } catch (error) {
       return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
     }
@@ -130,33 +169,33 @@ export function registerMCPRoutes(app: FastifyInstance): void {
   app.delete('/mcp-servers/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as ScopeQuery;
-    const ok = await deleteMCPServer(id, query.tenantId, query.projectId);
+    const ok = await deps.deleteMCPServer(id, query.tenantId, query.projectId);
     if (!ok) return reply.status(404).send({ error: 'MCP server not found' });
     return { ok: true };
   });
 
   app.post('/mcp-servers/:id/verify', async (req, reply) => {
-    return await verifyRegisteredServer(req, reply);
+    return await verifyRegisteredServer(req, reply, deps);
   });
 
   app.post('/mcp-servers/:id/reload', async (req, reply) => {
-    return await verifyRegisteredServer(req, reply);
+    return await verifyRegisteredServer(req, reply, deps);
   });
 }
 
-async function verifyRegisteredServer(req: any, reply: any): Promise<unknown> {
+async function verifyRegisteredServer(req: any, reply: any, deps: MCPRouteDependencies): Promise<unknown> {
   const { id } = req.params as { id: string };
   const query = req.query as ScopeQuery;
-  await ensureMCPServerStore();
-  const server = await loadMCPServer(id, query.tenantId, query.projectId);
+  await deps.ensureMCPServerStore();
+  const server = await deps.loadMCPServer(id, query.tenantId, query.projectId);
   if (!server) return reply.status(404).send({ error: 'MCP server not found' });
   const unsupported = verificationBlocker(server);
   if (unsupported) {
-    await updateMCPServerStatus(id, { status: 'error', lastError: unsupported }, query.tenantId, query.projectId);
+    await deps.updateMCPServerStatus(id, { status: 'error', lastError: unsupported }, query.tenantId, query.projectId);
     return reply.status(400).send({ ok: false, serverId: id, error: unsupported });
   }
 
-  const client = new MCPClient({ command: server.command!, args: server.args, env: server.env });
+  const client = new deps.MCPClient({ command: server.command!, args: server.args, env: server.env });
   try {
     await client.connect();
     const tools = client.getTools();
@@ -169,11 +208,11 @@ async function verifyRegisteredServer(req: any, reply: any): Promise<unknown> {
       outputSchema: tool.outputSchema,
       annotations: tool.annotations,
       capability: server.adapterConfig.kind === 'cantool'
-        ? projectCanToolCapability(tool)
+        ? deps.projectCanToolCapability(tool)
         : undefined,
     }));
     const projections = registeredTools.flatMap(tool => tool.capability ? [tool.capability] : []);
-    await updateMCPServerStatus(id, {
+    await deps.updateMCPServerStatus(id, {
       status: 'connected',
       lastError: null,
       toolCount: tools.length,
@@ -184,7 +223,7 @@ async function verifyRegisteredServer(req: any, reply: any): Promise<unknown> {
         protocolVersion: identity.protocolVersion,
         verifiedAt: new Date().toISOString(),
         capabilitySummary: projections.length > 0
-          ? summarizeCanToolCapabilities(projections)
+          ? deps.summarizeCanToolCapabilities(projections)
           : undefined,
       },
     }, query.tenantId, query.projectId);
@@ -207,18 +246,18 @@ async function verifyRegisteredServer(req: any, reply: any): Promise<unknown> {
   } catch (error) {
     const message = messageOf(error);
     log.warn(`MCP server verify failed [${id}]: ${message}`);
-    await updateMCPServerStatus(id, { status: 'error', lastError: message }, query.tenantId, query.projectId);
+    await deps.updateMCPServerStatus(id, { status: 'error', lastError: message }, query.tenantId, query.projectId);
     return { ok: false, serverId: id, error: message };
   } finally {
     await client.close();
   }
 }
 
-function inspectBody(value: unknown) {
+function inspectBody(value: unknown, deps: MCPRouteDependencies) {
   const body = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const transport = normalizeTransport(body.transport);
   if (!transport) throw new Error('transport must be stdio, sse, or streamable-http');
-  return inspectMCPServer({
+  return deps.inspectMCPServer({
     id: optionalString(body.id) ?? '',
     tenantId: optionalString(body.tenantId),
     projectId: optionalString(body.projectId),

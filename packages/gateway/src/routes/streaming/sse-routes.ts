@@ -17,6 +17,37 @@ import {
 } from '@los/agent/stream-lease';
 import { computeRetryDelay, retryAfterHeader } from './stream-backoff.js';
 
+type SseRouteDependencies = {
+  listSessionEventsSince: typeof listSessionEventsSince;
+  listTaskRunsForSession: typeof listTaskRunsForSession;
+  loadTaskRun: typeof loadTaskRun;
+  acquireStreamLease: typeof acquireStreamLease;
+  releaseStreamLease: typeof releaseStreamLease;
+  heartbeatStreamLease: typeof heartbeatStreamLease;
+  ensureSessionEventStore: typeof ensureSessionEventStore;
+  ensureTaskRunStore: typeof ensureTaskRunStore;
+};
+
+type LiveEventRouteDependencies = {
+  listSessionEventsSince: typeof listSessionEventsSince;
+  ensureSessionEventStore: typeof ensureSessionEventStore;
+};
+
+const defaultSseRouteDeps: SseRouteDependencies = {
+  listSessionEventsSince,
+  listTaskRunsForSession,
+  loadTaskRun,
+  acquireStreamLease,
+  releaseStreamLease,
+  heartbeatStreamLease,
+  ensureSessionEventStore,
+  ensureTaskRunStore,
+};
+
+const defaultLiveEventRouteDeps: LiveEventRouteDependencies = {
+  listSessionEventsSince,
+  ensureSessionEventStore,
+};
 interface LiveClient {
   sessionId: string;
   reply: any;
@@ -54,7 +85,11 @@ function parseLiveSessionEventNotification(payload: string | undefined) {
   }
 }
 
-export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string): void {
+export function registerSseRoutes(
+  app: FastifyInstance,
+  gatewayServiceId: string,
+  deps: SseRouteDependencies = defaultSseRouteDeps,
+): void {
   app.get('/sessions/:id/events/stream', async (req, reply) => {
     const { id } = req.params as { id: string };
     const gateway = gatewayServiceId;
@@ -65,7 +100,7 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
       : Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
     const isReconnect = since > 0;
-    const lease = await acquireStreamLease({ sessionId: id, gateway, ttlSeconds: 30 });
+    const lease = await deps.acquireStreamLease({ sessionId: id, gateway, ttlSeconds: 30 });
 
     if (!lease.canTakeover) {
       reply.raw.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
@@ -81,11 +116,11 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
 
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     if (lease.newLease && isReconnect) {
-      heartbeatTimer = setInterval(() => { heartbeatStreamLease(id, gateway).catch(() => undefined); }, 10_000);
+      heartbeatTimer = setInterval(() => { deps.heartbeatStreamLease(id, gateway).catch(() => undefined); }, 10_000);
     }
 
-    await ensureSessionEventStore();
-    await ensureTaskRunStore();
+    await deps.ensureSessionEventStore();
+    await deps.ensureTaskRunStore();
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -110,7 +145,7 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
 
     const pollAndSend = async () => {
       if (ended) return 0;
-      const events = await listSessionEventsSince(id, lastId, 100);
+      const events = await deps.listSessionEventsSince(id, lastId, 100);
       for (const event of events) {
         send(event.type, {
           id: event.id, sessionId: event.sessionId, turn: event.turn,
@@ -127,7 +162,7 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
     try {
       await pollAndSend();
 
-      const activeTasks = await listTaskRunsForSession(id, 5);
+      const activeTasks = await deps.listTaskRunsForSession(id, 5);
       const active = activeTasks.find(t => t.status === 'queued' || t.status === 'running');
 
       if (active) {
@@ -141,13 +176,13 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
             await pollAndSend();
             const client = liveClients.get(cid);
             if (client) client.lastId = lastId;
-            const task = await loadTaskRun(active.id);
+            const task = await deps.loadTaskRun(active.id);
             if (!task || !['queued', 'running'].includes(task.status)) {
               ended = true;
               liveClients.delete(cid);
               clearInterval(interval);
               if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-              await releaseStreamLease(id, gateway).catch(() => undefined);
+              await deps.releaseStreamLease(id, gateway).catch(() => undefined);
               send('session.completed', { sessionId: id, taskRunId: active.id, status: task?.status ?? 'unknown' });
               reply.raw.end();
             }
@@ -155,7 +190,7 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
             liveClients.delete(cid);
             clearInterval(interval);
             if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-            await releaseStreamLease(id, gateway).catch(() => undefined);
+            await deps.releaseStreamLease(id, gateway).catch(() => undefined);
             reply.raw.end();
           }
         }, 1000);
@@ -164,29 +199,32 @@ export function registerSseRoutes(app: FastifyInstance, gatewayServiceId: string
           liveClients.delete(cid);
           clearInterval(interval);
           if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-          releaseStreamLease(id, gateway).catch(() => undefined);
+          deps.releaseStreamLease(id, gateway).catch(() => undefined);
         });
       } else {
         send('session.completed', { sessionId: id, message: 'No active task. All events delivered.' });
         if (heartbeatTimer) clearInterval(heartbeatTimer);
-        await releaseStreamLease(id, gateway).catch(() => undefined);
+        await deps.releaseStreamLease(id, gateway).catch(() => undefined);
         reply.raw.end();
       }
     } catch (err: any) {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
-      await releaseStreamLease(id, gateway).catch(() => undefined);
+      await deps.releaseStreamLease(id, gateway).catch(() => undefined);
       send('error', { message: err?.message ?? String(err) });
       reply.raw.end();
     }
   });
 }
 
-export function setupLiveEventPush(app: FastifyInstance): void {
+export function setupLiveEventPush(
+  app: FastifyInstance,
+  deps: SseRouteDependencies = defaultSseRouteDeps,
+): void {
   const unsubTransition = eventBus.on('execution:transition', (payload) => {
     for (const [cid, lc] of liveClients) {
       if (lc.sessionId !== payload.sessionId || lc.ended) continue;
       try {
-        listSessionEventsSince(lc.sessionId, lc.lastId, 100).then(events => {
+        deps.listSessionEventsSince(lc.sessionId, lc.lastId, 100).then(events => {
           if (lc.ended) return;
           for (const event of events) {
             if (event.id <= lc.lastId) continue;
@@ -213,7 +251,7 @@ export function setupLiveEventPush(app: FastifyInstance): void {
     for (const [cid, lc] of liveClients) {
       if (lc.sessionId !== payload.sessionId || lc.ended) continue;
       try {
-        listSessionEventsSince(lc.sessionId, lc.lastId, 100).then(events => {
+        deps.listSessionEventsSince(lc.sessionId, lc.lastId, 100).then(events => {
           if (lc.ended) return;
           for (const event of events) {
             if (event.id <= lc.lastId) continue;
@@ -252,7 +290,7 @@ export function setupLiveEventPush(app: FastifyInstance): void {
         for (const [cid, lc] of liveClients) {
           if (lc.sessionId !== parsed.sessionId || lc.ended) continue;
           try {
-            const events = await listSessionEventsSince(lc.sessionId, lc.lastId, 100);
+            const events = await deps.listSessionEventsSince(lc.sessionId, lc.lastId, 100);
             for (const event of events) {
               if (event.id <= lc.lastId) continue;
               lc.reply.raw.write(`id: ${event.id}\n`);
@@ -286,7 +324,10 @@ export function setupLiveEventPush(app: FastifyInstance): void {
   });
 }
 
-export function registerLiveEventRoutes(app: FastifyInstance): void {
+export function registerLiveEventRoutes(
+  app: FastifyInstance,
+  deps: LiveEventRouteDependencies = defaultLiveEventRouteDeps,
+): void {
   app.get('/sessions/:id/events/live', async (req, reply) => {
     const { id } = req.params as { id: string };
     const lastEventId = req.headers['last-event-id'];
@@ -294,7 +335,7 @@ export function registerLiveEventRoutes(app: FastifyInstance): void {
       ? Math.max(0, Number(lastEventId))
       : Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
-    await ensureSessionEventStore();
+    await deps.ensureSessionEventStore();
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -309,7 +350,7 @@ export function registerLiveEventRoutes(app: FastifyInstance): void {
 
     const pollAndSend = async () => {
       if (ended) return 0;
-      const events = await listSessionEventsSince(id, lastId, 100);
+      const events = await deps.listSessionEventsSince(id, lastId, 100);
       for (const event of events) {
         send('session.event', { id: event.id, sessionId: event.sessionId, type: event.type, payload: event.payload }, event.id);
         lastId = event.id;

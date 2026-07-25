@@ -25,6 +25,28 @@ import {
 import type { TodoStatus, CreateTodoInput } from '@los/agent/todos';
 import { LOS_PLANNING_TODO_SEED } from '@los/agent/todo-seeds';
 
+type SaaSTodoRouteDependencies = {
+  createTodo: typeof createTodo;
+  updateTodo: typeof updateTodo;
+  archiveTodo: typeof archiveTodo;
+  listTodos: typeof listTodos;
+  seedLosPlanningTodos: typeof seedLosPlanningTodos;
+  reconcilePlanningTodosWithDefaultDb: typeof reconcilePlanningTodosWithDefaultDb;
+  createGovernanceJob: typeof createGovernanceJob;
+  ensureGovernanceJobStore: typeof ensureGovernanceJobStore;
+};
+
+const defaultDependencies: SaaSTodoRouteDependencies = {
+  createTodo,
+  updateTodo,
+  archiveTodo,
+  listTodos,
+  seedLosPlanningTodos,
+  reconcilePlanningTodosWithDefaultDb,
+  createGovernanceJob,
+  ensureGovernanceJobStore,
+};
+
 // ── Normalizers ──────────────────────────────────────────
 
 function normalizeOptionalString(v: unknown): string | undefined {
@@ -56,7 +78,10 @@ function normalizeStatusFilter(v: unknown): TodoStatus[] | undefined {
 
 // ── Routes ───────────────────────────────────────────────
 
-export function registerSaaSTodoRoutes(app: FastifyInstance): void {
+export function registerSaaSTodoRoutes(
+  app: FastifyInstance,
+  deps: SaaSTodoRouteDependencies = defaultDependencies,
+): void {
   /**
    * POST /tenants/:tenantId/projects/:projectId/todos/dispatch
    *
@@ -76,10 +101,10 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     const source = normalizeOptionalString(body.source);
     const dryRun = body.dryRun === true || body.dryRun === 'true';
 
-    await ensureGovernanceJobStore();
+    await deps.ensureGovernanceJobStore();
 
     // Get current seeds vs DB state
-    const reconciled = await reconcilePlanningTodosWithDefaultDb({
+    const reconciled = await deps.reconcilePlanningTodosWithDefaultDb({
       tenantId,
       projectId,
       includeArchived: false,
@@ -98,8 +123,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     let skipped = 0;
 
     if (!dryRun) {
-      // Resolve full seed data from LOS_PLANNING_TODO_SEED
-      const { LOS_PLANNING_TODO_SEED } = await import('@los/agent/todo-seeds');
+      // Resolve full seed data from the statically-imported LOS_PLANNING_TODO_SEED
       const seedMap = new Map(LOS_PLANNING_TODO_SEED.map(s => [s.id, s]));
 
       for (const item of toCreate) {
@@ -107,7 +131,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
         if (!seed) { skipped++; continue; }
 
         try {
-          const created = await createTodo({
+          const created = await deps.createTodo({
             ...seed,
             // Override tenant/project scope
             metadata: {
@@ -133,7 +157,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     }
 
     // Record dispatch as a governance job for audit trail
-    const job = await createGovernanceJob({
+    const job = await deps.createGovernanceJob({
       jobType: 'consistency_audit',
       tenantId,
       projectId,
@@ -168,7 +192,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     const tenantId = normalizeId((req.params as any).tenantId);
     const projectId = normalizeId((req.params as any).projectId);
 
-    const reconciled = await reconcilePlanningTodosWithDefaultDb({
+    const reconciled = await deps.reconcilePlanningTodosWithDefaultDb({
       tenantId,
       projectId,
       includeArchived: false,
@@ -216,7 +240,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     const fixMode = (body.fixMode as string) ?? 'all';
     const dryRun = body.dryRun === true || body.dryRun === 'true';
 
-    const reconciled = await reconcilePlanningTodosWithDefaultDb({
+    const reconciled = await deps.reconcilePlanningTodosWithDefaultDb({
       tenantId,
       projectId,
       includeArchived: false,
@@ -232,7 +256,6 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     };
 
     if (!dryRun) {
-      const { LOS_PLANNING_TODO_SEED } = await import('@los/agent/todo-seeds');
       const seedMap = new Map(LOS_PLANNING_TODO_SEED.map(s => [s.id, s]));
 
       // Fix seedOnly (missing seeds in DB)
@@ -260,10 +283,9 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
 
       // Fix statusDrift (correct status mismatches)
       if (fixMode === 'all' || fixMode === 'status_drift') {
-        const { updateTodo } = await import('@los/agent/todos');
         for (const drift of reconciled.statusDrift) {
           try {
-            await updateTodo(drift.id, {
+            await deps.updateTodo(drift.id, {
               status: drift.expectedStatus,
               metadata: {
                 driftFixedAt: new Date().toISOString(),
@@ -281,7 +303,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
       if (fixMode === 'all' || fixMode === 'db_only') {
         for (const item of reconciled.dbOnly) {
           try {
-            await archiveTodo(item.id, 'seed_no_longer_defines_this_todo');
+            await deps.archiveTodo(item.id, 'seed_no_longer_defines_this_todo');
             (result.dbOnlyFixed as number)++;
           } catch (err: any) {
             (result.errors as string[]).push(`dbOnly ${item.id}: ${err.message}`);
@@ -290,7 +312,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
       }
     }
 
-    await ensureGovernanceJobStore();
+    await deps.ensureGovernanceJobStore();
     await createGovernanceJob({
       jobType: 'consistency_audit',
       tenantId,
@@ -316,7 +338,7 @@ export function registerSaaSTodoRoutes(app: FastifyInstance): void {
     const projectId = normalizeId((req.params as any).projectId);
     const query = req.query as { status?: string; limit?: string; includeArchived?: string };
 
-    const todos = await listTodos({
+    const todos = await deps.listTodos({
       tenantId,
       projectId,
       status: normalizeTodoStatus(query.status),

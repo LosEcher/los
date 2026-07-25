@@ -14,8 +14,33 @@ import {
   type RuleSeverity,
   type RuleStatus,
 } from '@los/agent/rules';
+type RuleRouteDependencies = {
+  ensureRuleStore: typeof ensureRuleStore;
+  listRules: typeof listRules;
+  loadRule: typeof loadRule;
+  upsertRule: typeof upsertRule;
+  updateRuleStatus: typeof updateRuleStatus;
+  deleteRule: typeof deleteRule;
+  loadRulesFromDir: typeof loadRulesFromDir;
+  syncRulesToDir: typeof syncRulesToDir;
+};
 
-export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: string) {
+const defaultDependencies: RuleRouteDependencies = {
+  ensureRuleStore,
+  listRules,
+  loadRule,
+  upsertRule,
+  updateRuleStatus,
+  deleteRule,
+  loadRulesFromDir,
+  syncRulesToDir,
+};
+
+export function registerRuleRoutes(
+  app: FastifyInstance,
+  defaultWorkspaceRoot?: string,
+  deps: RuleRouteDependencies = defaultDependencies,
+) {
   app.get('/rules', async (req) => {
     const query = req.query as {
       status?: string;
@@ -24,8 +49,8 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
       ruleLayer?: string;
       archived?: string;
     };
-    await ensureRuleStore();
-    return await listRules({
+    await deps.ensureRuleStore();
+    return await deps.listRules({
       status: normalizeRuleStatus(query.status),
       severity: normalizeRuleSeverity(query.severity),
       scope: normalizeScope(query.scope),
@@ -37,8 +62,8 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
   app.get('/rules/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
     const query = req.query as { scope?: string };
-    await ensureRuleStore();
-    const rule = await loadRule(name, normalizeScope(query.scope));
+    await deps.ensureRuleStore();
+    const rule = await deps.loadRule(name, normalizeScope(query.scope));
     if (!rule) return reply.status(404).send({ error: 'Rule not found' });
     return rule;
   });
@@ -67,8 +92,8 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
     metadata.ruleLayer = ruleLayer;
     if (metadata.archived === undefined) metadata.archived = false;
 
-    await ensureRuleStore();
-    const rule = await upsertRule({
+    await deps.ensureRuleStore();
+    const rule = await deps.upsertRule({
       name,
       severity: normalizeRuleSeverity(body.severity),
       enforcementMode: normalizeEnforcementMode(body.enforcementMode),
@@ -86,8 +111,8 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
     const status = normalizeRuleStatus(body?.status);
     if (!status) return reply.status(400).send({ error: 'status is required' });
 
-    await ensureRuleStore();
-    const rule = await updateRuleStatus(name, status, normalizeScope(query.scope));
+    await deps.ensureRuleStore();
+    const rule = await deps.updateRuleStatus(name, status, normalizeScope(query.scope));
     if (!rule) return reply.status(404).send({ error: 'Rule not found' });
     return rule;
   });
@@ -95,8 +120,8 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
   app.delete('/rules/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
     const query = req.query as { scope?: string };
-    await ensureRuleStore();
-    const ok = await deleteRule(name, normalizeScope(query.scope));
+    await deps.ensureRuleStore();
+    const ok = await deps.deleteRule(name, normalizeScope(query.scope));
     if (!ok) return reply.status(404).send({ error: 'Rule not found' });
     return { ok: true };
   });
@@ -109,9 +134,9 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
     const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
     const ruleLayer = layer ?? defaultRuleLayer(scope);
     const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
-    await ensureRuleStore();
-    const rules = await listRules({ scope, ruleLayer, status: 'active' });
-    syncRulesToDir(scope, rules, workspaceRoot, ruleLayer);
+    await deps.ensureRuleStore();
+    const rules = await deps.listRules({ scope, ruleLayer, status: 'active' });
+    deps.syncRulesToDir(scope, rules, workspaceRoot, ruleLayer);
     return { ok: true, count: rules.length, scope, ruleLayer };
   });
 
@@ -121,11 +146,11 @@ export function registerRuleRoutes(app: FastifyInstance, defaultWorkspaceRoot?: 
     const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
     const ruleLayer = layer ?? defaultRuleLayer(scope);
     const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
-    const loaded = loadRulesFromDir(scope, workspaceRoot, ruleLayer);
-    await ensureRuleStore();
+    const loaded = deps.loadRulesFromDir(scope, workspaceRoot, ruleLayer);
+    await deps.ensureRuleStore();
     const upserted = [];
     for (const item of loaded) {
-      upserted.push(await upsertRule({
+      upserted.push(await deps.upsertRule({
         name: item.name,
         content: item.content,
         severity: item.severity as RuleSeverity,

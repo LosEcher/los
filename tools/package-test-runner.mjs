@@ -65,6 +65,15 @@ export function runPackageTests(options) {
       ...dbBackedFiles,
     ], testEnv);
   }
+
+  runLane('isolated', [
+    '--import', 'tsx',
+    '--import', options.testSetupFile,
+    '--test',
+    `--test-global-setup=${options.globalSetupFile}`,
+    '--test-concurrency', '1',
+    ...options.isolatedDatabaseTestFiles,
+  ], testEnv);
 }
 
 function walk(directory) {

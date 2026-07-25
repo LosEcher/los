@@ -6,6 +6,28 @@ import { listVerificationRecordsForSession, type Message, type TurnSummary } fro
 import { projectExecutionObservability } from '@los/agent/execution-observability';
 import { asObject, truncate } from '../../trace-utils.js';
 
+type TraceRouteDependencies = {
+  loadSession: typeof loadSession;
+  listSessionEvents: typeof listSessionEvents;
+  listSessionEventsSince: typeof listSessionEventsSince;
+  projectSessionTrace: typeof projectSessionTrace;
+  listVerificationRecordsForSession: typeof listVerificationRecordsForSession;
+  projectExecutionObservability: typeof projectExecutionObservability;
+  ensureSessionStore: typeof ensureSessionStore;
+  ensureSessionEventStore: typeof ensureSessionEventStore;
+};
+
+const defaultDependencies: TraceRouteDependencies = {
+  loadSession,
+  listSessionEvents,
+  listSessionEventsSince,
+  projectSessionTrace,
+  listVerificationRecordsForSession,
+  projectExecutionObservability,
+  ensureSessionStore,
+  ensureSessionEventStore,
+};
+
 type TraceMessageRole = 'user' | 'assistant' | 'system' | 'separator';
 
 type TraceToolCallStatus = 'running' | 'completed' | 'error' | 'denied';
@@ -187,28 +209,31 @@ function buildTraceMessagesFromEvents(args: {
   return result;
 }
 
-export function registerTraceRoutes(app: FastifyInstance): void {
+export function registerTraceRoutes(
+  app: FastifyInstance,
+  deps: TraceRouteDependencies = defaultDependencies,
+): void {
   app.get('/sessions/:id/execution-observability', async (req) => {
     const { id } = req.params as { id: string };
-    await ensureSessionEventStore();
+    await deps.ensureSessionEventStore();
     const [events, verificationRecords] = await Promise.all([
-      listSessionEvents(id, 10000),
-      listVerificationRecordsForSession(id),
+      deps.listSessionEvents(id, 10000),
+      deps.listVerificationRecordsForSession(id),
     ]);
-    return projectExecutionObservability(id, events, verificationRecords);
+    return deps.projectExecutionObservability(id, events, verificationRecords);
   });
 
   app.get('/sessions/:id/trace', async (req, reply) => {
     const { id } = req.params as { id: string };
 
-    await ensureSessionStore();
-    await ensureSessionEventStore();
+    await deps.ensureSessionStore();
+    await deps.ensureSessionEventStore();
 
-    const session = await loadSession(id);
+    const session = await deps.loadSession(id);
     if (!session) return reply.status(404).send({ error: 'Not found' });
 
-    const events = await listSessionEvents(id, 10000);
-    const projection = projectSessionTrace(id, events);
+    const events = await deps.listSessionEvents(id, 10000);
+    const projection = deps.projectSessionTrace(id, events);
 
     const apiMessages = session.messages;
     const turns = session.turns;
@@ -242,18 +267,18 @@ export function registerTraceRoutes(app: FastifyInstance): void {
     const { id } = req.params as { id: string };
     const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
-    await ensureSessionStore();
-    await ensureSessionEventStore();
+    await deps.ensureSessionStore();
+    await deps.ensureSessionEventStore();
 
-    const session = await loadSession(id);
+    const session = await deps.loadSession(id);
     if (!session) return reply.status(404).send({ error: 'Not found' });
 
     if (since > 0) {
-      const newEvents = await listSessionEventsSince(id, since, 10000);
+      const newEvents = await deps.listSessionEventsSince(id, since, 10000);
       if (newEvents.length === 0) {
         return { sessionId: id, since, nextSince: since, messages: [], unchanged: true };
       }
-      const projection = projectSessionTrace(id, newEvents);
+      const projection = deps.projectSessionTrace(id, newEvents);
       const messages =
         session.messages.length > 0
           ? buildTraceMessages({ apiMessages: session.messages, turns: session.turns, traceTurns: projection.turns })
@@ -263,8 +288,8 @@ export function registerTraceRoutes(app: FastifyInstance): void {
     }
 
     // since=0: full trace, same as /trace
-    const events = await listSessionEvents(id, 10000);
-    const projection = projectSessionTrace(id, events);
+    const events = await deps.listSessionEvents(id, 10000);
+    const projection = deps.projectSessionTrace(id, events);
     const apiMessages = session.messages;
     const turns = session.turns;
     const messages =
