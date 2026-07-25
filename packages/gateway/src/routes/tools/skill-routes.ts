@@ -151,7 +151,7 @@ export function registerSkillRoutes(
     if (!scope) return reply.status(400).send({ error: 'scope is required' });
     try {
       return body.pinned === false
-        ? await deps.pinSkillVersion(name, scope)
+        ? await deps.unpinSkillVersion(name, scope)
         : await deps.pinSkillVersion(name, scope, normalizeOptionalString(body.versionHash));
     } catch (error) {
       return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
