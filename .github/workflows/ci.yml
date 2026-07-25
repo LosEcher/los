@@ -7,15 +7,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# CI is split into three parallel jobs so a hang in the DB-dependent test
+# CI is split into independent jobs so a hang in the DB-dependent test
 # phase can no longer burn the whole gate budget, and a failing/hanging
-# package surfaces by name instead of as an anonymous timeout.
+# phase remains distinguishable from fast, Web E2E, and migration checks.
 #
 #   gate-fast  — typecheck/structure/coupling/state-machine/contracts/
 #                delete-safety/unwired. No DB. Fast feedback.
-#   gate-test  — per-package tests plus a real root `pnpm test` matrix entry
-#                against PostgreSQL. Package jobs isolate failures; the root
-#                entry verifies cross-package parallel execution.
+#   gate-test  — one root `pnpm test` against PostgreSQL, followed by critical
+#                coverage. The root runner already executes every workspace
+#                package and reports the failing package through Turbo.
 #   gate-drift — migration-drift gate (own DB env, isolated from NODE_ENV
 #                redirect).
 jobs:
@@ -81,21 +81,7 @@ jobs:
       DATABASE_URL: postgres://los:los@localhost:5432/los_test
       TEST_DATABASE_URL: postgres://los:los@localhost:5432/los_test
       NODE_ENV: test
-
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          # Ordered lightest → heaviest so the slowest package starts early.
-          # Per-step timeout bounds a hang to its own package; fail-fast:false
-          # keeps every package running so a hang still names itself.
-          - infra
-          - web
-          - memory
-          - gateway
-          - executor
-          - agent
-          - root
+      RESOURCE_OBSERVATION_FILE: ${{ runner.temp }}/gate-test-resources.json
 
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +94,6 @@ jobs:
           cache: pnpm
 
       - name: Install jj for managed workspace tests
-        if: matrix.package == 'agent' || matrix.package == 'root'
         env:
           JJ_VERSION: 0.39.0
           JJ_SHA256: 8da8d96e9c8696c21ad47847a63d533e249acb0449d9af0f0562b5ea7b024f04
@@ -141,18 +126,31 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Test @los/${{ matrix.package }}
-        if: matrix.package != 'root'
-        run: pnpm --filter @los/${{ matrix.package }} test
-        timeout-minutes: 8
-
-      - name: Test root workspace in parallel
-        if: matrix.package == 'root'
-        run: pnpm test
+      - name: Test root workspace
+        run: >-
+          node tools/observe-command-resources.mjs
+          --label github-gate-test
+          --output "$RESOURCE_OBSERVATION_FILE"
+          -- pnpm test
         timeout-minutes: 12
 
+      - name: Report test resource observation
+        if: always()
+        run: |
+          if [ ! -f "$RESOURCE_OBSERVATION_FILE" ]; then
+            echo "resource observation unavailable (test may have been cancelled before the observer flushed)"
+            exit 0
+          fi
+          cat "$RESOURCE_OBSERVATION_FILE"
+          {
+            echo '### gate-test resource observation'
+            echo
+            echo '```json'
+            cat "$RESOURCE_OBSERVATION_FILE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Enforce critical module coverage
-        if: matrix.package == 'agent'
         run: pnpm test:coverage:critical
         timeout-minutes: 5
 
@@ -177,14 +175,6 @@ jobs:
 
       - name: Test Web operator paths
         run: pnpm --filter @los/web test:e2e
-
-  # Branch protection on GitHub still requires this job name until rules are updated.
-  gate-test-input-preprocessor-retired:
-    name: gate-test (input-preprocessor)
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - run: echo "@los/input-preprocessor removed (9bb74ed); legacy required-check stub."
 
   gate-drift:
     runs-on: ubuntu-latest
