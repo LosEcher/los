@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,16 +9,13 @@ concurrency:
   group: ci-${{ forgejo.ref }}
   cancel-in-progress: true
 
-# Primary CI workflow. Pull requests run three required jobs plus Web E2E. A
-# main push runs only gate-fast because the protected PR head already passed
-# the required test and drift jobs. gate-fast stays on node34 and runs first;
-# gate-test then uses the Windows burst runner. Web E2E runs on node34 in
-# parallel with the Windows test path from a Playwright-preloaded image. This
-# separates Forgejo service capacity from the largest Node/PostgreSQL test
-# workload without making Chromium download latency part of the Windows path.
+# Primary CI workflow. Pull requests run three required jobs plus Web E2E on
+# the Windows Podman runner. Manual dispatch provides unchanged-head canaries.
+# Keeping all four context names stable avoids a simultaneous branch-protection
+# migration while node34 is reduced to Forgejo-only archival service.
 jobs:
   gate-fast:
-    runs-on: ubuntu-jj
+    runs-on: win-ci-jj
     timeout-minutes: 15
     env:
       TURBO_CONCURRENCY: 1
@@ -115,7 +110,7 @@ jobs:
   gate-web-e2e:
     if: forgejo.event_name != 'push'
     needs: gate-fast
-    runs-on: ubuntu-playwright
+    runs-on: win-ci-playwright
     timeout-minutes: 10
 
     steps:

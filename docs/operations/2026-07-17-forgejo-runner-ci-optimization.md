@@ -2,6 +2,14 @@
 
 ## Outcome
 
+The 2026-07-25 operator decision supersedes the node34 shared-CI design. node34
+will run Forgejo as a code archive only; all LOS Forgejo jobs move to the
+repo-scoped Windows Podman runner. The migration keeps the existing job/context
+names and dependency order, removes the protected-`main` duplicate run, and
+disables the unattended dependency-audit schedule. Three exact-head Windows
+canaries are required before the node34 LOS runner is stopped and the PR is
+merged.
+
 The los Forgejo runner now accepts two concurrent jobs and bind-mounts a
 host-persistent pnpm store into each job. The repository workflow cancels
 superseded runs, runs full CI on pull requests, and avoids repeating the two
@@ -192,8 +200,8 @@ replace the product P0/P1 queue in
 
 | ID | Priority | State | Work | Completion evidence |
 | --- | --- | --- | --- | --- |
-| `CI-OBS-01` | P0 | paused | Record the next 10-20 real Forgejo PR runs | Resume only after `CI-HOST-01`; interim summary at 10 eligible PRs; close at 20 or earlier on a resource stop condition, with queue and duration P95, minimum available memory, swap delta, and classified flake rate |
-| `CI-HOST-01` | P0 | decision required | Restore a reliable node34 resource margin without treating the systemd-managed `nmem.service` as an orphan | The 10-GiB expansion alone failed the stable-swap criterion; operator chooses service scheduling, a tested memory limit, or host separation, then three resource-observed exact-head canaries retain at least 1.5 GiB available memory and show a stable post-run swap delta |
+| `CI-OBS-01` | P0 | superseded | Record the next 10-20 real Forgejo PR runs | Replaced by Windows-runner observation because node34 no longer executes LOS CI |
+| `CI-HOST-01` | P0 | done | Remove LOS CI resource contention from node34 without changing nmem | All four jobs passed three exact-head canaries on Windows; node34 LOS runner was stopped while Forgejo API and repository access remained healthy |
 | `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
 | `CI-STORE-01` | P1 | done | Add a periodic pnpm store capacity check without restoring `actions/cache` | `gate-fast` runs `tools/observe-pnpm-store.sh --json`; the observation protocol records a weekly and every-fifth-eligible-PR cadence without deleting store content |
 | `CI-TEST-01` | P1 | done | Compare the pinned Node 22 and Node 24 job images on the same source head and runner | Three warm runs per version completed; median difference was 0.04%, so Node 24 is retained as a compatibility upgrade rather than a performance optimization |
@@ -201,13 +209,13 @@ replace the product P0/P1 queue in
 | `CI-TEST-03` | P1 | in progress | Replace per-file migration/store setup with run-scoped provisioning and isolated mutable data | Agent and Gateway provision stores once per run and truncate mutable rows per isolated file; remaining DB packages and repeated CI evidence are pending |
 | `CI-TEST-04` | P2 | backlog | Persist safe build/check caches and shorten the required-job dependency chain | Cache keys include OS, architecture, Node major, lockfile and task inputs; mutable DB, browser profile, coverage, secret, and session state remain uncached; full main/nightly gates detect classifier omissions |
 
-`CI-HOST-01` owns the immediate next action because run `222` crossed the
-available-memory stop condition. `CI-OBS-01` resumes after that decision and
-three clean canaries. `CI-NET-01` is the prerequisite for any attempt to
-parallelize the two database jobs. `CI-STORE-01` is complete and does not
-change job execution behavior. `CI-TEST-01` can proceed independently on the
-Windows burst runner; it does not resolve node34's `nmem.service` contention or
-authorize higher job concurrency.
+`CI-HOST-01` owns the immediate next action. Its selected host-separation path
+moves every LOS CI job to Windows and leaves `nmem.service` unchanged.
+`CI-NET-01` remains the prerequisite for any attempt to parallelize the two
+database jobs. After the migration canaries pass, the next test-runtime item is
+the remaining Gateway isolated-DB audit: classify the 39 files, introduce
+focused fakes or move DB-independent behavior into the DB-free lane, and retain
+PostgreSQL where persistence behavior is part of the contract.
 
 ## 2026-07-24 Test Runtime Optimization Plan
 
@@ -706,6 +714,72 @@ Changing only `vm.swappiness` is not sufficient evidence of restored capacity:
 it can reduce swapping while leaving the same memory contention. After the
 operator chooses one option, rerun three exact-head canaries with uninterrupted
 memory and swap sampling, including the five-minute post-run swap value.
+
+## 2026-07-25 Windows-Only CI Migration
+
+### Decision
+
+The operator selected host separation and explicitly excluded further nmem
+limits, imports, restarts, or tuning from this work. node34 remains the Forgejo
+archive host; the Windows Podman VM becomes the only LOS Forgejo Actions host.
+This removes CI resource acceptance from the nmem working-set decision instead
+of attempting to make both workloads fit the same memory envelope.
+
+The migration preserves the four job names and their dependency graph:
+
+```text
+gate-fast (win-ci-jj)
+├─ gate-test (win-ci-jj) ── gate-drift (win-ci)
+└─ gate-web-e2e (win-ci-playwright)
+```
+
+Keeping the names stable avoids changing branch protection in the same rollout.
+`push: main` is removed because the exact PR head already runs the complete
+workflow. The dependency audit becomes manual-only so an offline Windows host
+does not accumulate scheduled work. The PostgreSQL isolation canary also uses
+`win-ci`, making its overlap result representative of the target runner.
+
+### Provisioning Evidence
+
+- [E] The Windows Podman VM reports 8 vCPU, 15 GiB effective memory, 8 GiB
+  swap, and no current swap use.
+- [E] The runner volume contains a backup at
+  `/data/.runner.bak-20260725-windows-only-ci`.
+- [E] The runner advertises `win-ci`, `win-ci-jj`, and
+  `win-ci-playwright`; the new label maps to
+  `los-ci:node22-jj0.39.0-playwright1.61.1`.
+- [E] The Windows image store contains the pinned Node 24 CI image, the
+  Playwright image, and PostgreSQL 16.
+- [E] No action job container was running when the label file was changed and
+  `forgejo-runner-win-canary` was restarted.
+
+### Acceptance And Rollback
+
+Run three manual exact-head workflows after the repository change is pushed.
+Each run must pass `gate-fast`, `gate-test`, `gate-web-e2e`, and `gate-drift`,
+remain on the same PR head, keep the runner online, and avoid Podman VM swap
+growth or service-container DNS failures. Record run IDs and durations below
+before stopping node34's LOS runner.
+
+| Canary | Head | Run | Total | Fast | Test | Web E2E | Drift | Result |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `1` | `da5fc6f10fd7` | `259` | 7m22s | passed | passed | passed | passed | green |
+| `2` | `da5fc6f10fd7` | `260` | 7m32s | passed | passed | passed | passed | green |
+| `3` | `da5fc6f10fd7` | `261` | 7m54s | passed | passed | passed | passed | green |
+
+All three runs finished with Windows VM swap at zero. Sampled available memory
+remained above about 13.5 GiB during the overlapping test and browser stages.
+After run `261`, node34's `forgejo-runner` container was stopped and its restart
+policy changed from `unless-stopped` to `no`. Forgejo `16.0.1`, repository ref
+reads, and the separately owned `forgejo-runner-cantool` remained available.
+The documentation update creates a new final head, so the same three-run rule
+must be repeated on that head before merge; the earlier runs remain provisioning
+evidence rather than final merge evidence.
+
+Rollback keeps the node34 runner available until all three canaries pass. If a
+Windows-only failure is caused by runner availability, image selection, Podman
+networking, or resource pressure, restore the previous workflow labels and the
+runner registration backup. Do not change nmem as a CI rollback action.
 
 ## Observation Protocol
 
