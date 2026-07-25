@@ -7,11 +7,24 @@ import {
 
 import { getRequestContext, requireOperator } from '../../request-context.js';
 
-export function registerDailyAgentQualityRoutes(app: FastifyInstance): void {
+type DailyAgentQualityRouteDependencies = {
+  captureDailyAgentQuality: typeof captureDailyAgentQuality;
+  getDailyAgentQualityBaseline: typeof getDailyAgentQualityBaseline;
+};
+
+const defaultDependencies: DailyAgentQualityRouteDependencies = {
+  captureDailyAgentQuality,
+  getDailyAgentQualityBaseline,
+};
+
+export function registerDailyAgentQualityRoutes(
+  app: FastifyInstance,
+  dependencies: DailyAgentQualityRouteDependencies = defaultDependencies,
+): void {
   app.get('/daily-agent-quality/baseline', async (req) => {
     const context = getRequestContext(req);
     const query = req.query as { days?: string };
-    return await getDailyAgentQualityBaseline({
+    return await dependencies.getDailyAgentQualityBaseline({
       tenantId: context.tenantId,
       projectId: context.projectId,
       requiredDays: boundedDays(query.days),
@@ -21,7 +34,7 @@ export function registerDailyAgentQualityRoutes(app: FastifyInstance): void {
   app.post('/daily-agent-quality/capture', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
     const context = getRequestContext(req);
-    const result = await captureDailyAgentQuality({
+    const result = await dependencies.captureDailyAgentQuality({
       tenantId: context.tenantId,
       projectId: context.projectId,
     });
