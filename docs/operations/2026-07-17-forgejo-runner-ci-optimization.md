@@ -202,7 +202,7 @@ replace the product P0/P1 queue in
 | --- | --- | --- | --- | --- |
 | `CI-OBS-01` | P0 | superseded | Record the next 10-20 real Forgejo PR runs | Replaced by Windows-runner observation because node34 no longer executes LOS CI |
 | `CI-HOST-01` | P0 | done | Remove LOS CI resource contention from node34 without changing nmem | All four jobs passed three exact-head canaries on Windows; node34 LOS runner was stopped while Forgejo API and repository access remained healthy |
-| `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
+| `CI-NET-01` | P1 | done | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Run `269` (UI `241`) completed both isolation jobs concurrently; `gate-drift` no longer waits for `gate-test`, with three exact-head workflow canaries required before delivery |
 | `CI-STORE-01` | P1 | done | Add a periodic pnpm store capacity check without restoring `actions/cache` | `gate-fast` runs `tools/observe-pnpm-store.sh --json`; the observation protocol records a weekly and every-fifth-eligible-PR cadence without deleting store content |
 | `CI-TEST-01` | P1 | done | Compare the pinned Node 22 and Node 24 job images on the same source head and runner | Three warm runs per version completed; median difference was 0.04%, so Node 24 is retained as a compatibility upgrade rather than a performance optimization |
 | `CI-TEST-02` | P1 | in progress | Separate DB-free regression tests, DB integration tests, and coverage collection | Agent and Gateway now have explicit DB-free and isolated-DB lanes plus separate coverage commands; three Gateway audit batches moved four files to the DB-free lane, while 35 Gateway files and the remaining DB packages still need classification |
@@ -805,12 +805,14 @@ archive host; the Windows Podman VM becomes the only LOS Forgejo Actions host.
 This removes CI resource acceptance from the nmem working-set decision instead
 of attempting to make both workloads fit the same memory envelope.
 
-The migration preserves the four job names and their dependency graph:
+The migration preserves the four job names. After the PostgreSQL isolation
+canary, the dependency graph is:
 
 ```text
 gate-fast (win-ci-jj)
-├─ gate-test (win-ci-jj) ── gate-drift (win-ci)
+├─ gate-test (win-ci-jj)
 └─ gate-web-e2e (win-ci-playwright)
+gate-drift (win-ci)
 ```
 
 Keeping the names stable avoids changing branch protection in the same rollout.
@@ -855,6 +857,14 @@ reads, and the separately owned `forgejo-runner-cantool` remained available.
 The documentation update creates a new final head, so the same three-run rule
 must be repeated on that head before merge; the earlier runs remain provisioning
 evidence rather than final merge evidence.
+
+Manual PostgreSQL isolation canary run `269` (UI run `241`) then executed exact
+`main` commit `c0702b2b25bf`. Both dependency-free `win-ci` jobs were observed
+running together and completed successfully in one 22-second workflow. Each
+job held its window for 15 seconds after asserting its distinct service DNS,
+database, user, and table creation. This closes `CI-NET-01` and allows
+`gate-drift` to start independently; repeat three exact-head full-workflow
+canaries before merging the dependency change.
 
 Rollback keeps the node34 runner available until all three canaries pass. If a
 Windows-only failure is caused by runner availability, image selection, Podman

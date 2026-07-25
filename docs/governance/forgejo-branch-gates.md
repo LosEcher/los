@@ -39,11 +39,12 @@ short drift job. Do not remove the fast dependency or raise the Windows limit
 without CPU, available-memory, swap, service-latency, and job-duration evidence
 from representative unchanged-head runs.
 
-`gate-drift` depends on `gate-test` while the isolation change is observed. The
-jobs register distinct PostgreSQL service DNS names (`postgres-test` and
-`postgres-drift`). Keep the dependency until three consecutive full green runs
-prove the Windows Podman service networking and resource envelope; only then
-reassess same-host overlap.
+`gate-drift` starts independently with `gate-fast`. Its PostgreSQL service uses
+a distinct DNS name, database, user, and credential from `gate-test`. Manual
+isolation canary run `269` (UI run `241`) completed both dependency-free jobs
+in the same 22-second window before this dependency was removed. Keep runner
+capacity at two and restore `needs: gate-test` if later evidence shows Podman
+service-network collisions, swap growth, or Forgejo latency during overlap.
 
 `.forgejo/workflows/audit.yml` runs the dependency audit manually. The daily
 schedule is disabled so an offline Windows host cannot accumulate unattended
