@@ -49,8 +49,13 @@ Current package scripts:
    files.
 2. Root `pnpm check` runs Turbo check, `tools/check-structure.sh`, and
    `tools/check-contracts.sh`.
-3. Root `pnpm test` runs Turbo test.
-4. Root `pnpm test:coverage:baseline` reruns package tests and fails when the
+3. Root `pnpm test` runs Turbo test without requiring every package to collect
+   full coverage. Agent uses an explicit 69-file shared-process lane and a
+   52-file isolated PostgreSQL lane. Gateway uses an 18-file shared-process
+   lane and a 39-file isolated PostgreSQL lane. In both packages, every
+   discovered test file must belong to exactly one lane.
+4. Root `pnpm test:coverage:baseline` uses a package's `test:coverage` script
+   when available, otherwise its ordinary `test` script. It fails when the
    source/test inventory changes without review, observed implementation files
    decrease, or line, branch, or function coverage regresses by more than 0.5
    percentage points. The `:update` form writes the reviewed artifact.
@@ -136,6 +141,13 @@ question and should not be treated as interchangeable.
 Repository-wide coverage percentage is not the first control for this project.
 Required evidence remains behavior-specific, while named critical modules use
 explicit thresholds that fail CI.
+
+Ordinary regression and repository coverage are separate execution paths.
+Shared-process tests must not import mutable database state or rely on file
+process isolation. DB-backed tests keep per-file process isolation, reuse only
+the run-scoped schema structure, and truncate mutable rows before each file.
+Repository coverage continues to execute every discovered test file under the
+isolated coverage path.
 
 The following modules require source tests for new behavior:
 

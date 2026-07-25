@@ -8,8 +8,6 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initDb, closeDb } from '@los/infra/db';
-import { loadConfig } from '@los/infra/config';
 import type { FastifyInstance } from 'fastify';
 
 const { createServer } = await import('../../server.js');
@@ -17,15 +15,12 @@ const { createServer } = await import('../../server.js');
 let app: FastifyInstance;
 
 test.before(async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
   app = await createServer();
   await app.ready();
 });
 
 test.after(async () => {
   await app.close();
-  await closeDb().catch(() => undefined);
 });
 
 // ── POST /providers ────────────────────────────────────────
