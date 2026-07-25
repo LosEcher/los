@@ -34,6 +34,15 @@ runs the complete workspace. `gate-web-e2e` remains visible and runs on every
 pull request, but it is not a GitHub required check. Changing that policy needs
 separate reliability and runner-cost evidence.
 
+Forgejo PR `#70` and GitHub PR `#175` show the current mirror delivery rule.
+The repositories had equivalent content but non-linear merge histories, so the
+Windows observer change used an independent equivalent-patch GitHub PR instead
+of pushing Forgejo `main` over protected GitHub `main`. GitHub run
+`30170606961` passed all four jobs on head
+`76c513a335cf2df7ab57fc57a97deee47713df7b` and merged as
+`4ec11f0e6518907cc6f206bf2ea541deba51b0ac`. This result maintains the fallback
+mirror; it is not required evidence for the Forgejo merge.
+
 The workflow concurrency group is the event type plus pull-request number or
 full ref. A newer head for the same pull request cancels its older run, while
 different pull requests cannot cancel each other. Pushes to `main` cancel an
@@ -64,6 +73,14 @@ GitHub's job timestamps are the source for full job duration, while the observer
 reports command duration, peak sampled process-group CPU/RSS, host memory/swap,
 and cgroup v2 values when the hosted runner exposes them.
 
+The current provisional Linux baseline has 4 of the required 10 unique heads.
+Observed workflows consumed 365--397 runner-seconds with 204--226 seconds wall
+time; the root command took 160.261--164.838 seconds and all four sampled swap
+peaks were zero. Relative to the historical 915 runner-second matrix this is a
+56.6%--60.1% observed range, averaging 58.2%. Do not publish P95, tune cache,
+or change runner capacity until the tenth unique head. Keep these hosted Linux
+records separate from Forgejo Windows host/container measurements.
+
 When a covered test, coverage, Web E2E, or migration-drift command fails,
 `tools/collect-ci-failure-evidence.mjs` creates one evidence directory capped at
 10 MiB. It can contain the resource JSON, at most 512 KiB from each test or gate
@@ -78,6 +95,21 @@ the repository collector is not available yet. Collector inputs are explicitly
 allowlisted and do not include environment variables, but the collector is not
 a general content redactor; covered commands must not print production
 credentials or raw session transcripts into logs or traces.
+
+The resource JSON in a successful job summary is not a retained artifact. The
+runner temporary file is cleaned with the hosted runner, while the summary
+follows the run record. Failure bundles are owned by the workflow and expire
+after five days through `actions/upload-artifact@v4`. The complete owner,
+cleanup trigger, size, and retention table is in
+`docs/operations/2026-07-25-ci-cd-observability-priority-and-todo-plan.md`.
+
+Required-context rollback must update both GitHub policy surfaces. Restore a
+known-good workflow on a PR, verify the replacement contexts on its exact head,
+add/restore them in ruleset `17481877` and classic branch protection, then
+remove the broken contexts. Changing only one policy surface can leave the PR
+`BLOCKED`, as PR `#172` demonstrated. Keep GitHub rollback independent from
+Forgejo protection; neither remote's emergency bypass authorizes bypass on the
+other.
 
 Do not enable automatic GitHub mirror pushes until the mirror account can update
 `main` without bypassing an intended protection rule. Prefer Forgejo's push-mirror
