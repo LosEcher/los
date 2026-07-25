@@ -1,17 +1,42 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
-import { closeDb, initDb } from '@los/infra/db';
+import type { ExecutionExperimentRecord } from '@los/agent';
 import { loadConfig } from '@los/infra/config';
-import { ensureExecutionExperimentStore } from '@los/agent/execution-experiments';
 import { registerExecutionExperimentRoutes } from './routes/orchestration/execution-experiment-routes.js';
 
 test('execution experiment routes keep draft creation separate from operator approval', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-  await ensureExecutionExperimentStore();
+  await loadConfig();
+  const records = new Map<string, ExecutionExperimentRecord>();
   const app = Fastify({ logger: false });
-  registerExecutionExperimentRoutes(app);
+  registerExecutionExperimentRoutes(app, {
+    async createExecutionExperiment(input) {
+      const now = new Date().toISOString();
+      const record: ExecutionExperimentRecord = {
+        ...input,
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+      };
+      records.set(record.id, record);
+      return record;
+    },
+    async loadExecutionExperiment(id) {
+      return records.get(id) ?? null;
+    },
+    async approveExecutionExperiment(id, actor) {
+      const current = records.get(id);
+      if (!current) throw new Error(`Execution experiment not found: ${id}`);
+      const approved = {
+        ...current,
+        status: 'approved' as const,
+        approvedBy: actor,
+        updatedAt: new Date().toISOString(),
+      };
+      records.set(id, approved);
+      return approved;
+    },
+  });
   const id = `route-experiment-${Date.now()}`;
   try {
     const created = await app.inject({
@@ -33,8 +58,5 @@ test('execution experiment routes keep draft creation separate from operator app
     assert.equal(approved.json().experiment.status, 'approved');
   } finally {
     await app.close();
-    const { getDb } = await import('@los/infra/db');
-    await getDb().query('DELETE FROM execution_experiments WHERE id = $1', [id]).catch(() => undefined);
-    await closeDb().catch(() => undefined);
   }
 });
