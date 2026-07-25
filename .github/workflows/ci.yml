@@ -128,11 +128,12 @@ jobs:
       - name: Test root workspace
         env:
           RESOURCE_OBSERVATION_FILE: ${{ runner.temp }}/gate-test-resources.json
-        run: >-
-          node tools/observe-command-resources.mjs
-          --label github-gate-test
-          --output "$RESOURCE_OBSERVATION_FILE"
-          -- pnpm test
+          TEST_LOG_FILE: ${{ runner.temp }}/gate-test.log
+        run: |
+          node tools/observe-command-resources.mjs \
+            --label github-gate-test \
+            --output "$RESOURCE_OBSERVATION_FILE" \
+            -- bash -o pipefail -c 'pnpm test 2>&1 | tee "$TEST_LOG_FILE"'
         timeout-minutes: 12
 
       - name: Report test resource observation
@@ -154,8 +155,38 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce critical module coverage
-        run: pnpm test:coverage:critical
+        env:
+          COVERAGE_LOG_FILE: ${{ runner.temp }}/critical-coverage.log
+        run: |
+          set -o pipefail
+          pnpm test:coverage:critical 2>&1 | tee "$COVERAGE_LOG_FILE"
         timeout-minutes: 5
+
+      - name: Collect bounded test failure evidence
+        if: failure()
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/ci-failure-evidence/gate-test
+          RESOURCE_OBSERVATION_FILE: ${{ runner.temp }}/gate-test-resources.json
+          TEST_LOG_FILE: ${{ runner.temp }}/gate-test.log
+          COVERAGE_LOG_FILE: ${{ runner.temp }}/critical-coverage.log
+        run: >-
+          node tools/collect-ci-failure-evidence.mjs
+          --output "$EVIDENCE_DIR"
+          --max-bytes 10485760
+          --tail-bytes 524288
+          --file resources="$RESOURCE_OBSERVATION_FILE"
+          --tail test-log="$TEST_LOG_FILE"
+          --tail coverage-log="$COVERAGE_LOG_FILE"
+
+      - name: Upload test failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-gate-test-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-failure-evidence/gate-test
+          if-no-files-found: error
+          retention-days: 5
+          compression-level: 6
 
   gate-web-e2e:
     runs-on: ubuntu-latest
@@ -177,7 +208,34 @@ jobs:
         run: pnpm --filter @los/web exec playwright install --with-deps chromium
 
       - name: Test Web operator paths
-        run: pnpm --filter @los/web test:e2e
+        env:
+          WEB_E2E_LOG_FILE: ${{ runner.temp }}/web-e2e.log
+        run: |
+          set -o pipefail
+          pnpm --filter @los/web test:e2e 2>&1 | tee "$WEB_E2E_LOG_FILE"
+
+      - name: Collect bounded Web E2E failure evidence
+        if: failure()
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/ci-failure-evidence/gate-web-e2e
+          WEB_E2E_LOG_FILE: ${{ runner.temp }}/web-e2e.log
+        run: >-
+          node tools/collect-ci-failure-evidence.mjs
+          --output "$EVIDENCE_DIR"
+          --max-bytes 10485760
+          --tail-bytes 524288
+          --tail web-e2e-log="$WEB_E2E_LOG_FILE"
+          --tree playwright=packages/web/test-results
+
+      - name: Upload Web E2E failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-gate-web-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-failure-evidence/gate-web-e2e
+          if-no-files-found: error
+          retention-days: 5
+          compression-level: 6
 
   gate-drift:
     runs-on: ubuntu-latest
@@ -234,7 +292,33 @@ jobs:
       # Unset NODE_ENV/TEST_DATABASE_URL: initDb's test guard would otherwise
       # ignore the gate's explicit drift-DB URLs and redirect to los_test,
       # making the gate compare a DB against itself (always green, inert).
-      - run: pnpm check:migration-drift
+      - name: Migration drift
         env:
+          MIGRATION_DRIFT_LOG_FILE: ${{ runner.temp }}/migration-drift.log
           NODE_ENV: ''
           TEST_DATABASE_URL: ''
+        run: |
+          set -o pipefail
+          pnpm check:migration-drift 2>&1 | tee "$MIGRATION_DRIFT_LOG_FILE"
+
+      - name: Collect bounded migration failure evidence
+        if: failure()
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/ci-failure-evidence/gate-drift
+          MIGRATION_DRIFT_LOG_FILE: ${{ runner.temp }}/migration-drift.log
+        run: >-
+          node tools/collect-ci-failure-evidence.mjs
+          --output "$EVIDENCE_DIR"
+          --max-bytes 10485760
+          --tail-bytes 524288
+          --tail migration-drift-log="$MIGRATION_DRIFT_LOG_FILE"
+
+      - name: Upload migration failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-gate-drift-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-failure-evidence/gate-drift
+          if-no-files-found: error
+          retention-days: 5
+          compression-level: 6
