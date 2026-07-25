@@ -69,6 +69,42 @@ function makeSkill(name: string, overrides: Record<string, unknown> = {}): Recor
   };
 }
 
+test('skill pin route delegates pinned=false to the unpin dependency', async () => {
+  const name = `pinned-skill-${Date.now()}`;
+  stubStore.set(name, makeSkill(name, { pinnedVersionHash: 'v0' }));
+  let pinCalls = 0;
+  let unpinCalls = 0;
+  const deps: SkillRouteDependencies = {
+    ...stubDeps,
+    pinSkillVersion: async (...args) => {
+      pinCalls += 1;
+      return await stubDeps.pinSkillVersion(...args);
+    },
+    unpinSkillVersion: async (...args) => {
+      unpinCalls += 1;
+      return await stubDeps.unpinSkillVersion(...args);
+    },
+  };
+  const app = Fastify({ logger: false });
+  registerSkillRoutes(app, undefined, deps);
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/skills/${name}/pin`,
+      payload: { scope: 'project', pinned: false },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(unpinCalls, 1);
+    assert.equal(pinCalls, 0);
+    assert.equal(Object.hasOwn(stubStore.get(name)!, 'pinnedVersionHash'), false);
+  } finally {
+    stubStore.delete(name);
+    await app.close();
+  }
+});
+
 test('skill routes expose preview-only import before exact-version apply', async () => {
   const root = mkdtempSync(join(tmpdir(), 'los-skill-routes-'));
   const dir = join(root, '.los', 'skills');
