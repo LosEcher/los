@@ -81,7 +81,6 @@ jobs:
       DATABASE_URL: postgres://los:los@localhost:5432/los_test
       TEST_DATABASE_URL: postgres://los:los@localhost:5432/los_test
       NODE_ENV: test
-      RESOURCE_OBSERVATION_FILE: ${{ runner.temp }}/gate-test-resources.json
 
     steps:
       - uses: actions/checkout@v4
@@ -127,6 +126,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Test root workspace
+        env:
+          RESOURCE_OBSERVATION_FILE: ${{ runner.temp }}/gate-test-resources.json
         run: >-
           node tools/observe-command-resources.mjs
           --label github-gate-test
@@ -136,6 +137,8 @@ jobs:
 
       - name: Report test resource observation
         if: always()
+        env:
+          RESOURCE_OBSERVATION_FILE: ${{ runner.temp }}/gate-test-resources.json
         run: |
           if [ ! -f "$RESOURCE_OBSERVATION_FILE" ]; then
             echo "resource observation unavailable (test may have been cancelled before the observer flushed)"
