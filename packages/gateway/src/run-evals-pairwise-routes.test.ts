@@ -1,37 +1,66 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createExecutionExperiment, setExecutionExperimentCandidate } from '@los/agent';
+import type { RunEvalRecord } from '@los/agent';
 import { loadConfig } from '@los/infra/config';
-import { closeDb, getDb, initDb } from '@los/infra/db';
-import { createServer } from './server.js';
+import Fastify from 'fastify';
+import { registerRequestContext } from './request-context.js';
+import { registerProviderEvidenceRoutes } from './routes/providers/provider-evidence-routes.js';
 
 test('pairwise run eval route records and returns separated rubric evidence', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const experimentId = `experiment-pairwise-route-${suffix}`;
   const baselineRunSpecId = `baseline-route-${suffix}`;
   const candidateRunSpecId = `candidate-route-${suffix}`;
   const pairId = `pair-route-${suffix}`;
-  const app = await createServer({
-    serviceId: `gateway-pairwise-route-test-${suffix}`,
-    bindUrl: 'http://127.0.0.1:0',
-    publicUrl: 'http://127.0.0.1:0',
-    hostLabel: 'test',
-  });
-
-  await createExecutionExperiment({
-    id: experimentId,
-    source: {
-      sessionId: `session-route-${suffix}`,
-      runSpecId: baselineRunSpecId,
-      eventCursor: 3,
-      evidenceHash: `sha256:${suffix}`,
+  const records: RunEvalRecord[] = [];
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, await loadConfig());
+  registerProviderEvidenceRoutes(app, {
+    async recordPairwiseRunEval(input) {
+      if (input.rubricSnapshot.revision !== input.rubricRevision) {
+        throw new Error('rubricSnapshot.revision must equal rubricRevision');
+      }
+      const now = new Date().toISOString();
+      const record: RunEvalRecord = {
+        id: input.id ?? `eval-${input.pairId}`,
+        runSpecId: input.runSpecId ?? input.candidateRunSpecId,
+        sessionId: input.sessionId,
+        taskRunId: input.taskRunId,
+        provider: input.provider,
+        model: input.model,
+        success: input.success ?? false,
+        latencyMs: input.latencyMs,
+        retryCount: input.retryCount ?? 0,
+        toolErrorCount: input.toolErrorCount ?? 0,
+        verificationStatus: input.verificationStatus === 'succeeded' ? 'succeeded' : 'unknown',
+        modelCost: input.modelCost,
+        evaluationKind: 'pairwise',
+        pairId: input.pairId,
+        experimentId: input.experimentId,
+        baselineRunSpecId: input.baselineRunSpecId,
+        candidateRunSpecId: input.candidateRunSpecId,
+        rubricRevision: input.rubricRevision,
+        rubricSnapshot: input.rubricSnapshot,
+        human: input.human,
+        judge: input.judge,
+        deterministic: input.deterministic,
+        pairwiseVerdict: input.verdict,
+        summary: input.summary ?? {},
+        createdAt: now,
+        updatedAt: now,
+      };
+      records.push(record);
+      return record;
     },
-    configDiff: [{ path: 'maxLoops', value: 4 }],
-    createdBy: 'operator:test',
+    async listPairwiseRunEvals(input) {
+      const query = typeof input === 'string' ? { pairId: input } : input;
+      return records.filter(record => (
+        (!query.pairId || record.pairId === query.pairId)
+        && (!query.experimentId || record.experimentId === query.experimentId)
+        && (!query.verdict || record.pairwiseVerdict === query.verdict)
+      ));
+    },
   });
-  await setExecutionExperimentCandidate(experimentId, candidateRunSpecId);
 
   try {
     const response = await app.inject({
@@ -97,9 +126,6 @@ test('pairwise run eval route records and returns separated rubric evidence', as
     assert.equal(invalid.statusCode, 422);
     assert.match(invalid.json().error, /revision/);
   } finally {
-    await getDb().query('DELETE FROM run_evals WHERE experiment_id = $1', [experimentId]).catch(() => undefined);
-    await getDb().query('DELETE FROM execution_experiments WHERE id = $1', [experimentId]).catch(() => undefined);
     await app.close();
-    await closeDb().catch(() => undefined);
   }
 });
