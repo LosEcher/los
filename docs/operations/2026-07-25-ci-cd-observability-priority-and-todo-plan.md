@@ -36,14 +36,19 @@
 6. `[E]` `tools/ci-gate.sh` 已在 Forgejo PR `#66` 修复退出码捕获，改用
    `mktemp` 与 `EXIT` 清理，并通过 success、known failure、new failure 三条
    focused 回归路径。旧固定临时日志已删除。
-7. `[E]` Playwright 已产生失败 trace/截图，但 CI 没有上传步骤；资源 JSON
-   当前只进入 runner temp 和 GitHub job summary。
+7. `[E]` GitHub workflow 已为 test、critical coverage、Playwright 和 migration
+   drift 增加失败日志采集；每个失败包上限 10 MiB、日志单项上限 512 KiB、
+   保留 5 天，成功 job 不上传 retained artifact。
 8. `[E]` 仓库 workflow 只有 CI、audit 和 canary，没有自动部署 workflow。
    当前交付仍是 operator-driven。
 9. `[E]` Daily Agent 父 todo 仍为 `in_progress`，但已列子阶段均为 `done`；
    需要把功能完成和 28 天趋势收集分开表达。
 10. `[E]` Execution Lab 的下一个功能任务是
-    `todo-los-execution-experiment-contract`，原有三个依赖均已完成。
+    `todo-los-execution-experiment-contract`，全部五个依赖均已完成，todo 已从
+    `backlog` 转为 `ready`。
+11. `[E]` Forgejo run-artifact 读 API 返回 HTTP 200，但当前账号读取 user/org
+    artifact quota 均为 HTTP 404。常规 Forgejo CI 暂不上传失败包；手动 1 KiB
+    upload/download canary 尚待远端执行。
 
 ## 优先级和依赖
 
@@ -52,13 +57,13 @@
 | 1 | `todo-los-ci-github-single-test-rollout` | `done` | P0 | 无 | Forgejo PR `#64/#65`、GitHub PR `#172` 已交付 |
 | 2 | `todo-los-ci-gate-result-capture` | `done` | P0 | 无 | Forgejo PR `#66` 已交付，focused 3/3 和 root gate 通过 |
 | 3 | `todo-los-ci-github-ruleset-migration` | `done` | P0 | 1 | 双策略面已迁移，exact-head canary 与镜像 merge 已完成 |
-| 4 | `todo-los-ci-failure-evidence-lifecycle` | `backlog` | P1 | 1 | 失败证据保留 3-7 天，成功 run 不上传大型产物 |
+| 4 | `todo-los-ci-failure-evidence-lifecycle` | `in_progress` | P1 | 1 | GitHub 接入待 exact-head 验证；Forgejo canary 和 quota gap 待记录 |
 | 5 | `todo-los-ci-superseded-run-control` | `backlog` | P1 | 1 | 增加 concurrency/cancel，并量化重任务依赖 fast gate 的时间代价 |
 | 6 | `todo-los-ci-forgejo-windows-resource-probe` | `backlog` | P1 | 1 | Windows CPU/RSS/page-file 单独建基线 |
 | 7 | `todo-los-ci-resource-baseline` | `backlog` | P1 | 3 | 10 个 unique-head 后再判断 cache/runner 调优 |
 | 8 | `todo-los-p1-turbo-cache` | `backlog` | P1 | 6、7 | 验证 pnpm cache 重复、Turbo key、Playwright 安装和 coverage 拆分 |
 | 9 | `todo-los-p2-ci-cd-docs` | `backlog` | P1 | 2、3、4、5 | 更新为完整控制面、执行面、证据面和保留策略文档 |
-| 10 | `todo-los-execution-experiment-contract` | `backlog` | P1 | 1、2 及原有依赖 | 两个本地 P0 完成后恢复的下一功能切片 |
+| 10 | `todo-los-execution-experiment-contract` | `ready` | P1 | 1、2 及原有依赖 | 依赖均完成，可恢复的下一功能切片 |
 | 11 | `todo-los-daily-agent-product-status-reconciliation` | `ready` | P1 | 无 | 校准长期 P0 父计划状态，不新增功能范围 |
 | 12 | `todo-los-cd-release-contract-discovery` | `backlog` | P2 | 9 | 先调研发布合同，不自动部署 |
 | 13 | `todo-los-ci-policy-alignment-research` | `backlog` | P2 | 6、7 | Node、audit、E2E required、cgroup、schema 和 store 策略 |
@@ -107,6 +112,26 @@ execution experiment contract。它原先依赖的两个短期本地 P0 已完�
 4. Prometheus/Grafana 不作为本轮 CI 观测前置条件，先用平台时间戳和小型 JSON；
 5. CD 调研不授权部署，生产变更仍需要 operator consent。
 
+## 过程产物生命周期
+
+| 类型 | 位置/所有者 | 成功时 | 失败时 | 上限与保留 |
+| --- | --- | --- | --- | --- |
+| test、coverage、drift 原始日志 | runner temp | job 结束即释放 | collector 只取尾部 | 每个输入最多 512 KiB |
+| Linux 资源 JSON | GitHub runner temp + job summary | summary 保留小型 JSON | 纳入失败包；未 flush 记 `unavailable` | 5 秒采样，不伪造缺失值 |
+| Playwright trace/截图 | `packages/web/test-results/` | job 结束即释放 | 在总预算内纳入失败包 | 每个 job 总包 10 MiB |
+| GitHub failure artifact | GitHub Actions | 不创建 | `gate-test`、E2E、drift 分 job 上传 | 5 天；每包 10 MiB 内容上限 |
+| Forgejo artifact canary | Forgejo server | 仅手动运行 | 验证 1 KiB round trip | 请求保留 1 天；常规上传关闭 |
+| pnpm store、`.turbo`、`node_modules` | cache/runner | 按 cache 策略处理 | 禁止作为失败证据 | 不进入 artifact |
+
+collector 写入 `manifest.json`，对每个来源记录 `included`、`partial`、
+`unavailable` 或 `cap_exceeded`。GitHub workflow 被 superseded 后如果 cleanup
+step 未执行，平台的 `cancelled` conclusion 就是缺失原因；后续统计不得把它转成
+零资源或测试成功。
+
+collector 只读取 workflow 明确列出的文件，不读取环境变量；但它不是通用的内容
+脱敏器，因此被采集命令不得把生产凭据或原始会话内容写入日志与 trace。checkout
+或 Node setup 之前的失败无法运行仓库内 collector，仍以平台日志为唯一证据面。
+
 ## 执行和进度规则
 
 1. 每个 todo 保持一个 change intent；rollout、gate result capture 和远端
@@ -135,7 +160,9 @@ execution experiment contract。它原先依赖的两个短期本地 P0 已完�
 - Forgejo API：PR `#64/#65/#66`，runs `281/282/283`；run `281` 归类为 runner
   outage，不计代码 flake；
 - `pnpm check:ci-observer`：2/2 passed；`pnpm check:ci-gate`：3/3 passed；
-- `pnpm check`：passed；`pnpm run gate`：9 phases、0 failures、192 秒；
+- `pnpm check:ci-evidence`：4/4 passed，覆盖精确 bundle 大小、缺失输入与 cache
+  排除；
+- `pnpm check`：passed；`pnpm run gate`：9 phases、0 failures、197 秒；
 - GitHub/Forgejo workflow YAML parse：passed；
 - PostgreSQL `todos`：父计划、子任务、状态和依赖已持久化；
 - PostgreSQL todo ledger：Todo 1、Todo 2、Todo 3 均已完成并记录交付证据。

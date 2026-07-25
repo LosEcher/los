@@ -1,0 +1,33 @@
+name: Artifact canary
+
+on:
+  workflow_dispatch:
+
+# Manual compatibility probe only. Regular Forgejo CI must not upload failure
+# bundles until the instance storage quota and cleanup policy can be inspected.
+jobs:
+  artifact-roundtrip:
+    runs-on: win-ci
+    timeout-minutes: 5
+    steps:
+      - name: Create 1 KiB sentinel
+        run: node -e "require('node:fs').writeFileSync('forgejo-artifact-canary.bin', Buffer.alloc(1024, 0x5a))"
+
+      - name: Upload sentinel
+        uses: forgejo/upload-artifact@v4
+        with:
+          name: forgejo-artifact-canary
+          path: forgejo-artifact-canary.bin
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Download sentinel
+        uses: forgejo/download-artifact@v4
+        with:
+          name: forgejo-artifact-canary
+          path: artifact-roundtrip
+
+      - name: Verify sentinel
+        run: |
+          node -e "const fs=require('node:fs'); const p='artifact-roundtrip/forgejo-artifact-canary.bin'; const b=fs.readFileSync(p); if (b.length !== 1024 || b.some(v => v !== 0x5a)) throw new Error('artifact roundtrip mismatch')"
