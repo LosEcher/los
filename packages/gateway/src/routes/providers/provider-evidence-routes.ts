@@ -42,7 +42,20 @@ import {
 } from './provider-helpers.js';
 import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
 
-export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
+type ProviderEvidenceRouteDependencies = {
+  listPairwiseRunEvals: typeof listPairwiseRunEvals;
+  recordPairwiseRunEval: typeof recordPairwiseRunEval;
+};
+
+const defaultDependencies: ProviderEvidenceRouteDependencies = {
+  listPairwiseRunEvals,
+  recordPairwiseRunEval,
+};
+
+export function registerProviderEvidenceRoutes(
+  app: FastifyInstance,
+  dependencies: ProviderEvidenceRouteDependencies = defaultDependencies,
+): void {
   app.get('/onboarding', async () => {
     const report = await discoverAll();
     const compatEvidence = await listLatestProviderCompatEvidence().catch(() => []);
@@ -226,7 +239,7 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
     const query = req.query as { pairId?: string; experimentId?: string; verdict?: string; limit?: string };
     const verdict = normalizeOptionalString(query.verdict);
     const allowedVerdicts = new Set(['baseline', 'candidate', 'tie', 'inconclusive']);
-    const evals = await listPairwiseRunEvals({
+    const evals = await dependencies.listPairwiseRunEvals({
       pairId: normalizeOptionalString(query.pairId),
       experimentId: normalizeOptionalString(query.experimentId),
       verdict: verdict && allowedVerdicts.has(verdict) ? verdict as never : undefined,
@@ -239,7 +252,7 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
     const pairId = normalizeOptionalString((req.params as { pairId?: string }).pairId);
     if (!pairId) return reply.status(400).send({ error: 'pairId is required' });
     try {
-      const evals = await listPairwiseRunEvals(pairId);
+      const evals = await dependencies.listPairwiseRunEvals(pairId);
       return { count: evals.length, evals };
     } catch (err) {
       return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
@@ -252,7 +265,7 @@ export function registerProviderEvidenceRoutes(app: FastifyInstance): void {
     const metrics = asRecord(body.metrics);
     const success = parseOptionalBoolean(metrics.success);
     try {
-      const evaluation = await recordPairwiseRunEval({
+      const evaluation = await dependencies.recordPairwiseRunEval({
         id: normalizeOptionalString(body.id),
         pairId: normalizeOptionalString(body.pairId),
         experimentId: normalizeOptionalString(body.experimentId) ?? '',

@@ -205,7 +205,7 @@ replace the product P0/P1 queue in
 | `CI-NET-01` | P1 | observing | Give `gate-test` and `gate-drift` isolated PostgreSQL DNS, database, user, and credential identities, then reassess the serial dependency | Identities are distinct; retain `needs: gate-test` until the manual concurrency canary overlaps and three consecutive full green runs are evidenced |
 | `CI-STORE-01` | P1 | done | Add a periodic pnpm store capacity check without restoring `actions/cache` | `gate-fast` runs `tools/observe-pnpm-store.sh --json`; the observation protocol records a weekly and every-fifth-eligible-PR cadence without deleting store content |
 | `CI-TEST-01` | P1 | done | Compare the pinned Node 22 and Node 24 job images on the same source head and runner | Three warm runs per version completed; median difference was 0.04%, so Node 24 is retained as a compatibility upgrade rather than a performance optimization |
-| `CI-TEST-02` | P1 | in progress | Separate DB-free regression tests, DB integration tests, and coverage collection | Agent and Gateway now have explicit DB-free and isolated-DB lanes plus separate coverage commands; two Gateway audit batches moved three files to the DB-free lane, while 36 Gateway files and the remaining DB packages still need classification |
+| `CI-TEST-02` | P1 | in progress | Separate DB-free regression tests, DB integration tests, and coverage collection | Agent and Gateway now have explicit DB-free and isolated-DB lanes plus separate coverage commands; three Gateway audit batches moved four files to the DB-free lane, while 35 Gateway files and the remaining DB packages still need classification |
 | `CI-TEST-03` | P1 | in progress | Replace per-file migration/store setup with run-scoped provisioning and isolated mutable data | Agent and Gateway provision stores once per run and truncate mutable rows per isolated file; remaining DB packages and repeated CI evidence are pending |
 | `CI-TEST-04` | P2 | backlog | Persist safe build/check caches and shorten the required-job dependency chain | Cache keys include OS, architecture, Node major, lockfile and task inputs; mutable DB, browser profile, coverage, secret, and session state remain uncached; full main/nightly gates detect classifier omissions |
 
@@ -216,7 +216,7 @@ database jobs. After the migration canaries pass, the next test-runtime item is
 the remaining Gateway isolated-DB audit: classify the 39 files, introduce
 focused fakes or move DB-independent behavior into the DB-free lane, and retain
 PostgreSQL where persistence behavior is part of the contract. The first audit
-batch completed on 2026-07-25; after the second batch, 36 Gateway files remain
+batch completed on 2026-07-25; after the third batch, 35 Gateway files remain
 in the isolated lane.
 
 ## 2026-07-24 Test Runtime Optimization Plan
@@ -444,6 +444,30 @@ PostgreSQL 16 service, `LOS_TEST_CONCURRENCY=2`, and a unique
 - [J] Continue auditing the remaining 36 isolated files in bounded batches.
   Keep tests that own durable state, cross-process recovery, or state-machine
   evidence on PostgreSQL; use focused fakes only for route-level orchestration.
+
+### 2026-07-25 Gateway Isolated-Lane Audit, Batch 3
+
+- [E] `run-evals-pairwise-routes.test.ts` now injects file-owned record and
+  list dependencies into the pairwise provider-evidence handlers. Production
+  registration still defaults to the PostgreSQL-backed Agent store.
+- [E] The focused route test passed with `DATABASE_URL` pointed at the
+  deliberately unreachable `127.0.0.1:1` endpoint. The Agent package's
+  `run-evals-pairwise.test.ts` retains PostgreSQL coverage for immutable rubric
+  evidence, human/judge/deterministic channels, uniqueness, and persisted
+  lookup semantics.
+- [E] The ordinary Gateway command now classifies 22 files as shared and 35 as
+  isolated. It passed 73 shared assertions in 3.44s and 81 isolated assertions
+  in 94.35s, retaining all 154 assertions; `/usr/bin/time` reported 98.46s
+  elapsed.
+- [J] The 3.48s improvement from the Batch 2 local run is a single-machine
+  observation, not a stable CI speedup claim. The deterministic gain is one
+  fewer isolated Node process and repeated PostgreSQL setup cycle.
+- [I] The isolated run again logged the existing concurrent PostgreSQL type
+  creation warning without failing an assertion. Batch 3 does not change
+  run-scoped store provisioning.
+- [J] Continue auditing the remaining 35 isolated files with the same evidence
+  boundary: persistence and recovery stay on PostgreSQL; duplicate route
+  orchestration may use focused injected dependencies.
 
 ### Cocoon Reference Assessment
 
