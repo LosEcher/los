@@ -14,7 +14,22 @@ import { applyDirectRunCompletionStatus } from '../../chat-run-completion.js';
 
 const ALLOWED_DIFF_PATHS = new Set(['provider', 'model', 'toolMode', 'allowedTools', 'maxLoops', 'timeoutMs', 'modelSettings']);
 
-export function registerExecutionExperimentRoutes(app: FastifyInstance): void {
+type ExecutionExperimentRouteDependencies = {
+  createExecutionExperiment: typeof createExecutionExperiment;
+  loadExecutionExperiment: typeof loadExecutionExperiment;
+  approveExecutionExperiment: typeof approveExecutionExperiment;
+};
+
+const defaultDependencies: ExecutionExperimentRouteDependencies = {
+  createExecutionExperiment,
+  loadExecutionExperiment,
+  approveExecutionExperiment,
+};
+
+export function registerExecutionExperimentRoutes(
+  app: FastifyInstance,
+  dependencies: ExecutionExperimentRouteDependencies = defaultDependencies,
+): void {
   app.post('/execution-experiments', async (req, reply) => {
     const body = asRecord(req.body);
     const source = asRecord(body.source);
@@ -23,7 +38,7 @@ export function registerExecutionExperimentRoutes(app: FastifyInstance): void {
       return reply.status(422).send({ error: 'source.sessionId, source.runSpecId, source.eventCursor, and source.evidenceHash are required' });
     }
     try {
-      const record = await createExecutionExperiment({
+      const record = await dependencies.createExecutionExperiment({
         id: normalizeOptionalString(body.id) ?? `experiment-${randomUUID()}`,
         tenantId: getRequestContext(req).tenantId,
         projectId: getRequestContext(req).projectId,
@@ -43,14 +58,14 @@ export function registerExecutionExperimentRoutes(app: FastifyInstance): void {
   });
 
   app.get('/execution-experiments/:id', async (req, reply) => {
-    const record = await loadExecutionExperiment((req.params as { id: string }).id);
+    const record = await dependencies.loadExecutionExperiment((req.params as { id: string }).id);
     return record ? { experiment: record } : reply.status(404).send({ error: 'Execution experiment not found' });
   });
 
   app.post('/execution-experiments/:id/approve', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
     try {
-      const record = await approveExecutionExperiment((req.params as { id: string }).id, getRequestContext(req).userId);
+      const record = await dependencies.approveExecutionExperiment((req.params as { id: string }).id, getRequestContext(req).userId);
       return { experiment: record };
     } catch (err) {
       return reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
