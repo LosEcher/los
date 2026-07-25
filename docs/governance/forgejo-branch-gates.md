@@ -5,11 +5,10 @@ point to Forgejo; an optional GitHub backup uses the `github` remote name.
 
 ## Repository CI
 
-`.forgejo/workflows/ci.yml` runs on pushes to `main`, pull requests targeting
-`main`, and manual dispatch. Pull requests and manual dispatch run three
-required jobs plus Web E2E; a protected `main` push runs `gate-fast` only
-because the exact PR head must already have passed the three required checks
-before merge. It provides:
+`.forgejo/workflows/ci.yml` runs on pull requests targeting `main` and manual
+dispatch. Both events run three required jobs plus Web E2E. Protected `main`
+does not repeat the workflow because the exact PR head must already have passed
+the required checks before merge. It provides:
 
 1. `gate-fast`: typecheck, security, structure, coupling, state-machine,
    contracts, delete-safety, and wiring checks;
@@ -17,7 +16,7 @@ before merge. It provides:
    run every package test script once against PostgreSQL 16;
 3. `gate-drift`: migration-versus-ensure-store schema drift verification;
 4. `gate-web-e2e`: Playwright operator-path specs, scheduled after `gate-fast`
-   on node34 while the Windows test path runs independently.
+   on the Windows runner while the test path runs independently.
 
 The workflow cancels an older in-progress run for the same ref. Each runner
 bind-mounts its own host-persistent pnpm store into its jobs, and dependency
@@ -25,20 +24,20 @@ installation uses `--prefer-offline`. This avoids downloading and executing an
 external cache action before repository checks can start. Turbo `test` remains
 uncached and every package test command executes on every PR.
 
-The node34 runner keeps `gate-fast` and Web E2E. `gate-fast` uses
-`ubuntu-latest` with `TURBO_CONCURRENCY=1`; Web E2E stays there until Chromium
-is provisioned in a Windows job image. The repo-scoped `win-los-canary` runner
-handles `gate-test` through `win-ci-jj` and `gate-drift` through `win-ci`. Both
-labels use the pinned `los-ci:node22-jj0.39.0` image. `gate-test` advertises two
-Turbo package tasks through `LOS_TEST_CONCURRENCY=2` on the effective 8-vCPU,
-16-GiB Podman VM.
+The repo-scoped `win-los-canary` runner handles `gate-fast` and `gate-test`
+through `win-ci-jj`, `gate-drift` through `win-ci`, and Web E2E through
+`win-ci-playwright`. The first two labels use the pinned Node 24 image. The
+Playwright label uses `los-ci:node22-jj0.39.0-playwright1.61.1`, which preloads
+Chromium and its Debian dependencies. `gate-test` advertises two Turbo package
+tasks through `LOS_TEST_CONCURRENCY=2` on the effective 8-vCPU, 15-GiB Podman
+VM. node34 runs Forgejo only and is not a CI fallback.
 
 `gate-test` and Web E2E depend on `gate-fast`, so a fast failure does not
-allocate either expensive workload. After fast passes, node34 runs the
-single-worker browser path while Windows runs the workspace tests and later
-the short drift job. Do not remove the fast dependency or raise the Windows
-limit without CPU, available-memory, swap, service-latency, and job-duration
-evidence from representative unchanged-head runs.
+allocate either expensive workload. After fast passes, the Windows runner runs
+the single-worker browser path alongside the workspace tests and later the
+short drift job. Do not remove the fast dependency or raise the Windows limit
+without CPU, available-memory, swap, service-latency, and job-duration evidence
+from representative unchanged-head runs.
 
 `gate-drift` depends on `gate-test` while the isolation change is observed. The
 jobs register distinct PostgreSQL service DNS names (`postgres-test` and
@@ -46,15 +45,19 @@ jobs register distinct PostgreSQL service DNS names (`postgres-test` and
 prove the Windows Podman service networking and resource envelope; only then
 reassess same-host overlap.
 
-`.forgejo/workflows/audit.yml` runs the dependency audit daily and manually.
+`.forgejo/workflows/audit.yml` runs the dependency audit manually. The daily
+schedule is disabled so an offline Windows host cannot accumulate unattended
+work.
 
 Runner requirements are Linux containers, Git, Bash, Node 22+, Corepack, pnpm
 9, service containers, and outbound access to the package registry. The
-Windows labels require the locally provisioned `los-ci:node22-jj0.39.0` and
+Windows labels require the locally provisioned Node 24, Playwright, and
 `postgres:16` images because its Podman VM cannot reliably pull Docker Hub.
-The CI image must provide jj 0.39.0 and pnpm 9.0.0 and is built with
-`tools/build-forgejo-ci-image.sh`. The PostgreSQL service user must be able to
-create the temporary drift databases.
+The base CI image must provide jj 0.39.0 and pnpm 9.0.0 and is built with
+`tools/build-forgejo-ci-image.sh`. The Playwright derivative is built and
+smoke-tested with `tools/build-forgejo-playwright-image.sh`, then exported to
+Windows before the label is enabled. The PostgreSQL service user must be able
+to create the temporary drift databases.
 
 The Windows runner configuration must allow and mount its named store:
 
@@ -67,9 +70,10 @@ container:
 
 Windows jobs verify the image-provided pnpm version but do not run
 `corepack prepare`; otherwise a registry timeout can fail the job before the
-preheated package store is used.
+preheated package store is used. The Windows Playwright job follows the same
+rule.
 
-`win-los-canary` is a manually enabled burst runner. Start the Windows host,
+`win-los-canary` is manually enabled CI capacity. Start the Windows host,
 Podman machine, and runner before opening or updating a delivery PR; otherwise
 the required Windows jobs remain queued. Do not treat it as unattended
 capacity until startup automation and three unchanged-head runs are recorded.

@@ -1,13 +1,11 @@
 name: Audit
 
 on:
-  schedule:
-    - cron: '47 6 * * *'
   workflow_dispatch:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: win-ci
     timeout-minutes: 5
 
     steps:
@@ -26,11 +24,11 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
-          corepack prepare pnpm@9.0.0 --activate
+          test "$(pnpm --version)" = "9.0.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: pnpm audit
         run: |
