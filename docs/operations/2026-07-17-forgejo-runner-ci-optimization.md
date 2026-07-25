@@ -934,6 +934,37 @@ The initial persistent-store baseline is about 225 MiB. Size growth alone does
 not authorize deletion; record the trend and filesystem pressure before choosing
 a cleanup policy. The observer never prunes or deletes store content.
 
+### Lightweight Resource Observation
+
+Use native workflow/job timestamps for queue, wall-clock, and job duration;
+they have no in-job sampling cost. For Linux command-level diagnosis,
+`tools/observe-command-resources.mjs` wraps only an expensive command and emits
+one JSON record. The GitHub mirror's root test is the first integration:
+
+```bash
+node tools/observe-command-resources.mjs \
+  --label github-gate-test \
+  --output "$RUNNER_TEMP/gate-test-resources.json" \
+  -- pnpm test
+```
+
+The default five-second interval bounds sampling overhead to one `ps` process
+and a few `/proc` or cgroup file reads per interval. The wrapper preserves the
+command exit code. Missing `/proc`, cgroup v2, or process-group metrics are
+reported as `null`; they must not be interpreted as zero. Keep the record in
+the job summary during the initial observation window rather than adding an
+artifact upload to every run.
+
+Do not combine GitHub hosted-runner samples with the Forgejo Windows trend.
+Forgejo remains the primary CI surface, and its current runner needs a focused
+Windows compatibility probe before resource sampling is enabled there. That
+probe should verify descendant-process RSS and CPU accounting plus page-file
+usage, then run as an unchanged-head canary. If the probe passes, observe only
+`gate-test` on every eligible PR; sample the whole host and the five-minute
+post-run swap/page-file value every fifth eligible PR. Continue using the
+existing stop thresholds in this document. Do not increase runner capacity
+from resource data until at least ten unique-head samples are available.
+
 Before removing `gate-drift`'s `needs: gate-test` dependency, manually dispatch
 `.forgejo/workflows/postgres-isolation-canary.yml` on a capacity-2 runner and
 verify that both jobs overlap and report their distinct database/user identity.
