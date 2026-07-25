@@ -107,7 +107,7 @@ port_owner() {
       return 0
     fi
   elif [ -n "$url" ] && command -v curl >/dev/null 2>&1; then
-    if curl -fsS "$url/health" >/dev/null 2>&1; then
+    if curl --noproxy '*' -fsS "$url/health" >/dev/null 2>&1; then
       printf 'unknown'
       return 0
     fi
@@ -130,7 +130,8 @@ health_check() {
   # Usage: health_check <url>  (e.g. "http://127.0.0.1:8080")
   local url="${1:-}"
   command -v curl >/dev/null 2>&1 || return 2
-  curl -fsS "$url/health" >/dev/null 2>&1
+  # Managed service probes are host-local and must not be routed through HTTP proxies.
+  curl --noproxy '*' -fsS "$url/health" >/dev/null 2>&1
 }
 
 wait_for_health() {
