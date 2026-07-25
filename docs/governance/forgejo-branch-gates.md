@@ -119,6 +119,26 @@ bash tools/branch-prune-origin.sh
 
 Use `--apply` for branch deletion only with explicit operator approval.
 
+## Failure Artifacts
+
+Regular Forgejo CI does not upload retained failure bundles yet. The server
+reports version `16.0.1+gitea-1.22.0`, and its authenticated run-artifact list
+endpoint returns HTTP 200, but the advertised user and organization artifact
+quota endpoints return HTTP 404 for the current operator account. Storage
+capacity and cleanup policy therefore remain unverified.
+
+`.forgejo/workflows/artifact-canary.yml` is a manual compatibility probe. It
+uploads and downloads a 1 KiB sentinel with the patched
+`forgejo/upload-artifact@v4` and `forgejo/download-artifact@v4` actions, requests
+one-day retention, and verifies the downloaded bytes. A successful canary
+proves the runner round trip only; it does not authorize enabling regular
+failure uploads until the instance quota and cleanup configuration are read.
+
+Forgejo's artifact compatibility and retention references are:
+
+- <https://forgejo.org/docs/latest/user/actions/advanced-features/>
+- <https://forgejo.org/docs/latest/admin/actions/>
+
 ## GitHub Independence
 
 No build or deterministic test requires GitHub. GitHub Actions, rulesets, `gh`,

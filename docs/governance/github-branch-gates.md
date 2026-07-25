@@ -36,11 +36,25 @@ separate reliability and runner-cost evidence.
 
 The single GitHub test job samples its expensive root test command every five
 seconds through `tools/observe-command-resources.mjs`. The JSON record is
-written to the runner temporary directory and copied to the job summary; it is
-not committed or uploaded as a retained artifact. GitHub's job timestamps are
-the source for full job duration, while the observer reports command duration,
-peak sampled process-group CPU/RSS, host memory/swap, and cgroup v2 values when
-the hosted runner exposes them.
+written to the runner temporary directory and copied to the job summary.
+GitHub's job timestamps are the source for full job duration, while the observer
+reports command duration, peak sampled process-group CPU/RSS, host memory/swap,
+and cgroup v2 values when the hosted runner exposes them.
+
+When a covered test, coverage, Web E2E, or migration-drift command fails,
+`tools/collect-ci-failure-evidence.mjs` creates one evidence directory capped at
+10 MiB. It can contain the resource JSON, at most 512 KiB from each test or gate
+log, and Playwright failure trace/screenshots that fit the remaining budget.
+The manifest records missing inputs as `unavailable` and oversized files as
+`cap_exceeded`; a cancelled run with no flushed observer output is never
+reported as zero. `actions/upload-artifact@v4` retains the directory for five
+days. Successful jobs do not run the collector or upload a retained artifact.
+Dependency trees, the pnpm store, and `.turbo` are not valid evidence inputs.
+Failures before checkout or Node setup still rely on the platform log because
+the repository collector is not available yet. Collector inputs are explicitly
+allowlisted and do not include environment variables, but the collector is not
+a general content redactor; covered commands must not print production
+credentials or raw session transcripts into logs or traces.
 
 Do not enable automatic GitHub mirror pushes until the mirror account can update
 `main` without bypassing an intended protection rule. Prefer Forgejo's push-mirror
