@@ -11,19 +11,28 @@ GitHub-specific dependencies that remain are optional:
 
 1. `actions/checkout`, `actions/setup-node`, `actions/cache`, and
    `pnpm/action-setup` inside `.github/workflows/`;
-2. the old GitHub ruleset contexts that still name the retired package matrix;
+2. the repository ruleset and classic branch protection surfaces, which must
+   remain aligned when required checks change;
 3. `gh` for inspecting the optional mirror.
 
-As verified through the GitHub API on 2026-07-25, ruleset `main-protection`
-still requires the retired six-package `gate-test (*)` contexts plus the
-input-preprocessor compatibility stub. The current workflow replaces the
-package matrix with one `gate-test` job because root `pnpm test` already runs
-the complete workspace. Before using GitHub pull requests again, update the
-ruleset to require `gate-fast`, `gate-test`, and `gate-drift` as part of the
-workflow rollout. The workflow no longer emits the retired input-preprocessor
-stub. Until that ruleset migration is complete, the repository workflow is
-suitable for mirror validation but the old GitHub required-check set cannot be
-satisfied.
+As verified through the GitHub API on 2026-07-25, repository ruleset
+`17481877` (`main-protection`) and classic `main` branch protection both require
+`gate-fast`, `gate-test`, and `gate-drift`. The ruleset also rejects deletion
+and non-fast-forward updates. Classic protection keeps strict status checks,
+disallows force pushes and deletion, and requires zero approving reviews.
+
+Both policy surfaces previously required the retired package matrix and
+`gate-test (input-preprocessor)`. Updating only the ruleset left pull request
+`#172` blocked, so required-check migrations must inspect and update both
+surfaces, record their before/after context sets, and verify the pull request's
+merge state after the change. Canary run `30162236325` emitted the three new
+required contexts on exact head `b924fa65`; pull request `#172` then changed
+from `BLOCKED` to `CLEAN` and merged as `499fc6b3`.
+
+The current workflow has one `gate-test` job because root `pnpm test` already
+runs the complete workspace. `gate-web-e2e` remains visible and runs on every
+pull request, but it is not a GitHub required check. Changing that policy needs
+separate reliability and runner-cost evidence.
 
 The single GitHub test job samples its expensive root test command every five
 seconds through `tools/observe-command-resources.mjs`. The JSON record is
