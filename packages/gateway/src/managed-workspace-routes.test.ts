@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import test from 'node:test';
-import { getConfig, setConfig } from '@los/infra/config';
+import { loadConfig, setConfig } from '@los/infra/config';
 import { registerManagedWorkspaceRoutes } from './routes/orchestration/managed-workspace-routes.js';
 import { registerRequestContext } from './request-context.js';
 
 test('managed workspace mutations require operator privilege and exact release confirmation', async () => {
-  const original = getConfig();
+  const original = await loadConfig();
   const config = { ...original, auth: { enabled: true, token: 'access-token', operatorToken: 'operator-token' } };
   setConfig(config);
   const app = Fastify({ logger: false });
