@@ -9,15 +9,49 @@ import { listServiceInstances } from '@los/agent/service-instances';
 import { listDeadLetterEvents, acknowledgeDeadLetterEvent, summarizeDeadLetterEvents, requeueDeadLetterEvent } from '@los/agent';
 import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
 
+export type TaskRouteDependencies = {
+  acknowledgeDeadLetterEvent: typeof acknowledgeDeadLetterEvent;
+  appendSessionEvent: typeof appendSessionEvent;
+  cancelScheduledTask: typeof cancelScheduledTask;
+  listDeadLetterEvents: typeof listDeadLetterEvents;
+  listServiceInstances: typeof listServiceInstances;
+  listTaskRuns: typeof listTaskRuns;
+  listTaskRunsByStatus: typeof listTaskRunsByStatus;
+  loadTaskRun: typeof loadTaskRun;
+  requestCancellation: typeof requestCancellation;
+  requeueDeadLetterEvent: typeof requeueDeadLetterEvent;
+  summarizeDeadLetterEvents: typeof summarizeDeadLetterEvents;
+  transitionExecutionState: typeof transitionExecutionState;
+  updateTaskRunFields: typeof updateTaskRunFields;
+  ensureTaskRunStore: typeof ensureTaskRunStore;
+};
+
+const defaultDependencies: TaskRouteDependencies = {
+  acknowledgeDeadLetterEvent,
+  appendSessionEvent,
+  cancelScheduledTask,
+  listDeadLetterEvents,
+  listServiceInstances,
+  listTaskRuns,
+  listTaskRunsByStatus,
+  loadTaskRun,
+  requestCancellation,
+  requeueDeadLetterEvent,
+  summarizeDeadLetterEvents,
+  transitionExecutionState,
+  updateTaskRunFields,
+  ensureTaskRunStore,
+};
+
 type OrphanClassification = 'stale-gateway' | 'expired-lease' | 'cancelled' | 'none';
 
-async function classifyOrphans(): Promise<{
+async function classifyOrphans(deps: TaskRouteDependencies): Promise<{
   orphans: Array<{ taskRunId: string; sessionId: string; status: string; classification: OrphanClassification; gatewayId?: string }>;
   staleGatewayIds: string[];
 }> {
-  await ensureTaskRunStore();
-  const tasks = await listTaskRuns(500);
-  const services = await listServiceInstances(200);
+  await deps.ensureTaskRunStore();
+  const tasks = await deps.listTaskRuns(500);
+  const services = await deps.listServiceInstances(200);
 
   const now = Date.now();
   const staleMs = 60_000;
@@ -48,26 +82,29 @@ async function classifyOrphans(): Promise<{
   return { orphans, staleGatewayIds };
 }
 
-export function registerTaskRoutes(app: FastifyInstance): void {
+export function registerTaskRoutes(
+  app: FastifyInstance,
+  deps: TaskRouteDependencies = defaultDependencies,
+): void {
   app.get('/tasks', async () => {
-    await ensureTaskRunStore();
-    return await listTaskRuns();
+    await deps.ensureTaskRunStore();
+    return await deps.listTaskRuns();
   });
 
   app.get('/tasks/orphans', async () => {
-    return await classifyOrphans();
+    return await classifyOrphans(deps);
   });
 
   app.get('/tasks/failed', async (_req, reply) => {
-    await ensureTaskRunStore();
-    const tasks = await listTaskRunsByStatus('failed', 50);
+    await deps.ensureTaskRunStore();
+    const tasks = await deps.listTaskRunsByStatus('failed', 50);
     return reply.send({ tasks });
   });
 
   app.get('/tasks/:id', async (req) => {
     const { id } = req.params as { id: string };
-    await ensureTaskRunStore();
-    const taskRun = await loadTaskRun(id);
+    await deps.ensureTaskRunStore();
+    const taskRun = await deps.loadTaskRun(id);
     if (!taskRun) return { error: 'Not found' };
     return taskRun;
   });
@@ -77,25 +114,25 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     const body = req.body as { reason?: string } | undefined;
     const reason = normalizeOptionalString(body?.reason) ?? 'cancelled_by_request';
 
-    await ensureTaskRunStore();
-    const taskRun = await loadTaskRun(id);
+    await deps.ensureTaskRunStore();
+    const taskRun = await deps.loadTaskRun(id);
     if (!taskRun) {
       return reply.status(404).send({ error: 'Not found' });
     }
 
-    const live = cancelScheduledTask(id, reason);
+    const live = deps.cancelScheduledTask(id, reason);
     // Also write to cross-process cancellation table for remote executors
-    await requestCancellation(id, reason, 'api').catch(() => undefined);
+    await deps.requestCancellation(id, reason, 'api').catch(() => undefined);
 
     if (live) {
-      await transitionExecutionState({
+      await deps.transitionExecutionState({
         entityType: 'task_run',
         entityId: id,
         to: 'cancelled',
         sessionId: taskRun.sessionId,
         reason,
       }).catch(() => undefined);
-      await updateTaskRunFields(id, {
+      await deps.updateTaskRunFields(id, {
         metadata: {
           ...taskRun.metadata,
           cancelReason: reason,
@@ -105,21 +142,21 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     }
 
     if (taskRun.status === 'queued' || taskRun.status === 'running') {
-      await transitionExecutionState({
+      await deps.transitionExecutionState({
         entityType: 'task_run',
         entityId: id,
         to: 'cancelled',
         sessionId: taskRun.sessionId,
         reason,
       });
-      const cancelled = await updateTaskRunFields(id, {
+      const cancelled = await deps.updateTaskRunFields(id, {
         metadata: {
           ...taskRun.metadata,
           cancelReason: reason,
         },
       });
       const finalTask = cancelled ?? taskRun;
-      await appendSessionEvent({
+      await deps.appendSessionEvent({
         sessionId: finalTask.sessionId,
         tenantId: finalTask.tenantId,
         projectId: finalTask.projectId,
@@ -154,11 +191,11 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     const acknowledged = query.acknowledged === 'true' ? true : query.acknowledged === 'false' ? false : undefined;
     const reason = normalizeOptionalString(query.reason);
     const limit = query.limit ? parseInt(query.limit, 10) || 50 : 50;
-    return await listDeadLetterEvents({ acknowledged, reason: reason as any, limit });
+    return await deps.listDeadLetterEvents({ acknowledged, reason: reason as any, limit });
   });
 
   app.get('/tasks/dead-letter/summary', async () => {
-    return await summarizeDeadLetterEvents();
+    return await deps.summarizeDeadLetterEvents();
   });
 
   app.post('/tasks/dead-letter/:id/ack', async (req, reply) => {
@@ -173,7 +210,7 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     if (!resolution) return reply.status(400).send({ error: 'invalid_dead_letter_resolution' });
     let record;
     try {
-      record = await acknowledgeDeadLetterEvent(id, {
+      record = await deps.acknowledgeDeadLetterEvent(id, {
         resolution,
         note: normalizeOptionalString(body?.note),
         replacementTaskRunId: normalizeOptionalString(body?.replacementTaskRunId),
@@ -189,7 +226,7 @@ export function registerTaskRoutes(app: FastifyInstance): void {
   app.post('/tasks/dead-letter/:id/retry', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
-    const result = await requeueDeadLetterEvent(id);
+    const result = await deps.requeueDeadLetterEvent(id);
     if (result.status === 'not_found') return reply.status(404).send({ error: result.reason });
     if (result.status !== 'requeued') return reply.status(409).send({ error: result.reason, event: result.event });
     return result;

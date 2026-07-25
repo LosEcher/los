@@ -16,7 +16,34 @@ import {
 import { getRequestContext } from '../../request-context.js';
 import { runIdempotentJson } from '../../idempotency.js';
 
-export function registerTodoRoutes(app: FastifyInstance) {
+type TodoRouteDependencies = {
+  archiveTodo: typeof archiveTodo;
+  createTodo: typeof createTodo;
+  dispatchTodo: typeof dispatchTodo;
+  listTodos: typeof listTodos;
+  loadTodo: typeof loadTodo;
+  reopenTodo: typeof reopenTodo;
+  seedLosPlanningTodos: typeof seedLosPlanningTodos;
+  unarchiveTodo: typeof unarchiveTodo;
+  updateTodo: typeof updateTodo;
+};
+
+const defaultDependencies: TodoRouteDependencies = {
+  archiveTodo,
+  createTodo,
+  dispatchTodo,
+  listTodos,
+  loadTodo,
+  reopenTodo,
+  seedLosPlanningTodos,
+  unarchiveTodo,
+  updateTodo,
+};
+
+export function registerTodoRoutes(
+  app: FastifyInstance,
+  deps: TodoRouteDependencies = defaultDependencies,
+) {
   app.get('/todos', async (req) => {
     const query = req.query as {
       tenantId?: string;
@@ -33,7 +60,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       limit?: string;
       includeArchived?: string;
     };
-    return await listTodos({
+    return await deps.listTodos({
       tenantId: normalizeOptionalString(query.tenantId),
       projectId: normalizeOptionalString(query.projectId),
       status: normalizeTodoStatus(query.status),
@@ -60,7 +87,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       req,
       reply,
       { route: '/todos', method: 'POST', body, context },
-      async () => await createTodo({
+      async () => await deps.createTodo({
         title,
         description: normalizeOptionalString(body.description),
         tenantId: normalizeOptionalString(body.tenantId) ?? context.tenantId,
@@ -94,7 +121,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       reply,
       { route: `/todos/${id}`, method: 'PATCH', body, context },
       async () => {
-        const todo = await updateTodo(id, {
+        const todo = await deps.updateTodo(id, {
           title: normalizeOptionalString(body.title),
           description: normalizeOptionalString(body.description),
           kind: normalizeTodoKind(body.kind),
@@ -130,7 +157,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       reply,
       { route: `/todos/${id}/reopen`, method: 'POST', body: req.body ?? {}, context },
       async () => {
-        const todo = await reopenTodo(id);
+        const todo = await deps.reopenTodo(id);
         if (!todo) {
           reply.status(404);
           return { error: 'Not found' };
@@ -149,7 +176,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       reply,
       { route: `/todos/${id}/archive`, method: 'POST', body: body ?? {}, context },
       async () => {
-        const todo = await archiveTodo(id, normalizeOptionalString(body?.reason));
+        const todo = await deps.archiveTodo(id, normalizeOptionalString(body?.reason));
         if (!todo) {
           reply.status(404);
           return { error: 'Not found' };
@@ -167,7 +194,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       reply,
       { route: `/todos/${id}/unarchive`, method: 'POST', body: req.body ?? {}, context },
       async () => {
-        const todo = await unarchiveTodo(id);
+        const todo = await deps.unarchiveTodo(id);
         if (!todo) {
           reply.status(404);
           return { error: 'Not found' };
@@ -186,7 +213,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       reply,
       { route: `/todos/${id}/cancel`, method: 'POST', body: body ?? {}, context },
       async () => {
-        const existing = await loadTodo(id);
+        const existing = await deps.loadTodo(id);
         if (!existing) {
           reply.status(404);
           return { error: 'Not found' };
@@ -204,7 +231,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
 
   app.post('/todos/seed', async (req) => {
     const body = req.body as Record<string, unknown> | undefined;
-    const todos = await seedLosPlanningTodos({ overwrite: body?.overwrite === true });
+    const todos = await deps.seedLosPlanningTodos({ overwrite: body?.overwrite === true });
     return { ok: true, count: todos.length, todos };
   });
 
@@ -219,7 +246,7 @@ export function registerTodoRoutes(app: FastifyInstance) {
       { route: `/todos/${id}/dispatch`, method: 'POST', body: body ?? {}, context },
       async () => {
         try {
-          const result = await dispatchTodo(id, {
+          const result = await deps.dispatchTodo(id, {
             force: body?.force === true,
             toolMode: body?.toolMode as 'read-only' | 'project-write' | 'all' | undefined,
             workspaceRoot: body?.workspaceRoot as string | undefined,

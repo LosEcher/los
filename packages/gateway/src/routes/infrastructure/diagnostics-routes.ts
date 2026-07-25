@@ -14,6 +14,20 @@ import { getRepairCounters } from '@los/agent/providers/repair-telemetry';
 import { readExecutionOutboxHealth } from '@los/agent/execution-outbox';
 import { getSymbolCacheMetrics } from '../../chat-cbm-symbol-cache.js';
 
+export type DiagnosticsRouteDependencies = {
+  ensureProviderCallTelemetryStore: typeof ensureProviderCallTelemetryStore;
+  ensureSessionEventStore: typeof ensureSessionEventStore;
+  readExecutionOutboxHealth: typeof readExecutionOutboxHealth;
+  getRepairCounters: typeof getRepairCounters;
+};
+
+const defaultDependencies: DiagnosticsRouteDependencies = {
+  ensureProviderCallTelemetryStore,
+  ensureSessionEventStore,
+  readExecutionOutboxHealth,
+  getRepairCounters,
+};
+
 // DB columns use snake_case; use Record<string, any> for raw query results.
 type DbRow = Record<string, any>;
 
@@ -40,9 +54,12 @@ function isValidTraceId(value: string): boolean {
   return /^[a-zA-Z0-9_-]{4,200}$/.test(value);
 }
 
-export function registerDiagnosticsRoutes(app: FastifyInstance): void {
+export function registerDiagnosticsRoutes(
+  app: FastifyInstance,
+  deps: DiagnosticsRouteDependencies = defaultDependencies,
+): void {
   app.get('/diagnostics/outbox', async () => ({
-    outbox: await readExecutionOutboxHealth(),
+    outbox: await deps.readExecutionOutboxHealth(),
   }));
 
   app.get('/diagnostics/cbm-cache', async () => ({
@@ -56,8 +73,8 @@ export function registerDiagnosticsRoutes(app: FastifyInstance): void {
       return reply.status(400).send({ error: 'Invalid traceId' });
     }
 
-    await ensureSessionEventStore();
-    await ensureProviderCallTelemetryStore();
+    await deps.ensureSessionEventStore();
+    await deps.ensureProviderCallTelemetryStore();
     const db = getDb();
 
     // Session events for this trace
@@ -165,7 +182,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance): void {
 
   // ── Recent traces ───────────────────────────────────────
   app.get('/diagnostics', async (_req, reply) => {
-    await ensureSessionEventStore();
+    await deps.ensureSessionEventStore();
     const db = getDb();
 
     const rows = await db.query<TraceSummary>(
@@ -189,7 +206,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance): void {
 
   // ── Provider health ─────────────────────────────────────
   app.get('/diagnostics/provider-health', async (_req, reply) => {
-    await ensureProviderCallTelemetryStore();
+    await deps.ensureProviderCallTelemetryStore();
     const db = getDb();
 
     const rows = await db.query<ProviderHealth>(
@@ -209,7 +226,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance): void {
     return {
       providers: rows.rows,
       windowMs: 15 * 60 * 1000,
-      repairCounters: getRepairCounters(),
+      repairCounters: deps.getRepairCounters(),
       symbolCache: getSymbolCacheMetrics(),
     };
   });

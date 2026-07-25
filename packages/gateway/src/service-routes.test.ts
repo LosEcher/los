@@ -2,30 +2,48 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 
-import { closeDb, getDb, initDb } from '@los/infra/db';
-import { loadConfig } from '@los/infra/config';
-import {
-  ensureServiceInstanceStore,
-  upsertServiceInstanceHeartbeat,
-} from '@los/agent/service-instances';
 import { registerServiceRoutes } from './routes/infrastructure/service-routes.js';
+import type { ServiceRoutesDependencies } from './routes/infrastructure/service-routes.js';
+
+// ── Stub deps: in-memory service instance store, no DB ──
+
+const stubStore = new Map<string, Record<string, unknown>>();
+
+const stubDeps: ServiceRoutesDependencies = {
+  ensureServiceInstanceStore: async () => ({} as any),
+  listServiceInstances: async () => Array.from(stubStore.values()) as any,
+  loadServiceInstance: async (id: string) => (stubStore.get(id) ?? null) as any,
+  upsertServiceInstance: async (input: any) => {
+    // Update readiness based on status transitions
+    const status = input.status as string | undefined;
+    const blockers: string[] = status === 'draining' ? ['status:draining'] : [];
+    const warnings: string[] = [];
+    if (input.status || input.rolloutState) {
+      input.readiness = { blockers, warnings };
+    }
+    const existing = stubStore.get(input.serviceId);
+    const merged = { ...existing, ...input };
+    stubStore.set(input.serviceId, merged);
+    return merged as any;
+  },
+};
 
 test('service routes expose liveness, readiness, and drain state', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
   const serviceId = `test-service-route-${Date.now()}`;
   const app = Fastify({ logger: false });
-  registerServiceRoutes(app, { serviceId, serviceKind: 'gateway' });
+  registerServiceRoutes(app, { serviceId, serviceKind: 'gateway' }, stubDeps);
+
+  // Stub: pre-populate with a healthy service instance
+  stubStore.set(serviceId, {
+    serviceId,
+    serviceKind: 'gateway',
+    status: 'online',
+    health: { db_ok: true, schema_ok: true },
+    capabilities: { chat_api: true },
+    readiness: { blockers: [], warnings: [] },
+  });
 
   try {
-    await ensureServiceInstanceStore();
-    await upsertServiceInstanceHeartbeat({
-      serviceId,
-      serviceKind: 'gateway',
-      health: { db_ok: true, schema_ok: true },
-      capabilities: { chat_api: true },
-    });
-
     const live = await app.inject({ method: 'GET', url: '/live' });
     assert.equal(live.statusCode, 200);
     assert.equal(live.json().serviceId, serviceId);
@@ -59,8 +77,6 @@ test('service routes expose liveness, readiness, and drain state', async () => {
     assert.equal(promote.statusCode, 200);
     assert.equal(promote.json().service.status, 'online');
   } finally {
-    await getDb().query('DELETE FROM service_instances WHERE service_id = $1', [serviceId]).catch(() => undefined);
-    await closeDb().catch(() => undefined);
     await app.close();
   }
 });

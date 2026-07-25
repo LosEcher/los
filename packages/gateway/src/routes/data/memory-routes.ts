@@ -31,18 +31,68 @@ import {
   normalizeBoundedInteger,
 } from '../server-helpers.js';
 
+type MemoryRouteDependencies = {
+  addObservation: typeof addObservation;
+  applyRetentionPolicy: typeof applyRetentionPolicy;
+  canDeleteMemory: typeof canDeleteMemory;
+  canWriteToScope: typeof canWriteToScope;
+  checkMemoryIntegrity: typeof checkMemoryIntegrity;
+  compactSession: typeof compactSession;
+  deleteObservation: typeof deleteObservation;
+  ensureMemoryCompactionStore: typeof ensureMemoryCompactionStore;
+  ensureMemoryStore: typeof ensureMemoryStore;
+  ensureRunEvalStore: typeof ensureRunEvalStore;
+  ensureTaskRunStore: typeof ensureTaskRunStore;
+  evaluatePromotion: typeof evaluatePromotion;
+  getLatestCheckpoint: typeof getLatestCheckpoint;
+  getObservation: typeof getObservation;
+  getStats: typeof getStats;
+  listCompactions: typeof listCompactions;
+  resolveMemoryScope: typeof resolveMemoryScope;
+  retrieveActiveRules: typeof retrieveActiveRules;
+  routeMemoryRetrieval: typeof routeMemoryRetrieval;
+  searchObservations: typeof searchObservations;
+  syncMemoryMd: typeof syncMemoryMd;
+  updateObservation: typeof updateObservation;
+};
+const defaultDependencies: MemoryRouteDependencies = {
+  addObservation,
+  applyRetentionPolicy,
+  canDeleteMemory,
+  canWriteToScope,
+  checkMemoryIntegrity,
+  compactSession,
+  deleteObservation,
+  ensureMemoryCompactionStore,
+  ensureMemoryStore,
+  ensureRunEvalStore,
+  ensureTaskRunStore,
+  evaluatePromotion,
+  getLatestCheckpoint,
+  getObservation,
+  getStats,
+  listCompactions,
+  resolveMemoryScope,
+  retrieveActiveRules,
+  routeMemoryRetrieval,
+  searchObservations,
+  syncMemoryMd,
+  updateObservation,
+};
+
 const log = getLogger('memory-routes');
 
 /** Build an access context from the request context, sessionId, and target scope.
  *  Operator status is taken from the validated RequestContext (gated on operatorToken),
  *  NOT from the forgeable x-los-role header. */
 function buildAccessContext(
+  deps: { resolveMemoryScope: typeof resolveMemoryScope },
   req: { headers: Record<string, string | string[] | undefined> },
   targetScope: MemoryScope,
-  opts?: { sessionId?: string | null; targetSessionId?: string | null; targetProjectId?: string | null; targetUserId?: string | null },
+  opts: { sessionId?: string | null; targetSessionId?: string | null; targetProjectId?: string | null; targetUserId?: string | null } = {},
 ): MemoryAccessContext {
   const ctx = getRequestContext(req as any);
-  const reqScope = resolveMemoryScope({
+  const reqScope = deps.resolveMemoryScope({
     sessionId: opts?.sessionId,
     tenantId: ctx.tenantId,
     projectId: ctx.projectId,
@@ -57,7 +107,10 @@ function buildAccessContext(
     sameUser: opts?.targetUserId ? (opts.targetUserId === ctx.userId) : undefined,
   };
 }
-export function registerMemoryRoutes(app: FastifyInstance): void {
+export function registerMemoryRoutes(
+  app: FastifyInstance,
+  deps: MemoryRouteDependencies = defaultDependencies,
+): void {
   app.get('/memory', async (req) => {
     const ctx = getRequestContext(req);
     const query = req.query as {
@@ -66,7 +119,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       tenantId?: string; projectId?: string; userId?: string;
       requestId?: string; traceId?: string; limit?: string;
     };
-    await ensureMemoryStore();
+    await deps.ensureMemoryStore();
 
     // ACL enforcement: if auth is enabled, scope read results to the caller's
     // tenant/project/user context. Operator can see everything.
@@ -74,7 +127,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     const effectiveProjectId = ctx.isOperator ? (query.projectId ?? undefined) : (query.projectId ?? ctx.projectId);
     const effectiveUserId = ctx.isOperator ? (query.userId ?? undefined) : (query.userId ?? ctx.userId);
 
-    const results = await searchObservations(query.q ?? '', {
+    const results = await deps.searchObservations(query.q ?? '', {
       kind: query.kind,
       source: query.source,
       tag: query.tag,
@@ -95,12 +148,12 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
   app.post('/memory', async (req, reply) => {
     const { title, summary, kind, tags, content, metadata, source, sessionId, nodeId, scope: requestedScope } = req.body as any;
     const context = getRequestContext(req);
-    await ensureMemoryStore();
+    await deps.ensureMemoryStore();
 
     // Scope enforcement: caller must be able to write at the requested scope
     const targetScope = normalizeScope(requestedScope ?? 'session');
-    const acl = buildAccessContext(req, targetScope, { sessionId: sessionId });
-    if (!canWriteToScope(acl)) {
+    const acl = buildAccessContext(deps, req, targetScope, { sessionId: sessionId });
+    if (!deps.canWriteToScope(acl)) {
       return reply.status(403).send({
         error: 'Forbidden',
         detail: `Scope ${acl.requesterScope} cannot write to ${targetScope} scope`,
@@ -109,7 +162,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       });
     }
 
-    const obs = await addObservation({
+    const obs = await deps.addObservation({
       title, summary, kind,
       tags: normalizeStringArray(tags),
       content,
@@ -134,8 +187,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
   app.patch('/memory/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as any;
-    await ensureMemoryStore();
-    const obs = await updateObservation(parseInt(id), {
+    await deps.ensureMemoryStore();
+    const obs = await deps.updateObservation(parseInt(id), {
       title: normalizeOptionalString(body.title),
       summary: normalizeOptionalString(body.summary),
       kind: normalizeOptionalString(body.kind),
@@ -152,8 +205,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
 
   app.delete('/memory/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    await ensureMemoryStore();
-    const existing = await getObservation(parseInt(id));
+    await deps.ensureMemoryStore();
+    const existing = await deps.getObservation(parseInt(id));
     if (!existing) return reply.status(404).send({ error: 'Not found' });
 
     // Caller sessionId from query param — needed for sameSession check on
@@ -164,14 +217,14 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     // Scope enforcement: can the caller delete at the observation's scope?
     const targetScope = normalizeScope(existing.metadata.scope as string);
     const acl: MemoryAccessContext = {
-      ...buildAccessContext(req, targetScope, {
+      ...buildAccessContext(deps, req, targetScope, {
         sessionId: callerSessionId,
         targetSessionId: existing.sessionId,
         targetProjectId: existing.projectId,
         targetUserId: existing.userId,
       }),
     };
-    if (!canDeleteMemory(acl)) {
+    if (!deps.canDeleteMemory(acl)) {
       return reply.status(403).send({
         error: 'Forbidden',
         detail: `Cannot delete observation at scope ${targetScope} from scope ${acl.requesterScope}`,
@@ -180,13 +233,13 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       });
     }
 
-    const ok = await deleteObservation(parseInt(id));
+    const ok = await deps.deleteObservation(parseInt(id));
     return { ok };
   });
 
   app.get('/memory/stats', async () => {
-    await ensureMemoryStore();
-    return await getStats();
+    await deps.ensureMemoryStore();
+    return await deps.getStats();
   });
 
   app.post('/memory/compact', async (req, reply) => {
@@ -194,10 +247,10 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     const sessionId = normalizeOptionalString(body.sessionId);
     if (!sessionId) return reply.status(422).send({ error: 'sessionId is required' });
     const context = getRequestContext(req);
-    await ensureMemoryCompactionStore();
-    await ensureRunEvalStore();
-    await ensureTaskRunStore();
-    const compaction = await compactSession({
+    await deps.ensureMemoryCompactionStore();
+    await deps.ensureRunEvalStore();
+    await deps.ensureTaskRunStore();
+    const compaction = await deps.compactSession({
       sessionId,
       runSpecId: normalizeOptionalString(body.runSpecId),
       tenantId: context.tenantId,
@@ -217,8 +270,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
   app.get('/memory/compactions', async (req) => {
     const query = req.query as { sessionId?: string; runSpecId?: string; limit?: string };
     const context = getRequestContext(req);
-    await ensureMemoryCompactionStore();
-    const compactions = await listCompactions({
+    await deps.ensureMemoryCompactionStore();
+    const compactions = await deps.listCompactions({
       sessionId: normalizeOptionalString(query.sessionId),
       runSpecId: normalizeOptionalString(query.runSpecId),
       tenantId: context.tenantId,
@@ -232,15 +285,15 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
   app.get('/memory/checkpoint/:sessionId', async (req) => {
     const { sessionId } = req.params as { sessionId: string };
     if (!sessionId) return { checkpoint: null };
-    const checkpoint = await getLatestCheckpoint(sessionId);
+    const checkpoint = await deps.getLatestCheckpoint(sessionId);
     return { checkpoint };
   });
 
   app.get('/memory/active-rules', async (req) => {
     const query = req.query as { runSpecId?: string; limit?: string };
     const context = getRequestContext(req);
-    await ensureMemoryCompactionStore();
-    const rules = await retrieveActiveRules({
+    await deps.ensureMemoryCompactionStore();
+    const rules = await deps.retrieveActiveRules({
       runSpecId: normalizeOptionalString(query.runSpecId),
       tenantId: context.tenantId,
       projectId: context.projectId,
@@ -255,9 +308,9 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       runSpecId?: string; maxObservationsPerLayer?: string;
     };
     const context = getRequestContext(req);
-    await ensureMemoryStore();
-    await ensureMemoryCompactionStore();
-    const result = await routeMemoryRetrieval({
+    await deps.ensureMemoryStore();
+    await deps.ensureMemoryCompactionStore();
+    const result = await deps.routeMemoryRetrieval({
       taskState: normalizeOptionalString(body.taskState) as any,
       runPhase: normalizeOptionalString(body.runPhase),
       sessionId: normalizeOptionalString(body.sessionId),
@@ -274,15 +327,15 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       workspaceRoot: string; scope?: string; memoryLayer?: string;
       archived?: boolean; projectId?: string;
     };
-    await ensureMemoryStore();
-    const observations = await searchObservations('', {
+    await deps.ensureMemoryStore();
+    const observations = await deps.searchObservations('', {
       limit: 50,
       scope: body.scope,
       memoryLayer: body.memoryLayer,
       archived: body.archived,
       projectId: body.projectId,
     });
-    syncMemoryMd(body.workspaceRoot, observations);
+    deps.syncMemoryMd(body.workspaceRoot, observations);
     return { ok: true, count: observations.length };
   });
 
@@ -290,25 +343,25 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     const body = req.body as { dryRun?: boolean };
     if (body.dryRun) {
       // For dry-run, just report what would happen without applying
-      const stats = await getStats();
+      const stats = await deps.getStats();
       return { dryRun: true, totalObservations: stats.totalObservations, archived: stats.archived };
     }
-    const result = await applyRetentionPolicy();
+    const result = await deps.applyRetentionPolicy();
     return { ok: true, ...result };
   });
 
   app.get('/memory/integrity', async () => {
-    const report = await checkMemoryIntegrity();
+    const report = await deps.checkMemoryIntegrity();
     return report;
   });
 
   // Auto-compact: find uncompacted sessions (>1h old) and compact them.
   // Called by the scheduler or governance sweeper periodically.
   app.post('/memory/auto-compact', async () => {
-    await ensureMemoryStore();
-    await ensureMemoryCompactionStore();
-    await ensureRunEvalStore();
-    await ensureTaskRunStore();
+    await deps.ensureMemoryStore();
+    await deps.ensureMemoryCompactionStore();
+    await deps.ensureRunEvalStore();
+    await deps.ensureTaskRunStore();
 
     const db = getDb();
     const rows = await db.query<{ session_id: string }>(
@@ -331,7 +384,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
 
     for (const sessionId of sessionIds) {
       try {
-        const result = await compactSession({ sessionId });
+        const result = await deps.compactSession({ sessionId });
         if (result) {
           compacted.push(sessionId);
         }
@@ -348,8 +401,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
   app.post('/memory/:id/promote', async (req, reply) => {
     const { id } = req.params as { id: string };
     const ctx = getRequestContext(req);
-    await ensureMemoryStore();
-    const obs = await getObservation(parseInt(id));
+    await deps.ensureMemoryStore();
+    const obs = await deps.getObservation(parseInt(id));
     if (!obs) return reply.status(404).send({ error: 'Not found' });
 
     const fromScope = normalizeScope(obs.metadata.scope as string);
@@ -364,7 +417,7 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       kind: obs.kind,
     };
 
-    const decision = evaluatePromotion(fromScope, evidence);
+    const decision = deps.evaluatePromotion(fromScope, evidence);
     if (!decision.allowed) {
       return reply.status(422).send({
         error: 'Promotion denied',
@@ -375,8 +428,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
     }
 
     // Scope enforcement: caller must meet the required scope for this gate
-    const acl = buildAccessContext(req, decision.requiredCallerScope!);
-    if (!canWriteToScope(acl)) {
+    const acl = buildAccessContext(deps, req, decision.requiredCallerScope!);
+    if (!deps.canWriteToScope(acl)) {
       return reply.status(403).send({
         error: 'Forbidden',
         detail: `Promotion to ${decision.targetScope} requires ${decision.requiredCallerScope} caller scope, you have ${acl.requesterScope}`,
@@ -392,8 +445,8 @@ export function registerMemoryRoutes(app: FastifyInstance): void {
       promotedGate: decision.gate,
     };
 
-    await updateObservation(parseInt(id), { metadata: updatedMetadata });
-    const updated = await getObservation(parseInt(id));
+    await deps.updateObservation(parseInt(id), { metadata: updatedMetadata });
+    const updated = await deps.getObservation(parseInt(id));
 
     return {
       ok: true,

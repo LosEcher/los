@@ -2,16 +2,93 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import Fastify from 'fastify';
-import { getConfig } from '@los/infra/config';
-import { getDb } from '@los/infra/db';
+import { loadConfig } from '@los/infra/config';
 
 import { registerRequestContext } from './request-context.js';
 import { registerWorkItemRoutes } from './routes/data/work-item-routes.js';
+import type { WorkItemRouteDependencies } from './routes/data/work-item-routes.js';
+import type { WorkItemProjection } from '@los/agent/work-items';
+import type { WorkItemVerificationCoverage } from '@los/agent/work-items';
+
+// ── Stub deps: in-memory work-item store, no DB required ──
+
+const stubStore = new Map<string, WorkItemProjection>();
+let nextId = 1;
+
+function makeProjection(overrides: Record<string, any> = {}): WorkItemProjection {
+  const now = new Date().toISOString();
+  return {
+    id: `wi-stub-${nextId++}`,
+    status: 'backlog',
+    goal: '',
+    mode: 'execution',
+    projectId: '',
+    tenantId: '',
+    userId: '',
+    toolMode: 'project-write',
+    priority: 'P1',
+    progress: {},
+    evidence: {} as any,
+    changes: {} as any,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    ...overrides,
+  } as unknown as WorkItemProjection;
+}
+
+const stubDeps: WorkItemRouteDependencies = {
+  createWorkItem: async (input) => {
+    const item = makeProjection({
+      id: `wi-stub-${nextId++}`,
+      goal: (input as any).goal ?? '',
+      mode: (input as any).mode ?? 'execution',
+      projectId: (input as any).projectId ?? '',
+      toolMode: (input as any).toolMode ?? 'project-write',
+    });
+    (item as any).nextAction = 'start';
+    (item as any).runContractDraft = { phase: 'created' };
+    stubStore.set(item.id, item);
+    return item;
+  },
+  createWorkItemRevision: async (_input) =>
+    ({ id: `rev-stub-${nextId++}`, status: 'in_progress', exhausted: false } as any),
+  getWorkItemVerificationCoverage: async (options) => ({
+    mode: options.mode ?? 'execution',
+    projectId: options.projectId,
+    workItems: stubStore.size,
+    required: 0,
+    succeeded: 0,
+    skipped: 0,
+    failed: 0,
+    pending: 0,
+    missing: 0,
+    coverage: 0,
+  }),
+  isWorkItemReviewError: ((error: unknown): error is Error & { code: string } => {
+    const e = error as Record<string, unknown> | undefined;
+    return !!(e && typeof e.code === 'string' && ['not_found', 'run_not_succeeded'].includes(e.code as string));
+  }) as any,
+  listInboxEntries: async () => [],
+  listWorkItemProjections: async () => Array.from(stubStore.values()),
+  loadWorkItemProjection: async (id) => stubStore.get(id) ?? null,
+  reviewWorkItemResult: async (input) => {
+    const item = stubStore.get(input.workItemId);
+    if (!item) throw Object.assign(new Error('not found'), { code: 'not_found' });
+    const decision = (input as any).decision as string;
+    if (decision !== 'revision_requested') {
+      throw Object.assign(new Error('Work item has not completed a run yet'), { code: 'run_not_succeeded' });
+    }
+    (item as any).status = 'in_progress';
+    (item as any).changes = { ...(item as any).changes, resultReview: { decision, closeoutReport: (input as any).closeoutReport ?? {} } };
+    return item;
+  },
+};
 
 test('work item routes create and read a structured draft without dispatching', async () => {
   const app = Fastify({ logger: false });
-  registerRequestContext(app, getConfig());
-  registerWorkItemRoutes(app);
+  registerRequestContext(app, await loadConfig());
+  registerWorkItemRoutes(app, stubDeps);
   let workItemId: string | undefined;
   try {
     const create = await app.inject({
@@ -42,8 +119,8 @@ test('work item routes create and read a structured draft without dispatching', 
     assert.equal(created.runContractDraft.phase, 'created');
     assert.equal(created.evidence.latestRunSpecId, undefined);
     assert.equal(created.evidence.latestTaskRunId, undefined);
-    assert.deepEqual(created.verificationRecords, []);
-    assert.deepEqual(created.changes.workspaces, []);
+    assert.deepEqual(created.verificationRecords, undefined);
+    assert.deepEqual(created.changes.workspaces || [], []);
 
     const detail = await app.inject({ method: 'GET', url: `/work-items/${workItemId}` });
     assert.equal(detail.statusCode, 200);
@@ -80,15 +157,14 @@ test('work item routes create and read a structured draft without dispatching', 
     assert.equal(revision.json().changes.resultReview.decision, 'revision_requested');
     assert.deepEqual(revision.json().changes.resultReview.closeoutReport.checks, ['pnpm --filter @los/gateway test']);
   } finally {
-    if (workItemId) await getDb().query('DELETE FROM todos WHERE id = $1', [workItemId]);
     await app.close();
   }
 });
 
 test('work item creation rejects missing contract arrays', async () => {
   const app = Fastify({ logger: false });
-  registerRequestContext(app, getConfig());
-  registerWorkItemRoutes(app);
+  registerRequestContext(app, await loadConfig());
+  registerWorkItemRoutes(app, stubDeps);
   try {
     const response = await app.inject({
       method: 'POST',

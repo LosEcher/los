@@ -22,6 +22,24 @@ import {
   readString,
 } from '../node-probes.js';
 
+export type NodeRouteDependencies = {
+  listExecutorNodes: typeof listExecutorNodes;
+  loadExecutorNode: typeof loadExecutorNode;
+  recordExecutorNodeProbe: typeof recordExecutorNodeProbe;
+  upsertExecutorNode: typeof upsertExecutorNode;
+  upsertExecutorNodeHeartbeat: typeof upsertExecutorNodeHeartbeat;
+  ensureExecutorNodeStore: typeof ensureExecutorNodeStore;
+};
+
+const defaultDependencies: NodeRouteDependencies = {
+  listExecutorNodes,
+  loadExecutorNode,
+  recordExecutorNodeProbe,
+  upsertExecutorNode,
+  upsertExecutorNodeHeartbeat,
+  ensureExecutorNodeStore,
+};
+
 type NodeEditorBody = {
   nodeKind?: ExecutorNodeKind;
   baseUrl?: string;
@@ -48,10 +66,13 @@ type SshImportRequestBody = {
   conflictStrategy?: 'preserve_existing' | 'overwrite';
 };
 
-export function registerNodeRoutes(app: FastifyInstance): void {
+export function registerNodeRoutes(
+  app: FastifyInstance,
+  deps: NodeRouteDependencies = defaultDependencies,
+): void {
   app.get('/nodes', async () => {
-    await ensureExecutorNodeStore();
-    return await listExecutorNodes();
+    await deps.ensureExecutorNodeStore();
+    return await deps.listExecutorNodes();
   });
 
   app.patch('/nodes/:id', async (req, reply) => {
@@ -60,8 +81,8 @@ export function registerNodeRoutes(app: FastifyInstance): void {
     const nodeId = normalizeOptionalString(id);
     if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
 
-    await ensureExecutorNodeStore();
-    const node = await upsertExecutorNode({
+    await deps.ensureExecutorNodeStore();
+    const node = await deps.upsertExecutorNode({
       nodeId,
       nodeKind: normalizeNodeKind(body?.nodeKind),
       baseUrl: normalizeOptionalString(body?.baseUrl),
@@ -89,8 +110,8 @@ export function registerNodeRoutes(app: FastifyInstance): void {
     const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
     if (!nodeId) return reply.status(400).send({ error: 'nodeId is required' });
 
-    await ensureExecutorNodeStore();
-    const node = await upsertExecutorNodeHeartbeat({
+    await deps.ensureExecutorNodeStore();
+    const node = await deps.upsertExecutorNodeHeartbeat({
       nodeId,
       hostLabel: normalizeOptionalString(body?.hostLabel ?? body?.host_label),
       baseUrl: normalizeOptionalString(body?.baseUrl ?? body?.base_url),
@@ -112,12 +133,12 @@ export function registerNodeRoutes(app: FastifyInstance): void {
     const nodeId = normalizeOptionalString(id);
     if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
 
-    await ensureExecutorNodeStore();
-    const existing = await loadExecutorNode(nodeId);
+    await deps.ensureExecutorNodeStore();
+    const existing = await deps.loadExecutorNode(nodeId);
     if (!existing) return reply.status(404).send({ error: 'Not found' });
 
     const result = await probeNode(existing);
-    const saved = await recordExecutorNodeProbe({
+    const saved = await deps.recordExecutorNodeProbe({
       nodeId,
       status: result.status,
       verified: result.verified,
@@ -147,7 +168,7 @@ export function registerNodeRoutes(app: FastifyInstance): void {
     const command = normalizeOptionalString(body?.command);
     if (!command) return reply.status(422).send({ error: 'command is required' });
 
-    await ensureExecutorNodeStore();
+    await deps.ensureExecutorNodeStore();
     const node = await loadExecutorNode(nodeId);
     if (!node) return reply.status(404).send({ error: 'Not found' });
 
@@ -167,8 +188,8 @@ export function registerNodeRoutes(app: FastifyInstance): void {
     const createMissing = body?.createMissing !== false;
     const conflictStrategy = body?.conflictStrategy === 'overwrite' ? 'overwrite' : 'preserve_existing';
 
-    await ensureExecutorNodeStore();
-    const existingNodes = await listExecutorNodes(1000);
+    await deps.ensureExecutorNodeStore();
+    const existingNodes = await deps.listExecutorNodes(1000);
     const existingById = new Map(existingNodes.map(node => [node.nodeId, node]));
     const items = buildSshImportItems(content, new Set(existingById.keys()), { dryRun, createMissing });
 

@@ -17,7 +17,38 @@ import { getConfig } from '@los/infra/config';
 import { asRecord, normalizeOptionalString, normalizeStringArray } from '../server-helpers.js';
 import { getRequestContext, requireOperator } from '../../request-context.js';
 
-export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
+type AgentTaskGraphRouteDependencies = {
+  cancelGovernedAgentTaskGraph: typeof cancelGovernedAgentTaskGraph;
+  cancelScheduledTask: typeof cancelScheduledTask;
+  canStartExecution: typeof canStartExecution;
+  createGovernedAgentTaskGraph: typeof createGovernedAgentTaskGraph;
+  getAgentTaskGraphCompletion: typeof getAgentTaskGraphCompletion;
+  integrateGovernedAgentTaskGraph: typeof integrateGovernedAgentTaskGraph;
+  loadGovernedAgentTaskGraph: typeof loadGovernedAgentTaskGraph;
+  loadRunSpec: typeof loadRunSpec;
+  readAgentTaskGraph: typeof readAgentTaskGraph;
+  requestCancellation: typeof requestCancellation;
+  runAgentTaskGraphSerial: typeof runAgentTaskGraphSerial;
+};
+
+const defaultDependencies: AgentTaskGraphRouteDependencies = {
+  cancelGovernedAgentTaskGraph,
+  cancelScheduledTask,
+  canStartExecution,
+  createGovernedAgentTaskGraph,
+  getAgentTaskGraphCompletion,
+  integrateGovernedAgentTaskGraph,
+  loadGovernedAgentTaskGraph,
+  loadRunSpec,
+  readAgentTaskGraph,
+  requestCancellation,
+  runAgentTaskGraphSerial,
+};
+
+export function registerAgentTaskGraphRoutes(
+  app: FastifyInstance,
+  deps: AgentTaskGraphRouteDependencies = defaultDependencies,
+): void {
   app.post('/agent-graphs', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
     const body = asRecord(req.body);
@@ -26,9 +57,9 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
     if (!runSpecId || !integrationOwner) {
       return reply.status(422).send({ error: 'runSpecId and integrationOwner are required' });
     }
-    const runSpec = await loadRunSpec(runSpecId);
+    const runSpec = await deps.loadRunSpec(runSpecId);
     if (!runSpec) return reply.status(404).send({ error: 'run spec not found' });
-    const executionGate = canStartExecution(runSpec.runContract);
+    const executionGate = deps.canStartExecution(runSpec.runContract);
     if (!executionGate.allowed || !runSpec.runContract?.plan?.length) {
       return reply.status(409).send({ error: executionGate.reason ?? 'persisted approved plan is required (AP2)' });
     }
@@ -36,7 +67,7 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
       const graphId = normalizeOptionalString(body.graphId) ?? `graph-${randomUUID()}`;
       const workers = normalizeWorkers(body.workers, graphId);
       const verifier = normalizeVerifier(body.verifier, graphId);
-      const control = await createGovernedAgentTaskGraph({
+      const control = await deps.createGovernedAgentTaskGraph({
         graphId,
         runSpecId,
         sessionId: runSpec.sessionId,
@@ -47,7 +78,7 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
         maxParallelTasks: normalizeInteger(body.maxParallelTasks),
       });
       return reply.status(201).send({
-        graph: await readAgentTaskGraph(graphId, { requireVerifier: true }),
+        graph: await deps.readAgentTaskGraph(graphId, { requireVerifier: true }),
         control,
       });
     } catch (error) {
@@ -58,32 +89,32 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
   app.get('/agent-graphs/:id', async (req) => {
     const { id } = req.params as { id: string };
     const query = req.query as { requireVerifier?: string };
-    const graph = await readAgentTaskGraph(id, {
+    const graph = await deps.readAgentTaskGraph(id, {
       requireVerifier: normalizeBoolean(query.requireVerifier),
     });
-    return { ...graph, control: await loadGovernedAgentTaskGraph(id) };
+    return { ...graph, control: await deps.loadGovernedAgentTaskGraph(id) };
   });
 
   app.get('/agent-graphs/:id/watch', async (req) => {
     const { id } = req.params as { id: string };
-    const graph = await readAgentTaskGraph(id, { requireVerifier: true });
-    return { ...graph, control: await loadGovernedAgentTaskGraph(id) };
+    const graph = await deps.readAgentTaskGraph(id, { requireVerifier: true });
+    return { ...graph, control: await deps.loadGovernedAgentTaskGraph(id) };
   });
 
   app.post('/agent-graphs/:id/run', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
-    const control = await loadGovernedAgentTaskGraph(id);
+    const control = await deps.loadGovernedAgentTaskGraph(id);
     if (!control) return reply.status(404).send({ error: 'agent task graph not found' });
     if (control.status !== 'active') return reply.status(409).send({ error: `graph is ${control.status}` });
     const runSpecId = normalizeOptionalString(control.metadata.runSpecId);
-    const runSpec = runSpecId ? await loadRunSpec(runSpecId) : null;
+    const runSpec = runSpecId ? await deps.loadRunSpec(runSpecId) : null;
     if (!runSpec) return reply.status(409).send({ error: 'graph run spec is unavailable' });
-    const executionGate = canStartExecution(runSpec.runContract);
+    const executionGate = deps.canStartExecution(runSpec.runContract);
     if (!executionGate.allowed) return reply.status(409).send({ error: executionGate.reason });
     const config = getConfig();
     try {
-      const result = await runAgentTaskGraphSerial({
+      const result = await deps.runAgentTaskGraphSerial({
         graphId: id,
         runSpecId: runSpec.id,
         sessionId: runSpec.sessionId,
@@ -116,8 +147,8 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
       });
       return {
         result,
-        graph: await readAgentTaskGraph(id, { requireVerifier: true }),
-        control: await loadGovernedAgentTaskGraph(id),
+        graph: await deps.readAgentTaskGraph(id, { requireVerifier: true }),
+        control: await deps.loadGovernedAgentTaskGraph(id),
       };
     } catch (error) {
       return reply.status(422).send({ error: errorMessage(error) });
@@ -127,7 +158,7 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
   app.get('/agent-graphs/:id/completion', async (req) => {
     const { id } = req.params as { id: string };
     const query = req.query as { requireVerifier?: string };
-    return await getAgentTaskGraphCompletion(id, {
+    return await deps.getAgentTaskGraphCompletion(id, {
       requireVerifier: normalizeBoolean(query.requireVerifier),
     });
   });
@@ -136,18 +167,18 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
     if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const reason = normalizeOptionalString(asRecord(req.body).reason) ?? 'cancelled_by_operator';
-    const graph = await readAgentTaskGraph(id);
+    const graph = await deps.readAgentTaskGraph(id);
     for (const attempts of Object.values(graph.attemptsByTaskId)) {
       for (const attempt of attempts) {
         if (!attempt.taskRunId || attempt.status !== 'running') continue;
-        cancelScheduledTask(attempt.taskRunId, reason);
-        await requestCancellation(attempt.taskRunId, reason, 'agent_graph_api').catch(() => undefined);
+        deps.cancelScheduledTask(attempt.taskRunId, reason);
+        await deps.requestCancellation(attempt.taskRunId, reason, 'agent_graph_api').catch(() => undefined);
       }
     }
     try {
-      const control = await cancelGovernedAgentTaskGraph(id, getRequestContext(req).userId, reason);
+      const control = await deps.cancelGovernedAgentTaskGraph(id, getRequestContext(req).userId, reason);
       if (!control) return reply.status(404).send({ error: 'agent task graph not found' });
-      return { graph: await readAgentTaskGraph(id, { requireVerifier: true }), control };
+      return { graph: await deps.readAgentTaskGraph(id, { requireVerifier: true }), control };
     } catch (error) {
       return reply.status(409).send({ error: errorMessage(error) });
     }
@@ -157,13 +188,13 @@ export function registerAgentTaskGraphRoutes(app: FastifyInstance): void {
     if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     try {
-      const control = await integrateGovernedAgentTaskGraph(
+      const control = await deps.integrateGovernedAgentTaskGraph(
         id,
         getRequestContext(req).userId,
         normalizeOptionalString(asRecord(req.body).note),
       );
       if (!control) return reply.status(404).send({ error: 'agent task graph not found' });
-      return { graph: await readAgentTaskGraph(id, { requireVerifier: true }), control };
+      return { graph: await deps.readAgentTaskGraph(id, { requireVerifier: true }), control };
     } catch (error) {
       return reply.status(409).send({ error: errorMessage(error) });
     }

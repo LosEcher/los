@@ -20,16 +20,51 @@ import { getConfig } from '@los/infra/config';
 import { resolveGatewayServiceIdentity } from '../../server.js';
 import { normalizeBoundedInteger } from '../server-helpers.js';
 
-export function registerSessionRoutes(app: FastifyInstance): void {
+type SessionRouteDependencies = {
+  claimRunSpec: typeof claimRunSpec;
+  deleteSession: typeof deleteSession;
+  getSessionObservability: typeof getSessionObservability;
+  listSessionEvents: typeof listSessionEvents;
+  listSessions: typeof listSessions;
+  listVerificationRecordsForSession: typeof listVerificationRecordsForSession;
+  loadSession: typeof loadSession;
+  notifySessionEvent: typeof notifySessionEvent;
+  recordOperatorFollowup: typeof recordOperatorFollowup;
+  recordOperatorSteering: typeof recordOperatorSteering;
+  saveSession: typeof saveSession;
+  ensureSessionStore: typeof ensureSessionStore;
+  ensureSessionEventStore: typeof ensureSessionEventStore;
+};
+
+const defaultDependencies: SessionRouteDependencies = {
+  claimRunSpec,
+  deleteSession,
+  getSessionObservability,
+  listSessionEvents,
+  listSessions,
+  listVerificationRecordsForSession,
+  loadSession,
+  notifySessionEvent,
+  recordOperatorFollowup,
+  recordOperatorSteering,
+  saveSession,
+  ensureSessionStore,
+  ensureSessionEventStore,
+};
+
+export function registerSessionRoutes(
+  app: FastifyInstance,
+  deps: SessionRouteDependencies = defaultDependencies,
+): void {
   app.get('/sessions', async () => {
-    await ensureSessionStore();
-    return await listSessions();
+    await deps.ensureSessionStore();
+    return await deps.listSessions();
   });
 
   app.get('/sessions/:id', async (req) => {
     const { id } = req.params as { id: string };
-    await ensureSessionStore();
-    const session = await loadSession(id);
+    await deps.ensureSessionStore();
+    const session = await deps.loadSession(id);
     if (!session) return { error: 'Not found' };
     return session;
   });
@@ -47,8 +82,8 @@ export function registerSessionRoutes(app: FastifyInstance): void {
       return reply.status(400).send({ error: 'type must be steering or followup' });
     }
 
-    await ensureSessionStore();
-    const session = await loadSession(id);
+    await deps.ensureSessionStore();
+    const session = await deps.loadSession(id);
     if (!session) return reply.status(404).send({ error: 'Session not found' });
 
     const context = getRequestContext(req);
@@ -60,7 +95,7 @@ export function registerSessionRoutes(app: FastifyInstance): void {
         body,
         context,
         atomicEffect: true,
-        afterCommit: async result => notifySessionEvent(result.event),
+        afterCommit: async result => deps.notifySessionEvent(result.event),
       }, async transaction => {
         const writeOptions = { client: transaction?.client, notify: false };
         const common = {
@@ -76,13 +111,13 @@ export function registerSessionRoutes(app: FastifyInstance): void {
           reason: body.reason,
         };
         const event = body.type === 'steering'
-          ? await recordOperatorSteering({
+          ? await deps.recordOperatorSteering({
               ...common,
               instruction: body.instruction,
               turnBoundary: body.turnBoundary,
               drainMode: body.drainMode,
             }, writeOptions)
-          : await recordOperatorFollowup({
+          : await deps.recordOperatorFollowup({
               ...common,
               prompt: body.prompt,
               parentSessionId: body.parentSessionId,
@@ -97,8 +132,8 @@ export function registerSessionRoutes(app: FastifyInstance): void {
 
   app.delete('/sessions/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    await ensureSessionStore();
-    const deleted = await deleteSession(id);
+    await deps.ensureSessionStore();
+    const deleted = await deps.deleteSession(id);
     if (!deleted) return reply.status(404).send({ error: 'Not found' });
     return { ok: true };
   });
@@ -114,13 +149,13 @@ export function registerSessionRoutes(app: FastifyInstance): void {
       ? body.metadata as Record<string, unknown>
       : {};
 
-    await ensureSessionStore();
-    const existing = await loadSession(body.id);
+    await deps.ensureSessionStore();
+    const existing = await deps.loadSession(body.id);
     if (existing) {
       return reply.status(409).send({ error: 'session already exists', id: body.id });
     }
 
-    await saveSession({
+    await deps.saveSession({
       id: body.id,
       createdAt: typeof body.createdAt === 'string' ? body.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -145,7 +180,7 @@ export function registerSessionRoutes(app: FastifyInstance): void {
   app.post('/runs/:id/claim', async (req, reply) => {
     const { id } = req.params as { id: string };
     const gatewayId = (req.body as { gatewayId?: string }).gatewayId ?? resolveGatewayServiceIdentity(getConfig()).serviceId;
-    const claimed = await claimRunSpec(id, gatewayId);
+    const claimed = await deps.claimRunSpec(id, gatewayId);
     if (!claimed) return reply.status(404).send({ error: 'Run spec not found' });
     return { ok: true, runSpec: claimed, claimedBy: gatewayId };
   });
@@ -157,20 +192,20 @@ export function registerSessionRoutes(app: FastifyInstance): void {
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 10000 ? rawLimit : 200;
     // Operator UI default: hide internal state-machine noise. Pass includeInternal=1 for full ledger.
     const includeInternal = query.includeInternal === '1' || query.includeInternal === 'true';
-    await ensureSessionEventStore();
-    const events = await listSessionEvents(id, limit, { includeInternal });
+    await deps.ensureSessionEventStore();
+    const events = await deps.listSessionEvents(id, limit, { includeInternal });
     return { sessionId: id, count: events.length, events, includeInternal };
   });
 
   app.get('/sessions/:id/observability', async (req) => {
     const { id } = req.params as { id: string };
-    await ensureSessionEventStore();
-    return await getSessionObservability(id);
+    await deps.ensureSessionEventStore();
+    return await deps.getSessionObservability(id);
   });
 
   app.get('/sessions/:id/verification', async (req) => {
     const { id } = req.params as { id: string };
-    const records = await listVerificationRecordsForSession(id);
+    const records = await deps.listVerificationRecordsForSession(id);
     return { sessionId: id, count: records.length, records };
   });
 }

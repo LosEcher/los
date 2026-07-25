@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 
 import {
   createWorkItem,
+  createWorkItemRevision,
   getWorkItemVerificationCoverage,
   isWorkItemReviewError,
   listInboxEntries,
@@ -14,14 +15,38 @@ import type { TodoPriority, TodoStatus } from '@los/agent/todos';
 
 import { runIdempotentJson } from '../../idempotency.js';
 import { getRequestContext, requireOperator } from '../../request-context.js';
-import { createWorkItemRevision } from '@los/agent/work-items';
 import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
 
-export function registerWorkItemRoutes(app: FastifyInstance): void {
+export type WorkItemRouteDependencies = {
+  createWorkItem: typeof createWorkItem;
+  createWorkItemRevision: typeof createWorkItemRevision;
+  getWorkItemVerificationCoverage: typeof getWorkItemVerificationCoverage;
+  isWorkItemReviewError: typeof isWorkItemReviewError;
+  listInboxEntries: typeof listInboxEntries;
+  listWorkItemProjections: typeof listWorkItemProjections;
+  loadWorkItemProjection: typeof loadWorkItemProjection;
+  reviewWorkItemResult: typeof reviewWorkItemResult;
+};
+
+const defaultDependencies: WorkItemRouteDependencies = {
+  createWorkItem,
+  createWorkItemRevision,
+  getWorkItemVerificationCoverage,
+  isWorkItemReviewError,
+  listInboxEntries,
+  listWorkItemProjections,
+  loadWorkItemProjection,
+  reviewWorkItemResult,
+};
+
+export function registerWorkItemRoutes(
+  app: FastifyInstance,
+  deps: WorkItemRouteDependencies = defaultDependencies,
+): void {
   app.get('/inbox', async (req) => {
     const query = req.query as { projectId?: string; limit?: string };
     const context = getRequestContext(req);
-    const entries = await listInboxEntries({
+    const entries = await deps.listInboxEntries({
       tenantId: context.tenantId,
       projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
       limit: normalizePositiveInteger(query.limit),
@@ -32,7 +57,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
   app.get('/work-items', async (req) => {
     const query = req.query as { projectId?: string; status?: string; limit?: string };
     const context = getRequestContext(req);
-    const results = await listWorkItemProjections({
+    const results = await deps.listWorkItemProjections({
       tenantId: context.tenantId,
       projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
       status: normalizeTodoStatus(query.status),
@@ -44,7 +69,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
   app.get('/work-items/verification-coverage', async (req) => {
     const query = req.query as { projectId?: string; mode?: string };
     const context = getRequestContext(req);
-    return await getWorkItemVerificationCoverage({
+    return await deps.getWorkItemVerificationCoverage({
       tenantId: context.tenantId,
       projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
       mode: normalizeMode(query.mode),
@@ -53,7 +78,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
 
   app.get('/work-items/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const result = await loadWorkItemProjection(id);
+    const result = await deps.loadWorkItemProjection(id);
     if (!result) return reply.status(404).send({ error: 'work item not found' });
     return result;
   });
@@ -68,7 +93,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
       req,
       reply,
       { route: '/work-items', method: 'POST', body, context },
-      async () => await createWorkItem({
+      async () => await deps.createWorkItem({
         tenantId: context.tenantId,
         projectId: validation.projectId,
         userId: context.userId,
@@ -103,7 +128,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
         reply,
         { route: `/work-items/${id}/result-decision`, method: 'POST', body, context },
         async () => {
-          const updated = await reviewWorkItemResult({
+          const updated = await deps.reviewWorkItemResult({
             workItemId: id,
             decision,
             actor: context.userId,
@@ -111,7 +136,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
             closeoutReport: normalizeCloseoutReport(body.closeoutReport),
           });
           if (decision !== 'revision_requested' || !updated.evidence.latestRunSpecId) return updated;
-          const recovery = await createWorkItemRevision({
+          const recovery = await deps.createWorkItemRevision({
             runSpecId: updated.evidence.latestRunSpecId,
             actor: context.userId,
             reason,
@@ -124,7 +149,7 @@ export function registerWorkItemRoutes(app: FastifyInstance): void {
         },
       );
     } catch (error) {
-      if (!isWorkItemReviewError(error)) throw error;
+      if (!deps.isWorkItemReviewError(error)) throw error;
       const status = error.code === 'not_found' ? 404 : 409;
       return reply.status(status).send({ error: error.code, message: error.message });
     }

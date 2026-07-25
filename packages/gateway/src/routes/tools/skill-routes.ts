@@ -19,8 +19,41 @@ import {
   rollbackSkillVersion,
   unpinSkillVersion,
 } from '@los/agent/skill-distribution';
+export type SkillRouteDependencies = {
+  ensureSkillStore: typeof ensureSkillStore;
+  listSkills: typeof listSkills;
+  loadSkill: typeof loadSkill;
+  upsertSkill: typeof upsertSkill;
+  deleteSkill: typeof deleteSkill;
+  listSkillVersions: typeof listSkillVersions;
+  pinSkillVersion: typeof pinSkillVersion;
+  rollbackSkillVersion: typeof rollbackSkillVersion;
+  unpinSkillVersion: typeof unpinSkillVersion;
+  inspectSkillDirectory: typeof inspectSkillDirectory;
+  applyInspectedSkills: typeof applyInspectedSkills;
+  syncSkillsToDir: typeof syncSkillsToDir;
+};
 
-export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?: string) {
+const defaultDependencies: SkillRouteDependencies = {
+  ensureSkillStore,
+  listSkills,
+  loadSkill,
+  upsertSkill,
+  deleteSkill,
+  listSkillVersions,
+  pinSkillVersion,
+  rollbackSkillVersion,
+  unpinSkillVersion,
+  inspectSkillDirectory,
+  applyInspectedSkills,
+  syncSkillsToDir,
+};
+
+export function registerSkillRoutes(
+  app: FastifyInstance,
+  defaultWorkspaceRoot?: string,
+  deps: SkillRouteDependencies = defaultDependencies,
+) {
   app.get('/skills', async (req) => {
     const query = req.query as {
       category?: string;
@@ -29,8 +62,8 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
       skillLayer?: string;
       archived?: string;
     };
-    await ensureSkillStore();
-    return await listSkills({
+    await deps.ensureSkillStore();
+    return await deps.listSkills({
       category: normalizeOptionalString(query.category),
       enabled: query.enabled === 'true' ? true : query.enabled === 'false' ? false : undefined,
       scope: normalizeScope(query.scope),
@@ -42,8 +75,8 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
   app.get('/skills/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
     const query = req.query as { scope?: string };
-    await ensureSkillStore();
-    const skill = await loadSkill(name, normalizeScope(query.scope));
+    await deps.ensureSkillStore();
+    const skill = await deps.loadSkill(name, normalizeScope(query.scope));
     if (!skill) return reply.status(404).send({ error: 'Skill not found' });
     return skill;
   });
@@ -76,8 +109,8 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     metadata.skillLayer = skillLayer;
     if (metadata.archived === undefined) metadata.archived = false;
 
-    await ensureSkillStore();
-    const skill = await upsertSkill({
+    await deps.ensureSkillStore();
+    const skill = await deps.upsertSkill({
       name,
       category: normalizeOptionalString(body.category),
       description: normalizeOptionalString(body.description),
@@ -95,8 +128,8 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
   app.delete('/skills/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
     const query = req.query as { scope?: string };
-    await ensureSkillStore();
-    const ok = await deleteSkill(name, normalizeScope(query.scope));
+    await deps.ensureSkillStore();
+    const ok = await deps.deleteSkill(name, normalizeScope(query.scope));
     if (!ok) return reply.status(404).send({ error: 'Skill not found' });
     return { ok: true };
   });
@@ -106,9 +139,9 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     const query = req.query as { scope?: string };
     const scope = normalizeScope(query.scope);
     if (!scope) return reply.status(400).send({ error: 'scope is required' });
-    const skill = await loadSkill(name, scope);
+    const skill = await deps.loadSkill(name, scope);
     if (!skill) return reply.status(404).send({ error: 'Skill not found' });
-    return { currentVersionHash: skill.versionHash, pinnedVersionHash: skill.pinnedVersionHash, versions: await listSkillVersions(name, scope) };
+    return { currentVersionHash: skill.versionHash, pinnedVersionHash: skill.pinnedVersionHash, versions: await deps.listSkillVersions(name, scope) };
   });
 
   app.post('/skills/:name/pin', async (req, reply) => {
@@ -118,8 +151,8 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     if (!scope) return reply.status(400).send({ error: 'scope is required' });
     try {
       return body.pinned === false
-        ? await unpinSkillVersion(name, scope)
-        : await pinSkillVersion(name, scope, normalizeOptionalString(body.versionHash));
+        ? await deps.pinSkillVersion(name, scope)
+        : await deps.pinSkillVersion(name, scope, normalizeOptionalString(body.versionHash));
     } catch (error) {
       return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
     }
@@ -132,7 +165,7 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     const versionHash = normalizeOptionalString(body.versionHash);
     if (!scope || !versionHash) return reply.status(400).send({ error: 'scope and versionHash are required' });
     try {
-      return await rollbackSkillVersion(name, scope, versionHash);
+      return await deps.rollbackSkillVersion(name, scope, versionHash);
     } catch (error) {
       return reply.status(messageOf(error).includes('not found') ? 404 : 409).send({ error: messageOf(error) });
     }
@@ -146,9 +179,9 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
     const skillLayer = layer ?? defaultSkillLayer(scope);
     const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
-    await ensureSkillStore();
-    const skills = await listSkills({ scope, skillLayer, enabled: true });
-    syncSkillsToDir(scope, skills, workspaceRoot, skillLayer);
+    await deps.ensureSkillStore();
+    const skills = await deps.listSkills({ scope, skillLayer, enabled: true });
+    deps.syncSkillsToDir(scope, skills, workspaceRoot, skillLayer);
     return { ok: true, count: skills.length, scope, skillLayer };
   });
 
@@ -158,8 +191,8 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
     const skillLayer = layer ?? defaultSkillLayer(scope);
     const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
-    await ensureSkillStore();
-    const skills = await inspectSkillDirectory(scope, workspaceRoot, skillLayer);
+    await deps.ensureSkillStore();
+    const skills = await deps.inspectSkillDirectory(scope, workspaceRoot, skillLayer);
     return { ok: true, count: skills.length, scope, skillLayer, skills };
   });
 
@@ -179,7 +212,7 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
       .filter((item): item is { name: string; versionHash: string } => Boolean(item.name && item.versionHash));
     if (expected.length === 0) return reply.status(400).send({ error: 'expected inspected name/version pairs are required' });
     try {
-      const skills = await applyInspectedSkills({ scope, workspaceRoot, layer: skillLayer, expected });
+      const skills = await deps.applyInspectedSkills({ scope, workspaceRoot, layer: skillLayer, expected });
       return reply.status(201).send({ ok: true, count: skills.length, scope, skillLayer, skills });
     } catch (error) {
       return reply.status(409).send({ error: messageOf(error) });
@@ -192,7 +225,7 @@ export function registerSkillRoutes(app: FastifyInstance, defaultWorkspaceRoot?:
     const scope = layer === 'system' ? 'global' : normalizeScope(body.scope) ?? 'global';
     const skillLayer = layer ?? defaultSkillLayer(scope);
     const workspaceRoot = normalizeOptionalString(body.workspaceRoot) ?? defaultWorkspaceRoot;
-    const skills = await inspectSkillDirectory(scope, workspaceRoot, skillLayer);
+    const skills = await deps.inspectSkillDirectory(scope, workspaceRoot, skillLayer);
     return { ok: true, previewOnly: true, count: skills.length, scope, skillLayer, skills };
   });
 }

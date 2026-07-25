@@ -6,6 +6,7 @@ export function runPackageTests(options) {
   const discoveredTestFiles = walk('src').filter(path => path.endsWith('.test.ts')).sort();
   const classifiedTestFiles = [
     ...options.sharedProcessTestFiles,
+    ...(options.dbBackedTestFiles ?? []),
     ...options.isolatedDatabaseTestFiles,
   ].sort();
   const missingClassifications = discoveredTestFiles.filter(path => !classifiedTestFiles.includes(path));
@@ -52,7 +53,20 @@ export function runPackageTests(options) {
     '--test-concurrency', '1',
     ...options.sharedProcessTestFiles,
   ], testEnv);
-  runLane('isolated-database', [
+
+  const dbBackedFiles = options.dbBackedTestFiles ?? [];
+  if (dbBackedFiles.length > 0) {
+    runLane('db-backed', [
+      '--import', 'tsx',
+      '--import', options.testSetupFile,
+      '--test',
+      `--test-global-setup=${options.globalSetupFile}`,
+      '--test-concurrency', '1',
+      ...dbBackedFiles,
+    ], testEnv);
+  }
+
+  runLane('isolated', [
     '--import', 'tsx',
     '--import', options.testSetupFile,
     '--test',

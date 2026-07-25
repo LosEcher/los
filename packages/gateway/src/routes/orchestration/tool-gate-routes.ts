@@ -28,6 +28,20 @@ import { _GLOBAL_PRE_ACTION_SESSION_ID } from '@los/agent/pre-action-evidence';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { getLogger } from '@los/infra/logger';
 
+export type ToolGateRouteDependencies = {
+  createPreActionFailureEvidence: typeof createPreActionFailureEvidence;
+  loadPreActionEvidence: typeof loadPreActionEvidence;
+  preActionGate: typeof preActionGate;
+  appendSessionEvent: typeof appendSessionEvent;
+};
+
+const defaultDependencies: ToolGateRouteDependencies = {
+  createPreActionFailureEvidence,
+  loadPreActionEvidence,
+  preActionGate,
+  appendSessionEvent,
+};
+
 const log = getLogger('tool-gate');
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -117,7 +131,10 @@ const ALWAYS_BLOCK_TOOL_PATTERNS: Array<{
   },
 ];
 
-async function evaluateToolGate(req: ToolGateRequest): Promise<ToolGateResponse> {
+async function evaluateToolGate(
+  req: ToolGateRequest,
+  deps: ToolGateRouteDependencies,
+): Promise<ToolGateResponse> {
   const { callId, toolName, args, sessionId, source = 'external-agent' } = req;
 
   // 1. Check always-block patterns
@@ -143,7 +160,7 @@ async function evaluateToolGate(req: ToolGateRequest): Promise<ToolGateResponse>
   let gateConfig: PreActionGateConfig;
   let evidenceWarning: string | undefined;
   try {
-    gateConfig = await loadPreActionEvidence({
+    gateConfig = await deps.loadPreActionEvidence({
       sessionId,
       tenantId: req.tenantId,
       projectId: req.projectId,
@@ -153,7 +170,7 @@ async function evaluateToolGate(req: ToolGateRequest): Promise<ToolGateResponse>
     log.warn(`${evidenceWarning} ${(err as Error).message}`);
     gateConfig = {};
   }
-  const preCheck: PreActionCheck = preActionGate(toolName, args, gateConfig);
+  const preCheck: PreActionCheck = deps.preActionGate(toolName, args, gateConfig);
 
   return {
     allowed: true,
@@ -165,7 +182,10 @@ async function evaluateToolGate(req: ToolGateRequest): Promise<ToolGateResponse>
 
 // ── Routes ──────────────────────────────────────────────────────────
 
-export function registerToolGateRoutes(app: FastifyInstance): void {
+export function registerToolGateRoutes(
+  app: FastifyInstance,
+  deps: ToolGateRouteDependencies = defaultDependencies,
+): void {
 
   // ── PreToolUse gate ────────────────────────────────────
   app.post('/operator/tool-gate', async (req, reply) => {
@@ -182,13 +202,13 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
       });
     }
 
-    const decision = await evaluateToolGate(body);
+    const decision = await evaluateToolGate(body, deps);
 
     // Record decision as session event for audit
     let auditEventId: number | undefined;
     if (body.sessionId) {
       try {
-        const event = await appendSessionEvent({
+        const event = await deps.appendSessionEvent({
           sessionId: body.sessionId,
           type: decision.allowed ? 'tool.gate.allow' : 'tool.gate.deny',
           source: body.source ?? 'tool-gate',
@@ -242,9 +262,9 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
     }
 
     const failureEvidence = !body.ok && body.error
-      ? createPreActionFailureEvidence(body.toolName, body.args, body.error, body.callId)
+      ? deps.createPreActionFailureEvidence(body.toolName, body.args, body.error, body.callId)
       : undefined;
-    await appendSessionEvent({
+    await deps.appendSessionEvent({
       sessionId: body.sessionId,
       tenantId: body.tenantId,
       projectId: body.projectId,
@@ -258,7 +278,7 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
         ok: body.ok,
       },
     });
-    const evidence = await loadPreActionEvidence({
+    const evidence = await deps.loadPreActionEvidence({
       sessionId: body.sessionId,
       tenantId: body.tenantId,
       projectId: body.projectId,
@@ -278,7 +298,7 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
       tenantId?: string;
       projectId?: string;
     };
-    const evidence = await loadPreActionEvidence(query);
+    const evidence = await deps.loadPreActionEvidence(query);
     return {
       fragileFilesCount: evidence.fragileFiles?.size ?? 0,
       fragileFiles: [...(evidence.fragileFiles ?? [])].slice(0, 100),
@@ -301,14 +321,14 @@ export function registerToolGateRoutes(app: FastifyInstance): void {
       return reply.status(400).send({ error: 'action and paths array are required' });
     }
     for (const path of body.paths) {
-      await appendSessionEvent({
+      await deps.appendSessionEvent({
         sessionId: _GLOBAL_PRE_ACTION_SESSION_ID,
         type: `tool.pre_action.fragile_file.${body.action === 'add' ? 'added' : 'removed'}`,
         source: body.source ?? 'operator',
         payload: { path },
       });
     }
-    const evidence = await loadPreActionEvidence({});
+    const evidence = await deps.loadPreActionEvidence({});
     return reply.send({ fragileFiles: [...(evidence.fragileFiles ?? [])] });
   });
 }

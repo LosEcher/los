@@ -18,6 +18,20 @@ import {
 } from '@los/agent';
 import { requireOperator } from '../../request-context.js';
 
+type GovernanceRouteDependencies = {
+  listGovernanceJobs: typeof listGovernanceJobs;
+  seedGovernanceJobs: typeof seedGovernanceJobs;
+  runGovernanceSweep: typeof runGovernanceSweep;
+  ensureGovernanceJobStore: typeof ensureGovernanceJobStore;
+};
+
+const defaultDependencies: GovernanceRouteDependencies = {
+  listGovernanceJobs,
+  seedGovernanceJobs,
+  runGovernanceSweep,
+  ensureGovernanceJobStore,
+};
+
 const KNOWN_JOB_TYPES = [
   'consistency_audit', 'hotspot', 'architecture_drift',
   'memory_integrity', 'memory_retention', 'reflection',
@@ -65,11 +79,14 @@ function toSummary(job: any): GovernanceJobSummary {
   };
 }
 
-export function registerGovernanceRoutes(app: FastifyInstance): void {
+export function registerGovernanceRoutes(
+  app: FastifyInstance,
+  deps: GovernanceRouteDependencies = defaultDependencies,
+): void {
   // ── GET /governance/jobs ────────────────────────────
   app.get('/governance/jobs', async (_req, reply) => {
     try {
-      const jobs = await listGovernanceJobs({ limit: 50 });
+      const jobs = await deps.listGovernanceJobs({ limit: 50 });
       return reply.send({
         count: jobs.length,
         jobs: jobs.map(toSummary),
@@ -90,7 +107,7 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
     }
 
     try {
-      const jobs = await listGovernanceJobs({ jobType: jobType as any, limit: 5 });
+      const jobs = await deps.listGovernanceJobs({ jobType: jobType as any, limit: 5 });
       if (jobs.length === 0) {
         return reply.status(404).send({ error: `No governance job found for type: ${jobType}` });
       }
@@ -124,8 +141,8 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const jobType = typeof body.jobType === 'string' ? body.jobType : undefined;
       const jobTypes = jobType ? [jobType] : undefined;
-      await ensureGovernanceJobStore();
-      await seedGovernanceJobs();
+      await deps.ensureGovernanceJobStore();
+      await deps.seedGovernanceJobs();
       // When force=true, set lastRunAt far in the past so cadence thresholds pass.
       // This avoids the race with the background wake loop's claimNextDueJob.
       if (force && jobType) {
@@ -136,7 +153,7 @@ export function registerGovernanceRoutes(app: FastifyInstance): void {
           await updateGovernanceJob(job.id, { lastRunAt: past }).catch(() => undefined);
         }
       }
-      const result = await runGovernanceSweep({ dryRun, jobTypes: jobTypes as any });
+      const result = await deps.runGovernanceSweep({ dryRun, jobTypes: jobTypes as any });
       return reply.send({
         dryRun: result.dryRun,
         jobsRun: result.jobsRun,
