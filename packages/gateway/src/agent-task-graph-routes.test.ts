@@ -101,6 +101,14 @@ test('operator creates, watches, cancels, and integrates a governed graph after 
     });
     await approveRunSpecPhase(runSpecId, { actor: 'local-user' });
 
+    const spoofedOwner = await app.inject({
+      method: 'POST',
+      url: '/agent-graphs',
+      payload: { ...graphPayload(`spoofed-${graphId}`, runSpecId), integrationOwner: 'attacker' },
+    });
+    assert.equal(spoofedOwner.statusCode, 422);
+    assert.match(spoofedOwner.json().error, /derived from the operator principal/);
+
     const createResponse = await app.inject({
       method: 'POST',
       url: '/agent-graphs',
@@ -112,7 +120,7 @@ test('operator creates, watches, cancels, and integrates a governed graph after 
     const watchResponse = await app.inject({ method: 'GET', url: `/agent-graphs/${graphId}/watch` });
     assert.equal(watchResponse.statusCode, 200);
     assert.equal(watchResponse.json().tasks.length, 3);
-    assert.equal(watchResponse.json().control.integrationOwner, 'local-user');
+    assert.equal(watchResponse.json().control.integrationOwner, 'operator:local');
 
     const blockedIntegration = await app.inject({
       method: 'POST',
@@ -188,7 +196,6 @@ function graphPayload(graphId: string, runSpecId: string) {
   return {
     graphId,
     runSpecId,
-    integrationOwner: 'local-user',
     maxParallelTasks: 2,
     workers: [
       { id: `${graphId}-worker-a`, title: 'Implement agent surface', editableSurfaces: ['packages/agent'] },
