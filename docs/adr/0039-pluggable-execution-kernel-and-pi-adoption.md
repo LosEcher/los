@@ -33,9 +33,15 @@
   whole-response instruction, and add bounded envelope shape/length evidence
   without raw text. The new report passes deterministic evidence 11/11 and
   live evidence 6/6, for 17/17 passing observations and
-  `ready_for_k4_policy_review`. Local, HTTP executor, and SSH executor paths
-  still select only the LOS adapter through the fail-closed production
-  registry. Pi remains comparison-only and is not selectable.
+  `ready_for_k4_policy_review`. K4 now persists an exact candidate selection in
+  the candidate RunContract before approval or execution. The default registry,
+  HTTP executor, and SSH executor still expose only LOS. The local scheduler may
+  resolve Pi only when the persisted execution experiment points to the same
+  candidate run spec, the run is audit/read-only, the exact candidate identity
+  matches, the candidate plan is approved when required, and a separate
+  operator canary-authorization event exists. Rollback selects the exact LOS
+  adapter on the same run spec, revokes canary authorization, and appends an
+  operator-attributed history entry. No provider-backed K4 canary has run.
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
   selection only
 
@@ -141,12 +147,32 @@ arguments, or checkpoint contents. The existing loop still builds its governed
 tool catalog, but execution now crosses `LosToolBroker`, which owns capability
 and phase decisions, pre-action checks, state callbacks, canonical events,
 registry invocation, retry evidence, and persisted retrieval evidence.
-`execution-kernel-registry.ts` selects the adapter for both scheduler and
-executor entrypoints; only `los` is registered, it is the explicit default,
-and unknown kinds fail before task-run creation. HTTP and SSH requests carry
-`executionKernelKind`, and both NDJSON readers forward canonical
+`execution-kernel-registry.ts` keeps only `los` in the default registry, makes
+it the explicit default, and rejects unknown kinds before task-run creation.
+K4 adds a separate per-run resolver for the exact Pi candidate. It requires a
+persisted RunContract selection plus matching execution-experiment and operator
+event evidence; it does not add Pi to the default list. HTTP and SSH requests
+continue to reject Pi. Both NDJSON readers forward canonical
 `kernel_event` chunks to the scheduler-owned durable projection. These
 properties complete K1; they do not constitute Pi adoption.
+
+The K4 control path is split into three operator actions:
+
+1. `POST /execution-experiments/:id/select-candidate` creates the candidate run
+   spec while the experiment is still `draft`; it copies the persisted source
+   plan, records lineage, forces `mode=audit` and `toolMode=read-only`, and sets
+   canary authorization to `not_granted`.
+2. `POST /execution-experiments/:id/authorize-canary` requires an approved
+   experiment, an approved candidate plan, and an exact candidate run-spec
+   confirmation. This action is not implied by experiment or plan approval.
+3. `POST /execution-experiments/:id/rollback` selects `LosKernelAdapter`,
+   records actor/reason/time in the RunContract and session ledger, and revokes
+   any prior canary authorization.
+
+`kernel-event-projection.ts` now rejects sequence gaps and kernel-identity
+changes before writing canonical session evidence. This is the K4 transcript-
+drift stop condition; it applies to LOS and Pi rather than relying on a Pi-only
+post-processing check.
 
 Every attempt persists `kernel_kind`, exact `kernel_version`, and
 `kernel_protocol_version`. An external kernel version identifies both the
