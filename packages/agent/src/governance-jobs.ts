@@ -38,5 +38,9 @@ export {
   seedGovernanceJobs,
 } from './governance-jobs-crud.js';
 
-export { runGovernanceSweep } from './governance-sweeper.js';
+export {
+  runGovernanceSweep,
+  runGovernanceSweepWithDefaultDb,
+  type RunGovernanceSweepOptions,
+} from './governance-sweeper.js';
 export { runGovernanceSweepLoop, setupGovernanceWake } from './governance-wake.js';

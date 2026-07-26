@@ -87,6 +87,7 @@ const isolatedDatabaseTestFiles = [
   'src/feed-analysis-integration.test.ts',
   'src/governance-drift-sweeper.test.ts',
   'src/governance-jobs.test.ts',
+  'src/governance-sweep-todos.test.ts',
   'src/governance-sweeper.test.ts',
   'src/governance-wake.test.ts',
   'src/kernel-event-projection.test.ts',
