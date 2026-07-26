@@ -1,9 +1,10 @@
 # lsclaw To LOS: Pi Kernel Decision Record And Migration Plan
 
 - Date: 2026-07-22
-- Status: active plan; K0-K2 complete; K3 v3 stopped at 5/6 live with one
-  envelope failure; v4 corpus `1.1.2` passes 11/11 deterministic and 6/6 live
-  evidence; ready for K4 policy review
+- Status: active plan; K0-K3 complete for exact candidate `0.81.1+los.3`; K4
+  candidate persistence, explicit local per-run selection, separate canary
+  consent, transcript-drift stop, and LOS rollback are implemented. No
+  provider-backed K4 canary has run and authorization remains not granted.
 - Owner: `packages/agent` execution kernel and LOS governance runtime
 - Decision: `docs/adr/0039-pluggable-execution-kernel-and-pi-adoption.md`
 - Protocol: `contracts/execution-kernel.yaml`
@@ -338,6 +339,36 @@ decision:
    projection, zero project writes, and rollback behavior.
 6. Obtain separate operator consent before the first provider-backed K4 canary.
 
+### K4 Control Path Implementation (2026-07-26)
+
+Observed from contracts, source, and focused tests:
+
+1. `contracts/run-spec.yaml` version `0.6.0` persists exact requested, selected,
+   rollback, authorization, and history records under
+   `runContract.executionKernel`. `contracts/execution-experiment.yaml` version
+   `0.2.0` separates candidate selection, canary authorization, rollback, and
+   execution routes.
+2. Candidate selection is operator-only and only valid while the experiment is
+   `draft`. It rejects a missing source plan, any candidate other than
+   `pi@0.81.1+los.3` protocol `0.1.0`, non-audit mode, non-read-only tool mode,
+   and remote executor use.
+3. The default registry continues to list only `los`. The local scheduler's K4
+   resolver also checks the persisted experiment-to-candidate link and the
+   operator authorization or rollback event before task-run creation. A JSON
+   field alone is not authorization evidence.
+4. Canonical event projection rejects sequence gaps and kernel identity changes
+   before persistence. Rollback selects `los@0.1.0` protocol `0.1.0`, revokes
+   canary authorization, and preserves the selection history on the same run
+   spec.
+5. Focused tests use deterministic adapters, route stubs, and PostgreSQL
+   persistence. They create no provider request and assert that selection,
+   authorization, and rollback create no task attempt by themselves.
+
+Judgment: the K4 implementation prerequisite is present, but K4 execution is
+not accepted. The first provider-backed canary remains a separate operator
+decision and must not be inferred from green tests, an approved experiment, or
+an approved candidate plan.
+
 The structured review todo is
 `todo-los-pi-k4-policy-review-20260726`. The separately authorized execution
 work is `todo-los-pi-k4-readonly-canary`.
@@ -354,7 +385,8 @@ LOS todos. Their status here must not be presented as database todo state.
 | `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
 | `kernel-k3-shadow` | complete for exact v4 identity; K4 review remains separate | v3 remains immutable at 11/11 deterministic, 5/6 live, 16/17 observed with one `prefixed_fenced_json` failure; v4 is 11/11 deterministic, 6/6 live, 17/17 observed, zero failures, and `ready_for_k4_policy_review` |
 | `todo-los-pi-k4-policy-review-20260726` | complete in DB | K3/K4 evidence, production-registry boundary, rollback requirements, and consent boundary reviewed without provider execution |
-| `todo-los-pi-k4-readonly-canary` | backlog in DB; operator consent not granted | implement explicit planning/inspection selection, real candidate run spec, persisted evidence, and per-run rollback before any canary |
+| `todo-los-pi-k4-readonly-selection` | in progress in DB; implementation checks complete, delivery evidence pending | exact candidate run spec, explicit local per-run selection, separate consent gate, transcript-drift stop, and LOS rollback |
+| `todo-los-pi-k4-readonly-canary` | backlog in DB; operator consent not granted | create and approve a real candidate through the K4 control path, then obtain separate consent before the first provider request |
 | `kernel-k5-k6-canary` | pending; not DB todos | write and graph-worker canaries remain outside the K4 review |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |

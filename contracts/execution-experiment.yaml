@@ -1,5 +1,5 @@
 contract: los.execution-experiment
-version: 0.1.0
+version: 0.2.0
 status: implemented
 owner: packages/agent
 description: >
@@ -60,6 +60,19 @@ routes:
     auth: operator
     scope: request tenant and project
   - method: POST
+    path: /execution-experiments/{id}/select-candidate
+    auth: operator
+    scope: request tenant and project
+  - method: POST
+    path: /execution-experiments/{id}/authorize-canary
+    auth: operator
+    scope: request tenant and project
+    confirmation: candidate run-spec id
+  - method: POST
+    path: /execution-experiments/{id}/rollback
+    auth: operator
+    scope: request tenant and project
+  - method: POST
     path: /execution-experiments/{id}/execute
     auth: operator
     scope: request tenant and project
@@ -71,11 +84,37 @@ operatorControl:
   authentication:
     header: x-los-operator-token
     behaviorWhenAuthDisabled: local_operator
-  requiredFor: [approve, execute]
+  requiredFor: [approve, select-candidate, authorize-canary, rollback, execute]
   actorSource: request context user id
+kernelCandidate:
+  configDiffPath: executionKernel
+  exactCandidate:
+    kind: pi
+    version: 0.81.1+los.3
+    protocolVersion: 0.1.0
+  dispositions: [planning, inspection]
+  requiredToolMode: read-only
+  requiredRunContractMode: audit
+  defaultKernelUnchanged: los
+  remoteExecutorAllowed: false
+  canaryAuthorization:
+    initial: not_granted
+    explicitOperatorActionRequired: true
+    executeRequiresGranted: true
+  rollback:
+    target:
+      kind: los
+      version: 0.1.0
+      protocolVersion: 0.1.0
+    revokesCanaryAuthorization: true
 invariants:
   - Draft creation never schedules or executes a candidate.
   - Source session, run, cursor, evidence hash, and fingerprints are immutable provenance references.
+  - A K4 candidate run spec is persisted before experiment approval or execution and keeps the source plan lineage.
+  - Pi selection is valid only for the exact K4 candidate, an audit RunContract, and read-only planning or inspection.
+  - Selecting Pi never changes the default LOS registry decision and never enables a remote executor.
+  - Experiment approval and candidate plan approval do not grant provider-canary consent.
+  - Rollback selects the exact LOS adapter on the same run spec, records actor and reason, and revokes canary authorization.
   - Candidate run plans are persisted in planning and approved through approveRunSpecPhase before execution.
   - Candidate success remains gated by canMarkSucceeded and persisted verification records.
   - An idempotent create retry replays the original response without creating another experiment.

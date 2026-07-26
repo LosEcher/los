@@ -70,7 +70,7 @@ test('kernel event projector appends ordered usage evidence through LOS storage 
   });
 
   await project({
-    sequence: 7,
+    sequence: 0,
     type: 'usage.recorded',
     occurredAt: '2026-07-22T00:00:01.000Z',
     kernel,
@@ -83,7 +83,34 @@ test('kernel event projector appends ordered usage evidence through LOS storage 
     completionTokens: 4,
     totalTokens: 14,
   });
-  assert.equal(writes[0].payload?.sequence, 7);
+  assert.equal(writes[0].payload?.sequence, 0);
+});
+
+test('kernel event projector stops on sequence or identity drift before persistence', async () => {
+  const writes: SessionEventWrite[] = [];
+  const project = _createKernelEventProjector(context, async write => { writes.push(write); });
+  await project({
+    sequence: 0,
+    type: 'kernel.started',
+    occurredAt: '2026-07-22T00:00:00.000Z',
+    kernel,
+    payload: {},
+  });
+  await assert.rejects(() => project({
+    sequence: 2,
+    type: 'turn.started',
+    occurredAt: '2026-07-22T00:00:01.000Z',
+    kernel,
+    payload: {},
+  }), /Canonical kernel transcript drift: expected sequence 1/);
+  await assert.rejects(() => project({
+    sequence: 1,
+    type: 'turn.started',
+    occurredAt: '2026-07-22T00:00:01.000Z',
+    kernel: { ...kernel, kind: 'pi' },
+    payload: {},
+  }), /Canonical kernel transcript drift: identity changed/);
+  assert.equal(writes.length, 1);
 });
 
 test('kernel event projection summarizes tool and checkpoint payloads without raw values', () => {

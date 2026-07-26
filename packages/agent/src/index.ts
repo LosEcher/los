@@ -30,6 +30,8 @@ export { recordOperatorFollowup, recordOperatorSteering, recordSessionBranchCrea
 export { applyToolCallRecoveryTransitionForRunSpec, evaluateToolCallRecovery, readToolCallRecoveryForRunSpec, readToolCallRecoveryForTaskRun, type ToolCallRecoveryDecision, type ToolCallRecoveryIntent, type ToolCallRecoveryOptions, type ToolCallRecoveryRecommendation, type ToolCallRecoveryTransitionAction, type ToolCallRecoveryTransitionResult } from './tool-call-recovery.js';
 export { ExecutionTransitionError, assertExecutionTransition, canTransitionExecutionState, evaluateExecutionTransition, executionTransitionEventType, isTerminalExecutionState, type ExecutionEntityType, type ExecutionState, type ExecutionStateByEntity, type ExecutionTransitionInput, type ExecutionTransitionResult } from './execution-transitions.js';
 export { ensureRunSpecStore, claimRunSpec, createRunSpec, approveRunSpecPhase, loadRunSpec, reviseRunSpecPlan, listRunSpecs, listRunSpecsForSession, type RunSpecRecord, type RunSpecStatus, type CreateRunSpecInput } from './run-specs.js';
+export { assertPersistedRunSpecKernelSelection, authorizeRunSpecKernelCanary, rollbackRunSpecExecutionKernel } from './run-spec-kernel-selection.js';
+export { createK4ExecutionKernelSelection, executionKernelIdentitiesEqual, getLosKernelSelectionIdentity, getPiK4KernelSelectionIdentity, normalizeExecutionKernelSelection, validateK4ExecutionKernelSelection, type ExecutionKernelCandidateDisposition, type ExecutionKernelSelection } from './execution-kernel-selection.js';
 export { persistRunSpecPlan } from './run-spec-plans.js';
 export {
   buildPlanningPrompt,
