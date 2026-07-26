@@ -7,6 +7,12 @@ export function useChatProviders() {
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
 
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => getJson<{ agent?: { defaultProvider?: string; defaultModel?: string } }>('/settings'),
+    staleTime: 60_000,
+  });
+
   const onboarding = useQuery({
     queryKey: ['onboarding'],
     queryFn: () => getJson<ProviderDiscovery>('/onboarding'),
@@ -40,22 +46,28 @@ export function useChatProviders() {
     return [...ids];
   }, [selectedRoute]);
 
-  // Auto-select first provider
+  // Auto-select the server default provider when it is available.
   useEffect(() => {
     if (provider || providerOptions.length === 0) return;
     if (!modelRoutes.data && !modelRoutes.isError) return;
-    setProvider(providerOptions[0]!.id);
-  }, [modelRoutes.data, modelRoutes.isError, provider, providerOptions]);
+    const defaultProvider = settings.data?.agent?.defaultProvider?.trim();
+    setProvider(providerOptions.find(option => option.id === defaultProvider)?.id ?? providerOptions[0]!.id);
+  }, [modelRoutes.data, modelRoutes.isError, provider, providerOptions, settings.data]);
 
   // Auto-select fallback model
   useEffect(() => {
     if (!selectedRoute) return;
-    const fallback = selectedRoute.model ?? modelOptions[0] ?? '';
+    const serverDefaultModel = selectedRoute.provider === settings.data?.agent?.defaultProvider
+      ? settings.data?.agent?.defaultModel?.trim()
+      : undefined;
+    const fallback = serverDefaultModel && modelOptions.includes(serverDefaultModel)
+      ? serverDefaultModel
+      : selectedRoute.model ?? modelOptions[0] ?? '';
     if (!fallback) return;
     if (!model || (modelOptions.length > 0 && !modelOptions.includes(model))) {
       setModel(fallback);
     }
-  }, [model, modelOptions, selectedRoute]);
+  }, [model, modelOptions, selectedRoute, settings.data]);
 
   return {
     provider, setProvider,

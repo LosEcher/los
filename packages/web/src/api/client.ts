@@ -128,8 +128,7 @@ async function readSSEStream(body: ReadableStream<Uint8Array>, onEvent: (event: 
 
 function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const pid = getCurrentProjectId();
-  if (pid) headers['x-project-id'] = pid;
+  headers['x-project-id'] = getCurrentProjectId() ?? 'los';
   const token = getAuthToken();
   if (token) headers['x-los-auth-token'] = token;
   const operatorToken = getOperatorToken();
