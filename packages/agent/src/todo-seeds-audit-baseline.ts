@@ -379,18 +379,28 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
   {
     id: 'todo-los-p1-otel-docs',
     title: 'P1-10 OTel bridge 配置文档与健康验证',
-    description: 'bridge 已提供 /health 和 /runtimes/bridge/status；剩余工作是文档化端口、OTLP 协议、collector 边界和操作检查。',
+    description: '文档化 OTel bridge 端口、OTLP/HTTP 协议、health/status、external collector 边界与故障检查；bridge 实现本身此前已存在。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-otel-docs',
     dependsOnIds: [],
     metadata: {
-      files: ['packages/agent/src/runtime-adapter/otel-bridge.ts', 'packages/gateway/src/routes/orchestration/runtime-adapter-routes.ts', '.env.example'],
-      partialEvidence: ['OTel bridge /health exists', 'GET /runtimes/bridge/status exists', 'no OTEL_* collector endpoint is configured in the current environment'],
+      files: [
+        'packages/agent/src/runtime-adapter/otel-bridge.ts',
+        'packages/gateway/src/routes/orchestration/runtime-adapter-routes.ts',
+        '.env.example',
+        'docs/operations/otel-bridge.md',
+      ],
       priorityReason: 'P1: runtime behavior exists, but operators cannot distinguish the local bridge from an external collector configuration.',
+      evidence: [
+        'docs/operations/otel-bridge.md covers port 4318, OTLP/HTTP JSON, /health, /runtimes/bridge/status, collector boundary, and failure checks',
+        '.env.example OTel bridge section documents non-auto-start, loopback default, and external-collector boundary',
+        'live 2026-07-27: GET /runtimes/bridge/status → running=true; GET http://127.0.0.1:4318/health → status=ok service=los-otel-bridge',
+      ],
+      statusUpdatedAt: '2026-07-27',
     },
   },
 

@@ -128,7 +128,7 @@ larger or more valuable than every later item.
 
 | Order | Todo | State | Priority reason | Completion evidence |
 | --- | --- | --- | --- | --- |
-| 6 | `todo-los-p1-otel-docs` | `ready` | Health endpoints exist, but operator configuration and external-collector boundaries are undocumented | `.env.example` and operations doc cover port, protocol, health, status, collector boundary, and failure checks |
+| 6 | `todo-los-p1-otel-docs` | `done` | Health endpoints exist, but operator configuration and external-collector boundaries were undocumented | `.env.example` + `docs/operations/otel-bridge.md`; live health/status verified 2026-07-27 |
 | 7 | `todo-los-p1-perf-metrics` | `backlog` | PostgreSQL telemetry and diagnostics are not a durable metrics export or trend surface | Metrics endpoint, documented labels, task/tool/provider/cache measures, and trend verification |
 | 8 | `todo-los-p1-cbm-ab-inject` | `backlog` | Current in-memory alternating assignment is neither stable nor evidence-linked | Persisted deterministic cohort assignment, eligibility gate, and outcome comparison from execution projection |
 
@@ -150,9 +150,9 @@ containers as missing feature work.
 
 Next operator-contract candidates (not unattended dispatch):
 
-1. `todo-los-p1-otel-docs` (`ready`) — docs only; low risk.
-2. `todo-los-execution-pairwise-sample-gate` (`ready`) — Execution Lab main line.
-3. Async: continue `todo-los-ci-resource-baseline` to 10/10 unique-head samples.
+1. `todo-los-execution-pairwise-sample-gate` (`ready`) — Execution Lab main line.
+2. Async: continue `todo-los-ci-resource-baseline` to 10/10 unique-head samples.
+3. `todo-los-p1-otel-docs` is `done` (2026-07-27).
 
 Do **not** start: Pi K4 canary without consent; turbo/cache policy changes before
 baseline maturity; optimization analysis before sample gate; full-repo file-size
@@ -234,9 +234,9 @@ Planning truth owners for this queue:
 
 #### Live P0: containers vs dispatchable work [E]
 
-Post-decision active counts: P0 = 4; P1 = 12; P2 = 73; P3 = 3
+Post-otel active counts: P0 = 4; P1 = 11; P2 = 73; P3 = 3
 (`backlog+ready+in_progress+blocked`, non-archived). P1 dropped after
-roadmap-sync completion and optimization demotion to P2.
+roadmap-sync completion, optimization demotion to P2, and otel-docs done.
 
 | Todo | Kind | Status | Dispatchable? | Note |
 | --- | --- | --- | --- | --- |
@@ -282,14 +282,14 @@ ci-correctness (done) → resource-baseline (in_progress, 5/10)
                                           ↓
                               turbo-cache (backlog, P1; blocked until 10/10)
 
-otel-docs (ready, P1)  ── parallel with sample-gate and baseline
+otel-docs (done, P1)  ── Wave 1 complete 2026-07-27
 pi-k4-canary (backlog, P0) ── consent-gated side track only
 ```
 
 #### Recommended execution order after Wave 0 [I]
 
 1. **Wave 1 (ops evidence, parallel)**  
-   - `todo-los-p1-otel-docs` (`ready`) — document bridge port/protocol/health/status and external collector boundary.  
+   - `todo-los-p1-otel-docs` — **done** 2026-07-27 (`docs/operations/otel-bridge.md` + `.env.example`).  
    - `todo-los-ci-resource-baseline` (`in_progress`, 5/10 unique-head) — async only; no P95 or cache/runner tuning before 10 samples.  
    - `todo-los-p1-turbo-cache` stays blocked on baseline.
 

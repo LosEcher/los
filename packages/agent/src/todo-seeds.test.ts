@@ -62,7 +62,6 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-execution-lab', ['P0', 'in_progress']],
   ['todo-los-daily-agent-product', ['P0', 'in_progress']],
   ['todo-los-execution-pairwise-sample-gate', ['P1', 'ready']],
-  ['todo-los-p1-otel-docs', ['P1', 'ready']],
   ['todo-los-p1-perf-metrics', ['P1', 'backlog']],
   ['todo-los-p1-cbm-ab-inject', ['P1', 'backlog']],
   ['todo-los-p1-context-reconstruction', ['P1', 'backlog']],

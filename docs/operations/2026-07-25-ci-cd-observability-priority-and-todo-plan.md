@@ -102,7 +102,7 @@
 | 12 | `todo-los-p1-turbo-cache` | `backlog` | P1 | 6、8 | 等待资源基线；验证 pnpm cache、Turbo key、Playwright 安装和 coverage 拆分 |
 | 13 | `todo-los-daily-agent-product-status-reconciliation` | `done` | P1 | 无 | 父计划保持 `in_progress`，`p0AuthorizedScopeComplete=true` |
 | 14 | `todo-los-roadmap-outbox-todo-sync` | `done` | P1 | typed planning + Web-first acceptance + K4 selection | 2026-07-27 Wave 0 对齐完成 |
-| 15 | `todo-los-p1-otel-docs` | `ready` | P1 | 无 | Wave 1 低风险文档；可与 CI 采样并行 |
+| 15 | `todo-los-p1-otel-docs` | `done` | P1 | 无 | 2026-07-27：`docs/operations/otel-bridge.md` + `.env.example`；live health/status 已验证 |
 | 16 | `todo-los-cd-release-contract-discovery` | `backlog` | P2 | 7 | 先调研发布合同，不自动部署 |
 | 17 | `todo-los-ci-policy-alignment-research` | `backlog` | P2 | 6、8 | Node、audit、E2E required、cgroup、schema 和 store 策略 |
 

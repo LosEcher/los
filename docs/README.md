@@ -96,6 +96,9 @@ Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
 
+Use `operations/otel-bridge.md` for the local OTLP/HTTP bridge port, protocol,
+health/status endpoints, external collector boundary, and failure checks.
+
 ### Governance
 
 Use `docs/governance/` for repeated analysis practices. Start with
