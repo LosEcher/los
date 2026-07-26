@@ -57,3 +57,43 @@ test('run-spec runtime validator rejects invalid request fields', () => {
     assert.ok(result.errors.some(error => error.instancePath === '/timeoutMs'));
   }
 });
+
+test('run-spec runtime validator enforces explicit kernel selection evidence shape', () => {
+  const identity = { kind: 'pi', version: '0.81.1+los.3', protocolVersion: '0.1.0' };
+  const rollback = { kind: 'los', version: '0.1.0', protocolVersion: '0.1.0' };
+  const valid = validateRunSpecRequest({
+    prompt: 'inspect with the K4 candidate',
+    toolMode: 'read-only',
+    runContract: {
+      mode: 'audit',
+      executionKernel: {
+        selectionMode: 'explicit',
+        experimentId: 'experiment-k4',
+        disposition: 'inspection',
+        requested: identity,
+        selected: identity,
+        rollback: { target: rollback, status: 'available' },
+        canaryAuthorization: { status: 'not_granted' },
+        history: [{ action: 'selected', from: rollback, to: identity, actor: 'operator:test', at: '2026-07-26T00:00:00.000Z' }],
+      },
+    },
+  });
+  assert.equal(valid.success, true);
+
+  const invalid = validateRunSpecRequest({
+    prompt: 'inspect with an incomplete candidate',
+    runContract: {
+      executionKernel: {
+        selectionMode: 'explicit',
+        experimentId: 'experiment-k4',
+        disposition: 'inspection',
+        requested: identity,
+        selected: identity,
+        rollback: { target: rollback, status: 'available' },
+        canaryAuthorization: { status: 'not_granted' },
+        history: [],
+      },
+    },
+  });
+  assert.equal(invalid.success, false);
+});

@@ -1,5 +1,5 @@
 contract: los.execution-kernel
-version: 0.1.0
+version: 0.2.0
 status: draft
 owner: packages/agent
 description: >
@@ -76,6 +76,36 @@ interface:
       - reject collection when the current corpus already has failing live evidence
       - persist and re-read evidence after every observation
       - stop after a non-completed observation or any failing live requirement
+  canary:
+    description: >
+      K4 local read-only candidate path. The default registry remains LOS. Pi
+      is resolved only from an exact persisted per-run selection with matching
+      execution-experiment and operator-event evidence.
+    candidate:
+      kind: pi
+      version: 0.81.1+los.3
+      protocolVersion: 0.1.0
+    required:
+      - candidate run spec persisted before experiment approval or execution
+      - source plan lineage and AP2 plan persistence
+      - runContract.mode audit
+      - planning or inspection disposition
+      - read-only tool mode and readonly sandbox
+      - local scheduler execution with remote executor disabled
+      - separate operator canary authorization after experiment and plan approval
+      - canonical transcript sequence and kernel identity continuity
+      - exact LOS rollback target with actor, reason, time, and history
+    forbidden:
+      - implicit candidate creation from the execute route
+      - default registry promotion
+      - provider execution from selection, experiment approval, or plan approval alone
+      - project-write, unrestricted, child-agent, or remote-executor Pi execution
+    rollback:
+      target:
+        kind: los
+        version: 0.1.0
+        protocolVersion: 0.1.0
+      revokesCanaryAuthorization: true
 schemas:
   KernelIdentity:
     required: [kind, version, protocolVersion]

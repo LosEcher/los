@@ -1,6 +1,6 @@
 import type { PlanRevisionSnapshot, PlanStep, VerificationRequirement } from './run-plan-types.js';
+import { normalizeExecutionKernelSelection, type ExecutionKernelSelection } from './execution-kernel-selection.js';
 export type { PlanRevisionSnapshot, PlanStep, VerificationRequirement } from './run-plan-types.js';
-
 export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress' | 'architect-editor';
 
 /**
@@ -138,6 +138,7 @@ export interface RunContractMetadata {
   selfCheckEnabled?: boolean;
   /** Result of the last post-execution goal self-check (persisted for audit). */
   selfCheckResult?: Record<string, unknown>;
+  executionKernel?: ExecutionKernelSelection;
 }
 
 /**
@@ -308,6 +309,7 @@ export type RunContractMetadataInput = Partial<{
   hooks: unknown;
   selfCheckEnabled: unknown;
   selfCheckResult: unknown;
+  executionKernel: unknown;
 }>;
 
 const ARRAY_FIELDS: Array<keyof Pick<
@@ -389,6 +391,9 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
 
   const selfCheckResult = normalizeObject(raw.selfCheckResult);
   if (selfCheckResult) out.selfCheckResult = selfCheckResult;
+
+  const executionKernel = normalizeExecutionKernelSelection(raw.executionKernel);
+  if (executionKernel) out.executionKernel = executionKernel;
 
   if (!hasRunContractValue(out)) return undefined;
   return out;
