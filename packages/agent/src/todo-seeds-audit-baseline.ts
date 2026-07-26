@@ -419,13 +419,13 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     title: 'P1-12 Turbo cache behavior 文档与 CI 策略',
     description: 'turbo.json 控制构建依赖，但 CI 中可能存在 cache miss 导致重构建。需要文档化期望 cache hit behavior。',
     kind: 'task',
-    status: 'ready',
+    status: 'backlog',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-turbo-cache',
     dependsOnIds: [],
-    metadata: { files: ['turbo.json'] },
+    metadata: { files: ['turbo.json'], blocker: 'Wait for todo-los-ci-resource-baseline to collect the 10 unique-head resource window before changing cache policy.', statusUpdatedAt: '2026-07-26' },
   },
 
   // ════════════════════════════════════════════════════════════

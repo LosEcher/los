@@ -292,6 +292,56 @@ promotion. The pre-corpus
 smoke remains excluded rather than retroactively labeled. `pnpm --filter
 @los/agent scenario:pi-shadow` reads current status without invoking a provider.
 
+## K4 Policy Review (2026-07-26)
+
+### Observed
+
+1. `pnpm --filter @los/agent scenario:pi-shadow -- --require-ready` re-read the
+   persisted exact-candidate report without collecting new evidence. Candidate
+   `pi@0.81.1+los.3`, protocol `0.1.0`, corpus `1.1.2`, and rubric
+   `pi-shadow-readonly-v4` remain 17/17 passing and
+   `ready_for_k4_policy_review`.
+2. `pnpm check:contracts` passed all 27 contracts. Fourteen focused kernel,
+   registry, admission, corpus, and collection-stop tests passed.
+3. `execution-kernel-registry.ts` still registers only `los`; scheduler and
+   executor requests for `pi` fail before task-run creation. Pi is available
+   only through the explicit K3 shadow path.
+4. K3 does not create a candidate `run_spec` or a formal pairwise eval. The K4
+   contract requires explicit planning/inspection selection, persisted plan and
+   evidence, and operator-visible rollback.
+
+### Inference And Judgment
+
+The exact K3 candidate satisfies the evidence prerequisite for K4 policy work.
+That result does not make the current production path K4-capable: there is no
+governed candidate run-spec path, no per-run Pi registry admission, and no
+operator-visible rollback record. The review is therefore complete with this
+decision:
+
+- K4 policy and implementation design may proceed for the exact candidate;
+- registry admission, provider execution, read-only canary execution, and
+  production selection remain unauthorized;
+- K5 write canary, K6 graph-worker use, and K7 default promotion remain outside
+  this decision.
+
+### Required Before K4 Execution
+
+1. Define a planning/inspection-only RunContract policy and reject every other
+   disposition or tool mode.
+2. Persist a real candidate `run_spec` and immutable execution-experiment
+   provenance before selection or execution.
+3. Add fail-closed, explicit per-run Pi selection without changing the default
+   `los` registry decision.
+4. Record an operator-visible rollback to `LosKernelAdapter` and stop on AP2 or
+   canonical transcript drift.
+5. Add focused regressions for plan persistence, candidate lineage, transcript
+   projection, zero project writes, and rollback behavior.
+6. Obtain separate operator consent before the first provider-backed K4 canary.
+
+The structured review todo is
+`todo-los-pi-k4-policy-review-20260726`. The separately authorized execution
+work is `todo-los-pi-k4-readonly-canary`.
+
 ## Active Work Ledger
 
 These identifiers are owned by this plan until they are persisted as structured
@@ -303,7 +353,9 @@ LOS todos. Their status here must not be presented as database todo state.
 | `kernel-k1-los-adapter` | complete in repository; not a DB todo | TypeScript protocol, registry-driven local/HTTP/SSH `LosKernelAdapter`, bounded durable event projection, and LOS ToolBroker |
 | `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
 | `kernel-k3-shadow` | complete for exact v4 identity; K4 review remains separate | v3 remains immutable at 11/11 deterministic, 5/6 live, 16/17 observed with one `prefixed_fenced_json` failure; v4 is 11/11 deterministic, 6/6 live, 17/17 observed, zero failures, and `ready_for_k4_policy_review` |
-| `kernel-k4-k6-canary` | pending | read-only, write, and graph-worker canaries |
+| `todo-los-pi-k4-policy-review-20260726` | complete in DB | K3/K4 evidence, production-registry boundary, rollback requirements, and consent boundary reviewed without provider execution |
+| `todo-los-pi-k4-readonly-canary` | backlog in DB; operator consent not granted | implement explicit planning/inspection selection, real candidate run spec, persisted evidence, and per-run rollback before any canary |
+| `kernel-k5-k6-canary` | pending; not DB todos | write and graph-worker canaries remain outside the K4 review |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |
 
