@@ -94,6 +94,11 @@ execution gate.
 1. A planning attempt may inspect the declared workspace with read-only tools.
 2. It must return structured `PlanStep[]` plus the verification mapping needed
    by `approveRunSpecPhase()`.
+   The default carrier is the planning-only `submit_run_contract` typed tool;
+   model-editable arguments contain only summary, plan, and verifications.
+   LOS injects run, task, session, actor, tenant, and project identity from the
+   scheduled execution context. Final-text JSON remains available only through
+   explicit `text_json_legacy` compatibility mode.
 3. The plan is persisted while the run remains in `planning`.
 4. Planning completion leaves the planning `task_run` blocked with reason
    `planning_awaiting_approval` and creates `approval_required`; it does not
