@@ -28,8 +28,12 @@ import {
 } from '../server-helpers.js';
 import { getLogger } from '@los/infra/logger';
 import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
-import { createWorkItemRevision, listWorkItemRunLinksForRunSpec } from '@los/agent/work-items';
+import {
+  createWorkItemRevision,
+  listWorkItemRunLinksForRunSpec,
+} from '@los/agent/work-items';
 import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
+import { validatePlanApprovalCapability } from '../../plan-approval-capability.js';
 
 type RunRoutesDependencies = {
   appendSessionEvent: typeof appendSessionEvent;
@@ -309,6 +313,8 @@ export function registerRunRoutes(
     await deps.ensureRunSpecStore();
     const runSpec = await deps.loadRunSpec(id);
     if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+    const capabilityError = validatePlanApprovalCapability(body, id, runSpec.runContract);
+    if (capabilityError) return reply.status(capabilityError.statusCode).send(capabilityError.payload);
 
     try {
       const updated = await deps.approveRunSpecPhase(id, {

@@ -41,6 +41,8 @@ test('work item creation persists a structured contract draft without starting a
     assert.equal(todo?.sessionId, undefined);
     assert.equal(projection.nextAction, 'start');
     assert.equal(projection.attentionState, 'none');
+    assert.equal(projection.availableActions.startWork?.payload.workItemId, projection.id);
+    assert.equal(projection.availableActions.approvePlan, undefined);
     assert.deepEqual(projection.runContractDraft, {
       mode: 'execution',
       goal: 'Create a reviewable work item',
@@ -151,6 +153,12 @@ test('latest run spec contract enables approval instead of stale todo draft reco
     assert.equal(projected?.attentionState, 'approval_required');
     assert.equal(projected?.nextAction, 'review_plan');
     assert.equal(projected?.runContractDraft.planRevision, 1);
+    assert.deepEqual(projected?.availableActions.approvePlan?.payload, {
+      runSpecId,
+      planRevision: 1,
+      contractHash: projected?.availableActions.approvePlan?.payload.contractHash,
+    });
+    assert.match(projected?.availableActions.approvePlan?.payload.contractHash ?? '', /^sha256:[a-f0-9]{64}$/);
   } finally {
     await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
@@ -333,6 +341,15 @@ function acceptanceProjection(): WorkItemProjection {
     },
     attentionState: 'review_ready',
     nextAction: 'review_changes',
+    availableActions: {
+      reviewResult: {
+        label: 'Review result',
+        effect: 'Accept the verified result or request a revision.',
+        scope: 'work_item:work-review-test',
+        irreversible: false,
+        payload: { workItemId: 'work-review-test', decisions: ['accepted', 'revision_requested'] },
+      },
+    },
     links: [],
     evidence: {
       latestRunSpecId: 'run-review-test',
