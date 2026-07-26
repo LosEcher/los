@@ -250,7 +250,7 @@ roadmap-sync completion, optimization demotion to P2, and otel-docs done.
 | Check | Result |
 | --- | --- |
 | `los governance todo-reconcile --tenant-id local --project-id los` | seed=132, db=229, seedOnly=0, dbOnly=97, statusDrift=0 |
-| fieldDrift | only `todo-los-execution-optimization-analysis` priority DB=`P1` vs seed=`P2` |
+| fieldDrift | none after operator P2 decision (was optimization-analysis priority) |
 | Gateway `/health` outbox | pending=0, claimed=0, legacy=2658 through id 2817 |
 | ADR 0028 / publisher | Accepted; gateway maintenance polls `publishExecutionOutboxBatch` every 1s |
 | Pi K4 selection | `todo-los-pi-k4-readonly-selection` = `done` (Forgejo PR #78 / GitHub #180) |
