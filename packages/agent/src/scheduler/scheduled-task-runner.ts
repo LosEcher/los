@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { ensureSessionEventStore } from '../session-events.js';
 import { resolveExecutionKernel } from '../execution-kernel-registry.js';
 import { _createKernelEventProjector } from '../kernel-event-projection.js';
-import { recordFailoverEval } from '../run-evals.js';
 import { startScheduledKernelShadow } from './kernel-shadow.js';
 import {
   ensureTaskRunStore,
@@ -15,35 +14,27 @@ import { transitionExecutionState } from '../execution-store.js';
 import { runLifecycleHooks } from '../lifecycle-hooks.js';
 import {
   cancelScheduledTask,
-  getScheduledTaskAbortReason,
-  isAbortError,
   linkAbortSignal,
   registerScheduledTaskController,
 } from './abort-registry.js';
-import { isWorkerBlockReason, workerBlockReasonFrom } from './worker-block-error.js';
 import { clearCancellation } from '../cancellation.js';
 import { canStartExecution, type RunContractMetadata } from '../run-contract.js';
 import { recordSchedulerDecision } from '../scheduler-decision-ledger.js';
 import {
   _ExecutorSelectionError,
   resolveExecutor,
-  runAgentOnExecutor,
   type ResolvedExecutor,
 } from './executor-client.js';
 import { normalizeOptionalString, normalizePositiveInteger, readObject } from './helpers.js';
 import { emitTaskEvent } from './task-events.js';
 import { reportTaskDeduplicated } from './task-deduplication.js';
 import { startTaskHeartbeat } from './task-heartbeat.js';
-import { persistScheduledToolCallState } from './tool-call-state-persistence.js';
-import { readCurrentRunContract, checkVerificationGate } from './contract-reader.js';
+import { readCurrentRunContract } from './contract-reader.js';
 import {
-  completePlanningDisposition,
   promptForDisposition,
   resolveTaskDisposition,
   validatePlanningDisposition,
 } from './planning-disposition.js';
-import { runGoalSelfCheck } from './goal-self-check-runner.js';
-import { writeDeadLetterEvent } from '../dead-letter.js';
 import {
   normalizeProviderFallbackPolicy,
   resolveProviderFallbackInitialTarget,
@@ -51,6 +42,8 @@ import {
 } from '../providers/provider-fallback.js';
 import type { SessionEventRecord } from '../session-events.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
+import { runScheduledTaskExecution } from './scheduled-task-execution.js';
+import { completeScheduledTask, handleScheduledTaskError } from './scheduled-task-terminal.js';
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
   await ensureTaskRunStore();
   await ensureSessionEventStore();
@@ -285,311 +278,61 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   let kernelShadow: ReturnType<typeof startScheduledKernelShadow>;
   try {
     kernelShadow = startScheduledKernelShadow({ task: input, prompt: runtimePrompt, productionKernel: executionKernel.identity, sessionId, taskRunId, traceId, toolMode, remoteExecutor: Boolean(executor), config: { ...input, sessionId, taskRunId, traceId, provider: initialProvider, model: initialModel, toolMode, sandboxMode, architectEditor, signal: controller.signal, runContractMetadata: { ...running.metadata, ...(runContract ? { runContract } : {}) } } });
-    const result = executor
-      ? await runAgentOnExecutor(executor, {
-          taskRunId,
-          executionKernelKind: executionKernel.identity.kind,
-          leaseVersion,
-          agentTaskLease: input.agentTaskLease,
-          leaseMs,
-          prompt: runtimePrompt,
-          config: {
-            sessionId,
-            runSpecId: input.runSpecId,
-            provider: initialProvider,
-            model: initialModel,
-            providerFallback,
-            modelSettings: input.modelSettings,
-            maxLoops: input.maxLoops,
-            systemPrompt: input.systemPrompt,
-            identity: input.identity,
-            workspaceRoot,
-            tenantId: input.tenantId,
-            projectId: input.projectId,
-            userId: input.userId,
-            nodeId,
-            requestId: input.requestId,
-            traceId,
-            toolMode,
-            sandboxMode,
-            skipPreExecutionPhases: disposition === 'planning',
-            architectEditor,
-            taskRunId,
-            dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
-            initialMessages: input.initialMessages,
-            allowedTools: input.allowedTools,
-            toolRetry: input.toolRetry,
-            mcpServers: input.mcpServers,
-            runContractMetadata: {
-              ...running.metadata,
-              ...(runContract ? { runContract } : {}),
-            },
-          },
-          signal: controller.signal,
-          onSessionEvent: handleSessionEvent,
-          onKernelEvent: projectKernelEvent,
-          onModelDelta: input.onModelDelta,
-          onToolCallState: async (transition) => {
-            await persistScheduledToolCallState({
-              transition,
-              sessionId,
-              runSpecId: input.runSpecId,
-              taskRunId,
-            });
-            await input.onToolCallState?.(transition);
-          },
-          onCheckpoint: input.onCheckpoint,
-        })
-      : await executionKernel.run(runtimePrompt, {
-          sessionId,
-          runSpecId: input.runSpecId,
-          provider: initialProvider,
-          model: initialModel,
-          providerFallback,
-          modelSettings: input.modelSettings,
-          maxLoops: input.maxLoops,
-          systemPrompt: input.systemPrompt,
-          identity: input.identity,
-          workspaceRoot,
-          tenantId: input.tenantId,
-          projectId: input.projectId,
-          userId: input.userId,
-          nodeId,
-          requestId: input.requestId,
-          traceId,
-          log: input.log,
-          toolMode,
-          sandboxMode,
-          skipPreExecutionPhases: disposition === 'planning',
-          architectEditor,
-          taskRunId,
-          dispatchId: normalizeOptionalString(input.metadata?.agentTaskAttemptId),
-          initialMessages: input.initialMessages,
-          allowedTools: input.allowedTools,
-          toolRetry: input.toolRetry,
-          mcpServers: input.mcpServers,
-          runContractMetadata: {
-            ...running.metadata,
-            ...(runContract ? { runContract } : {}),
-          },
-          signal: controller.signal,
-          onSessionEvent: handleSessionEvent,
-          onProviderFallback: persistProviderFallbackSelection,
-          onTurn: input.onTurn,
-          onToolCall: input.onToolCall,
-          onToolCallState: async (transition) => {
-            await persistScheduledToolCallState({
-              transition,
-              sessionId,
-              runSpecId: input.runSpecId,
-              taskRunId,
-            });
-            await input.onToolCallState?.(transition);
-          },
-          onModelDelta: input.onModelDelta,
-          onCheckpoint: input.onCheckpoint,
-          contextMonitor: input.contextMonitor,
-        }, projectKernelEvent);
+    const result = await runScheduledTaskExecution({
+      input,
+      executionKernel,
+      executor,
+      taskRunId,
+      leaseVersion,
+      leaseMs,
+      runtimePrompt,
+      sessionId,
+      initialProvider,
+      initialModel,
+      providerFallback,
+      workspaceRoot,
+      nodeId,
+      traceId,
+      toolMode,
+      sandboxMode,
+      disposition,
+      architectEditor,
+      runContractMetadata: {
+        ...running.metadata,
+        ...(runContract ? { runContract } : {}),
+      },
+      signal: controller.signal,
+      onSessionEvent: handleSessionEvent,
+      onKernelEvent: projectKernelEvent,
+      onProviderFallback: persistProviderFallbackSelection,
+    });
     await kernelShadow?.settle(result);
-
-    if (disposition === 'planning') {
-      return await completePlanningDisposition({
-        schedulerInput: input,
-        result,
-        running,
-        taskRunId,
-        sessionId,
-        nodeId,
-        leaseVersion,
-      });
-    }
-    const verifyContract = await readCurrentRunContract(input.runSpecId, running.metadata);
-    const verifyCheck = input.verificationOwner === 'graph'
-      ? { allowed: true }
-      : await checkVerificationGate(input.runSpecId, verifyContract);
-    if (!verifyCheck.allowed) {
-      await transitionExecutionState({
-        entityType: 'task_run',
-        entityId: taskRunId,
-        to: 'blocked',
-        sessionId,
-        reason: verifyCheck.reason ?? 'verification_pending',
-        nodeId,
-        leaseVersion,
-      });
-      const blocked = await updateTaskRunFields(taskRunId, {
-        metadata: {
-          ...running.metadata,
-          blockReason: verifyCheck.reason,
-          loopCount: result.loopCount,
-          totalTokens: result.totalTokens,
-        },
-      });
-      const finalBlocked = blocked ?? running;
-      await emitTaskEvent(sessionId, 'task.blocked', finalBlocked);
-      await input.onTaskEvent?.({ type: 'task.blocked', taskRun: finalBlocked });
-      return {
-        status: 'blocked',
-        sessionId,
-        taskRun: { ...finalBlocked, status: 'blocked' },
-        result,
-        reason: verifyCheck.reason ?? 'verification pending',
-      };
-    }
-
-    const selfCheckBlock = await runGoalSelfCheck(input, result, running, sessionId, taskRunId);
-    if (selfCheckBlock) return selfCheckBlock;
-
-    await transitionExecutionState({
-      entityType: 'task_run',
-      entityId: taskRunId,
-      to: 'succeeded',
+    return await completeScheduledTask(result, {
+      input,
+      running,
+      taskRunId,
       sessionId,
-      reason: 'task_completed',
       nodeId,
       leaseVersion,
+      disposition,
+      initialProvider,
+      initialModel,
+      executor,
     });
-    const succeeded = await updateTaskRunFields(taskRunId, {
-      metadata: {
-        ...running.metadata,
-        loopCount: result.loopCount,
-        totalTokens: result.totalTokens,
-      },
-    });
-    const finalTask = succeeded ?? running;
-    await emitTaskEvent(sessionId, 'task.succeeded', finalTask);
-    await input.onTaskEvent?.({ type: 'task.succeeded', taskRun: finalTask });
-
-    if (input.runContract?.hooks) {
-      runLifecycleHooks('afterFinish', {
-        hooks: input.runContract.hooks as any,
-        sessionId,
-        runSpecId: input.runSpecId,
-        taskRunId,
-      }).catch(() => undefined);
-    }
-
-    return {
-      status: 'completed',
-      sessionId,
-      taskRun: finalTask,
-      result,
-    };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await kernelShadow?.cancel(message);
-    if (isAbortError(err)) {
-      const reason = getScheduledTaskAbortReason(taskRunId) ?? message;
-      if (isWorkerBlockReason(reason)) {
-        const blockReason = workerBlockReasonFrom(reason) ?? 'worker_block';
-        const blocked = await updateTaskRunFields(taskRunId, {
-          metadata: {
-            ...running.metadata,
-            blockReason,
-          },
-        });
-        const finalBlocked = blocked ?? running;
-        await emitTaskEvent(sessionId, 'task.blocked', finalBlocked, { reason: blockReason });
-        await input.onTaskEvent?.({ type: 'task.blocked', taskRun: finalBlocked });
-        return {
-          status: 'blocked',
-          sessionId,
-          taskRun: finalBlocked,
-          reason: blockReason,
-        };
-      }
-      await transitionExecutionState({
-        entityType: 'task_run',
-        entityId: taskRunId,
-        to: 'cancelled',
-        sessionId,
-        reason,
-        nodeId,
-        leaseVersion,
-      });
-      const cancelled = await updateTaskRunFields(taskRunId, {
-        metadata: {
-          ...running.metadata,
-          cancelReason: reason,
-        },
-      });
-      const finalTask = cancelled ?? running;
-      await emitTaskEvent(sessionId, 'task.cancelled', finalTask, { reason });
-      await input.onTaskEvent?.({ type: 'task.cancelled', taskRun: finalTask });
-      if (input.runContract?.hooks) {
-        runLifecycleHooks('afterFinish', {
-          hooks: input.runContract.hooks as any,
-          sessionId,
-          runSpecId: input.runSpecId,
-          taskRunId,
-        }).catch(() => undefined);
-      }
-      return {
-        status: 'cancelled',
-        sessionId,
-        taskRun: finalTask,
-        reason,
-      };
-    }
-
-    await transitionExecutionState({
-      entityType: 'task_run',
-      entityId: taskRunId,
-      to: 'failed',
+    await kernelShadow?.cancel(err instanceof Error ? err.message : String(err));
+    return await handleScheduledTaskError(err, {
+      input,
+      running,
+      taskRunId,
       sessionId,
-      reason: message,
       nodeId,
       leaseVersion,
+      disposition,
+      initialProvider,
+      initialModel,
+      executor,
     });
-    const failed = await updateTaskRunFields(taskRunId, {
-      metadata: {
-        ...running.metadata,
-        error: message,
-      },
-      attempt: (running.attempt ?? 0) + 1,
-    });
-    const finalTask = failed ?? running;
-    await emitTaskEvent(sessionId, 'task.failed', finalTask, { message });
-    await input.onTaskEvent?.({ type: 'task.failed', taskRun: finalTask });
-
-    if (!isAbortError(err)) {
-      writeDeadLetterEvent({
-        taskRunId,
-        runSpecId: input.runSpecId,
-        reason: finalTask.attempt && finalTask.attempt >= 3 ? 'max_attempts' : 'unrecoverable_error',
-        originalError: message,
-        eventPayload: {
-          attempt: finalTask.attempt,
-          provider: initialProvider,
-          model: initialModel,
-          sessionId,
-          promptPreview: input.promptPreview,
-        },
-      }).catch(() => undefined);
-    }
-
-    if (input.runContract?.hooks) {
-      runLifecycleHooks('afterFinish', {
-        hooks: input.runContract.hooks as any,
-        sessionId,
-        runSpecId: input.runSpecId,
-        taskRunId,
-      }).catch(() => undefined);
-    }
-
-    if (executor && input.runSpecId) {
-      await recordFailoverEval({
-        runSpecId: input.runSpecId,
-        sessionId,
-        taskRunId,
-        provider: initialProvider,
-        model: initialModel,
-        failureClass: 'executor_failure',
-        failoverScope: 'executor',
-        errorMessage: message,
-      });
-    }
-    throw err;
   } finally {
     if (timeout) clearTimeout(timeout);
     stopHeartbeat();

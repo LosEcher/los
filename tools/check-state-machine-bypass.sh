@@ -22,8 +22,8 @@ BYPASS_APIS=(
 # - run-specs.ts: owns updateRunSpecStatus
 # - tool-call-states.ts: owns updateToolCallState
 # - tool-call-state-persistence.ts: scheduler helper that mirrors tool_call_states
-# - scheduled-task-runner.ts: scheduler helper calling updateTaskRunFields for
-#   metadata updates (not status transitions)
+# - scheduled-task-runner.ts / scheduled-task-terminal.ts: scheduler helpers
+#   calling updateTaskRunFields for metadata updates (not status transitions)
 # - planning-disposition.ts: planning completion transitions through the
 #   execution store, then records result metadata without changing status
 ALLOWED_FILES=(
@@ -35,6 +35,7 @@ ALLOWED_FILES=(
   "packages/agent/src/tool-call-recovery.ts"
   "packages/agent/src/scheduler/tool-call-state-persistence.ts"
   "packages/agent/src/scheduler/scheduled-task-runner.ts"
+  "packages/agent/src/scheduler/scheduled-task-terminal.ts"
   "packages/agent/src/scheduler/goal-self-check-runner.ts"
   "packages/agent/src/scheduler/planning-disposition.ts"
 )
