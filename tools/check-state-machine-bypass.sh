@@ -26,6 +26,8 @@ BYPASS_APIS=(
 #   calling updateTaskRunFields for metadata updates (not status transitions)
 # - planning-disposition.ts: planning completion transitions through the
 #   execution store, then records result metadata without changing status
+# - verification-runner.ts: verification completion transitions first, then
+#   records task metadata after a successful verification decision
 ALLOWED_FILES=(
   "packages/agent/src/execution-store.ts"
   "packages/agent/src/execution-transitions.ts"
@@ -38,6 +40,7 @@ ALLOWED_FILES=(
   "packages/agent/src/scheduler/scheduled-task-terminal.ts"
   "packages/agent/src/scheduler/goal-self-check-runner.ts"
   "packages/agent/src/scheduler/planning-disposition.ts"
+  "packages/agent/src/verification-runner.ts"
 )
 
 for api in "${BYPASS_APIS[@]}"; do
