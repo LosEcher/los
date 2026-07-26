@@ -29,6 +29,11 @@ export interface CreateExecutionExperimentInput {
   createdBy: string;
 }
 
+export interface ExecutionExperimentScope {
+  tenantId: string;
+  projectId: string;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS execution_experiments (
   id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT,
@@ -75,39 +80,55 @@ export async function createExecutionExperiment(input: CreateExecutionExperiment
   return rowToRecord(rows.rows[0]);
 }
 
-export async function loadExecutionExperiment(id: string): Promise<ExecutionExperimentRecord | null> {
+export async function loadExecutionExperiment(id: string, scope?: ExecutionExperimentScope): Promise<ExecutionExperimentRecord | null> {
   await ensureExecutionExperimentStore();
-  const rows = await getDb().query<ExperimentRow>('SELECT * FROM execution_experiments WHERE id = $1', [id]);
+  const rows = await getDb().query<ExperimentRow>(
+    `SELECT * FROM execution_experiments WHERE id = $1${scopeSql(scope, 2)}`,
+    [id, ...scopeParams(scope)],
+  );
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }
 
-export async function setExecutionExperimentCandidate(id: string, candidateRunSpecId: string): Promise<ExecutionExperimentRecord> {
+export async function setExecutionExperimentCandidate(id: string, candidateRunSpecId: string, scope?: ExecutionExperimentScope): Promise<ExecutionExperimentRecord> {
   await ensureExecutionExperimentStore();
   const rows = await getDb().query<ExperimentRow>(
-    `UPDATE execution_experiments SET candidate_run_spec_id = $2, updated_at = now() WHERE id = $1 RETURNING *`,
-    [id, candidateRunSpecId],
+    `UPDATE execution_experiments SET candidate_run_spec_id = $2, updated_at = now() WHERE id = $1${scopeSql(scope, 3)} RETURNING *`,
+    [id, candidateRunSpecId, ...scopeParams(scope)],
   );
   if (!rows.rows[0]) throw new Error(`Execution experiment not found: ${id}`);
   return rowToRecord(rows.rows[0]);
 }
 
-export async function approveExecutionExperiment(id: string, actor: string): Promise<ExecutionExperimentRecord> {
-  const current = await loadExecutionExperiment(id);
+export async function approveExecutionExperiment(id: string, actor: string, scope?: ExecutionExperimentScope): Promise<ExecutionExperimentRecord> {
+  const current = await loadExecutionExperiment(id, scope);
   if (!current) throw new Error(`Execution experiment not found: ${id}`);
   await transitionExecutionState({ entityType: 'execution_experiment', entityId: id, to: 'approved', sessionId: current.source.sessionId, reason: 'operator_approved_experiment', source: 'los.experiment', correlationId: actor });
-  await getDb().query('UPDATE execution_experiments SET approved_by = $2, updated_at = now() WHERE id = $1', [id, actor]);
-  const updated = await loadExecutionExperiment(id);
+  await getDb().query(
+    `UPDATE execution_experiments SET approved_by = $2, updated_at = now() WHERE id = $1${scopeSql(scope, 3)}`,
+    [id, actor, ...scopeParams(scope)],
+  );
+  const updated = await loadExecutionExperiment(id, scope);
   if (!updated) throw new Error(`Execution experiment disappeared: ${id}`);
   return { ...updated, approvedBy: actor };
 }
 
-export async function transitionExecutionExperiment(id: string, to: Exclude<ExecutionExperimentStatus, 'draft' | 'approved'>, reason: string): Promise<ExecutionExperimentRecord> {
-  const current = await loadExecutionExperiment(id);
+export async function transitionExecutionExperiment(id: string, to: Exclude<ExecutionExperimentStatus, 'draft' | 'approved'>, reason: string, scope?: ExecutionExperimentScope): Promise<ExecutionExperimentRecord> {
+  const current = await loadExecutionExperiment(id, scope);
   if (!current) throw new Error(`Execution experiment not found: ${id}`);
   await transitionExecutionState({ entityType: 'execution_experiment', entityId: id, to, sessionId: current.source.sessionId, reason, source: 'los.experiment' });
-  const updated = await loadExecutionExperiment(id);
+  const updated = await loadExecutionExperiment(id, scope);
   if (!updated) throw new Error(`Execution experiment disappeared: ${id}`);
   return updated;
+}
+
+function scopeSql(scope: ExecutionExperimentScope | undefined, firstParam: number): string {
+  return scope
+    ? ` AND tenant_id IS NOT DISTINCT FROM $${firstParam} AND project_id IS NOT DISTINCT FROM $${firstParam + 1}`
+    : '';
+}
+
+function scopeParams(scope: ExecutionExperimentScope | undefined): string[] {
+  return scope ? [scope.tenantId, scope.projectId] : [];
 }
 
 type ExperimentRow = {
