@@ -84,6 +84,7 @@ export function WorkPage({
     return (list.data?.results ?? []).filter(candidate => [candidate.title, candidate.id, candidate.goal].some(value => value.toLocaleLowerCase().includes(query)));
   }, [list.data?.results, search]);
   const runSpecId = item?.evidence.latestRunSpecId;
+  const availableActions = item?.availableActions;
   const inspect = useQuery({
     queryKey: ['work-item-run-inspect', runSpecId],
     queryFn: () => getJson<RuntimeInspect>(`/runs/${runSpecId}/inspect`),
@@ -98,16 +99,18 @@ export function WorkPage({
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['work-items'] });
     if (activeId) void queryClient.invalidateQueries({ queryKey: ['work-item', activeId] });
+    if (runSpecId) void queryClient.invalidateQueries({ queryKey: ['work-item-run-inspect', runSpecId] });
   };
   const approve = useMutation({
-    mutationFn: (id: string) => postJson(`/runs/${id}/approve`, {
-      actor: 'web-console',
+    mutationFn: (action: NonNullable<WorkItemProjection['availableActions']['approvePlan']>) => postJson(`/runs/${action.payload.runSpecId}/approve`, {
+      ...action.payload,
       reason: approvalReason.trim() || 'operator approved plan from Work',
     }),
-    onSuccess: () => { setApprovalReason(''); refresh(); },
+    onSuccess: () => { setApprovalReason(''); },
+    onSettled: refresh,
   });
   const verify = useMutation({
-    mutationFn: (id: string) => postJson(`/runs/${id}/verify`, {}),
+    mutationFn: (action: NonNullable<WorkItemProjection['availableActions']['runVerification']>) => postJson(`/runs/${action.payload.runSpecId}/verify`, {}),
     onSuccess: refresh,
   });
   const review = useMutation({
@@ -197,17 +200,17 @@ export function WorkPage({
               <NextStepGuide item={item} />
 
               <div className="work-action-strip">
-                {item.nextAction === 'start' ? <button className="btn" type="button" onClick={() => onStartWork(item)}><Play size={14} /> Start in Chat</button> : null}
-                {item.nextAction === 'review_plan' && runSpecId ? (
-                  <button className="btn" type="button" disabled={approve.isPending} onClick={() => approve.mutate(runSpecId)}><Check size={14} /> {approve.isPending ? 'Approving' : 'Approve plan & allow execution'}</button>
+                {availableActions?.startWork ? <button className="btn" type="button" title={availableActions.startWork.effect} onClick={() => onStartWork(item)}><Play size={14} /> {availableActions.startWork.label}</button> : null}
+                {availableActions?.approvePlan ? (
+                  <button className="btn" type="button" title={availableActions.approvePlan.effect} disabled={approve.isPending} onClick={() => approve.mutate(availableActions.approvePlan!)}><Check size={14} /> {approve.isPending ? 'Approving' : availableActions.approvePlan.label}</button>
                 ) : null}
-                {item.nextAction === 'inspect_verification' && runSpecId ? (
-                  <button className="btn" type="button" disabled={verify.isPending} onClick={() => verify.mutate(runSpecId)}><ShieldCheck size={14} /> {verify.isPending ? 'Running checks' : 'Run required checks'}</button>
+                {availableActions?.runVerification ? (
+                  <button className="btn" type="button" title={availableActions.runVerification.effect} disabled={verify.isPending} onClick={() => verify.mutate(availableActions.runVerification!)}><ShieldCheck size={14} /> {verify.isPending ? 'Running checks' : availableActions.runVerification.label}</button>
                 ) : null}
-                {runSpecId ? <button className="ghost-btn" type="button" onClick={() => onOpenRun(runSpecId)}><FileCheck2 size={14} /> Run evidence</button> : null}
-                {item.evidence.latestSessionId ? <button className="ghost-btn" type="button" onClick={() => onOpenSession(item.evidence.latestSessionId!)}><MessageSquare size={14} /> Continue</button> : null}
+                {availableActions?.inspectRun ? <button className="ghost-btn" type="button" title={availableActions.inspectRun.effect} onClick={() => onOpenRun(availableActions.inspectRun!.payload.runSpecId)}><FileCheck2 size={14} /> {availableActions.inspectRun.label}</button> : null}
+                {availableActions?.continueSession ? <button className="ghost-btn" type="button" title={availableActions.continueSession.effect} onClick={() => onOpenSession(availableActions.continueSession!.payload.sessionId)}><MessageSquare size={14} /> {availableActions.continueSession.label}</button> : null}
               </div>
-              {item.nextAction === 'review_plan' ? (
+              {availableActions?.approvePlan ? (
                 <label className="approval-reason"><span>Approval reason</span><input value={approvalReason} onChange={event => setApprovalReason(event.target.value)} placeholder="Decision context for the audit trail" /></label>
               ) : null}
               {approve.error || verify.error ? <div className="daily-error">{friendlyWorkError(approve.error ?? verify.error)}</div> : null}

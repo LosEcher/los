@@ -1,5 +1,5 @@
 contract: los.work-item
-version: 0.4.0
+version: 0.5.0
 status: implemented
 owner: packages/agent
 description: >
@@ -85,6 +85,7 @@ schemas:
       - runContractDraft
       - attentionState
       - nextAction
+      - availableActions
       - links
       - evidence
       - updatedAt
@@ -106,6 +107,26 @@ schemas:
         - review_changes
         - start
         - none
+    availableActions:
+      description: >
+        Server-declared capabilities are the only source for rendering Work
+        actions. Clients may use attentionState and nextAction for explanation,
+        but must not infer effectful controls from them.
+      optionalFields:
+        - startWork
+        - approvePlan
+        - runVerification
+        - inspectRun
+        - continueSession
+        - reviewResult
+      actionFields: [label, effect, scope, irreversible, payload]
+      payloads:
+        startWork: [workItemId]
+        approvePlan: [runSpecId, planRevision, contractHash]
+        runVerification: [runSpecId]
+        inspectRun: [runSpecId]
+        continueSession: [sessionId]
+        reviewResult: [workItemId, decisions]
     links:
       type: array
       itemFields: [id, relationKind, runSpecId, taskRunId, sessionId, createdAt, updatedAt]
@@ -219,6 +240,8 @@ safety:
   - Result acceptance requires a succeeded run, complete required verification, and a backup artifact for every reviewable managed workspace.
   - Result acceptance may mark the Work Item todo done but never mutates run-spec, task-run, tool-call, or verification state.
   - Request and response payloads never include auth or operator credentials.
+  - Web clients render effectful Work controls only from availableActions.
+  - approvePlan binds the request to runSpecId, planRevision, and contractHash so a stale page cannot approve a revised plan.
   - Feed-analysis dispatch, LOS run, result availability, and callback delivery are exposed separately and never collapsed into one status.
 sourceOfTruth:
   workItem: todos

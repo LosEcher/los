@@ -47,6 +47,12 @@ const stubDeps: WorkItemRouteDependencies = {
       toolMode: (input as any).toolMode ?? 'project-write',
     });
     (item as any).nextAction = 'start';
+    (item as any).availableActions = {
+      startWork: {
+        label: 'Start in Chat', effect: 'Create a planning attempt for this Work Item.',
+        scope: `work_item:${item.id}`, irreversible: false, payload: { workItemId: item.id },
+      },
+    };
     (item as any).runContractDraft = { phase: 'created' };
     stubStore.set(item.id, item);
     return item;
@@ -116,6 +122,7 @@ test('work item routes create and read a structured draft without dispatching', 
     workItemId = created.id;
     assert.equal(created.status, 'backlog');
     assert.equal(created.nextAction, 'start');
+    assert.equal(created.availableActions.startWork.payload.workItemId, workItemId);
     assert.equal(created.runContractDraft.phase, 'created');
     assert.equal(created.evidence.latestRunSpecId, undefined);
     assert.equal(created.evidence.latestTaskRunId, undefined);

@@ -16,7 +16,7 @@ export function WorkReviewPanel({
   onDecision: (decision: 'accepted' | 'revision_requested', reason: string) => void;
 }) {
   const [reason, setReason] = useState('');
-  const canDecide = item.nextAction === 'review_changes';
+  const canDecide = Boolean(item.availableActions.reviewResult);
   return (
     <section className="work-review-panel">
       <header><div><span className="eyebrow">Result review</span><h3>Verification and changes</h3></div><ShieldCheck size={18} /></header>

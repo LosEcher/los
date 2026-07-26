@@ -10,7 +10,9 @@ import {
   ensureSessionEventStore,
   listSessionEvents,
   loadRunSpec,
+  reviseRunSpecPlan,
 } from '@los/agent';
+import { projectWorkItemAvailableActions } from '@los/agent/work-items';
 import { createServer } from '../server.js';
 
 test('POST /runs/:id/approve approves plan_approved transition', async () => {
@@ -31,7 +33,7 @@ test('POST /runs/:id/approve approves plan_approved transition', async () => {
     await ensureRunSpecStore();
     await ensureSessionEventStore();
 
-    await createRunSpec({
+    const created = await createRunSpec({
       id: runSpecId,
       sessionId,
       prompt: 'gateway approve test',
@@ -54,11 +56,44 @@ test('POST /runs/:id/approve approves plan_approved transition', async () => {
       },
     });
 
+    const invalidCapability = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/approve`,
+      payload: { planRevision: 0, reason: 'invalid browser approval' },
+    });
+    assert.equal(invalidCapability.statusCode, 400);
+    assert.equal(invalidCapability.json().error, 'invalid_request');
+
+    const staleCapability = approvalCapability(runSpecId, created.runContract!);
+    await reviseRunSpecPlan(runSpecId, {
+      actor: 'gateway-tester',
+      reason: 'clarify the completion evidence',
+      plan: [{
+        id: 'step-1',
+        title: 'Approve revised gateway plan',
+        description: 'Exercise stale capability rejection before approval.',
+        dependsOnIds: [],
+        editableSurfaces: ['src/'],
+        completionCriteria: 'The stale capability is rejected and the current plan is approved.',
+      }],
+    });
+
+    const stale = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/approve`,
+      payload: { ...staleCapability, reason: 'stale browser approval' },
+    });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().error, 'approval_capability_stale');
+
+    const revised = await loadRunSpec(runSpecId);
+    const currentCapability = approvalCapability(runSpecId, revised!.runContract!);
+
     const res = await app.inject({
       method: 'POST',
       url: `/runs/${runSpecId}/approve`,
       payload: {
-        actor: 'gateway-tester',
+        ...currentCapability,
         reason: 'approved via integration test',
       },
     });
@@ -86,6 +121,15 @@ test('POST /runs/:id/approve approves plan_approved transition', async () => {
     await closeDb().catch(() => undefined);
   }
 });
+
+function approvalCapability(runSpecId: string, contract: NonNullable<Awaited<ReturnType<typeof createRunSpec>>['runContract']>) {
+  return projectWorkItemAvailableActions({
+    workItemId: 'work-item-gateway-approval-test',
+    nextAction: 'review_plan',
+    runSpecId,
+    contract,
+  }).approvePlan!.payload;
+}
 
 test('POST /runs/:id/approve rejects invalid phase transition', async () => {
   const config = await loadConfig();

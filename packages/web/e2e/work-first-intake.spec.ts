@@ -140,6 +140,9 @@ function workItem(input: Record<string, unknown> | undefined) {
   return {
     id: 'work-chat-e2e', title: goal, description: goal, goal, tenantId: 'local', projectId: 'los',
     status: 'backlog', priority: 'P2', source: 'web-work-item', attentionState: 'none', nextAction: 'start',
+    availableActions: {
+      startWork: { label: 'Start in Chat', effect: 'Create planning attempt', scope: 'work_item:work-chat-e2e', irreversible: false, payload: { workItemId: 'work-chat-e2e' } },
+    },
     links: [], createdAt: NOW, updatedAt: NOW, verificationRecords: [], changes: { hasReviewableDiff: false, workspaces: [] },
     runContractDraft: {
       mode: 'execution', phase: 'created', goal, editableSurfaces: input?.editableSurfaces ?? [], nonGoals: [],

@@ -5,6 +5,26 @@ export type WorkItemAttentionState = 'approval_required' | 'recovery_required' |
 export type WorkItemNextAction = 'review_plan' | 'inspect_verification' | 'recover' | 'inspect_run' | 'review_changes' | 'start' | 'none';
 export type InboxSourceKind = 'work_item' | 'orphan_run' | 'orphan_task' | 'orphan_event';
 
+export type WorkItemActionCapability<Payload> = {
+  label: string;
+  effect: string;
+  scope: string;
+  irreversible: boolean;
+  payload: Payload;
+};
+
+export type WorkItemAvailableActions = {
+  startWork?: WorkItemActionCapability<{ workItemId: string }>;
+  approvePlan?: WorkItemActionCapability<{ runSpecId: string; planRevision: number; contractHash: string }>;
+  runVerification?: WorkItemActionCapability<{ runSpecId: string }>;
+  inspectRun?: WorkItemActionCapability<{ runSpecId: string }>;
+  continueSession?: WorkItemActionCapability<{ sessionId: string }>;
+  reviewResult?: WorkItemActionCapability<{
+    workItemId: string;
+    decisions: Array<'accepted' | 'revision_requested'>;
+  }>;
+};
+
 export type RunContractDraft = Record<string, unknown> & {
   mode?: WorkItemMode;
   phase?: string;
@@ -78,6 +98,7 @@ export type WorkItemProjection = {
   runContractDraft: RunContractDraft;
   attentionState: WorkItemAttentionState;
   nextAction: WorkItemNextAction;
+  availableActions: WorkItemAvailableActions;
   links: WorkItemRunLink[];
   evidence: {
     latestRunSpecId?: string;
