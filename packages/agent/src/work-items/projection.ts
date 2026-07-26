@@ -11,6 +11,7 @@ import {
 } from './store.js';
 import { readWorkItemResultReview } from './result-review-metadata.js';
 import { readScheduledWorkMetadata } from './scheduled-work-metadata.js';
+import { projectWorkItemAvailableActions } from './action-capabilities.js';
 import { projectInboxEntries } from './inbox.js';
 import type {
   CreateWorkItemInput,
@@ -160,6 +161,7 @@ export function _projectWorkItem(input: WorkItemProjectionInput): WorkItemProjec
     scheduledRunStatus: readScheduledWorkMetadata(input.todo.metadata)?.status,
     feedAnalysis: input.feedAnalysis,
   });
+  const nextAction = nextActionFor(attentionState, Boolean(input.runSpec || latestTask), input.todo.status);
   return {
     id: input.todo.id,
     title: input.todo.title,
@@ -173,7 +175,14 @@ export function _projectWorkItem(input: WorkItemProjectionInput): WorkItemProjec
     source: input.todo.source,
     runContractDraft: contract,
     attentionState,
-    nextAction: nextActionFor(attentionState, Boolean(input.runSpec || latestTask), input.todo.status),
+    nextAction,
+    availableActions: projectWorkItemAvailableActions({
+      workItemId: input.todo.id,
+      nextAction,
+      runSpecId: input.runSpec?.id,
+      sessionId: evidence.latestSessionId,
+      contract,
+    }),
     links: input.links,
     evidence,
     verificationRecords: input.verificationStatuses,
