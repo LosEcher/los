@@ -23,7 +23,8 @@ test('planning disposition is read-only and stops at approval', async () => {
       events: [],
       deltas: [],
       result: {
-        text: JSON.stringify({
+        text: 'Plan submitted for operator review.',
+        planningSubmission: {
           summary: 'One bounded step.',
           plan: [{
             id: 'step-1',
@@ -34,7 +35,7 @@ test('planning disposition is read-only and stops at approval', async () => {
             completionCriteria: 'The focused check passes.',
           }],
           verifications: [],
-        }),
+        },
         turns: [],
         loopCount: 1,
         totalTokens: { prompt: 10, completion: 20 },
@@ -56,6 +57,7 @@ test('planning disposition is read-only and stops at approval', async () => {
         mode: 'execution',
         executionMode: 'standard',
         phase: 'planning',
+        editableSurfaces: ['packages/agent/src/'],
         requiredChecks: ['pnpm --filter @los/agent check'],
       },
     });
@@ -82,8 +84,10 @@ test('planning disposition is read-only and stops at approval', async () => {
     assert.equal(result.planStepCount, 1);
     assert.equal(requests[0]?.config?.toolMode, 'read-only');
     assert.equal(requests[0]?.config?.sandboxMode, 'readonly');
+    assert.equal(requests[0]?.config?.planningTransport, 'typed_tool');
     assert.equal(requests[0]?.config?.skipPreExecutionPhases, true);
-    assert.match(String(requests[0]?.prompt), /Planning disposition/);
+    assert.match(String(requests[0]?.prompt), /submit_run_contract/);
+    assert.match(String(requests[0]?.prompt), /pnpm --filter @los\/agent check/);
     const runSpec = await loadRunSpec(runSpecId);
     assert.equal(runSpec?.status, 'created');
     assert.equal(runSpec?.runContract?.phase, 'planning');

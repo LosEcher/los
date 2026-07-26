@@ -362,6 +362,35 @@ test('malformed provider arguments are repaired before entering the tool runner'
   assert.ok(result.toolResults[0]?.includes('result:read_file'));
 });
 
+test('unrepairable tool arguments return a tool error for model repair', async () => {
+  const registry = mockRegistry([{ name: 'read_file', parallelizable: true, sleepMs: 0 }]);
+  const events: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const sessionErrors: Array<{ type: string; message: string }> = [];
+  const { runToolCalls } = await import('./tool-runner.js');
+  const malformed: ToolCall = {
+    id: 'malformed-read',
+    type: 'function',
+    function: { name: 'read_file', arguments: '{"path":"package.json","range":1-20}' },
+  };
+
+  const result = await runToolCalls({
+    toolCalls: [malformed],
+    turn: 1,
+    tools: registry,
+    config: buildConfig(),
+    signal: undefined,
+    policy: buildPolicy(),
+    emitEvent: async event => { events.push(event); },
+    onSessionError: error => { sessionErrors.push(error); },
+  });
+
+  assert.equal(registry.executionOrder.length, 0);
+  assert.equal(result.toolMessages[0]?.tool_call_id, 'malformed-read');
+  assert.match(result.toolMessages[0]?.content ?? '', /invalid_tool_arguments/);
+  assert.equal(events.some(event => event.type === 'tool.result' && event.payload?.ok === false), true);
+  assert.equal(sessionErrors[0]?.type, 'tool_parse_error');
+});
+
 test('all non-parallelizable tools each execute sequentially', async () => {
   const registry = mockRegistry([
     { name: 'write_a', parallelizable: false, sleepMs: 20, sideEffect: true },

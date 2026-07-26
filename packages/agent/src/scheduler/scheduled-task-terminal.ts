@@ -43,6 +43,7 @@ export async function completeScheduledTask(
       sessionId,
       nodeId,
       leaseVersion,
+      planningTransport: input.planningTransport ?? 'typed_tool',
     });
   }
 
@@ -64,6 +65,7 @@ export async function completeScheduledTask(
       metadata: {
         ...running.metadata,
         blockReason: verifyCheck.reason,
+        blockKind: 'verification',
         loopCount: result.loopCount,
         totalTokens: result.totalTokens,
       },

@@ -183,6 +183,8 @@ completion/rejection surface exists, plan approval rejects `assertion` and
 
 Stored via:
 - `createRunSpec()` — on `/chat` invocation
+- `submit_run_contract` — planning-only typed protocol submission, validated in
+  the loop and persisted by the scheduler with trusted LOS context
 - `approveRunSpecPhase()` — on operator approval
 - `reviseRunSpecPlan()` — on plan revision
 

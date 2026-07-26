@@ -38,15 +38,9 @@ import {
   preActionGateConfigFromAgentOptions,
   type PreActionGateConfig,
 } from '../pre-action-gate.js';
-import {
-  buildInitialMessages,
-  getDefaultSystemPrompt,
-} from './message-builder.js';
+import { buildInitialMessages, getDefaultSystemPrompt } from './message-builder.js';
 import { resolveAgentIdentity, formatIdentityForPrompt } from '../identity-loader.js';
-import {
-  resolveAllowedTools,
-  resolveToolPolicy,
-} from './tool-resolver.js';
+import { resolveAllowedTools, resolveToolPolicy } from './tool-resolver.js';
 import {
   previewText,
 } from './utils.js';
@@ -57,6 +51,7 @@ import type { Logger } from '@los/infra/logger';
 import type {
   SessionEventUsage,
 } from '../session-events.js';
+import { registerPlanningSubmissionTool, type PlanningSubmissionCollector } from '../planning-submission-tool.js';
 
 type EmitEvent = ReturnType<typeof createEventEmitter>;
 
@@ -78,6 +73,7 @@ export interface AgentRunSetup {
   messages: Message[];
   maxLoops: number;
   preActionGateConfig: PreActionGateConfig | undefined;
+  planningSubmissionCollector?: PlanningSubmissionCollector;
   counters: {
     totalPromptTokens: number;
     totalCompletionTokens: number;
@@ -160,7 +156,7 @@ export function setupAgentRun(
     const initialPromptToolMode = editorMode ? 'editor' as const : toolMode;
     systemPrompt = getDefaultSystemPrompt(initialPromptToolMode, identityBlock || undefined);
   }
-  const allowedTools = resolveAllowedTools(config.allowedTools, toolMode);
+  const allowedTools = resolveAllowedTools(config.allowedTools, toolMode, config.planningTransport);
   const sandboxMode = config.sandboxMode ?? 'workspace-write';
   const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode);
   const signal = config.signal;
@@ -170,6 +166,9 @@ export function setupAgentRun(
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });
+  const planningSubmissionCollector = config.planningTransport === 'typed_tool'
+    ? registerPlanningSubmissionTool(tools, config.runContractMetadata)
+    : undefined;
   registerSpawnAgentTool(tools, createSpawnAgentRunner({
     runAgent,
     sessionId: config.sessionId,
@@ -213,6 +212,7 @@ export function setupAgentRun(
     messages,
     maxLoops,
     preActionGateConfig: preActionGateConfigFromAgentOptions(config.preActionGate),
+    planningSubmissionCollector,
     counters: {
       totalPromptTokens: 0,
       totalCompletionTokens: 0,

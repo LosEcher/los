@@ -65,6 +65,20 @@ export function normalizePlanForPersistence(plan: PlanStep[]): PlanStep[] {
   }));
 }
 
+export function validatePlanScopeForApproval(
+  contract: Pick<RunContractMetadata, 'editableSurfaces' | 'plan'>,
+): string | null {
+  const allowedSurfaces = contract.editableSurfaces.map(surface => surface.trim()).filter(Boolean);
+  if (allowedSurfaces.length === 0 || !contract.plan) return null;
+  const outOfScope = contract.plan
+    .flatMap(step => step.editableSurfaces)
+    .map(surface => surface.trim())
+    .filter(surface => surface && !allowedSurfaces.some(allowed => surfaceMatchesScope(surface, allowed)));
+  return outOfScope.length > 0
+    ? `Plan editable surfaces exceed the RunContract scope: ${[...new Set(outOfScope)].join(', ')}`
+    : null;
+}
+
 export function validateVerificationMappingForApproval(
   contract: Pick<RunContractMetadata, 'requiredChecks' | 'verifications'>,
 ): string | null {
@@ -88,4 +102,18 @@ export function validatePlanRevisionPhase(phase: RunPhase | undefined): string |
   return phase && REVISION_PHASES.has(phase)
     ? null
     : `Plan revision is not allowed from phase '${phase ?? 'created'}'`;
+}
+
+function surfaceMatchesScope(surface: string, allowed: string): boolean {
+  if (surface === allowed) return true;
+  const normalizedAllowed = allowed.replace(/\/+$/, '');
+  if (allowed.endsWith('/**')) {
+    const prefix = allowed.slice(0, -3).replace(/\/+$/, '');
+    return surface === prefix || surface.startsWith(`${prefix}/`);
+  }
+  if (allowed.endsWith('/*')) {
+    const prefix = allowed.slice(0, -2).replace(/\/+$/, '');
+    return surface.startsWith(`${prefix}/`) && !surface.slice(prefix.length + 1).includes('/');
+  }
+  return surface.startsWith(`${normalizedAllowed}/`);
 }

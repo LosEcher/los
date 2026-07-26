@@ -13,6 +13,7 @@ import {
 } from './verification-records.js';
 import { transitionExecutionState } from './execution-store.js';
 import { createRunSpec, loadRunSpec } from './run-specs.js';
+import { createTaskRun, loadTaskRun } from './task-runs.js';
 import { listSessionEvents } from './session-events.js';
 import { runVerificationRecordsForRunSpec } from './verification-runner.js';
 
@@ -70,12 +71,43 @@ test('verification records track required, succeeded, and skipped checks', async
   }
 });
 
+test('verification requirements deduplicate required checks and planned commands', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-verification-dedup-${suffix}`;
+  const runSpecId = `run-verification-dedup-${suffix}`;
+  try {
+    await ensureVerificationRecordStore();
+    await seedVerificationRequirementsForRunSpec({
+      sessionId,
+      runSpecId,
+      requiredChecks: ['node --check package.json'],
+      verifications: [{
+        id: 'check-package-json',
+        kind: 'command',
+        description: 'Validate package.json syntax.',
+        command: 'node --check package.json',
+      }],
+    });
+
+    const seeded = await listVerificationRecordsForRunSpec(runSpecId);
+    assert.equal(seeded.length, 1);
+    assert.equal(seeded[0]?.checkName, 'check-package-json');
+    assert.equal(seeded[0]?.command, 'node --check package.json');
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
 test('verification runner executes required checks and releases blocked run specs', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const sessionId = `session-verifier-runner-${suffix}`;
   const runSpecId = `run-verifier-runner-${suffix}`;
+  const taskRunId = `task-verifier-runner-${suffix}`;
   const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("console.log('verify ok')")}`;
   try {
     await createRunSpec({
@@ -86,6 +118,7 @@ test('verification runner executes required checks and releases blocked run spec
       toolMode: 'project-write',
       runContract: {
         mode: 'closeout',
+        phase: 'plan_approved',
         requiredChecks: [command],
       },
     });
@@ -101,6 +134,31 @@ test('verification runner executes required checks and releases blocked run spec
       to: 'blocked',
       reason: 'verification_required',
     });
+    await createTaskRun({
+      id: taskRunId,
+      sessionId,
+      runSpecId,
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      promptPreview: 'run verifier',
+      metadata: {
+        disposition: 'execution',
+        blockKind: 'verification',
+        blockReason: '1 verification(s) still pending or failed',
+      },
+    });
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'running',
+      reason: 'execution_started',
+    });
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'blocked',
+      reason: 'verification_required',
+    });
 
     const result = await runVerificationRecordsForRunSpec(runSpecId, {
       timeoutMs: 5_000,
@@ -112,6 +170,17 @@ test('verification runner executes required checks and releases blocked run spec
     assert.equal(result.records[0]?.status, 'succeeded');
     assert.match(result.records[0]?.outputSummary ?? '', /verify ok/);
     assert.equal((await loadRunSpec(runSpecId))?.status, 'succeeded');
+    const completedTask = await loadTaskRun(taskRunId);
+    assert.equal(completedTask?.status, 'succeeded');
+    assert.equal(completedTask?.metadata.blockKind, undefined);
+    assert.equal(completedTask?.metadata.blockReason, undefined);
+
+    const repeated = await runVerificationRecordsForRunSpec(runSpecId, {
+      timeoutMs: 5_000,
+      outputLimit: 1_000,
+    });
+    assert.equal(repeated.decision.status, 'succeeded');
+    assert.deepEqual(repeated.ranRecordIds, []);
 
     const loaded = await loadVerificationRecord(result.records[0]!.id);
     assert.equal(loaded?.completedAt !== undefined, true);
@@ -122,6 +191,7 @@ test('verification runner executes required checks and releases blocked run spec
   } finally {
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }

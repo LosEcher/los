@@ -8,6 +8,7 @@ import {
   Play,
   Plus,
   RefreshCcw,
+  Search,
   ShieldCheck,
   X,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import {
 } from '../api/index.js';
 import { formatDate } from '../ui.js';
 import { WorkReviewPanel } from './work-review-panel.js';
+import { NextStepGuide, attentionLabel, friendlyWorkError } from './work-guidance.js';
 
 type WorkFormState = {
   projectId: string;
@@ -60,6 +62,7 @@ export function WorkPage({
 }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<TodoStatus | ''>('');
+  const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [approvalReason, setApprovalReason] = useState('');
   const list = useQuery({
@@ -75,6 +78,11 @@ export function WorkPage({
     refetchInterval: 10_000,
   });
   const item = detail.data ?? list.data?.results.find(candidate => candidate.id === activeId) ?? null;
+  const visibleItems = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    if (!query) return list.data?.results ?? [];
+    return (list.data?.results ?? []).filter(candidate => [candidate.title, candidate.id, candidate.goal].some(value => value.toLocaleLowerCase().includes(query)));
+  }, [list.data?.results, search]);
   const runSpecId = item?.evidence.latestRunSpecId;
   const inspect = useQuery({
     queryKey: ['work-item-run-inspect', runSpecId],
@@ -121,6 +129,7 @@ export function WorkPage({
     <section className="daily-page work-page">
       <div className="daily-toolbar">
         <div className="work-filters">
+          <label className="work-search"><Search size={14} /><input aria-label="Find work by title or ID" value={search} onChange={event => setSearch(event.target.value)} placeholder="Find work by title or ID" /></label>
           <select aria-label="Work status" value={status} onChange={event => setStatus(event.target.value as TodoStatus | '')}>
             <option value="">all status</option>
             <option value="backlog">backlog</option>
@@ -129,7 +138,7 @@ export function WorkPage({
             <option value="blocked">blocked</option>
             <option value="done">done</option>
           </select>
-          <span>{list.data?.count ?? 0} work items</span>
+          <span>{visibleItems.length} of {list.data?.count ?? 0} work items</span>
         </div>
         <div className="daily-toolbar-actions">
           <button className="icon-btn" type="button" title="Refresh work" aria-label="Refresh work" onClick={refresh}>
@@ -158,7 +167,10 @@ export function WorkPage({
           {!list.isLoading && !list.error && list.data?.results.length === 0 ? (
             <div className="daily-empty"><FileCheck2 size={22} /><strong>No work items</strong><span>Create a structured target to begin.</span></div>
           ) : null}
-          {list.data?.results.map(candidate => (
+          {!list.isLoading && !list.error && list.data?.results.length !== 0 && visibleItems.length === 0 ? (
+            <div className="daily-empty"><Search size={22} /><strong>No matching work</strong><span>Try a different title, goal, or full work item ID.</span></div>
+          ) : null}
+          {visibleItems.map(candidate => (
             <button
               key={candidate.id}
               type="button"
@@ -168,7 +180,7 @@ export function WorkPage({
             >
               <span className={`priority-mark ${candidate.priority.toLowerCase()}`}>{candidate.priority}</span>
               <span className="work-list-copy"><strong>{candidate.title}</strong><small>{candidate.projectId} · {formatDate(candidate.updatedAt)}</small></span>
-              <span className={`attention-state ${candidate.attentionState}`}>{candidate.attentionState.replaceAll('_', ' ')}</span>
+              <span className={`attention-state ${candidate.attentionState}`}>{attentionLabel(candidate.attentionState)}</span>
               <ChevronRight size={14} />
             </button>
           ))}
@@ -179,16 +191,18 @@ export function WorkPage({
             <>
               <header className="work-detail-head">
                 <div><span className="eyebrow">{item.projectId} / {item.priority}</span><h2>{item.title}</h2><p>{item.goal}</p></div>
-                <span className={`attention-state ${item.attentionState}`}>{item.attentionState.replaceAll('_', ' ')}</span>
+                <span className={`attention-state ${item.attentionState}`}>{attentionLabel(item.attentionState)}</span>
               </header>
+
+              <NextStepGuide item={item} />
 
               <div className="work-action-strip">
                 {item.nextAction === 'start' ? <button className="btn" type="button" onClick={() => onStartWork(item)}><Play size={14} /> Start in Chat</button> : null}
                 {item.nextAction === 'review_plan' && runSpecId ? (
-                  <button className="btn" type="button" disabled={approve.isPending} onClick={() => approve.mutate(runSpecId)}><Check size={14} /> {approve.isPending ? 'Approving' : 'Approve plan'}</button>
+                  <button className="btn" type="button" disabled={approve.isPending} onClick={() => approve.mutate(runSpecId)}><Check size={14} /> {approve.isPending ? 'Approving' : 'Approve plan & allow execution'}</button>
                 ) : null}
                 {item.nextAction === 'inspect_verification' && runSpecId ? (
-                  <button className="btn" type="button" disabled={verify.isPending} onClick={() => verify.mutate(runSpecId)}><ShieldCheck size={14} /> {verify.isPending ? 'Running checks' : 'Run checks'}</button>
+                  <button className="btn" type="button" disabled={verify.isPending} onClick={() => verify.mutate(runSpecId)}><ShieldCheck size={14} /> {verify.isPending ? 'Running checks' : 'Run required checks'}</button>
                 ) : null}
                 {runSpecId ? <button className="ghost-btn" type="button" onClick={() => onOpenRun(runSpecId)}><FileCheck2 size={14} /> Run evidence</button> : null}
                 {item.evidence.latestSessionId ? <button className="ghost-btn" type="button" onClick={() => onOpenSession(item.evidence.latestSessionId!)}><MessageSquare size={14} /> Continue</button> : null}
@@ -196,7 +210,7 @@ export function WorkPage({
               {item.nextAction === 'review_plan' ? (
                 <label className="approval-reason"><span>Approval reason</span><input value={approvalReason} onChange={event => setApprovalReason(event.target.value)} placeholder="Decision context for the audit trail" /></label>
               ) : null}
-              {approve.error || verify.error ? <div className="daily-error">{String(approve.error ?? verify.error)}</div> : null}
+              {approve.error || verify.error ? <div className="daily-error">{friendlyWorkError(approve.error ?? verify.error)}</div> : null}
 
               <div className="work-evidence-grid">
                 {item.feedAnalysis ? (
