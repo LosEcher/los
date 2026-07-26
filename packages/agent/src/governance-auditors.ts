@@ -49,7 +49,11 @@ async function runHotspotAudit(): Promise<Record<string, unknown>> {
     runtimeCleanup: {
       taskRunsScanned: cleanupReport.taskRuns.scanned,
       illegalStatusCount: cleanupReport.taskRuns.illegalStatus.length,
-      staleFixtureCount: cleanupReport.taskRuns.staleFixtureCandidates.length,
+      staleTaskFixtureCount: cleanupReport.taskRuns.staleFixtureCandidates.length,
+      staleRunSpecFixtureCount: cleanupReport.runSpecs.staleFixtureCandidates.length,
+      staleFixtureCount:
+        cleanupReport.taskRuns.staleFixtureCandidates.length
+        + cleanupReport.runSpecs.staleFixtureCandidates.length,
       runSpecsScanned: cleanupReport.runSpecs.scanned,
     },
     errorFrequency: { recentErrors24h: Number(errorPatternRows.rows[0]?.error_count ?? 0) },

@@ -2,7 +2,7 @@ import {
   detectRuntimeCleanupWithDefaultDb,
   readStatusConstraintReportWithDefaultDb,
   reconcilePlanningTodosWithDefaultDb,
-  runGovernanceSweep,
+  runGovernanceSweepWithDefaultDb,
   summarizeStatusConstraintReport,
   validateStatusConstraintsWithDefaultDb,
   type GovernanceSweepResult,
@@ -263,7 +263,7 @@ async function sweep(parsed: ParsedArgs): Promise<void> {
     ? (jobType.split(',').filter(t => validTypes.includes(t as GovernanceJobType)) as GovernanceJobType[])
     : undefined;
 
-  const result = await runGovernanceSweep({
+  const result = await runGovernanceSweepWithDefaultDb({
     jobTypes,
     dryRun: !apply,
     tenantId: stringFlag(parsed, 'tenant-id') ?? stringFlag(parsed, 'tenant'),

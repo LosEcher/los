@@ -9,7 +9,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyConsistencyFix, applyDeadLetterFix } from './ga-loop-fixes.js';
+import { applyConsistencyFix, applyDeadLetterFix, applyHotspotFix } from './ga-loop-fixes.js';
 import { checkHasFindings } from './ga-loop-runner.js';
 import { SEED_JOBS } from './governance-jobs-schema.js';
 import { evaluateLoopGate, computeNextState, maybeAutoRecoverPaused } from './ga-circuit-breaker.js';
@@ -125,6 +125,18 @@ describe('dead-letter governance ownership', () => {
     assert.equal(result.applied, true);
     assert.match(result.detail, /Requeued 1\/2/);
     assert.match(result.detail, /run_spec_succeeded/);
+  });
+});
+
+describe('hotspot governance ownership', () => {
+  it('keeps runtime cleanup manual-only when findings exist', async () => {
+    const result = await applyHotspotFix({
+      runtimeCleanup: { illegalStatusCount: 1, staleFixtureCount: 2 },
+    });
+
+    assert.equal(result.applied, false);
+    assert.match(result.detail, /manual-only/);
+    assert.match(result.detail, /transitionExecutionState/);
   });
 });
 
