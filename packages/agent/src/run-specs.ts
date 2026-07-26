@@ -22,6 +22,7 @@ import {
 import {
   normalizePlanForPersistence,
   validatePlanForApproval,
+  validatePlanScopeForApproval,
   validatePlanRevisionPhase,
   validateVerificationExecutionSupport,
   validateVerificationMappingForApproval,
@@ -291,6 +292,8 @@ export async function approveRunSpecPhase(
       if (!shouldSkipPlanApprovalGate(currentContract)) {
         const planError = validatePlanForApproval(plan);
         if (planError) throw new Error(planError);
+        const scopeError = validatePlanScopeForApproval({ ...currentContract, plan });
+        if (scopeError) throw new Error(scopeError);
         const verificationError = validateVerificationMappingForApproval(currentContract);
         if (verificationError) throw new Error(verificationError);
       }

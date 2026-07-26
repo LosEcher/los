@@ -8,6 +8,7 @@ import { getAvailableSandbox } from '../tools/external/shell-sandbox.js';
 import { platform } from 'node:os';
 import { getLogger } from '@los/infra/logger';
 import type { AgentConfig } from './types.js';
+import { _PLANNING_SUBMISSION_TOOL_NAME, type PlanningTransport } from '../planning-output.js';
 
 const log = getLogger('agent');
 
@@ -18,6 +19,7 @@ const log = getLogger('agent');
 export function resolveAllowedTools(
   explicitAllowedTools: readonly string[] | undefined,
   toolMode: 'all' | 'project-write' | 'read-only',
+  planningTransport?: PlanningTransport,
 ): readonly string[] | undefined {
   const selected = explicitAllowedTools ? [...new Set(explicitAllowedTools)] : undefined;
   if (toolMode !== 'read-only') {
@@ -25,11 +27,17 @@ export function resolveAllowedTools(
   }
 
   const readOnly = new Set<string>(READ_ONLY_BUILTIN_TOOLS);
+  if (planningTransport === 'typed_tool') {
+    readOnly.add(_PLANNING_SUBMISSION_TOOL_NAME);
+  }
   if (!selected) {
     return [...readOnly];
   }
-
-  return selected.filter(tool => readOnly.has(tool));
+  const filtered = selected.filter(tool => readOnly.has(tool));
+  if (planningTransport === 'typed_tool' && !filtered.includes(_PLANNING_SUBMISSION_TOOL_NAME)) {
+    filtered.push(_PLANNING_SUBMISSION_TOOL_NAME);
+  }
+  return filtered;
 }
 
 /**

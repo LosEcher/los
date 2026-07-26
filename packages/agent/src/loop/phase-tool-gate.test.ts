@@ -6,6 +6,8 @@ import { isToolAllowedInPhase } from './phase-tool-gate.js';
 test('planning permits inspection tools and blocks writes', () => {
   assert.equal(isToolAllowedInPhase('read_file', 'planning').allowed, true);
   assert.equal(isToolAllowedInPhase('search_content', 'planning').allowed, true);
+  assert.equal(isToolAllowedInPhase('submit_run_contract', 'planning').allowed, true);
+  assert.equal(isToolAllowedInPhase('submit_run_contract', 'discovering').allowed, false);
   assert.equal(isToolAllowedInPhase('write_file', 'planning').allowed, false);
   assert.equal(isToolAllowedInPhase('run_shell', 'planning').allowed, false);
 });

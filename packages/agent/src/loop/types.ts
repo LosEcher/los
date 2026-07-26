@@ -8,6 +8,7 @@ import type { ModelDiagnosticConfig } from '../model-diagnostics.js';
 import type { AgentPreActionGateConfig } from '../pre-action-gate.js';
 import type { ProviderFallbackPolicy } from '../providers/provider-fallback.js';
 import type { ProviderFallbackEvent } from '../providers/provider-fallback.js';
+import type { PlanningOutput, PlanningTransport } from '../planning-output.js';
 
 export interface AgentConfig {
   sessionId?: string;
@@ -61,6 +62,8 @@ export interface AgentConfig {
   /** Sandbox isolation mode. Maps to config sandboxMode. Default: 'workspace-write'. */
   sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
   allowedTools?: readonly string[];
+  /** Planning submission carrier. typed_tool is the scheduler default. */
+  planningTransport?: PlanningTransport;
   toolRetry?: {
     maxAttempts?: number;
     baseDelayMs?: number;
@@ -139,6 +142,7 @@ export interface AgentResult {
   loopCount: number;
   totalTokens: { prompt: number; completion: number };
   messages: Message[];
+  planningSubmission?: PlanningOutput;
 }
 
 export interface ContextCompressionConfig {
