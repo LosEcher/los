@@ -1,5 +1,5 @@
 contract: los.run-spec
-version: 0.4.0
+version: 0.5.0
 status: implemented
 owner: packages/agent
 description: >
@@ -288,6 +288,15 @@ operatorControl:
       path: /runs/{runSpecId}/verify
     - method: POST
       path: /runs/{runSpecId}/approve
+      request:
+        optional:
+          reason: string
+          planRevision: positive integer; required for Work capability requests
+          contractHash: sha256-prefixed string; required for Work capability requests
+      behavior:
+        staleCapabilityStatus: 409
+        staleCapabilityError: approval_capability_stale
+        compatibility: callers outside the Work capability surface may omit planRevision and contractHash
     - method: POST
       path: /runs/{runSpecId}/revise-plan
     - method: POST

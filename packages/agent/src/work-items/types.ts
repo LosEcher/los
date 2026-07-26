@@ -37,6 +37,30 @@ export type WorkItemNextAction =
   | 'start'
   | 'none';
 
+export interface WorkItemActionCapability<Payload> {
+  label: string;
+  effect: string;
+  scope: string;
+  irreversible: boolean;
+  payload: Payload;
+}
+
+export interface WorkItemAvailableActions {
+  startWork?: WorkItemActionCapability<{ workItemId: string }>;
+  approvePlan?: WorkItemActionCapability<{
+    runSpecId: string;
+    planRevision: number;
+    contractHash: string;
+  }>;
+  runVerification?: WorkItemActionCapability<{ runSpecId: string }>;
+  inspectRun?: WorkItemActionCapability<{ runSpecId: string }>;
+  continueSession?: WorkItemActionCapability<{ sessionId: string }>;
+  reviewResult?: WorkItemActionCapability<{
+    workItemId: string;
+    decisions: Array<'accepted' | 'revision_requested'>;
+  }>;
+}
+
 export interface CreateWorkItemInput {
   tenantId?: string;
   projectId: string;
@@ -147,6 +171,7 @@ export interface WorkItemProjection {
   runContractDraft: RunContractMetadata;
   attentionState: WorkItemAttentionState;
   nextAction: WorkItemNextAction;
+  availableActions: WorkItemAvailableActions;
   links: WorkItemRunLink[];
   evidence: WorkItemEvidenceSummary;
   verificationRecords: WorkItemVerificationEvidence[];

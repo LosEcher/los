@@ -28,22 +28,29 @@ agent-owned read model over existing evidence.
 3. Inbox states such as `approval_required`, `recovery_required`,
    `verification_blocked`, and `review_ready` are derived projections. They are
    never written into `todos.status`.
-4. Creating a Work Item persists a structured run-contract draft in todo
+4. `availableActions` is the server-declared capability surface for Work. Web
+   may use `attentionState` and `nextAction` to explain state, but renders
+   effectful controls only from `availableActions`.
+5. Creating a Work Item persists a structured run-contract draft in todo
    metadata. It does not create a run spec, approve a plan, or dispatch a task.
-5. Read routes may aggregate execution evidence, but write routes may not
+6. Read routes may aggregate execution evidence, but write routes may not
    directly update run-spec, task-run, tool-call, or verification status.
-6. Attention records without Work Item lineage remain visible as orphan Inbox
+7. Attention records without Work Item lineage remain visible as orphan Inbox
    entries so the daily surface does not hide actionable runtime evidence.
-7. P1 extends the projection with full verification records and managed
+8. P1 extends the projection with full verification records and managed
    workspace evidence. Workspaces are correlated through
    `agent_tasks.run_spec_id`; their backup artifact is durable diff evidence.
-8. Operator result review is stored in `todos.metadata_json.resultReview`.
+9. Operator result review is stored in `todos.metadata_json.resultReview`.
    Accepting a result may move the todo to `done`, but only after the linked run
    is succeeded, required verification is complete, and every reviewable
    managed workspace has a backup artifact. It never changes execution state.
-9. Verification coverage is a derived project/mode query. Coverage reports
+10. Verification coverage is a derived project/mode query. Coverage reports
    succeeded and explicitly allowed skips separately from failed, pending, and
    missing requirements.
+11. Plan approval capabilities bind `runSpecId`, `planRevision`, and a hash of
+    the complete persisted RunContract. A revised or otherwise changed contract
+    makes the capability stale; the gateway returns `409
+    approval_capability_stale` and the Web reloads the current projection.
 
 ## Ownership
 
@@ -60,13 +67,14 @@ stays in `packages/agent`; no new `packages/infra/src` module is required.
 
 ## Projection Rules
 
-The first applicable condition wins:
+The first applicable condition wins. Terminal and failed evidence outranks an
+older planning phase so the read model never offers approval for a failed run:
 
-1. a persisted planning phase waiting for operator approval produces
-   `approval_required`;
+1. a failed or blocked attempt produces `recovery_required`;
 2. a required verification that is missing, pending, or failed produces
    `verification_blocked`;
-3. a failed or blocked attempt produces `recovery_required`;
+3. a persisted planning phase waiting for operator approval produces
+   `approval_required`;
 4. a queued or running attempt produces `running`;
 5. succeeded execution evidence on an unfinished todo produces `review_ready`;
 6. an unclassified attention event produces `unknown`;
@@ -96,6 +104,8 @@ Those capabilities remain later phases in the Web-first design.
 
 P0 is complete only when contract validation, focused agent/gateway/Web tests,
 the repository check, the cross-package gate, and a desktop/mobile Web smoke
-pass. P1 additionally requires verification projection/coverage tests, operator
+pass. The browser smoke must cover stale capability rejection, projection
+reload, successful approval of the current revision, and unavailable-action
+hiding. P1 additionally requires verification projection/coverage tests, operator
 result-decision gate tests, managed workspace backup enforcement, and the
 existing recovery, verification, and managed-workspace harnesses.

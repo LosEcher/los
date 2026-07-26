@@ -11,6 +11,10 @@ export {
 } from './result-review.js';
 export { createWorkItemRevision, type WorkItemRevisionResult } from './revision-loop.js';
 export {
+  matchesPlanApprovalCapability,
+  projectWorkItemAvailableActions,
+} from './action-capabilities.js';
+export {
   ensureWorkItemStore,
   linkWorkItemRun,
   listWorkItemRunLinks,
@@ -24,6 +28,8 @@ export type {
   LinkWorkItemRunInput,
   ListWorkItemsOptions,
   WorkItemAttentionState,
+  WorkItemActionCapability,
+  WorkItemAvailableActions,
   WorkItemEvidenceSummary,
   WorkItemVerificationEvidence,
   WorkItemVerificationCoverage,

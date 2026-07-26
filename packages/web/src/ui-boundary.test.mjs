@@ -267,8 +267,12 @@ test('new Work sends a structured contract draft and does not dispatch directly'
 
 test('Work reviews plans in the daily surface and proxies Work Item routes', () => {
   assert.match(workPage, /getJson<RuntimeInspect>\(`\/runs\/\$\{runSpecId\}\/inspect`\)/);
-  assert.match(workPage, /postJson\(`\/runs\/\$\{id\}\/approve`/);
+  assert.match(workPage, /postJson\(`\/runs\/\$\{action\.payload\.runSpecId\}\/approve`/);
   assert.match(workPage, /reason: approvalReason\.trim\(\)/);
+  assert.match(workPage, /availableActions\?\.approvePlan/);
+  assert.match(workPage, /\.\.\.action\.payload/);
+  assert.doesNotMatch(workPage, /item\.nextAction === 'review_plan' && runSpecId/);
+  assert.match(workReviewPanel, /Boolean\(item\.availableActions\.reviewResult\)/);
   assert.match(viteConfig, /'\/inbox': 'http:\/\/127\.0\.0\.1:8080'/);
   assert.match(viteConfig, /'\/work-items': 'http:\/\/127\.0\.0\.1:8080'/);
   assert.match(styles, /@media \(max-width: 780px\)[^]*\.daily-split,[^]*\.work-split/);

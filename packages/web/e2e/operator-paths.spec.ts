@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
+import { reviewWorkItem, workItem } from './operator-path-fixtures.js';
 const AUTH_TOKEN = 'e2e-auth-token';
 const OPERATOR_TOKEN = 'e2e-operator-token';
 const NOW = '2026-07-18T08:00:00.000Z';
@@ -204,7 +205,12 @@ test('uses Inbox and Work for plan review and structured creation', async ({ pag
   await page.getByRole('button', { name: 'Approve plan' }).click();
   await expect.poll(() => records.some(record => record.path === '/runs/run-work-e2e/approve')).toBe(true);
   const approval = records.find(record => record.path === '/runs/run-work-e2e/approve')!;
-  expect(approval.body).toEqual({ actor: 'web-console', reason: 'scope and checks reviewed in Work' });
+  expect(approval.body).toEqual({
+    runSpecId: 'run-work-e2e',
+    planRevision: 1,
+    contractHash: 'sha256:work-e2e-revision-1',
+    reason: 'scope and checks reviewed in Work',
+  });
 
   await page.getByRole('button', { name: /Review completed Web changes/ }).click();
   await expect(page.getByRole('heading', { name: 'Verification and changes' })).toBeVisible();
@@ -320,56 +326,6 @@ function inboxEntry() {
     id: 'work-item-work-e2e-1', sourceKind: 'work_item', workItemId: 'work-e2e-1',
     title: 'Review the structured plan', projectId: 'los', sessionId: 'session-main',
     runSpecId: 'run-work-e2e', attentionState: 'approval_required', nextAction: 'review_plan', updatedAt: NOW,
-  };
-}
-
-function workItem(id: string, withRun: boolean) {
-  const goal = withRun ? 'Inspect the Web-first plan' : 'Create a bounded daily workflow task';
-  return {
-    id, title: goal, description: goal, goal, tenantId: 'local', projectId: 'los', status: 'backlog',
-    priority: 'P2', source: 'web-work-item', attentionState: withRun ? 'approval_required' : 'none',
-    nextAction: withRun ? 'review_plan' : 'start', links: [], createdAt: NOW, updatedAt: NOW,
-    runContractDraft: {
-      mode: 'execution', phase: 'created', goal, editableSurfaces: ['packages/web/src/pages'],
-      requiredChecks: ['pnpm --filter @los/web test'], allowedSkippedChecks: [], stopConditions: ['scope expands'],
-      evidenceRequired: ['focused test output'], externalEvidenceAllowed: [], rawEvidenceProhibited: [], toolMode: 'read-only',
-    },
-    evidence: {
-      latestRunSpecId: withRun ? 'run-work-e2e' : undefined, latestSessionId: withRun ? 'session-main' : undefined,
-      runSpecStatus: withRun ? 'created' : undefined, verificationRequired: 1, verificationSucceeded: 0,
-      verificationSkipped: 0, verificationFailed: 0, verificationPending: 1,
-    },
-    verificationRecords: [],
-    changes: { hasReviewableDiff: false, workspaces: [] },
-  };
-}
-
-function reviewWorkItem() {
-  const item = workItem('work-e2e-review', true);
-  return {
-    ...item,
-    title: 'Review completed Web changes',
-    goal: 'Review completed Web changes',
-    status: 'in_progress',
-    attentionState: 'review_ready',
-    nextAction: 'review_changes',
-    evidence: {
-      ...item.evidence,
-      runSpecStatus: 'succeeded',
-      verificationSucceeded: 1,
-      verificationPending: 0,
-    },
-    verificationRecords: [{
-      id: 'verification-web-e2e', checkName: 'web focused tests', kind: 'command', status: 'succeeded', required: true,
-      command: 'pnpm --filter @los/web test', outputSummary: '14 tests passed', updatedAt: NOW, completedAt: NOW,
-    }],
-    changes: {
-      hasReviewableDiff: true,
-      workspaces: [{
-        workspaceId: 'workspace-web-e2e', status: 'backup_ready', baseRevision: '91df23c4',
-        backupArtifactId: 'artifact-diff-web-e2e', updatedAt: NOW,
-      }],
-    },
   };
 }
 
