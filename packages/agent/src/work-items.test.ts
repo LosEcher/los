@@ -4,11 +4,15 @@ import test from 'node:test';
 import { getDb } from '@los/infra/db';
 
 import { createTodo, loadTodo } from './todos.js';
+import { createRunSpec } from './run-specs.js';
+import { createTaskRun } from './task-runs.js';
+import { ensureAgentTaskGraphStore } from './agent-task-graph.js';
 import {
   createWorkItem,
   linkWorkItemRun,
   listInboxEntries,
   listWorkItemRunLinks,
+  loadWorkItemProjection,
 } from './work-items/index.js';
 import type { WorkItemProjection } from './work-items/types.js';
 import type { FeedAnalysisWorkItemEvidence } from './integration/feed-analysis-work-item.js';
@@ -89,6 +93,71 @@ test('work item run linkage is stable and fills later task evidence', async () =
   }
 });
 
+test('latest run spec contract enables approval instead of stale todo draft recovery', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-work-approval-${suffix}`;
+  const taskRunId = `task-work-approval-${suffix}`;
+  const sessionId = `session-work-approval-${suffix}`;
+  const projection = await createWorkItem({
+    projectId: 'los',
+    goal: 'Inspect package metadata',
+    mode: 'execution',
+    editableSurfaces: ['package.json'],
+    requiredChecks: ['node --check package.json'],
+    stopConditions: [],
+  });
+  try {
+    await ensureAgentTaskGraphStore();
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'Inspect package metadata',
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      runContract: {
+        mode: 'execution',
+        phase: 'planning',
+        editableSurfaces: ['package.json'],
+        requiredChecks: ['node --check package.json'],
+        planRevision: 1,
+        plan: [{
+          id: 'inspect',
+          title: 'Inspect package metadata',
+          description: 'Read the package manifest.',
+          dependsOnIds: [],
+          editableSurfaces: ['package.json'],
+          completionCriteria: 'The metadata is reported.',
+        }],
+      },
+    });
+    await createTaskRun({
+      id: taskRunId,
+      sessionId,
+      runSpecId,
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      promptPreview: 'Inspect package metadata',
+      status: 'blocked',
+      metadata: { awaitingApproval: true, disposition: 'planning' },
+    });
+    await linkWorkItemRun({
+      workItemId: projection.id,
+      runSpecId,
+      taskRunId,
+      sessionId,
+      relationKind: 'planning',
+    });
+    const projected = await loadWorkItemProjection(projection.id);
+    assert.equal(projected?.attentionState, 'approval_required');
+    assert.equal(projected?.nextAction, 'review_plan');
+    assert.equal(projected?.runContractDraft.planRevision, 1);
+  } finally {
+    await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM todos WHERE id = $1', [projection.id]).catch(() => undefined);
+  }
+});
+
 test('attention projection applies approval, verification, recovery, active, and review precedence', () => {
   const base = {
     todoStatus: 'in_progress',
@@ -96,11 +165,34 @@ test('attention projection applies approval, verification, recovery, active, and
     verificationFailed: 0,
     verificationPending: 0,
   };
-  assert.equal(_classifyWorkItemAttention({ ...base, phase: 'planning' }), 'approval_required');
+  assert.equal(_classifyWorkItemAttention({ ...base, phase: 'planning', approvalReady: true }), 'approval_required');
+  assert.equal(_classifyWorkItemAttention({
+    ...base,
+    phase: 'planning',
+    taskRunStatus: 'failed',
+  }), 'recovery_required');
+  assert.equal(_classifyWorkItemAttention({
+    ...base,
+    phase: 'planning',
+    taskRunStatus: 'blocked',
+  }), 'recovery_required');
   assert.equal(_classifyWorkItemAttention({
     ...base,
     phase: 'verifying',
     taskRunStatus: 'failed',
+    verificationFailed: 1,
+  }), 'recovery_required');
+  assert.equal(_classifyWorkItemAttention({
+    ...base,
+    phase: 'blocked',
+    taskRunStatus: 'blocked',
+    runSpecStatus: 'blocked',
+    verificationPending: 1,
+  }), 'verification_blocked');
+  assert.equal(_classifyWorkItemAttention({
+    ...base,
+    phase: 'verifying',
+    runSpecStatus: 'blocked',
     verificationFailed: 1,
   }), 'verification_blocked');
   assert.equal(_classifyWorkItemAttention({ ...base, taskRunStatus: 'failed' }), 'recovery_required');

@@ -323,7 +323,16 @@ function normalizeRequirements(
       reviewer: requirement.reviewer?.trim() || undefined,
     })),
   ].filter((requirement) => requirement.checkName);
-  return [...new Map(requirements.map((requirement) => [requirement.checkName, requirement])).values()];
+  return [...new Map(requirements.map((requirement) => [verificationRequirementKey(requirement), requirement])).values()];
+}
+
+function verificationRequirementKey(requirement: {
+  checkName: string;
+  kind: VerificationRequirement['kind'];
+  command?: string;
+}): string {
+  if (requirement.kind === 'command' && requirement.command) return `command:${requirement.command}`;
+  return `${requirement.kind}:${requirement.checkName}`;
 }
 
 function uniqueStrings(value: readonly string[]): string[] {

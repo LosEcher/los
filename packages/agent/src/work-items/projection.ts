@@ -143,6 +143,11 @@ export function _projectWorkItem(input: WorkItemProjectionInput): WorkItemProjec
     verificationFailed,
     verificationPending: recordedPending + missing,
   };
+  const approvalReady = latestTask?.status === 'blocked'
+    && latestTask.metadata.awaitingApproval === true
+    && (contract.phase === 'planning' || contract.phase === 'discovery_ready')
+    && Array.isArray(contract.plan)
+    && contract.plan.length > 0;
   const attentionState = _classifyWorkItemAttention({
     todoStatus: input.todo.status,
     phase: input.runSpec?.phase,
@@ -151,6 +156,7 @@ export function _projectWorkItem(input: WorkItemProjectionInput): WorkItemProjec
     hasRunEvidence: Boolean(input.runSpec || latestTask),
     verificationFailed,
     verificationPending: evidence.verificationPending,
+    approvalReady,
     scheduledRunStatus: readScheduledWorkMetadata(input.todo.metadata)?.status,
     feedAnalysis: input.feedAnalysis,
   });
@@ -197,13 +203,12 @@ export function _classifyWorkItemAttention(input: {
   hasRunEvidence: boolean;
   verificationFailed: number;
   verificationPending: number;
+  approvalReady?: boolean;
   scheduledRunStatus?: 'awaiting_approval' | 'succeeded' | 'failed';
   feedAnalysis?: WorkItemProjectionInput['feedAnalysis'];
 }): WorkItemAttentionState {
   if (input.todoStatus === 'done' || input.todoStatus === 'cancelled') return 'none';
-  if (input.scheduledRunStatus === 'awaiting_approval') return 'approval_required';
   if (input.scheduledRunStatus === 'failed') return 'recovery_required';
-  if (input.scheduledRunStatus === 'succeeded') return 'review_ready';
   if (input.feedAnalysis?.callback.deadLetterCount) return 'recovery_required';
   if (input.feedAnalysis?.dispatchStatus === 'completed' && !input.feedAnalysis.resultAvailable) {
     return 'verification_blocked';
@@ -212,17 +217,20 @@ export function _classifyWorkItemAttention(input: {
   if (input.feedAnalysis?.dispatchStatus === 'cancelled') return 'none';
   if (input.feedAnalysis?.dispatchStatus === 'completed') return 'review_ready';
   if (input.feedAnalysis) return 'running';
-  if (input.phase === 'planning' || input.phase === 'discovery_ready') return 'approval_required';
+  if (
+    input.taskRunStatus === 'failed'
+    || input.runSpecStatus === 'failed'
+  ) return 'recovery_required';
   const verificationPhase = input.phase === 'verifying' || input.phase === 'blocked' || input.phase === 'succeeded';
   if (input.verificationFailed > 0 || (verificationPhase && input.verificationPending > 0)) {
     return 'verification_blocked';
   }
   if (
-    input.taskRunStatus === 'failed'
-    || input.taskRunStatus === 'blocked'
-    || input.runSpecStatus === 'failed'
-    || input.runSpecStatus === 'blocked'
+    (input.taskRunStatus === 'blocked' && !input.approvalReady)
+    || (input.runSpecStatus === 'blocked' && !input.approvalReady)
   ) return 'recovery_required';
+  if (input.scheduledRunStatus === 'awaiting_approval' || input.approvalReady) return 'approval_required';
+  if (input.scheduledRunStatus === 'succeeded') return 'review_ready';
   if (
     input.taskRunStatus === 'queued'
     || input.taskRunStatus === 'running'
@@ -263,7 +271,7 @@ async function projectPersistedWorkItem(todo: Awaited<ReturnType<typeof loadTodo
   return _projectWorkItem({
     todo,
     links,
-    runContract: readRunContractMetadata(todo.metadata),
+    runContract: runSpec?.runContract ?? readRunContractMetadata(todo.metadata),
     runSpec: runSpec ? {
       id: runSpec.id,
       sessionId: runSpec.sessionId,
