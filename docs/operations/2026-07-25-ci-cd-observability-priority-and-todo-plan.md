@@ -28,11 +28,14 @@
 3. `[E]` Forgejo PR `#64/#65` 和 GitHub PR `#172` 已把 GitHub test matrix
    收敛为一次 root test，并增加 5 秒资源采样。exact-head GitHub run
    `30162236325` 与 Forgejo run `282` 四项全绿。
-4. `[E]` GitHub Linux 当前有 4 个 unique-head 样本。四次 workflow
-   分别消耗 365、397、389、380 runner-seconds，wall time 为 212、226、218、
-   204 秒，root test command 为 160.261--164.838 秒，swap sampled peak 均为
-   0。相对 915 runner-seconds 历史基线的暂定节省范围是 56.6%--60.1%，平均
-   58.2%。样本未达到 10 个，不发布 P95，也不据此调整 cache 或 runner 容量。
+4. `[E]` GitHub Linux 当前有 5 个 unique-head 样本。五次 workflow
+   分别消耗 365、397、389、380、397 runner-seconds，wall time 为 212、226、
+   218、204、235 秒，root test command 为 160.261--165.729 秒，swap sampled
+   peak 均为 0。第 5 个样本是 PR run `30180609399`，head 为
+   `3c90fedd347907d623d41b7d1d87fe1c24f80a64`；后续 main push run
+   `30180751162` 是 merge 后运行，不增加 unique-head 分母。相对 915
+   runner-seconds 历史基线的暂定节省范围是 56.6%--60.1%，平均 57.9%。样本未
+   达到 10 个，不发布 P95，也不据此调整 cache 或 runner 容量。
 5. `[E]` GitHub ruleset `17481877` 与 classic `main` branch protection 现在都只
    要求 `gate-fast`、`gate-test`、`gate-drift`。两处曾同时保留旧 contexts；只改
    ruleset 后 PR `#172` 仍为 `BLOCKED`，两处迁移后变为 `CLEAN` 并合并。
@@ -92,7 +95,7 @@
 | 5 | `todo-los-ci-superseded-run-control` | `done` | P1 | 1 | GitHub PR `#174` 已证明 replacement run 自动取消旧 run |
 | 6 | `todo-los-ci-forgejo-windows-resource-probe` | `done` | P1 | 1 | Forgejo PR `#70` / run `289` 与 GitHub PR `#175` / run `30170606961` 均已合并 |
 | 7 | `todo-los-p2-ci-cd-docs` | `in_progress` | P1 | 2、3、4、5 | 当前 change 统一控制面、执行面、证据面和保留策略；双端交付后完成 |
-| 8 | `todo-los-ci-resource-baseline` | `in_progress` | P1 | 3 | `4/10` unique-head；异步收集，10 个样本前不发布 P95 或调容量 |
+| 8 | `todo-los-ci-resource-baseline` | `in_progress` | P1 | 3 | `5/10` unique-head；异步收集，10 个样本前不发布 P95 或调容量 |
 | 9 | `todo-los-execution-experiment-contract` | `ready` | P1 | 1、2 及原有依赖 | 文档交付后的下一功能切片，不等待 10-run 窗口 |
 | 10 | `todo-los-p1-turbo-cache` | `backlog` | P1 | 6、8 | 等待资源基线；验证 pnpm cache、Turbo key、Playwright 安装和 coverage 拆分 |
 | 11 | `todo-los-daily-agent-product-status-reconciliation` | `ready` | P1 | 无 | 校准长期 P0 父计划状态，不新增功能范围 |
@@ -161,7 +164,7 @@ used 在 start、peak、end 和 +5 分钟均约 65 MB；本样本没有换页压
 
 该探针不进入每个 PR。后续仅对 `gate-test` 每第 5 个 eligible PR 采一次，原始
 JSON 在汇总写入 todo/doc 后删除，不上传成功 artifact。Windows 与 GitHub Linux
-样本分组统计；GitHub Linux 当前为 `4/10` unique-head，累计 10 个后才计算
+样本分组统计；GitHub Linux 当前为 `5/10` unique-head，累计 10 个后才计算
 P50/P95 和讨论 runner capacity，20 个样本复算。Windows exact-head 样本只能
 证明采样可行，不能证明容量长期充足。
 
@@ -228,7 +231,7 @@ collector 只读取 workflow 明确列出的文件，不读取环境变量；但
    run id、artifact 或 API/DB evidence。
 4. 远端 ruleset、push、PR、merge、runner 配置和部署继续单独经过 operator
    consent。
-5. unique-head 观测窗口是异步任务，不占用产品功能主线；当前 `4/10`，达到 10 个
+5. unique-head 观测窗口是异步任务，不占用产品功能主线；当前 `5/10`，达到 10 个
    样本后计算 P50/P95，20 个样本复算。
 6. superseded cancellation 不计 flake；unchanged-head 无代码变更失败后通过才计
    flake。
@@ -242,8 +245,9 @@ collector 只读取 workflow 明确列出的文件，不读取环境变量；但
 - `pnpm run status`：gateway/executor managed、health ok；
 - `pnpm run executor:status`：PostgreSQL connected，executor online、
   candidate=true、active=0；
-- GitHub API：ruleset `17481877`、classic `main` protection、PR `#172/#175`，
-  以及 runs `30157262347`、`30162236325`、`30170606961`；
+- GitHub API：ruleset `17481877`、classic `main` protection、PR `#172/#175/#176`，
+  以及 runs `30157262347`、`30162236325`、`30170606961`、`30180609399`、
+  `30180751162`；最后一个是 merge 后 main push，不计入 unique-head；
 - Forgejo API：PR `#64/#65/#66/#70`，runs `281/282/283/289`；run `281` 归类为 runner
   outage，不计代码 flake；
 - `pnpm check:ci-observer`：6/6 passed；`pnpm check:ci-gate`：3/3 passed；
@@ -253,4 +257,4 @@ collector 只读取 workflow 明确列出的文件，不读取环境变量；但
 - GitHub/Forgejo workflow YAML parse：passed；
 - PostgreSQL `todos`：父计划、子任务、状态和依赖已持久化；
 - PostgreSQL todo ledger：Todo 1 至 Todo 6 已完成；资源基线为 `in_progress`、
-  `4/10` unique-head；CI/CD 文档任务在双端交付前为 `in_progress`。
+  `5/10` unique-head；CI/CD 文档任务在双端交付前为 `in_progress`。
