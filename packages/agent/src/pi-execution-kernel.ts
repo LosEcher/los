@@ -26,14 +26,12 @@ import {
 } from './execution-kernel.js';
 import type { AgentResult, TurnSummary } from './loop.js';
 import type { Message, ToolCall } from './providers/index.js';
+import { getPiK4KernelSelectionIdentity } from './execution-kernel-selection.js';
 
-const PI_VERSION = '0.81.1+los.3';
+const PI_K4_KERNEL_IDENTITY = getPiK4KernelSelectionIdentity();
+const PI_VERSION = PI_K4_KERNEL_IDENTITY.version;
 const PI_CHECKPOINT_CODEC = 'pi-agent-core-messages-v1';
-const PI_KERNEL_IDENTITY: KernelIdentity = Object.freeze({
-  kind: 'pi',
-  version: PI_VERSION,
-  protocolVersion: '0.1.0',
-});
+const PI_KERNEL_IDENTITY: KernelIdentity = PI_K4_KERNEL_IDENTITY;
 
 export interface PiKernelToolDescriptor {
   name: string;

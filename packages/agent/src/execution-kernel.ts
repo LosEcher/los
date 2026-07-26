@@ -1,6 +1,8 @@
 import { runAgent, type AgentConfig, type AgentResult } from './loop.js';
+import { getLosKernelSelectionIdentity } from './execution-kernel-selection.js';
 
 const EXECUTION_KERNEL_PROTOCOL_VERSION = '0.1.0';
+const LOS_KERNEL_IDENTITY = getLosKernelSelectionIdentity();
 
 export interface KernelIdentity {
   kind: string;
@@ -116,12 +118,6 @@ interface LosExecutionKernelOptions {
   runner?: AgentRunner;
   now?: () => Date;
 }
-
-const LOS_KERNEL_IDENTITY: KernelIdentity = Object.freeze({
-  kind: 'los',
-  version: '0.1.0',
-  protocolVersion: EXECUTION_KERNEL_PROTOCOL_VERSION,
-});
 
 export function _createLosExecutionKernel(
   options: LosExecutionKernelOptions = {},

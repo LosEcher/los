@@ -1,10 +1,24 @@
 import type { AgentConfig, AgentResult } from './loop.js';
 import {
+  _consumeExecutionKernel,
   getLosExecutionKernelIdentity,
   runLosExecutionKernel,
   type KernelEvent,
   type KernelIdentity,
 } from './execution-kernel.js';
+import {
+  executionKernelIdentitiesEqual,
+  getPiK4KernelSelectionIdentity,
+  normalizeExecutionKernelSelection,
+  validateK4ExecutionKernelSelection,
+} from './execution-kernel-selection.js';
+import {
+  _createPiExecutionKernel,
+  _getPiExecutionKernelIdentity,
+  type PiKernelRunInput,
+} from './pi-execution-kernel.js';
+import { _preparePiKernelRun } from './pi-kernel-input.js';
+import type { RunContractMetadata } from './run-contract.js';
 
 export type ExecutionKernelKind = 'los';
 
@@ -42,9 +56,53 @@ export function resolveExecutionKernel(kind?: string): ScheduledExecutionKernel 
   return _createExecutionKernelRegistry().resolve(kind);
 }
 
+export function resolveExecutionKernelForRun(input: {
+  requestedKind?: string;
+  runSpecId?: string;
+  runContract?: RunContractMetadata;
+  toolMode?: string;
+  executorEnabled?: boolean;
+}): ScheduledExecutionKernel {
+  const selection = normalizeExecutionKernelSelection(input.runContract?.executionKernel);
+  if (!selection) return resolveExecutionKernel(input.requestedKind);
+  if (!input.runSpecId) throw new Error('Explicit execution-kernel selection requires a persisted run spec');
+  if (input.requestedKind && input.requestedKind !== selection.selected.kind) {
+    throw new Error(`Requested execution kernel ${input.requestedKind} does not match persisted selection ${selection.selected.kind}`);
+  }
+  if (executionKernelIdentitiesEqual(selection.selected, getPiK4KernelSelectionIdentity())) {
+    const error = validateK4ExecutionKernelSelection(selection, {
+      runContractMode: input.runContract?.mode,
+      toolMode: input.toolMode,
+      executorEnabled: input.executorEnabled,
+      requireCanaryAuthorization: true,
+    });
+    if (error) throw new Error(error);
+    return piScheduledExecutionKernel();
+  }
+  return resolveExecutionKernel(selection.selected.kind);
+}
+
 function losScheduledExecutionKernel(): ScheduledExecutionKernel {
   return {
     identity: getLosExecutionKernelIdentity(),
     run: (prompt, config, onEvent) => runLosExecutionKernel(prompt, config, onEvent),
+  };
+}
+
+function piScheduledExecutionKernel(): ScheduledExecutionKernel {
+  return {
+    identity: _getPiExecutionKernelIdentity(),
+    run: async (prompt, config, onEvent) => {
+      const prepared = await _preparePiKernelRun(prompt, config);
+      try {
+        return (await _consumeExecutionKernel<PiKernelRunInput, AgentResult>(
+          _createPiExecutionKernel(),
+          prepared.input,
+          onEvent,
+        )).result;
+      } finally {
+        await prepared.cleanup();
+      }
+    },
   };
 }
