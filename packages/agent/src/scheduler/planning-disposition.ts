@@ -1,6 +1,10 @@
 import { transitionExecutionState } from '../execution-store.js';
 import type { AgentResult } from '../loop.js';
-import { buildPlanningPrompt, parsePlanningOutput } from '../planning-output.js';
+import {
+  buildPlanningPrompt,
+  parsePlanningOutput,
+  type PlanningTransport,
+} from '../planning-output.js';
 import type { RunContractMetadata } from '../run-contract.js';
 import { persistRunSpecPlan } from '../run-spec-plans.js';
 import { updateTaskRunFields, type TaskRunRecord } from '../task-runs.js';
@@ -16,8 +20,13 @@ export function resolveTaskDisposition(
   return input.disposition ?? (contract?.phase === 'planning' ? 'planning' : 'execution');
 }
 
-export function promptForDisposition(prompt: string, disposition: ScheduledTaskDisposition): string {
-  return disposition === 'planning' ? buildPlanningPrompt(prompt) : prompt;
+export function promptForDisposition(
+  prompt: string,
+  disposition: ScheduledTaskDisposition,
+  planningTransport: PlanningTransport = 'typed_tool',
+  contract?: RunContractMetadata,
+): string {
+  return disposition === 'planning' ? buildPlanningPrompt(prompt, planningTransport, contract) : prompt;
 }
 
 export function validatePlanningDisposition(contract: RunContractMetadata | undefined): string | null {
@@ -34,10 +43,16 @@ export async function completePlanningDisposition(input: {
   sessionId: string;
   nodeId: string;
   leaseVersion: number;
+  planningTransport: PlanningTransport;
 }): Promise<ScheduledAgentTaskResult> {
   const runSpecId = input.schedulerInput.runSpecId;
   if (!runSpecId) throw new Error('Planning disposition requires a persisted run spec');
-  const planning = parsePlanningOutput(input.result.text);
+  const planning = input.planningTransport === 'text_json_legacy'
+    ? parsePlanningOutput(input.result.text)
+    : input.result.planningSubmission;
+  if (!planning) {
+    throw new Error('Invalid planning output: submit_run_contract was not accepted');
+  }
   const runSpec = await persistRunSpecPlan(runSpecId, {
     plan: planning.plan,
     verifications: planning.verifications,

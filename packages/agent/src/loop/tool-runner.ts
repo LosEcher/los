@@ -166,11 +166,12 @@ function prepareToolCall(input: {
       try {
         args = fn.arguments ? JSON.parse(fn.arguments) as Record<string, unknown> : {};
       } catch (err: any) {
+        const message = `Invalid tool arguments: ${err?.message ?? String(err)}`;
         onSessionError({
           turn,
           type: 'tool_parse_error',
           toolName: fn.name,
-          message: `Failed to parse tool arguments: ${err?.message ?? String(err)}`,
+          message,
         });
         await emitEvent({
           type: 'tool.result',
@@ -183,10 +184,23 @@ function prepareToolCall(input: {
             durationMs: 0,
             contentPreview: '',
             contentLength: 0,
-            errorPreview: `Invalid tool arguments: ${err?.message ?? String(err)}`,
+            errorPreview: message,
           },
         });
-        throw err;
+        return {
+          index,
+          callId: tc.id,
+          toolName: fn.name,
+          content: JSON.stringify({
+            error: 'invalid_tool_arguments',
+            message,
+            repair: 'Call the tool again with valid JSON arguments.',
+          }),
+          ok: false,
+          denied: false,
+          durationMs: 0,
+          error: message,
+        };
       }
 
       const result = await broker.execute({

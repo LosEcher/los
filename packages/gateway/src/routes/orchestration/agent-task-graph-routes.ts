@@ -15,7 +15,7 @@ import {
 } from '@los/agent';
 import { getConfig } from '@los/infra/config';
 import { asRecord, normalizeOptionalString, normalizeStringArray } from '../server-helpers.js';
-import { getRequestContext, requireOperator } from '../../request-context.js';
+import { getOperatorPrincipal, getRequestContext, requireOperator } from '../../request-context.js';
 
 type AgentTaskGraphRouteDependencies = {
   cancelGovernedAgentTaskGraph: typeof cancelGovernedAgentTaskGraph;
@@ -53,10 +53,11 @@ export function registerAgentTaskGraphRoutes(
     if (!(await requireOperator(req, reply))) return;
     const body = asRecord(req.body);
     const runSpecId = normalizeOptionalString(body.runSpecId);
-    const integrationOwner = normalizeOptionalString(body.integrationOwner);
-    if (!runSpecId || !integrationOwner) {
-      return reply.status(422).send({ error: 'runSpecId and integrationOwner are required' });
+    if (!runSpecId) return reply.status(422).send({ error: 'runSpecId is required' });
+    if (normalizeOptionalString(body.integrationOwner)) {
+      return reply.status(422).send({ error: 'integrationOwner is derived from the operator principal' });
     }
+    const operator = getOperatorPrincipal(req);
     const runSpec = await deps.loadRunSpec(runSpecId);
     if (!runSpec) return reply.status(404).send({ error: 'run spec not found' });
     const executionGate = deps.canStartExecution(runSpec.runContract);
@@ -71,8 +72,8 @@ export function registerAgentTaskGraphRoutes(
         graphId,
         runSpecId,
         sessionId: runSpec.sessionId,
-        integrationOwner,
-        createdBy: getRequestContext(req).userId,
+        integrationOwner: operator.subject,
+        createdBy: operator.subject,
         workers,
         verifier,
         maxParallelTasks: normalizeInteger(body.maxParallelTasks),
@@ -165,6 +166,7 @@ export function registerAgentTaskGraphRoutes(
 
   app.post('/agent-graphs/:id/cancel', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const { id } = req.params as { id: string };
     const reason = normalizeOptionalString(asRecord(req.body).reason) ?? 'cancelled_by_operator';
     const graph = await deps.readAgentTaskGraph(id);
@@ -176,7 +178,7 @@ export function registerAgentTaskGraphRoutes(
       }
     }
     try {
-      const control = await deps.cancelGovernedAgentTaskGraph(id, getRequestContext(req).userId, reason);
+      const control = await deps.cancelGovernedAgentTaskGraph(id, operator.subject, reason);
       if (!control) return reply.status(404).send({ error: 'agent task graph not found' });
       return { graph: await deps.readAgentTaskGraph(id, { requireVerifier: true }), control };
     } catch (error) {
@@ -186,11 +188,12 @@ export function registerAgentTaskGraphRoutes(
 
   app.post('/agent-graphs/:id/integrate', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
+    const operator = getOperatorPrincipal(req);
     const { id } = req.params as { id: string };
     try {
       const control = await deps.integrateGovernedAgentTaskGraph(
         id,
-        getRequestContext(req).userId,
+        operator.subject,
         normalizeOptionalString(asRecord(req.body).note),
       );
       if (!control) return reply.status(404).send({ error: 'agent task graph not found' });

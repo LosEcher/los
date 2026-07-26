@@ -216,7 +216,13 @@ export interface WorkItemProjectionInput {
     phase?: string;
     updatedAt: string;
   };
-  taskRuns: Array<{ id: string; sessionId: string; status: string; updatedAt: string }>;
+  taskRuns: Array<{
+    id: string;
+    sessionId: string;
+    status: string;
+    metadata: Record<string, unknown>;
+    updatedAt: string;
+  }>;
   verificationStatuses: WorkItemVerificationEvidence[];
   managedWorkspaces?: WorkItemWorkspaceEvidence[];
   feedAnalysis?: FeedAnalysisWorkItemEvidence;

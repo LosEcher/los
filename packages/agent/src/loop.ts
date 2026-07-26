@@ -102,6 +102,7 @@ export async function runAgent(
     totalCostUsd,
     cacheEventCount,
   } = counters;
+  const readPlanningSubmission = () => s.planningSubmissionCollector?.getSubmission();
 
   const turns: TurnSummary[] = [];
   let operatorControlCursors: OperatorControlCursors = { steering: 0, followup: 0 };
@@ -469,6 +470,7 @@ export async function runAgent(
         loopCount: i + 1,
         totalTokens: { prompt: totalPromptTokens, completion: totalCompletionTokens },
         messages,
+        planningSubmission: readPlanningSubmission(),
       };
     }
 
@@ -571,6 +573,7 @@ export async function runAgent(
     loopCount: maxLoops + 1,
     totalTokens: { prompt: totalPromptTokens, completion: totalCompletionTokens },
     messages,
+    planningSubmission: readPlanningSubmission(),
   };
   } finally {
     await mcpCleanup();

@@ -7,6 +7,7 @@ test('run-spec runtime validator accepts a valid request', () => {
     prompt: 'inspect current state',
     provider: null,
     toolMode: 'read-only',
+    planningTransport: 'typed_tool',
     maxLoops: 2,
   });
   assert.equal(result.success, true);
@@ -46,11 +47,13 @@ test('run-spec runtime validator rejects invalid request fields', () => {
   const result = validateRunSpecRequest({
     prompt: 'inspect current state',
     toolMode: 'root',
+    planningTransport: 'markdown',
     timeoutMs: 0,
   });
   assert.equal(result.success, false);
   if (!result.success) {
     assert.ok(result.errors.some(error => error.instancePath === '/toolMode'));
+    assert.ok(result.errors.some(error => error.instancePath === '/planningTransport'));
     assert.ok(result.errors.some(error => error.instancePath === '/timeoutMs'));
   }
 });
