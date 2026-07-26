@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ensureSessionEventStore } from '../session-events.js';
-import { resolveExecutionKernel } from '../execution-kernel-registry.js';
+import { resolveExecutionKernelForRun } from '../execution-kernel-registry.js';
+import { assertPersistedRunSpecKernelSelection } from '../run-spec-kernel-selection.js';
 import { _createKernelEventProjector } from '../kernel-event-projection.js';
 import { startScheduledKernelShadow } from './kernel-shadow.js';
 import {
@@ -50,7 +51,6 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const taskRunId = input.taskRunId ?? `task-${randomUUID()}`;
   const sessionId = input.sessionId ?? `session-${Date.now()}`;
   const traceId = input.traceId ?? taskRunId;
-  const executionKernel = resolveExecutionKernel(input.executionKernelKind);
   const dedupeKey = normalizeOptionalString(input.dedupeKey);
   const contractMetadata = {
     ...(input.metadata ?? {}),
@@ -61,6 +61,21 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   const planningTransport = input.planningTransport ?? 'typed_tool';
   const toolMode = disposition === 'planning' ? 'read-only' : (input.toolMode ?? 'project-write');
   const sandboxMode = disposition === 'planning' ? 'readonly' : input.sandboxMode;
+  if (runContract?.executionKernel) {
+    await assertPersistedRunSpecKernelSelection({
+      runSpecId: input.runSpecId ?? '',
+      selection: runContract.executionKernel,
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+    });
+  }
+  const executionKernel = resolveExecutionKernelForRun({
+    requestedKind: input.executionKernelKind,
+    runSpecId: input.runSpecId,
+    runContract,
+    toolMode,
+    executorEnabled: input.executor?.enabled === true,
+  });
   const runtimePrompt = promptForDisposition(input.prompt, disposition, planningTransport, runContract);
   const workspaceRoot = input.workspaceRoot ?? process.cwd();
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
@@ -183,7 +198,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       timeoutMs,
       disposition,
       planningTransport: disposition === 'planning' ? planningTransport : null,
-      requestedExecutionKernel: input.executionKernelKind ?? 'los',
+      requestedExecutionKernel: input.executionKernelKind ?? runContract?.executionKernel?.selected.kind ?? 'los',
       executionKernel: executionKernel.identity,
     },
     runContract,

@@ -14,8 +14,19 @@ export function _createKernelEventProjector(
   const sessionId = requireContext(context.sessionId, 'sessionId');
   const taskRunId = requireContext(context.taskRunId, 'taskRunId');
   const traceId = requireContext(context.traceId, 'traceId');
+  let expectedSequence = 0;
+  let kernelIdentity: string | undefined;
 
   return async event => {
+    if (event.sequence !== expectedSequence) {
+      throw new Error(`Canonical kernel transcript drift: expected sequence ${expectedSequence}, received ${event.sequence}`);
+    }
+    const currentIdentity = `${event.kernel.kind}@${event.kernel.version}/${event.kernel.protocolVersion}`;
+    if (kernelIdentity && kernelIdentity !== currentIdentity) {
+      throw new Error(`Canonical kernel transcript drift: identity changed from ${kernelIdentity} to ${currentIdentity}`);
+    }
+    expectedSequence += 1;
+    kernelIdentity = currentIdentity;
     const record = await append(_projectKernelEvent(event, {
       ...context,
       sessionId,
