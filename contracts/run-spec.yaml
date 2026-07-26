@@ -1,5 +1,5 @@
 contract: los.run-spec
-version: 0.3.0
+version: 0.4.0
 status: implemented
 owner: packages/agent
 description: >
@@ -74,6 +74,17 @@ properties:
     type: array
     items:
       type: string
+  planningTransport:
+    type: string
+    enum:
+      - typed_tool
+      - text_json_legacy
+    default: typed_tool
+    description: >
+      Planning submission carrier. typed_tool exposes the planning-only
+      submit_run_contract protocol tool and is the default. text_json_legacy
+      retains explicit compatibility for providers that cannot emit typed tool
+      calls; it must not become the implicit planning path.
   sandbox:
     type: object
     properties:

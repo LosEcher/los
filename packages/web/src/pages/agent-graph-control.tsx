@@ -21,7 +21,6 @@ export function AgentGraphControl() {
   const [expanded, setExpanded] = useState(false);
   const [graphId, setGraphId] = useState('');
   const [runSpecId, setRunSpecId] = useState('');
-  const [integrationOwner, setIntegrationOwner] = useState('local');
   const [workers, setWorkers] = useState<WorkerDraft[]>(INITIAL_WORKERS);
   const [verifierTitle, setVerifierTitle] = useState('Verify required checks and worker output');
 
@@ -34,7 +33,6 @@ export function AgentGraphControl() {
   const create = useMutation({
     mutationFn: () => postJson<GovernedAgentTaskGraphResponse>('/agent-graphs', {
       runSpecId,
-      integrationOwner,
       maxParallelTasks: workers.length,
       workers: workers.map((worker, index) => ({
         title: worker.title || `Worker ${index + 1}`,
@@ -62,32 +60,28 @@ export function AgentGraphControl() {
       <div className="governed-graph-bar">
         <div className="governed-graph-title">
           <GitMerge size={15} />
-          <strong>Governed Graph</strong>
-          {control ? <span className={`status-text ${control.integrationStatus}`}>{control.integrationStatus}</span> : null}
+          <div><strong>Optional task graph</strong><small>Use after a Work plan is approved; ordinary Work does not need this.</small></div>
+          {control ? <span className={`status-text ${control.integrationStatus}`}>{graphStatusLabel(control.integrationStatus)}</span> : null}
         </div>
         <button className={`ghost-btn ${expanded ? 'active' : ''}`} type="button" onClick={() => setExpanded(value => !value)}>
-          <Plus size={14} /> {expanded ? 'close' : 'create / open'}
+          <Plus size={14} /> {expanded ? 'close' : 'open or create'}
         </button>
       </div>
 
       {expanded ? (
         <div className="governed-graph-form">
           <div className="governed-graph-open">
-            <Field label="Graph id">
-              <input value={graphId} onChange={event => setGraphId(event.target.value.trim())} placeholder="graph-..." />
+            <Field label="Open an existing graph">
+              <input value={graphId} onChange={event => setGraphId(event.target.value.trim())} placeholder="Paste graph ID, e.g. manual-web-graph-..." />
             </Field>
             <button className="ghost-btn" type="button" disabled={!graphId} onClick={() => graph.refetch()}>
-              <Search size={14} /> inspect
+              <Search size={14} /> open graph
             </button>
           </div>
-          <div className="field-grid governed-graph-fields">
-            <Field label="Approved run spec">
-              <input value={runSpecId} onChange={event => setRunSpecId(event.target.value)} placeholder="run-..." />
-            </Field>
-            <Field label="Integration owner">
-              <input value={integrationOwner} onChange={event => setIntegrationOwner(event.target.value)} />
-            </Field>
-          </div>
+          <p className="governed-graph-help">A graph is a bounded group of workers plus an independent verifier. It is not a replacement for Work approval, and <b>integrate</b> records operator confirmation; it does not merge or push code.</p>
+          <Field label="Approved run spec">
+            <input value={runSpecId} onChange={event => setRunSpecId(event.target.value)} placeholder="run-..." />
+          </Field>
           <div className="governed-worker-list">
             {workers.map((worker, index) => (
               <div className="governed-worker-row" key={index}>
@@ -126,16 +120,16 @@ export function AgentGraphControl() {
             >
               <Plus size={14} /> worker
             </button>
-            <Field label="Verifier">
+            <Field label="Independent verifier">
               <input value={verifierTitle} onChange={event => setVerifierTitle(event.target.value)} />
             </Field>
             <button
               className="primary-btn"
               type="button"
-              disabled={!runSpecId || !integrationOwner || workers.some(worker => splitSurfaces(worker.surfaces).length === 0) || create.isPending}
+              disabled={!runSpecId || workers.some(worker => splitSurfaces(worker.surfaces).length === 0) || create.isPending}
               onClick={() => create.mutate()}
             >
-              <Plus size={14} /> create graph
+              <Plus size={14} /> create governed graph
             </button>
           </div>
           {create.error ? <p className="form-error">{create.error.message}</p> : null}
@@ -146,19 +140,19 @@ export function AgentGraphControl() {
         <div className="governed-graph-watch">
           <div className="governed-graph-facts">
             <Fact label="graph" value={current.graphId} />
-            <Fact label="owner" value={control?.integrationOwner ?? 'legacy graph'} />
-            <Fact label="tasks" value={`${current.completion.counts.succeeded}/${current.completion.counts.total} succeeded`} />
-            <Fact label="verifier" value={`${current.completion.counts.succeededVerifier}/${current.completion.counts.verifier}`} />
+            <Fact label="operator owner" value={control?.integrationOwner ?? 'legacy graph'} />
+            <Fact label="worker progress" value={`${current.completion.counts.succeeded}/${current.completion.counts.total} succeeded`} />
+            <Fact label="verifier" value={`${current.completion.counts.succeededVerifier}/${current.completion.counts.verifier} passed`} />
           </div>
           <div className="inline-actions governed-graph-actions">
             <button className="ghost-btn" type="button" disabled={!active || run.isPending} onClick={() => run.mutate()}>
-              <Play size={14} /> run
+              <Play size={14} /> run workers
             </button>
             <button className="ghost-btn danger" type="button" disabled={!active || cancel.isPending} onClick={() => cancel.mutate()}>
-              <Square size={14} /> cancel
+              <Square size={14} /> stop graph
             </button>
             <button className="ghost-btn" type="button" disabled={control?.integrationStatus !== 'ready' || integrate.isPending} onClick={() => integrate.mutate()}>
-              <GitMerge size={14} /> integrate
+              <GitMerge size={14} /> confirm integration
             </button>
           </div>
           <div className="governed-task-lines">
@@ -166,8 +160,8 @@ export function AgentGraphControl() {
               <div className="governed-task-line" key={task.id}>
                 <span className={`status-dot ${task.status}`} aria-hidden="true" />
                 <span>{task.title}</span>
-                <span>{task.role}</span>
-                <span>{task.status}</span>
+                <span>{roleLabel(task.role)}</span>
+                <span>{taskStatusLabel(task.status)}</span>
               </div>
             ))}
           </div>
@@ -178,6 +172,29 @@ export function AgentGraphControl() {
       ) : graphId && !graph.isLoading ? <EmptyText text="Graph evidence is unavailable." /> : null}
     </div>
   );
+}
+
+function graphStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending_verification': return 'Waiting for verifier';
+    case 'ready': return 'Ready to confirm';
+    case 'integrated': return 'Integration confirmed';
+    case 'cancelled': return 'Cancelled';
+    default: return status.replaceAll('_', ' ');
+  }
+}
+
+function roleLabel(role: string): string {
+  if (role === 'executor') return 'worker';
+  if (role === 'verifier') return 'verifier';
+  return role;
+}
+
+function taskStatusLabel(status: string): string {
+  if (status === 'succeeded') return 'passed';
+  if (status === 'queued') return 'waiting';
+  if (status === 'running') return 'working';
+  return status;
 }
 
 function useGraphAction(graphId: string, action: 'run' | 'cancel' | 'integrate', body: Record<string, unknown> = {}) {

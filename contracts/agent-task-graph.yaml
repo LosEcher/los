@@ -1,11 +1,12 @@
 contract: los.agent-task-graph
-version: 0.3.0
+version: 0.4.0
 status: draft
 owner: packages/agent
 description: >
   Contract for durable planner/executor/verifier task graphs. Governed graphs
   support two to four executor workers with non-overlapping editable surfaces,
-  an independent verifier, and an explicit operator integration owner.
+  an independent verifier, and an integration owner derived from the validated
+  operator principal.
 type: object
 sourceOfTruth:
   - agent_tasks
@@ -88,8 +89,9 @@ rules:
   - heartbeat and terminal writes require the claimed node id, lease_version, and an unexpired lease
   - losing either the agent_tasks or task_runs lease aborts the active execution
   - every mutating graph route requires validated operator privilege
-  - graph creation requires an approved run spec and an explicit integration owner
-  - integration requires verifier-backed completion and the designated integration owner
+  - graph creation requires an approved run spec and derives integration owner from the validated operator principal
+  - request bodies cannot select or override the integration owner
+  - integration requires verifier-backed completion and the same designated operator principal
   - integration records an operator intervention event and does not automatically merge, push, or release workspaces
 leasing:
   fence:

@@ -7,6 +7,7 @@ import {
 import {
   normalizePlanForPersistence,
   validatePlanForApproval,
+  validatePlanScopeForApproval,
   validateVerificationExecutionSupport,
   validateVerificationMappingForApproval,
 } from './run-plan-validation.js';
@@ -62,6 +63,8 @@ export async function persistRunSpecPlan(
       };
       const mappingError = validateVerificationMappingForApproval(nextContract);
       if (mappingError) throw new Error(mappingError);
+      const scopeError = validatePlanScopeForApproval(nextContract);
+      if (scopeError) throw new Error(scopeError);
       const supportError = validateVerificationExecutionSupport(nextContract);
       if (supportError) throw new Error(supportError);
       await client.query(

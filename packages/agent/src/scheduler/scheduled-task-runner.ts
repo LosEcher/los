@@ -58,9 +58,10 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   };
   const runContract = await readCurrentRunContract(input.runSpecId, contractMetadata);
   const disposition = resolveTaskDisposition(input, runContract);
+  const planningTransport = input.planningTransport ?? 'typed_tool';
   const toolMode = disposition === 'planning' ? 'read-only' : (input.toolMode ?? 'project-write');
   const sandboxMode = disposition === 'planning' ? 'readonly' : input.sandboxMode;
-  const runtimePrompt = promptForDisposition(input.prompt, disposition);
+  const runtimePrompt = promptForDisposition(input.prompt, disposition, planningTransport, runContract);
   const workspaceRoot = input.workspaceRoot ?? process.cwd();
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
@@ -181,6 +182,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       toolRetry: input.toolRetry,
       timeoutMs,
       disposition,
+      planningTransport: disposition === 'planning' ? planningTransport : null,
       requestedExecutionKernel: input.executionKernelKind ?? 'los',
       executionKernel: executionKernel.identity,
     },

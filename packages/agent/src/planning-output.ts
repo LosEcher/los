@@ -1,10 +1,12 @@
 import {
   normalizeRunContractMetadata,
   type PlanStep,
+  type RunContractMetadata,
   type VerificationRequirement,
 } from './run-contract.js';
 import {
   validatePlanForApproval,
+  validatePlanScopeForApproval,
   validateVerificationExecutionSupport,
 } from './run-plan-validation.js';
 
@@ -14,20 +16,48 @@ export interface PlanningOutput {
   summary?: string;
 }
 
-export function buildPlanningPrompt(goal: string): string {
+export type PlanningTransport = 'typed_tool' | 'text_json_legacy';
+
+export const _PLANNING_SUBMISSION_TOOL_NAME = 'submit_run_contract';
+
+export function buildPlanningPrompt(
+  goal: string,
+  transport: PlanningTransport = 'typed_tool',
+  contract?: RunContractMetadata,
+): string {
+  if (transport === 'text_json_legacy') {
+    return buildLegacyPlanningPrompt(goal);
+  }
   return [
     goal,
     '',
-    'Planning disposition: inspect the workspace with read-only tools and return an execution plan.',
+    ...formatPlanningContract(contract),
+    'Planning disposition: inspect the workspace with read-only tools and prepare an execution plan.',
     'Do not edit files, run write commands, or execute the plan.',
-    'Your final response must be one JSON object with no markdown fence:',
-    '{"summary":"...","plan":[{"id":"step-1","title":"...","description":"...","dependsOnIds":[],"editableSurfaces":["path"],"completionCriteria":"..."}],"verifications":[{"id":"check-1","kind":"command","description":"...","command":"..."}]}',
+    `Submit the plan exactly once with the ${_PLANNING_SUBMISSION_TOOL_NAME} tool.`,
+    'The tool accepts summary, plan steps, and command verifications only. Trusted run, task, session, actor, tenant, and project identifiers are injected by LOS and must not be included.',
+    'After the tool accepts the plan, provide a short human-readable summary; do not repeat the plan as JSON.',
     'Plan dependencies must be acyclic. Use only command verifications; operator approval will review the result before execution.',
+    'Treat the authoritative RunContract as the scope boundary. Do not add editable surfaces outside it, and include its required checks in the submitted verification mapping.',
   ].join('\n');
 }
 
 export function parsePlanningOutput(text: string): PlanningOutput {
-  const raw = parseJsonObject(stripMarkdownFence(text));
+  return validatePlanningOutputPayload(parseJsonObject(stripMarkdownFence(text)));
+}
+
+export function validatePlanningOutputPayload(
+  input: unknown,
+  contract?: RunContractMetadata,
+): PlanningOutput {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('Invalid planning output: expected object');
+  }
+  const raw = input as Record<string, unknown>;
+  const unexpectedKeys = Object.keys(raw).filter(key => !['summary', 'plan', 'verifications'].includes(key));
+  if (unexpectedKeys.length > 0) {
+    throw new Error(`Invalid planning output: unexpected fields ${unexpectedKeys.join(', ')}`);
+  }
   const normalized = normalizeRunContractMetadata({
     plan: raw.plan,
     verifications: raw.verifications,
@@ -39,11 +69,41 @@ export function parsePlanningOutput(text: string): PlanningOutput {
     verifications: normalized?.verifications,
   });
   if (supportError) throw new Error(`Invalid planning output: ${supportError}`);
+  const scopeError = contract
+    ? validatePlanScopeForApproval({ editableSurfaces: contract.editableSurfaces, plan })
+    : null;
+  if (scopeError) throw new Error(`Invalid planning output: ${scopeError}`);
   return {
     plan: plan!,
     verifications: normalized?.verifications ?? [],
     summary: normalizeOptionalString(raw.summary),
   };
+}
+
+function formatPlanningContract(contract: RunContractMetadata | undefined): string[] {
+  if (!contract) return [];
+  const lines = [
+    'Authoritative RunContract:',
+    `- Goal: ${contract.goal ?? 'Use the user request above.'}`,
+    `- Tool mode: ${contract.toolMode ?? 'read-only'}`,
+    `- Editable surfaces: ${contract.editableSurfaces.length > 0 ? contract.editableSurfaces.join(', ') : '(none)'}`,
+    `- Required checks: ${contract.requiredChecks.length > 0 ? contract.requiredChecks.join(' | ') : '(none)'}`,
+    `- Stop conditions: ${contract.stopConditions.length > 0 ? contract.stopConditions.join(' | ') : '(none)'}`,
+    '',
+  ];
+  return lines;
+}
+
+function buildLegacyPlanningPrompt(goal: string): string {
+  return [
+    goal,
+    '',
+    'Planning disposition: inspect the workspace with read-only tools and return an execution plan.',
+    'Do not edit files, run write commands, or execute the plan.',
+    'Legacy planning transport is explicitly enabled. Your final response must be one JSON object with no markdown fence:',
+    '{"summary":"...","plan":[{"id":"step-1","title":"...","description":"...","dependsOnIds":[],"editableSurfaces":["path"],"completionCriteria":"..."}],"verifications":[{"id":"check-1","kind":"command","description":"...","command":"..."}]}',
+    'Plan dependencies must be acyclic. Use only command verifications; operator approval will review the result before execution.',
+  ].join('\n');
 }
 
 function stripMarkdownFence(value: string): string {

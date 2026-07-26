@@ -20,6 +20,7 @@ import {
 import {
   buildAdvancedCount,
   buildTodoPrompt,
+  readRunContract,
   metadataText,
   buildHistoryRows,
   mapTraceToMessages,
@@ -248,6 +249,10 @@ export function ChatPage({
   // Todo context
   useEffect(() => {
     if (run.running || !activeTodoContext || activeTodoContext.id === boundTodoId) return;
+    const contractToolMode = readRunContract(activeTodoContext)?.toolMode;
+    if (contractToolMode === 'read-only' || contractToolMode === 'project-write') {
+      setToolMode(contractToolMode);
+    }
     bindTodo(activeTodoContext);
     run.setPrompt(buildTodoPrompt(activeTodoContext));
     run.setRows([{ id: crypto.randomUUID(), event: 'todo.selected', message: activeTodoContext.title, meta: activeTodoContext.id, level: 'ok' }]);

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { loadRunSpec, type RunSpecStatus } from './run-specs.js';
 import { transitionExecutionState } from './execution-store.js';
 import { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
+import { listTaskRunsForRunSpec, updateTaskRunFields, type TaskRunRecord } from './task-runs.js';
 import {
   listVerificationRecordsForRunSpec,
   loadVerificationRecord,
@@ -150,7 +151,9 @@ export async function runVerificationRecordsForRunSpec(
       sessionId: initialRecords[0]?.sessionId,
     });
   }
-  await ensureRunSpecVerificationPhase(runSpecId, 'verification_started', 'los.verification');
+  if (runSpec.status !== 'succeeded') {
+    await ensureRunSpecVerificationPhase(runSpecId, 'verification_started', 'los.verification');
+  }
   const ranRecordIds: string[] = [];
   for (const record of runnable) {
     await runVerificationRecord(record.id, {
@@ -186,16 +189,50 @@ async function applyVerificationDecisionForRunSpec(
   );
   if (shouldUpdateStatus) {
     if (runSpec.status !== 'failed' && runSpec.status !== 'cancelled') {
-      await transitionExecutionState({
-        entityType: 'run_spec',
-        entityId: runSpecId,
-        to: decision.status,
-        reason: `verification_decision:${decision.status}`,
-        sessionId: runSpec.sessionId,
-      });
+      if (runSpec.status !== decision.status) {
+        await transitionExecutionState({
+          entityType: 'run_spec',
+          entityId: runSpecId,
+          to: decision.status,
+          reason: `verification_decision:${decision.status}`,
+          sessionId: runSpec.sessionId,
+        });
+      }
+      if (decision.status === 'succeeded') {
+        await completeVerificationBlockedTaskRuns(runSpecId, runSpec.sessionId);
+      }
     }
   }
   return decision;
+}
+
+async function completeVerificationBlockedTaskRuns(runSpecId: string, sessionId: string): Promise<void> {
+  const taskRuns = await listTaskRunsForRunSpec(runSpecId);
+  for (const taskRun of taskRuns.filter(isVerificationBlockedTaskRun)) {
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRun.id,
+      to: 'running',
+      reason: 'verification_passed_resume',
+      sessionId,
+    });
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRun.id,
+      to: 'succeeded',
+      reason: 'verification_passed',
+      sessionId,
+    });
+    const { blockReason: _blockReason, blockKind: _blockKind, ...metadata } = taskRun.metadata;
+    await updateTaskRunFields(taskRun.id, { metadata });
+  }
+}
+
+function isVerificationBlockedTaskRun(taskRun: TaskRunRecord): boolean {
+  if (taskRun.status !== 'blocked' || taskRun.metadata.disposition !== 'execution') return false;
+  if (taskRun.metadata.blockKind === 'verification') return true;
+  return typeof taskRun.metadata.blockReason === 'string'
+    && taskRun.metadata.blockReason.includes('verification(s) still pending or failed');
 }
 
 async function resolveVerificationCwd(record: VerificationRecord, explicitCwd?: string): Promise<string> {

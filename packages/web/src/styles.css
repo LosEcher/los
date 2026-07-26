@@ -2007,6 +2007,10 @@ button:disabled {
   letter-spacing: .01em;
 }
 
+.governed-graph-title > div { display: grid; gap: 2px; min-width: 0; }
+.governed-graph-title small { color: var(--text-muted); font-size: 10px; font-weight: 400; }
+.governed-graph-help { margin: 0 0 12px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+
 .governed-graph-form,
 .governed-graph-watch {
   padding: 12px 10px 14px;
@@ -2286,6 +2290,21 @@ button:disabled {
   width: 150px;
 }
 
+.work-search {
+  min-width: min(34vw, 320px);
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  color: var(--faint);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.work-search:focus-within { border-color: var(--accent); color: var(--accent); }
+.work-search input { min-width: 0; width: 100%; border: 0; padding: 0; background: transparent; }
+
 .work-filters > span,
 .work-create-submit > span {
   color: var(--faint);
@@ -2555,6 +2574,23 @@ button:disabled {
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
+
+.next-step-guide {
+  display: grid;
+  grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr) minmax(0, 1.3fr);
+  gap: 14px;
+  align-items: start;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, var(--info) 8%);
+}
+
+.next-step-guide.warn { background: color-mix(in srgb, var(--surface) 91%, var(--warn) 9%); }
+.next-step-guide.ok { background: color-mix(in srgb, var(--surface) 91%, var(--ok) 9%); }
+.next-step-guide > div { display: grid; gap: 4px; }
+.next-step-guide strong { font-size: 13px; }
+.next-step-guide p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.next-step-guide b { color: var(--text); font-weight: 600; }
 
 .approval-reason {
   display: grid;
@@ -3020,6 +3056,8 @@ button:disabled {
 @media (max-width: 780px) {
   .daily-toolbar,
   .work-detail-head { align-items: stretch; flex-direction: column; }
+  .work-filters { flex-wrap: wrap; }
+  .work-search { min-width: 100%; }
   .attention-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .daily-split,
   .work-split,
@@ -3043,6 +3081,7 @@ button:disabled {
   .work-create-lists,
   .schedule-form-fields { grid-template-columns: 1fr; }
   .approval-reason { grid-template-columns: 1fr; }
+  .next-step-guide { grid-template-columns: 1fr; gap: 8px; }
   .verification-record,
   .workspace-record,
   .result-review-record { grid-template-columns: 1fr; }

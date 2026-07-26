@@ -7,6 +7,8 @@ const chatComposer = readFileSync(new URL('./chat-composer.tsx', import.meta.url
 const chatMessages = readFileSync(new URL('./chat-messages.tsx', import.meta.url), 'utf8');
 const useChatStream = readFileSync(new URL('./hooks/useChatStream.ts', import.meta.url), 'utf8');
 const useChatRun = readFileSync(new URL('./hooks/useChatRun.ts', import.meta.url), 'utf8');
+const useChatProviders = readFileSync(new URL('./hooks/useChatProviders.ts', import.meta.url), 'utf8');
+const apiClient = readFileSync(new URL('./api/client.ts', import.meta.url), 'utf8');
 const providersPage = readFileSync(new URL('./pages/providers-page.tsx', import.meta.url), 'utf8');
 const providerAccountsPanel = readFileSync(new URL('./pages/provider-accounts-panel.tsx', import.meta.url), 'utf8');
 const apiTypes = readFileSync(new URL('./api/types.ts', import.meta.url), 'utf8');
@@ -126,6 +128,7 @@ test('tasks page exposes governed graph create, watch, cancel, and verifier-gate
   assert.match(agentGraphControl, /useGraphAction\(graphId, 'integrate'/);
   assert.match(agentGraphControl, /control\?\.integrationStatus !== 'ready'/);
   assert.match(viteConfig, /'\/agent-graphs': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.doesNotMatch(agentGraphControl, /setIntegrationOwner|integrationOwner,/);
 });
 
 test('composer run controls are responsive instead of fixed to one crowded grid', () => {
@@ -282,6 +285,20 @@ test('project-write chat intake creates and reuses a Work Item before streaming'
   assert.match(useChatRun, /queryKey: \['work-items'\]/);
   assert.match(useChatRun, /queryKey: \['inbox'\]/);
   assert.match(useChatRun, /o\.toolMode === 'project-write'/);
+});
+
+test('Work-first context keeps the project header and tool mode aligned', () => {
+  assert.match(apiClient, /headers\['x-project-id'\] = getCurrentProjectId\(\) \?\? 'los'/);
+  assert.match(chatPage, /const contractToolMode = readRunContract\(activeTodoContext\)\?\.toolMode/);
+  assert.match(chatPage, /contractToolMode === 'read-only' \|\| contractToolMode === 'project-write'/);
+  assert.match(chatPage, /setToolMode\(contractToolMode\)/);
+});
+
+test('Chat provider defaults follow the effective server configuration', () => {
+  assert.match(useChatProviders, /getJson<[^>]+>\('\/settings'\)/);
+  assert.match(useChatProviders, /settings\.data\?\.agent\?\.defaultProvider/);
+  assert.match(useChatProviders, /providerOptions\.find\(option => option\.id === defaultProvider\)/);
+  assert.match(useChatProviders, /settings\.data\?\.agent\?\.defaultModel/);
 });
 
 test('Work plan review exposes structured steps, verification mapping, and revision history', () => {

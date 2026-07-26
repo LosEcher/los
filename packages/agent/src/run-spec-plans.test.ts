@@ -26,6 +26,7 @@ test('persistRunSpecPlan records an approvable plan without completing the run',
         mode: 'execution',
         executionMode: 'standard',
         phase: 'planning',
+        editableSurfaces: ['packages/agent/src/'],
         requiredChecks: ['pnpm check'],
       },
     });

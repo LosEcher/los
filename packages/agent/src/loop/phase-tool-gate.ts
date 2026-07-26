@@ -12,6 +12,7 @@
 import type { RunPhase } from '../run-contract.js';
 import { readRunContractMetadata } from '../run-contract.js';
 import { READ_ONLY_BUILTIN_TOOLS } from '../tools/core/registry-policy.js';
+import { _PLANNING_SUBMISSION_TOOL_NAME } from '../planning-output.js';
 
 /** Determine whether a tool is allowed in a given run phase. */
 export function isToolAllowedInPhase(
@@ -23,8 +24,11 @@ export function isToolAllowedInPhase(
   switch (phase) {
     case 'discovering':
     case 'discovery_ready':
-    case 'planning':
       return checkReadPhase(toolName, phase);
+    case 'planning':
+      return toolName === _PLANNING_SUBMISSION_TOOL_NAME
+        ? { allowed: true }
+        : checkReadPhase(toolName, phase);
     case 'plan_approved':
     case 'executing':
       return { allowed: true };
