@@ -50,9 +50,32 @@ properties:
 routes:
   - method: POST
     path: /execution-experiments
+    idempotencyHeader: x-idempotency-key
+    scope: request tenant and project
   - method: GET
     path: /execution-experiments/{id}
+    scope: request tenant and project
   - method: POST
     path: /execution-experiments/{id}/approve
+    auth: operator
+    scope: request tenant and project
   - method: POST
     path: /execution-experiments/{id}/execute
+    auth: operator
+    scope: request tenant and project
+candidateBudget:
+  inheritedFields: [maxLoops, timeoutMs, toolMode, allowedTools]
+  overrideRule: every override must appear in configDiff and pass the run-spec contract
+  numericRule: maxLoops and timeoutMs must be positive integers
+operatorControl:
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
+  requiredFor: [approve, execute]
+  actorSource: request context user id
+invariants:
+  - Draft creation never schedules or executes a candidate.
+  - Source session, run, cursor, evidence hash, and fingerprints are immutable provenance references.
+  - Candidate run plans are persisted in planning and approved through approveRunSpecPhase before execution.
+  - Candidate success remains gated by canMarkSucceeded and persisted verification records.
+  - An idempotent create retry replays the original response without creating another experiment.
