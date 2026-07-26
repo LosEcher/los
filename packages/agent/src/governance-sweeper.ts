@@ -1,4 +1,5 @@
 import { getLogger } from '@los/infra/logger';
+import { withInitDb } from '@los/infra/db';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
 import { listDueGovernanceJobs, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { runJobAudit } from './governance-auditors.js';
@@ -17,13 +18,23 @@ import type {
 
 const log = getLogger('governance-jobs');
 
-export async function runGovernanceSweep(opts?: {
+export interface RunGovernanceSweepOptions {
   jobTypes?: GovernanceJobType[];
   dryRun?: boolean;
   tenantId?: string;
   projectId?: string;
   now?: Date;
-}): Promise<GovernanceSweepResult> {
+}
+
+export async function runGovernanceSweepWithDefaultDb(
+  opts?: RunGovernanceSweepOptions,
+): Promise<GovernanceSweepResult> {
+  return withInitDb(() => runGovernanceSweep(opts));
+}
+
+export async function runGovernanceSweep(
+  opts?: RunGovernanceSweepOptions,
+): Promise<GovernanceSweepResult> {
   const dryRun = opts?.dryRun !== false;
   const tenantId = opts?.tenantId;
   const projectId = opts?.projectId;

@@ -12,7 +12,7 @@
  * Auto-fix strategies are per jobType.  Currently implemented:
  *   - consistency_audit: reconcile seed↔DB drift (create missing + update status)
  *   - dead_letter: requeue eligible lease-expired task runs
- *   - hotspot: cleanup illegal status task_runs + stale fixtures
+ *   - hotspot: manual-only detection; no automatic execution-state writes
  *
  * For jobs without autoFix or when dryRun, falls back to the existing
  * createTodosFromFindings path in governance-sweeper.ts.

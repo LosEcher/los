@@ -51,22 +51,20 @@ const EXECUTION_LAB_PRIORITIES = new Map([
 const EXECUTION_LAB_STATES: ReadonlyMap<string, string> = new Map([
   ['todo-los-execution-lab', 'in_progress'],
   ['todo-los-execution-observability-projection', 'done'],
+  ['todo-los-execution-experiment-contract', 'done'],
+  ['todo-los-execution-pairwise-rubric-eval', 'done'],
 ] as const);
 
 const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new Map([
   ['todo-los-execution-lab', ['P0', 'in_progress']],
   ['todo-los-daily-agent-product', ['P0', 'in_progress']],
-  ['todo-los-multi-gateway-entry', ['P1', 'backlog']],
-  ['todo-los-run-spec-stream-replay', ['P1', 'backlog']],
-  ['todo-los-execution-experiment-contract', ['P1', 'backlog']],
-  ['todo-los-execution-pairwise-rubric-eval', ['P1', 'backlog']],
   ['todo-los-p1-otel-docs', ['P1', 'ready']],
   ['todo-los-p1-perf-metrics', ['P1', 'backlog']],
   ['todo-los-p1-cbm-ab-inject', ['P1', 'backlog']],
   ['todo-los-p1-context-reconstruction', ['P1', 'backlog']],
   ['todo-los-p1-stale-detection', ['P1', 'backlog']],
   ['todo-los-p1-supply-chain-full', ['P1', 'backlog']],
-  ['todo-los-p1-turbo-cache', ['P1', 'ready']],
+  ['todo-los-p1-turbo-cache', ['P1', 'backlog']],
   ['todo-los-p1-los-ast-rules', ['P1', 'backlog']],
 ] as const);
 

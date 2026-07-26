@@ -50,3 +50,31 @@ test('approval is explicit and AP3 blocks experiment success without a verified 
   assert.equal(blocked?.status, 'running');
   await getDb().query('DELETE FROM execution_experiments WHERE id = $1', [experimentId]);
 });
+
+test('tenant and project scope prevent cross-scope reads and mutations', async () => {
+  const experimentId = id('experiment-scope');
+  const scope = { tenantId: 'tenant-a', projectId: 'project-a' };
+  const otherScope = { tenantId: 'tenant-b', projectId: 'project-a' };
+  await createExecutionExperiment({
+    id: experimentId,
+    ...scope,
+    source: { sessionId: id('session'), runSpecId: id('source-run'), eventCursor: 1, evidenceHash: 'sha256:scope' },
+    configDiff: [],
+    createdBy: 'operator:test',
+  });
+  try {
+    assert.equal((await loadExecutionExperiment(experimentId, scope))?.id, experimentId);
+    assert.equal(await loadExecutionExperiment(experimentId, otherScope), null);
+    await assert.rejects(
+      approveExecutionExperiment(experimentId, 'operator:test', otherScope),
+      /Execution experiment not found/,
+    );
+    await assert.rejects(
+      setExecutionExperimentCandidate(experimentId, id('foreign-candidate'), otherScope),
+      /Execution experiment not found/,
+    );
+    assert.equal((await loadExecutionExperiment(experimentId, scope))?.status, 'draft');
+  } finally {
+    await getDb().query('DELETE FROM execution_experiments WHERE id = $1', [experimentId]);
+  }
+});

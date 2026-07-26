@@ -70,11 +70,19 @@ export const AUDIT_BASELINE_P2_TODO_SEED: CreateTodoInput[] = [
   },
   {
     id: 'todo-los-p2-ci-cd-docs',
-    title: 'P2-8 CI/CD 流程文档',
-    description: 'CI gate（ci-gate.sh 包含哪些检查、顺序、退出码语义）。',
-    kind: 'task', status: 'backlog', priority: 'P2',
+    title: '维护 CI/CD 控制面、执行面、证据面与保留策略文档',
+    description: '已统一记录 CI gate、双端 required checks、失败证据包、资源观测与保留策略。',
+    kind: 'task', status: 'done', priority: 'P1',
     source: 'audit-2026-06-21', stageId: 'p2-planned',
-    dedupeKey: 'los:todo:p2-ci-cd-docs', dependsOnIds: [], metadata: {},
+    dedupeKey: 'los:todo:p2-ci-cd-docs', dependsOnIds: [],
+    metadata: {
+      evidence: [
+        'docs/operations/2026-07-25-ci-cd-observability-priority-and-todo-plan.md',
+        'docs/operations/2026-07-17-forgejo-runner-ci-optimization.md',
+        'Forgejo PR #71 merged on main',
+      ],
+      statusUpdatedAt: '2026-07-26',
+    },
   },
   {
     id: 'todo-los-p2-dr-docs',
