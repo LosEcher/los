@@ -5,10 +5,51 @@
  * gate. Pure mapping from a job's audit summary to backlog TODOs; depends only
  * on createTodo + the per-jobType todo creators (dynamic imports).
  */
+import { createHash } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import type { GovernanceJob } from './governance-jobs-types.js';
+import type { CreateTodoInput } from './todo-types.js';
 
 const log = getLogger('governance-jobs');
+
+type FindingTodoInput = Omit<CreateTodoInput, 'id' | 'tenantId' | 'projectId' | 'dedupeKey'>;
+type TodoOperations = typeof import('./todos.js');
+
+function findingIdentity(job: GovernanceJob, auditType: string) {
+  const tenantId = job.tenantId ?? 'local';
+  const projectId = job.projectId ?? 'los';
+  const scopeHash = createHash('sha256')
+    .update(`${tenantId}\0${projectId}\0${auditType}`)
+    .digest('hex')
+    .slice(0, 12);
+  return {
+    id: `todo-governance-${auditType}-${scopeHash}`,
+    tenantId,
+    projectId,
+    dedupeKey: `governance-finding:${tenantId}:${projectId}:${auditType}`,
+  };
+}
+
+async function syncFindingTodo(
+  todos: TodoOperations,
+  job: GovernanceJob,
+  auditType: string,
+  active: boolean,
+  input: FindingTodoInput,
+): Promise<number> {
+  const identity = findingIdentity(job, auditType);
+  const existing = await todos.loadTodo(identity.id);
+  if (!active) {
+    if (existing && !existing.archivedAt) {
+      await todos.archiveTodo(identity.id, `governance finding resolved: ${auditType}`);
+    }
+    return 0;
+  }
+
+  const todo = await todos.createTodo({ ...identity, ...input });
+  if (todo.archivedAt) await todos.unarchiveTodo(todo.id);
+  return 1;
+}
 
 export async function createTodosFromFindings(
   job: GovernanceJob,
@@ -19,7 +60,8 @@ export async function createTodosFromFindings(
 
   let created = 0;
   try {
-    const { createTodo } = await import('./todos.js');
+    const todos = await import('./todos.js');
+    const { createTodo } = todos;
 
     if (job.jobType === 'consistency_audit') {
       const todoRecon = summary.todoReconciliation as Record<string, unknown> | undefined;
@@ -51,18 +93,33 @@ export async function createTodosFromFindings(
 
     if (job.jobType === 'hotspot') {
       const cleanup = summary.runtimeCleanup as Record<string, unknown> | undefined;
-      if (cleanup && typeof cleanup.illegalStatusCount === 'number' && cleanup.illegalStatusCount > 0) {
-        await createTodo({
-          title: `Governance: ${cleanup.illegalStatusCount} task runs with illegal status`,
-          description: `Hotspot audit found ${cleanup.illegalStatusCount} illegal status task runs and ${cleanup.staleFixtureCount ?? 0} stale fixtures. Review the full report at ${job.id}.`,
+      const illegalStatusCount = typeof cleanup?.illegalStatusCount === 'number' ? cleanup.illegalStatusCount : 0;
+      const staleFixtureCount = typeof cleanup?.staleFixtureCount === 'number' ? cleanup.staleFixtureCount : 0;
+      const staleTaskFixtureCount = typeof cleanup?.staleTaskFixtureCount === 'number'
+        ? cleanup.staleTaskFixtureCount
+        : staleFixtureCount;
+      const staleRunSpecFixtureCount = typeof cleanup?.staleRunSpecFixtureCount === 'number'
+        ? cleanup.staleRunSpecFixtureCount
+        : 0;
+
+      created += await syncFindingTodo(todos, job, 'illegalRuntimeStatus', illegalStatusCount > 0, {
+          title: `Governance: ${illegalStatusCount} task runs with illegal status`,
+          description: `Hotspot audit found ${illegalStatusCount} task runs with illegal status. Review the full report at ${job.id}.`,
           kind: 'task',
           status: 'backlog',
           priority: 'P1',
           source: 'governance_sweep',
-          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'illegalStatus' },
-        });
-        created += 1;
-      }
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'illegalRuntimeStatus' },
+      });
+      created += await syncFindingTodo(todos, job, 'staleRuntimeFixtures', staleFixtureCount > 0, {
+          title: `Governance: ${staleFixtureCount} stale runtime fixture(s) need review`,
+          description: `Hotspot audit found ${staleTaskFixtureCount} stale task run fixture(s) and ${staleRunSpecFixtureCount} stale run spec fixture(s). Cleanup remains manual-only; review the full report at ${job.id}.`,
+          kind: 'task',
+          status: 'backlog',
+          priority: 'P1',
+          source: 'governance_sweep',
+          metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'staleRuntimeFixtures' },
+      });
     }
 
     if (job.jobType === 'architecture_drift') {
@@ -197,8 +254,7 @@ export async function createTodosFromFindings(
       const tasksWith = typeof summary.tasksWithReflection === 'number' ? summary.tasksWithReflection : 0;
       const coverage = typeof summary.coverage === 'string' ? summary.coverage : 'N/A';
 
-      if (tasksWithout > 0) {
-        await createTodo({
+      created += await syncFindingTodo(todos, job, 'missingReflection', tasksWithout > 0, {
           title: `Governance: ${tasksWithout} blocked/failed task(s) missing reflection metadata`,
           description: `Reflection audit: ${tasksWith} tasks have reflection, ${tasksWithout} without (coverage: ${coverage}). Recovery types used: ${summary.recoveryTypes || 'none'}. ${summary.recoveryTodosCreated ?? 0} recovery todos created. Review at ${job.id}.`,
           kind: 'task',
@@ -206,13 +262,9 @@ export async function createTodosFromFindings(
           priority: 'P1',
           source: 'governance_sweep',
           metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'missingReflection' },
-        });
-        created += 1;
-      }
+      });
 
-      // Always create a summary todo for visibility into reflection health
-      if (tasksWith + tasksWithout > 0) {
-        await createTodo({
+      created += await syncFindingTodo(todos, job, 'reflectionSummary', tasksWith + tasksWithout > 0, {
           title: `Governance: Reflection coverage ${coverage} (${tasksWith}/${tasksWith + tasksWithout} tasks)`,
           description: `Reflection audit summary: ${tasksWith} tasks with reflection, ${tasksWithout} without. Recovery types: ${summary.recoveryTypes || 'none'}. Recovery todos: ${summary.recoveryTodosCreated ?? 0}. Review at ${job.id}.`,
           kind: 'task',
@@ -220,9 +272,7 @@ export async function createTodosFromFindings(
           priority: 'P3',
           source: 'governance_sweep',
           metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'reflectionSummary' },
-        });
-        created += 1;
-      }
+      });
     }
 
     if (job.jobType === 'branch_cleanup') {

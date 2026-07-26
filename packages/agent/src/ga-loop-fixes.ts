@@ -123,7 +123,7 @@ export async function applyConsistencyFix(
   return { applied: true, detail: fixes.join('; ') };
 }
 
-// ── Hotspot auto-fix ───────────────────────────────────
+// ── Hotspot manual review boundary ─────────────────────
 
 export async function applyHotspotFix(
   summary: Record<string, unknown>,
@@ -137,43 +137,8 @@ export async function applyHotspotFix(
   if (illegalStatusCount === 0 && staleFixtureCount === 0) {
     return { applied: true, detail: 'No hotspot issues detected' };
   }
-
-  const fixes: string[] = [];
-
-  // Fix: Attempt to move illegal status task_runs to blocked
-  if (illegalStatusCount > 0) {
-    try {
-      const { getDb } = await import('@los/infra/db');
-      const db = getDb();
-      const result = await db.query<{ id: string }>(
-        `UPDATE task_runs SET status = 'blocked', updated_at = now()
-         WHERE status NOT IN ('pending', 'queued', 'running', 'succeeded', 'failed', 'blocked', 'cancelled')
-         RETURNING id`,
-      );
-      const fixed = result.rows.length;
-      fixes.push(`Moved ${fixed}/${illegalStatusCount} illegal status task_run(s) to blocked`);
-    } catch (err) {
-      fixes.push(`Failed to fix illegal statuses: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  // Fix: Attempt to mark stale fixtures as cancelled
-  if (staleFixtureCount > 0) {
-    try {
-      const { getDb } = await import('@los/infra/db');
-      const db = getDb();
-      const result = await db.query<{ id: string }>(
-        `UPDATE task_runs SET status = 'cancelled', updated_at = now()
-         WHERE status = 'running' AND metadata_json->>'test_fixture' = 'true'
-           AND updated_at < now() - INTERVAL '24 hours'
-         RETURNING id`,
-      );
-      const fixed = result.rows.length;
-      fixes.push(`Cancelled ${fixed}/${staleFixtureCount} stale fixture task_run(s)`);
-    } catch (err) {
-      fixes.push(`Failed to fix stale fixtures: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  return { applied: true, detail: fixes.join('; ') };
+  return {
+    applied: false,
+    detail: `Hotspot cleanup is manual-only: ${illegalStatusCount} illegal status row(s), ${staleFixtureCount} stale fixture candidate(s). Use the dry-run report and transitionExecutionState() for any approved status repair.`,
+  };
 }
