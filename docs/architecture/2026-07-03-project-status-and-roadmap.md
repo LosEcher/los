@@ -1,13 +1,15 @@
 # los 项目现状、规划与待办
 
-> **基线刷新**：2026-07-22（受控 task graph 执行与账本校验；其余盘点项仍以 2026-07-09 为准）
-> 历史审计：2026-07-03 工作树；上游 `AGENTS.md` / `SKILL.md` / ADR 0012、0020、0021、0024
+> **基线刷新**：2026-07-27（Wave 0：roadmap / outbox / todo 对齐；Execution Lab sample gate 为下一功能切片）
+> 前次：2026-07-22（受控 task graph 执行与账本校验）；历史审计：2026-07-03
+> 上游：`AGENTS.md` / `SKILL.md` / ADR 0012、0020、0021、0024、0028、0038、0039
 >
 > 文档结构：**当前基线 → 已完成并接线 → 待验证 → 真实 open backlog**。过期 checklist 不再当活待办。
+> **活队列**：`docs/governance/2026-07-16-current-p0-p1-queue.md`（优先于本节历史 checklist）。
 
 ## 一句话结论
 
-项目仍处于自我治理基建期，但受控多 agent 已从“仅有 DAG 原语”推进到可执行基线：本地 2-worker + verifier graph 已通过真实 gateway/executor smoke。下一步不是扩大 worker 数量，而是补 graph provenance、恢复证据和串行/并行 eval 对比。
+项目仍处于自我治理基建期，但 Web-first Daily Agent 的 P0 授权范围与受控 task graph 基线已交付；Execution Lab 的投影/实验合同/rubric 已完成。下一步不是扩大 worker 数量，而是：OTel 文档与 CI 资源采样并行、通过真实 pairwise sample gate、再做 advisory 优化分析；Pi K4 canary 仍需单独 operator consent。
 
 ---
 

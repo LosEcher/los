@@ -424,8 +424,17 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-turbo-cache',
-    dependsOnIds: [],
-    metadata: { files: ['turbo.json'], blocker: 'Wait for todo-los-ci-resource-baseline to collect the 10 unique-head resource window before changing cache policy.', statusUpdatedAt: '2026-07-26' },
+    dependsOnIds: ['todo-los-ci-resource-baseline'],
+    metadata: {
+      files: ['turbo.json'],
+      blocker: 'Wait for todo-los-ci-resource-baseline to collect the 10 unique-head resource window before changing cache policy.',
+      executionOrder: {
+        after: ['todo-los-ci-resource-baseline'],
+        notBefore: 'uniqueHeadCount >= 10',
+        forbids: ['publishP95', 'allowCacheTuning', 'allowRunnerCapacityChange'],
+      },
+      statusUpdatedAt: '2026-07-27',
+    },
   },
 
   // ════════════════════════════════════════════════════════════

@@ -278,11 +278,14 @@ live collection passed 6/6, making the v4 report 17/17 passing with zero
 failures and `ready_for_k4_policy_review`. Explicit
 `thinking='enabled'` mapping remains a separate compatibility gap.
 The pre-corpus smoke and superseded corpus `1.0.0` remain ignored. K4 policy
-review is now eligible, but registry admission and canary use remain blocked.
-Pi remains unavailable as a selected production kernel. The
-current LOS loop stays the production baseline until a
-preregistered evaluation revision, canary, formal pairwise evaluation, and
-rollback gates pass.
+review and the K4 selection/rollback implementation are complete in the
+persisted ledger (`todo-los-pi-k4-policy-review-20260726` and
+`todo-los-pi-k4-readonly-selection` both `done`). Registry admission and the
+first provider-backed canary remain blocked behind
+`todo-los-pi-k4-readonly-canary` with `authorization=not_granted`. Pi remains
+unavailable as a selected production kernel. The current LOS loop stays the
+production baseline until a real canary, formal pairwise evaluation, and
+rollback gates pass under explicit operator consent.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,
@@ -310,8 +313,10 @@ Exit criteria:
 
 The owning migration record is
 `docs/governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md`. The parent
-daily-agent product remains in progress until its existing Web-first acceptance
-and graph integration work plus the kernel baseline are complete.
+daily-agent product remains `in_progress` with
+`p0AuthorizedScopeComplete=true`: Web-first acceptance and governed-graph
+baseline are delivered, and the open residue is consent-gated K4 canary plus
+roadmap/outbox evidence linkage rather than missing P0 product scope.
 
 ## Operating Modes
 

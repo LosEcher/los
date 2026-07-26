@@ -145,17 +145,18 @@ larger or more valuable than every later item.
 
 ## Immediate Action
 
-The active P0 container remains open for Execution Lab child work. Select the next
-P1 only after reconciling dependency readiness; the current highest-value path is
-recovery evidence, followed by the execution experiment contract. The remaining ready
-seed tasks remain bounded operator-contract candidates rather than unattended
-dispatch work.
+Wave 0 alignment is complete as of 2026-07-27. Do not treat open P0 phase/plan
+containers as missing feature work.
 
-Live dispatch gates currently admit four ready P1 tasks: OTel documentation,
-Turbo cache documentation, and the two file-size findings.
-None has a persisted run contract, and the default todo dispatch tool mode is
-read-only, so they are candidates for a new bounded operator contract rather
-than unattended execution. The separate reflection finding remains backlog. [E]
+Next operator-contract candidates (not unattended dispatch):
+
+1. `todo-los-p1-otel-docs` (`ready`) — docs only; low risk.
+2. `todo-los-execution-pairwise-sample-gate` (`ready`) — Execution Lab main line.
+3. Async: continue `todo-los-ci-resource-baseline` to 10/10 unique-head samples.
+
+Do **not** start: Pi K4 canary without consent; turbo/cache policy changes before
+baseline maturity; optimization analysis before sample gate; full-repo file-size
+refactors. Default todo dispatch tool mode remains read-only. [E]
 
 Completed implementation used this gate sequence:
 
@@ -174,3 +175,140 @@ After this calibration change:
 3. Re-query the DB after each bounded task and record the resulting status here.
 4. Preserve any DB-only todo that has independent runtime ownership; do not
    delete or overwrite it merely because it is absent from the built-in seed.
+
+## 2026-07-27 Queue Handling Addendum
+
+The global ledger was re-queried after the CI/CD and Execution Lab P0 review,
+then again after Wave 0 alignment. The persisted scope is `tenant=local`,
+`project=los`, with 229 todos (132 seed items). Post-Wave-0 status counts are
+41 `backlog`, 43 `ready`, 7 `in_progress`, 1 `blocked`, 134 `done`, and 3
+`cancelled`. Reconciliation reports no status drift. [E]
+
+CI/CD P0 correctness work is terminal: the single-root test rollout,
+`ci-gate` result capture, and GitHub ruleset migration are all `done`, with the
+focused CI gate, evidence collector, resource observer, and workflow-policy
+checks passing (3/3, 4/4, 6/6, and 2/2). The DB-owned parent
+`todo-los-ci-cd-observability-20260725` remains `in_progress` only because its
+separate P1 resource baseline has 5/10 unique-head samples; it is a plan
+container, not dispatchable P0 execution work. [E]
+
+Execution Lab's P0 observability projection is `done`; the experiment contract
+and pairwise rubric tasks are also `done`. Agent coverage passed 282/282 tests,
+and Gateway coverage passed 73/73 tests, including the projection, experiment,
+pairwise, and seed/reconciliation paths. The parent
+`todo-los-execution-lab` remains an `in_progress` phase because the real
+pairwise sample gate and later optimization analysis remain open; it is not a
+dispatchable P0 task. [E]
+
+The previous report-only priority drift on
+`todo-los-execution-optimization-analysis` (DB `P1` vs seed `P2`) was resolved
+by explicit operator decision on 2026-07-27: DB priority is now `P2`, with
+`dependsOnIds` including the sample gate and `executionPolicy=
+blocked_until_real_pairwise_sample_gate_passes`. [E]
+
+### 2026-07-27 Wave 0 alignment (roadmap / outbox / todo)
+
+This pass inventories agent entry surfaces, re-queries the live ledger, and
+aligns planning docs with persisted Todo state. It does **not** execute Pi K4
+canary work, publish CI P95, or auto-tune cache/runner policy.
+
+#### Agent / skill / rule / MCP inventory
+
+| Surface | Role | Current judgment |
+| --- | --- | --- |
+| `AGENTS.md` | Hard project rules, AP invariants, commands | Current; no change required for this alignment |
+| `Claude.md` | Points at `AGENTS.md` + `SKILL.md` | Current entrypoint only |
+| `SKILL.md` | Runtime truth, ADR reconciliation, closeout | Current operational workflows |
+| `docs/governance/anti-patterns.md` | AP1–AP10 detail | Canonical constraint surface |
+| `docs/governance/agent-doc-manifest.json` | Doc hygiene bounds | Entrypoint/skill/governance list still valid |
+| Global `~/.claude/rules/*` | Cross-project execution discipline | Not project truth; do not copy into los |
+| MCP: gateway/runtime | Live evidence when gateway is up | Gateway/executor healthy; outbox pending/claimed = 0 [E] |
+| MCP: external design/memory tools | Non-los tools | Not ownership for P0 queue decisions |
+
+Planning truth owners for this queue:
+
+1. PostgreSQL todos (`tenant=local`, `project=los`)
+2. Built-in seeds (`packages/agent/src/todo-seeds*.ts`) for status reconciliation only
+3. This file + dated operations/governance docs for operator-facing sequencing
+4. ADRs for design intent; implementation for runtime behavior
+
+#### Live P0: containers vs dispatchable work [E]
+
+Post-decision active counts: P0 = 4; P1 = 12; P2 = 73; P3 = 3
+(`backlog+ready+in_progress+blocked`, non-archived). P1 dropped after
+roadmap-sync completion and optimization demotion to P2.
+
+| Todo | Kind | Status | Dispatchable? | Note |
+| --- | --- | --- | --- | --- |
+| `todo-los-ci-cd-observability-20260725` | plan | `in_progress` | No | Correctness children done; open for resource baseline 5/10 |
+| `todo-los-execution-lab` | phase | `in_progress` | No | Projection/experiment/rubric done; sample gate next |
+| `todo-los-daily-agent-product` | phase | `in_progress` | No | `p0AuthorizedScopeComplete=true`; holds roadmap/canary linkage |
+| `todo-los-pi-k4-readonly-canary` | task | `backlog` | Only with consent | `authorization=not_granted`, `providerCanaryExecuted=false` |
+
+#### Wave 0 evidence and todo mutations [E]
+
+| Check | Result |
+| --- | --- |
+| `los governance todo-reconcile --tenant-id local --project-id los` | seed=132, db=229, seedOnly=0, dbOnly=97, statusDrift=0 |
+| fieldDrift | only `todo-los-execution-optimization-analysis` priority DB=`P1` vs seed=`P2` |
+| Gateway `/health` outbox | pending=0, claimed=0, legacy=2658 through id 2817 |
+| ADR 0028 / publisher | Accepted; gateway maintenance polls `publishExecutionOutboxBatch` every 1s |
+| Pi K4 selection | `todo-los-pi-k4-readonly-selection` = `done` (Forgejo PR #78 / GitHub #180) |
+| Pi K4 canary | still not authorized |
+
+Todo ledger updates applied in this pass:
+
+1. `todo-los-roadmap-outbox-todo-sync` → `in_progress` then `done` with alignment evidence.
+2. `todo-los-execution-pairwise-sample-gate` → `ready` (depends on done rubric eval).
+3. `todo-los-execution-lab` metadata `statusReview` refreshed with child matrix and next dispatch.
+4. `todo-los-daily-agent-product` metadata `statusReview` refreshed; remains
+   `in_progress` with `p0AuthorizedScopeComplete=true`.
+
+Operator decision applied:
+
+- **optimization priority** → **P2** (2026-07-27). Seed and DB agree. Task stays
+  `backlog` until sample gate passes; output remains advisory-only.
+
+#### Execution Lab / CI dependency design [E]
+
+```text
+projection (done) → experiment (done) → pairwise-rubric (done)
+                                          ↓
+                               pairwise-sample-gate (ready, P1)
+                                          ↓
+                         optimization-analysis (backlog, P2, advisory)
+
+ci-correctness (done) → resource-baseline (in_progress, 5/10)
+                                          ↓
+                              turbo-cache (backlog, P1; blocked until 10/10)
+
+otel-docs (ready, P1)  ── parallel with sample-gate and baseline
+pi-k4-canary (backlog, P0) ── consent-gated side track only
+```
+
+#### Recommended execution order after Wave 0 [I]
+
+1. **Wave 1 (ops evidence, parallel)**  
+   - `todo-los-p1-otel-docs` (`ready`) — document bridge port/protocol/health/status and external collector boundary.  
+   - `todo-los-ci-resource-baseline` (`in_progress`, 5/10 unique-head) — async only; no P95 or cache/runner tuning before 10 samples.  
+   - `todo-los-p1-turbo-cache` stays blocked on baseline.
+
+2. **Wave 2 (Execution Lab)**  
+   - `todo-los-execution-pairwise-sample-gate` first: preregister thresholds/scenarios and immutable baseline/candidate/rubric refs; keep configured vs effective routes separate.  
+   - Only then `todo-los-execution-optimization-analysis` (advisory only; no default profile/tool/context auto-tune).
+
+3. **Wave 3 (reliability/governance)**  
+   context-reconstruction → stale-detection → CBM A/B (after ~20 shadow sessions) → perf-metrics → supply-chain-full → los-ast-rules.
+
+4. **Wave 4 (long tail)**  
+   operator-gated CD release-contract discovery; file-size on touch only; structure-wiring-ratchet stays long-horizon P2; feed-analysis runtime todos and historical governance findings stay off the main line.
+
+5. **Consent-gated side track**  
+   `todo-los-pi-k4-readonly-canary` only after explicit operator consent; never inferred from green tests or selection delivery.
+
+#### Doc surfaces updated with this pass
+
+- this queue addendum
+- `docs/governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md` Active Work Ledger
+- `docs/operations/2026-07-25-ci-cd-observability-priority-and-todo-plan.md` stale Execution Lab / wave rows
+- `docs/governance/agent-workflow-roadmap.md` Stage F short-term K4 status
