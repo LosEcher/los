@@ -956,14 +956,22 @@ the job summary during the initial observation window rather than adding an
 artifact upload to every run.
 
 Do not combine GitHub hosted-runner samples with the Forgejo Windows trend.
-Forgejo remains the primary CI surface, and its current runner needs a focused
-Windows compatibility probe before resource sampling is enabled there. That
-probe should verify descendant-process RSS and CPU accounting plus page-file
-usage, then run as an unchanged-head canary. If the probe passes, observe only
-`gate-test` on every eligible PR; sample the whole host and the five-minute
-post-run swap/page-file value every fifth eligible PR. Continue using the
-existing stop thresholds in this document. Do not increase runner capacity
-from resource data until at least ten unique-head samples are available.
+Forgejo remains the primary CI surface. The focused Windows compatibility
+probe passed on PR `#70` exact-head run `289`: task `863` produced 18 samples
+with zero unavailable values, a 15-second interval, and a 6.496% probe duty
+cycle. Task-container peaks were 1,237,619,573 bytes, 121.44% CPU, and 262
+PIDs; page-file used remained 65,011,712 bytes through start, sampled peak, job
+end, and the five-minute post-run sample. The shared WSL working set remains
+host context, not per-job RSS.
+
+The probe is not enabled on every PR. Observe only `gate-test` every fifth
+eligible PR, include the whole-host five-minute post-run page-file value, write
+the bounded aggregate to the todo/document record, and delete the explicit raw
+Windows JSON paths afterward. Todo 6's six raw paths were verified absent and
+no success artifact was uploaded. The separate GitHub Linux baseline currently
+has 4 of 10 unique heads; do not publish P95, change cache policy, or increase
+runner capacity until at least ten representative unique-head samples are
+available. Continue using the existing stop thresholds in this document.
 
 Before removing `gate-drift`'s `needs: gate-test` dependency, manually dispatch
 `.forgejo/workflows/postgres-isolation-canary.yml` on a capacity-2 runner and

@@ -79,6 +79,18 @@ Podman machine, and runner before opening or updating a delivery PR; otherwise
 the required Windows jobs remain queued. Do not treat it as unattended
 capacity until startup automation and three unchanged-head runs are recorded.
 
+The Windows host observer is not part of every pull request. Exact-head run
+`289` for PR `#70` verified task `863` with 18 samples, zero unavailable
+samples, a 15-second interval, and a 6.496% probe duty cycle. Task-container
+peaks were 1,237,619,573 bytes, 121.44% CPU, and 262 PIDs. The shared WSL
+working set is host context rather than per-job RSS; page-file used stayed at
+65,011,712 bytes through start, sampled peak, job end, and the five-minute
+post-run sample. Raw host JSON was summarized into the todo/document record and
+the six explicit temporary paths were then verified absent. Continue sampling
+only every fifth eligible PR and keep Windows results separate from GitHub
+Linux samples. This canary proves observer compatibility, not long-term runner
+capacity.
+
 ## Required Server Policy
 
 Configure Forgejo `main` protection to:
@@ -95,6 +107,14 @@ API. Repository YAML cannot create branch protection by itself.
 The `main` fast-only policy depends on normal changes entering through this
 protected PR path. If an emergency operator bypasses the pull-request rule, run
 the full workflow manually before treating that revision as verified.
+
+For a required-context migration, first make the workflow emit the replacement
+context, verify it on an exact PR head, then add it to server protection, and
+only then remove the retired context. Rollback follows the same overlap rule:
+restore the last verified workflow behavior on a feature bookmark, obtain a
+green exact-head run, and then restore the server context set. Stop merges
+throughout the change. An emergency bypass remains an explicitly audited
+operator action and requires a full manual workflow on the final SHA afterward.
 
 ## Merge Evidence
 
@@ -119,6 +139,13 @@ bash tools/branch-prune-origin.sh
 
 Use `--apply` for branch deletion only with explicit operator approval.
 
+PR `#70` is the current delivery example: exact head
+`70aa3d14f2a9e324256fed3aec2ab2ac2c66da59` passed run `289`, jobs `942--945`,
+and merged as `a14fc8751cba847b3a08825bd86ef295438dfd60`. The optional GitHub mirror used
+an independent equivalent-patch PR because its merge history had diverged; that
+mirror result did not gate the Forgejo merge. Both remote feature branches were
+retained because no branch-deletion approval was given.
+
 ## Failure Artifacts
 
 Regular Forgejo CI does not upload retained failure bundles yet. The server
@@ -133,6 +160,13 @@ uploads and downloads a 1 KiB sentinel with the patched
 one-day retention, and verifies the downloaded bytes. A successful canary
 proves the runner round trip only; it does not authorize enabling regular
 failure uploads until the instance quota and cleanup configuration are read.
+
+Canary run `286` did not reach upload: cloning `forgejo/upload-artifact@v4`
+timed out, job `933` failed after 301 seconds, and the run contained zero
+artifacts. Therefore regular Forgejo CI still owns only runner-temporary logs;
+it uploads neither success artifacts nor retained failure bundles. The unified
+owner, cleanup trigger, size, and retention table is in
+`docs/operations/2026-07-25-ci-cd-observability-priority-and-todo-plan.md`.
 
 Forgejo's artifact compatibility and retention references are:
 
