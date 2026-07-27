@@ -37,6 +37,8 @@
  * Clamped to [0, 1]. Scores below {@link STALE_THRESHOLD} are stale.
  */
 
+import { getDb } from '@los/infra/db';
+
 /** Score below which an observation is considered stale. */
 export const STALE_THRESHOLD = 0.3;
 
@@ -144,5 +146,66 @@ export function decayScores(
     staleCount,
     staleRatio: Number((staleCount / observations.length).toFixed(4)),
     averageScore,
+  };
+}
+
+// ── DB-backed scoring for a session ─────────────────────────────
+
+/**
+ * Result of calculating decay scores for all observations in a session.
+ */
+export interface SessionDecayResult {
+  sessionId: string;
+  observationCount: number;
+  results: DecayScoreResult[];
+  staleObservationIds: number[];
+  staleCount: number;
+  staleRatio: number;
+  averageScore: number;
+}
+
+/**
+ * Query all non-archived observations in a session and compute decay scores
+ * for each. Returns per-observation scores plus session-level aggregates.
+ */
+export async function calculateDecayScores(sessionId: string): Promise<SessionDecayResult> {
+  const db = getDb();
+  const rows = await db.query<{
+    id: string;
+    created_at: string;
+    reference_count: string;
+    tool_status: string | null;
+  }>(
+    `SELECT
+       id::text,
+       created_at,
+       COALESCE((metadata_json->>'referenceCount')::int, 0)::text AS reference_count,
+       metadata_json->>'toolStatus' AS tool_status
+     FROM observations
+     WHERE session_id = $1
+       AND COALESCE(metadata_json->>'archived', 'false') = 'false'
+     ORDER BY created_at`,
+    [sessionId],
+  );
+
+  const observations: DecayObservation[] = rows.rows.map(r => ({
+    createdAt: new Date(r.created_at),
+    referenceCount: Number(r.reference_count),
+    toolStatus: (r.tool_status as DecayObservation['toolStatus']) ?? undefined,
+  }));
+
+  const aggregate = decayScores(observations);
+  const staleObservationIds = aggregate.scores
+    .map((s, i) => (s.stale ? Number(rows.rows[i].id) : -1))
+    .filter(id => id >= 0);
+
+  return {
+    sessionId,
+    observationCount: observations.length,
+    results: aggregate.scores,
+    staleObservationIds,
+    staleCount: aggregate.staleCount,
+    staleRatio: aggregate.staleRatio,
+    averageScore: aggregate.averageScore,
   };
 }

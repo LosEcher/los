@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decayScore, decayScores, STALE_THRESHOLD, type DecayObservation } from './core/decay.js';
+import { decayScore, decayScores, calculateDecayScores, STALE_THRESHOLD, type DecayObservation } from './core/decay.js';
+import { loadConfig } from '@los/infra/config';
+import { closeDb, getDb, initDb } from '@los/infra/db';
+import { ensureMemoryStore, addObservation } from './core/store.js';
 
 function now(): Date { return new Date(); }
 function hoursAgo(h: number): Date { return new Date(Date.now() - h * 3_600_000); }
@@ -117,4 +120,82 @@ test('decayScores: mixed session computes correct aggregate', () => {
   assert.ok(result.staleCount > 0 && result.staleCount < obs.length, 'mixed should have some stale');
   assert.ok(result.averageScore > 0 && result.averageScore < 1);
   assert.equal(result.scores.length, obs.length);
+});
+
+// ── DB-backed tests ─────────────────────────────────────────────
+
+test('calculateDecayScores: empty session returns sensible default', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `decay-empty-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    const result = await calculateDecayScores(sessionId);
+    assert.equal(result.sessionId, sessionId);
+    assert.equal(result.observationCount, 0);
+    assert.equal(result.staleCount, 0);
+    assert.equal(result.staleRatio, 0);
+    assert.equal(result.results.length, 0);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('calculateDecayScores: scores fresh observation correctly', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `decay-fresh-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    await addObservation({ title: 'fresh obs', kind: 'note', sessionId });
+    // Set referenceCount and toolStatus in metadata
+    await getDb().query(
+      `UPDATE observations SET metadata_json = $2::jsonb WHERE session_id = $1`,
+      [sessionId, JSON.stringify({ referenceCount: 2, toolStatus: 'running' })],
+    );
+    const result = await calculateDecayScores(sessionId);
+    assert.equal(result.observationCount, 1);
+    assert.equal(result.staleCount, 0);
+    assert.ok(result.averageScore > 0.8, `fresh+refs+running should be > 0.8, got ${result.averageScore}`);
+  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('calculateDecayScores: stale ratio computed across multiple observations', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `decay-mix-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    // Fresh observation
+    await addObservation({ title: 'fresh', kind: 'note', sessionId });
+    // Stale observation (old, no refs, failed tool)
+    await addObservation({ title: 'stale', kind: 'note', sessionId });
+    await getDb().query(
+      `UPDATE observations SET
+         metadata_json = CASE
+           WHEN title = 'fresh' THEN $2::jsonb
+           WHEN title = 'stale' THEN $3::jsonb
+         END
+       WHERE session_id = $1`,
+      [sessionId,
+       JSON.stringify({ referenceCount: 2, toolStatus: 'running' }),
+       JSON.stringify({ referenceCount: 0, toolStatus: 'failed' })],
+    );
+    // Manually age the stale observation
+    await getDb().query(
+      `UPDATE observations SET created_at = now() - interval '72 hours' WHERE session_id = $1 AND title = 'stale'`,
+      [sessionId],
+    );
+    const result = await calculateDecayScores(sessionId);
+    assert.equal(result.observationCount, 2);
+    assert.ok(result.staleCount >= 1, 'at least 1 stale');
+    assert.ok(result.averageScore > 0 && result.averageScore < 1);
+    assert.equal(result.staleObservationIds.length, result.staleCount);
+  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
 });
