@@ -384,6 +384,7 @@ export async function runAgent(
       role: 'assistant',
       content: res.text,
       tool_calls: repaired.calls.length > 0 ? repaired.calls : undefined,
+      reasoningContent: res.reasoningContent,
     };
     messages.push(assistantMsg);
 
