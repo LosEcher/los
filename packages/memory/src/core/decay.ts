@@ -209,3 +209,63 @@ export async function calculateDecayScores(sessionId: string): Promise<SessionDe
     averageScore: aggregate.averageScore,
   };
 }
+
+// ── Auto-trigger rules ──────────────────────────────────────────
+
+/** Trigger decision from decay-based rules. */
+export interface TriggerDecision {
+  triggered: boolean;
+  /** Reason code: low_decay, high_stale, none. */
+  reason: 'low_decay' | 'high_stale' | 'none';
+  averageScore: number;
+  staleRatio: number;
+  observationCount: number;
+}
+
+/**
+ * Evaluate whether compaction should be triggered for a session based on
+ * decay scores. Rules (checked in order):
+ *
+ * 1. **Low decay + volume**: averageScore < 0.3 AND ≥ 20 observations
+ * 2. **High stale ratio**: staleRatio > 0.4 (40%)
+ *
+ * The 24h safety-net timer is handled by the caller (server-maintenance)
+ * and is not evaluated here.
+ */
+export async function shouldTriggerCompaction(sessionId: string): Promise<TriggerDecision> {
+  const result = await calculateDecayScores(sessionId);
+
+  if (result.observationCount === 0) {
+    return { triggered: false, reason: 'none', averageScore: 1, staleRatio: 0, observationCount: 0 };
+  }
+
+  // Rule 1: low average score plus volume
+  if (result.averageScore < 0.3 && result.observationCount >= 20) {
+    return {
+      triggered: true,
+      reason: 'low_decay',
+      averageScore: result.averageScore,
+      staleRatio: result.staleRatio,
+      observationCount: result.observationCount,
+    };
+  }
+
+  // Rule 2: high stale ratio
+  if (result.staleRatio > 0.4) {
+    return {
+      triggered: true,
+      reason: 'high_stale',
+      averageScore: result.averageScore,
+      staleRatio: result.staleRatio,
+      observationCount: result.observationCount,
+    };
+  }
+
+  return {
+    triggered: false,
+    reason: 'none',
+    averageScore: result.averageScore,
+    staleRatio: result.staleRatio,
+    observationCount: result.observationCount,
+  };
+}
