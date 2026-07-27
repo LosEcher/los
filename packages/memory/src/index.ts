@@ -38,6 +38,8 @@ export {
   type CandidateStatus,
 } from './core/compaction.js';
 
+export { shouldTriggerCompaction, type TriggerDecision } from './core/decay.js';
+
 export { getLatestCheckpoint } from './core/checkpoint.js';
 
 export {
