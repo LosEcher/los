@@ -6,6 +6,10 @@ export interface Message {
   content: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  /** Raw reasoning / thinking content from the model.
+   *  Serialized as `reasoning_content` in OpenAI-compatible requests.
+   *  Required for Kimi-K3 multi-turn conversations; preserved by other providers. */
+  reasoningContent?: string;
 }
 
 export interface ToolCall {
