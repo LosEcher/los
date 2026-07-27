@@ -37,3 +37,4 @@ packages/agent/src/todo-seeds-daily-gaps.ts
 packages/agent/src/session-recovery.ts
 packages/agent/src/loop/setup.ts
 packages/gateway/src/chat-service.ts
+packages/gateway/src/server-maintenance.ts
