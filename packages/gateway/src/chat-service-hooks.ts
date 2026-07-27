@@ -152,8 +152,16 @@ export function createChatTaskHooks(input: {
             sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger,
             onPreCompact: async (ctx) => {
               const ts = toolStateCache.get(sid);
-              if (ts && ts.pendingCalls.length > 0) {
-                log.debug(`Checkpoint with ${ts.pendingCalls.length} pending tool calls`);
+              if (ts) {
+                send('operator', {
+                  type: 'compaction.pre_compact',
+                  sessionId: ctx.sessionId,
+                  trigger: ctx.trigger ?? trigger,
+                  reason: `Checkpoint triggered by ${ctx.trigger ?? 'unknown'}`,
+                  preCompactAt: ctx.preCompactAt,
+                  pendingCalls: ts.pendingCalls.length,
+                  fileReferences: ts.fileReferences.length,
+                });
               }
             },
             onPostCompact: async (ctx) => {
