@@ -34,3 +34,6 @@ packages/agent/src/auth/xai-oauth-login.ts
 packages/agent/src/providers/index.ts
 packages/gateway/src/routes/data/memory-routes.ts
 packages/agent/src/todo-seeds-daily-gaps.ts
+packages/agent/src/session-recovery.ts
+packages/agent/src/loop/setup.ts
+packages/gateway/src/chat-service.ts

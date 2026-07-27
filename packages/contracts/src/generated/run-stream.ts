@@ -6,6 +6,7 @@ export const RUN_STREAM_EVENT_TYPES = [
   "session",
   "session.resumed",
   "session.resume_state",
+  "session.recovery_failed",
   "session.started",
   "session.branched",
   "session.branch_created",
