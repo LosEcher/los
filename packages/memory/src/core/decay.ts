@@ -1,0 +1,148 @@
+/**
+ * @los/memory/decay — Observation decay scoring model.
+ *
+ * Four-factor weighted model that computes a staleness score [0,1] for
+ * each observation. Scores below {@link STALE_THRESHOLD} (0.3) are
+ * considered stale and candidates for compaction pruning.
+ *
+ * ## Factors
+ *
+ * 1. **baseScore** — exponential time-decay over 24h (1.0→0.1). The
+ *    older an observation, the lower its baseline value.
+ *
+ * 2. **recencyFactor** — stepwise recency bonus:
+ *    - < 1h: 1.0 (fresh)
+ *    - 1-6h: 0.8
+ *    - 6-24h: 0.5
+ *    - > 24h: 0.3
+ *
+ * 3. **referenceCountFactor** — observations referenced by other
+ *    observations or tool calls retain higher value:
+ *    - 0 refs: 0.7
+ *    - 1 ref:  0.85
+ *    - ≥ 2 refs: 1.0
+ *
+ * 4. **toolStatusFactor** — tool-call liveness protects active work;
+ *    failed/cancelled calls reduce retention priority:
+ *    - running/requested: 1.0
+ *    - failed/cancelled:  0.5
+ *    - succeeded / no tool: 0.8
+ *
+ * ## Composite
+ *
+ * ```
+ * score = baseScore × recencyFactor × referenceCountFactor × toolStatusFactor
+ * ```
+ *
+ * Clamped to [0, 1]. Scores below {@link STALE_THRESHOLD} are stale.
+ */
+
+/** Score below which an observation is considered stale. */
+export const STALE_THRESHOLD = 0.3;
+
+/** Observation data required for decay scoring. */
+export interface DecayObservation {
+  createdAt: Date;
+  /** Number of times this observation is referenced by others. */
+  referenceCount: number;
+  /** Associated tool call status, if any. */
+  toolStatus?: 'running' | 'requested' | 'succeeded' | 'failed' | 'cancelled';
+}
+
+export interface DecayScoreResult {
+  score: number;
+  stale: boolean;
+  factors: {
+    base: number;
+    recency: number;
+    referenceCount: number;
+    toolStatus: number;
+  };
+}
+
+// ── Individual factors ─────────────────────────────────────────
+
+/** Exponential time-decay: hoursSince=0→1.0, 8h→0.37, 24h→0.05 (floor 0.1). */
+function baseScore(createdAt: Date): number {
+  const hoursSince = (Date.now() - createdAt.getTime()) / 3_600_000;
+  return Math.max(0.1, Number(Math.exp(-hoursSince / 8).toFixed(4)));
+}
+
+/** Stepwise recency bonus. */
+function recencyFactor(createdAt: Date): number {
+  const hoursSince = (Date.now() - createdAt.getTime()) / 3_600_000;
+  if (hoursSince < 1) return 1.0;
+  if (hoursSince < 6) return 0.8;
+  if (hoursSince < 24) return 0.5;
+  return 0.3;
+}
+
+/** Reference count multiplier. */
+function referenceCountFactor(refCount: number): number {
+  if (refCount >= 2) return 1.0;
+  if (refCount === 1) return 0.85;
+  return 0.7;
+}
+
+/** Tool-call liveness multiplier. */
+function toolStatusFactor(status?: string): number {
+  switch (status) {
+    case 'running':
+    case 'requested':
+      return 1.0;
+    case 'failed':
+    case 'cancelled':
+      return 0.5;
+    default:
+      return 0.8;
+  }
+}
+
+// ── Public API ──────────────────────────────────────────────────
+
+/**
+ * Compute the decay score for a single observation.
+ *
+ * Returns a clamped [0,1] score and a breakdown of contributing factors.
+ * Scores below {@link STALE_THRESHOLD} are marked stale.
+ */
+export function decayScore(obs: DecayObservation): DecayScoreResult {
+  const base = baseScore(obs.createdAt);
+  const recency = recencyFactor(obs.createdAt);
+  const referenceCount = referenceCountFactor(obs.referenceCount);
+  const toolStatus = toolStatusFactor(obs.toolStatus);
+
+  const raw = base * recency * referenceCount * toolStatus;
+  const score = Math.min(1, Math.max(0, Number(raw.toFixed(4))));
+
+  return {
+    score,
+    stale: score < STALE_THRESHOLD,
+    factors: { base, recency, referenceCount, toolStatus },
+  };
+}
+
+/**
+ * Compute decay scores for multiple observations in a session.
+ * Returns per-observation scores plus session-level summary.
+ */
+export function decayScores(
+  observations: DecayObservation[],
+): { scores: DecayScoreResult[]; staleCount: number; staleRatio: number; averageScore: number } {
+  if (observations.length === 0) {
+    return { scores: [], staleCount: 0, staleRatio: 0, averageScore: 1 };
+  }
+
+  const scores = observations.map(decayScore);
+  const staleCount = scores.filter(s => s.stale).length;
+
+  const sum = scores.reduce((acc, s) => acc + s.score, 0);
+  const averageScore = Number((sum / scores.length).toFixed(4));
+
+  return {
+    scores,
+    staleCount,
+    staleRatio: Number((staleCount / observations.length).toFixed(4)),
+    averageScore,
+  };
+}
