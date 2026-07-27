@@ -126,6 +126,7 @@ const isolatedDatabaseTestFiles = [
   'src/todo-dispatch.test.ts',
   'src/todos.test.ts',
   'src/tool-call-recovery.test.ts',
+  'src/session-recovery.test.ts',
   'src/verification-records.test.ts',
   'src/work-items.test.ts',
   'src/work-items/revision-loop.test.ts',
