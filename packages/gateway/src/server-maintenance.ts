@@ -152,7 +152,7 @@ export function registerServerMaintenance(
   // ── Daily memory maintenance (retention + integrity + auto-compact) ──
   const RETENTION_MS = 24 * 60 * 60 * 1000;
   const runMemoryMaintenance = async () => {
-    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore }) => {
+    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore, shouldTriggerCompaction }) => {
       const retention = await applyRetentionPolicy().catch((err) => {
         log.warn(`Memory retention failed: ${err.message ?? String(err)}`);
         return null;
@@ -173,7 +173,6 @@ export function registerServerMaintenance(
       // Auto-compact: decay-triggered (low score / high stale) + 24h safety net
       try {
         const { getDb } = await import('@los/infra/db');
-        const { shouldTriggerCompaction } = await import('@los/memory');
         await ensureMemoryCompactionStore();
         const db = getDb();
 
