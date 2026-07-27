@@ -2,11 +2,14 @@ import type { CreateTodoInput } from './todo-types.js';
 import { LOS_AGENT_WORKFLOW_TODO_SEED } from './todo-seeds-agent-workflow.js';
 import { AUDIT_BASELINE_TODO_SEED } from './todo-seeds-audit-baseline.js';
 import { AUDIT_BASELINE_P2_TODO_SEED } from './todo-seeds-audit-baseline-p2.js';
+import { AUDIT_BASELINE_P1_TODO_SEED } from './todo-seeds-audit-baseline-p1.js';
 import { CONTEXT_ENGINEERING_TODO_SEED } from './todo-seeds-context-engineering.js';
 import { _EXECUTION_LAB_TODO_SEED } from './todo-seeds-execution-lab.js';
 import { LOS_GOVERNANCE_TODO_SEED } from './todo-seeds-governance.js';
 import { LOS_RUNTIME_CORE_TODO_SEED } from './todo-seeds-runtime-core.js';
 import { _DAILY_AGENT_PRODUCT_TODO_SEED } from './todo-seeds-daily-agent.js';
+import { DAILY_GAP_TODO_SEED } from './todo-seeds-daily-gaps.js';
+import { DAILY_GAP_WAVE3_TODO_SEED } from './todo-seeds-daily-gaps-wave3.js';
 
 export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   {
@@ -582,10 +585,13 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
     },
   },
   ...AUDIT_BASELINE_TODO_SEED,
+  ...AUDIT_BASELINE_P1_TODO_SEED,
   ...AUDIT_BASELINE_P2_TODO_SEED,
   ...LOS_AGENT_WORKFLOW_TODO_SEED,
   ...LOS_RUNTIME_CORE_TODO_SEED,
   ..._DAILY_AGENT_PRODUCT_TODO_SEED,
+  ...DAILY_GAP_TODO_SEED,
+  ...DAILY_GAP_WAVE3_TODO_SEED,
   ...LOS_GOVERNANCE_TODO_SEED,
   ..._EXECUTION_LAB_TODO_SEED,
 ];

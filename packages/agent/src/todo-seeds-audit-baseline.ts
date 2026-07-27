@@ -379,18 +379,28 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
   {
     id: 'todo-los-p1-otel-docs',
     title: 'P1-10 OTel bridge 配置文档与健康验证',
-    description: 'bridge 已提供 /health 和 /runtimes/bridge/status；剩余工作是文档化端口、OTLP 协议、collector 边界和操作检查。',
+    description: '文档化 OTel bridge 端口、OTLP/HTTP 协议、health/status、external collector 边界与故障检查；bridge 实现本身此前已存在。',
     kind: 'task',
-    status: 'ready',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-otel-docs',
     dependsOnIds: [],
     metadata: {
-      files: ['packages/agent/src/runtime-adapter/otel-bridge.ts', 'packages/gateway/src/routes/orchestration/runtime-adapter-routes.ts', '.env.example'],
-      partialEvidence: ['OTel bridge /health exists', 'GET /runtimes/bridge/status exists', 'no OTEL_* collector endpoint is configured in the current environment'],
+      files: [
+        'packages/agent/src/runtime-adapter/otel-bridge.ts',
+        'packages/gateway/src/routes/orchestration/runtime-adapter-routes.ts',
+        '.env.example',
+        'docs/operations/otel-bridge.md',
+      ],
       priorityReason: 'P1: runtime behavior exists, but operators cannot distinguish the local bridge from an external collector configuration.',
+      evidence: [
+        'docs/operations/otel-bridge.md covers port 4318, OTLP/HTTP JSON, /health, /runtimes/bridge/status, collector boundary, and failure checks',
+        '.env.example OTel bridge section documents non-auto-start, loopback default, and external-collector boundary',
+        'live 2026-07-27: GET /runtimes/bridge/status → running=true; GET http://127.0.0.1:4318/health → status=ok service=los-otel-bridge',
+      ],
+      statusUpdatedAt: '2026-07-27',
     },
   },
 
@@ -424,8 +434,17 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
     source: 'audit-2026-06-21',
     stageId: 'p1-iteration-fixes',
     dedupeKey: 'los:todo:p1-turbo-cache',
-    dependsOnIds: [],
-    metadata: { files: ['turbo.json'], blocker: 'Wait for todo-los-ci-resource-baseline to collect the 10 unique-head resource window before changing cache policy.', statusUpdatedAt: '2026-07-26' },
+    dependsOnIds: ['todo-los-ci-resource-baseline'],
+    metadata: {
+      files: ['turbo.json'],
+      blocker: 'Wait for todo-los-ci-resource-baseline to collect the 10 unique-head resource window before changing cache policy.',
+      executionOrder: {
+        after: ['todo-los-ci-resource-baseline'],
+        notBefore: 'uniqueHeadCount >= 10',
+        forbids: ['publishP95', 'allowCacheTuning', 'allowRunnerCapacityChange'],
+      },
+      statusUpdatedAt: '2026-07-27',
+    },
   },
 
   // ════════════════════════════════════════════════════════════
@@ -476,122 +495,6 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       files: ['tools/check-security.sh'],
       evidence: ['tracked .env variants are rejected', 'private_key, jwt_secret, and encryption_key patterns are scanned', 'executable fixture test covers the expanded rules'],
       statusUpdatedAt: '2026-07-15',
-    },
-  },
-
-  // ════════════════════════════════════════════════════════════
-  // P1 — 2026-06-24 Governance Audit (8 items)
-  // ════════════════════════════════════════════════════════════
-
-  {
-    id: 'todo-los-p1-stale-detection',
-    title: 'P1-N1 P0-3 Stale detection + 自动 compaction trigger',
-    description:
-      '实现证据衰减评分和跨 session 模式聚合。\n' +
-      '当前 P0-3 被推迟到 P1：stale candidate auto-marking, cross-session pattern aggregation, evidence decay scoring。\n' +
-      '来源: los-mimo-p0-evaluation-2026-06-17',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-stale-detection',
-    dependsOnIds: [],
-    metadata: {
-      problem: 'compaction 缺乏自动触发和模式衰减',
-      sourceMemory: 'los-mimo-p0-evaluation-2026-06-17',
-      files: ['packages/memory/src/core/compaction.ts'],
-    },
-  },
-  {
-    id: 'todo-los-p1-los-ast-rules',
-    title: 'P1-N2 los-ast 自定义规则：编码 AP1/AP3/AP5',
-    description:
-      '为 los-ast 编写 los 专属规则，将 AGENTS.md 中的 AP1/AP3/AP5 编码为 AST 规则：\n' +
-      'AP1: Direct calls to updateTaskRun/updateTaskRunFields/updateRunSpecStatus\n' +
-      'AP3: 检测 markSucceeded 前缺少 canMarkSucceeded() 调用\n' +
-      'AP5: 检测 task phase 前缺少 loadSpecsForFiles() 调用\n' +
-      '参考 lsclaw-governance rule pack 的 YAML 格式。',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-los-ast-rules',
-    dependsOnIds: [],
-    metadata: {
-      problem: 'AP 反模式依赖文档记忆，无自动检测',
-      solution: 'AST 规则自动化 CI 扫描',
-      files: ['projects/los-ast/rules/projects/los-governance/'],
-    },
-  },
-  {
-    id: 'todo-los-p1-context-reconstruction',
-    title: 'P1-N3 MiMo P1-4 上下文重建协议',
-    description:
-      '实现 failed session 的完整上下文重建：从 session_events + observations 中\n' +
-      '恢复最后一次有效 checkpoint 前的完整上下文，用于 handoff 到新 agent。\n' +
-      '来源: los-remaining-backlog-2026-06-17',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-context-reconstruction',
-    dependsOnIds: [],
-    metadata: {
-      problem: 'session 中断后无法恢复上下文',
-      sourceMemory: 'los-remaining-backlog-2026-06-17',
-      files: ['packages/agent/src/session-events.ts', 'packages/agent/src/loop/compression.ts'],
-    },
-  },
-  {
-    id: 'todo-los-p1-cbm-ab-inject',
-    title: 'P1-N4 CBM Phase 2 A/B injection',
-    description:
-      '当 shadow 模式积累 >= 20 sessions 且成功率 >= 90% 后，启动 A/B 注入测试。\n' +
-      '随机分配 session 使用 CBM 注入的 architecture context vs 不注入。\n' +
-      '当前状态：shadow mode 已启用，等数据积累。\n' +
-      '来源: los-cbm-integration-backlog-2026-06-19',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-cbm-ab-inject',
-    dependsOnIds: ['todo-los-execution-observability-projection'],
-    metadata: {
-      problem: 'CBM 注入效果未经验证',
-      trigger: 'shadow sessions >= 20',
-      sourceMemory: 'los-cbm-integration-backlog-2026-06-19',
-      files: ['packages/gateway/src/chat-cbm-inject.ts'],
-      partialEvidence: 'Alternating in-memory assignment is wired, but it is not stable across processes and is not persisted with outcome evidence.',
-      acceptance: [
-        'assignment is deterministic per session and persisted as an event or decision record',
-        'the experiment gate verifies at least 20 eligible shadow sessions before enabling injection',
-        'success, latency, token, and failure outcomes can be compared by assigned cohort',
-      ],
-    },
-  },
-  {
-    id: 'todo-los-p1-perf-metrics',
-    title: 'P1-N5 接入完整 metrics',
-    description:
-      '接入 task_runs 延迟、tool 成功率、provider latency、cache hit rate 的\n' +
-      '结构化 metrics 收集。当前 performance_audit 提供了基础统计，需要：\n' +
-      '1. Prometheus metrics endpoint\n' +
-      '2. Grafana dashboard 模板\n' +
-      '3. 持续收集的 provider_call_telemetry 趋势分析',
-    kind: 'task',
-    status: 'backlog',
-    priority: 'P1',
-    source: 'audit-2026-06-24',
-    stageId: 'p1-iteration-fixes',
-    dedupeKey: 'los:todo:p1-perf-metrics',
-    dependsOnIds: [],
-    metadata: {
-      problem: '无可观测性后端，纯 PG 查询不够',
-      files: ['packages/infra/src/metrics.ts', 'packages/gateway/src/routes/'],
     },
   },
 ];

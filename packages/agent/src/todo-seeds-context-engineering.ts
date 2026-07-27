@@ -161,6 +161,8 @@ export const CONTEXT_ENGINEERING_TODO_SEED: CreateTodoInput[] = [
       reference: 'Aider architect mode: aider.chat/docs/usage/modes.html, aider.chat/2024/09/26/architect.html',
       candidateFiles: ['packages/agent/src/loop.ts', 'packages/agent/src/run-contract.ts', 'packages/agent/src/model-profiles.ts'],
       nonGoals: ['不强制所有 task', '不替代 P0-2 Judge Model'],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
   {
@@ -181,6 +183,8 @@ export const CONTEXT_ENGINEERING_TODO_SEED: CreateTodoInput[] = [
       reference: 'Claude Code PreCompact/PostCompact hooks, v2.1.128 compaction beta',
       candidateFiles: ['packages/memory/src/compaction.ts', 'packages/gateway/src/chat-service.ts'],
       hookEvents: ['pre_compact', 'post_compact'],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
   {
@@ -201,6 +205,8 @@ export const CONTEXT_ENGINEERING_TODO_SEED: CreateTodoInput[] = [
       reference: 'Claude Code 2026 Deferred Tool Loading, alexop.dev full-stack guide',
       candidateFiles: ['packages/agent/src/registry.ts', 'packages/agent/src/loop.ts'],
       nonGoals: ['不改变 tool 注册 API 外部接口', '不延迟 tool execution path (schema cache <1ms)'],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
   {
