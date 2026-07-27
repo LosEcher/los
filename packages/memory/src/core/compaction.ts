@@ -23,7 +23,6 @@ import {
   normalizeRequired, normalizeLimit, normalizeJsonObject,
   normalizeJsonArray, parseJsonArray, toIsoString,
 } from '../normalizers.js';
-
 const log = getLogger('memory-compaction');
 
 export type CandidateStatus = 'draft' | 'review' | 'approved' | 'active' | 'retired';
@@ -301,6 +300,19 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       const sr = await detectSelfReflectionCandidates({ sessionId, tenantId: input.tenantId ?? undefined, projectId: input.projectId ?? undefined });
       for (const p of sr.observedPatterns) observedPatterns.push(p);
       for (const c of sr.proceduralCandidates) proceduralCandidates.push(c);
+    } catch (err) { /* best-effort */ }
+
+    // Cross-session decay aggregation (Phase 5) — identify globally low-value kinds
+    try {
+      const { aggregateCrossSessionDecay } = await import('./decay.js');
+      const decayPatterns = await aggregateCrossSessionDecay(sessionId);
+      if (decayPatterns.length > 0) {
+        observedPatterns.push({
+          kind: 'cross_session_decay',
+          patterns: decayPatterns,
+          highDecayKinds: decayPatterns.filter(p => p.decayRate > 0.5).map(p => p.kind),
+        });
+      }
     } catch (err) { /* best-effort */ }
 
     confidence = proceduralCandidates.length > 0

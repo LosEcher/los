@@ -269,3 +269,60 @@ export async function shouldTriggerCompaction(sessionId: string): Promise<Trigge
     observationCount: result.observationCount,
   };
 }
+
+// ── Cross-session decay aggregation ─────────────────────────────
+
+export interface CrossSessionDecayPattern {
+  kind: string;
+  /** Number of sessions that have this observation kind. */
+  sessionCount: number;
+  /** Average hours since creation across sessions. */
+  avgAgeHours: number;
+  /** Estimated decay rate (0-1, higher = decays faster). */
+  decayRate: number;
+}
+
+/**
+ * Aggregate observation decay patterns across other sessions by kind.
+ * Identifies observation kinds that consistently decay quickly and may
+ * warrant lower retention priority.
+ *
+ * Queries observations in sessions other than `excludeSessionId`,
+ * groups by kind, and computes the average age. Uses the baseScore
+ * exponential-decay formula to estimate per-kind decay rates.
+ */
+export async function aggregateCrossSessionDecay(
+  excludeSessionId: string,
+): Promise<CrossSessionDecayPattern[]> {
+  const db = getDb();
+  const rows = await db.query<{
+    kind: string;
+    session_count: string;
+    avg_age_hours: string;
+  }>(
+    `SELECT kind,
+            COUNT(DISTINCT session_id)::text AS session_count,
+            AVG(EXTRACT(EPOCH FROM (now() - created_at)) / 3600)::text AS avg_age_hours
+     FROM observations
+     WHERE session_id != $1
+       AND kind IS NOT NULL
+       AND COALESCE(metadata_json->>'archived', 'false') = 'false'
+     GROUP BY kind
+     HAVING COUNT(DISTINCT session_id) >= 2
+     ORDER BY session_count DESC
+     LIMIT 10`,
+    [excludeSessionId],
+  );
+
+  return rows.rows.map(r => {
+    const avgAgeHours = Number(r.avg_age_hours);
+    // Use the same exponential decay formula as baseScore (without floor)
+    const decayRate = Number((1 - Math.exp(-avgAgeHours / 8)).toFixed(4));
+    return {
+      kind: r.kind,
+      sessionCount: Number(r.session_count),
+      avgAgeHours: Number(avgAgeHours.toFixed(1)),
+      decayRate: Math.max(0, Math.min(1, decayRate)),
+    };
+  });
+}
