@@ -199,7 +199,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       `SELECT id FROM memory_compactions WHERE session_id = $1 LIMIT 1`,
       [sessionId],
     );
-    if (existingCheck.rows[0] && !(input as any).force) {
+    if (existingCheck.rows[0] && !input.force) {
       log.info(`Session ${sessionId} already compacted, skipping (use force=true to re-compact)`);
       return getCompaction(existingCheck.rows[0].id);
     }
