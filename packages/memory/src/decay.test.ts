@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decayScore, decayScores, calculateDecayScores, STALE_THRESHOLD, type DecayObservation } from './core/decay.js';
+import { decayScore, decayScores, calculateDecayScores, shouldTriggerCompaction, STALE_THRESHOLD, type DecayObservation } from './core/decay.js';
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { ensureMemoryStore, addObservation } from './core/store.js';
@@ -194,6 +194,88 @@ test('calculateDecayScores: stale ratio computed across multiple observations', 
     assert.ok(result.staleCount >= 1, 'at least 1 stale');
     assert.ok(result.averageScore > 0 && result.averageScore < 1);
     assert.equal(result.staleObservationIds.length, result.staleCount);
+  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+// ── Auto-trigger tests ──────────────────────────────────────────
+
+test('shouldTriggerCompaction: empty session does not trigger', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `trig-empty-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    const decision = await shouldTriggerCompaction(sessionId);
+    assert.equal(decision.triggered, false);
+    assert.equal(decision.reason, 'none');
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('shouldTriggerCompaction: low decay + volume triggers', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `trig-low-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    for (let i = 0; i < 20; i++) {
+      await addObservation({ title: `old-${i}`, kind: 'note', sessionId });
+    }
+    await getDb().query(
+      `UPDATE observations SET created_at = now() - interval '100 hours',
+         metadata_json = $2::jsonb WHERE session_id = $1`,
+      [sessionId, JSON.stringify({ referenceCount: 0, toolStatus: 'failed' })],
+    );
+    const decision = await shouldTriggerCompaction(sessionId);
+    assert.equal(decision.triggered, true);
+    assert.equal(decision.reason, 'low_decay');
+    assert.ok(decision.averageScore < 0.3);
+  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('shouldTriggerCompaction: high stale ratio triggers', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `trig-stale-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    for (let i = 0; i < 3; i++) await addObservation({ title: `s-${i}`, kind: 'note', sessionId });
+    for (let i = 0; i < 2; i++) await addObservation({ title: `f-${i}`, kind: 'note', sessionId });
+    await getDb().query(
+      `UPDATE observations SET created_at = now() - interval '100 hours',
+         metadata_json = $2::jsonb WHERE session_id = $1 AND title LIKE 's-%'`,
+      [sessionId, JSON.stringify({ referenceCount: 0, toolStatus: 'failed' })],
+    );
+    const decision = await shouldTriggerCompaction(sessionId);
+    assert.equal(decision.triggered, true);
+    assert.equal(decision.reason, 'high_stale');
+    assert.ok(decision.staleRatio > 0.4);
+  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('shouldTriggerCompaction: fresh session does not trigger', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `trig-fresh-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    await addObservation({ title: 'fresh', kind: 'note', sessionId });
+    await getDb().query(
+      `UPDATE observations SET metadata_json = $2::jsonb WHERE session_id = $1`,
+      [sessionId, JSON.stringify({ referenceCount: 2, toolStatus: 'running' })],
+    );
+    const decision = await shouldTriggerCompaction(sessionId);
+    assert.equal(decision.triggered, false);
   } finally {
     await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
