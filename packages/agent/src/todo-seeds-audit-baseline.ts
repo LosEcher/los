@@ -445,8 +445,6 @@ export const AUDIT_BASELINE_TODO_SEED: CreateTodoInput[] = [
       },
       statusUpdatedAt: '2026-07-27',
     },
-    dependsOnIds: [],
-    metadata: { files: ['turbo.json'], blocker: 'Wait for todo-los-ci-resource-baseline to collect the 10 unique-head resource window before changing cache policy.', statusUpdatedAt: '2026-07-26' },
   },
 
   // ════════════════════════════════════════════════════════════
