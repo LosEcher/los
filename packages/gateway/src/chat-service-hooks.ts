@@ -126,6 +126,7 @@ export function createChatTaskHooks(input: {
                 proceduralCandidateCount: ctx.proceduralCandidateCount,
                 confidence: ctx.confidence,
                 mode: ctx.mode,
+                metrics: (ctx.summary as any).compactionMetrics ?? null,
               });
             },
           }).catch(() => undefined)
@@ -156,6 +157,18 @@ export function createChatTaskHooks(input: {
             },
             onPostCompact: async (ctx) => {
               rebuildFileContext({ ctx, sid, wsRoot, send });
+              send('operator', {
+                type: 'compaction.post_compact',
+                sessionId: ctx.sessionId,
+                compactionId: ctx.compactionId,
+                observationCount: ctx.observationCount,
+                taskRunCount: ctx.taskRunCount,
+                proceduralCandidateCount: ctx.proceduralCandidateCount,
+                confidence: ctx.confidence,
+                mode: ctx.mode,
+                trigger: ctx.trigger ?? trigger,
+                metrics: (ctx.summary as any).compactionMetrics ?? null,
+              });
             },
           }).catch(() => undefined)
         ).catch(() => undefined);
