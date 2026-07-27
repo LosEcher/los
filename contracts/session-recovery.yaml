@@ -1,0 +1,293 @@
+contract: los.session-recovery
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Data contract for session recovery after interruption. Defines checkpoint
+  content, reconstruction flow, and handoff message format so a replacement
+  agent can resume a failed session from the last valid checkpoint.
+schemaDialect: https://json-schema.org/draft/2020-12/schema
+
+properties:
+  checkpoint:
+    type: object
+    description: >
+      A snapshot taken before compaction or at a configurable interval
+      (event count, tool state change, time). Stored in stream_checkpoints
+      and referenced by session_recovery records.
+    required:
+      - checkpointId
+      - sessionId
+      - takenAt
+      - mode
+    properties:
+      checkpointId:
+        type: string
+        minLength: 1
+      sessionId:
+        type: string
+        minLength: 1
+      runSpecId:
+        type: ["string", "null"]
+      takenAt:
+        type: string
+        format: date-time
+      trigger:
+        type: string
+        enum: [event_count, tool_state_change, time_interval, pre_compact, manual]
+        description: What triggered this checkpoint.
+      mode:
+        type: string
+        enum: [checkpoint, full]
+        description: >
+          checkpoint = lightweight snapshot (no pattern extraction).
+          full = full compaction checkpoint.
+      toolState:
+        type: object
+        description: >
+          Active tool calls at checkpoint time. Each entry identifies an
+          in-flight tool call that the recovery agent must know about.
+        properties:
+          pendingCalls:
+            type: array
+            items:
+              type: object
+              required: [callId, toolName]
+              properties:
+                callId:
+                  type: string
+                  minLength: 1
+                toolName:
+                  type: string
+                  minLength: 1
+                args:
+                  type: object
+                status:
+                  type: string
+                  enum: [requested, running, succeeded, failed]
+            description: Tool calls that were issued but not yet completed.
+          lastResult:
+            type: array
+            items:
+              type: object
+              properties:
+                callId:
+                  type: string
+                toolName:
+                  type: string
+                outcome:
+                  type: string
+                  enum: [success, error, cancelled]
+                resultSummary:
+                  type: string
+                  description: Truncated result for context (full result recoverable from DB).
+            description: Most recent completed tool results (last 5).
+      fileReferences:
+        type: array
+        maxItems: 10
+        items:
+          type: object
+          required: [path]
+          properties:
+            path:
+              type: string
+              minLength: 1
+              description: Repository-relative path.
+            contentHash:
+              type: string
+              description: SHA-256 of file content at checkpoint time.
+            lastOperation:
+              type: string
+              enum: [read, write, edit]
+        description: >
+          Files referenced by the agent in recent turns, with content hash
+          for staleness detection on recovery.
+      messageCursor:
+        type: object
+        description: >
+          Position in the session event stream at checkpoint time.
+        properties:
+          lastEventId:
+            type: string
+            minLength: 1
+            description: Last session event ID before checkpoint.
+          lastEventIndex:
+            type: integer
+            minimum: 0
+            description: Monotonic index in the event stream.
+          turnCount:
+            type: integer
+            minimum: 0
+
+  recoveryInput:
+    type: object
+    description: >
+      Input to reconstructSessionContext(). The caller provides a sessionId;
+      the function gathers checkpoints, events, and compaction records.
+    required:
+      - sessionId
+    properties:
+      sessionId:
+        type: string
+        minLength: 1
+      targetCheckpointId:
+        type: string
+        description: Specific checkpoint to use. Defaults to most recent valid one.
+      includeSystemMessages:
+        type: boolean
+        default: true
+        description: Whether to include system-level events in the reconstructed context.
+
+  recoveryOutput:
+    type: object
+    description: >
+      Result of reconstructSessionContext(). Contains the reconstructed
+      message array ready for provider.chat() and metadata about what was
+      recovered and what was lost.
+    required:
+      - sessionId
+      - checkpointId
+      - messages
+      - recoverySummary
+    properties:
+      sessionId:
+        type: string
+      checkpointId:
+        type: string
+        description: The checkpoint from which recovery was performed.
+      messages:
+        type: array
+        items:
+          type: object
+          description: Provider-compatible message objects (role + content).
+        minItems: 1
+        description: >
+          Reconstructed message array. First message is always a system
+          message describing the recovery scope. Remaining messages are
+          the checkpointed conversation history.
+      recoverySummary:
+        type: object
+        required:
+          - recoveredTurnCount
+          - lostToolResults
+          - fileStaleness
+          - recoveryMode
+        properties:
+          recoveredTurnCount:
+            type: integer
+            minimum: 0
+            description: Number of conversation turns successfully recovered.
+          totalTurnCount:
+            type: integer
+            minimum: 0
+            description: Total turns in the original session (for coverage %).
+          lostToolResults:
+            type: integer
+            minimum: 0
+            description: >
+              Number of tool call results that could not be recovered
+              (replaced by placeholder stubs).
+          fileStaleness:
+            type: array
+            items:
+              type: object
+              properties:
+                path:
+                  type: string
+                checkpointHash:
+                  type: string
+                currentHash:
+                  type: string
+                stale:
+                  type: boolean
+            description: >
+              Referenced files whose content has changed since the checkpoint.
+              Recovery agent should re-read stale files.
+          recoveryMode:
+            type: string
+            enum: [full, partial, degraded]
+            description: >
+              full = all turns + tool results recovered.
+              partial = some tool results replaced by stubs.
+              degraded = significant data loss, recovery may be incomplete.
+          errorEvents:
+            type: array
+            items:
+              type: object
+              properties:
+                type:
+                  type: string
+                message:
+                  type: string
+                at:
+                  type: string
+                  format: date-time
+            description: >
+              Errors encountered during recovery (missing checkpoints,
+              version mismatches, corrupted events). Non-empty only in
+              degraded mode.
+
+  handoffMessage:
+    type: object
+    description: >
+      The first system message injected after recovery. Tells the replacement
+      agent what was completed, what was in progress, and where to continue.
+    required:
+      - role
+      - recoveryScope
+    properties:
+      role:
+        type: string
+        const: system
+      recoveryScope:
+        type: string
+        description: >
+          Template: "You are resuming session {sessionId} from checkpoint
+          {checkpointId} taken at {takenAt}. Completed: {completedSummary}.
+          In progress: {inProgressSummary}. Lost: {lostSummary}."
+      completedWork:
+        type: object
+        properties:
+          succeededTasks:
+            type: integer
+          succeededToolCalls:
+            type: array
+            items:
+              type: object
+              properties:
+                toolName:
+                  type: string
+                summary:
+                  type: string
+      inProgressWork:
+        type: object
+        properties:
+          pendingToolCalls:
+            type: array
+            items:
+              type: object
+              properties:
+                toolName:
+                  type: string
+                callId:
+                  type: string
+                args:
+                  type: object
+          lastPlanStep:
+            type: string
+            description: The last PlanStep id or title that was being executed.
+      lostWork:
+        type: string
+        description: >
+          Summary of what could not be recovered (lost tool results,
+          missing checkpoints). Empty if recovery was full.
+      staleFiles:
+        type: array
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+            note:
+              type: string
+        description: Files that changed since checkpoint; agent should re-read.

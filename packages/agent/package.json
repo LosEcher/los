@@ -24,6 +24,7 @@
     "./model-profiles": "./src/model-profiles.ts",
     "./model-settings": "./src/model-settings.ts",
     "./compat-harness": "./src/compat-harness.ts",
+    "./session-recovery": "./src/session-recovery.ts",
     "./todos": "./src/todos.ts",
     "./run-specs": "./src/run-specs.ts",
     "./stream-checkpoints": "./src/stream-checkpoints.ts",
