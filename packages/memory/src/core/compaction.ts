@@ -15,7 +15,9 @@ import {
   promoteProceduralCandidate,
 } from '../procedures/procedural-candidates.js';
 import { buildTranscriptBrief, type TranscriptBrief } from '../transcript/transcript-brief.js';
-import { collectSymbolSummary } from './compaction-symbol-summary.js';
+import { collectSymbolSummary, serializeSymbolSummary } from './compaction-symbol-summary.js';
+import { computeCompactionMetrics } from './compaction-metrics.js';
+import { lookupCrossSessionEvidence } from './compaction-evidence.js';
 import { rowToCompaction, assertRow, normalizeCandidateArray, type CompactionRow } from './compaction-rows.js';
 import {
   normalizeRequired, normalizeLimit, normalizeJsonObject,
@@ -75,6 +77,11 @@ export interface CompactSessionInput {
   /** Force re-compaction even if session already has a compaction record. */
   force?: boolean;
   /**
+   * Model context window size in tokens. Used to compute postCompactionFillPct.
+   * When omitted, fill percentage is not computed.
+   */
+  contextWindowTokens?: number;
+  /**
    * Pre-compaction hook: called before advisory lock is acquired and data is gathered.
    * Return `false` to abort compaction.
    */
@@ -106,6 +113,14 @@ export interface PostCompactContext {
   mode: 'checkpoint' | 'full';
   trigger?: string;
   summary: Record<string, unknown>;
+  /** Symbol summary from observations (deduplicated symbol→count map with file paths). */
+  symbolSummary?: Array<{
+    symbolId: string;
+    name: string;
+    kind: string;
+    file: string;
+    operationCount: number;
+  }>;
 }
 
 export interface ListCompactionsOptions {
@@ -152,32 +167,6 @@ export async function ensureMemoryCompactionStore(): Promise<void> {
   log.info('Memory compaction store initialized');
 }
 
-/**
- * Search existing compactions across other sessions for matching observed patterns.
- * Returns the number of distinct sessions that observed each pattern kind.
- */
-async function lookupCrossSessionEvidence(
-  sessionId: string,
-  patternKinds: string[],
-): Promise<Map<string, number>> {
-  if (patternKinds.length === 0) return new Map();
-  await ensureMemoryCompactionStore();
-  const db = getDb();
-  const counts = new Map<string, number>();
-
-  for (const kind of patternKinds) {
-    const rows = await db.query<{ cnt: string }>(
-      `SELECT COUNT(DISTINCT session_id)::text AS cnt
-       FROM memory_compactions
-       WHERE session_id != $1
-         AND observed_patterns_json @> $2::jsonb`,
-      [sessionId, JSON.stringify([{ kind }])],
-    );
-    const count = Number(rows.rows[0]?.cnt ?? 0);
-    if (count > 0) counts.set(kind, count);
-  }
-  return counts;
-}
 
 export async function compactSession(input: CompactSessionInput): Promise<MemoryCompaction | null> {
   await ensureMemoryCompactionStore();
@@ -270,6 +259,9 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   let evidenceCount = 0;
   let symbolSummary: Map<string, { name: string; kind: string; file: string; count: number }> | null = null;
 
+  // Collect symbol summary for both checkpoint and full modes (lightweight query)
+  symbolSummary = await collectSymbolSummary(db, sessionId);
+
   if (!isCheckpoint) {
     const executorFailures = evalSummaries.filter((e: Record<string, unknown>) => e.failover_scope === 'executor').length;
 
@@ -301,8 +293,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       });
     }
 
-    // Phase 4: collect symbol summary from observations (data accumulation, not pattern detection)
-    symbolSummary = await collectSymbolSummary(db, sessionId);
+    // Phase 4: symbol summary already collected above (shared with checkpoint mode)
 
     // Self-reflection detection (Phase 2) — extracted to self-reflection.ts
     try {
@@ -317,7 +308,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       : 0;
   }
 
-  const summary = {
+  const summary: Record<string, unknown> = {
     sessionId,
     runSpecId: input.runSpecId ?? null,
     tenantId: input.tenantId ?? null,
@@ -329,15 +320,18 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     checkpoint: isCheckpoint || undefined,
     // Phase 4: symbol summary from observations (data accumulation only)
     ...(symbolSummary && symbolSummary.size > 0 ? {
-      symbolSummary: [...symbolSummary.entries()].map(([id, s]) => ({
-        symbolId: id,
-        name: s.name,
-        kind: s.kind,
-        file: s.file,
-        operationCount: s.count,
-      })),
+      symbolSummary: serializeSymbolSummary(symbolSummary),
     } : {}),
   };
+
+  // Compute compaction metrics from observation content sizes
+  if (observationCount > 0) {
+    const metrics = await computeCompactionMetrics({
+      sessionId, summary, observationCount,
+      contextWindowTokens: input.contextWindowTokens,
+    });
+    if (metrics) summary.compactionMetrics = metrics;
+  }
 
   // Build transcript brief from session_events (best-effort augmentation)
   let transcriptBrief: TranscriptBrief | undefined;
@@ -422,6 +416,9 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   // Post-compaction hook — notify caller that compaction is complete
   if (input.onPostCompact) {
     try {
+      const symbolSummaryArray = symbolSummary && symbolSummary.size > 0
+        ? serializeSymbolSummary(symbolSummary)
+        : undefined;
       await input.onPostCompact({
         sessionId,
         compactionId: id,
@@ -435,6 +432,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
         mode: isCheckpoint ? 'checkpoint' : 'full',
         trigger: input.autoTrigger ?? undefined,
         summary,
+        symbolSummary: symbolSummaryArray,
       });
     } catch (err) {
       log.warn(`Post-compaction hook failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
