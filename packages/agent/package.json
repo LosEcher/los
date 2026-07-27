@@ -51,6 +51,8 @@
     "./managed-workspaces": "./src/managed-workspaces.ts",
     "./providers/telemetry": "./src/providers/telemetry.ts",
     "./providers/repair-telemetry": "./src/providers/repair-telemetry.ts",
+    "./providers/provider-health": "./src/providers/provider-health.ts",
+    "./providers/route-healthy": "./src/providers/route-healthy.ts",
     "./dead-letter": "./src/dead-letter.ts",
     "./event-bus": "./src/event-bus.ts",
     "./runtime-adapter": "./src/runtime-adapter/index.ts",
