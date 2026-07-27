@@ -96,15 +96,11 @@
 | 6 | `todo-los-ci-forgejo-windows-resource-probe` | `done` | P1 | 1 | Forgejo PR `#70` / run `289` 与 GitHub PR `#175` / run `30170606961` 均已合并 |
 | 7 | `todo-los-p2-ci-cd-docs` | `in_progress` | P1 | 2、3、4、5 | 当前 change 统一控制面、执行面、证据面和保留策略；双端交付后完成 |
 | 8 | `todo-los-ci-resource-baseline` | `in_progress` | P1 | 3 | `5/10` unique-head；异步收集，10 个样本前不发布 P95 或调容量 |
-| 9 | `todo-los-execution-experiment-contract` | `done` | P1 | 1、2 及原有依赖 | 2026-07-26 已交付；不再阻塞后续功能切片 |
-| 10 | `todo-los-execution-pairwise-rubric-eval` | `done` | P1 | 9 + projection | 已交付；下一片是真实 pairwise sample gate |
-| 11 | `todo-los-execution-pairwise-sample-gate` | `ready` | P1 | 10 | Wave 2 主线；门槛通过前禁止 optimization analysis 自动调优 |
-| 12 | `todo-los-p1-turbo-cache` | `backlog` | P1 | 6、8 | 等待资源基线；验证 pnpm cache、Turbo key、Playwright 安装和 coverage 拆分 |
-| 13 | `todo-los-daily-agent-product-status-reconciliation` | `done` | P1 | 无 | 父计划保持 `in_progress`，`p0AuthorizedScopeComplete=true` |
-| 14 | `todo-los-roadmap-outbox-todo-sync` | `done` | P1 | typed planning + Web-first acceptance + K4 selection | 2026-07-27 Wave 0 对齐完成 |
-| 15 | `todo-los-p1-otel-docs` | `done` | P1 | 无 | 2026-07-27：`docs/operations/otel-bridge.md` + `.env.example`；live health/status 已验证 |
-| 16 | `todo-los-cd-release-contract-discovery` | `backlog` | P2 | 7 | 先调研发布合同，不自动部署 |
-| 17 | `todo-los-ci-policy-alignment-research` | `backlog` | P2 | 6、8 | Node、audit、E2E required、cgroup、schema 和 store 策略 |
+| 9 | `todo-los-execution-experiment-contract` | `ready` | P1 | 1、2 及原有依赖 | 文档交付后的下一功能切片，不等待 10-run 窗口 |
+| 10 | `todo-los-p1-turbo-cache` | `backlog` | P1 | 6、8 | 等待资源基线；验证 pnpm cache、Turbo key、Playwright 安装和 coverage 拆分 |
+| 11 | `todo-los-daily-agent-product-status-reconciliation` | `ready` | P1 | 无 | 校准长期 P0 父计划状态，不新增功能范围 |
+| 12 | `todo-los-cd-release-contract-discovery` | `backlog` | P2 | 7 | 先调研发布合同，不自动部署 |
+| 13 | `todo-los-ci-policy-alignment-research` | `backlog` | P2 | 6、8 | Node、audit、E2E required、cgroup、schema 和 store 策略 |
 
 依赖关系：
 
@@ -115,14 +111,11 @@ single-test-rollout ──> ruleset-migration ──> resource-baseline
         ├──> superseded-run-control                └──> policy research
         └──> Windows resource probe ───────────────────> turbo/cache tuning
 
-ci-gate-result-capture ──┐
-single-test-rollout ─────┴──> experiment-contract (done)
-                              └──> pairwise-rubric (done)
-                                   └──> pairwise-sample-gate (ready; Wave 2 mainline)
-                                        └──> optimization-analysis (P2 backlog; advisory; blocked until gate)
+ci-gate-result-capture ───────────────┐
+single-test-rollout ──────────────────┴──> execution-experiment-contract
 
-gate-result + ruleset + evidence + run-control ──> CI/CD docs (done)
-CI/CD docs ──> release-contract discovery (P2, operator-gated)
+gate-result + ruleset + evidence + run-control ──> CI/CD docs
+CI/CD docs ──> release-contract discovery
 ```
 
 ## 功能、结构和环境的取舍
@@ -130,11 +123,10 @@ CI/CD docs ──> release-contract discovery (P2, operator-gated)
 ### 功能开发
 
 当前两个长期 P0 父计划是 Daily Agent 和 Execution Lab。Daily Agent 的已列
-实现子阶段与状态核对均已完成；父计划仍 `in_progress` 仅作为 roadmap/canary
-载体（`p0AuthorizedScopeComplete=true`），不表示 P0 功能缺口。Execution Lab
-的 experiment contract 与 pairwise rubric 已完成；下一功能切片是
-`todo-los-execution-pairwise-sample-gate`，通过前不得启动 optimization
-analysis 调优。CI 资源基线继续异步推进，不占用功能主线。
+实现子阶段均已完成，首先需要状态核对；真正的下一功能切片是 Execution Lab 的
+execution experiment contract。它原先依赖的两个短期本地 P0 已完成，不依赖
+10-run 观测窗口或自动 CD 调研。当前先完成 CI/CD 文档交付，随后恢复该功能；
+资源基线继续异步推进。
 
 ### 结构治理
 
