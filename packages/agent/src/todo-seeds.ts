@@ -8,6 +8,8 @@ import { _EXECUTION_LAB_TODO_SEED } from './todo-seeds-execution-lab.js';
 import { LOS_GOVERNANCE_TODO_SEED } from './todo-seeds-governance.js';
 import { LOS_RUNTIME_CORE_TODO_SEED } from './todo-seeds-runtime-core.js';
 import { _DAILY_AGENT_PRODUCT_TODO_SEED } from './todo-seeds-daily-agent.js';
+import { DAILY_GAP_TODO_SEED } from './todo-seeds-daily-gaps.js';
+import { DAILY_GAP_WAVE3_TODO_SEED } from './todo-seeds-daily-gaps-wave3.js';
 
 export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   {
@@ -588,6 +590,8 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   ...LOS_AGENT_WORKFLOW_TODO_SEED,
   ...LOS_RUNTIME_CORE_TODO_SEED,
   ..._DAILY_AGENT_PRODUCT_TODO_SEED,
+  ...DAILY_GAP_TODO_SEED,
+  ...DAILY_GAP_WAVE3_TODO_SEED,
   ...LOS_GOVERNANCE_TODO_SEED,
   ..._EXECUTION_LAB_TODO_SEED,
 ];

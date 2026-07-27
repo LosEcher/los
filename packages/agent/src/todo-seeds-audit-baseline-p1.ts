@@ -28,6 +28,8 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       problem: 'compaction 缺乏自动触发和模式衰减',
       sourceMemory: 'los-mimo-p0-evaluation-2026-06-17',
       files: ['packages/memory/src/core/compaction.ts'],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
   {
@@ -70,6 +72,8 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       problem: 'session 中断后无法恢复上下文',
       sourceMemory: 'los-remaining-backlog-2026-06-17',
       files: ['packages/agent/src/session-events.ts', 'packages/agent/src/loop/compression.ts'],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
   {
@@ -98,6 +102,8 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
         'the experiment gate verifies at least 20 eligible shadow sessions before enabling injection',
         'success, latency, token, and failure outcomes can be compared by assigned cohort',
       ],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
   {
@@ -119,6 +125,8 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: '无可观测性后端，纯 PG 查询不够',
       files: ['packages/infra/src/metrics.ts', 'packages/gateway/src/routes/'],
+      subtaskPlan: 'daily-gaps-2026-07-27',
+      subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },
 ];
