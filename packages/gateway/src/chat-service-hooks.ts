@@ -2,8 +2,15 @@ import type { Config } from '@los/infra/config';
 import { ensureSessionStore, saveSession } from '@los/agent/session';
 import { emitRunningToolCallUpsert, emitToolCallUpsertFromSessionEvent, relaySessionEvent } from './chat-live-events.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
+import { getLogger } from '@los/infra/logger';
 
+const log = getLogger('chat-hooks');
 const checkpointTracker = new Map<string, { count: number; lastAt: number }>();
+const toolStateCache = new Map<string, {
+  pendingCalls: Array<{ callId: string; toolName: string; args: Record<string, unknown>; status: string }>;
+  lastResults: Array<{ callId: string; toolName: string; outcome: string; resultSummary: string }>;
+  fileReferences: Array<{ path: string; contentHash: string; lastOperation: string }>;
+}>();
 
 export function createChatTaskHooks(input: {
   sid: string;
@@ -83,9 +90,45 @@ export function createChatTaskHooks(input: {
     onSessionEvent: async (event: any) => {
       relaySessionEvent(send, event);
       await emitToolCallUpsertFromSessionEvent({ send, sessionId: sid, runSpecId, event });
+
+      // Track tool state for checkpoint snapshots
+      updateToolStateCache(sid, event);
+
       if (event.type === 'session.completed' || event.type === 'session.error') {
-        import('@los/memory').then(({ compactSession }) => compactSession({ sessionId: sid, runSpecId }).catch(() => undefined)).catch(() => undefined);
+        import('@los/memory').then(({ compactSession }) =>
+          compactSession({
+            sessionId: sid, runSpecId,
+            onPreCompact: async (ctx) => {
+              // Save tool state snapshot before compaction
+              const ts = toolStateCache.get(sid);
+              if (ts) {
+                send('operator', {
+                  type: 'compaction.pre_compact',
+                  sessionId: ctx.sessionId,
+                  trigger: ctx.trigger ?? 'session_completed',
+                  reason: event.type === 'session.error' ? 'Session error — compacting for recovery' : 'Session completed — running final compaction',
+                  preCompactAt: ctx.preCompactAt,
+                  pendingCalls: ts.pendingCalls.length,
+                  fileReferences: ts.fileReferences.length,
+                });
+              }
+            },
+            onPostCompact: async (ctx) => {
+              send('operator', {
+                type: 'compaction.post_compact',
+                sessionId: ctx.sessionId,
+                compactionId: ctx.compactionId,
+                observationCount: ctx.observationCount,
+                taskRunCount: ctx.taskRunCount,
+                proceduralCandidateCount: ctx.proceduralCandidateCount,
+                confidence: ctx.confidence,
+                mode: ctx.mode,
+              });
+            },
+          }).catch(() => undefined)
+        ).catch(() => undefined);
         checkpointTracker.delete(sid);
+        toolStateCache.delete(sid);
         return;
       }
       const ck = checkpointTracker.get(sid) ?? { count: 0, lastAt: Date.now() };
@@ -98,9 +141,82 @@ export function createChatTaskHooks(input: {
       if (shouldCheckpoint) {
         ck.count = 0; ck.lastAt = Date.now();
         const trigger = triggeredByCount ? 'event_count' : isToolTransition ? 'tool_state_change' : 'time_interval';
-        import('@los/memory').then(({ compactSession }) => compactSession({ sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger }).catch(() => undefined)).catch(() => undefined);
+        import('@los/memory').then(({ compactSession }) =>
+          compactSession({
+            sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger,
+            onPreCompact: async (ctx) => {
+              const ts = toolStateCache.get(sid);
+              if (ts && ts.pendingCalls.length > 0) {
+                log.debug(`Checkpoint with ${ts.pendingCalls.length} pending tool calls`);
+              }
+            },
+          }).catch(() => undefined)
+        ).catch(() => undefined);
       }
       checkpointTracker.set(sid, ck);
     },
   };
+}
+
+// ── Tool state tracking for compaction checkpoints ───────────────
+
+function updateToolStateCache(sessionId: string, event: any): void {
+  const ts = toolStateCache.get(sessionId) ?? {
+    pendingCalls: [],
+    lastResults: [],
+    fileReferences: [],
+  };
+
+  if (event.type === 'tool_call_state.updated') {
+    const payload = event.payload as Record<string, unknown> | undefined;
+    const status = payload?.to as string | undefined;
+    if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
+      // Move from pending to lastResults
+      const callId = event.tool_call_state_id as string;
+      ts.pendingCalls = ts.pendingCalls.filter(c => c.callId !== callId);
+      ts.lastResults.push({
+        callId,
+        toolName: event.toolName ?? 'unknown',
+        outcome: status === 'succeeded' ? 'success' : status === 'failed' ? 'error' : 'cancelled',
+        resultSummary: typeof payload?.result === 'string'
+          ? payload.result.slice(0, 200)
+          : `${status} at ${new Date().toISOString()}`,
+      });
+      // Keep only last 5 results
+      if (ts.lastResults.length > 5) ts.lastResults = ts.lastResults.slice(-5);
+    } else {
+      // Still pending
+      ts.pendingCalls.push({
+        callId: event.tool_call_state_id as string ?? `pending-${Date.now()}`,
+        toolName: event.toolName ?? 'unknown',
+        args: (payload?.args as Record<string, unknown>) ?? {},
+        status: status ?? 'requested',
+      });
+    }
+  } else if (event.type === 'tool.execute') {
+    // Track file references from tool executions
+    const payload = event.payload as Record<string, unknown> | undefined;
+    const filePath = payload?.path as string | undefined;
+    const fileRefs = payload?.fileReferences as Array<{ path: string; hash?: string }> | undefined;
+    if (filePath) {
+      ts.fileReferences.push({
+        path: filePath,
+        contentHash: '',
+        lastOperation: (payload?.op as string) === 'write' ? 'write' : 'read',
+      });
+    }
+    if (fileRefs) {
+      for (const ref of fileRefs) {
+        ts.fileReferences.push({
+          path: ref.path,
+          contentHash: ref.hash ?? '',
+          lastOperation: 'read',
+        });
+      }
+    }
+    // Keep only last 10 file references
+    if (ts.fileReferences.length > 10) ts.fileReferences = ts.fileReferences.slice(-10);
+  }
+
+  toolStateCache.set(sessionId, ts);
 }
