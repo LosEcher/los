@@ -116,6 +116,16 @@ export interface AgentConfig {
   };
   /** Advisory model diagnostics. Defaults to heuristic shadow mode when unset. */
   modelDiagnostics?: ModelDiagnosticConfig;
+  /**
+   * Deferred tool loading: when 'name-only', system prompt only sends {name, description}
+   * instead of full JSON schemas. Full schema is loaded on first invocation and cached.
+   * Default: 'full' (no change in behavior).
+   */
+  deferredToolLoading?: {
+    mode: 'name-only' | 'full';
+    /** Pre-materialize top-N most-used tools at startup (default: none). */
+    preloadTopN?: number;
+  };
 }
 
 export interface AgentModelDelta extends ProviderDelta {
