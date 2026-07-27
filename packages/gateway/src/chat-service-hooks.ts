@@ -1,5 +1,8 @@
 import type { Config } from '@los/infra/config';
 import { ensureSessionStore, saveSession } from '@los/agent/session';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { emitRunningToolCallUpsert, emitToolCallUpsertFromSessionEvent, relaySessionEvent } from './chat-live-events.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
 import { getLogger } from '@los/infra/logger';
@@ -141,6 +144,7 @@ export function createChatTaskHooks(input: {
       if (shouldCheckpoint) {
         ck.count = 0; ck.lastAt = Date.now();
         const trigger = triggeredByCount ? 'event_count' : isToolTransition ? 'tool_state_change' : 'time_interval';
+        const wsRoot = input.workspaceRoot;
         import('@los/memory').then(({ compactSession }) =>
           compactSession({
             sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger,
@@ -149,6 +153,9 @@ export function createChatTaskHooks(input: {
               if (ts && ts.pendingCalls.length > 0) {
                 log.debug(`Checkpoint with ${ts.pendingCalls.length} pending tool calls`);
               }
+            },
+            onPostCompact: async (ctx) => {
+              rebuildFileContext({ ctx, sid, wsRoot, send });
             },
           }).catch(() => undefined)
         ).catch(() => undefined);
@@ -219,4 +226,76 @@ function updateToolStateCache(sessionId: string, event: any): void {
   }
 
   toolStateCache.set(sessionId, ts);
+}
+
+// ── PostCompact file context rebuild ────────────────────────
+
+const MAX_REBUILD_FILES = 5;
+const MAX_FILE_CONTENT_CHARS = 2000;
+
+interface RebuildFileContextInput {
+  ctx: {
+    sessionId: string;
+    compactionId: string;
+    trigger?: string;
+    symbolSummary?: Array<{
+      symbolId: string;
+      name: string;
+      kind: string;
+      file: string;
+      operationCount: number;
+    }>;
+  };
+  sid: string;
+  wsRoot: string;
+  send: (event: string, payload: unknown) => void;
+}
+
+function rebuildFileContext(input: RebuildFileContextInput): void {
+  const { ctx, sid, wsRoot, send } = input;
+  const symbols = ctx.symbolSummary;
+  if (!symbols || symbols.length === 0) return;
+
+  const fileMap = new Map<string, { path: string; operationCount: number }>();
+  for (const s of symbols) {
+    if (!s.file) continue;
+    const existing = fileMap.get(s.file);
+    if (!existing || existing.operationCount < s.operationCount) {
+      fileMap.set(s.file, { path: s.file, operationCount: s.operationCount });
+    }
+  }
+
+  const topFiles = [...fileMap.values()]
+    .sort((a, b) => b.operationCount - a.operationCount)
+    .slice(0, MAX_REBUILD_FILES);
+  if (topFiles.length === 0) return;
+
+  const ts = toolStateCache.get(sid);
+  const fileContexts: Array<{
+    path: string; content: string; truncated: boolean; hash: string; changed: boolean | null;
+  }> = [];
+
+  for (const { path: filePath } of topFiles) {
+    const resolved = resolvePath(wsRoot, filePath);
+    try {
+      const content = readFileSync(resolved, 'utf-8');
+      const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
+      const truncated = content.length > MAX_FILE_CONTENT_CHARS;
+      const prevRef = ts?.fileReferences.find(r => r.path === filePath);
+      const changed = prevRef ? prevRef.contentHash !== hash : null;
+      fileContexts.push({ path: filePath,
+        content: truncated ? content.slice(0, MAX_FILE_CONTENT_CHARS) : content,
+        truncated, hash, changed });
+      if (ts) ts.fileReferences.push({ path: filePath, contentHash: hash, lastOperation: 'read' });
+    } catch { /* file deleted or unreadable */ }
+  }
+
+  if (fileContexts.length > 0) {
+    send('operator', {
+      type: 'compaction.file_context',
+      sessionId: ctx.sessionId, compactionId: ctx.compactionId,
+      trigger: ctx.trigger ?? 'checkpoint',
+      files: fileContexts, rebuiltAt: new Date().toISOString(),
+    });
+  }
 }
