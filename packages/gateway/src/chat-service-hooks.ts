@@ -27,6 +27,7 @@ export function createChatTaskHooks(input: {
   model: string | undefined;
   workspaceRoot: string;
   toolMode: string;
+  allowedTools?: string[];
   config: Config;
   resumedSession: any;
   ctx: { activeTaskRunId: string | undefined; lastCheckpoint: any };
@@ -169,6 +170,16 @@ export function createChatTaskHooks(input: {
                 trigger: ctx.trigger ?? trigger,
                 metrics: (ctx.summary as any).compactionMetrics ?? null,
               });
+              // Re-declare available tools after compaction (name-only list)
+              if (input.allowedTools && input.allowedTools.length > 0) {
+                send('operator', {
+                  type: 'compaction.tool_catalog',
+                  sessionId: ctx.sessionId,
+                  compactionId: ctx.compactionId,
+                  tools: input.allowedTools,
+                  count: input.allowedTools.length,
+                });
+              }
             },
           }).catch(() => undefined)
         ).catch(() => undefined);
