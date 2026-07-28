@@ -9,6 +9,7 @@
 #   DATABASE_URL=postgres://user:pass@host:5432/los
 #   EXECUTOR_ENABLED=true
 #   EXECUTOR_HOST=0.0.0.0
+#   EXECUTOR_PORT=8090
 #   EXECUTOR_AGENT_KEY=<shared key>
 #   GATEWAY_URL=http://<gateway-host>:8080
 #
@@ -35,8 +36,6 @@ WorkingDirectory=/opt/los
 EnvironmentFile=/opt/los/.env
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--max-old-space-size=256
-Environment=EXECUTOR_HOST=0.0.0.0
-Environment=EXECUTOR_PORT=8090
 
 ExecStart=/opt/los/packages/executor/node_modules/.bin/tsx /opt/los/packages/executor/src/index.ts
 ExecReload=/bin/kill -HUP $MAINPID

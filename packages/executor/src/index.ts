@@ -25,6 +25,7 @@ import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { _renewTaskLease } from './lease-fencing.js';
 import { heartbeatNode } from './executor-heartbeat.js';
+import { createHeartbeatReporter } from './executor-heartbeat-reporter.js';
 import { ExecutorRuntimeLifecycle, shutdownExecutor } from './runtime-lifecycle.js';
 import {
   acceptsNdjson,
@@ -127,14 +128,16 @@ export async function startExecutor() {
     }
   };
 
-  // Fire initial heartbeat without blocking server startup.
-  // If the gateway is temporarily unreachable the server still starts,
-  // and the interval below will retry every heartbeat interval.
-  heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, await resolveFileSyncFolders()).catch((err) => log.warn(`initial heartbeat failed (will retry): ${err.message ?? String(err)}`));
+  const reportHeartbeat = createHeartbeatReporter(async () => {
+    const folders = await resolveFileSyncFolders();
+    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders);
+  }, log);
+
+  // Fire initial heartbeat without blocking server startup. The reporter logs
+  // the first failure, periodic reminders, and the eventual recovery.
+  void reportHeartbeat();
   const nodeHeartbeat = setInterval(() => {
-    resolveFileSyncFolders().then(folders =>
-      heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders).catch((err) => log.warn(`node heartbeat failed: ${err.message ?? String(err)}`))
-    );
+    void reportHeartbeat();
   }, DEFAULT_HEARTBEAT_MS);
 
   const server = createServer(async (req, res) => {

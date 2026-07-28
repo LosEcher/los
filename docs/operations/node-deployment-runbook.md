@@ -41,6 +41,9 @@ Current dated evidence belongs in a rollout smoke such as
 4. Confirm `.env` exists with mode 600 and contains, without printing values:
    `DATABASE_URL`, `EXECUTOR_AGENT_KEY`, `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`,
    and `GATEWAY_URL`.
+   The systemd unit must not override `EXECUTOR_HOST` or `EXECUTOR_PORT`; the
+   node `.env` is the endpoint configuration source used by both runtime and
+   deployment verification.
 5. Identify the database listener owner with `ss -tlnp` or `lsof`. Test an
    actual query using the configured URL. A reachable port is insufficient.
 6. Confirm Node 22+, pnpm, Tailscale, `/opt/los` ownership, and free disk.

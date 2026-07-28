@@ -7,6 +7,7 @@ export interface ProviderDefaults {
 
 const PROVIDER_DEFAULTS = {
   deepseek: { baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-v4-flash', apiKeyEnv: 'DEEPSEEK_API_KEY' },
+  kimi: { baseUrl: 'https://api.moonshot.ai/v1', defaultModel: 'kimi-k3', apiKeyEnv: 'KIMI_API_KEY' },
   openai: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.5', apiKeyEnv: 'OPENAI_API_KEY' },
   packycode: { baseUrl: 'https://www.packyapi.com/v1', defaultModel: 'gpt-5.5' },
   codex: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.5' },

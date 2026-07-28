@@ -76,6 +76,10 @@ export interface ModelProfile {
   toolCallRepair: ToolCallRepairMode;
   maxInputTokens?: number;
   maxOutputTokens?: number;
+  /** Recommended token count at which context compression should trigger.
+   *  Provider-specific; based on official recommendations (e.g. Kimi-K3: 300K).
+   *  Scheduler picks this up as the default `maxContextTokens` when not overridden. */
+  recommendedCompressionTokens?: number;
   defaultTemperature?: number;
   usageMapping: {
     promptTokens: string[];
@@ -182,6 +186,31 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
       'deepseek-chat': DEEPSEEK_V4_FLASH_PRICING,
       'deepseek-reasoner': DEEPSEEK_V4_FLASH_PRICING,
     },
+    transportHints: ['sse'],
+  },
+  kimi: {
+    provider: 'kimi',
+    protocol: 'openai',
+    apiShape: 'openai-chat-completions',
+    baseUrl: requireProviderDefaults('kimi').baseUrl,
+    model: requireProviderDefaults('kimi').defaultModel,
+    supportsTools: true,
+    supportsParallelToolCalls: true,
+    supportsReasoning: true,
+    reasoningParam: 'reasoning_effort',
+    modelAliases: ['kimi-k3'],
+    supportsToolStreaming: true,
+    supportsVision: true,
+    visionMode: 'native',
+    sessionAffinity: 'provider',
+    cachePolicy: 'none',
+    toolCallRepair: 'json-loose',
+    maxInputTokens: 1_048_576,
+    maxOutputTokens: 128_000,
+    recommendedCompressionTokens: 300_000,
+    usageMapping: OPENAI_USAGE_MAPPING,
+    retryPolicy: DEFAULT_RETRY_POLICY,
+    knownFailurePatterns: [],
     transportHints: ['sse'],
   },
   openai: {
