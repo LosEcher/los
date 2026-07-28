@@ -157,7 +157,11 @@ export async function registerBuiltinTools(
   const enabledSet = new Set(enabledToolNames);
   const origRegister = registry.register.bind(registry);
   registry.register = (name, handler, def, capability) => {
-    if (!isToolEnabled(name, enabledSet)) return;
+    // MCP tools (discovered from external servers) bypass toolset filtering.
+    // Their names use server-specific conventions (prefix_name or server.tool)
+    // that are not known toolset names.
+    const isMCP = capability?.permissions?.includes('mcp:external');
+    if (!isMCP && !isToolEnabled(name, enabledSet)) return;
     origRegister(name, handler, def, capability);
   };
   // ────────────────────────────────────────────────────────
