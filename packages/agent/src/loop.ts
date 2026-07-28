@@ -59,6 +59,7 @@ import {
   checkStopConditionsMet,
   hasStopConditions,
 } from './loop/stop-conditions.js';
+import { setupContextMonitor, restoreCheckpointState } from './loop/agent-lifecycle.js';
 
 export type {
   AgentConfig,
@@ -66,8 +67,6 @@ export type {
   AgentResult,
   CheckpointState,
   ContextCompressionConfig,
-  ExecutionProjection,
-  ProjectionFrameBudget,
   ToolCallStateTransition,
   TurnSummary,
 } from './loop/types.js';
@@ -91,12 +90,6 @@ export async function runAgent(
   prompt: string,
   config: AgentConfig = {},
 ): Promise<AgentResult> {
-  // ── Resume from checkpoint ─────────────────────────────
-  const isResume = config.resumeState !== undefined;
-  if (isResume) {
-    config.skipPreExecutionPhases = true;
-  }
-
   const setup = setupAgentRun(prompt, config, runAgent);
   const s = await completeAgentSetup(prompt, config, setup);
 
@@ -107,6 +100,8 @@ export async function runAgent(
     counters,
   } = s;
 
+  const { turns, isResume } = restoreCheckpointState(config, messages, agentLog);
+
   let {
     totalPromptTokens,
     totalCompletionTokens,
@@ -116,15 +111,6 @@ export async function runAgent(
     cacheEventCount,
   } = counters;
   const readPlanningSubmission = () => s.planningSubmissionCollector?.getSubmission();
-
-  // ── Restore checkpoint state on resume ───────────────
-  let turns: TurnSummary[] = [];
-  if (isResume && config.resumeState) {
-    messages.length = 0;
-    messages.push(...config.resumeState.messages);
-    turns = [...config.resumeState.turns];
-    agentLog.info(`Resuming from checkpoint: ${turns.length} turns, ${messages.length} messages`);
-  }
 
   let operatorControlCursors: OperatorControlCursors = { steering: 0, followup: 0 };
   const sessionErrors: Array<{ turn: number; type: string; toolName?: string; message: string }> = [];
@@ -205,48 +191,7 @@ export async function runAgent(
     messages.push(...evictedMessages);
     agentLog.info(`Semantic eviction applied at critical fill (${(fillPercent * 100).toFixed(1)}%)`);
   };
-  const ctxMon = config.contextMonitor
-    ? createContextMonitor({
-        contextWindowTokens: config.contextMonitor.contextWindowTokens ?? 200_000,
-        warnThreshold: config.contextMonitor.warnThreshold ?? 0.60,
-        checkpointThreshold: config.contextMonitor.checkpointThreshold ?? 0.75,
-        criticalThreshold: config.contextMonitor.criticalThreshold ?? 0.85,
-        onWarn: (s) => {
-          agentLog.warn(formatContextFill(s));
-          config.contextMonitor?.onWarn?.({
-            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
-          });
-          emitEvent({
-            type: 'context.fill.warn',
-            turn: s.turn,
-            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
-          });
-        },
-        onCheckpoint: (s) => {
-          agentLog.info(formatContextFill(s));
-          config.contextMonitor?.onCheckpoint?.({
-            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
-          });
-          emitEvent({
-            type: 'context.fill.checkpoint',
-            turn: s.turn,
-            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
-          });
-        },
-        onCritical: (s) => {
-          agentLog.warn(formatContextFill(s));
-          config.contextMonitor?.onCritical?.({
-            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
-          });
-          emitEvent({
-            type: 'context.fill.critical',
-            turn: s.turn,
-            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
-          });
-          applyCriticalEviction(s.fillPercent);
-        },
-      })
-    : null;
+  const ctxMon = setupContextMonitor(config, messages, emitEvent, applyCriticalEviction, persistedToolResults, agentLog);
 
   try {
     // ADR 0024: repair pipeline context. The storm breaker persists across
