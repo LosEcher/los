@@ -1,0 +1,75 @@
+# los — Docker Compose (single-node deployment)
+#
+# Quick start:
+#   1. Set your provider API key below (DEEPSEEK_API_KEY or OPENAI_API_KEY etc.)
+#   2. docker compose up -d
+#   3. Open http://localhost:8080
+#
+# The gateway starts, runs database migrations automatically, and serves
+# the Web UI. Chat in the browser, or use the CLI:
+#   docker compose exec los node --import ./packages/cli/node_modules/tsx/dist/loader.mjs packages/cli/src/index.ts chat "hello"
+
+version: "3.8"
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: los
+      POSTGRES_PASSWORD: los-dev
+      POSTGRES_DB: los
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U los"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Expose only to the los container; comment out the ports line to
+    # publish on the host for external tooling.
+    # ports:
+    #   - "5432:5432"
+
+  # ── los Gateway ───────────────────────────────────────
+  los:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # ── Database ──────────────────────────────────────
+      DATABASE_URL: postgres://los:los-dev@postgres:5432/los
+
+      # ── Auth (optional) ───────────────────────────────
+      # LOS_AUTH_ENABLED: "true"
+      # LOS_AUTH_TOKEN: change-me
+      # LOS_OPERATOR_TOKEN: change-me-operator
+
+      # ── Providers ─────────────────────────────────────
+      # Uncomment and set at least one provider API key.
+      # los auto-discovers providers from *_API_KEY env vars.
+      # DEEPSEEK_API_KEY: sk-xxx
+      # OPENAI_API_KEY: sk-xxx
+      # ANTHROPIC_API_KEY: sk-xxx
+
+      # ── Agent defaults ────────────────────────────────
+      AGENT_DEFAULT_PROVIDER: deepseek
+      # AGENT_DEFAULT_MODEL: deepseek-v4-flash
+      # AGENT_MAX_LOOPS: "20"
+
+      # ── Executor (optional — enable for remote/multi-node) ──
+      # EXECUTOR_ENABLED: "true"
+      # EXECUTOR_PORT: "8090"
+      # GATEWAY_URL: http://los:8080
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - los-runtime:/app/.los-runtime
+
+volumes:
+  pgdata:
+  los-runtime:

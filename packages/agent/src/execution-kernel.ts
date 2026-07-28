@@ -1,4 +1,6 @@
 import { runAgent, type AgentConfig, type AgentResult } from './loop.js';
+import type { Message } from './providers/index.js';
+import type { TurnSummary } from './loop/types.js';
 import { getLosKernelSelectionIdentity } from './execution-kernel-selection.js';
 
 const EXECUTION_KERNEL_PROTOCOL_VERSION = '0.1.0';
@@ -34,6 +36,7 @@ export type KernelEventType =
   | 'turn.completed'
   | 'kernel.finished'
   | 'kernel.interrupted'
+  | 'kernel.resumed'
   | 'kernel.failed';
 
 export interface KernelEvent {
@@ -135,7 +138,7 @@ export function _createLosExecutionKernel(
       followUp: true,
       interrupt: false,
       checkpoint: true,
-      resume: false,
+      resume: true,
       compaction: true,
     }),
     run: input => runLosAgentAsKernel(input, runner, now),
@@ -143,7 +146,7 @@ export function _createLosExecutionKernel(
       accepted: false,
       reason: 'Interrupt is owned by the scheduler AbortSignal in the LOS adapter',
     }),
-    resume: input => unsupportedResume(input, now),
+    resume: input => resumeFromCheckpoint(input, runner, now),
   };
 }
 
@@ -308,20 +311,99 @@ async function* runLosAgentAsKernel(
   if (failure) throw failure;
 }
 
-async function* unsupportedResume(
+async function* resumeFromCheckpoint(
   input: KernelResumeInput<LosKernelRunInput>,
+  runner: AgentRunner,
   now: () => Date,
 ): AsyncGenerator<KernelEvent> {
+  const checkpoint = input.checkpoint;
+
+  // Validate codec
+  if (checkpoint.codec !== 'los-agent-checkpoint-v1') {
+    yield {
+      sequence: 0,
+      type: 'kernel.failed',
+      occurredAt: now().toISOString(),
+      kernel: LOS_KERNEL_IDENTITY,
+      payload: {
+        error: `Cannot resume: checkpoint codec '${checkpoint.codec}' is not 'los-agent-checkpoint-v1'`,
+      },
+    };
+    return;
+  }
+
+  const state = checkpoint.value as { messages: unknown[]; turns: unknown[] } | undefined;
+  if (!state || !Array.isArray(state.messages) || !Array.isArray(state.turns)) {
+    yield {
+      sequence: 0,
+      type: 'kernel.failed',
+      occurredAt: now().toISOString(),
+      kernel: LOS_KERNEL_IDENTITY,
+      payload: {
+        error: 'Cannot resume: checkpoint value is missing messages or turns',
+      },
+    };
+    return;
+  }
+
   yield {
     sequence: 0,
-    type: 'kernel.failed',
+    type: 'kernel.resumed',
     occurredAt: now().toISOString(),
     kernel: LOS_KERNEL_IDENTITY,
     payload: {
-      error: `Checkpoint resume is not implemented for ${input.checkpoint.codec}`,
+      runSpecId: input.run.runSpecId ?? null,
+      taskRunId: input.run.taskRunId,
+      turns: state.turns.length,
+      messages: state.messages.length,
     },
   };
-  throw new Error(`LOS execution kernel cannot resume checkpoint codec ${input.checkpoint.codec}`);
+
+  // Lightweight element shape validation — fails early on corrupted checkpoints
+  const validMessages = state.messages.every(
+    (m: any) => m && typeof m.role === 'string' && typeof m.content === 'string',
+  );
+  if (!validMessages) {
+    yield {
+      sequence: 1,
+      type: 'kernel.failed',
+      occurredAt: now().toISOString(),
+      kernel: LOS_KERNEL_IDENTITY,
+      payload: { error: 'Cannot resume: checkpoint messages are malformed' },
+    };
+    return;
+  }
+
+  try {
+    const result = await runner(
+      input.run.prompt ?? 'Continue from checkpoint',
+      {
+        ...input.run.agentConfig,
+        resumeState: {
+          messages: state.messages as Message[],
+          turns: state.turns as TurnSummary[],
+        },
+      },
+    );
+
+    yield {
+      sequence: 1,
+      type: 'kernel.finished',
+      occurredAt: now().toISOString(),
+      kernel: LOS_KERNEL_IDENTITY,
+      payload: { result },
+    };
+  } catch (error) {
+    yield {
+      sequence: 1,
+      type: 'kernel.failed',
+      occurredAt: now().toISOString(),
+      kernel: LOS_KERNEL_IDENTITY,
+      payload: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
 }
 
 function requiredKernelContext(value: string | undefined, field: string): string {

@@ -107,6 +107,11 @@ export function RulesPage() {
             </button>
           )}
         />
+        {list.length === 0 && !rules.isLoading ? (
+          <div className="empty-guide">
+            <p>Rules enforce constraints and best practices on agent behavior. Create one above or add <code>.md</code> files to your project's rules directory.</p>
+          </div>
+        ) : null}
       </div>
 
       <aside className="panel inspector">

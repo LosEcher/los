@@ -76,7 +76,6 @@ export function inspectMCPServer(input: MCPInspectInput): MCPInspection {
     envKeys: [],
   });
   const blockers: string[] = [];
-  if (normalized.transport !== 'stdio') blockers.push(`transport ${normalized.transport} is not implemented`);
   if (authConfig.mode !== 'none') blockers.push(`auth mode ${authConfig.mode} has no credential resolver`);
   if (adapterConfig.kind === 'cantool' && normalized.transport !== 'stdio') {
     blockers.push('CanTool adapter requires stdio transport');

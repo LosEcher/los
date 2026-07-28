@@ -9,12 +9,14 @@ import { getLogger } from '@los/infra/logger';
 import type { ToolDef } from '../../providers/index.js';
 import { isMCPToolAllowed, normalizeMCPToolPolicy } from '../../mcp-distribution-policy.js';
 import { projectCanToolCapability } from '../../cantool-capability-adapter.js';
+import { resolveToolsets, getEnabledToolsets, isToolEnabled } from '../../toolsets.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { safeWorkspacePath } from './path-safety.js';
 import { registerPatchTools } from '../builtin/patch-tools.js';
 import { registerTodoTools } from '../builtin/todo-tools.js';
+import { registerSqlQueryTool } from '../builtin/sql-query-tool.js';
 import { runSandboxedShell } from '../external/shell-sandbox.js';
 import {
   MCPToolBridge,
@@ -146,6 +148,19 @@ export async function registerBuiltinTools(
   options: BuiltinToolOptions = {},
 ): Promise<() => Promise<void>> {
   const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
+
+  // ── Toolset filter ────────────────────────────────────
+  // Resolve enabled toolsets and wrap registry registration to
+  // skip tools not in the enabled set. MCP tools are discovered
+  // separately and filtered by tool name prefix matching.
+  const enabledToolNames = resolveToolsets(getEnabledToolsets());
+  const enabledSet = new Set(enabledToolNames);
+  const origRegister = registry.register.bind(registry);
+  registry.register = (name, handler, def, capability) => {
+    if (!isToolEnabled(name, enabledSet)) return;
+    origRegister(name, handler, def, capability);
+  };
+  // ────────────────────────────────────────────────────────
 
   // read_file
   registry.register('read_file', async (args) => {
@@ -309,6 +324,7 @@ export async function registerBuiltinTools(
   registerEditTools(registry, { workspaceRoot });
   registerWebTools(registry);
   registerJobTools(registry, { workspaceRoot });
+  registerSqlQueryTool(registry);
   // Worker coordination tools (ask_coordinator / escalate) — only block when
   // taskRunId is threaded in (scheduled-task path); refuse harmlessly otherwise.
   registerWorkerAskTools(registry, {

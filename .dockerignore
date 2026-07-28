@@ -1,0 +1,48 @@
+# los — Docker ignore
+# Keep the build context lean.
+
+# Dependencies
+node_modules/
+
+# Build outputs (regenerated in the image)
+dist/
+.turbo/
+packages/*/dist/
+packages/web/dist/
+
+# Runtime artifacts
+.los-runtime/
+*.pid
+*.log
+
+# VCS
+.git/
+.jj/
+
+# CI / Forgejo
+.forgejo/
+
+# Docs (not needed at runtime)
+docs/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env (use docker-compose environment or --env-file)
+.env
+.env.local
+.env.*.local
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# Misc
+tmp/

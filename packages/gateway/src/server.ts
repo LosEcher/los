@@ -37,6 +37,7 @@ import { registerManagedWorkspaceRoutes } from './routes/orchestration/managed-w
 import { registerScheduledWorkRoutes } from './routes/orchestration/scheduled-work-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
+import { registerAuthRoutes } from './routes/auth-routes.js';
 import { ensureAllStores } from './bootstrap.js';
 import { registerChatRoute } from './chat-route.js';
 import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
@@ -269,6 +270,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerScheduledWorkRoutes(app);
   registerDiagnosticsRoutes(app);
   registerGovernanceRoutes(app);
+  registerAuthRoutes(app, { config });
   registerNodeRoutes(app);
   registerServiceRoutes(app, { serviceId: service.serviceId, serviceKind: 'gateway' });
   registerMCPRoutes(app);

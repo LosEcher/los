@@ -81,6 +81,8 @@ export const ConfigSchema = z.object({
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
     systemPrompt: z.string().optional(),
+    /** Comma-separated toolset names. Defaults to "coding". Use "all" for everything. */
+    enabledToolsets: z.string().optional(),
     identity: z.object({
       /** Agent name used for identity resolution. 'default' uses the built-in los identity. */
       name: z.string().default('default'),

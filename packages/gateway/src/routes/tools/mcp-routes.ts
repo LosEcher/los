@@ -284,8 +284,8 @@ function toPublicMCPInput(input: object): Record<string, unknown> {
 
 function verificationBlocker(server: MCPServerRecord): string | undefined {
   if (server.authConfig.mode !== 'none') return `MCP auth mode ${server.authConfig.mode} has no credential resolver`;
-  if (server.transport !== 'stdio') return `Remote MCP transport ${server.transport} is not implemented`;
-  if (!server.command) return 'stdio command is missing';
+  if (server.transport === 'stdio' && !server.command) return 'stdio command is missing';
+  if (server.transport !== 'stdio' && !server.url) return 'remote transport url is missing';
   return undefined;
 }
 
