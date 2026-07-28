@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   Archive,
@@ -16,6 +16,7 @@ import {
   MemoryStick,
   MessageSquare,
   Network,
+  Play,
   ScrollText,
   CalendarClock,
   Server,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import {
   getJson,
+  postJson,
   type Health,
   type SessionSummary,
   type TodoItem,
@@ -64,6 +66,9 @@ import { EvalsPage } from './evals-page';
 import { PairwiseEvalsPage } from './pairwise-evals-page';
 import { formatDuration, StatusPill, type StatusState } from './ui';
 import { AuthBanner } from './auth-banner';
+import { LoginPage, isAuthenticated, logout } from './pages/login-page';
+import { OnboardingPage } from './pages/onboarding-page';
+import { getAuthToken } from './api';
 
 type PageId =
   | 'inbox'
@@ -90,7 +95,8 @@ type PageId =
   | 'run-specs'
   | 'communication-accounts'
   | 'setup'
-  | 'settings';
+  | 'settings'
+  | 'onboarding';
 
 type NavAudience = 'workspace' | 'configure' | 'operations';
 
@@ -152,6 +158,7 @@ export function App() {
   const [selectedRunSpecId, setSelectedRunSpecId] = useState<string | null>(null);
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
+  const [authenticated, setAuthenticated] = useState(() => isAuthenticated());
 
   // Operations section collapsible — default collapsed, persisted in localStorage
   const [opsExpanded, setOpsExpanded] = useState(() => {
@@ -178,6 +185,29 @@ export function App() {
     queryFn: () => getJson<Health>('/health'),
     refetchInterval: 10_000,
   });
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => getJson<{ auth?: { enabled?: boolean } }>('/settings'),
+    staleTime: 60_000,
+  });
+  const authEnabled = settings.data?.auth?.enabled === true;
+
+  // Onboarding auto-detect: redirect to onboarding when no providers are configured
+  const onboarding = useQuery({
+    queryKey: ['onboarding'],
+    queryFn: () => getJson<{ summary?: { readyProviders?: number; totalProviders?: number } }>('/onboarding'),
+    staleTime: 30_000,
+    enabled: !authEnabled || authenticated,
+  });
+  const needsOnboarding = onboarding.data?.summary?.totalProviders === 0;
+
+  // Auto-redirect to onboarding when no providers (once on load)
+  useEffect(() => {
+    if (needsOnboarding && page !== 'onboarding' && page !== 'setup' && page !== 'providers' && page !== 'settings') {
+      navigate('onboarding');
+    }
+  }, [needsOnboarding]);
+
   const sessionCount = useQuery({
     queryKey: ['sessions'],
     queryFn: () => getJson<SessionSummary[]>('/sessions'),
@@ -247,8 +277,23 @@ export function App() {
     setSelectedSessionId(null);
     navigate('chat');
   };
+  const queryClient = useQueryClient();
+  const approvePlan = useMutation({
+    mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/approve`, { reason: 'plan reviewed from inbox' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inbox'] });
+      queryClient.invalidateQueries({ queryKey: ['work-items'] });
+    },
+  });
+  const handleApprovePlan = (runSpecId: string) => {
+    if (!approvePlan.isPending) approvePlan.mutate(runSpecId);
+  };
 
   return (
+    <>
+      {authEnabled && !authenticated ? (
+        <LoginPage onLogin={() => setAuthenticated(true)} />
+      ) : (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-block">
@@ -267,7 +312,27 @@ export function App() {
             const isOps = item.audience === 'operations';
             const isFirstOps = isOps && (!prev || prev.audience !== 'operations');
 
-            return (
+            // Inject onboarding after Communication section heading
+            const content = [];
+
+            if (showSection && item.section === 'Communication') {
+              content.push(
+                <div key="onboarding-nav-item">
+                  <button
+                    type="button"
+                    className="nav-item"
+                    data-active={page === 'onboarding'}
+                    onClick={() => navigate('onboarding')}
+                  >
+                    <Play size={16} />
+                    <span>Onboarding</span>
+                    <StatusPill status={needsOnboarding ? 'partial' : 'live'} />
+                  </button>
+                </div>
+              );
+            }
+
+            content.push(
               <div key={item.id}>
                 {isFirstOps ? (
                   <div
@@ -301,6 +366,7 @@ export function App() {
                 )}
               </div>
             );
+            return content;
           })}
         </nav>
 
@@ -311,6 +377,11 @@ export function App() {
             <span>{health.data?.status ?? 'checking'}</span>
           </div>
           <code>127.0.0.1:8080</code>
+          {authEnabled && authenticated ? (
+            <button type="button" className="logout-btn" onClick={() => { logout(); setAuthenticated(false); }}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </aside>
 
@@ -328,7 +399,7 @@ export function App() {
           </div>
         </header>
 
-        {page === 'inbox' && <InboxPage onOpenWork={openWork} onOpenRun={openRun} onOpenSession={continueSession} />}
+        {page === 'inbox' && <InboxPage onOpenWork={openWork} onOpenRun={openRun} onOpenSession={continueSession} onApprovePlan={handleApprovePlan} />}
         {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={setSelectedWorkItemId} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
         {page === 'schedules' && <SchedulesPage />}
         {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} branchFromSession={branchFromSession} onBranchConsumed={() => setBranchFromSession(null)} activeTodoContext={activeTodoContext} onTodoContextSet={setActiveTodoContext} onTodoContextClear={() => setActiveTodoContext(null)} />}
@@ -353,8 +424,11 @@ export function App() {
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage />}
         {page === 'setup' && <SetupPage />}
+        {page === 'onboarding' && <OnboardingPage onReady={() => navigate('chat')} />}
       </main>
     </div>
+      )}
+    </>
   );
 }
 

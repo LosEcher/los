@@ -30,6 +30,7 @@ export function projectInboxEntries(
       } : undefined,
       attentionState: item.attentionState,
       nextAction: item.nextAction,
+      approvePlan: item.availableActions.approvePlan?.payload,
       updatedAt: item.updatedAt,
     }));
   return [

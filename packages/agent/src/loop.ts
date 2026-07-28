@@ -54,6 +54,11 @@ import {
   consumeOperatorControlEvents,
   type OperatorControlCursors,
 } from './operator-control-consumer.js';
+import {
+  buildStopConditionReminder,
+  checkStopConditionsMet,
+  hasStopConditions,
+} from './loop/stop-conditions.js';
 
 export type {
   AgentConfig,
@@ -61,6 +66,8 @@ export type {
   AgentResult,
   CheckpointState,
   ContextCompressionConfig,
+  ExecutionProjection,
+  ProjectionFrameBudget,
   ToolCallStateTransition,
   TurnSummary,
 } from './loop/types.js';
@@ -84,6 +91,12 @@ export async function runAgent(
   prompt: string,
   config: AgentConfig = {},
 ): Promise<AgentResult> {
+  // ── Resume from checkpoint ─────────────────────────────
+  const isResume = config.resumeState !== undefined;
+  if (isResume) {
+    config.skipPreExecutionPhases = true;
+  }
+
   const setup = setupAgentRun(prompt, config, runAgent);
   const s = await completeAgentSetup(prompt, config, setup);
 
@@ -104,7 +117,15 @@ export async function runAgent(
   } = counters;
   const readPlanningSubmission = () => s.planningSubmissionCollector?.getSubmission();
 
-  const turns: TurnSummary[] = [];
+  // ── Restore checkpoint state on resume ───────────────
+  let turns: TurnSummary[] = [];
+  if (isResume && config.resumeState) {
+    messages.length = 0;
+    messages.push(...config.resumeState.messages);
+    turns = [...config.resumeState.turns];
+    agentLog.info(`Resuming from checkpoint: ${turns.length} turns, ${messages.length} messages`);
+  }
+
   let operatorControlCursors: OperatorControlCursors = { steering: 0, followup: 0 };
   const sessionErrors: Array<{ turn: number; type: string; toolName?: string; message: string }> = [];
   const onSessionError = (err: typeof sessionErrors[number]) => { sessionErrors.push(err); };
@@ -240,6 +261,8 @@ export async function runAgent(
         isMutating: (name) => tools.getCapability(name)?.sideEffect === true,
       }),
     };
+
+    let stoppedByCondition = false;
 
     for (let i = 0; i < maxLoops; i++) {
     repairCtx.providerName = provider.name;
@@ -506,6 +529,23 @@ export async function runAgent(
     await config.onTurn?.(turn);
     await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
 
+    // ── Stop-condition runtime enforcement ─────────────
+    // When a run contract has stop conditions, periodically remind the
+    // agent and check if the LLM's last response declares them met.
+    // This runs every 5 turns (configurable) to avoid excessive cost.
+    const scInterval = config.stopConditionCheckInterval ?? 5;
+    if (hasStopConditions(config.runContractMetadata) && (i + 1) % scInterval === 0) {
+      const reminder = buildStopConditionReminder(config.runContractMetadata);
+      if (reminder) {
+        messages.push({ role: 'user', content: reminder });
+      }
+      if (checkStopConditionsMet(res.text)) {
+        agentLog.info('Stop conditions met — ending loop');
+        stoppedByCondition = true;
+        break;
+      }
+    }
+
     // Mid-loop context compression
     if (config.maxContextTokens && config.maxContextTokens > 0 &&
         config.contextCompression?.enabled !== false) {
@@ -520,6 +560,39 @@ export async function runAgent(
         agentLog.debug(`Compressed context: ${compressed.length} messages (was ${previousLength})`);
       }
     }
+  }
+
+  // ── Stop-condition completion ────────────────────────
+  if (stoppedByCondition) {
+    // Pop the last reminder message that was injected before the break
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === 'user' && lastMsg.content.includes('STOP CONDITION CHECK')) {
+      messages.pop();
+    }
+    agentLog.info(`Agent completed via stop-condition after ${turns.length} turns`);
+    await emitEvent({
+      type: 'session.completed',
+      turn: turns.length,
+      payload: {
+        loopCount: turns.length,
+        totalTokens: totalPromptTokens + totalCompletionTokens,
+        totalPromptTokens,
+        totalCompletionTokens,
+        totalCacheHitTokens,
+        totalCacheMissTokens,
+        totalCostUsd: totalCostUsd > 0 ? totalCostUsd : undefined,
+        cacheEventCount,
+        errorSummary: sessionErrors.length > 0 ? summarizeSessionErrors(sessionErrors) : undefined,
+      },
+    });
+    return {
+      text: turns[turns.length - 1]?.text ?? '',
+      turns,
+      loopCount: turns.length,
+      totalTokens: { prompt: totalPromptTokens, completion: totalCompletionTokens },
+      messages,
+      planningSubmission: readPlanningSubmission(),
+    };
   }
 
   // Max loops reached — ask model for final summary

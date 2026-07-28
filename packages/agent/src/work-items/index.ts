@@ -1,4 +1,5 @@
 export {
+  createQuickWorkItem,
   createWorkItem,
   loadWorkItemProjection,
   listWorkItemProjections,
@@ -23,6 +24,7 @@ export {
 } from './store.js';
 export type {
   CreateWorkItemInput,
+  QuickIntakeInput,
   InboxEntry,
   InboxSourceKind,
   LinkWorkItemRunInput,

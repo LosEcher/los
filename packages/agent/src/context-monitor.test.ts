@@ -76,12 +76,15 @@ describe('context-monitor', () => {
     assert.equal(count, 1); // not re-fired
   });
 
-  it('tracks cumulative usage separately from current context fill', () => {
+  it('tracks latest prompt and cumulative completions separately', () => {
     const m = createContextMonitor({ contextWindowTokens: WINDOW });
     m.update({ promptTokens: 50_000, completionTokens: 5_000 }, 1);
     const s = m.update({ promptTokens: 55_000, completionTokens: 5_000 }, 2);
-    assert.equal(s.cumulativePromptTokens, 105_000);
+    // Latest prompt reflects current context (API reports full prompt per turn)
+    assert.equal(s.latestPromptTokens, 55_000);
+    // Completions accumulate per turn (each is incremental)
     assert.equal(s.cumulativeCompletionTokens, 10_000);
+    // Current context = latest prompt + completion
     assert.equal(s.estimatedTotalTokens, 60_000);
     assert.equal(s.fillPercent, 0.3);
     assert.equal(s.level, 'normal');
@@ -108,7 +111,7 @@ describe('context-monitor', () => {
     m.reset();
     const s = m.update({ promptTokens: 0, completionTokens: 0 }, 1);
     assert.equal(s.level, 'normal');
-    assert.equal(s.cumulativePromptTokens, 0);
+    assert.equal(s.latestPromptTokens, 0);
   });
 
   it('fires all three levels in sequence', () => {
@@ -145,7 +148,7 @@ describe('context-monitor', () => {
       level: 'warn',
       levelCrossed: true,
       turn: 3,
-      cumulativePromptTokens: 110_000,
+      latestPromptTokens: 110_000,
       cumulativeCompletionTokens: 10_000,
       estimatedTotalTokens: 120_000,
     };

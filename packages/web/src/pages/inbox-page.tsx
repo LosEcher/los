@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   CheckCheck,
   ChevronRight,
   CircleDot,
+  Plus,
   RefreshCcw,
   ShieldAlert,
+  Zap,
 } from 'lucide-react';
 
-import { getJson, type InboxEntry, type InboxResponse, type WorkItemAttentionState } from '../api/index.js';
+import { getJson, postJson, type InboxEntry, type InboxResponse, type WorkItemAttentionState } from '../api/index.js';
 import { formatDate } from '../ui.js';
 
 type InboxFilter = 'all' | 'decision' | 'recovery' | 'review' | 'running';
@@ -18,17 +20,35 @@ export function InboxPage({
   onOpenWork,
   onOpenRun,
   onOpenSession,
+  onApprovePlan,
 }: {
   onOpenWork: (id: string) => void;
   onOpenRun: (id: string) => void;
   onOpenSession: (id: string) => void;
+  onApprovePlan: (runSpecId: string) => void;
 }) {
   const [filter, setFilter] = useState<InboxFilter>('all');
+  const [quickGoal, setQuickGoal] = useState('');
+  const queryClient = useQueryClient();
   const inbox = useQuery({
     queryKey: ['inbox'],
     queryFn: () => getJson<InboxResponse>('/inbox?limit=100'),
     refetchInterval: 10_000,
   });
+  const quickMutation = useMutation({
+    mutationFn: (goal: string) => postJson<{ id: string }>('/work-items/quick', { goal }),
+    onSuccess: (data) => {
+      setQuickGoal('');
+      queryClient.invalidateQueries({ queryKey: ['inbox'] });
+      queryClient.invalidateQueries({ queryKey: ['work-items'] });
+      onOpenWork(data.id);
+    },
+  });
+  const handleQuickSubmit = useCallback(() => {
+    const trimmed = quickGoal.trim();
+    if (!trimmed || quickMutation.isPending) return;
+    quickMutation.mutate(trimmed);
+  }, [quickGoal, quickMutation]);
   const entries = inbox.data?.results ?? [];
   const visible = useMemo(() => entries.filter(entry => matchesFilter(entry, filter)), [entries, filter]);
 
@@ -43,6 +63,28 @@ export function InboxPage({
         </div>
         <button className="icon-btn" type="button" title="Refresh inbox" aria-label="Refresh inbox" onClick={() => inbox.refetch()} disabled={inbox.isFetching}>
           <RefreshCcw size={15} className={inbox.isFetching ? 'spin' : ''} />
+        </button>
+      </div>
+
+      <div className="quick-intake-bar">
+        <Zap size={14} className="quick-intake-icon" />
+        <input
+          type="text"
+          className="quick-intake-input"
+          placeholder="What do you want to build? (e.g. add rate limiting to auth routes)"
+          value={quickGoal}
+          onChange={e => setQuickGoal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleQuickSubmit(); }}
+          disabled={quickMutation.isPending}
+        />
+        <button
+          type="button"
+          className="quick-intake-btn"
+          onClick={handleQuickSubmit}
+          disabled={!quickGoal.trim() || quickMutation.isPending}
+          title="Create work item and start planning"
+        >
+          {quickMutation.isPending ? 'Creating...' : <><Plus size={14} /> Create</>}
         </button>
       </div>
 
@@ -64,6 +106,9 @@ export function InboxPage({
               <CheckCheck size={22} />
               <strong>No action required</strong>
               <span>{filter === 'all' ? 'Runs with no operator action stay out of this view.' : `No ${filter} items are waiting.`}</span>
+              <span className="empty-guide-link">
+                <button type="button" className="link-btn" onClick={() => window.location.hash = 'chat'}>Start a chat</button> to create your first run, or <button type="button" className="link-btn" onClick={() => window.location.hash = 'work'}>create a work item</button>.
+              </span>
             </div>
           ) : null}
           {visible.map(entry => (
@@ -71,6 +116,7 @@ export function InboxPage({
               key={entry.id}
               entry={entry}
               onAction={() => openEntry(entry, { onOpenWork, onOpenRun, onOpenSession })}
+              onApprovePlan={() => entry.approvePlan && onApprovePlan(entry.approvePlan.runSpecId)}
             />
           ))}
         </div>
@@ -79,8 +125,9 @@ export function InboxPage({
   );
 }
 
-function InboxRow({ entry, onAction }: { entry: InboxEntry; onAction: () => void }) {
+function InboxRow({ entry, onAction, onApprovePlan }: { entry: InboxEntry; onAction: () => void; onApprovePlan: () => void }) {
   const Icon = attentionIcon(entry.attentionState);
+  const canApprove = entry.attentionState === 'approval_required' && entry.approvePlan;
   return (
     <article className="attention-row" data-attention={entry.attentionState}>
       <div className="attention-icon"><Icon size={16} /></div>
@@ -97,9 +144,16 @@ function InboxRow({ entry, onAction }: { entry: InboxEntry; onAction: () => void
           {entry.runSpecId ? <code>{entry.runSpecId.slice(0, 12)}</code> : null}
         </div>
       </div>
-      <button className="attention-action" type="button" onClick={onAction}>
-        {actionLabel(entry)} <ChevronRight size={14} />
-      </button>
+      <div className="attention-actions">
+        {canApprove && (
+          <button className="attention-action approve-action" type="button" onClick={onApprovePlan}>
+            Approve <ChevronRight size={14} />
+          </button>
+        )}
+        <button className="attention-action" type="button" onClick={onAction}>
+          {actionLabel(entry)} <ChevronRight size={14} />
+        </button>
+      </div>
     </article>
   );
 }

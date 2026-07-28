@@ -38,6 +38,19 @@ function makeProjection(overrides: Record<string, any> = {}): WorkItemProjection
 }
 
 const stubDeps: WorkItemRouteDependencies = {
+  createQuickWorkItem: async (input) => {
+    return await stubDeps.createWorkItem({
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      userId: input.userId,
+      goal: input.goal,
+      mode: input.mode ?? 'execution',
+      editableSurfaces: [],
+      requiredChecks: input.mode === 'audit' ? [] : ['pnpm check'],
+      stopConditions: input.mode === 'audit' ? [] : ['All required checks pass'],
+      toolMode: 'project-write',
+    });
+  },
   createWorkItem: async (input) => {
     const item = makeProjection({
       id: `wi-stub-${nextId++}`,

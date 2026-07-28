@@ -77,6 +77,8 @@ export interface AgentConfig {
   mcpServers?: MCPServerConfig[];
   /** Run contract metadata (mode, phase, plan, verifications). Passed from scheduler. */
   runContractMetadata?: Record<string, unknown>;
+  /** Interval (in turns) for stop-condition runtime checks. Default 5, 0 to disable. */
+  stopConditionCheckInterval?: number;
   /** Scheduler-owned planning disposition runs the normal read-only tool loop. */
   skipPreExecutionPhases?: boolean;
   /** Agent identity configuration. When set and systemPrompt is not explicitly provided,
@@ -185,4 +187,80 @@ export interface ToolCallStateTransition {
   maxAttempts?: number;
   idempotent?: boolean;
   retryPolicy?: Record<string, unknown>;
+}
+
+// ── Execution Projection ────────────────────────────────
+
+/**
+ * Transport-neutral typed projection of agent execution state.
+ * CLI and Web share this reducer; each renderer maps it to its own output.
+ *
+ * Design reference: Grok Build AcpUpdateTracker (typed state machine)
+ * and the LOS agent-workflow-roadmap Stage D requirement for a single
+ * replay/live event identity.
+ */
+export interface ExecutionProjection {
+  /** Monotonic event sequence for replay deduplication */
+  lastEventId: number;
+  /** Current run phase (from run contract) */
+  phase: string;
+  /** Latest model response text, if any */
+  text?: string;
+  /** Active reasoning/thinking content from the model */
+  reasoningContent?: string;
+  /** Current turn number */
+  turn: number;
+  /** Whether the run was stopped by a stop-condition match */
+  stoppedByCondition?: boolean;
+  /** Pending parallel tool calls (name + args) */
+  toolCalls: Array<{ callId: string; name: string; args: Record<string, unknown> }>;
+  /** Completed tool results in original call order */
+  toolResults: Array<{
+    callId: string;
+    name: string;
+    content: string;
+    error?: string;
+    durationMs?: number;
+    denied?: boolean;
+  }>;
+  /** Human-readable waiting reason (e.g. "planning", "verifying", "approval_required") */
+  waitingReason?: string;
+  /** Retry state for the current turn */
+  retry?: { attempt: number; maxAttempts: number; reason?: string };
+  /** Compaction summary when context was reduced */
+  compaction?: {
+    compressedAt: string;
+    messageCountBefore: number;
+    messageCountAfter: number;
+    semanticEvictionCount?: number;
+  };
+  /** Terminal outcome when the run completes */
+  terminal?: {
+    outcome: 'succeeded' | 'failed' | 'cancelled' | 'blocked';
+    loopCount: number;
+    totalTokens: { prompt: number; completion: number };
+    planningSubmission?: { planStepCount: number; summary?: string };
+  };
+  /** Context fill state for display */
+  contextFill?: {
+    fillPercent: number;
+    level: 'normal' | 'warn' | 'checkpoint' | 'critical';
+    usedTokens: number;
+    contextWindowTokens: number;
+  };
+  /** Provider/model used for the current turn */
+  provider?: { name: string; model: string };
+  /** Elapsed wall-clock time since run started (ms) */
+  elapsedMs?: number;
+}
+
+/**
+ * Frame budget for UI rendering: batch deltas and cap refresh rate.
+ * CLI and Web should respect these limits to avoid jank.
+ */
+export interface ProjectionFrameBudget {
+  /** Max deltas to process per frame (default 50) */
+  maxDeltasPerFrame: number;
+  /** Min interval between frames in ms (default 33 ~= 30fps) */
+  minFrameIntervalMs: number;
 }
