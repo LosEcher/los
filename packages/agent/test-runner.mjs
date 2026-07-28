@@ -80,6 +80,8 @@ const sharedProcessTestFiles = [
 ];
 
 const isolatedDatabaseTestFiles = [
+  // ── Group A (19 files) — LOS_TEST_GROUP=1 or unset (backward compat) ──
+  ...(process.env.LOS_TEST_GROUP === '2' || process.env.LOS_TEST_GROUP === '3' ? [] : [
   'src/agent-task-graph.test.ts',
   'src/daily-agent-quality.test.ts',
   'src/dead-letter.test.ts',
@@ -99,6 +101,9 @@ const isolatedDatabaseTestFiles = [
   'src/managed-workspaces.test.ts',
   'src/mcp-distribution.test.ts',
   'src/message-router/handlers-run-contract.test.ts',
+  ]),
+  // ── Group B (19 files) — LOS_TEST_GROUP=2 ──
+  ...(process.env.LOS_TEST_GROUP !== '2' ? [] : [
   'src/operator-control-consumer.test.ts',
   'src/operator-control.test.ts',
   'src/pi-kernel-envelope.test.ts',
@@ -118,6 +123,9 @@ const isolatedDatabaseTestFiles = [
   'src/scheduler-kernel-shadow.test.ts',
   'src/scheduler-planning.test.ts',
   'src/scheduler.test.ts',
+  ]),
+  // ── Group C (18 files) — LOS_TEST_GROUP=3 ──
+  ...(process.env.LOS_TEST_GROUP !== '3' ? [] : [
   'src/scheduler/executor-client.test.ts',
   'src/scheduler/task-heartbeat.test.ts',
   'src/self-check.test.ts',
@@ -134,6 +142,7 @@ const isolatedDatabaseTestFiles = [
   'src/work-items.test.ts',
   'src/work-items/revision-loop.test.ts',
   'src/worker-messages.test.ts',
+  ]),
 ];
 
 runPackageTests({
@@ -142,4 +151,5 @@ runPackageTests({
   isolatedDatabaseTestFiles,
   testSetupFile: './src/test-setup.ts',
   globalSetupFile: './src/test-global-setup.mjs',
+  skipClassificationCheck: Boolean(process.env.LOS_TEST_GROUP),
 });
