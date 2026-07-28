@@ -24,6 +24,7 @@ import {
   registerBuiltinTools,
   type ToolRegistry,
 } from '../tools/core/registry.js';
+import { createDeferredRegistry } from '../tools/core/deferred-registry.js';
 import type { MCPServerRegistryRecord } from '../tools/external/mcp-client.js';
 import { listMCPServers } from '../mcp-servers.js';
 import { mcpServerExecutionBlocker } from '../mcp-distribution-policy.js';
@@ -166,6 +167,9 @@ export function setupAgentRun(
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });
+  const deferredTools = config.deferredToolLoading?.mode === 'name-only'
+    ? createDeferredRegistry(tools, config.deferredToolLoading)
+    : undefined;
   const planningSubmissionCollector = config.planningTransport === 'typed_tool'
     ? registerPlanningSubmissionTool(tools, config.runContractMetadata)
     : undefined;
@@ -204,7 +208,7 @@ export function setupAgentRun(
     sandboxMode,
     policy,
     signal,
-    tools,
+    tools: deferredTools ?? tools,
     mcpCleanup: async () => {}, // placeholder — replaced by async init
     toolDefs: [], // placeholder — replaced by async init
     toolNames: [], // placeholder — replaced by async init

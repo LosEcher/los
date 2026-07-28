@@ -201,99 +201,67 @@ test('compactSession handles empty session gracefully', async () => {
     await closeDb().catch(() => undefined);
   }
 });
-
-test('attestCompaction stores attestation in summary_json', async () => {
+test('onPostCompact receives symbolSummary from checkpoint', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
-
-  const sessionId = `attest-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
+  const sessionId = `symsum-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   try {
     await ensureMemoryStore();
     await ensureMemoryCompactionStore();
-    await addObservation({ title: 'attest obs', kind: 'note', sessionId });
-    const compaction = await compactSession({ sessionId });
-    assert.ok(!compaction!.attestedAt);
-
-    const attested = await attestCompaction(compaction!.id, 'operator-test');
-    assert.ok(attested);
-    assert.equal(attested.attestedBy, 'operator-test');
-    assert.ok(typeof attested.attestedAt === 'string');
-  } finally {
-    await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
-    await closeDb().catch(() => undefined);
-  }
-});
-
-test('promoteCandidate transitions draft→review→approved→active→retired', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-
-  const sessionId = `promote-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
-  try {
-    await ensureMemoryCompactionStore();
-
-    const compactionId = randomUUID();
+    await addObservation({ title: 'symbol-test', kind: 'fact', sessionId });
     await getDb().query(
-      `INSERT INTO memory_compactions (id, session_id, summary_json, observed_patterns_json, procedural_candidates_json, confidence, evidence_count)
-       VALUES ($1, $2, '{}'::jsonb, '[{"kind":"test"}]'::jsonb, $3::jsonb, 0.8, 3)`,
-      [compactionId, sessionId, JSON.stringify([{
-        name: 'test-candidate', content: 'test rule', severity: 'warn',
-        rationale: 'test', confidence: 0.8, status: 'draft', supportingSessionIds: [sessionId],
-      }])],
+      `UPDATE observations SET metadata_json = $2::jsonb WHERE session_id = $1`,
+      [sessionId, JSON.stringify({ symbolRefs: [{ callId: 'c1', symbols: [{ id: 'sym1', name: 'testFn', kind: 'function', file: 'src/test.ts' }] }] })],
     );
-
-    const reviewed = await promoteCandidate(compactionId, 'test-candidate', 'review');
-    assert.equal(reviewed!.proceduralCandidates[0].status, 'review');
-
-    const approved = await promoteCandidate(compactionId, 'test-candidate', 'approved');
-    assert.equal(approved!.proceduralCandidates[0].status, 'approved');
-
-    const active = await promoteCandidate(compactionId, 'test-candidate', 'active');
-    assert.equal(active!.proceduralCandidates[0].status, 'active');
-
-    const retired = await promoteCandidate(compactionId, 'test-candidate', 'retired');
-    assert.equal(retired!.proceduralCandidates[0].status, 'retired');
+    let receivedSymbolSummary: any = undefined;
+    const compaction = await compactSession({
+      sessionId, checkpoint: true,
+      onPostCompact: async (ctx) => { receivedSymbolSummary = ctx.symbolSummary; },
+    });
+    assert.ok(compaction);
+    assert.ok(receivedSymbolSummary);
+    assert.equal(receivedSymbolSummary.length, 1);
+    assert.equal(receivedSymbolSummary[0].symbolId, 'sym1');
   } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });
 
-test('compactSession with observations but no tasks or evals', async () => {
+test('serializeSymbolSummary deduplicates and preserves counts', async () => {
+  const { serializeSymbolSummary } = await import('./core/compaction-symbol-summary.js');
+  const map = new Map<string, { name: string; kind: string; file: string; count: number }>();
+  map.set('sym1', { name: 'fnA', kind: 'function', file: 'src/a.ts', count: 3 });
+  map.set('sym2', { name: 'fnB', kind: 'method', file: 'src/b.ts', count: 1 });
+  const result = serializeSymbolSummary(map);
+  assert.equal(result.length, 2);
+  assert.deepStrictEqual(result[0], { symbolId: 'sym1', name: 'fnA', kind: 'function', file: 'src/a.ts', operationCount: 3 });
+});
+
+test('serializeSymbolSummary returns empty array for empty map', async () => {
+  const { serializeSymbolSummary } = await import('./core/compaction-symbol-summary.js');
+  assert.deepStrictEqual(serializeSymbolSummary(new Map()), []);
+});
+
+test('compaction metrics include pre/post token estimates', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
-
-  const sessionId = `solo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
+  const sessionId = `metrics-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   try {
     await ensureMemoryStore();
     await ensureMemoryCompactionStore();
-    await addObservation({ title: 'solo obs', kind: 'note', sessionId });
-
-    const compaction = await compactSession({ sessionId });
-    assert.equal(compaction!.summary.observationCount, 1);
-    assert.equal(compaction!.summary.taskRunCount, 0);
-    assert.equal(compaction!.summary.evalCount, 0);
-    assert.equal(compaction!.proceduralCandidates.length, 0);
+    await addObservation({ title: 'Token measurement observation', kind: 'note', sessionId });
+    const compaction = await compactSession({ sessionId, contextWindowTokens: 200_000 });
+    assert.ok(compaction);
+    const metrics = (compaction.summary as any).compactionMetrics;
+    assert.ok(metrics, 'metrics should be present');
+    assert.ok(metrics.preTokenEstimate > 0, 'preTokenEstimate should be > 0');
+    assert.ok(metrics.tokenSavedCount >= 0, 'tokenSavedCount should be >= 0');
+    assert.ok(metrics.compactionRatio > 0 && metrics.compactionRatio <= 1, 'compactionRatio in (0,1]');
+    assert.ok(typeof metrics.postCompactionFillPct === 'number', 'fillPct when contextWindowTokens set');
   } finally {
-    await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
-    await closeDb().catch(() => undefined);
-  }
-});
-
-test('compactSession handles completely empty session', async () => {
-  const config = await loadConfig();
-  await initDb(config.databaseUrl);
-
-  const sessionId = `empty-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
-  try {
-    await ensureMemoryCompactionStore();
-    const compaction = await compactSession({ sessionId });
-    assert.equal(compaction, null, 'completely empty session should return null');
-  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }

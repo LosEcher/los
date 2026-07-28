@@ -20,6 +20,7 @@ import { handleNonCompletedOutcome } from './chat-service-outcomes.js';
 import { createChatTaskHooks } from './chat-service-hooks.js';
 import { linkWorkItemRun } from '@los/agent/work-items';
 import { prepareChatPlanningDisposition } from './chat-planning-disposition.js';
+import { reconstructSessionContext } from '@los/agent/session-recovery';
 
 export type { SendEvent } from './chat-live-events.js';
 export interface ChatRunContext {
@@ -251,6 +252,16 @@ export async function runChat(params: {
         ? (params.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox')
         : (config as any).agent?.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox' | undefined,
       initialMessages: branchSourceMessages ?? resumedSession?.messages,
+      // Recovery path: if session is recoverable but has no saved messages,
+      // attempt to reconstruct from checkpoint
+      ...(resumedSession && !resumedSession.messages?.length ? {
+        recoveryContext: await reconstructRecoveryContext({
+          sessionId: sid,
+          resumedSession,
+          runSpecId,
+          send,
+        }),
+      } : {}),
       allowedTools,
       maxLoops,
       traceId,
@@ -286,7 +297,7 @@ export async function runChat(params: {
         userId,
       },
       ...createChatTaskHooks({ sid, runSpecId, requestId, tenantId, projectId, userId, traceId,
-        provider, model, workspaceRoot, toolMode, config, resumedSession, ctx, send }),
+        provider, model, workspaceRoot, toolMode, allowedTools, config, resumedSession, ctx, send }),
     });
 
     if (boundTodoId && 'taskRun' in scheduled && scheduled.taskRun) {
@@ -397,4 +408,44 @@ function relationKindForRun(
   if (contract?.phase === 'planning' || contract?.phase === 'plan_approved') return 'planning';
   if (contract?.phase === 'verifying') return 'verification';
   return 'execution';
+}
+
+// ── Session recovery integration ───────────────────────────────
+
+async function reconstructRecoveryContext(input: {
+  sessionId: string;
+  resumedSession: any;
+  runSpecId: string;
+  send: (event: string, payload: unknown) => void;
+}): Promise<{ initialMessages: any[] | null; recoverySummary: any }> {
+  const { sessionId, resumedSession, runSpecId, send } = input;
+
+  try {
+    const recovery = await reconstructSessionContext({ sessionId });
+    if (!recovery || recovery.messages.length === 0) {
+      return { initialMessages: null, recoverySummary: null };
+    }
+
+    send('session.resumed', {
+      sessionId,
+      runSpecId,
+      checkpointId: recovery.checkpointId,
+      recoveryMode: recovery.recoverySummary.recoveryMode,
+      recoveredTurnCount: recovery.recoverySummary.recoveredTurnCount,
+      lostToolResults: recovery.recoverySummary.lostToolResults,
+      staleFiles: recovery.recoverySummary.fileStaleness.filter((f: { stale: boolean; path: string }) => f.stale).map((f: { path: string }) => f.path),
+    });
+
+    return {
+      initialMessages: recovery.messages,
+      recoverySummary: recovery.recoverySummary,
+    };
+  } catch (err) {
+    send('session.recovery_failed', {
+      sessionId,
+      runSpecId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { initialMessages: null, recoverySummary: null };
+  }
 }

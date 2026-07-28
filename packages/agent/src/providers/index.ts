@@ -143,9 +143,18 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
     profile,
 
     async chat(messages: Message[], tools?: ToolDef[], options: ChatOptions = {}): Promise<ProviderResponse> {
+      // Serialize reasoningContent → reasoning_content for providers that
+      // require preserved thinking history (Kimi-K3, DeepSeek R1, etc.).
+      const serializedMessages = messages.map(m => {
+        if (m.role === 'assistant' && m.reasoningContent !== undefined) {
+          const { reasoningContent, ...rest } = m;
+          return { ...rest, reasoning_content: reasoningContent };
+        }
+        return m;
+      });
       const body: Record<string, unknown> = {
         model,
-        messages,
+        messages: serializedMessages,
         stream: Boolean(options.onDelta),
         ...buildOpenAIModelSettings(options.modelSettings, profile.provider),
       };

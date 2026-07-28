@@ -51,3 +51,27 @@ export async function collectSymbolSummary(
     return null;
   }
 }
+
+export interface SerializedSymbolEntry {
+  symbolId: string;
+  name: string;
+  kind: string;
+  file: string;
+  operationCount: number;
+}
+
+/**
+ * Serialize a symbol summary map into an array of deduplicated entries
+ * (used both for storage in summary_json and for passing to PostCompact hook).
+ */
+export function serializeSymbolSummary(
+  symbolSummary: Map<string, { name: string; kind: string; file: string; count: number }>,
+): SerializedSymbolEntry[] {
+  return [...symbolSummary.entries()].map(([id, s]) => ({
+    symbolId: id,
+    name: s.name,
+    kind: s.kind,
+    file: s.file,
+    operationCount: s.count,
+  }));
+}

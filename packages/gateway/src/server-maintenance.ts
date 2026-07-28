@@ -152,7 +152,7 @@ export function registerServerMaintenance(
   // ── Daily memory maintenance (retention + integrity + auto-compact) ──
   const RETENTION_MS = 24 * 60 * 60 * 1000;
   const runMemoryMaintenance = async () => {
-    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore }) => {
+    import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore, shouldTriggerCompaction }) => {
       const retention = await applyRetentionPolicy().catch((err) => {
         log.warn(`Memory retention failed: ${err.message ?? String(err)}`);
         return null;
@@ -170,32 +170,60 @@ export function registerServerMaintenance(
           log.warn(`Memory integrity: ${failed.length} error(s) — ${failed.slice(0, 3).map(c => c.name).join('; ')}`);
         }
       }
-      // Auto-compact uncompacted sessions (>1h old, up to 10)
+      // Auto-compact: decay-triggered (low score / high stale) + 24h safety net
       try {
         const { getDb } = await import('@los/infra/db');
         await ensureMemoryCompactionStore();
         const db = getDb();
-        const rows = await db.query<{ session_id: string }>(
-          `SELECT DISTINCT o.session_id
+
+        // Find uncompacted sessions with observations
+        const rows = await db.query<{ session_id: string; oldest_obs: string; obs_count: string }>(
+          `SELECT o.session_id,
+                  MIN(o.created_at)::text AS oldest_obs,
+                  COUNT(*)::text AS obs_count
            FROM observations o
            LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
            WHERE o.session_id IS NOT NULL
              AND mc.id IS NULL
-             AND o.created_at < now() - INTERVAL '1 hour'
-           LIMIT 10`,
+             AND COALESCE(o.metadata_json->>'archived', 'false') = 'false'
+           GROUP BY o.session_id
+           LIMIT 20`,
         );
-        const sessionIds = rows.rows.map(r => r.session_id).filter(Boolean);
-        if (sessionIds.length > 0) {
-          let compacted = 0;
-          for (const sessionId of sessionIds) {
+
+        let decayCompacted = 0;
+        let scheduledCompacted = 0;
+        const SAFETY_NET_HOURS = 24;
+
+        for (const { session_id: sessionId, oldest_obs, obs_count } of rows.rows) {
+          const obsCount = Number(obs_count);
+          const oldest = new Date(oldest_obs);
+          const hoursSinceOldest = (Date.now() - oldest.getTime()) / 3_600_000;
+
+          // Rule 1: decay-based trigger
+          try {
+            const decision = await shouldTriggerCompaction(sessionId);
+            if (decision.triggered) {
+              await compactSession({ sessionId, autoTrigger: 'decay' });
+              decayCompacted += 1;
+              continue;
+            }
+          } catch (err) {
+            log.debug(`Decay check skipped for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+
+          // Rule 2: 24h safety net for sessions with at least some observations
+          if (obsCount >= 10 && hoursSinceOldest >= SAFETY_NET_HOURS) {
             try {
-              const result = await compactSession({ sessionId });
-              if (result) compacted += 1;
+              await compactSession({ sessionId, autoTrigger: 'scheduled' });
+              scheduledCompacted += 1;
             } catch (err) {
-              log.warn(`Auto-compact failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+              log.warn(`Safety-net compact failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-          if (compacted > 0) log.info(`Auto-compact: compacted ${compacted}/${sessionIds.length} session(s)`);
+        }
+
+        if (decayCompacted > 0 || scheduledCompacted > 0) {
+          log.info(`Auto-compact: decay=${decayCompacted}, scheduled=${scheduledCompacted}`);
         }
       } catch (err) {
         log.warn(`Auto-compact maintenance failed: ${err instanceof Error ? err.message : String(err)}`);
