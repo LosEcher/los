@@ -34,7 +34,7 @@ export type OperatorCapability =
 export interface OperatorPrincipal {
   kind: 'operator';
   subject: string;
-  authenticatedBy: 'operator_token' | 'trusted_channel' | 'auth_disabled';
+  authenticatedBy: 'operator_token' | 'trusted_channel' | 'auth_disabled' | 'jwt';
   capabilities: readonly OperatorCapability[];
   tenantId?: string;
   projectId?: string;
@@ -44,7 +44,7 @@ export interface OperatorPrincipal {
 export interface NonOperatorPrincipal {
   kind: 'anonymous' | 'authenticated';
   subject: string;
-  authenticatedBy: 'none' | 'access_token';
+  authenticatedBy: 'none' | 'access_token' | 'jwt';
   capabilities: readonly [];
   tenantId?: string;
   projectId?: string;

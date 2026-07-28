@@ -98,7 +98,7 @@ test('LOS execution kernel advertises current lifecycle limits', async () => {
   const kernel = _createLosExecutionKernel();
 
   assert.deepEqual(kernel.identity, getLosExecutionKernelIdentity());
-  assert.equal(kernel.capabilities().resume, false);
+  assert.equal(kernel.capabilities().resume, true);
   assert.equal(kernel.capabilities().interrupt, false);
   assert.equal(kernel.capabilities().checkpoint, true);
   assert.deepEqual(await kernel.interrupt({ runSpecId: 'r', taskRunId: 't', reason: 'test' }), {

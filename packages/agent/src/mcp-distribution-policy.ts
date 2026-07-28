@@ -79,13 +79,14 @@ export function mcpServerExecutionBlocker(server: {
   transport: string;
   authConfig: MCPAuthConfig;
   command?: string;
+  url?: string;
 }): string | undefined {
   if (!server.enabled) return 'server is disabled';
   if (server.status !== 'connected') return `server status is ${server.status}`;
   if (server.pinnedVersionHash && server.pinnedVersionHash !== server.versionHash) return 'pinned version does not match current version';
-  if (server.transport !== 'stdio') return `transport ${server.transport} is not implemented`;
   if (server.authConfig.mode !== 'none') return `auth mode ${server.authConfig.mode} has no credential resolver`;
-  if (!server.command) return 'stdio command is missing';
+  if (server.transport === 'stdio' && !server.command) return 'stdio command is missing';
+  if (server.transport !== 'stdio' && !server.url) return 'remote transport url is missing';
   return undefined;
 }
 

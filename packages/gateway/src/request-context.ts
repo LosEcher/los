@@ -3,11 +3,14 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getConfig, type Config } from '@los/infra/config';
 import { getLogger, type Logger } from '@los/infra/logger';
 import type { MessagePrincipal, OperatorPrincipal } from '@los/agent/message-router';
+import { verifyJwt, getJwtSecret, type JwtPayload } from './auth-store.js';
 
 const log = getLogger('request-context');
 const LOCAL_OPERATOR_SUBJECT = 'operator:local';
 const SHARED_OPERATOR_SUBJECT = 'operator:shared-token';
+const JWT_OPERATOR_SUBJECT = 'operator:jwt';
 const SHARED_ACCESS_SUBJECT = 'authenticated:shared-token';
+const JWT_ACCESS_SUBJECT = 'authenticated:jwt';
 const CONTEXT_OPTIONAL_INFRA_PATHS = new Set(['/health', '/live', '/ready', '/nodes/heartbeat']);
 
 export interface RequestContext {
@@ -36,29 +39,42 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
     const requestId = normalizeHeader(req.headers['x-request-id']) ?? `req-${randomUUID()}`;
     const traceId = normalizeHeader(req.headers['x-trace-id']) ?? requestId;
 
-    // Operator token validation — uses timing-safe comparison so an attacker
-    // can't enumerate the token character by character.
-    const isOperator = validateOperatorToken(
+    // Resolve JWT claims from Bearer token (user login).
+    const jwtPayload = resolveJwtPayload(req);
+
+    // Operator token validation — uses timing-safe comparison.
+    const isStaticOperator = validateOperatorToken(
       req.headers['x-los-operator-token'],
       config.auth.operatorToken,
     );
-    const isAuthenticated = isOperator || validateAccessToken(req, config.auth.token);
+    // JWT-based operator: user with role='operator'
+    const isJwtOperator = jwtPayload?.role === 'operator';
+    const isOperator = isStaticOperator || isJwtOperator;
+
+    const hasStaticAccess = validateAccessToken(req, config.auth.token);
+    const isAuthenticated = isOperator || hasStaticAccess || !!jwtPayload;
 
     if (config.auth.enabled) {
-      const tenantId = normalizeHeader(req.headers['x-tenant-id']);
-      const projectId = normalizeHeader(req.headers['x-project-id']);
-      const userId = normalizeHeader(req.headers['x-user-id']);
+      // Prefer JWT claims over headers for identity
+      const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
+      const projectId = normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los';
+      const userId = jwtPayload?.sub
+        ?? normalizeHeader(req.headers['x-user-id'])
+        ?? 'unknown';
 
-      if ((!tenantId || !userId) && _requiresActorContext(req.url)) {
-        log.warn(`Request missing tenant/user context: tenant=${tenantId ?? '<none>'}, user=${userId ?? '<none>'} (auth enabled, headers required)`);
+      if (!jwtPayload && _requiresActorContext(req.url)) {
+        const hdrUser = normalizeHeader(req.headers['x-user-id']);
+        if (!hdrUser) {
+          log.warn(`Request missing user context: user=<none> (auth enabled, no JWT)`);
+        }
       }
 
       req.requestContext = {
         requestId,
         traceId,
-        tenantId: tenantId ?? 'unknown',
-        projectId: projectId ?? 'unknown',
-        userId: userId ?? 'unknown',
+        tenantId,
+        projectId,
+        userId,
         isOperator,
         isAuthenticated,
         log: getGatewayLogger().child({ requestId, traceId }),
@@ -66,9 +82,9 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
 
       reply.header('x-request-id', requestId);
       reply.header('x-trace-id', traceId);
-      if (tenantId) reply.header('x-tenant-id', tenantId);
-      if (projectId) reply.header('x-project-id', projectId);
-      if (userId) reply.header('x-user-id', userId);
+      reply.header('x-tenant-id', tenantId);
+      reply.header('x-project-id', projectId);
+      reply.header('x-user-id', userId);
     } else {
       const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
       const projectId = normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los';
@@ -158,10 +174,14 @@ export function getMessagePrincipal(req: FastifyRequest): MessagePrincipal {
     };
   }
   if (ctx.isOperator) {
+    const isJwtOp = ctx.isOperator && !validateOperatorToken(
+      req.headers['x-los-operator-token'],
+      getConfig().auth.operatorToken,
+    );
     return {
       kind: 'operator',
-      subject: SHARED_OPERATOR_SUBJECT,
-      authenticatedBy: 'operator_token',
+      subject: isJwtOp ? JWT_OPERATOR_SUBJECT : SHARED_OPERATOR_SUBJECT,
+      authenticatedBy: isJwtOp ? 'jwt' : 'operator_token',
       capabilities: ['operator:*'],
       ...common,
     };
@@ -240,4 +260,17 @@ function validateToken(provided: string | undefined, configuredToken: string): b
   const actual = Buffer.from(provided);
   const expected = Buffer.from(configuredToken);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+/** Extract and verify JWT from Authorization: Bearer header. */
+function resolveJwtPayload(req: FastifyRequest): JwtPayload | null {
+  const authHeader = req.headers.authorization;
+  const authValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  if (!authValue || typeof authValue !== 'string') return null;
+  const match = authValue.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1];
+  if (!token) return null;
+  // Only treat as JWT if it has 3 dot-separated parts (JWT format)
+  if (token.split('.').length !== 3) return null;
+  return verifyJwt(token, getJwtSecret());
 }

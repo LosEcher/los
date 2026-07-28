@@ -276,6 +276,8 @@ export async function completeAgentSetup(
           command: s.command,
           args: s.args,
           url: s.url,
+          transport: s.transport as 'stdio' | 'sse' | 'streamable-http' | undefined,
+          headers: s.headers,
           env: s.env,
           toolPolicy: s.toolPolicy,
           adapterConfig: s.adapterConfig,

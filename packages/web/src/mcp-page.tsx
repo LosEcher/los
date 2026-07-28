@@ -75,6 +75,11 @@ export function MCPServersPage() {
             </button>
           )}
         />
+        {list.length === 0 && !servers.isLoading ? (
+          <div className="empty-guide">
+            <p>MCP servers extend the agent with external tools. Create one above, or run <code>los mcp import</code> from the CLI.</p>
+          </div>
+        ) : null}
       </div>
 
       <aside className="panel inspector">

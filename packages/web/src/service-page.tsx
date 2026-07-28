@@ -61,6 +61,11 @@ export function ServicesPage() {
             </button>
           )}
         />
+        {list.length === 0 && !services.isLoading ? (
+          <div className="empty-guide">
+            <p>Services represent running los processes (gateway, executors, bots). Start <code>pnpm start</code> to register the gateway.</p>
+          </div>
+        ) : null}
       </div>
 
       <aside className="panel inspector">

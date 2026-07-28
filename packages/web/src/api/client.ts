@@ -130,7 +130,15 @@ function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   headers['x-project-id'] = getCurrentProjectId() ?? 'los';
   const token = getAuthToken();
-  if (token) headers['x-los-auth-token'] = token;
+  if (token) {
+    // JWT tokens (3 dot-separated parts) go in Authorization header.
+    // Static tokens (legacy) go in x-los-auth-token header.
+    if (token.split('.').length === 3) {
+      headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      headers['x-los-auth-token'] = token;
+    }
+  }
   const operatorToken = getOperatorToken();
   if (operatorToken) headers['x-los-operator-token'] = operatorToken;
   // Tenant and user are required by request-context when auth is enabled.

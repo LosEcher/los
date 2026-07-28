@@ -1,8 +1,8 @@
 /**
  * @los/agent/tools/mcp-client — MCP (Model Context Protocol) client.
  *
- * Connects to MCP servers via stdio transport, discovers their tools,
- * and routes tool calls through the JSON-RPC protocol.
+ * Connects to MCP servers via stdio, SSE, or streamable-HTTP transport,
+ * discovers their tools, and routes tool calls through JSON-RPC.
  *
  * Supports any MCP-compatible server: filesystem, github, puppeteer,
  * memory, databases, Composio, etc.
@@ -18,15 +18,25 @@ import {
   MCPStdioTransport,
   type JSONRPCMessage,
 } from './mcp-stdio-transport.js';
+import { MCPSSETransport } from './mcp-sse-transport.js';
+import { MCPStreamableHTTPTransport } from './mcp-streamable-http-transport.js';
+import type { MCPTransport } from './mcp-transport.js';
 
 const log = getLogger('agent');
 
 // ── Public Types ─────────────────────────────────────────
 
 export interface MCPServerConfig {
-  command: string;
+  /** stdio command (local servers). Required for stdio transport. */
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Remote endpoint URL (sse / streamable-http transports). */
+  url?: string;
+  /** Transport type. Defaults to 'stdio' when command is set. */
+  transport?: 'stdio' | 'sse' | 'streamable-http';
+  /** Additional HTTP headers for remote transports (auth, etc.). */
+  headers?: Record<string, string>;
   serverId?: string;
   toolPolicy?: MCPToolPolicy;
   adapterConfig?: MCPAdapterConfig;
@@ -53,10 +63,44 @@ interface MCPToolCallResult {
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const REQUEST_TIMEOUT_MS = 60_000;
+
+// ── Transport factory ──────────────────────────────────
+
+function createTransport(config: MCPServerConfig): MCPTransport {
+  const transport = config.transport ?? (config.command ? 'stdio' : 'sse');
+
+  switch (transport) {
+    case 'stdio': {
+      if (!config.command) {
+        throw new Error('MCP stdio transport requires a command');
+      }
+      return new MCPStdioTransport(
+        config.command,
+        config.args ?? [],
+        config.env,
+      );
+    }
+    case 'sse': {
+      if (!config.url) {
+        throw new Error('MCP SSE transport requires a url');
+      }
+      return new MCPSSETransport(config.url, config.headers);
+    }
+    case 'streamable-http': {
+      if (!config.url) {
+        throw new Error('MCP streamable-http transport requires a url');
+      }
+      return new MCPStreamableHTTPTransport(config.url, config.headers);
+    }
+    default:
+      throw new Error(`Unknown MCP transport: ${transport}`);
+  }
+}
+
 // ── MCP Client ──────────────────────────────────────────
 
 export class MCPClient {
-  private transport: MCPStdioTransport;
+  private transport: MCPTransport;
   private requestId = 0;
   private pending = new Map<number, {
     resolve: (value: unknown) => void;
@@ -68,11 +112,7 @@ export class MCPClient {
   private initialized = false;
 
   constructor(private config: MCPServerConfig) {
-    this.transport = new MCPStdioTransport(
-      config.command,
-      config.args ?? [],
-      config.env,
-    );
+    this.transport = createTransport(config);
     this.transport.onMessage((msg) => this.handleMessage(msg));
   }
 
@@ -93,7 +133,8 @@ export class MCPClient {
         ? (initResult as any).protocolVersion
         : undefined,
     };
-    log.info(`MCP connected: ${serverInfo?.name ?? this.config.command} v${serverInfo?.version ?? '?'}`);
+    const label = serverInfo?.name ?? this.config.command ?? this.config.url ?? '?';
+    log.info(`MCP connected: ${label} v${serverInfo?.version ?? '?'}`);
 
     // Send initialized notification
     this.sendNotification('notifications/initialized', {});
@@ -103,7 +144,7 @@ export class MCPClient {
     this.tools = (toolsResult as any)?.tools ?? [];
     this.initialized = true;
     log.info(
-      `MCP [${this.config.command}] tools: ${this.tools.map(t => t.name).join(', ') || '(none)'}`,
+      `MCP [${label}] tools: ${this.tools.map(t => t.name).join(', ') || '(none)'}`,
     );
   }
 
@@ -117,7 +158,8 @@ export class MCPClient {
 
   async callTool(name: string, args: Record<string, unknown>, options: MCPCallOptions = {}): Promise<string> {
     if (!this.initialized) {
-      throw new Error(`MCP client not initialized: ${this.config.command}`);
+      const label = this.config.command ?? this.config.url ?? '?';
+      throw new Error(`MCP client not initialized: ${label}`);
     }
     const result = await this.sendRequest('tools/call', {
       name,
@@ -140,7 +182,6 @@ export class MCPClient {
   }
 
   async close(): Promise<void> {
-    // Reject all pending requests
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
       entry.reject(new Error('MCP client closed'));
@@ -195,7 +236,6 @@ export class MCPClient {
   }
 
   private handleMessage(msg: JSONRPCMessage): void {
-    // Notifications and responses without an id are ignored
     if (msg.id === undefined || msg.id === null) return;
 
     const numericId = typeof msg.id === 'string' ? Number(msg.id) : msg.id;
@@ -222,6 +262,8 @@ export interface MCPServerRegistryRecord {
   command?: string;
   args: string[];
   url?: string;
+  transport?: 'stdio' | 'sse' | 'streamable-http';
+  headers?: Record<string, string>;
   env: Record<string, string>;
   toolPolicy?: MCPToolPolicy;
   adapterConfig?: MCPAdapterConfig;
@@ -229,7 +271,7 @@ export interface MCPServerRegistryRecord {
 
 /**
  * Convert a registry record to MCP client config.
- * Returns null if the record has no usable connection info.
+ * Supports stdio (command), SSE, and streamable-http (url) transports.
  */
 export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServerConfig | null {
   if (record.command) {
@@ -237,13 +279,22 @@ export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServ
       command: record.command,
       args: record.args.length > 0 ? record.args : undefined,
       env: Object.keys(record.env).length > 0 ? record.env : undefined,
+      transport: 'stdio',
       serverId: record.id,
       toolPolicy: record.toolPolicy,
       adapterConfig: record.adapterConfig,
     };
   }
-  // SSE / streamable-http remote servers are not yet implemented;
-  // return null so the caller can skip them gracefully.
+  if (record.url) {
+    return {
+      url: record.url,
+      transport: record.transport ?? 'sse',
+      headers: record.headers,
+      serverId: record.id,
+      toolPolicy: record.toolPolicy,
+      adapterConfig: record.adapterConfig,
+    };
+  }
   return null;
 }
 

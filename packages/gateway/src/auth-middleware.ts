@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Config } from '@los/infra/config';
+import { verifyJwt, getJwtSecret } from './auth-store.js';
 
 /**
  * Paths that never require auth.
  */
 const EXACT_PUBLIC_PATHS = ['/', '/favicon.ico'];
-const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/nodes/heartbeat'];
+const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/nodes/heartbeat', '/auth/login', '/auth/register', '/auth/status'];
 
 /** Paths that are public only for specific HTTP methods. */
 const METHOD_PUBLIC_PATHS: Record<string, Set<string>> = {
@@ -27,37 +28,48 @@ export default async function authMiddleware(
 
     if (isPublicPath(req.url, req.method)) return;
 
-    // Operator token (strongest auth path): x-los-operator-token header
-    // When set, grants operator-level access for RunContract phase approvals,
-    // session steering, and other operator-gated actions.
+    // 1. Operator token (strongest auth path): x-los-operator-token header
     if (config.auth.operatorToken) {
       const opToken = req.headers['x-los-operator-token'];
       const opNormalized = Array.isArray(opToken) ? opToken[0] : opToken;
       if (opNormalized === config.auth.operatorToken) return;
     }
 
-    // Auth token: x-los-auth-token OR Authorization: Bearer <token>
-    // Bearer is required for OpenAI-compatible clients (WeClaw HTTP agent,
-    // curl -H "Authorization: Bearer …", etc.) which never set x-los-auth-token.
-    const provided = extractAuthToken(req);
-    if (!config.auth.token || provided !== config.auth.token) {
-      return reply.code(401).send({ error: 'unauthorized' });
+    // 2. JWT Bearer token (user login)
+    const bearerToken = extractBearerToken(req);
+    if (bearerToken) {
+      const payload = verifyJwt(bearerToken, getJwtSecret());
+      if (payload) return; // Valid JWT → authenticated
     }
+
+    // 3. Static auth token (legacy backward compatibility)
+    const staticToken = extractAuthToken(req);
+    if (config.auth.token && staticToken === config.auth.token) return;
+
+    return reply.code(401).send({ error: 'unauthorized' });
   });
 }
 
-/** Resolve auth token from los header or standard Bearer scheme. */
+/** Extract Bearer token from Authorization header (JWT). */
+function extractBearerToken(req: FastifyRequest): string | undefined {
+  const authorization = req.headers.authorization;
+  const authValue = Array.isArray(authorization) ? authorization[0] : authorization;
+  if (typeof authValue !== 'string') return undefined;
+  const match = authValue.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+/** Resolve auth token from los header or standard Bearer scheme (legacy static token). */
 function extractAuthToken(req: FastifyRequest): string | undefined {
   const headerToken = req.headers['x-los-auth-token'];
   const fromHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
   if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader.trim();
 
-  const authorization = req.headers.authorization;
-  const authValue = Array.isArray(authorization) ? authorization[0] : authorization;
-  if (typeof authValue !== 'string') return undefined;
-  const match = authValue.match(/^Bearer\s+(.+)$/i);
-  const bearer = match?.[1]?.trim();
-  return bearer || undefined;
+  // Only treat as static token if it doesn't look like a JWT (3 dot-separated parts)
+  const bearer = extractBearerToken(req);
+  if (bearer && !bearer.includes('.')) return bearer;
+
+  return undefined;
 }
 
 function isPublicPath(url: string | undefined, method: string): boolean {

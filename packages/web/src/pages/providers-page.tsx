@@ -252,6 +252,11 @@ export function ProvidersPage() {
             );
           }}
         />
+        {providers.length === 0 && !onboarding.isLoading ? (
+          <div className="empty-guide">
+            <p>Set an API key in your environment (e.g. <code>DEEPSEEK_API_KEY</code>) and restart, or go to <button type="button" className="link-btn" onClick={() => window.location.hash = 'onboarding'}>Onboarding</button> for step-by-step setup.</p>
+          </div>
+        ) : null}
         <div className="section-divider" />
         <div className="panel-head compact">
           <h2>Effective Model Routes</h2>

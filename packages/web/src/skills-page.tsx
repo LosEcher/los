@@ -187,6 +187,11 @@ export function SkillsPage() {
             </button>
           )}
         />
+        {list.length === 0 && !skills.isLoading ? (
+          <div className="empty-guide">
+            <p>Skills define reusable agent capabilities. Create one above, or run <code>los skill import</code> from the CLI to import from a file.</p>
+          </div>
+        ) : null}
       </div>
 
       <aside className="panel inspector">
