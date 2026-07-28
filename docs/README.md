@@ -92,6 +92,12 @@ application behavior, drift validation, and failure handling. Use
 `operations/github-mirror-recovery.md` when the secondary GitHub `main` has
 diverged from Forgejo and requires an explicitly approved lease-protected repair.
 
+Use `operations/forgejo-delivery.md` for Forgejo authentication choices,
+read-only preflight, PR creation, exact-head CI inspection, protected merge,
+branch pruning, and GitHub/Forgejo reconciliation. The runbook distinguishes
+the optional local access token, Git Keychain Basic Auth, the Actions job token,
+and GitHub `gh` authentication.
+
 Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
