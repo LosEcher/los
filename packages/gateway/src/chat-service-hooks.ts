@@ -1,18 +1,19 @@
 import type { Config } from '@los/infra/config';
 import { ensureSessionStore, saveSession } from '@los/agent/session';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
 import { emitRunningToolCallUpsert, emitToolCallUpsertFromSessionEvent, relaySessionEvent } from './chat-live-events.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
 import { getLogger } from '@los/infra/logger';
+import type { RecoveryCheckpointInput } from '@los/memory';
 
 const log = getLogger('chat-hooks');
 const checkpointTracker = new Map<string, { count: number; lastAt: number }>();
 const toolStateCache = new Map<string, {
-  pendingCalls: Array<{ callId: string; toolName: string; args: Record<string, unknown>; status: string }>;
-  lastResults: Array<{ callId: string; toolName: string; outcome: string; resultSummary: string }>;
-  fileReferences: Array<{ path: string; contentHash: string; lastOperation: string }>;
+  pendingCalls: RecoveryCheckpointInput['toolState']['pendingCalls'];
+  lastResults: RecoveryCheckpointInput['toolState']['lastResult'];
+  fileReferences: RecoveryCheckpointInput['fileReferences'];
+  lastEventId: string;
+  lastEventIndex: number;
+  turns: Set<number>;
 }>();
 
 export function createChatTaskHooks(input: {
@@ -27,7 +28,6 @@ export function createChatTaskHooks(input: {
   model: string | undefined;
   workspaceRoot: string;
   toolMode: string;
-  allowedTools?: string[];
   config: Config;
   resumedSession: any;
   ctx: { activeTaskRunId: string | undefined; lastCheckpoint: any };
@@ -65,6 +65,7 @@ export function createChatTaskHooks(input: {
       });
     },
     onToolCall: async (callId: string, tool: string, args: unknown, turn: number) => {
+      _trackRequestedToolCall(sid, callId, tool, args, turn);
       await emitRunningToolCallUpsert({ send, sessionId: sid, runSpecId, turn, callId, toolName: tool, input: args as Record<string, unknown> });
       import('./chat-cbm-symbol-cache.js').then(m => m.cacheSymbolsForToolCall(
         sid, callId, tool, args as Record<string, unknown>, input.workspaceRoot,
@@ -96,12 +97,14 @@ export function createChatTaskHooks(input: {
       await emitToolCallUpsertFromSessionEvent({ send, sessionId: sid, runSpecId, event });
 
       // Track tool state for checkpoint snapshots
-      updateToolStateCache(sid, event);
+      _updateToolStateCache(sid, event);
 
       if (event.type === 'session.completed' || event.type === 'session.error') {
+        const recoveryCheckpoint = _snapshotRecoveryCheckpoint(sid);
+        await persistRecoveryCheckpoint(sid, runSpecId, recoveryCheckpoint, 'manual', 'full');
         import('@los/memory').then(({ compactSession }) =>
           compactSession({
-            sessionId: sid, runSpecId,
+            sessionId: sid, runSpecId, recoveryCheckpoint,
             onPreCompact: async (ctx) => {
               // Save tool state snapshot before compaction
               const ts = toolStateCache.get(sid);
@@ -146,10 +149,11 @@ export function createChatTaskHooks(input: {
       if (shouldCheckpoint) {
         ck.count = 0; ck.lastAt = Date.now();
         const trigger = triggeredByCount ? 'event_count' : isToolTransition ? 'tool_state_change' : 'time_interval';
-        const wsRoot = input.workspaceRoot;
+        const recoveryCheckpoint = _snapshotRecoveryCheckpoint(sid);
+        await persistRecoveryCheckpoint(sid, runSpecId, recoveryCheckpoint, trigger, 'checkpoint');
         import('@los/memory').then(({ compactSession }) =>
           compactSession({
-            sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger,
+            sessionId: sid, runSpecId, checkpoint: true, autoTrigger: trigger, recoveryCheckpoint,
             onPreCompact: async (ctx) => {
               const ts = toolStateCache.get(sid);
               if (ts) {
@@ -165,7 +169,6 @@ export function createChatTaskHooks(input: {
               }
             },
             onPostCompact: async (ctx) => {
-              rebuildFileContext({ ctx, sid, wsRoot, send });
               send('operator', {
                 type: 'compaction.post_compact',
                 sessionId: ctx.sessionId,
@@ -178,16 +181,6 @@ export function createChatTaskHooks(input: {
                 trigger: ctx.trigger ?? trigger,
                 metrics: (ctx.summary as any).compactionMetrics ?? null,
               });
-              // Re-declare available tools after compaction (name-only list)
-              if (input.allowedTools && input.allowedTools.length > 0) {
-                send('operator', {
-                  type: 'compaction.tool_catalog',
-                  sessionId: ctx.sessionId,
-                  compactionId: ctx.compactionId,
-                  tools: input.allowedTools,
-                  count: input.allowedTools.length,
-                });
-              }
             },
           }).catch(() => undefined)
         ).catch(() => undefined);
@@ -199,38 +192,47 @@ export function createChatTaskHooks(input: {
 
 // ── Tool state tracking for compaction checkpoints ───────────────
 
-function updateToolStateCache(sessionId: string, event: any): void {
-  const ts = toolStateCache.get(sessionId) ?? {
-    pendingCalls: [],
-    lastResults: [],
-    fileReferences: [],
-  };
+export function _updateToolStateCache(sessionId: string, event: any): void {
+  const ts = getOrCreateToolState(sessionId);
+
+  if (Number.isSafeInteger(event.id) && event.id > 0) {
+    ts.lastEventId = String(event.id);
+    ts.lastEventIndex = event.id;
+  }
+  if (Number.isSafeInteger(event.turn) && event.turn > 0) ts.turns.add(event.turn);
 
   if (event.type === 'tool_call_state.updated') {
     const payload = event.payload as Record<string, unknown> | undefined;
     const status = payload?.to as string | undefined;
+    const callId = String(payload?.entityId ?? payload?.callId ?? '');
+    if (!callId) {
+      toolStateCache.set(sessionId, ts);
+      return;
+    }
+    const existing = ts.pendingCalls.find(call => call.callId === callId);
+    const toolName = String(payload?.toolName ?? event.toolName ?? existing?.toolName ?? 'unknown');
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
       // Move from pending to lastResults
-      const callId = event.tool_call_state_id as string;
       ts.pendingCalls = ts.pendingCalls.filter(c => c.callId !== callId);
       ts.lastResults.push({
         callId,
-        toolName: event.toolName ?? 'unknown',
+        toolName,
         outcome: status === 'succeeded' ? 'success' : status === 'failed' ? 'error' : 'cancelled',
         resultSummary: typeof payload?.result === 'string'
           ? payload.result.slice(0, 200)
-          : `${status} at ${new Date().toISOString()}`,
+          : String(payload?.reason ?? `${status} at ${new Date().toISOString()}`).slice(0, 200),
       });
       // Keep only last 5 results
       if (ts.lastResults.length > 5) ts.lastResults = ts.lastResults.slice(-5);
     } else {
-      // Still pending
-      ts.pendingCalls.push({
-        callId: event.tool_call_state_id as string ?? `pending-${Date.now()}`,
-        toolName: event.toolName ?? 'unknown',
-        args: (payload?.args as Record<string, unknown>) ?? {},
-        status: status ?? 'requested',
-      });
+      const pendingStatus = status === 'running' ? 'running' : 'requested';
+      const next = {
+        callId,
+        toolName,
+        args: isRecord(payload?.args) ? payload.args : existing?.args ?? {},
+        status: pendingStatus,
+      } satisfies RecoveryCheckpointInput['toolState']['pendingCalls'][number];
+      ts.pendingCalls = [...ts.pendingCalls.filter(call => call.callId !== callId), next];
     }
   } else if (event.type === 'tool.execute') {
     // Track file references from tool executions
@@ -260,74 +262,67 @@ function updateToolStateCache(sessionId: string, event: any): void {
   toolStateCache.set(sessionId, ts);
 }
 
-// ── PostCompact file context rebuild ────────────────────────
-
-const MAX_REBUILD_FILES = 5;
-const MAX_FILE_CONTENT_CHARS = 2000;
-
-interface RebuildFileContextInput {
-  ctx: {
-    sessionId: string;
-    compactionId: string;
-    trigger?: string;
-    symbolSummary?: Array<{
-      symbolId: string;
-      name: string;
-      kind: string;
-      file: string;
-      operationCount: number;
-    }>;
-  };
-  sid: string;
-  wsRoot: string;
-  send: (event: string, payload: unknown) => void;
+export function _trackRequestedToolCall(
+  sessionId: string,
+  callId: string,
+  toolName: string,
+  args: unknown,
+  turn: number,
+): void {
+  const ts = getOrCreateToolState(sessionId);
+  if (turn > 0) ts.turns.add(turn);
+  ts.pendingCalls = [
+    ...ts.pendingCalls.filter(call => call.callId !== callId),
+    { callId, toolName, args: isRecord(args) ? args : {}, status: 'requested' },
+  ];
+  toolStateCache.set(sessionId, ts);
 }
 
-function rebuildFileContext(input: RebuildFileContextInput): void {
-  const { ctx, sid, wsRoot, send } = input;
-  const symbols = ctx.symbolSummary;
-  if (!symbols || symbols.length === 0) return;
+export function _snapshotRecoveryCheckpoint(sessionId: string): RecoveryCheckpointInput | undefined {
+  const ts = toolStateCache.get(sessionId);
+  if (!ts) return undefined;
+  return {
+    toolState: {
+      pendingCalls: ts.pendingCalls.map(call => ({ ...call, args: { ...call.args } })),
+      lastResult: ts.lastResults.map(result => ({ ...result })),
+    },
+    fileReferences: ts.fileReferences.slice(-10).map(reference => ({ ...reference })),
+    messageCursor: {
+      lastEventId: ts.lastEventId,
+      lastEventIndex: ts.lastEventIndex,
+      turnCount: ts.turns.size,
+    },
+  };
+}
 
-  const fileMap = new Map<string, { path: string; operationCount: number }>();
-  for (const s of symbols) {
-    if (!s.file) continue;
-    const existing = fileMap.get(s.file);
-    if (!existing || existing.operationCount < s.operationCount) {
-      fileMap.set(s.file, { path: s.file, operationCount: s.operationCount });
-    }
-  }
+async function persistRecoveryCheckpoint(
+  sessionId: string,
+  runSpecId: string,
+  checkpoint: RecoveryCheckpointInput | undefined,
+  trigger: string,
+  mode: 'checkpoint' | 'full',
+): Promise<void> {
+  if (!checkpoint) return;
+  await persistStreamCheckpoint({
+    sessionId,
+    runSpecId,
+    eventType: 'session.recovery.checkpoint',
+    turn: checkpoint.messageCursor.turnCount,
+    payload: { ...checkpoint, trigger, mode },
+  });
+}
 
-  const topFiles = [...fileMap.values()]
-    .sort((a, b) => b.operationCount - a.operationCount)
-    .slice(0, MAX_REBUILD_FILES);
-  if (topFiles.length === 0) return;
+function getOrCreateToolState(sessionId: string) {
+  return toolStateCache.get(sessionId) ?? {
+    pendingCalls: [],
+    lastResults: [],
+    fileReferences: [],
+    lastEventId: '',
+    lastEventIndex: 0,
+    turns: new Set<number>(),
+  };
+}
 
-  const ts = toolStateCache.get(sid);
-  const fileContexts: Array<{
-    path: string; content: string; truncated: boolean; hash: string; changed: boolean | null;
-  }> = [];
-
-  for (const { path: filePath } of topFiles) {
-    const resolved = resolvePath(wsRoot, filePath);
-    try {
-      const content = readFileSync(resolved, 'utf-8');
-      const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
-      const truncated = content.length > MAX_FILE_CONTENT_CHARS;
-      const prevRef = ts?.fileReferences.find(r => r.path === filePath);
-      const changed = prevRef ? prevRef.contentHash !== hash : null;
-      fileContexts.push({ path: filePath,
-        content: truncated ? content.slice(0, MAX_FILE_CONTENT_CHARS) : content,
-        truncated, hash, changed });
-      if (ts) ts.fileReferences.push({ path: filePath, contentHash: hash, lastOperation: 'read' });
-    } catch { /* file deleted or unreadable */ }
-  }
-
-  if (fileContexts.length > 0) {
-    send('operator', {
-      type: 'compaction.file_context',
-      sessionId: ctx.sessionId, compactionId: ctx.compactionId,
-      trigger: ctx.trigger ?? 'checkpoint',
-      files: fileContexts, rebuiltAt: new Date().toISOString(),
-    });
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
