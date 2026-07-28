@@ -26,6 +26,7 @@ import type { AppendEventInput } from './event-log/types.js';
 import { randomUUID } from 'node:crypto';
 
 const log = getLogger('stream-checkpoints');
+const RECOVERY_CHECKPOINT_EVENT = 'session.recovery.checkpoint';
 
 // ── Types ───────────────────────────────────────────────
 
@@ -142,12 +143,41 @@ export async function listStreamCheckpointsSince(
     createdAt: e.timestamp,
   }));
 
-  // If file backend returned nothing, fall back to PG for legacy data
-  if (results.length === 0 && sinceId > 0) {
+  // Fall back only when the file stream does not exist. An empty page after a
+  // valid file cursor must not unexpectedly switch to the legacy PG stream.
+  if (results.length === 0 && await log_.getLastEventId(sessionId) === 0) {
     return listStreamCheckpointsSincePg(sessionId, sinceId, limit);
   }
 
   return results;
+}
+
+export async function _getLatestStreamCheckpoint(
+  sessionId: string,
+): Promise<StreamCheckpointRecord | null> {
+  const log_ = getEventLog();
+  const lastId = await log_.getLastEventId(sessionId);
+  if (lastId > 0) {
+    const entries = await log_.read(sessionId, {
+      fromId: 0,
+      limit: lastId,
+      type: RECOVERY_CHECKPOINT_EVENT,
+    });
+    return entries.at(-1) ? eventLogEntryToRecord(entries.at(-1)!) : null;
+  }
+  return getLatestStreamCheckpointPg(sessionId);
+}
+
+export async function _getStreamCheckpointById(
+  sessionId: string,
+  checkpointId: number,
+): Promise<StreamCheckpointRecord | null> {
+  const log_ = getEventLog();
+  const entries = await log_.read(sessionId, { fromId: checkpointId - 1, limit: 1 });
+  if (entries[0]?.id === checkpointId && entries[0].type === RECOVERY_CHECKPOINT_EVENT) {
+    return eventLogEntryToRecord(entries[0]);
+  }
+  return getStreamCheckpointByIdPg(sessionId, checkpointId);
 }
 
 export async function listStreamCheckpointsForRunSpec(
@@ -217,6 +247,41 @@ async function listStreamCheckpointsForRunSpecPg(
   }
 }
 
+async function getLatestStreamCheckpointPg(sessionId: string): Promise<StreamCheckpointRecord | null> {
+  try {
+    await ensureStreamCheckpointStore();
+    const rows = await getDb().query<StreamCheckpointRow>(
+      `SELECT * FROM stream_checkpoints
+       WHERE session_id = $1 AND event_type = $2
+       ORDER BY id DESC LIMIT 1`,
+      [sessionId, RECOVERY_CHECKPOINT_EVENT],
+    );
+    return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+  } catch (err) {
+    log.warn(`PG latest checkpoint read failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+async function getStreamCheckpointByIdPg(
+  sessionId: string,
+  checkpointId: number,
+): Promise<StreamCheckpointRecord | null> {
+  try {
+    await ensureStreamCheckpointStore();
+    const rows = await getDb().query<StreamCheckpointRow>(
+      `SELECT * FROM stream_checkpoints
+       WHERE session_id = $1 AND id = $2 AND event_type = $3
+       LIMIT 1`,
+      [sessionId, checkpointId, RECOVERY_CHECKPOINT_EVENT],
+    );
+    return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+  } catch (err) {
+    log.warn(`PG checkpoint read failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
 // ── Helpers ─────────────────────────────────────────────
 
 type StreamCheckpointRow = {
@@ -238,6 +303,18 @@ function rowToRecord(row: StreamCheckpointRow): StreamCheckpointRecord {
     eventType: row.event_type,
     payload: normalizeJsonObject(row.payload_json),
     createdAt: toIsoString(row.created_at),
+  };
+}
+
+function eventLogEntryToRecord(entry: Awaited<ReturnType<FileEventLogBackend['read']>>[number]): StreamCheckpointRecord {
+  return {
+    id: entry.id,
+    sessionId: entry.stream,
+    runSpecId: entry.payload._runSpecId as string | undefined,
+    turn: (entry.payload._turn as number) ?? entry.id,
+    eventType: entry.type,
+    payload: stripInternal(entry.payload),
+    createdAt: entry.timestamp,
   };
 }
 
