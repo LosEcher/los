@@ -97,6 +97,8 @@ export interface AgentConfig {
   onToolCall?: (callId: string, tool: string, args: Record<string, unknown>, turn: number) => void | Promise<void>;
   onModelDelta?: (delta: AgentModelDelta) => void | Promise<void>;
   onCheckpoint?: (state: CheckpointState) => void | Promise<void>;
+  /** Resume state from a previous checkpoint (messages + turns). */
+  resumeState?: CheckpointState;
   /** Context fill monitoring configuration. When set, enables 3-tier fill tracking. */
   contextMonitor?: {
     /** Model's advertised context window size. Default: 200_000 */
