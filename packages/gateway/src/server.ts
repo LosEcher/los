@@ -62,7 +62,6 @@ import { registerCommunicationRoutes } from './routes/data/communication-routes.
 import { registerRuntimeAdapterRoutes } from './routes/orchestration/runtime-adapter-routes.js';
 import { registerToolGateRoutes } from './routes/orchestration/tool-gate-routes.js';
 import { registerExecutionExperimentRoutes } from './routes/orchestration/execution-experiment-routes.js';
-import { registerAcpRoutes } from './routes/acp.js';
 import { recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { loadServiceInstance, upsertServiceInstanceHeartbeat } from '@los/agent/service-instances';
@@ -312,7 +311,6 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerRuntimeAdapterRoutes(app, messageRouter);
   registerToolGateRoutes(app);
   registerExecutionExperimentRoutes(app);
-  registerAcpRoutes(app);
   setupLiveEventPush(app);
   registerLiveEventRoutes(app);
   registerOperatorEvents(app);

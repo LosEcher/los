@@ -87,6 +87,7 @@ Related:
 
 - `docs/governance/forgejo-branch-gates.md`
 - `docs/governance/github-branch-gates.md`
+- `docs/operations/forgejo-delivery.md`
 - `tools/branch-closeout.sh`
 - `tools/branch-prune-origin.sh`
 - `SKILL.md`

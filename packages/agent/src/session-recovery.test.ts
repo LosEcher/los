@@ -1,88 +1,134 @@
-/**
- * @los/agent/session-recovery.test — End-to-end recovery fixture tests.
- *
- * Validates the full recovery pipeline per contracts/session-recovery.yaml:
- * - Normal recovery from a valid checkpoint
- * - Partial recovery with lost tool results
- * - Degraded recovery when no checkpoint exists
- * - Handoff message format
- * - Stale file detection
- */
-import { describe, it } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconstructSessionContext } from './session-recovery.js';
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-describe('session recovery', () => {
-  describe('degraded mode — no checkpoint', () => {
-    it('throws when no checkpoint exists for session', async () => {
-      await assert.rejects(
-        reconstructSessionContext({ sessionId: 'nonexistent-session-123' }),
-        /No valid checkpoint found/,
-      );
-    });
+import {
+  _buildHandoffMessage,
+  buildMessagesFromEvents,
+  classifyRecoveryMode,
+  countLostToolResults,
+  detectStaleFiles,
+} from './session-recovery-context.js';
+import type { CheckpointSnapshot } from './session-recovery.js';
+import type { SessionEventRecord } from './session-events.js';
+
+function checkpoint(overrides: Partial<CheckpointSnapshot> = {}): CheckpointSnapshot {
+  return {
+    checkpointId: 'chkpt-1',
+    sessionId: 'session-1',
+    runSpecId: 'run-1',
+    takenAt: '2026-07-28T01:00:00.000Z',
+    trigger: 'manual',
+    mode: 'checkpoint',
+    toolState: { pendingCalls: [], lastResult: [] },
+    fileReferences: [],
+    messageCursor: { lastEventId: '1', lastEventIndex: 1, turnCount: 1 },
+    ...overrides,
+  };
+}
+
+function event(
+  id: number,
+  type: string,
+  payload: Record<string, unknown>,
+  toolName?: string,
+): SessionEventRecord {
+  return {
+    id,
+    sessionId: 'session-1',
+    turn: 1,
+    type,
+    source: 'loop',
+    toolName,
+    payload,
+    visibility: 'public',
+    createdAt: `2026-07-28T01:00:0${id}.000Z`,
+  };
+}
+
+test('handoff message includes checkpoint work and referenced files', () => {
+  const message = _buildHandoffMessage('session-1', checkpoint({
+    toolState: {
+      pendingCalls: [{ callId: 'call-2', toolName: 'write_file', args: {}, status: 'running' }],
+      lastResult: [{ callId: 'call-1', toolName: 'read_file', outcome: 'success', resultSummary: 'read src/a.ts' }],
+    },
+    fileReferences: [{ path: 'src/a.ts', contentHash: 'abc', lastOperation: 'read' }],
+  }));
+
+  assert.equal(message.role, 'system');
+  assert.match(String(message.content), /checkpoint chkpt-1/);
+  assert.match(String(message.content), /read_file: read src\/a\.ts/);
+  assert.match(String(message.content), /write_file \(running\)/);
+  assert.match(String(message.content), /src\/a\.ts \(read\)/);
+});
+
+test('message reconstruction preserves event order and completed tool results', () => {
+  const messages = buildMessagesFromEvents('session-1', checkpoint(), [
+    event(2, 'session.resumed', { content: 'resume marker' }),
+    event(3, 'user.message', { content: 'inspect the file' }),
+    event(4, 'model.turn.completed', { textPreview: 'I will inspect it' }),
+    event(5, 'tool.call', { callId: 'call-1', args: { path: 'src/a.ts' } }, 'read_file'),
+    event(6, 'tool.result', { callId: 'call-1', contentPreview: 'file contents' }, 'read_file'),
+  ], true);
+
+  assert.deepEqual(messages.map(message => message.role), [
+    'system', 'system', 'user', 'assistant', 'assistant', 'tool',
+  ]);
+  assert.equal(messages.at(-1)?.content, 'file contents');
+  assert.equal(countLostToolResults(messages, checkpoint()), 0);
+});
+
+test('missing tool result is stubbed and counted once with matching pending state', () => {
+  const activeCheckpoint = checkpoint({
+    toolState: {
+      pendingCalls: [{ callId: 'call-1', toolName: 'read_file', args: {}, status: 'running' }],
+      lastResult: [],
+    },
   });
+  const messages = buildMessagesFromEvents('session-1', activeCheckpoint, [
+    event(2, 'tool.call', { callId: 'call-1', args: {} }, 'read_file'),
+  ], true);
 
-  describe('handoff message format', () => {
-    it('builds correct handoff message structure', () => {
-      // Verify the handoff message follows the contract: role='system',
-      // contains sessionId, checkpointId, completed/in-progress/lost sections
-      assert.ok(true, 'handoff message template validated against contract');
-    });
-  });
+  assert.match(String(messages.at(-1)?.content), /Tool result lost/);
+  assert.equal(countLostToolResults(messages, activeCheckpoint), 1);
+  assert.equal(classifyRecoveryMode(1, 0, activeCheckpoint), 'partial');
+});
 
-  describe('recovery mode classification', () => {
-    it('classifies full recovery when all data is intact', () => {
-      // full: no lost tool results, no errors, no pending calls
-      assert.ok(true, 'full mode classification logic verified');
-    });
+test('recovery mode distinguishes intact, partial, and degraded recovery', () => {
+  const intact = checkpoint();
+  assert.equal(classifyRecoveryMode(0, 0, intact), 'full');
+  assert.equal(classifyRecoveryMode(1, 0, intact), 'partial');
+  assert.equal(classifyRecoveryMode(0, 3, intact), 'degraded');
+});
 
-    it('classifies partial recovery when tool results are lost', () => {
-      // partial: some tool results replaced by stubs OR pending calls exist
-      assert.ok(true, 'partial mode classification logic verified');
-    });
+test('stale file detection covers unchanged, modified, and deleted files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'los-recovery-files-'));
+  const unchangedPath = join(root, 'unchanged.ts');
+  const modifiedPath = join(root, 'modified.ts');
+  const deletedPath = join(root, 'deleted.ts');
+  const original = 'export const value = 1;\n';
+  const originalHash = createHash('sha256').update(original).digest('hex');
 
-    it('classifies degraded recovery when checkpoint is invalid or missing', () => {
-      // degraded: error count > 2 OR significant data loss
-      assert.ok(true, 'degraded mode classification logic verified');
-    });
-  });
+  try {
+    await Promise.all([
+      writeFile(unchangedPath, original),
+      writeFile(modifiedPath, 'export const value = 2;\n'),
+      writeFile(deletedPath, original),
+    ]);
+    await unlink(deletedPath);
+    const results = await detectStaleFiles([
+      { path: unchangedPath, contentHash: originalHash, lastOperation: 'read' },
+      { path: modifiedPath, contentHash: originalHash, lastOperation: 'edit' },
+      { path: deletedPath, contentHash: originalHash, lastOperation: 'read' },
+    ]);
 
-  describe('stale file detection', () => {
-    it('detects unchanged files as not stale', () => {
-      // file hash matches checkpoint → stale = false
-      assert.ok(true, 'stale file detection: unchanged');
-    });
-
-    it('detects modified files as stale', () => {
-      // file hash differs → stale = true
-      assert.ok(true, 'stale file detection: modified');
-    });
-
-    it('detects deleted files as stale', () => {
-      // file not found → stale = true
-      assert.ok(true, 'stale file detection: deleted');
-    });
-  });
-
-  describe('message reconstruction from events', () => {
-    it('includes system handoff message as first message', () => {
-      // First message must be role='system' with recovery info
-      assert.ok(true, 'handoff message is first');
-    });
-
-    it('rebuilds user/assistant/tool message sequence', () => {
-      // Events are ordered by time: user → assistant → tool_calls → tool results
-      assert.ok(true, 'message sequence preserved');
-    });
-
-    it('replaces lost tool results with stub messages', () => {
-      // Tool results not in session_events → "[Tool result lost...]" stub
-      assert.ok(true, 'lost tool results stubbed');
-    });
-
-    it('preserves completed tool call results', () => {
-      // Tool results present in session_events → included verbatim
-      assert.ok(true, 'completed tool results preserved');
-    });
-  });
+    assert.deepEqual(results.map(result => result.stale), [false, true, true]);
+    assert.equal(results[0]?.currentHash, originalHash);
+    assert.equal(results[2]?.currentHash, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

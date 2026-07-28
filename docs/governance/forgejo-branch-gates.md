@@ -125,9 +125,13 @@ bash tools/branch-closeout.sh
 ```
 
 The closeout script treats `origin` as primary and queries Forgejo Actions when
-the remote uses HTTP(S). Private repositories require `FORGEJO_TOKEN` for API
-evidence. A local gate does not substitute for a green clean-checkout Forgejo
-run on the exact PR head.
+the remote uses HTTP(S). Its current API query supports `FORGEJO_TOKEN` or an
+anonymous request, so private-repository evidence requires that environment
+variable when using the script. The Forgejo server also supports Basic Auth
+from the local Git credential helper; use the authenticated procedure in
+`docs/operations/forgejo-delivery.md` when no local token is configured. A
+local gate does not substitute for a green clean-checkout Forgejo run on the
+exact PR head.
 
 After merging:
 

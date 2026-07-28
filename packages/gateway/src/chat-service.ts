@@ -297,7 +297,7 @@ export async function runChat(params: {
         userId,
       },
       ...createChatTaskHooks({ sid, runSpecId, requestId, tenantId, projectId, userId, traceId,
-        provider, model, workspaceRoot, toolMode, allowedTools, config, resumedSession, ctx, send }),
+        provider, model, workspaceRoot, toolMode, config, resumedSession, ctx, send }),
     });
 
     if (boundTodoId && 'taskRun' in scheduled && scheduled.taskRun) {

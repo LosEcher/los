@@ -18,6 +18,7 @@ import { buildTranscriptBrief, type TranscriptBrief } from '../transcript/transc
 import { collectSymbolSummary, serializeSymbolSummary } from './compaction-symbol-summary.js';
 import { computeCompactionMetrics } from './compaction-metrics.js';
 import { lookupCrossSessionEvidence } from './compaction-evidence.js';
+import { recoveryCheckpointSummary, type RecoveryCheckpointInput } from './compaction-recovery.js';
 import { rowToCompaction, assertRow, normalizeCandidateArray, type CompactionRow } from './compaction-rows.js';
 import {
   normalizeRequired, normalizeLimit, normalizeJsonObject,
@@ -80,6 +81,7 @@ export interface CompactSessionInput {
    * When omitted, fill percentage is not computed.
    */
   contextWindowTokens?: number;
+  recoveryCheckpoint?: RecoveryCheckpointInput;
   /**
    * Pre-compaction hook: called before advisory lock is acquired and data is gathered.
    * Return `false` to abort compaction.
@@ -165,8 +167,6 @@ export async function ensureMemoryCompactionStore(): Promise<void> {
   _initialized = true;
   log.info('Memory compaction store initialized');
 }
-
-
 export async function compactSession(input: CompactSessionInput): Promise<MemoryCompaction | null> {
   await ensureMemoryCompactionStore();
   const sessionId = normalizeRequired(input.sessionId, 'sessionId');
@@ -258,7 +258,6 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
   let evidenceCount = 0;
   let symbolSummary: Map<string, { name: string; kind: string; file: string; count: number }> | null = null;
 
-  // Collect symbol summary for both checkpoint and full modes (lightweight query)
   symbolSummary = await collectSymbolSummary(db, sessionId);
 
   if (!isCheckpoint) {
@@ -291,8 +290,6 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
         supportingSessionIds: [sessionId],
       });
     }
-
-    // Phase 4: symbol summary already collected above (shared with checkpoint mode)
 
     // Self-reflection detection (Phase 2) — extracted to self-reflection.ts
     try {
@@ -330,6 +327,7 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
     evalSummaries: isCheckpoint ? undefined : evalSummaries,
     compactedAt: new Date().toISOString(),
     checkpoint: isCheckpoint || undefined,
+    ...recoveryCheckpointSummary(input.recoveryCheckpoint),
     // Phase 4: symbol summary from observations (data accumulation only)
     ...(symbolSummary && symbolSummary.size > 0 ? {
       symbolSummary: serializeSymbolSummary(symbolSummary),

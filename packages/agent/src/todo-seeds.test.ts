@@ -105,6 +105,9 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-gap-cbm-gate', ['P1', 'backlog']],
   ['todo-los-gap-cbm-cohort', ['P1', 'backlog']],
   ['todo-los-gap-cbm-decision', ['P1', 'backlog']],
+  // 2026-07-28 two-day change review remediation (9 items)
+  ['todo-los-review-20260728-remediation', ['P0', 'in_progress']],
+  ['todo-los-review-20260728-forgejo-sync', ['P0', 'blocked']],
 ] as const);
 
 test('daily agent product seeds preserve the accepted delivery order', () => {
@@ -160,6 +163,22 @@ test('active P0/P1 seeds match the reconciled current queue', () => {
       `${todo.id} is not in the reconciled current queue`,
     );
   }
+});
+
+test('2026-07-28 review remediation preserves execution and delivery ordering', () => {
+  const allById = new Map(LOS_PLANNING_TODO_SEED.map(todo => [todo.id, todo]));
+  const parent = allById.get('todo-los-review-20260728-remediation');
+  const recovery = allById.get('todo-los-review-20260728-recovery-summary');
+  const forgejo = allById.get('todo-los-review-20260728-forgejo-sync');
+
+  assert.equal(parent?.status, 'in_progress');
+  assert.equal(recovery?.status, 'done');
+  assert.equal(forgejo?.status, 'blocked');
+  assert.deepEqual(forgejo?.dependsOnIds, [
+    'todo-los-review-20260728-recovery-tests',
+    'todo-los-review-20260728-acp-dispatch',
+    'todo-los-review-20260728-provider-routing',
+  ]);
 });
 
 test('execution lab seeds preserve the staged priority and dependency contract', () => {
