@@ -57,7 +57,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          # Keep image path aligned with Dockerfile / docker-compose.yml.
+          # Do not use github.repository: Forgejo path is los/los while the
+          # published GHCR name is los-ecommerce/los.
+          images: ghcr.io/los-ecommerce/los
           tags: |
             type=raw,value=${{ inputs.tag || 'latest' }}
             type=sha,prefix=sha-,format=short
