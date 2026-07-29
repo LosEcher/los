@@ -23,6 +23,7 @@ import {
   registryRecordToConfig,
   type MCPServerConfig,
 } from '../external/mcp-client.js';
+import { resolveBuiltinMCPConfigs } from './builtin-mcp-servers.js';
 import { registerSearchTools } from '../builtin/search-tools.js';
 import { registerFileTools } from '../builtin/file-tools.js';
 import { registerCodeIntelTools } from '../builtin/code-intel.js';
@@ -349,7 +350,13 @@ export async function registerBuiltinTools(
     .map(registryRecordToConfig)
     .filter((c): c is MCPServerConfig => c !== null);
   const requestConfigs = options.mcpServers ?? [];
-  const allMCPConfigs = [...registryConfigs, ...requestConfigs];
+  // Build external configs first (DB + request-level), then add built-in
+  // MCP servers for enabled toolsets that have no external equivalent.
+  const externalConfigs = [...registryConfigs, ...requestConfigs];
+  const allMCPConfigs: MCPServerConfig[] = [
+    ...externalConfigs,
+    ...resolveBuiltinMCPConfigs(externalConfigs),
+  ];
 
   if (allMCPConfigs.length > 0) {
     const bridge = new MCPToolBridge();
