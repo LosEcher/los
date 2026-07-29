@@ -9,7 +9,8 @@
 # CI behavior (check-known-failures.sh):
 #   - Failures matching a baseline entry → [KNOWN], non-blocking
 #   - New failures not in baseline        → [NEW], gate BLOCKS
-#   - Baseline entries that now pass      → [FIXED], prompt to trim
+#   - Baseline entries that now pass      → [FIXED], gate BLOCKS until trimmed
+#   - Failure markers without .test.ts paths → [NEW] unparsed failure, gate BLOCKS
 #
 # Add entries when you confirm a test failure is pre-existing (not caused by
 # your change). Remove entries when the underlying issue is fixed.
@@ -21,10 +22,3 @@
 # ============================================================================
 # entries below
 # ============================================================================
-packages/infra/src/config.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise
-packages/infra/src/db.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise
-packages/infra/src/discovery.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise
-packages/infra/src/logger.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise
-packages/infra/src/migrate.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise
-packages/infra/src/provider-accounts.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise
-packages/infra/src/provider-defaults.test.ts * 2026-07-29 Promise resolution is still pending — event loop resolved before promise

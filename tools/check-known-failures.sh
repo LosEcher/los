@@ -6,8 +6,8 @@
 # The baseline file is tools/.known-test-failures.txt. See that file for format.
 #
 # STDIN: raw test output (e.g. from `pnpm run _test 2>&1`)
-# Exit code: 0 = no NEW failures detected
-#            1 = at least one NEW failure (block merge)
+# Exit code: 0 = no NEW failures and no stale FIXED baseline entries
+#            1 = at least one NEW failure, unparsed failure, or FIXED entry
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BASELINE="$ROOT/tools/.known-test-failures.txt"
@@ -18,21 +18,36 @@ YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ── Parse stdin for actual failures ──────────────────────────
+# ── Capture stdin once ───────────────────────────────────
+RAW=$(cat || true)
+
+# ── Parse stdin for actual failures ──────────────────────
 # Node --test emits:   ✖ src/path/to/file.test.ts
 # or:                  ✖ src/path/to/file.test.ts (duration)
-ACTUAL_FAILURES=$(cat | grep -E '✖[[:space:]]+.*\.test\.ts' | sed 's/^.*✖[[:space:]]*//' | sed 's/ [(].*//' | sort -u || true)
+ACTUAL_FAILURES=$(printf '%s\n' "$RAW" | grep -E '✖[[:space:]]+.*\.test\.ts' | sed 's/^.*✖[[:space:]]*//' | sed 's/ [(].*//' | sort -u || true)
 
-# ── Parse baseline ───────────────────────────────────────────
+# ── Parse baseline ───────────────────────────────────────
 KNOWN_FILES=$( (grep '\.test\.ts' "$BASELINE" 2>/dev/null || true) | grep -v '^#' | awk '{print $1}' | sort -u)
 
-# ── No failures at all ───────────────────────────────────────
-if [ -z "$KNOWN_FILES" ] && [ -z "$ACTUAL_FAILURES" ]; then
+# ── Unparsed failure markers (non-node-test formats) ─────
+# If the command failed with error markers but no .test.ts paths were found,
+# treat that as a NEW failure so the gate cannot pass silently.
+UNPARSED=0
+if [ -z "$ACTUAL_FAILURES" ] && [ -n "$RAW" ]; then
+  # Use high-signal markers only — avoid bare "Error:" which appears in
+  # stack traces printed by passing suites and in coverage text.
+  if printf '%s\n' "$RAW" | grep -qE '✖|not ok |ELIFECYCLE|Tests failed|test failed|AssertionError'; then
+    UNPARSED=1
+  fi
+fi
+
+# ── No failures at all ───────────────────────────────────
+if [ -z "$KNOWN_FILES" ] && [ -z "$ACTUAL_FAILURES" ] && [ "$UNPARSED" -eq 0 ]; then
   printf '  %b✓ No test failures detected%b\n' "$GREEN" "$NC"
   exit 0
 fi
 
-# ── Compare ──────────────────────────────────────────────────
+# ── Compare ──────────────────────────────────────────────
 
 match_known() {
   local failure="$1"
@@ -78,6 +93,11 @@ while IFS= read -r failure_file; do
   fi
 done < "$TMP_ACTUAL"
 
+if [ "$UNPARSED" -eq 1 ]; then
+  NEW_COUNT=$((NEW_COUNT + 1))
+  printf '  %b[NEW]  %b (unparsed failure output — no .test.ts path matched)\n' "$RED" "$NC"
+fi
+
 # Check for FIXED
 while IFS= read -r known_file; do
   [ -z "$known_file" ] && continue
@@ -97,7 +117,7 @@ done < "$TMP_KNOWN"
 
 rm -f "$TMP_ACTUAL" "$TMP_KNOWN"
 
-# ── Summary ──────────────────────────────────────────────────
+# ── Summary ──────────────────────────────────────────────
 printf '\n%b─── Known-Failure Check ───%b\n' "$CYAN" "$NC"
 printf '  KNOWN:  %d\n' "$KNOWN_COUNT"
 printf '  NEW:    %d\n' "$NEW_COUNT"
@@ -110,6 +130,11 @@ fi
 if [ "$NEW_COUNT" -gt 0 ]; then
   printf '\n%bKNOWN-FAILURE GATE FAILED — %d new failure(s) detected%b\n' "$RED" "$NEW_COUNT" "$NC"
   printf '  Add them to tools/.known-test-failures.txt if pre-existing, or fix them.\n'
+  exit 1
+fi
+
+if [ "$FIXED_COUNT" -gt 0 ]; then
+  printf '\n%bKNOWN-FAILURE GATE FAILED — %d fixed baseline entr(y/ies) must be removed%b\n' "$RED" "$FIXED_COUNT" "$NC"
   exit 1
 fi
 
