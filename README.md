@@ -23,7 +23,62 @@ Read these first for project work:
    - stage goals for personal high-autonomy agent workflows, evals, and
    toolchain governance.
 
-## Local Runtime
+## Docker Quickstart (recommended)
+
+The fastest way to start using los — no Node.js, pnpm, or PostgreSQL setup needed.
+
+**Prerequisites:** Docker and Docker Compose.
+
+```bash
+# 1. Create your environment file
+cp .env.example .env.docker
+
+# 2. Edit .env.docker — uncomment and set at least one provider API key:
+#    DEEPSEEK_API_KEY=sk-your-key-here
+
+# 3. Start los (pre-built image from GHCR)
+docker compose --env-file .env.docker up -d
+
+# 4. Open http://localhost:8080
+```
+
+On first launch, the gateway runs database migrations automatically, then waits
+for PostgreSQL to be ready (up to 60s). Check status:
+
+```bash
+docker compose ps
+docker compose logs los
+```
+
+**First-time setup** (in your browser):
+1. **Create account** — the login page auto-detects there are no users and
+   switches to "Create Account" mode. Register your operator account.
+2. **Provider** — the onboarding wizard guides you through configuring an AI
+   provider (API key or local model).
+3. **Verify** — run a compatibility check to confirm the provider works.
+4. **Project** — bind a workspace directory for the agent.
+5. **Chat** — start chatting with your agent.
+
+You can always return to Setup (⚙️ in the sidebar) to check runtime readiness.
+
+**Stop los:**
+
+```bash
+docker compose down
+```
+
+To preserve your data, the `pgdata` and `los-runtime` volumes persist across
+restarts. Use `docker compose down -v` only if you want a clean reset.
+
+### Building locally
+
+If you prefer to build from source instead of using the GHCR image:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+```
+
+## Local Runtime (source checkout)
 
 Install dependencies:
 

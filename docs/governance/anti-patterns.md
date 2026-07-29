@@ -188,3 +188,32 @@ Identity files in `.los/identity/<name>/` (project > user > system > built-in).
 ADR 0023 defines the decision matrix.
 
 **Code**: `packages/agent/src/identity-loader.ts`, `docs/adr/0023-agent-identity-decision-framework.md`
+
+## AP11: Non-Deterministic Prompt / Context Strategy Changes
+
+**Symptom**: System prompt text, tool definitions, or context-window strategy
+(compression thresholds, semantic eviction policy) are modified without
+evaluating impact on provider prompt cache hit rate or agent behavior.
+
+**Consequence**: Provider prefix cache is silently invalidated, increasing
+latency (no cached tokens) and cost (full re-computation) on every subsequent
+request. Agent behavior shifts without evidence that the shift is intentional or
+safe. Hot-path regression may degrade per-turn latency beyond the 50ms p95
+budget.
+
+Real cases in los:
+- Tool definition reordering invalidated prefix cache for all subsequent turns
+- Context compression threshold change doubled per-request token count on
+  DeepSeek without operator awareness
+
+**Prevention**: `docs/governance/code-first-determinism.md` defines the gates:
+1. **Prompt cache impact assessment** — how many tokens changed? Will prefix
+   cache survive?
+2. **Focused harness regression test** — at least one test verifying key
+   behavior path is not degraded.
+3. **Version bump** — increment `system-prompt-version.ts` so downstream
+   consumers can detect the change.
+4. **Feature flag** — allow rollback to previous prompt version without deploy.
+
+**Code**: `docs/governance/code-first-determinism.md`,
+`packages/agent/src/system-prompt.ts`, `packages/agent/src/context-monitor.ts`

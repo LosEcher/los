@@ -44,3 +44,4 @@ packages/agent/src/execution-kernel.ts
 packages/web/src/pages/onboarding-page.tsx
 packages/agent/src/work-items/projection.ts
 packages/web/src/App.tsx
+packages/agent/src/scheduler-decision-ledger.ts

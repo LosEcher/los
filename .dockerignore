@@ -37,6 +37,7 @@ Thumbs.db
 
 # Env (use docker-compose environment or --env-file)
 .env
+.env.docker
 .env.local
 .env.*.local
 

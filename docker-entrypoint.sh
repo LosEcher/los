@@ -22,8 +22,7 @@ set -e
 
 # ── Wait for PostgreSQL ──────────────────────────────────
 if [ -n "${DATABASE_URL}" ]; then
-  # Extract host:port from DATABASE_URL for pg_isready-style check.
-  # Fall back to DB_WAIT_HOST:DB_WAIT_PORT if parsing fails.
+  # Extract host:port from DATABASE_URL for readiness check.
   DB_HOST=$(printf '%s' "${DATABASE_URL}" | sed -n 's|.*@\([^:/]*\).*|\1|p')
   DB_PORT=$(printf '%s' "${DATABASE_URL}" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
   DB_HOST="${DB_HOST:-$DB_WAIT_HOST}"
@@ -32,7 +31,9 @@ if [ -n "${DATABASE_URL}" ]; then
   echo "los: waiting for PostgreSQL at ${DB_HOST}:${DB_PORT} (timeout ${DB_WAIT_TIMEOUT}s)..."
   ELAPSED=0
   while [ "$ELAPSED" -lt "$DB_WAIT_TIMEOUT" ]; do
-    if timeout 2 sh -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then
+    # Use Node.js for TCP connectivity check — /dev/tcp is a bashism not
+    # available in Alpine's busybox sh. Silently exit 0 on connect, 1 on failure.
+    if node -e "const net=require('net');const s=net.createConnection({host:process.argv[1],port:parseInt(process.argv[2])},()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));s.setTimeout(2000,()=>{s.destroy();process.exit(1)})" "${DB_HOST}" "${DB_PORT}" 2>/dev/null; then
       echo "los: PostgreSQL is ready."
       break
     fi
@@ -47,7 +48,9 @@ else
 fi
 
 # ── Runtime directory ────────────────────────────────────
-mkdir -p "${LOS_RUNTIME_DIR}"
+# The mounted volume may be root-owned on first run; attempt mkdir, fall back
+# gracefully — the gateway creates subdirectories as needed.
+mkdir -p "${LOS_RUNTIME_DIR}" 2>/dev/null || echo "los: WARNING — cannot create ${LOS_RUNTIME_DIR} (volume may need chown). The gateway will retry at startup."
 
 # ── Start Gateway ────────────────────────────────────────
 echo "los: starting gateway on ${SERVER_HOST}:${SERVER_PORT}..."

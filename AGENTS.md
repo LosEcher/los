@@ -56,6 +56,10 @@ For workspace-boundary questions, also read `../../AGENTS.md` and
   checks to the end of a multi-step change.
 - AP9: agent identity must flow through `resolveAgentIdentity()` and
   `formatIdentityForPrompt()`, never hardcoded prompt prose.
+- AP11: system prompt changes, tool definition changes, and context-window
+  strategy changes must pass code-first determinism gates: prompt cache impact
+  assessment, focused harness regression test, and version bump. See
+  `docs/governance/code-first-determinism.md` for the full checklist.
 - AP4, AP6, AP8, and AP10 remain hard constraints; their canonical wording and
   code locations are in `docs/governance/anti-patterns.md`.
 - Persisted task, session, provider, node, and todo evidence outranks UI state
