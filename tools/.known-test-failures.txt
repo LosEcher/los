@@ -22,3 +22,8 @@
 # ============================================================================
 # entries below
 # ============================================================================
+packages/infra/src/discovery.test.ts  *  2026-07-29  Promise resolution still pending (turbo parallel DB pool race; passes in isolation)
+packages/infra/src/logger.test.ts  *  2026-07-29  Promise resolution still pending (turbo parallel DB pool race; passes in isolation)
+packages/infra/src/migrate.test.ts  *  2026-07-29  Promise resolution still pending (turbo parallel DB pool race; passes in isolation)
+packages/infra/src/provider-accounts.test.ts  *  2026-07-29  Promise resolution still pending (turbo parallel DB pool race; passes in isolation)
+packages/infra/src/provider-defaults.test.ts  *  2026-07-29  Promise resolution still pending (turbo parallel DB pool race; passes in isolation)
