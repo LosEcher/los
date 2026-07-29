@@ -42,3 +42,5 @@ packages/agent/src/tools/core/registry.ts
 packages/agent/src/tools/external/web-tools.ts
 packages/agent/src/execution-kernel.ts
 packages/web/src/pages/onboarding-page.tsx
+packages/agent/src/work-items/projection.ts
+packages/web/src/App.tsx

@@ -46,11 +46,11 @@ export interface ContextFillState {
   levelCrossed: boolean;
   /** Turn number */
   turn: number;
-  /** Cumulative prompt tokens from API usage data */
-  cumulativePromptTokens: number;
-  /** Cumulative completion tokens */
+  /** Latest turn prompt tokens (provider-reported, includes full context for chat APIs) */
+  latestPromptTokens: number;
+  /** Cumulative completion tokens across all turns (completions are per-turn incremental) */
   cumulativeCompletionTokens: number;
-  /** Current context tokens (latest prompt + completion, or fallback estimate) */
+  /** Current estimated context tokens (latest prompt + completion, or provider total) */
   estimatedTotalTokens: number;
 }
 
@@ -86,7 +86,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
   const criticalThresh = config.criticalThreshold ?? DEFAULTS.criticalThreshold;
 
   const crossed: CrossedLevels = { warn: false, checkpoint: false, critical: false };
-  let cumulativePrompt = 0;
+  let latestPrompt = 0;
   let cumulativeCompletion = 0;
   let currentContextTokens = 0;
 
@@ -128,10 +128,13 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
   ): ContextFillState {
     const promptTokens = normalizeTokenCount(usage.promptTokens);
     const completionTokens = normalizeTokenCount(usage.completionTokens);
-    cumulativePrompt += promptTokens;
+    // Chat APIs report full prompt tokens per request (including history),
+    // so accumulate only completions and track the latest prompt directly.
+    latestPrompt = promptTokens;
     cumulativeCompletion += completionTokens;
 
     const reportedTotal = normalizeOptionalTokenCount(usage.totalTokens);
+    // Current context: provider total if available, otherwise prompt + completion from latest turn.
     const providerContextTokens = reportedTotal ?? promptTokens + completionTokens;
     const fallbackOverhead = providerContextTokens === 0 && messageCount
       ? messageCount * 3
@@ -152,7 +155,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
       level,
       levelCrossed: newCrossing,
       turn,
-      cumulativePromptTokens: cumulativePrompt,
+      latestPromptTokens: latestPrompt,
       cumulativeCompletionTokens: cumulativeCompletion,
       estimatedTotalTokens: usedTokens,
     };
@@ -182,7 +185,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     crossed.warn = false;
     crossed.checkpoint = false;
     crossed.critical = false;
-    cumulativePrompt = 0;
+    latestPrompt = 0;
     cumulativeCompletion = 0;
     currentContextTokens = 0;
   }
@@ -195,7 +198,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
       contextWindowTokens: ctxWindow,
       fillPercent: Math.min(fillPercent, 1.0),
       level: determineLevel(fillPercent),
-      cumulativePromptTokens: cumulativePrompt,
+      latestPromptTokens: latestPrompt,
       cumulativeCompletionTokens: cumulativeCompletion,
       estimatedTotalTokens: currentContextTokens,
     };

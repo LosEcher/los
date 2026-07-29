@@ -17,6 +17,7 @@ import type {
   CreateWorkItemInput,
   InboxEntry,
   ListWorkItemsOptions,
+  QuickIntakeInput,
   WorkItemAttentionState,
   WorkItemMode,
   WorkItemNextAction,
@@ -27,6 +28,42 @@ import type {
   WorkItemVerificationEvidence,
   WorkItemWorkspaceEvidence,
 } from './types.js';
+
+// ── Quick Intake ──────────────────────────────────────────
+
+/** Default checks applied to execution-mode quick intakes. */
+const DEFAULT_EXECUTION_CHECKS = ['pnpm check'];
+
+/** Default stop conditions for execution-mode quick intakes. */
+const DEFAULT_EXECUTION_STOPS = [
+  'All required checks pass',
+  'Code compiles without errors',
+  'All changed files listed in diff are intentional',
+];
+
+/**
+ * Create a work item with smart defaults from a one-line goal.
+ * Derives mode, checks, stop conditions, and editable surfaces
+ * automatically so the user only provides a goal.
+ */
+export async function createQuickWorkItem(input: QuickIntakeInput): Promise<WorkItemProjection> {
+  const mode = input.mode ?? 'execution';
+  const isExecution = mode === 'execution';
+  return await createWorkItem({
+    tenantId: input.tenantId,
+    projectId: input.projectId,
+    userId: input.userId,
+    goal: input.goal,
+    mode,
+    editableSurfaces: [],
+    requiredChecks: isExecution ? DEFAULT_EXECUTION_CHECKS : [],
+    stopConditions: isExecution ? DEFAULT_EXECUTION_STOPS : [],
+    toolMode: isExecution ? 'project-write' : 'read-only',
+    priority: 'P2',
+  });
+}
+
+// ── Work Item CRUD ───────────────────────────────────────
 
 export async function createWorkItem(input: CreateWorkItemInput): Promise<WorkItemProjection> {
   const goal = normalizeRequired(input.goal, 'goal');

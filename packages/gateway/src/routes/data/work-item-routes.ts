@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 
 import {
+  createQuickWorkItem,
   createWorkItem,
   createWorkItemRevision,
   getWorkItemVerificationCoverage,
@@ -18,6 +19,7 @@ import { getRequestContext, requireOperator } from '../../request-context.js';
 import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
 
 export type WorkItemRouteDependencies = {
+  createQuickWorkItem: typeof createQuickWorkItem;
   createWorkItem: typeof createWorkItem;
   createWorkItemRevision: typeof createWorkItemRevision;
   getWorkItemVerificationCoverage: typeof getWorkItemVerificationCoverage;
@@ -29,6 +31,7 @@ export type WorkItemRouteDependencies = {
 };
 
 const defaultDependencies: WorkItemRouteDependencies = {
+  createQuickWorkItem,
   createWorkItem,
   createWorkItemRevision,
   getWorkItemVerificationCoverage,
@@ -108,6 +111,29 @@ export function registerWorkItemRoutes(
         evidenceRequired: normalizeStringArray(body.evidenceRequired),
         toolMode: normalizeToolMode(body.toolMode),
         priority: normalizePriority(body.priority),
+      }),
+    );
+  });
+
+  app.post('/work-items/quick', async (req, reply) => {
+    const body = asObject(req.body);
+    const context = getRequestContext(req);
+    const goal = normalizeOptionalString(body.goal);
+    const projectId = normalizeOptionalString(body.projectId) ?? context.projectId;
+    if (!projectId) return reply.status(400).send({ error: 'invalid_request', message: 'projectId is required' });
+    if (!goal) return reply.status(400).send({ error: 'invalid_request', message: 'goal is required' });
+    const mode = normalizeMode(body.mode) ?? 'execution';
+    reply.status(201);
+    return await runIdempotentJson(
+      req,
+      reply,
+      { route: '/work-items/quick', method: 'POST', body, context },
+      async () => await deps.createQuickWorkItem({
+        tenantId: context.tenantId,
+        projectId,
+        userId: context.userId,
+        goal,
+        mode,
       }),
     );
   });

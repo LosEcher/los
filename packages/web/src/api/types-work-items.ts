@@ -199,6 +199,11 @@ export type InboxEntry = {
   };
   attentionState: WorkItemAttentionState;
   nextAction: WorkItemNextAction;
+  approvePlan?: {
+    runSpecId: string;
+    planRevision: number;
+    contractHash: string;
+  };
   updatedAt: string;
 };
 

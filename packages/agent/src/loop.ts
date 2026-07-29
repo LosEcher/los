@@ -54,6 +54,12 @@ import {
   consumeOperatorControlEvents,
   type OperatorControlCursors,
 } from './operator-control-consumer.js';
+import {
+  buildStopConditionReminder,
+  checkStopConditionsMet,
+  hasStopConditions,
+} from './loop/stop-conditions.js';
+import { setupContextMonitor, restoreCheckpointState } from './loop/agent-lifecycle.js';
 
 export type {
   AgentConfig,
@@ -94,6 +100,8 @@ export async function runAgent(
     counters,
   } = s;
 
+  const { turns, isResume } = restoreCheckpointState(config, messages, agentLog);
+
   let {
     totalPromptTokens,
     totalCompletionTokens,
@@ -104,7 +112,6 @@ export async function runAgent(
   } = counters;
   const readPlanningSubmission = () => s.planningSubmissionCollector?.getSubmission();
 
-  const turns: TurnSummary[] = [];
   let operatorControlCursors: OperatorControlCursors = { steering: 0, followup: 0 };
   const sessionErrors: Array<{ turn: number; type: string; toolName?: string; message: string }> = [];
   const onSessionError = (err: typeof sessionErrors[number]) => { sessionErrors.push(err); };
@@ -184,48 +191,7 @@ export async function runAgent(
     messages.push(...evictedMessages);
     agentLog.info(`Semantic eviction applied at critical fill (${(fillPercent * 100).toFixed(1)}%)`);
   };
-  const ctxMon = config.contextMonitor
-    ? createContextMonitor({
-        contextWindowTokens: config.contextMonitor.contextWindowTokens ?? 200_000,
-        warnThreshold: config.contextMonitor.warnThreshold ?? 0.60,
-        checkpointThreshold: config.contextMonitor.checkpointThreshold ?? 0.75,
-        criticalThreshold: config.contextMonitor.criticalThreshold ?? 0.85,
-        onWarn: (s) => {
-          agentLog.warn(formatContextFill(s));
-          config.contextMonitor?.onWarn?.({
-            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
-          });
-          emitEvent({
-            type: 'context.fill.warn',
-            turn: s.turn,
-            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
-          });
-        },
-        onCheckpoint: (s) => {
-          agentLog.info(formatContextFill(s));
-          config.contextMonitor?.onCheckpoint?.({
-            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
-          });
-          emitEvent({
-            type: 'context.fill.checkpoint',
-            turn: s.turn,
-            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
-          });
-        },
-        onCritical: (s) => {
-          agentLog.warn(formatContextFill(s));
-          config.contextMonitor?.onCritical?.({
-            fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn,
-          });
-          emitEvent({
-            type: 'context.fill.critical',
-            turn: s.turn,
-            payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens },
-          });
-          applyCriticalEviction(s.fillPercent);
-        },
-      })
-    : null;
+  const ctxMon = setupContextMonitor(config, messages, emitEvent, applyCriticalEviction, persistedToolResults, agentLog);
 
   try {
     // ADR 0024: repair pipeline context. The storm breaker persists across
@@ -240,6 +206,8 @@ export async function runAgent(
         isMutating: (name) => tools.getCapability(name)?.sideEffect === true,
       }),
     };
+
+    let stoppedByCondition = false;
 
     for (let i = 0; i < maxLoops; i++) {
     repairCtx.providerName = provider.name;
@@ -506,6 +474,23 @@ export async function runAgent(
     await config.onTurn?.(turn);
     await config.onCheckpoint?.({ messages: [...messages], turns: [...turns] });
 
+    // ── Stop-condition runtime enforcement ─────────────
+    // When a run contract has stop conditions, periodically remind the
+    // agent and check if the LLM's last response declares them met.
+    // This runs every 5 turns (configurable) to avoid excessive cost.
+    const scInterval = config.stopConditionCheckInterval ?? 5;
+    if (hasStopConditions(config.runContractMetadata) && (i + 1) % scInterval === 0) {
+      const reminder = buildStopConditionReminder(config.runContractMetadata);
+      if (reminder) {
+        messages.push({ role: 'user', content: reminder });
+      }
+      if (checkStopConditionsMet(res.text)) {
+        agentLog.info('Stop conditions met — ending loop');
+        stoppedByCondition = true;
+        break;
+      }
+    }
+
     // Mid-loop context compression
     if (config.maxContextTokens && config.maxContextTokens > 0 &&
         config.contextCompression?.enabled !== false) {
@@ -520,6 +505,39 @@ export async function runAgent(
         agentLog.debug(`Compressed context: ${compressed.length} messages (was ${previousLength})`);
       }
     }
+  }
+
+  // ── Stop-condition completion ────────────────────────
+  if (stoppedByCondition) {
+    // Pop the last reminder message that was injected before the break
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === 'user' && lastMsg.content.includes('STOP CONDITION CHECK')) {
+      messages.pop();
+    }
+    agentLog.info(`Agent completed via stop-condition after ${turns.length} turns`);
+    await emitEvent({
+      type: 'session.completed',
+      turn: turns.length,
+      payload: {
+        loopCount: turns.length,
+        totalTokens: totalPromptTokens + totalCompletionTokens,
+        totalPromptTokens,
+        totalCompletionTokens,
+        totalCacheHitTokens,
+        totalCacheMissTokens,
+        totalCostUsd: totalCostUsd > 0 ? totalCostUsd : undefined,
+        cacheEventCount,
+        errorSummary: sessionErrors.length > 0 ? summarizeSessionErrors(sessionErrors) : undefined,
+      },
+    });
+    return {
+      text: turns[turns.length - 1]?.text ?? '',
+      turns,
+      loopCount: turns.length,
+      totalTokens: { prompt: totalPromptTokens, completion: totalCompletionTokens },
+      messages,
+      planningSubmission: readPlanningSubmission(),
+    };
   }
 
   // Max loops reached — ask model for final summary

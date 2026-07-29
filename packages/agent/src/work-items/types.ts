@@ -61,6 +61,14 @@ export interface WorkItemAvailableActions {
   }>;
 }
 
+export interface QuickIntakeInput {
+  tenantId?: string;
+  projectId: string;
+  userId?: string;
+  goal: string;
+  mode?: WorkItemMode;
+}
+
 export interface CreateWorkItemInput {
   tenantId?: string;
   projectId: string;
@@ -207,6 +215,11 @@ export interface InboxEntry {
   };
   attentionState: WorkItemAttentionState;
   nextAction: WorkItemNextAction;
+  approvePlan?: {
+    runSpecId: string;
+    planRevision: number;
+    contractHash: string;
+  };
   updatedAt: string;
 }
 

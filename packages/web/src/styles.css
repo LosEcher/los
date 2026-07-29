@@ -2277,6 +2277,69 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+/* ── Quick Intake ──────────────────────────────── */
+
+.quick-intake-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.quick-intake-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.quick-intake-input {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 0.925rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.quick-intake-input:focus {
+  border-color: var(--accent);
+}
+
+.quick-intake-input::placeholder {
+  color: var(--faint);
+}
+
+.quick-intake-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 6px;
+  padding: 9px 16px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.quick-intake-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.quick-intake-btn:not(:disabled):hover {
+  opacity: 0.85;
+}
+
 .daily-toolbar-actions,
 .work-filters,
 .work-create-submit,
@@ -2476,6 +2539,22 @@ button:disabled {
 }
 
 .attention-action:hover { border-color: var(--accent); color: var(--accent); }
+
+.attention-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.approve-action {
+  border-color: var(--ok) !important;
+  color: var(--ok) !important;
+  font-weight: 600;
+}
+
+.approve-action:hover {
+  background: color-mix(in srgb, var(--ok) 15%, transparent) !important;
+}
 
 .daily-empty,
 .daily-error {
@@ -4752,4 +4831,428 @@ button:disabled {
   white-space: pre-wrap;
   color: var(--muted);
   line-height: 1.5;
+}
+
+/* ── Login page ─────────────────────────────────────── */
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.login-card {
+  width: 380px;
+  max-width: 90vw;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 36px 32px;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.login-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-error {
+  font-size: 12px;
+  color: var(--danger);
+  background: rgb(215 109 92 / 0.1);
+  border: 1px solid rgb(215 109 92 / 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-switch {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.login-switch .link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-2);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.login-switch .link-btn:hover {
+  color: var(--accent);
+}
+
+/* ── Logout button in sidebar ────────────────────────── */
+
+.logout-btn {
+  margin-top: 10px;
+  width: 100%;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.logout-btn:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ── Onboarding page ─────────────────────────────────── */
+
+.onboarding-page {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: calc(100vh - 80px);
+  padding: 40px 20px;
+}
+
+.onboarding-loading {
+  color: var(--muted);
+  padding: 40px;
+}
+
+.onboarding-card {
+  width: 640px;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Steps progress bar */
+.onboarding-steps {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+
+.onboarding-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.onboarding-step.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.onboarding-step.done {
+  color: var(--accent-2);
+}
+
+.onboarding-step-icon {
+  display: flex;
+}
+
+.onboarding-step-label {
+  font-weight: 500;
+}
+
+/* Body */
+.onboarding-body {
+  padding: 32px;
+  min-height: 280px;
+}
+
+.onboarding-step-content h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--text);
+}
+
+.onboarding-desc {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 20px;
+  line-height: 1.6;
+}
+
+/* Provider list */
+.onboarding-provider-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.onboarding-provider-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.onboarding-provider-list li.ready {
+  border-color: var(--accent-2);
+}
+
+.onboarding-provider-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.onboarding-blocker {
+  font-size: 11px;
+  color: var(--warn);
+  margin-left: auto;
+}
+
+/* Setup cards */
+.onboarding-provider-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.onboarding-setup-card {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.onboarding-setup-card h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.onboarding-setup-card p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.onboarding-setup-card code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  background: var(--surface-3);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Code list */
+.onboarding-code-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.onboarding-code-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.onboarding-code-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 70px;
+}
+
+.onboarding-code-item code {
+  flex: 1;
+  font-size: 11px;
+  color: var(--accent);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.onboarding-code-desc {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.onboarding-code-block {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  background: var(--surface-3);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.onboarding-steps-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 2;
+}
+
+.onboarding-note {
+  font-size: 11px;
+  color: var(--faint);
+  margin-top: 10px;
+}
+
+.onboarding-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Navigation */
+.onboarding-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 32px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+/* Ready state */
+.onboarding-ready {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.onboarding-ready-check {
+  color: var(--accent-2);
+  margin-bottom: 12px;
+}
+
+.onboarding-ready p {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+.onboarding-todo-list {
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 2;
+}
+
+/* Pills */
+.pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.pill-ok {
+  background: rgb(122 168 120 / 0.15);
+  color: var(--accent-2);
+}
+
+.pill-warn {
+  background: rgb(215 168 66 / 0.15);
+  color: var(--warn);
+}
+
+/* Link button */
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-2);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.link-btn:hover {
+  color: var(--accent);
+}
+
+/* ── Empty state guidance ────────────────────────────── */
+
+.empty-guide {
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.empty-guide code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  background: var(--surface-3);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent);
+}
+
+.empty-guide-link {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
 }

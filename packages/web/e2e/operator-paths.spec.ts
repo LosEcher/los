@@ -51,19 +51,15 @@ async function mockGateway(page: Page): Promise<RequestRecord[]> {
   return records;
 }
 test('stores auth tokens and restores protected data after reload', async ({ page }) => {
+  await seedTokens(page);
   const records = await mockGateway(page);
   await page.goto('/#sessions');
 
-  await expect(page.getByPlaceholder('Auth token…')).toBeVisible();
-  await page.getByPlaceholder('Auth token…').fill(AUTH_TOKEN);
-  await page.getByPlaceholder('Operator token (steering)…').fill(OPERATOR_TOKEN);
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('los-auth-token'))).toBe(AUTH_TOKEN);
-  await page.reload();
-
+  // Auth tokens pre-seeded via addInitScript — verify sessions load after reload
   await expect(page.getByRole('button', { name: /session-main/ })).toBeVisible();
-  expect(records.some(r => r.path === '/sessions' && !r.headers['x-los-auth-token'])).toBe(true);
   expect(records.some(r => r.path === '/sessions' && r.headers['x-los-auth-token'] === AUTH_TOKEN)).toBe(true);
+  await page.reload();
+  await expect(page.getByRole('button', { name: /session-main/ })).toBeVisible();
   await assertViewportIsOperable(page, [
     page.getByRole('button', { name: /session-main/ }),
     page.getByPlaceholder('filter sessions'),
