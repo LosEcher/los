@@ -9,19 +9,22 @@ export function runPackageTests(options) {
     ...(options.dbBackedTestFiles ?? []),
     ...options.isolatedDatabaseTestFiles,
   ].sort();
-  const missingClassifications = discoveredTestFiles.filter(path => !classifiedTestFiles.includes(path));
-  const staleClassifications = classifiedTestFiles.filter(path => !discoveredTestFiles.includes(path));
-  const duplicateClassifications = classifiedTestFiles.filter(
-    (path, index) => classifiedTestFiles.indexOf(path) !== index,
-  );
 
-  if (missingClassifications.length || staleClassifications.length || duplicateClassifications.length) {
-    process.stderr.write([
-      ...missingClassifications.map(path => `unclassified test: ${path}`),
-      ...staleClassifications.map(path => `missing test file: ${path}`),
-      ...duplicateClassifications.map(path => `duplicate test classification: ${path}`),
-    ].join('\n') + '\n');
-    process.exit(1);
+  if (!options.skipClassificationCheck) {
+    const missingClassifications = discoveredTestFiles.filter(path => !classifiedTestFiles.includes(path));
+    const staleClassifications = classifiedTestFiles.filter(path => !discoveredTestFiles.includes(path));
+    const duplicateClassifications = classifiedTestFiles.filter(
+      (path, index) => classifiedTestFiles.indexOf(path) !== index,
+    );
+
+    if (missingClassifications.length || staleClassifications.length || duplicateClassifications.length) {
+      process.stderr.write([
+        ...missingClassifications.map(path => `unclassified test: ${path}`),
+        ...staleClassifications.map(path => `missing test file: ${path}`),
+        ...duplicateClassifications.map(path => `duplicate test classification: ${path}`),
+      ].join('\n') + '\n');
+      process.exit(1);
+    }
   }
 
   const testRunId = process.env.LOS_TEST_RUN_ID
