@@ -43,16 +43,18 @@ export async function registerAuthRoutes(app: FastifyInstance, _opts: { config: 
     const trimmedUsername = username.trim().toLowerCase();
     const userCount = await countUsers();
 
-    // Bootstrap: first user can always register as operator
+    // Bootstrap: first user is always operator (client role is ignored).
+    // After bootstrap, only operators can create users; role still clamped.
     if (userCount > 0) {
-      // After bootstrap, only operators can create new users
       const ctx = getRequestContext(req);
       if (!ctx.isOperator) {
         return reply.code(403).send({ error: 'operator privilege required to create users' });
       }
     }
 
-    const safeRole = role === 'operator' ? 'operator' : 'user';
+    const safeRole = userCount === 0
+      ? 'operator'
+      : (role === 'operator' ? 'operator' : 'user');
 
     try {
       const user = await createUser(trimmedUsername, password, safeRole);
