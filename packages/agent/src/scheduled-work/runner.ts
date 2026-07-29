@@ -3,6 +3,13 @@ import { getLogger } from '@los/infra/logger';
 import { listExecutorNodes } from '../executor-nodes.js';
 import { dispatchFeedAnalysisJob } from '../integration/feed-analysis-ingress.js';
 import type { FeedAnalysisDispatchRequest } from '../integration/feed-analysis-types.js';
+import {
+  getAllCachedProbeResults,
+  probeProviders,
+  resolveConfiguredProbeTargets,
+  startProviderProbeLoop,
+  stopProviderProbeLoop,
+} from '../providers/provider-probe.js';
 import { listServiceInstances } from '../service-instances.js';
 import { createTodo } from '../todos.js';
 import { listInboxEntries } from '../work-items/projection.js';
@@ -135,7 +142,23 @@ export function setupScheduledWorkWake(input: {
   };
   const timeout = setTimeout(tick, 2_000);
   const timer = setInterval(tick, intervalMs);
-  return () => { clearTimeout(timeout); clearInterval(timer); };
+  // ADR 0031: start provider health probe cadence alongside scheduler wake.
+  // Warm-up one cycle immediately so routing has cache data before the first timer.
+  startProviderProbeLoop();
+  void probeProviders(resolveConfiguredProbeTargets())
+    .then((probes) => {
+      if (probes.length > 0) {
+        log.info(`Provider probe warm-up: ${probes.length} target(s), cache=${getAllCachedProbeResults().length}`);
+      }
+    })
+    .catch((error) => {
+      log.warn(`Provider probe warm-up failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  return () => {
+    clearTimeout(timeout);
+    clearInterval(timer);
+    stopProviderProbeLoop();
+  };
 }
 
 async function executeTemplate(

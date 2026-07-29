@@ -16,6 +16,7 @@ import {
   resolveProviderFallbackInitialTarget,
   type ProviderFallbackEvent,
 } from '../providers/provider-fallback.js';
+import { getCachedHealthScore, isUnhealthy } from '../providers/provider-health.js';
 import { resolveModelRouteDecision, type ModelRouteDecision } from '../providers/model-routing.js';
 import { listLatestProviderCompatEvidence } from '../provider-compat-evidence.js';
 import { summarizeModelProfile, type ModelExecutionSummary } from '../model-profiles.js';
@@ -365,6 +366,10 @@ export async function _applyProviderFallbackToSetup(
     initialProvider: setup.provider,
     createProvider: providerFactory,
     traceId: config.traceId,
+    shouldSkipTarget: target => {
+      const score = getCachedHealthScore(target.provider);
+      return Boolean(score && isUnhealthy(score));
+    },
     onEvent: async event => {
       await emitProviderFallbackEvent(setup.emitEvent, event);
       await config.onProviderFallback?.(event);
