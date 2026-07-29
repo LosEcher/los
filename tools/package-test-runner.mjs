@@ -4,10 +4,12 @@ import { join } from 'node:path';
 
 export function runPackageTests(options) {
   const discoveredTestFiles = walk('src').filter(path => path.endsWith('.test.ts')).sort();
+  // Classification inventory may be a superset of the files this process runs
+  // (e.g. CI agent lanes run one LOS_TEST_GROUP but must still classify all).
   const classifiedTestFiles = [
     ...options.sharedProcessTestFiles,
     ...(options.dbBackedTestFiles ?? []),
-    ...options.isolatedDatabaseTestFiles,
+    ...(options.classifiedIsolatedDatabaseTestFiles ?? options.isolatedDatabaseTestFiles),
   ].sort();
 
   if (!options.skipClassificationCheck) {

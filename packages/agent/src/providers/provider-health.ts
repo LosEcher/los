@@ -62,6 +62,25 @@ export interface HealthScore {
 
 export type HealthTier = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
 
+// ── In-memory score cache (filled by probe loop) ────────
+
+const healthScoreCache = new Map<string, HealthScore>();
+
+/** Cache a computed health score for sync consumers (fallback router). */
+export function cacheHealthScore(score: HealthScore): void {
+  healthScoreCache.set(score.provider, score);
+}
+
+/** Read the latest cached health score, if any. */
+export function getCachedHealthScore(provider: string): HealthScore | undefined {
+  return healthScoreCache.get(provider);
+}
+
+/** Test-only: clear cached scores. */
+export function _resetHealthScoreCacheForTests(): void {
+  healthScoreCache.clear();
+}
+
 // ── Constants ───────────────────────────────────────────
 
 /** RTT values at or above this are scored 0.0 */

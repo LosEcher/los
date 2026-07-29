@@ -26,9 +26,9 @@ export async function resolveGraphTaskProviderModelSelection(
   const explicit = readProviderModelTarget(task.metadata) ?? readProviderModelTarget(runContract);
   const evidence = targets.length > 0 ? await listLatestProviderCompatEvidence() : [];
 
-  // ── Health-aware routing: compute health scores for candidate providers ──
+  // ── Health-aware routing (ADR 0031) ──
   // Combines cached probe RTT + persisted task success rates (24h window).
-  // Providers without data get neutral scores (don't block selection).
+  // Unhealthy providers are skipped when healthier alternatives exist.
   const uniqueProviders = [...new Set(targets.map(t => t.provider))];
   const healthScores = await Promise.all(
     uniqueProviders.map(async (provider) => {

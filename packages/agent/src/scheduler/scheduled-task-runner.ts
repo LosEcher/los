@@ -45,7 +45,10 @@ import type { SessionEventRecord } from '../session-events.js';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 import { runScheduledTaskExecution } from './scheduled-task-execution.js';
 import { completeScheduledTask, handleScheduledTaskError } from './scheduled-task-terminal.js';
+import { markProviderProbeActivity } from '../providers/provider-probe.js';
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
+  // Keep provider probe cadence in the active (60s) band while tasks run.
+  markProviderProbeActivity();
   await ensureTaskRunStore();
   await ensureSessionEventStore();
   const taskRunId = input.taskRunId ?? `task-${randomUUID()}`;

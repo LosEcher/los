@@ -54,7 +54,7 @@ test('gate blocks new test failures after printing the captured log tail', () =>
   try {
     assert.equal(fixture.result.status, 1, fixture.result.stdout + fixture.result.stderr);
     assert.match(fixture.result.stdout, /fixture-new-tail/);
-    assert.match(fixture.result.stdout, /NEW test failures detected/);
+    assert.match(fixture.result.stdout, /NEW test failures or unparsed failure output/);
     assert.match(fixture.result.stdout, /tests \(new failures beyond known-failure baseline\)/);
     assert.match(fixture.result.stdout, /GATE FAILED/);
     assertTempLogRemoved(fixture.tempDirectory);
@@ -78,7 +78,13 @@ function runGate(testCase) {
   }
   writeExecutable(join(toolsDirectory, 'check-known-failures.sh'), `#!/usr/bin/env bash
 cat >/dev/null
-[ "\${GATE_TEST_CASE:-}" = "known" ]
+# success: tests passed — allow clean baseline check
+# known: failures present but all known — allow continue
+# new: real regression — block
+case "\${GATE_TEST_CASE:-}" in
+  known|success) exit 0 ;;
+  *) exit 1 ;;
+esac
 `);
   writeExecutable(join(binDirectory, 'pnpm'), `#!/usr/bin/env bash
 if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "_test" ]; then

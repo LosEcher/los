@@ -114,6 +114,11 @@ export function createProviderFallbackRouter(input: {
   createProvider: (provider: string, options: CreateProviderOptions) => Provider;
   traceId?: string;
   onEvent: (event: ProviderFallbackEvent) => void | Promise<void>;
+  /**
+   * Optional ADR 0031 health gate: skip unhealthy fallback targets when
+   * healthier alternatives remain in the chain.
+   */
+  shouldSkipTarget?: (target: PreparedProviderFallbackTarget) => boolean;
 }): Provider {
   const providers = input.prepared.targets.map((target, index) => index === 0
     ? input.initialProvider
@@ -134,11 +139,16 @@ export function createProviderFallbackRouter(input: {
         } catch (error) {
           const failureClass = _classifyProviderFallbackFailure(error);
           if (!failureClass || !input.prepared.policy.onFailure.includes(failureClass)) throw error;
-          const nextIndex = currentIndex + 1;
-          const canSwitch = nextIndex < providers.length && switchCount < input.prepared.policy.maxSwitches;
           const errorCode = error instanceof AgentError ? error.code : undefined;
           const errorMessage = boundedErrorMessage(error);
-          if (!canSwitch) {
+          const nextIndex = findNextFallbackIndex(
+            currentIndex,
+            input.prepared.targets,
+            input.prepared.policy.maxSwitches,
+            switchCount,
+            input.shouldSkipTarget,
+          );
+          if (nextIndex === undefined) {
             await input.onEvent({
               type: 'exhausted', callIndex, switchIndex: switchCount,
               failureClass, errorCode, errorMessage,
@@ -161,6 +171,25 @@ export function createProviderFallbackRouter(input: {
       }
     },
   };
+}
+
+function findNextFallbackIndex(
+  currentIndex: number,
+  targets: readonly PreparedProviderFallbackTarget[],
+  maxSwitches: number,
+  switchCount: number,
+  shouldSkipTarget?: (target: PreparedProviderFallbackTarget) => boolean,
+): number | undefined {
+  if (switchCount >= maxSwitches) return undefined;
+  const remaining: number[] = [];
+  for (let index = currentIndex + 1; index < targets.length; index++) {
+    remaining.push(index);
+  }
+  if (remaining.length === 0) return undefined;
+  // Prefer non-unhealthy targets; if all remaining are unhealthy, still pick
+  // the next one so the chain can surface the real provider error.
+  const preferred = remaining.filter(index => !shouldSkipTarget?.(targets[index]!));
+  return (preferred.length > 0 ? preferred : remaining)[0];
 }
 
 export function _classifyProviderFallbackFailure(error: unknown): ProviderFallbackFailureClass | undefined {

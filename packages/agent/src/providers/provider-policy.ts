@@ -1,4 +1,4 @@
-import type { HealthScore } from './provider-health.js';
+import { isHealthierThan, isUnhealthy, type HealthScore } from './provider-health.js';
 
 export interface ProviderModelPolicyTarget {
   provider?: string;
@@ -114,21 +114,29 @@ function selectTargetFromEvidence(
   if (passing.length === 0) return undefined;
   if (passing.length === 1) return passing[0];
 
-  // When health scores are available, rank by health (healthiest first)
+  // When health scores are available, skip unhealthy when alternatives exist
+  // and rank remaining candidates by health (healthiest first).
+  let candidates = passing;
   if (healthScores && healthScores.length > 0) {
     const scoreMap = new Map(healthScores.map(s => [s.provider, s]));
-    passing.sort((a, b) => {
+    const nonUnhealthy = passing.filter(item => {
+      const score = scoreMap.get(item.target.provider);
+      return !score || !isUnhealthy(score);
+    });
+    if (nonUnhealthy.length > 0) candidates = nonUnhealthy;
+    candidates = [...candidates].sort((a, b) => {
       const scoreA = scoreMap.get(a.target.provider);
       const scoreB = scoreMap.get(b.target.provider);
-      // Unknown providers go last
       if (!scoreA && !scoreB) return 0;
       if (!scoreA) return 1;
       if (!scoreB) return -1;
+      if (isHealthierThan(scoreA, scoreB)) return -1;
+      if (isHealthierThan(scoreB, scoreA)) return 1;
       return scoreB.score - scoreA.score;
     });
   }
 
-  return passing[0];
+  return candidates[0];
 }
 
 function normalizeTarget(target: ProviderModelPolicyTarget | undefined): ProviderModelPolicyTarget {

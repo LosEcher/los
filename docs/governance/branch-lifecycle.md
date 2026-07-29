@@ -48,6 +48,12 @@ Forgejo must protect `main` with:
    `gate-fast`, `gate-test`, and `gate-drift`;
 4. no merge while a required check is pending or failed.
 
+**Incident note (2026-07):** PR #96 was merged at 21:49 before `gate-test`
+failed at 21:52; PR #92 merged after required checks were cancelled. Both
+violated rule 4. Operators must re-verify Forgejo branch protection so that
+`gate-fast`, `gate-test`, and `gate-drift` are **required** and merges are
+blocked while any required check is pending, cancelled, or failed.
+
 The retired `gate-test (input-preprocessor)` stub is legacy GitHub compatibility
 and must not be configured as a Forgejo required check.
 

@@ -21,6 +21,39 @@ test('provider fallback requires exact passing evidence by default', () => {
   }, [{ id: 'e-a', provider: 'a', model: 'a-1', passed: true }]), /b:b-1 requires passing/);
 });
 
+test('provider fallback skips unhealthy targets when healthier alternatives remain', async () => {
+  const events: ProviderFallbackEvent[] = [];
+  const prepared = prepareProviderFallbackPolicy({
+    mode: 'explicit_ordered',
+    targets: [
+      { provider: 'a', model: 'a-1' },
+      { provider: 'b', model: 'b-1' },
+      { provider: 'c', model: 'c-1' },
+    ],
+    onFailure: ['rate_limit'],
+  }, [
+    { id: 'e-a', provider: 'a', model: 'a-1', passed: true },
+    { id: 'e-b', provider: 'b', model: 'b-1', passed: true },
+    { id: 'e-c', provider: 'c', model: 'c-1', passed: true },
+  ])!;
+  const first = fakeProvider('a', 'a-1', async () => {
+    throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', 'a', 'a-1', 429, 'rate limited');
+  });
+  const unhealthy = fakeProvider('b', 'b-1', async () => response('b-1'));
+  const healthy = fakeProvider('c', 'c-1', async () => response('c-1'));
+  const router = createProviderFallbackRouter({
+    prepared,
+    initialProvider: first,
+    createProvider: (name) => (name === 'b' ? unhealthy : healthy),
+    shouldSkipTarget: target => target.provider === 'b',
+    onEvent: event => { events.push(event); },
+  });
+
+  const result = await router.chat([]);
+  assert.equal(result.model, 'c-1');
+  assert.equal(events[0]?.toProvider, 'c');
+});
+
 test('provider fallback switches in declared order for rate limits and records evidence', async () => {
   const events: ProviderFallbackEvent[] = [];
   const prepared = prepareProviderFallbackPolicy({

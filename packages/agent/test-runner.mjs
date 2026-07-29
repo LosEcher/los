@@ -81,9 +81,9 @@ const sharedProcessTestFiles = [
   'src/tools/registry.test.ts',
 ];
 
-const isolatedDatabaseTestFiles = [
-  // ── Group A (19 files) — LOS_TEST_GROUP=1 or unset (backward compat) ──
-  ...(process.env.LOS_TEST_GROUP === '2' || process.env.LOS_TEST_GROUP === '3' ? [] : [
+// Full isolated classification always includes every group so local
+// `pnpm --filter @los/agent test` and CI group lanes share one inventory.
+const isolatedGroupA = [
   'src/agent-task-graph.test.ts',
   'src/daily-agent-quality.test.ts',
   'src/dead-letter.test.ts',
@@ -103,9 +103,9 @@ const isolatedDatabaseTestFiles = [
   'src/managed-workspaces.test.ts',
   'src/mcp-distribution.test.ts',
   'src/message-router/handlers-run-contract.test.ts',
-  ]),
-  // ── Group B (19 files) — LOS_TEST_GROUP=2 ──
-  ...(process.env.LOS_TEST_GROUP !== '2' ? [] : [
+];
+
+const isolatedGroupB = [
   'src/operator-control-consumer.test.ts',
   'src/operator-control.test.ts',
   'src/pi-kernel-envelope.test.ts',
@@ -125,9 +125,9 @@ const isolatedDatabaseTestFiles = [
   'src/scheduler-kernel-shadow.test.ts',
   'src/scheduler-planning.test.ts',
   'src/scheduler.test.ts',
-  ]),
-  // ── Group C (18 files) — LOS_TEST_GROUP=3 ──
-  ...(process.env.LOS_TEST_GROUP !== '3' ? [] : [
+];
+
+const isolatedGroupC = [
   'src/scheduler/executor-client.test.ts',
   'src/scheduler/task-heartbeat.test.ts',
   'src/self-check.test.ts',
@@ -144,14 +144,30 @@ const isolatedDatabaseTestFiles = [
   'src/work-items.test.ts',
   'src/work-items/revision-loop.test.ts',
   'src/worker-messages.test.ts',
-  ]),
 ];
+
+const allIsolatedDatabaseTestFiles = [
+  ...isolatedGroupA,
+  ...isolatedGroupB,
+  ...isolatedGroupC,
+];
+
+const testGroup = process.env.LOS_TEST_GROUP;
+const isolatedDatabaseTestFiles = testGroup === '1'
+  ? isolatedGroupA
+  : testGroup === '2'
+    ? isolatedGroupB
+    : testGroup === '3'
+      ? isolatedGroupC
+      // unset / unknown: run every isolated file (local full package test)
+      : allIsolatedDatabaseTestFiles;
 
 runPackageTests({
   packageId: 'agent',
   sharedProcessTestFiles,
   isolatedDatabaseTestFiles,
+  // Classification always validates the full inventory even when CI runs one group.
+  classifiedIsolatedDatabaseTestFiles: allIsolatedDatabaseTestFiles,
   testSetupFile: './src/test-setup.ts',
   globalSetupFile: './src/test-global-setup.mjs',
-  skipClassificationCheck: Boolean(process.env.LOS_TEST_GROUP),
 });

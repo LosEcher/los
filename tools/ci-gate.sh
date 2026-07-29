@@ -177,15 +177,22 @@ else
   fi
   tail -30 "$TEST_OUTPUT"  # always show tail so failures are visible
   if [ "$TEST_EXIT" -eq 0 ]; then
-    phase_ok "tests"
+    # Still run known-failure check so stale FIXED baseline entries block.
+    if ./tools/check-known-failures.sh < "$TEST_OUTPUT"; then
+      phase_ok "tests"
+    else
+      printf '    %bStale known-failure baseline (FIXED entries) — gate blocked%b\n' "$RED" "$NC"
+      phase_fail "tests (stale known-failure baseline)"
+    fi
   else
     # Tests failed — but distinguish KNOWN (pre-existing, non-blocking) from
     # NEW (a real regression, blocking). If every failure is in the baseline,
     # the gate continues; any NEW failure blocks.
     if ./tools/check-known-failures.sh < "$TEST_OUTPUT"; then
       printf '    %bAll test failures are KNOWN — gate continues%b\n' "$YELLOW" "$NC"
+      phase_ok "tests (known failures only)"
     else
-      printf '    %bNEW test failures detected — gate blocked%b\n' "$RED" "$NC"
+      printf '    %bNEW test failures or unparsed failure output — gate blocked%b\n' "$RED" "$NC"
       phase_fail "tests (new failures beyond known-failure baseline)"
     fi
   fi

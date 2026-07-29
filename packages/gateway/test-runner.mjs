@@ -58,6 +58,7 @@ const isolatedDatabaseTestFiles = [
   'src/integration-routes.test.ts',
   'src/node-command-routes.test.ts',
   'src/provider-compat-routes.test.ts',
+  'src/routes/auth-routes.test.ts',
   'src/routes/run-routes.test.ts',
   'src/routes/streaming/ws-routes.test.ts',
   'src/run-evals-routes.test.ts',
