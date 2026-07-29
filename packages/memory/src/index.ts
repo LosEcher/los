@@ -5,6 +5,8 @@
 export {
   ensureMemoryStore,
   addObservation,
+  upsertObservation,
+  validateDedupeKey,
   getObservation,
   updateObservation,
   deleteObservation,

@@ -162,8 +162,18 @@ export function setupAgentRun(
   const policy = resolveToolPolicy(toolMode, config.toolRetry, sandboxMode);
   const signal = config.signal;
 
+  // Inject provider context window into compression config so large-window
+  // providers (Kimi-K3 1M, Gemini 2.5 Pro, etc.) trigger compression at
+  // absolute token budgets (300K / 500K / 750K) instead of percentage ratios.
+  const effectiveMaxContextTokens = config.maxContextTokens
+    ?? provider.profile.recommendedCompressionTokens;
+  const effectiveCompression = config.contextCompression && {
+    ...config.contextCompression,
+    providerContextWindow: provider.profile.maxInputTokens,
+  };
+
   // Build initial messages (synchronous; MCP loading happens in async phase)
-  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, config.maxContextTokens, config.contextCompression);
+  const messages = buildInitialMessages(prompt, systemPrompt, config.initialMessages, effectiveMaxContextTokens, effectiveCompression);
 
   // Set up tools
   const tools = createToolRegistry({ allowedTools, policy });

@@ -1,7 +1,7 @@
 import { getDb } from '@los/infra/db';
 import { normalizeOptionalString } from './scheduler/helpers.js';
 
-export type SchedulerDecisionKind = 'claim' | 'provider_selection' | 'executor_selection';
+export type SchedulerDecisionKind = 'claim' | 'provider_selection' | 'executor_selection' | 'task_outcome';
 
 export interface SchedulerDecisionRecord {
   id: string;
@@ -170,6 +170,126 @@ export async function listSchedulerDecisions(
   return rows.rows.map(rowToRecord);
 }
 
+export interface TaskOutcomeInput {
+  taskRunId: string;
+  runSpecId?: string;
+  sessionId?: string;
+  provider: string;
+  model: string;
+  status: 'succeeded' | 'failed' | 'cancelled';
+  durationMs: number;
+  totalTokens?: number;
+  loopCount?: number;
+  error?: string;
+}
+
+/**
+ * Record a task completion outcome for scheduler feedback.
+ *
+ * This closes the decision loop: the scheduler can query recent outcomes per
+ * provider/model to inform future selection decisions (e.g. deprioritize a
+ * provider with recent failures, prefer one with low latency).
+ */
+export async function recordTaskOutcome(input: TaskOutcomeInput): Promise<SchedulerDecisionRecord> {
+  return recordSchedulerDecision({
+    graphId: input.taskRunId,
+    taskRunId: input.taskRunId,
+    runSpecId: input.runSpecId,
+    sessionId: input.sessionId,
+    kind: 'task_outcome',
+    provider: input.provider,
+    model: input.model,
+    reason: input.status,
+    selectedIds: [`${input.provider}:${input.model}`],
+    metadata: {
+      durationMs: input.durationMs,
+      totalTokens: input.totalTokens ?? 0,
+      loopCount: input.loopCount ?? 0,
+      error: input.error ?? null,
+    },
+  });
+}
+
+export interface ProviderRecentOutcome {
+  provider: string;
+  model: string;
+  totalTasks: number;
+  succeeded: number;
+  failed: number;
+  avgDurationMs: number;
+  avgTokens: number;
+  lastOutcomeAt: string;
+}
+
+/**
+ * Query recent task outcomes for a provider/model combo.
+ * Used by the scheduler to inform provider selection: recent failures
+ * or high latency can trigger fallback routing.
+ *
+ * @param provider - Provider name
+ * @param model - Model name (optional)
+ * @param windowHours - Lookback window in hours (default 24)
+ * @param limit - Max outcomes to aggregate (default 50)
+ */
+export async function getProviderRecentOutcomes(
+  provider: string,
+  model?: string,
+  windowHours = 24,
+  limit = 50,
+): Promise<ProviderRecentOutcome[]> {
+  await ensureSchedulerDecisionLedgerStore();
+  const params: unknown[] = [provider, windowHours];
+  let modelClause = '';
+  if (model) {
+    params.push(model);
+    modelClause = `AND model = $${params.length}`;
+  }
+  params.push(limit);
+
+  const rows = await getDb().query<{
+    provider: string;
+    model: string;
+    total: string;
+    succeeded: string;
+    failed: string;
+    avg_duration: string;
+    avg_tokens: string;
+    last_at: string;
+  }>(
+    `
+    SELECT
+      provider,
+      model,
+      COUNT(*)::text AS total,
+      COUNT(*) FILTER (WHERE reason = 'succeeded')::text AS succeeded,
+      COUNT(*) FILTER (WHERE reason = 'failed')::text AS failed,
+      COALESCE(AVG((metadata_json->>'durationMs')::numeric), 0)::text AS avg_duration,
+      COALESCE(AVG((metadata_json->>'totalTokens')::numeric), 0)::text AS avg_tokens,
+      MAX(created_at)::text AS last_at
+    FROM scheduler_decisions
+    WHERE kind = 'task_outcome'
+      AND provider = $1
+      AND created_at > now() - ($2 || ' hours')::interval
+      ${modelClause}
+    GROUP BY provider, model
+    ORDER BY last_at DESC
+    LIMIT $${params.length}
+  `,
+    params,
+  );
+
+  return rows.rows.map(r => ({
+    provider: r.provider,
+    model: r.model,
+    totalTasks: Number(r.total),
+    succeeded: Number(r.succeeded),
+    failed: Number(r.failed),
+    avgDurationMs: Math.round(Number(r.avg_duration)),
+    avgTokens: Math.round(Number(r.avg_tokens)),
+    lastOutcomeAt: r.last_at,
+  }));
+}
+
 type SchedulerDecisionRow = {
   id: string;
   graph_id: string;
@@ -211,7 +331,7 @@ function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
 }
 
 function normalizeKind(value: unknown): SchedulerDecisionKind {
-  if (value === 'claim' || value === 'provider_selection' || value === 'executor_selection') return value;
+  if (value === 'claim' || value === 'provider_selection' || value === 'executor_selection' || value === 'task_outcome') return value;
   throw new Error('scheduler decision kind is invalid');
 }
 

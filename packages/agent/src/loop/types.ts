@@ -157,6 +157,8 @@ export interface AgentResult {
   totalTokens: { prompt: number; completion: number };
   messages: Message[];
   planningSubmission?: PlanningOutput;
+  /** Wall-clock duration of the agent loop in milliseconds. */
+  durationMs?: number;
 }
 
 export interface ContextCompressionConfig {
@@ -164,6 +166,13 @@ export interface ContextCompressionConfig {
   warningRatio?: number;
   aggressiveRatio?: number;
   emergencyRatio?: number;
+  /**
+   * Provider context window size in tokens. When set and > 200K (e.g. Kimi-K3 1M window),
+   * compression thresholds use absolute token budgets instead of percentage ratios:
+   * warning at 300K, aggressive at 500K, emergency at 750K. This prevents premature
+   * compression on large-window providers while still capping memory pressure.
+   */
+  providerContextWindow?: number;
   /** Semantic eviction configuration — mask persisted tool results at critical fill. */
   semanticEviction?: {
     enabled?: boolean;

@@ -1,6 +1,7 @@
 import { writeDeadLetterEvent } from '../dead-letter.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { runLifecycleHooks } from '../lifecycle-hooks.js';
+import { recordTaskOutcome } from '../scheduler-decision-ledger.js';
 import type { AgentResult } from '../loop.js';
 import { recordFailoverEval } from '../run-evals.js';
 import { updateTaskRunFields, type TaskRunRecord } from '../task-runs.js';
@@ -33,7 +34,7 @@ export async function completeScheduledTask(
   result: AgentResult,
   context: ScheduledTaskTerminalContext,
 ): Promise<ScheduledAgentTaskResult> {
-  const { input, running, taskRunId, sessionId, nodeId, leaseVersion, disposition } = context;
+  const { input, running, taskRunId, sessionId, nodeId, leaseVersion, disposition, initialProvider, initialModel } = context;
   if (disposition === 'planning') {
     return await completePlanningDisposition({
       schedulerInput: input,
@@ -105,6 +106,17 @@ export async function completeScheduledTask(
   await emitTaskEvent(sessionId, 'task.succeeded', finalTask);
   await input.onTaskEvent?.({ type: 'task.succeeded', taskRun: finalTask });
   runAfterFinishHooks(input, sessionId, taskRunId);
+  recordTaskOutcome({
+    taskRunId,
+    runSpecId: input.runSpecId,
+    sessionId,
+    provider: initialProvider ?? 'unknown',
+    model: initialModel ?? 'unknown',
+    status: 'succeeded',
+    durationMs: result.durationMs ?? 0,
+    totalTokens: (result.totalTokens?.prompt ?? 0) + (result.totalTokens?.completion ?? 0),
+    loopCount: result.loopCount,
+  }).catch(() => undefined);
 
   return {
     status: 'completed',
@@ -170,6 +182,16 @@ export async function handleScheduledTaskError(
     await emitTaskEvent(sessionId, 'task.cancelled', finalTask, { reason });
     await input.onTaskEvent?.({ type: 'task.cancelled', taskRun: finalTask });
     runAfterFinishHooks(input, sessionId, taskRunId);
+    recordTaskOutcome({
+      taskRunId,
+      runSpecId: input.runSpecId,
+      sessionId,
+      provider: initialProvider ?? 'unknown',
+      model: initialModel ?? 'unknown',
+      status: 'cancelled',
+      durationMs: 0,
+      error: reason,
+    }).catch(() => undefined);
     return {
       status: 'cancelled',
       sessionId,
@@ -212,6 +234,16 @@ export async function handleScheduledTaskError(
     },
   }).catch(() => undefined);
   runAfterFinishHooks(input, sessionId, taskRunId);
+  recordTaskOutcome({
+    taskRunId,
+    runSpecId: input.runSpecId,
+    sessionId,
+    provider: initialProvider ?? 'unknown',
+    model: initialModel ?? 'unknown',
+    status: 'failed',
+    durationMs: 0,
+    error: message,
+  }).catch(() => undefined);
 
   if (executor && input.runSpecId) {
     await recordFailoverEval({
