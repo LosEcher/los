@@ -1,13 +1,25 @@
 # los — Docker Compose (single-node deployment)
 #
-# Quick start:
-#   1. Set your provider API key below (DEEPSEEK_API_KEY or OPENAI_API_KEY etc.)
-#   2. docker compose up -d
-#   3. Open http://localhost:8080
+# Two modes:
+#   A. Pre-built image (recommended, from GitHub Container Registry):
+#        docker compose up -d
+#   B. Local build (for development / custom changes):
+#        docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 #
-# The gateway starts, runs database migrations automatically, and serves
-# the Web UI. Chat in the browser, or use the CLI:
-#   docker compose exec los node --import ./packages/cli/node_modules/tsx/dist/loader.mjs packages/cli/src/index.ts chat "hello"
+# Prerequisites:
+#   1. Copy .env.example to .env.docker and set at least one provider API key.
+#   2. (Mode B only) Clone the los repository first.
+#
+# Quick start:
+#   cp .env.example .env.docker
+#   # Edit .env.docker — uncomment and set DEEPSEEK_API_KEY (or equivalent)
+#   docker compose up -d
+#   # Open http://localhost:8080
+#
+# First-time setup:
+#   Open http://localhost:8080 in your browser.
+#   You'll see the login page — create your operator account (bootstrap mode).
+#   Follow the onboarding wizard to configure a provider and bind a project.
 
 version: "3.8"
 
@@ -27,35 +39,36 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    # Expose only to the los container; comment out the ports line to
-    # publish on the host for external tooling.
+    # Expose only to the los container; uncomment to publish on the host:
     # ports:
     #   - "5432:5432"
 
   # ── los Gateway ───────────────────────────────────────
   los:
-    build: .
+    # Mode A: pre-built GHCR image (default)
+    image: ghcr.io/los-ecommerce/los:latest
+    # Mode B: local build — use docker-compose.build.yml override, or uncomment:
+    # build: .
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${SERVER_PORT:-8080}:8080"
     environment:
       # ── Database ──────────────────────────────────────
       DATABASE_URL: postgres://los:los-dev@postgres:5432/los
 
-      # ── Auth (optional) ───────────────────────────────
+      # ── Auth (optional — enable for multi-user setups) ─
       # LOS_AUTH_ENABLED: "true"
       # LOS_AUTH_TOKEN: change-me
       # LOS_OPERATOR_TOKEN: change-me-operator
 
       # ── Providers ─────────────────────────────────────
-      # Uncomment and set at least one provider API key.
-      # los auto-discovers providers from *_API_KEY env vars.
-      # DEEPSEEK_API_KEY: sk-xxx
-      # OPENAI_API_KEY: sk-xxx
-      # ANTHROPIC_API_KEY: sk-xxx
+      # Set at least one API key. los auto-discovers from *_API_KEY env vars.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
       # ── Agent defaults ────────────────────────────────
-      AGENT_DEFAULT_PROVIDER: deepseek
+      AGENT_DEFAULT_PROVIDER: ${AGENT_DEFAULT_PROVIDER:-deepseek}
       # AGENT_DEFAULT_MODEL: deepseek-v4-flash
       # AGENT_MAX_LOOPS: "20"
 
@@ -69,6 +82,14 @@ services:
         condition: service_healthy
     volumes:
       - los-runtime:/app/.los-runtime
+
+    # Health check: gateway reports readiness after DB migrations
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:8080/health',r=>{process.exit(r.statusCode===200?0:1)})\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
 
 volumes:
   pgdata:

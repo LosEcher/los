@@ -13,6 +13,15 @@ import type { ContextCompressionConfig } from './types.js';
  *   aggressive (88%): compress old turns into terse summaries
  *   emergency  (95%): hard truncation — drop oldest messages
  *
+ * When `providerContextWindow` exceeds 200K (e.g. Kimi-K3 1M window), the
+ * thresholds switch to absolute token budgets instead of percentages:
+ *   warning    300K  — compress at 300K tokens
+ *   aggressive 500K  — terse summaries at 500K
+ *   emergency  750K  — hard truncation at 750K
+ *
+ * This prevents premature compression on large-window providers while
+ * still capping memory pressure well below the actual window limit.
+ *
  * Preserves the system message and the most recent turns intact.
  * Compressed turns become a synthetic "user" message summarizing earlier work.
  */
@@ -24,9 +33,19 @@ export function compressOrTrimMessages(
   if (budget <= 0) return messages;
 
   const enabled = compression?.enabled !== false;
-  const warningRatio = compression?.warningRatio ?? 0.80;
-  const aggressiveRatio = compression?.aggressiveRatio ?? 0.88;
-  const emergencyRatio = compression?.emergencyRatio ?? 0.95;
+  const contextWindow = compression?.providerContextWindow ?? 0;
+  const isLargeWindow = contextWindow > 200_000;
+
+  // Large-window providers (K3, Gemini 2.5 Pro, etc.) use absolute thresholds
+  const warningRatio = isLargeWindow
+    ? Math.min(300_000 / contextWindow, compression?.warningRatio ?? 0.80)
+    : compression?.warningRatio ?? 0.80;
+  const aggressiveRatio = isLargeWindow
+    ? Math.min(500_000 / contextWindow, compression?.aggressiveRatio ?? 0.88)
+    : compression?.aggressiveRatio ?? 0.88;
+  const emergencyRatio = isLargeWindow
+    ? Math.min(750_000 / contextWindow, compression?.emergencyRatio ?? 0.95)
+    : compression?.emergencyRatio ?? 0.95;
 
   const totalTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
   const ratio = totalTokens / budget;

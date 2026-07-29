@@ -1,3 +1,5 @@
+import type { HealthScore } from './provider-health.js';
+
 export interface ProviderModelPolicyTarget {
   provider?: string;
   model?: string;
@@ -16,6 +18,9 @@ export interface ResolveProviderModelPolicyInput<Source extends string> {
   fallback?: ProviderModelPolicyTarget;
   emptyTargetLabel?: string;
   contextLabel?: string;
+  /** Optional health scores for candidate providers. When provided, targets
+   * with passing evidence are ranked by health score instead of list order. */
+  healthScores?: readonly HealthScore[];
   sources: {
     evidence: Source;
     target: Source;
@@ -42,7 +47,7 @@ export function resolveProviderModelPolicy<Source extends string>(
   const formatLabel = (target: ProviderModelPolicyTarget) => formatTargetLabel(target, input.emptyTargetLabel);
 
   if (targets.length > 0) {
-    const selected = selectTargetFromEvidence(targets, input.evidence ?? []);
+    const selected = selectTargetFromEvidence(targets, input.evidence ?? [], input.healthScores);
     if (selected) {
       return {
         provider: selected.target.provider,
@@ -93,16 +98,37 @@ export function resolveProviderModelPolicy<Source extends string>(
 function selectTargetFromEvidence(
   targets: readonly (ProviderModelPolicyTarget & { provider: string })[],
   evidence: readonly ProviderModelPolicyEvidence[],
+  healthScores?: readonly HealthScore[],
 ): { target: ProviderModelPolicyTarget & { provider: string }; evidence: ProviderModelPolicyEvidence } | undefined {
+  // Collect all targets with passing evidence
+  const passing: Array<{ target: ProviderModelPolicyTarget & { provider: string }; evidence: ProviderModelPolicyEvidence }> = [];
   for (const target of targets) {
     const passed = evidence.find(item => (
       item.passed
       && normalizeOptionalString(item.provider) === target.provider
       && (!target.model || normalizeOptionalString(item.model) === target.model)
     ));
-    if (passed) return { target, evidence: passed };
+    if (passed) passing.push({ target, evidence: passed });
   }
-  return undefined;
+
+  if (passing.length === 0) return undefined;
+  if (passing.length === 1) return passing[0];
+
+  // When health scores are available, rank by health (healthiest first)
+  if (healthScores && healthScores.length > 0) {
+    const scoreMap = new Map(healthScores.map(s => [s.provider, s]));
+    passing.sort((a, b) => {
+      const scoreA = scoreMap.get(a.target.provider);
+      const scoreB = scoreMap.get(b.target.provider);
+      // Unknown providers go last
+      if (!scoreA && !scoreB) return 0;
+      if (!scoreA) return 1;
+      if (!scoreB) return -1;
+      return scoreB.score - scoreA.score;
+    });
+  }
+
+  return passing[0];
 }
 
 function normalizeTarget(target: ProviderModelPolicyTarget | undefined): ProviderModelPolicyTarget {

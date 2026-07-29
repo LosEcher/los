@@ -160,29 +160,31 @@ const TOOLSETS: Record<string, ToolsetDefinition> = {
   },
 
   /**
-   * Browser automation tools. These are provided by MCP servers
-   * (e.g. @anthropic/mcp-puppeteer) — not built-in. The toolset is
-   * a grouping marker; actual tools are discovered at MCP connect time.
+   * Browser automation tools — auto-started via MCP stdio.
    *
-   * Setup:
-   *   1. Install an MCP browser server, e.g.:
-   *        npm install -g @anthropic/mcp-puppeteer
-   *   2. Register in LOS: MCP page → Add Server → stdio transport
-   *      Command: npx, Args: -y @anthropic/mcp-puppeteer
-   *   3. Enable browser toolset: LOS_ENABLED_TOOLSETS=coding,browser
-   *   4. Chat: the agent can now navigate, click, screenshot, etc.
+   * When this toolset is enabled and no externally registered MCP server
+   * provides browser tools, los auto-starts @executeautomation/playwright-mcp-server
+   * (25+ tools: navigate, click, type, screenshot, evaluate, iframe, drag,
+   * keyboard, tab switching, console logs, PDF export). Zero configuration needed.
    *
-   * Common MCP browser tools (varies by server):
-   *   puppeteer_navigate, puppeteer_screenshot, puppeteer_click,
-   *   puppeteer_fill, puppeteer_select, puppeteer_hover, puppeteer_evaluate
+   * Configuration (environment variables):
+   *   LOS_BROWSER_HEADLESS=true   # default: true  (set false for visible browser)
+   *   LOS_BROWSER_ENGINE=chromium # default: chromium (or firefox, webkit)
+   *
+   * To use a different browser MCP server, register it manually via the
+   * MCP Servers page — manually registered servers take precedence over auto-start.
+   *
+   * Tool names use the playwright_* prefix (e.g. playwright_navigate). Both
+   * playwright_* and puppeteer_* tools are matched via prefix when this
+   * toolset is enabled.
    */
   browser: {
     description: 'Browser automation via MCP: navigate, click, type, scroll, screenshot, console',
     tools: [
-      // Standard MCP Puppeteer tools (discovered at runtime)
-      'puppeteer_navigate', 'puppeteer_screenshot', 'puppeteer_click',
-      'puppeteer_fill', 'puppeteer_select', 'puppeteer_hover',
-      'puppeteer_evaluate',
+      // playwright prefix — matches all playwright_* tools from auto-started server
+      'playwright',
+      // puppeteer prefix — backward compat for manually registered puppeteer servers
+      'puppeteer',
     ],
     includes: [],
   },

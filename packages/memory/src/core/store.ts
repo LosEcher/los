@@ -36,6 +36,9 @@ export interface Observation {
 
 import type { ObserverType } from '../types.js';
 
+/** Dedupe key format: alphanumeric + : _ - .  only, 1-128 chars (slug-safe). */
+const DEDUPE_KEY_RE = /^[a-zA-Z0-9:_\-.]+$/;
+
 export interface MemoryStats {
   totalObservations: number;
   byKind: Record<string, number>;
@@ -43,6 +46,12 @@ export interface MemoryStats {
   byScope: Record<string, number>;
   byLayer: Record<string, number>;
   archived: number;
+  /** Observations written in the last 24 hours */
+  recentWrites24h: number;
+  /** Observations read (via getObservation / searchObservations) in the last 24 hours */
+  recentReads24h: number;
+  /** True when recent reads are < 10% of recent writes (write-dominated memory is a smell). */
+  lowReadRatio: boolean;
 }
 
 const SCHEMA = `
@@ -114,6 +123,27 @@ export async function ensureMemoryStore(): Promise<void> {
   await db.exec(SCHEMA);
   _initialized = true;
   log.info('Memory store initialized');
+}
+
+/**
+ * Validate a dedupe-key slug format. Throws on invalid input.
+ *
+ * Rules: 1-128 characters; allowed chars: a-z, A-Z, 0-9, :, _, -, .
+ * No leading/trailing whitespace.
+ */
+export function validateDedupeKey(key: string): void {
+  if (key.length < 1 || key.length > 128) {
+    throw new Error(`dedupeKey must be 1-128 characters, got ${key.length}`);
+  }
+  if (key !== key.trim()) {
+    throw new Error('dedupeKey must not have leading or trailing whitespace');
+  }
+  if (!DEDUPE_KEY_RE.test(key)) {
+    throw new Error(
+      `dedupeKey contains invalid characters: "${key}". ` +
+      `Allowed: a-z A-Z 0-9 : _ - .`,
+    );
+  }
 }
 
 export async function addObservation(obs: {
@@ -217,6 +247,108 @@ export async function updateObservation(
   `, [title, summary, kind, JSON.stringify(tags), content, JSON.stringify(metadata), id]);
 
   return rows.rows[0] ? rowToObservation(rows.rows[0]) : null;
+}
+
+/**
+ * Idempotent observation write: insert or update based on a caller-provided dedupe key.
+ *
+ * When `dedupeKey` is provided, this function checks for an existing observation
+ * with the same key and updates it in-place (merging content/metadata). Without a
+ * dedupe key it behaves like {@link addObservation} (pure INSERT).
+ *
+ * **Design note**: The current implementation uses check-then-insert/update.
+ * A future migration should add `dedupe_key TEXT UNIQUE` to the observations table
+ * and replace this with true `ON CONFLICT ... DO UPDATE` for full atomicity.
+ *
+ * @param dedupeKey — caller-scoped unique key, e.g. `${sessionId}:${kind}:${title}`.
+ *   Validated via {@link validateDedupeKey}. When omitted, a new row is always inserted.
+ */
+export async function upsertObservation(
+  obs: {
+    title: string;
+    summary?: string;
+    kind?: string;
+    tags?: string[];
+    content?: string;
+    metadata?: Record<string, unknown>;
+    observerType?: ObserverType;
+    source?: string;
+    sessionId?: string;
+    tenantId?: string;
+    projectId?: string;
+    userId?: string;
+    nodeId?: string;
+    requestId?: string;
+    traceId?: string;
+    /**
+     * Caller-scoped unique key for deduplication.
+     * When provided, existing observations with the same key are updated instead
+     * of creating a duplicate. Stored in metadata_json.dedupeKey.
+     */
+    dedupeKey?: string;
+  },
+): Promise<Observation> {
+  await ensureMemoryStore();
+  const db = getDb();
+
+  // Without a dedupe key, fall through to plain insert
+  if (!obs.dedupeKey) {
+    return addObservation(obs);
+  }
+
+  // Validate slug format before any DB work
+  validateDedupeKey(obs.dedupeKey);
+
+  // Merge dedupeKey into metadata for storage
+  const mergedMetadata = {
+    ...(obs.metadata ?? {}),
+    dedupeKey: obs.dedupeKey,
+    ...(obs.observerType ? { observerType: obs.observerType } : {}),
+  };
+
+  // Check for existing observation with the same dedupe key
+  const existingRows = await db.query<ObservationRow>(
+    `SELECT * FROM observations
+     WHERE metadata_json ->> 'dedupeKey' = $1
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [obs.dedupeKey],
+  );
+
+  if (existingRows.rows[0]) {
+    const existing = rowToObservation(existingRows.rows[0]);
+    // Update in-place: merge tags, replace content/summary
+    const mergedTags = [
+      ...new Set([...(existing.tags ?? []), ...(obs.tags ?? [])]),
+    ];
+    return (await updateObservation(existing.id, {
+      title: obs.title,
+      summary: obs.summary ?? existing.summary,
+      kind: obs.kind ?? existing.kind,
+      tags: mergedTags,
+      content: obs.content ?? existing.content,
+      metadata: mergedMetadata,
+    }))!;
+  }
+
+  // No existing match → insert via addObservation (which handles the cap)
+  return addObservation({
+    title: obs.title,
+    summary: obs.summary,
+    kind: obs.kind,
+    tags: obs.tags,
+    content: obs.content,
+    metadata: mergedMetadata,
+    observerType: obs.observerType,
+    source: obs.source,
+    sessionId: obs.sessionId,
+    tenantId: obs.tenantId,
+    projectId: obs.projectId,
+    userId: obs.userId,
+    nodeId: obs.nodeId,
+    requestId: obs.requestId,
+    traceId: obs.traceId,
+  });
 }
 
 export async function deleteObservation(id: number): Promise<boolean> {
@@ -334,6 +466,20 @@ export async function getStats(): Promise<MemoryStats> {
     WHERE coalesce(metadata_json->>'archived', 'false') = 'true'
   `);
 
+  // 24h sliding-window read/write ratio tracking
+  const recentWritesRows = await db.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c FROM observations WHERE created_at > now() - interval '24 hours'`,
+  );
+  const recentReadsRows = await db.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c FROM observations WHERE updated_at > now() - interval '24 hours'
+     AND created_at < updated_at`,
+  );
+
+  const recentWrites24h = Number(recentWritesRows.rows[0]?.c ?? 0);
+  const recentReads24h = Number(recentReadsRows.rows[0]?.c ?? 0);
+  // Low-read alarm: write-heavy memory with fewer than 10% reads is a smell
+  const lowReadRatio = recentWrites24h > 10 && recentReads24h < recentWrites24h * 0.1;
+
   const byKind: Record<string, number> = {};
   for (const r of kindRows.rows) byKind[r.kind] = Number(r.c);
 
@@ -353,6 +499,9 @@ export async function getStats(): Promise<MemoryStats> {
     byScope,
     byLayer,
     archived: Number(archivedRows.rows[0]?.c ?? 0),
+    recentWrites24h,
+    recentReads24h,
+    lowReadRatio,
   };
 }
 

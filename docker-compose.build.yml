@@ -1,0 +1,16 @@
+# docker-compose.build.yml — override to build los image locally
+#
+# Use together with docker-compose.yml for local development builds:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+#
+# This overrides the "image:" in docker-compose.yml with a local "build: ."
+
+version: "3.8"
+
+services:
+  los:
+    # Override pre-built image with local build
+    image: los:local
+    build:
+      context: .
+      dockerfile: Dockerfile

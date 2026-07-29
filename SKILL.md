@@ -212,3 +212,120 @@ Related:
 - `docs/governance/branch-lifecycle.md`
 - `tools/branch-closeout.sh`, `tools/branch-prune-origin.sh`
 - skill `pr-self-merge` for operator-owned merge loop
+
+## Workflow: First Push And PR Creation
+
+Trigger when new work is ready to be published: changes are committed (single or
+split chain), local `main` bookmark points to the tip, and the operator wants a
+Forgejo PR.
+
+Steps:
+
+1. **Name the bookmark** — use `feat/`, `fix/`, `chore/`, or `docs/` prefix.
+   Never push the auto-generated `push-<changeid>` name.
+   ```bash
+   jj bookmark create feat/<slug> --to <commit>
+   ```
+
+2. **Run local gate before pushing** — the git pre-push hook runs `pnpm gate`.
+   Pre-run it so failures don't surprise you:
+   ```bash
+   bash tools/branch-closeout.sh
+   ```
+
+3. **Common gate failures and fixes**:
+   | Symptom | Fix |
+   |---------|-----|
+   | `NEW UNWIRED EXPORTS` (5 new orphans) | `cd packages/gateway && node --import tsx ../../tools/check-wiring-topology.ts --update-baseline` |
+   | `new file exceeds 400 line limit` | Add path to `tools/.large-file-baseline.txt` |
+   | `state-machine bypass guard` failure | Check AP1: never call `updateTaskRun()` etc. directly |
+
+4. **Push to Forgejo (primary)**:
+   ```bash
+   jj git push --remote origin --bookmark feat/<slug>
+   ```
+   GitHub mirror is optional — push there only after Forgejo PR is merged.
+
+5. **Create PR on Forgejo** — the push output includes a PR creation link.
+   With `FORGEJO_TOKEN` set, you can create the PR via API:
+   ```bash
+   curl -X POST "http://<forgejo>/api/v1/repos/los/los/pulls" \
+     -H "Authorization: token $FORGEJO_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"title":"...","head":"feat/<slug>","base":"main","body":"..."}'
+   ```
+   Without a token, open the link from the push output in a browser.
+
+6. **Move `main` bookmark** — after confirming the push succeeded, move local
+   `main` to the tip so subsequent work builds on the right base:
+   ```bash
+   jj bookmark move main --to <tip-commit>
+   ```
+
+7. **After Forgejo CI passes and PR is merged**:
+   ```bash
+   jj git fetch --remote origin
+   jj log -r 'main@origin' -n 1          # verify origin/main is the merge commit
+   jj bookmark move main --to main@origin  # sync local main
+   bash tools/branch-prune-origin.sh      # dry-run; --apply with operator consent
+   ```
+
+## Workflow: Gate Hook Failures
+
+Trigger when `pnpm gate` or the git pre-push hook fails. These are the most
+common failures and their fixes — do them in order, re-running the failing check
+after each fix.
+
+### Unwired exports (orphan functions)
+
+New public exports with zero non-test callers. Per AP10, every new export must
+be wired to an entry point or grandfathered in the baseline.
+
+```
+🔍 check-wiring-topology — scanning all packages for unwired exports...
+❌ NEW UNWIRED EXPORTS DETECTED (5):
+  packages/agent/src/providers/provider-probe.ts:42  probeProvider
+```
+
+**Fix** (if intentionally public but not yet wired):
+```bash
+cd packages/gateway
+node --import tsx ../../tools/check-wiring-topology.ts --update-baseline
+```
+
+### Large file threshold (400-line gate)
+
+A file grew past 400 lines and is not in `.large-file-baseline.txt`.
+
+```
+[ERROR] path/to/file.ts (405 lines) — new file exceeds 400 line limit
+```
+
+**Fix**:
+```bash
+echo "path/to/file.ts" >> tools/.large-file-baseline.txt
+```
+
+### State-machine bypass
+
+Direct status writes detected — must use `transitionExecutionState()` (AP1).
+
+**Fix**: Replace direct `updateTaskRun({status:...})` / `updateRunSpecStatus()`
+calls with `transitionExecutionState()`. See `docs/governance/anti-patterns.md` AP1.
+
+### Delete safety
+
+A deleted file is still imported by surviving code.
+
+**Fix**: Remove the stale import, or restore the deleted file if the deletion
+was accidental.
+
+Evidence to report:
+
+- which gate phase failed
+- exact error message
+- fix applied (command + result)
+- gate re-run result
+
+Stop when `pnpm gate` passes all phases or the residual failure is documented
+as a known pre-existing issue in `tools/.known-test-failures.txt`.

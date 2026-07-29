@@ -125,6 +125,9 @@ export type MemoryStats = {
   byScope: Record<string, number>;
   byLayer: Record<string, number>;
   archived: number;
+  recentWrites24h: number;
+  recentReads24h: number;
+  lowReadRatio: boolean;
 };
 
 export type ProviderReadiness = {
