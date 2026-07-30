@@ -21,6 +21,14 @@ test('project-write Chat creates one Work Item before streaming and reuses it', 
   await page.getByRole('button', { name: 'send' }).click();
   await (await firstResponse).finished();
   await expect(prompt).toBeEnabled();
+  await expect(page.getByText('Plan Ready')).toBeVisible();
+  await page.getByRole('button', { name: 'Approve & Execute' }).click();
+  await expect.poll(() => records.some(record => record.path === '/runs/run-chat-e2e/approve')).toBe(true);
+  expect(records.find(record => record.path === '/runs/run-chat-e2e/approve')?.body).toEqual({
+    planRevision: 2,
+    contractHash: 'sha256:work-chat-e2e-revision-2',
+    reason: 'Approved from Chat: Approve plan & allow execution',
+  });
 
   const firstCreateIndex = records.findIndex(record => record.path === '/work-items' && record.method === 'POST');
   const firstChatIndex = records.findIndex(record => record.path === '/chat' && record.method === 'POST');
@@ -98,6 +106,10 @@ async function mockGateway(page: Page): Promise<RequestRecord[]> {
       await json(route, workItem(record.body));
       return;
     }
+    if (url.pathname === '/work-items/work-chat-e2e') {
+      await json(route, approvalWorkItem());
+      return;
+    }
     await json(route, responseFor(url.pathname));
   });
   return records;
@@ -152,6 +164,38 @@ function workItem(input: Record<string, unknown> | undefined) {
     evidence: {
       verificationRequired: 0, verificationSucceeded: 0, verificationSkipped: 0,
       verificationFailed: 0, verificationPending: 0,
+    },
+  };
+}
+
+function approvalWorkItem() {
+  return {
+    ...workItem(undefined),
+    attentionState: 'approval_required',
+    nextAction: 'review_plan',
+    availableActions: {
+      approvePlan: {
+        label: 'Approve plan & allow execution',
+        effect: 'Approve the current persisted plan and schedule execution.',
+        scope: 'run_spec:run-chat-e2e',
+        irreversible: false,
+        payload: {
+          runSpecId: 'run-chat-e2e',
+          planRevision: 2,
+          contractHash: 'sha256:work-chat-e2e-revision-2',
+        },
+      },
+    },
+    evidence: {
+      latestRunSpecId: 'run-chat-e2e',
+      latestSessionId: 'session-e2e',
+      runSpecStatus: 'created',
+      taskRunStatus: 'blocked',
+      verificationRequired: 0,
+      verificationSucceeded: 0,
+      verificationSkipped: 0,
+      verificationFailed: 0,
+      verificationPending: 0,
     },
   };
 }

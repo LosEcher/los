@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
+const chatPlanApproval = readFileSync(new URL('./chat-plan-approval.tsx', import.meta.url), 'utf8');
 const chatComposer = readFileSync(new URL('./chat-composer.tsx', import.meta.url), 'utf8');
 const chatMessages = readFileSync(new URL('./chat-messages.tsx', import.meta.url), 'utf8');
 const useChatStream = readFileSync(new URL('./hooks/useChatStream.ts', import.meta.url), 'utf8');
@@ -167,6 +168,15 @@ test('chat ApprovalCard is interactive via operator-events and WS steering is wi
   assert.match(chatPage, /sessionId=\{sessionId\}/);
   assert.match(chatPage, /notices=\{/);
   assert.match(chatMessages, /\{notices\}[\s\S]*\{debugMode \?/);
+});
+
+test('Chat plan approval preserves the Work capability revision binding', () => {
+  assert.match(chatPage, /ChatPlanApproval/);
+  assert.match(chatPage, /workItemId=\{activeTodoContext\?\.id\}/);
+  assert.match(chatPlanApproval, /planRevision:\s*planApproval\.planRevision/);
+  assert.match(chatPlanApproval, /contractHash:\s*planApproval\.contractHash/);
+  assert.match(chatPlanApproval, /queryKey:\s*\['work-item', workItemId\]/);
+  assert.doesNotMatch(chatPlanApproval, /actor:\s*['"]web-chat['"]/);
 });
 
 test('dead-letter resolution requires an audited disposition instead of an empty ack', () => {
