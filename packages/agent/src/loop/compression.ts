@@ -7,6 +7,11 @@ import type { Message, ToolCall } from '../providers/index.js';
 import { estimateTokens, estimateMessageTokens, trimMessagesToBudget, truncateContent } from './token-utils.js';
 import type { ContextCompressionConfig } from './types.js';
 
+// ── Compaction attempt tracking ──
+// WeakMap keyed by messages array reference — tracks how many times compaction
+// was attempted and whether it succeeded in reducing message count.
+const _compactionState = new WeakMap<Message[], { attempts: number; lastReduced: boolean }>();
+
 /**
  * Three-tier context compression:
  *   warning    (80%): compress old turns into brief summaries
@@ -45,7 +50,6 @@ export function compressOrTrimMessages(
   const contextWindow = compression?.providerContextWindow ?? 0;
   const isLargeWindow = contextWindow > 200_000;
 
-  // Large-window providers (K3, Gemini 2.5 Pro, etc.) use absolute thresholds
   const warningRatio = isLargeWindow
     ? Math.min(300_000 / contextWindow, compression?.warningRatio ?? 0.80)
     : compression?.warningRatio ?? 0.80;
@@ -58,7 +62,20 @@ export function compressOrTrimMessages(
 
   const totalTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
   const ratio = totalTokens / budget;
-  if (ratio <= warningRatio) return messages; // Safely under the warning threshold.
+  if (ratio <= warningRatio) return messages;
+
+  if (!enabled) {
+    return totalTokens > budget ? trimMessagesToBudget(messages, budget) : messages;
+  }
+
+  // ── Compaction attempt throttle ──
+  const maxAttempts = compression?.maxCompactionAttempts ?? 3;
+  if (maxAttempts > 0) {
+    const state = _compactionState.get(messages);
+    if (state && state.attempts >= maxAttempts && !state.lastReduced) {
+      return messages;
+    }
+  }
 
   // Cache-aware: when cache hit rate is healthy (>= 70%), avoid structural
   // head compression that would destroy the prompt prefix cache. Instead,
@@ -112,6 +129,10 @@ export function compressOrTrimMessages(
   if (systemIdx >= 0) result.push(messages[systemIdx]!);
   result.push({ role: 'user', content: summary });
   result.push(...toKeep);
+
+  // Track compaction attempt
+  const prevState = _compactionState.get(messages) ?? { attempts: 0, lastReduced: false };
+  _compactionState.set(messages, { attempts: prevState.attempts + 1, lastReduced: result.length < messages.length });
 
   return result;
 }
