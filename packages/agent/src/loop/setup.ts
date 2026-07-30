@@ -29,7 +29,7 @@ import { createDeferredRegistry } from '../tools/core/deferred-registry.js';
 import type { MCPServerRegistryRecord } from '../tools/external/mcp-client.js';
 import { listMCPServers } from '../mcp-servers.js';
 import { mcpServerExecutionBlocker } from '../mcp-distribution-policy.js';
-import { createSpawnAgentRunner, registerSpawnAgentTool, type ChildAgentRunner } from '../tools/core/agent-tools.js';
+import { createSpawnAgentRunner, registerSpawnAgentTool, registerAgentQueryKillTools, type ChildAgentRunner } from '../tools/core/agent-tools.js';
 import { createEventEmitter, type SessionEventContext, type SessionEventCallback } from '../event-emitter.js';
 import { appendSessionEvent } from '../session-events.js';
 import {
@@ -206,6 +206,9 @@ export function setupAgentRun(
     onSessionEvent: config.onSessionEvent,
     onProviderFallback: config.onProviderFallback,
   }));
+
+  // Register background agent query/kill/list tools
+  registerAgentQueryKillTools(tools);
 
   const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
 
