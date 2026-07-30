@@ -43,6 +43,7 @@ import {
   AbortConfirmation,
 } from './chat-approval.js';
 import { FilesPanel } from './chat-files-panel.js';
+import { ChatPlanApproval } from './chat-plan-approval.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -332,6 +333,7 @@ export function ChatPage({
                   ))}
                 </div>
               )}
+              <ChatPlanApproval running={run.running} workItemId={activeTodoContext?.id} />
             </>
           )}
         >
