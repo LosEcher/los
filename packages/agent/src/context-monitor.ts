@@ -261,17 +261,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
 
   /** Format fill state as a human-readable string */
   function formatState(state: ContextFillState): string {
-    const pct = (state.fillPercent * 100).toFixed(1);
-    const levelIcon = {
-      normal: '○',
-      warn: '⚠',
-      checkpoint: '◈',
-      critical: '🛑',
-    }[state.level];
-    const cacheInfo = state.cacheObserved
-      ? ` cache:${((state.cacheHitRate ?? 0) * 100).toFixed(0)}%`
-      : '';
-    return `${levelIcon} [${state.level.toUpperCase()}] Turn ${state.turn}: ${state.usedTokens.toLocaleString()} / ${state.contextWindowTokens.toLocaleString()} tokens (${pct}%)${cacheInfo}`;
+    return formatContextFill(state);
   }
 
   return { update, reset, getState, formatState, recordCacheActivity, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
