@@ -5,13 +5,14 @@ import {
   CheckCheck,
   ChevronRight,
   CircleDot,
+  Play,
   Plus,
   RefreshCcw,
   ShieldAlert,
   Zap,
 } from 'lucide-react';
 
-import { getJson, postJson, type InboxEntry, type InboxResponse, type WorkItemAttentionState } from '../api/index.js';
+import { getJson, postJson, type InboxEntry, type InboxResponse, type WorkItemAttentionState, type WorkItemProjection } from '../api/index.js';
 import { formatDate } from '../ui.js';
 
 type InboxFilter = 'all' | 'decision' | 'recovery' | 'review' | 'running';
@@ -21,11 +22,13 @@ export function InboxPage({
   onOpenRun,
   onOpenSession,
   onApprovePlan,
+  onStartWork,
 }: {
   onOpenWork: (id: string) => void;
   onOpenRun: (id: string) => void;
   onOpenSession: (id: string) => void;
   onApprovePlan: (runSpecId: string) => void;
+  onStartWork?: (item: WorkItemProjection) => void;
 }) {
   const [filter, setFilter] = useState<InboxFilter>('all');
   const [quickGoal, setQuickGoal] = useState('');
@@ -37,11 +40,21 @@ export function InboxPage({
   });
   const quickMutation = useMutation({
     mutationFn: (goal: string) => postJson<{ id: string }>('/work-items/quick', { goal }),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setQuickGoal('');
       queryClient.invalidateQueries({ queryKey: ['inbox'] });
       queryClient.invalidateQueries({ queryKey: ['work-items'] });
-      onOpenWork(data.id);
+      if (onStartWork) {
+        try {
+          const projection = await getJson<WorkItemProjection>(`/work-items/${data.id}`);
+          onStartWork(projection);
+        } catch {
+          // fallback: navigate to work detail if projection fetch fails
+          onOpenWork(data.id);
+        }
+      } else {
+        onOpenWork(data.id);
+      }
     },
   });
   const handleQuickSubmit = useCallback(() => {
@@ -117,6 +130,11 @@ export function InboxPage({
               entry={entry}
               onAction={() => openEntry(entry, { onOpenWork, onOpenRun, onOpenSession })}
               onApprovePlan={() => entry.approvePlan && onApprovePlan(entry.approvePlan.runSpecId)}
+              onStartWork={onStartWork && entry.workItemId
+                ? () => {
+                  getJson<WorkItemProjection>(`/work-items/${entry.workItemId}`).then(onStartWork).catch(() => onOpenWork(entry.workItemId!));
+                }
+                : undefined}
             />
           ))}
         </div>
@@ -125,9 +143,10 @@ export function InboxPage({
   );
 }
 
-function InboxRow({ entry, onAction, onApprovePlan }: { entry: InboxEntry; onAction: () => void; onApprovePlan: () => void }) {
+function InboxRow({ entry, onAction, onApprovePlan, onStartWork }: { entry: InboxEntry; onAction: () => void; onApprovePlan: () => void; onStartWork?: () => void }) {
   const Icon = attentionIcon(entry.attentionState);
   const canApprove = entry.attentionState === 'approval_required' && entry.approvePlan;
+  const canStart = entry.nextAction === 'start' && onStartWork;
   return (
     <article className="attention-row" data-attention={entry.attentionState}>
       <div className="attention-icon"><Icon size={16} /></div>
@@ -148,6 +167,11 @@ function InboxRow({ entry, onAction, onApprovePlan }: { entry: InboxEntry; onAct
         {canApprove && (
           <button className="attention-action approve-action" type="button" onClick={onApprovePlan}>
             Approve <ChevronRight size={14} />
+          </button>
+        )}
+        {canStart && (
+          <button className="attention-action start-action" type="button" onClick={onStartWork}>
+            <Play size={13} /> Start <ChevronRight size={14} />
           </button>
         )}
         <button className="attention-action" type="button" onClick={onAction}>
