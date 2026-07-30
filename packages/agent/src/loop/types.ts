@@ -117,6 +117,8 @@ export interface AgentConfig {
     onCheckpoint?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
     /** Callback on CRITICAL level crossing */
     onCritical?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
+    /** Callback when cache hit rate drops below the warn threshold (default 0.70) */
+    onCacheLow?: (state: { fillPercent: number; usedTokens: number; turn: number }) => void;
   };
   /** Advisory model diagnostics. Defaults to heuristic shadow mode when unset. */
   modelDiagnostics?: ModelDiagnosticConfig;

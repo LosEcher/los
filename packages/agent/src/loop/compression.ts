@@ -22,6 +22,14 @@ import type { ContextCompressionConfig } from './types.js';
  * This prevents premature compression on large-window providers while
  * still capping memory pressure well below the actual window limit.
  *
+ * **Cache-aware strategy** (when `cacheHitRate` is provided):
+ *   - cacheHitRate >= 0.70 (cache alive): delay head compression — preserve the
+ *     cached prefix (system + early turns) and apply tail-only tool-result
+ *     truncation instead. This avoids destroying the provider's prompt prefix
+ *     cache and triggering full-price re-reads.
+ *   - cacheHitRate < 0.70 or absent (cache broken): fall back to the standard
+ *     head-compression strategy.
+ *
  * Preserves the system message and the most recent turns intact.
  * Compressed turns become a synthetic "user" message summarizing earlier work.
  */
@@ -29,6 +37,7 @@ export function compressOrTrimMessages(
   messages: Message[],
   budget: number,
   compression?: ContextCompressionConfig,
+  cacheHitRate?: number,
 ): Message[] {
   if (budget <= 0) return messages;
 
@@ -50,6 +59,15 @@ export function compressOrTrimMessages(
   const totalTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
   const ratio = totalTokens / budget;
   if (ratio <= warningRatio) return messages; // Safely under the warning threshold.
+
+  // Cache-aware: when cache hit rate is healthy (>= 70%), avoid structural
+  // head compression that would destroy the prompt prefix cache. Instead,
+  // apply tail-only eviction — truncate large tool results from the end
+  // while keeping the cached prefix (system + early conversation) intact.
+  const cacheAlive = cacheHitRate !== undefined && cacheHitRate >= 0.70;
+  if (cacheAlive && ratio < 0.95 && !(totalTokens > budget && ratio > 0.90)) {
+    return compressTailOnly(messages, budget);
+  }
 
   if (!enabled) {
     return totalTokens > budget ? trimMessagesToBudget(messages, budget) : messages;
@@ -93,6 +111,41 @@ export function compressOrTrimMessages(
   if (systemIdx >= 0) result.push(messages[systemIdx]!);
   result.push({ role: 'user', content: summary });
   result.push(...toKeep);
+
+  return result;
+}
+
+/**
+ * Tail-only compression: truncate large tool result content from the end
+ * of the message list while preserving the prefix (system + early turns).
+ *
+ * This preserves the provider's prompt prefix cache — system prompt and
+ * early conversation remain byte-for-byte identical, so the cache survives.
+ *
+ * Strategy: scan from the end, truncate tool messages exceeding a minimum
+ * size threshold, stop when estimated token count is within budget.
+ */
+function compressTailOnly(messages: Message[], budget: number): Message[] {
+  const MIN_TOOL_CONTENT_BYTES = 1024;
+  const result = [...messages];
+  const totalTokens = result.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+  if (totalTokens <= budget) return result;
+
+  // Evict from the tail: truncate the largest tool results first
+  const excessTokens = totalTokens - budget;
+  let saved = 0;
+  for (let i = result.length - 1; i >= 0 && saved < excessTokens; i--) {
+    const msg = result[i]!;
+    if (msg.role !== 'tool') continue;
+    const contentLen = msg.content.length;
+    if (contentLen <= MIN_TOOL_CONTENT_BYTES) continue;
+    const tokens = estimateTokens(msg.content);
+    // Truncate to ~25% of original size or MIN_TOOL_CONTENT_BYTES chars
+    const keepChars = Math.max(MIN_TOOL_CONTENT_BYTES, Math.floor(contentLen * 0.25));
+    const truncated = `${msg.content.slice(0, keepChars)}\n[... evicted ${contentLen - keepChars} bytes from tail to preserve cache prefix]`;
+    result[i] = { ...msg, content: truncated };
+    saved += tokens - estimateTokens(truncated);
+  }
 
   return result;
 }

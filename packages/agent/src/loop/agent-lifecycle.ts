@@ -41,6 +41,11 @@ export function setupContextMonitor(
       emitEvent({ type: 'context.fill.critical', turn: s.turn, payload: { fillPercent: s.fillPercent, usedTokens: s.usedTokens, contextWindowTokens: s.contextWindowTokens } });
       applyCriticalEviction(s.fillPercent);
     },
+    onCacheLow: (s) => {
+      agentLog.warn(`Cache hit rate low: ${((s.cacheHitRate ?? 0) * 100).toFixed(0)}% (${s.cumulativeCacheHitTokens.toLocaleString()} hit / ${s.cumulativeCacheMissTokens.toLocaleString()} miss tokens)`);
+      config.contextMonitor?.onCacheLow?.({ fillPercent: s.fillPercent, usedTokens: s.usedTokens, turn: s.turn });
+      emitEvent({ type: 'context.cache.low', turn: s.turn, payload: { cacheHitRate: s.cacheHitRate, cacheHitTokens: s.cumulativeCacheHitTokens, cacheMissTokens: s.cumulativeCacheMissTokens, fillPercent: s.fillPercent } });
+    },
   });
 }
 

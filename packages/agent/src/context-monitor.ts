@@ -23,6 +23,8 @@ export interface ContextMonitorConfig {
   checkpointThreshold?: number;
   /** Critical / compact threshold (0-1). Default: 0.85 */
   criticalThreshold?: number;
+  /** Cache hit rate that triggers a low-cache warning (0-1). Default: 0.70 */
+  cacheHitRateWarnThreshold?: number;
   /** Callback when WARN level is reached */
   onWarn?: (state: ContextFillState) => void;
   /** Callback when CHECKPOINT level is reached (fires once per threshold crossing) */
@@ -31,6 +33,8 @@ export interface ContextMonitorConfig {
   onCritical?: (state: ContextFillState) => void;
   /** Callback on every fill change (for telemetry) */
   onFillChange?: (state: ContextFillState) => void;
+  /** Callback when cache hit rate drops below cacheHitRateWarnThreshold */
+  onCacheLow?: (state: ContextFillState) => void;
 }
 
 export interface ContextFillState {
@@ -52,6 +56,14 @@ export interface ContextFillState {
   cumulativeCompletionTokens: number;
   /** Current estimated context tokens (latest prompt + completion, or provider total) */
   estimatedTotalTokens: number;
+  /** Rolling cache hit rate (0-1), or undefined if no cache events observed */
+  cacheHitRate: number | undefined;
+  /** Whether any cache activity has been observed across turns */
+  cacheObserved: boolean;
+  /** Cumulative cache hit tokens across all turns */
+  cumulativeCacheHitTokens: number;
+  /** Cumulative cache miss tokens across all turns */
+  cumulativeCacheMissTokens: number;
 }
 
 export type ContextFillLevel = 'normal' | 'warn' | 'checkpoint' | 'critical';
@@ -86,9 +98,12 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
   const criticalThresh = config.criticalThreshold ?? DEFAULTS.criticalThreshold;
 
   const crossed: CrossedLevels = { warn: false, checkpoint: false, critical: false };
+  let crossedCacheLow = false;
   let latestPrompt = 0;
   let cumulativeCompletion = 0;
   let currentContextTokens = 0;
+  let cumulativeCacheHit = 0;
+  let cumulativeCacheMiss = 0;
 
   function determineLevel(fillPercent: number): ContextFillLevel {
     if (fillPercent >= criticalThresh) return 'critical';
@@ -108,6 +123,22 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     if (level === 'critical') crossed.critical = true;
     if (level === 'checkpoint') crossed.checkpoint = true;
     if (level === 'warn') crossed.warn = true;
+  }
+
+  /**
+   * Record cache activity to compute rolling hit rate.
+   * Call after each model turn alongside update().
+   */
+  function recordCacheActivity(hitTokens: number, missTokens: number): void {
+    cumulativeCacheHit += normalizeTokenCount(hitTokens);
+    cumulativeCacheMiss += normalizeTokenCount(missTokens);
+  }
+
+  /** Compute current cache hit rate from accumulated token counts */
+  function computeCacheHitRate(): number | undefined {
+    const total = cumulativeCacheHit + cumulativeCacheMiss;
+    if (total === 0) return undefined;
+    return cumulativeCacheHit / total;
   }
 
   /**
@@ -148,6 +179,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     const newCrossing = isNewCrossing(level);
     if (newCrossing) markCrossed(level);
 
+    const cacheHitRate = computeCacheHitRate();
     const state: ContextFillState = {
       usedTokens,
       contextWindowTokens: ctxWindow,
@@ -158,10 +190,25 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
       latestPromptTokens: latestPrompt,
       cumulativeCompletionTokens: cumulativeCompletion,
       estimatedTotalTokens: usedTokens,
+      cacheHitRate,
+      cacheObserved: cumulativeCacheHit + cumulativeCacheMiss > 0,
+      cumulativeCacheHitTokens: cumulativeCacheHit,
+      cumulativeCacheMissTokens: cumulativeCacheMiss,
     };
 
     // Fire callbacks
     config.onFillChange?.(state);
+
+    // Cache hit rate warning (fires once per low-cache crossing)
+    const cacheLowThreshold = config.cacheHitRateWarnThreshold ?? 0.70;
+    if (cacheHitRate !== undefined && cacheHitRate < cacheLowThreshold && !crossedCacheLow) {
+      crossedCacheLow = true;
+      config.onCacheLow?.(state);
+    }
+    // Reset cache-low crossing when hit rate recovers above threshold
+    if (cacheHitRate !== undefined && cacheHitRate >= cacheLowThreshold && crossedCacheLow) {
+      crossedCacheLow = false;
+    }
 
     if (newCrossing) {
       switch (level) {
@@ -185,14 +232,18 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     crossed.warn = false;
     crossed.checkpoint = false;
     crossed.critical = false;
+    crossedCacheLow = false;
     latestPrompt = 0;
     cumulativeCompletion = 0;
     currentContextTokens = 0;
+    cumulativeCacheHit = 0;
+    cumulativeCacheMiss = 0;
   }
 
   /** Get current state without updating */
   function getState(): Omit<ContextFillState, 'levelCrossed' | 'turn'> {
     const fillPercent = currentContextTokens / ctxWindow;
+    const cacheHitRate = computeCacheHitRate();
     return {
       usedTokens: currentContextTokens,
       contextWindowTokens: ctxWindow,
@@ -201,6 +252,10 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
       latestPromptTokens: latestPrompt,
       cumulativeCompletionTokens: cumulativeCompletion,
       estimatedTotalTokens: currentContextTokens,
+      cacheHitRate,
+      cacheObserved: cumulativeCacheHit + cumulativeCacheMiss > 0,
+      cumulativeCacheHitTokens: cumulativeCacheHit,
+      cumulativeCacheMissTokens: cumulativeCacheMiss,
     };
   }
 
@@ -213,10 +268,13 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
       checkpoint: '◈',
       critical: '🛑',
     }[state.level];
-    return `${levelIcon} [${state.level.toUpperCase()}] Turn ${state.turn}: ${state.usedTokens.toLocaleString()} / ${state.contextWindowTokens.toLocaleString()} tokens (${pct}%)`;
+    const cacheInfo = state.cacheObserved
+      ? ` cache:${((state.cacheHitRate ?? 0) * 100).toFixed(0)}%`
+      : '';
+    return `${levelIcon} [${state.level.toUpperCase()}] Turn ${state.turn}: ${state.usedTokens.toLocaleString()} / ${state.contextWindowTokens.toLocaleString()} tokens (${pct}%)${cacheInfo}`;
   }
 
-  return { update, reset, getState, formatState, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
+  return { update, reset, getState, formatState, recordCacheActivity, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
 }
 
 function normalizeTokenCount(value: number): number {
@@ -237,5 +295,8 @@ export function formatContextFill(state: ContextFillState): string {
     checkpoint: '◈',
     critical: '🛑',
   }[state.level];
-  return `${levelIcon} [${state.level.toUpperCase()}] Turn ${state.turn}: ${state.usedTokens.toLocaleString()} / ${state.contextWindowTokens.toLocaleString()} tokens (${pct}%)`;
+  const cacheInfo = state.cacheObserved
+    ? ` cache:${((state.cacheHitRate ?? 0) * 100).toFixed(0)}%`
+    : '';
+  return `${levelIcon} [${state.level.toUpperCase()}] Turn ${state.turn}: ${state.usedTokens.toLocaleString()} / ${state.contextWindowTokens.toLocaleString()} tokens (${pct}%)${cacheInfo}`;
 }
