@@ -40,26 +40,29 @@ export async function resolveExecutor(
   const requiredCapabilities = _compileExecutorRequirements(config, intent);
 
   if (config.nodeUrls && config.nodeUrls.length > 0) {
-    const normalizedUrls = config.nodeUrls.map(normalizeExecutorUrl);
-    const firstUrl = normalizedUrls.find(Boolean);
-    if (!firstUrl) {
+    const normalizedUrls = config.nodeUrls.map(normalizeExecutorUrl).filter(Boolean);
+    if (normalizedUrls.length === 0) {
       throw new Error('Executor is enabled but no executor node URL is configured');
     }
-    const nodeId = normalizeOptionalString(config.nodeId) ?? firstUrl;
+    // Distribute load across configured nodes instead of always picking the first
+    const selectedUrl = normalizedUrls.length === 1
+      ? normalizedUrls[0]!
+      : normalizedUrls[Math.floor(Math.random() * normalizedUrls.length)]!;
+    const nodeId = normalizeOptionalString(config.nodeId) ?? selectedUrl;
+    const skipped = normalizedUrls
+      .filter(url => url !== selectedUrl)
+      .map(url => ({ id: url, reason: 'load_distribution' as const }));
     return {
-      url: firstUrl,
+      url: selectedUrl,
       nodeId,
       agentKey: normalizeOptionalString(config.agentKey),
       decision: {
         source: 'config_node_url',
         placementTier: 'degraded',
         requiredCapabilities,
-        candidateIds: normalizedUrls.filter(Boolean),
+        candidateIds: normalizedUrls,
         selectedId: nodeId,
-        skipped: normalizedUrls
-          .map((url, index) => ({ url, index }))
-          .filter(item => !item.url)
-          .map(item => ({ id: `nodeUrls[${item.index}]`, reason: 'invalid_executor_url' })),
+        skipped,
       },
     };
   }

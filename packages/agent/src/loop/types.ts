@@ -175,6 +175,8 @@ export interface ContextCompressionConfig {
    * compression on large-window providers while still capping memory pressure.
    */
   providerContextWindow?: number;
+  /** Max ineffective compaction attempts before throttle. Default: 3. Set to 0 to disable. */
+  maxCompactionAttempts?: number;
   /** Semantic eviction configuration — mask persisted tool results at critical fill. */
   semanticEviction?: {
     enabled?: boolean;

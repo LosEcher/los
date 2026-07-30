@@ -85,6 +85,30 @@ export function buildSafeMCPEnv(): Record<string, string> {
   return env;
 }
 
+// ── Orca Computer-Use server ────────────────────────────
+
+const ORCA_MCP_PACKAGE = '@reasonix/orca-mcp';
+const ORCA_MCP_VERSION = '0.1.0';
+
+function createOrcaComputerUseServer(): BuiltinMCPServer {
+  return {
+    id: 'orca-computer-use',
+    displayName: 'Orca Computer-Use',
+    isEnabled: () => process.env.LOS_ORCA_ENABLED !== '0',
+    shouldAutoStart: (existing) => !existing.some(cfg =>
+      cfg.command?.includes('orca') || cfg.command?.includes('computer-use')
+      || cfg.args?.some(a => a.includes('orca')),
+    ),
+    createConfig: () => ({
+      command: 'npx',
+      args: ['-y', `${ORCA_MCP_PACKAGE}@${ORCA_MCP_VERSION}`],
+      env: {
+        ORCA_DISPLAY: process.env.ORCA_DISPLAY ?? ':0',
+      },
+    }),
+  };
+}
+
 // ── Browser server implementation ───────────────────────
 
 const BROWSER_SERVER_PACKAGE = '@executeautomation/playwright-mcp-server';
@@ -166,6 +190,7 @@ export function createBrowserMCPServer(
  * picked up by resolveBuiltinMCPConfigs() with no other code changes.
  */
 const BUILTIN_SERVERS: BuiltinMCPServer[] = [
+  createOrcaComputerUseServer(),
   createBrowserMCPServer(),
 ];
 

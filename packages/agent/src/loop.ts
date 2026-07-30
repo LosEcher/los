@@ -509,6 +509,8 @@ export async function runAgent(
         const previousLength = messages.length;
         messages.length = 0;
         messages.push(...compressed);
+        // Reset context monitor after compaction so fill% reflects new message size
+        if (ctxMon) ctxMon.reset();
         agentLog.debug(`Compressed context: ${compressed.length} messages (was ${previousLength})`);
       }
     }

@@ -102,7 +102,12 @@ export async function runToolCalls(input: RunToolCallsInput): Promise<{
   // Sort back to original order so model sees results in call order
   results.sort((a, b) => a.index - b.index);
 
-  const toolResults = results.map(r => r.content);
+  const TOOL_RESULT_SOFT_CAP = 32_768; // 32KB — prevent single tool result from dominating context
+  const toolResults = results.map(r => {
+    if (r.content.length <= TOOL_RESULT_SOFT_CAP) return r.content;
+    const lines = r.content.split('\n');
+    return `${r.content.slice(0, TOOL_RESULT_SOFT_CAP)}\n[...truncated ${r.content.length - TOOL_RESULT_SOFT_CAP} bytes, ${lines.length} lines total — retrieve full content via read_file with offset/limit]`;
+  });
   const toolMessages = results.map(r => ({
     role: 'tool' as const,
     content: r.content.slice(0, 8000),
