@@ -21,6 +21,10 @@ export interface ResolveProviderModelPolicyInput<Source extends string> {
   /** Optional health scores for candidate providers. When provided, targets
    * with passing evidence are ranked by health score instead of list order. */
   healthScores?: readonly HealthScore[];
+  /** Optional per-provider cost data (prompt USD/1M tokens) for cost-aware
+   * tiebreaking. When two providers have health scores within 0.05, the cheaper
+   * provider is preferred. */
+  costData?: ReadonlyMap<string, number>;
   sources: {
     evidence: Source;
     target: Source;
@@ -47,7 +51,7 @@ export function resolveProviderModelPolicy<Source extends string>(
   const formatLabel = (target: ProviderModelPolicyTarget) => formatTargetLabel(target, input.emptyTargetLabel);
 
   if (targets.length > 0) {
-    const selected = selectTargetFromEvidence(targets, input.evidence ?? [], input.healthScores);
+    const selected = selectTargetFromEvidence(targets, input.evidence ?? [], input.healthScores, input.costData);
     if (selected) {
       return {
         provider: selected.target.provider,
@@ -99,6 +103,7 @@ function selectTargetFromEvidence(
   targets: readonly (ProviderModelPolicyTarget & { provider: string })[],
   evidence: readonly ProviderModelPolicyEvidence[],
   healthScores?: readonly HealthScore[],
+  costData?: ReadonlyMap<string, number>,
 ): { target: ProviderModelPolicyTarget & { provider: string }; evidence: ProviderModelPolicyEvidence } | undefined {
   // Collect all targets with passing evidence
   const passing: Array<{ target: ProviderModelPolicyTarget & { provider: string }; evidence: ProviderModelPolicyEvidence }> = [];
@@ -115,7 +120,8 @@ function selectTargetFromEvidence(
   if (passing.length === 1) return passing[0];
 
   // When health scores are available, skip unhealthy when alternatives exist
-  // and rank remaining candidates by health (healthiest first).
+  // and rank remaining candidates by health (healthiest first), with cost-aware
+  // tiebreaking: when two providers are within 0.05 health score, prefer cheaper.
   let candidates = passing;
   if (healthScores && healthScores.length > 0) {
     const scoreMap = new Map(healthScores.map(s => [s.provider, s]));
@@ -132,6 +138,15 @@ function selectTargetFromEvidence(
       if (!scoreB) return -1;
       if (isHealthierThan(scoreA, scoreB)) return -1;
       if (isHealthierThan(scoreB, scoreA)) return 1;
+      // Health scores within 0.05 → cost-aware tiebreaker
+      const healthDiff = Math.abs(scoreA.score - scoreB.score);
+      if (healthDiff <= 0.05 && costData && costData.size > 0) {
+        const costA = costData.get(a.target.provider);
+        const costB = costData.get(b.target.provider);
+        if (costA !== undefined && costB !== undefined && costA !== costB) {
+          return costA - costB; // cheaper first
+        }
+      }
       return scoreB.score - scoreA.score;
     });
   }
