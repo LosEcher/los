@@ -71,13 +71,18 @@ a statement about server authentication support.
 test -n "${FORGEJO_TOKEN:-}"
 curl -fsS --max-time 15 \
   -H "Authorization: token $FORGEJO_TOKEN" \
-  "$FORGEJO_SERVER_URL/api/v1/user" \
-  | jq '{login,is_admin,active}'
+  "$FORGEJO_SERVER_URL/api/v1/repos/$FORGEJO_REPOSITORY" \
+  | jq '{full_name,private,archived,permissions,default_branch}'
 ```
 
 Use a token with the smallest repository permissions that cover the intended
 operation. Do not put the token in a remote URL, shell history, committed env
 file, operation record, or issue/PR body.
+
+A repository-scoped token may return `403` from `/api/v1/user` or branch
+protection endpoints while repository, PR creation, and merge endpoints return
+`200`/`201`. Verify the exact repository endpoint needed for the operation;
+do not broaden token scope only to make `/user` succeed.
 
 ### Git Keychain Basic Authentication
 
@@ -143,7 +148,29 @@ or PR does not exist; authenticate first.
 
 ## Normal Delivery
 
-### 1. Verify And Push The Bookmark
+Forgejo CI becoming green does not merge the PR automatically. An operator or
+authorized delivery agent must explicitly submit the Forgejo merge request
+after re-reading the exact head and base. In this runbook, “manual merge” means
+that explicit protected Forgejo action; it never means running a local
+`git merge` and pushing `main`.
+
+### 1. Start From The Authoritative Main
+
+Create each unrelated intent from the fetched Forgejo main. Never start the
+next task from a feature change merely because that change was pushed or has an
+open PR.
+
+```bash
+jj git fetch --remote origin
+jj new main@origin
+jj describe -m '<type(scope): summary>'
+```
+
+Keep local `main` on `origin/main` until Forgejo merges the PR. Moving `main` to
+an unmerged feature head makes later branches inherit unpublished work and was
+the source of the mixed #99/#100 history.
+
+### 2. Verify And Push The Bookmark
 
 Use the narrowest project check first and run `pnpm run gate` when the change
 crosses package boundaries or is ready for delivery.
@@ -164,7 +191,7 @@ test -n "$HEAD_SHA"
 printf '%s\n' "$HEAD_SHA"
 ```
 
-### 2. Create The Forgejo Pull Request
+### 3. Create And Inspect The Forgejo Pull Request
 
 Use the branch name, not an unverified local SHA, as `head`. The following is
 the Basic Auth form; token authentication uses the same endpoint and payload.
@@ -188,7 +215,20 @@ jq -n \
 After creation, fetch the PR again and require `.head.sha == $HEAD_SHA`. A CI
 run for another head, a local gate, or a GitHub run does not satisfy this check.
 
-### 3. Monitor Exact-Head CI
+Inspect the file list before waiting for CI. If the PR spans unrelated package
+intents, stop and rebuild separate bookmarks from `main@origin` rather than
+merging or force-rewriting the published mixed branch.
+
+```bash
+PR_NUMBER=<forgejo-pr-number>
+
+curl -fsS --max-time 15 \
+  --user "$FORGEJO_USER:$FORGEJO_PASSWORD" \
+  "$FORGEJO_SERVER_URL/api/v1/repos/$FORGEJO_REPOSITORY/pulls/$PR_NUMBER/files" \
+  | jq '[.[] | {filename,status,additions,deletions}]'
+```
+
+### 4. Monitor Exact-Head CI
 
 Check both the aggregate commit status and Actions jobs. Keep pending, failed,
 cancelled, and success states distinct.
@@ -208,8 +248,12 @@ curl -fsS --max-time 15 \
 Do not merge while a required context is missing, pending, stale, cancelled, or
 failed. A successful Actions run may appear before the commit-status aggregate
 finishes propagating; wait and read again rather than bypassing protection.
+The current workflow emits `gate-web-e2e` in addition to the three documented
+server-required contexts. Operator delivery waits for all four; do not claim
+that `gate-web-e2e` is server-enforced until the protection surface is read
+through an authorized UI or API credential.
 
-### 4. Merge Through The API
+### 5. Merge Through The API
 
 Immediately before merging, re-read the PR and compare the exact head. Do not
 reuse an old response after the branch has changed.
@@ -236,7 +280,7 @@ jq -n \
 Keep `force_merge:false`. Deleting the feature branch is a separate closeout
 decision so absorption and operator consent can be verified first.
 
-### 5. Verify And Close Out
+### 6. Verify And Close Out
 
 ```bash
 jj git fetch --remote origin
@@ -249,6 +293,12 @@ bash tools/branch-prune-origin.sh
 operator approves remote deletion. Report the PR number, exact head, merge
 commit, required checks, dirty paths, bookmark state, checks not run, and any
 remaining risk.
+
+For a closed, unmerged PR with unique obsolete patches, the prune script will
+correctly report `Needs review`. Delete that branch only after verifying the PR
+is closed, its exact head is recorded, and the PR body names the replacement or
+rejection reason. Use `--no-verify` only for that verified remote-ref deletion;
+it is not permission to skip checks on a code push.
 
 ## GitHub-To-Forgejo Reconciliation
 
@@ -285,6 +335,7 @@ authentication, not current API reachability or successful mirroring.
 | `/api/v1/version` returns `200` | Forgejo/API is reachable | Authenticate and read the repository |
 | Private repo endpoint returns anonymous `404` | The repo may be hidden from anonymous callers | Retry with supported authentication |
 | Authenticated `/api/v1/user` returns `401` | Credential rejected or second factor required | Verify Keychain/token and `X-FORGEJO-OTP` requirements |
+| Repo-scoped token gets `/user` `403` but repository endpoint `200` | Token lacks user-profile scope but can access the repository | Verify the exact repo/PR endpoint and keep least privilege |
 | Authenticated repo returns `403` | Account or token lacks permission | Read repo permissions; do not bypass protection |
 | PR create returns `409` or `422` | Conflict, duplicate PR, stale/missing branch, or invalid payload | List open PRs and read both branch heads |
 | Merge request is rejected while jobs are green | Commit-status aggregation may still be pending or the head changed | Re-read PR head, protection contexts, and aggregate status |
