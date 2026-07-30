@@ -57,6 +57,8 @@ import {
 import {
   buildStopConditionReminder,
   checkStopConditionsMet,
+  evaluateStopConditions,
+  getStopConditions,
   hasStopConditions,
 } from './loop/stop-conditions.js';
 import { setupContextMonitor, restoreCheckpointState } from './loop/agent-lifecycle.js';
@@ -479,39 +481,57 @@ export async function runAgent(
 
     // ── Stop-condition runtime enforcement ─────────────
     // When a run contract has stop conditions, periodically remind the
-    // agent and check if the LLM's last response declares them met.
-    // This runs every 5 turns (configurable) to avoid excessive cost.
+    // agent and evaluate whether each condition has been independently met.
+    // Forced evaluation on the penultimate turn (before maxLoops) prevents
+    // the loop from exhausting its budget without a stop-condition gate.
     const scInterval = config.stopConditionCheckInterval ?? 5;
-    if (hasStopConditions(config.runContractMetadata) && (i + 1) % scInterval === 0) {
+    const isPenultimate = config.maxLoops && (i + 1) >= config.maxLoops - 1;
+    if (hasStopConditions(config.runContractMetadata) && ((i + 1) % scInterval === 0 || isPenultimate)) {
       const reminder = buildStopConditionReminder(config.runContractMetadata);
       if (reminder) {
         messages.push({ role: 'user', content: reminder });
       }
-      if (checkStopConditionsMet(res.text)) {
-        agentLog.info('Stop conditions met — ending loop');
+      const conditions = getStopConditions(config.runContractMetadata);
+      const evaluation = evaluateStopConditions(res.text, conditions);
+      if (evaluation.allMet) {
+        agentLog.info('Stop conditions met — ending loop', { perCondition: evaluation.conditions });
         stoppedByCondition = true;
         break;
       }
+      if (isPenultimate && !evaluation.allMet) {
+        agentLog.warn('Stop conditions not met on penultimate turn — loop will end after maxLoops without full satisfaction');
+      }
     }
 
-    // Mid-loop context compression
+    // ── Context-aware compression (monitor-driven) ──────
+    // Only trigger compression when the context monitor signals
+    // CHECKPOINT (75%) or CRITICAL (85%) levels. This avoids
+    // unnecessary per-turn computation when the window is healthy.
+    // After compression the monitor is reset so the next trigger
+    // is based on post-compaction token counts.
     if (config.maxContextTokens && config.maxContextTokens > 0 &&
-        config.contextCompression?.enabled !== false) {
-      const cacheTotal = totalCacheHitTokens + totalCacheMissTokens;
-      const cacheHitRate = cacheTotal > 0 ? totalCacheHitTokens / cacheTotal : undefined;
-      const compressed = compressOrTrimMessages(
-        messages, config.maxContextTokens, config.contextCompression, cacheHitRate,
-      );
-      // Only replace if compression actually changed the messages
-      const compressedContentChanged = compressed.length !== messages.length
-        || compressed.some((m, i) => m.content !== messages[i]?.content);
-      if (compressedContentChanged) {
-        const previousLength = messages.length;
-        messages.length = 0;
-        messages.push(...compressed);
-        // Reset context monitor after compaction so fill% reflects new message size
-        if (ctxMon) ctxMon.reset();
-        agentLog.debug(`Compressed context: ${compressed.length} messages (was ${previousLength})`);
+        config.contextCompression?.enabled !== false &&
+        ctxMon) {
+      const ctxState = ctxMon.getState();
+      const shouldCompress = ctxState && (ctxState.level === 'checkpoint' || ctxState.level === 'critical');
+      if (shouldCompress) {
+        const cacheTotal = totalCacheHitTokens + totalCacheMissTokens;
+        const cacheHitRate = cacheTotal > 0 ? totalCacheHitTokens / cacheTotal : undefined;
+        const compressed = compressOrTrimMessages(
+          messages, config.maxContextTokens, config.contextCompression, cacheHitRate,
+        );
+        const compressedContentChanged = compressed.length !== messages.length
+          || compressed.some((m, i) => m.content !== messages[i]?.content);
+        if (compressedContentChanged) {
+          const previousLength = messages.length;
+          messages.length = 0;
+          messages.push(...compressed);
+          ctxMon.reset();
+          agentLog.debug(`Compressed context at ${ctxState.level} (${(ctxState.fillPercent * 100).toFixed(0)}% fill): ${compressed.length} messages (was ${previousLength})`);
+        }
+        // Even if compression didn't change content, reset the monitor's
+        // crossed flags so the next fill crossing triggers a fresh compaction attempt.
+        ctxMon.resetLevelFlags();
       }
     }
   }

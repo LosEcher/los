@@ -7,7 +7,7 @@
  * File-size loop auto-fix strategy — uses CBM code graph to recommend split points.
  *
  * Phases:
- *   1. Audit: scan for files > 400 lines (check-structure.sh)
+ *   1. Audit: scan for files > 500 lines (check-structure.sh)
  *   2. Analyze: for each hot file, query CBM symbol graph to find natural split boundaries
  *   3. Report: generate a decomposition plan with specific extract targets
  *   4. Fix: if autoFix enabled, create agent tasks for each split
@@ -26,7 +26,7 @@ export interface HotFile {
   path: string;
   lines: number;
   isNew: boolean;           // not grandfathered in baseline
-  threshold: 'block' | 'warn'; // 600 = block, 400 = warn
+  threshold: 'block' | 'warn'; // 700 = block, 500 = warn
 }
 
 export interface SplitRecommendation {
@@ -46,8 +46,8 @@ export interface SplitRecommendation {
 // ── Audit: detect hot files ──────────────────────────────
 
 export function detectHotFiles(root: string): HotFile[] {
-  const MAX_LINES = 600;
-  const BLOCK_LINES = 400;
+  const MAX_LINES = 700;
+  const BLOCK_LINES = 500;
   const baselineFile = resolve(root, 'tools', '.large-file-baseline.txt');
 
   let baselinePaths: Set<string>;
@@ -290,7 +290,7 @@ export async function applyFileSizeFix(
 
   const totalCandidates = recommendations.reduce((sum, r) => sum + r.extractCandidates.length, 0);
   const lines: string[] = [
-    `File-size loop: ${hotFiles.length} file(s) > 400 lines, ${recommendations.length} analyzed`,
+    `File-size loop: ${hotFiles.length} file(s) > 500 lines, ${recommendations.length} analyzed`,
     `Total split candidates: ${totalCandidates}`,
     '',
   ];

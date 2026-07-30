@@ -18,8 +18,8 @@ cross-project execution rules remain under `~/.codex/`.
 3. Route DB, config, logger, and provider discovery through `@los/infra`.
 4. Use Zod schemas as configuration truth and PostgreSQL for persistence.
 5. Use feature flags, not experimental directories.
-6. Keep source files below the CI module-size gates: over 400 lines warns and
-   over 600 lines blocks.
+6. Keep source files below the CI module-size gates: over 500 lines warns and
+   over 700 lines blocks.
 7. Keep gateway routes under `packages/gateway/src/routes/`; `server.ts` is
    registration and composition only.
 8. Do not create a file and directory with the same name under

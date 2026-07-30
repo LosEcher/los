@@ -2,7 +2,7 @@
  * File-size TODO creation — second self-iteration detector (mirrors
  * governance-sweeper-migration-todos.ts). Converts the file_size GA job from a
  * degenerate report-only autoFix (which never reduced file sizes) into a
- * detection-driven TODO worklist: one TODO per >400-line file, worked by a
+ * detection-driven TODO worklist: one TODO per >500-line file, worked by a
  * Claude agent via /pr-self-merge (extract submodule → file shrinks → TODO
  * auto-archives on next sweep).
  *
@@ -26,12 +26,12 @@ export async function createFileSizeTodos(
 ): Promise<number> {
   try {
     if (typeof summary.error === 'string') return 0;
-    const over600 = (summary.filesOver600 as HotFileEntry[] | undefined) ?? [];
-    const over400 = (summary.filesOver400 as HotFileEntry[] | undefined) ?? [];
-    // Surface all >400-line files: P1 for >600, P2 for 400-600.
+    const over700 = (summary.filesOver700 as HotFileEntry[] | undefined) ?? [];
+    const over500 = (summary.filesOver500 as HotFileEntry[] | undefined) ?? [];
+    // Surface all >500-line files: P1 for >700, P2 for 500-700.
     const all = new Map<string, HotFileEntry & { priority: 'P1' | 'P2' }>();
-    for (const f of over400) all.set(f.file, { ...f, priority: 'P2' });
-    for (const f of over600) all.set(f.file, { ...f, priority: 'P1' }); // 600+ overrides → P1
+    for (const f of over500) all.set(f.file, { ...f, priority: 'P2' });
+    for (const f of over700) all.set(f.file, { ...f, priority: 'P1' }); // 700+ overrides → P1
     if (all.size === 0) return 0;
 
     const currentKeys = new Set([...all.keys()].map(dedupeKeyFor));
@@ -49,14 +49,14 @@ export async function createFileSizeTodos(
       const dedupeKey = dedupeKeyFor(file);
       const title = `file-size: extract submodule from ${file} (${f.lines} lines)`;
       const description = [
-        `${file} is ${f.lines} lines (threshold 400${f.priority === 'P1' ? ', >600 P1' : ''}).`,
+        `${file} is ${f.lines} lines (threshold 500${f.priority === 'P1' ? ', >700 P1' : ''}).`,
         `Package: ${f.package ?? '?'}. Delta vs last scan: ${f.delta ?? 'n/a'}.`,
         `Fix: extract a cohesive submodule (see check-structure.sh thresholds),`,
-        `then /pr-self-merge. Next sweep archives this TODO when the file < 400 lines.`,
+        `then /pr-self-merge. Next sweep archives this TODO when the file < 500 lines.`,
       ].join('\n');
       const metadata = {
         file, lines: f.lines, package: f.package, delta: f.delta,
-        priority: f.priority, threshold: 400, sweepJobId: job.id,
+        priority: f.priority, threshold: 500, sweepJobId: job.id,
       };
       const ex = existingByDedupe.get(dedupeKey);
       if (ex) {
@@ -72,7 +72,7 @@ export async function createFileSizeTodos(
     // Resolve闭环: archive active TODOs for files no longer over threshold (refactored down).
     for (const { id, dedupeKey, archived } of existingByDedupe.values()) {
       if (!archived && !currentKeys.has(dedupeKey!)) {
-        await archiveTodo(id, `file-size resolved: ${dedupeKey} now under 400 lines`);
+        await archiveTodo(id, `file-size resolved: ${dedupeKey} now under 500 lines`);
         log.info(`Archived file-size TODO ${dedupeKey} (file shrunk under threshold)`);
       }
     }

@@ -10,6 +10,7 @@ import {
   startProviderProbeLoop,
   stopProviderProbeLoop,
 } from '../providers/provider-probe.js';
+import { runScheduledAgentTask } from '../scheduler.js';
 import { listServiceInstances } from '../service-instances.js';
 import { createTodo } from '../todos.js';
 import { listInboxEntries } from '../work-items/projection.js';
@@ -206,6 +207,56 @@ async function executeTemplate(
       title: `${schedule.title}: ${entries.length} item${entries.length === 1 ? '' : 's'} need attention`,
       summary: { inboxCount: entries.length, byAttention },
     };
+  }
+  if (schedule.runTemplate.templateId === 'scheduled_execution') {
+    const dedupeKey = `schedule-exec-${run.id}`;
+    const disposition = schedule.runTemplate.mode === 'execution' ? 'execution' as const : 'planning' as const;
+    const result = await runScheduledAgentTask({
+      prompt: schedule.runTemplate.goalTemplate,
+      workspaceRoot: process.cwd(),
+      tenantId: schedule.tenantId,
+      projectId: schedule.projectId,
+      userId: schedule.userId,
+      toolMode: schedule.runTemplate.toolMode,
+      disposition,
+      dedupeKey,
+      runSpecId: run.runSpecId,
+      metadata: {
+        scheduledWork: {
+          scheduleId: schedule.id,
+          runId: run.id,
+          scheduledFor: run.scheduledFor,
+          templateId: 'scheduled_execution',
+          revision: schedule.revision,
+        },
+      },
+      runContract: {
+        mode: schedule.runTemplate.mode,
+        goal: schedule.runTemplate.goalTemplate,
+        editableSurfaces: schedule.runTemplate.editableSurfaces,
+        requiredChecks: schedule.runTemplate.requiredChecks,
+        stopConditions: ['operator cancels schedule'],
+      },
+    });
+    if (result.status === 'completed') {
+      return {
+        status: 'succeeded',
+        title: `${schedule.title}: execution completed`,
+        summary: {
+          sessionId: result.sessionId,
+          taskRunId: result.taskRun?.id,
+          runSpecId: result.taskRun?.runSpecId,
+          loopCount: result.result?.loopCount,
+          promptTokens: result.result?.totalTokens?.prompt,
+          completionTokens: result.result?.totalTokens?.completion,
+        },
+        runSpecId: result.taskRun?.runSpecId,
+        taskRunId: result.taskRun?.id,
+      };
+    }
+    // blocked / cancelled / failed → surface as run failure for circuit breaker
+    const reason = 'reason' in result ? (result as { reason?: string }).reason : result.status;
+    throw new Error(`Scheduled execution ${result.status}${reason ? `: ${reason}` : ''}`);
   }
   const [nodes, services] = await Promise.all([listExecutorNodes(), listServiceInstances()]);
   const unavailableNodes = nodes.filter(node => node.status !== 'online');
