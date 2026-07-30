@@ -23,6 +23,8 @@ import {
   postJson,
   type AgentTaskGraph,
   type AgentTaskGraphCompletion,
+  type AgentTaskGraphTask,
+  type AgentTaskGraphEdge,
   type MemoryObservation,
   type MemoryResponse,
   type MemoryStats,
@@ -296,10 +298,16 @@ function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; co
         ].filter(Boolean).join('\n')}</pre>
       </div>
       {graph ? (
+        <>
+        <div className="json-block">
+          <strong>Dependency Tree</strong>
+          <pre>{buildDependencyTree(graph.tasks ?? [], graph.edges ?? [])}</pre>
+        </div>
         <div className="json-block">
           <strong>Graph Tasks</strong>
           <pre>{(graph.tasks ?? []).map(task => `${task.id} | ${task.role} | ${task.status} | attempts ${attempts.filter(attempt => attempt.taskId === task.id).length}/${task.maxAttempts}`).join('\n') || 'none'}</pre>
         </div>
+        </>
       ) : null}
       {attempts.length > 0 ? (
         <div className="json-block">
@@ -309,6 +317,38 @@ function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; co
       ) : null}
     </div>
   );
+}
+
+
+function buildDependencyTree(
+  tasks: AgentTaskGraphTask[],
+  edges: AgentTaskGraphEdge[],
+): string {
+  if (edges.length === 0) return '(no dependencies — all tasks run in parallel)';
+  const taskMap = new Map(tasks.map(t => [t.id, t]));
+  const children = new Map<string, string[]>();
+  const parents = new Set<string>();
+  for (const edge of edges) {
+    const list = children.get(edge.dependsOnTaskId) ?? [];
+    list.push(edge.taskId);
+    children.set(edge.dependsOnTaskId, list);
+    parents.add(edge.taskId);
+  }
+  const roots = tasks.filter(t => !parents.has(t.id));
+  const lines: string[] = [];
+  function render(id: string, indent: number) {
+    const task = taskMap.get(id);
+    const prefix = '  '.repeat(indent) + (indent > 0 ? '↳ ' : '');
+    lines.push(`${prefix}${id} ${task ? `[${task.role}] ${task.status}` : ''}`);
+    for (const child of (children.get(id) ?? [])) render(child, indent + 1);
+  }
+  for (const root of roots) render(root.id, 0);
+  const rendered = new Set<string>();
+  function collect(id: string) { rendered.add(id); for (const c of children.get(id) ?? []) collect(c); }
+  for (const root of roots) collect(root.id);
+  const unrendered = tasks.filter(t => !rendered.has(t.id));
+  if (unrendered.length > 0) lines.push(`(orphaned: ${unrendered.map(t => t.id).join(', ')})`);
+  return lines.join('\n');
 }
 
 function agentGraphIdForTask(task: TaskRun): string | null {
