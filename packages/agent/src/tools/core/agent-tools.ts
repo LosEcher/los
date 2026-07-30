@@ -273,9 +273,9 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
     let childRunSpecId: string | undefined;
     try {
       await ensureRunSpecStore();
-      childRunSpecId = `run-child-${childSessionId}-${Date.now()}`;
+      const specId = `run-child-${childSessionId}-${Date.now()}`;
       await createRunSpec({
-        id: childRunSpecId,
+        id: specId,
         sessionId: childSessionId,
         tenantId: options.tenantId,
         projectId: options.projectId,
@@ -293,8 +293,9 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         maxLoops: childMaxLoops,
         runContract: childRunContractMetadata,
       });
+      childRunSpecId = specId;
     } catch {
-      // best-effort
+      childRunSpecId = undefined; // ensure caller never sees stale ID
     }
 
     // Background mode: fire-and-forget with AbortController
@@ -347,11 +348,15 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
           loopCount: result.loopCount,
           totalTokens: result.totalTokens.prompt + result.totalTokens.completion,
         };
+        // Schedule cleanup after completion
+        setTimeout(() => trackedAgents.delete(agentId), 300_000).unref();
       }).catch(err => {
         const agent = getAgent(agentId);
         if (!agent || agent.status === 'killed') return;
         agent.status = 'failed';
         agent.error = err instanceof Error ? err.message : String(err);
+        // Schedule cleanup after failure
+        setTimeout(() => trackedAgents.delete(agentId), 300_000).unref();
       });
 
       return {
