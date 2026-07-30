@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolveIdentityLevelForExecutionPath } from '../../identity-loader.js';
 import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
+import { createRunSpec, ensureRunSpecStore } from '../../run-specs.js';
 import type { AgentConfig, AgentResult } from '../../loop.js';
 import type { ToolRegistry, ToolResult } from './registry.js';
 
@@ -70,7 +71,7 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
     type: 'function',
     function: {
       name: 'spawn_agent',
-      description: 'Run a constrained child coding agent for focused investigation or project-write edits. The child cannot spawn further agents or run shell commands.',
+      description: 'Run a constrained child coding agent for focused investigation or project-write edits. The child cannot spawn further agents or run shell commands. Each child agent creates a durable run_spec record with parent lineage for traceability and recovery.',
       parameters: {
         type: 'object',
         properties: {
@@ -112,10 +113,41 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
   return async (request) => {
     const childToolMode = request.toolMode ?? 'read-only';
     const childMaxLoops = Math.max(1, Math.min(request.maxLoops ?? 8, 12));
-    const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : undefined;
+    const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : `child:${randomUUID()}`;
     // AP6: full contract inheritance (phase, surfaces, requiredChecks) as an isolated clone
     const childRunContractMetadata = inheritRunContractMetadata(options.runContractMetadata);
     const childOverridesRoute = Boolean(request.provider || request.model);
+
+    // Durable child lineage: persist a child run_spec before execution so the
+    // sub-agent is visible in the run-spec and work-item UI, recoverable on restart,
+    // and trackable for evidence.
+    let childRunSpecId: string | undefined;
+    try {
+      await ensureRunSpecStore();
+      childRunSpecId = `run-child-${childSessionId}-${Date.now()}`;
+      await createRunSpec({
+        id: childRunSpecId,
+        sessionId: childSessionId,
+        tenantId: options.tenantId,
+        projectId: options.projectId,
+        traceId: options.traceId,
+        requestId: options.requestId,
+        parentRunSpecId: options.runSpecId,
+        prompt: request.prompt,
+        provider: request.provider ?? options.provider ?? undefined,
+        model: request.model ?? options.model ?? undefined,
+        workspaceRoot: options.workspaceRoot ?? '',
+        toolMode: childToolMode,
+        allowedTools: childToolMode === 'read-only'
+          ? [...READ_ONLY_BUILTIN_TOOLS]
+          : [...SUBAGENT_PROJECT_WRITE_TOOLS],
+        maxLoops: childMaxLoops,
+        runContract: childRunContractMetadata,
+      });
+    } catch (error) {
+      // Child run-spec persistence is best-effort; agent execution continues
+    }
+
     const childResult = await options.runAgent(request.prompt, {
       sessionId: childSessionId,
       provider: request.provider ?? options.provider,
@@ -150,7 +182,8 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
 
     return {
       content: JSON.stringify({
-        childSessionId: childSessionId ?? null,
+        childSessionId: childSessionId,
+        childRunSpecId: childRunSpecId ?? null,
         provider: request.provider ?? options.provider ?? null,
         model: request.model ?? options.model ?? null,
         toolMode: childToolMode,

@@ -53,6 +53,7 @@ export interface RunSpecRecord {
   requestId?: string;
   traceId?: string;
   gatewayId?: string;
+  parentRunSpecId?: string;
   prompt: string;
   systemPrompt?: string;
   provider?: string;
@@ -81,6 +82,7 @@ export interface CreateRunSpecInput {
   requestId?: string;
   traceId?: string;
   gatewayId?: string;
+  parentRunSpecId?: string;
   prompt: string;
   systemPrompt?: string;
   provider?: RunSpecRequest['provider'];
@@ -122,6 +124,7 @@ CREATE TABLE IF NOT EXISTS run_specs (
   mcp_servers_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   gateway_id TEXT,
+  parent_run_spec_id TEXT,
   status TEXT NOT NULL DEFAULT 'created',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -129,12 +132,14 @@ CREATE TABLE IF NOT EXISTS run_specs (
 
 ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS gateway_id TEXT;
+ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS parent_run_spec_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_run_specs_session_id ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_status ON run_specs(status);
 CREATE INDEX IF NOT EXISTS idx_run_specs_tenant_project ON run_specs(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_request_id ON run_specs(request_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_trace_id ON run_specs(trace_id);
+CREATE INDEX IF NOT EXISTS idx_run_specs_parent ON run_specs(parent_run_spec_id);
 
 DO $$
 BEGIN
@@ -180,9 +185,9 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
       id, session_id, tenant_id, project_id, user_id, node_id,
       request_id, trace_id, prompt, system_prompt, provider, model,
       model_settings_json, workspace_root, tool_mode, allowed_tools_json,
-      tool_retry_json, max_loops, timeout_ms, mcp_servers_json, run_contract_json, gateway_id, status
+      tool_retry_json, max_loops, timeout_ms, mcp_servers_json, run_contract_json, gateway_id, parent_run_spec_id, status
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20::jsonb, $21::jsonb, $22, 'created')
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20::jsonb, $21::jsonb, $22, $23, 'created')
     RETURNING *
   `,
     [
@@ -208,6 +213,7 @@ export async function createRunSpec(input: CreateRunSpecInput): Promise<RunSpecR
       JSON.stringify(input.mcpServers ?? []),
       JSON.stringify(runContract ?? {}),
       input.gatewayId ?? null,
+      input.parentRunSpecId ?? null,
     ],
   );
   const record = rowToRecord(assertRow(rows.rows[0]));
@@ -483,6 +489,7 @@ type RunSpecRow = {
   user_id: string | null;
   node_id: string | null;
   gateway_id: string | null;
+  parent_run_spec_id: string | null;
   request_id: string | null;
   trace_id: string | null;
   prompt: string;
@@ -524,6 +531,7 @@ function rowToRecord(row: RunSpecRow): RunSpecRecord {
     userId: row.user_id ?? undefined,
     nodeId: row.node_id ?? undefined,
     gatewayId: row.gateway_id ?? undefined,
+    parentRunSpecId: row.parent_run_spec_id ?? undefined,
     requestId: row.request_id ?? undefined,
     traceId: row.trace_id ?? undefined,
     prompt: row.prompt,
