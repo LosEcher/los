@@ -3,6 +3,7 @@ import {
   listLatestProviderCompatEvidence,
 } from '../provider-compat-evidence.js';
 import { resolveProviderModelPolicy } from '../providers/provider-policy.js';
+import { resolveModelProfile } from '../model-profiles.js';
 import { normalizeOptionalString, readBoolean, readObject } from './helpers.js';
 import { getCachedProbeResult } from '../providers/provider-probe.js';
 import { computeHealthScore } from '../providers/provider-health.js';
@@ -38,6 +39,18 @@ export async function resolveGraphTaskProviderModelSelection(
     }),
   );
 
+  // ── Cost-aware: build per-provider prompt cost map for tiebreaking ──
+  const costData = new Map<string, number>();
+  for (const target of targets) {
+    if (!target.provider || costData.has(target.provider)) continue;
+    try {
+      const profile = resolveModelProfile(target.provider, { model: target.model });
+      if (profile.pricing) {
+        costData.set(target.provider, profile.pricing.promptTokenCostPer1M);
+      }
+    } catch { /* profile resolution is best-effort */ }
+  }
+
   return resolveProviderModelPolicy({
     targets,
     evidence,
@@ -47,6 +60,7 @@ export async function resolveGraphTaskProviderModelSelection(
     emptyTargetLabel: 'scheduler-default',
     contextLabel: `graph task ${task.id}`,
     healthScores,
+    costData,
     sources: {
       evidence: 'provider_compat_evidence',
       target: 'graph_task_target',
