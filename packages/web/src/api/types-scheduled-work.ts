@@ -14,7 +14,7 @@ export type ScheduledWorkRunStatus =
   | 'skipped'
   | 'failed'
   | 'cancelled';
-export type ScheduledWorkTemplateId = 'morning_inbox_digest' | 'runtime_readiness' | 'scheduled_feed_analysis';
+export type ScheduledWorkTemplateId = 'morning_inbox_digest' | 'runtime_readiness' | 'scheduled_feed_analysis' | 'scheduled_execution';
 
 export type ScheduledWorkTrigger = {
   kind: ScheduledTriggerKind;

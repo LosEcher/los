@@ -144,23 +144,27 @@ function normalizeCreateInput(
 ): CreateScheduledWorkItemInput {
   const templateId = normalizeEnum(
     body.templateId,
-    ['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis'] as const,
+    ['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'] as const,
     'morning_inbox_digest',
   );
   const title = normalizeString(body.title);
   if (!title) throw new Error('title is required');
+  const isExecution = templateId === 'scheduled_execution';
   return {
     tenantId: context.tenantId, projectId: normalizeString(body.projectId) ?? context.projectId,
     userId: context.userId, title, trigger: normalizeTrigger(body.trigger),
     runTemplate: {
-      templateId, mode: templateId === 'runtime_readiness' ? 'governance' : 'audit',
+      templateId,
+      mode: isExecution ? 'execution' : (templateId === 'runtime_readiness' ? 'governance' : 'audit'),
       goalTemplate: normalizeString(body.goalTemplate) ?? defaultGoal(templateId),
-      editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+      editableSurfaces: isExecution ? normalizeStringArray(body.editableSurfaces) : [],
+      requiredChecks: isExecution ? normalizeStringArray(body.requiredChecks) : [],
+      toolMode: isExecution ? 'project-write' : 'read-only',
       feedAnalysisRequest: templateId === 'scheduled_feed_analysis'
         ? normalizeFeedAnalysisRequest(body.feedAnalysisRequest)
         : undefined,
     },
-    approvalPolicy: normalizeEnum(body.approvalPolicy, ['read_only_auto', 'preapproved_scope', 'each_run'] as const, 'read_only_auto'),
+    approvalPolicy: normalizeEnum(body.approvalPolicy, ['read_only_auto', 'preapproved_scope', 'each_run'] as const, isExecution ? 'preapproved_scope' : 'read_only_auto'),
     concurrencyPolicy: normalizeEnum(body.concurrencyPolicy, ['skip', 'queue_one', 'parallel'] as const, 'skip'),
     catchUpPolicy: normalizeEnum(body.catchUpPolicy, ['skip', 'run_once'] as const, 'skip'),
     maxConcurrentRuns: normalizeNumber(body.maxConcurrentRuns), maxLatenessMs: normalizeNumber(body.maxLatenessMs),
@@ -201,7 +205,13 @@ function optionalEnum<T extends string>(value: unknown, choices: readonly T[]): 
 function defaultGoal(templateId: ScheduledWorkRunTemplate['templateId']): string {
   if (templateId === 'morning_inbox_digest') return 'Summarize persisted Inbox attention without calling a provider.';
   if (templateId === 'runtime_readiness') return 'Inspect persisted LOS runtime readiness without calling a provider.';
+  if (templateId === 'scheduled_execution') return 'Execute the scheduled task with full project-write access within the approved scope.';
   return 'Dispatch a preapproved feed-analysis request and track its result and callback evidence.';
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(v => typeof v === 'string' ? v.trim() : '').filter(Boolean))];
 }
 
 function normalizeFeedAnalysisRequest(value: unknown): ScheduledWorkRunTemplate['feedAnalysisRequest'] {

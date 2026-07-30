@@ -35,6 +35,8 @@ type FormState = {
   concurrencyPolicy: ScheduledConcurrencyPolicy;
   catchUpPolicy: ScheduledCatchUpPolicy;
   feedAnalysisRequest: string;
+  editableSurfaces: string;
+  requiredChecks: string;
 };
 
 type FeedAnalysisRequestValidation =
@@ -80,6 +82,12 @@ export function SchedulesPage() {
         projectId: form.projectId.trim(), title: form.title.trim(), templateId: form.templateId,
         trigger, approvalPolicy: form.approvalPolicy, concurrencyPolicy: form.concurrencyPolicy,
         catchUpPolicy: form.catchUpPolicy,
+        editableSurfaces: form.templateId === 'scheduled_execution'
+          ? form.editableSurfaces.split(',').map(s => s.trim()).filter(Boolean)
+          : undefined,
+        requiredChecks: form.templateId === 'scheduled_execution'
+          ? form.requiredChecks.split(',').map(s => s.trim()).filter(Boolean)
+          : undefined,
         feedAnalysisRequest: form.templateId === 'scheduled_feed_analysis'
           ? feedAnalysisRequest.value
           : undefined,
@@ -225,8 +233,8 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
         <label><span>Project</span><input value={form.projectId} onChange={event => set('projectId', event.target.value)} required /></label>
         <label><span>Template</span><select value={form.templateId} onChange={event => {
           const templateId = event.target.value as ScheduledWorkTemplateId;
-          setForm({ ...form, templateId, approvalPolicy: templateId === 'scheduled_feed_analysis' ? 'preapproved_scope' : form.approvalPolicy });
-        }}><option value="morning_inbox_digest">Morning inbox digest</option><option value="runtime_readiness">Runtime readiness</option><option value="scheduled_feed_analysis">Feed analysis</option></select></label>
+          setForm({ ...form, templateId, approvalPolicy: templateId === 'scheduled_feed_analysis' || templateId === 'scheduled_execution' ? 'preapproved_scope' : form.approvalPolicy });
+        }}><option value="morning_inbox_digest">Morning inbox digest</option><option value="runtime_readiness">Runtime readiness</option><option value="scheduled_feed_analysis">Feed analysis</option><option value="scheduled_execution">Scheduled execution</option></select></label>
         <label><span>Preset</span><select value={form.preset} onChange={event => set('preset', event.target.value as TriggerPreset)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="interval">Interval</option><option value="once">Once</option></select></label>
         {form.preset === 'daily' || form.preset === 'weekly' ? <label><span>Time</span><input type="time" value={form.time} onChange={event => set('time', event.target.value)} required /></label> : null}
         {form.preset === 'weekly' ? <label><span>Weekday</span><select value={form.weekday} onChange={event => set('weekday', event.target.value)}>{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label> : null}
@@ -239,6 +247,10 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
         {form.templateId === 'scheduled_feed_analysis' ? (
           <label className="schedule-request-field"><span>Feed analysis request</span><textarea rows={10} value={form.feedAnalysisRequest} onChange={event => set('feedAnalysisRequest', event.target.value)} spellCheck={false} />{feedAnalysisRequest.error ? <small className="schedule-preview-error" role="alert">{feedAnalysisRequest.error}</small> : null}</label>
         ) : null}
+        {form.templateId === 'scheduled_execution' ? (<>
+          <label><span>Editable surfaces</span><input value={form.editableSurfaces} onChange={event => set('editableSurfaces', event.target.value)} placeholder="src/,packages/ (comma-separated)" /></label>
+          <label><span>Required checks</span><input value={form.requiredChecks} onChange={event => set('requiredChecks', event.target.value)} placeholder="pnpm check,pnpm test (comma-separated)" /></label>
+        </>) : null}
       </div>
       <div className="schedule-preview">
         <span className="mini-label">Next occurrences</span>
@@ -246,7 +258,7 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
         {preview.isError ? <span className="schedule-preview-error">{String(preview.error)}</span> : null}
         {preview.data?.occurrences.map(value => <strong key={value}>{formatDate(value)}</strong>)}
       </div>
-      <button className="btn" type="submit" disabled={create.isPending || !form.title.trim() || !form.projectId.trim() || (form.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest.value)}><Plus size={14} /> Create schedule</button>
+      <button className="btn" type="submit" disabled={create.isPending || !form.title.trim() || !form.projectId.trim() || (form.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest.value) || (form.templateId === 'scheduled_execution' && !form.editableSurfaces.trim())}><Plus size={14} /> Create schedule</button>
     </form>
   );
 }
@@ -261,6 +273,7 @@ function initialForm(): FormState {
     templateId: 'morning_inbox_digest', preset: 'daily', time: '08:30', weekday: '1',
     interval: '6h', onceAt: '', timezone: DEFAULT_TIMEZONE,
     approvalPolicy: 'read_only_auto', concurrencyPolicy: 'skip', catchUpPolicy: 'skip',
+    editableSurfaces: '', requiredChecks: '',
     feedAnalysisRequest: JSON.stringify({
       sourceSystem: 'lot2extension',
       deliveryMode: 'result_returning',
