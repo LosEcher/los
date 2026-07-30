@@ -65,7 +65,8 @@ export function compressOrTrimMessages(
   // apply tail-only eviction — truncate large tool results from the end
   // while keeping the cached prefix (system + early conversation) intact.
   const cacheAlive = cacheHitRate !== undefined && cacheHitRate >= 0.70;
-  if (cacheAlive && ratio < 0.95 && !(totalTokens > budget && ratio > 0.90)) {
+  // Use tail-only eviction when cache is alive and we're under budget
+  if (cacheAlive && ratio < 0.95 && totalTokens <= budget) {
     return compressTailOnly(messages, budget);
   }
 

@@ -14,6 +14,8 @@
  *   - arXiv:2606.11213 CWL: Structured Context Eviction
  */
 
+import { CONTEXT_STRATEGY_VERSION } from './system-prompt-version.js';
+
 export interface ContextMonitorConfig {
   /** Model's advertised context window size (tokens). Default: 200000 */
   contextWindowTokens?: number;
@@ -264,7 +266,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     return formatContextFill(state);
   }
 
-  return { update, reset, getState, formatState, recordCacheActivity, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
+  return { update, reset, getState, formatState, recordCacheActivity, version: CONTEXT_STRATEGY_VERSION, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
 }
 
 function normalizeTokenCount(value: number): number {
