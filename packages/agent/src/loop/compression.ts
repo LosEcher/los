@@ -164,20 +164,35 @@ export function generateCompressionSummary(
   lines.push('');
 
   let turnIdx = 0;
+  let fileChanges: string[] = [];
+  let errors: string[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
     if (msg.role === 'assistant') {
       turnIdx++;
-      const text = summarizeText(msg.content, aggressive ? 60 : 120);
+      const text = summarizeText(msg.content, aggressive ? 80 : 160);
       const tools = summarizeToolCallsForCompression(msg.tool_calls);
+
+      // Track file-editing tool calls separately for a summary footer
+      for (const tc of msg.tool_calls ?? []) {
+        if (['write_file', 'edit_file', 'apply_patch', 'preview_patch'].includes(tc.function.name)) {
+          try {
+            const args = JSON.parse(tc.function.arguments);
+            if (args.filePath || args.path) fileChanges.push(args.filePath ?? args.path);
+          } catch { /* skip unparseable */ }
+        }
+      }
 
       if (tools.length > 0) {
         lines.push(`Turn ${turnIdx}: ${text} [Tools: ${tools.join(', ')}]`);
       } else {
         lines.push(`Turn ${turnIdx}: ${text}`);
       }
+      // Detect error messages in assistant text
+      const errMatch = text.match(/(?:error|failed|denied|blocked)[^.]*/i);
+      if (errMatch) errors.push(errMatch[0]);
     } else if (msg.role === 'tool') {
-      const result = summarizeText(msg.content, aggressive ? 30 : 60);
+      const result = summarizeToolResult(msg.content, aggressive ? 40 : 80);
       if (result) {
         const last = lines[lines.length - 1] ?? '';
         if (last.startsWith(`Turn ${turnIdx}:`)) {
@@ -189,7 +204,14 @@ export function generateCompressionSummary(
 
   if (turnIdx === 0) {
     lines.push('(no assistant turns to summarize)');
+    return lines.join('\n');
   }
+
+  // Append structured summary footer
+  const uniqueFiles = [...new Set(fileChanges)].slice(0, 10);
+  if (uniqueFiles.length > 0) lines.push(`\nFiles changed: ${uniqueFiles.join(', ')}`);
+  const uniqueErrors = [...new Set(errors)].slice(0, 5);
+  if (uniqueErrors.length > 0) lines.push(`Errors encountered: ${uniqueErrors.join('; ')}`);
 
   const full = lines.join('\n');
   if (estimateTokens(full) <= tokenBudget) return full;
@@ -198,6 +220,8 @@ export function generateCompressionSummary(
 
 /**
  * Summarize a single text chunk to a maximum character length.
+ * Extracts meaningful content: key findings, file paths, error patterns,
+ * and edit operations instead of simple truncation.
  */
 export function summarizeText(text: string, maxLen: number): string {
   const cleaned = text
@@ -205,7 +229,39 @@ export function summarizeText(text: string, maxLen: number): string {
     .replace(/\s+/g, ' ')
     .trim();
   if (cleaned.length <= maxLen) return cleaned;
+
+  // Try to extract a key sentence: look for patterns that carry semantic value
+  const patterns = [
+    /(?:Successfully|Completed|Finished|Done|Created|Updated|Fixed|Resolved|Implemented|Added|Removed|Deleted|Refactored)\s[^.!?]*[.!?]/i,
+    /(?:Error|Failed|Could not|Unable to|denied|blocked|rejected)\s[^.!?]*[.!?]/i,
+    /(?:Found|Discovered|Identified|Located|Detected)\s[^.!?]*[.!?]/i,
+    /(?:The\s(?:issue|problem|bug|fix|change|result|output)\s(?:is|was)\s[^.!?]*)[.!?]/i,
+  ];
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match && match[0].length <= maxLen) return match[0];
+  }
+  // Fallback: first sentence if short enough, else truncate
+  const firstSentence = cleaned.split(/[.!?]\s/)[0] ?? '';
+  if (firstSentence.length > 0 && firstSentence.length <= maxLen) return firstSentence + '.';
   return cleaned.slice(0, maxLen) + '...';
+}
+
+/**
+ * Extract a compact summary of tool result content.
+ * For file reads: file name + size. For search/grep: match count.
+ * For shell output: first meaningful line.
+ */
+export function summarizeToolResult(content: string, maxLen: number): string {
+  const trimmed = content.trim();
+  if (!trimmed) return '';
+  if (trimmed.length <= maxLen) return trimmed;
+  // File content: report size, first line hint
+  const lines = trimmed.split('\n');
+  if (lines.length > 1) {
+    return `[${lines.length} lines, ${trimmed.length} bytes] ${lines[0]!.slice(0, maxLen - 30)}`;
+  }
+  return trimmed.slice(0, maxLen) + '...';
 }
 
 /**
