@@ -17,7 +17,7 @@ export type ScheduledWorkRunStatus =
   | 'skipped'
   | 'failed'
   | 'cancelled';
-export type ScheduledWorkTemplateId = 'morning_inbox_digest' | 'runtime_readiness' | 'scheduled_feed_analysis';
+export type ScheduledWorkTemplateId = 'morning_inbox_digest' | 'runtime_readiness' | 'scheduled_feed_analysis' | 'scheduled_execution';
 
 export interface ScheduledWorkTrigger {
   kind: ScheduledTriggerKind;
@@ -27,11 +27,11 @@ export interface ScheduledWorkTrigger {
 
 export interface ScheduledWorkRunTemplate {
   templateId: ScheduledWorkTemplateId;
-  mode: Extract<WorkItemMode, 'audit' | 'governance'>;
+  mode: Extract<WorkItemMode, 'audit' | 'governance' | 'execution'>;
   goalTemplate: string;
   editableSurfaces: string[];
   requiredChecks: string[];
-  toolMode: 'read-only';
+  toolMode: 'read-only' | 'project-write';
   feedAnalysisRequest?: Omit<FeedAnalysisDispatchRequest, 'sourceJobId'>;
 }
 

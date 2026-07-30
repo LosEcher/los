@@ -22,11 +22,30 @@ export function validateScheduledTrigger(trigger: ScheduledWorkTrigger): void {
 export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInput): void {
   if (!input.projectId.trim() || !input.title.trim()) throw new Error('projectId and title are required');
   validateScheduledTrigger(input.trigger);
-  if (!['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis'].includes(input.runTemplate.templateId)) {
+  const validTemplates = ['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'];
+  if (!validTemplates.includes(input.runTemplate.templateId)) {
     throw new Error('unsupported schedule template');
   }
+  const isExecution = input.runTemplate.templateId === 'scheduled_execution';
+  // Execution-mode: allow project-write, editable surfaces, and required checks.
+  // Still requires preapproved_scope as a safety gate.
+  if (isExecution) {
+    if (input.approvalPolicy !== 'preapproved_scope') {
+      throw new Error('scheduled_execution requires preapproved_scope approval policy');
+    }
+    if (input.runTemplate.mode !== 'execution') {
+      throw new Error('scheduled_execution must use execution mode');
+    }
+    if (input.runTemplate.toolMode !== 'project-write') {
+      throw new Error('scheduled_execution requires project-write tool mode');
+    }
+    if (input.runTemplate.editableSurfaces.length === 0) {
+      throw new Error('scheduled_execution requires at least one editable surface');
+    }
+    return; // skip feed-analysis and read-only checks
+  }
   if (input.runTemplate.toolMode !== 'read-only' || input.runTemplate.editableSurfaces.length > 0) {
-    throw new Error('P2 scheduled templates must be read-only with no editable surfaces');
+    throw new Error('non-execution scheduled templates must be read-only with no editable surfaces');
   }
   if (input.runTemplate.templateId === 'scheduled_feed_analysis') {
     if (input.approvalPolicy !== 'preapproved_scope') {
