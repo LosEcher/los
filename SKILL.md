@@ -215,9 +215,9 @@ Related:
 
 ## Workflow: First Push And PR Creation
 
-Trigger when new work is ready to be published: changes are committed (single or
-split chain), local `main` bookmark points to the tip, and the operator wants a
-Forgejo PR.
+Trigger when new work is ready to be published: the change descends from
+`main@origin`, has one intent, and the operator wants a Forgejo PR. Local `main`
+must remain aligned with the authoritative Forgejo merge state.
 
 Steps:
 
@@ -256,10 +256,12 @@ Steps:
    ```
    Without a token, open the link from the push output in a browser.
 
-6. **Move `main` bookmark** — after confirming the push succeeded, move local
-   `main` to the tip so subsequent work builds on the right base:
+6. **Keep `main` on Forgejo** — pushing a feature does not publish it to `main`.
+   Start unrelated work from the current authoritative base instead of stacking
+   it on the pushed feature:
    ```bash
-   jj bookmark move main --to <tip-commit>
+   jj log -r 'main|main@origin' -n 2
+   jj new main@origin
    ```
 
 7. **After Forgejo CI passes and PR is merged**:
@@ -269,6 +271,12 @@ Steps:
    jj bookmark move main --to main@origin  # sync local main
    bash tools/branch-prune-origin.sh      # dry-run; --apply with operator consent
    ```
+
+Before merging, inspect `/pulls/<number>/files`. If the file list contains a
+second task or package intent, close/split the PR rather than merging it or
+moving `main` forward locally. A stale entry in
+`tools/.known-test-failures.txt` is also a gate failure: remove recovered
+entries in a separate bounded change before delivering feature work.
 
 ## Workflow: Gate Hook Failures
 
