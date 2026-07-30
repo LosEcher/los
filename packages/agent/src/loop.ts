@@ -266,6 +266,9 @@ export async function runAgent(
     totalCompletionTokens += res.usage.completionTokens;
     totalCacheHitTokens += res.usage.cacheHitTokens ?? 0;
     totalCacheMissTokens += res.usage.cacheMissTokens ?? 0;
+    if (ctxMon) {
+      ctxMon.recordCacheActivity(res.usage.cacheHitTokens ?? 0, res.usage.cacheMissTokens ?? 0);
+    }
 
     // Cost estimation
     const turnCost = estimateCost({
@@ -494,11 +497,15 @@ export async function runAgent(
     // Mid-loop context compression
     if (config.maxContextTokens && config.maxContextTokens > 0 &&
         config.contextCompression?.enabled !== false) {
+      const cacheTotal = totalCacheHitTokens + totalCacheMissTokens;
+      const cacheHitRate = cacheTotal > 0 ? totalCacheHitTokens / cacheTotal : undefined;
       const compressed = compressOrTrimMessages(
-        messages, config.maxContextTokens, config.contextCompression,
+        messages, config.maxContextTokens, config.contextCompression, cacheHitRate,
       );
-      // Only replace if compression actually reduced the message count
-      if (compressed.length < messages.length) {
+      // Only replace if compression actually changed the messages
+      const compressedContentChanged = compressed.length !== messages.length
+        || compressed.some((m, i) => m.content !== messages[i]?.content);
+      if (compressedContentChanged) {
         const previousLength = messages.length;
         messages.length = 0;
         messages.push(...compressed);
