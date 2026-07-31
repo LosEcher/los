@@ -6,6 +6,10 @@ rule:
   any:
     - pattern: "import $$$ from 'pg'"
     - pattern: "import { $$$ } from 'pg'"
+# infra/ owns the pg pool and static-analysis/ needs no cross-boundary rule.
+exclude:
+  - "/packages/infra/"
+  - "/static-analysis/"
 governance:
   domain: architecture
   owner: platform

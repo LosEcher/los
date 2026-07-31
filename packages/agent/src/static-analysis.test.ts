@@ -117,6 +117,42 @@ test('scanFiles finds issues in a test fixture', async () => {
   }
 });
 
+test('rule exclude skips findings in matching files', async () => {
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'los-static-analysis-excl-'));
+  const matchingFile = join(fixtureDir, 'store.test.ts');
+  const otherFile = join(fixtureDir, 'store.ts');
+  const body = `updateTaskRun("r1", { status: "succeeded" });\n`;
+  writeFileSync(matchingFile, body, 'utf8');
+  writeFileSync(otherFile, body, 'utf8');
+
+  const baseRule = {
+    id: 'test.excluded-rule',
+    language: 'TypeScript',
+    message: 'direct store write',
+    severity: 'error' as const,
+    rule: { pattern: 'updateTaskRun($A, $B)' },
+  };
+
+  try {
+    const excluded = await scanFiles([matchingFile, otherFile], {
+      project: 'test',
+      rules: [{ ...baseRule, exclude: ['\\.test\\.ts$'] }],
+    });
+    const onTest = excluded.findings.filter((f) => f.file.endsWith('store.test.ts'));
+    const onProd = excluded.findings.filter((f) => f.file.endsWith('store.ts'));
+    assert.equal(onTest.length, 0, 'excluded rule must skip *.test.ts files');
+    assert.equal(onProd.length, 1, 'excluded rule still fires on non-test files');
+
+    const noExclude = await scanFiles([matchingFile], {
+      project: 'test',
+      rules: [baseRule],
+    });
+    assert.equal(noExclude.findings.length, 1, 'rule without exclude fires on all files');
+  } finally {
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
 test('scanProject integrates discover + scan', async () => {
   const rulesDir = resolve(__dirname, './static-analysis/rules');
   const rules = await loadRuleFiles([`${rulesDir}/languages/typescript/*.yml`]);

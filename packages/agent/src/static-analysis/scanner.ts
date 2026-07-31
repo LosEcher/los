@@ -81,6 +81,12 @@ export async function scanFiles(
   const findings: StaticAnalysisFinding[] = [];
   const parseFailures: Array<{ file: string; language: string; error: string }> = [];
 
+  // Precompile per-rule exclusion regexes once instead of per file×rule.
+  const ruleExcludes = rules.map((rule) => ({
+    rule,
+    excludes: (rule.exclude ?? []).map((source) => new RegExp(source)),
+  }));
+
   for (const file of files) {
     if (signal?.aborted) {
       const err = new Error('Scan cancelled');
@@ -105,8 +111,9 @@ export async function scanFiles(
       continue;
     }
 
-    for (const rule of rules) {
+    for (const { rule, excludes } of ruleExcludes) {
       if (rule.language !== languageName(lang)) continue;
+      if (excludes.some((regex) => regex.test(file))) continue;
 
       try {
         const nodes = root.findAll({ rule: rule.rule as AstGrepRule });

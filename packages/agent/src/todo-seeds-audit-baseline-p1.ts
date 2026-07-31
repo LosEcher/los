@@ -34,13 +34,14 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
   },
   {
     id: 'todo-los-p1-los-ast-rules',
-    title: 'P1-N2 los-ast 自定义规则：编码 AP1/AP3/AP5',
+    title: 'P1-N2 静态分析规则收口：豁免已落地，剩余接入 CI',
     description:
-      '为 los-ast 编写 los 专属规则，将 AGENTS.md 中的 AP1/AP3/AP5 编码为 AST 规则：\n' +
-      'AP1: Direct calls to updateTaskRun/updateTaskRunFields/updateRunSpecStatus\n' +
-      'AP3: 检测 markSucceeded 前缺少 canMarkSucceeded() 调用\n' +
-      'AP5: 检测 task phase 前缺少 loadSpecsForFiles() 调用\n' +
-      '参考 lsclaw-governance rule pack 的 YAML 格式。',
+      '2026-07-31 盘点后重写（原描述基于 2026-06-24 旧理解，指向已失效的 legacy 路径）：\n' +
+      'AP1 已由内部规则 packages/agent/src/static-analysis/rules/projects/los/state-machine-bypass.yml 编码；\n' +
+      'AP3 不适用静态规则：markSucceeded 非公共 API，execution-store.ts 在事务内强制 canMarkSucceeded 运行时 gate；\n' +
+      'AP5 不适用静态规则：loadSpecsForFiles 是 agent 运行时流程规范（无生产调用点），静态 AST 无法检测 phase 前置；\n' +
+      '已完成：规则系统 exclude 字段（测试文件/包级豁免）、state-machine-bypass 与 direct-infra-import 豁免、los scan 全仓 0 error。\n' +
+      '剩余：把 los scan 接入 ci-gate.sh（约 3.9s 开销），先 error-only + baseline。',
     kind: 'task',
     status: 'backlog',
     priority: 'P1',
@@ -51,7 +52,10 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
     metadata: {
       problem: 'AP 反模式依赖文档记忆，无自动检测',
       solution: 'AST 规则自动化 CI 扫描',
-      files: ['projects/los-ast/rules/projects/los-governance/'],
+      files: [
+        'packages/agent/src/static-analysis/rules/projects/los/',
+        'packages/agent/src/static-analysis/exclude 支持（types.ts/scanner.ts）',
+      ],
     },
   },
   {
