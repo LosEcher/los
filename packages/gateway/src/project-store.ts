@@ -40,17 +40,24 @@ interface ProjectsFile {
   defaultProjectId?: string;
 }
 
-const PROJECTS_DIR = process.env.LOS_PROJECTS_DIR
-  ? resolve(process.env.LOS_PROJECTS_DIR)
-  : join(homedir(), '.los');
-const PROJECTS_PATH = join(PROJECTS_DIR, 'projects.json');
+function getProjectsPath(): string {
+  const dir = process.env.LOS_PROJECTS_DIR
+    ? resolve(process.env.LOS_PROJECTS_DIR)
+    : join(homedir(), '.los');
+  return join(dir, 'projects.json');
+}
+
+function getProjectsDir(): string {
+  return dirname(getProjectsPath());
+}
 
 function readProjectsFile(): ProjectsFile {
-  if (!existsSync(PROJECTS_PATH)) {
+  const path = getProjectsPath();
+  if (!existsSync(path)) {
     return { projects: {} };
   }
   try {
-    const raw = readFileSync(PROJECTS_PATH, 'utf-8');
+    const raw = readFileSync(path, 'utf-8');
     return JSON.parse(raw) as ProjectsFile;
   } catch (e: any) {
     log.warn(`Failed to parse projects.json: ${e.message}`);
@@ -59,10 +66,11 @@ function readProjectsFile(): ProjectsFile {
 }
 
 function writeProjectsFile(data: ProjectsFile): void {
-  if (!existsSync(PROJECTS_DIR)) {
-    mkdirSync(PROJECTS_DIR, { recursive: true });
+  const dir = getProjectsDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(PROJECTS_PATH, JSON.stringify(data, null, 2), 'utf-8');
+  writeFileSync(getProjectsPath(), JSON.stringify(data, null, 2), 'utf-8');
 }
 
 export function listProjects(): ProjectBinding[] {

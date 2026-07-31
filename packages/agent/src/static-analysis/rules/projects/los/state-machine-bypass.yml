@@ -7,6 +7,10 @@ rule:
     - pattern: "updateTaskRun($A, $B)"
     - pattern: "updateRunSpecStatus($A, $B)"
     - pattern: "updateToolCallState($A, $B)"
+# Store-layer unit tests exercise updateTaskRun() directly to verify
+# persistence itself — the transition gate lives in execution-store.ts.
+exclude:
+  - "\\.test\\.ts$"
 governance:
   domain: architecture
   owner: platform

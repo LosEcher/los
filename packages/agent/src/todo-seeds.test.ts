@@ -69,7 +69,6 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-p1-stale-detection', ['P1', 'backlog']],
   ['todo-los-p1-supply-chain-full', ['P1', 'backlog']],
   ['todo-los-p1-turbo-cache', ['P1', 'backlog']],
-  ['todo-los-p1-los-ast-rules', ['P1', 'backlog']],
   // daily-gaps-2026-07-27 sub-tasks (34 items)
   ['todo-los-gap-cr-protocol', ['P1', 'backlog']],
   ['todo-los-gap-cr-reconstruct', ['P1', 'backlog']],

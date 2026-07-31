@@ -2,5 +2,9 @@ id: lang.typescript.no-as-assertion
 language: TypeScript
 severity: info
 message: "Prefer type annotations over 'as' assertions"
+# `as const` is a legitimate literal-type idiom, not a type-narrowing assertion.
 rule:
-  kind: as_expression
+  all:
+    - kind: as_expression
+    - not:
+        pattern: "$A as const"
