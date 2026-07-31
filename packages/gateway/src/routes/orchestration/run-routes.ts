@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ensureRunSpecStore, loadRunSpec, listRunSpecs } from '@los/agent/run-specs';
 import { ensureSessionEventStore, listSessionEventsSince, appendSessionEvent } from '@los/agent/session-events';
 import {
@@ -89,310 +89,323 @@ type StreamReplayItem =
   | { kind: 'stream'; id: number; eventType: string; turn: number; payload: Record<string, unknown>; createdAt: string }
   | { kind: 'event'; id: number; type: string; turn: number; payload: Record<string, unknown>; createdAt: string };
 
+async function handleListRuns(_req: FastifyRequest, _reply: FastifyReply, deps: RunRoutesDependencies) {
+  await deps.ensureRunSpecStore();
+  return await deps.listRunSpecs();
+}
+
+async function handleListEvents(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  const { id } = req.params as { id: string };
+  const query = req.query as { since?: string; limit?: string };
+  const since = normalizeNonNegativeInteger(query.since, 0);
+  const limit = normalizeBoundedInteger(query.limit, 200, 1, 10000);
+
+  await deps.ensureRunSpecStore();
+  await deps.ensureSessionEventStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+
+  const events = await deps.listSessionEventsSince(runSpec.sessionId, since, limit);
+  return {
+    runSpecId: runSpec.id, sessionId: runSpec.sessionId, since,
+    count: events.length, nextSince: events.at(-1)?.id ?? since, events,
+  };
+}
+
+async function handleStream(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  const { id } = req.params as { id: string };
+  const query = req.query as { since?: string; streamSince?: string; limit?: string };
+  const since = normalizeNonNegativeInteger(query.since, 0);
+  const streamSince = normalizeNonNegativeInteger(query.streamSince, 0);
+  const limit = normalizeBoundedInteger(query.limit, 200, 1, 10000);
+
+  await deps.ensureRunSpecStore();
+  await deps.ensureSessionEventStore();
+  await deps.ensureStreamCheckpointStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+
+  const [streamItems, events] = await Promise.all([
+    deps.listStreamCheckpointsSince(runSpec.sessionId, streamSince, limit),
+    deps.listSessionEventsSince(runSpec.sessionId, since, limit),
+  ]);
+
+  // Merge by createdAt timestamp, interleaving stream checkpoints and session events
+  const merged: Array<StreamReplayItem> = [];
+  let si = 0;
+  let ei = 0;
+  while (si < streamItems.length && ei < events.length) {
+    if (streamItems[si].createdAt <= events[ei].createdAt) {
+      merged.push({ kind: 'stream', id: streamItems[si].id, eventType: streamItems[si].eventType, turn: streamItems[si].turn, payload: streamItems[si].payload, createdAt: streamItems[si].createdAt });
+      si += 1;
+    } else {
+      merged.push({ kind: 'event', id: events[ei].id, type: events[ei].type, turn: events[ei].turn, payload: events[ei].payload, createdAt: events[ei].createdAt });
+      ei += 1;
+    }
+  }
+  while (si < streamItems.length) {
+    merged.push({ kind: 'stream', id: streamItems[si].id, eventType: streamItems[si].eventType, turn: streamItems[si].turn, payload: streamItems[si].payload, createdAt: streamItems[si].createdAt });
+    si += 1;
+  }
+  while (ei < events.length) {
+    merged.push({ kind: 'event', id: events[ei].id, type: events[ei].type, turn: events[ei].turn, payload: events[ei].payload, createdAt: events[ei].createdAt });
+    ei += 1;
+  }
+
+  return {
+    runSpecId: runSpec.id,
+    sessionId: runSpec.sessionId,
+    since,
+    streamSince,
+    count: merged.length,
+    nextSince: events.at(-1)?.id ?? since,
+    nextStreamSince: streamItems.at(-1)?.id ?? streamSince,
+    items: merged,
+  };
+}
+
+async function handleInspect(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  const { id } = req.params as { id: string };
+  const [graph, state] = await Promise.all([
+    deps.readRuntimeEvidenceGraph(id),
+    deps.readRunStateProjection(id),
+  ]);
+  if (!graph) return reply.status(404).send({ error: 'Not found' });
+  return { ...graph, state };
+}
+
+async function handleState(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  const { id } = req.params as { id: string };
+  const state = await deps.readRunStateProjection(id);
+  if (!state) return reply.status(404).send({ error: 'Not found' });
+  return state;
+}
+
+async function handleRecover(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  if (!(await requireOperator(req, reply))) return;
+  const operator = getOperatorPrincipal(req);
+  const { id } = req.params as { id: string };
+  const body = asRecord(req.body);
+  const staleMs = normalizeOptionalNonNegativeInteger(body.staleMs);
+
+  if (body.apply === true) {
+    const action = body.intent === 'cancel' ? 'cancel' : 'operator_attention';
+    return await deps.applyToolCallRecoveryTransitionForRunSpec(id, {
+      action,
+      staleMs,
+      reason: normalizeOptionalString(body.reason),
+      actor: operator.subject,
+      cancelLiveTaskRun: action === 'cancel'
+        ? (taskRunId, reason) => deps.cancelScheduledTask(taskRunId, reason)
+        : undefined,
+    });
+  }
+
+  return await deps.readToolCallRecoveryForRunSpec(id, {
+    intent: body.intent === 'cancel' ? 'cancel' : 'recover',
+    staleMs,
+  });
+}
+
+// Answer a worker `ask` message. The operator UI surfaces a worker.ask session
+// event (emitted by the ask_coordinator tool); this route writes the answer onto
+// the ask row (recordWorkerAnswer), appends a worker.answered session event for
+// the audit trail, and fire-and-forget-triggers resumeAnsweredAsksForRunSpec so
+// the blocked task is resumed without waiting for an external
+// runAgentTaskGraphSerial invocation. The PG NOTIFY is kept for future LISTEN
+// subscribers (e.g. a multi-gateway mesh where another process owns the graph).
+async function handleAnswer(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  if (!(await requireOperator(req, reply))) return;
+  const operator = getOperatorPrincipal(req);
+  const { id } = req.params as { id: string };
+  const body = asRecord(req.body);
+  const messageId = normalizeOptionalString(body.messageId);
+  const answer = normalizeOptionalString(body.answer);
+  if (!messageId) return reply.status(400).send({ error: 'messageId is required' });
+  if (!answer) return reply.status(400).send({ error: 'answer is required' });
+
+  await deps.ensureRunSpecStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return reply.status(404).send({ error: 'Run spec not found' });
+
+  const updated = await deps.recordWorkerAnswer(messageId, answer);
+  if (!updated) return reply.status(404).send({ error: 'ask message not found (or not an ask)' });
+
+  await deps.ensureSessionEventStore();
+  await deps.appendSessionEvent({
+    sessionId: runSpec.sessionId,
+    type: 'worker.answered',
+    payload: {
+      messageId,
+      answer,
+      actor: operator.subject,
+      runSpecId: id,
+      dispatchId: updated.dispatchId,
+      taskId: updated.taskId,
+    },
+  }).catch(() => undefined);
+
+  // Fire-and-forget: resume the blocked task(s) for this run spec. Not awaited
+  // so the operator's POST returns immediately; resume runs in the background.
+  // Errors are logged but do not fail the answer write — the answer is already
+  // persisted. There is no resident retry tick today (follow-up), so a failed
+  // resume leaves the task blocked until the next runAgentTaskGraphSerial
+  // invocation; the log line is the operator's signal to retry manually.
+  void deps.resumeAnsweredAsksForRunSpec(id).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn('resumeAnsweredAsksForRunSpec failed', { runSpecId: id, messageId, err: msg });
+  });
+
+  // PG NOTIFY for future multi-process LISTEN subscribers (no-op today; the
+  // direct call above is the active trigger in a single-gateway deployment).
+  try {
+    const db = getDb();
+    await db.notify('worker_answer', JSON.stringify({ runSpecId: id, messageId }));
+  } catch {
+    // NOTIFY best-effort.
+  }
+
+  return { ok: true, messageId, answer };
+}
+
+async function handleVerify(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  if (!(await requireOperator(req, reply))) return;
+  const { id } = req.params as { id: string };
+  const body = asRecord(req.body);
+  await deps.ensureRunSpecStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+  const verification = await deps.runVerificationRecordsForRunSpec(id, {
+    cwd: normalizeOptionalString(body.cwd),
+    timeoutMs: normalizeOptionalNonNegativeInteger(body.timeoutMs),
+    outputLimit: normalizeOptionalNonNegativeInteger(body.outputLimit),
+    includeFailed: body.includeFailed === false ? false : undefined,
+  });
+  let recovery: Awaited<ReturnType<typeof createWorkItemRevision>> | undefined;
+  if (verification.decision.status === 'blocked') {
+    const links = await deps.listWorkItemRunLinksForRunSpec(id);
+    if (links[0]) {
+      recovery = await deps.createWorkItemRevision({
+        runSpecId: id,
+        actor: getOperatorPrincipal(req).subject,
+        reason: `Verification failed or remains incomplete: ${verification.decision.blockedVerificationRecordIds.join(', ')}`,
+        trigger: 'verification_failed',
+      }).catch(() => undefined);
+      if (recovery && !recovery.exhausted) {
+        void dispatchPersistedRunSpec(recovery.runSpecId, 'planning').catch((error: unknown) => {
+          log.warn('revision planning dispatch failed', { runSpecId: recovery?.runSpecId, error: error instanceof Error ? error.message : String(error) });
+        });
+      }
+    }
+  }
+  return { ...verification, recovery };
+}
+
+async function handleApprove(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  if (!(await requireOperator(req, reply))) return;
+  const operator = getOperatorPrincipal(req);
+  const { id } = req.params as { id: string };
+  const body = asRecord(req.body);
+  await deps.ensureRunSpecStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+  const capabilityError = validatePlanApprovalCapability(body, id, runSpec.runContract);
+  if (capabilityError) return reply.status(capabilityError.statusCode).send(capabilityError.payload);
+
+  try {
+    const updated = await deps.approveRunSpecPhase(id, {
+      actor: operator.subject,
+      reason: normalizeOptionalString(body.reason),
+    });
+    const dispatch = updated.runContract?.phase === 'plan_approved'
+      ? {
+        status: 'scheduled' as const,
+        planRevision: updated.runContract?.planRevision ?? 1,
+      }
+      : undefined;
+    if (dispatch) {
+      void dispatchPersistedRunSpec(id, 'execution').catch((error: unknown) => {
+        log.warn('approved run dispatch failed', {
+          runSpecId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+    return {
+      runSpecId: id,
+      phase: updated.runContract?.phase,
+      previousPhase: updated.runContract?.previousPhase,
+      phaseChangedAt: updated.runContract?.phaseChangedAt,
+      dispatch,
+    };
+  } catch (err: any) {
+    return reply.status(400).send({
+      error: 'approval_failed',
+      message: err?.message ?? String(err),
+    });
+  }
+}
+
+async function handleRevisePlan(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  if (!(await requireOperator(req, reply))) return;
+  const operator = getOperatorPrincipal(req);
+  const { id } = req.params as { id: string };
+  const body = asRecord(req.body);
+  await deps.ensureRunSpecStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return reply.status(404).send({ error: 'Not found' });
+
+  try {
+    const updated = await deps.reviseRunSpecPlan(id, {
+      plan: Array.isArray(body.plan) ? body.plan as any : undefined,
+      actor: operator.subject,
+      reason: normalizeOptionalString(body.reason),
+    });
+    return {
+      runSpecId: id,
+      planRevision: updated.runContract?.planRevision,
+      previousRevision: (updated.runContract?.planRevision ?? 1) - 1,
+      phase: updated.runContract?.phase,
+      previousPhase: updated.runContract?.previousPhase,
+    };
+  } catch (err: any) {
+    return reply.status(400).send({
+      error: 'plan_revision_failed',
+      message: err?.message ?? String(err),
+    });
+  }
+}
+
+async function handleGetRun(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {
+  const { id } = req.params as { id: string };
+  await deps.ensureRunSpecStore();
+  const runSpec = await deps.loadRunSpec(id);
+  if (!runSpec) return { error: 'Not found' };
+  return runSpec;
+}
+
+async function handleGraph(req: FastifyRequest, _reply: FastifyReply, deps: RunRoutesDependencies) {
+  const { id } = req.params as { id: string };
+  const query = req.query as { requireVerifier?: string };
+  return await deps.readAgentTaskGraph(id, {
+    requireVerifier: query.requireVerifier === 'true' ? true : query.requireVerifier === 'false' ? false : undefined,
+  });
+}
+
 export function registerRunRoutes(
   app: FastifyInstance,
   deps: RunRoutesDependencies = defaultDependencies,
 ): void {
-  app.get('/runs', async () => {
-    await deps.ensureRunSpecStore();
-    return await deps.listRunSpecs();
-  });
-
-  app.get('/runs/:id/events', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const query = req.query as { since?: string; limit?: string };
-    const since = normalizeNonNegativeInteger(query.since, 0);
-    const limit = normalizeBoundedInteger(query.limit, 200, 1, 10000);
-
-    await deps.ensureRunSpecStore();
-    await deps.ensureSessionEventStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
-
-    const events = await deps.listSessionEventsSince(runSpec.sessionId, since, limit);
-    return {
-      runSpecId: runSpec.id, sessionId: runSpec.sessionId, since,
-      count: events.length, nextSince: events.at(-1)?.id ?? since, events,
-    };
-  });
-
-  app.get('/runs/:id/stream', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const query = req.query as { since?: string; streamSince?: string; limit?: string };
-    const since = normalizeNonNegativeInteger(query.since, 0);
-    const streamSince = normalizeNonNegativeInteger(query.streamSince, 0);
-    const limit = normalizeBoundedInteger(query.limit, 200, 1, 10000);
-
-    await deps.ensureRunSpecStore();
-    await deps.ensureSessionEventStore();
-    await deps.ensureStreamCheckpointStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
-
-    const [streamItems, events] = await Promise.all([
-      deps.listStreamCheckpointsSince(runSpec.sessionId, streamSince, limit),
-      deps.listSessionEventsSince(runSpec.sessionId, since, limit),
-    ]);
-
-    // Merge by createdAt timestamp, interleaving stream checkpoints and session events
-    const merged: Array<StreamReplayItem> = [];
-    let si = 0;
-    let ei = 0;
-    while (si < streamItems.length && ei < events.length) {
-      if (streamItems[si].createdAt <= events[ei].createdAt) {
-        merged.push({ kind: 'stream', id: streamItems[si].id, eventType: streamItems[si].eventType, turn: streamItems[si].turn, payload: streamItems[si].payload, createdAt: streamItems[si].createdAt });
-        si += 1;
-      } else {
-        merged.push({ kind: 'event', id: events[ei].id, type: events[ei].type, turn: events[ei].turn, payload: events[ei].payload, createdAt: events[ei].createdAt });
-        ei += 1;
-      }
-    }
-    while (si < streamItems.length) {
-      merged.push({ kind: 'stream', id: streamItems[si].id, eventType: streamItems[si].eventType, turn: streamItems[si].turn, payload: streamItems[si].payload, createdAt: streamItems[si].createdAt });
-      si += 1;
-    }
-    while (ei < events.length) {
-      merged.push({ kind: 'event', id: events[ei].id, type: events[ei].type, turn: events[ei].turn, payload: events[ei].payload, createdAt: events[ei].createdAt });
-      ei += 1;
-    }
-
-    return {
-      runSpecId: runSpec.id,
-      sessionId: runSpec.sessionId,
-      since,
-      streamSince,
-      count: merged.length,
-      nextSince: events.at(-1)?.id ?? since,
-      nextStreamSince: streamItems.at(-1)?.id ?? streamSince,
-      items: merged,
-    };
-  });
-
-  app.get('/runs/:id/inspect', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const [graph, state] = await Promise.all([
-      deps.readRuntimeEvidenceGraph(id),
-      deps.readRunStateProjection(id),
-    ]);
-    if (!graph) return reply.status(404).send({ error: 'Not found' });
-    return { ...graph, state };
-  });
-
-  app.get('/runs/:id/state', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const state = await deps.readRunStateProjection(id);
-    if (!state) return reply.status(404).send({ error: 'Not found' });
-    return state;
-  });
-
-  app.post('/runs/:id/recover', async (req, reply) => {
-    if (!(await requireOperator(req, reply))) return;
-    const operator = getOperatorPrincipal(req);
-    const { id } = req.params as { id: string };
-    const body = asRecord(req.body);
-    const staleMs = normalizeOptionalNonNegativeInteger(body.staleMs);
-
-    if (body.apply === true) {
-      const action = body.intent === 'cancel' ? 'cancel' : 'operator_attention';
-      return await deps.applyToolCallRecoveryTransitionForRunSpec(id, {
-        action,
-        staleMs,
-        reason: normalizeOptionalString(body.reason),
-        actor: operator.subject,
-        cancelLiveTaskRun: action === 'cancel'
-          ? (taskRunId, reason) => deps.cancelScheduledTask(taskRunId, reason)
-          : undefined,
-      });
-    }
-
-    return await deps.readToolCallRecoveryForRunSpec(id, {
-      intent: body.intent === 'cancel' ? 'cancel' : 'recover',
-      staleMs,
-    });
-  });
-
-  // Answer a worker `ask` message. The operator UI surfaces a worker.ask session
-  // event (emitted by the ask_coordinator tool); this route writes the answer onto
-  // the ask row (recordWorkerAnswer), appends a worker.answered session event for
-  // the audit trail, and fire-and-forget-triggers resumeAnsweredAsksForRunSpec so
-  // the blocked task is resumed without waiting for an external
-  // runAgentTaskGraphSerial invocation. The PG NOTIFY is kept for future LISTEN
-  // subscribers (e.g. a multi-gateway mesh where another process owns the graph).
-  app.post('/runs/:id/answer', async (req, reply) => {
-    if (!(await requireOperator(req, reply))) return;
-    const operator = getOperatorPrincipal(req);
-    const { id } = req.params as { id: string };
-    const body = asRecord(req.body);
-    const messageId = normalizeOptionalString(body.messageId);
-    const answer = normalizeOptionalString(body.answer);
-    if (!messageId) return reply.status(400).send({ error: 'messageId is required' });
-    if (!answer) return reply.status(400).send({ error: 'answer is required' });
-
-    await deps.ensureRunSpecStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return reply.status(404).send({ error: 'Run spec not found' });
-
-    const updated = await deps.recordWorkerAnswer(messageId, answer);
-    if (!updated) return reply.status(404).send({ error: 'ask message not found (or not an ask)' });
-
-    await deps.ensureSessionEventStore();
-    await deps.appendSessionEvent({
-      sessionId: runSpec.sessionId,
-      type: 'worker.answered',
-      payload: {
-        messageId,
-        answer,
-        actor: operator.subject,
-        runSpecId: id,
-        dispatchId: updated.dispatchId,
-        taskId: updated.taskId,
-      },
-    }).catch(() => undefined);
-
-    // Fire-and-forget: resume the blocked task(s) for this run spec. Not awaited
-    // so the operator's POST returns immediately; resume runs in the background.
-    // Errors are logged but do not fail the answer write — the answer is already
-    // persisted. There is no resident retry tick today (follow-up), so a failed
-    // resume leaves the task blocked until the next runAgentTaskGraphSerial
-    // invocation; the log line is the operator's signal to retry manually.
-    void deps.resumeAnsweredAsksForRunSpec(id).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.warn('resumeAnsweredAsksForRunSpec failed', { runSpecId: id, messageId, err: msg });
-    });
-
-    // PG NOTIFY for future multi-process LISTEN subscribers (no-op today; the
-    // direct call above is the active trigger in a single-gateway deployment).
-    try {
-      const db = getDb();
-      await db.notify('worker_answer', JSON.stringify({ runSpecId: id, messageId }));
-    } catch {
-      // NOTIFY best-effort.
-    }
-
-    return { ok: true, messageId, answer };
-  });
-
-  app.post('/runs/:id/verify', async (req, reply) => {
-    if (!(await requireOperator(req, reply))) return;
-    const { id } = req.params as { id: string };
-    const body = asRecord(req.body);
-    await deps.ensureRunSpecStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
-    const verification = await deps.runVerificationRecordsForRunSpec(id, {
-      cwd: normalizeOptionalString(body.cwd),
-      timeoutMs: normalizeOptionalNonNegativeInteger(body.timeoutMs),
-      outputLimit: normalizeOptionalNonNegativeInteger(body.outputLimit),
-      includeFailed: body.includeFailed === false ? false : undefined,
-    });
-    let recovery: Awaited<ReturnType<typeof createWorkItemRevision>> | undefined;
-    if (verification.decision.status === 'blocked') {
-      const links = await deps.listWorkItemRunLinksForRunSpec(id);
-      if (links[0]) {
-        recovery = await deps.createWorkItemRevision({
-          runSpecId: id,
-          actor: getOperatorPrincipal(req).subject,
-          reason: `Verification failed or remains incomplete: ${verification.decision.blockedVerificationRecordIds.join(', ')}`,
-          trigger: 'verification_failed',
-        }).catch(() => undefined);
-        if (recovery && !recovery.exhausted) {
-          void dispatchPersistedRunSpec(recovery.runSpecId, 'planning').catch((error: unknown) => {
-            log.warn('revision planning dispatch failed', { runSpecId: recovery?.runSpecId, error: error instanceof Error ? error.message : String(error) });
-          });
-        }
-      }
-    }
-    return { ...verification, recovery };
-  });
-
-  app.post('/runs/:id/approve', async (req, reply) => {
-    if (!(await requireOperator(req, reply))) return;
-    const operator = getOperatorPrincipal(req);
-    const { id } = req.params as { id: string };
-    const body = asRecord(req.body);
-    await deps.ensureRunSpecStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
-    const capabilityError = validatePlanApprovalCapability(body, id, runSpec.runContract);
-    if (capabilityError) return reply.status(capabilityError.statusCode).send(capabilityError.payload);
-
-    try {
-      const updated = await deps.approveRunSpecPhase(id, {
-        actor: operator.subject,
-        reason: normalizeOptionalString(body.reason),
-      });
-      const dispatch = updated.runContract?.phase === 'plan_approved'
-        ? {
-          status: 'scheduled' as const,
-          planRevision: updated.runContract?.planRevision ?? 1,
-        }
-        : undefined;
-      if (dispatch) {
-        void dispatchPersistedRunSpec(id, 'execution').catch((error: unknown) => {
-          log.warn('approved run dispatch failed', {
-            runSpecId: id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }
-      return {
-        runSpecId: id,
-        phase: updated.runContract?.phase,
-        previousPhase: updated.runContract?.previousPhase,
-        phaseChangedAt: updated.runContract?.phaseChangedAt,
-        dispatch,
-      };
-    } catch (err: any) {
-      return reply.status(400).send({
-        error: 'approval_failed',
-        message: err?.message ?? String(err),
-      });
-    }
-  });
-
-  app.post('/runs/:id/revise-plan', async (req, reply) => {
-    if (!(await requireOperator(req, reply))) return;
-    const operator = getOperatorPrincipal(req);
-    const { id } = req.params as { id: string };
-    const body = asRecord(req.body);
-    await deps.ensureRunSpecStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return reply.status(404).send({ error: 'Not found' });
-
-    try {
-      const updated = await deps.reviseRunSpecPlan(id, {
-        plan: Array.isArray(body.plan) ? body.plan as any : undefined,
-        actor: operator.subject,
-        reason: normalizeOptionalString(body.reason),
-      });
-      return {
-        runSpecId: id,
-        planRevision: updated.runContract?.planRevision,
-        previousRevision: (updated.runContract?.planRevision ?? 1) - 1,
-        phase: updated.runContract?.phase,
-        previousPhase: updated.runContract?.previousPhase,
-      };
-    } catch (err: any) {
-      return reply.status(400).send({
-        error: 'plan_revision_failed',
-        message: err?.message ?? String(err),
-      });
-    }
-  });
-
-  app.get('/runs/:id', async (req) => {
-    const { id } = req.params as { id: string };
-    await deps.ensureRunSpecStore();
-    const runSpec = await deps.loadRunSpec(id);
-    if (!runSpec) return { error: 'Not found' };
-    return runSpec;
-  });
-
-  app.get('/runs/:id/graph', async (req) => {
-    const { id } = req.params as { id: string };
-    const query = req.query as { requireVerifier?: string };
-    return await deps.readAgentTaskGraph(id, {
-      requireVerifier: query.requireVerifier === 'true' ? true : query.requireVerifier === 'false' ? false : undefined,
-    });
-  });
+  app.get('/runs', (req, reply) => handleListRuns(req, reply, deps));
+  app.get('/runs/:id/events', (req, reply) => handleListEvents(req, reply, deps));
+  app.get('/runs/:id/stream', (req, reply) => handleStream(req, reply, deps));
+  app.get('/runs/:id/inspect', (req, reply) => handleInspect(req, reply, deps));
+  app.get('/runs/:id/state', (req, reply) => handleState(req, reply, deps));
+  app.post('/runs/:id/recover', (req, reply) => handleRecover(req, reply, deps));
+  app.post('/runs/:id/answer', (req, reply) => handleAnswer(req, reply, deps));
+  app.post('/runs/:id/verify', (req, reply) => handleVerify(req, reply, deps));
+  app.post('/runs/:id/approve', (req, reply) => handleApprove(req, reply, deps));
+  app.post('/runs/:id/revise-plan', (req, reply) => handleRevisePlan(req, reply, deps));
+  app.get('/runs/:id', (req, reply) => handleGetRun(req, reply, deps));
+  app.get('/runs/:id/graph', (req, reply) => handleGraph(req, reply, deps));
 }
