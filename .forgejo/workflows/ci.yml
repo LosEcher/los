@@ -18,7 +18,10 @@ jobs:
     runs-on: win-ci-jj
     timeout-minutes: 15
     env:
-      TURBO_CONCURRENCY: 1
+      # Parallel turbo typecheck: CI has no turbo cache, so serial (1) cost
+      # ~100s of the ~2.4m gate-fast. 4x matches github's parallel jobs and
+      # the runner's observed capacity (two concurrent jobs ran undegraded).
+      TURBO_CONCURRENCY: 4
     steps:
       - name: Checkout
         run: |
@@ -49,7 +52,10 @@ jobs:
 
   gate-test:
     if: forgejo.event_name != 'push'
-    needs: gate-fast
+    # No `needs: gate-fast`: each job does its own checkout+install, and the
+    # runner sustains concurrent jobs (observed: two gate-fast jobs overlapped
+    # at full speed). Parallelizing cuts run wall time from gate-fast+gate-test
+    # (~5.2m) to max(gate-fast, gate-test) (~2.8m), matching github's layout.
     runs-on: win-ci-jj
     timeout-minutes: 40
 
@@ -123,7 +129,8 @@ jobs:
 
   gate-web-e2e:
     if: forgejo.event_name != 'push'
-    needs: gate-fast
+    # Same rationale as gate-test: no needs on gate-fast; each job checks out
+    # its own tree and the runner pool handles concurrency.
     runs-on: win-ci-playwright
     timeout-minutes: 10
 

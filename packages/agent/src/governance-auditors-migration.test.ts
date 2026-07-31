@@ -31,9 +31,14 @@ test('parseMigrationDriftBaseline parses both direction paddings', () => {
 
 test('parseMigrationDriftBaseline groups by table with correct counts + priority', async () => {
   // runMigrationDriftAudit groups via groupByTable; verify via the audit using a temp file.
+  // Path must be unique per process: CI runs agent tests as 3 parallel groups
+  // (LOS_TEST_GROUP), and a shared fixed path made one group's finally-rmSync
+  // delete the file another group was mid-audit, failing with count/priority asserts.
   const tmp = `${process.env.LOS_MIGRATION_DRIFT_BASELINE ?? ''}`;
-  process.env.LOS_MIGRATION_DRIFT_BASELINE = '/tmp/los-mig-drift-test-baseline.txt';
   const { writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  process.env.LOS_MIGRATION_DRIFT_BASELINE = join(tmpdir(), `los-mig-drift-test-${process.pid}.txt`);
   writeFileSync(process.env.LOS_MIGRATION_DRIFT_BASELINE, SAMPLE);
   try {
     const summary = await runMigrationDriftAudit() as Record<string, unknown>;
