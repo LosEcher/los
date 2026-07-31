@@ -55,3 +55,24 @@
 - similarity 对:人工确认后转入 `todo-seeds` dedupe 队列,确认前禁止直接提取;
 - complexity 热点:gateway `register*Routes` 拆 handler 是最高杠杆项,按文件分批;
 - CBM 查询结果只作线索,不直接写死到 gate(图索引可能过期,以 `los scan` 为 gate 真源)。
+
+## 复杂度热点处置决策(2026-07-31 记录)
+
+**已完成**:gateway 路由注册函数热点全部清零(5 文件拆解,
+51/44/33/31/28 → 全部 <25):execution-experiment-routes、server-maintenance、
+run-routes、provider-evidence-routes、runtime-adapter-routes。
+模式:内联 handler 提取为命名函数 / 定时任务提取 timer helper,
+逻辑逐字搬运 + DB 集成测试 + 全量 gate 验证。CBM 重扫确认闭环。
+
+**剩余 >25 函数分类处置**(不再无差别批量拆解):
+
+| 分类 | 函数 | 处置 |
+|---|---|---|
+| 领域复杂性(不拆) | `runAgent`(28, loop.ts)、`compactSession`(31, memory)、`runGaLoop`/`runGovernanceSweep`(33/28, agent, **GA 自愈禁用中**)、`readRuntimeEvidenceGraph`(28) | 复杂度即业务逻辑;拆分需先有测试设计与独立批次,禁止在无测试覆盖下重构核心路径 |
+| 装配类(按需) | `setupLiveEventPush`(27, sse-routes)、`createWxPusherIngress`(33, wechat) | 接近已拆模式,若触及这些文件时顺带处理 |
+| 前端低收益(不拆) | `eventPayloadSummary`(36)、`ChatPage`(32, web) | 展示逻辑,拆分收益低 |
+
+**防增量原则**:
+- 新 `register*Routes` 保持薄(仅路由接线,handler 独立命名函数)——作为代码评审惯例,
+  并靠 `.large-file-baseline.txt` 防文件膨胀;
+- 新核心函数复杂度 >25 时,先写测试再考虑拆分,不追求所有函数低复杂度。
