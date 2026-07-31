@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decayScore, decayScores, calculateDecayScores, shouldTriggerCompaction, STALE_THRESHOLD, type DecayObservation } from './core/decay.js';
+import { decayScore, decayScores, calculateDecayScores, shouldTriggerCompaction, aggregateCrossSessionDecay, STALE_THRESHOLD, type DecayObservation } from './core/decay.js';
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { ensureMemoryStore, addObservation } from './core/store.js';
@@ -278,6 +278,41 @@ test('shouldTriggerCompaction: fresh session does not trigger', async () => {
     assert.equal(decision.triggered, false);
   } finally {
     await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('aggregateCrossSessionDecay: groups kinds across sessions and excludes the current session', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const stamp = `${Date.now()}`;
+  const currentSession = `agg-current-${stamp}`;
+  const otherSessions = [`agg-other-a-${stamp}`, `agg-other-b-${stamp}`];
+  try {
+    await ensureMemoryStore();
+    // Two other sessions share the same kind -> must be aggregated.
+    for (const sessionId of otherSessions) {
+      await addObservation({ title: 'shared kind', kind: 'tool_result', sessionId });
+      await getDb().query(
+        `UPDATE observations SET created_at = $2 WHERE session_id = $1`,
+        [sessionId, hoursAgo(96)],
+      );
+    }
+    // A single-session kind must NOT be aggregated (HAVING >= 2 distinct sessions).
+    await addObservation({ title: 'loner kind', kind: 'note', sessionId: otherSessions[0]! });
+    // The current session must be excluded even when it has the same kind.
+    await addObservation({ title: 'current session kind', kind: 'tool_result', sessionId: currentSession });
+
+    const patterns = await aggregateCrossSessionDecay(currentSession);
+    const shared = patterns.find(p => p.kind === 'tool_result');
+    assert.ok(shared, 'tool_result kind should be aggregated across the two other sessions');
+    assert.equal(shared!.sessionCount, 2);
+    assert.ok(shared!.decayRate > 0.5, '96h-old observations should show high decay');
+    assert.equal(patterns.some(p => p.kind === 'note'), false, 'single-session kind must not be aggregated');
+  } finally {
+    for (const sessionId of [currentSession, ...otherSessions]) {
+      await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    }
     await closeDb().catch(() => undefined);
   }
 });
