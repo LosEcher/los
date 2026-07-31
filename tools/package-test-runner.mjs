@@ -47,7 +47,7 @@ export function runPackageTests(options) {
       '--experimental-test-coverage',
       `--test-coverage-include=${options.coverageInclude ?? 'src/**/*.ts'}`,
       ...discoveredTestFiles,
-    ], testEnv);
+    ], testEnv, testRunId);
     return;
   }
 
@@ -57,7 +57,7 @@ export function runPackageTests(options) {
     '--test-isolation=none',
     '--test-concurrency', '1',
     ...options.sharedProcessTestFiles,
-  ], testEnv);
+  ], testEnv, testRunId);
 
   const dbBackedFiles = options.dbBackedTestFiles ?? [];
   if (dbBackedFiles.length > 0) {
@@ -68,7 +68,7 @@ export function runPackageTests(options) {
       `--test-global-setup=${options.globalSetupFile}`,
       '--test-concurrency', '1',
       ...dbBackedFiles,
-    ], testEnv);
+    ], testEnv, testRunId);
   }
 
   runLane('isolated', [
@@ -78,7 +78,7 @@ export function runPackageTests(options) {
     `--test-global-setup=${options.globalSetupFile}`,
     '--test-concurrency', '1',
     ...options.isolatedDatabaseTestFiles,
-  ], testEnv);
+  ], testEnv, testRunId);
 }
 
 function walk(directory) {
@@ -88,9 +88,16 @@ function walk(directory) {
   });
 }
 
-function runLane(name, args, env) {
+function runLane(name, args, env, testRunId) {
+  // Every lane gets a distinct LOS_TEST_RUN_ID so test schemas derived from it
+  // (e.g. _configureTestSchema()) stay unique per lane process. Sharing one id
+  // across lanes makes the second lane's schema DDL collide with the first
+  // (CREATE TYPE ... already exists) on the same PostgreSQL database.
+  const laneEnv = testRunId
+    ? { ...env, LOS_TEST_RUN_ID: `${testRunId}-${name}` }
+    : env;
   process.stdout.write(`test lane: ${name}\n`);
-  const result = spawnSync(process.execPath, args, { env, stdio: 'inherit' });
+  const result = spawnSync(process.execPath, args, { env: laneEnv, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }

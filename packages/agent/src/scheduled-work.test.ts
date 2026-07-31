@@ -164,10 +164,13 @@ test('scheduled_execution with empty requiredChecks throws', () => {
 });
 
 test('scheduled_execution with requiredChecks passes validation', async () => {
+  // Use a future one-shot trigger relative to the real clock — a fixed past
+  // date (e.g. 2026-07-20) makes this fail once the date passes.
+  const futureOnce = new Date(Date.now() + 60_000).toISOString();
   const schedule = await createScheduledWorkItem({
     projectId: 'los',
     title: `valid-checks-${Date.now()}`,
-    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    trigger: { kind: 'once', expression: futureOnce, timezone: 'UTC' },
     runTemplate: {
       templateId: 'scheduled_execution',
       mode: 'execution',
