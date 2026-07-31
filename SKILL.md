@@ -247,14 +247,16 @@ Steps:
    GitHub mirror is optional — push there only after Forgejo PR is merged.
 
 5. **Create PR on Forgejo** — the push output includes a PR creation link.
-   With `FORGEJO_TOKEN` set, you can create the PR via API:
+   `FORGEJO_TOKEN` is configured in `.env` (read from macOS keychain entry `los-forgejo-write-token`).
+   Create the PR via Forgejo API:
    ```bash
-   curl -X POST "http://<forgejo>/api/v1/repos/los/los/pulls" \
+   FORGEJO_URL="http://100.68.106.96:3022"
+   curl -X POST "$FORGEJO_URL/api/v1/repos/los/los/pulls" \
      -H "Authorization: token $FORGEJO_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"title":"...","head":"feat/<slug>","base":"main","body":"..."}'
    ```
-   Without a token, open the link from the push output in a browser.
+   When `FORGEJO_TOKEN` is not available, open the link from the push output in a browser.
 
 6. **Keep `main` on Forgejo** — pushing a feature does not publish it to `main`.
    Start unrelated work from the current authoritative base instead of stacking
