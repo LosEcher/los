@@ -47,6 +47,7 @@ export async function ensureAllAgentStores(): Promise<void> {
     import('./work-items/store.js'),
     import('./scheduled-work/schema.js'),
     import('./daily-agent-quality/schema.js'),
+    import('./run-evals/sample-gate.js'),
   ]);
 
   const ensureFns = [
@@ -91,4 +92,10 @@ export async function ensureAllAgentStores(): Promise<void> {
     const fn = mod[ensureFns[i]];
     if (typeof fn === 'function') await fn();
   }
+
+  // Explicit wiring for check-wiring-topology (AP10): the sample gate store is
+  // an agent-owned store and must be created through this single bootstrap
+  // surface. The direct call keeps the wiring visible to the static check.
+  const gateStore = await import('./run-evals/sample-gate.js');
+  await gateStore.ensureSampleGateStore();
 }

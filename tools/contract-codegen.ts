@@ -18,17 +18,19 @@ export interface GeneratedContractFiles {
   runStream: string;
   executionExperiment: string;
   executionPairwiseEval: string;
+  executionPairwiseSampleGate: string;
 }
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GENERATED_DIR = resolve(ROOT, 'packages/contracts/src/generated');
 
 export async function generateContractFiles(root = ROOT): Promise<GeneratedContractFiles> {
-  const [runSpecText, runStreamText, executionExperimentText, executionPairwiseEvalText] = await Promise.all([
+  const [runSpecText, runStreamText, executionExperimentText, executionPairwiseEvalText, executionPairwiseSampleGateText] = await Promise.all([
     readFile(resolve(root, 'contracts/run-spec.yaml'), 'utf8'),
     readFile(resolve(root, 'contracts/run-stream.yaml'), 'utf8'),
     readFile(resolve(root, 'contracts/execution-experiment.yaml'), 'utf8'),
     readFile(resolve(root, 'contracts/execution-pairwise-eval.yaml'), 'utf8'),
+    readFile(resolve(root, 'contracts/execution-pairwise-sample-gate.yaml'), 'utf8'),
   ]);
   const runSpec = YAML.parse(runSpecText) as Schema & { contract: string; version: string };
   const runStream = YAML.parse(runStreamText) as {
@@ -40,14 +42,17 @@ export async function generateContractFiles(root = ROOT): Promise<GeneratedContr
 
   const executionExperiment = YAML.parse(executionExperimentText) as Schema & { contract: string; version: string };
   const executionPairwiseEval = YAML.parse(executionPairwiseEvalText) as Schema & { contract: string; version: string };
+  const executionPairwiseSampleGate = YAML.parse(executionPairwiseSampleGateText) as Schema & { contract: string; version: string };
   const schema = pickJsonSchema(runSpec);
   const executionExperimentSchema = pickJsonSchema(executionExperiment);
   const executionPairwiseEvalSchema = pickJsonSchema(executionPairwiseEval);
+  const executionPairwiseSampleGateSchema = pickJsonSchema(executionPairwiseSampleGate);
   return {
     runSpec: renderRunSpec(runSpec.contract, runSpec.version, schema),
     runStream: renderRunStream(runStream),
     executionExperiment: renderObjectContract(executionExperiment.contract, executionExperiment.version, executionExperimentSchema, 'ExecutionExperimentRequest', 'EXECUTION_EXPERIMENT'),
     executionPairwiseEval: renderObjectContract(executionPairwiseEval.contract, executionPairwiseEval.version, executionPairwiseEvalSchema, 'ExecutionPairwiseEvalRequest', 'EXECUTION_PAIRWISE_EVAL'),
+    executionPairwiseSampleGate: renderObjectContract(executionPairwiseSampleGate.contract, executionPairwiseSampleGate.version, executionPairwiseSampleGateSchema, 'ExecutionPairwiseSampleGateRequest', 'EXECUTION_PAIRWISE_SAMPLE_GATE'),
   };
 }
 
@@ -60,6 +65,7 @@ export async function writeGeneratedContractFiles(root = ROOT): Promise<void> {
     writeFile(resolve(directory, 'run-stream.ts'), generated.runStream),
     writeFile(resolve(directory, 'execution-experiment.ts'), generated.executionExperiment),
     writeFile(resolve(directory, 'execution-pairwise-eval.ts'), generated.executionPairwiseEval),
+    writeFile(resolve(directory, 'execution-pairwise-sample-gate.ts'), generated.executionPairwiseSampleGate),
   ]);
 }
 
