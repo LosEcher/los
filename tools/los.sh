@@ -150,14 +150,9 @@ start_executor_process() {
   local command
   command="$(ex_launch_command)"
 
-  if command -v launchctl >/dev/null 2>&1; then
-    start_daemon_launchctl "$command" "$EX_LOG_FILE" "$EX_LAUNCH_PREFIX"
-    # launchctl doesn't return a PID, caller must discover via lsof
-    printf ''
+  if command -v perl >/dev/null 2>&1; then
+    start_daemon_perl "$command" "$EX_LOG_FILE" "$EX_LAUNCH_PREFIX"
   else
-    # shellcheck disable=SC2034
-    local tsx
-    tsx="$(tsx_dist executor)"
     start_daemon_nohup "$command" "$EX_LOG_FILE" "$ROOT"
   fi
 }

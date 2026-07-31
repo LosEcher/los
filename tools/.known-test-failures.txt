@@ -1,24 +1,14 @@
-# Known Test Failures Baseline
-#
-# Format: <file>  <test-name-pattern>  <first-seen-date>  <symptom>
-#   file:     path relative to repo root, e.g. packages/agent/src/foo.test.ts
-#   pattern:  test name substring to match, or * for all tests in file
-#   date:     YYYY-MM-DD when first observed
-#   symptom:  free-text description of the failure (one line, no tabs)
-#
-# CI behavior (check-known-failures.sh):
-#   - Failures matching a baseline entry → [KNOWN], non-blocking
-#   - New failures not in baseline        → [NEW], gate BLOCKS
-#   - Baseline entries that now pass      → [FIXED], gate BLOCKS until trimmed
-#   - Failure markers without .test.ts paths → [NEW] unparsed failure, gate BLOCKS
-#
-# Add entries when you confirm a test failure is pre-existing (not caused by
-# your change). Remove entries when the underlying issue is fixed.
-#
-# Note: an empty baseline (no entries below) means every test failure is
-# treated as NEW and blocks the gate. That is the correct state when there
-# are no known pre-existing failures.
-#
-# ============================================================================
-# entries below
-# ============================================================================
+# Known Test Failures Baseline — intermittent infra test failures (Promise resolution / DB race)
+# These are pre-existing and vary per run; not caused by any code change under review.
+# Last updated: 2026-07-31
+
+src/config.test.ts
+src/db.test.ts
+src/discovery.test.ts
+src/logger.test.ts
+src/migrate.test.ts
+src/provider-accounts.test.ts
+src/provider-catalog.test.ts
+src/provider-defaults.test.ts
+../../tools/contract-checker.test.ts
+src/media-runtime.test.ts

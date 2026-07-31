@@ -1,4 +1,5 @@
 import { getLogger } from '@los/infra/logger';
+import { listManagedWorkspaces } from '../managed-workspace-store.js';
 
 import { listExecutorNodes } from '../executor-nodes.js';
 import { dispatchFeedAnalysisJob } from '../integration/feed-analysis-ingress.js';
@@ -24,6 +25,18 @@ import {
 import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome } from './types.js';
 
 const log = getLogger('scheduled-work');
+
+async function resolveWorkspaceRoot(projectId: string): Promise<string> {
+  try {
+    const workspaces = await listManagedWorkspaces({ projectId, status: 'active', limit: 1 });
+    if (workspaces.length > 0 && workspaces[0]!.workspaceRoot) {
+      return workspaces[0]!.workspaceRoot;
+    }
+  } catch {
+    // Fall through to cwd if managed-workspace lookup fails
+  }
+  return process.cwd();
+}
 
 export interface ScheduledWorkTickResult {
   claimed: number;
@@ -169,7 +182,7 @@ async function executeTemplate(
   if (schedule.runTemplate.templateId === 'scheduled_feed_analysis') {
     const derived = _deriveScheduledFeedAnalysisDispatch(schedule, run);
     const result = await dispatchFeedAnalysisJob(derived.request, derived.idempotencyKey, {
-      workspaceRoot: process.cwd(),
+      workspaceRoot: await resolveWorkspaceRoot(schedule.projectId),
       tenantId: schedule.tenantId,
       projectId: schedule.projectId,
       userId: schedule.userId,
@@ -213,7 +226,7 @@ async function executeTemplate(
     const disposition = schedule.runTemplate.mode === 'execution' ? 'execution' as const : 'planning' as const;
     const result = await runScheduledAgentTask({
       prompt: schedule.runTemplate.goalTemplate,
-      workspaceRoot: process.cwd(),
+      workspaceRoot: await resolveWorkspaceRoot(schedule.projectId),
       tenantId: schedule.tenantId,
       projectId: schedule.projectId,
       userId: schedule.userId,

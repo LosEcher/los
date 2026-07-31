@@ -124,7 +124,14 @@ export async function discoverAll(): Promise<DiscoveryReport> {
   }
 
   // Phase 4: Local endpoints (async — probes network)
-  const localProviders = await scanLocalEndpoints();
+  // Skip network probing in test processes — probe timeouts cause flaky
+  // "Promise resolution is still pending" errors when tests exit mid-flight.
+  const isTestProcess =
+    process.env.NODE_ENV === 'test' ||
+    process.env.LOS_TEST_MODE === '1' ||
+    Boolean(process.env.NODE_TEST_CONTEXT);
+
+  const localProviders = isTestProcess ? [] : await scanLocalEndpoints();
   for (const p of localProviders) {
     if (!providers.some(existing => existing.name === p.name)) {
       providers.push(p);

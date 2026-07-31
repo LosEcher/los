@@ -246,17 +246,57 @@ Steps:
    ```
    GitHub mirror is optional — push there only after Forgejo PR is merged.
 
-5. **Create PR on Forgejo** — the push output includes a PR creation link.
-   With `FORGEJO_TOKEN` set, you can create the PR via API:
+5. **Create PR on Forgejo** — `FORGEJO_TOKEN` is configured in `.env`
+   (read from macOS keychain entry `los-forgejo-write-token`). Derive the
+   Forgejo URL from `origin`; never hardcode an address from old session output.
    ```bash
-   curl -X POST "http://<forgejo>/api/v1/repos/los/los/pulls" \
+   source .env 2>/dev/null
+   FORGEJO_URL=$(git remote get-url origin | sed -E 's#(https?://[^/]+).*#\1#')
+   curl -X POST "$FORGEJO_URL/api/v1/repos/los/los/pulls" \
      -H "Authorization: token $FORGEJO_TOKEN" \
      -H "Content-Type: application/json" \
-     -d '{"title":"...","head":"feat/<slug>","base":"main","body":"..."}'
+     -d '{"title":"feat: <summary>","head":"feat/<slug>","base":"main","body":"<checks + risk>"}'
    ```
-   Without a token, open the link from the push output in a browser.
+   Without `FORGEJO_TOKEN`, open the push-output link in a browser.
 
-6. **Keep `main` on Forgejo** — pushing a feature does not publish it to `main`.
+6. **Verify exact-head CI before merging** — Forgejo must report green
+   required checks for the pushed head SHA. `force_merge` is forbidden per
+   `docs/operations/forgejo-delivery.md`. If CI is not running:
+   1. Check Forgejo Actions at `$FORGEJO_URL/los/los/actions`.
+   2. If no workflows are configured, open a separate bounded change to
+      repair `.forgejo/workflows/ci.yml` and re-provision branch protection.
+   3. Do not bypass with `force_merge` unless an explicit operator emergency
+      authorization is recorded.
+   ```bash
+   HEAD_SHA=$(jj log -r '@' --no-graph -T 'commit_id' | head -1)
+   curl -fsS -H "Authorization: token $FORGEJO_TOKEN" \
+     "$FORGEJO_URL/api/v1/repos/los/los/commits/$HEAD_SHA/status"
+   ```
+
+7. **Merge through the Forgejo API** — re-read the PR head immediately
+   before merging. Keep `force_merge:false`.
+   ```bash
+   PR_NUM=<number>
+   # Re-confirm exact head
+   curl -fsS -H "Authorization: token $FORGEJO_TOKEN" \
+     "$FORGEJO_URL/api/v1/repos/los/los/pulls/$PR_NUM" | jq '{head_sha:.head.sha,mergeable}'
+   # Merge
+   curl -X POST "$FORGEJO_URL/api/v1/repos/los/los/pulls/$PR_NUM/merge" \
+     -H "Authorization: token $FORGEJO_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"Do":"merge","delete_branch_after_merge":false,"force_merge":false}'
+   ```
+
+8. **Sync local main and clean up** — only after Forgejo confirms the merge.
+   ```bash
+   jj git fetch --remote origin
+   jj bookmark move main --to main@origin
+   jj bookmark delete feat/<slug>
+   bash tools/branch-prune-origin.sh   # dry-run; --apply with operator consent
+   jj new main                          # start next change from authoritative main
+   ```
+
+9. **Keep `main` on Forgejo** — pushing a feature does not publish it to `main`.
    Start unrelated work from the current authoritative base instead of stacking
    it on the pushed feature:
    ```bash
@@ -264,17 +304,8 @@ Steps:
    jj new main@origin
    ```
 
-7. **After Forgejo CI passes and PR is merged**:
-   ```bash
-   jj git fetch --remote origin
-   jj log -r 'main@origin' -n 1          # verify origin/main is the merge commit
-   jj bookmark move main --to main@origin  # sync local main
-   bash tools/branch-prune-origin.sh      # dry-run; --apply with operator consent
-   ```
-
 Before merging, inspect `/pulls/<number>/files`. If the file list contains a
-second task or package intent, close/split the PR rather than merging it or
-moving `main` forward locally. A stale entry in
+second task or package intent, close/split the PR. A stale entry in
 `tools/.known-test-failures.txt` is also a gate failure: remove recovered
 entries in a separate bounded change before delivering feature work.
 

@@ -42,6 +42,9 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     if (input.runTemplate.editableSurfaces.length === 0) {
       throw new Error('scheduled_execution requires at least one editable surface');
     }
+    if (input.runTemplate.requiredChecks.length === 0) {
+      throw new Error('scheduled_execution requires at least one required check');
+    }
     return; // skip feed-analysis and read-only checks
   }
   if (input.runTemplate.toolMode !== 'read-only' || input.runTemplate.editableSurfaces.length > 0) {
