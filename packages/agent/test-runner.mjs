@@ -116,6 +116,7 @@ const isolatedGroupB = [
   'src/provider-promotion-decisions.test.ts',
   'src/providers.test.ts',
   'src/run-evals-pairwise.test.ts',
+  'src/run-evals-sample-gate.test.ts',
   'src/run-evals.test.ts',
   'src/run-spec-plans.test.ts',
   'src/run-spec-kernel-selection.test.ts',

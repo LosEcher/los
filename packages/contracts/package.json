@@ -9,6 +9,7 @@
     "./run-stream": "./src/generated/run-stream.ts"
     ,"./execution-experiment": "./src/generated/execution-experiment.ts"
     ,"./execution-pairwise-eval": "./src/generated/execution-pairwise-eval.ts"
+    ,"./execution-pairwise-sample-gate": "./src/generated/execution-pairwise-sample-gate.ts"
   },
   "scripts": {
     "generate": "node --import tsx ../../tools/contract-codegen.ts",
