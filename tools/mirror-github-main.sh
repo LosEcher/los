@@ -313,7 +313,9 @@ content_diff_empty() {
   if [[ -z "$stat" ]]; then
     return 0
   fi
-  if printf '%s\n' "$stat" | grep -q '0 files changed'; then
+  # IMPORTANT: must anchor. Unanchored "0 files changed" matches "10 files changed"
+  # (and any N0), which false-positive "already in sync" and skipped mirror PRs.
+  if printf '%s\n' "$stat" | grep -qE '^0 files changed'; then
     return 0
   fi
   return 1
