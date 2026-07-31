@@ -138,6 +138,7 @@ async function runMemoryMaintenance(): Promise<void> {
 
       let decayCompacted = 0;
       let scheduledCompacted = 0;
+      let autoArchived = 0;
       const SAFETY_NET_HOURS = 24;
 
       for (const { session_id: sessionId, oldest_obs, obs_count } of rows.rows) {
@@ -155,6 +156,16 @@ async function runMemoryMaintenance(): Promise<void> {
           }
         } catch (err) {
           log.debug(`Decay check skipped for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        // Auto-marking: archive individually stale plain observations (approved
+        // operator policy); runs even when the session does not trigger compaction.
+        try {
+          const { archiveStaleObservations } = await import('@los/memory');
+          const marked = await archiveStaleObservations(sessionId);
+          autoArchived += marked.archivedCount;
+        } catch (err) {
+          log.debug(`Auto-marking skipped for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
         }
 
         // Rule 2: 24h safety net for sessions with at least some observations
