@@ -16,7 +16,10 @@ import {
 } from './identity-loader.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const TMP_DIR = join(__dirname, '../../.los-runtime', 'identity-test-' + Date.now());
+// Unique per process: CI runs agent tests as 3 parallel groups (LOS_TEST_GROUP),
+// and a bare Date.now() suffix can collide across processes loaded in the same
+// millisecond, causing parallel cleanup() calls to delete a sibling's directory.
+const TMP_DIR = join(__dirname, '../../.los-runtime', 'identity-test-' + process.pid + '-' + Date.now());
 
 // ── Cleanup ───────────────────────────────────────────────
 
