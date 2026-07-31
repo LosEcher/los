@@ -27,7 +27,7 @@
 | 领域 | 状态 |
 |---|---|
 | ReAct 内核 | `loop.ts` + provider 抽象（OpenAI-compat / Anthropic / Responses）+ 工具能力分级 L0/L1/L2 + 副作用感知并行批处理 + 重试退避 |
-| 契约优先 | `contracts/` 11 份 YAML + `check-contracts.sh` + 8 阶段 `ci-gate.sh` |
+| 契约优先 | `contracts/` 29 个 YAML（28 业务契约 + meta-schema，2026-07-31 核）+ `check-contracts.sh` + 8 阶段 `ci-gate.sh` |
 | 状态机 | `execution-transitions.ts` 迁移表 + `transitionExecutionState()` 单事务 outbox + `check-state-machine-bypass.sh` 白名单 CI 门 |
 | PG 队列 | 3+1 套均 `FOR UPDATE SKIP LOCKED` + advisory lock + lease/heartbeat + 死信表 |
 | 治理子系统 | 11 类审计 job + drift sweeper + hotspot detector + GA 自修复循环 + 熔断器 + PG LISTEN 唤醒 |

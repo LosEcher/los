@@ -27,7 +27,7 @@ The historical claims below come from local repositories and documents:
 
 - `projects/lsclaw` commit history and its May 2026 Pi adapter;
 - `projects/los` commit history, ADRs, contracts, and current source;
-- archived `docs/archive/seven-project-boundary-spec.md`;
+- archived `../../docs/archive/seven-project-boundary-spec.md` (workspace-level, at los-workspace/docs/archive/);
 - local Pi reference checkout at
   `304f42d20937ff06e8b63e4e7e330b953dedad76`.
 
@@ -402,7 +402,7 @@ LOS todos. Their status here must not be presented as database todo state.
 - `docs/operations/2026-07-22-pi-kernel-shadow-adapter-revision-result.md`
 - `docs/operations/2026-07-22-pi-kernel-second-turn-envelope-probe.md`
 - `docs/operations/2026-07-22-pi-kernel-semantic-default-revision-result.md`
-- archived `docs/archive/seven-project-boundary-spec.md`
+- archived `../../docs/archive/seven-project-boundary-spec.md` (workspace-level, at los-workspace/docs/archive/)
 - Pi AgentHarness lifecycle:
   <https://github.com/earendil-works/pi/blob/main/packages/agent/docs/agent-harness.md>
 - OpenClaw runtime architecture:

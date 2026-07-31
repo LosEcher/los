@@ -6,6 +6,11 @@ rule:
   any:
     - pattern: "import $$$ from 'pg'"
     - pattern: "import { $$$ } from 'pg'"
+# infra/ owns the pg pool and static-analysis/ needs no cross-boundary rule.
+# Regexes avoid path separators so they match on both POSIX and Windows paths.
+exclude:
+  - "packages[\\\\/]infra[\\\\/]"
+  - "static-analysis"
 governance:
   domain: architecture
   owner: platform

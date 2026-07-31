@@ -14,14 +14,14 @@
 
 当前状态总览：
 
-复核时间：2026-06-19。证据来自 `packages/web/src/App.tsx`、
-`packages/web/src/pages/*`、`packages/gateway/src/routes/providers/provider-routes.ts`、
-`packages/gateway/src/provider-routes.test.ts`、`packages/web/vite.config.ts`
+复核时间：2026-07-31。证据来自 `packages/web/src/App.tsx`、
+`packages/web/src/pages/*`、`packages/gateway/src/routes/providers/provider-crud-routes.ts`、
+`packages/gateway/src/routes/providers/provider-crud-routes.test.ts`、`packages/web/vite.config.ts`
 和 `bash tools/check-readiness.sh`。
 
 | 模块 | API 完备 | UI 完备 | 证据闭环 | 当前 |
 |---|---|---|---|---|
-| providers | ⚠️ update/delete 已有，create 缺失 | ❌ 页面仍显示只读/copy-paste | ❌ CRUD 集成测试缺失 | `partial`（NAV 当前误标 `live`） |
+| providers | ✅ CRUD 端点齐全（POST/PATCH/DELETE + `setConfig()` 运行时更新） | ✅ 表单已接 `useMutation` + `postJson`/`patchJson`，表格有 add/edit/delete | ✅ CRUD 全生命周期集成测试存在 | `partial`（P1 全部完成，剩 P2：config 持久化 round-trip、StatusPill → `live`） |
 | evals | ✅ 读写俱全 | ⚠️ summary/compare 可视，手动录入仍弱 | ✅ E01-E06 探针和 backlog scheduler 已有 | `live`（仍有 P2 增强项） |
 | nodes | ✅ `/node-commands` proxy 已有 | ✅ 心跳/候选状态已在表格显示 | ✅ stale/candidate blocker 单测已有 | `live`（仍有资源压力展示增强项） |
 | settings | ✅ `PATCH /settings` 已有 | ✅ 表单保存已接 `patchJson` | ⚠️ 运行时更新路径存在，缺专门 route round-trip 测试 | `live`（仍有 P2 热加载测试/磁盘持久化） |

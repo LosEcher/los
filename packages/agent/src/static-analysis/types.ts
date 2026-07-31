@@ -5,6 +5,13 @@ export interface StaticAnalysisRule {
   severity: 'error' | 'warning' | 'info';
   rule: Record<string, unknown>;
   constraints?: StaticAnalysisConstraint[] | null;
+  /**
+   * Regex sources matched against the absolute file path. Findings in
+   * matching files are skipped for this rule. Used for scoped exemptions:
+   * e.g. `['\\.test\\.ts$']` for store-layer unit tests, or package paths
+   * for rules whose rationale excludes a package by design.
+   */
+  exclude?: string[] | null;
   fix?: { replace: string; joinBy?: string } | null;
   governance?: {
     domain?: string[] | null;

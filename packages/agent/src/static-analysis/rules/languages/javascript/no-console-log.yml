@@ -6,3 +6,7 @@ rule:
   pattern: console.log($$$)
 fix:
   replace: console.info($$$)
+exclude:
+  - "packages[\\\\/]cli[\\\\/]"
+  - "xai-oauth-login"
+  - "firing-range-scan"

@@ -4,7 +4,7 @@
   "activeTruthMaxLines": 240,
   "maxActiveTruthDocuments": 6,
   "auditClaudeMemory": true,
-  "archivePaths": ["docs/archive/", "docs/research/legacy/"],
+  "archivePaths": ["docs/research/legacy/"],
   "documents": {
     "entrypoint": [
       {

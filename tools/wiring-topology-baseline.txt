@@ -127,6 +127,7 @@ agent|packages/agent/src/session-trace.ts|validateTraceCompleteness  # test-only
 agent|packages/agent/src/skills.ts|incrementSkillUsage  # zero callers (orphan)
 agent|packages/agent/src/skills.ts|skillDirForScope  # zero callers (orphan)
 agent|packages/agent/src/spec-loader.ts|loadAllSpecs  # test-only caller (no production caller)
+agent|packages/agent/src/spec-loader.ts|loadSpecsForFiles  # test-only caller (no production caller)
 agent|packages/agent/src/spec-loader.ts|resolveSpecLayer  # test-only caller (no production caller)
 agent|packages/agent/src/spec-loader.ts|trimSpecForReview  # test-only caller (no production caller)
 agent|packages/agent/src/static-analysis/shared.ts|DEFAULT_EXCERPT_LENGTH  # zero callers (orphan)
