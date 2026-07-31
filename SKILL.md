@@ -245,6 +245,8 @@ Steps:
    jj git push --remote origin --bookmark feat/<slug>
    ```
    GitHub mirror is optional — push there only after Forgejo PR is merged.
+   For the mirror sync workflow (ruleset constraints, PR path), see
+   `## Workflow: GitHub Mirror Sync` below.
 
 5. **Create PR on Forgejo** — `FORGEJO_TOKEN` is configured in `.env`
    (read from macOS keychain entry `los-forgejo-write-token`). Derive the
@@ -308,6 +310,80 @@ Before merging, inspect `/pulls/<number>/files`. If the file list contains a
 second task or package intent, close/split the PR. A stale entry in
 `tools/.known-test-failures.txt` is also a gate failure: remove recovered
 entries in a separate bounded change before delivering feature work.
+
+## Workflow: GitHub Mirror Sync
+
+Trigger when `main@github` lags Forgejo `main` and the mirror must be pulled
+even. Verified on 2026-07-31 (PR #197, 6 commits behind).
+
+**Why direct push is impossible** — GitHub `main` is protected by the ruleset
+`main-protection` (`repos/LosEcher/los/rulesets/17481877`), which applies to
+`refs/heads/main`:
+
+| Rule | Effect |
+|------|--------|
+| `required_status_checks` | `gate-fast` / `gate-test` / `gate-drift` — **enforced on direct push too** (unlike classic protection, which only gates PR merges) |
+| `non_fast_forward` | force push blocked |
+| `deletion` | branch deletion blocked |
+
+`bypass_actors` is empty, so there is no bypass — even a pure fast-forward push
+is rejected (`push declined due to repository rule violations`) because the
+target commit has no GitHub Actions check records (Forgejo-merged commits never
+ran GitHub CI). **The only legal path is a PR merge** (prior art: #195, #196,
+#197).
+
+Steps:
+
+1. **Create the mirror bookmark** on local `main`:
+   ```bash
+   jj bookmark create mirror/forgejo-main-sync --to main
+   jj git push --remote github --bookmark mirror/forgejo-main-sync
+   ```
+   Feature branches are not covered by the ruleset, so the push succeeds.
+   (`jj git push` does not run the git pre-push hook — run `pnpm gate` once
+   yourself before pushing.)
+
+2. **Open the PR on GitHub**:
+   ```bash
+   gh pr create --base main --head mirror/forgejo-main-sync \
+     --title "mirror: sync Forgejo main → GitHub (N commits)" \
+     --body "Mirror sync from Forgejo (authoritative). Direct push blocked by ruleset main-protection (required_status_checks)."
+   ```
+
+3. **Wait for all checks green** — `gate-fast`, `gate-drift`, `gate-web-e2e`
+   and `gate-test`:
+   ```bash
+   gh pr checks <PR_NUM> --watch --interval 20
+   ```
+
+4. **Merge with a merge commit** (matches #195/#196/#197 shape; do not
+   squash/rebase):
+   ```bash
+   gh pr merge <PR_NUM> --merge --delete-branch=false
+   ```
+
+5. **Clean up and re-align local `main`**:
+   ```bash
+   git push github --delete mirror/forgejo-main-sync
+   jj bookmark delete mirror/forgejo-main-sync
+   jj git fetch --remote github
+   jj bookmark move main --to main@origin   # keep main on Forgejo; --allow-backwards if a mirror merge commit auto-advanced it
+   ```
+
+Expected end state: GitHub `main` is ahead of Forgejo by exactly one mirror
+merge commit with identical content — verify with
+`jj diff --from main@origin --to main@github --stat` (must print `0 files
+changed`). Local `main` stays aligned with Forgejo.
+
+**When gate-test fails on GitHub**: do not patch the mirror PR. Fix Forgejo
+`main` first (own Forgejo PR, exact-head CI green), then re-run this workflow
+by moving the mirror bookmark forward. Known 2026-07-31 blockers that all had
+to be fixed in Forgejo main before the mirror could go green: `test-runner.mjs`
+unclassified test files (#115 added tests without classifying them — fails
+every CI immediately), orca computer-use MCP defaulting on (`registry.execute()`
+blocked ~60s per call; now opt-in via `LOS_ORCA_ENABLED=1`), a hardcoded past
+`once` trigger date in `scheduled-work.test.ts`, and test lanes sharing one
+`LOS_TEST_RUN_ID` schema (CREATE TYPE collisions).
 
 ## Workflow: Gate Hook Failures
 
