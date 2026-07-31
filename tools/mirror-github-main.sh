@@ -298,7 +298,9 @@ cleanup_mirror_ref() {
     info "[dry-run] jj bookmark delete ${BOOKMARK}"
     return 0
   fi
-  git push "$GITHUB_REMOTE" --delete "$BOOKMARK" 2>/dev/null || true
+  # --no-verify: branch deletion must not run the pre-push `pnpm gate` hook
+  # (observed ~80s waste on every successful mirror cleanup).
+  git push --no-verify "$GITHUB_REMOTE" --delete "$BOOKMARK" 2>/dev/null || true
   if bookmark_exists; then
     jj bookmark delete "$BOOKMARK" 2>/dev/null || true
   fi
