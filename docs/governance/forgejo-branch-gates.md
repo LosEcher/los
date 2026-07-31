@@ -11,12 +11,13 @@ does not repeat the workflow because the exact PR head must already have passed
 the required checks before merge. It provides:
 
 1. `gate-fast`: typecheck, security, structure, coupling, state-machine,
-   contracts, delete-safety, and wiring checks;
-2. `gate-test`: the real root `pnpm test` path, which uses Turbo concurrency to
-   run every package test script once against PostgreSQL 16;
+   contracts, delete-safety, wiring, and CI workflow-policy checks; sets
+   `TURBO_CONCURRENCY=4` so typecheck is not serialized on a cold turbo cache;
+2. `gate-test`: agent tests in three parallel groups plus the other package
+   tests against PostgreSQL 16 (`LOS_TEST_CONCURRENCY=2`);
 3. `gate-drift`: migration-versus-ensure-store schema drift verification;
-4. `gate-web-e2e`: Playwright operator-path specs, scheduled after `gate-fast`
-   on the Windows runner while the test path runs independently.
+4. `gate-web-e2e`: Playwright operator-path specs on the Windows Playwright
+   runner (starts in parallel with the other PR jobs).
 
 The workflow cancels an older in-progress run for the same ref. Each runner
 bind-mounts its own host-persistent pnpm store into its jobs, and dependency
@@ -28,23 +29,24 @@ The repo-scoped `win-los-canary` runner handles `gate-fast` and `gate-test`
 through `win-ci-jj`, `gate-drift` through `win-ci`, and Web E2E through
 `win-ci-playwright`. The first two labels use the pinned Node 24 image. The
 Playwright label uses `los-ci:node22-jj0.39.0-playwright1.61.1`, which preloads
-Chromium and its Debian dependencies. `gate-test` advertises two Turbo package
-tasks through `LOS_TEST_CONCURRENCY=2` on the effective 8-vCPU, 15-GiB Podman
-VM. node34 runs Forgejo only and is not a CI fallback.
+Chromium and its Debian dependencies. node34 runs Forgejo only and is not a CI
+fallback.
 
-`gate-test` and Web E2E depend on `gate-fast`, so a fast failure does not
-allocate either expensive workload. After fast passes, the Windows runner runs
-the single-worker browser path alongside the workspace tests and later the
-short drift job. Do not remove the fast dependency or raise the Windows limit
-without CPU, available-memory, swap, service-latency, and job-duration evidence
-from representative unchanged-head runs.
+As of PR `#125` (verified run `421`, ~3.2 minutes wall time), `gate-test`,
+`gate-web-e2e`, and `gate-drift` have **no** `needs: gate-fast` edge. Each job
+checks out and installs on its own tree so wall time is dominated by the
+slowest job under the runner capacity limit rather than
+`gate-fast + gate-test`. The Windows runner capacity remains two concurrent
+slots; four eligible jobs therefore pack onto two workers. Do not raise
+capacity or re-serialize jobs without CPU, available-memory, swap,
+service-latency, and job-duration evidence from representative unchanged-head
+runs. If overlap causes Podman service-network collisions or swap growth,
+restore a serial `needs` edge rather than raising concurrency blindly.
 
-`gate-drift` starts independently with `gate-fast`. Its PostgreSQL service uses
-a distinct DNS name, database, user, and credential from `gate-test`. Manual
-isolation canary run `269` (UI run `241`) completed both dependency-free jobs
-in the same 22-second window before this dependency was removed. Keep runner
-capacity at two and restore `needs: gate-test` if later evidence shows Podman
-service-network collisions, swap growth, or Forgejo latency during overlap.
+`gate-drift` uses a PostgreSQL service with a distinct DNS name, database,
+user, and credential from `gate-test` so the two DB jobs can overlap safely.
+Policy is locked by `tools/ci-workflow-policy.test.mjs` (also invoked from
+`pnpm gate` via `tools/check-ci-workflow-policy.sh`).
 
 `.forgejo/workflows/audit.yml` runs the dependency audit manually. The daily
 schedule is disabled so an offline Windows host cannot accumulate unattended

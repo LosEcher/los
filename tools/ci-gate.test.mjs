@@ -17,6 +17,7 @@ const ciGate = fileURLToPath(new URL('./ci-gate.sh', import.meta.url));
 const passingChecks = [
   'check-security.sh',
   'check-structure.sh',
+  'check-ci-workflow-policy.sh',
   'check-coupling.sh',
   'check-state-machine-bypass.sh',
   'check-contracts.sh',
