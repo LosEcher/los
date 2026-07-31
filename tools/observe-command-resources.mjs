@@ -112,9 +112,13 @@ async function sampleResources(processGroupId, cgroupPath, aggregate) {
 }
 
 function sampleProcessGroup(processGroupId) {
-  if (process.platform === 'win32') return Promise.resolve({ cpuPercent: null, rssKiB: null });
+  // macOS (darwin) and Windows both lack /proc and reliable `ps` for this purpose.
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    return Promise.resolve({ cpuPercent: null, rssKiB: null });
+  }
   return new Promise(resolve => {
-    execFile('ps', ['-eo', 'pgid=,rss=,pcpu='], { encoding: 'utf8' }, (error, stdout) => {
+    try {
+      execFile('ps', ['-eo', 'pgid=,rss=,pcpu='], { encoding: 'utf8' }, (error, stdout) => {
       if (error) return resolve({ cpuPercent: null, rssKiB: null });
       let cpuPercent = 0;
       let rssKiB = 0;
@@ -131,6 +135,9 @@ function sampleProcessGroup(processGroupId) {
         rssKiB: matched ? rssKiB : null,
       });
     });
+    } catch {
+      resolve({ cpuPercent: null, rssKiB: null });
+    }
   });
 }
 
