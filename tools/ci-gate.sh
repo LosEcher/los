@@ -14,6 +14,7 @@
 #   coupling next     → circular deps, forbidden imports, dep-cruiser
 #   structure next   → catches file-size / flat-dir / route placement
 #   ci-workflow-policy → job needs/concurrency invariants for both CI platforms
+#   test-isolation   → fixed /tmp + Date.now()-only temp races under LOS_TEST_GROUP
 #   state-machine    → prevents direct status-update bypass
 #   contracts        → bidirectional event ↔ route coverage
 #   unwired exports  → catches implemented-but-not-wired antipattern
@@ -121,6 +122,16 @@ if ./tools/check-ci-workflow-policy.sh; then
   phase_ok "ci-workflow-policy"
 else
   phase_fail "ci-workflow-policy"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 3c: test isolation ───────────────────────────────
+
+phase_start "Test isolation (parallel LOS_TEST_GROUP filesystem races)"
+if ./tools/check-test-isolation.sh; then
+  phase_ok "test-isolation"
+else
+  phase_fail "test-isolation"
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
