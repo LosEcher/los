@@ -142,25 +142,28 @@ describe('resolveBuiltinMCPConfigs', () => {
     // browser autoStart disabled → no configs
     // (but the default is enabled, so this test relies on
     //  the toolset NOT including 'browser' or 'all')
-    // The orca-computer-use server is enabled by default (LOS_ORCA_ENABLED !== '0'),
-    // so disable it explicitly to keep the "no eligible server" scenario valid.
-    process.env.LOS_ORCA_ENABLED = '0';
-    try {
-      const configs = resolveBuiltinMCPConfigs([]);
-      // In test environment without LOS_ENABLED_TOOLSETS=browser set,
-      // the browser server's isEnabled() should return false.
-      assert.equal(configs.length, 0);
-    } finally {
-      delete process.env.LOS_ORCA_ENABLED;
-    }
+    // orca-computer-use is opt-in (LOS_ORCA_ENABLED=1), so with neither
+    // toolset nor env set, no built-in server is eligible.
+    const configs = resolveBuiltinMCPConfigs([]);
+    // In test environment without LOS_ENABLED_TOOLSETS=browser set,
+    // the browser server's isEnabled() should return false.
+    assert.equal(configs.length, 0);
   });
 
   it('does not duplicate when external browser server is registered', () => {
-    process.env.LOS_ORCA_ENABLED = '0';
+    const external = [makeConfig('npx', ['playwright-mcp-server'])];
+    const configs = resolveBuiltinMCPConfigs(external);
+    assert.equal(configs.length, 0, 'should skip auto-start when external browser server exists');
+  });
+
+  it('orca computer-use is opt-in via LOS_ORCA_ENABLED=1', () => {
+    const without = resolveBuiltinMCPConfigs([]);
+    assert.equal(without.length, 0, 'orca must not auto-start by default');
+    process.env.LOS_ORCA_ENABLED = '1';
     try {
-      const external = [makeConfig('npx', ['playwright-mcp-server'])];
-      const configs = resolveBuiltinMCPConfigs(external);
-      assert.equal(configs.length, 0, 'should skip auto-start when external browser server exists');
+      const withOrca = resolveBuiltinMCPConfigs([]);
+      assert.equal(withOrca.length, 1, 'orca config appears when explicitly enabled');
+      assert.match(withOrca[0]!.command ?? '', /npx/);
     } finally {
       delete process.env.LOS_ORCA_ENABLED;
     }

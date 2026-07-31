@@ -94,7 +94,10 @@ function createOrcaComputerUseServer(): BuiltinMCPServer {
   return {
     id: 'orca-computer-use',
     displayName: 'Orca Computer-Use',
-    isEnabled: () => process.env.LOS_ORCA_ENABLED !== '0',
+    // Opt-in only: defaulting this on made every registry.execute() spawn an
+    // npx orca-mcp attempt and block ~60s on initialize timeout when no
+    // computer-use environment is present (CI, headless, remote nodes).
+    isEnabled: () => process.env.LOS_ORCA_ENABLED === '1',
     shouldAutoStart: (existing) => !existing.some(cfg =>
       cfg.command?.includes('orca') || cfg.command?.includes('computer-use')
       || cfg.args?.some(a => a.includes('orca')),
