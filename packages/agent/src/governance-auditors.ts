@@ -171,22 +171,22 @@ async function runFileSizeAudit(job: GovernanceJob, dryRun: boolean): Promise<Re
     const { scanFileHotspots } = await import('./hotspot-drift-detector.js');
     const hotspotReport = await scanFileHotspots({ workspaceRoot: process.cwd() });
     // Store both the count (for drift metrics) and the file list (for trend detection).
-    // Drift iteration expects filesOver400/filesOver600 to be arrays, not numbers.
+    // Drift iteration expects filesOver500/filesOver700 to be arrays, not numbers.
     return {
       auditedAt: hotspotReport.scannedAt,
       totalFilesScanned: hotspotReport.totalFilesScanned,
-      filesOver600: hotspotReport.filesOver600.map(f => ({ file: f.file, lines: f.lines, package: f.package, delta: f.delta })),
-      filesOver400: hotspotReport.filesOver400.map(f => ({ file: f.file, lines: f.lines, package: f.package, delta: f.delta })),
-      filesOver600Count: hotspotReport.filesOver600.length,
-      filesOver400Count: hotspotReport.filesOver400.length,
+      filesOver700: hotspotReport.filesOver700.map(f => ({ file: f.file, lines: f.lines, package: f.package, delta: f.delta })),
+      filesOver500: hotspotReport.filesOver500.map(f => ({ file: f.file, lines: f.lines, package: f.package, delta: f.delta })),
+      filesOver700Count: hotspotReport.filesOver700.length,
+      filesOver500Count: hotspotReport.filesOver500.length,
       newCrossers: hotspotReport.newCrossers.length,
-      new600Crossers: hotspotReport.new600Crossers.length,
+      new700Crossers: hotspotReport.new700Crossers.length,
       shrank: hotspotReport.shrank.length,
       worseningFiles: hotspotReport.trend.worseningFiles,
-      totalOver400Delta: hotspotReport.trend.totalOver400Delta,
-      totalOver600Delta: hotspotReport.trend.totalOver600Delta,
+      totalOver500Delta: hotspotReport.trend.totalOver500Delta,
+      totalOver700Delta: hotspotReport.trend.totalOver700Delta,
       avgDelta: hotspotReport.trend.avgDelta,
-      topFiles: hotspotReport.filesOver600.slice(0, 10).map(f => ({
+      topFiles: hotspotReport.filesOver700.slice(0, 10).map(f => ({
         file: f.file, lines: f.lines, package: f.package, delta: f.delta,
       })),
       topWorsening: hotspotReport.trend.worseningFiles.slice(0, 10),

@@ -141,3 +141,47 @@ test('scheduled feed analysis requires preapproval and derives stable retry iden
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
 });
+
+test('scheduled_execution with empty requiredChecks throws', () => {
+  const createSchedule = createScheduledWorkItem.bind(null, {
+    projectId: 'los',
+    title: `empty-checks-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'scheduled_execution',
+      mode: 'execution',
+      goalTemplate: 'Run task',
+      editableSurfaces: ['src/'],
+      requiredChecks: [],
+      toolMode: 'project-write' as const,
+    },
+    approvalPolicy: 'preapproved_scope',
+  });
+  return assert.rejects(
+    createSchedule(),
+    /requires at least one required check/,
+  );
+});
+
+test('scheduled_execution with requiredChecks passes validation', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los',
+    title: `valid-checks-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'scheduled_execution',
+      mode: 'execution',
+      goalTemplate: 'Run task',
+      editableSurfaces: ['src/'],
+      requiredChecks: ['pnpm check'],
+      toolMode: 'project-write' as const,
+    },
+    approvalPolicy: 'preapproved_scope',
+  });
+  try {
+    assert.equal(schedule.runTemplate.requiredChecks.length, 1);
+    assert.equal(schedule.runTemplate.requiredChecks[0], 'pnpm check');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});

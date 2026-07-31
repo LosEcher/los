@@ -160,7 +160,6 @@ export function ChatComposer(props: {
               <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
                 <option value="read-only">off / read-only</option>
                 <option value="project-write">project tools (no shell)</option>
-                <option value="all">all tools + sandboxed shell</option>
               </select>
             </RunField>
           </>

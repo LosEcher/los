@@ -144,8 +144,8 @@ function extractMetrics(jobType: GovernanceJobType, resultSummary: Record<string
   }
 
   if (jobType === 'file_size') {
-    metrics.filesOver600 = Number(resultSummary.filesOver600Count ?? resultSummary.filesOver600 ?? 0);
-    metrics.filesOver400 = Number(resultSummary.filesOver400Count ?? resultSummary.filesOver400 ?? 0);
+    metrics.filesOver700 = Number(resultSummary.filesOver700Count ?? resultSummary.filesOver700 ?? 0);
+    metrics.filesOver500 = Number(resultSummary.filesOver500Count ?? resultSummary.filesOver500 ?? 0);
   }
 
   return metrics;
