@@ -48,6 +48,7 @@ const sharedProcessTestFiles = [
   'src/pi-kernel-shadow-scenarios.test.ts',
   'src/pi-kernel-shadow.test.ts',
   'src/planning-output.test.ts',
+  'src/loop-stop-conditions.integration.test.ts',
   'src/pre-action-gate.test.ts',
   'src/provider-routing-boundary.test.ts',
   'src/providers/finish-reason.test.ts',
