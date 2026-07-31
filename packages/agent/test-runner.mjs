@@ -70,7 +70,6 @@ const sharedProcessTestFiles = [
   'src/semantic-eviction.test.ts',
   'src/session-events-visibility.test.ts',
   'src/session-recovery-checkpoints.test.ts',
-  'src/session-recovery.test.ts',
   'src/session-trace.test.ts',
   'src/session.test.ts',
   'src/spec-loader.test.ts',
@@ -146,6 +145,7 @@ const isolatedGroupC = [
   'src/work-items.test.ts',
   'src/work-items/revision-loop.test.ts',
   'src/worker-messages.test.ts',
+  'src/session-recovery.test.ts',
 ];
 
 const allIsolatedDatabaseTestFiles = [
