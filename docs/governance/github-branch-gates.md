@@ -59,12 +59,15 @@ active run. Run `30167769845` is the observed waste sample: before cancellation,
 fast, drift, and Web E2E had completed and the root test command had run for 92
 seconds. It is classified as superseded, not as a test flake.
 
-Forgejo keeps its existing `needs: gate-fast` policy for `gate-test` and Web
-E2E because its local runners have tighter shared-resource constraints. Run
-`257` took about 410 seconds wall time and 484 accumulated runner-seconds; full
-parallelism could reduce a green path by roughly the 158-second fast gate, but
-would not reduce green runner consumption and would spend heavy-job resources
-on every fast failure. One run is insufficient evidence to change that policy.
+Forgejo historically serialized `gate-test` and Web E2E behind `gate-fast`
+because its local runners have tighter shared-resource constraints. Run `257`
+took about 410 seconds wall time. PR `#125` (2026-07-31) dropped those `needs`
+edges after the win-los-canary pool sustained concurrent jobs undegraded; run
+`421` completed in about 3.2 minutes wall time (~38% faster than the prior
+~5.2 minute serial chain). Forgejo and GitHub heavy-job ordering now match:
+no `needs` on `gate-test`, `gate-web-e2e`, or `gate-drift`. Policy is locked by
+`tools/ci-workflow-policy.test.mjs` (also invoked from `pnpm gate` via
+`tools/check-ci-workflow-policy.sh`).
 
 The single GitHub test job samples its expensive root test command every five
 seconds through `tools/observe-command-resources.mjs`. The JSON record is
@@ -111,9 +114,14 @@ remove the broken contexts. Changing only one policy surface can leave the PR
 Forgejo protection; neither remote's emergency bypass authorizes bypass on the
 other.
 
-Do not enable automatic GitHub mirror pushes until the mirror account can update
-`main` without bypassing an intended protection rule. Prefer Forgejo's push-mirror
-facility or a narrowly scoped mirror credential over a developer token.
+Do not enable automatic direct pushes to GitHub `main` until the mirror account
+can update `main` without bypassing an intended protection rule. The supported
+automation is the **PR path** encoded in `tools/mirror-github-main.sh`: push a
+mirror branch, open a PR, wait for required checks with a non-empty
+`statusCheckRollup` guard, merge with a merge commit, then verify content
+equality. Prefer that script (or Forgejo push-mirror only after ruleset policy
+is re-approved) over ad-hoc `gh pr view --jq` loops that treat empty output as
+pending.
 
 Current primary policy and required checks are documented in
 `docs/governance/forgejo-branch-gates.md`.

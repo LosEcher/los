@@ -211,6 +211,7 @@ Related:
 - `AGENTS.md` → Session Closeout Gate
 - `docs/governance/branch-lifecycle.md`
 - `tools/branch-closeout.sh`, `tools/branch-prune-origin.sh`
+- `tools/mirror-github-main.sh` for optional GitHub mirror PR path after Forgejo merge
 - skill `pr-self-merge` for operator-owned merge loop
 
 ## Workflow: First Push And PR Creation
@@ -314,7 +315,7 @@ entries in a separate bounded change before delivering feature work.
 ## Workflow: GitHub Mirror Sync
 
 Trigger when `main@github` lags Forgejo `main` and the mirror must be pulled
-even. Verified on 2026-07-31 (PR #197, 6 commits behind).
+even. Verified on 2026-07-31 (PR #197, 6 commits behind; PR #200 content-equal).
 
 **Why direct push is impossible** — GitHub `main` is protected by the ruleset
 `main-protection` (`repos/LosEcher/los/rulesets/17481877`), which applies to
@@ -329,10 +330,29 @@ even. Verified on 2026-07-31 (PR #197, 6 commits behind).
 `bypass_actors` is empty, so there is no bypass — even a pure fast-forward push
 is rejected (`push declined due to repository rule violations`) because the
 target commit has no GitHub Actions check records (Forgejo-merged commits never
-ran GitHub CI). **The only legal path is a PR merge** (prior art: #195, #196,
-#197).
+ran GitHub CI). **The only legal path is a PR merge** (prior art: #195–#200).
 
-Steps:
+### Preferred: automated script
+
+```bash
+# Full path: fetch → content-diff short-circuit → local gate --no-tests →
+# push mirror bookmark → open/reuse PR → gh pr checks --watch →
+# assert non-empty statusCheckRollup + required contexts → merge commit →
+# cleanup → verify content equality → realign local main to Forgejo.
+bash tools/mirror-github-main.sh
+
+bash tools/mirror-github-main.sh --dry-run          # plan only
+bash tools/mirror-github-main.sh --skip-gate        # when gate just ran
+bash tools/mirror-github-main.sh --wait-only <PR>   # reliable waiter only
+bash tools/mirror-github-main.sh --merge-only <PR>  # wait + merge + cleanup
+```
+
+**Observation rule** — never treat empty `gh pr view --jq` output as pending.
+The script hard-fails on empty JSON and requires `statusCheckRollup` to contain
+the required contexts before merge. That guards the 2026-07-31 mirror #200
+false-pending bug (~6 minutes of human wait after checks were already green).
+
+### Manual steps (same path the script encodes)
 
 1. **Create the mirror bookmark** on local `main`:
    ```bash
@@ -350,13 +370,16 @@ Steps:
      --body "Mirror sync from Forgejo (authoritative). Direct push blocked by ruleset main-protection (required_status_checks)."
    ```
 
-3. **Wait for all checks green** — `gate-fast`, `gate-drift`, `gate-web-e2e`
-   and `gate-test`:
+3. **Wait for required checks green** — `gate-fast`, `gate-test`, `gate-drift`
+   (gate-web-e2e runs but is not a ruleset required context):
    ```bash
    gh pr checks <PR_NUM> --watch --interval 20
+   # Then verify non-empty rollup before merge:
+   gh pr view <PR_NUM> --json mergeStateStatus,statusCheckRollup \
+     | jq '{mergeStateStatus, checks: [.statusCheckRollup[]? | {name, status, conclusion}]}'
    ```
 
-4. **Merge with a merge commit** (matches #195/#196/#197 shape; do not
+4. **Merge with a merge commit** (matches #195–#200 shape; do not
    squash/rebase):
    ```bash
    gh pr merge <PR_NUM> --merge --delete-branch=false
@@ -373,7 +396,7 @@ Steps:
 Expected end state: GitHub `main` is ahead of Forgejo by exactly one mirror
 merge commit with identical content — verify with
 `jj diff --from main@origin --to main@github --stat` (must print `0 files
-changed`). Local `main` stays aligned with Forgejo.
+changed` or an empty stat). Local `main` stays aligned with Forgejo.
 
 **When gate-test fails on GitHub**: do not patch the mirror PR. Fix Forgejo
 `main` first (own Forgejo PR, exact-head CI green), then re-run this workflow

@@ -13,6 +13,7 @@
 #   security next    → hardcoded secrets, eval(), .env tracking
 #   coupling next     → circular deps, forbidden imports, dep-cruiser
 #   structure next   → catches file-size / flat-dir / route placement
+#   ci-workflow-policy → job needs/concurrency invariants for both CI platforms
 #   state-machine    → prevents direct status-update bypass
 #   contracts        → bidirectional event ↔ route coverage
 #   unwired exports  → catches implemented-but-not-wired antipattern
@@ -110,6 +111,16 @@ if ./tools/check-structure.sh; then
   phase_ok "structure"
 else
   phase_fail "structure"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 3b: CI workflow policy ───────────────────────────
+
+phase_start "CI workflow policy (job needs / concurrency invariants)"
+if ./tools/check-ci-workflow-policy.sh; then
+  phase_ok "ci-workflow-policy"
+else
+  phase_fail "ci-workflow-policy"
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
