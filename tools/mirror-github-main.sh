@@ -152,51 +152,89 @@ assert_required_checks_green() {
 
 wait_for_checks() {
   local pr="$1"
-  local json state
+  local json state rollup_len pending failed attempts=0
+  # ~20s * 45 ~= 15 minutes upper bound (GitHub green path is ~2.5–4m).
+  local max_attempts="${LOS_MIRROR_MAX_ATTEMPTS:-45}"
 
   info "Waiting for PR #${pr} checks..."
   info "  required: ${REQUIRED_CHECKS[*]}"
-  info "  primary watcher: gh pr checks ${pr} --watch --interval ${CHECK_INTERVAL}"
+  info "  poll interval: ${CHECK_INTERVAL}s (max attempts ${max_attempts})"
   info "  success requires non-empty statusCheckRollup + required contexts green"
+  info "  note: gh pr checks --watch can exit early while status=QUEUED; we poll JSON instead"
 
-  # gh pr checks --watch returns when all reported checks complete. It is the
-  # platform-native waiter; we still re-validate via JSON before treating the
-  # PR as mergeable (guards empty jq / incomplete rollup).
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    info "[dry-run] gh pr checks $pr --watch --interval $CHECK_INTERVAL"
+    info "[dry-run] poll gh pr view --json statusCheckRollup,mergeStateStatus"
     return 0
   fi
 
-  if ! gh pr checks "$pr" --watch --interval "$CHECK_INTERVAL"; then
-    json="$(pr_json "$pr" || true)"
-    red "gh pr checks --watch reported failure for PR #$pr"
-    if [[ -n "${json:-}" ]]; then
-      printf '%s\n' "$json" | jq '{mergeStateStatus, checks: [.statusCheckRollup[]? | {name, status, conclusion}]}' || true
-    fi
-    exit 1
-  fi
-
-  json="$(pr_json "$pr")"
-  state="$(printf '%s' "$json" | jq -er '.mergeStateStatus')" \
-    || die "mergeStateStatus missing from PR JSON"
-  info "  mergeStateStatus=$state after checks watch"
-  assert_required_checks_green "$json"
-
-  # Poll briefly if mergeability lags behind check completion.
-  local attempts=0
-  while [[ "$state" != "CLEAN" && "$state" != "HAS_HOOKS" ]]; do
+  while true; do
     attempts=$((attempts + 1))
-    if [[ "$attempts" -gt 30 ]]; then
-      die "PR #$pr checks green but mergeStateStatus stayed $state"
+    if [[ "$attempts" -gt "$max_attempts" ]]; then
+      die "timed out waiting for PR #${pr} checks after ${max_attempts} attempts"
     fi
-    info "  waiting for mergeStateStatus=CLEAN (now ${state})..."
-    sleep "$CHECK_INTERVAL"
-    json="$(pr_json "$pr")"
-    state="$(printf '%s' "$json" | jq -er '.mergeStateStatus')"
-    assert_required_checks_green "$json"
-  done
 
-  green "PR #$pr ready (mergeStateStatus=$state, required checks green)"
+    json="$(pr_json "$pr")"
+    state="$(printf '%s' "$json" | jq -er '.mergeStateStatus')" \
+      || die "mergeStateStatus missing from PR JSON"
+    rollup_len="$(printf '%s' "$json" | jq -er '(.statusCheckRollup // []) | length')" \
+      || die "statusCheckRollup missing from PR JSON"
+
+    if [[ "$rollup_len" -eq 0 ]]; then
+      info "  $(date '+%H:%M:%S') attempt=${attempts} mergeStateStatus=${state} rollup=[] (scheduling)"
+      sleep "$CHECK_INTERVAL"
+      continue
+    fi
+
+    pending="$(printf '%s' "$json" | jq -r '
+      [.statusCheckRollup[]?
+        | select((.status // "") != "COMPLETED")
+      ] | length
+    ')"
+    failed="$(printf '%s' "$json" | jq -r '
+      [.statusCheckRollup[]?
+        | select((.status // "") == "COMPLETED")
+        | select((.conclusion // "") as $c
+            | ($c != "SUCCESS" and $c != "NEUTRAL" and $c != "SKIPPED" and $c != ""))
+      ] | length
+    ')"
+
+    info "  $(date '+%H:%M:%S') attempt=${attempts} mergeStateStatus=${state} pending=${pending} failed=${failed} rollup=${rollup_len}"
+    printf '%s' "$json" | jq -r '
+      .statusCheckRollup[]?
+      | "    " + (.name // .context // "?")
+        + " status=" + (.status // "?")
+        + " conclusion=" + (.conclusion // "null")
+    ' || true
+
+    if [[ "$failed" -gt 0 ]]; then
+      red "PR #${pr} has failing checks — refuse to merge"
+      printf '%s\n' "$json" | jq '{mergeStateStatus, checks: [.statusCheckRollup[]? | {name, status, conclusion}]}'
+      exit 1
+    fi
+
+    if [[ "$pending" -eq 0 ]]; then
+      # All completed; require required contexts green. mergeStateStatus may be
+      # BEHIND on mirror PRs (divergent histories) — that is OK for merge commits.
+      assert_required_checks_green "$json"
+      case "$state" in
+        CLEAN|HAS_HOOKS|BEHIND|BLOCKED|UNSTABLE)
+          # BLOCKED/UNSTABLE with all required green usually means non-required
+          # or review rules; re-check after a short wait once, then allow merge
+          # only for CLEAN/HAS_HOOKS/BEHIND (mirror typical).
+          if [[ "$state" == "CLEAN" || "$state" == "HAS_HOOKS" || "$state" == "BEHIND" ]]; then
+            green "PR #${pr} ready (mergeStateStatus=${state}, required checks green)"
+            return 0
+          fi
+          info "  required green but mergeStateStatus=${state}; waiting..."
+          ;;
+        *)
+          info "  required green but mergeStateStatus=${state}; waiting..."
+          ;;
+      esac
+    fi
+
+    sleep "$CHECK_INTERVAL"
+  done
 }
 
 merge_pr() {
@@ -211,16 +249,46 @@ merge_pr() {
   json="$(pr_json "$pr")"
   state="$(printf '%s' "$json" | jq -er '.mergeStateStatus')"
   assert_required_checks_green "$json"
-  if [[ "$state" != "CLEAN" && "$state" != "HAS_HOOKS" ]]; then
-    die "refuse merge: PR #$pr mergeStateStatus=$state (want CLEAN)"
-  fi
+  # Mirror histories diverge, so BEHIND is expected and still mergeable with a
+  # merge commit. Only refuse hard blockers.
+  case "$state" in
+    CLEAN|HAS_HOOKS|BEHIND) ;;
+    DIRTY|DRAFT|UNKNOWN)
+      die "refuse merge: PR #${pr} mergeStateStatus=${state}"
+      ;;
+    *)
+      info "mergeStateStatus=${state}; attempting merge commit anyway (required checks green)"
+      ;;
+  esac
   info "Merging PR #${pr} with merge commit (no squash/rebase)..."
   gh pr merge "$pr" --merge --delete-branch=false
   green "Merged PR #${pr}"
 }
 
 bookmark_exists() {
-  jj bookmark list --all 2>/dev/null | grep -F "$BOOKMARK" >/dev/null 2>&1
+  # Exact local bookmark name only. Do NOT grep --all output: descriptions of
+  # prior mirror merges mention the branch name and caused false positives
+  # (move skipped, push no-op, gh pr create: no commits between main and head).
+  jj bookmark list -T 'name ++ "\n"' 2>/dev/null | grep -Fxq "$BOOKMARK"
+}
+
+ensure_mirror_bookmark() {
+  if bookmark_exists; then
+    info "Moving existing bookmark ${BOOKMARK} -> main@${ORIGIN_REMOTE}"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      info "[dry-run] jj bookmark move ${BOOKMARK} --to main@${ORIGIN_REMOTE}"
+      return 0
+    fi
+    jj bookmark move "$BOOKMARK" --to "main@${ORIGIN_REMOTE}"
+  else
+    info "Creating bookmark ${BOOKMARK} -> main@${ORIGIN_REMOTE}"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      info "[dry-run] jj bookmark create ${BOOKMARK} --to main@${ORIGIN_REMOTE}"
+      return 0
+    fi
+    jj bookmark create "$BOOKMARK" --to "main@${ORIGIN_REMOTE}"
+  fi
+  bookmark_exists || die "failed to create/move bookmark ${BOOKMARK}"
 }
 
 cleanup_mirror_ref() {
@@ -334,16 +402,18 @@ else
   info "Skipping local gate (--skip-gate)"
 fi
 
-if bookmark_exists; then
-  info "Moving existing bookmark ${BOOKMARK} -> main@${ORIGIN_REMOTE}"
-  run jj bookmark move "$BOOKMARK" --to "main@${ORIGIN_REMOTE}"
-else
-  info "Creating bookmark ${BOOKMARK} -> main@${ORIGIN_REMOTE}"
-  run jj bookmark create "$BOOKMARK" --to "main@${ORIGIN_REMOTE}"
-fi
+ensure_mirror_bookmark
 
 info "Pushing ${BOOKMARK} to ${GITHUB_REMOTE}..."
-run jj git push --remote "$GITHUB_REMOTE" --bookmark "$BOOKMARK"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  info "[dry-run] jj git push --remote ${GITHUB_REMOTE} --bookmark ${BOOKMARK}"
+else
+  # Fail hard if the bookmark is missing after ensure (guards the false-positive
+  # "Nothing changed" path that left gh pr create with an empty head).
+  bookmark_exists || die "bookmark ${BOOKMARK} missing before push"
+  jj git push --remote "$GITHUB_REMOTE" --bookmark "$BOOKMARK" \
+    || die "jj git push of ${BOOKMARK} to ${GITHUB_REMOTE} failed"
+fi
 
 EXISTING_PR=""
 if [[ "$DRY_RUN" -eq 0 ]]; then
