@@ -18,6 +18,7 @@ const passingChecks = [
   'check-security.sh',
   'check-structure.sh',
   'check-ci-workflow-policy.sh',
+  'check-test-isolation.sh',
   'check-coupling.sh',
   'check-state-machine-bypass.sh',
   'check-contracts.sh',

@@ -16,10 +16,14 @@ import {
 } from './identity-loader.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-// Unique per process: CI runs agent tests as 3 parallel groups (LOS_TEST_GROUP),
-// and a bare Date.now() suffix can collide across processes loaded in the same
-// millisecond, causing parallel cleanup() calls to delete a sibling's directory.
-const TMP_DIR = join(__dirname, '../../.los-runtime', 'identity-test-' + process.pid + '-' + Date.now());
+// Unique per process: CI runs agent tests as 3 parallel groups (LOS_TEST_GROUP).
+// Include pid + Date.now() + random — bare Date.now() collided across processes
+// loaded in the same millisecond (run 415 ENOENT on IDENTITY.md).
+const TMP_DIR = join(
+  __dirname,
+  '../../.los-runtime',
+  `identity-test-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+);
 
 // ── Cleanup ───────────────────────────────────────────────
 

@@ -38,7 +38,13 @@ test('parseMigrationDriftBaseline groups by table with correct counts + priority
   const { writeFileSync, rmSync } = await import('node:fs');
   const { join } = await import('node:path');
   const { tmpdir } = await import('node:os');
-  process.env.LOS_MIGRATION_DRIFT_BASELINE = join(tmpdir(), `los-mig-drift-test-${process.pid}.txt`);
+  const { randomBytes } = await import('node:crypto');
+  // pid + random: unique across LOS_TEST_GROUP processes and within a process
+  // if the same suite is ever re-entered before finally cleanup.
+  process.env.LOS_MIGRATION_DRIFT_BASELINE = join(
+    tmpdir(),
+    `los-mig-drift-test-${process.pid}-${randomBytes(4).toString('hex')}.txt`,
+  );
   writeFileSync(process.env.LOS_MIGRATION_DRIFT_BASELINE, SAMPLE);
   try {
     const summary = await runMigrationDriftAudit() as Record<string, unknown>;
