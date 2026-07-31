@@ -132,3 +132,95 @@ test('stale file detection covers unchanged, modified, and deleted files', async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ── End-to-end recovery integration test ─────────────────
+
+test('end-to-end recovery rebuilds context from persisted session events', async () => {
+  const { loadConfig } = await import('@los/infra/config');
+  const { closeDb, getDb, initDb } = await import('@los/infra/db');
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-e2e-${suffix}`;
+  const runSpecId = `run-e2e-${suffix}`;
+
+  try {
+    const { ensureSessionEventStore, appendSessionEvent, listSessionEvents } = await import('./session-events.js');
+    const { ensureRunSpecStore, createRunSpec } = await import('./run-specs.js');
+    const { ensureTaskRunStore, createTaskRun } = await import('./task-runs.js');
+
+    await Promise.all([ensureSessionEventStore(), ensureRunSpecStore(), ensureTaskRunStore()]);
+
+    // 1. Create run spec and task run (simulating a real execution start)
+    await createRunSpec({
+      id: runSpecId, sessionId, prompt: 'fix the bug in auth.ts',
+      workspaceRoot: process.cwd(), toolMode: 'project-write', maxLoops: 4,
+    });
+    await createTaskRun({
+      id: `task-e2e-${suffix}`, sessionId, runSpecId,
+      provider: 'deepseek', model: 'deepseek-v4-flash',
+      workspaceRoot: process.cwd(), toolMode: 'project-write', promptPreview: 'fix the bug',
+    });
+
+    // 2. Simulate 3 agent turns, then crash before the last tool result
+    await appendSessionEvent({
+      sessionId, type: 'session.started', source: 'los.execution',
+      payload: { runSpecId }, visibility: 'public',
+    });
+    await appendSessionEvent({
+      sessionId, type: 'user.message', source: 'chat',
+      payload: { content: 'fix the bug in auth.ts' }, visibility: 'public',
+    });
+    await appendSessionEvent({
+      sessionId, type: 'model.turn.completed', source: 'loop', turn: 1,
+      payload: { textPreview: 'I will read the file first' }, visibility: 'public',
+    });
+    // Tool call persisted, result persisted
+    await appendSessionEvent({
+      sessionId, type: 'tool.call', source: 'loop', turn: 1, toolName: 'read_file',
+      payload: { callId: 'call-1', args: { path: 'src/auth.ts' } }, visibility: 'public',
+    });
+    await appendSessionEvent({
+      sessionId, type: 'tool.result', source: 'loop', turn: 1, toolName: 'read_file',
+      payload: { callId: 'call-1', contentPreview: 'export function auth()' }, visibility: 'public',
+    });
+    // Turn 2 completes normally
+    await appendSessionEvent({
+      sessionId, type: 'model.turn.completed', source: 'loop', turn: 2,
+      payload: { textPreview: 'Bug is on line 42' }, visibility: 'public',
+    });
+    // Turn 3: tool.call persisted, but CRASH before tool.result
+    await appendSessionEvent({
+      sessionId, type: 'tool.call', source: 'loop', turn: 3, toolName: 'edit_file',
+      payload: { callId: 'call-2', args: { path: 'src/auth.ts' } }, visibility: 'public',
+    });
+    // NO tool.result for call-2 — simulated crash
+
+    // 3. Load events and rebuild context
+    const events = await listSessionEvents(sessionId, 100);
+    assert.ok(events.length >= 5, `expected >=5 events, got ${events.length}`);
+
+    const { buildMessagesFromEvents, classifyRecoveryMode, countLostToolResults } = await import('./session-recovery-context.js');
+    const messages = buildMessagesFromEvents(sessionId, checkpoint(), events, true);
+    const lostCount = countLostToolResults(messages, checkpoint());
+    const mode = classifyRecoveryMode(lostCount, 0, checkpoint());
+
+    // 4. Assert recovery correctness
+    assert.ok(messages.length >= 4, `expected >=4 messages, got ${messages.length}`);
+    assert.equal(mode, 'partial', 'missing tool result should yield partial recovery');
+
+    // Verify user prompt is preserved
+    const userMsg = messages.find(m => m.role === 'user');
+    assert.ok(userMsg, 'recovery must preserve user message');
+
+    // Verify tool messages are present
+    const toolMsgs = messages.filter(m => m.role === 'tool');
+    assert.ok(toolMsgs.length >= 1, 'at least 1 tool message expected');
+  } finally {
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});

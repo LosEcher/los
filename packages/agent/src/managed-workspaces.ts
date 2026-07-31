@@ -187,6 +187,19 @@ export async function releaseManagedWorkspace(
   }
 }
 
+/**
+ * Return the raw jj diff (--git format) for an active managed workspace.
+ * Returns an empty string when the workspace has no uncommitted changes.
+ * Only active or backup_ready workspaces are accepted.
+ */
+export async function getWorkspaceDiff(workspaceId: string): Promise<string> {
+  const workspace = await requireActiveWorkspace(workspaceId);
+  if (workspace.status !== 'active' && workspace.status !== 'backup_ready') {
+    throw new Error(`managed workspace status '${workspace.status}' does not support diff; expected active or backup_ready`);
+  }
+  return await runJj(workspace.workspaceRoot, ['diff', '--git']);
+}
+
 export function workspaceRootForTask(
   task: { metadata?: Record<string, unknown> },
   fallback?: string,

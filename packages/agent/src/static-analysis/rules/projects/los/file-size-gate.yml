@@ -1,7 +1,7 @@
 id: los.file-size-gate
 language: TypeScript
 severity: info
-message: "File size enforcement is handled by tools/check-structure.sh (400-line warn, 600-line block). This rule serves as a documentation marker for the policy."
+message: "File size enforcement is handled by tools/check-structure.sh (500-line warn, 700-line block). This rule serves as a documentation marker for the policy."
 rule:
   kind: program
 governance:

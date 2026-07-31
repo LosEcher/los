@@ -5,6 +5,7 @@ import {
   createManagedWorkspace,
   editableSurfacesForAgentTask,
   editableSurfacesOverlap,
+  getWorkspaceDiff,
   listManagedWorkspaces,
   loadManagedWorkspaceDetail,
   readAgentTaskGraph,
@@ -87,6 +88,13 @@ export function registerManagedWorkspaceRoutes(app: FastifyInstance, options: Ma
     const detail = await loadManagedWorkspaceDetail(id);
     if (!detail) return reply.status(404).send({ error: 'managed workspace not found' });
     return detail;
+  });
+
+  app.get('/managed-workspaces/:id/diff', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await loadManagedWorkspaceDetail(id))) return reply.status(404).send({ error: 'managed workspace not found' });
+    const diff = await getWorkspaceDiff(id);
+    return { workspaceId: id, diff };
   });
 
   app.post('/managed-workspaces/:id/backup', async (req, reply) => {

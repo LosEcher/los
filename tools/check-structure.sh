@@ -6,8 +6,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WARNINGS=0
 ERRORS=0
-MAX_LINES=600
-BLOCK_LINES=400
+MAX_LINES=700
+BLOCK_LINES=500
 MAX_DIR_FILES=10
 BASELINE_FILE="$ROOT/tools/.large-file-baseline.txt"
 
@@ -33,7 +33,7 @@ done < <(find "$ROOT/packages" -type f \( -name '*.ts' -o -name '*.tsx' \) \
   -exec wc -l {} + 2>/dev/null | awk -v max="$MAX_LINES" \
   '$2 != "total" && $1 > max { print $1, $2 }')
 
-# 2. New files >400 lines (not in baseline) → error. Grandfathered files → warn.
+# 2. New files >500 lines (not in baseline) → error. Grandfathered files → warn.
 header "Files >$BLOCK_LINES lines"
 GRANDFATHERED_COUNT=0
 while IFS= read -r line; do

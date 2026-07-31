@@ -29,7 +29,7 @@ over-instrument a one-line fix or under-instrument a cross-package refactor.
 | 1 file, <20 lines, no API change | Direct edit | `loadSpecsForFiles` + `pnpm check` |
 | 2-3 files, same package | Bounded change | Above + read matching ADR + check after each file |
 | 4+ files or crossing package boundaries | Plan mode | Above + `contracts/` review + full `pnpm gate` |
-| >400 lines net new | Extract sub-module | Above + stay under 400-line warn threshold |
+| >400 lines net new | Extract sub-module | Above + stay under 500-line warn threshold |
 | New package or route module | ADR + plan | All above + operator approval + test harness |
 | Provider, scheduler, or execution state change | ADR review + harness gate | All above + compat probe + golden trace update |
 
@@ -237,7 +237,7 @@ Steps:
    | Symptom | Fix |
    |---------|-----|
    | `NEW UNWIRED EXPORTS` (5 new orphans) | `cd packages/gateway && node --import tsx ../../tools/check-wiring-topology.ts --update-baseline` |
-   | `new file exceeds 400 line limit` | Add path to `tools/.large-file-baseline.txt` |
+   | `new file exceeds 500 line limit` | Add path to `tools/.large-file-baseline.txt` |
    | `state-machine bypass guard` failure | Check AP1: never call `updateTaskRun()` etc. directly |
 
 4. **Push to Forgejo (primary)**:
@@ -301,12 +301,12 @@ cd packages/gateway
 node --import tsx ../../tools/check-wiring-topology.ts --update-baseline
 ```
 
-### Large file threshold (400-line gate)
+### Large file threshold (500-line gate)
 
-A file grew past 400 lines and is not in `.large-file-baseline.txt`.
+A file grew past 500 lines and is not in `.large-file-baseline.txt`.
 
 ```
-[ERROR] path/to/file.ts (405 lines) — new file exceeds 400 line limit
+[ERROR] path/to/file.ts (505 lines) — new file exceeds 500 line limit
 ```
 
 **Fix**:

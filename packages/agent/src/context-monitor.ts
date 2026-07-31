@@ -242,6 +242,16 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     cumulativeCacheMiss = 0;
   }
 
+  /** Reset only level-crossed flags without clearing token counts.
+   *  Use after a failed compaction attempt so the next fill crossing
+   *  still triggers a fresh compaction attempt. */
+  function resetLevelFlags(): void {
+    crossed.warn = false;
+    crossed.checkpoint = false;
+    crossed.critical = false;
+    crossedCacheLow = false;
+  }
+
   /** Get current state without updating */
   function getState(): Omit<ContextFillState, 'levelCrossed' | 'turn'> {
     const fillPercent = currentContextTokens / ctxWindow;
@@ -266,7 +276,7 @@ export function createContextMonitor(config: ContextMonitorConfig = {}) {
     return formatContextFill(state);
   }
 
-  return { update, reset, getState, formatState, recordCacheActivity, version: CONTEXT_STRATEGY_VERSION, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
+  return { update, reset, resetLevelFlags, getState, formatState, recordCacheActivity, version: CONTEXT_STRATEGY_VERSION, config: { ctxWindow, warnThresh, checkpointThresh, criticalThresh } };
 }
 
 function normalizeTokenCount(value: number): number {

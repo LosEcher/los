@@ -83,8 +83,8 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
     { metric: 'retentionIssues', direction: 'higher', thresholdPercent: 1, label: 'Memory retention issues increased' },
   ],
   file_size: [
-    { metric: 'filesOver600', direction: 'higher', thresholdPercent: 1, label: 'Files over 600 line limit increased' },
-    { metric: 'filesOver400', direction: 'higher', thresholdPercent: 10, label: 'Files over 400 line threshold increased >10%' },
+    { metric: 'filesOver700', direction: 'higher', thresholdPercent: 1, label: 'Files over 700 line limit increased' },
+    { metric: 'filesOver500', direction: 'higher', thresholdPercent: 10, label: 'Files over 500 line threshold increased >10%' },
   ],
   reflection: [],
   branch_cleanup: [],

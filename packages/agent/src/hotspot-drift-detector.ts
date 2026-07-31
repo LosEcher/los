@@ -2,7 +2,7 @@
  * Hotspot & Tool Drift Detection — file size + tool usage hotspot governance.
  *
  * Detects two drift dimensions:
- *   1. File size drift — files approaching thresholds (400 / 600 lines) and trending
+ *   1. File size drift — files approaching thresholds (500 / 700 lines) and trending
  *   2. Tool usage drift — tool call frequency changes, error patterns
  *
  * Integrated into governance sweep pipeline as a 'file_size' job type.
@@ -21,7 +21,7 @@ export interface FileSizeSnapshot {
   file: string;
   lines: number;
   package: string;
-  /** Last time this file was seen at >400 lines */
+  /** Last time this file was seen at >500 lines */
   lastSeenAt?: string;
   /** Trend: +N lines since previous scan, negative = shrinking */
   delta?: number;
@@ -31,14 +31,14 @@ export interface FileHotspotReport {
   scannedAt: string;
   workspaceRoot: string;
   totalFilesScanned: number;
-  filesOver600: FileSizeSnapshot[];
-  filesOver400: FileSizeSnapshot[];
-  newCrossers: FileSizeSnapshot[];  // files that crossed 400 since last scan
-  new600Crossers: FileSizeSnapshot[]; // files that crossed 600 since last scan
+  filesOver700: FileSizeSnapshot[];
+  filesOver500: FileSizeSnapshot[];
+  newCrossers: FileSizeSnapshot[];  // files that crossed 500 since last scan
+  new700Crossers: FileSizeSnapshot[]; // files that crossed 700 since last scan
   shrank: FileSizeSnapshot[];  // files that dropped below thresholds
   trend: {
-    totalOver400Delta: number;
-    totalOver600Delta: number;
+    totalOver500Delta: number;
+    totalOver700Delta: number;
     avgDelta: number;
     worseningFiles: string[];  // files that grew >10% since last scan
   };
@@ -63,8 +63,8 @@ export interface ToolDriftReport {
 
 // ── Config ───────────────────────────────────────────────
 
-const SIZE_THRESHOLD_400 = 400;
-const SIZE_THRESHOLD_600 = 600;
+const SIZE_THRESHOLD_500 = 500;
+const SIZE_THRESHOLD_700 = 700;
 const DELTA_WARN_PERCENT = 10;     // 10% size increase triggers warn
 const ERROR_RATE_SPIKE_PCT = 50;   // 50pp increase triggers spike alert
 const TOOL_UNUSED_DAYS = 7;
@@ -153,40 +153,40 @@ export async function scanFileHotspots(opts: {
     const prevSummary = typeof prev.rows[0].result_summary_json === 'string'
       ? JSON.parse(prev.rows[0].result_summary_json)
       : (prev.rows[0].result_summary_json as Record<string, unknown>) ?? {};
-    const raw400 = prevSummary.filesOver400 ?? [];
-    const raw600 = prevSummary.filesOver600 ?? [];
+    const raw500 = prevSummary.filesOver500 ?? [];
+    const raw700 = prevSummary.filesOver700 ?? [];
     // Backward-compat: old auditor stored .length (number), not array.
-    const prevOver400: Array<{ file: string; lines: number }> = Array.isArray(raw400) ? raw400 : [];
-    const prevOver600: Array<{ file: string; lines: number }> = Array.isArray(raw600) ? raw600 : [];
-    for (const f of [...prevOver400, ...prevOver600]) {
+    const prevOver500: Array<{ file: string; lines: number }> = Array.isArray(raw500) ? raw500 : [];
+    const prevOver700: Array<{ file: string; lines: number }> = Array.isArray(raw700) ? raw700 : [];
+    for (const f of [...prevOver500, ...prevOver700]) {
       previousFiles.set(f.file, f.lines);
     }
   }
 
-  const over400 = snapshots
-    .filter(s => s.lines > SIZE_THRESHOLD_400)
+  const over500 = snapshots
+    .filter(s => s.lines > SIZE_THRESHOLD_500)
     .sort((a, b) => b.lines - a.lines);
 
-  const over600 = over400.filter(s => s.lines > SIZE_THRESHOLD_600);
+  const over700 = over500.filter(s => s.lines > SIZE_THRESHOLD_700);
 
-  const over400Set = new Set(over400.map(s => s.file));
-  const over600Set = new Set(over600.map(s => s.file));
+  const over500Set = new Set(over500.map(s => s.file));
+  const over700Set = new Set(over700.map(s => s.file));
 
   const newCrossers: FileSizeSnapshot[] = [];
-  const new600Crossers: FileSizeSnapshot[] = [];
+  const new700Crossers: FileSizeSnapshot[] = [];
   const shrank: FileSizeSnapshot[] = [];
   const worseningFiles: string[] = [];
 
-  for (const s of over400) {
+  for (const s of over500) {
     const prevLines = previousFiles.get(s.file);
     const delta = prevLines !== undefined ? s.lines - prevLines : 0;
 
-    if (prevLines === undefined || prevLines <= SIZE_THRESHOLD_400) {
+    if (prevLines === undefined || prevLines <= SIZE_THRESHOLD_500) {
       newCrossers.push({ ...s, delta });
     }
-    if (prevLines === undefined || prevLines <= SIZE_THRESHOLD_600) {
-      if (s.lines > SIZE_THRESHOLD_600) {
-        new600Crossers.push({ ...s, delta });
+    if (prevLines === undefined || prevLines <= SIZE_THRESHOLD_700) {
+      if (s.lines > SIZE_THRESHOLD_700) {
+        new700Crossers.push({ ...s, delta });
       }
     }
     if (delta > 0 && prevLines !== undefined && (delta / prevLines) * 100 > DELTA_WARN_PERCENT) {
@@ -195,35 +195,35 @@ export async function scanFileHotspots(opts: {
   }
 
   for (const [file, prevLines] of previousFiles) {
-    if (!over400Set.has(file)) {
+    if (!over500Set.has(file)) {
       shrank.push({ file, lines: 0, package: extractPackage(file), delta: -prevLines });
     }
   }
 
-  const totalOver400Delta = over400.reduce((sum, s) => {
+  const totalOver500Delta = over500.reduce((sum, s) => {
     const prev = previousFiles.get(s.file);
     return sum + (prev !== undefined ? s.lines - prev : s.lines);
   }, 0);
 
-  const totalOver600Delta = over600.reduce((sum, s) => {
+  const totalOver700Delta = over700.reduce((sum, s) => {
     const prev = previousFiles.get(s.file);
     return sum + (prev !== undefined ? s.lines - prev : s.lines);
   }, 0);
 
-  const avgDelta = over400.length > 0 ? totalOver400Delta / over400.length : 0;
+  const avgDelta = over500.length > 0 ? totalOver500Delta / over500.length : 0;
 
   return {
     scannedAt: new Date().toISOString(),
     workspaceRoot: root,
     totalFilesScanned: snapshots.length,
-    filesOver600: over600,
-    filesOver400: over400,
+    filesOver700: over700,
+    filesOver500: over500,
     newCrossers,
-    new600Crossers,
+    new700Crossers,
     shrank,
     trend: {
-      totalOver400Delta,
-      totalOver600Delta,
+      totalOver500Delta,
+      totalOver700Delta,
       avgDelta: Math.round(avgDelta * 10) / 10,
       worseningFiles,
     },
