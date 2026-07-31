@@ -114,9 +114,9 @@ test('detectGovernanceDrift maps thresholds and direction for every governed job
     },
     {
       jobType: 'file_size',
-      previous: { filesOver600Count: 0, filesOver400: 100 },
-      current: { filesOver600: 1, filesOver400Count: 109 },
-      expectedMetrics: ['filesOver600'],
+      previous: { filesOver700Count: 0, filesOver500: 100 },
+      current: { filesOver700: 1, filesOver500Count: 109 },
+      expectedMetrics: ['filesOver700'],
     },
   ];
 

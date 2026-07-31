@@ -171,7 +171,7 @@ export function useChatRun(options: {
             mode: 'execution',
             editableSurfaces: o.workspaceRoot.trim() ? [o.workspaceRoot.trim()] : [],
             nonGoals: [],
-            requiredChecks: [],
+            requiredChecks: ['pnpm check'],
             stopConditions: [],
             evidenceRequired: [],
             toolMode: 'project-write',

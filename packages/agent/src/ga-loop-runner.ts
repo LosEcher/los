@@ -435,10 +435,10 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       return absorbable > 0;
     }
     case 'file_size': {
-      // Audit returns filesOver400Count/filesOver600Count (NOT hotFileCount).
-      const c400 = typeof summary.filesOver400Count === 'number' ? summary.filesOver400Count : 0;
-      const c600 = typeof summary.filesOver600Count === 'number' ? summary.filesOver600Count : 0;
-      return c400 > 0 || c600 > 0;
+      // Audit returns filesOver500Count/filesOver700Count (NOT hotFileCount).
+      const c500 = typeof summary.filesOver500Count === 'number' ? summary.filesOver500Count : 0;
+      const c700 = typeof summary.filesOver700Count === 'number' ? summary.filesOver700Count : 0;
+      return c500 > 0 || c700 > 0;
     }
     case 'migration_drift_fix': {
       // fileMissing runs (e.g. prod build without tools/) must NOT count as
