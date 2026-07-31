@@ -20,8 +20,19 @@ test('heavy-job ordering matches each CI platform capacity policy', async () => 
   const github = await loadWorkflow('../.github/workflows/ci.yml');
   const forgejo = await loadWorkflow('../.forgejo/workflows/ci.yml');
 
+  // Both platforms run gate-test / gate-web-e2e without a gate-fast dependency.
+  // GitHub: hosted runners are independent; Forgejo (PR #125 / run 421): each
+  // job checks out its own tree and the win-los-canary pool sustains concurrent
+  // jobs, so wall time is max(job) rather than sum(gate-fast + gate-test).
   assert.equal(github.jobs['gate-test'].needs, undefined);
   assert.equal(github.jobs['gate-web-e2e'].needs, undefined);
-  assert.equal(forgejo.jobs['gate-test'].needs, 'gate-fast');
-  assert.equal(forgejo.jobs['gate-web-e2e'].needs, 'gate-fast');
+  assert.equal(github.jobs['gate-drift'].needs, undefined);
+  assert.equal(forgejo.jobs['gate-test'].needs, undefined);
+  assert.equal(forgejo.jobs['gate-web-e2e'].needs, undefined);
+  assert.equal(forgejo.jobs['gate-drift'].needs, undefined);
+});
+
+test('Forgejo gate-fast enables turbo typecheck concurrency', async () => {
+  const forgejo = await loadWorkflow('../.forgejo/workflows/ci.yml');
+  assert.equal(String(forgejo.jobs['gate-fast'].env?.TURBO_CONCURRENCY ?? ''), '4');
 });
