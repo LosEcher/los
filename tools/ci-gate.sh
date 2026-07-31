@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci-gate.sh — single CI gate for los (typecheck → structure → state-machine → contracts → unwired → test)
+# ci-gate.sh — single CI gate for los (typecheck → structure → state-machine → contracts → unwired → static-analysis → test)
 #
 # This replaces the previous "pnpm gate" chain that concatenated 5 shell &&
 # operators inside a package.json script. A standalone script gives us:
@@ -17,6 +17,7 @@
 #   contracts        → bidirectional event ↔ route coverage
 #   unwired exports  → catches implemented-but-not-wired antipattern
 #   delete-safety     → catches deleted files still imported by surviving code
+#   static-analysis   → in-repo AST rules (los scan), error-only hard gate
 #   tests last       → most expensive, only runs if everything else passes
 set -euo pipefail
 
@@ -162,7 +163,17 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 7: tests ─────────────────────────────────────────
+# ── Phase 7: static-analysis ──────────────────────────────
+
+phase_start "Static analysis (los scan, in-repo AST rules, error-only gate)"
+if ./tools/check-static-analysis.sh; then
+  phase_ok "static-analysis"
+else
+  phase_fail "static-analysis"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 8: tests ─────────────────────────────────────────
 
 if [ "$SKIP_TESTS" -eq 1 ]; then
   printf '\n%b━━━ Phase: Tests (turbo test) ━━━%b\n' "$CYAN" "$NC"

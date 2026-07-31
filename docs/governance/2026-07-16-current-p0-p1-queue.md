@@ -141,7 +141,8 @@ larger or more valuable than every later item.
 | 11 | `todo-los-p1-test-coverage` | `done` | Versioned package-local baseline now separates static inventory from V8-observed sources | Baseline update/check commands pass; media observes 5/5 implementation files; governance drift direct review reaches 96.37/73.68/83.33 line/branch/function coverage |
 | 12 | `todo-los-p1-supply-chain-full` | `backlog` | Current audit covers install scripts, CVEs, and workspace references only | SBOM, license policy, freshness analysis, persisted audit trend, and focused tests |
 | 13 | `todo-los-p1-turbo-cache` | `ready` | CI behavior is observable only from logs and expected cache semantics are undocumented | Documented inputs/outputs, clean and warm-run evidence, and explicit CI cache policy |
-| 14 | `todo-los-p1-los-ast-rules` | `backlog` | AP1/AP3/AP5 checks are split across scripts and human workflow; AP5 is not statically enforced | los-ast rules with positive/negative fixtures and a documented repo gate boundary |
+
+> 2026-07-31 归档:`todo-los-p1-los-ast-rules` 已完成(AP1 由内部 state-machine-bypass.yml 编码,AP3/AP5 确认不适用静态规则——运行时 gate 覆盖;rule.exclude 豁免、los scan 接入 ci-gate.sh Phase 7、可信度审计规则修复 4 条;见 `docs/governance/static-analysis-reliability.md`)。
 
 ## Immediate Action
 
@@ -298,7 +299,7 @@ pi-k4-canary (backlog, P0) ── consent-gated side track only
    - Only then `todo-los-execution-optimization-analysis` (advisory only; no default profile/tool/context auto-tune).
 
 3. **Wave 3 (reliability/governance)**  
-   context-reconstruction → stale-detection → CBM A/B (after ~20 shadow sessions) → perf-metrics → supply-chain-full → los-ast-rules.
+   context-reconstruction → stale-detection → CBM A/B (after ~20 shadow sessions) → perf-metrics → supply-chain-full.
 
 4. **Wave 4 (long tail)**  
    operator-gated CD release-contract discovery; file-size on touch only; structure-wiring-ratchet stays long-horizon P2; feed-analysis runtime todos and historical governance findings stay off the main line.

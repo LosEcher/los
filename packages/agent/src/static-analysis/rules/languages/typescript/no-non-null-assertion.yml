@@ -4,3 +4,7 @@ severity: warning
 message: "Avoid non-null assertions (!) — use explicit null checks"
 rule:
   pattern: $A!
+# Test fixtures commonly use first!/second! on array access; keep the gate
+# focused on production code.
+exclude:
+  - "\\.test\\.ts$"

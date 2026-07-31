@@ -1,5 +1,19 @@
 import fg from 'fast-glob';
 
+/**
+ * Default directories never worth static analysis. `los scan --root <repo>`
+ * would otherwise walk every node_modules file (fast-glob does not honor
+ * .gitignore), making scans hang on dependency trees.
+ */
+const DEFAULT_IGNORES = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.git/**',
+  '**/.turbo/**',
+  '**/.los-runtime/**',
+];
+
 export async function discoverFiles({
   rootDir,
   include,
@@ -16,6 +30,6 @@ export async function discoverFiles({
     absolute: true,
     unique: true,
     dot: false,
-    ignore: ignore || [],
+    ignore: [...DEFAULT_IGNORES, ...(ignore || [])],
   });
 }

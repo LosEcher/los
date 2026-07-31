@@ -6,3 +6,9 @@ rule:
   pattern: console.log($A)
 fix:
   replace: console.info($A)
+# CLI output IS console output (packages/cli) and interactive login/scan
+# tools legitimately print to stdout.
+exclude:
+  - "packages[\\\\/]cli[\\\\/]"
+  - "xai-oauth-login"
+  - "firing-range-scan"

@@ -1,12 +1,18 @@
 id: los.duplicate-functions
 language: TypeScript
 severity: info
-message: "Duplicate function pattern detected — consider extracting to shared utility"
+message: "Duplicate function detection is tracked manually — see governance CBM similarity pairs and todo-seeds dedupe queue"
+# 2026-07-31: this rule previously matched a single symbol
+# (`pattern: normalizeOptionalString`), producing 576 noise findings across
+# every call site. A generic duplicate-detector is out of scope for
+# ast-grep patterns; the reliable signal lives in CBM SIMILAR_TO edges
+# (cli command skeletons, wxpusher accept/fail pairs) which require human
+# confirmation before extraction. This rule now serves as a documentation
+# marker for that policy, mirroring file-size-gate.
 rule:
-  any:
-    - pattern: "normalizeOptionalString"
+  kind: program
 governance:
   domain: architecture
   owner: backend
   impact: low
-  rationale: "2026-06-12 audit identified normalizeOptionalString duplication across chat-normalizers.ts and server-helpers.ts"
+  rationale: "Duplicate detection needs semantic similarity, not AST pattern matching. CBM similarity edges + manual triage decide extraction candidates."

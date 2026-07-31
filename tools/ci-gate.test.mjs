@@ -22,6 +22,7 @@ const passingChecks = [
   'check-contracts.sh',
   'check-delete-safety.sh',
   'check-unwired-exports.sh',
+  'check-static-analysis.sh',
 ];
 
 test('gate passes when the test command succeeds and removes its temp log', () => {
