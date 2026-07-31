@@ -40,10 +40,10 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       'AP1 已由内部规则 packages/agent/src/static-analysis/rules/projects/los/state-machine-bypass.yml 编码；\n' +
       'AP3 不适用静态规则：markSucceeded 非公共 API，execution-store.ts 在事务内强制 canMarkSucceeded 运行时 gate；\n' +
       'AP5 不适用静态规则：loadSpecsForFiles 是 agent 运行时流程规范（无生产调用点），静态 AST 无法检测 phase 前置；\n' +
-      '已完成：规则系统 exclude 字段（测试文件/包级豁免）、state-machine-bypass 与 direct-infra-import 豁免、los scan 全仓 0 error。\n' +
-      '剩余：把 los scan 接入 ci-gate.sh（约 3.9s 开销），先 error-only + baseline。',
+      '已完成（2026-07-31）：规则系统 exclude 字段（测试文件/包级豁免）、state-machine-bypass 与 direct-infra-import 豁免、\n' +
+      'los scan 接入 ci-gate.sh Phase 7（error-only 硬门槛，10/10 phases 全绿）、规则精度修复 4 条（可信度审计）。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-24',
     stageId: 'p1-iteration-fixes',
