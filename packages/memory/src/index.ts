@@ -47,6 +47,13 @@ export {
 
 export { shouldTriggerCompaction, type TriggerDecision } from './core/decay.js';
 
+export {
+  archiveStaleObservations,
+  AUTO_MARK_SCORE,
+  type AutoMarkingCandidate,
+  type AutoMarkingResult,
+} from './core/auto-marking.js';
+
 export { getLatestCheckpoint } from './core/checkpoint.js';
 
 export {
