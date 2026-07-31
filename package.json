@@ -41,6 +41,8 @@
     "check:ci-evidence": "node --test ./tools/collect-ci-failure-evidence.test.mjs",
     "check:ci-observer": "node --test ./tools/observe-command-resources.test.mjs ./tools/observe-windows-runner-resources.test.mjs",
     "check:ci-workflow-policy": "./tools/check-ci-workflow-policy.sh",
+    "check:test-isolation": "./tools/check-test-isolation.sh",
+    "test:agent-stress": "bash ./tools/stress-agent-parallel.sh",
     "check:wiring": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-wiring-topology.ts",
     "check:wiring:update-baseline": "pnpm --filter @los/gateway exec node --import tsx ../../tools/check-wiring-topology.ts --update-baseline",
     "gate": "./tools/ci-gate.sh",

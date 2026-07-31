@@ -29,8 +29,10 @@ export function runPackageTests(options) {
     }
   }
 
+  // Include LOS_TEST_GROUP when present so three CI agent groups never share a
+  // base id even if forked in the same millisecond with the same pid namespace.
   const testRunId = process.env.LOS_TEST_RUN_ID
-    ?? `${options.packageId}-${process.pid}-${Date.now()}`;
+    ?? `${options.packageId}-g${process.env.LOS_TEST_GROUP ?? 'all'}-${process.pid}-${Date.now()}`;
   const testEnv = {
     ...process.env,
     NODE_ENV: process.env.NODE_ENV ?? 'test',

@@ -149,7 +149,7 @@ async function createRevisionFixture(label: string): Promise<{
     sessionId,
     projectId: 'los',
     prompt: 'exercise the persisted revision loop',
-    workspaceRoot: '/tmp/los-revision-loop',
+    workspaceRoot: `/tmp/los-revision-loop-${suffix}`,
     toolMode: 'project-write',
     runContract: {
       mode: 'execution',
