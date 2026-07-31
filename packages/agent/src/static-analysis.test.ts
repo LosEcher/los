@@ -58,6 +58,17 @@ test('discoverFiles finds TypeScript files in agent src', async () => {
   }
 });
 
+test('discoverFiles defaults exclude node_modules/dist without explicit ignore', async () => {
+  // Root repo contains node_modules; a default scan must never walk them.
+  const repoRoot = resolve(__dirname, '../../..');
+  const files = await discoverFiles({ rootDir: repoRoot, include: ['**/*.ts'] });
+  assert.ok(files.length > 0, `expected some .ts files from repo root, got ${files.length}`);
+  for (const f of files) {
+    assert.ok(!f.includes('/node_modules/'), `must not include node_modules: ${f}`);
+    assert.ok(!f.includes('/dist/'), `must not include dist: ${f}`);
+  }
+});
+
 test('scanFiles finds issues in a test fixture', async () => {
   const rulesDir = resolve(__dirname, './static-analysis/rules');
   const rules = await loadRuleFiles([`${rulesDir}/languages/typescript/*.yml`]);
