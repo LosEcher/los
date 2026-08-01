@@ -328,12 +328,14 @@ test('Work plan review exposes structured steps, verification mapping, and revis
 test('Work result review exposes verification and durable workspace evidence before an operator decision', () => {
   assert.match(workPage, /<WorkReviewPanel/);
   assert.match(workPage, /postJson\(`\/work-items\/\$\{item!\.id\}\/result-decision`/);
-  assert.match(workPage, /dirtyPaths: \[\]/);
+  assert.match(workPage, /dirtyPaths,?\s*$/m);
   assert.match(workPage, /record\.status === 'succeeded' \|\| record\.status === 'skipped'/);
   assert.match(workReviewPanel, /item\.verificationRecords\.map/);
   assert.match(workReviewPanel, /workspace\.backupArtifactId \?\? 'backup required'/);
-  assert.match(workReviewPanel, /onDecision\('revision_requested', reason\)/);
-  assert.match(workReviewPanel, /onDecision\('accepted', reason\)/);
+  assert.match(workReviewPanel, /Create backup/);
+  assert.match(workReviewPanel, /decide\('revision_requested'\)/);
+  assert.match(workReviewPanel, /decide\('accepted'\)/);
+  assert.match(workReviewPanel, /onFilesLoaded=\{onDiffFiles\}/);
   assert.match(styles, /\.workspace-record code[^]*overflow-wrap: anywhere/);
 });
 

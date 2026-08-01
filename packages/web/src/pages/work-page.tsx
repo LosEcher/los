@@ -114,11 +114,11 @@ export function WorkPage({
     onSuccess: refresh,
   });
   const review = useMutation({
-    mutationFn: ({ decision, reason }: { decision: 'accepted' | 'revision_requested'; reason: string }) => postJson(`/work-items/${item!.id}/result-decision`, {
+    mutationFn: ({ decision, reason, dirtyPaths = [] }: { decision: 'accepted' | 'revision_requested'; reason: string; dirtyPaths?: string[] }) => postJson(`/work-items/${item!.id}/result-decision`, {
       decision,
       reason,
       closeoutReport: {
-        dirtyPaths: [],
+        dirtyPaths,
         checks: item!.verificationRecords
           .filter(record => record.status === 'succeeded' || record.status === 'skipped')
           .map(record => record.checkName),
@@ -263,7 +263,7 @@ export function WorkPage({
                 item={item}
                 pending={review.isPending}
                 error={review.error}
-                onDecision={(decision, reason) => review.mutate({ decision, reason })}
+                onDecision={(decision, reason, dirtyPaths) => review.mutate({ decision, reason, dirtyPaths })}
               />
 
               <PlanReview contract={runContract} />
