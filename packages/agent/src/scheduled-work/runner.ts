@@ -349,3 +349,44 @@ async function createScheduleWorkItem(
   });
   return todo.id;
 }
+
+/**
+ * Approve an awaiting_approval scheduled run and execute it.
+ *
+ * Closes the each_run approval gap: the run is moved through
+ * awaiting_approval → claimed → running (state machine permits both hops) and
+ * the template executes without re-checking the approval policy (the operator
+ * approval is the check). Reuses the ordinary outcome/error transitions.
+ */
+export async function approveScheduledWorkRun(
+  runId: string,
+  input: { ownerId: string },
+): Promise<ScheduledWorkItemRun> {
+  const run = await loadScheduledWorkItemRun(runId);
+  if (!run) throw new Error(`Scheduled work run not found: ${runId}`);
+  if (run.status !== 'awaiting_approval') {
+    throw new Error(`run must be awaiting_approval to approve (status=${run.status})`);
+  }
+  const schedule = await loadScheduledWorkItem(run.scheduleId);
+  if (!schedule) throw new Error('schedule disappeared before approval');
+
+  await transitionScheduledWorkRun(run.id, 'claimed', { ownerId: input.ownerId });
+  await transitionScheduledWorkRun(run.id, 'running', {
+    ownerId: input.ownerId,
+    leaseExpiresAt: run.leaseExpiresAt ? new Date(run.leaseExpiresAt) : undefined,
+  });
+  try {
+    const outcome = await executeTemplate(schedule, run);
+    const completed = await transitionScheduledWorkRun(run.id, outcome.status, {
+      resultSummary: outcome.summary,
+      workItemId: outcome.workItemId,
+      runSpecId: outcome.runSpecId,
+      taskRunId: outcome.taskRunId,
+    });
+    return completed;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await transitionScheduledWorkRun(run.id, 'failed', { error: message });
+    throw err;
+  }
+}
