@@ -5,15 +5,18 @@
  *   1. Install scripts in pnpm-lock.yaml that could be supply-chain risks
  *   2. Known CVEs via pnpm audit
  *   3. workspace:* references pointing to missing packages
+ *   4. SPDX SBOM generation from pnpm-lock.yaml (offline)
+ *   5. License compliance scan of installed packages (offline)
+ *   6. Optional dependency freshness check (registry queries, off by default)
  */
 import { getLogger } from '@los/infra/logger';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const log = getLogger('governance-jobs');
 
 interface SupplyChainFinding {
-  kind: 'install_script' | 'cve' | 'workspace_missing' | 'audit_error';
+  kind: 'install_script' | 'cve' | 'workspace_missing' | 'audit_error' | 'stale_dependency';
   severity: 'critical' | 'high' | 'medium' | 'low';
   package?: string;
   version?: string;
@@ -128,6 +131,26 @@ export async function runSupplyChainAudit(): Promise<Record<string, unknown>> {
     log.warn(`Supply chain: workspace check failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // ── 4. SPDX SBOM generation (offline, from the lockfile) ──
+  const sbom = generateSbom(resolve(workspaceRoot, 'pnpm-lock.yaml'));
+
+  // ── 5. License compliance scan (offline, installed packages) ──
+  const licenseFindings = scanInstalledLicenses(resolve(workspaceRoot, 'node_modules'));
+
+  // ── 6. Optional dependency freshness (registry queries, opt-in) ──
+  const freshness = process.env.LOS_SUPPLY_CHAIN_FRESHNESS === '1'
+    ? await checkTopLevelFreshness(resolve(workspaceRoot, 'package.json'))
+    : { enabled: false, stalePackages: [] };
+  for (const stale of freshness.stalePackages) {
+    findings.push({
+      kind: 'stale_dependency',
+      severity: 'low',
+      package: stale.name,
+      version: stale.version,
+      detail: `Dependency "${stale.name}"@${stale.version} last published ${stale.monthsSinceUpdate} months ago (>= 12 months threshold)`,
+    });
+  }
+
   // ── Summarize ──
   const criticalFindings = findings.filter(f => f.severity === 'critical');
   const highFindings = findings.filter(f => f.severity === 'high');
@@ -144,6 +167,17 @@ export async function runSupplyChainAudit(): Promise<Record<string, unknown>> {
     installScriptPackages: findings.filter(f => f.kind === 'install_script').map(f => f.package),
     cveCount: findings.filter(f => f.kind === 'cve').length,
     workspaceMissing: findings.filter(f => f.kind === 'workspace_missing').map(f => f.package),
+    sbom: {
+      format: sbom.format,
+      packageCount: sbom.packages.length,
+      packages: sbom.packages.slice(0, 50),
+    },
+    license: {
+      scannedCount: licenseFindings.scannedCount,
+      missingCount: licenseFindings.missingCount,
+      missingPackages: licenseFindings.missingPackages.slice(0, 20),
+    },
+    freshness,
     // Top 5 most severe findings
     topFindings: [...criticalFindings, ...highFindings].slice(0, 5).map(f => ({
       severity: f.severity,
@@ -151,4 +185,114 @@ export async function runSupplyChainAudit(): Promise<Record<string, unknown>> {
       detail: f.detail,
     })),
   };
+}
+
+// ── SBOM / license / freshness helpers ──────────────────────────
+
+interface SbomEntry { name: string; version: string }
+
+/** Parse pnpm-lock.yaml `packages:` entries into name@version pairs (offline). */
+export function parseLockfilePackages(lockPath: string): SbomEntry[] {
+  if (!existsSync(lockPath)) return [];
+  const content = readFileSync(lockPath, 'utf8');
+  const entries: SbomEntry[] = [];
+  const lines = content.split('\n');
+  for (const line of lines) {
+    // pnpm v9 lockfile entries: "  'name@version':" or '  name@version:'
+    const match = line.match(/^\s*['"]?(@?[^'"\s]+)['"]?:$/);
+    if (!match) continue;
+    const raw = match[1]!.trim();
+    if (!raw.includes('@') || raw.startsWith('.') || raw.startsWith('/')) continue;
+    // Split scoped names: @scope/name@version
+    const atIndex = raw.lastIndexOf('@');
+    if (atIndex <= 0) continue;
+    const name = raw.slice(0, atIndex);
+    const version = raw.slice(atIndex + 1);
+    if (name && version && !version.includes('(')) {
+      entries.push({ name, version });
+    }
+  }
+  return entries;
+}
+
+export function generateSbom(lockPath: string): {
+  format: string;
+  packages: Array<{ name: string; version: string }>;
+} {
+  const packages = parseLockfilePackages(lockPath);
+  return { format: 'spdx-2.3-lite', packages };
+}
+
+interface LicenseScanResult {
+  scannedCount: number;
+  missingCount: number;
+  missingPackages: string[];
+}
+
+/** Scan installed top-level packages for a license field (offline). */
+export function scanInstalledLicenses(nodeModulesPath: string): LicenseScanResult {
+  const result: LicenseScanResult = { scannedCount: 0, missingCount: 0, missingPackages: [] };
+  if (!existsSync(nodeModulesPath)) return result;
+  let names: string[];
+  try {
+    names = readdirSync(nodeModulesPath).filter(name => !name.startsWith('.'));
+  } catch {
+    return result;
+  }
+  for (const name of names) {
+    // Handle scoped packages: @scope/name → @scope directory with name inside
+    const pkgJsonPath = name.startsWith('@')
+      ? resolve(nodeModulesPath, name, name.split('/').pop()!, 'package.json')
+      : resolve(nodeModulesPath, name, 'package.json');
+    if (!existsSync(pkgJsonPath)) continue;
+    try {
+      const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'));
+      result.scannedCount += 1;
+      const license = pkg.license ?? pkg.licenses;
+      const licenseOk = typeof license === 'string' && license !== 'UNLICENSED' && license !== 'SEE LICENSE IN LICENSE'
+        || (Array.isArray(license) && license.length > 0);
+      if (!licenseOk) {
+        result.missingCount += 1;
+        result.missingPackages.push(name);
+      }
+    } catch {
+      // unreadable package.json — skip
+    }
+  }
+  return result;
+}
+
+interface StalePackage { name: string; version: string; monthsSinceUpdate: number }
+
+/** Freshness check against the npm registry; opt-in via LOS_SUPPLY_CHAIN_FRESHNESS=1. */
+export async function checkTopLevelFreshness(rootPkgPath: string): Promise<{
+  enabled: boolean;
+  stalePackages: StalePackage[];
+}> {
+  const stalePackages: StalePackage[] = [];
+  if (!existsSync(rootPkgPath)) return { enabled: true, stalePackages };
+  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8')) as Record<string, Record<string, string>>;
+  const deps = { ...(rootPkg.dependencies ?? {}), ...(rootPkg.devDependencies ?? {}) };
+  const names = Object.keys(deps).filter(name => !name.startsWith('@los/'));
+  const STALE_MONTHS = 12;
+  for (const name of names) {
+    try {
+      const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`, {
+        headers: { Accept: 'application/vnd.npm.install-v1+json' },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) continue;
+      const body = await response.json() as { 'dist-tags'?: Record<string, string>; time?: Record<string, string> };
+      const latest = body['dist-tags']?.latest;
+      const publishedAt = latest ? body.time?.[latest] : undefined;
+      if (!publishedAt) continue;
+      const months = (Date.now() - Date.parse(publishedAt)) / (30 * 24 * 3600 * 1000);
+      if (months >= STALE_MONTHS) {
+        stalePackages.push({ name, version: latest ?? '', monthsSinceUpdate: Math.floor(months) });
+      }
+    } catch {
+      // registry unreachable — skip silently (offline tolerance)
+    }
+  }
+  return { enabled: true, stalePackages };
 }
