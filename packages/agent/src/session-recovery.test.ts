@@ -224,3 +224,147 @@ test('end-to-end recovery rebuilds context from persisted session events', async
     await closeDb().catch(() => undefined);
   }
 });
+
+test('checkpoint version support accepts legacy and current formats', async () => {
+  const { isCheckpointVersionSupported, CHECKPOINT_VERSION } = await import('./session-recovery.js');
+  assert.equal(isCheckpointVersionSupported(undefined), true, 'legacy checkpoint without version is v1');
+  assert.equal(isCheckpointVersionSupported(1), true);
+  assert.equal(isCheckpointVersionSupported(CHECKPOINT_VERSION), true);
+  assert.equal(isCheckpointVersionSupported(999), false, 'newer format must degrade');
+});
+
+test('end-to-end recovery degrades on an incompatible checkpoint version', async () => {
+  const { loadConfig } = await import('@los/infra/config');
+  const { closeDb, getDb, initDb } = await import('@los/infra/db');
+  const { reconstructSessionContext } = await import('./session-recovery.js');
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-ver-${suffix}`;
+  try {
+    // The table is created lazily by reconstructSessionContext; build the
+    // minimal shape here so the INSERT below has a target.
+    await getDb().exec(`
+      CREATE TABLE IF NOT EXISTS memory_compactions (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        run_spec_id TEXT,
+        summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        auto_trigger TEXT
+      );
+    `);
+    await getDb().query(
+      `INSERT INTO memory_compactions (id, session_id, run_spec_id, summary_json, auto_trigger)
+       VALUES ($1, $2, $3, $4::jsonb, 'manual')`,
+      [
+        `chkpt-ver-${suffix}`,
+        sessionId,
+        `run-ver-${suffix}`,
+        JSON.stringify({
+          version: 999,
+          toolState: { pendingCalls: [], lastResult: [] },
+          fileReferences: [],
+          messageCursor: { lastEventId: '1', lastEventIndex: 1, turnCount: 1 },
+        }),
+      ],
+    );
+
+    const output = await reconstructSessionContext({ sessionId });
+    assert.equal(output.recoverySummary.recoveryMode, 'degraded');
+    const incompat = output.recoverySummary.errorEvents.find(e => e.type === 'checkpoint_version_incompatible');
+    assert.ok(incompat, 'degraded recovery must record a checkpoint_version_incompatible error event');
+    assert.match(incompat!.message, /version 999/);
+  } finally {
+    await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('recovered context can continue the agent loop via initialMessages', async () => {
+  const { loadConfig } = await import('@los/infra/config');
+  const { closeDb, getDb, initDb } = await import('@los/infra/db');
+  const { reconstructSessionContext } = await import('./session-recovery.js');
+  const { ConfigSchema, setConfig } = await import('@los/infra/config');
+  const { runAgent } = await import('./loop.js');
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-cont-${suffix}`;
+  const runSpecId = `run-cont-${suffix}`;
+  try {
+    await getDb().exec(`
+      CREATE TABLE IF NOT EXISTS memory_compactions (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_spec_id TEXT,
+        summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(), auto_trigger TEXT
+      );
+    `);
+    await getDb().query(
+      `INSERT INTO memory_compactions (id, session_id, run_spec_id, summary_json, auto_trigger)
+       VALUES ($1, $2, $3, $4::jsonb, 'manual')`,
+      [ `chkpt-cont-${suffix}`, sessionId, runSpecId, JSON.stringify({
+          version: 1,
+          toolState: { pendingCalls: [], lastResult: [] },
+          fileReferences: [],
+          messageCursor: { lastEventId: '1', lastEventIndex: 1, turnCount: 1 },
+        }) ],
+    );
+    const { ensureSessionEventStore, appendSessionEvent } = await import('./session-events.js');
+    await ensureSessionEventStore();
+    await appendSessionEvent({
+      sessionId, type: 'session.started', source: 'los.execution',
+      payload: { runSpecId }, visibility: 'public',
+    });
+    await appendSessionEvent({
+      sessionId, type: 'user.message', source: 'chat',
+      payload: { content: 'fix the bug in auth.ts' }, visibility: 'public',
+    });
+    await appendSessionEvent({
+      sessionId, type: 'model.turn.completed', source: 'loop', turn: 1,
+      payload: { textPreview: 'I will read the file first' }, visibility: 'public',
+    });
+
+    const recovered = await reconstructSessionContext({ sessionId });
+    assert.ok(recovered.messages.length >= 3, 'recovered context should carry the prior conversation');
+
+    // Feed the recovered messages into a fresh loop and verify it continues.
+    const previous = await loadConfig();
+    setConfig(ConfigSchema.parse({
+      server: {}, agent: { defaultProvider: 'fixture' }, memory: {}, executor: {}, auth: {},
+      providers: { fixture: { enabled: true, apiKey: 'fixture-key', baseUrl: 'https://fixture.invalid/v1' } },
+    }));
+    (globalThis as { fetch?: unknown }).fetch = async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: 'Continuing from the recovered context.',
+          tool_calls: [{ id: 'call-cont', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: '/tmp/cont.txt' }) } }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+      usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      model: 'fixture-model',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    try {
+      const continued = await runAgent('Continue the work.', {
+        provider: 'fixture',
+        toolMode: 'read-only',
+        sandboxMode: 'readonly',
+        skipPreExecutionPhases: true,
+        maxLoops: 2,
+        initialMessages: recovered.messages,
+      });
+      assert.ok(continued.loopCount >= 1, 'loop must continue from the recovered context');
+      assert.ok(continued.messages.length > recovered.messages.length,
+        'continuation must extend the recovered message array');
+    } finally {
+      setConfig(previous);
+    }
+  } finally {
+    await getDb().query('DELETE FROM memory_compactions WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});

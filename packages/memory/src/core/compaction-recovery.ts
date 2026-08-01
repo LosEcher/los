@@ -1,4 +1,8 @@
+import { CHECKPOINT_VERSION } from '@los/agent/session-recovery';
+
 export interface RecoveryCheckpointInput {
+  /** Checkpoint format version; absent means version 1. */
+  version?: number;
   toolState: {
     pendingCalls: Array<{
       callId: string;
@@ -31,6 +35,7 @@ export function recoveryCheckpointSummary(
   if (!checkpoint) return {};
 
   return {
+    version: CHECKPOINT_VERSION,
     toolState: {
       pendingCalls: checkpoint.toolState.pendingCalls.map(call => ({ ...call, args: { ...call.args } })),
       lastResult: checkpoint.toolState.lastResult.map(result => ({ ...result })),

@@ -24,6 +24,13 @@ properties:
       checkpointId:
         type: string
         minLength: 1
+      version:
+        type: integer
+        minimum: 1
+        description: >
+          Checkpoint format version. Missing on legacy checkpoints, which are
+          treated as version 1. Versions newer than the current reader degrade
+          recovery to 'degraded' instead of failing hard.
       sessionId:
         type: string
         minLength: 1
