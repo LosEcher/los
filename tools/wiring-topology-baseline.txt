@@ -123,6 +123,8 @@ agent|packages/agent/src/semantic-eviction.ts|isEligibleForEviction  # zero call
 agent|packages/agent/src/service-instances.ts|evaluateServiceInstance  # zero callers (orphan)
 agent|packages/agent/src/session-events.ts|appendSessionEvents  # zero callers (orphan)
 agent|packages/agent/src/session-events.ts|projectSessionObservability  # zero callers (orphan)
+agent|packages/agent/src/session-recovery.ts|CHECKPOINT_VERSION  # zero callers (orphan)
+agent|packages/agent/src/session-recovery.ts|isCheckpointVersionSupported  # test-only caller (no production caller)
 agent|packages/agent/src/session-trace.ts|validateTraceCompleteness  # test-only caller (no production caller)
 agent|packages/agent/src/skills.ts|incrementSkillUsage  # zero callers (orphan)
 agent|packages/agent/src/skills.ts|skillDirForScope  # zero callers (orphan)
