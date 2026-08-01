@@ -57,6 +57,7 @@ const isolatedDatabaseTestFiles = [
   'src/external-summary-routes.test.ts',
   'src/idempotency-atomic.test.ts',
   'src/integration-routes.test.ts',
+  'src/metrics-routes.test.ts',
   'src/node-command-routes.test.ts',
   'src/provider-compat-routes.test.ts',
   'src/routes/auth-routes.test.ts',

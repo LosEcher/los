@@ -10,6 +10,7 @@
     "./discovery": "./src/discovery.ts",
     "./migrate": "./src/migrate.ts",
     "./procedural-candidates-ddl": "./src/procedural-candidates-ddl.ts",
+    "./metrics": "./src/metrics.ts",
     "./provider-defaults": "./src/provider-defaults.ts",
     "./provider-accounts": "./src/provider-accounts.ts"
   },
