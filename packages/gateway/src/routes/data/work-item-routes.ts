@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import {
   createQuickWorkItem,
@@ -6,17 +6,20 @@ import {
   createWorkItemRevision,
   getWorkItemVerificationCoverage,
   isWorkItemReviewError,
+  linkWorkItemRun,
   listInboxEntries,
   listWorkItemProjections,
   loadWorkItemProjection,
   reviewWorkItemResult,
   type WorkItemMode,
 } from '@los/agent/work-items';
+import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import type { TodoPriority, TodoStatus } from '@los/agent/todos';
 
 import { runIdempotentJson } from '../../idempotency.js';
 import { getRequestContext, requireOperator } from '../../request-context.js';
 import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
+import { updateBoundTodoFromRun } from '../../chat-session-helpers.js';
 
 export type WorkItemRouteDependencies = {
   createQuickWorkItem: typeof createQuickWorkItem;
@@ -28,6 +31,11 @@ export type WorkItemRouteDependencies = {
   listWorkItemProjections: typeof listWorkItemProjections;
   loadWorkItemProjection: typeof loadWorkItemProjection;
   reviewWorkItemResult: typeof reviewWorkItemResult;
+  ensureRunSpecStore: typeof ensureRunSpecStore;
+  createRunSpec: typeof createRunSpec;
+  linkWorkItemRun: typeof linkWorkItemRun;
+  updateBoundTodoFromRun: typeof updateBoundTodoFromRun;
+  dispatchPersistedRunSpec: typeof dispatchPersistedRunSpec;
 };
 
 const defaultDependencies: WorkItemRouteDependencies = {
@@ -40,6 +48,11 @@ const defaultDependencies: WorkItemRouteDependencies = {
   listWorkItemProjections,
   loadWorkItemProjection,
   reviewWorkItemResult,
+  ensureRunSpecStore,
+  createRunSpec,
+  linkWorkItemRun,
+  updateBoundTodoFromRun,
+  dispatchPersistedRunSpec,
 };
 
 export function registerWorkItemRoutes(
@@ -138,8 +151,8 @@ export function registerWorkItemRoutes(
     );
   });
 
-  app.post('/work-items/:id/result-decision', async (req, reply) => {
-    if (!(await requireOperator(req, reply))) return;
+  app.post('/work-items/:id/start', (req, reply) => handleStartWorkItem(req, reply, deps));
+  app.post('/work-items/:id/result-decision', async (req, reply) => {    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = asObject(req.body);
     const decision = normalizeResultDecision(body.decision);
@@ -272,6 +285,84 @@ function normalizeTodoStatus(value: unknown): TodoStatus | undefined {
 
 function normalizeResultDecision(value: unknown): 'accepted' | 'revision_requested' | undefined {
   return value === 'accepted' || value === 'revision_requested' ? value : undefined;
+}
+
+/**
+ * POST /work-items/:id/start — begin the planning phase server-side.
+ *
+ * Closes the "created → planning" gap: the work item's goal becomes a run
+ * spec with a planning disposition, linked to the work item, dispatched
+ * through the ordinary persisted-run path, and the todo moves to
+ * in_progress. The UI Start button calls this instead of falling back to a
+ * manual chat round-trip.
+ */
+async function handleStartWorkItem(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  deps: WorkItemRouteDependencies,
+) {
+  const { id } = req.params as { id: string };
+  const context = getRequestContext(req);
+  const projection = await deps.loadWorkItemProjection(id);
+  if (!projection) return reply.status(404).send({ error: 'work item not found' });
+  if (projection.status !== 'backlog' && projection.status !== 'ready') {
+    return reply.status(409).send({
+      error: `work item must be backlog/ready to start planning (status=${projection.status})`,
+    });
+  }
+  if ((projection.links ?? []).some(link => link.relationKind === 'planning')) {
+    return reply.status(409).send({ error: 'planning run already started for this work item' });
+  }
+  try {
+    await deps.ensureRunSpecStore();
+    const runSpecId = `run-${id}-plan-${Date.now()}`;
+    const sessionId = `wi:${id}`;
+    const now = new Date().toISOString();
+    const draft = projection.runContractDraft ?? {};
+    await deps.createRunSpec({
+      id: runSpecId,
+      sessionId,
+      tenantId: context.tenantId,
+      projectId: context.projectId,
+      userId: context.userId,
+      requestId: context.requestId,
+      traceId: context.traceId,
+      prompt: projection.goal || projection.title,
+      modelSettings: {},
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      allowedTools: [],
+      toolRetry: {},
+      maxLoops: 4,
+      timeoutMs: undefined,
+      mcpServers: [],
+      runContract: {
+        ...draft,
+        mode: 'execution',
+        phase: 'planning',
+        previousPhase: 'created',
+        phaseChangedAt: now,
+      },
+    });
+    await deps.linkWorkItemRun({
+      workItemId: id,
+      runSpecId,
+      sessionId,
+      relationKind: 'planning',
+    });
+    await deps.updateBoundTodoFromRun(id, {
+      status: 'in_progress',
+      sessionId,
+      traceId: context.traceId,
+      requestId: context.requestId,
+      runSpecId,
+      event: 'planning_started',
+    });
+    const dispatch = await deps.dispatchPersistedRunSpec(runSpecId, 'planning');
+    return { workItemId: id, runSpecId, planning: dispatch };
+  } catch (err) {
+    return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 function normalizeCloseoutReport(value: unknown) {

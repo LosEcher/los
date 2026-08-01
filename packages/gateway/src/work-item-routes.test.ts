@@ -27,6 +27,7 @@ function makeProjection(overrides: Record<string, any> = {}): WorkItemProjection
     userId: '',
     toolMode: 'project-write',
     priority: 'P1',
+    links: [],
     progress: {},
     evidence: {} as any,
     changes: {} as any,
@@ -102,6 +103,16 @@ const stubDeps: WorkItemRouteDependencies = {
     (item as any).changes = { ...(item as any).changes, resultReview: { decision, closeoutReport: (input as any).closeoutReport ?? {} } };
     return item;
   },
+  ensureRunSpecStore: async () => undefined,
+  createRunSpec: async (input) => ({ ...input } as any),
+  linkWorkItemRun: async (input) => ({
+    workItemId: input.workItemId,
+    runSpecId: input.runSpecId,
+    sessionId: input.sessionId ?? null,
+    relationKind: input.relationKind,
+  } as any),
+  updateBoundTodoFromRun: async () => undefined,
+  dispatchPersistedRunSpec: async (runSpecId) => ({ runSpecId, status: 'succeeded' } as any),
 };
 
 test('work item routes create and read a structured draft without dispatching', async () => {
@@ -196,6 +207,70 @@ test('work item creation rejects missing contract arrays', async () => {
       error: 'invalid_request',
       message: 'editableSurfaces must be an array',
     });
+  } finally {
+    await app.close();
+  }
+});
+
+test('POST /work-items/:id/start creates a planning run and dispatches it', async () => {
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, await loadConfig());
+  let dispatched: string | undefined;
+  let linked: { workItemId?: string; relationKind: string } | undefined;
+  registerWorkItemRoutes(app, {
+    ...stubDeps,
+    dispatchPersistedRunSpec: async (runSpecId) => {
+      dispatched = runSpecId;
+      return { runSpecId, status: 'succeeded' } as any;
+    },
+    linkWorkItemRun: async (input) => {
+      linked = { workItemId: input.workItemId ?? '', relationKind: input.relationKind ?? 'planning' };
+      return input as any;
+    },
+  });
+  try {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/work-items',
+      payload: { projectId: 'los', goal: 'Refactor the auth module', mode: 'execution', editableSurfaces: [], requiredChecks: [], stopConditions: [] },
+    });
+    assert.equal(created.statusCode, 201);
+    const workItemId = created.json().id;
+
+    const started = await app.inject({ method: 'POST', url: `/work-items/${workItemId}/start` });
+    assert.equal(started.statusCode, 200);
+    const body = started.json();
+    assert.ok(body.runSpecId.startsWith(`run-${workItemId}-plan-`), body.runSpecId);
+    assert.equal(body.planning.status, 'succeeded');
+    assert.equal(dispatched, body.runSpecId);
+    assert.deepEqual(linked, { workItemId, relationKind: 'planning' });
+  } finally {
+    await app.close();
+  }
+});
+
+test('POST /work-items/:id/start rejects already-running work items', async () => {
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, await loadConfig());
+  registerWorkItemRoutes(app, {
+    ...stubDeps,
+    linkWorkItemRun: async (input) => {
+      const item = stubStore.get(input.workItemId);
+      if (item) (item as any).links = [...((item as any).links ?? []), { relationKind: input.relationKind }];
+      return input as any;
+    },
+  });
+  try {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/work-items',
+      payload: { projectId: 'los', goal: 'Already started', mode: 'execution', editableSurfaces: [], requiredChecks: [], stopConditions: [] },
+    });
+    const workItemId = created.json().id;
+    await app.inject({ method: 'POST', url: `/work-items/${workItemId}/start` });
+    const second = await app.inject({ method: 'POST', url: `/work-items/${workItemId}/start` });
+    assert.equal(second.statusCode, 409);
+    assert.match(second.json().error, /planning run already started/);
   } finally {
     await app.close();
   }
