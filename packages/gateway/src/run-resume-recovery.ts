@@ -1,4 +1,5 @@
 import { resolveCoordinationBackend } from '@los/agent/coordination';
+import { linkWorkItemRun } from '@los/agent/work-items';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { dispatchPersistedRunSpec } from './run-resume-dispatch.js';
@@ -31,6 +32,13 @@ export async function recoverApprovedRunDispatches(
     const runSpecIds = await listApprovedRunsWithoutExecutionAttempt(options.limit);
     const dispatch = options.dispatch ?? dispatchPersistedRunSpec;
     for (const runSpecId of runSpecIds) {
+      // Record the crash-recovery lineage on the owning work item (best-effort).
+      await linkRecoveredRunToWorkItem(runSpecId).catch((error: unknown) => {
+        log.warn('work item recovery lineage failed', {
+          runSpecId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       void dispatch(runSpecId, 'execution').catch((error: unknown) => {
         if (options.onDispatchError) {
           options.onDispatchError(runSpecId, error);
@@ -49,8 +57,7 @@ export async function recoverApprovedRunDispatches(
   return { lockAcquired: true, runSpecIds: result };
 }
 
-async function listApprovedRunsWithoutExecutionAttempt(limit = DEFAULT_RECOVERY_LIMIT): Promise<string[]> {
-  const boundedLimit = Number.isInteger(limit) && limit > 0
+async function listApprovedRunsWithoutExecutionAttempt(limit = DEFAULT_RECOVERY_LIMIT): Promise<string[]> {  const boundedLimit = Number.isInteger(limit) && limit > 0
     ? Math.min(limit, 1_000)
     : DEFAULT_RECOVERY_LIMIT;
   const rows = await getDb().query<{ id: string }>(
@@ -76,4 +83,20 @@ async function listApprovedRunsWithoutExecutionAttempt(limit = DEFAULT_RECOVERY_
     [boundedLimit],
   );
   return rows.rows.map((row) => row.id);
+}
+
+/**
+ * Re-tag the owning work item's link for a recovered run with
+ * relationKind='recovery' (upsert; the run spec already has a planning or
+ * execution link). No-op when no work item owns the run spec. Best-effort:
+ * callers catch errors so a missing work-item store never blocks recovery.
+ */
+async function linkRecoveredRunToWorkItem(runSpecId: string): Promise<void> {
+  const rows = await getDb().query<{ work_item_id: string }>(
+    'SELECT work_item_id FROM work_item_runs WHERE run_spec_id = $1 LIMIT 1',
+    [runSpecId],
+  );
+  const workItemId = rows.rows[0]?.work_item_id;
+  if (!workItemId) return;
+  await linkWorkItemRun({ workItemId, runSpecId, relationKind: 'recovery' });
 }

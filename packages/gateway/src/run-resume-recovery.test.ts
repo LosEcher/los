@@ -89,3 +89,52 @@ async function createApprovedRun(id: string, sessionId: string): Promise<void> {
   });
   await approveRunSpecPhase(id, { actor: 'operator:test' });
 }
+
+test('recovery re-tags the owning work item link as recovery lineage', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-recover-lineage-${suffix}`;
+  const workItemId = `todo-recover-lineage-${suffix}`;
+  const dispatched: string[] = [];
+  try {
+    const { createTodo } = await import('@los/agent/todos');
+    const { linkWorkItemRun } = await import('@los/agent/work-items');
+    const { ensureTodoStore } = await import('@los/agent/todos');
+    await ensureTodoStore();
+    await createTodo({
+      id: workItemId,
+      tenantId: 'local',
+      projectId: 'los',
+      title: 'recovery lineage work item',
+      description: 'verify crash recovery lineage',
+      kind: 'task',
+      status: 'backlog',
+      priority: 'P1',
+      source: 'test',
+      dedupeKey: `test:recovery-lineage:${suffix}`,
+    });
+    await createApprovedRun(runSpecId, `session-recover-lineage-${suffix}`);
+    await linkWorkItemRun({ workItemId, runSpecId, relationKind: 'planning' });
+
+    const recovery = await recoverApprovedRunDispatches({
+      dispatch: async (id) => {
+        dispatched.push(id);
+        return { runSpecId: id, status: 'deduplicated', planRevision: 1 };
+      },
+    });
+    assert.ok(recovery.runSpecIds.includes(runSpecId));
+    assert.ok(dispatched.includes(runSpecId));
+
+    const links = await getDb().query<{ relation_kind: string }>(
+      'SELECT relation_kind FROM work_item_runs WHERE run_spec_id = $1',
+      [runSpecId],
+    );
+    assert.equal(links.rows.length, 1, 'recovery must upsert the existing link');
+    assert.equal(links.rows[0]!.relation_kind, 'recovery');
+  } finally {
+    await getDb().query('DELETE FROM work_item_runs WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM todos WHERE id = $1', [workItemId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM execution_outbox WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+  }
+});
