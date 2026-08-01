@@ -20,6 +20,7 @@ const sharedProcessTestFiles = [
   'src/ga-branch-hygiene.test.ts',
   'src/ga-circuit-breaker.test.ts',
   'src/ga-loop-integration.test.ts',
+  'src/governance-auditors-supply-chain.test.ts',
   'src/governance-auditors-migration.test.ts',
   'src/governance-reconciliation.test.ts',
   'src/governance-runtime-cleanup.test.ts',
