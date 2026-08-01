@@ -9,6 +9,7 @@ export {
 } from './store.js';
 export {
   runScheduledWorkTick, triggerScheduledWorkItem, executeScheduledWorkRun,
+  approveScheduledWorkRun,
   setupScheduledWorkWake, _deriveScheduledFeedAnalysisDispatch,
 } from './runner.js';
 export type {
