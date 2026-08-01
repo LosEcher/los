@@ -227,6 +227,7 @@ gateway|packages/gateway/src/auth-store.ts|verifyPassword  # zero callers (orpha
 gateway|packages/gateway/src/chat-cbm-inject.ts|resetABCounter  # zero callers (orphan)
 gateway|packages/gateway/src/chat-run-completion.ts|resolveDirectRunCompletionDecision  # test-only caller (no production caller)
 gateway|packages/gateway/src/idempotency.ts|getIdempotencyKey  # zero callers (orphan)
+gateway|packages/gateway/src/routes/infrastructure/metrics-routes.ts|collectPrometheusSamples  # zero callers (orphan)
 gateway|packages/gateway/src/routes/node-probes.ts|fetchHealth  # zero callers (orphan)
 gateway|packages/gateway/src/routes/node-probes.ts|parseSocketEndpoint  # zero callers (orphan)
 gateway|packages/gateway/src/routes/node-probes.ts|PROBE_TIMEOUT_MS  # zero callers (orphan)
