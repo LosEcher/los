@@ -77,7 +77,11 @@ export async function assertPersistedRunSpecKernelSelection(input: {
     throw new Error('Execution-kernel selection scope does not match the scheduled run');
   }
   if (executionKernelIdentitiesEqual(persisted.selected, getPiK4KernelSelectionIdentity())) {
-    if (row.experiment_status !== 'approved') throw new Error('Pi K4 execution experiment is not approved');
+    // The experiment transitions to 'running' inside the execute endpoint before
+    // dispatch, so both approved and running are legal pre-dispatch states.
+    if (row.experiment_status !== 'approved' && row.experiment_status !== 'running') {
+      throw new Error('Pi K4 execution experiment is not approved');
+    }
     await assertSelectionEvent(row.session_id, input.runSpecId, persisted.experimentId, 'run.kernel_canary_authorized');
   } else if (executionKernelIdentitiesEqual(persisted.selected, getLosKernelSelectionIdentity())) {
     await assertSelectionEvent(row.session_id, input.runSpecId, persisted.experimentId, 'run.kernel_rollback_applied');
