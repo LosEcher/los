@@ -45,6 +45,8 @@
 | D4 | ci-prepare.sh / runner-health.sh 记忆纠正 | git 历史核实:2026-06-19 "CI optimization" 提交(#48)只含 ci-gate.sh 合并与缓存,从未包含这两个脚本——不是"被回滚丢失",是"从未合入" | 不重启该优化;CI 结构调整保持 blocked(turbo-cache 依赖 10/10 baseline) |
 | D5 | ADR 0030–0034 五对重复编号:记录待办,不擅自改内容 | ADR 合并/归档需要 operator 裁决(哪份为主、Status 头格式);超出本轮只读治理范围 | 生成 `docs-adr-duplicate-numbers` 待办,由 operator 决策归档方案 |
 | D6 | 运行时服务(gateway/executor)不自动重启 | 进程 DEAD 无异常日志;重启属运行时操作,留待 operator 需要时执行 | 本轮测试均走 TEST_DATABASE_URL(los-postgres 容器),不受影响 |
+| D7 | coverage 本地刷新需跳过 macOS sandbox 已知失败:新增 `LOS_TEST_SKIP_PATTERN` env(匹配测试名,非文件路径),package-test-runner.mjs coverage lane 透传 `--test-skip-pattern`;CI 不设置该变量,覆盖收集保持完整 | macOS 上 registry.test.ts 的 sandbox-exec 测试必败(known-failure 基线),baseline 脚本无过滤,本地刷新永远失败 | 使用:`LOS_TEST_SKIP_PATTERN="executes shell commands" pnpm test:coverage:baseline:update` |
+| D8 | **发现并修复真实 schema 漂移 bug**:`governance-auditors-memory.ts:137` 的 `runMemoryRetentionAudit` 用残缺 DDL(observations 缺 6 列 / memory_compactions 缺 9 列)建表。共享 schema 场景(coverage 单进程、schema 名含 RUN_ID)下若它先执行,`CREATE TABLE IF NOT EXISTS` 后续全部跳过 → session-recovery 测试 42703 失败 | 根因:DDL 复制粘贴无同步机制;CI isolated 每文件独立 schema(pid 进 schema 名)掩盖了该 bug | 修复:两处 DDL 与 @los/memory 权威 SCHEMA 对齐(列+ALTER+索引)。agent 全量 coverage 973/973 复跑通过 [E]。残余:governance 版 search_vector 为非 GENERATED 普通列,与 memory 版有渐进差异,不影响查询,待统一 |
 
 ## 4. 发现与漂移(按依赖排序的下一步)
 
@@ -87,9 +89,11 @@ optimization-analysis(P2, advisory)→ 可选 web UI(experiments/sample-gate 页
 
 | 变更 | 结果 |
 | --- | --- |
-| coverage baseline 刷新 | `pnpm test:coverage:baseline:update`(后台,结果见批次收尾) |
+| coverage baseline 刷新 | `LOS_TEST_SKIP_PATTERN="executes shell commands" pnpm test:coverage:baseline:update`(D7/D8 后重跑,结果见批次收尾) |
 | AP1 修复 | recovery-follow-up.ts 加 `tool_call_state.recovery_retry` 审计事件 + scheduler.test.ts 回归断言 |
 | 死代码删除 | ga-file-size-fix.ts 删除 + wiring-topology-baseline.txt 移除 3 条 orphan 条目 |
+| schema 漂移修复 | governance-auditors-memory.ts 两处 DDL 与 @los/memory 对齐;agent coverage 973/973 通过 [E] |
+| 工具改进 | package-test-runner.mjs coverage lane 支持可选 LOS_TEST_SKIP_PATTERN(CI 无影响) |
 | 记忆更新 | los-project-inventory 记忆刷新至 08-01 基线;ci-prepare 误解纠正(D4) |
 
 ## 6. 残余风险
@@ -103,6 +107,10 @@ optimization-analysis(P2, advisory)→ 可选 web UI(experiments/sample-gate 页
 4. **运行时服务停止**:gateway/executor 未运行;`/health` 面不可用,需要时
    `pnpm start` 恢复(D6)。
 5. **web 覆盖率 0、gateway 函数覆盖 56.67%**:保持诚实记录,不做无依据提升。
+6. **DDL 复制漂移风险**:agent 包内 governance/session-recovery 仍以复制方式
+   持有 @los/memory 的 SCHEMA(本轮已对齐,search_vector 的 GENERATED 差异
+   保留);未来 memory SCHEMA 变更需同步 4 处定义——中期方案是抽公共 DDL
+   常量或迁移单一来源。
 
 ## 7. Closeout
 
