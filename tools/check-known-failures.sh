@@ -140,7 +140,19 @@ if [ "$NEW_COUNT" -gt 0 ]; then
   exit 1
 fi
 
+# --allow-fixed: CI mode. A FIXED entry means the baseline needs local
+# maintenance; CI (where known failures may not reproduce, e.g. missing
+# sandbox-exec) must not turn that into a red job.
+ALLOW_FIXED=0
+for arg in "$@"; do
+  if [ "$arg" = "--allow-fixed" ]; then ALLOW_FIXED=1; fi
+done
+
 if [ "$FIXED_COUNT" -gt 0 ]; then
+  if [ "$ALLOW_FIXED" -eq 1 ]; then
+    printf '\n%bKNOWN-FAILURE GATE PASSED (CI mode — %d fixed baseline entr(y/ies) need local cleanup)%b\n' "$YELLOW" "$FIXED_COUNT" "$NC"
+    exit 0
+  fi
   printf '\n%bKNOWN-FAILURE GATE FAILED — %d fixed baseline entr(y/ies) must be removed%b\n' "$RED" "$FIXED_COUNT" "$NC"
   exit 1
 fi
