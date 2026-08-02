@@ -137,7 +137,7 @@ jobs:
           node tools/observe-command-resources.mjs \
             --label github-gate-test \
             --output "$RESOURCE_OBSERVATION_FILE" \
-            -- bash -o pipefail -c 'pnpm test 2>&1 | tee "$TEST_LOG_FILE"'
+            -- bash -o pipefail -c 'set -o pipefail; pnpm test 2>&1 | tee "$TEST_LOG_FILE" | bash tools/check-known-failures.sh --allow-fixed'
         timeout-minutes: 12
 
       - name: Report test resource observation
