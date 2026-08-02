@@ -40,6 +40,12 @@ export function runPackageTests(options) {
   };
 
   if (process.argv.includes('--coverage')) {
+    // Optional LOS_TEST_SKIP_PATTERN skips tests whose *name* matches the
+    // pattern in coverage mode (e.g. the macOS sandbox-exec denial recorded
+    // in tools/.known-test-failures.txt; the test name is "all mode executes
+    // shell commands through the OS sandbox"). CI never sets it, so coverage
+    // collection there stays complete.
+    const skipPattern = process.env.LOS_TEST_SKIP_PATTERN;
     runLane('coverage', [
       '--import', 'tsx',
       '--import', options.testSetupFile,
@@ -48,6 +54,7 @@ export function runPackageTests(options) {
       '--test-concurrency', '1',
       '--experimental-test-coverage',
       `--test-coverage-include=${options.coverageInclude ?? 'src/**/*.ts'}`,
+      ...(skipPattern ? [`--test-skip-pattern=${skipPattern}`] : []),
       ...discoveredTestFiles,
     ], testEnv, testRunId);
     return;

@@ -313,3 +313,24 @@ pi-k4-canary (backlog, P0) ── consent-gated side track only
 - `docs/governance/2026-07-22-lsclaw-los-pi-kernel-migration-plan.md` Active Work Ledger
 - `docs/operations/2026-07-25-ci-cd-observability-priority-and-todo-plan.md` stale Execution Lab / wave rows
 - `docs/governance/agent-workflow-roadmap.md` Stage F short-term K4 status
+
+### 2026-07-31 operator decisions addendum
+
+Operator decisions recorded (ask tool, 2026-07-31):
+
+1. **K4 canary authorized (read-only)** — operator granted consent for the Pi
+   K4 readonly canary (`todo-los-pi-k4-readonly-canary`). The todo row is not
+   present in the current runtime DB ledger (213 rows; no `pi-k4` id), so the
+   consent is recorded here as the owning governance surface. Execution
+   requires: a source run spec with persisted plan, an execution experiment
+   created with the exact K4 kernel candidate (configDiff executionKernel
+   pi@0.81.1+los.3, disposition planning/inspection, toolMode read-only),
+   candidate selection, `approveRunSpecPhase()`, and the
+   `POST /execution-experiments/{id}/authorize-canary` + `/execute` path.
+   Default LOS kernel stays production baseline; canary results remain
+   advisory until a formal pairwise sample-gate pass and rollback gates.
+
+2. **Flow DSL deferred** — ADR 0030 (declarative-flow-dsl) remains design
+   intent only; no implementation is scheduled. The decision is recorded here
+   so the dangling ADR does not block Execution Lab or daily-agent work.
+   Revisit only if a concrete workflow requirement emerges.

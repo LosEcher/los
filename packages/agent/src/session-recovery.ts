@@ -33,6 +33,23 @@ const log = getLogger('session-recovery');
 
 // ── Types (aligned with contracts/session-recovery.yaml) ────────
 
+/**
+ * Current checkpoint format version, aligned with
+ * contracts/session-recovery.yaml. Readers treat checkpoints without a
+ * version as version 1. The compaction write side imports this constant from
+ * @los/agent/session-recovery (memory → agent is the existing dependency
+ * direction).
+ */
+export const CHECKPOINT_VERSION = 1;
+
+/**
+ * True when the checkpoint format version is readable by this runtime.
+ * Legacy checkpoints without a version are treated as version 1.
+ */
+export function isCheckpointVersionSupported(version: number | undefined): boolean {
+  return (version ?? 1) <= CHECKPOINT_VERSION;
+}
+
 export interface CheckpointSnapshot {
   checkpointId: string;
   sessionId: string;
@@ -40,6 +57,8 @@ export interface CheckpointSnapshot {
   takenAt: string;
   trigger: string;
   mode: 'checkpoint' | 'full';
+  /** Checkpoint format version; absent on legacy checkpoints means version 1. */
+  version?: number;
   toolState: {
     pendingCalls: Array<{
       callId: string;
@@ -169,6 +188,20 @@ export async function reconstructSessionContext(
     );
   }
 
+  // ── Step 1b: Checkpoint version compatibility ──
+  // A checkpoint written by a newer runtime than this one may carry fields we
+  // cannot interpret. Do not fail hard — degrade recovery so the operator can
+  // still hand off with the state we can read.
+  let versionIncompatible = false;
+  if (!isCheckpointVersionSupported(checkpoint.version)) {
+    versionIncompatible = true;
+    errorEvents.push({
+      type: 'checkpoint_version_incompatible',
+      message: `Checkpoint ${checkpoint.checkpointId} uses format version ${checkpoint.version ?? 1}; this runtime supports up to version ${CHECKPOINT_VERSION}. Recovery is degraded.`,
+      at: new Date().toISOString(),
+    });
+  }
+
   // ── Step 2: Load session events from checkpoint cursor ──
   const events = await loadEventsSinceCheckpoint(sessionId, checkpoint, errorEvents);
 
@@ -185,11 +218,13 @@ export async function reconstructSessionContext(
 
   // ── Step 5: Calculate recovery stats ──
   const lostToolResults = countLostToolResults(messages, checkpoint);
-  const recoveryMode = classifyRecoveryMode(
-    lostToolResults,
-    errorEvents.length,
-    checkpoint,
-  );
+  const recoveryMode = versionIncompatible
+    ? 'degraded'
+    : classifyRecoveryMode(
+        lostToolResults,
+        errorEvents.length,
+        checkpoint,
+      );
 
   return {
     sessionId,

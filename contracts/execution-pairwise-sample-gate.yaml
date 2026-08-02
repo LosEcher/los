@@ -1,0 +1,72 @@
+contract: los.execution-pairwise-sample-gate
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Operator-preregistered sample gate for real pairwise evaluation evidence.
+  The threshold and scenarios are fixed at registration time so that sample
+  counts cannot be invented after collection; every collected pair references
+  immutable baseline, candidate, and rubric revisions. Advisory optimization
+  analysis stays blocked until the gate passes.
+type: object
+required:
+  - id
+  - minimumPairs
+  - scenarios
+  - baselineRef
+  - candidateRef
+  - rubricRef
+properties:
+  id: { type: string, minLength: 1 }
+  tenantId: { type: string }
+  projectId: { type: string }
+  minimumPairs:
+    type: integer
+    minimum: 1
+  scenarios:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, label, requiredPairs]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 1 }
+        label: { type: string, minLength: 1 }
+        description: { type: string }
+        requiredPairs: { type: integer, minimum: 1 }
+  baselineRef:
+    type: object
+    required: [experimentId, runSpecId]
+    additionalProperties: false
+    properties:
+      experimentId: { type: string, minLength: 1 }
+      runSpecId: { type: string, minLength: 1 }
+  candidateRef:
+    type: object
+    required: [experimentId, runSpecId]
+    additionalProperties: false
+    properties:
+      experimentId: { type: string, minLength: 1 }
+      runSpecId: { type: string, minLength: 1 }
+  rubricRef:
+    type: object
+    required: [id, revision]
+    additionalProperties: false
+    properties:
+      id: { type: string, minLength: 1 }
+      revision: { type: string, minLength: 1 }
+  status:
+    type: string
+    enum: [registered, passed, superseded, cancelled]
+  registeredBy: { type: string, minLength: 1 }
+  preregisteredAt: { type: string, format: date-time }
+  passedAt: { type: string, format: date-time }
+additionalProperties: false
+verification:
+  - thresholds and scenarios are immutable after registration; changing them requires cancelling and registering a new gate
+  - baseline, candidate, and rubric references are immutable provenance refs
+  - gate evaluation counts only real pairwise evidence (at least one non-empty evidence channel per pair)
+  - configured and effective provider routes stay distinct in the evaluation output
+  - optimization analysis remains blocked until the sample gate passes
+  - ./tools/check-contracts.sh

@@ -188,3 +188,69 @@ test('scheduled_execution with requiredChecks passes validation', async () => {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
 });
+
+test('each_run approval moves awaiting_approval run to execution', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-approve-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'each_run', catchUpPolicy: 'run_once', maxAttempts: 2,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      approveScheduledWorkRun,
+      createManualScheduledWorkRun,
+      executeScheduledWorkRun,
+      loadScheduledWorkItemRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    const outcome = await executeScheduledWorkRun(run);
+    assert.equal(outcome, 'awaiting_approval');
+    const pending = await loadScheduledWorkItemRun(run.id);
+    assert.ok(pending, 'run must exist after awaiting_approval transition');
+    assert.equal(pending.status, 'awaiting_approval');
+
+    const approved = await approveScheduledWorkRun(run.id, { ownerId: 'operator' });
+    assert.ok(['succeeded', 'no_op'].includes(approved.status),
+      `expected execution outcome, got ${approved.status}`);
+    assert.equal(approved.claimOwner, 'operator');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('approve rejects runs that are not awaiting_approval', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-approve-bad-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'read_only_auto', catchUpPolicy: 'run_once', maxAttempts: 2,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      approveScheduledWorkRun,
+      createManualScheduledWorkRun,
+      executeScheduledWorkRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    await executeScheduledWorkRun(run); // read_only_auto executes directly
+    await assert.rejects(
+      approveScheduledWorkRun(run.id, { ownerId: 'operator' }),
+      /must be awaiting_approval/,
+    );
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});

@@ -105,6 +105,25 @@ async function markToolStatesRetrying(toolStates: readonly ToolCallStateRecord[]
     outputSummary: `queued recovery follow-up attempt ${state.attempt + 1}/${state.maxAttempts}`,
     error: null,
     attempt: Math.min(state.attempt + 1, state.maxAttempts),
+  }).then(async () => {
+    // AP1 audit: this transition bypasses transitionExecutionState (the state
+    // machine rejects the non-terminal retrying hop), so record it in the
+    // event ledger to keep the bypass observable. Mirrors the
+    // tool_call_state.fallback_update pattern.
+    if (state.sessionId) {
+      await appendSessionEvent({
+        sessionId: state.sessionId,
+        type: 'tool_call_state.recovery_retry',
+        source: 'los.scheduler',
+        payload: {
+          callId: state.id,
+          state: 'retrying',
+          attempt: Math.min(state.attempt + 1, state.maxAttempts),
+          runSpecId: state.runSpecId ?? null,
+          taskRunId: state.taskRunId ?? null,
+        },
+      });
+    }
   })));
 }
 

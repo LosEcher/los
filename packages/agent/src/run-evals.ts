@@ -39,6 +39,12 @@ export type {
 } from './run-evals/types.js';
 
 export { listPairwiseRunEvals, recordPairwiseRunEval } from './run-evals/pairwise.js';
+export {
+  cancelPairwiseSampleGate, evaluatePairwiseSampleGate,
+  listPairwiseSampleGates, loadPairwiseSampleGate, registerPairwiseSampleGate,
+  type SampleGateEvaluation, type SampleGateRegistration, type SampleGateScope,
+  type SampleGateStatus,
+} from './run-evals/sample-gate.js';
 
 import {
   addOptionalClause,

@@ -33,6 +33,7 @@ test('recovery checkpoint fields round-trip into a compaction summary', () => {
   const summary = recoveryCheckpointSummary(checkpoint);
 
   assert.deepEqual(summary, {
+    version: 1,
     toolState: checkpoint.toolState,
     fileReferences: checkpoint.fileReferences,
     messageCursor: checkpoint.messageCursor,

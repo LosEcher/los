@@ -107,6 +107,7 @@ function checkpointFromCompaction(row: CompactionCheckpointRow): CheckpointSnaps
     takenAt: toIsoString(row.created_at),
     trigger: row.auto_trigger ?? 'manual',
     mode: row.id.startsWith('chkpt-') ? 'checkpoint' : 'full',
+    version: readCheckpointVersion(summary),
     toolState: isRecord(toolState)
       ? toolState as unknown as CheckpointSnapshot['toolState']
       : { pendingCalls: [], lastResult: [] },
@@ -129,6 +130,7 @@ function checkpointFromStreamRecord(record: StreamCheckpointRecord): CheckpointS
     takenAt: record.createdAt,
     trigger: String(record.payload.trigger ?? 'event_count'),
     mode: record.payload.mode === 'full' ? 'full' : 'checkpoint',
+    version: readCheckpointVersion(record.payload),
     toolState: {
       pendingCalls: extractPendingCalls(record.payload),
       lastResult: extractLastResults(record.payload),
@@ -204,4 +206,11 @@ function toIsoString(value: Date | string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Read the checkpoint format version; missing on legacy records means v1. */
+function readCheckpointVersion(payload: Record<string, unknown>): number | undefined {
+  const raw = payload.version;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1) return undefined;
+  return raw;
 }

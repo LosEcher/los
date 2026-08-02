@@ -1,30 +1,30 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-22",
+  "capturedAt": "2026-08-02",
   "nodeVersion": "v24.14.0",
   "command": "pnpm test:coverage:baseline:update",
-  "methodology": "Each package test runs with package-local Node coverage. Static inventory and V8-observed implementation files are recorded separately; unobserved files are not represented as covered.",
+  "methodology": "Each package runs test:coverage when defined, otherwise test. Static inventory and V8-observed implementation files are recorded separately; unobserved files are not represented as covered.",
   "regressionTolerancePercent": 0.5,
   "totals": {
     "packages": 11,
-    "implementationFiles": 565,
-    "sourceTestFiles": 213,
-    "sourceTestLines": 33461,
-    "observedImplementationFiles": 416
+    "implementationFiles": 629,
+    "sourceTestFiles": 252,
+    "sourceTestLines": 40705,
+    "observedImplementationFiles": 472
   },
   "packages": [
     {
       "name": "@los/agent",
       "path": "packages/agent",
-      "implementationFiles": 309,
-      "sourceTestFiles": 108,
-      "sourceTestLines": 20355,
-      "observedImplementationFiles": 266,
-      "observedFilePercent": 86.08,
+      "implementationFiles": 353,
+      "sourceTestFiles": 135,
+      "sourceTestLines": 25169,
+      "observedImplementationFiles": 309,
+      "observedFilePercent": 87.54,
       "coverage": {
-        "lines": 85.8,
-        "branches": 74.23,
-        "functions": 80.03
+        "lines": 86.82,
+        "branches": 75.95,
+        "functions": 81.02
       }
     },
     {
@@ -44,11 +44,11 @@
     {
       "name": "@los/contracts",
       "path": "packages/contracts",
-      "implementationFiles": 6,
+      "implementationFiles": 7,
       "sourceTestFiles": 1,
-      "sourceTestLines": 57,
+      "sourceTestLines": 100,
       "observedImplementationFiles": 2,
-      "observedFilePercent": 33.33,
+      "observedFilePercent": 28.57,
       "coverage": {
         "lines": 100,
         "branches": 85.71,
@@ -58,43 +58,43 @@
     {
       "name": "@los/executor",
       "path": "packages/executor",
-      "implementationFiles": 18,
-      "sourceTestFiles": 8,
-      "sourceTestLines": 717,
-      "observedImplementationFiles": 10,
-      "observedFilePercent": 55.56,
+      "implementationFiles": 19,
+      "sourceTestFiles": 10,
+      "sourceTestLines": 799,
+      "observedImplementationFiles": 11,
+      "observedFilePercent": 57.89,
       "coverage": {
-        "lines": 78.51,
-        "branches": 77.78,
-        "functions": 70.64
+        "lines": 79.13,
+        "branches": 79.4,
+        "functions": 71.68
       }
     },
     {
       "name": "@los/gateway",
       "path": "packages/gateway",
-      "implementationFiles": 81,
-      "sourceTestFiles": 57,
-      "sourceTestLines": 7376,
-      "observedImplementationFiles": 78,
-      "observedFilePercent": 96.3,
+      "implementationFiles": 88,
+      "sourceTestFiles": 63,
+      "sourceTestLines": 9151,
+      "observedImplementationFiles": 84,
+      "observedFilePercent": 95.45,
       "coverage": {
-        "lines": 67.95,
-        "branches": 62.64,
-        "functions": 56.67
+        "lines": 72.15,
+        "branches": 63.8,
+        "functions": 62.55
       }
     },
     {
       "name": "@los/infra",
       "path": "packages/infra",
-      "implementationFiles": 16,
-      "sourceTestFiles": 7,
-      "sourceTestLines": 917,
-      "observedImplementationFiles": 14,
-      "observedFilePercent": 87.5,
+      "implementationFiles": 17,
+      "sourceTestFiles": 8,
+      "sourceTestLines": 960,
+      "observedImplementationFiles": 15,
+      "observedFilePercent": 88.24,
       "coverage": {
-        "lines": 90.85,
-        "branches": 67.72,
-        "functions": 80.52
+        "lines": 90.4,
+        "branches": 68.7,
+        "functions": 78.98
       }
     },
     {
@@ -114,15 +114,15 @@
     {
       "name": "@los/memory",
       "path": "packages/memory",
-      "implementationFiles": 20,
-      "sourceTestFiles": 7,
-      "sourceTestLines": 1505,
-      "observedImplementationFiles": 13,
-      "observedFilePercent": 65,
+      "implementationFiles": 25,
+      "sourceTestFiles": 10,
+      "sourceTestLines": 1947,
+      "observedImplementationFiles": 18,
+      "observedFilePercent": 72,
       "coverage": {
-        "lines": 81.53,
-        "branches": 68.21,
-        "functions": 75
+        "lines": 84.09,
+        "branches": 73.46,
+        "functions": 79.22
       }
     },
     {
@@ -142,9 +142,9 @@
     {
       "name": "@los/web",
       "path": "packages/web",
-      "implementationFiles": 66,
+      "implementationFiles": 71,
       "sourceTestFiles": 1,
-      "sourceTestLines": 304,
+      "sourceTestLines": 349,
       "observedImplementationFiles": 0,
       "observedFilePercent": 0,
       "coverage": null

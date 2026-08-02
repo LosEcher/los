@@ -4,7 +4,7 @@ import { CheckCircle2, Diff, FileArchive, RotateCcw, ShieldCheck } from 'lucide-
 import type { WorkItemProjection } from '../api/index.js';
 import { formatDate } from '../ui.js';
 
-function WorkspaceDiff({ workspaceId }: { workspaceId: string }) {
+function WorkspaceDiff({ workspaceId, onFilesLoaded }: { workspaceId: string; onFilesLoaded?: (paths: string[]) => void }) {
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +19,7 @@ function WorkspaceDiff({ workspaceId }: { workspaceId: string }) {
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json() as { diff: string };
       setDiff(data.diff || '');
+      onFilesLoaded?.(parseDiffFiles(data.diff || '').map(file => file.path));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -119,10 +120,17 @@ export function WorkReviewPanel({
   item: WorkItemProjection;
   pending: boolean;
   error?: unknown;
-  onDecision: (decision: 'accepted' | 'revision_requested', reason: string) => void;
+  onDecision: (decision: 'accepted' | 'revision_requested', reason: string, dirtyPaths: string[]) => void;
 }) {
   const [reason, setReason] = useState('');
+  const [dirtyPaths, setDirtyPaths] = useState<string[]>([]);
   const canDecide = Boolean(item.availableActions.reviewResult);
+  const collectDiffFiles = (paths: string[]) => {
+    setDirtyPaths(current => Array.from(new Set([...current, ...paths])));
+  };
+  const decide = (decision: 'accepted' | 'revision_requested') => {
+    onDecision(decision, reason, decision === 'accepted' ? dirtyPaths : []);
+  };
   return (
     <section className="work-review-panel">
       <header><div><span className="eyebrow">Result review</span><h3>Verification and changes</h3></div><ShieldCheck size={18} /></header>
@@ -137,12 +145,7 @@ export function WorkReviewPanel({
       </div>
       <div className="workspace-evidence">
         {item.changes.workspaces.length === 0 ? <p className="review-empty">No managed workspace evidence.</p> : item.changes.workspaces.map(workspace => (
-          <article className="workspace-record" key={workspace.workspaceId}>
-            <FileArchive size={16} />
-            <div><strong>{workspace.workspaceId}</strong><small>{workspace.status} · base {workspace.baseRevision}</small></div>
-            <code>{workspace.backupArtifactId ?? 'backup required'}</code>
-            <WorkspaceDiff workspaceId={workspace.workspaceId} />
-          </article>
+          <WorkspaceEvidence key={workspace.workspaceId} workspace={workspace} onDiffFiles={collectDiffFiles} />
         ))}
       </div>
       {item.changes.resultReview ? (
@@ -152,12 +155,51 @@ export function WorkReviewPanel({
         <div className="result-review-actions">
           <label><span>Decision reason</span><input value={reason} onChange={event => setReason(event.target.value)} placeholder="Evidence-based review decision" /></label>
           <div>
-            <button className="ghost-btn" type="button" disabled={pending || !reason.trim()} onClick={() => onDecision('revision_requested', reason)}><RotateCcw size={14} /> Request revision</button>
-            <button className="btn" type="button" disabled={pending || !reason.trim()} onClick={() => onDecision('accepted', reason)}><CheckCircle2 size={14} /> Accept result</button>
+            <button className="ghost-btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('revision_requested')}><RotateCcw size={14} /> Request revision</button>
+            <button className="btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('accepted')}><CheckCircle2 size={14} /> Accept result</button>
           </div>
         </div>
       ) : null}
       {error ? <div className="daily-error">Review failed: {String(error)}</div> : null}
     </section>
+  );
+}
+
+function WorkspaceEvidence({
+  workspace,
+  onDiffFiles,
+}: {
+  workspace: WorkItemProjection['changes']['workspaces'][number];
+  onDiffFiles: (paths: string[]) => void;
+}) {
+  const [backupState, setBackupState] = useState<'idle' | 'pending' | 'created' | 'error'>('idle');
+  const [backupError, setBackupError] = useState<string | null>(null);
+
+  async function createBackup() {
+    setBackupState('pending');
+    setBackupError(null);
+    try {
+      const res = await fetch(`/managed-workspaces/${encodeURIComponent(workspace.workspaceId)}/backup`, { method: 'POST' });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setBackupState('created');
+    } catch (err) {
+      setBackupState('error');
+      setBackupError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <article className="workspace-record" key={workspace.workspaceId}>
+      <FileArchive size={16} />
+      <div><strong>{workspace.workspaceId}</strong><small>{workspace.status} · base {workspace.baseRevision}</small></div>
+      <code>{workspace.backupArtifactId ?? 'backup required'}</code>
+      {workspace.backupArtifactId ? null : (
+        <button className="ghost-btn" type="button" disabled={backupState === 'pending'} onClick={() => void createBackup()}>
+          <FileArchive size={14} /> {backupState === 'pending' ? 'Creating backup…' : backupState === 'created' ? 'Backup created' : 'Create backup'}
+        </button>
+      )}
+      {backupState === 'error' && backupError ? <p className="diff-error">Backup failed: {backupError}</p> : null}
+      <WorkspaceDiff workspaceId={workspace.workspaceId} onFilesLoaded={onDiffFiles} />
+    </article>
   );
 }

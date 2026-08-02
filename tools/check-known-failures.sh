@@ -24,7 +24,14 @@ RAW=$(cat || true)
 # ── Parse stdin for actual failures ──────────────────────
 # Node --test emits:   ✖ src/path/to/file.test.ts
 # or:                  ✖ src/path/to/file.test.ts (duration)
-ACTUAL_FAILURES=$(printf '%s\n' "$RAW" | grep -E '✖[[:space:]]+.*\.test\.ts' | sed 's/^.*✖[[:space:]]*//' | sed 's/ [(].*//' | sort -u || true)
+# Newer node --test separates location from the failure name:
+#   test at src/path/to/file.test.ts:1:123
+#   ✖ <test name>
+ACTUAL_FAILURES=$( ( \
+  printf '%s\n' "$RAW" | grep -E '✖[[:space:]]+.*\.test\.ts' \
+    | sed 's/^.*✖[[:space:]]*//' | sed 's/ [(].*//' ; \
+  printf '%s\n' "$RAW" | awk '/test at .*\.test\.ts/ { line=$0; sub(/^.*test at /, "", line); sub(/:[0-9:]+$/, "", line); file=line } /✖/ && file != "" { print file; file="" }' \
+) | sort -u || true )
 
 # ── Parse baseline ───────────────────────────────────────
 KNOWN_FILES=$( (grep '\.test\.ts' "$BASELINE" 2>/dev/null || true) | grep -v '^#' | awk '{print $1}' | sort -u)

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   createScheduledWorkItem,
   executeScheduledWorkRun,
+  approveScheduledWorkRun,
   listScheduledWorkItemRuns,
   listScheduledWorkItems,
   loadScheduledWorkItem,
@@ -27,6 +28,7 @@ export type ScheduledWorkRouteDeps = {
   preview: typeof previewScheduledOccurrences;
   trigger: typeof triggerScheduledWorkItem;
   retry: typeof retryScheduledWorkRun;
+  approve: typeof approveScheduledWorkRun;
   execute: typeof executeScheduledWorkRun;
 };
 
@@ -34,7 +36,7 @@ const defaultDeps: ScheduledWorkRouteDeps = {
   create: createScheduledWorkItem, list: listScheduledWorkItems, load: loadScheduledWorkItem,
   update: updateScheduledWorkItem, listRuns: listScheduledWorkItemRuns,
   preview: previewScheduledOccurrences, trigger: triggerScheduledWorkItem,
-  retry: retryScheduledWorkRun, execute: executeScheduledWorkRun,
+  retry: retryScheduledWorkRun, approve: approveScheduledWorkRun, execute: executeScheduledWorkRun,
 };
 
 export function registerScheduledWorkRoutes(
@@ -132,6 +134,18 @@ export function registerScheduledWorkRoutes(
       const run = await deps.retry({ runId: id, ownerId: `manual:${context.userId ?? 'operator'}` });
       await deps.execute(run);
       return { runId: run.id, accepted: true };
+    } catch (error) {
+      return reply.status(409).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.post('/scheduled-work-item-runs/:id/approve', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const context = getRequestContext(req);
+    try {
+      const run = await deps.approve(id, { ownerId: `manual:${context.userId ?? 'operator'}` });
+      return { runId: run.id, status: run.status };
     } catch (error) {
       return reply.status(409).send({ error: errorMessage(error) });
     }

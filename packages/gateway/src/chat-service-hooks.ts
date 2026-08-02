@@ -1,4 +1,6 @@
 import type { Config } from '@los/infra/config';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { ensureSessionStore, saveSession } from '@los/agent/session';
 import { emitRunningToolCallUpsert, emitToolCallUpsertFromSessionEvent, relaySessionEvent } from './chat-live-events.js';
 import { persistStreamCheckpoint } from './chat-stream-persist.js';
@@ -242,7 +244,7 @@ export function _updateToolStateCache(sessionId: string, event: any): void {
     if (filePath) {
       ts.fileReferences.push({
         path: filePath,
-        contentHash: '',
+        contentHash: computeFileContentHash(filePath),
         lastOperation: (payload?.op as string) === 'write' ? 'write' : 'read',
       });
     }
@@ -325,4 +327,19 @@ function getOrCreateToolState(sessionId: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Compute the same sha256 hex fingerprint used by detectStaleFiles
+ * (session-recovery-context.ts) so recovery can compare checkpoint hashes
+ * against current file content. Unreadable files keep an empty hash, which
+ * detectStaleFiles already treats as stale.
+ */
+function computeFileContentHash(path: string): string {
+  try {
+    const content = readFileSync(path, 'utf-8');
+    return createHash('sha256').update(content).digest('hex');
+  } catch {
+    return '';
+  }
 }

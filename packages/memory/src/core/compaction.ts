@@ -304,11 +304,24 @@ export async function compactSession(input: CompactSessionInput): Promise<Memory
       const { aggregateCrossSessionDecay } = await import('./decay.js');
       const decayPatterns = await aggregateCrossSessionDecay(sessionId);
       if (decayPatterns.length > 0) {
+        const highDecayKinds = decayPatterns.filter(p => p.decayRate > 0.5);
         observedPatterns.push({
           kind: 'cross_session_decay',
           patterns: decayPatterns,
-          highDecayKinds: decayPatterns.filter(p => p.decayRate > 0.5).map(p => p.kind),
+          highDecayKinds: highDecayKinds.map(p => p.kind),
         });
+        for (const pattern of highDecayKinds) {
+          const slug = pattern.kind.replace(/[^a-z0-9-]/gi, '-').slice(0, 32);
+          proceduralCandidates.push({
+            name: `cross-session-decay-${slug}`,
+            content: `Observation kind "${pattern.kind}" shows high decay across ${pattern.sessionCount} session(s).`,
+            severity: 'info',
+            rationale: `Global decay rate ${pattern.decayRate.toFixed(2)} across ${pattern.sessionCount} session(s); consider whether this observation kind still carries value.`,
+            confidence: Math.min(0.5 + pattern.decayRate * 0.4, 0.9),
+            status: 'draft',
+            supportingSessionIds: [sessionId],
+          });
+        }
       }
     } catch (err) { /* best-effort */ }
 

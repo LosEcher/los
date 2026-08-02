@@ -36,6 +36,13 @@ test('scheduled work routes preview, enforce operator writes, and expose history
       };
     },
     retry: async () => { throw new Error('not used'); },
+    approve: async () => {
+      return {
+        id: 'schedule-run-2', scheduleId: schedule.id, scheduledFor: '2026-07-20T01:00:00.000Z',
+        triggerKind: 'manual', status: 'succeeded', attemptCount: 1, maxAttempts: 2,
+        createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
+      };
+    },
     execute: async () => 'succeeded',
   };
   registerScheduledWorkRoutes(app, deps);
