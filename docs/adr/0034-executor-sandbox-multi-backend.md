@@ -2,6 +2,10 @@
 
 ## Status
 
+> Numbering conflict: `docs/adr/0034-user-scheduled-work-state-and-claim-policy.md` shares this number and is the
+> canonical entry referenced by docs/README.md. Revisit numbering on the
+> next archive pass.
+
 Proposed.
 
 ## Context
