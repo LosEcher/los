@@ -129,3 +129,91 @@ test('run-spec kernel authorization and rollback persist atomically without crea
     await closeDb().catch(() => undefined);
   }
 });
+
+test('K4 kernel assertion accepts a running experiment (execute endpoint order)', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-k4-running-${suffix}`;
+  const sessionId = `session-k4-running-${suffix}`;
+  const experimentId = `experiment-k4-running-${suffix}`;
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      tenantId: 'tenant-test',
+      projectId: 'project-test',
+      prompt: 'inspect without writes',
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      allowedTools: ['read_file'],
+      runContract: {
+        mode: 'audit',
+        executionMode: 'standard',
+        editableSurfaces: [],
+        phase: 'plan_approved',
+        plan: [{
+          id: 'inspect',
+          title: 'Inspect candidate',
+          description: 'Inspect the bounded workspace without writes.',
+          dependsOnIds: [],
+          editableSurfaces: [],
+          completionCriteria: 'Canonical evidence is persisted.',
+        }],
+        planRevision: 1,
+        executionKernel: createK4ExecutionKernelSelection({
+          experimentId,
+          disposition: 'inspection',
+          actor: 'operator:select',
+        }),
+      },
+    });
+    await createExecutionExperiment({
+      id: experimentId,
+      tenantId: 'tenant-test',
+      projectId: 'project-test',
+      source: { sessionId, runSpecId, eventCursor: 0, evidenceHash: 'sha256:k4-running' },
+      configDiff: [],
+      createdBy: 'operator:create',
+    });
+    await setExecutionExperimentCandidate(experimentId, runSpecId, { tenantId: 'tenant-test', projectId: 'project-test' });
+    await approveExecutionExperiment(experimentId, 'operator:approve', { tenantId: 'tenant-test', projectId: 'project-test' });
+    await authorizeRunSpecKernelCanary({
+      runSpecId,
+      experimentId,
+      actor: 'operator:authorize',
+    });
+    // Simulate the execute endpoint moving the experiment to running before dispatch.
+    await getDb().query(
+      "UPDATE execution_experiments SET status='running' WHERE id=$1",
+      [experimentId],
+    );
+    const selection = (await loadRunSpec(runSpecId))?.runContract?.executionKernel;
+    assert.ok(selection);
+    await assertPersistedRunSpecKernelSelection({
+      runSpecId,
+      selection,
+      tenantId: 'tenant-test',
+      projectId: 'project-test',
+    });
+    // Sanity: a non-approved, non-running experiment still blocks.
+    await getDb().query(
+      "UPDATE execution_experiments SET status='blocked' WHERE id=$1",
+      [experimentId],
+    );
+    await assert.rejects(
+      assertPersistedRunSpecKernelSelection({
+        runSpecId,
+        selection,
+        tenantId: 'tenant-test',
+        projectId: 'project-test',
+      }),
+      /Pi K4 execution experiment is not approved/,
+    );
+  } finally {
+    await getDb().query('DELETE FROM execution_experiments WHERE id=$1', [experimentId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id=$1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id=$1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
