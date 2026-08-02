@@ -126,17 +126,44 @@ export async function runMemoryRetentionAudit(): Promise<Record<string, unknown>
   let archivedCount = 0, deletedCount = 0;
   const errors: string[] = [];
 
+  // Mirrors the @los/memory SCHEMA (store.ts / compaction.ts) so this audit
+  // never becomes the first creator of a partial table in a shared test
+  // schema. Keep column lists in sync with the memory package.
   await db.exec(`
     CREATE TABLE IF NOT EXISTS observations (
       id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
       kind TEXT NOT NULL DEFAULT 'note', tags_json JSONB NOT NULL DEFAULT '[]'::jsonb,
       content TEXT NOT NULL DEFAULT '', metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       source TEXT NOT NULL DEFAULT 'user', session_id TEXT,
+      tenant_id TEXT, project_id TEXT, user_id TEXT, node_id TEXT,
+      request_id TEXT, trace_id TEXT,
+      search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(content, '') || ' ' || coalesce(tags_json::text, ''))
+      ) STORED,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE observations ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+    ALTER TABLE observations ADD COLUMN IF NOT EXISTS project_id TEXT;
+    ALTER TABLE observations ADD COLUMN IF NOT EXISTS user_id TEXT;
+    ALTER TABLE observations ADD COLUMN IF NOT EXISTS node_id TEXT;
+    ALTER TABLE observations ADD COLUMN IF NOT EXISTS request_id TEXT;
+    ALTER TABLE observations ADD COLUMN IF NOT EXISTS trace_id TEXT;
     CREATE TABLE IF NOT EXISTS memory_compactions (
-      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_spec_id TEXT,
+      tenant_id TEXT, project_id TEXT, summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      observed_patterns_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      procedural_candidates_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      confidence NUMERIC NOT NULL DEFAULT 0, evidence_count INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+    ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS project_id TEXT;
+    ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS auto_trigger TEXT;
+    ALTER TABLE memory_compactions ADD COLUMN IF NOT EXISTS transcript_brief_json JSONB;
+    CREATE INDEX IF NOT EXISTS idx_memcomp_session ON memory_compactions(session_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memcomp_run_spec ON memory_compactions(run_spec_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memcomp_tenant_project ON memory_compactions(tenant_id, project_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memcomp_checkpoint ON memory_compactions(session_id, auto_trigger, created_at DESC);
   `);
 
   const PERMANENT_CLAUSE = `AND coalesce(metadata_json->>'retention', '') != 'permanent'`;
