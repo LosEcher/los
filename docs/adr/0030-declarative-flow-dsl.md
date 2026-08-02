@@ -2,6 +2,10 @@
 
 ## Status
 
+> Numbering conflict: `docs/adr/0030-provider-account-credential-and-quota-boundary.md` shares this number and is the
+> canonical entry referenced by docs/README.md. Revisit numbering on the
+> next archive pass.
+
 Proposed.
 
 ## Context
