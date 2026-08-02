@@ -20,3 +20,4 @@ packages/*/.los/streams/
 
 # TypeScript incremental build info
 *.tsbuildinfo
+.pnpm-store/
