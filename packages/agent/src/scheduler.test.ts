@@ -1123,6 +1123,14 @@ test('scheduler queues retry follow-up attempts for recoverable tool failures', 
     assert.equal(followUp?.payload.taskId, `${graphId}-exec`);
     assert.equal(followUp?.payload.recommendation, 'retry');
     assert.deepEqual(followUp?.payload.retryToolCallIds, [callId]);
+
+    // AP1: the retrying hop bypasses transitionExecutionState, so the bypass
+    // must be visible in the event ledger as an audit event.
+    const retryAudit = events.filter(event => event.type === 'tool_call_state.recovery_retry');
+    assert.equal(retryAudit.length, 1);
+    assert.equal(retryAudit[0]?.payload.callId, callId);
+    assert.equal(retryAudit[0]?.payload.state, 'retrying');
+    assert.equal(retryAudit[0]?.payload.attempt, 2);
   } finally {
     await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
