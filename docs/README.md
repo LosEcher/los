@@ -73,6 +73,14 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   with a provider-neutral execution-kernel protocol, Pi adoption gates, and
   later replacement criteria.
 
+> **Numbering conflicts**: five ADR numbers are shared by a second,
+> non-canonical document (each marked in its `Status` block). The entries
+> listed above are the canonical holders; the co-numbered files are
+> `0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
+> `0032-acp-endpoint`, `0033-provider-tool-hot-reload`, and
+> `0034-executor-sandbox-multi-backend`. Revisit numbering on the next
+> archive pass.
+
 ### Operation Smokes
 
 Use `docs/operations/` for dated runtime evidence. A smoke should record:

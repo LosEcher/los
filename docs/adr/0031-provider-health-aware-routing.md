@@ -2,6 +2,10 @@
 
 ## Status
 
+> Numbering conflict: `docs/adr/0031-programmatic-agent-interface-over-mcp.md` shares this number and is the
+> canonical entry referenced by docs/README.md. Revisit numbering on the
+> next archive pass.
+
 Accepted.
 
 ## Context
