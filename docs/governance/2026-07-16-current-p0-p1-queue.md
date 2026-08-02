@@ -366,3 +366,23 @@ Governance debt recorded in this pass (not todo-dispatched):
 2. ADR 0030–0034 duplicate-number pairs await operator archive decision.
 3. known-failures baseline enforcement stays local-gate-only (operator
    decision pending).
+
+### 2026-08-03 K4 canary addendum (executed, advisory)
+
+`todo-los-pi-k4-readonly-canary` — **executed (advisory)**, 2026-08-03.
+Full evidence: `docs/operations/2026-08-03-k4-canary.md`.
+
+| Item | Value |
+| --- | --- |
+| Experiment | `experiment-k4-canary-20260803d` (configDiff `executionKernel=pi@0.81.1+los.3`, disposition planning, read-only) |
+| Source run | `run-k4-source-1785704633832` (audit/heavyweight, plan persisted + plan_approved, AP2) |
+| Candidate | `run-experiment-k4-canary-20260803d-candidate` (plan_approved, canary granted) |
+| Pi kernel evidence | `kernel.started`/`kernel.finished` session events; 1 loop, 287 completion tokens [E] |
+| Outcome | experiment blocked (`candidate_plan_awaiting_approval`); results remain advisory until formal pairwise sample-gate pass and rollback gates |
+| Defects fixed (PR #154) | approve no longer auto-dispatches K4 candidates; kernel assertion accepts running experiments |
+| Todo row | Not present in runtime DB ledger (per 2026-07-31 note); status recorded here as the owning governance surface |
+
+The todo is considered closed for dispatch purposes: canary execution is
+complete and advisory. Do not re-dispatch; revisit only for the formal
+sample-gate comparison and any rollback exercise. Default kernel stays
+production baseline; `POST /execution-experiments/:id/rollback` remains wired.
