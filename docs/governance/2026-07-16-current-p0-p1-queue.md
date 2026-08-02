@@ -334,3 +334,35 @@ Operator decisions recorded (ask tool, 2026-07-31):
    intent only; no implementation is scheduled. The decision is recorded here
    so the dangling ADR does not block Execution Lab or daily-agent work.
    Revisit only if a concrete workflow requirement emerges.
+
+### 2026-08-02 delivery addendum (queue reconciliation)
+
+Queue states updated against code delivered in PRs #144–#147 (Forgejo,
+merged 2026-08-02; GitHub mirror #206):
+
+| Todo | Prior state | 2026-08-02 state | Evidence |
+| --- | --- | --- | --- |
+| `todo-los-p1-context-reconstruction` | backlog | **done** | #132/#136 checkpoint versioning + degraded recovery + loop continuation |
+| `todo-los-p1-stale-detection` | backlog | **done** | #134 decay-driven stale observation auto-marking |
+| `todo-los-p1-perf-metrics` | backlog | **done** | #138 Prometheus metrics endpoint |
+| `todo-los-p1-supply-chain-full` | backlog | **done** | #139 SBOM/license/freshness audit |
+| `todo-los-execution-pairwise-sample-gate` | ready (main line) | **done** | #131 pairwise sample gate (thresholds/scenarios preregistration, immutable refs, live evaluation, 9 tests); optimization-analysis stays P2/backlog |
+| `todo-los-ci-cd-observability-20260725` | in_progress (plan) | unchanged | resource baseline still 5/10 unique heads; turbo-cache stays blocked |
+| `todo-los-pi-k4-readonly-canary` | backlog (authorized) | unchanged | canary still not executed; path fully wired (`authorize-canary`/`execute` + `pi@0.81.1+los.3` validation) |
+
+Active P1 set after this reconciliation: `todo-los-p1-turbo-cache` (blocked),
+`todo-los-p1-cbm-ab-inject` (backlog), `todo-los-p1-otel-docs` (done, kept for
+history), plus the DB-owned submodule extraction rows (chat-service.ts,
+config.ts) unchanged. `todo-los-execution-optimization-analysis` remains P2
+advisory with `executionPolicy=blocked_until_real_pairwise_sample_gate_passes`;
+the gate mechanism now exists, sample production still depends on manual
+`POST /run-evals/pairwise` ingestion.
+
+Governance debt recorded in this pass (not todo-dispatched):
+1. coverage baseline refreshed 2026-08-02 (629 impl / 252 test files); check
+   requires `LOS_TEST_SKIP_PATTERN="executes shell commands"` on macOS for the
+   known sandbox failure; baseline check still not wired into CI (ratchet
+   dormant; operator decision pending).
+2. ADR 0030–0034 duplicate-number pairs await operator archive decision.
+3. known-failures baseline enforcement stays local-gate-only (operator
+   decision pending).

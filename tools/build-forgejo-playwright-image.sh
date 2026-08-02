@@ -14,7 +14,7 @@ IMAGE=${FORGEJO_PLAYWRIGHT_IMAGE:-los-ci:node22-jj0.39.0-playwright1.61.1}
 "$ENGINE" run --rm "$IMAGE" sh -c '
   set -eu
   node -e "if (Number(process.versions.node.split(\".\")[0]) < 22) process.exit(1)"
-  test "$(pnpm --version)" = "9.0.0"
+  test "$(pnpm --version)" = "11.6.0"
   case "$(jj --version)" in
     "jj 0.39.0"*) ;;
     *) exit 1 ;;

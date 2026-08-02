@@ -5,7 +5,7 @@ FROM ${TOOLCHAIN_IMAGE} AS toolchain
 
 FROM ${NODE_IMAGE}
 
-ARG PNPM_VERSION=9.0.0
+ARG PNPM_VERSION=11.6.0
 
 # Reuse only the pinned, already-verified CI toolchain. Application dependencies
 # and mutable runner state are supplied separately by the job.

@@ -28,5 +28,5 @@ fi
   "$IMAGE" sh -c '
   node -e "if (Number(process.versions.node.split(\".\")[0]) !== Number(process.env.REQUIRED_NODE_MAJOR)) process.exit(1)"
   jj --version
-  test "$(pnpm --version)" = "9.0.0"
+  test "$(pnpm --version)" = "11.6.0"
 '

@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
-          test "$(pnpm --version)" = "9.0.0"
+          test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
