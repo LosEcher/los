@@ -315,3 +315,72 @@ test('POST /runs/:id/revise-plan returns 404 for nonexistent run spec', async ()
     await closeDb().catch(() => undefined);
   }
 });
+
+test('POST /runs/:id/approve does not auto-dispatch K4 kernel candidate runs', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-approve-k4-${suffix}`;
+  const sessionId = `session-approve-k4-${suffix}`;
+  const app = await createServer({
+    serviceId: `gateway-approve-k4-${suffix}`,
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'test',
+  });
+
+  try {
+    await ensureRunSpecStore();
+    await ensureSessionEventStore();
+
+    const { createK4ExecutionKernelSelection } = await import('@los/agent');
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'K4 candidate approve test',
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      runContract: {
+        mode: 'audit',
+        goal: 'test K4 candidate approval without auto-dispatch',
+        editableSurfaces: ['docs/'],
+        phase: 'planning',
+        plan: [{
+          id: 'step-1',
+          title: 'Approve K4 candidate plan',
+          description: 'Exercise the K4 approval path; dispatch must stay with the execute endpoint.',
+          dependsOnIds: [],
+          editableSurfaces: ['docs/'],
+          completionCriteria: 'The K4 candidate plan is approved and not auto-dispatched.',
+        }],
+        verifications: [{
+          id: 'v1',
+          kind: 'command',
+          description: 'queue document exists',
+          command: 'test -f docs/governance/2026-07-16-current-p0-p1-queue.md',
+        }],
+        executionKernel: createK4ExecutionKernelSelection({
+          experimentId: 'experiment-k4-approve-test',
+          disposition: 'planning',
+          actor: 'operator:select',
+        }),
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/runs/${runSpecId}/approve`,
+      payload: { reason: 'approve K4 candidate plan (no auto dispatch)' },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.phase, 'plan_approved');
+    // K4 candidate runs are executed through the experiment execute endpoint;
+    // approving the plan must not schedule an execution dispatch.
+    assert.equal(body.dispatch, undefined);
+  } finally {
+    await app.close();
+    await closeDb().catch(() => undefined);
+  }
+});

@@ -318,6 +318,7 @@ async function handleApprove(req: FastifyRequest, reply: FastifyReply, deps: Run
       reason: normalizeOptionalString(body.reason),
     });
     const dispatch = updated.runContract?.phase === 'plan_approved'
+      && !updated.runContract?.executionKernel
       ? {
         status: 'scheduled' as const,
         planRevision: updated.runContract?.planRevision ?? 1,
