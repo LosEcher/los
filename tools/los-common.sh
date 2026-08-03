@@ -136,7 +136,7 @@ health_check() {
 
 wait_for_health() {
   # Usage: wait_for_health <pid> <url> [deadline_seconds]
-  local pid="${1:-}" url="${2:-}" deadline_sec="${3:-25}"
+  local pid="${1:-}" url="${2:-}" deadline_sec="${3:-60}"
   local deadline=$((SECONDS + deadline_sec))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if health_check "$url"; then

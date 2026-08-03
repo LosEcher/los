@@ -302,7 +302,16 @@ export async function startOtelBridge(config: OtelBridgeConfig = {}): Promise<{ 
     }));
   });
 
-  await new Promise<void>((resolve) => server!.listen(port, host, resolve));
+  await new Promise<void>((resolve, reject) => {
+    // Convert the 'error' event (e.g. EADDRINUSE when another instance already
+    // owns the port) into a rejection so callers' try/catch treats this as
+    // non-fatal, instead of an unhandled 'error' event killing the process.
+    server!.once('error', reject);
+    server!.listen(port, host, () => {
+      server!.removeListener('error', reject);
+      resolve();
+    });
+  });
   log.info(`OTel bridge listening on http://${host}:${port} (OTLP/HTTP)`);
 
   return {

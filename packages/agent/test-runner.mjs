@@ -129,6 +129,7 @@ const isolatedGroupB = [
   'src/scheduler-kernel-shadow.test.ts',
   'src/scheduler-planning.test.ts',
   'src/scheduler.test.ts',
+  'src/tools/core/subagent-persistence.test.ts',
 ];
 
 const isolatedGroupC = [

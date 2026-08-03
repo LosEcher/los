@@ -208,7 +208,7 @@ export function setupAgentRun(
   }));
 
   // Register background agent query/kill/list tools
-  registerAgentQueryKillTools(tools);
+  registerAgentQueryKillTools(tools, { tenantId: config.tenantId, projectId: config.projectId });
 
   const emitEvent = createEventEmitter(config.sessionId, config, config.onSessionEvent);
 

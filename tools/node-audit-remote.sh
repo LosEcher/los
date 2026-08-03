@@ -83,9 +83,25 @@ else
   printf 'repo: /opt/los MISSING\n'
 fi
 if command -v systemctl >/dev/null 2>&1; then
+  # kranz-inspired: restart count + uptime + last exit result per service,
+  # with an explicit CRASH-LOOP marker (restarts >= 100) so a repeating
+  # crash (e.g. vultr los-executor, 56196 restarts in 08-02/03) shows up
+  # in the one-line summary instead of requiring manual log digging.
   for svc in los-executor tailscaled docker ssh sing-box forgejo; do
-    st="$(systemctl is-active "$svc" 2>/dev/null || echo 'n/a')"
-    printf 'service %-14s %s\n' "$svc" "$st"
+    if systemctl show "$svc" -p ActiveState >/dev/null 2>&1; then
+      active="$(systemctl show "$svc" -p ActiveState --value 2>/dev/null)"
+      substate="$(systemctl show "$svc" -p SubState --value 2>/dev/null)"
+      restarts="$(systemctl show "$svc" -p NRestarts --value 2>/dev/null)"
+      since="$(systemctl show "$svc" -p ActiveEnterTimestamp --value 2>/dev/null | sed 's/ [A-Z][A-Z]*$//')"
+      result="$(systemctl show "$svc" -p Result --value 2>/dev/null)"
+      line="service $svc active=$active/$substate restarts=${restarts:-0} since=${since:-?} result=${result:-?}"
+      if [ "${restarts:-0}" -ge 100 ] 2>/dev/null; then
+        line="$line CRASH-LOOP"
+      fi
+      printf '%s\n' "$line"
+    else
+      printf 'service %-14s absent\n' "$svc"
+    fi
   done
 fi
 # executor health (ports 8090/8091)
