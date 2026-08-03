@@ -39,7 +39,6 @@ import {
 
 const log = getLogger('executor');
 const DEFAULT_LEASE_MS = 30_000;
-const DEFAULT_HEARTBEAT_MS = 10_000;
 
 interface RunAgentRequest {
   taskRunId: string;
@@ -131,14 +130,19 @@ export async function startExecutor() {
   const reportHeartbeat = createHeartbeatReporter(async () => {
     const folders = await resolveFileSyncFolders();
     await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders);
-  }, log);
+  }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
 
-  // Fire initial heartbeat without blocking server startup. The reporter logs
-  // the first failure, periodic reminders, and the eventual recovery.
-  void reportHeartbeat();
-  const nodeHeartbeat = setInterval(() => {
-    void reportHeartbeat();
-  }, DEFAULT_HEARTBEAT_MS);
+  // Self-scheduling heartbeat: fires immediately, then waits
+  // reportHeartbeat.nextIntervalMs() (base on success, exponential backoff
+  // while the gateway is unreachable). Never blocks server startup.
+  let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleHeartbeat = async () => {
+    await reportHeartbeat.run();
+    heartbeatTimer = setTimeout(() => {
+      void scheduleHeartbeat();
+    }, reportHeartbeat.nextIntervalMs());
+  };
+  void scheduleHeartbeat();
 
   const server = createServer(async (req, res) => {
     try {
@@ -213,7 +217,7 @@ export async function startExecutor() {
     server,
     lifecycle,
     shutdownGraceMs,
-    stopHeartbeat: () => clearInterval(nodeHeartbeat),
+    stopHeartbeat: () => clearTimeout(heartbeatTimer),
     stopPeriodicSync,
     writeHeartbeat: async () => heartbeatNode(
       nodeId,
