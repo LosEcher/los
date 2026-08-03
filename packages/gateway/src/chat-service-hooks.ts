@@ -9,6 +9,15 @@ import type { RecoveryCheckpointInput } from '@los/memory';
 
 const log = getLogger('chat-hooks');
 const checkpointTracker = new Map<string, { count: number; lastAt: number }>();
+
+// Recovery-checkpoint cadence (event-storm convergence, advisory 2026-08-04 candidate A).
+// Every tool transition used to trigger one compactSession — long runs with 200+ tool
+// calls produced 200+ compaction.pre/post_compact event pairs plus 200+ rows in
+// memory_compactions. Throttle to at most one checkpoint per MIN_INTERVAL while
+// keeping the event-count cadence and the max-interval backstop.
+const CHECKPOINT_MIN_INTERVAL_MS = 60_000;
+const CHECKPOINT_EVENT_COUNT = 20;
+const CHECKPOINT_MAX_INTERVAL_MS = 10 * 60_000;
 const toolStateCache = new Map<string, {
   pendingCalls: RecoveryCheckpointInput['toolState']['pendingCalls'];
   lastResults: RecoveryCheckpointInput['toolState']['lastResult'];
@@ -145,11 +154,20 @@ export function createChatTaskHooks(input: {
       ck.count += 1;
       const isToolTransition = event.type === 'tool_call_state.updated'
         && ((event.payload as any)?.to === 'succeeded' || (event.payload as any)?.to === 'failed');
-      const timeSinceLast = Date.now() - ck.lastAt;
-      const triggeredByCount = ck.count >= 20;
-      const shouldCheckpoint = triggeredByCount || isToolTransition || timeSinceLast >= 10 * 60 * 1000;
+      const now = Date.now();
+      const sinceLastCheckpoint = now - ck.lastAt;
+      const triggeredByCount = ck.count >= CHECKPOINT_EVENT_COUNT;
+      // Throttle to one checkpoint per CHECKPOINT_MIN_INTERVAL_MS: without this, every
+      // tool transition (or every 20th event) triggers a compactSession, producing one
+      // compaction.pre/post_compact event pair and one memory_compactions row each time
+      // (200+ per long run). Events arriving inside the throttle window accumulate in
+      // ck.count and fire as soon as the window passes; the max-interval backstop still
+      // forces a checkpoint during idle stretches.
+      const throttled = sinceLastCheckpoint < CHECKPOINT_MIN_INTERVAL_MS;
+      const shouldCheckpoint = sinceLastCheckpoint >= CHECKPOINT_MAX_INTERVAL_MS
+        || (!throttled && (triggeredByCount || isToolTransition));
       if (shouldCheckpoint) {
-        ck.count = 0; ck.lastAt = Date.now();
+        ck.count = 0; ck.lastAt = now;
         const trigger = triggeredByCount ? 'event_count' : isToolTransition ? 'tool_state_change' : 'time_interval';
         const recoveryCheckpoint = _snapshotRecoveryCheckpoint(sid);
         await persistRecoveryCheckpoint(sid, runSpecId, recoveryCheckpoint, trigger, 'checkpoint');

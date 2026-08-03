@@ -16,14 +16,30 @@
 
 ## 2. 观察与优化候选(按预估收益排序)
 
-### A. session 事件风暴(高收益,低风险) [E]
+### A. session 事件风暴(高收益,低风险)— ✅ 已收敛 (2026-08-05)
 - 08-03 chat 流观测:单次 run 产生 **200+ 对 `compaction.pre_compact` /
   `compaction.post_compact` 事件**(~300 事件/run);K4 run 同(221 对)。
-- 影响:session_events 表膨胀、SSE/回放开销、投影(execution-observability)
-  扫描成本;长期 DB 增长。
-- 候选:compaction 事件合并(每会话每 N 分钟一条)或降级为 internal
-  低粒度;需确认 replay 与 recovery 是否消费这些事件(疑似仅审计)。
-- 风险:低(事件为 append-only 审计面);需 focused harness 验证 replay 不变。
+- 影响:SSE 推送膨胀、每次 compactSession 的 DB 成本(3×count 查询 +
+  symbol 汇总 + metrics + INSERT memory_compactions)、memory_compactions
+  表增长(200+ 行/run)。
+- **根因**:`chat-service-hooks.ts` 中每个 tool transition(succeeded/failed)、
+  每 20 个 session 事件都触发一次 `compactSession(checkpoint: true)`;checkpoint
+  模式无 dedup,每次全量执行并各发一对 pre/post 事件。
+- **收敛方案**(PR #164):checkpoint 节流——两次 checkpoint 最小间隔
+  `CHECKPOINT_MIN_INTERVAL_MS = 60s`,事件计数节流窗口内继续累计,10 分钟
+  max-interval 兜底保留;`session.completed`/`session.error` 的 final
+  compaction 不变。
+- **量化证据**(focused harness `chat-service-hooks-storm.test.ts`):
+  250 事件 / 200 tool transitions / 5 分钟 run → compactSession 调用从
+  **legacy≈212 收敛到 4(reduction 98.1%)**,pre/post 事件 4 对,
+  memory_compactions 4 行(1 行/次),recovery checkpoint 与 10 分钟兜底
+  行为不变。
+- **附带修复**:storm harness 暴露 `ensureMemoryCompactionStore()` 并发竞态
+  (两个并发 compactSession 同时执行 SCHEMA → `pg_type_typname_nsp_index`
+  重复键);已用 in-flight promise 去重修复(compaction.ts)。
+- 消费面确认:pre/post 事件仅走 operator SSE(append-only 审计面),不进
+  session_events,replay/recovery 均不消费;恢复数据源 memory_compactions +
+  stream_checkpoints(event log)未变。
 
 ### B. CI 镜像分裂(中收益,已部分缓解) [E]
 - gate-fast/test/drift 用 node24 镜像(pnpm 11.6.0 prepare),web-e2e 用
