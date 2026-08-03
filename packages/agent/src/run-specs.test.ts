@@ -7,8 +7,10 @@ import {
   approveRunSpecPhase,
   createRunSpec,
   ensureRunSpecStore,
+  listCompletedChildRunSpecs,
   loadRunSpec,
   reviseRunSpecPlan,
+  updateRunSpecResult,
 } from './run-specs.js';
 import { listVerificationRecordsForRunSpec } from './verification-records.js';
 import { transitionExecutionState } from './execution-store.js';
@@ -649,6 +651,75 @@ test('reviseRunSpecPlan rejects revisions while execution is active or terminal'
       await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [id]).catch(() => undefined);
       await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
     }
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('updateRunSpecResult persists a completed subagent result and reads back', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const id = `run-result-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await ensureRunSpecStore();
+    await createRunSpec({
+      id,
+      sessionId: `session-${id}`,
+      prompt: 'background subagent',
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'read-only',
+      parentRunSpecId: 'parent-spec',
+    });
+    const completedAt = new Date().toISOString();
+    const updated = await updateRunSpecResult(id, {
+      status: 'completed',
+      text: 'finished with findings',
+      loopCount: 4,
+      totalTokens: 900,
+      completedAt,
+    });
+    assert.equal(updated?.result?.status, 'completed');
+    assert.equal(updated?.result?.text, 'finished with findings');
+    assert.equal(updated?.result?.loopCount, 4);
+    assert.equal(updated?.result?.totalTokens, 900);
+
+    const loaded = await loadRunSpec(id);
+    assert.equal(loaded?.result?.status, 'completed');
+    assert.equal(loaded?.result?.text, 'finished with findings');
+    assert.equal(loaded?.result?.completedAt, completedAt);
+    // status field itself is untouched by result persistence (AP1 boundary)
+    assert.equal(loaded?.status, 'created');
+
+    const children = await listCompletedChildRunSpecs(5);
+    assert.ok(children.some((spec) => spec.id === id));
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('updateRunSpecResult persists a failed subagent result with error', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const id = `run-result-fail-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await ensureRunSpecStore();
+    await createRunSpec({
+      id,
+      sessionId: `session-${id}`,
+      prompt: 'background subagent that fails',
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'read-only',
+      parentRunSpecId: 'parent-spec',
+    });
+    await updateRunSpecResult(id, {
+      status: 'failed',
+      text: '',
+      error: 'loop budget exhausted',
+      completedAt: new Date().toISOString(),
+    });
+    const loaded = await loadRunSpec(id);
+    assert.equal(loaded?.result?.status, 'failed');
+    assert.equal(loaded?.result?.error, 'loop budget exhausted');
   } finally {
     await closeDb().catch(() => undefined);
   }

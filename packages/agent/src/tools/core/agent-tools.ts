@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolveIdentityLevelForExecutionPath } from '../../identity-loader.js';
 import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
-import { createRunSpec, ensureRunSpecStore } from '../../run-specs.js';
+import { createRunSpec, ensureRunSpecStore, listCompletedChildRunSpecs, listRunSpecsForSession, updateRunSpecResult, type RunSpecResult } from '../../run-specs.js';
 import type { AgentConfig, AgentResult } from '../../loop.js';
 import type { ToolRegistry, ToolResult } from './registry.js';
 
@@ -69,6 +69,8 @@ interface TrackedAgent {
   };
   error?: string;
   abortController: AbortController;
+  /** Set when the agent was recovered from a persisted run_spec after a restart. */
+  persisted?: boolean;
 }
 
 const trackedAgents = new Map<string, TrackedAgent>();
@@ -97,6 +99,77 @@ function killAgent(agentId: string): boolean {
 
 function listAgents(): TrackedAgent[] {
   return [...trackedAgents.values()];
+}
+
+// ── Persisted Agent Recovery ───────────────────────────
+
+function agentIdToChildSessionId(agentId: string): string | undefined {
+  // agentId format: `agent-${childSessionId}` (see createSpawnAgentRunner)
+  return agentId.startsWith('agent-') ? agentId.slice('agent-'.length) : undefined;
+}
+
+function trackedFromRunSpec(spec: { id: string; sessionId: string; prompt: string; createdAt: string; result?: RunSpecResult | null }): TrackedAgent {
+  const result = spec.result;
+  return {
+    agentId: `agent-${spec.sessionId}`,
+    childRunSpecId: spec.id,
+    childSessionId: spec.sessionId,
+    status: result?.status === 'failed' ? 'failed' : 'completed',
+    startedAt: new Date(spec.createdAt).getTime(),
+    prompt: spec.prompt,
+    result: result ? {
+      text: result.text,
+      loopCount: result.loopCount ?? 0,
+      totalTokens: result.totalTokens ?? 0,
+    } : undefined,
+    error: result?.error,
+    abortController: new AbortController(), // no-op after restart
+    persisted: true,
+  };
+}
+
+/**
+ * Recover a background subagent from durable run_spec state after a process
+ * restart. Returns:
+ * - { kind: 'persisted', agent } when the result was persisted before shutdown
+ * - { kind: 'lost', prompt } when the run_spec exists but no result was persisted
+ * - undefined when no run_spec exists for this agentId
+ */
+async function resolvePersistedAgent(agentId: string, scope?: { tenantId?: string; projectId?: string }): Promise<
+  { kind: 'persisted'; agent: TrackedAgent } | { kind: 'lost'; prompt: string } | undefined
+> {
+  const childSessionId = agentIdToChildSessionId(agentId);
+  if (!childSessionId) return undefined;
+  try {
+    await ensureRunSpecStore();
+    const specs = await listRunSpecsForSession(childSessionId, 1, scope);
+    const spec = specs[0];
+    if (!spec) return undefined;
+    if (!spec.result) return { kind: 'lost', prompt: spec.prompt };
+    return { kind: 'persisted', agent: trackedFromRunSpec(spec) };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Fire-and-forget persistence of a background subagent result onto its child
+ * run_spec. Never rejects — the tool result must not depend on DB availability.
+ */
+function persistAgentResult(runSpecId: string | undefined, result: Omit<RunSpecResult, 'completedAt'>): void {
+  if (!runSpecId) return;
+  void updateRunSpecResult(runSpecId, { ...result, completedAt: new Date().toISOString() })
+    .catch(() => undefined);
+}
+
+async function listPersistedAgents(limit = 20, scope?: { tenantId?: string; projectId?: string }): Promise<TrackedAgent[]> {
+  try {
+    await ensureRunSpecStore();
+    const specs = await listCompletedChildRunSpecs(limit, scope);
+    return specs.map(trackedFromRunSpec);
+  } catch {
+    return [];
+  }
 }
 
 // ── Tool Registration ───────────────────────────────────
@@ -144,24 +217,56 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
   });
 }
 
-export function registerAgentQueryKillTools(registry: ToolRegistry): void {
+export function registerAgentQueryKillTools(registry: ToolRegistry, options: { tenantId?: string; projectId?: string } = {}): void {
+  const scope = { tenantId: options.tenantId, projectId: options.projectId };
   registry.register('query_agent', async (args) => {
     const agentId = normalizeString(args.agentId);
     if (!agentId) return { content: '', error: 'agentId is required' };
     const agent = getAgent(agentId);
-    if (!agent) return { content: '', error: `Agent not found: ${agentId}` };
-    return {
-      content: JSON.stringify({
-        agentId: agent.agentId,
-        childRunSpecId: agent.childRunSpecId ?? null,
-        childSessionId: agent.childSessionId,
-        status: agent.status,
-        startedAt: new Date(agent.startedAt).toISOString(),
-        prompt: agent.prompt,
-        result: agent.result ?? null,
-        error: agent.error ?? null,
-      }, null, 2),
-    };
+    if (agent) {
+      return {
+        content: JSON.stringify({
+          source: 'live',
+          agentId: agent.agentId,
+          childRunSpecId: agent.childRunSpecId ?? null,
+          childSessionId: agent.childSessionId,
+          status: agent.status,
+          startedAt: new Date(agent.startedAt).toISOString(),
+          prompt: agent.prompt,
+          result: agent.result ?? null,
+          error: agent.error ?? null,
+        }, null, 2),
+      };
+    }
+    // Memory miss: recover from durable run_spec state (process may have restarted).
+    const persisted = await resolvePersistedAgent(agentId, scope);
+    if (persisted?.kind === 'persisted') {
+      const a = persisted.agent;
+      return {
+        content: JSON.stringify({
+          source: 'persisted',
+          agentId: a.agentId,
+          childRunSpecId: a.childRunSpecId ?? null,
+          childSessionId: a.childSessionId,
+          status: a.status,
+          startedAt: new Date(a.startedAt).toISOString(),
+          prompt: a.prompt,
+          result: a.result ?? null,
+          error: a.error ?? null,
+        }, null, 2),
+      };
+    }
+    if (persisted?.kind === 'lost') {
+      return {
+        content: JSON.stringify({
+          agentId,
+          status: 'unknown',
+          message: 'Background agent ran in a previous process and shut down before its result was persisted. Re-run spawn_agent if the output is still needed.',
+          prompt: persisted.prompt,
+        }, null, 2),
+      };
+    }
+    return { content: '', error: `Agent not found: ${agentId}` };
   }, {
     type: 'function',
     function: {
@@ -220,14 +325,20 @@ export function registerAgentQueryKillTools(registry: ToolRegistry): void {
   });
 
   registry.register('list_agents', async (_args) => {
-    const agents = listAgents();
+    const live = listAgents();
+    const persisted = await listPersistedAgents(20, scope);
+    // Live state wins over persisted recovery entries with the same agentId.
+    const merged = new Map<string, TrackedAgent>();
+    for (const a of persisted) merged.set(a.agentId, a);
+    for (const a of live) merged.set(a.agentId, a);
     return {
-      content: JSON.stringify(agents.map(a => ({
+      content: JSON.stringify([...merged.values()].map(a => ({
         agentId: a.agentId,
         childRunSpecId: a.childRunSpecId ?? null,
         status: a.status,
         prompt: a.prompt.slice(0, 120),
         startedAt: new Date(a.startedAt).toISOString(),
+        source: a.persisted ? 'persisted' : 'live',
       })), null, 2),
     };
   }, {
@@ -313,7 +424,8 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       };
       trackAgent(tracked);
 
-      // Fire and forget — result is stored on the tracked agent
+      // Fire and forget — result is stored on the tracked agent and persisted
+      // to the child run_spec so it survives a process restart.
       void options.runAgent(request.prompt, {
         sessionId: childSessionId,
         provider: request.provider ?? options.provider,
@@ -348,6 +460,12 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
           loopCount: result.loopCount,
           totalTokens: result.totalTokens.prompt + result.totalTokens.completion,
         };
+        persistAgentResult(childRunSpecId, {
+          status: 'completed',
+          text: result.text,
+          loopCount: result.loopCount,
+          totalTokens: result.totalTokens.prompt + result.totalTokens.completion,
+        });
         // Schedule cleanup after completion
         setTimeout(() => trackedAgents.delete(agentId), 300_000).unref();
       }).catch(err => {
@@ -355,6 +473,11 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         if (!agent || agent.status === 'killed') return;
         agent.status = 'failed';
         agent.error = err instanceof Error ? err.message : String(err);
+        persistAgentResult(childRunSpecId, {
+          status: 'failed',
+          text: '',
+          error: err instanceof Error ? err.message : String(err),
+        });
         // Schedule cleanup after failure
         setTimeout(() => trackedAgents.delete(agentId), 300_000).unref();
       });
