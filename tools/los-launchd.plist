@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  los daemon — launchd 常驻 gateway+executor(经 tools/los-launchd-wrapper.sh)。
+  安装(替换 PROJECT_ROOT 为项目绝对路径):
+    sed "s|__LOS_ROOT__|/path/to/los|g" tools/los-launchd.plist \
+      > ~/Library/LaunchAgents/com.los.daemon.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.los.daemon.plist
+  卸载:
+    launchctl bootout gui/$(id -u)/com.los.daemon
+  KeepAlive=true:wrapper 本身常驻,意外退出由 launchd 立即拉起;
+  wrapper 内部每 30s 检查服务健康,不健康则 los.sh start(幂等)。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.los.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__LOS_ROOT__/tools/los-launchd-wrapper.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOS_ROOT__/.los-runtime/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOS_ROOT__/.los-runtime/launchd.err.log</string>
+</dict>
+</plist>
