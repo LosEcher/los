@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
-import { _configureTestSchema, _isSafeTestDatabaseUrl, _resolveDatabaseUrlForInit } from './db.js';
+import { _configureTestSchema, _isSafeTestDatabaseUrl, _resolveDatabaseUrlForInit, closeDb, getPool, initDb } from './db.js';
 
 describe('DbConnection interface', () => {
   it('defines exec/prepare/transaction/close contract', () => {
@@ -158,5 +158,34 @@ describe('Statement interface', () => {
       all: (..._params: unknown[]) => [{ a: 1 }, { a: 2 }, { a: 3 }],
     };
     assert.strictEqual(stmt.all().length, 3);
+  });
+});
+
+// ── Pool error resilience (integration, real PG) ────────
+
+describe('pool error resilience', () => {
+  it('survives a fatal pool error (57P01) and keeps serving queries', async (t) => {
+    process.env.LOS_ALLOW_LIVE_TEST_DB = '1';
+    const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+    if (!url) {
+      t.skip('no TEST_DATABASE_URL/DATABASE_URL configured');
+      return;
+    }
+    const db = await initDb(url);
+    try {
+      const pool = getPool();
+      // pg emits 'error' on the pool when an idle client receives a server-side
+      // fatal error (e.g. 57P01 admin_shutdown during a server restart). Without
+      // the pool error listener this surfaces as an uncaughtException and kills
+      // the process — the assertion below would never run.
+      const fatal = new Error('terminating connection due to administrator command') as Error & { code?: string };
+      fatal.code = '57P01';
+      pool.emit('error', fatal);
+      // The pool must still serve queries afterwards (lazy reconnect).
+      const res = await db.query<{ ok: number }>('SELECT 1 AS ok');
+      assert.equal(res.rows[0]?.ok, 1);
+    } finally {
+      await closeDb().catch(() => undefined);
+    }
   });
 });

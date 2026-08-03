@@ -60,6 +60,14 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
     idleTimeoutMillis: 10000,
     allowExitOnIdle: true,
   });
+  // Consume pool-level fatal errors (e.g. 57P01 admin_shutdown when the server
+  // restarts). Without a listener, Node promotes the 'error' event on an idle
+  // client to an uncaughtException and kills the whole process. pg drops the
+  // broken client automatically, so the pool reconnects lazily on the next
+  // query — the process must survive the interruption, not die from it.
+  _pool.on('error', (err) => {
+    log.warn(`[db] connection pool error — will reconnect on next query: ${err.message}`);
+  });
   await _pool.query('select 1');
   log.info('Database: PostgreSQL connected');
   return wrap(_pool);
