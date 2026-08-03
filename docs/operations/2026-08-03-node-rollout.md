@@ -101,3 +101,20 @@ deploy-to-remote.sh <node> verify
   已被 b9145adf11af8 取代
 - 后续:离线 4 节点(hh-hstorage2/node34-ssh/tencent-sin/vultr)不部署,仅
   reactivate 时更新(07-12 Follow-Up 不变)
+
+### 2026-08-03 second pass (version unification)
+
+After PR #154–#158 the deployable digest moved to `0.1.0+bae1687dd3e32`; all
+three executors were re-rolled out to the new digest (same procedure, no new
+issues — install completed first try on oracle, gateway heartbeat chain was
+up so no draining residue).
+
+| node_id | status | version | heartbeat |
+| --- | --- | --- | --- |
+| mbp-executor-1 | online | 0.1.0+bae1687dd3e32 | 01:07:43 UTC |
+| node34-executor-1 | online | 0.1.0+bae1687dd3e32 | 01:07:49 UTC |
+| oracle-executor | online | 0.1.0+bae1687dd3e32 | 01:07:52 UTC |
+
+Lesson 19: when the gateway heartbeat chain is up, re-rollouts are clean —
+the draining-residue issue (lesson 17) only appeared because the gateway was
+down during the first pass.
