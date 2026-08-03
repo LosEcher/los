@@ -9,6 +9,14 @@ concurrency:
   group: ci-${{ forgejo.ref }}
   cancel-in-progress: true
 
+# node34 reaches the npm registry over an unstable path (IPv6 unreachable +
+# intermittent IPv4 timeouts, observed 2026-08-03). Force IPv4-first DNS so
+# Node/pnpm do not burn the connect budget on ENETUNREACH v6 attempts.
+defaults:
+  run:
+    env:
+      NODE_OPTIONS: --dns-result-order=ipv4first
+
 # Primary CI workflow. Pull requests run three required jobs plus Web E2E on
 # the Windows Podman runner. Manual dispatch provides unchanged-head canaries.
 # Keeping all four context names stable avoids a simultaneous branch-protection
@@ -38,6 +46,14 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
+          # npm-registry path is jittery (2026-08-03: IPv6 unreachable +
+          # intermittent IPv4 timeouts); retry the corepack pnpm fetch instead
+          # of failing the job on one timeout.
+          for attempt in 1 2 3 4 5; do
+            if pnpm --version >/dev/null 2>&1; then break; fi
+            echo "corepack pnpm fetch attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
@@ -96,6 +112,14 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
+          # npm-registry path is jittery (2026-08-03: IPv6 unreachable +
+          # intermittent IPv4 timeouts); retry the corepack pnpm fetch instead
+          # of failing the job on one timeout.
+          for attempt in 1 2 3 4 5; do
+            if pnpm --version >/dev/null 2>&1; then break; fi
+            echo "corepack pnpm fetch attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
@@ -151,6 +175,14 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
+          # npm-registry path is jittery (2026-08-03: IPv6 unreachable +
+          # intermittent IPv4 timeouts); retry the corepack pnpm fetch instead
+          # of failing the job on one timeout.
+          for attempt in 1 2 3 4 5; do
+            if pnpm --version >/dev/null 2>&1; then break; fi
+            echo "corepack pnpm fetch attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
@@ -201,6 +233,13 @@ jobs:
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
           corepack enable
+          # npm-registry path is jittery (2026-08-03); retry the corepack
+          # pnpm fetch instead of failing the job on one timeout.
+          for attempt in 1 2 3 4 5; do
+            if pnpm --version >/dev/null 2>&1; then break; fi
+            echo "corepack pnpm fetch attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
           test "$(pnpm --version)" = "11.6.0"
           pnpm config set store-dir ~/.local/share/pnpm/store
 
