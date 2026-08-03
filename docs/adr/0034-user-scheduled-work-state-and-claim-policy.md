@@ -41,7 +41,10 @@ business queue.
 8. Claimed runs carry owner and lease expiry. An expired lease may be reclaimed
    only while attempts remain. A failure updates the schedule failure counter;
    the configured threshold opens the circuit and creates one recovery Work
-   Item. A successful run closes/reset the circuit.
+   Item. An open circuit auto-recovers to `half_open` once the recovery window
+   (24h) elapses, allowing exactly one probe run; a successful probe closes the
+   circuit and resets the counter, a failed probe re-opens the circuit and
+   restarts the window. A successful run closes/reset the circuit.
 9. Schedule results are projected into the existing Work Item/Inbox model with
    schedule and scheduled-run correlation metadata. A trigger, agent run,
    verification, and external callback remain separate evidence surfaces.

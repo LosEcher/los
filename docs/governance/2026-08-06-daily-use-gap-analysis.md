@@ -39,7 +39,7 @@ recheck.
 | G1 | ~~Real interrupted-run recovery never exercised end-to-end~~ ✅ **closed 2026-08-03** | kill gateway → restart → resume same run frozen as smoke: `tools/smoke-interrupted-run-recovery.sh` (`--scenario auto` proves `recoverApprovedRunDispatches` auto-resume; `--scenario in-flight` proves lease fence + operator revise/approve/verify resume). Evidence: `docs/operations/2026-08-03-interrupted-run-recovery-smoke.md` | user cannot trust work survives a crash |
 | G2 | ~~Subagent background results memory-only; no persisted completion + resume~~ ✅ **closed 2026-08-06** | `run_specs.result_json` column + `updateRunSpecResult()`; background completion/failure persists to child run_spec; `query_agent`/`list_agents` recover from DB after restart (tenant/project scoped), `unknown` status when run spec exists without result. Tests: `subagent-persistence.test.ts` (isolatedGroupB), run-specs.test.ts | — |
 | G3 | Docker image publishing absent while README/compose advertise `ghcr.io/los-ecommerce/los:latest` | no build/push job in `.github/workflows` or `.forgejo/workflows`; `docker-bake.hcl:30-41` OCI source mismatches real Forgejo repo identity | documented path fails for new users |
-| G4 | scheduled-work `half_open` circuit state never written by any code path | schema/CHECK mention `half_open` (`store.ts:129,208,235`), no writer found (governance `ga-circuit-breaker.ts` is a separate system) | circuit opens → permanently stuck until manual intervention |
+| G4 | ~~scheduled-work `half_open` circuit state never written by any code path~~ ✅ **closed 2026-08-06** | `recoverOpenScheduledWorkCircuits()` auto-recovers open circuits to `half_open` after the 24h window (`policy.ts` `CIRCUIT_RECOVERY_WINDOW_MS`); `recordScheduledRunOutcome()` closes the circuit on a successful probe and re-opens + restarts the window on a failed probe without a second recovery item. Tests: `scheduled-work.test.ts` (half_open probe success/failure paths) |
 
 ### Tier 2 — Experience (daily willingness)
 
@@ -73,8 +73,8 @@ cycle should reconcile roadmap with code.
 1. **Tier 1 first**: ~~G2 persist subagent results to run_spec~~ ✅ done
    2026-08-06; ~~G1 interrupted-recovery drill (kill gateway → restart → resume
    same run, freeze as smoke)~~ ✅ done 2026-08-03
-   (`docs/operations/2026-08-03-interrupted-run-recovery-smoke.md`); G4
-   half_open recovery path (small).
+   (`docs/operations/2026-08-03-interrupted-run-recovery-smoke.md`); ~~G4
+   half_open recovery path~~ ✅ done 2026-08-06.
 2. **Tier 2**: G5 Chinese i18n (one-time cost, immediate visible value); G7 CLI
    projection; G8 diff review upgrade.
 3. **Tier 3**: G3 fix bake identity + add image build/push CI, or stop

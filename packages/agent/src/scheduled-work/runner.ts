@@ -19,7 +19,8 @@ import {
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   claimDueScheduledWorkItems, claimQueuedScheduledWorkRuns,
   createManualScheduledWorkRun, loadScheduledWorkItem, loadScheduledWorkItemRun,
-  recordScheduledRunOutcome, recoverExpiredScheduledWorkRuns,
+  recoverExpiredScheduledWorkRuns, recoverOpenScheduledWorkCircuits,
+  recordScheduledRunOutcome,
   transitionScheduledWorkRun,
 } from './store.js';
 import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome } from './types.js';
@@ -52,9 +53,25 @@ export interface ScheduledWorkTickResult {
 export async function runScheduledWorkTick(input: {
   ownerId: string; now?: Date; leaseMs?: number; limit?: number;
 }): Promise<ScheduledWorkTickResult> {
+  // G4: open circuits whose recovery window elapsed become half_open, letting
+  // exactly one probe run through before the next claim pass.
+  const recoveredCircuits = await recoverOpenScheduledWorkCircuits(input);
+  if (recoveredCircuits.length > 0) {
+    log.info(`Scheduled work circuit recovered ${recoveredCircuits.length} open schedule(s) to half_open for a probe run`);
+  }
   const recovery = await recoverExpiredScheduledWorkRuns(input);
   for (const exhausted of recovery.exhausted) {
-    await recordScheduledRunOutcome({ scheduleId: exhausted.scheduleId, status: 'failed' });
+    const updated = await recordScheduledRunOutcome({ scheduleId: exhausted.scheduleId, status: 'failed' });
+    if (updated.circuitOpened) {
+      // Same operator notification as an execution failure at the threshold:
+      // a lease-exhausted run opening the circuit must surface a recovery item.
+      const workItemId = await createScheduleWorkItem(updated.schedule, exhausted, 'failed', {
+        error: exhausted.error ?? 'lease expired and retry limit exhausted',
+        circuitState: 'open',
+        consecutiveFailures: updated.schedule.consecutiveFailures,
+      }, `${updated.schedule.title}: recovery required`);
+      await attachScheduleRecoveryWorkItem(exhausted.scheduleId, workItemId);
+    }
   }
   const [due, queued] = await Promise.all([
     claimDueScheduledWorkItems(input),

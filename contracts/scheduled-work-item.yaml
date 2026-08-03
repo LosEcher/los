@@ -1,5 +1,5 @@
 contract: los.scheduled-work-item
-version: 0.2.0
+version: 0.3.0
 status: implemented
 owner: packages/agent
 description: >
@@ -44,13 +44,13 @@ schemas:
       timezone: IANA timezone string
     runTemplate:
       templateId:
-        enum: [morning_inbox_digest, runtime_readiness, scheduled_feed_analysis]
+        enum: [morning_inbox_digest, runtime_readiness, scheduled_feed_analysis, scheduled_execution]
       mode:
-        enum: [audit, governance]
+        enum: [audit, governance, execution]
       goalTemplate: string
       editableSurfaces: []
       requiredChecks: string[]
-      toolMode: read-only
+      toolMode: [read-only, project-write]
       feedAnalysisRequest:
         optional: true
         reference: los.integration-feed-analysis FeedAnalysisDispatchRequest excluding sourceJobId
@@ -80,7 +80,11 @@ policy:
   automaticExecution: deterministic built-ins use read_only_auto; scheduled_feed_analysis requires explicit preapproved_scope
   providerCalls: scheduled_feed_analysis may call the existing feed-analysis dispatch path only under preapproved_scope
   catchUp: skip records skipped_late; run_once executes one missed slot
-  circuit: failure threshold opens circuit and creates one recovery Work Item
+  circuit: >
+    failure threshold opens circuit and creates one recovery Work Item; an open
+    circuit auto-recovers to half_open after the recovery window and allows exactly
+    one probe run; a failed probe re-opens the circuit and restarts the window,
+    a successful probe closes the circuit and resets the failure counter
   noOp: increments consecutive_no_ops but never changes cadence automatically
 safety:
   - Operator credentials are not persisted in definitions or runs.
