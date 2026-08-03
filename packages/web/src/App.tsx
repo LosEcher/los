@@ -65,6 +65,7 @@ import { RulesPage } from './rules-page';
 import { EvalsPage } from './evals-page';
 import { PairwiseEvalsPage } from './pairwise-evals-page';
 import { formatDuration, StatusPill, type StatusState } from './ui';
+import { LANGS, useI18n } from './i18n';
 import { AuthBanner } from './auth-banner';
 import { LoginPage, isAuthenticated, logout } from './pages/login-page';
 import { OnboardingPage } from './pages/onboarding-page';
@@ -102,47 +103,47 @@ type NavAudience = 'workspace' | 'configure' | 'operations';
 
 type NavItem = {
   id: PageId;
-  label: string;
+  labelKey: string;
   icon: typeof MessageSquare;
   status: StatusState;
   badge?: number;
-  section?: string;
+  sectionKey?: string;
   audience: NavAudience;
 };
 
 const NAV: NavItem[] = [
   // ── Workspace (daily workflow) ──────────────────────────
-  { id: 'inbox', label: 'Inbox', icon: Inbox, status: 'live', audience: 'workspace' },
-  { id: 'work', label: 'Work', icon: BriefcaseBusiness, status: 'live', audience: 'workspace' },
-  { id: 'schedules', label: 'Schedules', icon: CalendarClock, status: 'live', audience: 'workspace' },
-  { id: 'chat', label: 'Chat', icon: MessageSquare, status: 'live', audience: 'workspace' },
-  { id: 'sessions', label: 'Sessions', icon: ListChecks, status: 'live', audience: 'workspace' },
-  { id: 'todos', label: 'Todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
-  { id: 'memory', label: 'Memory', icon: MemoryStick, status: 'live', audience: 'workspace' },
-  { id: 'artifacts', label: 'Artifacts', icon: Archive, status: 'live', audience: 'workspace' },
+  { id: 'inbox', labelKey: 'nav.inbox', icon: Inbox, status: 'live', audience: 'workspace' },
+  { id: 'work', labelKey: 'nav.work', icon: BriefcaseBusiness, status: 'live', audience: 'workspace' },
+  { id: 'schedules', labelKey: 'nav.schedules', icon: CalendarClock, status: 'live', audience: 'workspace' },
+  { id: 'chat', labelKey: 'nav.chat', icon: MessageSquare, status: 'live', audience: 'workspace' },
+  { id: 'sessions', labelKey: 'nav.sessions', icon: ListChecks, status: 'live', audience: 'workspace' },
+  { id: 'todos', labelKey: 'nav.todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
+  { id: 'memory', labelKey: 'nav.memory', icon: MemoryStick, status: 'live', audience: 'workspace' },
+  { id: 'artifacts', labelKey: 'nav.artifacts', icon: Archive, status: 'live', audience: 'workspace' },
 
   // ── Communication ─────────────────────────────────────
-  { id: 'communication-accounts', label: 'Communications', icon: MessageSquare, status: 'live', audience: 'workspace', section: 'Communication' },
+  { id: 'communication-accounts', labelKey: 'nav.communicationAccounts', icon: MessageSquare, status: 'live', audience: 'workspace', sectionKey: 'nav.section.communication' },
 
   // ── Configure (setup, rarely changed) ────────────────────
-  { id: 'setup', label: 'Setup', icon: Wrench, status: 'live', audience: 'configure', section: 'Configure' },
-  { id: 'providers', label: 'Providers', icon: Brain, status: 'live', audience: 'configure' },
-  { id: 'skills', label: 'Skills', icon: Zap, status: 'live', audience: 'configure' },
-  { id: 'rules', label: 'Rules', icon: Shield, status: 'live', audience: 'configure' },
-  { id: 'mcp', label: 'MCP', icon: Server, status: 'live', audience: 'configure' },
-  { id: 'settings', label: 'Settings', icon: Settings, status: 'live', audience: 'configure' },
+  { id: 'setup', labelKey: 'nav.setup', icon: Wrench, status: 'live', audience: 'configure', sectionKey: 'nav.section.configure' },
+  { id: 'providers', labelKey: 'nav.providers', icon: Brain, status: 'live', audience: 'configure' },
+  { id: 'skills', labelKey: 'nav.skills', icon: Zap, status: 'live', audience: 'configure' },
+  { id: 'rules', labelKey: 'nav.rules', icon: Shield, status: 'live', audience: 'configure' },
+  { id: 'mcp', labelKey: 'nav.mcp', icon: Server, status: 'live', audience: 'configure' },
+  { id: 'settings', labelKey: 'nav.settings', icon: Settings, status: 'live', audience: 'configure' },
 
   // ── Operations (debug / incident investigation) ──────────
-  { id: 'tasks', label: 'Tasks', icon: Activity, status: 'live', audience: 'operations', section: 'Operations' },
-  { id: 'evals', label: 'Evals', icon: BarChart3, status: 'live', audience: 'operations' },
-  { id: 'pairwise', label: 'Pairwise', icon: Scale, status: 'live', audience: 'operations' },
-  { id: 'run-specs', label: 'Run Specs', icon: ScrollText, status: 'live', audience: 'operations' },
-  { id: 'nodes', label: 'Nodes', icon: Network, status: 'live', audience: 'operations' },
-  { id: 'services', label: 'Services', icon: Activity, status: 'live', audience: 'operations' },
-  { id: 'logs', label: 'Logs', icon: TerminalSquare, status: 'live', audience: 'operations' },
-  { id: 'dead-letter', label: 'DLQ', icon: Skull, status: 'reserved', audience: 'operations' },
-  { id: 'diagnostics', label: 'Diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
-  { id: 'file-sync', label: 'File Sync', icon: Archive, status: 'live', audience: 'operations' },
+  { id: 'tasks', labelKey: 'nav.tasks', icon: Activity, status: 'live', audience: 'operations', sectionKey: 'nav.section.operations' },
+  { id: 'evals', labelKey: 'nav.evals', icon: BarChart3, status: 'live', audience: 'operations' },
+  { id: 'pairwise', labelKey: 'nav.pairwise', icon: Scale, status: 'live', audience: 'operations' },
+  { id: 'run-specs', labelKey: 'nav.runSpecs', icon: ScrollText, status: 'live', audience: 'operations' },
+  { id: 'nodes', labelKey: 'nav.nodes', icon: Network, status: 'live', audience: 'operations' },
+  { id: 'services', labelKey: 'nav.services', icon: Activity, status: 'live', audience: 'operations' },
+  { id: 'logs', labelKey: 'nav.logs', icon: TerminalSquare, status: 'live', audience: 'operations' },
+  { id: 'dead-letter', labelKey: 'nav.dlq', icon: Skull, status: 'reserved', audience: 'operations' },
+  { id: 'diagnostics', labelKey: 'nav.diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
+  { id: 'file-sync', labelKey: 'nav.fileSync', icon: Archive, status: 'live', audience: 'operations' },
 ];
 
 function pageFromHash(): PageId {
@@ -151,6 +152,7 @@ function pageFromHash(): PageId {
 }
 
 export function App() {
+  const { t, lang, setLang } = useI18n();
   const [page, setPage] = useState<PageId>(pageFromHash);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
@@ -300,22 +302,22 @@ export function App() {
           <div className="brand-mark"><Boxes size={18} /></div>
           <div>
             <div className="brand-title">los console</div>
-            <div className="brand-subtitle">agent runtime control</div>
+            <div className="brand-subtitle">{t('nav.brandSubtitle')}</div>
           </div>
         </div>
 
-        <nav className="nav-list" aria-label="Primary">
+        <nav className="nav-list" aria-label={t('nav.primaryAria')}>
           {NAV.map((item, idx) => {
             const Icon = item.icon;
             const prev = idx > 0 ? NAV[idx - 1] : null;
-            const showSection = item.section && (!prev || prev.section !== item.section);
+            const showSection = item.sectionKey && (!prev || prev.sectionKey !== item.sectionKey);
             const isOps = item.audience === 'operations';
             const isFirstOps = isOps && (!prev || prev.audience !== 'operations');
 
             // Inject onboarding after Communication section heading
             const content = [];
 
-            if (showSection && item.section === 'Communication') {
+            if (showSection && item.sectionKey === 'nav.section.communication') {
               content.push(
                 <div key="onboarding-nav-item">
                   <button
@@ -325,7 +327,7 @@ export function App() {
                     onClick={() => navigate('onboarding')}
                   >
                     <Play size={16} />
-                    <span>Onboarding</span>
+                    <span>{t('nav.onboarding')}</span>
                     <StatusPill status={needsOnboarding ? 'partial' : 'live'} />
                   </button>
                 </div>
@@ -343,11 +345,11 @@ export function App() {
                     onKeyDown={e => { if (e.key === 'Enter') toggleOps(); }}
                   >
                     {opsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    Operations
+                    {t('nav.section.operations')}
                     <span className="nav-section-count">{NAV.filter(n => n.audience === 'operations').length}</span>
                   </div>
                 ) : showSection ? (
-                  <div className="nav-section">{item.section}</div>
+                  <div className="nav-section">{item.sectionKey ? t(item.sectionKey) : null}</div>
                 ) : null}
                 {isOps && !opsExpanded ? null : (
                   <button
@@ -357,7 +359,7 @@ export function App() {
                     onClick={() => navigate(item.id)}
                   >
                     <Icon size={16} />
-                    <span>{item.label}</span>
+                    <span>{t(item.labelKey)}</span>
                     {item.id === 'sessions' && sessionCount.data !== undefined ? (
                       <span className="nav-badge">{sessionCount.data}</span>
                     ) : null}
@@ -371,15 +373,15 @@ export function App() {
         </nav>
 
         <div className="side-foot">
-          <div className="mini-label">Gateway</div>
+          <div className="mini-label">{t('nav.gateway')}</div>
           <div className="health-row">
             <span className={`health-dot ${health.data?.status === 'ok' ? 'ok' : ''}`} />
-            <span>{health.data?.status ?? 'checking'}</span>
+            <span>{healthText(health.data?.status, t)}</span>
           </div>
           <code>127.0.0.1:8080</code>
           {authEnabled && authenticated ? (
             <button type="button" className="logout-btn" onClick={() => { logout(); setAuthenticated(false); }}>
-              Sign out
+              {t('nav.signOut')}
             </button>
           ) : null}
         </div>
@@ -389,13 +391,25 @@ export function App() {
         <AuthBanner />
         <header className="topbar">
           <div>
-            <div className="eyebrow">Workspace</div>
-            <h1>{active.label}</h1>
+            <div className="eyebrow">{t('nav.workspace')}</div>
+            <h1>{t(active.labelKey)}</h1>
           </div>
           <div className="topbar-metrics">
-            <Metric label="health" value={health.data?.status ?? 'unknown'} tone={health.data?.status === 'ok' ? 'ok' : 'warn'} />
-            <Metric label="uptime" value={formatDuration(health.data?.uptime ?? 0)} />
-            <Metric label="mode" value="local mesh" />
+            <Metric label={t('nav.metric.health')} value={healthText(health.data?.status, t)} tone={health.data?.status === 'ok' ? 'ok' : 'warn'} />
+            <Metric label={t('nav.metric.uptime')} value={formatDuration(health.data?.uptime ?? 0)} />
+            <Metric label={t('nav.metric.mode')} value={t('common.localMesh')} />
+            <div className="lang-switch" role="group" aria-label={t('nav.languageAria')}>
+              {LANGS.map(l => (
+                <button
+                  key={l}
+                  type="button"
+                  className={lang === l ? 'active' : ''}
+                  onClick={() => setLang(l)}
+                >
+                  {l === 'zh' ? '中文' : 'EN'}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
@@ -450,6 +464,16 @@ function workItemAsTodo(item: WorkItemProjection): TodoItem {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
+}
+
+function healthText(status: string | undefined, t: (key: string) => string): string {
+  if (!status) return t('common.checking');
+  const known: Record<string, string> = {
+    ok: 'common.ok',
+    degraded: 'common.degraded',
+    down: 'common.down',
+  };
+  return known[status] ? t(known[status]) : status;
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: 'ok' | 'warn' }) {

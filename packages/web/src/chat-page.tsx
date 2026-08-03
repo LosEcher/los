@@ -27,6 +27,7 @@ import {
   type StreamRow,
 } from './chat-helpers.js';
 import { EmptyText, Fact } from './ui';
+import { useI18n } from './i18n';
 import { ContextChip } from './chat-ui.js';
 import { ChatComposer } from './chat-composer.js';
 import type { ChatAdvancedSettingsState } from './chat-advanced-settings.js';
@@ -62,6 +63,7 @@ export function ChatPage({
   onTodoContextSet: (todo: TodoItem) => void;
   onTodoContextClear: () => void;
 }) {
+  const { t } = useI18n();
   const [workspaceRoot, setWorkspaceRoot] = useState(() => {
     try { return localStorage.getItem('los-workspace') ?? ''; } catch { return ''; }
   });
@@ -208,8 +210,8 @@ export function ChatPage({
     setHookSessionId(selectedSessionId);
     setTaskRunId(null);
     run.historyLoadedForSession.current = null;
-    run.setRows([{ id: crypto.randomUUID(), event: 'session.loading', message: `Loading session ${selectedSessionId}...`, level: 'normal' }]);
-    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: `Loading session ${selectedSessionId}...`, eventType: 'session.loading', toolCalls: [] }]);
+    run.setRows([{ id: crypto.randomUUID(), event: 'session.loading', message: t('chat.loadingSession', { id: selectedSessionId }), level: 'normal' }]);
+    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: t('chat.loadingSession', { id: selectedSessionId }), eventType: 'session.loading', toolCalls: [] }]);
   }, [selectedSessionId, sessionId, run.running]);
 
   // Session resume
@@ -234,8 +236,8 @@ export function ChatPage({
     setHookSessionId(null);
     setTaskRunId(null);
     run.historyLoadedForSession.current = null;
-    run.setRows([{ id: crypto.randomUUID(), event: 'session.branch', message: `Branching from ${branchFromSession}. Enter your prompt to start.`, level: 'ok' }]);
-    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: `Branching from ${branchFromSession}. Enter your prompt to start.`, eventType: 'session.branch', level: 'ok', toolCalls: [] }]);
+    run.setRows([{ id: crypto.randomUUID(), event: 'session.branch', message: t('chat.branchingFrom', { id: branchFromSession }), level: 'ok' }]);
+    run.setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: t('chat.branchingFrom', { id: branchFromSession }), eventType: 'session.branch', level: 'ok', toolCalls: [] }]);
     Promise.all([getJson<SessionDetail>(`/sessions/${branchFromSession}`), getJson<SessionTraceResponse>(`/sessions/${branchFromSession}/trace`)])
       .then(([detail, trace]) => {
         if (detail && Array.isArray(detail.messages) && detail.messages.length > 0) {
@@ -280,34 +282,34 @@ export function ChatPage({
       <div className="panel main-panel">
         <div className="panel-head">
           <div>
-            <h2>Chat Run</h2>
-            <p>Current run controls feed Gateway `/chat`; session evidence stays in the ledger.</p>
+            <h2>{t('chat.title')}</h2>
+            <p>{t('chat.subtitle')}</p>
           </div>
           <div className="toolbar">
             <button className={`ghost-btn${newChatConfirming ? ' danger' : ''}`} type="button" disabled={run.running} onClick={startNewChat}>
-              <MessageSquarePlus size={14} /> {newChatConfirming ? 'confirm new?' : 'new chat'}
+              <MessageSquarePlus size={14} /> {newChatConfirming ? t('chat.confirmNew') : t('chat.newChat')}
             </button>
             <button className="ghost-btn" type="button" onClick={() => { run.setRows([]); run.setMessages([]); }}>
-              <RefreshCcw size={14} /> clear
+              <RefreshCcw size={14} /> {t('chat.clear')}
             </button>
             <button className="ghost-btn" type="button" onClick={() => setShowFiles(!showFiles)}>
-              <Folder size={14} /> files
+              <Folder size={14} /> {t('chat.files')}
             </button>
           </div>
         </div>
 
         <div className="chat-context-bar">
-          <ContextChip label="session" value={sessionId ?? 'new'} tone={sessionId ? 'ok' : undefined} />
-          {activeTodoContext ? <ContextChip label="todo" value={activeTodoContext.id} tone="ok" /> : null}
+          <ContextChip label={t('chat.chip.session')} value={sessionId ?? t('chat.chip.value.new')} tone={sessionId ? 'ok' : undefined} />
+          {activeTodoContext ? <ContextChip label={t('chat.chip.todo')} value={activeTodoContext.id} tone="ok" /> : null}
           {runtimeKind !== 'los' ? (
-            <ContextChip label="runtime" value={runtimeKind} tone="warn" />
+            <ContextChip label={t('chat.chip.runtime')} value={runtimeKind} tone="warn" />
           ) : (
             <>
-              <ContextChip label="provider" value={provider || 'default'} />
-              <ContextChip label="model" value={model || 'provider default'} />
+              <ContextChip label={t('chat.chip.provider')} value={provider || t('chat.chip.value.providerDefault')} />
+              <ContextChip label={t('chat.chip.model')} value={model || t('chat.chip.value.providerDefault')} />
             </>
           )}
-          <ContextChip label="task" value={taskRunId ?? (run.running ? 'starting' : 'idle')} tone={run.running ? 'warn' : undefined} />
+          <ContextChip label={t('chat.chip.task')} value={taskRunId ?? (run.running ? t('chat.chip.value.starting') : t('chat.chip.value.idle'))} tone={run.running ? 'warn' : undefined} />
         </div>
 
         <ChatMessages
@@ -337,7 +339,7 @@ export function ChatPage({
             </>
           )}
         >
-          {run.rows.length === 0 ? <EmptyText text="No stream events yet." /> : run.rows.map(row => (
+          {run.rows.length === 0 ? <EmptyText text={t('chat.emptyStream')} /> : run.rows.map(row => (
             <div className={`stream-row${row.event === '---' || row.event === 'history.end' ? ' stream-separator' : ''}`} data-level={row.level ?? 'normal'} key={row.id}>
               <span className="stream-event">{row.event}</span>
               <div><p>{row.message}</p>{row.meta ? <code>{row.meta}</code> : null}</div>
@@ -359,17 +361,17 @@ export function ChatPage({
 
       <aside className="panel inspector">
         <div className="panel-head compact">
-          <h2>Run Evidence</h2>
+          <h2>{t('chat.runEvidence')}</h2>
           <Activity size={16} />
         </div>
         <div className="fact-list compact-facts">
-          <Fact label="connection" value={run.connectionState === 'connected' ? 'WS live' : run.connectionState === 'reconnecting' ? 'reconnecting…' : run.connectionState === 'connecting' ? 'connecting…' : 'polling'} />
-          <Fact label="session" value={sessionId ?? 'not started'} />
-          <Fact label="task run" value={taskRunId ?? (run.running ? 'starting' : 'idle')} />
-          <Fact label="last provider" value={metadataText(sessionMetadata.provider) ?? 'none'} />
-          <Fact label="last model" value={metadataText(sessionMetadata.model) ?? 'none'} />
-          <Fact label="settings" value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
-          <Fact label="tokens" value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
+          <Fact label={t('chat.fact.connection')} value={run.connectionState === 'connected' ? t('chat.conn.wsLive') : run.connectionState === 'reconnecting' ? t('chat.conn.reconnecting') : run.connectionState === 'connecting' ? t('chat.conn.connecting') : t('chat.conn.polling')} />
+          <Fact label={t('chat.fact.session')} value={sessionId ?? t('chat.notStarted')} />
+          <Fact label={t('chat.fact.taskRun')} value={taskRunId ?? (run.running ? t('chat.chip.value.starting') : t('chat.chip.value.idle'))} />
+          <Fact label={t('chat.fact.lastProvider')} value={metadataText(sessionMetadata.provider) ?? t('common.none')} />
+          <Fact label={t('chat.fact.lastModel')} value={metadataText(sessionMetadata.model) ?? t('common.none')} />
+          <Fact label={t('chat.fact.settings')} value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
+          <Fact label={t('chat.fact.tokens')} value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
         </div>
       </aside>
 

@@ -8,6 +8,7 @@ import {
   type GovernedAgentTaskGraphResponse,
 } from '../api';
 import { EmptyText, Fact, Field } from '../ui';
+import { useI18n } from '../i18n';
 
 type WorkerDraft = { title: string; surfaces: string };
 
@@ -17,12 +18,13 @@ const INITIAL_WORKERS: WorkerDraft[] = [
 ];
 
 export function AgentGraphControl() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [graphId, setGraphId] = useState('');
   const [runSpecId, setRunSpecId] = useState('');
   const [workers, setWorkers] = useState<WorkerDraft[]>(INITIAL_WORKERS);
-  const [verifierTitle, setVerifierTitle] = useState('Verify required checks and worker output');
+  const [verifierTitle, setVerifierTitle] = useState(() => t('ops.graph.verifierTitleDefault'));
 
   const graph = useQuery({
     queryKey: ['governed-agent-graph', graphId],
@@ -35,7 +37,7 @@ export function AgentGraphControl() {
       runSpecId,
       maxParallelTasks: workers.length,
       workers: workers.map((worker, index) => ({
-        title: worker.title || `Worker ${index + 1}`,
+        title: worker.title || t('ops.graph.workerDefaultTitle', { index: index + 1 }),
         editableSurfaces: splitSurfaces(worker.surfaces),
       })),
       verifier: { title: verifierTitle },
@@ -60,26 +62,26 @@ export function AgentGraphControl() {
       <div className="governed-graph-bar">
         <div className="governed-graph-title">
           <GitMerge size={15} />
-          <div><strong>Optional task graph</strong><small>Use after a Work plan is approved; ordinary Work does not need this.</small></div>
-          {control ? <span className={`status-text ${control.integrationStatus}`}>{graphStatusLabel(control.integrationStatus)}</span> : null}
+          <div><strong>{t('ops.graph.title')}</strong><small>{t('ops.graph.subtitle')}</small></div>
+          {control ? <span className={`status-text ${control.integrationStatus}`}>{graphStatusLabel(control.integrationStatus, t)}</span> : null}
         </div>
         <button className={`ghost-btn ${expanded ? 'active' : ''}`} type="button" onClick={() => setExpanded(value => !value)}>
-          <Plus size={14} /> {expanded ? 'close' : 'open or create'}
+          <Plus size={14} /> {expanded ? t('common.close') : t('ops.graph.openOrCreate')}
         </button>
       </div>
 
       {expanded ? (
         <div className="governed-graph-form">
           <div className="governed-graph-open">
-            <Field label="Open an existing graph">
-              <input value={graphId} onChange={event => setGraphId(event.target.value.trim())} placeholder="Paste graph ID, e.g. manual-web-graph-..." />
+            <Field label={t('ops.graph.openExistingLabel')}>
+              <input value={graphId} onChange={event => setGraphId(event.target.value.trim())} placeholder={t('ops.graph.graphIdPlaceholder')} />
             </Field>
             <button className="ghost-btn" type="button" disabled={!graphId} onClick={() => graph.refetch()}>
-              <Search size={14} /> open graph
+              <Search size={14} /> {t('ops.graph.openGraphButton')}
             </button>
           </div>
-          <p className="governed-graph-help">A graph is a bounded group of workers plus an independent verifier. It is not a replacement for Work approval, and <b>integrate</b> records operator confirmation; it does not merge or push code.</p>
-          <Field label="Approved run spec">
+          <p className="governed-graph-help">{t('ops.graph.helpIntro')} <b>integrate</b> {t('ops.graph.helpTail')}</p>
+          <Field label={t('ops.graph.runSpecLabel')}>
             <input value={runSpecId} onChange={event => setRunSpecId(event.target.value)} placeholder="run-..." />
           </Field>
           <div className="governed-worker-list">
@@ -87,13 +89,13 @@ export function AgentGraphControl() {
               <div className="governed-worker-row" key={index}>
                 <span className="worker-index">{index + 1}</span>
                 <input
-                  aria-label={`Worker ${index + 1} title`}
+                  aria-label={t('ops.graph.workerTitleAria', { index: index + 1 })}
                   value={worker.title}
                   onChange={event => updateWorker(index, 'title', event.target.value, setWorkers)}
-                  placeholder="Worker title"
+                  placeholder={t('ops.graph.workerTitlePlaceholder')}
                 />
                 <input
-                  aria-label={`Worker ${index + 1} editable surfaces`}
+                  aria-label={t('ops.graph.workerSurfacesAria', { index: index + 1 })}
                   value={worker.surfaces}
                   onChange={event => updateWorker(index, 'surfaces', event.target.value, setWorkers)}
                   placeholder="packages/agent/src/..."
@@ -101,8 +103,8 @@ export function AgentGraphControl() {
                 <button
                   className="icon-btn"
                   type="button"
-                  aria-label={`Remove worker ${index + 1}`}
-                  title="Remove worker"
+                  aria-label={t('ops.graph.removeWorkerAria', { index: index + 1 })}
+                  title={t('ops.graph.removeWorkerTitle')}
                   disabled={workers.length <= 2}
                   onClick={() => setWorkers(items => items.filter((_, itemIndex) => itemIndex !== index))}
                 >
@@ -118,9 +120,9 @@ export function AgentGraphControl() {
               disabled={workers.length >= 4}
               onClick={() => setWorkers(items => [...items, { title: '', surfaces: '' }])}
             >
-              <Plus size={14} /> worker
+              <Plus size={14} /> {t('ops.graph.addWorkerButton')}
             </button>
-            <Field label="Independent verifier">
+            <Field label={t('ops.graph.verifierLabel')}>
               <input value={verifierTitle} onChange={event => setVerifierTitle(event.target.value)} />
             </Field>
             <button
@@ -129,7 +131,7 @@ export function AgentGraphControl() {
               disabled={!runSpecId || workers.some(worker => splitSurfaces(worker.surfaces).length === 0) || create.isPending}
               onClick={() => create.mutate()}
             >
-              <Plus size={14} /> create governed graph
+              <Plus size={14} /> {t('ops.graph.createGraphButton')}
             </button>
           </div>
           {create.error ? <p className="form-error">{create.error.message}</p> : null}
@@ -139,20 +141,20 @@ export function AgentGraphControl() {
       {current ? (
         <div className="governed-graph-watch">
           <div className="governed-graph-facts">
-            <Fact label="graph" value={current.graphId} />
-            <Fact label="operator owner" value={control?.integrationOwner ?? 'legacy graph'} />
-            <Fact label="worker progress" value={`${current.completion.counts.succeeded}/${current.completion.counts.total} succeeded`} />
-            <Fact label="verifier" value={`${current.completion.counts.succeededVerifier}/${current.completion.counts.verifier} passed`} />
+            <Fact label={t('ops.tasks.factGraph')} value={current.graphId} />
+            <Fact label={t('ops.graph.factOwner')} value={control?.integrationOwner ?? t('ops.graph.legacyGraph')} />
+            <Fact label={t('ops.graph.factWorkerProgress')} value={t('ops.graph.workerProgressValue', { succeeded: current.completion.counts.succeeded, total: current.completion.counts.total })} />
+            <Fact label={t('ops.graph.factVerifier')} value={t('ops.graph.verifierPassedValue', { succeeded: current.completion.counts.succeededVerifier, total: current.completion.counts.verifier })} />
           </div>
           <div className="inline-actions governed-graph-actions">
             <button className="ghost-btn" type="button" disabled={!active || run.isPending} onClick={() => run.mutate()}>
-              <Play size={14} /> run workers
+              <Play size={14} /> {t('ops.graph.runWorkersButton')}
             </button>
             <button className="ghost-btn danger" type="button" disabled={!active || cancel.isPending} onClick={() => cancel.mutate()}>
-              <Square size={14} /> stop graph
+              <Square size={14} /> {t('ops.graph.stopGraphButton')}
             </button>
             <button className="ghost-btn" type="button" disabled={control?.integrationStatus !== 'ready' || integrate.isPending} onClick={() => integrate.mutate()}>
-              <GitMerge size={14} /> confirm integration
+              <GitMerge size={14} /> {t('ops.graph.confirmIntegrationButton')}
             </button>
           </div>
           <div className="governed-task-lines">
@@ -160,8 +162,8 @@ export function AgentGraphControl() {
               <div className="governed-task-line" key={task.id}>
                 <span className={`status-dot ${task.status}`} aria-hidden="true" />
                 <span>{task.title}</span>
-                <span>{roleLabel(task.role)}</span>
-                <span>{taskStatusLabel(task.status)}</span>
+                <span>{roleLabel(task.role, t)}</span>
+                <span>{taskStatusLabel(task.status, t)}</span>
               </div>
             ))}
           </div>
@@ -169,31 +171,31 @@ export function AgentGraphControl() {
             <p className="form-error">{(graph.error ?? run.error ?? cancel.error ?? integrate.error)?.message}</p>
           ) : null}
         </div>
-      ) : graphId && !graph.isLoading ? <EmptyText text="Graph evidence is unavailable." /> : null}
+      ) : graphId && !graph.isLoading ? <EmptyText text={t('ops.graph.evidenceUnavailable')} /> : null}
     </div>
   );
 }
 
-function graphStatusLabel(status: string): string {
+function graphStatusLabel(status: string, t: (key: string) => string): string {
   switch (status) {
-    case 'pending_verification': return 'Waiting for verifier';
-    case 'ready': return 'Ready to confirm';
-    case 'integrated': return 'Integration confirmed';
-    case 'cancelled': return 'Cancelled';
+    case 'pending_verification': return t('ops.graph.integrationWaiting');
+    case 'ready': return t('ops.graph.integrationReady');
+    case 'integrated': return t('ops.graph.integrationConfirmed');
+    case 'cancelled': return t('ops.graph.integrationCancelled');
     default: return status.replaceAll('_', ' ');
   }
 }
 
-function roleLabel(role: string): string {
-  if (role === 'executor') return 'worker';
-  if (role === 'verifier') return 'verifier';
+function roleLabel(role: string, t: (key: string) => string): string {
+  if (role === 'executor') return t('ops.graph.roleWorker');
+  if (role === 'verifier') return t('ops.graph.roleVerifier');
   return role;
 }
 
-function taskStatusLabel(status: string): string {
-  if (status === 'succeeded') return 'passed';
-  if (status === 'queued') return 'waiting';
-  if (status === 'running') return 'working';
+function taskStatusLabel(status: string, t: (key: string) => string): string {
+  if (status === 'succeeded') return t('ops.graph.statusPassed');
+  if (status === 'queued') return t('ops.graph.statusWaiting');
+  if (status === 'running') return t('ops.graph.statusWorking');
   return status;
 }
 

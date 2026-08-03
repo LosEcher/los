@@ -3,10 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { getJson, postJson, type ServiceInstance } from './api';
 import { DataTable, EmptyText, Fact, formatDate, StatusPill } from './ui';
+import { useI18n } from './i18n';
 
 export function ServicesPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { t } = useI18n();
 
   const services = useQuery({
     queryKey: ['services'],
@@ -34,15 +36,15 @@ export function ServicesPage() {
           <div className="title-row">
             <Activity size={18} />
             <div>
-              <h2>Services</h2>
-              <p>Mesh service instances with health, readiness, and rollout state.</p>
+              <h2>{t('assets.service.title')}</h2>
+              <p>{t('assets.service.subtitle')}</p>
             </div>
           </div>
           <StatusPill status="live" />
         </div>
         <DataTable
           loading={services.isLoading}
-          empty="No service instances registered."
+          empty={t('assets.service.emptyList')}
           rows={list}
           renderRow={service => (
             <button
@@ -56,14 +58,14 @@ export function ServicesPage() {
               <span className={`status-text ${service.status}`}>{service.status}</span>
               <span>{service.role}</span>
               <span>{service.rolloutState ?? 'idle'}</span>
-              <span>{service.readiness.ready ? 'ready' : 'not ready'}</span>
+              <span>{service.readiness.ready ? t('assets.label.ready') : t('assets.service.notReady')}</span>
               <span>{formatDate(service.lastHeartbeatAt)}</span>
             </button>
           )}
         />
         {list.length === 0 && !services.isLoading ? (
           <div className="empty-guide">
-            <p>Services represent running los processes (gateway, executors, bots). Start <code>pnpm start</code> to register the gateway.</p>
+            <p>{t('assets.service.emptyGuidePre')} <code>pnpm start</code> {t('assets.service.emptyGuidePost')}</p>
           </div>
         ) : null}
       </div>
@@ -72,34 +74,34 @@ export function ServicesPage() {
         {selected ? (
           <>
             <div className="panel-head compact">
-              <h2>Service Detail</h2>
+              <h2>{t('assets.service.detailTitle')}</h2>
               <span className="mono-chip">{selected.serviceKind}</span>
             </div>
             <div className="fact-list compact-facts">
-              <Fact label="id" value={selected.serviceId} />
-              <Fact label="kind" value={selected.serviceKind} />
-              <Fact label="host" value={selected.hostLabel} />
-              <Fact label="status" value={selected.status} />
-              <Fact label="role" value={selected.role} />
-              <Fact label="version" value={selected.version ?? 'unknown'} />
-              <Fact label="bind url" value={selected.bindUrl ?? 'none'} />
-              <Fact label="public url" value={selected.publicUrl ?? 'none'} />
-              <Fact label="rollout" value={`${selected.rolloutState ?? 'idle'}${selected.rolloutMessage ? ` · ${selected.rolloutMessage}` : ''}`} />
-              <Fact label="priority" value={String(selected.priority)} />
-              <Fact label="last heartbeat" value={formatDate(selected.lastHeartbeatAt)} />
-              <Fact label="ready" value={String(selected.readiness.ready)} />
+              <Fact label={t('assets.label.id')} value={selected.serviceId} />
+              <Fact label={t('assets.label.kind')} value={selected.serviceKind} />
+              <Fact label={t('assets.label.host')} value={selected.hostLabel} />
+              <Fact label={t('assets.label.status')} value={selected.status} />
+              <Fact label={t('assets.label.role')} value={selected.role} />
+              <Fact label={t('assets.label.version')} value={selected.version ?? t('common.unknown')} />
+              <Fact label={t('assets.label.bindUrl')} value={selected.bindUrl ?? t('common.none')} />
+              <Fact label={t('assets.label.publicUrl')} value={selected.publicUrl ?? t('common.none')} />
+              <Fact label={t('assets.label.rollout')} value={`${selected.rolloutState ?? 'idle'}${selected.rolloutMessage ? ` ${t('assets.service.rolloutMessageSuffix', { message: selected.rolloutMessage })}` : ''}`} />
+              <Fact label={t('assets.label.priority')} value={String(selected.priority)} />
+              <Fact label={t('assets.label.lastHeartbeat')} value={formatDate(selected.lastHeartbeatAt)} />
+              <Fact label={t('assets.label.ready')} value={String(selected.readiness.ready)} />
             </div>
             {selected.readiness.blockers.length > 0 ? (
               <div className="definition-list">
                 {selected.readiness.blockers.map((b, i) => (
-                  <div className="definition" key={i}><strong>blocker</strong><span>{b}</span></div>
+                  <div className="definition" key={i}><strong>{t('assets.service.blocker')}</strong><span>{b}</span></div>
                 ))}
               </div>
             ) : null}
             {selected.readiness.warnings.length > 0 ? (
               <div className="definition-list">
                 {selected.readiness.warnings.map((w, i) => (
-                  <div className="definition" key={i}><strong>warning</strong><span>{w}</span></div>
+                  <div className="definition" key={i}><strong>{t('assets.service.warning')}</strong><span>{w}</span></div>
                 ))}
               </div>
             ) : null}
@@ -110,7 +112,7 @@ export function ServicesPage() {
                 disabled={drain.isPending || selected.status === 'draining'}
                 onClick={() => drain.mutate(selected.serviceId)}
               >
-                <ArrowDownCircle size={14} /> drain
+                <ArrowDownCircle size={14} /> {t('assets.service.drain')}
               </button>
               <button
                 className="ghost-btn"
@@ -118,30 +120,30 @@ export function ServicesPage() {
                 disabled={promote.isPending || selected.status === 'online'}
                 onClick={() => promote.mutate(selected.serviceId)}
               >
-                <ArrowUpCircle size={14} /> promote
+                <ArrowUpCircle size={14} /> {t('assets.service.promote')}
               </button>
             </div>
             {selected.capabilities && Object.keys(selected.capabilities).length > 0 ? (
               <div className="json-block">
-                <strong>capabilities</strong>
+                <strong>{t('assets.label.capabilities')}</strong>
                 <pre>{JSON.stringify(selected.capabilities, null, 2)}</pre>
               </div>
             ) : null}
             {selected.health && Object.keys(selected.health).length > 0 ? (
               <div className="json-block">
-                <strong>health</strong>
+                <strong>{t('assets.service.health')}</strong>
                 <pre>{JSON.stringify(selected.health, null, 2)}</pre>
               </div>
             ) : null}
             {selected.load && Object.keys(selected.load).length > 0 ? (
               <div className="json-block">
-                <strong>load</strong>
+                <strong>{t('assets.service.load')}</strong>
                 <pre>{JSON.stringify(selected.load, null, 2)}</pre>
               </div>
             ) : null}
           </>
         ) : (
-          <EmptyText text="Select a service to inspect readiness and lifecycle state." />
+          <EmptyText text={t('assets.service.selectHint')} />
         )}
       </aside>
     </section>

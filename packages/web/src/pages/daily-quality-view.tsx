@@ -9,10 +9,12 @@ import {
   type DailyAgentQualitySnapshot,
 } from '../api/index.js';
 import { Button, formatDate } from '../ui.js';
+import { useI18n } from '../i18n';
 
 const BASELINE_QUERY_KEY = ['daily-agent-quality', 28] as const;
 
 export function DailyQualityView() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const baseline = useQuery({
     queryKey: BASELINE_QUERY_KEY,
@@ -32,8 +34,8 @@ export function DailyQualityView() {
     },
   });
 
-  if (baseline.isLoading) return <div className="loading-block">Loading daily quality evidence...</div>;
-  if (baseline.error) return <div className="daily-error">Daily quality unavailable: {String(baseline.error)}</div>;
+  if (baseline.isLoading) return <div className="loading-block">{t('ops.dailyQuality.loading')}</div>;
+  if (baseline.error) return <div className="daily-error">{t('ops.dailyQuality.unavailablePrefix', { error: String(baseline.error) })}</div>;
   if (!baseline.data) return null;
 
   const { evidenceWindow, snapshots } = baseline.data;
@@ -45,13 +47,13 @@ export function DailyQualityView() {
         <div className="quality-evidence-main">
           <CalendarClock size={18} />
           <div>
-            <span className="quality-kicker">28-day evidence window</span>
-            <strong>{evidenceWindow.observedDays} of {evidenceWindow.requiredDays} UTC days observed</strong>
+            <span className="quality-kicker">{t('ops.dailyQuality.evidenceWindowLabel')}</span>
+            <strong>{t('ops.dailyQuality.daysObserved', { observed: evidenceWindow.observedDays, required: evidenceWindow.requiredDays })}</strong>
           </div>
         </div>
         <div className="quality-evidence-range">
           <span>{evidenceWindow.expectedFrom}</span>
-          <span aria-hidden="true">to</span>
+          <span aria-hidden="true">{t('ops.dailyQuality.toLabel')}</span>
           <span>{evidenceWindow.expectedTo}</span>
         </div>
         <span className="quality-window-status" data-status={evidenceWindow.status}>{evidenceWindow.status}</span>
@@ -59,78 +61,78 @@ export function DailyQualityView() {
           variant="ghost"
           onClick={() => capture.mutate()}
           disabled={capture.isPending}
-          title="Capture today's quality snapshot"
+          title={t('ops.dailyQuality.captureTitle')}
         >
           <RefreshCw size={14} className={capture.isPending ? 'spin' : ''} />
-          {capture.isPending ? 'Capturing...' : 'Capture'}
+          {capture.isPending ? t('ops.dailyQuality.capturing') : t('ops.dailyQuality.captureButton')}
         </Button>
       </section>
 
-      {capture.error ? <div className="daily-error">Capture failed: {String(capture.error)}</div> : null}
+      {capture.error ? <div className="daily-error">{t('ops.dailyQuality.captureFailedPrefix', { error: String(capture.error) })}</div> : null}
 
       {!latest ? (
         <div className="daily-empty">
           <CalendarClock size={22} />
-          <strong>No quality snapshots</strong>
-          <span>Capture the first UTC-day baseline.</span>
+          <strong>{t('ops.dailyQuality.noSnapshots')}</strong>
+          <span>{t('ops.dailyQuality.captureFirstHint')}</span>
         </div>
       ) : (
         <>
           <div className="quality-latest-head">
             <div>
-              <span className="quality-kicker">Latest snapshot</span>
+              <span className="quality-kicker">{t('ops.dailyQuality.latestSnapshotLabel')}</span>
               <strong>{latest.snapshotDate}</strong>
             </div>
-            <span>Captured {formatDate(latest.capturedAt)}</span>
+            <span>{t('ops.dailyQuality.capturedAtLabel', { date: formatDate(latest.capturedAt) })}</span>
           </div>
 
           <div className="quality-metric-groups">
-            <MetricGroup title="Inbox" metrics={[
-              ['Actionable', count(latest.inbox.actionableCount)],
-              ['Approval', count(latest.inbox.approvalRequired)],
-              ['Recovery', count(latest.inbox.recoveryRequired)],
-              ['Verification blocked', count(latest.inbox.verificationBlocked)],
-              ['Review ready', count(latest.inbox.reviewReady)],
-              ['Oldest item', duration(latest.inbox.oldestAgeMs)],
-              ['Over 24h', count(latest.inbox.over24h)],
-              ['Over 72h', count(latest.inbox.over72h)],
+            <MetricGroup title={t('ops.dailyQuality.groupInbox')} metrics={[
+              [t('ops.dailyQuality.inboxActionable'), count(latest.inbox.actionableCount)],
+              [t('ops.dailyQuality.inboxApproval'), count(latest.inbox.approvalRequired)],
+              [t('ops.dailyQuality.inboxRecovery'), count(latest.inbox.recoveryRequired)],
+              [t('ops.dailyQuality.inboxVerificationBlocked'), count(latest.inbox.verificationBlocked)],
+              [t('ops.dailyQuality.inboxReviewReady'), count(latest.inbox.reviewReady)],
+              [t('ops.dailyQuality.inboxOldestItem'), duration(latest.inbox.oldestAgeMs, t)],
+              [t('ops.dailyQuality.inboxOver24h'), count(latest.inbox.over24h)],
+              [t('ops.dailyQuality.inboxOver72h'), count(latest.inbox.over72h)],
             ]} />
-            <MetricGroup title="Schedules" metrics={[
-              ['Runs', count(latest.schedule.runCount)],
-              ['Succeeded', count(latest.schedule.succeeded)],
-              ['No-op', count(latest.schedule.noOp)],
-              ['Failed', count(latest.schedule.failed)],
-              ['Awaiting approval', count(latest.schedule.awaitingApproval)],
-              ['No-op rate', percent(latest.schedule.noOpRate)],
-              ['Failure rate', percent(latest.schedule.failureRate)],
-              ['Avg lateness', duration(latest.schedule.averageLatenessMs)],
+            <MetricGroup title={t('ops.dailyQuality.groupSchedules')} metrics={[
+              [t('ops.dailyQuality.schedRuns'), count(latest.schedule.runCount)],
+              [t('ops.dailyQuality.schedSucceeded'), count(latest.schedule.succeeded)],
+              [t('ops.dailyQuality.schedNoOp'), count(latest.schedule.noOp)],
+              [t('ops.dailyQuality.schedFailed'), count(latest.schedule.failed)],
+              [t('ops.dailyQuality.schedAwaitingApproval'), count(latest.schedule.awaitingApproval)],
+              [t('ops.dailyQuality.schedNoOpRate'), percent(latest.schedule.noOpRate)],
+              [t('ops.dailyQuality.schedFailureRate'), percent(latest.schedule.failureRate)],
+              [t('ops.dailyQuality.schedAvgLateness'), duration(latest.schedule.averageLatenessMs, t)],
             ]} />
-            <MetricGroup title="Recovery" metrics={[
-              ['Required now', count(latest.recovery.requiredItems)],
-              ['Events', count(latest.recovery.recoveryEvents)],
-              ['Retry attempts', count(latest.recovery.retryAttempts)],
-              ['Recovered', count(latest.recovery.recoveredSuccesses)],
-              ['Success rate', percent(latest.recovery.recoverySuccessRate)],
+            <MetricGroup title={t('ops.dailyQuality.groupRecovery')} metrics={[
+              [t('ops.dailyQuality.recoveryRequiredNow'), count(latest.recovery.requiredItems)],
+              [t('ops.dailyQuality.recoveryEvents'), count(latest.recovery.recoveryEvents)],
+              [t('ops.dailyQuality.recoveryRetryAttempts'), count(latest.recovery.retryAttempts)],
+              [t('ops.dailyQuality.recoveryRecovered'), count(latest.recovery.recoveredSuccesses)],
+              [t('ops.dailyQuality.recoverySuccessRate'), percent(latest.recovery.recoverySuccessRate)],
             ]} />
-            <MetricGroup title="Verification" metrics={[
-              ['Work items', count(latest.verification.workItems)],
-              ['Required checks', count(latest.verification.required)],
-              ['Succeeded', count(latest.verification.succeeded)],
-              ['Skipped', count(latest.verification.skipped)],
-              ['Failed', count(latest.verification.failed)],
-              ['Pending', count(latest.verification.pending)],
-              ['Missing', count(latest.verification.missing)],
-              ['Coverage', percent(latest.verification.coverage)],
+            <MetricGroup title={t('ops.dailyQuality.groupVerification')} metrics={[
+              [t('ops.dailyQuality.verifWorkItems'), count(latest.verification.workItems)],
+              [t('ops.dailyQuality.verifRequiredChecks'), count(latest.verification.required)],
+              [t('ops.dailyQuality.verifSucceeded'), count(latest.verification.succeeded)],
+              [t('ops.dailyQuality.verifSkipped'), count(latest.verification.skipped)],
+              [t('ops.dailyQuality.verifFailed'), count(latest.verification.failed)],
+              [t('ops.dailyQuality.verifPending'), count(latest.verification.pending)],
+              [t('ops.dailyQuality.verifMissing'), count(latest.verification.missing)],
+              [t('ops.dailyQuality.verifCoverage'), percent(latest.verification.coverage)],
             ]} />
-            <MetricGroup title="Provider / Model Quality" metrics={[
-              ['Evals', count(latest.providerQuality.evalCount)],
-              ['Successes', count(latest.providerQuality.successCount)],
-              ['Failures', count(latest.providerQuality.failureCount)],
-              ['Success rate', percent(latest.providerQuality.successRate)],
-              ['Avg latency', duration(latest.providerQuality.averageLatencyMs)],
-              ['Avg retries', latest.providerQuality.averageRetryCount.toFixed(1)],
-              ['Tool errors', count(latest.providerQuality.toolErrorCount)],
-              ['Model cost', `$${latest.providerQuality.modelCost.toFixed(4)}`],
+            <MetricGroup title={t('ops.dailyQuality.groupProviderModel')} metrics={[
+              [t('ops.dailyQuality.provEvals'), count(latest.providerQuality.evalCount)],
+              [t('ops.dailyQuality.provSuccesses'), count(latest.providerQuality.successCount)],
+              [t('ops.dailyQuality.provFailures'), count(latest.providerQuality.failureCount)],
+              [t('ops.dailyQuality.provSuccessRate'), percent(latest.providerQuality.successRate)],
+              [t('ops.dailyQuality.provAvgLatency'), duration(latest.providerQuality.averageLatencyMs, t)],
+              [t('ops.dailyQuality.provAvgRetries'), latest.providerQuality.averageRetryCount.toFixed(1)],
+              [t('ops.dailyQuality.provToolErrors'), count(latest.providerQuality.toolErrorCount)],
+              [t('ops.dailyQuality.provModelCost'), `$${latest.providerQuality.modelCost.toFixed(4)}`],
             ]} />
           </div>
 
@@ -140,7 +142,7 @@ export function DailyQualityView() {
 
       {evidenceWindow.missingDates.length > 0 ? (
         <details className="quality-missing-dates">
-          <summary>{evidenceWindow.missingDates.length} missing UTC dates</summary>
+          <summary>{t('ops.dailyQuality.missingDatesLabel', { count: evidenceWindow.missingDates.length })}</summary>
           <div>{evidenceWindow.missingDates.join(', ')}</div>
         </details>
       ) : null}
@@ -165,20 +167,21 @@ function MetricGroup({ title, metrics }: { title: string; metrics: Array<[string
 }
 
 function SnapshotHistory({ snapshots }: { snapshots: DailyAgentQualitySnapshot[] }) {
+  const { t } = useI18n();
   return (
     <section className="quality-history">
-      <h3>Recent snapshots</h3>
+      <h3>{t('ops.dailyQuality.recentSnapshotsTitle')}</h3>
       <div className="quality-table-wrap">
         <table className="quality-table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Inbox</th>
-              <th>Schedule fail</th>
-              <th>Recovery</th>
-              <th>Verification</th>
-              <th>Provider success</th>
-              <th>Captured</th>
+              <th>{t('ops.dailyQuality.thDate')}</th>
+              <th>{t('ops.dailyQuality.groupInbox')}</th>
+              <th>{t('ops.dailyQuality.thScheduleFail')}</th>
+              <th>{t('ops.dailyQuality.groupRecovery')}</th>
+              <th>{t('ops.dailyQuality.groupVerification')}</th>
+              <th>{t('ops.dailyQuality.thProviderSuccess')}</th>
+              <th>{t('ops.dailyQuality.thCaptured')}</th>
             </tr>
           </thead>
           <tbody>
@@ -208,8 +211,8 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function duration(value: number | undefined): string {
-  if (value === undefined) return 'n/a';
+function duration(value: number | undefined, t: (key: string) => string): string {
+  if (value === undefined) return t('ops.na');
   if (value < 1_000) return `${Math.round(value)}ms`;
   if (value < 60_000) return `${(value / 1_000).toFixed(1)}s`;
   if (value < 3_600_000) return `${Math.round(value / 60_000)}m`;

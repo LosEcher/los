@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, CircleDashed, RefreshCw, Wrench } from 'lucide-react';
 import { getJson, type ProviderDiscovery } from '../api/index.js';
 import { StatusPill } from '../ui.js';
+import { useI18n } from '../i18n';
 
 type SetupState = 'ready' | 'action' | 'optional' | 'unknown';
 type SetupPageId = 'providers' | 'nodes' | 'chat' | 'communication-accounts' | 'skills' | 'services';
@@ -11,6 +12,7 @@ type SetupCheck = {
   label: string;
   state: SetupState;
   detail: string;
+  detailVars?: Record<string, string | number>;
   action?: { label: string; page?: SetupPageId; focusAuth?: boolean };
 };
 
@@ -33,6 +35,7 @@ const ENDPOINTS = [
 ] as const;
 
 export function SetupPage() {
+  const { t } = useI18n();
   const setup = useQuery({
     queryKey: ['setup-readiness'],
     queryFn: loadSetupSnapshot,
@@ -49,8 +52,8 @@ export function SetupPage() {
           <div className="title-row">
             <Wrench size={18} />
             <div>
-              <h2>Runtime Setup</h2>
-              <p>Current readiness across the local execution surfaces.</p>
+              <h2>{t('pages.setup.title')}</h2>
+              <p>{t('pages.setup.subtitle')}</p>
             </div>
           </div>
           <div className="toolbar">
@@ -58,8 +61,8 @@ export function SetupPage() {
             <button
               type="button"
               className="icon-btn"
-              aria-label="Refresh setup status"
-              title="Refresh setup status"
+              aria-label={t('pages.setup.refreshAria')}
+              title={t('pages.setup.refreshAria')}
               onClick={() => setup.refetch()}
               disabled={setup.isFetching}
             >
@@ -68,11 +71,11 @@ export function SetupPage() {
           </div>
         </div>
 
-        {setup.isLoading ? <div className="empty-text">Checking runtime...</div> : null}
+        {setup.isLoading ? <div className="empty-text">{t('pages.setup.checking')}</div> : null}
         {setup.isError ? (
           <div className="setup-error">
             <AlertCircle size={16} />
-            <span>Gateway readiness could not be loaded.</span>
+            <span>{t('pages.setup.loadError')}</span>
           </div>
         ) : null}
         {checks.length > 0 ? (
@@ -81,13 +84,13 @@ export function SetupPage() {
               <div className="setup-row" key={check.id} data-state={check.state}>
                 <SetupStateIcon state={check.state} />
                 <div className="setup-copy">
-                  <strong>{check.label}</strong>
-                  <span>{check.detail}</span>
+                  <strong>{t(check.label)}</strong>
+                  <span>{t(check.detail, check.detailVars)}</span>
                 </div>
-                <span className="setup-state">{check.state}</span>
+                <span className="setup-state">{t(setupStateKey(check.state))}</span>
                 {check.action ? (
                   <button type="button" className="ghost-btn" onClick={() => runAction(check.action!)}>
-                    {check.action.label}
+                    {t(check.action.label)}
                   </button>
                 ) : <span />}
               </div>
@@ -97,15 +100,15 @@ export function SetupPage() {
       </div>
 
       <aside className="panel inspector">
-        <div className="panel-head compact"><h2>Readiness</h2></div>
+        <div className="panel-head compact"><h2>{t('pages.setup.readiness')}</h2></div>
         <div className="fact-list compact-facts">
-          <div className="fact"><span>ready</span><strong>{countState(checks, 'ready')}</strong></div>
-          <div className="fact"><span>action</span><strong>{countState(checks, 'action')}</strong></div>
-          <div className="fact"><span>optional</span><strong>{countState(checks, 'optional')}</strong></div>
-          <div className="fact"><span>unknown</span><strong>{countState(checks, 'unknown')}</strong></div>
+          <div className="fact"><span>{t('pages.status.ready')}</span><strong>{countState(checks, 'ready')}</strong></div>
+          <div className="fact"><span>{t('pages.status.action')}</span><strong>{countState(checks, 'action')}</strong></div>
+          <div className="fact"><span>{t('pages.status.optional')}</span><strong>{countState(checks, 'optional')}</strong></div>
+          <div className="fact"><span>{t('common.unknown')}</span><strong>{countState(checks, 'unknown')}</strong></div>
         </div>
         <div className="setup-boundary-note">
-          Provider discovery and compatibility evidence are separate checks.
+          {t('pages.setup.boundaryNote')}
         </div>
       </aside>
     </section>
@@ -127,7 +130,7 @@ async function loadSetupSnapshot(): Promise<SetupSnapshot> {
   const protectedReady = ENDPOINTS.slice(3).some(path => results[path].status === 'fulfilled');
 
   const checks: SetupCheck[] = [
-    { id: 'gateway', label: 'Gateway', state: 'ready', detail: 'Health endpoint is responding.' },
+    { id: 'gateway', label: 'pages.setup.check.gateway', state: 'ready', detail: 'pages.setup.check.gatewayDetail' },
     databaseCheck(results['/services'], results['/nodes'], services, nodes),
     authCheck(settings, protectedReady),
     providerCheck(onboarding),
@@ -141,15 +144,15 @@ async function loadSetupSnapshot(): Promise<SetupSnapshot> {
 
 function databaseCheck(servicesResult: Settled, nodesResult: Settled, services: unknown[], nodes: unknown[]): SetupCheck {
   if (servicesResult.status === 'fulfilled' || nodesResult.status === 'fulfilled') {
-    return { id: 'database', label: 'Database', state: 'ready', detail: `Registry reads succeeded: ${services.length} services, ${nodes.length} nodes.` };
+    return { id: 'database', label: 'pages.setup.check.database', state: 'ready', detail: 'pages.setup.check.databaseDetail', detailVars: { services: services.length, nodes: nodes.length } };
   }
-  return { id: 'database', label: 'Database', state: 'unknown', detail: 'Registry reads are unavailable.', action: { label: 'Open Services', page: 'services' } };
+  return { id: 'database', label: 'pages.setup.check.database', state: 'unknown', detail: 'pages.setup.check.databaseUnavailable', action: { label: 'pages.setup.action.openServices', page: 'services' } };
 }
 
 function authCheck(settings: Record<string, unknown>, protectedReady: boolean): SetupCheck {
-  if (asRecord(settings.auth).enabled !== true) return { id: 'auth', label: 'Auth', state: 'ready', detail: 'Disabled for this local gateway.' };
-  if (protectedReady) return { id: 'auth', label: 'Auth', state: 'ready', detail: 'Enabled and the saved credentials are accepted.' };
-  return { id: 'auth', label: 'Auth', state: 'action', detail: 'Enabled; protected checks need a valid access token.', action: { label: 'Set tokens', focusAuth: true } };
+  if (asRecord(settings.auth).enabled !== true) return { id: 'auth', label: 'pages.setup.check.auth', state: 'ready', detail: 'pages.setup.check.authDisabled' };
+  if (protectedReady) return { id: 'auth', label: 'pages.setup.check.auth', state: 'ready', detail: 'pages.setup.check.authEnabled' };
+  return { id: 'auth', label: 'pages.setup.check.auth', state: 'action', detail: 'pages.setup.check.authTokenNeeded', action: { label: 'pages.setup.action.setTokens', focusAuth: true } };
 }
 
 function providerCheck(onboarding: ProviderDiscovery): SetupCheck {
@@ -157,40 +160,41 @@ function providerCheck(onboarding: ProviderDiscovery): SetupCheck {
   const ready = providers.filter(providerReady);
   const verified = ready.filter(hasPassingCompatibility);
   if (ready.length === 0) {
-    return { id: 'provider', label: 'Provider', state: 'action', detail: 'No execution-ready provider is configured.', action: { label: 'Open Providers', page: 'providers' } };
+    return { id: 'provider', label: 'pages.setup.check.provider', state: 'action', detail: 'pages.setup.check.providerNone', action: { label: 'pages.setup.action.openProviders', page: 'providers' } };
   }
   if (verified.length === 0) {
-    return { id: 'provider', label: 'Provider', state: 'action', detail: `${ready.length} configured; passing compatibility evidence is still required.`, action: { label: 'Review Providers', page: 'providers' } };
+    return { id: 'provider', label: 'pages.setup.check.provider', state: 'action', detail: 'pages.setup.check.providerUnverified', detailVars: { count: ready.length }, action: { label: 'pages.setup.action.reviewProviders', page: 'providers' } };
   }
-  return { id: 'provider', label: 'Provider', state: 'ready', detail: `${ready.length} configured, ${verified.length} with passing compatibility evidence.` };
+  return { id: 'provider', label: 'pages.setup.check.provider', state: 'ready', detail: 'pages.setup.check.providerReady', detailVars: { count: ready.length, verified: verified.length } };
 }
 
 function executorCheck(settings: Record<string, unknown>, result: Settled, nodes: unknown[]): SetupCheck {
-  if (asRecord(settings.executor).enabled !== true) return { id: 'executor', label: 'Executor', state: 'optional', detail: 'Disabled; gateway-local execution remains available.', action: { label: 'Open Nodes', page: 'nodes' } };
-  if (result.status === 'rejected') return { id: 'executor', label: 'Executor', state: 'unknown', detail: 'Enabled; node registry is unavailable.', action: { label: 'Open Nodes', page: 'nodes' } };
+  if (asRecord(settings.executor).enabled !== true) return { id: 'executor', label: 'pages.setup.check.executor', state: 'optional', detail: 'pages.setup.check.executorDisabled', action: { label: 'pages.setup.action.openNodes', page: 'nodes' } };
+  if (result.status === 'rejected') return { id: 'executor', label: 'pages.setup.check.executor', state: 'unknown', detail: 'pages.setup.check.executorNoRegistry', action: { label: 'pages.setup.action.openNodes', page: 'nodes' } };
   const candidates = arrayRecords(nodes).filter(node => asRecord(node.execution).candidate === true && ['online', 'ready'].includes(String(node.status)));
   return candidates.length > 0
-    ? { id: 'executor', label: 'Executor', state: 'ready', detail: `${candidates.length} execution candidate nodes are online.` }
-    : { id: 'executor', label: 'Executor', state: 'action', detail: 'Enabled; no execution candidate node is online.', action: { label: 'Open Nodes', page: 'nodes' } };
+    ? { id: 'executor', label: 'pages.setup.check.executor', state: 'ready', detail: 'pages.setup.check.executorReady', detailVars: { count: candidates.length } }
+    : { id: 'executor', label: 'pages.setup.check.executor', state: 'action', detail: 'pages.setup.check.executorNoNodes', action: { label: 'pages.setup.action.openNodes', page: 'nodes' } };
 }
 
 function workspaceCheck(result: Settled, projects: Record<string, unknown>): SetupCheck {
-  if (result.status === 'rejected') return { id: 'workspace', label: 'Workspace', state: 'unknown', detail: 'Project bindings are unavailable.', action: { label: 'Bind Project', page: 'chat' } };
+  if (result.status === 'rejected') return { id: 'workspace', label: 'pages.setup.check.workspace', state: 'unknown', detail: 'pages.setup.check.workspaceUnavailable', action: { label: 'pages.setup.action.bindProject', page: 'chat' } };
   const count = Array.isArray(projects.projects) ? projects.projects.length : 0;
   return count > 0
-    ? { id: 'workspace', label: 'Workspace', state: 'ready', detail: `${count} project bindings are available.` }
-    : { id: 'workspace', label: 'Workspace', state: 'action', detail: 'No project is bound.', action: { label: 'Bind Project', page: 'chat' } };
+    ? { id: 'workspace', label: 'pages.setup.check.workspace', state: 'ready', detail: 'pages.setup.check.workspaceReady', detailVars: { count } }
+    : { id: 'workspace', label: 'pages.setup.check.workspace', state: 'action', detail: 'pages.setup.check.workspaceNone', action: { label: 'pages.setup.action.bindProject', page: 'chat' } };
 }
 
 function channelCheck(result: Settled, communication: Record<string, unknown>): SetupCheck {
-  if (result.status === 'rejected') return { id: 'channel', label: 'Channels', state: 'unknown', detail: 'Channel status is unavailable.', action: { label: 'Open Communications', page: 'communication-accounts' } };
+  if (result.status === 'rejected') return { id: 'channel', label: 'pages.setup.check.channels', state: 'unknown', detail: 'pages.setup.check.channelUnavailable', action: { label: 'pages.setup.action.openCommunications', page: 'communication-accounts' } };
   const channels = arrayRecords(communication.channels);
   const live = channels.filter(channel => channel.live === true).length;
   const connected = channels.filter(channel => channel.status === 'connected').length;
   return {
-    id: 'channel', label: 'Channels', state: live > 0 ? 'ready' : 'optional',
-    detail: `${live} live channel types, ${connected} external channels connected.`,
-    action: { label: 'Open Communications', page: 'communication-accounts' },
+    id: 'channel', label: 'pages.setup.check.channels', state: live > 0 ? 'ready' : 'optional',
+    detail: 'pages.setup.check.channelReady',
+    detailVars: { live, external: connected },
+    action: { label: 'pages.setup.action.openCommunications', page: 'communication-accounts' },
   };
 }
 
@@ -199,10 +203,15 @@ function toolingCheck(onboarding: ProviderDiscovery): SetupCheck {
   const installed = tools.filter(tool => tool.installed === true).length;
   const hermes = tools.find(tool => String(tool.name ?? '').toLowerCase().includes('hermes'));
   return {
-    id: 'tooling', label: 'Tool discovery', state: installed > 0 ? 'ready' : 'optional',
-    detail: `${installed} external tools detected; Hermes ${hermes?.installed === true ? 'detected' : 'not detected'}.`,
-    action: { label: 'Open Skills', page: 'skills' },
+    id: 'tooling', label: 'pages.setup.check.tooling', state: installed > 0 ? 'ready' : 'optional',
+    detail: hermes?.installed === true ? 'pages.setup.check.toolingDetected' : 'pages.setup.check.toolingNotDetected',
+    detailVars: { installed },
+    action: { label: 'pages.setup.action.openSkills', page: 'skills' },
   };
+}
+
+function setupStateKey(state: SetupState): string {
+  return state === 'unknown' ? 'common.unknown' : `pages.status.${state}`;
 }
 
 function SetupStateIcon({ state }: { state: SetupState }) {

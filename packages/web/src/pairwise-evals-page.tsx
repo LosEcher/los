@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, RefreshCcw, Scale } from 'lucide-react';
 import { getJson, postJson } from './api';
 import { Badge, Button, EmptyText, Field, formatDate } from './ui';
+import { useI18n } from './i18n';
 
 type Verdict = 'baseline' | 'candidate' | 'tie' | 'inconclusive';
 type Evidence = { source?: string; verdict?: Verdict; verificationStatus?: string; criterionScores?: Array<{ score: number }> };
@@ -13,6 +14,7 @@ type PairwiseEval = {
 };
 
 export function PairwiseEvalsPage() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [pairId, setPairId] = useState('');
   const [experimentId, setExperimentId] = useState('');
@@ -41,35 +43,37 @@ export function PairwiseEvalsPage() {
   return (
     <section className="page-evals page-pairwise-evals">
       <div className="page-toolbar">
-        <div className="toolbar-tabs"><Scale size={15} /><strong>Pairwise evaluation</strong></div>
+        <div className="toolbar-tabs"><Scale size={15} /><strong>{t('ops.pairwise.title')}</strong></div>
         <div className="toolbar-filters">
-          <input className="filter-input" placeholder="Pair ID..." value={pairId} onChange={e => setPairId(e.target.value)} />
-          <input className="filter-input" placeholder="Experiment ID..." value={experimentId} onChange={e => setExperimentId(e.target.value)} />
-          <select className="filter-input" aria-label="Verdict filter" value={verdict} onChange={e => setVerdict(e.target.value)}>
-            <option value="">All verdicts</option><option value="baseline">Baseline</option><option value="candidate">Candidate</option><option value="tie">Tie</option><option value="inconclusive">Inconclusive</option>
+          <input className="filter-input" placeholder={t('ops.pairwise.pairIdPlaceholder')} value={pairId} onChange={e => setPairId(e.target.value)} />
+          <input className="filter-input" placeholder={t('ops.pairwise.experimentIdPlaceholder')} value={experimentId} onChange={e => setExperimentId(e.target.value)} />
+          <select className="filter-input" aria-label={t('ops.pairwise.verdictFilterAria')} value={verdict} onChange={e => setVerdict(e.target.value)}>
+            <option value="">{t('ops.pairwise.allVerdicts')}</option><option value="baseline">{t('ops.pairwise.verdictBaseline')}</option><option value="candidate">{t('ops.pairwise.verdictCandidate')}</option><option value="tie">{t('ops.pairwise.verdictTie')}</option><option value="inconclusive">{t('ops.pairwise.verdictInconclusive')}</option>
           </select>
         </div>
         <div className="toolbar-actions">
-          <Button variant="ghost" onClick={() => qc.invalidateQueries({ queryKey: ['pairwise-evals'] })}><RefreshCcw size={14} /> Refresh</Button>
-          <Button onClick={() => setShowRecord(v => !v)}><Plus size={14} /> Record pair</Button>
+          <Button variant="ghost" onClick={() => qc.invalidateQueries({ queryKey: ['pairwise-evals'] })}><RefreshCcw size={14} /> {t('common.refresh')}</Button>
+          <Button onClick={() => setShowRecord(v => !v)}><Plus size={14} /> {t('ops.pairwise.recordPairButton')}</Button>
         </div>
       </div>
       {showRecord ? <PairwiseRecordForm form={form} setForm={setForm} onSubmit={() => record.mutate()} pending={record.isPending} error={record.error} /> : null}
-      {query.isLoading ? <div className="loading-block">Loading pairwise evidence...</div> : query.data?.evals.length ? <PairwiseTable rows={query.data.evals} /> : <EmptyText text="No pairwise evaluations match these filters." />}
+      {query.isLoading ? <div className="loading-block">{t('ops.pairwise.loading')}</div> : query.data?.evals.length ? <PairwiseTable rows={query.data.evals} /> : <EmptyText text={t('ops.pairwise.noMatches')} />}
     </section>
   );
 }
 
 function PairwiseRecordForm({ form, setForm, onSubmit, pending, error }: { form: { pairId: string; experimentId: string; baselineRunSpecId: string; candidateRunSpecId: string; rubricRevision: string; rubricId: string; verdict: Verdict }; setForm: (value: typeof form) => void; onSubmit: () => void; pending: boolean; error: Error | null }) {
+  const { t } = useI18n();
   const update = (key: keyof typeof form, value: string) => setForm({ ...form, [key]: value });
   return <div className="provider-edit-panel pairwise-record-form"><div className="provider-edit-grid">
     {(['pairId', 'experimentId', 'baselineRunSpecId', 'candidateRunSpecId', 'rubricRevision', 'rubricId'] as const).map(key => <Field key={key} label={key}><input value={form[key]} onChange={e => update(key, e.target.value)} /></Field>)}
-    <Field label="verdict"><select value={form.verdict} onChange={e => update('verdict', e.target.value)}><option value="candidate">Candidate</option><option value="baseline">Baseline</option><option value="tie">Tie</option><option value="inconclusive">Inconclusive</option></select></Field>
-  </div><div className="provider-edit-meta"><Button onClick={onSubmit} disabled={pending}>{pending ? 'Recording...' : 'Submit evidence'}</Button>{error ? <span className="error-banner">{String(error)}</span> : null}</div></div>;
+    <Field label={t('ops.pairwise.verdictLabel')}><select value={form.verdict} onChange={e => update('verdict', e.target.value)}><option value="candidate">{t('ops.pairwise.verdictCandidate')}</option><option value="baseline">{t('ops.pairwise.verdictBaseline')}</option><option value="tie">{t('ops.pairwise.verdictTie')}</option><option value="inconclusive">{t('ops.pairwise.verdictInconclusive')}</option></select></Field>
+  </div><div className="provider-edit-meta"><Button onClick={onSubmit} disabled={pending}>{pending ? t('ops.pairwise.recording') : t('ops.pairwise.submitEvidenceButton')}</Button>{error ? <span className="error-banner">{String(error)}</span> : null}</div></div>;
 }
 
 function PairwiseTable({ rows }: { rows: PairwiseEval[] }) {
-  return <div className="pairwise-table-wrap"><table className="data-table"><thead><tr><th>Pair / experiment</th><th>Baseline</th><th>Candidate</th><th>Verdict</th><th>Human</th><th>Judge</th><th>Deterministic</th><th>Rubric</th><th>Created</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
+  const { t } = useI18n();
+  return <div className="pairwise-table-wrap"><table className="data-table"><thead><tr><th>{t('ops.pairwise.thPairExperiment')}</th><th>{t('ops.pairwise.thBaseline')}</th><th>{t('ops.pairwise.thCandidate')}</th><th>{t('ops.pairwise.thVerdict')}</th><th>{t('ops.pairwise.thHuman')}</th><th>{t('ops.pairwise.thJudge')}</th><th>{t('ops.pairwise.thDeterministic')}</th><th>{t('ops.pairwise.thRubric')}</th><th>{t('ops.pairwise.thCreated')}</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
     <td><strong>{row.pairId ?? '-'}</strong><small>{row.experimentId ?? '-'}</small></td><td>{row.baselineRunSpecId ?? '-'}</td><td>{row.candidateRunSpecId ?? '-'}</td><td><Badge tone={row.pairwiseVerdict === 'candidate' ? 'ok' : row.pairwiseVerdict === 'baseline' ? 'warn' : 'muted'}>{row.pairwiseVerdict ?? '-'}</Badge></td>
     <td>{evidenceLabel(row.human)}</td><td>{evidenceLabel(row.judge)}</td><td>{row.deterministic?.verificationStatus ?? '-'}</td><td>{row.rubricRevision ?? '-'}</td><td>{formatDate(row.createdAt)}</td>
   </tr>)}</tbody></table></div>;

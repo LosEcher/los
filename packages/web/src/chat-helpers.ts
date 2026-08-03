@@ -9,6 +9,7 @@ import type {
   SessionEvent, SessionEventsResponse,
   TodoItem,
 } from './api';
+import { tt } from './i18n';
 
 export type StreamRow = {
   id: string; event: string; message: string;
@@ -34,8 +35,8 @@ export function readyStreamRows(): StreamRow[] {
   return [{
     id: 'ready',
     event: 'system',
-    message: 'Choose a project, provider, model, and tool mode before sending.',
-    meta: 'project tools can edit files; choose all tools when the run needs shell commands',
+    message: tt('chat.readyPrompt'),
+    meta: tt('chat.readyMeta'),
   }];
 }
 
@@ -213,11 +214,11 @@ export function buildHistoryRows(
       const turn = turns[turnIdx] as Record<string, unknown> | undefined;
       const hasReasoning = turn?.reasoningContent && typeof turn.reasoningContent === 'string' && turn.reasoningContent.length > 0;
       const metaParts: string[] = [];
-      if (toolNames.length > 0) metaParts.push(`tools: ${toolNames.join(', ')}`);
+      if (toolNames.length > 0) metaParts.push(tt('chat.tools', { list: toolNames.join(', ') }));
       if (hasReasoning) metaParts.push('🧠');
       rows.push({
         id: crypto.randomUUID(), event: `T${turnIdx + 1}/${turns.length}`,
-        message: text.length > 250 ? text.slice(0, 250) + '…' : (text || (toolNames.length > 0 ? '(tool calls only)' : '(empty)')),
+        message: text.length > 250 ? text.slice(0, 250) + '…' : (text || (toolNames.length > 0 ? tt('chat.toolCallsOnly') : tt('chat.empty'))),
         meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
         level: toolNames.length > 0 ? 'warn' : 'ok',
       });
@@ -231,7 +232,7 @@ export function buildHistoryRows(
       }
     }
   }
-  rows.push({ id: crypto.randomUUID(), event: 'history.end', message: `${rows.length} prior messages shown. Send a prompt to continue.`, meta: `${turnIdx} turns in history`, level: 'ok' });
+  rows.push({ id: crypto.randomUUID(), event: 'history.end', message: tt('chat.historyDivider', { count: rows.length }), meta: tt('chat.historyTurns', { count: turnIdx }), level: 'ok' });
   return rows;
 }
 
@@ -251,43 +252,43 @@ export function streamRow(event: string, data: Record<string, unknown>): StreamR
   if (event === 'awaiting_approval') return {
     id: crypto.randomUUID(),
     event,
-    message: `Plan ready with ${String(data.planStepCount ?? '?')} steps.`,
-    meta: `revision ${String(data.planRevision ?? 1)} · review required before execution`,
+    message: tt('chat.stream.planReady', { count: String(data.planStepCount ?? '?') }),
+    meta: tt('chat.stream.planReadyMeta', { n: String(data.planRevision ?? 1) }),
     level: 'warn',
   };
-  if (event === 'done') return { id: crypto.randomUUID(), event, message: typeof data.text === 'string' ? data.text : 'Run completed.', meta: data.sessionId ? `session ${data.sessionId}` : undefined, level: 'ok' };
-  if (event === 'error') return { id: crypto.randomUUID(), event, message: String(data.message ?? 'stream error'), level: 'error' };
+  if (event === 'done') return { id: crypto.randomUUID(), event, message: typeof data.text === 'string' ? data.text : tt('chat.stream.runCompleted'), meta: data.sessionId ? `${tt('chat.fact.session')} ${data.sessionId}` : undefined, level: 'ok' };
+  if (event === 'error') return { id: crypto.randomUUID(), event, message: String(data.message ?? tt('chat.stream.streamError')), level: 'error' };
   if (event === 'session.resumed') {
     const tps = Array.isArray(data.turnPreviews) ? (data.turnPreviews as Array<Record<string, unknown>>) : [];
     const lines = tps.slice(0, 8).map(tp => {
       return `T${tp.loop ?? '?'}: ${String(tp.text ?? '').slice(0, 60)}${Array.isArray(tp.tools) && (tp.tools as string[]).length ? ` [${(tp.tools as string[]).join(',')}]` : ''}`;
     });
-    const more = tps.length > 8 ? ` (+${tps.length - 8} more)` : '';
-    return { id: crypto.randomUUID(), event, message: `Resumed session (${data.turnCount ?? '?'} turns, ${data.messageCount ?? '?'} msgs)`, meta: lines.length > 0 ? lines.join(' | ') + more : `last task ${String(data.resumeLastTaskRunId ?? 'none')}`, level: 'ok' };
+    const more = tps.length > 8 ? tt('chat.stream.more', { count: tps.length - 8 }) : '';
+    return { id: crypto.randomUUID(), event, message: tt('chat.stream.resumed', { turns: String(data.turnCount ?? '?'), msgs: String(data.messageCount ?? '?') }), meta: lines.length > 0 ? lines.join(' | ') + more : tt('chat.stream.lastTask', { id: String(data.resumeLastTaskRunId ?? 'none') }), level: 'ok' };
   }
   if (event === 'session.branch') return { id: crypto.randomUUID(), event: 'branch', message: String(data.message ?? data), level: 'ok' };
-  if (event === 'session.branched') return { id: crypto.randomUUID(), event, message: `Branched from ${String(data.parentSessionId ?? 'unknown')}${data.branchAtTurn ? ` at turn ${data.branchAtTurn}` : ''}`, meta: `${data.copiedMessageCount ?? data.messageCount ?? '?'} messages copied`, level: 'ok' };
+  if (event === 'session.branched') return { id: crypto.randomUUID(), event, message: tt('chat.stream.branchedFrom', { parent: String(data.parentSessionId ?? tt('chat.stream.unknown')) }) + (data.branchAtTurn ? tt('chat.stream.branchedAtTurn', { turn: String(data.branchAtTurn) }) : ''), meta: tt('chat.stream.messagesCopied', { count: String(data.copiedMessageCount ?? data.messageCount ?? '?') }), level: 'ok' };
   if (event === 'session.loading') return { id: crypto.randomUUID(), event: 'session', message: String(data.message ?? data), level: 'normal' };
   if (event === '---') return { id: crypto.randomUUID(), event, message: String(data.message ?? data), meta: String(data.meta ?? ''), level: 'normal' };
   if (event === 'history.end') return { id: crypto.randomUUID(), event: '---', message: String(data.message ?? data), meta: String(data.meta ?? ''), level: 'ok' };
-  if (event === 'session.resume_state') return { id: crypto.randomUUID(), event, message: 'Loaded session resume state.', meta: JSON.stringify(data), level: 'normal' };
+  if (event === 'session.resume_state') return { id: crypto.randomUUID(), event, message: tt('chat.stream.loadedResume'), meta: JSON.stringify(data), level: 'normal' };
   if (event === 'model.delta') return { id: crypto.randomUUID(), event, message: String(data.text ?? data.delta ?? ''), meta: [data.provider, data.model].filter(Boolean).join(' / ') };
-  if (event === 'turn') return { id: crypto.randomUUID(), event, message: String(data.text ?? 'model turn'), meta: `loop ${String(data.loopCount ?? '?')} · tools ${Array.isArray(data.toolNames) ? data.toolNames.join(', ') || 'none' : '?'}` };
+  if (event === 'turn') return { id: crypto.randomUUID(), event, message: String(data.text ?? tt('chat.stream.modelTurn')), meta: tt('chat.stream.loopTools', { loop: String(data.loopCount ?? '?'), tools: Array.isArray(data.toolNames) ? data.toolNames.join(', ') || 'none' : '?' }) };
   if (event === 'tool.call.upsert' || event === 'tool_call') {
     return {
       id: crypto.randomUUID(),
       event,
-      message: String(data.toolName ?? data.tool ?? 'tool call'),
+      message: String(data.toolName ?? data.tool ?? tt('chat.stream.toolCall')),
       meta: [data.callId, data.status, data.argsPreview].filter(Boolean).join(' · '),
       level: 'warn',
     };
   }
-  if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? 'task event'), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
-  if (event === 'runtime.started') return { id: crypto.randomUUID(), event, message: `Runtime started: ${String(data.kind ?? '?')}`, meta: `session ${String(data.sessionId ?? '?').slice(0, 8)}…`, level: 'ok' };
-  if (event === 'runtime.process') return { id: crypto.randomUUID(), event, message: 'Runtime process spawned', meta: `pid ${data.pid ?? '?'}`, level: 'normal' };
-  if (event === 'runtime.output') return { id: crypto.randomUUID(), event, message: String(data.text ?? ''), meta: data.truncated ? `truncated at ${data.capturedBytes ?? '?'} bytes` : `${data.capturedBytes ?? 0} bytes`, level: data.truncated ? 'warn' : 'normal' };
-  if (event === 'runtime.completed') return { id: crypto.randomUUID(), event, message: `Runtime completed with exit ${data.exitCode ?? '?'}`, meta: data.status === 'success' ? 'OK' : 'FAILED', level: data.status === 'success' ? 'ok' : 'error' };
-  if (event === 'runtime.error') return { id: crypto.randomUUID(), event, message: `Runtime error: ${String(data.error ?? 'unknown')}`, level: 'error' };
+  if (event === 'task') return { id: crypto.randomUUID(), event, message: String(data.type ?? data.status ?? tt('chat.stream.taskEvent')), meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '), level: String(data.status ?? '').includes('succeeded') ? 'ok' : 'normal' };
+  if (event === 'runtime.started') return { id: crypto.randomUUID(), event, message: tt('chat.stream.runtimeStarted', { kind: String(data.kind ?? '?') }), meta: `${tt('chat.fact.session')} ${String(data.sessionId ?? '?').slice(0, 8)}…`, level: 'ok' };
+  if (event === 'runtime.process') return { id: crypto.randomUUID(), event, message: tt('chat.stream.runtimeSpawned'), meta: tt('chat.stream.pid', { pid: String(data.pid ?? '?') }), level: 'normal' };
+  if (event === 'runtime.output') return { id: crypto.randomUUID(), event, message: String(data.text ?? ''), meta: data.truncated ? tt('chat.stream.truncatedAt', { bytes: String(data.capturedBytes ?? '?') }) : tt('chat.stream.bytes', { bytes: String(data.capturedBytes ?? 0) }), level: data.truncated ? 'warn' : 'normal' };
+  if (event === 'runtime.completed') return { id: crypto.randomUUID(), event, message: tt('chat.stream.completedExit', { code: String(data.exitCode ?? '?') }), meta: data.status === 'success' ? tt('chat.stream.ok') : tt('chat.stream.failed'), level: data.status === 'success' ? 'ok' : 'error' };
+  if (event === 'runtime.error') return { id: crypto.randomUUID(), event, message: tt('chat.stream.runtimeError', { error: String(data.error ?? tt('chat.stream.unknown')) }), level: 'error' };
   return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };
 }
 

@@ -1,13 +1,15 @@
 import { type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCcw } from 'lucide-react';
+import { getActiveLang, useI18n } from './i18n';
 
 export type StatusState = 'live' | 'partial' | 'reserved';
 
 // ── StatusPill ──────────────────────────────────────────
 
 export function StatusPill({ status }: { status: StatusState }) {
-  return <span className={`status-pill ${status}`}>{status}</span>;
+  const { t } = useI18n();
+  return <span className={`status-pill ${status}`}>{t(`status.${status}`)}</span>;
 }
 
 // ── FormField ───────────────────────────────────────────
@@ -44,7 +46,8 @@ export function Definition({ term, text }: { term: string; text: string }) {
 // ── DataTable ───────────────────────────────────────────
 
 export function DataTable<T>({ loading, empty, rows, renderRow }: { loading: boolean; empty: string; rows: T[]; renderRow: (row: T, index: number) => ReactNode }) {
-  if (loading) return <EmptyText text="Loading..." />;
+  const { t } = useI18n();
+  if (loading) return <EmptyText text={t('common.loading')} />;
   if (rows.length === 0) return <EmptyText text={empty} />;
   return <div className="record-list">{rows.map(renderRow)}</div>;
 }
@@ -116,9 +119,10 @@ export function ToolbarToggle({ checked, onChange, label }: { checked: boolean; 
 
 export function RefreshQueryButton({ queryKey }: { queryKey: unknown[] }) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   return (
     <Button variant="ghost" onClick={() => queryClient.invalidateQueries({ queryKey })}>
-      <RefreshCcw size={14} /> refresh
+      <RefreshCcw size={14} /> {t('common.refresh')}
     </Button>
   );
 }
@@ -129,14 +133,14 @@ export function formatDate(value: string | undefined): string {
   if (!value) return '-';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString(locale(), { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 export function formatTime(value: string | undefined): string {
   if (!value) return '--:--:--';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return date.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export function formatDuration(seconds: number): string {
@@ -144,7 +148,16 @@ export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
+  if (getActiveLang() === 'zh') {
+    if (hours > 0) return `${hours}小时${minutes}分`;
+    if (minutes > 0) return `${minutes}分`;
+    return `${total}秒`;
+  }
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m`;
   return `${total}s`;
+}
+
+function locale(): string {
+  return getActiveLang() === 'zh' ? 'zh-CN' : 'en-US';
 }

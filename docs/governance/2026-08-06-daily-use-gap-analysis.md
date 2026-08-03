@@ -45,7 +45,7 @@ recheck.
 
 | ID | Gap | Evidence |
 |---|---|---|
-| G5 | No Chinese i18n at all | no i18n lib/files, `index.html` `lang="en"`, all UI strings hardcoded English |
+| G5 | ~~No Chinese i18n at all~~ ✅ **closed 2026-08-06** | i18n infrastructure (`packages/web/src/i18n/`: `I18nProvider` + `useI18n()`/`tt()`, `localStorage` persistence `los.lang`, `document.documentElement.lang`, browser-language first-visit default) + full en/zh dictionaries (8 files, ~1,600 keys across `core/chat/work/pages/ops/assets` areas) + EN/中文 switcher in the topbar + localized `formatDate`/`formatDuration`. All 43 UI surfaces extracted; `aria-label`/`title`/placeholder translated. Tests: `i18n.test.mjs` (en/zh key parity, static call-site resolution, placeholder subset rule), `ui-boundary.test.mjs` adapted to assert against the en dict, e2e `i18n-switcher.spec.ts` (switch + persistence on desktop & mobile). Checks: `pnpm --filter @los/web check` + 28 unit + 22 e2e green |
 | G6 | Context compaction: text-level only, no masking cascade | `loop/compression.ts` (heuristic summary + tail truncation + hard trim); persistent compaction is structured DB archive (`memory/src/core/compaction.ts`) but that is not context masking |
 | G7 | CLI still static render* output, no typed projection / interactive terminal | `cli/src/run-operations.ts:39-73`, `artifacts.ts` |
 | G8 | Web diff review is "viewer"-level only | `work-review-panel.tsx:7-112` (line coloring, truncation; no side-by-side/inline comments) |
@@ -75,7 +75,8 @@ cycle should reconcile roadmap with code.
    same run, freeze as smoke)~~ ✅ done 2026-08-03
    (`docs/operations/2026-08-03-interrupted-run-recovery-smoke.md`); ~~G4
    half_open recovery path~~ ✅ done 2026-08-06.
-2. **Tier 2**: G5 Chinese i18n (one-time cost, immediate visible value); G7 CLI
-   projection; G8 diff review upgrade.
+2. **Tier 2**: ~~G5 Chinese i18n~~ ✅ done 2026-08-06 (full en/zh extraction,
+   topbar EN/中文 switcher, persistence, `i18n.test.mjs` parity + e2e switcher
+   spec); G7 CLI projection; G8 diff review upgrade.
 3. **Tier 3**: G3 fix bake identity + add image build/push CI, or stop
    advertising GHCR; G12 npm publish under `@los/` scope.

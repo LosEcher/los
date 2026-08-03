@@ -4,8 +4,10 @@ import {
   Definition,
   StatusPill,
 } from '../ui.js';
+import { useI18n } from '../i18n';
 
 export function ReservedPage({ kind, icon, description, fields }: { kind: string; icon: ReactNode; description: string; fields: string[] }) {
+  const { t } = useI18n();
   return (
     <section className="panel-grid settings-grid">
       <div className="panel">
@@ -29,11 +31,11 @@ export function ReservedPage({ kind, icon, description, fields }: { kind: string
         </div>
       </div>
       <aside className="panel inspector">
-        <div className="panel-head compact"><h2>Initial Policy</h2></div>
+        <div className="panel-head compact"><h2>{t('ops.reserved.initialPolicyTitle')}</h2></div>
         <div className="definition-list">
-          <Definition term="phase 1" text="Read-only view." />
-          <Definition term="write gate" text="Requires storage contract, validation, and event evidence." />
-          <Definition term="audit" text="Every future mutation must link to task/session evidence." />
+          <Definition term={t('ops.reserved.phase1Term')} text={t('ops.reserved.phase1Text')} />
+          <Definition term={t('ops.reserved.writeGateTerm')} text={t('ops.reserved.writeGateText')} />
+          <Definition term={t('ops.reserved.auditTerm')} text={t('ops.reserved.auditText')} />
         </div>
       </aside>
     </section>

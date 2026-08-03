@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Play, ShieldCheck } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
 import { Button, DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
+import { useI18n } from '../i18n';
 
 /** Matches gateway POST /runs/:id/approve|recover|verify actor field. */
 const WEB_OPERATOR_ACTOR = 'web-console';
@@ -42,6 +43,7 @@ export function buildRunOperatorPayload(reason: string | undefined, fallbackReas
 }
 
 export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string | null }) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [approvalReason, setApprovalReason] = useState('');
@@ -112,14 +114,14 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Run Specs</h2>
-            <p>Task execution run specifications with phase and verification state.</p>
+            <h2>{t('ops.runSpecs.title')}</h2>
+            <p>{t('ops.runSpecs.subtitle')}</p>
           </div>
           <StatusPill status={runList.length > 0 ? 'live' : 'partial'} />
         </div>
         <DataTable
           loading={runs.isLoading}
-          empty="No run specs found."
+          empty={t('ops.runSpecs.empty')}
           rows={runList}
           renderRow={(r) => (
             <div
@@ -139,7 +141,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
                 </div>
                 <div className="record-meta">
                   {r.provider ? <span>{r.provider}/{r.model}</span> : null}
-                  {r.sessionId ? <span> · session: {r.sessionId.slice(0, 12)}</span> : null}
+                  {r.sessionId ? <span> · {t('ops.runSpecs.sessionShort', { sessionId: r.sessionId.slice(0, 12) })}</span> : null}
                   <span> · {new Date(r.createdAt).toLocaleString()}</span>
                 </div>
                 {r.prompt ? (
@@ -154,25 +156,25 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
       </div>
 
       <aside className="panel inspector">
-        <div className="panel-head compact"><h2>Run State</h2></div>
+        <div className="panel-head compact"><h2>{t('ops.runSpecs.runStateTitle')}</h2></div>
         {!selectedId ? (
-          <EmptyText text="Select a run spec to inspect its state." />
+          <EmptyText text={t('ops.runSpecs.selectPrompt')} />
         ) : runState.isLoading ? (
-          <EmptyText text="Loading..." />
+          <EmptyText text={t('common.loading')} />
         ) : runState.data ? (
           <>
             <div className="fact-list">
-              <Fact label="phase" value={runState.data.phase ?? '—'} />
-              <Fact label="action" value={runState.data.action ?? '—'} />
-              <Fact label="tasks" value={String(runState.data.taskCount ?? 0)} />
-              <Fact label="verifications" value={String(runState.data.verificationCount ?? 0)} />
-              <Fact label="verifier" value={runState.data.verifierStatus ?? '—'} />
+              <Fact label={t('ops.runSpecs.factPhase')} value={runState.data.phase ?? '—'} />
+              <Fact label={t('ops.runSpecs.factAction')} value={runState.data.action ?? '—'} />
+              <Fact label={t('ops.runSpecs.factTasks')} value={String(runState.data.taskCount ?? 0)} />
+              <Fact label={t('ops.runSpecs.factVerifications')} value={String(runState.data.verificationCount ?? 0)} />
+              <Fact label={t('ops.runSpecs.factVerifier')} value={runState.data.verifierStatus ?? '—'} />
               {runState.data.approvalStatus ? (
-                <Fact label="approval" value={runState.data.approvalStatus} />
+                <Fact label={t('ops.runSpecs.factApproval')} value={runState.data.approvalStatus} />
               ) : null}
               {runState.data.blockers && runState.data.blockers.length > 0 ? (
                 <div className="blocker-list">
-                  <strong style={{ fontSize: 13 }}>Blockers</strong>
+                  <strong style={{ fontSize: 13 }}>{t('ops.runSpecs.blockersTitle')}</strong>
                   <ul style={{ margin: '4px 0 0 16px', fontSize: 13, color: 'var(--text-dim)' }}>
                     {(runState.data.blockers ?? []).map((b, i) => <li key={i}>{b}</li>)}
                   </ul>
@@ -181,12 +183,12 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
             </div>
 
             <div className="section-divider" />
-            <div className="panel-head compact"><h2>Operator Actions</h2></div>
+            <div className="panel-head compact"><h2>{t('ops.runSpecs.operatorActionsTitle')}</h2></div>
             <div style={{ padding: '8px 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {!showApproval ? (
                   <Button variant="ghost" onClick={() => setShowApproval(true)} disabled={busy}>
-                    <Play size={14} /> Approve / Reject
+                    <Play size={14} /> {t('ops.runSpecs.approveRejectButton')}
                   </Button>
                 ) : null}
                 <Button
@@ -194,7 +196,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
                   onClick={() => verifyRun.mutate(selectedId!)}
                   disabled={busy}
                 >
-                  <ShieldCheck size={14} /> {verifyRun.isPending ? 'Verifying…' : 'Verify'}
+                  <ShieldCheck size={14} /> {verifyRun.isPending ? t('ops.runSpecs.verifying') : t('ops.runSpecs.verifyButton')}
                 </Button>
               </div>
 
@@ -202,30 +204,30 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
                 <div className="approval-panel">
                   <textarea
                     rows={2}
-                    placeholder="Reason (optional) — sent as operator reason"
+                    placeholder={t('ops.runSpecs.reasonPlaceholder')}
                     value={approvalReason}
                     onChange={e => setApprovalReason(e.target.value)}
                     style={{ width: '100%', marginBottom: 8 }}
                   />
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Button onClick={() => approveRun.mutate(selectedId!)} disabled={busy}>
-                      <Check size={14} /> {approveRun.isPending ? 'Approving…' : 'Approve plan'}
+                      <Check size={14} /> {approveRun.isPending ? t('ops.runSpecs.approving') : t('ops.runSpecs.approvePlanButton')}
                     </Button>
                     <Button variant="danger" onClick={() => rejectRun.mutate(selectedId!)} disabled={busy}>
-                      <X size={14} /> {rejectRun.isPending ? 'Rejecting…' : 'Reject / cancel'}
+                      <X size={14} /> {rejectRun.isPending ? t('ops.runSpecs.rejecting') : t('ops.runSpecs.rejectCancelButton')}
                     </Button>
-                    <Button variant="ghost" onClick={closeApprovalForm} disabled={busy}>Cancel</Button>
+                    <Button variant="ghost" onClick={closeApprovalForm} disabled={busy}>{t('common.cancel')}</Button>
                   </div>
                 </div>
               ) : null}
 
-              {approveRun.error ? <div className="error-banner">Approve: {String(approveRun.error)}</div> : null}
-              {rejectRun.error ? <div className="error-banner">Reject: {String(rejectRun.error)}</div> : null}
-              {verifyRun.error ? <div className="error-banner">Verify: {String(verifyRun.error)}</div> : null}
+              {approveRun.error ? <div className="error-banner">{t('ops.runSpecs.approveErrorPrefix', { error: String(approveRun.error) })}</div> : null}
+              {rejectRun.error ? <div className="error-banner">{t('ops.runSpecs.rejectErrorPrefix', { error: String(rejectRun.error) })}</div> : null}
+              {verifyRun.error ? <div className="error-banner">{t('ops.runSpecs.verifyErrorPrefix', { error: String(verifyRun.error) })}</div> : null}
             </div>
           </>
         ) : (
-          <EmptyText text="No state data available." />
+          <EmptyText text={t('ops.runSpecs.noStateData')} />
         )}
       </aside>
     </section>

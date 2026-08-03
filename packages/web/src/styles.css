@@ -4932,6 +4932,31 @@ button:disabled {
   color: var(--danger);
   border-color: var(--danger);
 }
+.lang-switch {
+  display: flex;
+  gap: 2px;
+  align-self: center;
+}
+.lang-switch button {
+  flex: 1;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.lang-switch button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.lang-switch button.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
 
 /* ── Onboarding page ─────────────────────────────────── */
 

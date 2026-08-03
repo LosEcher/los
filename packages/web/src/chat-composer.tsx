@@ -5,21 +5,22 @@ import { RunField } from './chat-ui.js';
 import { ProjectSelector } from './project-selector.js';
 import { providerRoutesFromModels } from './chat-helpers.js';
 import { ChatAdvancedSettings, type ChatAdvancedSettingsState } from './chat-advanced-settings.js';
+import { useI18n } from './i18n';
 
 // ── Slash commands ────────────────────────────────────
 
 const SLASH_COMMANDS = [
-  { cmd: '/clear', description: 'Start a new chat session' },
-  { cmd: '/debug', description: 'Toggle debug event mode' },
-  { cmd: '/retry', description: 'Retry last turn' },
-  { cmd: '/abort', description: 'Cancel the current run' },
-  { cmd: '/files', description: 'Toggle workspace files panel' },
-  { cmd: '/mode ', description: 'Set tool mode (off/read-only, project-write, all)' },
-  { cmd: '/provider ', description: 'Switch to a specific provider' },
-  { cmd: '/model ', description: 'Switch to a specific model' },
+  { cmd: '/clear', descKey: 'chat.slash.clear' },
+  { cmd: '/debug', descKey: 'chat.slash.debug' },
+  { cmd: '/retry', descKey: 'chat.slash.retry' },
+  { cmd: '/abort', descKey: 'chat.slash.abort' },
+  { cmd: '/files', descKey: 'chat.slash.files' },
+  { cmd: '/mode ', descKey: 'chat.slash.mode' },
+  { cmd: '/provider ', descKey: 'chat.slash.provider' },
+  { cmd: '/model ', descKey: 'chat.slash.model' },
 ];
 
-type SlashCommand = { cmd: string; description: string };
+type SlashCommand = { cmd: string; descKey: string };
 
 function matchCommands(input: string): SlashCommand[] {
   if (!input.startsWith('/')) return [];
@@ -58,6 +59,7 @@ export function ChatComposer(props: {
   onAdvancedChange: (patch: Partial<ChatAdvancedSettingsState>) => void;
   advancedCount: number;
 }) {
+  const { t } = useI18n();
   const providerRoutes = providerRoutesFromModels(props.modelRoutes);
   const selectedRoute = providerRoutes.find(route => route.provider === props.provider) ?? providerRoutes[0] ?? null;
   const modelOptions = (() => {
@@ -113,27 +115,27 @@ export function ChatComposer(props: {
 
   return (
     <form className="composer" onSubmit={props.onSubmit}>
-      <div className="composer-toolbar" aria-label="run choices">
+      <div className="composer-toolbar" aria-label={t('chat.runChoicesAria')}>
         <span
           className={`route-dot ${selectedRoute?.ok ? 'ok' : 'partial'}`}
-          title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? 'discovery pending'}
+          title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? t('chat.discoveryPending')}
         />
-        <RunField label="runtime" title="Agent runtime engine">
+        <RunField label={t('chat.runtime')} title={t('chat.runtimeTitle')}>
           <Zap size={13} />
           <select value={props.runtimeKind} onChange={event => props.onRuntimeKindChange(event.target.value as RuntimeKind | 'los')}>
-            <option value="los">los agent</option>
+            <option value="los">{t('chat.agentLos')}</option>
             <option value="claude-code">Claude Code</option>
             <option value="codex">Codex</option>
             {props.grokRuntimeEnabled || props.runtimeKind === 'grok' ? (
               <option value="grok" disabled={!props.grokRuntimeEnabled}>
-                {props.grokRuntimeEnabled ? 'Grok (existing login)' : 'Grok (unavailable)'}
+                {props.grokRuntimeEnabled ? t('chat.grokExisting') : t('chat.grokUnavailable')}
               </option>
             ) : null}
           </select>
         </RunField>
         {props.runtimeKind === 'los' ? (
           <>
-            <RunField label="provider" title="Provider endpoint for this send">
+            <RunField label={t('chat.provider')} title={t('chat.providerTitle')}>
               {props.providerOptions.length > 0 ? (
                 <select value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }}>
                   {props.providerOptions.map(option => (
@@ -143,30 +145,30 @@ export function ChatComposer(props: {
                   ))}
                 </select>
               ) : (
-                <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder="provider id" />
+                <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder={t('chat.providerId')} />
               )}
             </RunField>
-            <RunField label="model" title="Model for this send">
+            <RunField label={t('chat.model')} title={t('chat.modelTitle')}>
               {modelOptions.length > 0 ? (
                 <select value={props.model} onChange={event => props.onModelChange(event.target.value)}>
                   {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
                 </select>
               ) : (
-                <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? 'provider default'} />
+                <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? t('chat.providerDefault')} />
               )}
             </RunField>
-            <RunField label="tools / skills" title="Tool and skill access for this send">
+            <RunField label={t('chat.toolsSkills')} title={t('chat.toolsSkillsTitle')}>
               <Wrench size={13} />
               <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
-                <option value="read-only">off / read-only</option>
-                <option value="project-write">project tools (no shell)</option>
+                <option value="read-only">{t('chat.modeReadOnly')}</option>
+                <option value="project-write">{t('chat.modeProjectWrite')}</option>
               </select>
             </RunField>
           </>
         ) : (
-          <span className="route-dot warn" title={`${props.runtimeKind} runs externally — provider and tool mode are managed by the CLI`} />
+          <span className="route-dot warn" title={t('chat.externalRuntime', { runtime: props.runtimeKind })} />
         )}
-        <RunField label="execution dir" title={`Execution directory. Default: ${props.defaultWorkspace || 'loading...'}`} variant="group">
+        <RunField label={t('chat.executionDir')} title={t('chat.executionDirTitle', { default: props.defaultWorkspace || t('chat.loadingEllipsis') })} variant="group">
           <ProjectSelector
             workspaceRoot={props.workspaceRoot}
             onChange={props.onWorkspaceRootChange}
@@ -185,7 +187,7 @@ export function ChatComposer(props: {
           value={props.prompt}
           onChange={event => handleChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask los to inspect or prepare a bounded change... (/ for commands)"
+          placeholder={t('chat.placeholder')}
           rows={3}
         />
         {visible && (
@@ -199,7 +201,7 @@ export function ChatComposer(props: {
                 onMouseEnter={() => setSlashIndex(i)}
               >
                 <strong>{c.cmd}</strong>
-                <span>{c.description}</span>
+                <span>{t(c.descKey)}</span>
               </button>
             ))}
           </div>
@@ -207,10 +209,10 @@ export function ChatComposer(props: {
       </div>
       <div className="composer-actions">
         <button className="primary-btn" type="submit" disabled={props.running || !props.prompt.trim()}>
-          <Send size={15} /> send
+          <Send size={15} /> {t('chat.send')}
         </button>
         <button className="ghost-btn" type="button" disabled={!props.running} onClick={props.onCancel}>
-          <Square size={14} /> cancel
+          <Square size={14} /> {t('chat.cancel')}
         </button>
       </div>
     </form>

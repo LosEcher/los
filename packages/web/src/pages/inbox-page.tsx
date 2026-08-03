@@ -14,6 +14,7 @@ import {
 
 import { getJson, postJson, type InboxEntry, type InboxResponse, type WorkItemAttentionState, type WorkItemProjection } from '../api/index.js';
 import { formatDate } from '../ui.js';
+import { tt, useI18n } from '../i18n';
 
 type InboxFilter = 'all' | 'decision' | 'recovery' | 'review' | 'running';
 
@@ -32,6 +33,7 @@ export function InboxPage({
 }) {
   const [filter, setFilter] = useState<InboxFilter>('all');
   const [quickGoal, setQuickGoal] = useState('');
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const inbox = useQuery({
     queryKey: ['inbox'],
@@ -68,13 +70,13 @@ export function InboxPage({
   return (
     <section className="daily-page inbox-page">
       <div className="daily-toolbar">
-        <div className="attention-summary" aria-label="Inbox summary">
-          <SummaryCount label="decisions" value={count(entries, ['approval_required', 'verification_blocked'])} tone="warn" />
-          <SummaryCount label="recovery" value={count(entries, ['recovery_required'])} tone="danger" />
-          <SummaryCount label="review" value={count(entries, ['review_ready'])} tone="ok" />
-          <SummaryCount label="running" value={count(entries, ['running'])} tone="info" />
+        <div className="attention-summary" aria-label={t('work.inbox.summaryAria')}>
+          <SummaryCount label={t('work.inbox.sum.decisions')} value={count(entries, ['approval_required', 'verification_blocked'])} tone="warn" />
+          <SummaryCount label={t('work.inbox.sum.recovery')} value={count(entries, ['recovery_required'])} tone="danger" />
+          <SummaryCount label={t('work.inbox.sum.review')} value={count(entries, ['review_ready'])} tone="ok" />
+          <SummaryCount label={t('work.inbox.sum.running')} value={count(entries, ['running'])} tone="info" />
         </div>
-        <button className="icon-btn" type="button" title="Refresh inbox" aria-label="Refresh inbox" onClick={() => inbox.refetch()} disabled={inbox.isFetching}>
+        <button className="icon-btn" type="button" title={t('work.inbox.refresh')} aria-label={t('work.inbox.refresh')} onClick={() => inbox.refetch()} disabled={inbox.isFetching}>
           <RefreshCcw size={15} className={inbox.isFetching ? 'spin' : ''} />
         </button>
       </div>
@@ -84,7 +86,7 @@ export function InboxPage({
         <input
           type="text"
           className="quick-intake-input"
-          placeholder="What do you want to build? (e.g. add rate limiting to auth routes)"
+          placeholder={t('work.inbox.quickPlaceholder')}
           value={quickGoal}
           onChange={e => setQuickGoal(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleQuickSubmit(); }}
@@ -95,17 +97,17 @@ export function InboxPage({
           className="quick-intake-btn"
           onClick={handleQuickSubmit}
           disabled={!quickGoal.trim() || quickMutation.isPending}
-          title="Create work item and start planning"
+          title={t('work.inbox.quickTitle')}
         >
-          {quickMutation.isPending ? 'Creating...' : <><Plus size={14} /> Create</>}
+          {quickMutation.isPending ? t('work.inbox.creating') : <><Plus size={14} /> {t('work.inbox.create')}</>}
         </button>
       </div>
 
       <div className="daily-split">
-        <nav className="attention-filters" aria-label="Inbox filters">
+        <nav className="attention-filters" aria-label={t('work.inbox.filtersAria')}>
           {(['all', 'decision', 'recovery', 'review', 'running'] as const).map(value => (
             <button key={value} type="button" data-active={filter === value} onClick={() => setFilter(value)}>
-              <span>{value}</span>
+              <span>{t(`work.inbox.filter.${value}`)}</span>
               <strong>{filterCount(entries, value)}</strong>
             </button>
           ))}
@@ -113,14 +115,14 @@ export function InboxPage({
 
         <div className="attention-feed" aria-live="polite">
           {inbox.isLoading ? <InboxSkeleton /> : null}
-          {inbox.error ? <div className="daily-error">Inbox unavailable: {String(inbox.error)}</div> : null}
+          {inbox.error ? <div className="daily-error">{t('work.inbox.unavailable', { error: String(inbox.error) })}</div> : null}
           {!inbox.isLoading && !inbox.error && visible.length === 0 ? (
             <div className="daily-empty">
               <CheckCheck size={22} />
-              <strong>No action required</strong>
-              <span>{filter === 'all' ? 'Runs with no operator action stay out of this view.' : `No ${filter} items are waiting.`}</span>
+              <strong>{t('work.inbox.noActionTitle')}</strong>
+              <span>{filter === 'all' ? t('work.inbox.noActionHint') : t('work.inbox.noActionFiltered', { filter: t(`work.inbox.filter.${filter}`) })}</span>
               <span className="empty-guide-link">
-                <button type="button" className="link-btn" onClick={() => window.location.hash = 'chat'}>Start a chat</button> to create your first run, or <button type="button" className="link-btn" onClick={() => window.location.hash = 'work'}>create a work item</button>.
+                <button type="button" className="link-btn" onClick={() => window.location.hash = 'chat'}>{t('nav.chat')}</button> {t('work.inbox.guideMid')} <button type="button" className="link-btn" onClick={() => window.location.hash = 'work'}>{t('work.inbox.guideWork')}</button>{t('work.inbox.guideEnd')}
               </span>
             </div>
           ) : null}
@@ -144,6 +146,7 @@ export function InboxPage({
 }
 
 function InboxRow({ entry, onAction, onApprovePlan, onStartWork }: { entry: InboxEntry; onAction: () => void; onApprovePlan: () => void; onStartWork?: () => void }) {
+  const { t } = useI18n();
   const Icon = attentionIcon(entry.attentionState);
   const canApprove = entry.attentionState === 'approval_required' && entry.approvePlan;
   const canStart = entry.nextAction === 'start' && onStartWork;
@@ -153,12 +156,12 @@ function InboxRow({ entry, onAction, onApprovePlan, onStartWork }: { entry: Inbo
       <div className="attention-copy">
         <div className="attention-title-line">
           <strong>{entry.title}</strong>
-          <span className="attention-state">{stateLabel(entry.attentionState)}</span>
+          <span className="attention-state">{stateLabel(entry.attentionState, t)}</span>
         </div>
         <div className="attention-meta">
           <span>{entry.projectId}</span>
           <span>{entry.source ?? entry.sourceKind.replaceAll('_', ' ')}</span>
-          {entry.connector ? <span>{entry.connector.dispatchStatus} · result {entry.connector.resultAvailable ? 'ready' : 'pending'} · callback {entry.connector.callbackStatus.replaceAll('_', ' ')}</span> : null}
+          {entry.connector ? <span>{t('work.inbox.connector', { dispatch: entry.connector.dispatchStatus, result: entry.connector.resultAvailable ? t('work.inbox.resultReady') : t('work.inbox.resultPending'), callback: entry.connector.callbackStatus.replaceAll('_', ' ') })}</span> : null}
           <time dateTime={entry.updatedAt}>{formatDate(entry.updatedAt)}</time>
           {entry.runSpecId ? <code>{entry.runSpecId.slice(0, 12)}</code> : null}
         </div>
@@ -166,16 +169,16 @@ function InboxRow({ entry, onAction, onApprovePlan, onStartWork }: { entry: Inbo
       <div className="attention-actions">
         {canApprove && (
           <button className="attention-action approve-action" type="button" onClick={onApprovePlan}>
-            Approve <ChevronRight size={14} />
+            {t('work.inbox.approve')} <ChevronRight size={14} />
           </button>
         )}
         {canStart && (
           <button className="attention-action start-action" type="button" onClick={onStartWork}>
-            <Play size={13} /> Start <ChevronRight size={14} />
+            <Play size={13} /> {t('work.inbox.start')} <ChevronRight size={14} />
           </button>
         )}
         <button className="attention-action" type="button" onClick={onAction}>
-          {actionLabel(entry)} <ChevronRight size={14} />
+          {actionLabel(entry, t)} <ChevronRight size={14} />
         </button>
       </div>
     </article>
@@ -187,7 +190,7 @@ function SummaryCount({ label, value, tone }: { label: string; value: number; to
 }
 
 function InboxSkeleton() {
-  return <div className="daily-skeleton" aria-label="Loading inbox"><i /><i /><i /></div>;
+  return <div className="daily-skeleton" aria-label={tt('common.loading')}><i /><i /><i /></div>;
 }
 
 function count(entries: InboxEntry[], states: WorkItemAttentionState[]): number {
@@ -223,17 +226,18 @@ function attentionIcon(state: WorkItemAttentionState) {
   return CircleDot;
 }
 
-function stateLabel(state: WorkItemAttentionState): string {
-  return state.replaceAll('_', ' ');
+function stateLabel(state: WorkItemAttentionState, t: (key: string) => string): string {
+  const key = `work.inbox.state.${state}`;
+  return t(key) ?? state.replaceAll('_', ' ');
 }
 
-function actionLabel(entry: InboxEntry): string {
+function actionLabel(entry: InboxEntry, t: (key: string) => string): string {
   const labels: Record<string, string> = {
-    review_plan: 'Review plan',
-    inspect_verification: 'Inspect checks',
-    recover: 'Inspect recovery',
-    inspect_run: 'Inspect run',
-    review_changes: 'Review result',
+    review_plan: 'work.inbox.action.review_plan',
+    inspect_verification: 'work.inbox.action.inspect_verification',
+    recover: 'work.inbox.action.recover',
+    inspect_run: 'work.inbox.action.inspect_run',
+    review_changes: 'work.inbox.action.review_changes',
   };
-  return labels[entry.nextAction] ?? 'Inspect';
+  return t(labels[entry.nextAction] ?? 'work.inbox.action.inspect');
 }

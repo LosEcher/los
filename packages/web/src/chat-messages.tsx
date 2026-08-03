@@ -7,6 +7,7 @@ import { Wrench } from 'lucide-react';
 import { EmptyText } from './ui.js';
 import { MarkdownBlock } from './markdown-renderer.js';
 import { ChatVirtualScroller } from './chat-virtual-scroller.js';
+import { tt, useI18n } from './i18n';
 
 // ── Types ────────────────────────────────────────────
 
@@ -101,9 +102,9 @@ export function buildHistoryMessages(
   result.push({
     id: crypto.randomUUID(),
     role: 'separator',
-    content: `${result.length} prior messages shown. Send a prompt to continue.`,
+    content: tt('chat.historyDivider', { count: result.length }),
     level: 'ok',
-    meta: `${turnIdx} turns in history`,
+    meta: tt('chat.historyTurns', { count: turnIdx }),
     toolCalls: [],
   });
 
@@ -114,8 +115,8 @@ export function readyMessages(): Message[] {
   return [{
     id: crypto.randomUUID(),
     role: 'system',
-    content: 'Choose a project, provider, model, and tool mode before sending.',
-    meta: 'project tools can edit files; choose all tools when the run needs shell commands',
+    content: tt('chat.readyPrompt'),
+    meta: tt('chat.readyMeta'),
     toolCalls: [],
   }];
 }
@@ -123,15 +124,16 @@ export function readyMessages(): Message[] {
 // ── Components ───────────────────────────────────────
 
 export function ToolCard({ toolCall }: { toolCall: ToolCall }) {
+  const { t } = useI18n();
   return (
     <details className="tool-card" data-status={toolCall.status}>
       <summary className="tool-card-head">
         <Wrench size={12} />
         <strong>{toolCall.toolName}</strong>
-        {toolCall.status === 'running' && <span className="tool-status running">running</span>}
-        {toolCall.status === 'completed' && <span className="tool-status completed">done</span>}
-        {toolCall.status === 'error' && <span className="tool-status error">error</span>}
-        {toolCall.status === 'denied' && <span className="tool-status error">denied</span>}
+        {toolCall.status === 'running' && <span className="tool-status running">{t('chat.tool.running')}</span>}
+        {toolCall.status === 'completed' && <span className="tool-status completed">{t('chat.tool.done')}</span>}
+        {toolCall.status === 'error' && <span className="tool-status error">{t('chat.tool.error')}</span>}
+        {toolCall.status === 'denied' && <span className="tool-status error">{t('chat.tool.denied')}</span>}
         {toolCall.durationMs !== undefined && (
           <span className="tool-duration">{formatToolDuration(toolCall.durationMs)}</span>
         )}
@@ -139,19 +141,19 @@ export function ToolCard({ toolCall }: { toolCall: ToolCall }) {
       <div className="tool-card-body">
         {toolCall.argsPreview && (
           <div className="tool-args">
-            <span className="tool-label">Args</span>
+            <span className="tool-label">{t('chat.tool.args')}</span>
             <code>{toolCall.argsPreview}</code>
           </div>
         )}
         {toolCall.resultPreview && (
           <div className="tool-result">
-            <span className="tool-label">Result</span>
+            <span className="tool-label">{t('chat.tool.result')}</span>
             <code>{toolCall.resultPreview}</code>
           </div>
         )}
         {toolCall.errorPreview && (
           <div className="tool-result">
-            <span className="tool-label">Error</span>
+            <span className="tool-label">{t('chat.tool.error')}</span>
             <code>{toolCall.errorPreview}</code>
           </div>
         )}
@@ -166,6 +168,7 @@ function formatToolDuration(ms: number): string {
 }
 
 export function MessageBubble({ message, isStreaming }: { message: Message; isStreaming?: boolean }) {
+  const { t } = useI18n();
   if (message.role === 'separator') {
     return (
       <div className="chat-separator">
@@ -206,12 +209,12 @@ export function MessageBubble({ message, isStreaming }: { message: Message; isSt
         )}
         {message.reasoning && message.reasoning.length > 0 && (
           <details className="chat-reasoning">
-            <summary>Reasoning</summary>
+            <summary>{t('chat.reasoning')}</summary>
             <p>{message.reasoning}</p>
           </details>
         )}
         <div className="chat-bubble-text">
-          {message.content ? <MarkdownBlock content={message.content} /> : (message.toolCalls.length > 0 ? null : <span className="chat-empty">(empty)</span>)}
+          {message.content ? <MarkdownBlock content={message.content} /> : (message.toolCalls.length > 0 ? null : <span className="chat-empty">{t('chat.empty')}</span>)}
         </div>
         {message.toolCalls.length > 0 && (
           <div className="chat-tool-calls">
@@ -233,19 +236,20 @@ export function ChatMessages({ messages, debugMode, onDebugModeChange, notices, 
   children?: ReactNode;
   running?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <>
       <div className="detail-filter-bar">
         <span className="detail-filter-label">
-          {messages.filter(m => m.role !== 'separator').length} messages
+          {t('chat.messageCount', { count: messages.filter(m => m.role !== 'separator').length })}
         </span>
-        <label className="debug-toggle" title="Show raw agent events (tool_call_state.*, model.turn.started, etc.)">
+        <label className="debug-toggle" title={t('chat.debugTitle')}>
           <input
             type="checkbox"
             checked={debugMode}
             onChange={e => onDebugModeChange(e.target.checked)}
           />
-          <span>debug events</span>
+          <span>{t('chat.debugEvents')}</span>
         </label>
       </div>
 

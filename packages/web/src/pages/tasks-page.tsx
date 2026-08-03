@@ -53,6 +53,7 @@ import {
   StatusPill,
 } from '../ui';
 import { AgentGraphControl } from './agent-graph-control.js';
+import { useI18n } from '../i18n';
 
 type RunStateProjection = {
   phase: string;
@@ -68,6 +69,7 @@ type RunStateProjection = {
   };
 };
 export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) => void }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showRunSpecs, setShowRunSpecs] = useState(false);
@@ -98,20 +100,20 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Tasks</h2>
-            <p>Scheduler records above chat sessions. Cancel is available only for active tasks.</p>
+            <h2>{t('ops.tasks.title')}</h2>
+            <p>{t('ops.tasks.subtitle')}</p>
           </div>
           <div className="toolbar">
             <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-              <option value="">all status</option>
-              <option value="queued">queued</option>
-              <option value="running">running</option>
-              <option value="succeeded">succeeded</option>
-              <option value="failed">failed</option>
-              <option value="cancelled">cancelled</option>
+              <option value="">{t('ops.tasks.filterAllStatus')}</option>
+              <option value="queued">{t('ops.tasks.statusQueued')}</option>
+              <option value="running">{t('ops.tasks.statusRunning')}</option>
+              <option value="succeeded">{t('ops.tasks.statusSucceeded')}</option>
+              <option value="failed">{t('ops.tasks.statusFailed')}</option>
+              <option value="cancelled">{t('ops.tasks.statusCancelled')}</option>
             </select>
             <button className={`ghost-btn ${showRunSpecs ? 'active' : ''}`} type="button" onClick={() => setShowRunSpecs(prev => !prev)}>
-              <GitGraph size={14} /> run specs
+              <GitGraph size={14} /> {t('ops.tasks.runSpecsButton')}
             </button>
             <RefreshQueryButton queryKey={['tasks']} />
           </div>
@@ -119,7 +121,7 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
         <AgentGraphControl />
         <DataTable
           loading={tasks.isLoading}
-          empty="No tasks yet."
+          empty={t('ops.tasks.empty')}
           rows={tasks.data ?? []}
           renderRow={task => (
             <div className="record-row task-row" data-active={selectedTaskId === task.id}>
@@ -131,14 +133,14 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
               </div>
               <span className={`status-text ${task.status}`}>{task.status}</span>
               <span>{task.toolMode}</span>
-              <span>{task.provider ?? 'default'} / {task.model ?? 'model?'}</span>
-              <span>{task.nodeId ?? 'local'}</span>
+              <span>{task.provider ?? t('ops.tasks.fallbackDefault')} / {task.model ?? t('ops.tasks.fallbackModel')}</span>
+              <span>{task.nodeId ?? t('ops.tasks.fallbackLocal')}</span>
               <span>{formatDate(task.updatedAt)}</span>
               <button className="tiny-btn" type="button" onClick={() => setSelectedTaskId(task.id)}>
-                <Search size={12} /> inspect
+                <Search size={12} /> {t('ops.tasks.inspect')}
               </button>
               <button className="tiny-btn" type="button" disabled={!['queued', 'running'].includes(task.status) || cancel.isPending} onClick={() => cancel.mutate(task.id)}>
-                cancel
+                {t('common.cancel')}
               </button>
             </div>
           )}
@@ -146,21 +148,21 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
         {showRunSpecs ? (
           <div className="section-divider">
             <div className="panel-head compact">
-              <h2>Run Specs</h2>
+              <h2>{t('ops.runSpecs.title')}</h2>
               <RefreshQueryButton queryKey={['runs']} />
             </div>
             <DataTable
               loading={runSpecs.isLoading}
-              empty="No run specs found."
+              empty={t('ops.runSpecs.empty')}
               rows={runSpecs.data ?? []}
               renderRow={run => (
                 <div className="record-row" key={run.id}>
                   <span className="row-title">{run.id}</span>
                   <span className={`status-text ${run.status}`}>{run.status}</span>
-                  <span>session: {run.sessionId.slice(0, 12)}...</span>
+                  <span>{t('ops.tasks.sessionShort', { sessionId: run.sessionId.slice(0, 12) })}</span>
                   <span>{formatDate(run.updatedAt)}</span>
                   <button className="tiny-btn" type="button" onClick={() => setSelectedTaskId(run.taskRunId ?? null)}>
-                    <Search size={12} /> task
+                    <Search size={12} /> {t('ops.tasks.taskButton')}
                   </button>
                 </div>
               )}
@@ -174,6 +176,7 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
 }
 
 function TaskRunInspector({ task }: { task: TaskRun | null }) {
+  const { t } = useI18n();
   const inspect = useMutation({
     mutationFn: (runSpecId: string) => getJson(`/runs/${runSpecId}/inspect`),
   });
@@ -201,68 +204,69 @@ function TaskRunInspector({ task }: { task: TaskRun | null }) {
   const graphCompletion = agentGraph.data?.completion ?? agentGraphCompletion.data;
 
   if (!task) {
-    return <aside className="panel inspector"><EmptyText text="Select a task to inspect run evidence and recovery state." /></aside>;
+    return <aside className="panel inspector"><EmptyText text={t('ops.tasks.inspectorEmpty')} /></aside>;
   }
 
   return (
     <aside className="panel inspector">
       <div className="panel-head compact">
-        <h2>Task Run</h2>
+        <h2>{t('ops.tasks.inspectorTitle')}</h2>
         <span className={`status-text ${task.status}`}>{task.status}</span>
       </div>
       <span className="mono-chip">{task.id}</span>
       <div className="fact-list compact-facts">
-        <Fact label="run spec" value={runSpecId ?? 'none'} />
-        <Fact label="graph" value={graphId ?? 'none'} />
-        <Fact label="session" value={task.sessionId} />
-        <Fact label="trace" value={task.traceId} />
-        <Fact label="attempt" value={String(task.attempt)} />
-        <Fact label="node" value={task.nodeId ?? 'local'} />
-        <Fact label="heartbeat" value={task.heartbeatAt ? formatDate(task.heartbeatAt) : 'none'} />
-        {task.leaseExpiresAt ? <Fact label="lease expires" value={formatDate(task.leaseExpiresAt)} /> : null}
+        <Fact label={t('ops.tasks.factRunSpec')} value={runSpecId ?? t('common.none')} />
+        <Fact label={t('ops.tasks.factGraph')} value={graphId ?? t('common.none')} />
+        <Fact label={t('ops.tasks.factSession')} value={task.sessionId} />
+        <Fact label={t('ops.tasks.factTrace')} value={task.traceId} />
+        <Fact label={t('ops.tasks.factAttempt')} value={String(task.attempt)} />
+        <Fact label={t('ops.tasks.factNode')} value={task.nodeId ?? t('ops.tasks.fallbackLocal')} />
+        <Fact label={t('ops.tasks.factHeartbeat')} value={task.heartbeatAt ? formatDate(task.heartbeatAt) : t('common.none')} />
+        {task.leaseExpiresAt ? <Fact label={t('ops.tasks.factLeaseExpires')} value={formatDate(task.leaseExpiresAt)} /> : null}
       </div>
       <div className="inline-actions">
         <button className="ghost-btn" type="button" disabled={!runSpecId || inspect.isPending} onClick={() => runSpecId && inspect.mutate(runSpecId)}>
-          <Search size={14} /> inspect
+          <Search size={14} /> {t('ops.tasks.inspect')}
         </button>
         <button className="ghost-btn" type="button" disabled={!runSpecId || recover.isPending} onClick={() => runSpecId && recover.mutate(runSpecId)}>
-          <Database size={14} /> recover
+          <Database size={14} /> {t('ops.tasks.recover')}
         </button>
         <button className="ghost-btn" type="button" disabled={!runSpecId || verify.isPending} onClick={() => runSpecId && verify.mutate(runSpecId)}>
-          <Send size={14} /> verify
+          <Send size={14} /> {t('ops.tasks.verify')}
         </button>
         <button className="ghost-btn" type="button" disabled={!graphId || agentGraph.isPending || agentGraphCompletion.isPending} onClick={() => { if (graphId) { agentGraph.mutate(graphId); agentGraphCompletion.mutate(graphId); } }}>
-          <GitGraph size={14} /> graph
+          <GitGraph size={14} /> {t('ops.tasks.graphButton')}
         </button>
       </div>
       {runState.data ? (
         <div className="fact-list compact-facts">
-          <Fact label="phase" value={runState.data.phase} />
-          <Fact label="next action" value={runState.data.action} />
-          <Fact label="tasks" value={`${runState.data.counts.taskRuns.total ?? 0} total / ${(runState.data.counts.taskRuns.queued ?? 0) + (runState.data.counts.taskRuns.running ?? 0)} active`} />
-          <Fact label="verification" value={`${runState.data.counts.verificationRecords.total ?? 0} total / ${runState.data.ids.pendingVerificationRecordIds.length + runState.data.ids.failedVerificationRecordIds.length} blocked`} />
+          <Fact label={t('ops.tasks.factPhase')} value={runState.data.phase} />
+          <Fact label={t('ops.tasks.factNextAction')} value={runState.data.action} />
+          <Fact label={t('ops.tasks.factTasks')} value={t('ops.tasks.factTasksValue', { total: runState.data.counts.taskRuns.total ?? 0, active: (runState.data.counts.taskRuns.queued ?? 0) + (runState.data.counts.taskRuns.running ?? 0) })} />
+          <Fact label={t('ops.tasks.factVerification')} value={t('ops.tasks.factVerificationValue', { total: runState.data.counts.verificationRecords.total ?? 0, blocked: runState.data.ids.pendingVerificationRecordIds.length + runState.data.ids.failedVerificationRecordIds.length })} />
         </div>
       ) : null}
       {runState.data?.blockers.length ? (
         <div className="json-block">
-          <strong>Run State Blockers</strong>
+          <strong>{t('ops.tasks.blockersTitle')}</strong>
           <pre>{(runState.data.blockers ?? []).map(blocker => `${blocker.kind}: ${blocker.message}${blocker.ids.length ? ` [${blocker.ids.join(', ')}]` : ''}`).join('\n')}</pre>
         </div>
       ) : null}
       {graphCompletion ? <AgentGraphReadModel graph={agentGraph.data} completion={graphCompletion} /> : null}
       {latestResult ? (
         <div className="json-block">
-          <strong>Run Operation Result</strong>
+          <strong>{t('ops.tasks.operationResultTitle')}</strong>
           <pre>{JSON.stringify(latestResult, null, 2)}</pre>
         </div>
       ) : (
-        !graphCompletion ? <EmptyText text={runSpecId ? 'No run operation loaded.' : 'Task has no run spec link.'} /> : null
+        !graphCompletion ? <EmptyText text={runSpecId ? t('ops.tasks.noOperationLoaded') : t('ops.tasks.noRunSpecLink')} /> : null
       )}
     </aside>
   );
 }
 
 function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; completion: AgentTaskGraphCompletion }) {
+  const { t } = useI18n();
   const attempts = graph
     ? Object.entries(graph.attemptsByTaskId ?? {})
       .flatMap(([, items]) => items)
@@ -272,20 +276,20 @@ function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; co
   return (
     <div className="graph-read-model">
       <div className="panel-head compact">
-        <h2>Agent Task Graph</h2>
+        <h2>{t('ops.tasks.agentGraphTitle')}</h2>
         <span className={`status-text ${completion.status}`}>{completion.status}</span>
       </div>
       <span className="mono-chip">{completion.graphId}</span>
       <div className="fact-list compact-facts">
-        <Fact label="complete" value={completion.canComplete ? 'yes' : 'no'} />
-        <Fact label="tasks" value={`${completion.counts.total} total / ${completion.counts.running} running`} />
-        <Fact label="queued" value={String(completion.counts.queued)} />
-        <Fact label="succeeded" value={String(completion.counts.succeeded)} />
-        <Fact label="failed" value={String(completion.counts.failed + completion.counts.cancelled)} />
-        <Fact label="verifier" value={`${completion.counts.succeededVerifier}/${completion.counts.verifier} succeeded`} />
+        <Fact label={t('ops.tasks.factComplete')} value={completion.canComplete ? t('ops.tasks.yes') : t('ops.tasks.no')} />
+        <Fact label={t('ops.tasks.factTasks')} value={t('ops.tasks.graphTasksValue', { total: completion.counts.total, running: completion.counts.running })} />
+        <Fact label={t('ops.tasks.factQueued')} value={String(completion.counts.queued)} />
+        <Fact label={t('ops.tasks.factSucceeded')} value={String(completion.counts.succeeded)} />
+        <Fact label={t('ops.tasks.factFailed')} value={String(completion.counts.failed + completion.counts.cancelled)} />
+        <Fact label={t('ops.tasks.factVerifier')} value={t('ops.tasks.graphVerifierValue', { succeeded: completion.counts.succeededVerifier, total: completion.counts.verifier })} />
       </div>
       <div className="json-block">
-        <strong>Graph Completion</strong>
+        <strong>{t('ops.tasks.graphCompletionTitle')}</strong>
         <pre>{[
           `reason: ${completion.reason}`,
           completion.blockReason ? `blockReason: ${completion.blockReason}` : '',
@@ -300,18 +304,18 @@ function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; co
       {graph ? (
         <>
         <div className="json-block">
-          <strong>Dependency Tree</strong>
-          <pre>{buildDependencyTree(graph.tasks ?? [], graph.edges ?? [])}</pre>
+          <strong>{t('ops.tasks.dependencyTreeTitle')}</strong>
+          <pre>{buildDependencyTree(graph.tasks ?? [], graph.edges ?? [], t)}</pre>
         </div>
         <div className="json-block">
-          <strong>Graph Tasks</strong>
+          <strong>{t('ops.tasks.graphTasksTitle')}</strong>
           <pre>{(graph.tasks ?? []).map(task => `${task.id} | ${task.role} | ${task.status} | attempts ${attempts.filter(attempt => attempt.taskId === task.id).length}/${task.maxAttempts}`).join('\n') || 'none'}</pre>
         </div>
         </>
       ) : null}
       {attempts.length > 0 ? (
         <div className="json-block">
-          <strong>Attempt Evidence</strong>
+          <strong>{t('ops.tasks.attemptEvidenceTitle')}</strong>
           <pre>{attempts.map(attempt => `${attempt.taskId} #${attempt.attempt} ${attempt.status}${attempt.taskRunId ? ` taskRun=${attempt.taskRunId}` : ''}${attempt.verificationRecordId ? ` verification=${attempt.verificationRecordId}` : ''}${attempt.toolCallStateIds.length ? ` tools=${attempt.toolCallStateIds.join(',')}` : ''}`).join('\n')}</pre>
         </div>
       ) : null}
@@ -323,8 +327,9 @@ function AgentGraphReadModel({ graph, completion }: { graph?: AgentTaskGraph; co
 function buildDependencyTree(
   tasks: AgentTaskGraphTask[],
   edges: AgentTaskGraphEdge[],
+  tr: (key: string, vars?: Record<string, string | number>) => string,
 ): string {
-  if (edges.length === 0) return '(no dependencies — all tasks run in parallel)';
+  if (edges.length === 0) return tr('ops.tasks.noDependencies');
   const taskMap = new Map(tasks.map(t => [t.id, t]));
   const children = new Map<string, string[]>();
   const parents = new Set<string>();
@@ -347,7 +352,7 @@ function buildDependencyTree(
   function collect(id: string) { rendered.add(id); for (const c of children.get(id) ?? []) collect(c); }
   for (const root of roots) collect(root.id);
   const unrendered = tasks.filter(t => !rendered.has(t.id));
-  if (unrendered.length > 0) lines.push(`(orphaned: ${unrendered.map(t => t.id).join(', ')})`);
+  if (unrendered.length > 0) lines.push(tr('ops.tasks.orphanedLine', { ids: unrendered.map(t => t.id).join(', ') }));
   return lines.join('\n');
 }
 

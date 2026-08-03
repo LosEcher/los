@@ -38,6 +38,7 @@ import {
 } from './useLiveToolCalls.js';
 import { useChatStream } from './useChatStream.js';
 import type { ApprovalEvent } from '../chat-approval.js';
+import { tt } from '../i18n';
 
 export function useChatRun(options: {
   workspaceRoot: string;
@@ -145,14 +146,14 @@ export function useChatRun(options: {
     setRows(prev => {
       const hasHistory = prev.length > 0 && prev.some(r => r.event === 'history.end');
       if (hasHistory) {
-        return [...prev, { id: crypto.randomUUID(), event: '---', message: 'New message below', level: 'normal' as const }, { id: crypto.randomUUID(), event: 'user', message: text }];
+        return [...prev, { id: crypto.randomUUID(), event: '---', message: tt('chat.newMessageBelow'), level: 'normal' as const }, { id: crypto.randomUUID(), event: 'user', message: text }];
       }
       return [{ id: crypto.randomUUID(), event: 'user', message: text }];
     });
     setMessages(prev => {
       const hasHistory = prev.length > 0 && prev.some(m => m.role === 'separator');
       const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, toolCalls: [] };
-      if (hasHistory) return [...prev, { id: crypto.randomUUID(), role: 'separator' as const, content: 'New message below', level: 'normal' as const, toolCalls: [] }, userMsg];
+      if (hasHistory) return [...prev, { id: crypto.randomUUID(), role: 'separator' as const, content: tt('chat.newMessageBelow'), level: 'normal' as const, toolCalls: [] }, userMsg];
       return [userMsg];
     });
 
@@ -165,7 +166,7 @@ export function useChatRun(options: {
           const goal = text.trim();
           const created = await postJson<WorkItemProjection>('/work-items', {
             projectId: getCurrentProjectId() ?? 'los',
-            title: goal.split(/\r?\n/, 1)[0]?.slice(0, 120) || 'Web coding task',
+            title: goal.split(/\r?\n/, 1)[0]?.slice(0, 120) || tt('chat.webCodingTask'),
             goal,
             description: goal,
             mode: 'execution',
@@ -209,7 +210,7 @@ export function useChatRun(options: {
           todoId: resolvedTodo?.id,
         }, controller.signal, ({ event, data }) => onStreamEvent(event, data));
       } else {
-        setRows(prev => [...prev, { id: crypto.randomUUID(), event: 'runtime.started', message: `Starting ${o.runtimeKind}...`, level: 'ok' as const }]);
+        setRows(prev => [...prev, { id: crypto.randomUUID(), event: 'runtime.started', message: tt('chat.startingRuntime', { runtime: o.runtimeKind }), level: 'ok' as const }]);
         await streamRuntime({ kind: o.runtimeKind, prompt: text, workspaceRoot: o.workspaceRoot.trim() || undefined, timeoutMs: o.timeoutMs }, controller.signal, ({ event, data }) => {
           setRows(prev => [...prev, streamRow(event, data)]);
           if (event === 'runtime.completed' || event === 'runtime.error') void queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -253,8 +254,8 @@ export function useChatRun(options: {
     setSessionId(null);
     setTaskRunId(null);
     autoWorkItemRef.current = null;
-    setRows([{ id: crypto.randomUUID(), event: 'session.new', message: 'New chat is ready.', meta: 'next send will create a new session', level: 'ok' }]);
-    setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: 'New chat is ready.', meta: 'next send will create a new session', level: 'ok', toolCalls: [] }]);
+    setRows([{ id: crypto.randomUUID(), event: 'session.new', message: tt('chat.newChatReady'), meta: tt('chat.newChatMeta'), level: 'ok' }]);
+    setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: tt('chat.newChatReady'), meta: tt('chat.newChatMeta'), level: 'ok', toolCalls: [] }]);
   }
 
   return {
