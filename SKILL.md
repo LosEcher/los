@@ -467,3 +467,81 @@ Evidence to report:
 
 Stop when `pnpm gate` passes all phases or the residual failure is documented
 as a known pre-existing issue in `tools/.known-test-failures.txt`.
+
+## Workflow: CI Failure Triage And Retrigger
+
+Trigger when a Forgejo PR check fails, especially right after a push.
+
+Steps:
+
+1. Judge the failure by **conclusion**, not pending: a check that fails in
+   seconds is infrastructure (runner/network), a check that fails after
+   minutes is code. Read `commit/<sha>/status` and list every context with its
+   `status` — do not stop at "no longer pending".
+2. Network-jitter signature (observed 2026-08-03 on node34): log lines with
+   `ETIMEDOUT <cloudflare-ip>:443` or `ENETUNREACH 2606:4700::…:443` while the
+   host itself can reach the registry. Mitigations already in place:
+   workflow-level `NODE_OPTIONS=--dns-result-order=ipv4first`. Remaining
+   follow-up (not yet implemented): persistent pnpm store cache for the
+   Forgejo runner.
+3. Retrigger a PR without touching content:
+   ```bash
+   jj new <base-commit> -m "docs: retrigger N"
+   jj bookmark set --allow-backwards <bookmark> -r @   # siblings need this
+   jj git push --remote origin --bookmark <bookmark>
+   ```
+   Empty commits on the same base become siblings; `--allow-backwards` is
+   required to move the bookmark sideways.
+4. Merge caveats: Forgejo rejects merges with `head behind base` (chain
+   merges need rebase+CI per PR) and occasionally reports 405 then closes the
+   PR without merging — check `pulls/<n>` `merged` field and reopen as a new
+   PR if `closed && !merged`.
+
+Evidence to report: failing context names + conclusions, the log signature,
+retrigger commands run, final check states before merge.
+
+## Workflow: pnpm 11 Operations
+
+Trigger when installing, upgrading, or debugging pnpm in this repo.
+
+1. Version policy: `package.json` `packageManager: pnpm@11.6.0`; CI images
+   pin the same; remote nodes match. Do not downgrade without a deliberate
+   toolchain change.
+2. Settings live in `pnpm-workspace.yaml` (package.json `pnpm` field is
+   ignored with a warning). Build-script allowlist uses **`allowBuilds`**
+   (esbuild, @google/genai, protobufjs) — not the pnpm-10 name
+   `onlyBuiltDependencies`.
+3. Lockfile is v9-compatible: `pnpm install` produces zero lockfile drift.
+   Non-interactive installs need `CI=true` (store may land in the repo root
+   as `.pnpm-store/`; it is gitignored).
+4. In restricted shells (sandbox), the pnpm launcher cannot write its
+   install dir: use
+   `node ~/.cache/node/corepack/v1/pnpm/11.6.0/bin/pnpm.mjs <cmd>`.
+   Run repo scripts with
+   `./packages/gateway/node_modules/.bin/tsx tools/<script>.mts`
+   and relative-path imports (tsconfig paths are not resolved).
+
+## Workflow: Execution Lab Operations (experiments, K4, sample gate)
+
+Trigger when driving execution experiments, the Pi K4 canary path, or
+producing pairwise sample-gate samples.
+
+1. Source run spec must carry a persisted plan (AP2): model-driven planning
+   may fail repeatedly — use `tools/k4-create-source.mts` (operator-constructed
+   plan) when needed. The source run must have `tenant_id`/`project_id` set or
+   `select-candidate` rejects it as out-of-scope.
+2. Lifecycle: create experiment → `select-candidate` (draft only) → approve
+   experiment → approve candidate plan via `POST /runs/:id/approve` (K4
+   candidates are **not** auto-dispatched by approve) → `authorize-canary`
+   with `confirmCandidateRunSpecId` → `execute`. Planning-disposition
+   candidates end in `blocked` awaiting operator approval; results stay
+   advisory until the formal sample gate passes.
+3. Sample production: `tools/pairwise-sample-ingest.mts --experiment <id>
+   --scenario <sid>` extracts deterministic kernel evidence (idempotent).
+   Gate registration contract requires `scenarios[].label` and
+   `baselineRef/candidateRef {experimentId, runSpecId}`.
+4. Auth for all gateway operator endpoints: header `x-los-operator-token`
+   (not Bearer).
+
+Evidence to report: experiment/candidate ids, kernel.started/finished events,
+gate evaluation JSON (`collectedPairs`, `scenarioCoverage`, `passed`).
