@@ -5,6 +5,9 @@ import type {
   ScheduledWorkTrigger,
 } from './types.js';
 
+/** Milliseconds an open circuit must wait before auto-recovering to half_open. */
+export const CIRCUIT_RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 const ACTIVE_RUN_STATUSES = new Set<ScheduledWorkRunStatus>([
   'queued', 'claimed', 'running', 'awaiting_approval',
 ]);
