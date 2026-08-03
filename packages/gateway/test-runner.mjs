@@ -51,6 +51,7 @@ const isolatedDatabaseTestFiles = [
   'src/chat-resume-plan.test.ts',
   'src/chat-route.test.ts',
   'src/chat-run-completion.test.ts',
+  'src/chat-service-hooks-storm.test.ts',
   'src/chat-service-outcomes.test.ts',
   'src/execution-reliability.test.ts',
   'src/execution-experiment-routes.test.ts',

@@ -160,12 +160,24 @@ CREATE INDEX IF NOT EXISTS idx_memcomp_checkpoint ON memory_compactions(session_
 `;
 
 let _initialized = false;
+let _initializing: Promise<void> | null = null;
 
 export async function ensureMemoryCompactionStore(): Promise<void> {
   if (_initialized) return;
-  await getDb().exec(SCHEMA);
-  _initialized = true;
-  log.info('Memory compaction store initialized');
+  // Deduplicate concurrent ensure calls: without this, two compactSession
+  // invocations racing inside the `await getDb().exec(SCHEMA)` window both run
+  // the CREATE TABLE IF NOT EXISTS statements, and PostgreSQL can collide on
+  // the table's implicit row type (duplicate key on pg_type_typname_nsp_index).
+  if (!_initializing) {
+    _initializing = getDb().exec(SCHEMA)
+      .then(() => { _initialized = true; })
+      .catch((err) => {
+        _initializing = null;
+        throw err;
+      });
+  }
+  await _initializing;
+  if (_initialized) log.info('Memory compaction store initialized');
 }
 export async function compactSession(input: CompactSessionInput): Promise<MemoryCompaction | null> {
   await ensureMemoryCompactionStore();
