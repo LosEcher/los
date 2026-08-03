@@ -1,4 +1,5 @@
 import type { Message, ToolCall, ToolCallStatus } from './chat-messages.js';
+import { tt } from './i18n';
 
 function truncateJson(raw: string, maxLen: number): string {
   return raw.length > maxLen ? raw.slice(0, maxLen) + '…' : raw;
@@ -204,10 +205,10 @@ export function accumulateEvent(
     msgs.push({
       id: crypto.randomUUID(),
       role: 'system',
-      content: typeof data.text === 'string' ? data.text : 'Run completed.',
+      content: typeof data.text === 'string' ? data.text : tt('chat.stream.runCompleted'),
       eventType: 'done',
       level: 'ok',
-      meta: data.sessionId ? `session ${data.sessionId}` : undefined,
+      meta: data.sessionId ? `${tt('chat.fact.session')} ${data.sessionId}` : undefined,
       toolCalls: [],
     });
     return msgs;
@@ -217,7 +218,7 @@ export function accumulateEvent(
     msgs.push({
       id: crypto.randomUUID(),
       role: 'system',
-      content: String(data.message ?? 'stream error'),
+      content: String(data.message ?? tt('chat.stream.streamError')),
       eventType: 'error',
       level: 'error',
       toolCalls: [],
@@ -244,7 +245,7 @@ export function accumulateEvent(
     msgs.push({
       id: crypto.randomUUID(),
       role: 'system',
-      content: String(data.type ?? data.status ?? 'task event'),
+      content: String(data.type ?? data.status ?? tt('chat.stream.taskEvent')),
       eventType: 'task',
       level: status.includes('succeeded') ? 'ok' : status.includes('failed') ? 'error' : 'normal',
       meta: [data.taskRunId, data.nodeId].filter(Boolean).join(' · '),
@@ -257,10 +258,10 @@ export function accumulateEvent(
     msgs.push({
       id: crypto.randomUUID(),
       role: 'system',
-      content: event === 'cancelled' ? 'Run cancelled.' : 'Deduplicated — matching run already in progress.',
+      content: event === 'cancelled' ? tt('chat.runCancelled') : tt('chat.deduplicated'),
       eventType: event,
       level: 'warn',
-      meta: data.taskRunId ? `task ${data.taskRunId}` : undefined,
+      meta: data.taskRunId ? `${tt('chat.fact.taskRun')} ${data.taskRunId}` : undefined,
       toolCalls: [],
     });
     return msgs;
@@ -272,24 +273,24 @@ export function accumulateEvent(
     content: JSON.stringify(data),
     eventType: event,
     level: 'normal',
-    meta: `event: ${event}`,
+    meta: tt('chat.inspect.event', { event }),
     toolCalls: [],
   });
   return msgs;
 }
 
 function formatSessionEvent(event: string, data: Record<string, unknown>): string {
-  if (event === 'session' && data.sessionId) return `Session started: ${data.sessionId}`;
-  if (event === 'session.resumed') return `Resumed session (${data.turnCount ?? '?'} turns, ${data.messageCount ?? '?'} msgs)`;
-  if (event === 'session.branched') return `Branched from ${String(data.parentSessionId ?? 'unknown')}`;
-  if (event === 'session.resume_state') return 'Loaded session resume state.';
+  if (event === 'session' && data.sessionId) return tt('chat.sessionStarted', { id: String(data.sessionId) });
+  if (event === 'session.resumed') return tt('chat.stream.resumed', { turns: String(data.turnCount ?? '?'), msgs: String(data.messageCount ?? '?') });
+  if (event === 'session.branched') return tt('chat.stream.branchedFrom', { parent: String(data.parentSessionId ?? tt('chat.stream.unknown')) });
+  if (event === 'session.resume_state') return tt('chat.stream.loadedResume');
   if (event === 'session.loading') return String(data.message ?? data);
   return String(data.message ?? data);
 }
 
 function eventMeta(event: string, data: Record<string, unknown>): string | undefined {
-  if (event === 'session') return data.taskRunId ? `task ${data.taskRunId}` : undefined;
-  if (event === 'session.branched') return `${data.copiedMessageCount ?? data.messageCount ?? '?'} messages copied`;
-  if (event === 'session.resumed') return `last task ${String(data.resumeLastTaskRunId ?? 'none')}`;
+  if (event === 'session') return data.taskRunId ? `${tt('chat.fact.taskRun')} ${data.taskRunId}` : undefined;
+  if (event === 'session.branched') return tt('chat.stream.messagesCopied', { count: String(data.copiedMessageCount ?? data.messageCount ?? '?') });
+  if (event === 'session.resumed') return tt('chat.stream.lastTask', { id: String(data.resumeLastTaskRunId ?? 'none') });
   return undefined;
 }

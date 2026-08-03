@@ -57,6 +57,7 @@ import {
   RefreshQueryButton,
   StatusPill,
 } from '../ui';
+import { useI18n } from '../i18n';
 
 type RunStateProjection = {
   phase: string;
@@ -84,6 +85,7 @@ export function SessionsPage({
   onBranchSession: (id: string) => void;
   onSelectTodo: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [search, setSearch] = useState('');
   const [providerFilter, setProviderFilter] = useState('');
   const [modelFilter, setModelFilter] = useState('');
@@ -106,13 +108,13 @@ export function SessionsPage({
       const data = JSON.parse(text);
       const res = await postJson<{ ok?: boolean; error?: string; id?: string }>('/sessions/import', data);
       if (res.ok) {
-        setImportMessage(`Imported ${res.id ?? 'session'}`);
+        setImportMessage(t('assets.sessions.imported', { id: res.id ?? t('assets.sessions.session') }));
         void queryClient.invalidateQueries({ queryKey: ['sessions'] });
       } else {
-        setImportMessage(res.error ?? 'Import failed');
+        setImportMessage(res.error ?? t('assets.sessions.importFailed'));
       }
     } catch (err: any) {
-      setImportMessage(err?.message ?? 'Import failed');
+      setImportMessage(err?.message ?? t('assets.sessions.importFailed'));
     } finally {
       setImporting(false);
       event.target.value = '';
@@ -152,29 +154,29 @@ export function SessionsPage({
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Sessions</h2>
-            <p>Read-only persisted run list.</p>
+            <h2>{t('assets.sessions.title')}</h2>
+            <p>{t('assets.sessions.subtitle')}</p>
           </div>
           <div className="toolbar">
             <div className="search-box">
               <Search size={14} />
-              <input value={search} onChange={event => setSearch(event.target.value)} placeholder="filter sessions" />
+              <input value={search} onChange={event => setSearch(event.target.value)} placeholder={t('assets.sessions.searchPh')} />
             </div>
             {providers.length > 1 ? (
-              <select className="filter-select" value={providerFilter} onChange={event => setProviderFilter(event.target.value)} title="Filter by provider">
-                <option value="">all providers</option>
+              <select className="filter-select" value={providerFilter} onChange={event => setProviderFilter(event.target.value)} title={t('assets.sessions.filterByProvider')}>
+                <option value="">{t('assets.sessions.allProviders')}</option>
                 {providers.map(p => <option value={p} key={p}>{p}</option>)}
               </select>
             ) : null}
             {models.length > 1 ? (
-              <select className="filter-select" value={modelFilter} onChange={event => setModelFilter(event.target.value)} title="Filter by model">
-                <option value="">all models</option>
+              <select className="filter-select" value={modelFilter} onChange={event => setModelFilter(event.target.value)} title={t('assets.sessions.filterByModel')}>
+                <option value="">{t('assets.sessions.allModels')}</option>
                 {models.map(m => <option value={m} key={m}>{m}</option>)}
               </select>
             ) : null}
-            <label className="ghost-btn" title="Import session from JSON file">
+            <label className="ghost-btn" title={t('assets.sessions.importTitle')}>
               <input type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportFile} disabled={importing} />
-              <Upload size={14} /> {importing ? 'importing...' : 'import'}
+              <Upload size={14} /> {importing ? t('assets.sessions.importing') : t('assets.sessions.import')}
             </label>
             <RefreshQueryButton queryKey={['sessions']} />
             {importMessage ? <span className="mono-chip">{importMessage}</span> : null}
@@ -182,7 +184,7 @@ export function SessionsPage({
         </div>
         <DataTable
           loading={sessions.isLoading}
-          empty="No sessions found."
+          empty={t('assets.sessions.emptyList')}
           rows={filtered}
           renderRow={session => {
             const branchFrom = metadataText(session.metadata.branchFrom);
@@ -194,13 +196,13 @@ export function SessionsPage({
               onClick={() => onSelectSession(session.id)}
             >
               <span className="row-title">
-                {branchFrom ? <span title={`branched from ${branchFrom}`}><GitGraph size={13} /></span> : null}
+                {branchFrom ? <span title={t('assets.sessions.branchedFrom', { id: branchFrom })}><GitGraph size={13} /></span> : null}
                 {session.id}
               </span>
               <span>{formatDate(session.updatedAt)}</span>
-              <span>{metadataText(session.metadata.provider) ?? 'provider?'}</span>
-              <span>{metadataText(session.metadata.model) ?? 'model?'}</span>
-              <span>{metadataText(session.metadata.toolMode) ?? 'mode?'}</span>
+              <span>{metadataText(session.metadata.provider) ?? t('assets.sessions.providerUnknown')}</span>
+              <span>{metadataText(session.metadata.model) ?? t('assets.sessions.modelUnknown')}</span>
+              <span>{metadataText(session.metadata.toolMode) ?? t('assets.state.modeUnknown')}</span>
             </button>
             );
           }}
@@ -222,6 +224,7 @@ function SessionInspector({
   onBranchSession: (id: string) => void;
   onSelectTodo: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const detail = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => getJson<SessionDetail>(`/sessions/${sessionId}`),
@@ -253,63 +256,63 @@ function SessionInspector({
   });
 
   if (!sessionId) {
-    return <div className="panel inspector"><EmptyText text="Select a session to inspect events and observability." /></div>;
+    return <div className="panel inspector"><EmptyText text={t('assets.sessions.selectHint')} /></div>;
   }
 
   return (
     <aside className="panel inspector">
       <div className="panel-head compact">
-        <h2>Session Detail</h2>
+        <h2>{t('assets.sessions.detailTitle')}</h2>
         <div className="toolbar">
           <button className="ghost-btn" type="button" onClick={() => onContinueSession(sessionId)}>
-            <Send size={14} /> continue
+            <Send size={14} /> {t('assets.sessions.continue')}
           </button>
-          <button className="ghost-btn" type="button" onClick={() => onBranchSession(sessionId)} title="Branch from this session into a new one">
-            <GitGraph size={14} /> branch
+          <button className="ghost-btn" type="button" onClick={() => onBranchSession(sessionId)} title={t('assets.sessions.branchTitle')}>
+            <GitGraph size={14} /> {t('assets.sessions.branch')}
           </button>
           <button className="ghost-btn" type="button" onClick={() => exportSession(sessionId)}>
-            <Copy size={14} /> export
+            <Copy size={14} /> {t('assets.sessions.export')}
           </button>
           <DeleteSessionButton sessionId={sessionId} />
         </div>
       </div>
       <span className="mono-chip">{sessionId}</span>
-      {detail.isLoading ? <EmptyText text="Loading session..." /> : null}
+      {detail.isLoading ? <EmptyText text={t('assets.sessions.loading')} /> : null}
       {detail.data ? (
         <div className="fact-list compact-facts">
-          <Fact label="provider" value={metadataText(detail.data.metadata.provider) ?? 'default'} />
-          <Fact label="model" value={metadataText(detail.data.metadata.model) ?? 'default'} />
-          <Fact label="tool mode" value={metadataText(detail.data.metadata.toolMode) ?? 'unknown'} />
-          <Fact label="workspace" value={metadataText(detail.data.metadata.workspaceRoot) ?? 'default'} />
-          <Fact label="task" value={metadataText(detail.data.metadata.taskRunId) ?? 'none'} />
+          <Fact label={t('assets.label.provider')} value={metadataText(detail.data.metadata.provider) ?? t('assets.state.default')} />
+          <Fact label={t('assets.label.model')} value={metadataText(detail.data.metadata.model) ?? t('assets.state.default')} />
+          <Fact label={t('assets.label.toolMode')} value={metadataText(detail.data.metadata.toolMode) ?? t('common.unknown')} />
+          <Fact label={t('assets.label.workspace')} value={metadataText(detail.data.metadata.workspaceRoot) ?? t('assets.state.default')} />
+          <Fact label={t('assets.label.task')} value={metadataText(detail.data.metadata.taskRunId) ?? t('common.none')} />
           {metadataText(detail.data.metadata.branchFrom) ? (
-            <Fact label="branch from" value={`${metadataText(detail.data.metadata.branchFrom)}${metadataText(detail.data.metadata.branchAtTurn) ? ` @ turn ${metadataText(detail.data.metadata.branchAtTurn)}` : ''}`} />
+            <Fact label={t('assets.label.branchFrom')} value={`${metadataText(detail.data.metadata.branchFrom)}${metadataText(detail.data.metadata.branchAtTurn) ? ` ${t('assets.sessions.atTurn', { turn: metadataText(detail.data.metadata.branchAtTurn) ?? '' })}` : ''}`} />
           ) : null}
           {metadataText(detail.data.metadata.resumed) === 'true' || detail.data.metadata.resumeMessageCount ? (
-            <Fact label="resumed" value={`${detail.data.metadata.resumeMessageCount ?? '?'} prior msgs`} />
+            <Fact label={t('assets.label.resumed')} value={t('assets.sessions.priorMsgs', { count: String(detail.data.metadata.resumeMessageCount ?? '?') })} />
           ) : null}
         </div>
       ) : null}
       {observability.data ? (
         <div className="fact-list">
-          <Fact label="events" value={String(observability.data.eventCount)} />
-          <Fact label="turns" value={String(observability.data.turnCount)} />
-          <Fact label="tokens" value={String(observability.data.totalUsage.totalTokens)} />
-          <Fact label="tools" value={observability.data.tools.names.join(', ') || observability.data.tools.status} />
-          <Fact label="models" value={observability.data.models.names.join(', ') || observability.data.models.status} />
+          <Fact label={t('assets.label.events')} value={String(observability.data.eventCount)} />
+          <Fact label={t('assets.label.turns')} value={String(observability.data.turnCount)} />
+          <Fact label={t('assets.label.tokens')} value={String(observability.data.totalUsage.totalTokens)} />
+          <Fact label={t('assets.label.tools')} value={observability.data.tools.names.join(', ') || observability.data.tools.status} />
+          <Fact label={t('assets.label.models')} value={observability.data.models.names.join(', ') || observability.data.models.status} />
         </div>
       ) : null}
       {detail.data ? (
         <div className="definition-list compact-definition-list">
-          <Definition term="created" text={formatDate(detail.data.createdAt)} />
-          <Definition term="updated" text={formatDate(detail.data.updatedAt)} />
-          <Definition term="turns" text={String(detail.data.turns.length)} />
-          <Definition term="messages" text={String(detail.data.messages.length)} />
+          <Definition term={t('assets.label.created')} text={formatDate(detail.data.createdAt)} />
+          <Definition term={t('assets.label.updated')} text={formatDate(detail.data.updatedAt)} />
+          <Definition term={t('assets.label.turns')} text={String(detail.data.turns.length)} />
+          <Definition term={t('assets.label.messages')} text={String(detail.data.messages.length)} />
         </div>
       ) : null}
       {verification.data && verification.data.count > 0 ? (
         <div className="fact-list">
-          <Fact label="verification" value={(verification.data.records ?? []).map(r =>
+          <Fact label={t('assets.label.verification')} value={(verification.data.records ?? []).map(r =>
             `${r.checkName}: ${r.status}${r.outputSummary ? ` (${r.outputSummary.slice(0, 40)})` : ''}`
           ).join('; ')} />
         </div>
@@ -351,16 +354,16 @@ function SessionInspector({
       </div>
       <div className="section-divider">
         <div className="mini-timeline-head">
-          <strong>Related Todos</strong>
+          <strong>{t('assets.sessions.relatedTodos')}</strong>
           <span>{String(relatedTodos.data?.length ?? 0)}</span>
         </div>
         {(relatedTodos.data ?? []).length === 0 ? (
-          <EmptyText text="No linked todos found." />
+          <EmptyText text={t('assets.sessions.noLinkedTodos')} />
         ) : (relatedTodos.data ?? []).slice(0, 8).map(todo => (
           <button className="record-row compact-record" type="button" key={todo.id} onClick={() => onSelectTodo(todo.id)}>
             <span className="row-title">{todo.title}</span>
             <span className={`status-text ${todo.status}`}>{todo.status}</span>
-            <span>{todo.taskRunId ?? todo.traceId ?? 'linked'}</span>
+            <span>{todo.taskRunId ?? todo.traceId ?? t('assets.sessions.linked')}</span>
           </button>
         ))}
       </div>
@@ -403,9 +406,10 @@ async function exportSession(sessionId: string) {
 
 function DeleteSessionButton({ sessionId }: { sessionId: string }) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const deleteMutation = useMutation({
     mutationFn: () => deleteJson(`/sessions/${encodeURIComponent(sessionId)}`),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sessions'] }); },
   });
-  return <button className="ghost-btn danger" type="button" onClick={() => { if (confirm('Delete this session?')) deleteMutation.mutate(); }} disabled={deleteMutation.isPending}>Delete</button>;
+  return <button className="ghost-btn danger" type="button" onClick={() => { if (confirm(t('assets.sessions.deleteConfirm'))) deleteMutation.mutate(); }} disabled={deleteMutation.isPending}>{t('common.delete')}</button>;
 }

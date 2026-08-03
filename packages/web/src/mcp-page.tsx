@@ -27,11 +27,15 @@ import {
   formatDate,
   StatusPill,
 } from './ui';
+import { useI18n } from './i18n';
 import { MCPServerCreate } from './mcp-server-create';
+
+type T = ReturnType<typeof useI18n>['t'];
 
 export function MCPServersPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { t } = useI18n();
 
   const servers = useQuery({
     queryKey: ['mcp-servers'],
@@ -49,15 +53,15 @@ export function MCPServersPage() {
           <div className="title-row">
             <Server size={18} />
             <div>
-              <h2>MCP Servers</h2>
-              <p>Registered tool servers (stdio, sse, streamable-http). Verify, reload, or remove.</p>
+              <h2>{t('assets.mcp.serversTitle')}</h2>
+              <p>{t('assets.mcp.serversSubtitle')}</p>
             </div>
           </div>
           <StatusPill status="live" />
         </div>
         <DataTable
           loading={servers.isLoading}
-          empty="No MCP servers registered."
+          empty={t('assets.mcp.emptyList')}
           rows={list}
           renderRow={server => (
             <button
@@ -69,15 +73,15 @@ export function MCPServersPage() {
               <span className="row-title">{server.id}</span>
               <span>{server.transport}</span>
               <span className={`status-text ${server.status}`}>{server.status}</span>
-              <span>{server.enabled ? 'enabled' : 'disabled'}</span>
-              <span>{capabilityCountLabel(server)}</span>
+              <span>{server.enabled ? t('common.enabled') : t('common.disabled')}</span>
+              <span>{capabilityCountLabel(server, t)}</span>
               <span>{formatDate(server.updatedAt)}</span>
             </button>
           )}
         />
         {list.length === 0 && !servers.isLoading ? (
           <div className="empty-guide">
-            <p>MCP servers extend the agent with external tools. Create one above, or run <code>los mcp import</code> from the CLI.</p>
+            <p>{t('assets.mcp.emptyGuidePre')} <code>los mcp import</code> {t('assets.mcp.emptyGuidePost')}</p>
           </div>
         ) : null}
       </div>
@@ -112,6 +116,7 @@ function MCPServerInspector({
   onSelect: (id: string | null) => void;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const history = useQuery({
     queryKey: ['mcp-server-history', server.id],
     queryFn: () => getJson<MCPHistoryResponse>(`/mcp-servers/${encodeURIComponent(server.id)}/history`),
@@ -163,46 +168,49 @@ function MCPServerInspector({
   return (
     <>
       <div className="panel-head compact">
-        <h2>Server Detail</h2>
+        <h2>{t('assets.mcp.serverDetailTitle')}</h2>
         <span className="mono-chip">{server.id}</span>
       </div>
       <div className="fact-list compact-facts">
-        <Fact label="transport" value={server.transport} />
-        <Fact label="status" value={server.status} />
-        <Fact label="tools" value={String(server.toolCount)} />
-        <Fact label="enabled" value={String(server.enabled)} />
-        <Fact label="source" value={server.sourceUri || 'manual'} />
-        <Fact label="version" value={server.versionHash.slice(0, 12)} />
-        <Fact label="pinned" value={server.pinnedVersionHash?.slice(0, 12) || 'no'} />
-        <Fact label="auth" value={server.authConfig.mode} />
-        <Fact label="risk" value={server.toolPolicy.riskLevel} />
-        <Fact label="adapter" value={server.adapterConfig.kind} />
+        <Fact label={t('assets.label.transport')} value={server.transport} />
+        <Fact label={t('assets.label.status')} value={server.status} />
+        <Fact label={t('assets.label.tools')} value={String(server.toolCount)} />
+        <Fact label={t('common.enabled')} value={String(server.enabled)} />
+        <Fact label={t('assets.label.source')} value={server.sourceUri || t('assets.state.manual')} />
+        <Fact label={t('assets.label.version')} value={server.versionHash.slice(0, 12)} />
+        <Fact label={t('assets.label.pinned')} value={server.pinnedVersionHash?.slice(0, 12) || t('assets.state.no')} />
+        <Fact label={t('assets.label.auth')} value={server.authConfig.mode} />
+        <Fact label={t('assets.label.risk')} value={server.toolPolicy.riskLevel} />
+        <Fact label={t('assets.label.adapter')} value={server.adapterConfig.kind} />
         {server.adapterConfig.kind === 'cantool' ? (
           <>
-            <Fact label="provider location" value={server.adapterConfig.providerLocation} />
-            <Fact label="data grant owner" value={server.adapterConfig.dataGrantOwner} />
-            <Fact label="session binding" value={server.adapterConfig.sessionBinding} />
+            <Fact label={t('assets.mcp.providerLocation')} value={server.adapterConfig.providerLocation} />
+            <Fact label={t('assets.mcp.dataGrantOwner')} value={server.adapterConfig.dataGrantOwner} />
+            <Fact label={t('assets.mcp.sessionBinding')} value={server.adapterConfig.sessionBinding} />
           </>
         ) : null}
-        {server.adapterEvidence?.serverVersion ? <Fact label="server version" value={server.adapterEvidence.serverVersion} /> : null}
-        {server.adapterEvidence?.protocolVersion ? <Fact label="protocol" value={server.adapterEvidence.protocolVersion} /> : null}
+        {server.adapterEvidence?.serverVersion ? <Fact label={t('assets.mcp.serverVersion')} value={server.adapterEvidence.serverVersion} /> : null}
+        {server.adapterEvidence?.protocolVersion ? <Fact label={t('assets.mcp.protocol')} value={server.adapterEvidence.protocolVersion} /> : null}
         {server.adapterEvidence?.capabilitySummary ? (
           <Fact
-            label="capabilities"
-            value={`${server.adapterEvidence.capabilitySummary.available} available / ${server.adapterEvidence.capabilitySummary.blocked} blocked`}
+            label={t('assets.label.capabilities')}
+            value={t('assets.mcp.capabilitiesBlocked', {
+              available: server.adapterEvidence.capabilitySummary.available,
+              blocked: server.adapterEvidence.capabilitySummary.blocked,
+            })}
           />
         ) : null}
-        <Fact label="updated" value={formatDate(server.updatedAt)} />
+        <Fact label={t('assets.label.updated')} value={formatDate(server.updatedAt)} />
       </div>
-      {server.command ? <Fact label="command" value={server.command} /> : null}
-      {server.url ? <Fact label="url" value={server.url} /> : null}
-      {server.args.length > 0 ? <Fact label="args" value={server.args.join(' ')} /> : null}
-      {server.authConfig.credentialRef ? <Fact label="credential ref" value={server.authConfig.credentialRef} /> : null}
-      {server.toolPolicy.allow.length > 0 ? <Fact label="allowed tools" value={server.toolPolicy.allow.join(', ')} /> : null}
-      {server.toolPolicy.deny.length > 0 ? <Fact label="denied tools" value={server.toolPolicy.deny.join(', ')} /> : null}
+      {server.command ? <Fact label={t('assets.label.command')} value={server.command} /> : null}
+      {server.url ? <Fact label={t('assets.label.url')} value={server.url} /> : null}
+      {server.args.length > 0 ? <Fact label={t('assets.label.args')} value={server.args.join(' ')} /> : null}
+      {server.authConfig.credentialRef ? <Fact label={t('assets.mcp.credentialRef')} value={server.authConfig.credentialRef} /> : null}
+      {server.toolPolicy.allow.length > 0 ? <Fact label={t('assets.mcp.allowedTools')} value={server.toolPolicy.allow.join(', ')} /> : null}
+      {server.toolPolicy.deny.length > 0 ? <Fact label={t('assets.mcp.deniedTools')} value={server.toolPolicy.deny.join(', ')} /> : null}
       {server.lastError ? (
         <div className="definition-list">
-          <Definition term="last error" text={server.lastError} />
+          <Definition term={t('assets.mcp.lastError')} text={server.lastError} />
         </div>
       ) : null}
       {server.tools.length > 0 ? (
@@ -211,7 +219,7 @@ function MCPServerInspector({
             <Definition
               key={tool.name}
               term={tool.name}
-              text={capabilityDescription(tool)}
+              text={capabilityDescription(tool, t)}
             />
           ))}
         </div>
@@ -223,7 +231,7 @@ function MCPServerInspector({
           disabled={verify.isPending}
           onClick={() => verify.mutate(server.id)}
         >
-          <CheckCircle2 size={14} /> verify
+          <CheckCircle2 size={14} /> {t('assets.mcp.verify')}
         </button>
         <button
           className="ghost-btn"
@@ -231,7 +239,7 @@ function MCPServerInspector({
           disabled={enable.isPending || (!server.enabled && server.status !== 'connected')}
           onClick={() => enable.mutate(!server.enabled)}
         >
-          <Power size={14} /> {server.enabled ? 'disable' : 'enable'}
+          <Power size={14} /> {server.enabled ? t('assets.mcp.disable') : t('assets.mcp.enable')}
         </button>
         <button
           className="ghost-btn"
@@ -240,7 +248,7 @@ function MCPServerInspector({
           onClick={() => pin.mutate(!server.pinnedVersionHash)}
         >
           {server.pinnedVersionHash ? <PinOff size={14} /> : <Pin size={14} />}
-          {server.pinnedVersionHash ? 'unpin' : 'pin'}
+          {server.pinnedVersionHash ? t('assets.mcp.unpin') : t('assets.mcp.pin')}
         </button>
         <button
           className="ghost-btn"
@@ -248,7 +256,7 @@ function MCPServerInspector({
           disabled={reload.isPending}
           onClick={() => reload.mutate(server.id)}
         >
-          <RefreshCcw size={14} /> reload
+          <RefreshCcw size={14} /> {t('assets.mcp.reload')}
         </button>
         <button
           className="ghost-btn"
@@ -256,18 +264,18 @@ function MCPServerInspector({
           disabled={remove.isPending}
           onClick={() => remove.mutate(server.id)}
         >
-          <Trash2 size={14} /> delete
+          <Trash2 size={14} /> {t('common.delete')}
         </button>
       </div>
       {verify.data ? (
         <div className="json-block">
-          <strong>Verify Result</strong>
+          <strong>{t('assets.mcp.verifyResult')}</strong>
           <pre>{JSON.stringify(verify.data, null, 2)}</pre>
         </div>
       ) : null}
       {reload.data ? (
         <div className="json-block">
-          <strong>Reload Result</strong>
+          <strong>{t('assets.mcp.reloadResult')}</strong>
           <pre>{JSON.stringify(reload.data, null, 2)}</pre>
         </div>
       ) : null}
@@ -276,11 +284,11 @@ function MCPServerInspector({
           {history.data!.versions.map(version => (
             <div className="definition" key={version.versionHash}>
               <strong>{version.versionHash.slice(0, 12)}</strong>
-              {version.versionHash === server.versionHash ? <span>current</span> : (
+              {version.versionHash === server.versionHash ? <span>{t('assets.state.current')}</span> : (
                 <button
                   className="icon-btn"
                   type="button"
-                  title="Rollback to this version"
+                  title={t('assets.mcp.rollbackTitle')}
                   disabled={rollback.isPending || Boolean(server.pinnedVersionHash && server.pinnedVersionHash !== version.versionHash)}
                   onClick={() => rollback.mutate(version.versionHash)}
                 ><RotateCcw size={14} /></button>
@@ -293,14 +301,22 @@ function MCPServerInspector({
   );
 }
 
-function capabilityCountLabel(server: MCPServer): string {
+function capabilityCountLabel(server: MCPServer, t: T): string {
   const summary = server.adapterEvidence?.capabilitySummary;
-  return summary ? `${summary.available}/${summary.projected} available` : `${server.toolCount} tools`;
+  return summary
+    ? t('assets.mcp.capabilitiesAvailable', { available: summary.available, projected: summary.projected })
+    : t('assets.mcp.toolsCount', { count: server.toolCount });
 }
 
-function capabilityDescription(tool: MCPServer['tools'][number]): string {
+function capabilityDescription(tool: MCPServer['tools'][number], t: T): string {
   const capability = tool.capability;
-  if (!capability) return tool.description ?? 'no description';
-  const status = capability.availability === 'available' ? 'available' : `blocked: ${capability.reason}`;
-  return `${status} | ${capability.dataClassification} | ${tool.description ?? 'no description'}`;
+  if (!capability) return tool.description ?? t('assets.state.noDescription');
+  const status = capability.availability === 'available'
+    ? t('assets.state.available')
+    : t('assets.mcp.blockedReason', { reason: capability.reason });
+  return t('assets.mcp.capabilitySummary', {
+    status,
+    classification: capability.dataClassification,
+    description: tool.description ?? t('assets.state.noDescription'),
+  });
 }

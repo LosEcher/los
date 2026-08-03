@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 
 import { getJson, postJson, type WorkItemProjection } from './api/index.js';
+import { useI18n } from './i18n';
 
 type PlanApproval = {
   runSpecId: string;
@@ -18,6 +19,7 @@ export function ChatPlanApproval({
   running: boolean;
   workItemId?: string;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [planApproval, setPlanApproval] = useState<PlanApproval | null>(null);
 
@@ -60,20 +62,21 @@ export function ChatPlanApproval({
       <div className="approval-card plan-ready">
         <div className="approval-card-head">
           <Check size={13} />
-          <strong>Plan Ready</strong>
+          <strong>{t('chat.plan.ready')}</strong>
           <span className="approval-verdict">{planApproval.label}</span>
         </div>
         <p className="approval-reason">
-          The plan has been generated and awaits your approval. Approve to dispatch execution, or navigate to{' '}
-          <a href="#work" style={{ textDecoration: 'underline' }}>Work</a> for detailed review.
+          {t('chat.plan.bodyBefore')}{' '}
+          <a href="#work" style={{ textDecoration: 'underline' }}>{t('nav.work')}</a>{' '}
+          {t('chat.plan.bodyAfter')}
         </p>
         <div className="approval-actions" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" className="tiny-btn primary" disabled={approvePlan.isPending} onClick={() => approvePlan.mutate()}>
-            <Check size={12} /> {approvePlan.isPending ? 'Approving…' : 'Approve & Execute'}
+            <Check size={12} /> {approvePlan.isPending ? t('chat.plan.approving') : t('chat.plan.approveExecute')}
           </button>
-          <button type="button" className="tiny-btn" onClick={() => setPlanApproval(null)}>Dismiss</button>
+          <button type="button" className="tiny-btn" onClick={() => setPlanApproval(null)}>{t('chat.plan.dismiss')}</button>
         </div>
-        {approvePlan.isError ? <p className="approval-reason error">Approval failed: {String(approvePlan.error)}</p> : null}
+        {approvePlan.isError ? <p className="approval-reason error">{t('chat.plan.failed', { error: String(approvePlan.error) })}</p> : null}
       </div>
     </div>
   );

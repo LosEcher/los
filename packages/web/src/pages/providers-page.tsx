@@ -54,6 +54,7 @@ import {
   StatusPill,
 } from '../ui';
 import { ProviderAccountsPanel } from './provider-accounts-panel.js';
+import { useI18n } from '../i18n';
 
 type RunStateProjection = {
   phase: string;
@@ -69,6 +70,7 @@ type RunStateProjection = {
   };
 };
 export function ProvidersPage() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const onboarding = useQuery({
     queryKey: ['onboarding'],
@@ -150,19 +152,19 @@ export function ProvidersPage() {
         <div className="section-divider" />
         <div className="panel-head">
           <div>
-            <h2>Provider Endpoints</h2>
-            <p>Manage provider configs: add, edit, enable/disable, or remove.</p>
+            <h2>{t('pages.providers.title')}</h2>
+            <p>{t('pages.providers.subtitle')}</p>
           </div>
           <StatusPill status="partial" />
         </div>
         <DataTable
           loading={onboarding.isLoading}
-          empty="No provider endpoints discovered."
+          empty={t('pages.providers.emptyEndpoints')}
           rows={providers}
           renderRow={(provider, index) => {
             const readiness = provider.readiness ?? {};
-            const state = providerReadinessLabel(readiness);
-            const detail = providerReadinessDetail(provider, readiness);
+            const state = providerReadinessLabel(readiness, t);
+            const detail = providerReadinessDetail(provider, readiness, t);
             const compatEvidence = Array.isArray(provider.compatibilityEvidence)
               ? provider.compatibilityEvidence
               : provider.compatEvidence?.latest
@@ -180,51 +182,51 @@ export function ProvidersPage() {
                 <div className="provider-row-main">
                   <span className="row-title">
                     {name}
-                    {promotionState === 'verified_advisory' ? <span className="status-text succeeded" title="Verified advisory"> ✓</span> : null}
-                    {cfg?.hasApiKey ? <span className="status-text" title="API key set"> 🔑</span> : null}
+                    {promotionState === 'verified_advisory' ? <span className="status-text succeeded" title={t('pages.providers.verifiedAdvisory')}> ✓</span> : null}
+                    {cfg?.hasApiKey ? <span className="status-text" title={t('pages.providers.apiKeySet')}> 🔑</span> : null}
                   </span>
-                  <span>{metadataText(provider.source) ?? 'source?'}</span>
-                  <span>{metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? 'model?'}</span>
+                  <span>{metadataText(provider.source) ?? t('pages.providers.sourceUnknown')}</span>
+                  <span>{metadataText(provider.defaultModel) ?? metadataText(provider.model) ?? t('pages.providers.modelUnknown')}</span>
                   <span className={`status-text ${readiness.ready ? 'succeeded' : readiness.manualSetupRequired ? 'blocked' : 'ready'}`}>{state}</span>
                   <span>{detail}</span>
                   <span className="provider-row-actions">
                     {cfg ? (
                       isEditing ? (
                         <>
-                          <button type="button" className="tiny-btn" onClick={() => saveEdit(name)} title="Save"><Check size={12} /> save</button>
-                          <button type="button" className="tiny-btn" onClick={cancelEdit} title="Cancel"><X size={12} /></button>
+                          <button type="button" className="tiny-btn" onClick={() => saveEdit(name)} title={t('common.save')}><Check size={12} /> {t('pages.providers.save')}</button>
+                          <button type="button" className="tiny-btn" onClick={cancelEdit} title={t('common.cancel')}><X size={12} /></button>
                         </>
                       ) : (
                         <>
-                          <button type="button" className="tiny-btn" onClick={() => startEdit(name, cfg)} title="Edit"><Pencil size={12} /></button>
-                          <button type="button" className="tiny-btn danger" onClick={() => { if (confirm(`Remove provider "${name}"?`)) removeProvider.mutate(name); }} title="Remove"><Trash2 size={12} /></button>
+                          <button type="button" className="tiny-btn" onClick={() => startEdit(name, cfg)} title={t('common.edit')}><Pencil size={12} /></button>
+                          <button type="button" className="tiny-btn danger" onClick={() => { if (confirm(t('pages.providers.removeConfirm', { name }))) removeProvider.mutate(name); }} title={t('pages.providers.remove')}><Trash2 size={12} /></button>
                           {cfg.enabled !== undefined ? (
-                            <button type="button" className="tiny-btn" onClick={() => updateProvider.mutate({ name, enabled: !cfg.enabled })} title={cfg.enabled ? 'Disable' : 'Enable'}>
+                            <button type="button" className="tiny-btn" onClick={() => updateProvider.mutate({ name, enabled: !cfg.enabled })} title={cfg.enabled ? t('pages.providers.disable') : t('pages.providers.enable')}>
                               {cfg.enabled ? '⏻' : '⏼'}
                             </button>
                           ) : null}
                         </>
                       )
                     ) : (
-                      <span className="status-text dim">discovery-only</span>
+                      <span className="status-text dim">{t('pages.providers.discoveryOnly')}</span>
                     )}
                   </span>
                 </div>
                 {isEditing && cfg ? (
                   <div className="provider-edit-panel">
                     <div className="provider-edit-grid">
-                      <Field label="model"><input value={editDraft.model ?? ''} onChange={e => setEditDraft(d => ({ ...d, model: e.target.value }))} placeholder="model-id" /></Field>
-                      <Field label="api key"><input type="password" value={editDraft.apiKey ?? ''} onChange={e => setEditDraft(d => ({ ...d, apiKey: e.target.value }))} placeholder="sk-…" /></Field>
-                      <Field label="base url"><input value={editDraft.baseUrl ?? ''} onChange={e => setEditDraft(d => ({ ...d, baseUrl: e.target.value }))} placeholder="https://…" /></Field>
+                      <Field label={t('pages.providers.modelField')}><input value={editDraft.model ?? ''} onChange={e => setEditDraft(d => ({ ...d, model: e.target.value }))} placeholder={t('pages.providers.modelIdPlaceholder')} /></Field>
+                      <Field label={t('pages.providers.apiKeyField')}><input type="password" value={editDraft.apiKey ?? ''} onChange={e => setEditDraft(d => ({ ...d, apiKey: e.target.value }))} placeholder={t('pages.providers.apiKeyPlaceholder')} /></Field>
+                      <Field label={t('pages.providers.baseUrlField')}><input value={editDraft.baseUrl ?? ''} onChange={e => setEditDraft(d => ({ ...d, baseUrl: e.target.value }))} placeholder={t('pages.providers.baseUrlPlaceholder')} /></Field>
                       <div className="provider-edit-meta">
                         <label className="toolbar-toggle provider-toggle">
                           <input type="checkbox" checked={editDraft.enabled ?? true} onChange={e => setEditDraft(d => ({ ...d, enabled: e.target.checked }))} />
-                          enabled
+                          {t('common.enabled')}
                         </label>
-                        <Field label="weight"><input type="number" min={0} max={1000} value={editDraft.weight ?? 100} onChange={e => setEditDraft(d => ({ ...d, weight: Number(e.target.value) }))} /></Field>
+                        <Field label={t('pages.providers.weightField')}><input type="number" min={0} max={1000} value={editDraft.weight ?? 100} onChange={e => setEditDraft(d => ({ ...d, weight: Number(e.target.value) }))} /></Field>
                       </div>
                     </div>
-                    {deleteError ? <div className="error-banner">Error removing: {deleteError}</div> : null}
+                    {deleteError ? <div className="error-banner">{t('pages.providers.removeError', { error: deleteError })}</div> : null}
                   </div>
                 ) : null}
                 {compatEvidence.length > 0 ? (
@@ -243,10 +245,10 @@ export function ProvidersPage() {
                 ) : null}
                 {latestEvidence ? (
                   <span className="compat-evidence-detail">
-                    evidence {metadataText(latestEvidence.id) ?? '?'} · task {metadataText(latestEvidence.taskRunId) ?? 'none'} · run {metadataText(latestEvidence.runSpecId) ?? 'none'} · tokens {String(latestEvidence.totalTokens ?? 0)}
+                    {t('pages.providers.evidenceDetail', { evidence: metadataText(latestEvidence.id) ?? '?', task: metadataText(latestEvidence.taskRunId) ?? 'none', run: metadataText(latestEvidence.runSpecId) ?? 'none', tokens: String(latestEvidence.totalTokens ?? 0) })}
                   </span>
                 ) : readiness.ready ? (
-                  <span className="compat-evidence-detail">evidence none · run los compat --execute --target {name} --probe read-context</span>
+                  <span className="compat-evidence-detail">{t('pages.providers.evidenceNone')} los compat --execute --target {name} --probe read-context</span>
                 ) : null}
               </div>
             );
@@ -254,25 +256,25 @@ export function ProvidersPage() {
         />
         {providers.length === 0 && !onboarding.isLoading ? (
           <div className="empty-guide">
-            <p>Set an API key in your environment (e.g. <code>DEEPSEEK_API_KEY</code>) and restart, or go to <button type="button" className="link-btn" onClick={() => window.location.hash = 'onboarding'}>Onboarding</button> for step-by-step setup.</p>
+            <p>{t('pages.providers.emptyGuidePrefix', { key: 'DEEPSEEK_API_KEY' })} <button type="button" className="link-btn" onClick={() => window.location.hash = 'onboarding'}>{t('nav.onboarding')}</button> {t('pages.providers.emptyGuideSuffix')}</p>
           </div>
         ) : null}
         <div className="section-divider" />
         <div className="panel-head compact">
-          <h2>Effective Model Routes</h2>
+          <h2>{t('pages.providers.routesTitle')}</h2>
           <StatusPill status="live" />
         </div>
         <DataTable
           loading={modelRoutes.isLoading}
-          empty="No callable model routes found."
+          empty={t('pages.providers.emptyRoutes')}
           rows={routes}
           renderRow={(route) => (
             <div className="record-row route-row">
               <span className="row-title">{route.provider}</span>
-              <span>{route.baseUrl ?? 'baseUrl?'}</span>
-              <span>{route.model ?? 'model?'}</span>
-              <span>{route.ok ? `${route.count ?? route.models.length} models` : route.error ?? 'unavailable'}</span>
-              <span>{route.hasApiKey ? 'key set' : 'no key'} · {route.source ?? 'manual'}</span>
+              <span>{route.baseUrl ?? t('pages.providers.baseUrlUnknown')}</span>
+              <span>{route.model ?? t('pages.providers.modelUnknown')}</span>
+              <span>{route.ok ? t('pages.providers.modelsCount', { count: route.count ?? route.models.length }) : route.error ?? t('pages.providers.unavailable')}</span>
+              <span>{route.hasApiKey ? t('pages.providers.keySet') : t('pages.providers.noKey')} · {route.source ?? t('pages.providers.manualSource')}</span>
             </div>
           )}
         />
@@ -280,18 +282,18 @@ export function ProvidersPage() {
       <aside className="panel inspector">
         <ProviderAddForm onAdd={addProvider.mutate} adding={addProvider.isPending} error={addProvider.error ? String(addProvider.error) : null} />
         <div className="section-divider" />
-        <div className="panel-head compact"><h2>Discovery Tools</h2></div>
+        <div className="panel-head compact"><h2>{t('pages.providers.discoveryTools')}</h2></div>
         <div className="fact-list">
-          <Fact label="providers" value={String(providers.length)} />
-          <Fact label="config providers" value={String(configProviders.size)} />
-          <Fact label="routes" value={String(routes.length)} />
-          <Fact label="tools" value={String(tools.length)} />
-          <Fact label="status" value={onboarding.data?.summary ?? 'not loaded'} />
+          <Fact label={t('pages.providers.factProviders')} value={String(providers.length)} />
+          <Fact label={t('pages.providers.factConfigProviders')} value={String(configProviders.size)} />
+          <Fact label={t('pages.providers.factRoutes')} value={String(routes.length)} />
+          <Fact label={t('pages.providers.factTools')} value={String(tools.length)} />
+          <Fact label={t('pages.providers.factStatus')} value={onboarding.data?.summary ?? t('pages.providers.notLoaded')} />
         </div>
         <div className="definition-list">
-          <Definition term="provider endpoint" text="Callable model backend or route." />
-          <Definition term="provider account" text="Credential-bearing identity behind an endpoint." />
-          <Definition term="provider model" text="Concrete model identifier exposed by the endpoint." />
+          <Definition term={t('pages.providers.defEndpoint')} text={t('pages.providers.defEndpointText')} />
+          <Definition term={t('pages.providers.defAccount')} text={t('pages.providers.defAccountText')} />
+          <Definition term={t('pages.providers.defModel')} text={t('pages.providers.defModelText')} />
         </div>
       </aside>
     </section>
@@ -311,6 +313,7 @@ type ProviderAddPayload = {
 };
 
 function ProviderAddForm({ onAdd, adding, error }: { onAdd: (p: Record<string, unknown>) => void; adding: boolean; error: string | null }) {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
@@ -335,30 +338,30 @@ function ProviderAddForm({ onAdd, adding, error }: { onAdd: (p: Record<string, u
   return (
     <div className="provider-config-workspace">
       <div className="panel-head compact">
-        <h2>Add Provider</h2>
+        <h2>{t('pages.providers.addTitle')}</h2>
         <StatusPill status="partial" />
       </div>
-      <Field label="provider id *">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="my-provider" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+      <Field label={t('pages.providers.providerIdField')}>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder={t('pages.providers.namePlaceholder')} onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
-      <Field label="api key">
-        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+      <Field label={t('pages.providers.apiKeyField')}>
+        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={t('pages.providers.apiKeyPlaceholder')} onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
-      <Field label="base url">
-        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+      <Field label={t('pages.providers.baseUrlField')}>
+        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder={t('pages.providers.baseUrlFullPlaceholder')} onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
-      <Field label="default model">
-        <input value={model} onChange={e => setModel(e.target.value)} placeholder="model-id" onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+      <Field label={t('pages.providers.defaultModelField')}>
+        <input value={model} onChange={e => setModel(e.target.value)} placeholder={t('pages.providers.modelIdPlaceholder')} onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
       </Field>
-      <Field label="weight">
+      <Field label={t('pages.providers.weightField')}>
         <input type="number" min={0} max={1000} value={weight} onChange={e => setWeight(Number(e.target.value))} />
       </Field>
       <label className="toolbar-toggle provider-toggle">
         <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-        enabled
+        {t('common.enabled')}
       </label>
       <button type="button" className="btn" disabled={!canSubmit} onClick={submit}>
-        <Plus size={14} /> {adding ? 'Adding…' : 'Add Provider'}
+        <Plus size={14} /> {adding ? t('pages.providers.adding') : t('pages.providers.add')}
       </button>
       {error ? <div className="error-banner">{error}</div> : null}
     </div>
@@ -367,21 +370,21 @@ function ProviderAddForm({ onAdd, adding, error }: { onAdd: (p: Record<string, u
 
 // ── Helpers (unchanged) ──────────────────────────────────
 
-function providerReadinessLabel(readiness: ProviderReadiness): string {
-  if (readiness.ready) return 'ready';
-  if (readiness.manualSetupRequired) return 'manual setup';
-  if (readiness.discovered) return 'discovered';
-  return 'unknown';
+function providerReadinessLabel(readiness: ProviderReadiness, t: (key: string) => string): string {
+  if (readiness.ready) return t('pages.status.ready');
+  if (readiness.manualSetupRequired) return t('pages.providers.manualSetup');
+  if (readiness.discovered) return t('pages.providers.discovered');
+  return t('common.unknown');
 }
 
-function providerReadinessDetail(provider: ProviderDiscoveryProvider, readiness: ProviderReadiness): string {
+function providerReadinessDetail(provider: ProviderDiscoveryProvider, readiness: ProviderReadiness, t: (key: string) => string): string {
   const blocker = metadataText(readiness.blocker);
   if (blocker) return blocker;
   if (readiness.configuredKey !== undefined) {
-    return readiness.configuredKey ? 'configured key' : 'no configured key';
+    return readiness.configuredKey ? t('pages.providers.configuredKey') : t('pages.providers.noConfiguredKey');
   }
   if (provider.hasApiKey !== undefined) {
-    return provider.hasApiKey ? 'configured key' : 'no configured key';
+    return provider.hasApiKey ? t('pages.providers.configuredKey') : t('pages.providers.noConfiguredKey');
   }
-  return 'readiness unknown';
+  return t('pages.providers.readinessUnknown');
 }

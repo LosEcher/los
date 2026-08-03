@@ -4,6 +4,7 @@ import { BarChart3, CalendarDays, GitCompare, TrendingDown, TrendingUp, Zap, Plu
 import { getJson, postJson } from './api';
 import { DailyQualityView } from './pages/daily-quality-view.js';
 import { Button, DataTable, EmptyText, Field } from './ui';
+import { useI18n } from './i18n';
 
 interface EvalSummaryGroup {
   key: string;
@@ -54,6 +55,7 @@ interface EvalComparison {
 type ViewMode = 'summary' | 'compare' | 'daily';
 
 export function EvalsPage() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [mode, setMode] = useState<ViewMode>('summary');
   const [runSpecId, setRunSpecId] = useState('');
@@ -127,51 +129,51 @@ export function EvalsPage() {
             className={`toolbar-tab ${mode === 'summary' ? 'active' : ''}`}
             onClick={() => setMode('summary')}
           >
-            <BarChart3 size={14} /> Summary
+            <BarChart3 size={14} /> {t('ops.evals.tabSummary')}
           </button>
           <button
             type="button"
             className={`toolbar-tab ${mode === 'compare' ? 'active' : ''}`}
             onClick={() => setMode('compare')}
           >
-            <GitCompare size={14} /> Compare
+            <GitCompare size={14} /> {t('ops.evals.tabCompare')}
           </button>
           <button
             type="button"
             className={`toolbar-tab ${mode === 'daily' ? 'active' : ''}`}
             onClick={() => setMode('daily')}
           >
-            <CalendarDays size={14} /> Daily Quality
+            <CalendarDays size={14} /> {t('ops.evals.tabDailyQuality')}
           </button>
         </div>
 
         {mode !== 'daily' ? <div className="toolbar-filters">
           <input
             className="filter-input"
-            placeholder="Run spec ID..."
+            placeholder={t('ops.evals.runSpecFilterPlaceholder')}
             value={runSpecId}
             onChange={e => setRunSpecId(e.target.value)}
           />
           <input
             className="filter-input"
-            placeholder="Provider..."
+            placeholder={t('ops.evals.providerFilterPlaceholder')}
             value={provider}
             onChange={e => setProvider(e.target.value)}
           />
           <input
             className="filter-input"
-            placeholder="Model..."
+            placeholder={t('ops.evals.modelFilterPlaceholder')}
             value={model}
             onChange={e => setModel(e.target.value)}
           />
         </div> : null}
 
         {mode !== 'daily' ? <div className="toolbar-actions">
-          <Button variant="ghost" onClick={() => backlogSnapshot.mutate()} title="Record a snapshot of current eval backlog">
-            <Zap size={14} /> {backlogSnapshot.isPending ? 'Recording…' : 'Record Backlog Snapshot'}
+          <Button variant="ghost" onClick={() => backlogSnapshot.mutate()} title={t('ops.evals.backlogTitle')}>
+            <Zap size={14} /> {backlogSnapshot.isPending ? t('ops.evals.recording') : t('ops.evals.recordBacklogButton')}
           </Button>
-          <Button variant="ghost" onClick={() => setShowRecordForm(v => !v)} title="Manually record a single eval">
-            <Plus size={14} /> Record Eval
+          <Button variant="ghost" onClick={() => setShowRecordForm(v => !v)} title={t('ops.evals.recordEvalTitle')}>
+            <Plus size={14} /> {t('ops.evals.recordEvalButton')}
           </Button>
         </div> : null}
       </div>
@@ -179,20 +181,20 @@ export function EvalsPage() {
       {showRecordForm && mode !== 'daily' ? (
         <div className="provider-edit-panel">
           <div className="provider-edit-grid">
-            <Field label="provider"><input value={recordProvider} onChange={e => setRecordProvider(e.target.value)} placeholder="e.g. deepseek" /></Field>
-            <Field label="model"><input value={recordModel} onChange={e => setRecordModel(e.target.value)} placeholder="e.g. deepseek-v4-flash" /></Field>
-            <Field label="run spec id"><input value={recordRunSpecId} onChange={e => setRecordRunSpecId(e.target.value)} placeholder="manual" /></Field>
-            <Field label="latency (ms)"><input type="number" value={recordLatencyMs} onChange={e => setRecordLatencyMs(e.target.value)} placeholder="e.g. 1200" /></Field>
+            <Field label={t('ops.evals.formProvider')}><input value={recordProvider} onChange={e => setRecordProvider(e.target.value)} placeholder={t('ops.evals.providerPlaceholder')} /></Field>
+            <Field label={t('ops.evals.formModel')}><input value={recordModel} onChange={e => setRecordModel(e.target.value)} placeholder={t('ops.evals.modelPlaceholder')} /></Field>
+            <Field label={t('ops.evals.formRunSpecId')}><input value={recordRunSpecId} onChange={e => setRecordRunSpecId(e.target.value)} placeholder={t('ops.evals.manualPlaceholder')} /></Field>
+            <Field label={t('ops.evals.formLatencyMs')}><input type="number" value={recordLatencyMs} onChange={e => setRecordLatencyMs(e.target.value)} placeholder={t('ops.evals.latencyPlaceholder')} /></Field>
           </div>
           <div className="provider-edit-meta">
             <label className="toolbar-toggle">
               <input type="checkbox" checked={recordSuccess} onChange={e => setRecordSuccess(e.target.checked)} />
-              success
+              {t('ops.evals.successLabel')}
             </label>
             <Button onClick={() => recordEval.mutate()} disabled={recordEval.isPending}>
-              {recordEval.isPending ? 'Recording…' : 'Submit'}
+              {recordEval.isPending ? t('ops.evals.recording') : t('ops.evals.submitButton')}
             </Button>
-            <Button variant="ghost" onClick={() => setShowRecordForm(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setShowRecordForm(false)}>{t('common.cancel')}</Button>
           </div>
           {recordEval.error ? <div className="error-banner">{String(recordEval.error)}</div> : null}
         </div>
@@ -219,27 +221,28 @@ export function EvalsPage() {
 }
 
 function EvalSummaryView({ data, loading }: { data?: EvalSummary; loading: boolean }) {
-  if (loading) return <div className="loading-block">Loading eval summary...</div>;
-  if (!data) return <EmptyText text="No eval data available. Record evals via POST /run-evals or 'los evals record'." />;
+  const { t } = useI18n();
+  if (loading) return <div className="loading-block">{t('ops.evals.loadingSummary')}</div>;
+  if (!data) return <EmptyText text={t('ops.evals.noData')} />;
 
-  const t = data.totals;
+  const totals = data.totals;
   return (
     <div className="eval-dashboard">
       <div className="metric-cards">
-        <MetricCard label="Total Evals" value={String(t.count)} />
-        <MetricCard label="Success Rate" value={fmtPct(t.successRate)} tone={t.successRate >= 0.8 ? 'ok' : t.successRate >= 0.5 ? 'warn' : 'err'} />
-        <MetricCard label="Failures" value={String(t.failureCount)} tone={t.failureCount > 0 ? 'warn' : 'ok'} />
-        <MetricCard label="Avg Latency" value={t.averageLatencyMs !== undefined ? `${Math.round(t.averageLatencyMs)}ms` : 'n/a'} />
-        <MetricCard label="Avg Retries" value={t.averageRetryCount.toFixed(1)} />
-        <MetricCard label="Tool Errors" value={String(t.toolErrorCount)} tone={t.toolErrorCount > 0 ? 'warn' : 'ok'} />
-        <MetricCard label="Model Cost" value={`$${t.modelCost.toFixed(4)}`} />
+        <MetricCard label={t('ops.evals.metricTotal')} value={String(totals.count)} />
+        <MetricCard label={t('ops.evals.metricSuccessRate')} value={fmtPct(totals.successRate)} tone={totals.successRate >= 0.8 ? 'ok' : totals.successRate >= 0.5 ? 'warn' : 'err'} />
+        <MetricCard label={t('ops.evals.metricFailures')} value={String(totals.failureCount)} tone={totals.failureCount > 0 ? 'warn' : 'ok'} />
+        <MetricCard label={t('ops.evals.metricAvgLatency')} value={totals.averageLatencyMs !== undefined ? `${Math.round(totals.averageLatencyMs)}ms` : t('ops.na')} />
+        <MetricCard label={t('ops.evals.metricAvgRetries')} value={totals.averageRetryCount.toFixed(1)} />
+        <MetricCard label={t('ops.evals.metricToolErrors')} value={String(totals.toolErrorCount)} tone={totals.toolErrorCount > 0 ? 'warn' : 'ok'} />
+        <MetricCard label={t('ops.evals.metricModelCost')} value={`$${totals.modelCost.toFixed(4)}`} />
       </div>
 
       <div className="summary-groups">
-        <GroupTable title="By Failure Class" groups={data.byFailureClass} />
-        <GroupTable title="By Failover Scope" groups={data.byFailoverScope} />
-        <GroupTable title="By Verification Status" groups={data.byVerificationStatus} />
-        <GroupTable title="By Provider / Model" groups={data.byProviderModel} />
+        <GroupTable title={t('ops.evals.groupFailureClass')} groups={data.byFailureClass} />
+        <GroupTable title={t('ops.evals.groupFailoverScope')} groups={data.byFailoverScope} />
+        <GroupTable title={t('ops.evals.groupVerificationStatus')} groups={data.byVerificationStatus} />
+        <GroupTable title={t('ops.evals.groupProviderModel')} groups={data.byProviderModel} />
       </div>
     </div>
   );
@@ -255,34 +258,35 @@ function EvalCompareView({
   onBaselineFromChange: (v: string) => void; onBaselineToChange: (v: string) => void;
   onCandidateFromChange: (v: string) => void; onCandidateToChange: (v: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div>
       <div className="compare-windows">
         <div className="compare-window">
-          <h4>Baseline</h4>
-          <label>From <input type="datetime-local" value={toLocal(baselineFrom)} onChange={e => onBaselineFromChange(toIso(e.target.value))} /></label>
-          <label>To <input type="datetime-local" value={toLocal(baselineTo)} onChange={e => onBaselineToChange(toIso(e.target.value))} /></label>
+          <h4>{t('ops.evals.baselineTitle')}</h4>
+          <label>{t('ops.evals.fromLabel')} <input type="datetime-local" value={toLocal(baselineFrom)} onChange={e => onBaselineFromChange(toIso(e.target.value))} /></label>
+          <label>{t('ops.evals.toLabel')} <input type="datetime-local" value={toLocal(baselineTo)} onChange={e => onBaselineToChange(toIso(e.target.value))} /></label>
         </div>
         <div className="compare-window">
-          <h4>Candidate</h4>
-          <label>From <input type="datetime-local" value={toLocal(candidateFrom)} onChange={e => onCandidateFromChange(toIso(e.target.value))} /></label>
-          <label>To <input type="datetime-local" value={toLocal(candidateTo)} onChange={e => onCandidateToChange(toIso(e.target.value))} /></label>
+          <h4>{t('ops.evals.candidateTitle')}</h4>
+          <label>{t('ops.evals.fromLabel')} <input type="datetime-local" value={toLocal(candidateFrom)} onChange={e => onCandidateFromChange(toIso(e.target.value))} /></label>
+          <label>{t('ops.evals.toLabel')} <input type="datetime-local" value={toLocal(candidateTo)} onChange={e => onCandidateToChange(toIso(e.target.value))} /></label>
         </div>
       </div>
 
       {loading ? (
-        <div className="loading-block">Comparing evals...</div>
+        <div className="loading-block">{t('ops.evals.comparing')}</div>
       ) : !data ? (
-        <EmptyText text="Set baseline and candidate time windows to compare eval quality." />
+        <EmptyText text={t('ops.evals.comparePrompt')} />
       ) : (
         <div className="eval-dashboard">
           <div className="metric-cards">
-            <DeltaCard label="Success Rate" base={data.baseline.totals.successRate} cand={data.candidate.totals.successRate} delta={data.delta.successRate} pct />
-            <DeltaCard label="Failures" base={data.baseline.totals.failureCount} cand={data.candidate.totals.failureCount} delta={data.delta.failureCount} />
-            <DeltaCard label="Avg Latency" base={data.baseline.totals.averageLatencyMs} cand={data.candidate.totals.averageLatencyMs} delta={data.delta.averageLatencyMs} ms />
-            <DeltaCard label="Tool Errors" base={data.baseline.totals.toolErrorCount} cand={data.candidate.totals.toolErrorCount} delta={data.delta.toolErrorCount} />
-            <DeltaCard label="Avg Retries" base={data.baseline.totals.averageRetryCount} cand={data.candidate.totals.averageRetryCount} delta={data.delta.averageRetryCount} fixed />
-            <DeltaCard label="Model Cost" base={data.baseline.totals.modelCost} cand={data.candidate.totals.modelCost} delta={data.delta.modelCost} cost />
+            <DeltaCard label={t('ops.evals.metricSuccessRate')} base={data.baseline.totals.successRate} cand={data.candidate.totals.successRate} delta={data.delta.successRate} pct />
+            <DeltaCard label={t('ops.evals.metricFailures')} base={data.baseline.totals.failureCount} cand={data.candidate.totals.failureCount} delta={data.delta.failureCount} />
+            <DeltaCard label={t('ops.evals.metricAvgLatency')} base={data.baseline.totals.averageLatencyMs} cand={data.candidate.totals.averageLatencyMs} delta={data.delta.averageLatencyMs} ms />
+            <DeltaCard label={t('ops.evals.metricToolErrors')} base={data.baseline.totals.toolErrorCount} cand={data.candidate.totals.toolErrorCount} delta={data.delta.toolErrorCount} />
+            <DeltaCard label={t('ops.evals.metricAvgRetries')} base={data.baseline.totals.averageRetryCount} cand={data.candidate.totals.averageRetryCount} delta={data.delta.averageRetryCount} fixed />
+            <DeltaCard label={t('ops.evals.metricModelCost')} base={data.baseline.totals.modelCost} cand={data.candidate.totals.modelCost} delta={data.delta.modelCost} cost />
           </div>
         </div>
       )}
@@ -291,13 +295,14 @@ function EvalCompareView({
 }
 
 function GroupTable({ title, groups }: { title: string; groups: EvalSummaryGroup[] }) {
+  const { t } = useI18n();
   if (groups.length === 0) return null;
   return (
     <div className="group-table-block">
       <h4>{title}</h4>
       <DataTable
         loading={false}
-        empty={`No ${title.toLowerCase()} data`}
+        empty={t('ops.evals.groupEmpty', { name: title.toLowerCase() })}
         rows={groups}
         renderRow={(g) => (
           <tr key={g.key}>
@@ -305,7 +310,7 @@ function GroupTable({ title, groups }: { title: string; groups: EvalSummaryGroup
             <td className="cell-num">{g.count}</td>
             <td className="cell-num">{fmtPct(g.successRate)}</td>
             <td className="cell-num">{g.failureCount}</td>
-            <td className="cell-num">{g.averageLatencyMs !== undefined ? `${Math.round(g.averageLatencyMs)}ms` : 'n/a'}</td>
+            <td className="cell-num">{g.averageLatencyMs !== undefined ? `${Math.round(g.averageLatencyMs)}ms` : t('ops.na')}</td>
             <td className="cell-num">{g.averageRetryCount.toFixed(1)}</td>
             <td className="cell-num">{g.toolErrorCount}</td>
           </tr>
@@ -334,8 +339,9 @@ function DeltaCard({ label, base, cand, delta, pct, ms, fixed, cost }: {
   fixed?: boolean;
   cost?: boolean;
 }) {
+  const { t } = useI18n();
   const fmt = (v: number | undefined): string => {
-    if (v === undefined || v === null) return 'n/a';
+    if (v === undefined || v === null) return t('ops.na');
     if (pct) return fmtPct(v);
     if (ms) return `${Math.round(v)}ms`;
     if (cost) return `$${v.toFixed(4)}`;
@@ -353,7 +359,7 @@ function DeltaCard({ label, base, cand, delta, pct, ms, fixed, cost }: {
           <span>→</span>
           <span className="delta-to">{candFmt}</span>
         </div>
-        <div className="metric-card-delta">Δ n/a</div>
+        <div className="metric-card-delta">{t('ops.evals.deltaNa')}</div>
       </div>
     );
   }

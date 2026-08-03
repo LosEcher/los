@@ -2,10 +2,12 @@ import { type FormEvent, useState } from 'react';
 import { Eye, Plus } from 'lucide-react';
 import { postJson, type MCPInspection, type MCPServer, type MCPTransport } from './api';
 import { Definition, Field } from './ui';
+import { useI18n } from './i18n';
 
 const TRANSPORTS: MCPTransport[] = ['stdio', 'sse', 'streamable-http'];
 
 export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void }) {
+  const { t } = useI18n();
   const [id, setId] = useState('');
   const [transport, setTransport] = useState<MCPTransport>('stdio');
   const [adapterKind, setAdapterKind] = useState<'generic' | 'cantool'>('generic');
@@ -58,7 +60,7 @@ export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void
     try {
       const draft = draftBody();
       if (!inspection || inspection.draftKey !== JSON.stringify(draft)) {
-        setError('Inspect the current registration before applying it');
+        setError(t('assets.mcp.inspectRequired'));
         return;
       }
       const created = await postJson<MCPServer>('/mcp-servers', {
@@ -74,15 +76,15 @@ export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void
 
   return (
     <>
-      <div className="panel-head compact"><h2>Add MCP Server</h2></div>
+      <div className="panel-head compact"><h2>{t('assets.mcp.addServerTitle')}</h2></div>
       <form className="stack-form" onSubmit={handleSubmit}>
-        <Field label="server id"><input value={id} onChange={e => setId(e.target.value)} placeholder="my-mcp-server" /></Field>
-        <Field label="transport">
+        <Field label={t('assets.mcp.serverId')}><input value={id} onChange={e => setId(e.target.value)} placeholder="my-mcp-server" /></Field>
+        <Field label={t('assets.label.transport')}>
           <select value={transport} onChange={e => setTransport(e.target.value as MCPTransport)}>
             {TRANSPORTS.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </Field>
-        <Field label="capability adapter">
+        <Field label={t('assets.mcp.capabilityAdapter')}>
           <select
             value={adapterKind}
             onChange={e => {
@@ -95,43 +97,43 @@ export function MCPServerCreate({ onCreated }: { onCreated: (id: string) => void
               }
             }}
           >
-            <option value="generic">generic MCP</option>
-            <option value="cantool">CanTool local read-only</option>
+            <option value="generic">{t('assets.mcp.optionGeneric')}</option>
+            <option value="cantool">{t('assets.mcp.optionCantool')}</option>
           </select>
         </Field>
-        <Field label="source URI"><input value={sourceUri} onChange={e => setSourceUri(e.target.value)} placeholder="catalog:team/server@1.0.0" /></Field>
+        <Field label={t('assets.mcp.sourceUri')}><input value={sourceUri} onChange={e => setSourceUri(e.target.value)} placeholder="catalog:team/server@1.0.0" /></Field>
         {transport === 'stdio' ? (
           <>
-            <Field label="command"><input value={command} onChange={e => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-filesystem" /></Field>
-            <Field label="args (comma-separated)"><input value={args} onChange={e => setArgs(e.target.value)} placeholder="/path/to/allowed" /></Field>
+            <Field label={t('assets.label.command')}><input value={command} onChange={e => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-filesystem" /></Field>
+            <Field label={t('assets.mcp.argsSeparated')}><input value={args} onChange={e => setArgs(e.target.value)} placeholder="/path/to/allowed" /></Field>
           </>
-        ) : <Field label="url"><input value={url} onChange={e => setUrl(e.target.value)} placeholder="http://localhost:3001/mcp" /></Field>}
+        ) : <Field label={t('assets.label.url')}><input value={url} onChange={e => setUrl(e.target.value)} placeholder="http://localhost:3001/mcp" /></Field>}
         <div className="two-col">
-          <Field label="auth mode">
+          <Field label={t('assets.mcp.authMode')}>
             <select value={authMode} onChange={e => setAuthMode(e.target.value as typeof authMode)}>
-              <option value="none">none</option><option value="credential_ref">credential ref</option><option value="oauth">OAuth ref</option>
+              <option value="none">none</option><option value="credential_ref">{t('assets.mcp.optionCredentialRef')}</option><option value="oauth">{t('assets.mcp.optionOAuth')}</option>
             </select>
           </Field>
-          <Field label="risk level">
+          <Field label={t('assets.mcp.riskLevel')}>
             <select value={riskLevel} onChange={e => setRiskLevel(e.target.value as typeof riskLevel)}>
               <option value="L0">L0</option><option value="L1">L1</option><option value="L2">L2</option>
             </select>
           </Field>
         </div>
-        {authMode !== 'none' ? <Field label="credential ref"><input value={credentialRef} onChange={e => setCredentialRef(e.target.value)} placeholder="vault:mcp/server" /></Field> : null}
-        <Field label="allowed tools"><input value={allowTools} onChange={e => setAllowTools(e.target.value)} placeholder="search, read" /></Field>
-        <Field label="denied tools"><input value={denyTools} onChange={e => setDenyTools(e.target.value)} placeholder="delete, write" /></Field>
+        {authMode !== 'none' ? <Field label={t('assets.mcp.credentialRef')}><input value={credentialRef} onChange={e => setCredentialRef(e.target.value)} placeholder="vault:mcp/server" /></Field> : null}
+        <Field label={t('assets.mcp.allowedTools')}><input value={allowTools} onChange={e => setAllowTools(e.target.value)} placeholder="search, read" /></Field>
+        <Field label={t('assets.mcp.deniedTools')}><input value={denyTools} onChange={e => setDenyTools(e.target.value)} placeholder="delete, write" /></Field>
         {inspection ? (
           <div className="definition-list">
-            <Definition term="version" text={inspection.versionHash.slice(0, 12)} />
-            <Definition term="execution" text={inspection.executionSupported ? 'supported' : inspection.blockers.join('; ')} />
-            <Definition term="adapter" text={adapterKind === 'cantool' ? 'CanTool reviewed capabilities only' : 'generic MCP tool policy'} />
+            <Definition term={t('assets.label.version')} text={inspection.versionHash.slice(0, 12)} />
+            <Definition term={t('assets.label.execution')} text={inspection.executionSupported ? t('assets.mcp.executionSupported') : inspection.blockers.join('; ')} />
+            <Definition term={t('assets.label.adapter')} text={adapterKind === 'cantool' ? t('assets.mcp.cantoolCapabilities') : t('assets.mcp.genericToolPolicy')} />
           </div>
         ) : null}
         {error ? <p className="form-error">{error}</p> : null}
         <div className="inline-actions">
-          <button className="ghost-btn" type="button" disabled={!id.trim() || busy} onClick={handleInspect}><Eye size={14} /> inspect</button>
-          <button className="primary-btn" type="submit" disabled={!inspection || busy}><Plus size={14} /> apply disabled</button>
+          <button className="ghost-btn" type="button" disabled={!id.trim() || busy} onClick={handleInspect}><Eye size={14} /> {t('assets.mcp.inspect')}</button>
+          <button className="primary-btn" type="submit" disabled={!inspection || busy}><Plus size={14} /> {t('assets.mcp.applyDisabled')}</button>
         </div>
       </form>
     </>

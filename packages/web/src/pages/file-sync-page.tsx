@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCcw, Search } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
 import { DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
+import { useI18n } from '../i18n';
 
 interface FileSyncNode {
   nodeId: string;
@@ -33,6 +34,7 @@ interface FileSyncEvent {
 }
 
 export function FileSyncPage() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [scanFolder, setScanFolder] = useState('');
@@ -72,16 +74,16 @@ export function FileSyncPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>File Sync</h2>
-            <p>Cross-node file synchronization status and scan control.</p>
+            <h2>{t('nav.fileSync')}</h2>
+            <p>{t('ops.fileSync.subtitle')}</p>
           </div>
           <StatusPill status={nodes.length > 0 ? 'live' : 'partial'} />
         </div>
 
         <div className="fact-list" style={{ marginBottom: 16 }}>
-          <Fact label="sync nodes" value={String(nodes.length)} />
-          <Fact label="tracked folders" value={String(allFolders.length)} />
-          <Fact label="recent events" value={String(eventList.length)} />
+          <Fact label={t('ops.fileSync.factSyncNodes')} value={String(nodes.length)} />
+          <Fact label={t('ops.fileSync.factTrackedFolders')} value={String(allFolders.length)} />
+          <Fact label={t('ops.fileSync.factRecentEvents')} value={String(eventList.length)} />
         </div>
 
         {/* Scan trigger */}
@@ -92,7 +94,7 @@ export function FileSyncPage() {
               onChange={e => setSelectedNode(e.target.value || null)}
               style={{ flex: 1 }}
             >
-              <option value="">Select node...</option>
+              <option value="">{t('ops.fileSync.selectNodePlaceholder')}</option>
               {nodes.map(n => (
                 <option key={n.nodeId} value={n.nodeId}>{n.nodeId}</option>
               ))}
@@ -101,7 +103,7 @@ export function FileSyncPage() {
               type="text"
               value={scanFolder}
               onChange={e => setScanFolder(e.target.value)}
-              placeholder="folder name (default: all)"
+              placeholder={t('ops.fileSync.folderPlaceholder')}
               style={{ flex: 1 }}
             />
             <button
@@ -113,14 +115,14 @@ export function FileSyncPage() {
                 folder: scanFolder || undefined,
               })}
             >
-              <Search size={14} /> {triggerScan.isPending ? 'scanning...' : 'scan'}
+              <Search size={14} /> {triggerScan.isPending ? t('ops.fileSync.scanning') : t('ops.fileSync.scanButton')}
             </button>
           </div>
         ) : null}
 
         <DataTable
           loading={status.isLoading}
-          empty="No file-sync nodes found. Register executor nodes with file_sync_scan capability."
+          empty={t('ops.fileSync.empty')}
           rows={allFolders}
           renderRow={(f) => (
             <div key={f.folderId ?? f.name} className="record-row">
@@ -128,15 +130,15 @@ export function FileSyncPage() {
                 <div className="record-header">
                   <strong className="record-title">{f.name}</strong>
                   <span className={`status-pill ${f.status === 'active' ? 'live' : 'partial'}`}>
-                    {f.status ?? 'unknown'}
+                    {f.status ?? t('common.unknown')}
                   </span>
                 </div>
                 <div className="record-meta">
-                  <span>node: {f.nodeId}</span>
+                  <span>{t('ops.fileSync.nodePrefix', { id: f.nodeId })}</span>
                   <span> · {f.localPath}</span>
-                  {f.totalFiles !== undefined ? <span> · {f.totalFiles} files</span> : null}
-                  {f.inSyncFiles !== undefined ? <span> · {f.inSyncFiles} in sync</span> : null}
-                  {f.lastScanAt ? <span> · last scan: {new Date(f.lastScanAt).toLocaleString()}</span> : null}
+                  {f.totalFiles !== undefined ? <span> · {t('ops.fileSync.filesLabel', { count: f.totalFiles })}</span> : null}
+                  {f.inSyncFiles !== undefined ? <span> · {t('ops.fileSync.inSyncLabel', { count: f.inSyncFiles })}</span> : null}
+                  {f.lastScanAt ? <span> · {t('ops.fileSync.lastScanPrefix', { date: new Date(f.lastScanAt).toLocaleString() })}</span> : null}
                   {f.lastScanDurationMs ? <span> · {(f.lastScanDurationMs / 1000).toFixed(1)}s</span> : null}
                 </div>
               </div>
@@ -148,7 +150,7 @@ export function FileSyncPage() {
       {/* ── Recent Events ──────────────────────────────── */}
       <aside className="panel inspector">
         <div className="panel-head compact">
-          <h2>Events</h2>
+          <h2>{t('ops.fileSync.eventsTitle')}</h2>
           <button type="button" className="ghost-btn" onClick={() => {
             queryClient.invalidateQueries({ queryKey: ['file-sync-events'] });
           }}>
@@ -156,7 +158,7 @@ export function FileSyncPage() {
           </button>
         </div>
         {eventList.length === 0 ? (
-          <EmptyText text={events.isLoading ? 'Loading...' : 'No recent events.'} />
+          <EmptyText text={events.isLoading ? t('common.loading') : t('ops.fileSync.noEvents')} />
         ) : (
           <div className="record-list" style={{ maxHeight: 500, overflowY: 'auto' }}>
             {eventList.map(e => (

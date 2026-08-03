@@ -3,8 +3,10 @@ import { CheckCircle2, Diff, FileArchive, RotateCcw, ShieldCheck } from 'lucide-
 
 import type { WorkItemProjection } from '../api/index.js';
 import { formatDate } from '../ui.js';
+import { tt, useI18n } from '../i18n';
 
 function WorkspaceDiff({ workspaceId, onFilesLoaded }: { workspaceId: string; onFilesLoaded?: (paths: string[]) => void }) {
+  const { t } = useI18n();
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,13 +31,13 @@ function WorkspaceDiff({ workspaceId, onFilesLoaded }: { workspaceId: string; on
 
   if (!expanded) {
     return <button className="ghost-btn diff-expand-btn" type="button" onClick={() => { setExpanded(true); loadDiff(); }}>
-      <Diff size={14} /> View diff
+      <Diff size={14} /> {t('work.review.viewDiff')}
     </button>;
   }
 
-  if (loading) return <p className="diff-loading">Loading diff…</p>;
-  if (error) return <p className="diff-error">Diff unavailable: {error}</p>;
-  if (!diff) return <p className="diff-empty">No changes in this workspace.</p>;
+  if (loading) return <p className="diff-loading">{t('work.review.loadingDiff')}</p>;
+  if (error) return <p className="diff-error">{t('work.review.diffUnavailable', { error })}</p>;
+  if (!diff) return <p className="diff-empty">{t('work.review.diffEmpty')}</p>;
 
   const files = parseDiffFiles(diff);
   const fileCount = files.length;
@@ -44,10 +46,10 @@ function WorkspaceDiff({ workspaceId, onFilesLoaded }: { workspaceId: string; on
   return (
     <div className="workspace-diff">
       <div className="diff-summary">
-        <span>{fileCount} file{fileCount !== 1 ? 's' : ''} changed</span>
-        <span>{totalLines} line{totalLines !== 1 ? 's' : ''}</span>
+        <span>{fileCount === 1 ? t('work.review.fileChanged') : t('work.review.filesChanged', { count: fileCount })}</span>
+        <span>{totalLines === 1 ? t('work.review.line') : t('work.review.lines', { count: totalLines })}</span>
         <button className="ghost-btn" type="button" onClick={() => setShowAll(!showAll)}>
-          {showAll ? 'Collapse all' : 'Expand all'}
+          {showAll ? t('work.review.collapseAll') : t('work.review.expandAll')}
         </button>
       </div>
       <div className="diff-files">
@@ -85,7 +87,7 @@ function parseDiffFiles(diff: string): DiffFile[] {
 function finalizeHunks(lines: string[]): string[] {
   const MAX_PREVIEW = 60;
   if (lines.length <= MAX_PREVIEW) return lines;
-  return [...lines.slice(0, MAX_PREVIEW), `... (${lines.length - MAX_PREVIEW} more lines — expand to view)`];
+  return [...lines.slice(0, MAX_PREVIEW), tt('work.review.moreLines', { count: lines.length - MAX_PREVIEW })];
 }
 
 function DiffFile({ file, expanded }: { file: DiffFile; expanded: boolean }) {
@@ -122,6 +124,7 @@ export function WorkReviewPanel({
   error?: unknown;
   onDecision: (decision: 'accepted' | 'revision_requested', reason: string, dirtyPaths: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [reason, setReason] = useState('');
   const [dirtyPaths, setDirtyPaths] = useState<string[]>([]);
   const canDecide = Boolean(item.availableActions.reviewResult);
@@ -133,18 +136,18 @@ export function WorkReviewPanel({
   };
   return (
     <section className="work-review-panel">
-      <header><div><span className="eyebrow">Result review</span><h3>Verification and changes</h3></div><ShieldCheck size={18} /></header>
+      <header><div><span className="eyebrow">{t('work.review.eyebrow')}</span><h3>{t('work.review.title')}</h3></div><ShieldCheck size={18} /></header>
       <div className="verification-records">
-        {item.verificationRecords.length === 0 ? <p className="review-empty">No verification records.</p> : item.verificationRecords.map(record => (
+        {item.verificationRecords.length === 0 ? <p className="review-empty">{t('work.review.noRecords')}</p> : item.verificationRecords.map(record => (
           <article className="verification-record" key={record.id}>
             <span className={`review-status ${record.status}`}>{record.status}</span>
             <div><strong>{record.checkName}</strong><small>{record.command ?? record.assertion ?? record.reviewer ?? record.kind}</small></div>
-            <p>{record.outputSummary ?? record.error ?? record.skipReason ?? 'No output summary.'}</p>
+            <p>{record.outputSummary ?? record.error ?? record.skipReason ?? t('work.review.noOutput')}</p>
           </article>
         ))}
       </div>
       <div className="workspace-evidence">
-        {item.changes.workspaces.length === 0 ? <p className="review-empty">No managed workspace evidence.</p> : item.changes.workspaces.map(workspace => (
+        {item.changes.workspaces.length === 0 ? <p className="review-empty">{t('work.review.noWorkspace')}</p> : item.changes.workspaces.map(workspace => (
           <WorkspaceEvidence key={workspace.workspaceId} workspace={workspace} onDiffFiles={collectDiffFiles} />
         ))}
       </div>
@@ -153,14 +156,14 @@ export function WorkReviewPanel({
       ) : null}
       {canDecide ? (
         <div className="result-review-actions">
-          <label><span>Decision reason</span><input value={reason} onChange={event => setReason(event.target.value)} placeholder="Evidence-based review decision" /></label>
+          <label><span>{t('work.review.decisionReason')}</span><input value={reason} onChange={event => setReason(event.target.value)} placeholder={t('work.review.decisionPlaceholder')} /></label>
           <div>
-            <button className="ghost-btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('revision_requested')}><RotateCcw size={14} /> Request revision</button>
-            <button className="btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('accepted')}><CheckCircle2 size={14} /> Accept result</button>
+            <button className="ghost-btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('revision_requested')}><RotateCcw size={14} /> {t('work.review.requestRevision')}</button>
+            <button className="btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('accepted')}><CheckCircle2 size={14} /> {t('work.review.acceptResult')}</button>
           </div>
         </div>
       ) : null}
-      {error ? <div className="daily-error">Review failed: {String(error)}</div> : null}
+      {error ? <div className="daily-error">{t('work.review.failed', { error: String(error) })}</div> : null}
     </section>
   );
 }
@@ -172,6 +175,7 @@ function WorkspaceEvidence({
   workspace: WorkItemProjection['changes']['workspaces'][number];
   onDiffFiles: (paths: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [backupState, setBackupState] = useState<'idle' | 'pending' | 'created' | 'error'>('idle');
   const [backupError, setBackupError] = useState<string | null>(null);
 
@@ -191,14 +195,14 @@ function WorkspaceEvidence({
   return (
     <article className="workspace-record" key={workspace.workspaceId}>
       <FileArchive size={16} />
-      <div><strong>{workspace.workspaceId}</strong><small>{workspace.status} · base {workspace.baseRevision}</small></div>
-      <code>{workspace.backupArtifactId ?? 'backup required'}</code>
+      <div><strong>{workspace.workspaceId}</strong><small>{workspace.status} · {t('work.review.base', { rev: workspace.baseRevision })}</small></div>
+      <code>{workspace.backupArtifactId ?? t('work.review.backupRequired')}</code>
       {workspace.backupArtifactId ? null : (
         <button className="ghost-btn" type="button" disabled={backupState === 'pending'} onClick={() => void createBackup()}>
-          <FileArchive size={14} /> {backupState === 'pending' ? 'Creating backup…' : backupState === 'created' ? 'Backup created' : 'Create backup'}
+          <FileArchive size={14} /> {backupState === 'pending' ? t('work.review.creatingBackup') : backupState === 'created' ? t('work.review.backupCreated') : t('work.review.createBackup')}
         </button>
       )}
-      {backupState === 'error' && backupError ? <p className="diff-error">Backup failed: {backupError}</p> : null}
+      {backupState === 'error' && backupError ? <p className="diff-error">{t('work.review.backupFailed', { error: backupError })}</p> : null}
       <WorkspaceDiff workspaceId={workspace.workspaceId} onFilesLoaded={onDiffFiles} />
     </article>
   );

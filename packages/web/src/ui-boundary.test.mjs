@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
+
+const EN = readDict('en');
 
 const chatPage = readFileSync(new URL('./chat-page.tsx', import.meta.url), 'utf8');
 const chatPlanApproval = readFileSync(new URL('./chat-plan-approval.tsx', import.meta.url), 'utf8');
@@ -33,24 +35,25 @@ const evalsPage = readFileSync(new URL('./evals-page.tsx', import.meta.url), 'ut
 const dailyQualityView = readFileSync(new URL('./pages/daily-quality-view.tsx', import.meta.url), 'utf8');
 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
+  assert.equal(EN['chat.runChoicesAria'], 'run choices');
+  assert.equal(EN['chat.runEvidence'], 'Run Evidence');
   const composer = between(chatComposer, '<form className="composer"', '</form>');
   const inspector = between(chatPage, '<aside className="panel inspector">', '</aside>');
 
   assert.match(composer, /className="composer-toolbar"/);
-  assert.match(composer, /aria-label="run choices"/);
-  assert.match(composer, /label="provider"/);
-  assert.match(composer, /label="model"/);
-  assert.match(composer, /label="tools \/ skills"/);
-  assert.match(composer, /label="execution dir"/);
+  assert.match(composer, /aria-label=\{t\('chat\.runChoicesAria'\)\}/);
+  assert.match(composer, /label=\{t\('chat\.provider'\)\}/);
+  assert.match(composer, /label=\{t\('chat\.model'\)\}/);
+  assert.match(composer, /label=\{t\('chat\.toolsSkills'\)\}/);
+  assert.match(composer, /label=\{t\('chat\.executionDir'\)\}/);
   assert.match(composer, /ChatAdvancedSettings/);
-  assert.match(composer, /aria-label="run choices"/);
   assert.match(chatPage, /refetchInterval: run\.running \? 4_000 : false/);
   assert.match(useChatRun, /useChatStream/);
   assert.match(useChatStream, /connectWsStream/);
   assert.match(useChatStream, /addEventListener\('session\.event'/);
   assert.doesNotMatch(useChatStream, /es\.onmessage/);
 
-  assert.match(inspector, /Run Evidence/);
+  assert.match(inspector, /\{t\('chat\.runEvidence'\)\}/);
   assert.doesNotMatch(inspector, /Run Controls/);
   assert.doesNotMatch(composer, /Provider setup stays in Providers/);
   assert.doesNotMatch(composer, /composer-run-panel/);
@@ -62,15 +65,22 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
 });
 
 test('provider setup fields live on the providers page, not chat', () => {
+  assert.equal(EN['pages.providers.addTitle'], 'Add Provider');
+  assert.equal(EN['pages.providers.providerIdField'], 'provider id *');
+  assert.equal(EN['pages.providers.apiKeyField'], 'api key');
+  assert.equal(EN['pages.providers.baseUrlField'], 'base url');
+  assert.equal(EN['pages.providers.defaultModelField'], 'default model');
+  assert.equal(EN['common.enabled'], 'enabled');
+  assert.equal(EN['pages.providers.weightField'], 'weight');
   const providerWorkspace = between(providersPage, 'function ProviderAddForm', 'function providerReadinessLabel');
 
-  assert.match(providerWorkspace, /Add Provider/);
-  assert.match(providerWorkspace, /provider id \*/);
-  assert.match(providerWorkspace, /api key/);
-  assert.match(providerWorkspace, /base url/);
-  assert.match(providerWorkspace, /default model/);
-  assert.match(providerWorkspace, /enabled/);
-  assert.match(providerWorkspace, /weight/);
+  assert.match(providerWorkspace, /t\('pages\.providers\.addTitle'\)/);
+  assert.match(providerWorkspace, /t\('pages\.providers\.providerIdField'\)/);
+  assert.match(providerWorkspace, /t\('pages\.providers\.apiKeyField'\)/);
+  assert.match(providerWorkspace, /t\('pages\.providers\.baseUrlField'\)/);
+  assert.match(providerWorkspace, /t\('pages\.providers\.defaultModelField'\)/);
+  assert.match(providerWorkspace, /t\('common\.enabled'\)/);
+  assert.match(providerWorkspace, /t\('pages\.providers\.weightField'\)/);
 
   assert.doesNotMatch(chatPage, /api key env/);
   assert.doesNotMatch(chatPage, /base url/);
@@ -79,17 +89,19 @@ test('provider setup fields live on the providers page, not chat', () => {
 });
 
 test('Grok existing-login adoption stays explicit, redacted, and runtime-gated', () => {
+  assert.equal(EN['pages.accounts.noteUnavailable'], 'No usable login is copied or stored. Grok runtime remains unavailable until discovery and adoption both pass.');
   assert.match(providersPage, /<ProviderAccountsPanel \/>/);
   assert.match(providerAccountsPanel, /getJson<ProviderAccountDiscoveryResponse>\('\/providers\/accounts\/discovery'\)/);
   assert.match(providerAccountsPanel, /postJson<[^>]+>\('\/providers\/accounts\/grok', \{\}\)/);
   assert.match(providerAccountsPanel, /grok\?\.available && !active/);
-  assert.match(providerAccountsPanel, /No usable login is copied or stored/);
+  assert.match(providerAccountsPanel, /t\('pages\.accounts\.noteUnavailable'\)/);
   assert.doesNotMatch(providerAccountsPanel, /secretRef|auth\.json|access_token|refresh_token/);
 
   assert.match(chatPage, /providerAccountDiscovery\.data\?\.grok\.available === true/);
   assert.match(chatPage, /account\.id === 'xai-grok-default' && account\.state === 'active'/);
   assert.match(chatComposer, /props\.grokRuntimeEnabled \|\| props\.runtimeKind === 'grok'/);
-  assert.match(chatComposer, /Grok \(existing login\)/);
+  assert.match(chatComposer, /t\('chat\.grokExisting'\)/);
+  assert.equal(EN['chat.grokExisting'], 'Grok (existing login)');
   assert.match(apiTypes, /export type RuntimeKind = 'claude-code' \| 'codex' \| 'grok'/);
   assert.match(viteConfig, /'\/runtimes': 'http:\/\/127\.0\.0\.1:8080'/);
 });
@@ -108,15 +120,17 @@ test('providers page renders readiness instead of raw discovery booleans', () =>
 });
 
 test('task inspector renders agent graph read model fields', () => {
+  assert.equal(EN['ops.tasks.graphCompletionTitle'], 'Graph Completion');
+  assert.equal(EN['ops.tasks.attemptEvidenceTitle'], 'Attempt Evidence');
   const taskInspector = between(tasksPage, 'function TaskRunInspector', 'function formatIdList');
 
   assert.match(taskInspector, /agentGraphIdForTask/);
   assert.match(taskInspector, /getJson<AgentTaskGraph>\(`\/agent-graphs\/\$\{graphId\}`\)/);
-  assert.match(taskInspector, /Graph Completion/);
+  assert.match(taskInspector, /t\('ops\.tasks\.graphCompletionTitle'\)/);
   assert.match(taskInspector, /readyTaskIds/);
   assert.match(taskInspector, /waitingTaskIds/);
   assert.match(taskInspector, /blockedTaskIds/);
-  assert.match(taskInspector, /Attempt Evidence/);
+  assert.match(taskInspector, /t\('ops\.tasks\.attemptEvidenceTitle'\)/);
   assert.doesNotMatch(taskInspector, /JSON\.stringify\(graphResult/);
 });
 
@@ -184,7 +198,8 @@ test('dead-letter resolution requires an audited disposition instead of an empty
   assert.match(deadLetterPage, /\/tasks\/dead-letter\?acknowledged=false&limit=200/);
   assert.match(deadLetterPage, /\/tasks\/dead-letter\?acknowledged=true&limit=200/);
   assert.match(deadLetterPage, /replacementTaskRunId/);
-  assert.match(deadLetterPage, /reason for accepting data loss/);
+  assert.equal(EN['ops.deadLetter.noteRequiredPlaceholder'], 'reason for accepting data loss');
+  assert.match(deadLetterPage, /t\('ops\.deadLetter\.noteRequiredPlaceholder'\)/);
   assert.match(deadLetterPage, /postJson<DeadLetterEvent>\(`\/tasks\/dead-letter\/\$\{id\}\/ack`, body\)/);
   assert.doesNotMatch(deadLetterPage, /\/ack`, \{\}\)/);
 });
@@ -196,6 +211,14 @@ test('setup source excludes sensitive fields and keeps responsive rows', () => {
 });
 
 test('skill and MCP distribution require inspect before apply and expose rollback controls', () => {
+  assert.equal(EN['assets.mcp.credentialRef'], 'credential ref');
+  assert.equal(EN['assets.mcp.allowedTools'], 'allowed tools');
+  assert.equal(EN['assets.mcp.capabilityAdapter'], 'capability adapter');
+  assert.equal(EN['assets.mcp.optionCantool'], 'CanTool local read-only');
+  assert.equal(EN['assets.mcp.providerLocation'], 'provider location');
+  assert.equal(EN['assets.mcp.dataGrantOwner'], 'data grant owner');
+  assert.equal(EN['assets.state.available'], 'available');
+  assert.equal(EN['assets.mcp.blockedReason'], 'blocked: {reason}');
   const mcpSurface = mcpPage + mcpCreate;
   assert.match(skillsPage, /'\/skills\/import\/inspect'/);
   assert.match(skillsPage, /'\/skills\/import\/apply'/);
@@ -208,19 +231,22 @@ test('skill and MCP distribution require inspect before apply and expose rollbac
   assert.match(mcpSurface, /\/enable`/);
   assert.match(mcpSurface, /\/pin`/);
   assert.match(mcpSurface, /\/rollback`/);
-  assert.match(mcpSurface, /credential ref/);
-  assert.match(mcpSurface, /allowed tools/);
-  assert.match(mcpSurface, /capability adapter/);
-  assert.match(mcpSurface, /CanTool local read-only/);
-  assert.match(mcpSurface, /provider location/);
-  assert.match(mcpSurface, /data grant owner/);
-  assert.match(mcpSurface, /available.*blocked/);
+  assert.match(mcpSurface, /t\('assets\.mcp\.credentialRef'\)/);
+  assert.match(mcpSurface, /t\('assets\.mcp\.allowedTools'\)/);
+  assert.match(mcpSurface, /t\('assets\.mcp\.capabilityAdapter'\)/);
+  assert.match(mcpSurface, /t\('assets\.mcp\.optionCantool'\)/);
+  assert.match(mcpSurface, /t\('assets\.mcp\.providerLocation'\)/);
+  assert.match(mcpSurface, /t\('assets\.mcp\.dataGrantOwner'\)/);
+  assert.match(mcpSurface, /assets\.state\.available/);
+  assert.match(mcpSurface, /assets\.mcp\.blockedReason/);
   assert.doesNotMatch(mcpSurface, /env \(JSON\)|API_KEY/);
 });
 
 test('daily workflow opens on Inbox and keeps Inbox, Work, Chat, Sessions first', () => {
-  assert.match(app, /\{ id: 'inbox', label: 'Inbox'/);
-  assert.match(app, /\{ id: 'work', label: 'Work'/);
+  assert.equal(EN['nav.inbox'], 'Inbox');
+  assert.equal(EN['nav.work'], 'Work');
+  assert.match(app, /\{ id: 'inbox', labelKey: 'nav.inbox'/);
+  assert.match(app, /\{ id: 'work', labelKey: 'nav.work'/);
   assert.match(app, /\{ id: 'inbox'[^]*\{ id: 'work'[^]*\{ id: 'chat'[^]*\{ id: 'sessions'/);
   assert.match(app, /\?\.id \?\? 'inbox'/);
   assert.match(app, /page === 'inbox' && <InboxPage/);
@@ -229,7 +255,8 @@ test('daily workflow opens on Inbox and keeps Inbox, Work, Chat, Sessions first'
 });
 
 test('Schedules exposes bounded presets, trigger preview, operator actions, and run history', () => {
-  assert.match(app, /\{ id: 'schedules', label: 'Schedules'/);
+  assert.equal(EN['nav.schedules'], 'Schedules');
+  assert.match(app, /\{ id: 'schedules', labelKey: 'nav.schedules'/);
   assert.match(app, /page === 'schedules' && <SchedulesPage/);
   assert.match(schedulesPage, /getJson<ScheduledWorkListResponse>\('\/scheduled-work-items\?limit=100'\)/);
   assert.match(schedulesPage, /getJson<ScheduledWorkPreviewResponse>\(previewPath\(trigger\)\)/);
@@ -241,7 +268,8 @@ test('Schedules exposes bounded presets, trigger preview, operator actions, and 
   assert.match(schedulesPage, /preview\.data\?\.occurrences\.map/);
   assert.match(schedulesPage, /detail\.data\?\.runs\.map/);
   assert.match(schedulesPage, /validateFeedAnalysisRequest/);
-  assert.match(schedulesPage, /Add at least one material item, observation, or material bundle reference/);
+  assert.equal(EN['ops.schedules.feedAnalysisNoEvidence'], 'Add at least one material item, observation, or material bundle reference.');
+  assert.match(schedulesPage, /t\('ops\.schedules\.feedAnalysisNoEvidence'\)/);
   assert.match(schedulesPage, /form\.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest\.value/);
   assert.match(viteConfig, /'\/scheduled-work-items': 'http:\/\/127\.0\.0\.1:8080'/);
   assert.match(viteConfig, /'\/scheduled-work-item-runs': 'http:\/\/127\.0\.0\.1:8080'/);
@@ -249,29 +277,37 @@ test('Schedules exposes bounded presets, trigger preview, operator actions, and 
 });
 
 test('Daily Quality keeps the 28-day evidence window and metric families separate', () => {
-  assert.match(evalsPage, /<CalendarDays size=\{14\} \/> Daily Quality/);
+  assert.equal(EN['ops.evals.tabDailyQuality'], 'Daily Quality');
+  assert.equal(EN['ops.dailyQuality.evidenceWindowLabel'], '28-day evidence window');
+  assert.equal(EN['ops.dailyQuality.groupInbox'], 'Inbox');
+  assert.equal(EN['ops.dailyQuality.groupSchedules'], 'Schedules');
+  assert.equal(EN['ops.dailyQuality.groupRecovery'], 'Recovery');
+  assert.equal(EN['ops.dailyQuality.groupVerification'], 'Verification');
+  assert.equal(EN['ops.dailyQuality.groupProviderModel'], 'Provider / Model Quality');
+  assert.match(evalsPage, /<CalendarDays size=\{14\} \/> \{t\('ops\.evals\.tabDailyQuality'\)\}/);
   assert.match(evalsPage, /mode === 'daily' && <DailyQualityView \/>/);
   assert.match(dailyQualityView, /getJson<DailyAgentQualityBaseline>\('\/daily-agent-quality\/baseline\?days=28'\)/);
   assert.match(dailyQualityView, /postJson<DailyAgentQualityCaptureResponse>\('\/daily-agent-quality\/capture', \{\}\)/);
-  assert.match(dailyQualityView, /28-day evidence window/);
-  assert.match(dailyQualityView, /title="Inbox"/);
-  assert.match(dailyQualityView, /title="Schedules"/);
-  assert.match(dailyQualityView, /title="Recovery"/);
-  assert.match(dailyQualityView, /title="Verification"/);
-  assert.match(dailyQualityView, /title="Provider \/ Model Quality"/);
+  assert.match(dailyQualityView, /t\('ops\.dailyQuality\.evidenceWindowLabel'\)/);
+  assert.match(dailyQualityView, /t\('ops\.dailyQuality\.groupInbox'\)/);
+  assert.match(dailyQualityView, /t\('ops\.dailyQuality\.groupSchedules'\)/);
+  assert.match(dailyQualityView, /t\('ops\.dailyQuality\.groupRecovery'\)/);
+  assert.match(dailyQualityView, /t\('ops\.dailyQuality\.groupVerification'\)/);
+  assert.match(dailyQualityView, /t\('ops\.dailyQuality\.groupProviderModel'\)/);
   assert.doesNotMatch(dailyQualityView, /combined score|overall score/i);
   assert.match(viteConfig, /'\/daily-agent-quality': 'http:\/\/127\.0\.0\.1:8080'/);
   assert.match(styles, /@container \(max-width: 560px\)[^]*\.quality-metric-groups/);
 });
 
 test('new Work sends a structured contract draft and does not dispatch directly', () => {
+  assert.equal(EN['work.form.draftNote'], 'Creates a draft only. Execution starts after operator action.');
   assert.match(workPage, /postJson<WorkItemProjection>\('\/work-items', buildCreateWorkItemPayload\(form\)\)/);
   assert.match(workPage, /mode: form\.mode/);
   assert.match(workPage, /toolMode: form\.toolMode/);
   assert.match(workPage, /editableSurfaces: lines\(form\.editableSurfaces\)/);
   assert.match(workPage, /requiredChecks: lines\(form\.requiredChecks\)/);
   assert.match(workPage, /stopConditions: lines\(form\.stopConditions\)/);
-  assert.match(workPage, /Creates a draft only\. Execution starts after operator action\./);
+  assert.match(workPage, /t\('work\.form\.draftNote'\)/);
   assert.doesNotMatch(between(workPage, 'function StructuredCreateForm', 'function LineField'), /postJson[^\n]+\/chat/);
 });
 
@@ -316,13 +352,14 @@ test('Chat provider defaults follow the effective server configuration', () => {
 });
 
 test('Work plan review exposes structured steps, verification mapping, and revision history', () => {
-  assert.match(workPage, /revision \$\{contract\.planRevision\}/);
-  assert.match(workPage, /depends on/);
-  assert.match(workPage, /writable scope/);
-  assert.match(workPage, /done when/);
-  assert.match(workPage, /Verification mapping/);
+  assert.equal(EN['work.plan.revisionHistory'], 'Revision history');
+  assert.match(workPage, /t\('work\.plan\.revision', \{ n: contract\.planRevision \}\)/);
+  assert.match(workPage, /t\('work\.plan\.dependsOn'\)/);
+  assert.match(workPage, /t\('work\.plan\.writableScope'\)/);
+  assert.match(workPage, /t\('work\.plan\.doneWhen'\)/);
+  assert.match(workPage, /t\('work\.plan\.verificationMapping'\)/);
   assert.match(workPage, /planHistory/);
-  assert.match(workPage, /Revision history/);
+  assert.match(workPage, /t\('work\.plan\.revisionHistory'\)/);
 });
 
 test('Work result review exposes verification and durable workspace evidence before an operator decision', () => {
@@ -331,13 +368,25 @@ test('Work result review exposes verification and durable workspace evidence bef
   assert.match(workPage, /dirtyPaths,?\s*$/m);
   assert.match(workPage, /record\.status === 'succeeded' \|\| record\.status === 'skipped'/);
   assert.match(workReviewPanel, /item\.verificationRecords\.map/);
-  assert.match(workReviewPanel, /workspace\.backupArtifactId \?\? 'backup required'/);
-  assert.match(workReviewPanel, /Create backup/);
+  assert.match(workReviewPanel, /workspace\.backupArtifactId \?\? t\('work\.review\.backupRequired'\)/);
+  assert.match(workReviewPanel, /t\('work\.review\.createBackup'\)/);
   assert.match(workReviewPanel, /decide\('revision_requested'\)/);
   assert.match(workReviewPanel, /decide\('accepted'\)/);
   assert.match(workReviewPanel, /onFilesLoaded=\{onDiffFiles\}/);
   assert.match(styles, /\.workspace-record code[^]*overflow-wrap: anywhere/);
 });
+
+function readDict(lang) {
+  const dict = {};
+  const dir = new URL(`./i18n/${lang}/`, import.meta.url);
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.ts') && f !== 'index.ts')) {
+    const src = readFileSync(new URL(file, dir), 'utf8');
+    for (const m of src.matchAll(/^\s*'([^']+)':\s*'((?:[^'\\]|\\.)*)',\s*$/gm)) {
+      dict[m[1]] = m[2];
+    }
+  }
+  return dict;
+}
 
 function between(source, start, end) {
   const startIndex = source.indexOf(start);
