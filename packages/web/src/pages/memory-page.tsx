@@ -59,6 +59,7 @@ import {
   RefreshQueryButton,
   StatusPill,
 } from '../ui';
+import { useI18n } from '../i18n';
 
 type RunStateProjection = {
   phase: string;
@@ -75,6 +76,7 @@ type RunStateProjection = {
 };
 export function MemoryPage() {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [kindFilter, setKindFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
@@ -205,27 +207,27 @@ export function MemoryPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Memory</h2>
-            <p>Classify observations by scope, memory layer, project, and archive state.</p>
+            <h2>{t('assets.memory.title')}</h2>
+            <p>{t('assets.memory.subtitle')}</p>
           </div>
           <div className="toolbar">
             <div className="search-box">
               <Search size={14} />
-              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="search memory" />
+              <input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('assets.memory.searchPh')} />
             </div>
             <div className="filter-toggle">
               <button className="ghost-btn" type="button" onClick={() => setShowFilters(prev => !prev)}>
-                <SlidersHorizontal size={14} /> filters
+                <SlidersHorizontal size={14} /> {t('assets.memory.filters')}
               </button>
               {activeFilterCount > 0 ? <span className="filter-badge">{activeFilterCount}</span> : null}
             </div>
             {activeFilterCount > 0 ? (
               <button className="ghost-btn" type="button" onClick={clearFilters}>
-                <X size={14} /> clear
+                <X size={14} /> {t('assets.memory.clear')}
               </button>
             ) : null}
             <button className="ghost-btn" type="button" disabled={sync.isPending || !workspace.data?.workspaceRoot} onClick={() => sync.mutate()}>
-              <FileText size={14} /> sync md
+              <FileText size={14} /> {t('assets.memory.syncMd')}
             </button>
             <RefreshQueryButton queryKey={['memory']} />
           </div>
@@ -233,20 +235,20 @@ export function MemoryPage() {
         <div className={`filter-bar ${showFilters ? '' : 'collapsed'}`}>
           <div className="filter-row">
             <select value={kindFilter} onChange={event => setKindFilter(event.target.value)}>
-              <option value="">all kinds</option>
+              <option value="">{t('assets.memory.allKinds')}</option>
               <option value="note">note</option>
               <option value="fact">fact</option>
               <option value="rule">rule</option>
               <option value="decision">decision</option>
             </select>
             <select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}>
-              <option value="">all sources</option>
+              <option value="">{t('assets.memory.allSources')}</option>
               <option value="user">user</option>
               <option value="agent">agent</option>
               <option value="system">system</option>
             </select>
             <select value={scopeFilter} onChange={event => setScopeFilter(event.target.value)}>
-              <option value="">all scopes</option>
+              <option value="">{t('assets.memory.allScopes')}</option>
               <option value="global">global</option>
               <option value="workspace">workspace</option>
               <option value="project">project</option>
@@ -255,7 +257,7 @@ export function MemoryPage() {
           </div>
           <div className="filter-row">
             <select value={layerFilter} onChange={event => setLayerFilter(event.target.value)}>
-              <option value="">all layers</option>
+              <option value="">{t('assets.memory.allLayers')}</option>
               <option value="working">working</option>
               <option value="episodic">episodic</option>
               <option value="semantic">semantic</option>
@@ -263,23 +265,23 @@ export function MemoryPage() {
               <option value="preference">preference</option>
             </select>
             <select value={archivedFilter} onChange={event => setArchivedFilter(event.target.value)}>
-              <option value="">archive any</option>
-              <option value="false">active</option>
-              <option value="true">archived</option>
+              <option value="">{t('assets.memory.archiveAny')}</option>
+              <option value="false">{t('assets.label.active')}</option>
+              <option value="true">{t('assets.label.archived')}</option>
             </select>
-            <input value={projectFilter} onChange={event => setProjectFilter(event.target.value)} placeholder="project id" />
-            <input value={tagFilter} onChange={event => setTagFilter(event.target.value)} placeholder="tag" />
+            <input value={projectFilter} onChange={event => setProjectFilter(event.target.value)} placeholder={t('assets.memory.projectIdPh')} />
+            <input value={tagFilter} onChange={event => setTagFilter(event.target.value)} placeholder={t('assets.memory.tagPh')} />
           </div>
         </div>
         <div className="memory-list">
-          {memory.isLoading ? <EmptyText text="Loading memory..." /> : null}
+          {memory.isLoading ? <EmptyText text={t('assets.memory.loading')} /> : null}
           {(memory.data?.results ?? []).map(obs => (
             <button className="memory-row" data-active={selectedId === obs.id} key={obs.id} type="button" onClick={() => setSelectedId(obs.id)}>
               <div>
                 <h3>{obs.title}</h3>
-                <p>{obs.summary || 'No summary'}</p>
+                <p>{obs.summary || t('assets.memory.noSummary')}</p>
                 <span>
-                  {obs.kind} · {obs.source} · {metadataText(obs.metadata.scope) ?? 'scope?'} · {metadataText(obs.metadata.memoryLayer) ?? 'layer?'} · {isArchived(obs) ? 'archived' : 'active'} · {formatDate(obs.updatedAt)}
+                  {obs.kind} · {obs.source} · {metadataText(obs.metadata.scope) ?? t('assets.memory.scopeUnknown')} · {metadataText(obs.metadata.memoryLayer) ?? t('assets.memory.layerUnknown')} · {isArchived(obs) ? t('assets.label.archived') : t('assets.label.active')} · {formatDate(obs.updatedAt)}
                 </span>
               </div>
             </button>
@@ -287,80 +289,80 @@ export function MemoryPage() {
           {!memory.isLoading && (memory.data?.results ?? []).length === 0 ? (
             stats.data?.totalObservations === 0 ? (
               <div className="empty-text">
-                <p>No observations yet.</p>
-                <p className="muted-copy">Memory observations are created automatically when a chat session completes. Start a conversation in Chat to create your first memory records.</p>
+                <p>{t('assets.memory.noObservations')}</p>
+                <p className="muted-copy">{t('assets.memory.firstMemoryHint')}</p>
               </div>
             ) : (
-              <EmptyText text="No memory records match the filters." />
+              <EmptyText text={t('assets.memory.noMatch')} />
             )
           ) : null}
         </div>
       </div>
       <aside className="panel inspector">
         <div className="panel-head compact">
-          <h2>{selected ? 'Memory Detail' : 'Add Observation'}</h2>
+          <h2>{selected ? t('assets.memory.detailTitle') : t('assets.memory.addObservation')}</h2>
         </div>
         {selected ? (
           <>
             <span className="mono-chip">memory-{selected.id}</span>
             <div className="fact-list">
-              <Fact label="scope" value={metadataText(selected.metadata.scope) ?? 'unspecified'} />
-              <Fact label="layer" value={metadataText(selected.metadata.memoryLayer) ?? 'unspecified'} />
-              <Fact label="archived" value={String(isArchived(selected))} />
-              <Fact label="project" value={selected.projectId ?? 'none'} />
-              <Fact label="session" value={selected.sessionId ?? 'none'} />
-              <Fact label="trace" value={selected.traceId ?? 'none'} />
+              <Fact label={t('assets.label.scope')} value={metadataText(selected.metadata.scope) ?? t('assets.state.unspecified')} />
+              <Fact label={t('assets.label.layer')} value={metadataText(selected.metadata.memoryLayer) ?? t('assets.state.unspecified')} />
+              <Fact label={t('assets.label.archived')} value={String(isArchived(selected))} />
+              <Fact label={t('assets.label.project')} value={selected.projectId ?? t('common.none')} />
+              <Fact label={t('assets.label.session')} value={selected.sessionId ?? t('common.none')} />
+              <Fact label={t('assets.label.trace')} value={selected.traceId ?? t('common.none')} />
             </div>
             <div className="toolbar">
               {isArchived(selected) ? (
                 <button className="ghost-btn" type="button" onClick={() => patchSelectedMetadata({ archived: false, archiveReason: undefined })}>
-                  <RotateCcw size={14} /> restore
+                  <RotateCcw size={14} /> {t('assets.memory.restore')}
                 </button>
               ) : (
                 <button className="ghost-btn" type="button" onClick={() => patchSelectedMetadata({ archived: true, archiveReason: 'archived_from_memory_page' })}>
-                  <Archive size={14} /> archive
+                  <Archive size={14} /> {t('assets.label.archive')}
                 </button>
               )}
               <button className="ghost-btn" type="button" onClick={() => patchSelectedMetadata({ scope: 'project', memoryLayer: 'semantic', archived: false }, { tags: mergeTags(selected.tags, ['semantic']) })}>
-                <Layers size={14} /> project semantic
+                <Layers size={14} /> {t('assets.memory.projectSemantic')}
               </button>
-              <button className="icon-btn danger" type="button" onClick={() => remove.mutate(selected.id)} title="delete memory">
+              <button className="icon-btn danger" type="button" onClick={() => remove.mutate(selected.id)} title={t('assets.memory.deleteTitle')}>
                 <Trash2 size={14} />
               </button>
             </div>
             <div className="definition-list compact-definition-list">
-              <Definition term="title" text={selected.title} />
-              <Definition term="summary" text={selected.summary || 'none'} />
-              <Definition term="tags" text={selected.tags.join(', ') || 'none'} />
-              <Definition term="created" text={formatDate(selected.createdAt)} />
-              <Definition term="updated" text={formatDate(selected.updatedAt)} />
+              <Definition term={t('assets.label.title')} text={selected.title} />
+              <Definition term={t('assets.label.summary')} text={selected.summary || t('common.none')} />
+              <Definition term={t('assets.label.tags')} text={selected.tags.join(', ') || t('common.none')} />
+              <Definition term={t('assets.label.created')} text={formatDate(selected.createdAt)} />
+              <Definition term={t('assets.label.updated')} text={formatDate(selected.updatedAt)} />
             </div>
             {selected.content ? (
               <div className="json-block">
-                <strong>Content</strong>
+                <strong>{t('assets.label.content')}</strong>
                 <pre>{selected.content}</pre>
               </div>
             ) : null}
             <div className="json-block">
-              <strong>Metadata</strong>
+              <strong>{t('assets.memory.metadataTitle')}</strong>
               <pre>{JSON.stringify(selected.metadata, null, 2)}</pre>
             </div>
           </>
         ) : null}
         <form className="stack-form" onSubmit={(event) => { event.preventDefault(); if (title.trim()) add.mutate(); }}>
           <div className="panel-head compact">
-            <h2>Add Observation</h2>
+            <h2>{t('assets.memory.addObservation')}</h2>
           </div>
-          <Field label="title">
-            <input value={title} onChange={event => setTitle(event.target.value)} placeholder="short memory title" />
+          <Field label={t('assets.label.title')}>
+            <input value={title} onChange={event => setTitle(event.target.value)} placeholder={t('assets.memory.titlePh')} />
           </Field>
-          <Field label="summary">
-            <textarea value={summary} onChange={event => setSummary(event.target.value)} rows={3} placeholder="what should future runs know?" />
+          <Field label={t('assets.label.summary')}>
+            <textarea value={summary} onChange={event => setSummary(event.target.value)} rows={3} placeholder={t('assets.memory.summaryPh')} />
           </Field>
-          <Field label="content">
-            <textarea value={content} onChange={event => setContent(event.target.value)} rows={4} placeholder="optional details or evidence" />
+          <Field label={t('assets.label.content')}>
+            <textarea value={content} onChange={event => setContent(event.target.value)} rows={4} placeholder={t('assets.memory.contentPh')} />
           </Field>
-          <Field label="kind">
+          <Field label={t('assets.label.kind')}>
             <select value={kind} onChange={event => setKind(event.target.value)}>
               <option value="note">note</option>
               <option value="fact">fact</option>
@@ -368,14 +370,14 @@ export function MemoryPage() {
               <option value="decision">decision</option>
             </select>
           </Field>
-          <Field label="source">
+          <Field label={t('assets.label.source')}>
             <select value={source} onChange={event => setSource(event.target.value)}>
               <option value="user">user</option>
               <option value="agent">agent</option>
               <option value="system">system</option>
             </select>
           </Field>
-          <Field label="scope">
+          <Field label={t('assets.label.scope')}>
             <select value={scope} onChange={event => setScope(event.target.value)}>
               <option value="project">project</option>
               <option value="workspace">workspace</option>
@@ -383,7 +385,7 @@ export function MemoryPage() {
               <option value="session">session</option>
             </select>
           </Field>
-          <Field label="layer">
+          <Field label={t('assets.label.layer')}>
             <select value={memoryLayer} onChange={event => setMemoryLayer(event.target.value)}>
               <option value="semantic">semantic</option>
               <option value="procedural">procedural</option>
@@ -392,45 +394,45 @@ export function MemoryPage() {
               <option value="working">working</option>
             </select>
           </Field>
-          <Field label="tags">
-            <input value={tags} onChange={event => setTags(event.target.value)} placeholder="comma separated tags" />
+          <Field label={t('assets.label.tags')}>
+            <input value={tags} onChange={event => setTags(event.target.value)} placeholder={t('assets.memory.tagsPh')} />
           </Field>
           <label className="toolbar-toggle">
             <input type="checkbox" checked={promotable} onChange={event => setPromotable(event.target.checked)} />
-            promotable
+            {t('assets.memory.promotable')}
           </label>
-          <Field label="scope guide">
-            <p className="muted-copy">global is cross-project preference/procedure; project is tied to request project context; session is run history or smoke evidence.</p>
+          <Field label={t('assets.memory.scopeGuide')}>
+            <p className="muted-copy">{t('assets.memory.scopeGuideText')}</p>
           </Field>
           <button className="primary-btn" type="submit" disabled={!title.trim() || add.isPending}>
-            <Database size={14} /> save
+            <Database size={14} /> {t('common.save')}
           </button>
         </form>
         <div className="fact-list">
-          <Fact label="total" value={String(stats.data?.totalObservations ?? 0)} />
-          <Fact label="archived" value={String(stats.data?.archived ?? 0)} />
-          <Fact label="kinds" value={Object.keys(stats.data?.byKind ?? {}).join(', ') || 'none'} />
-          <Fact label="sources" value={Object.keys(stats.data?.bySource ?? {}).join(', ') || 'none'} />
-          <Fact label="scopes" value={Object.keys(stats.data?.byScope ?? {}).join(', ') || 'none'} />
-          <Fact label="layers" value={Object.keys(stats.data?.byLayer ?? {}).join(', ') || 'none'} />
+          <Fact label={t('assets.label.total')} value={String(stats.data?.totalObservations ?? 0)} />
+          <Fact label={t('assets.label.archived')} value={String(stats.data?.archived ?? 0)} />
+          <Fact label={t('assets.label.kinds')} value={Object.keys(stats.data?.byKind ?? {}).join(', ') || t('common.none')} />
+          <Fact label={t('assets.label.sources')} value={Object.keys(stats.data?.bySource ?? {}).join(', ') || t('common.none')} />
+          <Fact label={t('assets.label.scopes')} value={Object.keys(stats.data?.byScope ?? {}).join(', ') || t('common.none')} />
+          <Fact label={t('assets.label.layers')} value={Object.keys(stats.data?.byLayer ?? {}).join(', ') || t('common.none')} />
         </div>
 
         {(compactions.data?.compactions ?? []).length > 0 ? (
           <div className="compaction-list">
-            <h4>Recent Compactions</h4>
+            <h4>{t('assets.memory.recentCompactions')}</h4>
             {(compactions.data?.compactions ?? []).map(c => (
               <div key={c.id} className="compaction-card">
                 <div className="compaction-meta">
                   <code>{c.id.slice(0, 16)}...</code>
-                  <span>session={String(c.sessionId ?? '').slice(0, 12)}...</span>
-                  <span>evidence={c.evidenceCount}</span>
-                  <span>confidence={(Number(c.confidence) * 100).toFixed(0)}%</span>
+                  <span>{t('assets.memory.compactionSession', { id: String(c.sessionId ?? '').slice(0, 12) })}</span>
+                  <span>{t('assets.memory.compactionEvidence', { count: c.evidenceCount ?? 0 })}</span>
+                  <span>{t('assets.memory.compactionConfidence', { percent: (Number(c.confidence) * 100).toFixed(0) })}</span>
                   <span>{formatDate(c.createdAt)}</span>
                 </div>
                 <div className="compaction-summary">
-                  obs={String(c.summary.observationCount ?? 0)}
-                  tasks={String(c.summary.taskRunCount ?? 0)}
-                  evals={String(c.summary.evalCount ?? 0)}
+                  {t('assets.memory.obsCount', { count: String(c.summary.observationCount ?? 0) })}
+                  {t('assets.memory.taskCount', { count: String(c.summary.taskRunCount ?? 0) })}
+                  {t('assets.memory.evalCount', { count: String(c.summary.evalCount ?? 0) })}
                 </div>
                 {(c.proceduralCandidates?.length ?? 0) > 0 ? (
                   <div className="candidate-list">
@@ -447,7 +449,7 @@ export function MemoryPage() {
             ))}
           </div>
         ) : (
-          <p className="muted-copy">No compactions yet. Run 'los memory compact --session-id SID' to create one.</p>
+          <p className="muted-copy">{t('assets.memory.noCompactions')}</p>
         )}
       </aside>
     </section>
@@ -465,4 +467,3 @@ function isArchived(obs: MemoryObservation): boolean {
 function mergeTags(current: string[], next: string[]): string[] {
   return Array.from(new Set([...current, ...next].map(tag => tag.trim()).filter(Boolean)));
 }
-

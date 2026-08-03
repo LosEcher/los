@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getJson, postJson, setAuthToken, getAuthToken } from '../api/index.js';
+import { useI18n } from '../i18n';
 
 interface AuthStatus {
   hasUsers: boolean;
@@ -18,6 +19,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const { t } = useI18n();
 
   const authStatus = useQuery<AuthStatus>({
     queryKey: ['auth-status'],
@@ -36,7 +38,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
     e.preventDefault();
     setError('');
     if (!username.trim() || !password) {
-      setError('Username and password are required.');
+      setError(t('pages.login.required'));
       return;
     }
     setLoading(true);
@@ -58,7 +60,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       onLogin();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || 'Authentication failed.');
+      setError(msg || t('pages.login.authFailed'));
     } finally {
       setLoading(false);
     }
@@ -72,20 +74,20 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
           <h1>los</h1>
           <p className="login-subtitle">
             {isBootstrap
-              ? 'Create your operator account to get started.'
-              : 'Sign in to your account.'}
+              ? t('pages.login.bootstrapSubtitle')
+              : t('pages.login.signInSubtitle')}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           <label className="field-label">
-            Username
+            {t('pages.login.username')}
             <input
               type="text"
               className="field-input"
               value={username}
               onChange={e => { setUsername(e.target.value); setError(''); }}
-              placeholder="username"
+              placeholder={t('pages.login.usernamePlaceholder')}
               autoFocus
               autoComplete="username"
               disabled={loading}
@@ -93,13 +95,13 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
           </label>
 
           <label className="field-label">
-            Password
+            {t('pages.login.password')}
             <input
               type="password"
               className="field-input"
               value={password}
               onChange={e => { setPassword(e.target.value); setError(''); }}
-              placeholder={mode === 'register' ? 'min 6 characters' : 'password'}
+              placeholder={mode === 'register' ? t('pages.login.passwordMinPlaceholder') : t('pages.login.passwordPlaceholder')}
               autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
               disabled={loading}
             />
@@ -109,17 +111,17 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
 
           <button type="submit" className="btn-primary login-btn" disabled={loading}>
             {loading
-              ? (mode === 'register' ? 'Creating account…' : 'Signing in…')
-              : (mode === 'register' ? 'Create Account' : 'Sign In')}
+              ? (mode === 'register' ? t('pages.login.creating') : t('pages.login.signingIn'))
+              : (mode === 'register' ? t('pages.login.createAccount') : t('pages.login.signIn'))}
           </button>
         </form>
 
         {!isBootstrap ? (
           <p className="login-switch">
             {mode === 'login' ? (
-              <>No account yet? <button type="button" className="link-btn" onClick={() => setMode('register')}>Create one</button></>
+              <>{t('pages.login.noAccount')} <button type="button" className="link-btn" onClick={() => setMode('register')}>{t('pages.login.createOne')}</button></>
             ) : (
-              <>Already have an account? <button type="button" className="link-btn" onClick={() => setMode('login')}>Sign in</button></>
+              <>{t('pages.login.haveAccount')} <button type="button" className="link-btn" onClick={() => setMode('login')}>{t('pages.login.signInLink')}</button></>
             )}
           </p>
         ) : null}

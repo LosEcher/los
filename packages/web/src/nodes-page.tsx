@@ -4,6 +4,7 @@ import { Network, Plus, Upload, AlertTriangle } from 'lucide-react';
 import { getJson, postJson, type SshConfigImportResponse } from './api';
 import { Badge, DataTable, EmptyText, Fact, Field, formatDate, RefreshQueryButton, StatusPill } from './ui';
 import { NodeEditor, NodeInspector, errorMessage, fmtMb } from './node-editor.js';
+import { useI18n } from './i18n';
 
 function shortCapFlags(capabilities: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -39,8 +40,9 @@ function diskPressure(capacity: Record<string, unknown>): { freeGb: number; tone
 }
 
 export function NodesPage() {
+  const { t } = useI18n();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string>('Registry edits are local until saved.');
+  const [actionMessage, setActionMessage] = useState<string>(() => t('ops.nodes.registryLocalNote'));
   const nodes = useQuery({
     queryKey: ['nodes'],
     queryFn: () => getJson<Array<{ nodeId: string; nodeKind: string; status: string; connectModes: string[]; rolloutState?: string; targetVersion?: string; execution: { candidate: boolean; blockers?: string[]; warnings?: string[] }; lastHeartbeatAt: string; capacity?: Record<string, unknown>; capabilities?: Record<string, unknown> }>>('/nodes'),
@@ -58,8 +60,8 @@ export function NodesPage() {
           <div className="title-row">
             <Network size={18} />
             <div>
-              <h2>Executor Nodes</h2>
-              <p>Manual registry editing, dry-run probe, and live verified state.</p>
+              <h2>{t('ops.nodes.title')}</h2>
+              <p>{t('ops.nodes.subtitle')}</p>
             </div>
           </div>
           <div className="toolbar">
@@ -87,16 +89,16 @@ export function NodesPage() {
         />
         <div className="panel-head compact">
           <div>
-            <h2>Registry</h2>
+            <h2>{t('ops.nodes.registryTitle')}</h2>
             <p>{actionMessage}</p>
           </div>
           <button type="button" className="ghost-btn" onClick={() => setSelectedNodeId(null)}>
-            <Plus size={14} /> new
+            <Plus size={14} /> {t('ops.nodes.newButton')}
           </button>
         </div>
         <DataTable
           loading={nodes.isLoading}
-          empty="No executor nodes have heartbeated yet."
+          empty={t('ops.nodes.empty')}
           rows={nodes.data ?? []}
           renderRow={node => {
             const mem = memoryPressure(node.capacity ?? {});
@@ -113,14 +115,14 @@ export function NodesPage() {
               <span className={`status-text ${node.status}`}>{node.status}</span>
               <span>{resourceCell(node.capacity ?? {})}</span>
               <span>
-                {mem.pct > 0 ? <Badge tone={mem.tone}>mem {mem.pct}%</Badge> : null}
-                {disk.freeGb >= 0 ? <Badge tone={disk.tone}>disk {disk.freeGb}G</Badge> : null}
+                {mem.pct > 0 ? <Badge tone={mem.tone}>{t('ops.nodes.memBadge', { pct: mem.pct })}</Badge> : null}
+                {disk.freeGb >= 0 ? <Badge tone={disk.tone}>{t('ops.nodes.diskBadge', { freeGb: disk.freeGb })}</Badge> : null}
                 {mem.pct === 0 && disk.freeGb < 0 ? '—' : null}
               </span>
               <span>{shortCapFlags(node.capabilities ?? {})}</span>
-              <span>{node.connectModes.join(', ') || 'mode?'}</span>
-              <span>{node.rolloutState ?? 'idle'}{node.targetVersion ? ` → ${node.targetVersion}` : ''}</span>
-              <span>{node.execution.candidate ? 'exec' : 'non-exec'}</span>
+              <span>{node.connectModes.join(', ') || t('ops.nodes.modeUnknown')}</span>
+              <span>{node.rolloutState ?? t('ops.nodes.idle')}{node.targetVersion ? ` → ${node.targetVersion}` : ''}</span>
+              <span>{node.execution.candidate ? t('ops.nodes.exec') : t('ops.nodes.nonExec')}</span>
               <span>{formatDate(node.lastHeartbeatAt)}</span>
             </button>
             );
@@ -133,6 +135,7 @@ export function NodesPage() {
 }
 
 function SshImportPanel({ onImported }: { onImported: (message: string) => Promise<void> }) {
+  const { t } = useI18n();
   const [content, setContent] = useState('');
   const [dryRun, setDryRun] = useState(true);
   const [createMissing, setCreateMissing] = useState(true);
@@ -142,7 +145,7 @@ function SshImportPanel({ onImported }: { onImported: (message: string) => Promi
 
   async function importConfig() {
     if (!content.trim()) {
-      await onImported('ssh config content is required');
+      await onImported(t('ops.nodes.sshContentRequired'));
       return;
     }
     setBusy(true);
@@ -151,7 +154,7 @@ function SshImportPanel({ onImported }: { onImported: (message: string) => Promi
         content, dryRun, createMissing, conflictStrategy,
       });
       setResult(response);
-      await onImported(`${response.dryRun ? 'previewed' : 'imported'} ${response.summary.total} ssh host entries`);
+      await onImported(t('ops.nodes.sshImportResult', { action: response.dryRun ? t('ops.nodes.sshPreviewed') : t('ops.nodes.sshImported'), count: response.summary.total }));
     } catch (error) {
       await onImported(errorMessage(error));
     } finally {
@@ -162,23 +165,23 @@ function SshImportPanel({ onImported }: { onImported: (message: string) => Promi
   return (
     <div className="stack-form ssh-import">
       <div className="panel-head compact">
-        <h2>SSH Config Import</h2>
+        <h2>{t('ops.nodes.sshImportTitle')}</h2>
         <button type="button" className="ghost-btn" onClick={importConfig} disabled={busy || !content.trim()}>
-          <Upload size={14} /> import
+          <Upload size={14} /> {t('ops.nodes.importButton')}
         </button>
       </div>
       <div className="field-grid">
-        <Field label="content">
+        <Field label={t('ops.nodes.sshContentLabel')}>
           <textarea rows={8} value={content} onChange={event => setContent(event.target.value)} placeholder="Host hh-sgp1-r-t&#10;  HostName 100.86.24.22&#10;  User root&#10;  Port 23452" />
         </Field>
         <div className="import-controls">
           <label className="field-token">
-            <input type="checkbox" checked={dryRun} onChange={event => setDryRun(event.target.checked)} /> dry run
+            <input type="checkbox" checked={dryRun} onChange={event => setDryRun(event.target.checked)} /> {t('ops.nodes.dryRunLabel')}
           </label>
           <label className="field-token">
-            <input type="checkbox" checked={createMissing} onChange={event => setCreateMissing(event.target.checked)} /> create missing
+            <input type="checkbox" checked={createMissing} onChange={event => setCreateMissing(event.target.checked)} /> {t('ops.nodes.createMissingLabel')}
           </label>
-          <Field label="conflict">
+          <Field label={t('ops.nodes.conflictLabel')}>
             <select value={conflictStrategy} onChange={event => setConflictStrategy(event.target.value as 'preserve_existing' | 'overwrite')}>
               <option value="preserve_existing">preserve_existing</option>
               <option value="overwrite">overwrite</option>
@@ -189,23 +192,23 @@ function SshImportPanel({ onImported }: { onImported: (message: string) => Promi
       {result ? (
         <div className="import-result">
           <div className="fact-list compact-facts">
-            <Fact label="total" value={String(result.summary.total)} />
-            <Fact label="create" value={String(result.summary.created)} />
-            <Fact label="update" value={String(result.summary.updated)} />
-            <Fact label="skip" value={String(result.summary.skipped)} />
-            <Fact label="failed" value={String(result.summary.failed)} />
+            <Fact label={t('ops.nodes.sshFactTotal')} value={String(result.summary.total)} />
+            <Fact label={t('ops.nodes.sshFactCreate')} value={String(result.summary.created)} />
+            <Fact label={t('ops.nodes.sshFactUpdate')} value={String(result.summary.updated)} />
+            <Fact label={t('ops.nodes.sshFactSkip')} value={String(result.summary.skipped)} />
+            <Fact label={t('ops.nodes.sshFactFailed')} value={String(result.summary.failed)} />
           </div>
           <DataTable
             loading={false}
-            empty="No import items."
+            empty={t('ops.nodes.sshImportEmpty')}
             rows={result.items}
             renderRow={item => (
               <div className="record-row import-row" key={`${item.alias}:${item.nodeId}`}>
                 <span className="row-title">{item.nodeId}</span>
                 <span>{item.action}</span>
                 <span>{item.hostName}:{item.port}</span>
-                <span>{item.user ?? 'user?'}</span>
-                <span>{item.error ?? (item.willWrite ? 'write' : 'preview')}</span>
+                <span>{item.user ?? t('ops.nodes.userUnknown')}</span>
+                <span>{item.error ?? (item.willWrite ? t('ops.nodes.writeAction') : t('ops.nodes.previewAction'))}</span>
               </div>
             )}
           />

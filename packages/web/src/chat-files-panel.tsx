@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Folder, File, FileCode, FileText, FileImage, X, RefreshCw } from 'lucide-react';
 import { getJson } from './api';
+import { useI18n } from './i18n';
 
 type FileEntry = {
   name: string;
@@ -29,6 +30,7 @@ export function FilesPanel({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [currentPath, setCurrentPath] = useState('');
   const [previewPath, setPreviewPath] = useState<string | null>(null);
 
@@ -58,7 +60,7 @@ export function FilesPanel({
   return (
     <aside className="files-panel">
       <div className="files-panel-head">
-        <h3>Workspace</h3>
+        <h3>{t('chat.files.title')}</h3>
         <div className="files-panel-actions">
           <button className="ghost-btn" type="button" onClick={() => browse.refetch()}>
             <RefreshCw size={13} />
@@ -76,7 +78,7 @@ export function FilesPanel({
             parts.pop();
             setCurrentPath(parts.join('/'));
           }}>
-            ↑ up
+            {t('chat.files.up')}
           </button>
         )}
       </div>

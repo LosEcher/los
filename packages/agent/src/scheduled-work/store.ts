@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb, withDbClient } from '@los/infra/db';
 
 import {
+  CIRCUIT_RECOVERY_WINDOW_MS,
   nextOccurrenceAfterSlot,
   previewScheduledOccurrences,
   shouldSkipLateRun,
@@ -123,15 +124,21 @@ export async function claimDueScheduledWorkItems(input: {
   await withDbClient(async client => {
     await client.query('BEGIN');
     try {
+      // A half_open circuit allows exactly one probe run: once a half_open
+      // schedule has claimed a slot this tick, later due slots of the same
+      // schedule are excluded until the probe outcome flips the circuit.
+      const probedHalfOpen: string[] = [];
       for (let index = 0; index < Math.min(50, Math.max(1, input.limit ?? 10)); index += 1) {
         const selected = await client.query<ScheduledWorkRow>(
           `SELECT * FROM scheduled_work_items
            WHERE status='enabled' AND circuit_state IN ('closed','half_open') AND next_run_at <= $1
-           ORDER BY next_run_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, [now],
+             AND NOT (circuit_state='half_open' AND id = ANY($2::text[]))
+           ORDER BY next_run_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, [now, probedHalfOpen],
         );
         const row = selected.rows[0];
         if (!row) break;
         const schedule = scheduleFromRow(row);
+        if (schedule.circuitState === 'half_open') probedHalfOpen.push(schedule.id);
         const slot = new Date(schedule.nextRunAt);
         const active = await client.query<{ count: string; queued: string }>(
           `SELECT count(*)::text AS count,
@@ -307,22 +314,60 @@ export async function transitionScheduledWorkRun(
   return runFromRow(rows.rows[0]);
 }
 
+/**
+ * Auto-recover open circuits whose recovery window has elapsed: enabled
+ * schedules flip to half_open, which allows exactly one probe run (the next
+ * claimed run). A successful probe closes the circuit via
+ * `recordScheduledRunOutcome`; a failed probe re-opens it and restarts the
+ * window, so only one probe is ever attempted per window.
+ */
+export async function recoverOpenScheduledWorkCircuits(input: {
+  now?: Date;
+}): Promise<ScheduledWorkItem[]> {
+  await ensureScheduledWorkStore();
+  const now = input.now ?? new Date();
+  const rows = await getDb().query<ScheduledWorkRow>(
+    `UPDATE scheduled_work_items SET circuit_state='half_open',updated_at=now()
+     WHERE status='enabled' AND circuit_state='open' AND circuit_opened_at <= $1
+     RETURNING *`,
+    [new Date(now.getTime() - CIRCUIT_RECOVERY_WINDOW_MS)],
+  );
+  return rows.rows.map(scheduleFromRow);
+}
+
 export async function recordScheduledRunOutcome(input: {
   scheduleId: string; status: 'succeeded' | 'no_op' | 'failed'; recoveryWorkItemId?: string;
 }): Promise<{ schedule: ScheduledWorkItem; circuitOpened: boolean }> {
-  const current = await loadScheduledWorkItem(input.scheduleId);
-  if (!current) throw new Error('schedule not found');
-  const failures = input.status === 'failed' ? current.consecutiveFailures + 1 : 0;
-  const noOps = input.status === 'no_op' ? current.consecutiveNoOps + 1 : 0;
-  const shouldOpen = input.status === 'failed' && failures >= current.failureThreshold;
-  const circuitOpened = shouldOpen && current.circuitState !== 'open';
-  const rows = await getDb().query<ScheduledWorkRow>(
-    `UPDATE scheduled_work_items SET consecutive_failures=$2,consecutive_no_ops=$3,
-       circuit_state=$4,circuit_opened_at=CASE WHEN $4='open' THEN COALESCE(circuit_opened_at,now()) ELSE NULL END,
-       recovery_work_item_id=COALESCE($5,recovery_work_item_id),updated_at=now() WHERE id=$1 RETURNING *`,
-    [input.scheduleId, failures, noOps, shouldOpen ? 'open' : 'closed', input.recoveryWorkItemId ?? null],
-  );
-  return { schedule: scheduleFromRow(rows.rows[0]!), circuitOpened };
+  // Optimistic concurrency: the update carries the state read above, so a
+  // concurrent writer (e.g. two scheduler ticks finishing probes for the same
+  // schedule) is detected instead of overwriting the newer outcome. On a
+  // missed row we re-read and recompute once; two writers cannot both lose.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await loadScheduledWorkItem(input.scheduleId);
+    if (!current) throw new Error('schedule not found');
+    const failures = input.status === 'failed' ? current.consecutiveFailures + 1 : 0;
+    const noOps = input.status === 'no_op' ? current.consecutiveNoOps + 1 : 0;
+    const shouldOpen = input.status === 'failed' && failures >= current.failureThreshold;
+    // A failed half_open probe re-opens the circuit and restarts the recovery
+    // window; only a closed→open transition counts as "circuit opened" (which
+    // creates the one recovery Work Item).
+    const circuitOpened = shouldOpen && current.circuitState === 'closed';
+    const reopenedAfterProbe = shouldOpen && current.circuitState === 'half_open';
+    const rows = await getDb().query<ScheduledWorkRow>(
+      `UPDATE scheduled_work_items SET consecutive_failures=$2,consecutive_no_ops=$3,
+         circuit_state=$4,
+         circuit_opened_at=CASE
+           WHEN $4='open' AND $6 THEN now()
+           WHEN $4='open' THEN COALESCE(circuit_opened_at,now())
+           ELSE NULL END,
+         recovery_work_item_id=COALESCE($5,recovery_work_item_id),updated_at=now()
+       WHERE id=$1 AND circuit_state=$7 RETURNING *`,
+      [input.scheduleId, failures, noOps, shouldOpen ? 'open' : 'closed',
+        input.recoveryWorkItemId ?? null, reopenedAfterProbe, current.circuitState],
+    );
+    if (rows.rows[0]) return { schedule: scheduleFromRow(rows.rows[0]!), circuitOpened };
+  }
+  throw new Error('scheduled work outcome changed concurrently');
 }
 
 export async function attachScheduledRunWorkItem(runId: string, workItemId: string): Promise<void> {

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUp, Check, Folder, FolderOpen, Home, Star, X } from 'lucide-react';
 import { getJson, postJson, deleteJson, setCurrentProjectId } from './api/index.js';
 import type { ProjectBinding, ProjectBrowseResponse, ProjectListResponse } from './api/types.js';
+import { useI18n } from './i18n';
 
 interface ProjectSelectorProps {
   workspaceRoot: string;
@@ -12,6 +13,7 @@ interface ProjectSelectorProps {
 }
 
 export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: ProjectSelectorProps) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const selectorRef = useRef<HTMLDivElement>(null);
   const portalRootRef = useRef<HTMLDivElement | null>(null);
@@ -166,7 +168,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
 
   const handleUseBrowsePath = useCallback((path: string) => {
     onChange(path);
-    setPickerFeedback(`Selected ${path}`);
+    setPickerFeedback(t('pages.selector.selected', { path }));
     setBrowserOpen(false);
   }, [onChange]);
 
@@ -175,25 +177,25 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
       <div className="project-selector-row">
         <Folder size={13} />
         <input
-          aria-label="Execution directory"
+          aria-label={t('pages.selector.execDirAria')}
           list="workspace-suggestions"
           value={workspaceRoot}
           onChange={e => onChange(e.target.value)}
-          placeholder={defaultWorkspace || 'cwd'}
+          placeholder={defaultWorkspace || t('pages.selector.cwd')}
           className="exec-dir-input"
         />
         <button
           type="button"
           className="ghost-btn project-pick-btn"
-          title="Browse local folders"
+          title={t('pages.selector.browseTitle')}
           onClick={handlePickFolder}
         >
           <FolderOpen size={13} />
         </button>
         {workspaceRoot && workspaceRoot !== defaultWorkspace && (
-          <button type="button" className="ghost-btn exec-dir-reset" title="Reset to default workspace"
+          <button type="button" className="ghost-btn exec-dir-reset" title={t('pages.selector.resetTitle')}
             onClick={() => onChange('')}>
-            ↺ default
+            {t('pages.selector.resetLabel')}
           </button>
         )}
         <datalist id="workspace-suggestions">
@@ -211,7 +213,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
               className="ghost-btn"
               disabled={!browse.data?.parent}
               onClick={() => browse.data?.parent && setBrowsePath(browse.data.parent)}
-              title="Parent directory"
+              title={t('pages.selector.parentTitle')}
             >
               <ArrowUp size={12} />
             </button>
@@ -234,7 +236,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
               disabled={browse.isError || browse.isLoading}
               onClick={() => browse.data?.path && handleUseBrowsePath(browse.data.path)}
             >
-              <Check size={12} /> use
+              <Check size={12} /> {t('pages.selector.use')}
             </button>
           </div>
           <div className="project-browser-roots">
@@ -252,13 +254,13 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
             ))}
           </div>
           {browse.isLoading ? (
-            <div className="project-picker-feedback">Loading folders...</div>
+            <div className="project-picker-feedback">{t('pages.selector.loadingFolders')}</div>
           ) : browse.isError ? (
             <div className="project-picker-feedback error">{String((browse.error as Error).message ?? browse.error)}</div>
           ) : (
             <div className="project-browser-list">
               {browse.data?.entries.length === 0 ? (
-                <span className="project-empty">No subfolders</span>
+                <span className="project-empty">{t('pages.selector.noSubfolders')}</span>
               ) : (browse.data?.entries ?? []).map(entry => (
                 <div
                   key={entry.path}
@@ -267,7 +269,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
                   <button
                     type="button"
                     className="project-browser-item"
-                    title={`Browse into ${entry.path}`}
+                    title={t('pages.selector.browseInto', { path: entry.path })}
                     onClick={() => setBrowsePath(entry.path)}
                     onDoubleClick={(e) => {
                       e.preventDefault();
@@ -280,7 +282,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
                   <button
                     type="button"
                     className="project-browser-item-select"
-                    title={`Select ${entry.path}`}
+                    title={t('pages.selector.selectPath', { path: entry.path })}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleUseBrowsePath(entry.path);
@@ -299,12 +301,12 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
                 <input
                   type="text"
                   className="project-bind-name"
-                  placeholder={workspaceRoot.split('/').pop() ?? 'project name'}
+                  placeholder={workspaceRoot.split('/').pop() ?? t('pages.selector.projectName')}
                   value={bindName}
                   onChange={e => setBindName(e.target.value)}
                 />
                 <button type="button" className="ghost-btn project-bind-btn" onClick={handleBindProject}>
-                  <Star size={12} /> bind project
+                  <Star size={12} /> {t('pages.selector.bindProject')}
                 </button>
               </div>
             )}
@@ -313,7 +315,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
                 <Check size={12} />
                 <span>{currentProject.displayName}</span>
                 <button type="button" className="ghost-btn project-unbind-btn"
-                  title="Unbind project"
+                  title={t('pages.selector.unbindTitle')}
                   onClick={() => handleUnbind(currentProject.projectId)}>
                   <X size={12} />
                 </button>
@@ -322,7 +324,7 @@ export function ProjectSelector({ workspaceRoot, onChange, defaultWorkspace }: P
 
             {projects.length > 0 && (
               <div className="project-recent">
-                <span className="project-recent-label">projects</span>
+                <span className="project-recent-label">{t('pages.selector.projectsLabel')}</span>
                 {projects
                   .sort((a, b) => b.lastUsed.localeCompare(a.lastUsed))
                   .slice(0, 6)

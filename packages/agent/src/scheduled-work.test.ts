@@ -6,10 +6,12 @@ import { getDb } from '@los/infra/db';
 import {
   claimDueScheduledWorkItems,
   createScheduledWorkItem,
+  loadScheduledWorkItem,
   _deriveScheduledFeedAnalysisDispatch,
   previewScheduledOccurrences,
   recordScheduledRunOutcome,
   recoverExpiredScheduledWorkRuns,
+  recoverOpenScheduledWorkCircuits,
   shouldSkipLateRun,
 } from './scheduled-work/index.js';
 
@@ -82,6 +84,189 @@ test('circuit reports exactly one open transition at the failure threshold', asy
     assert.equal(second.circuitOpened, true);
     assert.equal(second.schedule.circuitState, 'open');
     assert.equal(third.circuitOpened, false);
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('open circuit auto-recovers to half_open after the window and closes on a successful probe', async () => {
+  const openedAt = new Date();
+  const slot = new Date(openedAt.getTime() + 3_600_000);
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-halfopen-${Date.now()}`,
+    trigger: { kind: 'once', expression: slot.toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1, catchUpPolicy: 'run_once',
+  });
+  try {
+    const opened = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    assert.equal(opened.circuitOpened, true);
+    assert.equal(opened.schedule.circuitState, 'open');
+    assert.ok(opened.schedule.circuitOpenedAt, 'open circuit must record circuit_opened_at');
+    const firstOpenedAt = new Date(opened.schedule.circuitOpenedAt!).getTime();
+
+    // Open circuit never claims due slots.
+    const during = await claimDueScheduledWorkItems({
+      ownerId: 'scheduler-a', now: new Date(slot.getTime() + 60_000),
+    });
+    assert.equal(during.length, 0);
+
+    // Recovery window not elapsed yet → still open.
+    const early = await recoverOpenScheduledWorkCircuits({ now: new Date(slot.getTime() + 60_000) });
+    assert.equal(early.length, 0);
+
+    // Window elapsed → half_open, exactly one probe run becomes claimable.
+    const afterWindow = new Date(firstOpenedAt + 24 * 3_600_000 + 60_000);
+    const recovered = await recoverOpenScheduledWorkCircuits({ now: afterWindow });
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0]!.circuitState, 'half_open');
+
+    const probe = await claimDueScheduledWorkItems({
+      ownerId: 'scheduler-a', now: new Date(afterWindow.getTime() + 60_000), leaseMs: 60_000,
+    });
+    assert.equal(probe.length, 1);
+
+    // Successful probe closes the circuit and resets the failure counter.
+    const success = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'succeeded' });
+    assert.equal(success.schedule.circuitState, 'closed');
+    assert.equal(success.schedule.consecutiveFailures, 0);
+    assert.equal(success.schedule.circuitOpenedAt, undefined);
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('failed half_open probe re-opens the circuit and restarts the recovery window', async () => {
+  const openedAt = new Date();
+  const slot = new Date(openedAt.getTime() + 3_600_000);
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-probe-fail-${Date.now()}`,
+    trigger: { kind: 'once', expression: slot.toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1, catchUpPolicy: 'run_once',
+  });
+  try {
+    const opened = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    assert.equal(opened.schedule.circuitState, 'open');
+    const firstOpenedAt = new Date(opened.schedule.circuitOpenedAt!).getTime();
+
+    const afterWindow = new Date(firstOpenedAt + 24 * 3_600_000 + 60_000);
+    const recovered = await recoverOpenScheduledWorkCircuits({ now: afterWindow });
+    assert.equal(recovered.length, 1);
+
+    // Probe fails → back to open, window restarts, and no second recovery item.
+    const probeFail = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    assert.equal(probeFail.circuitOpened, false, 're-open after a probe must not create another recovery item');
+    assert.equal(probeFail.schedule.circuitState, 'open');
+    const reopenedAt = new Date(probeFail.schedule.circuitOpenedAt!).getTime();
+    assert.ok(reopenedAt > firstOpenedAt, 'circuit_opened_at must restart at re-open, not keep the stale window start');
+    assert.ok(Math.abs(reopenedAt - Date.now()) < 60_000,
+      `circuit_opened_at must restart at re-open (got ${new Date(reopenedAt).toISOString()}, wall now ${new Date().toISOString()})`);
+
+    // Fresh window must elapse before the circuit may recover again.
+    const early = await recoverOpenScheduledWorkCircuits({ now: new Date(reopenedAt + 60_000) });
+    assert.equal(early.length, 0);
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('no_op probe closes a half_open circuit like a successful one', async () => {
+  const openedAt = new Date();
+  const slot = new Date(openedAt.getTime() + 3_600_000);
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-noop-probe-${Date.now()}`,
+    trigger: { kind: 'once', expression: slot.toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1, catchUpPolicy: 'run_once',
+  });
+  try {
+    const opened = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    const firstOpenedAt = new Date(opened.schedule.circuitOpenedAt!).getTime();
+    const recovered = await recoverOpenScheduledWorkCircuits({ now: new Date(firstOpenedAt + 24 * 3_600_000 + 60_000) });
+    assert.equal(recovered[0]?.circuitState, 'half_open');
+
+    const noOp = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'no_op' });
+    assert.equal(noOp.schedule.circuitState, 'closed');
+    assert.equal(noOp.schedule.consecutiveFailures, 0);
+    assert.equal(noOp.schedule.consecutiveNoOps, 1);
+    assert.equal(noOp.schedule.circuitOpenedAt, undefined);
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('concurrent probe outcomes never corrupt the circuit state', async () => {
+  const openedAt = new Date();
+  const slot = new Date(openedAt.getTime() + 3_600_000);
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-concurrent-probe-${Date.now()}`,
+    trigger: { kind: 'once', expression: slot.toISOString(), timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1, catchUpPolicy: 'run_once',
+  });
+  try {
+    const opened = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    const firstOpenedAt = new Date(opened.schedule.circuitOpenedAt!).getTime();
+    const recovered = await recoverOpenScheduledWorkCircuits({ now: new Date(firstOpenedAt + 24 * 3_600_000 + 60_000) });
+    assert.equal(recovered[0]?.circuitState, 'half_open');
+
+    // Two ticks finishing the same probe in opposite directions: the loser of
+    // the optimistic write re-reads and recomputes, so the circuit ends in a
+    // legal state instead of silently keeping a stale one. If success lands
+    // first, the failed write sees the circuit closed and legitimately opens
+    // it again (fresh open); if failure lands first, success closes it.
+    const [ok, failed] = await Promise.all([
+      recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'succeeded' }),
+      recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' }),
+    ]);
+    assert.equal(ok.circuitOpened, false, 'a success outcome never opens a circuit');
+    const final = await loadScheduledWorkItem(schedule.id);
+    assert.ok(final, 'schedule must still exist');
+    assert.ok(['closed', 'open'].includes(final.circuitState), `circuit must end closed or open, got ${final.circuitState}`);
+    if (final.circuitState === 'closed') assert.equal(final.consecutiveFailures, 0);
+    if (final.circuitState === 'open') assert.ok(final.circuitOpenedAt, 're-opened circuit must record a fresh window start');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('half_open claims at most one probe slot per tick even with overdue slots', async () => {
+  const createdAt = new Date();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-single-probe-${Date.now()}`,
+    trigger: { kind: 'interval', expression: '1h', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'runtime_readiness', mode: 'governance',
+      goalTemplate: 'Inspect runtime', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    failureThreshold: 1, catchUpPolicy: 'run_once',
+    now: createdAt,
+  });
+  try {
+    const opened = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
+    const firstOpenedAt = new Date(opened.schedule.circuitOpenedAt!).getTime();
+    const recovered = await recoverOpenScheduledWorkCircuits({ now: new Date(firstOpenedAt + 24 * 3_600_000 + 60_000) });
+    assert.equal(recovered[0]?.circuitState, 'half_open');
+
+    // Three hourly slots are due; the probe claim must stop after the first.
+    const claim = await claimDueScheduledWorkItems({
+      ownerId: 'scheduler-a', now: new Date(firstOpenedAt + 24 * 3_600_000 + 3 * 3_600_000), leaseMs: 60_000,
+    });
+    assert.equal(claim.length, 1, 'half_open must allow exactly one probe slot per tick');
+    assert.equal(claim[0]?.status, 'claimed');
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }

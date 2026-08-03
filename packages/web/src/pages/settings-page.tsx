@@ -15,6 +15,7 @@ import {
   StatusPill,
   EmptyText,
 } from '../ui.js';
+import { useI18n } from '../i18n';
 
 type Cfg = Record<string, Record<string, unknown>>;
 
@@ -46,11 +47,12 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
 }
 
 function ToggleField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  const { t } = useI18n();
   return (
     <Field label={label}>
       <label className="toolbar-toggle">
         <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
-        {checked ? 'enabled' : 'disabled'}
+        {checked ? t('common.enabled') : t('common.disabled')}
       </label>
     </Field>
   );
@@ -67,12 +69,13 @@ function SelectField({ label, value, options, onChange }: { label: string; value
 }
 
 function SectionHeader({ title, onSave, saving }: { title: string; onSave?: () => void; saving?: boolean }) {
+  const { t } = useI18n();
   return (
     <div className="section-header">
       <strong>{title}</strong>
       {onSave ? (
         <button type="button" className="ghost-btn" onClick={onSave} disabled={saving}>
-          <Save size={13} /> {saving ? 'saving...' : 'save'}
+          <Save size={13} /> {saving ? t('pages.settings.saving') : t('pages.settings.save')}
         </button>
       ) : null}
     </div>
@@ -82,6 +85,7 @@ function SectionHeader({ title, onSave, saving }: { title: string; onSave?: () =
 // ── Main component ────────────────────────────────────────
 
 export function SettingsPage() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const saveSection = useSaveSection(queryClient);
 
@@ -145,86 +149,90 @@ export function SettingsPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Settings</h2>
-            <p>Edit runtime configuration. Changes are applied immediately.</p>
+            <h2>{t('nav.settings')}</h2>
+            <p>{t('pages.settings.subtitle')}</p>
           </div>
           <StatusPill status="live" />
         </div>
 
         {/* ── Auth ──────────────────────────────────────── */}
-        <SectionHeader title="Auth" onSave={() => saveSection.mutate({ auth: { enabled: authEnabled } })} saving={saveSection.isPending} />
-        <ToggleField label="enabled" checked={authEnabled} onChange={setAuthEnabled} />
+        <SectionHeader title={t('pages.settings.section.auth')} onSave={() => saveSection.mutate({ auth: { enabled: authEnabled } })} saving={saveSection.isPending} />
+        <ToggleField label={t('common.enabled')} checked={authEnabled} onChange={setAuthEnabled} />
 
         {/* ── Server ────────────────────────────────────── */}
-        <SectionHeader title="Server" onSave={() => saveSection.mutate({ server: serverDraft })} saving={saveSection.isPending} />
-        <NumberField label="port" value={serverDraft.port} onChange={v => setServerDraft(p => ({ ...p, port: v }))} />
-        <TextField label="host" value={serverDraft.host} onChange={v => setServerDraft(p => ({ ...p, host: v }))} />
-        <TextField label="CORS origin" value={serverDraft.corsOrigin} onChange={v => setServerDraft(p => ({ ...p, corsOrigin: v }))} />
+        <SectionHeader title={t('pages.settings.section.server')} onSave={() => saveSection.mutate({ server: serverDraft })} saving={saveSection.isPending} />
+        <NumberField label={t('pages.settings.field.port')} value={serverDraft.port} onChange={v => setServerDraft(p => ({ ...p, port: v }))} />
+        <TextField label={t('pages.settings.field.host')} value={serverDraft.host} onChange={v => setServerDraft(p => ({ ...p, host: v }))} />
+        <TextField label={t('pages.settings.field.corsOrigin')} value={serverDraft.corsOrigin} onChange={v => setServerDraft(p => ({ ...p, corsOrigin: v }))} />
 
         {/* ── Agent ─────────────────────────────────────── */}
-        <SectionHeader title="Agent" onSave={() => saveSection.mutate({ agent: agentDraft })} saving={saveSection.isPending} />
-        <TextField label="default provider" value={agentDraft.defaultProvider} onChange={v => setAgentDraft(p => ({ ...p, defaultProvider: v }))} />
-        <TextField label="default model" value={agentDraft.defaultModel} onChange={v => setAgentDraft(p => ({ ...p, defaultModel: v }))} />
-        <NumberField label="max loops" value={agentDraft.maxLoops} onChange={v => setAgentDraft(p => ({ ...p, maxLoops: v }))} />
-        <SelectField label="sandbox mode" value={agentDraft.sandboxMode} options={['readonly', 'workspace-write', 'sandbox']} onChange={v => setAgentDraft(p => ({ ...p, sandboxMode: v }))} />
-        <Field label="system prompt">
+        <SectionHeader title={t('pages.settings.section.agent')} onSave={() => saveSection.mutate({ agent: agentDraft })} saving={saveSection.isPending} />
+        <TextField label={t('pages.settings.field.defaultProvider')} value={agentDraft.defaultProvider} onChange={v => setAgentDraft(p => ({ ...p, defaultProvider: v }))} />
+        <TextField label={t('pages.settings.field.defaultModel')} value={agentDraft.defaultModel} onChange={v => setAgentDraft(p => ({ ...p, defaultModel: v }))} />
+        <NumberField label={t('pages.settings.field.maxLoops')} value={agentDraft.maxLoops} onChange={v => setAgentDraft(p => ({ ...p, maxLoops: v }))} />
+        <SelectField label={t('pages.settings.field.sandboxMode')} value={agentDraft.sandboxMode} options={['readonly', 'workspace-write', 'sandbox']} onChange={v => setAgentDraft(p => ({ ...p, sandboxMode: v }))} />
+        <Field label={t('pages.settings.field.systemPrompt')}>
           <textarea rows={3} value={agentDraft.systemPrompt} onChange={e => setAgentDraft(p => ({ ...p, systemPrompt: e.target.value }))} />
         </Field>
 
         {/* ── Agent Identity ────────────────────────────── */}
-        <SectionHeader title="Agent Identity" onSave={() => saveSection.mutate({ agent: { ...agentDraft, identity: identityDraft } })} saving={saveSection.isPending} />
-        <TextField label="name" value={identityDraft.name} onChange={v => setIdentityDraft(p => ({ ...p, name: v }))} />
-        <SelectField label="level" value={identityDraft.level} options={['', 'none', 'minimal', 'standard', 'full']} onChange={v => setIdentityDraft(p => ({ ...p, level: v }))} />
-        <ToggleField label="inherit for children" checked={identityDraft.inheritForChildren} onChange={v => setIdentityDraft(p => ({ ...p, inheritForChildren: v }))} />
+        <SectionHeader title={t('pages.settings.section.agentIdentity')} onSave={() => saveSection.mutate({ agent: { ...agentDraft, identity: identityDraft } })} saving={saveSection.isPending} />
+        <TextField label={t('pages.settings.field.name')} value={identityDraft.name} onChange={v => setIdentityDraft(p => ({ ...p, name: v }))} />
+        <SelectField label={t('pages.settings.field.level')} value={identityDraft.level} options={['', 'none', 'minimal', 'standard', 'full']} onChange={v => setIdentityDraft(p => ({ ...p, level: v }))} />
+        <ToggleField label={t('pages.settings.field.inheritForChildren')} checked={identityDraft.inheritForChildren} onChange={v => setIdentityDraft(p => ({ ...p, inheritForChildren: v }))} />
 
         {/* ── Judge ─────────────────────────────────────── */}
-        <SectionHeader title="Judge (P0-2)" onSave={() => saveSection.mutate({ judge: judgeDraft })} saving={saveSection.isPending} />
-        <TextField label="provider" value={judgeDraft.provider} onChange={v => setJudgeDraft(p => ({ ...p, provider: v }))} />
-        <TextField label="model" value={judgeDraft.model} onChange={v => setJudgeDraft(p => ({ ...p, model: v }))} />
-        <Field label="system prompt">
+        <SectionHeader title={t('pages.settings.section.judge')} onSave={() => saveSection.mutate({ judge: judgeDraft })} saving={saveSection.isPending} />
+        <TextField label={t('pages.settings.field.provider')} value={judgeDraft.provider} onChange={v => setJudgeDraft(p => ({ ...p, provider: v }))} />
+        <TextField label={t('pages.settings.field.model')} value={judgeDraft.model} onChange={v => setJudgeDraft(p => ({ ...p, model: v }))} />
+        <Field label={t('pages.settings.field.systemPrompt')}>
           <textarea rows={3} value={judgeDraft.systemPrompt} onChange={e => setJudgeDraft(p => ({ ...p, systemPrompt: e.target.value }))} />
         </Field>
 
         {/* ── Review ────────────────────────────────────── */}
-        <SectionHeader title="Multi-Role Review (P0)" onSave={() => saveSection.mutate({ review: { enabled: reviewEnabled, roles: reviewRoles } })} saving={saveSection.isPending} />
-        <ToggleField label="enabled" checked={reviewEnabled} onChange={setReviewEnabled} />
+        <SectionHeader title={t('pages.settings.section.review')} onSave={() => saveSection.mutate({ review: { enabled: reviewEnabled, roles: reviewRoles } })} saving={saveSection.isPending} />
+        <ToggleField label={t('common.enabled')} checked={reviewEnabled} onChange={setReviewEnabled} />
         {Object.keys(reviewRoles).length === 0 ? (
-          <EmptyText text="No review roles configured. Add roles in ~/.los/config.yaml under review.roles." />
+          <EmptyText text={t('pages.settings.noReviewRoles')} />
         ) : (
           Object.entries(reviewRoles).map(([name, role]) => (
             <div key={name} className="role-card">
-              <SectionHeader title={`Role: ${name}`} />
-              <TextField label="provider" value={String(role.provider ?? '')} onChange={v => { /* roles are read-only in this UI for now */ }} />
-              <TextField label="model" value={String(role.model ?? '')} onChange={v => { }} />
-              <SelectField label="blocking severity" value={String(role.blockingSeverity ?? 'critical')} options={['critical', 'error', 'warn', 'info']} onChange={v => { }} />
-              <ToggleField label="enabled" checked={Boolean(role.enabled ?? true)} onChange={v => { }} />
+              <SectionHeader title={t('pages.settings.roleTitle', { name })} />
+              <TextField label={t('pages.settings.field.provider')} value={String(role.provider ?? '')} onChange={v => { /* roles are read-only in this UI for now */ }} />
+              <TextField label={t('pages.settings.field.model')} value={String(role.model ?? '')} onChange={v => { }} />
+              <SelectField label={t('pages.settings.field.blockingSeverity')} value={String(role.blockingSeverity ?? 'critical')} options={['critical', 'error', 'warn', 'info']} onChange={v => { }} />
+              <ToggleField label={t('common.enabled')} checked={Boolean(role.enabled ?? true)} onChange={v => { }} />
             </div>
           ))
         )}
 
         {/* ── Memory ────────────────────────────────────── */}
-        <SectionHeader title="Memory" onSave={() => saveSection.mutate({ memory: memoryDraft })} saving={saveSection.isPending} />
-        <ToggleField label="FTS enabled" checked={memoryDraft.ftsEnabled} onChange={v => setMemoryDraft(p => ({ ...p, ftsEnabled: v }))} />
-        <NumberField label="max observations" value={memoryDraft.maxObservations} onChange={v => setMemoryDraft(p => ({ ...p, maxObservations: v }))} />
-        <ToggleField label="self-reflection" checked={memoryDraft.selfReflectionEnabled} onChange={v => setMemoryDraft(p => ({ ...p, selfReflectionEnabled: v }))} />
+        <SectionHeader title={t('pages.settings.section.memory')} onSave={() => saveSection.mutate({ memory: memoryDraft })} saving={saveSection.isPending} />
+        <ToggleField label={t('pages.settings.field.ftsEnabled')} checked={memoryDraft.ftsEnabled} onChange={v => setMemoryDraft(p => ({ ...p, ftsEnabled: v }))} />
+        <NumberField label={t('pages.settings.field.maxObservations')} value={memoryDraft.maxObservations} onChange={v => setMemoryDraft(p => ({ ...p, maxObservations: v }))} />
+        <ToggleField label={t('pages.settings.field.selfReflection')} checked={memoryDraft.selfReflectionEnabled} onChange={v => setMemoryDraft(p => ({ ...p, selfReflectionEnabled: v }))} />
 
         {/* ── Executor ──────────────────────────────────── */}
-        <SectionHeader title="Executor" onSave={() => saveSection.mutate({ executor: { enabled: executorDraft.enabled, nodeId: executorDraft.nodeId, connectModes: executorDraft.connectModes ? executorDraft.connectModes.split(',').map(s => s.trim()).filter(Boolean) : [], meshNodes: executorDraft.meshNodes ? executorDraft.meshNodes.split('\n').map(s => s.trim()).filter(Boolean) : [] } })} saving={saveSection.isPending} />
-        <ToggleField label="enabled" checked={executorDraft.enabled} onChange={v => setExecutorDraft(p => ({ ...p, enabled: v }))} />
-        <TextField label="node ID" value={executorDraft.nodeId} onChange={v => setExecutorDraft(p => ({ ...p, nodeId: v }))} />
-        <TextField label="connect modes" value={executorDraft.connectModes} onChange={v => setExecutorDraft(p => ({ ...p, connectModes: v }))} />
-        <Field label="mesh nodes (one per line)">
+        <SectionHeader title={t('pages.settings.section.executor')} onSave={() => saveSection.mutate({ executor: { enabled: executorDraft.enabled, nodeId: executorDraft.nodeId, connectModes: executorDraft.connectModes ? executorDraft.connectModes.split(',').map(s => s.trim()).filter(Boolean) : [], meshNodes: executorDraft.meshNodes ? executorDraft.meshNodes.split('\n').map(s => s.trim()).filter(Boolean) : [] } })} saving={saveSection.isPending} />
+        <ToggleField label={t('common.enabled')} checked={executorDraft.enabled} onChange={v => setExecutorDraft(p => ({ ...p, enabled: v }))} />
+        <TextField label={t('pages.settings.field.nodeId')} value={executorDraft.nodeId} onChange={v => setExecutorDraft(p => ({ ...p, nodeId: v }))} />
+        <TextField label={t('pages.settings.field.connectModes')} value={executorDraft.connectModes} onChange={v => setExecutorDraft(p => ({ ...p, connectModes: v }))} />
+        <Field label={t('pages.settings.field.meshNodes')}>
           <textarea rows={4} value={executorDraft.meshNodes} onChange={e => setExecutorDraft(p => ({ ...p, meshNodes: e.target.value }))} />
         </Field>
 
         {/* ── Providers (read-only summary) ─────────────── */}
         {providers.length > 0 ? (
           <>
-            <SectionHeader title="Providers" />
+            <SectionHeader title={t('nav.providers')} />
             {providers.map((p, i) => (
               <div key={i} className="definition">
                 <strong>{String(p.name ?? `provider-${i}`)}</strong>
-                <span>{`${p.enabled ? 'enabled' : 'disabled'} · ${p.hasApiKey ? 'key set' : 'no key'}${p.model ? ` · ${p.model}` : ''}${p.weight ? ` · weight:${p.weight}` : ''}`}</span>
+                <span>
+                  {p.enabled ? t('common.enabled') : t('common.disabled')} · {p.hasApiKey ? t('pages.providers.keySet') : t('pages.providers.noKey')}
+                  {p.model ? ` · ${p.model}` : ''}
+                  {p.weight ? ` · ${t('pages.settings.weight', { weight: String(p.weight) })}` : ''}
+                </span>
               </div>
             ))}
           </>
@@ -233,10 +241,10 @@ export function SettingsPage() {
 
       {/* ── Runtime (sidebar) ───────────────────────────── */}
       <aside className="panel inspector">
-        <div className="panel-head compact"><h2>Runtime</h2></div>
+        <div className="panel-head compact"><h2>{t('pages.settings.runtime')}</h2></div>
         <div className="fact-list">
-          <Fact label="gateway" value={health.data?.status ?? 'unknown'} />
-          <Fact label="uptime" value={formatDuration(health.data?.uptime ?? 0)} />
+          <Fact label={t('pages.settings.gateway')} value={health.data?.status ?? t('common.unknown')} />
+          <Fact label={t('pages.settings.uptime')} value={formatDuration(health.data?.uptime ?? 0)} />
         </div>
       </aside>
 
@@ -244,20 +252,20 @@ export function SettingsPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Projects</h2>
-            <p>Bound workspace directories. Click to set as default.</p>
+            <h2>{t('pages.settings.projects')}</h2>
+            <p>{t('pages.settings.projectsSubtitle')}</p>
           </div>
           <StatusPill status={projectList.length > 0 ? 'live' : 'partial'} />
         </div>
         {projectList.length === 0 ? (
-          <div style={{ padding: '12px 0', color: 'var(--text-dim)', fontSize: '13px' }}>No projects bound. Use the &quot;bind project&quot; action on the Chat page to register a workspace.</div>
+          <div style={{ padding: '12px 0', color: 'var(--text-dim)', fontSize: '13px' }}>{t('pages.settings.noProjects')}</div>
         ) : (
           <table className="project-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Path</th>
-                <th>Last Used</th>
+                <th>{t('pages.settings.col.name')}</th>
+                <th>{t('pages.settings.col.path')}</th>
+                <th>{t('pages.settings.col.lastUsed')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -268,13 +276,13 @@ export function SettingsPage() {
                   <tr key={p.projectId} className={p.projectId === defaultProjectId ? 'project-default-row' : ''}>
                     <td>
                       <span className="project-name">{p.displayName}</span>
-                      {p.projectId === defaultProjectId ? <span className="default-badge">default</span> : null}
+                      {p.projectId === defaultProjectId ? <span className="default-badge">{t('pages.settings.defaultBadge')}</span> : null}
                     </td>
                     <td className="project-path-cell" title={p.workspacePath}>{p.workspacePath}</td>
                     <td className="text-dim">{p.lastUsed ? new Date(p.lastUsed).toLocaleDateString() : '—'}</td>
                     <td>
                       <button type="button" className="ghost-btn"
-                        title="Remove project binding"
+                        title={t('pages.settings.removeProjectTitle')}
                         onClick={async () => {
                           await deleteJson(`/projects/${p.projectId}`);
                           queryClient.invalidateQueries({ queryKey: ['projects'] });

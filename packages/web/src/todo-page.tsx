@@ -19,6 +19,7 @@ import {
   Field,
   formatDate,
 } from './ui';
+import { useI18n } from './i18n';
 
 const TODO_STATUSES: TodoStatus[] = ['backlog', 'ready', 'in_progress', 'blocked', 'done', 'cancelled'];
 const TODO_KINDS: TodoKind[] = ['problem', 'solution', 'plan', 'phase', 'task', 'batch'];
@@ -38,6 +39,7 @@ export function TodosPage({
   onSelectSession: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const [status, setStatus] = useState('');
   const [kind, setKind] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -119,43 +121,43 @@ export function TodosPage({
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Todos</h2>
-            <p>Tenant/project planning ledger before agent dispatch.</p>
+            <h2>{t('assets.todo.title')}</h2>
+            <p>{t('assets.todo.subtitle')}</p>
           </div>
           <div className="toolbar">
             <select value={status} onChange={event => setStatus(event.target.value)}>
-              <option value="">all status</option>
+              <option value="">{t('assets.todo.allStatus')}</option>
               {TODO_STATUSES.map(item => <option key={item} value={item}>{item}</option>)}
             </select>
             <select value={kind} onChange={event => setKind(event.target.value)}>
-              <option value="">all kinds</option>
+              <option value="">{t('assets.todo.allKinds')}</option>
               {TODO_KINDS.map(item => <option key={item} value={item}>{item}</option>)}
             </select>
             <select value={linkFilter} onChange={event => setLinkFilter(event.target.value as LinkFilter)}>
               {LINK_FILTERS.map(item => <option key={item} value={item}>{item}</option>)}
             </select>
-            <input value={linkValue} onChange={event => setLinkValue(event.target.value)} placeholder="link value" />
+            <input value={linkValue} onChange={event => setLinkValue(event.target.value)} placeholder={t('assets.todo.linkValuePh')} />
             <label className="toolbar-toggle">
               <input type="checkbox" checked={includeArchived} onChange={event => setIncludeArchived(event.target.checked)} />
-              archived
+              {t('assets.label.archived')}
             </label>
             <button className="ghost-btn" type="button" onClick={() => seed.mutate()} disabled={seed.isPending}>
-              <RefreshCcw size={14} /> seed
+              <RefreshCcw size={14} /> {t('assets.todo.seed')}
             </button>
           </div>
         </div>
 
         <div className="todo-summary">
-          <Fact label="ready" value={String(counts.ready)} />
-          <Fact label="active" value={String(counts.inProgress)} />
-          <Fact label="blocked" value={String(counts.blocked)} />
-          <Fact label="archived" value={String(counts.archived)} />
-          <Fact label="deps" value={String(counts.withDependencies)} />
+          <Fact label={t('assets.label.ready')} value={String(counts.ready)} />
+          <Fact label={t('assets.label.active')} value={String(counts.inProgress)} />
+          <Fact label={t('assets.label.blocked')} value={String(counts.blocked)} />
+          <Fact label={t('assets.label.archived')} value={String(counts.archived)} />
+          <Fact label={t('assets.label.deps')} value={String(counts.withDependencies)} />
         </div>
 
         <DataTable
           loading={todos.isLoading}
-          empty="No todos found."
+          empty={t('assets.todo.emptyList')}
           rows={todos.data ?? []}
           renderRow={todo => (
             <button
@@ -169,7 +171,7 @@ export function TodosPage({
             >
               <span className="todo-main">
                 <strong>{todo.title}</strong>
-                <em>{todo.tenantId}/{todo.projectId} · {todo.stageId ?? 'no-stage'} · {todo.source}{todo.archivedAt ? ` · archived ${formatDate(todo.archivedAt)}` : ''}</em>
+                <em>{todo.tenantId}/{todo.projectId} · {todo.stageId ?? t('assets.todo.noStage')} · {todo.source}{todo.archivedAt ? ` ${t('assets.todo.rowArchived', { date: formatDate(todo.archivedAt) })}` : ''}</em>
               </span>
               <span className={`priority-text ${todo.priority}`}>{todo.priority}</span>
               <span className={`status-text ${todo.status}`}>{todo.status}</span>
@@ -182,81 +184,81 @@ export function TodosPage({
 
       <aside className="panel inspector">
         <div className="panel-head compact">
-          <h2>Todo Detail</h2>
+          <h2>{t('assets.todo.detailTitle')}</h2>
           {selected ? <span className="mono-chip">{selected.id}</span> : null}
         </div>
         {selected ? (
           <>
             <div className="todo-detail">
               <h3>{selected.title}</h3>
-              <p>{selected.description || 'No description'}</p>
+              <p>{selected.description || t('assets.todo.noDescription')}</p>
               <div className="fact-list compact-facts">
-                <Fact label="tenant" value={selected.tenantId} />
-                <Fact label="project" value={selected.projectId} />
-                <Fact label="stage" value={selected.stageId ?? 'none'} />
-                <Fact label="trace" value={selected.traceId ?? 'not linked'} />
-                <Fact label="request" value={selected.requestId ?? 'not linked'} />
-                <Fact label="task" value={selected.taskRunId ?? 'not dispatched'} />
-                <Fact label="depends on" value={selected.dependsOnIds.join(', ') || 'none'} />
-                <Fact label="blocked by" value={selected.blockedByIds.join(', ') || 'none'} />
-                <Fact label="archive" value={selected.archivedAt ? `${formatDate(selected.archivedAt)} · ${selected.archiveReason ?? 'archived'}` : 'active'} />
+                <Fact label={t('assets.label.tenant')} value={selected.tenantId} />
+                <Fact label={t('assets.label.project')} value={selected.projectId} />
+                <Fact label={t('assets.label.stage')} value={selected.stageId ?? t('common.none')} />
+                <Fact label={t('assets.label.trace')} value={selected.traceId ?? t('assets.todo.notLinked')} />
+                <Fact label={t('assets.label.request')} value={selected.requestId ?? t('assets.todo.notLinked')} />
+                <Fact label={t('assets.label.task')} value={selected.taskRunId ?? t('assets.todo.notDispatched')} />
+                <Fact label={t('assets.label.dependsOn')} value={selected.dependsOnIds.join(', ') || t('common.none')} />
+                <Fact label={t('assets.label.blockedBy')} value={selected.blockedByIds.join(', ') || t('common.none')} />
+                <Fact label={t('assets.label.archive')} value={selected.archivedAt ? t('assets.todo.archiveValue', { date: formatDate(selected.archivedAt), reason: selected.archiveReason ?? t('assets.label.archived') }) : t('assets.label.active')} />
               </div>
               <div className="todo-actions">
                 <button className="tiny-btn" type="button" onClick={() => onRunTodo(selected)}>
-                  <Send size={12} /> run
+                  <Send size={12} /> {t('assets.todo.run')}
                 </button>
                 <button className="tiny-btn" type="button" disabled={!selected.sessionId} onClick={() => selected.sessionId && onSelectSession(selected.sessionId)}>
-                  session
+                  {t('assets.label.session')}
                 </button>
-                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'ready' } })}>ready</button>
-                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'in_progress' } })}>start</button>
-                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'blocked' } })}>block</button>
-                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'done' } })}>done</button>
-                <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/reopen`, {}).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>reopen</button>
-                <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/cancel`, { reason: 'cancelled_from_todos_page' }).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>cancel</button>
+                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'ready' } })}>{t('assets.label.ready')}</button>
+                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'in_progress' } })}>{t('assets.todo.start')}</button>
+                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'blocked' } })}>{t('assets.todo.block')}</button>
+                <button className="tiny-btn" type="button" onClick={() => update.mutate({ id: selected.id, body: { status: 'done' } })}>{t('assets.todo.done')}</button>
+                <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/reopen`, {}).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>{t('assets.todo.reopen')}</button>
+                <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/cancel`, { reason: 'cancelled_from_todos_page' }).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>{t('common.cancel')}</button>
                 {selected.archivedAt ? (
-                  <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/unarchive`, {}).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>unarchive</button>
+                  <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/unarchive`, {}).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>{t('assets.todo.unarchive')}</button>
                 ) : (
-                  <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/archive`, { reason: 'archived_from_todos_page' }).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>archive</button>
+                  <button className="tiny-btn" type="button" onClick={() => postJson(`/todos/${selected.id}/archive`, { reason: 'archived_from_todos_page' }).then(() => queryClient.invalidateQueries({ queryKey: ['todos'] }))}>{t('assets.label.archive')}</button>
                 )}
               </div>
             </div>
             <div className="definition-list">
-              <Definition term="dispatch rule" text="Only ready task/batch todos should create scheduler task runs later." />
-              <Definition term="reopen rule" text="Done or cancelled items return to ready, preserving trace and history fields." />
-              <Definition term="batch rule" text="Batch todos group several task todos by stageId or batchKey." />
-              <Definition term="archive rule" text="Archived todos leave the active work set but keep tenant/project/trace evidence." />
+              <Definition term={t('assets.todo.defDispatch')} text={t('assets.todo.defDispatchText')} />
+              <Definition term={t('assets.todo.defReopen')} text={t('assets.todo.defReopenText')} />
+              <Definition term={t('assets.todo.defBatch')} text={t('assets.todo.defBatchText')} />
+              <Definition term={t('assets.todo.defArchive')} text={t('assets.todo.defArchiveText')} />
             </div>
           </>
         ) : (
-          <EmptyText text="Select a todo to inspect dispatch context." />
+          <EmptyText text={t('assets.todo.selectHint')} />
         )}
 
         <form className="stack-form todo-create" onSubmit={createTodo}>
-          <div className="panel-head compact"><h2>Add Todo</h2></div>
-          <Field label="title">
-            <input value={title} onChange={event => setTitle(event.target.value)} placeholder="dispatchable planning item" />
+          <div className="panel-head compact"><h2>{t('assets.todo.addTitle')}</h2></div>
+          <Field label={t('assets.label.title')}>
+            <input value={title} onChange={event => setTitle(event.target.value)} placeholder={t('assets.todo.titlePh')} />
           </Field>
-          <Field label="description">
-            <textarea value={description} onChange={event => setDescription(event.target.value)} rows={4} placeholder="problem, solution, acceptance criteria" />
+          <Field label={t('assets.label.description')}>
+            <textarea value={description} onChange={event => setDescription(event.target.value)} rows={4} placeholder={t('assets.todo.descriptionPh')} />
           </Field>
-          <Field label="depends on">
-            <input value={dependsOn} onChange={event => setDependsOn(event.target.value)} placeholder="comma-separated todo ids" />
+          <Field label={t('assets.label.dependsOn')}>
+            <input value={dependsOn} onChange={event => setDependsOn(event.target.value)} placeholder={t('assets.todo.dependsOnPh')} />
           </Field>
           <div className="two-col">
-            <Field label="kind">
+            <Field label={t('assets.label.kind')}>
               <select value={newKind} onChange={event => setNewKind(event.target.value as TodoKind)}>
                 {TODO_KINDS.map(item => <option key={item} value={item}>{item}</option>)}
               </select>
             </Field>
-            <Field label="priority">
+            <Field label={t('assets.label.priority')}>
               <select value={priority} onChange={event => setPriority(event.target.value as TodoPriority)}>
                 {TODO_PRIORITIES.map(item => <option key={item} value={item}>{item}</option>)}
               </select>
             </Field>
           </div>
           <button className="primary-btn" type="submit" disabled={!title.trim() || create.isPending}>
-            <GitBranchPlus size={14} /> add todo
+            <GitBranchPlus size={14} /> {t('assets.todo.addTodo')}
           </button>
         </form>
       </aside>

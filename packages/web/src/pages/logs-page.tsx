@@ -17,8 +17,10 @@ import {
   formatTime,
   StatusPill,
 } from '../ui.js';
+import { useI18n } from '../i18n';
 
 export function LogsPage() {
+  const { t } = useI18n();
   const [file, setFile] = useState('');
   const [level, setLevel] = useState('');
   const [query, setQuery] = useState('');
@@ -41,17 +43,17 @@ export function LogsPage() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2>Logs</h2>
-          <p>Read-only tail over `.los-runtime` log files.</p>
+          <h2>{t('nav.logs')}</h2>
+          <p>{t('ops.logs.subtitle')}</p>
         </div>
         <div className="toolbar">
           <select value={selectedFile} onChange={event => setFile(event.target.value)} disabled={!hasFiles}>
             {hasFiles
               ? (files.data ?? []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)
-              : <option value="">no log files</option>}
+              : <option value="">{t('ops.logs.noLogFiles')}</option>}
           </select>
           <select value={level} onChange={event => setLevel(event.target.value)}>
-            <option value="">all levels</option>
+            <option value="">{t('ops.logs.allLevels')}</option>
             <option value="debug">debug</option>
             <option value="info">info</option>
             <option value="warn">warn</option>
@@ -59,21 +61,21 @@ export function LogsPage() {
           </select>
           <div className="search-box">
             <Search size={14} />
-            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="filter logs" />
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('ops.logs.filterPlaceholder')} />
           </div>
         </div>
       </div>
       <div className="log-table">
-        {files.isLoading ? <EmptyText text="Loading log files..." /> : null}
-        {logs.isLoading ? <EmptyText text="Loading logs..." /> : null}
+        {files.isLoading ? <EmptyText text={t('ops.logs.loadingFiles')} /> : null}
+        {logs.isLoading ? <EmptyText text={t('ops.logs.loadingEntries')} /> : null}
         {!files.isLoading && !hasFiles ? (
           <div className="daily-empty">
             <FileText size={28} />
-            <p>No log files found.</p>
-            <span>Logs are generated at <code>.los-runtime/gateway.log</code> when the gateway is running.</span>
+            <p>{t('ops.logs.emptyFilesTitle')}</p>
+            <span>{t('ops.logs.emptyFilesHintBefore')} <code>.los-runtime/gateway.log</code> {t('ops.logs.emptyFilesHintAfter')}</span>
           </div>
         ) : !logs.isLoading && !hasEntries ? (
-          <EmptyText text={query || level ? 'No log entries match the current filters.' : 'No log entries yet. Logs appear here as the gateway runs.'} />
+          <EmptyText text={query || level ? t('ops.logs.noMatches') : t('ops.logs.noEntries')} />
         ) : (
           (logs.data?.entries ?? []).map((entry, index) => (
             <div className="log-row" data-level={entry.level} key={`${entry.timestamp}-${index}`}>

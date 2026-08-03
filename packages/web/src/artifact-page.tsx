@@ -3,10 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, FileText, Trash2 } from 'lucide-react';
 import { deleteJson, getJson, type ArtifactListResponse, type ArtifactRecord } from './api';
 import { DataTable, EmptyText, Fact, formatDate, StatusPill } from './ui';
+import { useI18n } from './i18n';
+
+type T = ReturnType<typeof useI18n>['t'];
 
 export function ArtifactsPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { t } = useI18n();
 
   const artifacts = useQuery({
     queryKey: ['artifacts'],
@@ -32,15 +36,15 @@ export function ArtifactsPage() {
           <div className="title-row">
             <Archive size={18} />
             <div>
-              <h2>Artifacts</h2>
-              <p>Stored file artifacts from agent runs. Browse paths, sizes, and linked sessions.</p>
+              <h2>{t('assets.artifact.title')}</h2>
+              <p>{t('assets.artifact.subtitle')}</p>
             </div>
           </div>
           <StatusPill status="live" />
         </div>
         <DataTable
           loading={artifacts.isLoading}
-          empty="No artifacts stored."
+          empty={t('assets.artifact.emptyList')}
           rows={list}
           renderRow={artifact => (
             <button
@@ -51,9 +55,9 @@ export function ArtifactsPage() {
             >
               <span className="row-title">{artifact.artifactId}</span>
               <span>{artifact.path}</span>
-              <span>{formatBytes(artifact.size)}</span>
-              <span>{artifact.mimeType ?? 'unknown'}</span>
-              <span>{artifact.sessionId ? `session:${artifact.sessionId.slice(0, 8)}` : 'no session'}</span>
+              <span>{formatBytes(artifact.size, t)}</span>
+              <span>{artifact.mimeType ?? t('common.unknown')}</span>
+              <span>{artifact.sessionId ? t('assets.artifact.sessionRef', { id: artifact.sessionId.slice(0, 8) }) : t('assets.artifact.noSession')}</span>
               <span>{formatDate(artifact.createdAt)}</span>
             </button>
           )}
@@ -64,18 +68,18 @@ export function ArtifactsPage() {
         {selected ? (
           <>
             <div className="panel-head compact">
-              <h2>Artifact Detail</h2>
+              <h2>{t('assets.artifact.detailTitle')}</h2>
               <span className="mono-chip">{selected.artifactId}</span>
             </div>
             <div className="fact-list compact-facts">
-              <Fact label="path" value={selected.path} />
-              <Fact label="size" value={formatBytes(selected.size)} />
-              <Fact label="mime type" value={selected.mimeType ?? 'unknown'} />
-              <Fact label="session" value={selected.sessionId ?? 'none'} />
-              <Fact label="task run" value={selected.taskRunId ?? 'none'} />
-              <Fact label="node" value={selected.nodeId ?? 'local'} />
-              <Fact label="hash" value={selected.contentHash ?? 'none'} />
-              <Fact label="created" value={formatDate(selected.createdAt)} />
+              <Fact label={t('assets.label.path')} value={selected.path} />
+              <Fact label={t('assets.label.size')} value={formatBytes(selected.size, t)} />
+              <Fact label={t('assets.label.mimeType')} value={selected.mimeType ?? t('common.unknown')} />
+              <Fact label={t('assets.label.session')} value={selected.sessionId ?? t('common.none')} />
+              <Fact label={t('assets.label.taskRun')} value={selected.taskRunId ?? t('common.none')} />
+              <Fact label={t('assets.label.node')} value={selected.nodeId ?? t('assets.artifact.local')} />
+              <Fact label={t('assets.label.hash')} value={selected.contentHash ?? t('common.none')} />
+              <Fact label={t('assets.label.created')} value={formatDate(selected.createdAt)} />
             </div>
             <div className="inline-actions">
               <button
@@ -84,21 +88,21 @@ export function ArtifactsPage() {
                 disabled={remove.isPending}
                 onClick={() => remove.mutate(selected.artifactId)}
               >
-                <Trash2 size={14} /> delete
+                <Trash2 size={14} /> {t('common.delete')}
               </button>
             </div>
           </>
         ) : (
-          <EmptyText text="Select an artifact to inspect metadata." />
+          <EmptyText text={t('assets.artifact.selectHint')} />
         )}
       </aside>
     </section>
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes)) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatBytes(bytes: number, t: T): string {
+  if (!Number.isFinite(bytes)) return t('assets.artifact.bytesZero');
+  if (bytes < 1024) return t('assets.artifact.bytes', { bytes });
+  if (bytes < 1024 * 1024) return t('assets.artifact.kilobytes', { bytes: (bytes / 1024).toFixed(1) });
+  return t('assets.artifact.megabytes', { bytes: (bytes / (1024 * 1024)).toFixed(1) });
 }

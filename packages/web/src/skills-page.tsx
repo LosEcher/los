@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Eye, Pin, PinOff, Plus, RotateCcw, Trash2, Upload, Zap } from 'lucide-react';
 import { deleteJson, getJson, postJson } from './api';
 import { DataTable, EmptyText, Fact, Field, formatDate, StatusPill } from './ui';
+import { useI18n } from './i18n';
 
 const RUN_MODES = ['auto', 'manual'] as const;
 const SCOPES = ['', 'global', 'project'] as const;
@@ -39,11 +40,14 @@ interface SkillHistoryResponse {
   versions: Array<{ versionHash: string; sourcePath: string; createdAt: string }>;
 }
 
+type T = ReturnType<typeof useI18n>['t'];
+
 export function SkillsPage() {
   const queryClient = useQueryClient();
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [scopeFilter, setScopeFilter] = useState('');
   const [importPreview, setImportPreview] = useState<SkillImportPreview[]>([]);
+  const { t } = useI18n();
 
   const query = new URLSearchParams();
   if (scopeFilter) query.set('scope', scopeFilter);
@@ -80,7 +84,7 @@ export function SkillsPage() {
       scope: scope || 'global',
       workspaceRoot: workspace.data?.workspaceRoot,
     }),
-    onSuccess: (data: any) => alert(`Synced ${data.count} skills to ${data.scope} dir`),
+    onSuccess: (data: any) => alert(t('assets.skills.syncedAlert', { count: data.count, scope: data.scope })),
   });
 
   const inspectImport = useMutation({
@@ -134,25 +138,25 @@ export function SkillsPage() {
           <div className="title-row">
             <Zap size={18} />
             <div>
-              <h2>Skills</h2>
-              <p>Reusable agent instruction bundles. Define once, reference from chat runs.</p>
+              <h2>{t('assets.skills.title')}</h2>
+              <p>{t('assets.skills.subtitle')}</p>
             </div>
           </div>
           <StatusPill status="live" />
           <div className="toolbar">
             <select value={scopeFilter} onChange={e => setScopeFilter(e.target.value)}>
-              <option value="">all scopes</option>
+              <option value="">{t('assets.skills.allScopes')}</option>
               {SCOPES.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <button className="ghost-btn" type="button" disabled={syncToDir.isPending} onClick={() => syncToDir.mutate(scopeFilter)}>
-              <Download size={14} /> sync
+              <Download size={14} /> {t('assets.skills.sync')}
             </button>
             <button className="ghost-btn" type="button" disabled={inspectImport.isPending} onClick={() => inspectImport.mutate(scopeFilter)}>
-              <Eye size={14} /> inspect
+              <Eye size={14} /> {t('assets.skills.inspect')}
             </button>
             {importPreview.length > 0 ? (
               <button className="primary-btn" type="button" disabled={applyImport.isPending} onClick={() => applyImport.mutate()}>
-                <Upload size={14} /> apply {importPreview.filter(item => item.action !== 'unchanged').length}
+                <Upload size={14} /> {t('assets.skills.apply', { count: importPreview.filter(item => item.action !== 'unchanged').length })}
               </button>
             ) : null}
           </div>
@@ -168,7 +172,7 @@ export function SkillsPage() {
         ) : null}
         <DataTable
           loading={skills.isLoading}
-          empty="No skills registered. Add your first skill below."
+          empty={t('assets.skills.emptyList')}
           rows={list}
           renderRow={skill => (
             <button
@@ -178,18 +182,18 @@ export function SkillsPage() {
               onClick={() => setSelectedKey(skillKey(skill))}
             >
               <span className="row-title">{skill.name}</span>
-              <span>{scopeLabel(skill.metadata)}</span>
+              <span>{scopeLabel(skill.metadata, t)}</span>
               <span>{skill.category}</span>
               <span>{skill.runMode}</span>
-              <span>{skill.enabled ? 'enabled' : 'disabled'}</span>
-              <span>{skill.usageCount} uses</span>
+              <span>{skill.enabled ? t('common.enabled') : t('common.disabled')}</span>
+              <span>{t('assets.skills.usesCount', { count: skill.usageCount })}</span>
               <span>{formatDate(skill.updatedAt)}</span>
             </button>
           )}
         />
         {list.length === 0 && !skills.isLoading ? (
           <div className="empty-guide">
-            <p>Skills define reusable agent capabilities. Create one above, or run <code>los skill import</code> from the CLI to import from a file.</p>
+            <p>{t('assets.skills.emptyGuidePre')} <code>los skill import</code> {t('assets.skills.emptyGuidePost')}</p>
           </div>
         ) : null}
       </div>
@@ -198,34 +202,34 @@ export function SkillsPage() {
         {selected ? (
           <>
             <div className="panel-head compact">
-              <h2>Skill Detail</h2>
+              <h2>{t('assets.skills.detailTitle')}</h2>
               <span className="mono-chip">{selected.name}</span>
             </div>
             <div className="fact-list compact-facts">
-              <Fact label="scope" value={scopeLabel(selected.metadata)} />
-              <Fact label="layer" value={layerLabel(selected.metadata)} />
-              <Fact label="category" value={selected.category} />
-              <Fact label="run mode" value={selected.runMode} />
-              <Fact label="source" value={selected.sourcePath || 'none'} />
-              <Fact label="version" value={selected.versionHash || 'none'} />
-              <Fact label="pinned" value={selected.pinnedVersionHash?.slice(0, 12) || 'no'} />
-              <Fact label="uses" value={String(selected.usageCount)} />
-              <Fact label="last used" value={selected.lastUsed ? formatDate(selected.lastUsed) : 'never'} />
-              <Fact label="enabled" value={String(selected.enabled)} />
+              <Fact label={t('assets.label.scope')} value={scopeLabel(selected.metadata, t)} />
+              <Fact label={t('assets.label.layer')} value={layerLabel(selected.metadata, t)} />
+              <Fact label={t('assets.label.category')} value={selected.category} />
+              <Fact label={t('assets.label.runMode')} value={selected.runMode} />
+              <Fact label={t('assets.label.source')} value={selected.sourcePath || t('common.none')} />
+              <Fact label={t('assets.label.version')} value={selected.versionHash || t('common.none')} />
+              <Fact label={t('assets.label.pinned')} value={selected.pinnedVersionHash?.slice(0, 12) || t('assets.state.no')} />
+              <Fact label={t('assets.label.uses')} value={String(selected.usageCount)} />
+              <Fact label={t('assets.label.lastUsed')} value={selected.lastUsed ? formatDate(selected.lastUsed) : t('common.never')} />
+              <Fact label={t('common.enabled')} value={String(selected.enabled)} />
             </div>
             {selected.description ? (
               <div className="definition-list">
-                <div className="definition"><strong>description</strong><span>{selected.description}</span></div>
+                <div className="definition"><strong>{t('assets.label.description')}</strong><span>{selected.description}</span></div>
               </div>
             ) : null}
             {selected.tags.length > 0 ? (
               <div className="definition-list">
-                <div className="definition"><strong>tags</strong><span>{selected.tags.join(', ')}</span></div>
+                <div className="definition"><strong>{t('assets.label.tags')}</strong><span>{selected.tags.join(', ')}</span></div>
               </div>
             ) : null}
             {selected.content ? (
               <div className="json-block">
-                <strong>Content</strong>
+                <strong>{t('assets.label.content')}</strong>
                 <pre>{selected.content.slice(0, 2000)}{selected.content.length > 2000 ? '...' : ''}</pre>
               </div>
             ) : null}
@@ -237,7 +241,7 @@ export function SkillsPage() {
                 onClick={() => pin.mutate({ skill: selected, pinned: !selected.pinnedVersionHash })}
               >
                 {selected.pinnedVersionHash ? <PinOff size={14} /> : <Pin size={14} />}
-                {selected.pinnedVersionHash ? 'unpin' : 'pin'}
+                {selected.pinnedVersionHash ? t('assets.skills.unpin') : t('assets.skills.pin')}
               </button>
               <button
                 className="ghost-btn"
@@ -245,7 +249,7 @@ export function SkillsPage() {
                 disabled={remove.isPending}
                 onClick={() => remove.mutate(selected)}
               >
-                <Trash2 size={14} /> delete
+                <Trash2 size={14} /> {t('common.delete')}
               </button>
             </div>
             {(history.data?.versions.length ?? 0) > 1 ? (
@@ -253,11 +257,11 @@ export function SkillsPage() {
                 {history.data!.versions.map(version => (
                   <div className="definition" key={version.versionHash}>
                     <strong>{version.versionHash.slice(0, 12)}</strong>
-                    {version.versionHash === selected.versionHash ? <span>current</span> : (
+                    {version.versionHash === selected.versionHash ? <span>{t('assets.state.current')}</span> : (
                       <button
                         className="icon-btn"
                         type="button"
-                        title="Rollback to this version"
+                        title={t('assets.skills.rollbackTitle')}
                         disabled={rollback.isPending || Boolean(selected.pinnedVersionHash && selected.pinnedVersionHash !== version.versionHash)}
                         onClick={() => rollback.mutate({ skill: selected, versionHash: version.versionHash })}
                       ><RotateCcw size={14} /></button>
@@ -281,6 +285,7 @@ export function SkillsPage() {
 }
 
 function SkillCreate({ onCreated }: { onCreated: (skill: SkillRecordApi) => void }) {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [scope, setScope] = useState('project');
   const [category, setCategory] = useState('general');
@@ -322,62 +327,62 @@ function SkillCreate({ onCreated }: { onCreated: (skill: SkillRecordApi) => void
   return (
     <>
       <div className="panel-head compact">
-        <h2>Add Skill</h2>
+        <h2>{t('assets.skills.addTitle')}</h2>
       </div>
       <form className="stack-form" onSubmit={handleSubmit}>
-        <Field label="name">
+        <Field label={t('assets.label.name')}>
           <input value={name} onChange={e => setName(e.target.value)} placeholder="code-review" />
         </Field>
         <div className="two-col">
-          <Field label="scope">
+          <Field label={t('assets.label.scope')}>
             <select value={scope} onChange={e => setScope(e.target.value)}>
-              <option value="global">global (~/.los/skills/)</option>
-              <option value="project">project (.los/skills/)</option>
+              <option value="global">{t('assets.skills.optionGlobal')}</option>
+              <option value="project">{t('assets.skills.optionProject')}</option>
             </select>
           </Field>
-          <Field label="category">
+          <Field label={t('assets.label.category')}>
             <input value={category} onChange={e => setCategory(e.target.value)} placeholder="general" />
           </Field>
         </div>
-        <Field label="description">
-          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="What does this skill do?" />
+        <Field label={t('assets.label.description')}>
+          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder={t('assets.skills.descriptionPh')} />
         </Field>
-        <Field label="run mode">
+        <Field label={t('assets.label.runMode')}>
           <select value={runMode} onChange={e => setRunMode(e.target.value)}>
             {RUN_MODES.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </Field>
-        <Field label="source path">
-          <input value={sourcePath} onChange={e => setSourcePath(e.target.value)} placeholder="path/url to skill definition" />
+        <Field label={t('assets.label.sourcePath')}>
+          <input value={sourcePath} onChange={e => setSourcePath(e.target.value)} placeholder={t('assets.skills.sourcePathPh')} />
         </Field>
-        <Field label="content (markdown)">
-          <textarea value={content} onChange={e => setContent(e.target.value)} rows={6} placeholder="# Skill Name&#10;&#10;Instructions for the agent..." />
+        <Field label={t('assets.skills.contentLabel')}>
+          <textarea value={content} onChange={e => setContent(e.target.value)} rows={6} placeholder={t('assets.skills.contentPh')} />
         </Field>
-        <Field label="tags (comma-separated)">
+        <Field label={t('assets.skills.tagsLabel')}>
           <input value={tags} onChange={e => setTags(e.target.value)} placeholder="review, quality" />
         </Field>
         <label className="toolbar-toggle">
           <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-          enabled
+          {t('common.enabled')}
         </label>
         {error ? <p className="form-error">{error}</p> : null}
         <button className="primary-btn" type="submit" disabled={!name.trim() || busy}>
-          <Plus size={14} /> register
+          <Plus size={14} /> {t('assets.skills.register')}
         </button>
       </form>
     </>
   );
 }
 
-function scopeLabel(metadata: Record<string, unknown>): string {
+function scopeLabel(metadata: Record<string, unknown>, t: T): string {
   const scope = metadata.scope;
   const layer = metadata.skillLayer;
   if (typeof scope === 'string') return typeof layer === 'string' ? `${scope}/${layer}` : scope;
-  return typeof layer === 'string' ? `?/${layer}` : 'unspecified';
+  return typeof layer === 'string' ? t('assets.skills.scopeUnknownLayer', { layer }) : t('assets.state.unspecified');
 }
 
-function layerLabel(metadata: Record<string, unknown>): string {
-  return typeof metadata.skillLayer === 'string' ? metadata.skillLayer : 'unspecified';
+function layerLabel(metadata: Record<string, unknown>, t: T): string {
+  return typeof metadata.skillLayer === 'string' ? metadata.skillLayer : t('assets.state.unspecified');
 }
 
 function scopeValue(metadata: Record<string, unknown>): string {

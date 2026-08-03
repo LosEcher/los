@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, X } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
 import { DataTable, EmptyText, StatusPill, Fact } from '../ui.js';
+import { useI18n } from '../i18n';
 
 interface DeadLetterEvent {
   id: string;
@@ -30,6 +31,7 @@ interface DeadLetterResolutionInput {
 }
 
 export function DeadLetterPage() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
 
   const dlq = useQuery({
@@ -62,21 +64,21 @@ export function DeadLetterPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Dead Letter Queue</h2>
-            <p>Unresolved failures from task runs and run specs. Record an audited disposition after investigation.</p>
+            <h2>{t('ops.deadLetter.title')}</h2>
+            <p>{t('ops.deadLetter.subtitle')}</p>
           </div>
           <StatusPill status={unacked.length > 0 ? 'live' : 'partial'} />
         </div>
 
         <div className="fact-list" style={{ marginBottom: 16 }}>
-          <Fact label="unacknowledged" value={String(unacked.length)} />
-          <Fact label="acknowledged" value={String(acked.length)} />
-          <Fact label="total" value={String(events.length)} />
+          <Fact label={t('ops.deadLetter.factUnacknowledged')} value={String(unacked.length)} />
+          <Fact label={t('ops.deadLetter.factAcknowledged')} value={String(acked.length)} />
+          <Fact label={t('ops.deadLetter.factTotal')} value={String(events.length)} />
         </div>
 
         <DataTable
           loading={dlq.isLoading}
-          empty="No dead letter events."
+          empty={t('ops.deadLetter.empty')}
           rows={events}
           renderRow={(e) => (
             <div key={e.id} className={`record-row dead-letter-row ${e.acknowledgedAt ? 'record-dim' : ''}`}>
@@ -84,16 +86,16 @@ export function DeadLetterPage() {
                 <div className="record-header">
                   <strong className="record-title">{e.reason}</strong>
                   {e.acknowledgedAt ? (
-                    <span className="status-pill partial">resolved</span>
+                    <span className="status-pill partial">{t('ops.deadLetter.resolvedPill')}</span>
                   ) : (
-                    <span className="status-pill live">attention</span>
+                    <span className="status-pill live">{t('ops.deadLetter.attentionPill')}</span>
                   )}
                 </div>
                 <div className="record-meta">
-                  {e.taskRunId ? <span>task: {e.taskRunId.slice(0, 12)}</span> : null}
-                  {e.runSpecId ? <span> · run: {e.runSpecId.slice(0, 12)}</span> : null}
+                  {e.taskRunId ? <span>{t('ops.deadLetter.taskShort', { id: e.taskRunId.slice(0, 12) })}</span> : null}
+                  {e.runSpecId ? <span> · {t('ops.deadLetter.runShort', { id: e.runSpecId.slice(0, 12) })}</span> : null}
                   <span> · {new Date(e.createdAt).toLocaleString()}</span>
-                  {e.acknowledgedAt ? <span> · acked: {new Date(e.acknowledgedAt).toLocaleString()}</span> : null}
+                  {e.acknowledgedAt ? <span> · {t('ops.deadLetter.ackedPrefix', { date: new Date(e.acknowledgedAt).toLocaleString() })}</span> : null}
                 </div>
                 {e.originalError ? (
                   <div className="record-detail" style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 4 }}>
@@ -103,9 +105,9 @@ export function DeadLetterPage() {
                 {e.acknowledgedAt ? (
                   <div className="dead-letter-resolution-summary">
                     <strong>{e.resolution ?? 'legacy_acknowledged'}</strong>
-                    {e.replacementTaskRunId ? <span>replacement: {e.replacementTaskRunId}</span> : null}
+                    {e.replacementTaskRunId ? <span>{t('ops.deadLetter.replacementPrefix', { id: e.replacementTaskRunId })}</span> : null}
                     {e.resolutionNote ? <span>{e.resolutionNote}</span> : null}
-                    {e.resolvedBy ? <span>by {e.resolvedBy}</span> : null}
+                    {e.resolvedBy ? <span>{t('ops.deadLetter.resolvedByPrefix', { name: e.resolvedBy })}</span> : null}
                   </div>
                 ) : (
                   <DeadLetterResolutionForm
@@ -135,6 +137,7 @@ function DeadLetterResolutionForm({
   error: Error | null;
   onResolve: (input: DeadLetterResolutionInput) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [resolution, setResolution] = useState<DeadLetterResolution>('regression_covered');
   const [note, setNote] = useState('');
@@ -147,7 +150,7 @@ function DeadLetterResolutionForm({
   if (!open) {
     return (
       <button type="button" className="ghost-btn tiny-btn" onClick={() => setOpen(true)}>
-        <CheckCircle size={12} /> resolve
+        <CheckCircle size={12} /> {t('ops.deadLetter.resolveButton')}
       </button>
     );
   }
@@ -167,39 +170,39 @@ function DeadLetterResolutionForm({
       }}
     >
       <label className="field">
-        <span>resolution</span>
+        <span>{t('ops.deadLetter.resolutionLabel')}</span>
         <select value={resolution} onChange={event => setResolution(event.target.value as DeadLetterResolution)}>
-          <option value="regression_covered">regression covered</option>
-          <option value="superseded">superseded</option>
-          <option value="replaced">replaced by task</option>
-          <option value="accepted_loss">accepted loss</option>
+          <option value="regression_covered">{t('ops.deadLetter.resolutionRegressionCovered')}</option>
+          <option value="superseded">{t('ops.deadLetter.resolutionSuperseded')}</option>
+          <option value="replaced">{t('ops.deadLetter.resolutionReplaced')}</option>
+          <option value="accepted_loss">{t('ops.deadLetter.resolutionAcceptedLoss')}</option>
         </select>
       </label>
       {needsReplacement ? (
         <label className="field">
-          <span>replacement task run</span>
+          <span>{t('ops.deadLetter.replacementLabel')}</span>
           <input
             value={replacementTaskRunId}
             onChange={event => setReplacementTaskRunId(event.target.value)}
-            placeholder="task run id"
+            placeholder={t('ops.deadLetter.taskRunIdPlaceholder')}
             required
           />
         </label>
       ) : null}
       <label className="field dead-letter-note-field">
-        <span>note{needsNote ? ' *' : ''}</span>
+        <span>{t('ops.deadLetter.noteLabel')}{needsNote ? ' *' : ''}</span>
         <input
           value={note}
           onChange={event => setNote(event.target.value)}
-          placeholder={needsNote ? 'reason for accepting data loss' : 'optional audit note'}
+          placeholder={needsNote ? t('ops.deadLetter.noteRequiredPlaceholder') : t('ops.deadLetter.noteOptionalPlaceholder')}
           required={needsNote}
         />
       </label>
       <div className="dead-letter-resolution-actions">
         <button type="submit" className="tiny-btn" disabled={pending || !valid}>
-          <CheckCircle size={12} /> confirm
+          <CheckCircle size={12} /> {t('ops.deadLetter.confirmButton')}
         </button>
-        <button type="button" className="icon-btn" title="Cancel resolution" onClick={() => setOpen(false)} disabled={pending}>
+        <button type="button" className="icon-btn" title={t('ops.deadLetter.cancelResolutionTitle')} onClick={() => setOpen(false)} disabled={pending}>
           <X size={14} />
         </button>
       </div>

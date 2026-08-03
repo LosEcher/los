@@ -4,6 +4,7 @@
  */
 import { useState } from 'react';
 import { formatTime } from '../ui.js';
+import { tt } from '../i18n';
 import type { SessionEvent } from '../api';
 
 // ── Event classification ──────────────────────────
@@ -47,26 +48,26 @@ export function eventPayloadSummary(event: {
   }
 
   // Error previews
-  if (typeof p.errorPreview === 'string' && p.errorPreview) return `error: ${truncateSummary(p.errorPreview, 80)}`;
+  if (typeof p.errorPreview === 'string' && p.errorPreview) return tt('chat.inspect.error', { text: truncateSummary(p.errorPreview, 80) });
 
   // Session lifecycle
   if (event.type === 'session.started') {
     const parts: string[] = [];
-    if (typeof p.promptPreview === 'string') parts.push(`prompt: ${truncateSummary(p.promptPreview, 60)}`);
+    if (typeof p.promptPreview === 'string') parts.push(tt('chat.inspect.prompt', { text: truncateSummary(p.promptPreview, 60) }));
     if (typeof p.effectiveModel === 'string') parts.push(p.effectiveModel);
     if (typeof p.toolMode === 'string') parts.push(p.toolMode);
     return parts.join(' · ') || null;
   }
 
   // Tool catalog
-  if (event.type === 'tool.catalog' && typeof p.count === 'number') return `${p.count} tools available`;
+  if (event.type === 'tool.catalog' && typeof p.count === 'number') return tt('chat.inspect.toolsAvailable', { count: p.count });
 
   // Model responses
   if (event.type === 'model.response') {
     const parts: string[] = [];
     if (typeof p.durationMs === 'number') parts.push(formatDurationCompact(p.durationMs));
-    if (event.usage && event.usage.totalTokens > 0) parts.push(`${event.usage.totalTokens} tokens`);
-    if (typeof p.toolCallCount === 'number' && p.toolCallCount > 0) parts.push(`${p.toolCallCount} tool calls`);
+    if (event.usage && event.usage.totalTokens > 0) parts.push(tt('chat.inspect.tokens', { count: event.usage.totalTokens }));
+    if (typeof p.toolCallCount === 'number' && p.toolCallCount > 0) parts.push(tt('chat.inspect.toolCalls', { count: p.toolCallCount }));
     if (parts.length === 0 && typeof p.toolCalls === 'object') {
       const calls = p.toolCalls as Array<Record<string, unknown>>;
       if (Array.isArray(calls) && calls.length > 0) parts.push(calls.map(c => String(c.name ?? '?')).join(', '));
@@ -81,7 +82,7 @@ export function eventPayloadSummary(event: {
     else if (p.ok === false) parts.push('❌');
     if (typeof p.durationMs === 'number') parts.push(formatDurationCompact(p.durationMs));
     if (typeof p.contentPreview === 'string' && p.contentPreview) parts.push(truncateSummary(p.contentPreview, 50));
-    else if (typeof p.contentLength === 'number') parts.push(`${p.contentLength} chars output`);
+    else if (typeof p.contentLength === 'number') parts.push(tt('chat.inspect.charsOutput', { count: p.contentLength }));
     return parts.join(' ') || null;
   }
 
@@ -91,7 +92,7 @@ export function eventPayloadSummary(event: {
     if (argsSource && typeof argsSource === 'object') {
       return truncateSummary(JSON.stringify(argsSource), 60);
     }
-    if (typeof p.callId === 'string') return `call: ${truncateSummary(p.callId, 12)}`;
+    if (typeof p.callId === 'string') return tt('chat.inspect.call', { id: truncateSummary(p.callId, 12) });
     return null;
   }
 
@@ -100,17 +101,17 @@ export function eventPayloadSummary(event: {
     if (typeof p.callId === 'string') {
       const allowed = p.allowed;
       const tag = event.type === 'tool.approved'
-        ? (allowed === false ? '❌ denied' : '✅ approved')
-        : 'planned';
+        ? (allowed === false ? tt('chat.inspect.denied') : tt('chat.inspect.approved'))
+        : tt('chat.inspect.planned');
       return `${tag} · ${truncateSummary(p.callId, 12)}`;
     }
     return null;
   }
 
   // Task lifecycle
-  if (event.type === 'task.created' || event.type === 'task.running') return `status: ${p.status ?? '?'}`;
-  if (event.type === 'task.cancelled') return `❌ ${p.reason ?? 'cancelled'}`;
-  if (event.type === 'task.completed') return `✅ ${p.status ?? 'completed'}`;
+  if (event.type === 'task.created' || event.type === 'task.running') return tt('chat.inspect.status', { value: String(p.status ?? '?') });
+  if (event.type === 'task.cancelled') return tt('chat.inspect.cancelled', { reason: String(p.reason ?? 'cancelled') });
+  if (event.type === 'task.completed') return tt('chat.inspect.completed', { status: String(p.status ?? 'completed') });
 
   // Generic fallback: common fields
   if (typeof p.textPreview === 'string' && p.textPreview) return truncateSummary(p.textPreview, 60);
@@ -122,7 +123,7 @@ export function eventPayloadSummary(event: {
       return calls.map(c => String(c.name ?? '?')).join(', ');
     }
   }
-  if (typeof p.callId === 'string') return `call: ${truncateSummary(p.callId, 12)}`;
+  if (typeof p.callId === 'string') return tt('chat.inspect.call', { id: truncateSummary(p.callId, 12) });
   return null;
 }
 
@@ -138,7 +139,7 @@ export function formatDurationCompact(ms: number): string {
 function formatPayloadForDisplay(payload: Record<string, unknown>): string {
   const raw = JSON.stringify(payload, null, 2);
   if (raw.length <= TRUNCATED_PAYLOAD_CHARS) return raw;
-  return raw.slice(0, TRUNCATED_PAYLOAD_CHARS) + `\n\n… [truncated ${raw.length - TRUNCATED_PAYLOAD_CHARS} chars]`;
+  return raw.slice(0, TRUNCATED_PAYLOAD_CHARS) + tt('chat.inspect.truncated', { count: raw.length - TRUNCATED_PAYLOAD_CHARS });
 }
 
 // ── Components ─────────────────────────────────────
@@ -186,13 +187,13 @@ export function TurnGroup({ turn, events, children }: {
   const tokenCount = modelResponse?.usage?.totalTokens ?? 0;
 
   return (
-    <div className="turn-group" data-turn={turn}>
+      <div className="turn-group" data-turn={turn}>
       <div className="turn-group-head" onClick={() => setCollapsed(!collapsed)}>
-        <span className="turn-label">Turn {turn}</span>
-        {tokenCount > 0 ? <span className="turn-metric">{tokenCount} tokens</span> : null}
-        {modelDuration > 0 ? <span className="turn-metric">model: {formatDurationCompact(modelDuration)}</span> : null}
-        {totalToolDuration > 0 ? <span className="turn-metric">tools: {formatDurationCompact(totalToolDuration)}</span> : null}
-        {toolResults.length > 0 ? <span className="turn-metric">{toolResults.length} tool{toolResults.length !== 1 ? 's' : ''}</span> : null}
+        <span className="turn-label">{tt('chat.inspect.turn', { n: turn })}</span>
+        {tokenCount > 0 ? <span className="turn-metric">{tt('chat.inspect.tokens', { count: tokenCount })}</span> : null}
+        {modelDuration > 0 ? <span className="turn-metric">{tt('chat.inspect.model', { value: formatDurationCompact(modelDuration) })}</span> : null}
+        {totalToolDuration > 0 ? <span className="turn-metric">{tt('chat.inspect.tools', { value: formatDurationCompact(totalToolDuration) })}</span> : null}
+        {toolResults.length > 0 ? <span className="turn-metric">{tt('chat.inspect.toolCount', { count: toolResults.length })}</span> : null}
         <span className="turn-toggle">{collapsed ? '▶' : '▼'}</span>
       </div>
       {!collapsed ? <div className="turn-group-body">{children}</div> : null}

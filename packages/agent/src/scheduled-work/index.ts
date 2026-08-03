@@ -5,7 +5,7 @@ export {
   listScheduledWorkItemRuns, loadScheduledWorkItemRun, claimDueScheduledWorkItems,
   claimQueuedScheduledWorkRuns, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
   createManualScheduledWorkRun, transitionScheduledWorkRun, recordScheduledRunOutcome,
-  attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
+  attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem, recoverOpenScheduledWorkCircuits,
 } from './store.js';
 export {
   runScheduledWorkTick, triggerScheduledWorkItem, executeScheduledWorkRun,

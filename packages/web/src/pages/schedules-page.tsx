@@ -19,6 +19,7 @@ import {
   type ScheduledWorkTrigger,
 } from '../api/index.js';
 import { formatDate } from '../ui.js';
+import { useI18n } from '../i18n';
 
 type TriggerPreset = 'daily' | 'weekly' | 'interval' | 'once';
 type FormState = {
@@ -46,14 +47,15 @@ type FeedAnalysisRequestValidation =
 const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 export function SchedulesPage() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState<FormState>(() => initialForm());
+  const [form, setForm] = useState<FormState>(() => initialForm(t));
   const trigger = useMemo(() => buildTrigger(form), [form]);
   const feedAnalysisRequest = useMemo(
-    () => validateFeedAnalysisRequest(form.feedAnalysisRequest),
-    [form.feedAnalysisRequest],
+    () => validateFeedAnalysisRequest(form.feedAnalysisRequest, t),
+    [form.feedAnalysisRequest, t],
   );
   const list = useQuery({
     queryKey: ['scheduled-work-items'],
@@ -96,7 +98,7 @@ export function SchedulesPage() {
     onSuccess: async result => {
       setSelectedId(result.schedule.id);
       setShowCreate(false);
-      setForm(initialForm());
+      setForm(initialForm(t));
       await queryClient.invalidateQueries({ queryKey: ['scheduled-work-items'] });
     },
   });
@@ -130,16 +132,16 @@ export function SchedulesPage() {
     <div className="schedules-page">
       <div className="daily-toolbar">
         <div className="daily-summary">
-          <span>{list.data?.count ?? 0} schedules</span>
-          <span>{list.data?.results.filter(item => item.status === 'enabled').length ?? 0} enabled</span>
-          <span>{list.data?.results.filter(item => item.circuitState === 'open').length ?? 0} open circuits</span>
+          <span>{t('ops.schedules.countLabel', { count: list.data?.count ?? 0 })}</span>
+          <span>{t('ops.schedules.enabledCountLabel', { count: list.data?.results.filter(item => item.status === 'enabled').length ?? 0 })}</span>
+          <span>{t('ops.schedules.openCircuitsLabel', { count: list.data?.results.filter(item => item.circuitState === 'open').length ?? 0 })}</span>
         </div>
         <div className="work-action-strip">
-          <button className="icon-btn" type="button" title="Refresh schedules" aria-label="Refresh schedules" onClick={() => list.refetch()}>
+          <button className="icon-btn" type="button" title={t('ops.schedules.refreshTitle')} aria-label={t('ops.schedules.refreshTitle')} onClick={() => list.refetch()}>
             <RefreshCcw size={15} />
           </button>
           <button className="btn" type="button" onClick={() => setShowCreate(value => !value)}>
-            {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? 'Close' : 'New schedule'}
+            {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? t('common.close') : t('ops.schedules.newScheduleButton')}
           </button>
         </div>
       </div>
@@ -148,8 +150,8 @@ export function SchedulesPage() {
       {actionError ? <div className="daily-error">{String(actionError)}</div> : null}
 
       <section className="schedule-split">
-        <div className="schedule-list" aria-label="Schedules">
-          {list.isLoading ? <div className="daily-empty">Loading schedules...</div> : null}
+        <div className="schedule-list" aria-label={t('nav.schedules')}>
+          {list.isLoading ? <div className="daily-empty">{t('ops.schedules.loadingList')}</div> : null}
           {list.isError ? <div className="daily-error">{String(list.error)}</div> : null}
           {list.data?.results.map(item => (
             <button key={item.id} type="button" className="schedule-list-row" data-active={activeId === item.id} onClick={() => setSelectedId(item.id)}>
@@ -161,7 +163,7 @@ export function SchedulesPage() {
               <span className="schedule-next">{formatDate(item.nextRunAt)}</span>
             </button>
           ))}
-          {!list.isLoading && list.data?.results.length === 0 ? <div className="daily-empty">No schedules</div> : null}
+          {!list.isLoading && list.data?.results.length === 0 ? <div className="daily-empty">{t('ops.schedules.emptyList')}</div> : null}
         </div>
 
         <div className="schedule-detail">
@@ -176,41 +178,41 @@ export function SchedulesPage() {
                 <div className="work-action-strip">
                   {active.status !== 'retired' ? (
                     <button className="ghost-btn" type="button" disabled={updateStatus.isPending} onClick={() => updateStatus.mutate({ id: active.id, status: active.status === 'enabled' ? 'paused' : 'enabled' })}>
-                      {active.status === 'enabled' ? <Pause size={14} /> : <Play size={14} />} {active.status === 'enabled' ? 'Pause' : 'Resume'}
+                      {active.status === 'enabled' ? <Pause size={14} /> : <Play size={14} />} {active.status === 'enabled' ? t('ops.schedules.pauseButton') : t('ops.schedules.resumeButton')}
                     </button>
                   ) : null}
                   <button className="btn" type="button" disabled={triggerNow.isPending || active.status === 'retired'} onClick={() => triggerNow.mutate(active.id)}>
-                    <Play size={14} /> Run now
+                    <Play size={14} /> {t('ops.schedules.runNowButton')}
                   </button>
                 </div>
               </header>
               <div className="schedule-facts">
-                <ScheduleFact label="status" value={active.status} />
-                <ScheduleFact label="next run" value={formatDate(active.nextRunAt)} />
-                <ScheduleFact label="approval" value={active.approvalPolicy.replaceAll('_', ' ')} />
-                <ScheduleFact label="concurrency" value={active.concurrencyPolicy.replaceAll('_', ' ')} />
-                <ScheduleFact label="catch up" value={active.catchUpPolicy.replaceAll('_', ' ')} />
-                <ScheduleFact label="circuit" value={`${active.circuitState} · ${active.consecutiveFailures} failures`} tone={active.circuitState === 'open' ? 'danger' : 'ok'} />
+                <ScheduleFact label={t('ops.schedules.factStatus')} value={active.status} />
+                <ScheduleFact label={t('ops.schedules.factNextRun')} value={formatDate(active.nextRunAt)} />
+                <ScheduleFact label={t('ops.schedules.factApproval')} value={active.approvalPolicy.replaceAll('_', ' ')} />
+                <ScheduleFact label={t('ops.schedules.factConcurrency')} value={active.concurrencyPolicy.replaceAll('_', ' ')} />
+                <ScheduleFact label={t('ops.schedules.factCatchUp')} value={active.catchUpPolicy.replaceAll('_', ' ')} />
+                <ScheduleFact label={t('ops.schedules.factCircuit')} value={t('ops.schedules.circuitValue', { circuitState: active.circuitState, failures: active.consecutiveFailures })} tone={active.circuitState === 'open' ? 'danger' : 'ok'} />
               </div>
               <div className="schedule-history-head">
-                <div><h3>Run history</h3><span>{detail.data?.runs.length ?? 0} recorded</span></div>
+                <div><h3>{t('ops.schedules.runHistoryTitle')}</h3><span>{t('ops.schedules.recordedLabel', { count: detail.data?.runs.length ?? 0 })}</span></div>
                 <CalendarClock size={17} />
               </div>
               <div className="schedule-history">
                 {detail.data?.runs.map(run => (
                   <div className="schedule-run-row" key={run.id}>
                     <span className={`run-state ${run.status}`}>{run.status.replaceAll('_', ' ')}</span>
-                    <div><strong>{formatDate(run.scheduledFor)}</strong><small>{run.triggerKind} · attempt {run.attemptCount}/{run.maxAttempts}</small></div>
+                    <div><strong>{formatDate(run.scheduledFor)}</strong><small>{t('ops.schedules.attemptLabel', { triggerKind: run.triggerKind, attempt: run.attemptCount, maxAttempts: run.maxAttempts })}</small></div>
                     <code>{run.workItemId ?? run.id}</code>
                     {run.status === 'failed' && run.attemptCount < run.maxAttempts ? (
-                      <button className="icon-btn" type="button" title="Retry run" aria-label={`Retry run ${run.id}`} disabled={retryRun.isPending} onClick={() => retryRun.mutate(run.id)}><RotateCcw size={14} /></button>
+                      <button className="icon-btn" type="button" title={t('ops.schedules.retryRunTitle')} aria-label={t('ops.schedules.retryRunAria', { id: run.id })} disabled={retryRun.isPending} onClick={() => retryRun.mutate(run.id)}><RotateCcw size={14} /></button>
                     ) : <span />}
                   </div>
                 ))}
-                {detail.data?.runs.length === 0 ? <div className="daily-empty">No runs recorded</div> : null}
+                {detail.data?.runs.length === 0 ? <div className="daily-empty">{t('ops.schedules.noRunsRecorded')}</div> : null}
               </div>
             </>
-          ) : <div className="daily-empty">Select or create a schedule</div>}
+          ) : <div className="daily-empty">{t('ops.schedules.selectPrompt')}</div>}
         </div>
       </section>
     </div>
@@ -224,41 +226,42 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
   create: ReturnType<typeof useMutation<CreateScheduledWorkResponse, Error, void>>;
   feedAnalysisRequest: FeedAnalysisRequestValidation;
 }) {
+  const { t } = useI18n();
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm({ ...form, [key]: value });
   const submit = (event: FormEvent) => { event.preventDefault(); create.mutate(); };
   return (
     <form className="schedule-create" onSubmit={submit}>
       <div className="schedule-form-fields">
-        <label><span>Title</span><input value={form.title} onChange={event => set('title', event.target.value)} required /></label>
-        <label><span>Project</span><input value={form.projectId} onChange={event => set('projectId', event.target.value)} required /></label>
-        <label><span>Template</span><select value={form.templateId} onChange={event => {
+        <label><span>{t('ops.schedules.formTitle')}</span><input value={form.title} onChange={event => set('title', event.target.value)} required /></label>
+        <label><span>{t('ops.schedules.formProject')}</span><input value={form.projectId} onChange={event => set('projectId', event.target.value)} required /></label>
+        <label><span>{t('ops.schedules.formTemplate')}</span><select value={form.templateId} onChange={event => {
           const templateId = event.target.value as ScheduledWorkTemplateId;
           setForm({ ...form, templateId, approvalPolicy: templateId === 'scheduled_feed_analysis' || templateId === 'scheduled_execution' ? 'preapproved_scope' : form.approvalPolicy });
-        }}><option value="morning_inbox_digest">Morning inbox digest</option><option value="runtime_readiness">Runtime readiness</option><option value="scheduled_feed_analysis">Feed analysis</option><option value="scheduled_execution">Scheduled execution</option></select></label>
-        <label><span>Preset</span><select value={form.preset} onChange={event => set('preset', event.target.value as TriggerPreset)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="interval">Interval</option><option value="once">Once</option></select></label>
-        {form.preset === 'daily' || form.preset === 'weekly' ? <label><span>Time</span><input type="time" value={form.time} onChange={event => set('time', event.target.value)} required /></label> : null}
-        {form.preset === 'weekly' ? <label><span>Weekday</span><select value={form.weekday} onChange={event => set('weekday', event.target.value)}>{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label> : null}
-        {form.preset === 'interval' ? <label><span>Interval</span><input aria-label="Interval" value={form.interval} onChange={event => set('interval', event.target.value)} placeholder="6h" required /></label> : null}
-        {form.preset === 'once' ? <label><span>Run at</span><input type="datetime-local" value={form.onceAt} onChange={event => set('onceAt', event.target.value)} required /></label> : null}
-        <label><span>Timezone</span><input value={form.timezone} onChange={event => set('timezone', event.target.value)} required /></label>
-        <label><span>Approval</span><select value={form.approvalPolicy} onChange={event => set('approvalPolicy', event.target.value as ScheduledApprovalPolicy)}><option value="read_only_auto">Read-only auto</option><option value="preapproved_scope">Preapproved scope</option><option value="each_run">Each run</option></select></label>
-        <label><span>Concurrency</span><select value={form.concurrencyPolicy} onChange={event => set('concurrencyPolicy', event.target.value as ScheduledConcurrencyPolicy)}><option value="skip">Skip</option><option value="queue_one">Queue one</option><option value="parallel">Parallel</option></select></label>
-        <label><span>Catch up</span><select value={form.catchUpPolicy} onChange={event => set('catchUpPolicy', event.target.value as ScheduledCatchUpPolicy)}><option value="skip">Skip late</option><option value="run_once">Run once</option></select></label>
+        }}><option value="morning_inbox_digest">{t('ops.schedules.templateMorningDigest')}</option><option value="runtime_readiness">{t('ops.schedules.templateRuntimeReadiness')}</option><option value="scheduled_feed_analysis">{t('ops.schedules.templateFeedAnalysis')}</option><option value="scheduled_execution">{t('ops.schedules.templateScheduledExecution')}</option></select></label>
+        <label><span>{t('ops.schedules.formPreset')}</span><select value={form.preset} onChange={event => set('preset', event.target.value as TriggerPreset)}><option value="daily">{t('ops.schedules.presetDaily')}</option><option value="weekly">{t('ops.schedules.presetWeekly')}</option><option value="interval">{t('ops.schedules.presetInterval')}</option><option value="once">{t('ops.schedules.presetOnce')}</option></select></label>
+        {form.preset === 'daily' || form.preset === 'weekly' ? <label><span>{t('ops.schedules.formTime')}</span><input type="time" value={form.time} onChange={event => set('time', event.target.value)} required /></label> : null}
+        {form.preset === 'weekly' ? <label><span>{t('ops.schedules.formWeekday')}</span><select value={form.weekday} onChange={event => set('weekday', event.target.value)}>{['ops.schedules.daySunday','ops.schedules.dayMonday','ops.schedules.dayTuesday','ops.schedules.dayWednesday','ops.schedules.dayThursday','ops.schedules.dayFriday','ops.schedules.daySaturday'].map((key, index) => <option key={key} value={index}>{t(key)}</option>)}</select></label> : null}
+        {form.preset === 'interval' ? <label><span>{t('ops.schedules.presetInterval')}</span><input aria-label={t('ops.schedules.presetInterval')} value={form.interval} onChange={event => set('interval', event.target.value)} placeholder="6h" required /></label> : null}
+        {form.preset === 'once' ? <label><span>{t('ops.schedules.formRunAt')}</span><input type="datetime-local" value={form.onceAt} onChange={event => set('onceAt', event.target.value)} required /></label> : null}
+        <label><span>{t('ops.schedules.formTimezone')}</span><input value={form.timezone} onChange={event => set('timezone', event.target.value)} required /></label>
+        <label><span>{t('ops.schedules.formApproval')}</span><select value={form.approvalPolicy} onChange={event => set('approvalPolicy', event.target.value as ScheduledApprovalPolicy)}><option value="read_only_auto">{t('ops.schedules.approvalReadOnlyAuto')}</option><option value="preapproved_scope">{t('ops.schedules.approvalPreapprovedScope')}</option><option value="each_run">{t('ops.schedules.approvalEachRun')}</option></select></label>
+        <label><span>{t('ops.schedules.formConcurrency')}</span><select value={form.concurrencyPolicy} onChange={event => set('concurrencyPolicy', event.target.value as ScheduledConcurrencyPolicy)}><option value="skip">{t('ops.schedules.concurrencySkip')}</option><option value="queue_one">{t('ops.schedules.concurrencyQueueOne')}</option><option value="parallel">{t('ops.schedules.concurrencyParallel')}</option></select></label>
+        <label><span>{t('ops.schedules.formCatchUp')}</span><select value={form.catchUpPolicy} onChange={event => set('catchUpPolicy', event.target.value as ScheduledCatchUpPolicy)}><option value="skip">{t('ops.schedules.catchUpSkipLate')}</option><option value="run_once">{t('ops.schedules.catchUpRunOnce')}</option></select></label>
         {form.templateId === 'scheduled_feed_analysis' ? (
-          <label className="schedule-request-field"><span>Feed analysis request</span><textarea rows={10} value={form.feedAnalysisRequest} onChange={event => set('feedAnalysisRequest', event.target.value)} spellCheck={false} />{feedAnalysisRequest.error ? <small className="schedule-preview-error" role="alert">{feedAnalysisRequest.error}</small> : null}</label>
+          <label className="schedule-request-field"><span>{t('ops.schedules.formFeedAnalysisRequest')}</span><textarea rows={10} value={form.feedAnalysisRequest} onChange={event => set('feedAnalysisRequest', event.target.value)} spellCheck={false} />{feedAnalysisRequest.error ? <small className="schedule-preview-error" role="alert">{feedAnalysisRequest.error}</small> : null}</label>
         ) : null}
         {form.templateId === 'scheduled_execution' ? (<>
-          <label><span>Editable surfaces</span><input value={form.editableSurfaces} onChange={event => set('editableSurfaces', event.target.value)} placeholder="src/,packages/ (comma-separated)" /></label>
-          <label><span>Required checks</span><input value={form.requiredChecks} onChange={event => set('requiredChecks', event.target.value)} placeholder="pnpm check,pnpm test (comma-separated)" /></label>
+          <label><span>{t('ops.schedules.formEditableSurfaces')}</span><input value={form.editableSurfaces} onChange={event => set('editableSurfaces', event.target.value)} placeholder={t('ops.schedules.editableSurfacesPlaceholder')} /></label>
+          <label><span>{t('ops.schedules.formRequiredChecks')}</span><input value={form.requiredChecks} onChange={event => set('requiredChecks', event.target.value)} placeholder={t('ops.schedules.requiredChecksPlaceholder')} /></label>
         </>) : null}
       </div>
       <div className="schedule-preview">
-        <span className="mini-label">Next occurrences</span>
-        {preview.isFetching ? <span>Calculating...</span> : null}
+        <span className="mini-label">{t('ops.schedules.nextOccurrencesLabel')}</span>
+        {preview.isFetching ? <span>{t('ops.schedules.calculating')}</span> : null}
         {preview.isError ? <span className="schedule-preview-error">{String(preview.error)}</span> : null}
         {preview.data?.occurrences.map(value => <strong key={value}>{formatDate(value)}</strong>)}
       </div>
-      <button className="btn" type="submit" disabled={create.isPending || !form.title.trim() || !form.projectId.trim() || (form.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest.value) || (form.templateId === 'scheduled_execution' && !form.editableSurfaces.trim())}><Plus size={14} /> Create schedule</button>
+      <button className="btn" type="submit" disabled={create.isPending || !form.title.trim() || !form.projectId.trim() || (form.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest.value) || (form.templateId === 'scheduled_execution' && !form.editableSurfaces.trim())}><Plus size={14} /> {t('ops.schedules.createButton')}</button>
     </form>
   );
 }
@@ -267,9 +270,9 @@ function ScheduleFact({ label, value, tone }: { label: string; value: string; to
   return <div className={`work-fact ${tone ?? ''}`}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function initialForm(): FormState {
+function initialForm(t: (key: string) => string): FormState {
   return {
-    title: 'Morning inbox digest', projectId: getCurrentProjectId() ?? 'los',
+    title: t('ops.schedules.templateMorningDigest'), projectId: getCurrentProjectId() ?? 'los',
     templateId: 'morning_inbox_digest', preset: 'daily', time: '08:30', weekday: '1',
     interval: '6h', onceAt: '', timezone: DEFAULT_TIMEZONE,
     approvalPolicy: 'read_only_auto', concurrencyPolicy: 'skip', catchUpPolicy: 'skip',
@@ -301,15 +304,15 @@ function previewPath(trigger: ScheduledWorkTrigger): string {
   return `/scheduled-work-items/preview?${params}`;
 }
 
-function validateFeedAnalysisRequest(source: string): FeedAnalysisRequestValidation {
+function validateFeedAnalysisRequest(source: string, t: (key: string) => string): FeedAnalysisRequestValidation {
   let value: unknown;
   try {
     value = JSON.parse(source);
   } catch {
-    return { error: 'Request must be valid JSON.' };
+    return { error: t('ops.schedules.feedAnalysisInvalidJson') };
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { error: 'Request must be a JSON object.' };
+    return { error: t('ops.schedules.feedAnalysisNotObject') };
   }
   const request = value as Record<string, unknown>;
   const materialBundle = request.materialBundle;
@@ -319,6 +322,6 @@ function validateFeedAnalysisRequest(source: string): FeedAnalysisRequestValidat
   const hasEvidence = Boolean(request.materialBundleRef)
     || (Array.isArray(bundleItems) && bundleItems.length > 0)
     || (Array.isArray(request.feedObservations) && request.feedObservations.length > 0);
-  if (!hasEvidence) return { error: 'Add at least one material item, observation, or material bundle reference.' };
+  if (!hasEvidence) return { error: t('ops.schedules.feedAnalysisNoEvidence') };
   return { value: request };
 }

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getJson } from '../api/index.js';
 import { DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
+import { useI18n } from '../i18n';
 
 interface TraceSummary {
   traceId: string;
@@ -22,6 +23,7 @@ interface ProviderHealth {
 }
 
 export function DiagnosticsPage() {
+  const { t } = useI18n();
   const traces = useQuery({
     queryKey: ['diagnostics'],
     queryFn: () => getJson<TraceSummary[]>('/diagnostics'),
@@ -43,29 +45,29 @@ export function DiagnosticsPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Diagnostics · Traces</h2>
-            <p>Request traces from the last 24 hours. Errors flagged.</p>
+            <h2>{t('ops.diagnostics.tracesTitle')}</h2>
+            <p>{t('ops.diagnostics.tracesSubtitle')}</p>
           </div>
           <StatusPill status={traceList.length > 0 ? 'live' : 'partial'} />
         </div>
         <DataTable
           loading={traces.isLoading}
-          empty="No recent traces."
+          empty={t('ops.diagnostics.noTraces')}
           rows={traceList}
-          renderRow={(t) => (
-            <div key={t.traceId} className="record-row">
+          renderRow={(trace) => (
+            <div key={trace.traceId} className="record-row">
               <div className="record-main">
                 <div className="record-header">
                   <strong className="record-title" style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                    {t.traceId.slice(0, 16)}
+                    {trace.traceId.slice(0, 16)}
                   </strong>
-                  {t.errorCount > 0 ? <span className="status-pill live">{t.errorCount} errors</span> : null}
+                  {trace.errorCount > 0 ? <span className="status-pill live">{t('ops.diagnostics.errorsLabel', { count: trace.errorCount })}</span> : null}
                 </div>
                 <div className="record-meta">
-                  {t.sessionId ? <span>session: {t.sessionId.slice(0, 12)}</span> : null}
-                  {t.provider ? <span> · {t.provider}/{t.model}</span> : null}
-                  <span> · {t.eventCount} events</span>
-                  <span> · {new Date(t.createdAt).toLocaleString()}</span>
+                  {trace.sessionId ? <span>{t('ops.diagnostics.sessionShort', { id: trace.sessionId.slice(0, 12) })}</span> : null}
+                  {trace.provider ? <span> · {trace.provider}/{trace.model}</span> : null}
+                  <span> · {t('ops.diagnostics.eventsLabel', { count: trace.eventCount })}</span>
+                  <span> · {new Date(trace.createdAt).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -77,21 +79,21 @@ export function DiagnosticsPage() {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Provider Health</h2>
-            <p>Success rate, latency, and repair counters per provider.</p>
+            <h2>{t('ops.diagnostics.providerHealthTitle')}</h2>
+            <p>{t('ops.diagnostics.providerHealthSubtitle')}</p>
           </div>
         </div>
         {healthList.length === 0 ? (
-          <EmptyText text={providerHealth.isLoading ? 'Loading...' : 'No provider health data.'} />
+          <EmptyText text={providerHealth.isLoading ? t('common.loading') : t('ops.diagnostics.noProviderHealth')} />
         ) : (
           <table className="project-table" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>Provider</th>
-                <th>Calls</th>
-                <th>Success %</th>
-                <th>Avg Latency</th>
-                <th>Repairs</th>
+                <th>{t('ops.diagnostics.thProvider')}</th>
+                <th>{t('ops.diagnostics.thCalls')}</th>
+                <th>{t('ops.diagnostics.thSuccessPct')}</th>
+                <th>{t('ops.diagnostics.thAvgLatency')}</th>
+                <th>{t('ops.diagnostics.thRepairs')}</th>
               </tr>
             </thead>
             <tbody>
