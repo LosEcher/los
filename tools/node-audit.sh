@@ -75,9 +75,14 @@ for node in "${NODES[@]}"; do
   # summary line
   host="$(grep '^hostname:' "$out" | head -1 | cut -d' ' -f2)"
   os="$(grep '^os:' "$out" | head -1 | sed 's/^os: //')"
-  herdr="$(grep '^herdr:' "$out" | head -1 | awk '{print $2}')"
+  herdr="$(grep '^herdr:' "$out" | head -1 | sed 's/^herdr: //' | awk '{print $2}')"
   los_ver="$(grep -E '^LOS_VERSION=' "$out" | head -1 | cut -d= -f2)"
-  echo "  $node: $host | $os | herdr=${herdr:-MISSING} | los=${los_ver:-none}"
+  gw="$(grep -E '^gateway:' "$out" | head -1 | sed 's/^gateway: //')"
+  # kranz-inspired status dot: ok / warn (gateway unreachable) / err (crash-loop)
+  state="ok"
+  case "$gw" in *UNREACHABLE*) state="warn" ;; esac
+  if grep -q 'CRASH-LOOP' "$out"; then state="err"; fi
+  echo "  $node: $host | $os | herdr=${herdr:-MISSING} | los=${los_ver:-none} | $state${gw:+ | gw=$gw}"
 done
 
 echo ""

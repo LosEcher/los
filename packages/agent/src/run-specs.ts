@@ -67,6 +67,7 @@ export interface RunSpecRecord {
   timeoutMs?: number;
   mcpServers: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
   runContract?: RunContractMetadata;
+  result?: RunSpecResult | null;
   status: RunSpecStatus;
   createdAt: string;
   updatedAt: string;
@@ -97,6 +98,16 @@ export interface CreateRunSpecInput {
   mcpServers?: Array<{ command: string; args?: string[]; env?: Record<string, string> }>;
   runContract?: RunContractMetadataInput;
 }
+
+export type RunSpecResult = {
+  /** 'completed' when the run finished normally, 'failed' when it threw. */
+  status: 'completed' | 'failed';
+  text: string;
+  loopCount?: number;
+  totalTokens?: number;
+  error?: string;
+  completedAt: string;
+};
 
 // ── Schema ──────────────────────────────────────────────
 
@@ -133,6 +144,7 @@ CREATE TABLE IF NOT EXISTS run_specs (
 ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS run_contract_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS gateway_id TEXT;
 ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS parent_run_spec_id TEXT;
+ALTER TABLE run_specs ADD COLUMN IF NOT EXISTS result_json JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_run_specs_session_id ON run_specs(session_id);
 CREATE INDEX IF NOT EXISTS idx_run_specs_status ON run_specs(status);
@@ -244,12 +256,75 @@ export async function listRunSpecs(limit = 50): Promise<RunSpecRecord[]> {
   return rows.rows.map(rowToRecord);
 }
 
-export async function listRunSpecsForSession(sessionId: string, limit = 20): Promise<RunSpecRecord[]> {
+export async function listRunSpecsForSession(
+  sessionId: string,
+  limit = 20,
+  scope?: { tenantId?: string; projectId?: string },
+): Promise<RunSpecRecord[]> {
+  await ensureRunSpecStore();
+  const db = getDb();
+  const where = ['session_id = $1'];
+  const params: unknown[] = [sessionId];
+  if (scope?.tenantId) {
+    params.push(scope.tenantId);
+    where.push(`tenant_id = $${params.length}`);
+  }
+  if (scope?.projectId) {
+    params.push(scope.projectId);
+    where.push(`project_id = $${params.length}`);
+  }
+  params.push(limit);
+  const rows = await db.query<RunSpecRow>(
+    `SELECT * FROM run_specs WHERE ${where.join(' AND ')} ORDER BY updated_at DESC LIMIT $${params.length}`,
+    params,
+  );
+  return rows.rows.map(rowToRecord);
+}
+
+/**
+ * Persist a completed/failed subagent result onto its durable run spec.
+ *
+ * Only writes `result_json` (plus `updated_at`); run_spec status transitions
+ * remain owned by the scheduler/approval paths. Returns the updated record or
+ * null when the run spec no longer exists.
+ */
+export async function updateRunSpecResult(
+  runSpecId: string,
+  result: RunSpecResult,
+): Promise<RunSpecRecord | null> {
   await ensureRunSpecStore();
   const db = getDb();
   const rows = await db.query<RunSpecRow>(
-    'SELECT * FROM run_specs WHERE session_id = $1 ORDER BY updated_at DESC LIMIT $2',
-    [sessionId, limit],
+    'UPDATE run_specs SET result_json = $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *',
+    [runSpecId, JSON.stringify(result)],
+  );
+  return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
+}
+
+/**
+ * List child run specs (parentRunSpecId set) that have a persisted result,
+ * newest first. Used to recover background subagents after a process restart.
+ */
+export async function listCompletedChildRunSpecs(
+  limit = 20,
+  scope?: { tenantId?: string; projectId?: string },
+): Promise<RunSpecRecord[]> {
+  await ensureRunSpecStore();
+  const db = getDb();
+  const where = ['parent_run_spec_id IS NOT NULL', 'result_json IS NOT NULL'];
+  const params: unknown[] = [];
+  if (scope?.tenantId) {
+    params.push(scope.tenantId);
+    where.push(`tenant_id = $${params.length}`);
+  }
+  if (scope?.projectId) {
+    params.push(scope.projectId);
+    where.push(`project_id = $${params.length}`);
+  }
+  params.push(limit);
+  const rows = await db.query<RunSpecRow>(
+    `SELECT * FROM run_specs WHERE ${where.join(' AND ')} ORDER BY updated_at DESC LIMIT $${params.length}`,
+    params,
   );
   return rows.rows.map(rowToRecord);
 }
@@ -505,6 +580,7 @@ type RunSpecRow = {
   timeout_ms: number | null;
   mcp_servers_json: unknown;
   run_contract_json: unknown;
+  result_json: unknown;
   status: string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -547,6 +623,7 @@ function rowToRecord(row: RunSpecRow): RunSpecRecord {
     timeoutMs: row.timeout_ms ?? undefined,
     mcpServers: normalizeMCPServers(row.mcp_servers_json),
     runContract: normalizeRunContractMetadata(row.run_contract_json),
+    result: row.result_json ? normalizeRunSpecResult(row.result_json) : null,
     status: row.status as RunSpecStatus,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
@@ -559,6 +636,19 @@ function normalizeJsonArray(value: unknown): unknown[] {
     try { const p = JSON.parse(value); return Array.isArray(p) ? p : []; } catch { return []; }
   }
   return [];
+}
+
+function normalizeRunSpecResult(value: unknown): RunSpecResult {
+  const raw = typeof value === 'string' ? (() => { try { return JSON.parse(value) as Record<string, unknown>; } catch { return {}; } })() : normalizeJsonObject(value);
+  const status = raw.status === 'failed' ? 'failed' : 'completed';
+  return {
+    status,
+    text: typeof raw.text === 'string' ? raw.text : '',
+    loopCount: typeof raw.loopCount === 'number' ? raw.loopCount : undefined,
+    totalTokens: typeof raw.totalTokens === 'number' ? raw.totalTokens : undefined,
+    error: typeof raw.error === 'string' ? raw.error : undefined,
+    completedAt: typeof raw.completedAt === 'string' ? raw.completedAt : new Date(0).toISOString(),
+  };
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> {
