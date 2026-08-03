@@ -450,7 +450,24 @@ do_verify() {
   remote_sh ss -tlnp "sport = :$port" 2>/dev/null >> "$log_file" || true
   log_info "  port $port: listening"
 
-  # 4. DB registration check (best-effort, requires psql or gateway access)
+  # 4. GATEWAY_URL reachability check (dead-gateway guard — heartbeat fails
+  #    silently otherwise; vultr/tencent-sin crashed/starved on a stale URL)
+  printf '\n=== gateway reachability ===\n' >> "$log_file"
+  local gateway_url=""
+  gateway_url=$(remote_sh awk -F= '/^GATEWAY_URL=/{print $2; exit}' "$REMOTE_HOME/.env" 2>/dev/null || true)
+  if [ -n "$gateway_url" ]; then
+    if curl -sf --max-time 5 "${gateway_url%/}/health" >/dev/null 2>&1; then
+      log_info "  gateway $gateway_url: reachable"
+    else
+      log_warn "  gateway $gateway_url: NOT reachable from this machine"
+      log_warn "  executor heartbeats will fail; fix $REMOTE_HOME/.env GATEWAY_URL"
+      log_warn "  Diagnose: $0 $NODE cmd 'grep GATEWAY_URL $REMOTE_HOME/.env'"
+    fi
+  else
+    log_info "  GATEWAY_URL not set on remote (direct-to-DB heartbeat mode)"
+  fi
+
+  # 5. DB registration check (best-effort, requires psql or gateway access)
   printf '\n=== db registration ===\n' >> "$log_file"
   if remote_sh test -f "$REMOTE_HOME/.env" 2>/dev/null; then
     log_info "  .env present — DB registration must be checked from gateway"

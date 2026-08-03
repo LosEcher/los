@@ -25,10 +25,10 @@ test('heartbeat reporter logs the first failure, periodic reminders, and recover
     { reminderEvery: 3 },
   );
 
-  await reporter();
-  await reporter();
-  await reporter();
-  await reporter();
+  await reporter.run();
+  await reporter.run();
+  await reporter.run();
+  await reporter.run();
 
   assert.deepEqual(warnings, [
     'node heartbeat failed (1 consecutive): fetch failed (ECONNREFUSED: connect ECONNREFUSED 100.64.0.1:8080)',
@@ -48,9 +48,9 @@ test('heartbeat reporter resets its failure count after recovery', async () => {
     { warn: message => warnings.push(message), info: () => undefined },
   );
 
-  await reporter();
-  await reporter();
-  await reporter();
+  await reporter.run();
+  await reporter.run();
+  await reporter.run();
 
   assert.deepEqual(warnings, [
     'node heartbeat failed (1 consecutive): first outage',
@@ -58,9 +58,61 @@ test('heartbeat reporter resets its failure count after recovery', async () => {
   ]);
 });
 
-test('heartbeat reporter rejects invalid reminder intervals', () => {
+test('heartbeat reporter backs off exponentially while failing and resets on recovery', async () => {
+  let attempts = 0;
+  const reporter = createHeartbeatReporter(
+    async () => {
+      attempts += 1;
+      if (attempts <= 4) throw new Error(`outage ${attempts}`);
+    },
+    { warn: () => undefined, info: () => undefined },
+    { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 },
+  );
+
+  assert.equal(reporter.nextIntervalMs(), 10_000, 'healthy interval is the base');
+
+  await reporter.run();
+  assert.equal(reporter.nextIntervalMs(), 30_000, '1st failure: base * 3');
+
+  await reporter.run();
+  assert.equal(reporter.nextIntervalMs(), 90_000, '2nd failure: base * 9');
+
+  await reporter.run();
+  assert.equal(reporter.nextIntervalMs(), 270_000, '3rd failure: base * 27');
+
+  await reporter.run();
+  assert.equal(reporter.nextIntervalMs(), 810_000, '4th failure: base * 81');
+
+  await reporter.run(); // recovery
+  assert.equal(reporter.nextIntervalMs(), 10_000, 'recovered: back to base');
+});
+
+test('heartbeat reporter caps backoff at maxBackoffMs', async () => {
+  const reporter = createHeartbeatReporter(
+    async () => {
+      throw new Error('persistent outage');
+    },
+    { warn: () => undefined, info: () => undefined },
+    { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 60_000 },
+  );
+
+  for (let i = 0; i < 10; i += 1) {
+    await reporter.run();
+  }
+  assert.equal(reporter.nextIntervalMs(), 60_000, 'backoff never exceeds the cap');
+});
+
+test('heartbeat reporter rejects invalid options', () => {
   assert.throws(
     () => createHeartbeatReporter(async () => undefined, { warn: () => undefined, info: () => undefined }, { reminderEvery: 0 }),
+    /positive integer/,
+  );
+  assert.throws(
+    () => createHeartbeatReporter(async () => undefined, { warn: () => undefined, info: () => undefined }, { baseIntervalMs: 0 }),
+    /positive integer/,
+  );
+  assert.throws(
+    () => createHeartbeatReporter(async () => undefined, { warn: () => undefined, info: () => undefined }, { maxBackoffMs: -1 }),
     /positive integer/,
   );
 });
