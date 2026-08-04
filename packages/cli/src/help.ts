@@ -15,6 +15,8 @@ Usage:
   los nodes <list|commands|command> [options]
   los workspaces <plan|apply|list|inspect|backup|release> [options]
   los sessions [--gateway URL] [--json]
+  los sessions trace <session-id> [--since N] [--json]
+  los sessions follow <session-id> [--interval-ms N] [--max-idle-ms N]
   los tasks [--gateway URL] [--json]
   los health [--gateway URL] [--json]
   los mcp serve [--gateway URL]
