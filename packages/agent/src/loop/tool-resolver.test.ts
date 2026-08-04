@@ -10,6 +10,7 @@ test('empty allowedTools array behaves like undefined (not a zero-tool allowlist
   const readOnly = resolveAllowedTools([], 'read-only', 'typed_tool');
   assert.ok(readOnly, 'read-only mode must yield a non-empty default tool set');
   assert.ok(readOnly.includes('list_directory'), 'default read-only set includes read tools');
+  assert.ok(readOnly.includes('spawn_agent'), 'subagent tools are visible in read-only mode');
   assert.ok(readOnly.includes(PLANNING_TOOL), 'typed_tool planning adds the planning tool');
 });
 
