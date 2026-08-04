@@ -6,6 +6,7 @@
 import type { Message, ToolCall } from '../providers/index.js';
 import { estimateTokens, estimateMessageTokens, trimMessagesToBudget, truncateContent } from './token-utils.js';
 import type { ContextCompressionConfig } from './types.js';
+import { maskToolResults } from './masking.js';
 
 // ── Compaction attempt tracking ──
 // WeakMap keyed by messages array reference — tracks how many times compaction
@@ -13,9 +14,9 @@ import type { ContextCompressionConfig } from './types.js';
 const _compactionState = new WeakMap<Message[], { attempts: number; lastReduced: boolean }>();
 
 /**
- * Three-tier context compression:
- *   warning    (80%): compress old turns into brief summaries
- *   aggressive (88%): compress old turns into terse summaries
+ * Three-tier context compression with a deterministic masking cascade (G6):
+ *   warning    (80%): mask tool results into compact cards, keep turn structure
+ *   aggressive (88%): collapse masked turns into one terse summary
  *   emergency  (95%): hard truncation — drop oldest messages
  *
  * When `providerContextWindow` exceeds 200K (e.g. Kimi-K3 1M window), the
@@ -98,9 +99,6 @@ export function compressOrTrimMessages(
     return trimMessagesToBudget(messages, budget);
   }
 
-  // Warning / Aggressive: compress instead of drop
-  const summaryBudget = Math.floor(budget * (ratio > aggressiveRatio ? 0.05 : 0.10));
-
   // Find the split point: which messages to compress?
   // Keep the most recent user message + all after it intact
   // Compress everything before that (except system)
@@ -121,20 +119,46 @@ export function compressOrTrimMessages(
     return trimMessagesToBudget(messages, budget);
   }
 
-  // Generate summary from compressed messages
-  const summary = generateCompressionSummary(toCompress, summaryBudget, ratio > aggressiveRatio);
+  // Warning / Aggressive: compress instead of drop
+  const maskingEnabled = compression?.masking?.enabled !== false;
+  const maskedTurns = maskToolResults(toCompress, compression?.masking ?? {});
+
+  // Layer 2 (warning tier, masking enabled): keep the turn structure and mask
+  // only tool results. The cascade deepens only when this is not enough.
+  if (maskingEnabled && ratio <= aggressiveRatio) {
+    const result: Message[] = [];
+    if (systemIdx >= 0) result.push(messages[systemIdx]!);
+    result.push(...maskedTurns);
+    result.push(...toKeep);
+    recordCompactionAttempt(messages, result, totalTokens);
+    return result;
+  }
+
+  // Layer 3 (aggressive tier, or masking disabled): collapse the masked turns
+  // into a single compact summary.
+  const aggressive = ratio > aggressiveRatio || !maskingEnabled;
+  const summaryBudget = Math.floor(budget * (aggressive ? 0.05 : 0.10));
+  const summary = generateCompressionSummary(maskedTurns, summaryBudget, aggressive);
 
   // Build result: system + summary + recent messages
   const result: Message[] = [];
   if (systemIdx >= 0) result.push(messages[systemIdx]!);
   result.push({ role: 'user', content: summary });
   result.push(...toKeep);
-
-  // Track compaction attempt
-  const prevState = _compactionState.get(messages) ?? { attempts: 0, lastReduced: false };
-  _compactionState.set(messages, { attempts: prevState.attempts + 1, lastReduced: result.length < messages.length });
+  recordCompactionAttempt(messages, result, totalTokens);
 
   return result;
+}
+
+/**
+ * Track compaction attempts by estimated-token reduction (not message count),
+ * so masked-only compaction (Layer 2, same message count) still counts as a
+ * successful reduction for the throttle.
+ */
+function recordCompactionAttempt(messages: Message[], result: Message[], beforeTokens: number): void {
+  const afterTokens = result.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+  const prevState = _compactionState.get(messages) ?? { attempts: 0, lastReduced: false };
+  _compactionState.set(messages, { attempts: prevState.attempts + 1, lastReduced: afterTokens < beforeTokens });
 }
 
 /**
