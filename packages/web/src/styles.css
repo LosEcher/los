@@ -3293,12 +3293,26 @@ button:disabled {
   .result-review-actions label { grid-template-columns: 1fr; }
   .result-review-actions > div { justify-content: stretch; }
   .result-review-actions button { flex: 1 1 180px; }
+  /* Mobile: keep the accept/revision decision reachable while reviewing a long diff. */
+  .result-review-actions {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .diff-view-switch button { min-height: 36px; }
+  .diff-line-num { padding-right: 6px; }
+  .diff-line-row { grid-template-columns: 28px 28px 1fr; }
+  .diff-side-cell { grid-template-columns: 28px 1fr; }
 }
 
 @media (pointer: coarse) {
   .attention-action,
   .attention-filters button,
-  .work-list-row { min-height: 44px; }
+  .work-list-row,
+  .diff-view-switch button,
+  .diff-more-btn { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
