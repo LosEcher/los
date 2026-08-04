@@ -66,7 +66,7 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       '恢复最后一次有效 checkpoint 前的完整上下文，用于 handoff 到新 agent。\n' +
       '来源: los-remaining-backlog-2026-06-17',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-24',
     stageId: 'p1-iteration-fixes',
@@ -77,6 +77,13 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       sourceMemory: 'los-remaining-backlog-2026-06-17',
       files: ['packages/agent/src/session-events.ts', 'packages/agent/src/loop/compression.ts'],
       subtaskPlan: 'daily-gaps-2026-07-27',
+      evidence: [
+        'contracts/session-recovery.yaml v0.1.0 (checkpoint schema + recovery flow)',
+        'session-recovery.ts reconstructSessionContext() + recovery checkpoints',
+        'chat-service-hooks.ts onPreCompact tool-state snapshot persistence (G1)',
+        'session-recovery.test.ts end-to-end fixture (intact/partial/incompatible-version)',
+        'tools/smoke-interrupted-run-recovery.sh frozen smoke (G1, 2026-08-03)',
+      ],
       subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
     },
   },

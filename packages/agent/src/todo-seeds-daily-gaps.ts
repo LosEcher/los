@@ -75,7 +75,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
       '保存当前 tool call 状态（未完成的 tool call、最后成功/失败的工具结果引用）、\n' +
       '引用文件的路径和内容哈希、当前消息游标位置。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'design-2026-07-27',
     stageId: 'daily-gaps',
@@ -91,6 +91,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
         '快照包含最近 5 个引用文件的路径和 content hash',
       ],
       candidateFiles: ['packages/gateway/src/chat-service-hooks.ts'],
+      closedNote: '2026-08-08: onPreCompact path persists tool-state snapshot via persistStreamCheckpoint + compactSession recoveryCheckpoint (gateway chat-service-hooks.ts); tests: chat-service-hooks.test.ts',
     },
   },
   {
