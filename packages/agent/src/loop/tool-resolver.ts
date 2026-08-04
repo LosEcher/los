@@ -21,7 +21,13 @@ export function resolveAllowedTools(
   toolMode: 'all' | 'project-write' | 'read-only',
   planningTransport?: PlanningTransport,
 ): readonly string[] | undefined {
-  const selected = explicitAllowedTools ? [...new Set(explicitAllowedTools)] : undefined;
+  // An empty array means "not specified" — same as undefined. Persisted run
+  // specs store `allowed_tools_json` with a default of '[]', so callers that
+  // pass [] (e.g. work-item planning) must not end up with a zero-tool
+  // allowlist.
+  const selected = explicitAllowedTools && explicitAllowedTools.length > 0
+    ? [...new Set(explicitAllowedTools)]
+    : undefined;
   if (toolMode !== 'read-only') {
     return selected;
   }
