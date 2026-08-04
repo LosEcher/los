@@ -3,6 +3,7 @@
 import { runPackageTests } from '../../tools/package-test-runner.mjs';
 
 const sharedProcessTestFiles = [
+  'src/auth/kimi-code.test.ts',
   'src/auth/proxy-fetch.test.ts',
   'src/auth/xai-oauth.test.ts',
   'src/cantool-capability-adapter.test.ts',

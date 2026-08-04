@@ -450,6 +450,50 @@ export function scanXaiOAuth(): DiscoveredProvider[] {
   return providers;
 }
 
+// ── 6.5 Kimi Code subscription ──────────────────────────
+
+const KIMI_CODE_CREDENTIALS_REL = join('.kimi-code', 'credentials', 'kimi-code.json');
+const KIMI_CODE_BASE_URL = 'https://api.kimi.com/coding/v1';
+const KIMI_CODE_DEFAULT_MODEL = 'kimi-k3';
+
+/**
+ * Kimi Code CLI subscription login (`~/.kimi-code/credentials/kimi-code.json`).
+ * Reported as an OAuth-class provider: the agent transport refreshes the
+ * access token lazily before each request (`auth/kimi-code.ts`).
+ */
+export function scanKimiCode(options: { homeDir?: string } = {}): DiscoveredProvider[] {
+  const homeDir = options.homeDir ?? homedir();
+  const path = join(homeDir, KIMI_CODE_CREDENTIALS_REL);
+  if (!existsSync(path)) return [];
+
+  let raw: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const hasRefreshToken = hasString(raw.refresh_token);
+  const hasAccessToken = hasString(raw.access_token);
+  if (!hasRefreshToken && !hasAccessToken) return [];
+
+  return [{
+    name: 'kimi',
+    baseUrl: KIMI_CODE_BASE_URL,
+    defaultModel: KIMI_CODE_DEFAULT_MODEL,
+    authMode: 'oauth',
+    available: hasRefreshToken,
+    source: 'kimi-code/credentials/kimi-code.json',
+    sourceTool: 'kimi',
+    importable: true,
+    note: hasRefreshToken
+      ? 'Kimi Code subscription (auto-refresh)'
+      : 'Kimi Code session token (no refresh_token — may expire)',
+  }];
+}
+
 // ── 7. Grok CLI external login ──────────────────────────
 
 type GrokScanOptions = {

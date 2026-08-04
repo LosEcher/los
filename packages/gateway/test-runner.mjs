@@ -20,6 +20,7 @@ const sharedProcessTestFiles = [
   'src/project-store.test.ts',
   'src/programmatic-interface-boundary.test.ts',
   'src/routes/providers/provider-crud-routes.test.ts',
+  'src/routes/providers/provider-model-sync-routes.test.ts',
   'src/routes/tools/mcp-routes.test.ts',
   'src/routes/tools/skill-routes.test.ts',
   'src/provider-routes.test.ts',
