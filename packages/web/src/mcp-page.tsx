@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
+  Lock,
   Pin,
   PinOff,
   Power,
@@ -216,11 +217,7 @@ function MCPServerInspector({
       {server.tools.length > 0 ? (
         <div className="definition-list">
           {server.tools.map(tool => (
-            <Definition
-              key={tool.name}
-              term={tool.name}
-              text={capabilityDescription(tool, t)}
-            />
+            <MCPToolRow key={tool.name} tool={tool} t={t} />
           ))}
         </div>
       ) : null}
@@ -308,7 +305,31 @@ function capabilityCountLabel(server: MCPServer, t: T): string {
     : t('assets.mcp.toolsCount', { count: server.toolCount });
 }
 
-function capabilityDescription(tool: MCPServer['tools'][number], t: T): string {
+function MCPToolRow({ tool, t }: { tool: MCPServer['tools'][number]; t: T }) {
+  const capability = tool.capability;
+  if (!capability || capability.availability !== 'blocked') {
+    return <Definition term={tool.name} text={toolDescription(tool, t)} />;
+  }
+  return (
+    <div className="definition tool-blocked">
+      <strong>
+        <Lock size={12} className="tool-lock-icon" aria-hidden="true" />
+        {tool.name}
+      </strong>
+      <span className="tool-block-reason">
+        {t('assets.mcp.blockedReason', { reason: capability.reason })}
+      </span>
+      <span className="tool-block-meta">
+        {t('assets.mcp.capabilityDetail', {
+          classification: capability.dataClassification,
+          description: tool.description ?? t('assets.state.noDescription'),
+        })}
+      </span>
+    </div>
+  );
+}
+
+function toolDescription(tool: MCPServer['tools'][number], t: T): string {
   const capability = tool.capability;
   if (!capability) return tool.description ?? t('assets.state.noDescription');
   const status = capability.availability === 'available'
