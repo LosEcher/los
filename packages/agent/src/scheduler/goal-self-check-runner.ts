@@ -3,6 +3,7 @@ import { createProvider } from '../providers/index.js';
 import { runPostExecutionSelfCheck, shouldRunSelfCheck, summarizeAgentContext, CONFIDENCE_GATE_THRESHOLD } from '../self-check.js';
 import { runMultiRoleReview, type ReviewRoleConfig } from '../review-runner.js';
 import { reflectOnFailure, formatReflectionSummary } from '../reflection.js';
+import { normalizeRunContractMetadata } from '../run-contract.js';
 import { readCurrentRunContract } from './contract-reader.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { updateTaskRunFields, type TaskRunRecord } from '../task-runs.js';
@@ -23,7 +24,9 @@ export async function runGoalSelfCheck(
   sessionId: string,
   taskRunId: string,
 ): Promise<ScheduledAgentTaskResult | null> {
-  const selfCheckContract = await readCurrentRunContract(input.runSpecId, running.metadata);
+  const selfCheckContract = input.selfCheckContract
+    ? normalizeRunContractMetadata(input.selfCheckContract)
+    : await readCurrentRunContract(input.runSpecId, running.metadata);
   if (!selfCheckContract || !shouldRunSelfCheck(selfCheckContract)) return null;
 
   const config = getConfig();
