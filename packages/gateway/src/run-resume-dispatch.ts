@@ -47,6 +47,15 @@ export async function dispatchPersistedRunSpec(
   const config = getConfig();
   const disposition = mode === 'planning' ? 'planning' : 'execution';
   const dedupeKey = `run:${runSpecId}:${mode}:${planRevision}`;
+  // Planning is always read-only; execution may write when the contract
+  // declares editable surfaces. Work-item runs are created with toolMode
+  // 'read-only' for the planning phase — lift it for execution so the agent
+  // can actually implement the approved plan.
+  const toolMode = disposition === 'planning'
+    ? 'read-only'
+    : (contract?.editableSurfaces?.length ?? 0) > 0
+      ? 'project-write'
+      : (runSpec.toolMode as 'all' | 'project-write' | 'read-only');
 
   const onTaskEvent = async (event: { type: string; taskRun: { id: string; runSpecId?: string; sessionId: string; status: string } }) => {
     if (workItemId) {
@@ -92,7 +101,7 @@ export async function dispatchPersistedRunSpec(
       modelSettings: runSpec.modelSettings,
       systemPrompt: runSpec.systemPrompt,
       workspaceRoot: runSpec.workspaceRoot,
-      toolMode: runSpec.toolMode as 'all' | 'project-write' | 'read-only',
+      toolMode,
       sandboxMode: (config as any).agent?.sandboxMode as 'readonly' | 'workspace-write' | 'sandbox' | undefined,
       allowedTools: runSpec.allowedTools,
       maxLoops: runSpec.maxLoops,
