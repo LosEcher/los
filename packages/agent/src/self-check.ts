@@ -200,10 +200,25 @@ export function parseSelfCheckResponse(
     jsonStr = fenceMatch[1].trim();
   }
 
-  let parsed: Record<string, unknown>;
+  let parsed: Record<string, unknown> | null = null;
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
+    // Tolerate models that wrap the JSON with tool-call noise (e.g. a
+    // hallucinated <tool_calls> prefix): extract the first balanced {...}
+    // object instead of failing the whole self-check.
+    const start = jsonStr.indexOf('{');
+    const end = jsonStr.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      const candidate = jsonStr.slice(start, end + 1);
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        parsed = null;
+      }
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return fail(`unparseable JSON response: ${text.slice(0, 200)}`);
   }
 

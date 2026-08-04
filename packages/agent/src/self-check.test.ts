@@ -164,6 +164,22 @@ test('parseSelfCheckResponse fallback on garbled text', () => {
   assert.equal(result.gaps[0].condition, 'self_check_parse');
 });
 
+test('parseSelfCheckResponse extracts JSON wrapped in tool-call noise', () => {
+  const noisy = '<tool_calls>\n<read_file file="docs/governance/anti-patterns.md" />\n' +
+    '{"goalMet": true, "stopConditionsMet": [true], "summaryOfEvidence": "read the doc", "confidence": 0.8, "gaps": []}\n' +
+    '</tool_calls>';
+  const result = parseSelfCheckResponse(noisy, 1);
+  assert.equal(result.goalMet, true);
+  assert.equal(result.confidence, 0.8);
+  assert.deepEqual(result.stopConditionsMet, [true]);
+});
+
+test('parseSelfCheckResponse extracts JSON with prose prefix', () => {
+  const result = parseSelfCheckResponse('Here is my assessment: {"goalMet": false, "stopConditionsMet": [false], "summaryOfEvidence": "x", "confidence": 0.3, "gaps": [{"condition":"g","detail":"d","suggestion":"s"}]}', 1);
+  assert.equal(result.goalMet, false);
+  assert.equal(result.confidence, 0.3);
+});
+
 test('parseSelfCheckResponse fallback on empty string', () => {
   const result = parseSelfCheckResponse('', 1);
   assert.equal(result.goalMet, false);

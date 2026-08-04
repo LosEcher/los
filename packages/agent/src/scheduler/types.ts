@@ -51,6 +51,14 @@ export interface ScheduledAgentTaskInput extends AgentConfig {
   promptPreview?: string;
   metadata?: Record<string, unknown>;
   runContract?: RunContractMetadataInput;
+  /**
+   * Goal/stop-condition override for the post-execution self-check gate.
+   * Graph workers inherit the parent run spec's contract, whose goal spans the
+   * whole graph; without this override the self-check would judge a single
+   * worker's output against the parent goal and block it. When set, the
+   * self-check uses this contract instead of the persisted run spec contract.
+   */
+  selfCheckContract?: RunContractMetadataInput;
   verificationOwner?: 'task' | 'graph';
   executor?: ScheduledExecutorConfig;
   onTaskEvent?: (event: ScheduledTaskEvent) => void | Promise<void>;
