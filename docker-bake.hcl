@@ -42,8 +42,9 @@ target "los" {
   ]
 }
 
-// Additional target: tag with git SHA for immutable references
+// Additional target: rolling `latest` plus immutable git-SHA reference.
+// CI: TAG=<git-sha> docker buildx bake --push los-sha
 target "los-sha" {
   inherits = ["los"]
-  tags     = ["${REGISTRY}/${IMAGE_NAME}:${TAG}", "${REGISTRY}/${IMAGE_NAME}:sha-${TAG}"]
+  tags     = ["${REGISTRY}/${IMAGE_NAME}:latest", "${REGISTRY}/${IMAGE_NAME}:sha-${TAG}"]
 }
