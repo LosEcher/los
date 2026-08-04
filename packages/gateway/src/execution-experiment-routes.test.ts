@@ -356,3 +356,73 @@ for (const completionStatus of ['succeeded', 'blocked'] as const) {
     }
   });
 }
+
+test('select-candidate accepts a non-kernel configDiff and persists a plain candidate', async () => {
+  const experiment = experimentRecord('experiment-nonkernel', 'draft');
+  experiment.configDiff = [{ path: 'model', value: 'candidate-model' }, { path: 'toolMode', value: 'project-write' }];
+  const source = sourceRunSpec();
+  const candidateId = 'run-experiment-nonkernel-candidate';
+  let createdCandidate: RunSpecRecord | undefined;
+  const events: string[] = [];
+  const app = await createApp({
+    async loadExecutionExperiment() { return experiment; },
+    async loadRunSpec(id) {
+      if (id === source.id) return source;
+      return id === candidateId ? createdCandidate ?? null : null;
+    },
+    async createRunSpec(input) {
+      events.push(`create:toolMode=${input.toolMode}`);
+      createdCandidate = { ...source, ...input, id: candidateId, status: 'created', createdAt: source.createdAt, updatedAt: source.updatedAt } as RunSpecRecord;
+      return createdCandidate;
+    },
+    async setExecutionExperimentCandidate(_id, runSpecId, scope) {
+      events.push(`candidate:${runSpecId}`);
+      return { ...experiment, candidateRunSpecId: runSpecId };
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/execution-experiments/${experiment.id}/select-candidate`,
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.experiment.status, 'draft');
+    assert.equal(body.experiment.candidateRunSpecId, candidateId);
+    assert.equal(body.candidateRunSpec.runContract?.executionKernel, undefined);
+    assert.equal(body.candidateRunSpec.runContract?.planParentRunSpecId, source.id);
+    assert.equal(body.candidateRunSpec.toolMode, 'project-write');
+    assert.deepEqual(events, ['create:toolMode=project-write', `candidate:${candidateId}`]);
+  } finally {
+    await app.close();
+  }
+});
+
+test('select-candidate rejects a persisted candidate with incompatible lineage', async () => {
+  const experiment = experimentRecord('experiment-lineage', 'draft');
+  experiment.configDiff = [{ path: 'model', value: 'candidate-model' }];
+  const source = sourceRunSpec();
+  const candidateId = 'run-experiment-lineage-candidate';
+  const foreign = { ...sourceRunSpec(), id: candidateId, runContract: { ...sourceRunSpec().runContract!, planParentRunSpecId: 'other-source' } };
+  const app = await createApp({
+    async loadExecutionExperiment() { return experiment; },
+    async loadRunSpec(id) {
+      if (id === source.id) return source;
+      if (id === candidateId) return foreign;
+      return null;
+    },
+    async setExecutionExperimentCandidate() { throw new Error('must not overwrite incompatible candidate'); },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/execution-experiments/${experiment.id}/select-candidate`,
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 422);
+    assert.match(response.json().error, /already occupied by an incompatible record/);
+  } finally {
+    await app.close();
+  }
+});

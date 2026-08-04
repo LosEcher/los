@@ -86,6 +86,11 @@ operatorControl:
     behaviorWhenAuthDisabled: local_operator
   requiredFor: [approve, select-candidate, authorize-canary, rollback, execute]
   actorSource: request context user id
+# K4 kernel experiments are the first concrete candidate family. Non-kernel
+# experiments (provider/model/toolMode/allowedTools/maxLoops/timeoutMs/
+# modelSettings diffs) are also selectable through the same lifecycle; they
+# create a plain candidate run spec with no executionKernel selection and no
+# canary authorization.
 kernelCandidate:
   configDiffPath: executionKernel
   exactCandidate:
@@ -107,12 +112,21 @@ kernelCandidate:
       version: 0.1.0
       protocolVersion: 0.1.0
     revokesCanaryAuthorization: true
+nonKernelCandidate:
+  allowedDiffPaths: [provider, model, toolMode, allowedTools, maxLoops, timeoutMs, modelSettings]
+  toolModes: [all, project-write, read-only]
+  runContractMode: audit
+  executionKernel: omitted
+  canaryAuthorization: not_applicable
+  remoteExecutorAllowed: true
 invariants:
   - Draft creation never schedules or executes a candidate.
   - Source session, run, cursor, evidence hash, and fingerprints are immutable provenance references.
   - A K4 candidate run spec is persisted before experiment approval or execution and keeps the source plan lineage.
   - Pi selection is valid only for the exact K4 candidate, an audit RunContract, and read-only planning or inspection.
   - Selecting Pi never changes the default LOS registry decision and never enables a remote executor.
+  - Non-kernel candidates apply the configDiff onto the source run spec, keep the source plan lineage, and carry no executionKernel selection.
+  - Non-kernel candidate execution requires operator approval and a plan_approved phase, and may use the configured executor mesh.
   - Experiment approval and candidate plan approval do not grant provider-canary consent.
   - Rollback selects the exact LOS adapter on the same run spec, records actor and reason, and revokes canary authorization.
   - Candidate run plans are persisted in planning and approved through approveRunSpecPhase before execution.
