@@ -17,6 +17,7 @@ import {
   recordWorkerAnswer,
   resumeAnsweredAsksForRunSpec,
   runVerificationRecordsForRunSpec,
+  succeedFailedVerifiersForRunSpec,
 } from '@los/agent';
 import { getDb } from '@los/infra/db';
 import {
@@ -54,6 +55,7 @@ type RunRoutesDependencies = {
   resumeAnsweredAsksForRunSpec: typeof resumeAnsweredAsksForRunSpec;
   reviseRunSpecPlan: typeof reviseRunSpecPlan;
   runVerificationRecordsForRunSpec: typeof runVerificationRecordsForRunSpec;
+  succeedFailedVerifiersForRunSpec: typeof succeedFailedVerifiersForRunSpec;
   ensureRunSpecStore: typeof ensureRunSpecStore;
   ensureSessionEventStore: typeof ensureSessionEventStore;
   ensureStreamCheckpointStore: typeof ensureStreamCheckpointStore;
@@ -78,6 +80,7 @@ const defaultDependencies: RunRoutesDependencies = {
   resumeAnsweredAsksForRunSpec,
   reviseRunSpecPlan,
   runVerificationRecordsForRunSpec,
+  succeedFailedVerifiersForRunSpec,
   ensureRunSpecStore,
   ensureSessionEventStore,
   ensureStreamCheckpointStore,
@@ -296,6 +299,18 @@ async function handleVerify(req: FastifyRequest, reply: FastifyReply, deps: RunR
           log.warn('revision planning dispatch failed', { runSpecId: recovery?.runSpecId, error: error instanceof Error ? error.message : String(error) });
         });
       }
+    }
+  } else if (verification.decision.status === 'succeeded') {
+    // The verification gate now satisfies the graph verifier's goal: recover
+    // failed verifier tasks so the graph completion can unblock (otherwise
+    // the graph deadlocks — run rejects a succeeded run spec, verifier stays
+    // failed forever).
+    const recovered = await deps.succeedFailedVerifiersForRunSpec(id).catch((error: unknown) => {
+      log.warn('graph verifier recovery failed', { runSpecId: id, error: error instanceof Error ? error.message : String(error) });
+      return 0;
+    });
+    if (recovered > 0) {
+      log.info('graph verifier tasks recovered after verification gate passed', { runSpecId: id, recovered });
     }
   }
   return { ...verification, recovery };
