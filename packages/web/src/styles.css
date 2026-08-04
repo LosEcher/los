@@ -1967,6 +1967,60 @@ button:disabled {
   color: var(--muted);
 }
 
+/* MCP tool capability rows — blocked tools are de-emphasized */
+.definition.tool-blocked {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  border-bottom-color: var(--line);
+}
+
+.definition.tool-blocked strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+}
+
+.tool-lock-icon {
+  color: var(--faint);
+  flex-shrink: 0;
+}
+
+.definition.tool-blocked .tool-block-meta {
+  color: var(--faint);
+}
+
+.definition.tool-blocked .tool-block-reason {
+  color: var(--warn);
+}
+
+/* MCP tool capability rows — blocked tools are de-emphasized */
+.definition.tool-blocked {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  border-bottom-color: var(--line);
+}
+
+.definition.tool-blocked strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+}
+
+.tool-lock-icon {
+  color: var(--faint);
+  flex-shrink: 0;
+}
+
+.definition.tool-blocked .tool-block-meta {
+  color: var(--faint);
+}
+
+.definition.tool-blocked .tool-block-reason {
+  color: var(--warn);
+}
+
 .json-block {
   border-top: 1px solid var(--line);
   padding: 14px 16px;
