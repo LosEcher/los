@@ -54,6 +54,31 @@ test('parsePlanningOutput rejects prose and incomplete plan steps', () => {
   })), /requires a non-empty description/);
 });
 
+test('validatePlanningOutputPayload strips NUL bytes before persistence', () => {
+  const parsed = parsePlanningOutput(JSON.stringify({
+    summary: 'Fix\u0000 the page',
+    plan: [{
+      id: 'step-1',
+      title: 'Edit mcp-page\u0000',
+      description: 'Add blocked styling\u0000 to the tool list',
+      dependsOnIds: [],
+      editableSurfaces: ['packages/web/src/mcp-page.tsx'],
+      completionCriteria: 'blocked tools render gray\u0000',
+    }],
+    verifications: [{
+      id: 'verify-1',
+      kind: 'command',
+      description: 'web check',
+      command: 'pnpm --filter @los/web check\u0000',
+    }],
+  }));
+  assert.equal(parsed.summary, 'Fix the page');
+  assert.equal(parsed.plan[0]?.title, 'Edit mcp-page');
+  assert.equal(parsed.plan[0]?.description, 'Add blocked styling to the tool list');
+  assert.equal(parsed.plan[0]?.completionCriteria, 'blocked tools render gray');
+  assert.equal(parsed.verifications[0]?.command, 'pnpm --filter @los/web check');
+});
+
 test('parsePlanningOutput rejects non-command verification kinds', () => {
   assert.throws(() => parsePlanningOutput(JSON.stringify({
     plan: [{
