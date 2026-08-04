@@ -110,15 +110,15 @@ Goal: make the intended agent behavior explicit before the task starts.
 
 #### Remaining Gaps
 
-1. Direct unit tests for `approveRunSpecPhase()` and `reviseRunSpecPlan()`
-2. Gateway route integration tests for `POST /runs/:id/approve` and `/revise-plan`
-3. End-to-end smoke covering audit→execution→closeout full mode lifecycle
-4. Durable child run-spec lineage and child attempt linkage
-5. Active execution resume with attempt/retry contract
-6. Phase latency and rejection metrics
-7. Operator approval UI in Web console
-8. Stop-condition runtime enforcement (types exist, enforcement does not)
-9. Commit-boundary reporting automation
+1. ~~Direct unit tests for `approveRunSpecPhase()` and `reviseRunSpecPlan()`~~ ✅ closed — `packages/agent/src/run-specs.test.ts`
+2. ~~Gateway route integration tests for `POST /runs/:id/approve` and `/revise-plan`~~ ✅ closed — `packages/gateway/src/routes/run-routes.test.ts`
+3. ~~End-to-end smoke covering audit→execution→closeout full mode lifecycle~~ ✅ closed — `docs/operations/2026-06-10-stage-b-end-to-end-lifecycle-smoke.md`
+4. ~~Durable child run-spec lineage and child attempt linkage~~ ✅ closed 2026-08-06 — `run_specs.result_json` + `updateRunSpecResult()` (G2); `planParentRunSpecId` lineage; see `docs/governance/2026-08-06-daily-use-gap-analysis.md`
+5. ~~Active execution resume with attempt/retry contract~~ ✅ closed 2026-08-03 — interrupted-run recovery smoke (G1, `tools/smoke-interrupted-run-recovery.sh`) + `packages/gateway/src/chat-resume-guard.test.ts`
+6. Phase latency and rejection metrics — still open (no `phaseDuration`/rejection metric implementation found)
+7. ~~Operator approval UI in Web console~~ ✅ closed — `packages/web/src/chat-plan-approval.tsx`, `chat-approval.tsx`; work-page approve→dispatch loop
+8. ~~Stop-condition runtime enforcement (types exist, enforcement does not)~~ ✅ closed — `loop.ts` in-loop check every 5 rounds + independent goal-self-check judge gate (`stop-conditions.ts`, `goal-self-check-runner.ts`)
+9. Commit-boundary reporting automation — still open (only `run-contract.ts` types exist; no automated boundary report)
 
 #### Exit Criteria
 
@@ -157,11 +157,14 @@ Exit criteria:
 
 ### Stage D: Stateful Runtime
 
-Status: partially implemented early, aligned with ADR 0012. Durable run specs,
-task runs, session events, stream checkpoints, tool-call recovery, verification
-records, service heartbeat, and failover recovery surfaces exist. Remaining
-work is to prove resume behavior across real interrupted `/chat` sessions and
-to keep provider/model evaluation separate from runtime recovery evaluation.
+Status: implemented with recovery evidence as of 2026-08-03 (G1). Durable run
+specs, task runs, session events, stream checkpoints, tool-call recovery,
+verification records, service heartbeat, and failover recovery surfaces exist.
+Interrupted `/chat` resume is proven by the frozen smoke
+`tools/smoke-interrupted-run-recovery.sh` (kill gateway → restart → resume same
+run; `docs/operations/2026-08-03-interrupted-run-recovery-smoke.md`). Remaining
+work is to keep provider/model evaluation separate from runtime recovery
+evaluation and to harden reconstruction protocol (`todo-los-gap-cr-*` backlog).
 
 Goal: move from audit-grade evidence to recovery-grade execution.
 
@@ -192,9 +195,10 @@ three of three tasks succeeded and one legal graph-owned final transition; see
 `docs/operations/2026-07-22-governed-agent-graph-smoke.md`.
 
 This status does not mean general multi-agent autonomy is complete. Remaining
-work is graph-level provenance display, interrupted-run recovery evidence,
-serial-versus-graph eval comparison, and operator-reviewed live integration
-before increasing scale or reducing consent gates.
+work is graph-level provenance display (`agent-graph-control.tsx` control page
+exists; no `provenance` read model in `packages/web` yet), serial-versus-graph
+eval comparison, and operator-reviewed live integration before increasing scale
+or reducing consent gates. Interrupted-run recovery evidence (G1) is closed.
 
 Goal: support planner, executor, and verifier roles without turning the runtime
 into unconstrained peer chat.
@@ -286,6 +290,18 @@ first provider-backed canary remain blocked behind
 unavailable as a selected production kernel. The current LOS loop stays the
 production baseline until a real canary, formal pairwise evaluation, and
 rollback gates pass under explicit operator consent.
+
+**K4 canary executed (2026-08-03, advisory).** Operator-authorized 2026-07-31;
+executed 2026-08-03 under `experiment-k4-canary-20260803d`: candidate
+`pi@0.81.1+los.3` planning disposition, `canaryAuthorization=granted`,
+`kernel.started`/`kernel.finished` session events on record, candidate ended
+`blocked` at `candidate_plan_awaiting_approval`. Two defects found and fixed in
+that batch. Verdict is **advisory only**: the pairwise sample gate
+(`sample-gate-k4-20260803`, n=1 pair, tie 20:20) passed the pipeline but does
+not support statistical conclusions, and rollback gates are not yet run.
+Full record: `docs/operations/2026-08-03-k4-canary.md`. Pi still requires a
+formal pairwise evaluation plus rollback gates under explicit operator consent
+before promotion (`todo-los-pi-k4-readonly-canary`, `authorization=not_granted`).
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,
@@ -397,8 +413,8 @@ ingestion adapter requires a separate ADR and redaction contract.
 
 | Goal | Current owner | Next owner |
 | --- | --- | --- |
-| Mode contracts | `run-contract.ts` + `run_specs.ts` + ADR 0021 | CLI/UI entrypoints, Web approval UI |
-| Completion contract | `run-contract.ts` (canStartExecution, canMarkSucceeded) + `scheduled-task-runner.ts` (B0 gate) + ADR 0014 | Stop-condition runtime enforcement, commit-boundary automation |
+| Mode contracts | `run-contract.ts` + `run_specs.ts` + ADR 0021 | CLI/UI entrypoints (Web approval UI ✅ `chat-plan-approval.tsx`) |
+| Completion contract | `run-contract.ts` (canStartExecution, canMarkSucceeded) + `scheduled-task-runner.ts` (B0 gate) + ADR 0014 | Stop-condition runtime enforcement ✅ (`loop.ts` + `stop-conditions.ts`); commit-boundary automation remains open |
 | Scope contract | `run-contract.ts` (editableSurfaces, ownerLayer) + agent task graph/scheduler | — |
 | Toolchain matrix | `docs/governance/toolchain-matrix.md` | future redacted ingestion adapter ADR |
 | Eval corpus | `docs/governance/eval-backlog.md` + todos | tests, compat harnesses, operation smokes |
@@ -409,15 +425,13 @@ ingestion adapter requires a separate ADR and redaction contract.
 
 ## Current Short-Term Work Items
 
-2026-06-19 architecture inventory produced one actionable readiness gap:
-
-1. Providers module is not ready to be treated as fully `live` even though
-   `packages/web/src/App.tsx` currently marks the NAV item as `live`.
-2. Code evidence shows `PATCH /providers/:name` and `DELETE /providers/:name`
-   exist, but `POST /providers`, CRUD lifecycle route tests, and Web write
-   controls are still missing.
-3. The owner todo is `todo-los-provider-config-crud-readiness`; the tracking
-   checklist lives in `docs/governance/module-readiness.md`.
+2026-06-19 architecture inventory produced one actionable readiness gap —
+**closed**. `POST /providers` (CRUD lifecycle routes + tests,
+`provider-crud-routes.ts`/`provider-crud-routes.test.ts`), Web write controls
+(create/edit/delete in `providers-page.tsx`), and the owner todo
+`todo-los-provider-config-crud-readiness` are all complete (`done`, P1).
+Any future Web state alignment for provider module is tracked in
+`docs/governance/module-readiness.md`.
 
 ## Non-Goals
 
