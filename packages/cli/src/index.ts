@@ -18,6 +18,7 @@ import { providerCommand } from './provider.js';
 import { scanCommand } from './scan.js';
 import { setupCommand } from './setup.js';
 import { runCommand as runOperationCommand } from './run-operations.js';
+import { sessionTraceCommand } from './session-trace.js';
 import { parseProviderFallbackFlags } from './provider-fallback.js';
 import { workspacesCommand } from './workspaces.js';
 
@@ -57,6 +58,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'sessions') {
+    if (commandArgs[0] === 'trace' || commandArgs[0] === 'follow') {
+      await sessionTraceCommand(globalArgs, commandArgs);
+      return;
+    }
     await listCommand(globalArgs, commandArgs, '/sessions', renderSessions);
     return;
   }
