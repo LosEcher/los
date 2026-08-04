@@ -11,19 +11,19 @@
 #   docker build -t los .
 #
 # Build (multi-platform, for publishing):
-#   docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/los-ecommerce/los:latest .
+#   docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/losecher/los:latest .
 #
 # Run standalone (with external PostgreSQL):
 #   docker run -d --name los \
 #     -p 8080:8080 \
 #     -e DATABASE_URL=postgres://user:pass@host:5432/los \
 #     -e DEEPSEEK_API_KEY=sk-xxx \
-#     ghcr.io/los-ecommerce/los:latest
+#     ghcr.io/losecher/los:latest
 
 # ── Stage 1: Build ─────────────────────────────────────
 FROM node:22-alpine AS build
 
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.6.0 --activate
 WORKDIR /app
 
 # Layer 1: workspace root configs (infrequently changed — good cache hit)
@@ -58,7 +58,7 @@ RUN pnpm store prune && rm -rf .turbo packages/*/.turbo
 # ── Stage 2: Runtime ───────────────────────────────────
 FROM node:22-alpine
 
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.6.0 --activate
 
 WORKDIR /app
 
