@@ -23,7 +23,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
       '恢复时如何重建消息数组、恢复后的第一条系统消息格式。\n' +
       '需覆盖：正常完成恢复、部分 checkpoint 缺失、checkpoint 版本不兼容三种场景。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'design-2026-07-27',
     stageId: 'daily-gaps',
@@ -37,6 +37,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
         'checkpoint 包含 tool state 快照、引用文件路径和哈希、最近 N 条消息的游标',
       ],
       candidateFiles: ['contracts/session-recovery.yaml'],
+      closedNote: '2026-08-08: contracts/session-recovery.yaml v0.1.0 + CHECKPOINT_VERSION/isCheckpointVersionSupported in session-recovery.ts; tool-state snapshot writing tracked in todo-los-gap-cr-tool-state',
     },
   },
   {
@@ -47,7 +48,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
       '前的完整消息数组。按 event 时间顺序组装：系统消息 → 历史对话 → 未完成的 tool call。\n' +
       '对于无法恢复的部分（tool result 已丢失），注入占位消息说明原因。',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'design-2026-07-27',
     stageId: 'daily-gaps',
@@ -63,6 +64,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
         '重建后的消息格式兼容 provider chat() 的 messages 参数',
       ],
       candidateFiles: ['packages/agent/src/session-recovery.ts'],
+      closedNote: '2026-08-08: reconstructSessionContext() in session-recovery.ts:164; tests cover message rebuild, stub for lost tool results, provider-compatible messages',
     },
   },
   {
@@ -101,7 +103,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
       '3. 追加新用户消息，接续 agent loop 执行\n' +
       '4. 发出 session.resumed 事件，记录恢复来源 checkpoint',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'design-2026-07-27',
     stageId: 'daily-gaps',
@@ -117,6 +119,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
         '恢复不丢失之前 session 的已完成工具调用结果',
       ],
       candidateFiles: ['packages/gateway/src/chat-service.ts'],
+      closedNote: '2026-08-08: chat-resume-plan.ts/chat-resume-guard.ts/run-resume-recovery.ts (G1); implemented without waiting on cr-tool-state',
     },
   },
   {
@@ -129,7 +132,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
       '3. 模拟恢复后的 agent loop 继续执行\n' +
       '4. 验证恢复后的工具调用成功率和上下文引用正确性',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'design-2026-07-27',
     stageId: 'daily-gaps',
@@ -144,6 +147,7 @@ export const DAILY_GAP_TODO_SEED: CreateTodoInput[] = [
         '测试可通过 pnpm --filter @los/agent test 运行',
       ],
       candidateFiles: ['packages/agent/src/session-recovery.test.ts'],
+      closedNote: '2026-08-08: session-recovery.test.ts end-to-end fixture covers intact/partial/incompatible-version + loop continuation via initialMessages',
     },
   },
 
