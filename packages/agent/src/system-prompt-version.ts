@@ -11,4 +11,4 @@ export const SYSTEM_PROMPT_VERSION = '1.3.0';
  * Context-window strategy version: tracks compression, compaction, eviction, and
  * cache-aware policy changes independently from system prompt changes.
  */
-export const CONTEXT_STRATEGY_VERSION = '1.0.0';
+export const CONTEXT_STRATEGY_VERSION = '1.1.0';

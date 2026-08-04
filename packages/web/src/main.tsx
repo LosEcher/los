@@ -29,3 +29,13 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Offline shell / installability (G9): register the service worker only in
+// production builds so dev servers and e2e never race against a stale cache.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Non-fatal: the console works fully online without the worker.
+    });
+  });
+}

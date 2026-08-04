@@ -2730,6 +2730,131 @@ button:disabled {
   font-size: 14px;
 }
 
+.workspace-diff {
+  grid-column: 1 / -1;
+  border-top: 1px dashed rgb(57 61 49 / 0.3);
+  padding: 10px 20px 14px;
+}
+
+.diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.diff-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-view-switch button {
+  border: 0;
+  background: transparent;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.diff-view-switch button.active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.diff-files {
+  display: grid;
+  gap: 8px;
+}
+
+.diff-file {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: rgb(57 61 49 / 0.06);
+  font-size: 12px;
+}
+
+.diff-file-header strong { overflow-wrap: anywhere; }
+
+.diff-stat {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.diff-added { color: var(--ok); }
+.diff-removed { color: var(--danger); }
+
+.diff-content {
+  margin: 0;
+  padding: 6px 0;
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.diff-line-row {
+  display: grid;
+  grid-template-columns: 44px 44px 1fr;
+  min-width: max-content;
+}
+
+.diff-line-row.diff-add { background: rgb(46 160 67 / 0.12); }
+.diff-line-row.diff-del { background: rgb(248 81 73 / 0.12); }
+.diff-line-row.diff-hunk { background: rgb(88 166 255 / 0.12); }
+.diff-line-row.diff-ctx .diff-line-text { color: var(--muted); }
+.diff-line-row.diff-meta .diff-line-text { color: var(--faint); }
+.diff-line-row.diff-add .diff-line-text { color: var(--ok); }
+.diff-line-row.diff-del .diff-line-text { color: var(--danger); }
+.diff-line-row.diff-hunk .diff-line-text { color: var(--info); }
+
+.diff-line-num {
+  padding-right: 10px;
+  text-align: right;
+  color: var(--faint);
+  user-select: none;
+}
+
+.diff-line-text { white-space: pre; }
+
+.diff-side-grid { display: grid; }
+
+.diff-side-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: max-content;
+}
+
+.diff-side-row.full { grid-template-columns: 1fr; }
+
+.diff-side-cell {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+}
+
+.diff-side-cell.diff-empty { background: rgb(0 0 0 / 0.03); }
+
+.diff-more-btn {
+  margin: 6px 12px 10px;
+  font-size: 11px;
+}
+
 .verification-records,
 .workspace-evidence {
   border-top: 1px solid rgb(57 61 49 / 0.42);
@@ -3168,12 +3293,26 @@ button:disabled {
   .result-review-actions label { grid-template-columns: 1fr; }
   .result-review-actions > div { justify-content: stretch; }
   .result-review-actions button { flex: 1 1 180px; }
+  /* Mobile: keep the accept/revision decision reachable while reviewing a long diff. */
+  .result-review-actions {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .diff-view-switch button { min-height: 36px; }
+  .diff-line-num { padding-right: 6px; }
+  .diff-line-row { grid-template-columns: 28px 28px 1fr; }
+  .diff-side-cell { grid-template-columns: 28px 1fr; }
 }
 
 @media (pointer: coarse) {
   .attention-action,
   .attention-filters button,
-  .work-list-row { min-height: 44px; }
+  .work-list-row,
+  .diff-view-switch button,
+  .diff-more-btn { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

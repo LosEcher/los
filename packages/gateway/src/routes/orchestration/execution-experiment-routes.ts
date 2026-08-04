@@ -123,7 +123,7 @@ async function handleSelectCandidate(
       return reply.status(409).send({ error: `candidate must be selected while experiment is draft (status=${experiment.status})` });
     }
     const candidatePolicy = readK4KernelCandidate(experiment.configDiff);
-    if (!candidatePolicy) return reply.status(422).send({ error: 'executionKernel configDiff is required for K4 candidate selection' });
+    const isK4Candidate = candidatePolicy !== undefined;
     const candidateId = experiment.candidateRunSpecId ?? `run-${id}-candidate`;
     if (experiment.candidateRunSpecId) {
       const existing = await dependencies.loadRunSpec(candidateId);
@@ -141,16 +141,20 @@ async function handleSelectCandidate(
     }
     const recovered = await dependencies.loadRunSpec(candidateId);
     if (recovered) {
-      const policyError = validateK4ExecutionKernelSelection(recovered.runContract?.executionKernel, {
-        runContractMode: recovered.runContract?.mode,
-        toolMode: recovered.toolMode,
-        executorEnabled: false,
-        requireCanaryAuthorization: false,
-      });
+      const policyError = isK4Candidate
+        ? validateK4ExecutionKernelSelection(recovered.runContract?.executionKernel, {
+            runContractMode: recovered.runContract?.mode,
+            toolMode: recovered.toolMode,
+            executorEnabled: false,
+            requireCanaryAuthorization: false,
+          })
+        : null;
       if (!matchesExperimentScope(recovered, experiment)
-        || recovered.runContract?.executionKernel?.experimentId !== id
-        || recovered.runContract.executionKernel.disposition !== candidatePolicy.disposition
-        || recovered.runContract.planParentRunSpecId !== source.id
+        || recovered.runContract?.planParentRunSpecId !== source.id
+        || (isK4Candidate && (
+          recovered.runContract?.executionKernel?.experimentId !== id
+          || recovered.runContract.executionKernel.disposition !== candidatePolicy!.disposition
+        ))
         || policyError) {
         throw new Error(`candidate run spec id is already occupied by an incompatible record: ${candidateId}`);
       }
@@ -173,7 +177,7 @@ async function handleSelectCandidate(
       model: candidate.model,
       modelSettings: candidate.modelSettings,
       workspaceRoot: candidate.workspaceRoot,
-      toolMode: 'read-only',
+      toolMode: isK4Candidate ? 'read-only' : candidate.toolMode,
       allowedTools: candidate.allowedTools,
       toolRetry: candidate.toolRetry,
       maxLoops: candidate.maxLoops,
@@ -183,17 +187,17 @@ async function handleSelectCandidate(
         ...source.runContract,
         mode: 'audit',
         executionMode: 'standard',
-        toolMode: 'read-only',
+        toolMode: isK4Candidate ? 'read-only' : candidate.toolMode,
         phase: 'planning',
         previousPhase: 'created',
         phaseChangedAt: selectedAt.toISOString(),
         planParentRunSpecId: source.id,
-        executionKernel: createK4ExecutionKernelSelection({
+        executionKernel: isK4Candidate ? createK4ExecutionKernelSelection({
           experimentId: id,
-          disposition: candidatePolicy.disposition,
+          disposition: candidatePolicy!.disposition,
           actor: context.userId,
           now: selectedAt,
-        }),
+        }) : undefined,
       },
     });
     const updated = await dependencies.setExecutionExperimentCandidate(id, candidateId, scope);
