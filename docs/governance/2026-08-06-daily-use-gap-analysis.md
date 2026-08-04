@@ -48,7 +48,7 @@ recheck.
 | G5 | ~~No Chinese i18n at all~~ ✅ **closed 2026-08-06** | i18n infrastructure (`packages/web/src/i18n/`: `I18nProvider` + `useI18n()`/`tt()`, `localStorage` persistence `los.lang`, `document.documentElement.lang`, browser-language first-visit default) + full en/zh dictionaries (8 files, ~1,600 keys across `core/chat/work/pages/ops/assets` areas) + EN/中文 switcher in the topbar + localized `formatDate`/`formatDuration`. All 43 UI surfaces extracted; `aria-label`/`title`/placeholder translated. Tests: `i18n.test.mjs` (en/zh key parity, static call-site resolution, placeholder subset rule), `ui-boundary.test.mjs` adapted to assert against the en dict, e2e `i18n-switcher.spec.ts` (switch + persistence on desktop & mobile). Checks: `pnpm --filter @los/web check` + 28 unit + 22 e2e green |
 | G6 | Context compaction: text-level only, no masking cascade | `loop/compression.ts` (heuristic summary + tail truncation + hard trim); persistent compaction is structured DB archive (`memory/src/core/compaction.ts`) but that is not context masking |
 | G7 | ~~CLI static render output, no typed projection / interactive terminal~~ ✅ **closed 2026-08-07** | `los sessions trace <session-id>` renders the typed `los.session-trace` projection (`packages/cli/src/session-trace.ts`, mirrors `contracts/session-trace.yaml` 0.2.0; `--since N`/`--json`); `los sessions follow <session-id>` polls `/sessions/:id/trace/since` with a high-water `nextSince` cursor, dedupes by message key, prints tool status transitions, and exits after `--max-idle-ms` without new messages. Contract updated: `/sessions/{sessionId}/trace/since` documented in `session-trace.yaml`. Tests: `session-trace.test.ts` 10 cases (render/update-lines/follow dedupe+cursor+idle-exit/auth). Live smoke: real gateway trace + follow on `chat-deepseek-1783661218863` rendered turns/tools and idle-exited in 1.5s |
-| G8 | Web diff review is "viewer"-level only | `work-review-panel.tsx:7-112` (line coloring, truncation; no side-by-side/inline comments) |
+| G8 | ~~Web diff review is "viewer"-level only~~ ✅ **closed 2026-08-07** | Line-level diff rendering in `work-review-panel.tsx`: unified/side-by-side view switch, old/new line numbers, replacement-block pairing (consecutive `-` runs align with following `+` runs), large-file collapse with expand-on-demand, binary/new/deleted file markers. Parser is a pure module `packages/web/src/diff-parse.mjs` (+ `.d.mts` declarations) with runtime unit tests. Also fixed: `WorkspaceDiff`/backup used raw `fetch` without auth/tenant headers — now via `getJson`/`postJson` (diff previously returned 401 under auth). Tests: `diff-parse.test.mjs` 8 cases; e2e `work-diff-review.spec.ts` (unified render, side-by-side alignment, collapse/expand) green on desktop+mobile; full web e2e 26/26, unit 36/36, tsc clean |
 | G9 | Mobile: basic responsive only | `styles.css` @media ≤780px collapses sidebar; no standalone app/push |
 
 ### Tier 3 — Ecosystem / Scale
@@ -78,6 +78,10 @@ cycle should reconcile roadmap with code.
 2. **Tier 2**: ~~G5 Chinese i18n~~ ✅ done 2026-08-06 (full en/zh extraction,
    topbar EN/中文 switcher, persistence, `i18n.test.mjs` parity + e2e switcher
    spec); ~~G7 CLI projection~~ ✅ done 2026-08-07 (`los sessions trace|follow`,
-   typed `los.session-trace` 0.2.0); G8 diff review upgrade.
+   typed `los.session-trace` 0.2.0); ~~G8 diff review upgrade~~ ✅ done 2026-08-07
+   (line-level unified/side-by-side views + auth fix in `work-review-panel.tsx`);
+   ~~G6 compaction masking cascade~~ ✅ done 2026-08-07 (deterministic 3-layer
+   masking: warning masks tool results, aggressive collapses to summary,
+   emergency trims; AP11 version bump 1.1.0).
 3. **Tier 3**: G3 fix bake identity + add image build/push CI, or stop
    advertising GHCR; G12 npm publish under `@los/` scope.
