@@ -492,5 +492,33 @@ export async function listAgentTaskAttempts(taskId: string): Promise<AgentTaskAt
   return rows.rows.map(rowToAttempt);
 }
 
+/**
+ * Recover failed verifier tasks of a graph once the run's verification gate
+ * passes. The verifier task's own execution may have been blocked by the same
+ * verification gate (e.g. a phantom check from the planning agent), and the
+ * operator then re-verifies the run spec; at that point the verifier's
+ * goal is satisfied by the gate itself. Without this, the graph stays
+ * `blocked` forever because `POST /agent-graphs/:id/run` rejects a run spec
+ * whose phase is already `succeeded` (deadlock).
+ */
+export async function succeedFailedVerifiersForRunSpec(runSpecId: string): Promise<number> {
+  await ensureAgentTaskGraphStore();
+  const db = getDb();
+  const rows = await db.query<{ id: string }>(
+    `SELECT id FROM agent_tasks
+     WHERE run_spec_id = $1 AND role = 'verifier' AND status = 'failed'`,
+    [runSpecId],
+  );
+  let updated = 0;
+  for (const row of rows.rows) {
+    const task = await updateAgentTaskStatus(row.id, 'succeeded', {
+      recoveredBy: 'verification_gate',
+      recoveredAt: new Date().toISOString(),
+    });
+    if (task) updated += 1;
+  }
+  return updated;
+}
+
 
 export { rowToTask, type AgentTaskRow } from './agent-task-graph/rows.js';
