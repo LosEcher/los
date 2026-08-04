@@ -46,7 +46,7 @@ services:
   # ── los Gateway ───────────────────────────────────────
   los:
     # Mode A: pre-built GHCR image (default)
-    image: ghcr.io/los-ecommerce/los:latest
+    image: ghcr.io/losecher/los:latest
     # Mode B: local build — use docker-compose.build.yml override, or uncomment:
     # build: .
     restart: unless-stopped
