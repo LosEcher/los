@@ -30,6 +30,7 @@ const sharedProcessTestFiles = [
   'src/loop/architect-integration.test.ts',
   'src/loop/architect-phase.test.ts',
   'src/loop/compaction-quality.test.ts',
+  'src/loop/masking.test.ts',
   'src/loop/phase-tool-gate.test.ts',
   'src/loop/stop-conditions.test.ts',
   'src/loop/tool-runner.test.ts',

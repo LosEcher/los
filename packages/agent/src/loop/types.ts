@@ -185,6 +185,17 @@ export interface ContextCompressionConfig {
     /** Maximum stub length in characters (default: 200). */
     maxStubChars?: number;
   };
+  /**
+   * Deterministic masking cascade (G6): at the warning tier, tool results in
+   * old turns are replaced with compact mask cards (structure preserved)
+   * instead of being collapsed into a single summary. The aggressive tier
+   * then collapses masked turns into one summary; emergency stays hard trim.
+   */
+  masking?: {
+    enabled?: boolean;
+    /** Maximum mask card length in characters (default: 240). */
+    maxCardChars?: number;
+  };
 }
 
 export interface ToolCallStateTransition {
