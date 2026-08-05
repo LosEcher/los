@@ -55,8 +55,12 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   _pool = new Pool({
     connectionString: url,
     options: testSchema ? `-c search_path=${testSchema}` : undefined,
-    max: 20,
-    connectionTimeoutMillis: 5000,
+    // 2026-08-05 V4 probe: concurrent agent runs (parent + child subagents +
+    // compaction + outbox batch) exhausted 20 connections and hit the 5s
+    // connect timeout, cancelling the parent task. Raised headroom and
+    // tolerated peak queueing.
+    max: 50,
+    connectionTimeoutMillis: 15000,
     idleTimeoutMillis: 10000,
     allowExitOnIdle: true,
   });
