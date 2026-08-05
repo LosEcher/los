@@ -13,11 +13,11 @@ import { markStaleServiceInstancesOffline } from '@los/agent/service-instances';
 import { resolveCoordinationBackend } from '@los/agent/coordination';
 import { processDueFeedAnalysisCallbacks, pruneExpiredFeedAnalysisMaterial } from '@los/agent';
 import { publishExecutionOutboxBatch } from '@los/agent/execution-outbox';
-import { reapExpiredExecutionLeases } from './execution-lease-reaper.js';
+import { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs } from './execution-lease-reaper.js';
 import { sweepSymbolCache } from './chat-cbm-symbol-cache.js';
 import { registerDailyAgentQualityMaintenance } from './daily-agent-quality-maintenance.js';
 
-export { reapExpiredExecutionLeases };
+export { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs };
 
 const log = getLogger('gateway');
 
@@ -295,6 +295,16 @@ export function registerServerMaintenance(
       })
       .catch((error) => log.warn(
         `Execution lease reaper failed: ${error instanceof Error ? error.message : String(error)}`,
+      ));
+  });
+
+  // ── Stale-running run_spec recovery (60s) ───────────────────
+  // V2 observability task: run_specs stuck in `running` with no active task
+  // and no update for 30min are transitioned to blocked via the state machine.
+  registerImmediateIntervalTask(app, 60_000, () => {
+    recoverStaleRunningRunSpecs()
+      .catch((error) => log.warn(
+        `Stale-running recovery failed: ${error instanceof Error ? error.message : String(error)}`,
       ));
   });
 
