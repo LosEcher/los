@@ -1036,3 +1036,87 @@ immediately become outdated.
 Keep `block_on_outdated_branch=true`. The temporary disable used for PRs
 `#20-#24` bypassed the normal stale-base guard and should remain an exceptional,
 explicitly audited operation rather than the standard stacked-PR procedure.
+
+## 2026-08-05 Registry Mirror And Direct-Pull Enablement
+
+### Trigger
+
+`win-los-canary` was offline: the `forgejo-runner-win-canary` container had
+exited (last activity 2026-08-04 processing PR `#179` tasks) while the Podman
+machine and Windows host stayed up. `podman start` revived it; the queued
+`#180-#188` runs then drained on the runner. This session also removed three
+stale job containers (TASK-834/835) and six orphan volumes left by prior
+exits.
+
+### Corrected Understanding: "VM cannot pull Docker Hub"
+
+The 2026-07-23 note that "Docker Hub was not reachable from the VM" conflated
+two separate facts:
+
+1. **Bad proxy environment in the VM user shell** `[E]`: every SSH session as
+   `user` carries `http_proxy=http://http://127.0.0.1:12080` (double scheme,
+   broken) plus Windows-escaped `no_proxy` that Linux curl does not match.
+   Any curl/podman test run in that shell fails with
+   `proxyconnect ... lookup http` or `Resolving timed out` — including pure
+   IP literals. `default-env.sh` was renamed to
+   `default-env.sh.bak-20260723` on 07-23, but the injection point still
+   lives in the sshd session environment; it was not found in
+   profile.d/bashrc/sshd_config/PAM/authorized_keys. **The root environment
+   (used by the podman system service that actually pulls CI images) has
+   zero proxy variables** `[E]`, so CI pulls were never affected by this.
+2. **Direct Docker Hub is blocked** `[E]`: `https://registry-1.docker.io/v2/`
+   times out from both the Windows host and the VM (verified 2026-08-05),
+   while public mirrors work: `https://docker.1panel.live/v2/` returns 200
+   and `https://docker.m.daocloud.io/v2/` returns 401 (reachable).
+
+The VM NAT network itself was healthy all along: LAN Forgejo
+(`http://192.168.31.34:3022/v2/`) returns 401 when tested with
+`--noproxy "*"` `[E]`.
+
+### Mirrored-Mode Attempt And Rollback (negative result)
+
+`networkingMode=mirrored` was tried (`.wslconfig`, WSL 2.6.3 supports it) to
+bypass the suspected NAT fault. It gave the VM direct access to the Windows
+interfaces (eth1 = 192.168.31.5 LAN, eth4 = 100.90.170.58 Tailscale) and ICMP
+worked, but **it broke podman machine's SSH bootstrap**: the podman-machine
+init no longer started sshd on port 60277, `podman` on the Windows host
+failed with handshake errors, and a manually started sshd was unstable.
+Rollback restored NAT mode; podman connectivity returned immediately.
+**Do not use mirrored networking with this podman machine.**
+
+### Effective Change: Registry Mirrors
+
+`/etc/containers/registries.conf` in the VM now declares a `docker.io` table
+with two mirrors (backup: `registries.conf.bak-20260805`):
+
+```toml
+[[registry]]
+prefix = "docker.io"
+location = "docker.io"
+
+[[registry.mirror]]
+location = "docker.1panel.live"
+
+[[registry.mirror]]
+location = "docker.m.daocloud.io"
+```
+
+TOML pitfalls recorded: the section must be `[[registry]]` (array table),
+not `[registry]` (podman errors "incompatible types ... destination has
+type slice"); and PowerShell stdin pipes into `wsl.exe` inject CRLF into
+file names/heredocs — run scripts through
+`wsl.exe ... -- /bin/sh -c 'echo <b64> | base64 -d | sh'` instead.
+
+Verification `[E]`: `podman pull postgres:16-alpine` (297 MiB) succeeded via
+the mirror; the test image was removed afterward. New images no longer need
+the export-over-LAN-import flow; the locally provisioned `los-ci:*` images
+remain as pinned versions and rollback material.
+
+### Residual Items
+
+- The user-shell proxy injection point is still unlocated; harmless to CI
+  (root environment is clean) but it corrupts interactive diagnostics.
+- Forgejo's container registry is enabled (`/v2/` returns 401 with a Bearer
+  realm), so pushing built CI images to Forgejo (LAN pull) remains the
+  longer-term alternative to public mirrors; not yet wired into
+  `tools/build-forgejo-ci-image.sh`.
