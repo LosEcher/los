@@ -1120,3 +1120,34 @@ remain as pinned versions and rollback material.
   realm), so pushing built CI images to Forgejo (LAN pull) remains the
   longer-term alternative to public mirrors; not yet wired into
   `tools/build-forgejo-ci-image.sh`.
+
+### 2026-08-05 Follow-up: Container DNS And Healthcheck Repair
+
+A later session found `gate-test`/`gate-drift` failing (or hanging) because the
+VM was restarted and the Podman container network broke. Root causes and fixes,
+all verified `[E]` on the VM:
+
+1. **Container DNS (`aardvark-dns`) could not start.** The podman-machine init
+   launches systemd via `unshare --pid ... /lib/systemd/systemd`; systemd's
+   private socket `/run/systemd/private` then rejects clients from outside the
+   PID namespace (`AUTH EXTERNAL` gets reset — verified with a raw socket
+   probe). netavark starts aardvark-dns through `systemd-run --scope` only when
+   **both** `is_using_systemd()` (`/run/systemd/system` exists) **and**
+   `systemd-run` is on `PATH`. Fix: `rm -rf /run/systemd/system` (keeps
+   `systemd-run` in place) — netavark then forks aardvark-dns directly and
+   container name resolution works (`getent hosts <name>` verified). A manual
+   `podman system service` restart was also required because the long-running
+   service cached the old systemd detection.
+2. **Service healthchecks never became healthy.** Without systemd, Podman 5.7
+   creates the healthcheck but its timer never fires (container stays
+   `(starting)`; `podman healthcheck run` works manually). act_runner waits
+   forever → jobs hang until timeout. Fix: **removed the `--health-*` options
+   from both `postgres-*` services in `.forgejo/workflows/ci.yml`** — the
+   service container is running well before the job's checkout+install
+   (~2 min) finishes, so readiness is safe.
+3. **Operational notes:** after any VM restart, repeat
+   `rm -rf /run/systemd/system` and restart `podman system service`
+   (`kill` the old one; it respawns via systemd with stale detection — restart
+   it manually after removing the directory). Consider turning this into a
+   startup script later. The `workflow-cancel` on older runs (`cancelled`
+   statuses) is normal Forgejo behavior when a new head is pushed.
