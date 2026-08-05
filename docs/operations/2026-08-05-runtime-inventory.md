@@ -26,6 +26,13 @@
 - file-size 类 74 条 ready todo 降级 backlog(metadata 记录 demotedFrom/demotedBy/rationale),migration-drift 21 条保留 ready
 - Forgejo 远端 3 个已合并分支(docs/ci-vm-repair-note、feat/kimi-subscription-models-sync、fix/stale-running-recovery)经 `jj git push --deleted` 清理,ls-remote 验证 0 匹配
 
+## 0.7 V4 subagent planning 实测(23:10 更新,PR #193)
+
+- **Round 1(23:02)失败**:主 agent 4 次 spawn 全成功(planning 无失败),但 23:02:45 **pg pool(20)耗尽 → 5s 连接超时** → scheduled-work tick/heartbeat 失败 → 主 task 无主动取消记录被 cancelled;4 个 child 中 2 个完成、2 个无事件。根因:主 agent + 4 child + compaction + outbox 批量并发打满连接池
+- **修复**:`packages/infra/src/db.ts` pool max 20→50、connectionTimeoutMillis 5s→15s(PR #193)
+- **Round 2(23:06)验证通过**:`task.succeeded`,4/4 child completed(result_json 持久化 "# los"),0 连接错误,db.test 15/15
+- **残余观察**:① agent 两次都只 spawn 4 个(要求 5 个)—— LLM 遵循度偏差,非缺陷;② child run_spec.status 停在 created(result_json 有 completed,状态不同步)—— 可查询但语义待修
+
 ## 1. 服务状态盘点
 
 | 面 | 状态 | 证据 |
