@@ -1145,9 +1145,9 @@ all verified `[E]` on the VM:
    from both `postgres-*` services in `.forgejo/workflows/ci.yml`** — the
    service container is running well before the job's checkout+install
    (~2 min) finishes, so readiness is safe.
-3. **Operational notes:** after any VM restart, repeat
-   `rm -rf /run/systemd/system` and restart `podman system service`
-   (`kill` the old one; it respawns via systemd with stale detection — restart
-   it manually after removing the directory). Consider turning this into a
-   startup script later. The `workflow-cancel` on older runs (`cancelled`
+3. **Operational notes:** after any VM restart, run the idempotent repair
+   script once (`/usr/local/sbin/los-vm-ci-repair.sh` — removes
+   `/run/systemd/system`; the podman system service is socket-activated by
+   systemd and picks up the correct detection on the next connection, so do
+   not pkill it manually). The `workflow-cancel` on older runs (`cancelled`
    statuses) is normal Forgejo behavior when a new head is pushed.
