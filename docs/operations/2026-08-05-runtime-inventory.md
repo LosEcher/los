@@ -11,7 +11,20 @@
 | D1 僵尸 run 修复 | ✅ 已落地 | `recoverStaleRunningRunSpecs()`(gateway,60s,AP1 状态机);重启后 60s 内将 `run-todo-d4963bde`(卡 running 14h)自动转 blocked:`[12:48:29] WARN Stale-running sweep: blocked 1/1`;测试 `stale-running sweep blocks orphaned run_specs and preserves active ones` 通过(83/83) |
 | V2 僵尸巡检 | ✅ 已落地 | 同 D1:gateway 内 60s interval,无需 token、确定性执行;结果经 `transitionExecutionState` + 日志 + run_specs 状态可查 |
 | V3 日志新鲜度巡检 | ✅ 已落地 | `runtime_readiness` 模板为确定性内置检查(不执行 goalTemplate 自定义指令),故 V3 落地为两层:① `/health` 新增 `logBackpressure.stdoutWritableLength/stderrWritableLength`(进程内 write-queue 深度,持续高位 = 日志管道阻塞);② 新增 scheduled_work_item `schedule-78ffede5`(interval 10m,`runtime_readiness`)持久化节点/服务在线快照到 `scheduled_work_item_runs.result_summary_json`,首跑 20:58:31 succeeded,可查 |
+| V5 eval-backlog 快照 | ✅ 已执行 | `POST /eval-backlog/run` 入库 20 条:**11/11 automated probe 全过**(E02/E03/E08 绿),9 条 manual 正常标记 |
 | 盘点文档 | ✅ 本文件 | |
+
+## 0.5 双 postgres 清理(21:30 更新)
+
+- 事实:`127.0.0.1:55432` = 本机 Homebrew postgres(权威,6-15 至今);docker `los-postgres` = 早期库(6-06 起)+ **8-02/03 K4/Execution Lab 实验存档**(experiments=4、candidates=127、gates=2、evals=19,本机均为 0),8-04 02:46 后 gateway 切到本机,容器闲置
+- 处理(operator 授权):`pg_dump` 全量备份 → `.los-runtime/db-backups/los-postgres-20260805-212609.dump`(4.5MB,61 表,sha256 `c4469d07...fe06af6`)→ `docker stop los-postgres`(数据卷保留,可随时重启);gateway 不受影响
+- 区分增强:`.env` 头部注释已标注权威实例与备份位置;后续 `pnpm run doctor` 建议固化实例标识(未实现)
+- CI 用 runner 内 `postgres:16` 服务,与本地容器无关
+
+## 0.6 待办与分支清理(21:35 更新)
+
+- file-size 类 74 条 ready todo 降级 backlog(metadata 记录 demotedFrom/demotedBy/rationale),migration-drift 21 条保留 ready
+- Forgejo 远端 3 个已合并分支(docs/ci-vm-repair-note、feat/kimi-subscription-models-sync、fix/stale-running-recovery)经 `jj git push --deleted` 清理,ls-remote 验证 0 匹配
 
 ## 1. 服务状态盘点
 
