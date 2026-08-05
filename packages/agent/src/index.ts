@@ -128,6 +128,7 @@ export { scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFileP
 
 // ── OAuth ─────────────────────────────────────────────────
 export { resolveXaiOAuthCredential, getXaiOAuthStatus, clearXaiOAuthTokens, loadXaiOAuthState, refreshXaiOAuthToken, XaiOAuthError, type XaiOAuthTokens, type XaiOAuthState, type XaiOAuthCredential, type XaiOAuthStatus, type XaiLoginOptions } from './auth/xai-oauth.js';
+export { resolveKimiCodeCredential, type KimiCodeCredential } from './auth/kimi-code.js';
 
 // ── Runtime adapter — external agent CLI integration ──────
 export { startOtelBridge, isOtelBridgeRunning, spawnClaudeCode, runClaudeCodeWithBridge, claudeCodeSupportsOtel, claudeSpanToEventType, CLAUDE_CODE_SPAN_NAMES, spawnCodex, codexSupportsOtel, type OtelBridgeConfig, type ClaudeCodeSpawnInput, type CodexSpawnInput, type RuntimeKind, type RuntimeAdapterConfig, type RuntimeHandle } from './runtime-adapter/index.js';

@@ -44,6 +44,7 @@ import {
   scanLocalEndpoints,
   scanOwnAccounts,
   scanXaiOAuth,
+  scanKimiCode,
 } from './discovery/scanners.js';
 
 const require = createRequire(import.meta.url);
@@ -59,7 +60,7 @@ export {
   ccSwitchProviderFromRow,
   parseCodexRouteConfig,
 } from './discovery/provider-parsers.js';
-export { scanGrokAccount } from './discovery/scanners.js';
+export { scanGrokAccount, scanKimiCode } from './discovery/scanners.js';
 export type {
   DiscoveredProvider,
   DiscoveredTool,
@@ -118,6 +119,14 @@ export async function discoverAll(): Promise<DiscoveryReport> {
   // Phase 3.5: xAI OAuth tokens (sync — reads local auth stores)
   const xaiOAuthProviders = scanXaiOAuth();
   for (const p of xaiOAuthProviders) {
+    if (!providers.some(existing => existing.name === p.name && existing.source === p.source)) {
+      providers.push(p);
+    }
+  }
+
+  // Phase 3.6: Kimi Code subscription (sync — reads local auth store)
+  const kimiCodeProviders = scanKimiCode();
+  for (const p of kimiCodeProviders) {
     if (!providers.some(existing => existing.name === p.name && existing.source === p.source)) {
       providers.push(p);
     }

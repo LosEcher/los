@@ -7,8 +7,10 @@
 import type { FastifyInstance } from 'fastify';
 import { registerProviderEvidenceRoutes } from './provider-evidence-routes.js';
 import { registerProviderCrudRoutes } from './provider-crud-routes.js';
+import { registerProviderModelSyncRoutes } from './provider-model-sync-routes.js';
 
 export function registerProviderRoutes(app: FastifyInstance): void {
   registerProviderEvidenceRoutes(app);
   registerProviderCrudRoutes(app);
+  registerProviderModelSyncRoutes(app);
 }

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { requireProviderDefaults } from './provider-defaults.js';
-import { scanEnvKeys, scanGrokAccount } from './discovery/scanners.js';
+import { scanEnvKeys, scanGrokAccount, scanKimiCode } from './discovery/scanners.js';
 
 import {
   ccSwitchProviderFromRow,
@@ -247,4 +247,60 @@ test('Grok account discovery fails closed for malformed auth JSON', () => {
   });
   assert.equal(candidate.available, false);
   assert.equal(candidate.reason, 'grok_auth_malformed');
+});
+
+// ── Kimi Code subscription discovery ────────────────────
+
+test('Kimi Code discovery reports an OAuth provider when the subscription file exists', () => {
+  const homeDir = mkdtempSync(join(tmpdir(), 'los-kimi-discovery-'));
+  mkdirSync(join(homeDir, '.kimi-code', 'credentials'), { recursive: true });
+  writeFileSync(join(homeDir, '.kimi-code', 'credentials', 'kimi-code.json'), JSON.stringify({
+    access_token: 'fixture-access',
+    refresh_token: 'fixture-refresh',
+    expires_at: Math.floor(Date.now() / 1000) + 600,
+  }));
+  try {
+    const providers = scanKimiCode({ homeDir });
+    assert.equal(providers.length, 1);
+    const kimi = providers[0];
+    assert.equal(kimi.name, 'kimi');
+    assert.equal(kimi.baseUrl, 'https://api.kimi.com/coding/v1');
+    assert.equal(kimi.defaultModel, 'kimi-k3');
+    assert.equal(kimi.authMode, 'oauth');
+    assert.equal(kimi.available, true);
+    assert.equal(kimi.sourceTool, 'kimi');
+    assert.equal(kimi.importable, true);
+    assert.equal(kimi.apiKey, undefined);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('Kimi Code discovery treats a missing refresh_token as unavailable', () => {
+  const homeDir = mkdtempSync(join(tmpdir(), 'los-kimi-discovery-'));
+  mkdirSync(join(homeDir, '.kimi-code', 'credentials'), { recursive: true });
+  writeFileSync(join(homeDir, '.kimi-code', 'credentials', 'kimi-code.json'), JSON.stringify({
+    access_token: 'fixture-access',
+    expires_at: Math.floor(Date.now() / 1000) + 600,
+  }));
+  try {
+    const providers = scanKimiCode({ homeDir });
+    assert.equal(providers.length, 1);
+    assert.equal(providers[0].available, false);
+    assert.match(providers[0].note ?? '', /no refresh_token/);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('Kimi Code discovery returns nothing when credentials are absent or malformed', () => {
+  const homeDir = mkdtempSync(join(tmpdir(), 'los-kimi-discovery-'));
+  mkdirSync(join(homeDir, '.kimi-code', 'credentials'), { recursive: true });
+  writeFileSync(join(homeDir, '.kimi-code', 'credentials', 'kimi-code.json'), '{not-json');
+  try {
+    assert.deepEqual(scanKimiCode({ homeDir }), []);
+    assert.deepEqual(scanKimiCode({ homeDir: join(homeDir, 'missing') }), []);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
 });

@@ -5,18 +5,22 @@ import { createOpenAIResponsesProvider } from './responses.js';
 import { getProviderConfig, createOpenAICompatProvider, diag } from './index.js';
 import type { Provider, CreateProviderOptions } from './types.js';
 import { resolveXaiOAuthCredential } from '../auth/xai-oauth.js';
+import { resolveKimiCodeCredential } from '../auth/kimi-code.js';
 
 export function createProvider(name?: string, options: CreateProviderOptions = {}): Provider {
   const config = getConfig();
   const providerName = name ?? config.agent.defaultProvider;
 
   const p = getProviderConfig(providerName);
-  let credentialResolver: typeof resolveXaiOAuthCredential | undefined;
+  let credentialResolver: (() => Promise<{ apiKey: string; baseUrl: string }>) | undefined;
   if (!p.apiKey && p.authMode === 'oauth') {
-    if (providerName !== 'xai') {
+    if (providerName === 'xai') {
+      credentialResolver = () => resolveXaiOAuthCredential();
+    } else if (providerName === 'kimi') {
+      credentialResolver = () => resolveKimiCodeCredential();
+    } else {
       throw new Error(`Provider '${providerName}' has no supported OAuth credential resolver.`);
     }
-    credentialResolver = () => resolveXaiOAuthCredential();
   }
   const apiShapeOverride = (options.apiShape ?? (p as Record<string, unknown>).apiShape) as ApiShape | undefined;
   const profile = resolveModelProfile(providerName, {

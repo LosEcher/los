@@ -107,7 +107,7 @@ export function getProviderConfig(name: string) {
     // OAuth credentials are resolved lazily by the async transport immediately
     // before each request, so single-use refresh tokens can be rotated safely.
     if ((p as Record<string, unknown>).authMode === 'oauth') {
-      if (name === 'xai') return p;
+      if (name === 'xai' || name === 'kimi') return p;
       throw new Error(`Provider '${name}' has no supported OAuth credential resolver.`);
     }
     throw new Error(`Provider '${name}' has no API key.`);

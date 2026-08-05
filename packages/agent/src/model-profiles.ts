@@ -295,6 +295,8 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     reasoningParam: 'reasoning_effort',
     modelAliases: [
       'grok-4.3',
+      'grok-4.5',
+      'grok-4.20-multi-agent-0309',
       'grok-build-0.1',
       'grok-4.20-0309-reasoning',
       'grok-4.20-0309-non-reasoning',
