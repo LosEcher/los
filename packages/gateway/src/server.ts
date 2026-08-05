@@ -180,6 +180,14 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       blockers: current?.readiness.blockers ?? ['service:not_registered'],
       outbox,
       cbmSymbolCache: getSymbolCacheMetrics(),
+      // V3 observability: stdout/stderr write-queue depth. Persistent high
+      // values mean the daemonized log channel is not being consumed (e.g. the
+      // gateway.log pipe stall observed on 2026-08-05, where logs lagged 8h).
+      logBackpressure: {
+        stdoutWritableLength: (process.stdout as { writableLength?: number }).writableLength ?? -1,
+        stderrWritableLength: (process.stderr as { writableLength?: number }).writableLength ?? -1,
+        sampleAt: new Date().toISOString(),
+      },
     };
   });
 
