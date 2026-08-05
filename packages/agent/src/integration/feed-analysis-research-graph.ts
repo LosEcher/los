@@ -102,6 +102,11 @@ export async function runFeedAnalysisResearchGraph(
     runContract: {
       mode: 'feed-analysis-ingress',
       executionMode: input.prepared.workflow.executionMode,
+      // The graph's verifier stage already gates output quality, and the
+      // post-execution goal self-check needs a judge provider that is not
+      // configured in CI. Keep the feed-analysis path free of a second
+      // provider-dependent gate so tests and CI do not require real keys.
+      selfCheckEnabled: false,
     },
     onTaskEvent: input.onTaskEvent,
     resolveTaskPrompt: (task, completedStages) => buildResearchStagePrompt(task.id, input.prepared, completedStages),

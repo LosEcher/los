@@ -83,12 +83,6 @@ jobs:
           POSTGRES_PASSWORD: los-ci-test-only
           POSTGRES_DB: los_ci_test
           POSTGRES_HOST_AUTH_METHOD: md5
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-          --health-start-period 30s
 
     env:
       DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
@@ -205,12 +199,6 @@ jobs:
           POSTGRES_PASSWORD: los-ci-drift-only
           POSTGRES_DB: los_ci_drift
           POSTGRES_HOST_AUTH_METHOD: md5
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-          --health-start-period 30s
 
     # DATABASE_URL is the server URL check-migration-drift uses to CREATE
     # the ephemeral los_drift_mig / los_drift_ensure databases.
