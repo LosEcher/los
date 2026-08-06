@@ -160,6 +160,10 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
       const { runAdversarialReviewAudit } = await import('./governance-adversarial-review.js');
       return runAdversarialReviewAudit(job);
     }
+    case 'self_bootstrap': {
+      const { runSelfBootstrapAudit } = await import('./governance-self-bootstrap.js');
+      return runSelfBootstrapAudit(job);
+    }
     case 'dead_letter': {
       const { runDeadLetterGovernance } = await import('./dead-letter-governance.js');
       return runDeadLetterGovernance({ dryRun: true, limit: Number(job.config.requeueLimit ?? 25) });
