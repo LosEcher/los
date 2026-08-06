@@ -231,6 +231,47 @@ test('all mode executes shell commands through the OS sandbox', { skip: !existsS
   }
 });
 
+test('run_runtime_task validates input and enforces L2 risk gate', async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-runtime-'));
+  try {
+    const registry = createToolRegistry({
+      policy: {
+        maxRiskLevel: 'L2',
+        allowWrites: true,
+        sandboxAvailable: false,
+      },
+    });
+    await registerBuiltinTools(registry, { workspaceRoot });
+
+    // Empty prompt → validation error without spawning anything.
+    const empty = await registry.execute({
+      name: 'run_runtime_task',
+      arguments: { kind: 'codex', prompt: '   ' },
+    });
+    assert.match(empty.error ?? '', /prompt is required/);
+
+    // Unsupported kind → clear error.
+    const badKind = await registry.execute({
+      name: 'run_runtime_task',
+      arguments: { kind: 'gemini', prompt: 'hello' },
+    });
+    assert.match(badKind.error ?? '', /unsupported runtime kind/);
+
+    // L1 policy blocks the L2 tool entirely.
+    const registryL1 = createToolRegistry({
+      policy: { maxRiskLevel: 'L1', allowWrites: true, sandboxAvailable: false },
+    });
+    await registerBuiltinTools(registryL1, { workspaceRoot });
+    const blocked = await registryL1.execute({
+      name: 'run_runtime_task',
+      arguments: { kind: 'codex', prompt: 'hello' },
+    });
+    assert.match(blocked.error ?? '', /Tool risk L2 exceeds max L1/);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('spawn_agent defaults to read-only and forwards runner inputs', async () => {
   const registry = createToolRegistry();
   let seen: any;

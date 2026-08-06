@@ -28,6 +28,8 @@ export interface CodexSpawnInput {
   timeoutMs?: number;
   codexPath?: string;
   extraArgs?: string[];
+  /** Max stdout bytes retained for callers (default 128k, clamp [4k, 512k]). */
+  outputLimitBytes?: number;
   env?: Record<string, string>;
 }
 
@@ -43,7 +45,20 @@ export function codexSupportsOtel(codexPath = 'codex'): boolean {
   }
 }
 
-export function spawnCodex(input: CodexSpawnInput): RuntimeHandle {
+export interface CodexRuntimeOutput {
+  exitCode: number | null;
+  output: string;
+  outputBytes: number;
+  truncated: boolean;
+  stderrBytes: number;
+  spawnFailed: boolean;
+}
+
+export interface CodexRuntimeHandle extends RuntimeHandle {
+  output: Promise<CodexRuntimeOutput>;
+}
+
+export function spawnCodex(input: CodexSpawnInput): CodexRuntimeHandle {
   const {
     sessionId = `codex-${randomUUID()}`,
     workspaceRoot,
@@ -82,11 +97,33 @@ export function spawnCodex(input: CodexSpawnInput): RuntimeHandle {
     log.warn('Codex OTel support uncertain — telemetry may not be emitted');
   }
 
-  const proc: ChildProcess = spawn(codexPath, ['-p', prompt, ...extraArgs], {
+  const proc: ChildProcess = spawn(codexPath, ['exec', prompt, ...extraArgs], {
     cwd: workspaceRoot,
     env: { ...process.env, ...otelEnv, ...extraEnv },
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: timeoutMs,
+  });
+
+  // Collect stdout/stderr (bounded) so callers can surface the result text.
+  const outputLimitBytes = Math.max(4_096, Math.min(512_000, input.outputLimitBytes ?? 128_000));
+  const retained: Buffer[] = [];
+  let capturedBytes = 0;
+  let totalBytes = 0;
+  let stderrBytes = 0;
+  let spawnFailed = false;
+  proc.stdout?.on('data', (chunk: Buffer) => {
+    totalBytes += chunk.byteLength;
+    const remaining = outputLimitBytes - capturedBytes;
+    if (remaining <= 0) return;
+    const bounded = chunk.byteLength <= remaining ? chunk : chunk.subarray(0, remaining);
+    retained.push(bounded);
+    capturedBytes += bounded.byteLength;
+  });
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    stderrBytes += chunk.byteLength;
+  });
+  proc.on('error', () => {
+    spawnFailed = true;
   });
 
   const exited = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
@@ -105,5 +142,13 @@ export function spawnCodex(input: CodexSpawnInput): RuntimeHandle {
     pid: proc.pid,
     kill: (signal) => proc.kill(signal),
     exited,
+    output: exited.then(({ exitCode }) => ({
+      exitCode,
+      output: Buffer.concat(retained).toString('utf8'),
+      outputBytes: capturedBytes,
+      truncated: capturedBytes < totalBytes,
+      stderrBytes,
+      spawnFailed,
+    })),
   };
 }
