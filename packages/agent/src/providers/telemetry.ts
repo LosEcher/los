@@ -22,6 +22,10 @@ export interface ProviderCallTelemetry {
   requestPayloadSize: number;
   status: number;
   durationMs: number;
+  /** Time from request start to HTTP headers (P0-2, 2026-08-06). */
+  headersDurationMs?: number;
+  /** Time from headers to body fully read/parsed (P0-2). */
+  bodyDurationMs?: number;
   errorCode?: string;
   errorMessage?: string;
   rateLimitResetMs?: number;
@@ -48,6 +52,8 @@ CREATE TABLE IF NOT EXISTS provider_call_telemetry (
   usage_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE provider_call_telemetry ADD COLUMN IF NOT EXISTS headers_duration_ms INTEGER;
+ALTER TABLE provider_call_telemetry ADD COLUMN IF NOT EXISTS body_duration_ms INTEGER;
 CREATE INDEX IF NOT EXISTS idx_pct_trace_id ON provider_call_telemetry(trace_id);
 CREATE INDEX IF NOT EXISTS idx_pct_session_id ON provider_call_telemetry(session_id);
 CREATE INDEX IF NOT EXISTS idx_pct_provider ON provider_call_telemetry(provider);
@@ -71,8 +77,9 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
     `INSERT INTO provider_call_telemetry
        (trace_id, session_id, provider, model, endpoint, method, stream,
         request_payload_size, status, duration_ms,
+        headers_duration_ms, body_duration_ms,
         error_code, error_message, rate_limit_reset_ms, usage_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [
       tel.traceId,
       tel.sessionId ?? null,
@@ -84,6 +91,8 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
       tel.requestPayloadSize,
       tel.status,
       tel.durationMs,
+      tel.headersDurationMs ?? null,
+      tel.bodyDurationMs ?? null,
       tel.errorCode ?? null,
       tel.errorMessage ?? null,
       tel.rateLimitResetMs ?? null,

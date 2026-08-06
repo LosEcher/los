@@ -182,14 +182,16 @@ check_agent_key() {
 start_gateway() {
   local pid owner
   pid="$(pid_from_file "$GW_PID_FILE")"
-  if is_running "$pid"; then
-    echo "los gateway already running pid=$pid"
-    return 0
-  fi
-
   owner="$(port_owner "$(gw_port)" "$(gw_host)" "" "$(gw_url)" "$GW_SRC" "$GW_DIST")"
   if [ -n "$owner" ] && [ "$owner" != "unknown" ]; then
     if is_los_pid "$owner" "$GW_SRC" "$GW_DIST"; then
+      # A different los gateway pid may linger without a listener (bind-failure
+      # residue / races). Kill it before adopting the real listener.
+      if [ -n "$pid" ] && [ "$pid" != "$owner" ] && is_running "$pid" && is_los_pid "$pid" "$GW_SRC" "$GW_DIST"; then
+        echo "stale gateway pid=$pid (no listener) found; killing it"
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+      fi
       write_pid_file "$owner" "$GW_PID_FILE" "$RUNTIME_DIR"
       echo "los gateway already running pid=$owner; adopted into $GW_PID_FILE"
       return 0
@@ -197,6 +199,18 @@ start_gateway() {
     echo "port $(gw_port) is already in use by non-los pid=$owner"
     echo "not starting a second gateway"
     return 1
+  fi
+
+  if is_running "$pid"; then
+    if is_los_pid "$pid" "$GW_SRC" "$GW_DIST"; then
+      # pid file points at a live los process that does NOT own the port:
+      # timer-only residue from a failed bind — kill and restart clean.
+      echo "los gateway pid=$pid alive but not listening; killing stale instance"
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+    else
+      echo "los gateway pid file points at non-los pid=$pid; ignoring"
+    fi
   fi
 
   echo "starting los gateway at $(gw_url)"
