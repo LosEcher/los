@@ -129,7 +129,10 @@ export async function executeScheduledWorkRun(
   try {
     const outcome = await executeTemplate(schedule, run);
     const completed = await transitionScheduledWorkRun(run.id, outcome.status, {
-      resultSummary: outcome.summary,
+      // Merge with the existing result summary so approval markers
+      // (approvedBy) survive execution (2026-08-07 regression: outcome
+      // summary overwrote the approval record).
+      resultSummary: { ...(run.resultSummary ?? {}), ...outcome.summary },
       workItemId: outcome.workItemId,
       runSpecId: outcome.runSpecId,
       taskRunId: outcome.taskRunId,
@@ -357,7 +360,7 @@ async function createScheduleWorkItem(
     source: 'scheduled-work',
     dedupeKey: scheduledStatus === 'failed'
       ? `schedule-circuit:${schedule.id}:revision:${schedule.revision}`
-      : `schedule-run-result:${run.id}`,
+      : `schedule-run-result:${run.id}:${scheduledStatus}`,
     runContract: {
       mode: schedule.runTemplate.mode,
       phase: scheduledStatus === 'awaiting_approval' ? 'planning' : scheduledStatus === 'failed' ? 'blocked' : 'succeeded',

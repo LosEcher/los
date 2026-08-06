@@ -95,8 +95,16 @@ export async function runPostExecutionSelfCheck(
     rawResponse = response.text;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // AbortSignal.timeout rejects with DOMException('aborted', 'AbortError')
+    // (name 'AbortError', numeric code 20) on some runtimes rather than a
+    // TimeoutError; a string code 'ABORT_ERR' also appears. Treat all three
+    // shapes as the self-check timeout so the abort path is attributed
+    // correctly (2026-08-07: timeout test regressed after PR #208).
     const isTimeout = err instanceof Error && err.name === 'TimeoutError'
-      || (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ABORT_ERR');
+      || (typeof err === 'object' && err !== null && (
+        (err as { name?: string }).name === 'AbortError'
+        || (err as { code?: string }).code === 'ABORT_ERR'
+      ));
     timedOut = isTimeout;
     return {
       goalMet: false,

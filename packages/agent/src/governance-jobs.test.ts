@@ -84,8 +84,11 @@ test('governance jobs: seedGovernanceJobs creates 6 default jobs, idempotent', a
       `Expected >=${expectedMin} unique job types, got ${actualCount}`);
 
     // Verify the current seed set remains bounded and every type is unique.
-    assert.ok(uniqueByType.length >= 9 && uniqueByType.length <= 16,
-      `Expected 9-16 unique job types, got ${uniqueByType.length}`);
+    // 17 types as of 2026-08-07 (adversarial_review + self_bootstrap added
+    // after the original 15; upper bound 20 leaves room for the next few
+    // governance jobs without silently unbounded growth).
+    assert.ok(uniqueByType.length >= 9 && uniqueByType.length <= 20,
+      `Expected 9-20 unique job types, got ${uniqueByType.length}`);
 
     // Verify cadences
     const consistencyJob = seeded.find(j => j.jobType === 'consistency_audit')!;
@@ -206,7 +209,7 @@ test('governance jobs: runGovernanceSweep dry-run does not mutate', async () => 
     const result = await runGovernanceSweep({ dryRun: true });
     assert.equal(result.dryRun, true);
     assert.equal(result.jobsSkipped, 0); // All seeded jobs should be due (never run)
-    assert.equal(result.jobsRun, 15);
+    assert.equal(result.jobsRun, 17); // 17 seed job types as of 2026-08-07
     assert.equal(result.findingsCreated, 0); // No todos in dry-run
 
     // Verify no mutations
