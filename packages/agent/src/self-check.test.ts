@@ -202,6 +202,50 @@ test('parseSelfCheckResponse normalizes mismatched stop conditions count', () =>
   assert.equal(result.confidence, 0.5);
 });
 
+// ── Unit: runPostExecutionSelfCheck pass semantics ──
+
+test('selfCheckPassed requires only goalMet, not stop conditions', async () => {
+  // Regression: a task that completes normally never triggers a stop condition
+  // (e.g. scheduled execution's 'operator cancels schedule'), so a goalMet=true
+  // verdict with stopConditionsMet=[false] must still pass; otherwise every
+  // well-finished scheduled task is blocked and the circuit breaker trips.
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      stopConditions: ['operator cancels schedule'],
+      provider: createFakeProvider(
+        JSON.stringify({
+          goalMet: true,
+          stopConditionsMet: [false],
+          summaryOfEvidence: 'task completed normally, no cancellation observed',
+          confidence: 0.95,
+          gaps: [],
+        }),
+      ),
+    }),
+  );
+  assert.equal(result.goalMet, true);
+  assert.equal(result.selfCheckPassed, true);
+  assert.deepEqual(result.stopConditionsMet, [false]);
+});
+
+test('selfCheckPassed false when goal not met even if stop conditions met', async () => {
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      provider: createFakeProvider(
+        JSON.stringify({
+          goalMet: false,
+          stopConditionsMet: [true, true],
+          summaryOfEvidence: 'partial work only',
+          confidence: 0.4,
+          gaps: [{ condition: 'goal', detail: 'output missing', suggestion: 're-run' }],
+        }),
+      ),
+    }),
+  );
+  assert.equal(result.goalMet, false);
+  assert.equal(result.selfCheckPassed, false);
+});
+
 // ── Unit: shouldRunSelfCheck ──
 
 test('shouldRunSelfCheck false when contract undefined', () => {
@@ -255,7 +299,11 @@ test('SelfCheckResult.selfCheckPassed = false when goalMet is false', async () =
   assert.equal(result.confidence, 0.2);
 });
 
-test('SelfCheckResult.selfCheckPassed = false when stop condition not met', async () => {
+test('SelfCheckResult.selfCheckPassed = true when goal met even if a stop condition was not triggered', async () => {
+  // Stop conditions are audit information; a normally-completed task (e.g.
+  // scheduled execution where 'operator cancels schedule' never fires) must
+  // not be failed for not triggering them. This test pins the fixed semantics
+  // (previously: goalMet=true + stopConditionsMet=[true,false] → failed).
   const result = await runPostExecutionSelfCheck(
     makeInput({
       provider: createFakeProvider(
@@ -269,7 +317,7 @@ test('SelfCheckResult.selfCheckPassed = false when stop condition not met', asyn
       ),
     }),
   );
-  assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.selfCheckPassed, true);
 });
 
 test('SelfCheckResult selfCheckPassed = true when stop conditions empty and goal met', async () => {
