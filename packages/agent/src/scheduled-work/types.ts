@@ -1,5 +1,6 @@
 import type { WorkItemMode } from '../work-items/types.js';
 import type { FeedAnalysisDispatchRequest } from '../integration/feed-analysis-types.js';
+import type { ScheduledExecutorConfig } from '../scheduler/types.js';
 
 export type ScheduledTriggerKind = 'cron' | 'interval' | 'once';
 export type ScheduledWorkStatus = 'enabled' | 'paused' | 'retired';
@@ -33,6 +34,11 @@ export interface ScheduledWorkRunTemplate {
   requiredChecks: string[];
   toolMode: 'read-only' | 'project-write';
   feedAnalysisRequest?: Omit<FeedAnalysisDispatchRequest, 'sourceJobId'>;
+  /** Optional executor placement for scheduled_execution runs (wires the
+   *  otherwise unused remote-executor channel; see executor-client.ts). */
+  executor?: ScheduledExecutorConfig;
+  /** Override for the agent loop's maxLoops (default 20). */
+  maxLoops?: number;
 }
 
 export interface ScheduledWorkItem {

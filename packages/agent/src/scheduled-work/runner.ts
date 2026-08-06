@@ -110,7 +110,11 @@ export async function executeScheduledWorkRun(
   if (!schedule) throw new Error('schedule disappeared before execution');
   const feedAnalysisPreapproved = schedule.runTemplate.templateId === 'scheduled_feed_analysis'
     && schedule.approvalPolicy === 'preapproved_scope';
-  if (schedule.approvalPolicy !== 'read_only_auto' && !feedAnalysisPreapproved) {
+  // A run that was explicitly approved (approveScheduledWorkRun marks it with
+  // resultSummary.approvedBy and queues it) is allowed through; anything else
+  // under a non-auto approval policy must wait for operator approval.
+  const approved = run.resultSummary?.approvedBy !== undefined;
+  if (schedule.approvalPolicy !== 'read_only_auto' && !feedAnalysisPreapproved && !approved) {
     const workItemId = await createScheduleWorkItem(schedule, run, 'awaiting_approval', {
       approvalPolicy: schedule.approvalPolicy,
       message: 'This schedule requires operator approval for each execution.',
@@ -251,6 +255,8 @@ async function executeTemplate(
       disposition,
       dedupeKey,
       runSpecId: run.runSpecId,
+      executor: schedule.runTemplate.executor,
+      maxLoops: schedule.runTemplate.maxLoops,
       metadata: {
         scheduledWork: {
           scheduleId: schedule.id,
@@ -387,23 +393,13 @@ export async function approveScheduledWorkRun(
   const schedule = await loadScheduledWorkItem(run.scheduleId);
   if (!schedule) throw new Error('schedule disappeared before approval');
 
-  await transitionScheduledWorkRun(run.id, 'claimed', { ownerId: input.ownerId });
-  await transitionScheduledWorkRun(run.id, 'running', {
+  // Async approval (A3): mark the run as approved and queue it for the
+  // scheduled-work tick loop (claimQueuedScheduledWorkRuns → execute). This
+  // keeps the approve HTTP call short instead of synchronously running the
+  // whole agent task inside the request.
+  const queued = await transitionScheduledWorkRun(run.id, 'queued', {
     ownerId: input.ownerId,
-    leaseExpiresAt: run.leaseExpiresAt ? new Date(run.leaseExpiresAt) : undefined,
+    resultSummary: { ...(run.resultSummary ?? {}), approvedBy: input.ownerId },
   });
-  try {
-    const outcome = await executeTemplate(schedule, run);
-    const completed = await transitionScheduledWorkRun(run.id, outcome.status, {
-      resultSummary: outcome.summary,
-      workItemId: outcome.workItemId,
-      runSpecId: outcome.runSpecId,
-      taskRunId: outcome.taskRunId,
-    });
-    return completed;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await transitionScheduledWorkRun(run.id, 'failed', { error: message });
-    throw err;
-  }
+  return queued;
 }

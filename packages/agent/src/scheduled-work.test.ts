@@ -374,7 +374,7 @@ test('scheduled_execution with requiredChecks passes validation', async () => {
   }
 });
 
-test('each_run approval moves awaiting_approval run to execution', async () => {
+test('each_run approval queues the run and the tick loop executes it (async approval)', async () => {
   const schedule = await createScheduledWorkItem({
     projectId: 'los', title: `scheduled-approve-${Date.now()}`,
     trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
@@ -388,6 +388,7 @@ test('each_run approval moves awaiting_approval run to execution', async () => {
   try {
     const {
       approveScheduledWorkRun,
+      claimQueuedScheduledWorkRuns,
       createManualScheduledWorkRun,
       executeScheduledWorkRun,
       loadScheduledWorkItemRun,
@@ -401,10 +402,22 @@ test('each_run approval moves awaiting_approval run to execution', async () => {
     assert.ok(pending, 'run must exist after awaiting_approval transition');
     assert.equal(pending.status, 'awaiting_approval');
 
+    // A3: approve marks the run approved and queues it (no synchronous execution).
     const approved = await approveScheduledWorkRun(run.id, { ownerId: 'operator' });
-    assert.ok(['succeeded', 'no_op'].includes(approved.status),
-      `expected execution outcome, got ${approved.status}`);
-    assert.equal(approved.claimOwner, 'operator');
+    assert.equal(approved.status, 'queued', `expected queued, got ${approved.status}`);
+    assert.equal(approved.resultSummary?.approvedBy, 'operator');
+
+    // The scheduled-work tick loop picks up queued runs and executes them;
+    // the approval gate must let the approved run through.
+    const queued = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
+    const picked = queued.find(item => item.id === run.id);
+    assert.ok(picked, 'queued run must be claimed by the tick loop');
+    const executed = await executeScheduledWorkRun(picked);
+    assert.ok(['succeeded', 'no_op'].includes(executed),
+      `expected execution outcome, got ${executed}`);
+    const finalRun = await loadScheduledWorkItemRun(run.id);
+    assert.equal(finalRun?.resultSummary?.approvedBy, 'operator',
+      'approvedBy marker must survive the tick claim and execution');
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
