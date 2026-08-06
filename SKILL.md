@@ -66,6 +66,13 @@ Steps:
    `governance_jobs.last_run_at`) and `/health`, not by log freshness.
 6. If stop/start behavior is involved, verify the stop path writes offline state
    before claiming registry truth is synchronized.
+7. Remote execution (2026-08-06): scheduled_execution supports
+   `runTemplate.executor` (nodeUrls/agentKey) + `workspaceRoot` override +
+   `maxLoops`; tasks run on remote nodes via agent_http (e.g. node34). The
+   agent tool `run_runtime_task` (L2, approval) delegates to codex/grok CLIs
+   from within a task. Async approval: `approve` queues the run
+   (`awaiting_approval -> queued`, resultSummary.approvedBy), executed by the
+   ~30s tick. Approve HTTP returns immediately.
 
 Evidence to report:
 
