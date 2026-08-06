@@ -39,8 +39,8 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     if (input.runTemplate.mode !== 'execution') {
       throw new Error('scheduled_execution must use execution mode');
     }
-    if (input.runTemplate.toolMode !== 'project-write') {
-      throw new Error('scheduled_execution requires project-write tool mode');
+    if (input.runTemplate.toolMode !== 'project-write' && input.runTemplate.toolMode !== 'all') {
+      throw new Error('scheduled_execution requires project-write (or all with sandboxMode=sandbox) tool mode');
     }
     if (input.runTemplate.editableSurfaces.length === 0) {
       throw new Error('scheduled_execution requires at least one editable surface');

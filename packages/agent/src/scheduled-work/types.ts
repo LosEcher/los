@@ -32,7 +32,12 @@ export interface ScheduledWorkRunTemplate {
   goalTemplate: string;
   editableSurfaces: string[];
   requiredChecks: string[];
-  toolMode: 'read-only' | 'project-write';
+  toolMode: 'read-only' | 'project-write' | 'all';
+  /** Isolation level for scheduled_execution runs. `sandbox` requires an
+   *  executor node whose capabilities.sandbox is a real OS backend
+   *  (linux-bwrap / macos-sandbox-exec); selection rejects
+   *  tool_policy/native nodes. Defaults to workspace-write. */
+  sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
   feedAnalysisRequest?: Omit<FeedAnalysisDispatchRequest, 'sourceJobId'>;
   /** Optional executor placement for scheduled_execution runs (wires the
    *  otherwise unused remote-executor channel; see executor-client.ts). */

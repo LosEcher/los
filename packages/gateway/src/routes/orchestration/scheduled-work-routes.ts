@@ -186,7 +186,8 @@ function normalizeCreateInput(
       goalTemplate: normalizeString(body.goalTemplate) ?? defaultGoal(templateId),
       editableSurfaces: isExecution ? normalizeStringArray(body.editableSurfaces) : [],
       requiredChecks: isExecution ? normalizeStringArray(body.requiredChecks) : [],
-      toolMode: isExecution ? 'project-write' : 'read-only',
+      toolMode: isExecution ? normalizeToolMode(body.toolMode) : 'read-only',
+      sandboxMode: isExecution ? normalizeSandboxMode(body.sandboxMode) : undefined,
       executor: isExecution ? normalizeExecutorConfig(body.executor) : undefined,
       maxLoops: isExecution ? normalizeMaxLoops(body.maxLoops) : undefined,
       workspaceRoot: isExecution ? normalizeWorkspaceRoot(body.workspaceRoot) : undefined,
@@ -250,6 +251,16 @@ function normalizeMaxLoops(value: unknown): number | undefined {
     throw new Error(`maxLoops must be an integer in [1,200], got: ${String(value)}`);
   }
   return Math.floor(parsed);
+}
+
+function normalizeToolMode(value: unknown): 'all' | 'project-write' {
+  return value === 'all' ? 'all' : 'project-write';
+}
+
+function normalizeSandboxMode(value: unknown): 'readonly' | 'workspace-write' | 'sandbox' | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'readonly' || value === 'workspace-write' || value === 'sandbox') return value;
+  throw new Error(`sandboxMode must be one of readonly, workspace-write, sandbox, got: ${String(value)}`);
 }
 
 function normalizeWorkspaceRoot(value: unknown): string | undefined {

@@ -25,6 +25,7 @@ export { validateProviderModelRequest, type ProviderRequestConfig, type Provider
 export { createToolRegistry, registerBuiltinTools, READ_ONLY_BUILTIN_TOOLS, setWorkspaceRoot, type ToolRegistry, type ToolRegistryOptions, type BuiltinToolOptions, type ToolCapability, type ToolCostLevel, type ToolExecutionPolicy, type ToolExecutionDecision, type ToolHandler, type ToolInput, type ToolRetryPolicy, type ToolRiskLevel, type ToolResult } from './tools/core/registry.js';
 export { resolveToolset, resolveToolsets, getEnabledToolsets, isToolEnabled, listToolsets, getToolsetDefinition, postureForContext, TOOL_NAMES, type ToolsetDefinition } from './toolsets.js';
 export { MCPToolBridge, MCPClient, type MCPServerConfig, type MCPToolDef, type MCPServerRegistryRecord, registryRecordToConfig } from './tools/external/mcp-client.js';
+export { getAvailableSandbox } from './tools/external/shell-sandbox.js';
 export { ensureMCPServerStore, upsertMCPServer, loadMCPServer, listMCPServers, deleteMCPServer, updateMCPServerStatus, type MCPServerRecord, type MCPTransport, type MCPServerStatus, type MCPRegisteredTool, type UpsertMCPServerInput, type UpdateMCPServerStatusInput, type ListMCPServersOptions } from './mcp-servers.js';
 export { ensureSessionStore, saveSession, loadSession, listSessions, deleteSession, type SessionRecord } from './session.js';
 export { recordOperatorFollowup, recordOperatorSteering, recordSessionBranchCreated, type RecordOperatorFollowupInput, type RecordOperatorSteeringInput, type RecordSessionBranchCreatedInput } from './operator-control.js';
