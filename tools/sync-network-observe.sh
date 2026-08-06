@@ -43,6 +43,20 @@ LATEST_SNAPSHOT=$(ls -1 "$DST_INPUT"/*.json 2>/dev/null | sort -r | head -n 1 | 
 REPORT_COUNT=$(ls -1 "$DST_INPUT"/*.md 2>/dev/null | wc -l | tr -d ' ')
 SNAPSHOT_COUNT=$(ls -1 "$DST_INPUT"/*.json 2>/dev/null | wc -l | tr -d ' ')
 
+# ── Surge log error window (2h, matching the 1500/4000 per-hour thresholds) ──
+SURGE_DIR="$DST_ROOT/surge-input"
+mkdir -p "$SURGE_DIR"
+SURGE_TS=$(date -u +%Y-%m-%dT%H-%M-%S)
+NODE_BIN="/Users/echerlos/Library/Application Support/fnm/aliases/default/bin/node"
+if [ -x "$NODE_BIN" ] && "$NODE_BIN" /Users/echerlos/Downloads/projects/aidebug/scripts/surge-ai-window.mjs --minutes 120 --json > "$SURGE_DIR/surge-errors-$SURGE_TS.json" 2>/dev/null; then
+  # keep newest 24 surge windows
+  ls -1 "$SURGE_DIR"/surge-errors-*.json 2>/dev/null | sort -r | tail -n +25 | while read -r f; do rm -f "$f"; done || true
+  SURGE_WINDOWS=$(ls -1 "$SURGE_DIR"/surge-errors-*.json 2>/dev/null | wc -l | tr -d ' ')
+else
+  SURGE_WINDOWS=0
+  echo "warning: surge-ai-window capture failed (Surge may be off)" >&2
+fi
+
 cat > "$DST_ROOT/bridge-manifest.json" <<EOF
 {
   "syncedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -50,9 +64,10 @@ cat > "$DST_ROOT/bridge-manifest.json" <<EOF
   "keep": $KEEP,
   "reportCount": $REPORT_COUNT,
   "snapshotCount": $SNAPSHOT_COUNT,
+  "surgeWindowCount": $SURGE_WINDOWS,
   "latestReport": "$LATEST_REPORT",
   "latestSnapshot": "$LATEST_SNAPSHOT"
 }
 EOF
 
-echo "bridged $REPORT_COUNT reports, $SNAPSHOT_COUNT snapshots -> $DST_INPUT"
+echo "bridged $REPORT_COUNT reports, $SNAPSHOT_COUNT snapshots, $SURGE_WINDOWS surge windows -> $DST_ROOT"
