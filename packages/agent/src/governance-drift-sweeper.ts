@@ -96,6 +96,9 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
   event_retention: [],
   code_topology_audit: [],
   dead_letter: [],
+  adversarial_review: [
+    { metric: 'findingCount', direction: 'higher', thresholdPercent: 30, label: 'Adversarial findings increased >30%' },
+  ],
 };
 
 // ── Core ─────────────────────────────────────────────────
