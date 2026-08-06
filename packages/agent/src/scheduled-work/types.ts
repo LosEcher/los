@@ -39,6 +39,12 @@ export interface ScheduledWorkRunTemplate {
   executor?: ScheduledExecutorConfig;
   /** Override for the agent loop's maxLoops (default 20). */
   maxLoops?: number;
+  /** Workspace root override for remote execution: the default is the
+   *  gateway's absolute workspace path, which does not exist on remote
+   *  executor nodes. Point this at a node-local path (e.g.
+   *  /opt/los/los-workspace or /rclone-hub/sub-store) so the remote agent
+   *  can read/write real files. */
+  workspaceRoot?: string;
 }
 
 export interface ScheduledWorkItem {

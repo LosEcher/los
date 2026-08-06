@@ -247,7 +247,8 @@ async function executeTemplate(
     const disposition = schedule.runTemplate.mode === 'execution' ? 'execution' as const : 'planning' as const;
     const result = await runScheduledAgentTask({
       prompt: schedule.runTemplate.goalTemplate,
-      workspaceRoot: await resolveWorkspaceRoot(schedule.projectId),
+      workspaceRoot: schedule.runTemplate.workspaceRoot
+        ?? await resolveWorkspaceRoot(schedule.projectId),
       tenantId: schedule.tenantId,
       projectId: schedule.projectId,
       userId: schedule.userId,
