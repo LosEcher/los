@@ -27,6 +27,11 @@ export function _createKernelEventProjector(
     }
     expectedSequence += 1;
     kernelIdentity = currentIdentity;
+    // 降噪 (2026-08-07 B 项): message.delta 是流式中间态, 逐 token 落库曾在
+    // 8-05/8-06 两天 65 runs 产生 40 万行 (~512MB 表膨胀主因), 且生产代码无
+    // 消费者读取 delta 行 (message.completed 已含全文摘要)。跳过写库但照常
+    // 推进 sequence, 保持 canonical transcript 完整性校验不失效。
+    if (event.type === 'message.delta') return;
     const record = await append(_projectKernelEvent(event, {
       ...context,
       sessionId,

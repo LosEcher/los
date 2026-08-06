@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 
 import {
+  backfillDailyAgentQualitySnapshots,
   captureDailyAgentQuality,
   listDailyAgentQualityScopes,
   type DailyAgentQualityScope,
@@ -33,6 +34,17 @@ export function registerDailyAgentQualityMaintenance(
         } catch (error) {
           log.warn(
             `Daily agent quality capture failed for ${scope.tenantId}/${scope.projectId}: `
+            + `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        // Backfill snapshots for dates the gateway was offline for
+        // (2026-08-07 B 项): window metrics rebuild exactly, inbox is
+        // recorded empty rather than contaminating history.
+        try {
+          await backfillDailyAgentQualitySnapshots(scope);
+        } catch (error) {
+          log.warn(
+            `Daily agent quality backfill failed for ${scope.tenantId}/${scope.projectId}: `
             + `${error instanceof Error ? error.message : String(error)}`,
           );
         }

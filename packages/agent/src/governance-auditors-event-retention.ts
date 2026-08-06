@@ -91,13 +91,19 @@ export async function runEventRetentionAudit(): Promise<Record<string, unknown>>
         timestamp: e.event.timestamp as string,
       })));
 
-      // Mark events as archived in PG
+      // Mark events as archived in PG: replace the heavy payload with a
+      // lightweight archive reference (JSONL is the authoritative copy).
+      // Previously only an archived_at marker was added, so archived rows
+      // kept their full payload and PG space was never released.
       for (const e of events) {
         await db.query(
           `UPDATE session_events
-           SET payload_json = jsonb_set(payload_json, '{archived_at}', to_jsonb(now()::text))
+           SET payload_json = jsonb_build_object(
+             'archived_at', to_jsonb(now()::text),
+             'archive_ref', to_jsonb($2::text)
+           )
            WHERE id = $1`,
-          [e.id],
+          [e.id, stream],
         );
       }
 
