@@ -256,6 +256,7 @@ async function executeTemplate(
       projectId: schedule.projectId,
       userId: schedule.userId,
       toolMode: schedule.runTemplate.toolMode,
+      sandboxMode: schedule.runTemplate.sandboxMode,
       disposition,
       dedupeKey,
       runSpecId: run.runSpecId,

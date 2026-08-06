@@ -162,6 +162,8 @@ test('scheduled work routes reject invalid templateId and nested runTemplate (fa
         editableSurfaces: ['/tmp'], requiredChecks: ['x'],
         maxLoops: 40,
         workspaceRoot: '/opt/los/los-workspace',
+        toolMode: 'all',
+        sandboxMode: 'sandbox',
         executor: { enabled: true, nodeId: 'node34-executor-1', nodeUrls: ['http://100.68.106.96:8090'] },
         trigger: { kind: 'interval', expression: '6h', timezone: 'Asia/Shanghai' },
       },
@@ -170,8 +172,26 @@ test('scheduled work routes reject invalid templateId and nested runTemplate (fa
     const created = ok.json().schedule;
     assert.equal(created.runTemplate.maxLoops, 40);
     assert.equal(created.runTemplate.workspaceRoot, '/opt/los/los-workspace');
+    assert.equal(created.runTemplate.toolMode, 'all');
+    assert.equal(created.runTemplate.sandboxMode, 'sandbox');
     assert.equal(created.runTemplate.executor.nodeId, 'node34-executor-1');
     assert.deepEqual(created.runTemplate.executor.nodeUrls, ['http://100.68.106.96:8090']);
+
+    // C1/sandbox: invalid sandboxMode must 400 with a hint
+    const badSandbox = await app.inject({
+      method: 'POST', url: '/scheduled-work-items',
+      headers: { 'x-los-operator-token': 'operator-token', 'content-type': 'application/json' },
+      payload: {
+        projectId: 'los', title: 'bad-sandbox',
+        templateId: 'scheduled_execution',
+        goalTemplate: 'probe',
+        editableSurfaces: ['/tmp'], requiredChecks: ['x'],
+        sandboxMode: 'chroot',
+        trigger: { kind: 'interval', expression: '6h', timezone: 'Asia/Shanghai' },
+      },
+    });
+    assert.equal(badSandbox.statusCode, 400);
+    assert.match(badSandbox.json().error, /sandboxMode must be one of/);
   } finally {
     setConfig(original);
     await app.close();
