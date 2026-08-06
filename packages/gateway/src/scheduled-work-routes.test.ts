@@ -161,6 +161,7 @@ test('scheduled work routes reject invalid templateId and nested runTemplate (fa
         goalTemplate: 'probe',
         editableSurfaces: ['/tmp'], requiredChecks: ['x'],
         maxLoops: 40,
+        workspaceRoot: '/opt/los/los-workspace',
         executor: { enabled: true, nodeId: 'node34-executor-1', nodeUrls: ['http://100.68.106.96:8090'] },
         trigger: { kind: 'interval', expression: '6h', timezone: 'Asia/Shanghai' },
       },
@@ -168,6 +169,7 @@ test('scheduled work routes reject invalid templateId and nested runTemplate (fa
     assert.equal(ok.statusCode, 201, JSON.stringify(ok.json()));
     const created = ok.json().schedule;
     assert.equal(created.runTemplate.maxLoops, 40);
+    assert.equal(created.runTemplate.workspaceRoot, '/opt/los/los-workspace');
     assert.equal(created.runTemplate.executor.nodeId, 'node34-executor-1');
     assert.deepEqual(created.runTemplate.executor.nodeUrls, ['http://100.68.106.96:8090']);
   } finally {

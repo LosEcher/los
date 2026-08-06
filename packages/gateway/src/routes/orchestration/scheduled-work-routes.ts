@@ -189,6 +189,7 @@ function normalizeCreateInput(
       toolMode: isExecution ? 'project-write' : 'read-only',
       executor: isExecution ? normalizeExecutorConfig(body.executor) : undefined,
       maxLoops: isExecution ? normalizeMaxLoops(body.maxLoops) : undefined,
+      workspaceRoot: isExecution ? normalizeWorkspaceRoot(body.workspaceRoot) : undefined,
       feedAnalysisRequest: templateId === 'scheduled_feed_analysis'
         ? normalizeFeedAnalysisRequest(body.feedAnalysisRequest)
         : undefined,
@@ -249,6 +250,14 @@ function normalizeMaxLoops(value: unknown): number | undefined {
     throw new Error(`maxLoops must be an integer in [1,200], got: ${String(value)}`);
   }
   return Math.floor(parsed);
+}
+
+function normalizeWorkspaceRoot(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !value.startsWith('/')) {
+    throw new Error('workspaceRoot must be an absolute path');
+  }
+  return value.trim();
 }
 
 function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['executor'] {
