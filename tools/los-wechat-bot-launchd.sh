@@ -9,6 +9,9 @@ RUNTIME_DIR="$ROOT/.los-runtime"
 BOT_LOG="$RUNTIME_DIR/wechat-bot.log"
 BOT_PID_FILE="$RUNTIME_DIR/wechat-bot.pid"
 
+# launchd has a clean PATH; expose fnm/pnpm/homebrew like tools/los-launchd-wrapper.sh.
+export PATH="$HOME/Library/pnpm:$HOME/Library/Application Support/fnm/aliases/default/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$RUNTIME_DIR/launchd-wrapper.log"; }
 
 bot_alive() {
@@ -19,15 +22,14 @@ bot_alive() {
 }
 
 start_bot() {
-  local node tsx
-  node="$(command -v node || true)"
+  local tsx
   tsx="$ROOT/packages/wechat-bot/node_modules/.bin/tsx"
-  [ -n "$node" ] || { log "bot start: node not found"; return 1; }
   [ -x "$tsx" ] || { log "bot start: tsx not found at $tsx"; return 1; }
   cd "$ROOT" || return 1
   # shellcheck disable=SC1091
   set -a; . "$ROOT/.env" 2>/dev/null; set +a
-  nohup "$node" "$tsx" "$ROOT/packages/wechat-bot/src/index.ts" \
+  # .bin/tsx is a POSIX sh wrapper — execute it directly, not via node.
+  nohup "$tsx" "$ROOT/packages/wechat-bot/src/index.ts" \
     >> "$BOT_LOG" 2>&1 &
   echo $! > "$BOT_PID_FILE"
   log "bot started pid=$(cat "$BOT_PID_FILE")"
