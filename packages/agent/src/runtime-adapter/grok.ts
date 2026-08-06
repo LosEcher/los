@@ -27,7 +27,10 @@ export interface GrokRuntimeOutput {
 }
 
 export interface GrokRuntimeHandle extends RuntimeHandle {
+  /** Bounded stdout capture (GrokRuntimeOutput shape; supersedes RuntimeHandle.output). */
   output: Promise<GrokRuntimeOutput>;
+  /** Settled result: exit + output together. */
+  settled: Promise<{ exit: { exitCode: number | null; signal: NodeJS.Signals | null }; output: GrokRuntimeOutput }>;
 }
 
 export function getGrokRuntimeModel(): string {
@@ -97,6 +100,7 @@ export function spawnGrok(input: GrokSpawnInput): GrokRuntimeHandle {
     kill: signal => proc.kill(signal),
     exited: settled.then(result => result.exit),
     output: settled.then(result => result.output),
+    settled,
   };
 }
 

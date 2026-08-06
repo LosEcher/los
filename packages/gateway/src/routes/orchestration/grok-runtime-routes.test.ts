@@ -37,19 +37,21 @@ const account: ProviderAccountRecord = {
 };
 
 function handle(output: Partial<GrokRuntimeOutput> = {}): GrokRuntimeHandle {
+  const settledOutput: GrokRuntimeOutput = {
+    text: 'bounded redacted output',
+    capturedBytes: 23,
+    totalBytes: 23,
+    stderrBytes: 0,
+    truncated: false,
+    ...output,
+  };
   return {
     sessionId: 'ext-grok-fixture',
     pid: 4242,
     kill: () => true,
     exited: Promise.resolve({ exitCode: 0, signal: null }),
-    output: Promise.resolve({
-      text: 'bounded redacted output',
-      capturedBytes: 23,
-      totalBytes: 23,
-      stderrBytes: 0,
-      truncated: false,
-      ...output,
-    }),
+    output: Promise.resolve(settledOutput),
+    settled: Promise.resolve({ exit: { exitCode: 0, signal: null }, output: settledOutput }),
   };
 }
 
