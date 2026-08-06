@@ -160,6 +160,10 @@ export async function runGoalSelfCheck(
     traceId: input.traceId,
   });
   const contextSummary = summarizeAgentContext(result);
+  // P0 (2026-08-06 self-check latency): the judge call used to generate
+  // 3k-7k hidden thinking tokens on DeepSeek (non-streaming body read took
+  // 30-80s). Disable thinking and cap maxTokens; also pass sessionId so
+  // provider-call telemetry is attributable instead of empty-session rows.
   const selfCheckResult = await runPostExecutionSelfCheck({
     goal: selfCheckContract.goal!,
     stopConditions: selfCheckContract.stopConditions ?? [],
@@ -167,6 +171,8 @@ export async function runGoalSelfCheck(
     contextSummary,
     provider: selfCheckProvider,
     traceId: input.traceId,
+    sessionId,
+    modelSettings: { thinking: 'disabled', maxTokens: 1024 },
     judgeSystemPrompt: config.judge.systemPrompt,
   });
 

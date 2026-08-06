@@ -1,5 +1,6 @@
 import type { Provider, Message, ToolDef } from './providers/types.js';
 import type { AgentResult } from './loop.js';
+import type { ModelSettings } from './model-settings.js';
 import type { Severity } from './review-runner.js';
 
 export interface SelfCheckGap {
@@ -20,6 +21,16 @@ export interface SelfCheckInput {
   traceId?: string;
   /** Optional custom system prompt for the judge. Falls back to hardcoded evaluator prompt. */
   judgeSystemPrompt?: string;
+  /** Model settings for the judge call: limit reasoning/tokens so a
+   *  non-streaming self-check does not spend 30-80s generating thousands of
+   *  hidden thinking tokens (observed 2026-08-06). */
+  modelSettings?: ModelSettings;
+  /** Session id for provider-call telemetry attribution (self-check calls
+   *  used to land with empty session/trace rows). */
+  sessionId?: string;
+  /** Hard total timeout for the judge call (ms). Aborts long-tail generation;
+   *  the failure is reported as a self_check_timeout gap. Default 60s. */
+  timeoutMs?: number;
 }
 
 export interface SelfCheckResult {
@@ -32,6 +43,8 @@ export interface SelfCheckResult {
   confidence: number;
   rawResponse: string;
   evaluatedAt: string;
+  /** True when the judge call was aborted by the timeout (P1-4). */
+  timedOut?: boolean;
   skipped: boolean;
   skipReason?: string;
 }
@@ -69,24 +82,35 @@ export async function runPostExecutionSelfCheck(
 
   const messages = buildSelfCheckPrompt(input);
   let rawResponse = '';
+  let timedOut = false;
 
   try {
+    const timeoutMs = input.timeoutMs ?? 60_000;
     const response = await input.provider.chat(messages, undefined, {
-      signal: undefined,
+      signal: AbortSignal.timeout(timeoutMs),
       traceId: input.traceId,
+      sessionId: input.sessionId,
+      modelSettings: input.modelSettings,
     });
     rawResponse = response.text;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const isTimeout = err instanceof Error && err.name === 'TimeoutError'
+      || (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ABORT_ERR');
+    timedOut = isTimeout;
     return {
       goalMet: false,
       stopConditionsMet: input.stopConditions.map(() => false),
       summaryOfEvidence: '',
       gaps: [
         {
-          condition: 'self_check_provider',
-          detail: `self-check LLM call failed: ${message}`,
-          suggestion: 'verify the provider is available and the task result can be reviewed manually',
+          condition: isTimeout ? 'self_check_timeout' : 'self_check_provider',
+          detail: isTimeout
+            ? `self-check LLM call timed out after ${input.timeoutMs ?? 60_000}ms`
+            : `self-check LLM call failed: ${message}`,
+          suggestion: isTimeout
+            ? 'verify judge model settings (thinking disabled, maxTokens capped) and retry'
+            : 'verify the provider is available and the task result can be reviewed manually',
         },
       ],
       selfCheckPassed: false,
@@ -94,6 +118,7 @@ export async function runPostExecutionSelfCheck(
       rawResponse: message,
       evaluatedAt: now,
       skipped: false,
+      timedOut,
     };
   }
 

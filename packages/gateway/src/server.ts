@@ -459,7 +459,16 @@ export async function startServer(port?: number, host?: string) {
   // Register maintenance timers: orphan reaper, memory retention/integrity/auto-compact, governance sweep
   registerServerMaintenance(app, service, config, { executorAgentKey: config.executor.agentKey });
 
-  await app.listen({ port: p, host: h });
+  // P1-5: if the port is taken or bind fails, close the app so the onClose
+  // hooks stop the maintenance timers, then rethrow. Without this the process
+  // stays alive as a timer-only gateway with no listener and races the real
+  // one for scheduled runs (observed 2026-08-06: 3 concurrent gateways).
+  try {
+    await app.listen({ port: p, host: h });
+  } catch (error) {
+    await app.close().catch(() => {});
+    throw error;
+  }
   log.info(`Gateway ${service.serviceId} listening on http://${h}:${p}`);
   return app;
 }
@@ -468,7 +477,9 @@ if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.
   void startServer().catch((error) => {
     console.error('GATEWAY FATAL:', error instanceof Error ? `${error.message}\n${error.stack}` : String(error));
     log.error('Gateway failed to start', { error: error instanceof Error ? error.message : String(error) });
-    process.exitCode = 1;
+    // Explicit exit: process.exitCode alone would let maintenance timers keep
+    // the process alive with no listener (P1-5).
+    process.exit(1);
   });
 }
 

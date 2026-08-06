@@ -17,7 +17,7 @@ import {
   type ReviewPacket,
 } from './self-check.js';
 import type { AgentResult } from './loop.js';
-import type { Provider, ProviderResponse, Message, ToolDef } from './providers/types.js';
+import type { Provider, ProviderResponse, Message, ToolDef, ChatOptions } from './providers/types.js';
 
 function createFakeProvider(responseText: string): Provider {
   return {
@@ -244,6 +244,47 @@ test('selfCheckPassed false when goal not met even if stop conditions met', asyn
   );
   assert.equal(result.goalMet, false);
   assert.equal(result.selfCheckPassed, false);
+});
+
+test('self-check passes modelSettings and sessionId to the judge call', async () => {
+  let capturedOptions: unknown;
+  const capturingProvider: Provider = {
+    ...createFakeProvider('{"goalMet": true, "stopConditionsMet": [false], "summaryOfEvidence": "ok", "confidence": 0.9, "gaps": []}'),
+    chat: async (_m: Message[], _t?: ToolDef[], options?: ChatOptions) => {
+      capturedOptions = options;
+      return { text: '{"goalMet": true, "stopConditionsMet": [false], "summaryOfEvidence": "ok", "confidence": 0.9, "gaps": []}', toolCalls: [], usage: { promptTokens: 1, completionTokens: 1 }, model: 'test' };
+    },
+  };
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      provider: capturingProvider,
+      sessionId: 'session-abc',
+      modelSettings: { thinking: 'disabled', maxTokens: 1024 },
+    }),
+  );
+  assert.equal(result.selfCheckPassed, true);
+  const opts = capturedOptions as ChatOptions;
+  assert.equal(opts.sessionId, 'session-abc');
+  assert.deepEqual(opts.modelSettings, { thinking: 'disabled', maxTokens: 1024 });
+  assert.ok(opts.signal instanceof AbortSignal, 'timeout signal must be attached');
+});
+
+test('self-check timeout aborts the judge call with a timeout gap', async () => {
+  const hangingProvider: Provider = {
+    ...createFakeProvider(''),
+    chat: async (_m: Message[], _t?: ToolDef[], options?: ChatOptions) => {
+      // Honor the abort signal: never resolve, reject on abort.
+      return await new Promise<ProviderResponse>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    },
+  };
+  const result = await runPostExecutionSelfCheck(
+    makeInput({ provider: hangingProvider, timeoutMs: 100 }),
+  );
+  assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.gaps[0]?.condition, 'self_check_timeout');
 });
 
 // ── Unit: shouldRunSelfCheck ──
