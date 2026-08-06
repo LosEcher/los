@@ -18,8 +18,9 @@ cross-project execution rules remain under `~/.codex/`.
 3. Route DB, config, logger, and provider discovery through `@los/infra`.
 4. Use Zod schemas as configuration truth and PostgreSQL for persistence.
 5. Use feature flags, not experimental directories.
-6. Keep source files below the CI module-size gates: over 500 lines warns and
-   over 700 lines blocks.
+6. Keep source files below the CI module-size gates: `tools/check-structure.sh`
+   blocks new files >500 lines (grandfathered files in
+   `tools/.large-file-baseline.txt` warn) and errors on any file >700 lines.
 7. Keep gateway routes under `packages/gateway/src/routes/`; `server.ts` is
    registration and composition only.
 8. Do not create a file and directory with the same name under
@@ -62,6 +63,9 @@ For workspace-boundary questions, also read `../../AGENTS.md` and
   `docs/governance/code-first-determinism.md` for the full checklist.
 - AP4, AP6, AP8, and AP10 remain hard constraints; their canonical wording and
   code locations are in `docs/governance/anti-patterns.md`.
+- AP12: todo status must follow the underlying task-run outcome; owning
+  integration paths write back completion instead of leaving zombie
+  `in_progress` rows (2026-08-05/08-08 feed-analysis case).
 - Persisted task, session, provider, node, and todo evidence outranks UI state
   or agent summaries.
 

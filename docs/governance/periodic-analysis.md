@@ -115,7 +115,12 @@ Question: are eval backlog cases with automated probes still passing?
 node --import tsx --test --test-name-pattern="E0[238]" packages/agent/src/eval-probes.test.ts
 
 # Record a snapshot into run_evals for the dashboard
-curl -X POST http://127.0.0.1:8080/eval-backlog/run
+# (operator endpoints require the x-los-operator-token header, not Bearer)
+source .env 2>/dev/null
+TOKEN="${LOS_OPERATOR_TOKEN:-$LOS_AUTH_TOKEN}"
+curl -X POST http://127.0.0.1:8080/eval-backlog/run \
+  -H "x-los-operator-token: $TOKEN" \
+  -H "Content-Type: application/json"
 ```
 
 Check the dashboard at `#evals` with `runSpecId=eval-backlog` to see which cases have
@@ -257,6 +262,28 @@ Required evidence:
 Passing answer pattern:
 Owner surface:
 ```
+
+## Loop / Scheduled-Task Candidates
+
+Repeated work from session history that is a fit for `scheduled_work_items`
+(interval/cron, persisted `result_summary_json`) or `governance_jobs`
+(cadence + circuit breaker). Register via the Web Schedules page or
+`scheduled-work-routes.ts`; keep the same item idempotent (interval +
+`dedupeKey`).
+
+| Candidate | Cadence | Template/type | What it does | Provenance |
+|---|---|---|---|---|
+| Runtime readiness snapshot | 5-10m | `runtime_readiness` | Node/service online snapshot to `scheduled_work_item_runs` | live since 08-05 (`schedule-c86f9f56`) |
+| Doc drift sweep | weekly | `scheduled_execution` or manual | Run the `los-doc-drift-sweep` skill checklist: doc anchors, command surface, ADR numbering, memory vs persisted truth | skill `los-doc-drift-sweep`; 2026-08 analysis |
+| Todo/task_run reconciliation | daily | governance-style | Detect zombie `in_progress` todos (AP12) and machine-generated `ready` floods; demote with metadata note | 08-05/08-08 cleanups |
+| DB instance guard | on-demand (doctor) | deterministic check | Verify `lsof :55432` owner + `.env` comment before inventory queries | 08-05 dual-postgres incident |
+| Session theme summary | monthly | `scheduled_execution` (audit mode) | Summarize recent session topic distribution (inventory/gaps/fixes/scenario validation) and feed the monthly governance review | 2026-08 periodic analysis |
+
+Keep promotion rules: a candidate becomes a persisted schedule only when it is
+idempotent, has a bounded blast radius (audit/read-only first), and its
+evidence lands in a queryable table. Do not create parallel schedulers —
+`governance_jobs` owns governance cadences, `scheduled_work_items` owns
+work-item execution.
 
 ## Placement Rules
 
