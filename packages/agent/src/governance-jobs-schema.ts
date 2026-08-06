@@ -255,4 +255,13 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     config: { module: 'all' },
     initialStaggerMs: 15 * 60 * 1000,
   },
+  {
+    // Self-bootstrap (2026-08-07, A 项): quality snapshot → improvement todo,
+    // and todo lifecycle refresh for stale in_progress tasks.
+    jobType: 'self_bootstrap',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-self-bootstrap',
+    config: { staleDays: 14, reviewedWithinDays: 7 },
+    initialStaggerMs: 45 * 60 * 1000,
+  },
 ];
