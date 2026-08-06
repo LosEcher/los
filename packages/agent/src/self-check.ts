@@ -98,12 +98,18 @@ export async function runPostExecutionSelfCheck(
   }
 
   const parsed = parseSelfCheckResponse(rawResponse, input.stopConditions.length);
+  // stopConditionsMet is audit information (whether the agent stopped because a
+  // stop condition fired), NOT a pass gate: tasks that complete normally never
+  // trigger a stop condition (e.g. scheduled execution's 'operator cancels
+  // schedule'), so requiring every stop condition to be met would fail every
+  // well-finished task and trip the circuit breaker.
+  const selfCheckPassed = parsed.goalMet;
   return {
     goalMet: parsed.goalMet,
     stopConditionsMet: parsed.stopConditionsMet,
     summaryOfEvidence: parsed.summaryOfEvidence,
     gaps: parsed.gaps,
-    selfCheckPassed: parsed.goalMet && parsed.stopConditionsMet.every(Boolean),
+    selfCheckPassed,
     confidence: parsed.confidence,
     rawResponse,
     evaluatedAt: now,
