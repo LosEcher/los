@@ -48,6 +48,10 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     if (input.runTemplate.requiredChecks.length === 0) {
       throw new Error('scheduled_execution requires at least one required check');
     }
+    if (input.runTemplate.maxLoops !== undefined
+      && (input.runTemplate.maxLoops < 1 || input.runTemplate.maxLoops > 200)) {
+      throw new Error('maxLoops must be in [1,200]');
+    }
     return; // skip feed-analysis and read-only checks
   }
   if (input.runTemplate.toolMode !== 'read-only' || input.runTemplate.editableSurfaces.length > 0) {

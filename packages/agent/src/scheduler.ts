@@ -11,6 +11,7 @@ export { runScheduledAgentTask } from './scheduler/scheduled-task-runner.js';
 export { persistScheduledToolCallState } from './scheduler/tool-call-state-persistence.js';
 export type {
   AgentTaskGraphStageOutput,
+  ExecutorCapabilityRequirement,
   RunAgentTaskGraphSerialInput,
   RunAgentTaskGraphSerialResult,
   ScheduledAgentTaskInput,

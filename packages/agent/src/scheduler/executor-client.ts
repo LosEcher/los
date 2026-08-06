@@ -1,4 +1,5 @@
 import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
+import { resolveExecutorEndpoint } from '../executor-node-utils.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
@@ -44,11 +45,20 @@ export async function resolveExecutor(
     if (normalizedUrls.length === 0) {
       throw new Error('Executor is enabled but no executor node URL is configured');
     }
-    // Distribute load across configured nodes instead of always picking the first
-    const selectedUrl = normalizedUrls.length === 1
-      ? normalizedUrls[0]!
-      : normalizedUrls[Math.floor(Math.random() * normalizedUrls.length)]!;
-    const nodeId = normalizeOptionalString(config.nodeId) ?? selectedUrl;
+    // Health-aware selection (T1): prefer an online DB-registered node whose
+    // agent_http URL matches one of the configured URLs, ordered by the same
+    // health sort used for DB candidates (memory pressure → preferred → queue
+    // depth → active tasks → capacity → heartbeat). Falls back to the first
+    // configured URL when no DB record matches (deterministic, not random).
+    const nodes = await listExecutorNodes(100);
+    const ordered = sortExecutorCandidates(nodes, normalizeOptionalString(config.nodeId));
+    const healthy = ordered.find(node =>
+      normalizedUrls.includes(normalizeExecutorUrl(resolveExecutorEndpoint(node.connectConfig, 'agent_http') ?? ''))
+      && node.status === 'online');
+    const selectedUrl = healthy
+      ? normalizeExecutorUrl(resolveExecutorEndpoint(healthy.connectConfig, 'agent_http')!)!
+      : normalizedUrls[0]!;
+    const nodeId = normalizeOptionalString(config.nodeId) ?? (healthy ? healthy.nodeId : selectedUrl);
     const skipped = normalizedUrls
       .filter(url => url !== selectedUrl)
       .map(url => ({ id: url, reason: 'load_distribution' as const }));
