@@ -60,9 +60,17 @@ Run transitions are:
 queued -> claimed | skipped | cancelled
 claimed -> running | awaiting_approval | skipped | failed
 running -> claimed (expired lease recovery) | succeeded | no_op | failed | cancelled
-awaiting_approval -> claimed | cancelled
+awaiting_approval -> claimed | queued | cancelled
 failed -> claimed
 ```
+
+`awaiting_approval -> queued` is the async-approval path (2026-08-06): an
+operator approval marks the run approved (resultSummary.approvedBy) and queues
+it; the scheduled-work tick (`claimQueuedScheduledWorkRuns`) claims and
+executes it within one tick interval (~30s). This keeps the approve HTTP call
+short instead of synchronously running the whole agent task inside the request.
+The execution gate in `executeScheduledWorkRun` lets a `queued` run through
+(approvedBy present) while still intercepting fresh preapproved_scope runs.
 
 `failed -> claimed` requires an expired/explicit retry, a remaining attempt,
 and a non-open circuit. Terminal success, no-op, skipped, and cancelled runs do
