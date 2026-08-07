@@ -54,6 +54,7 @@
     "./dead-letter": "./src/dead-letter.ts",
     "./event-bus": "./src/event-bus.ts",
     "./runtime-adapter": "./src/runtime-adapter/index.ts",
+    "./runtime-task": "./src/runtime-task.ts",
     "./pre-action-gate": "./src/pre-action-gate.ts",
     "./pre-action-evidence": "./src/pre-action-evidence.ts",
     "./message-router": "./src/message-router/index.ts",

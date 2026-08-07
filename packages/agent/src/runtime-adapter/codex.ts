@@ -8,10 +8,12 @@
  * be added here (similar to the Claude Code debug parser pattern).
  */
 
-import { spawn, type ChildProcess, execSync } from 'node:child_process';
+import { spawn, type ChildProcess, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
+import { redactExternalSummaryText } from '../external-tool-summary.js';
 import type { RuntimeHandle } from './types.js';
+import { resolveRuntimeCommand } from './command.js';
 
 const log = getLogger('codex-adapter');
 
@@ -35,7 +37,7 @@ export interface CodexSpawnInput {
 
 export function codexSupportsOtel(codexPath = 'codex'): boolean {
   try {
-    const out = execSync(`${codexPath} --version`, { encoding: 'utf-8', timeout: 5_000 }).trim();
+    const out = execFileSync(resolveRuntimeCommand(codexPath), ['--version'], { encoding: 'utf-8', timeout: 5_000 }).trim();
     // OTel support: >= 1.0, or 0.146+ (OTel env support landed in 0.146,
     // verified 2026-08 via los runtime-adapter).
     const versionMatch = out.match(/(\d+)\.(\d+)/);
@@ -48,10 +50,20 @@ export function codexSupportsOtel(codexPath = 'codex'): boolean {
   }
 }
 
+export function codexAvailable(codexPath = 'codex'): boolean {
+  try {
+    execFileSync(resolveRuntimeCommand(codexPath), ['--version'], { encoding: 'utf-8', timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface CodexRuntimeOutput {
   exitCode: number | null;
   output: string;
   outputBytes: number;
+  totalBytes: number;
   truncated: boolean;
   stderrBytes: number;
   spawnFailed: boolean;
@@ -100,10 +112,10 @@ export function spawnCodex(input: CodexSpawnInput): CodexRuntimeHandle {
     log.warn('Codex OTel support uncertain — telemetry may not be emitted');
   }
 
-  const proc: ChildProcess = spawn(codexPath, ['exec', prompt, ...extraArgs], {
+  const proc: ChildProcess = spawn(resolveRuntimeCommand(codexPath), ['exec', prompt, ...extraArgs], {
     cwd: workspaceRoot,
     env: { ...process.env, ...otelEnv, ...extraEnv },
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
   });
 
@@ -147,8 +159,9 @@ export function spawnCodex(input: CodexSpawnInput): CodexRuntimeHandle {
     exited,
     output: exited.then(({ exitCode }) => ({
       exitCode,
-      output: Buffer.concat(retained).toString('utf8'),
+      output: redactExternalSummaryText([Buffer.concat(retained).toString('utf8')]).values[0] ?? '',
       outputBytes: capturedBytes,
+      totalBytes,
       truncated: capturedBytes < totalBytes,
       stderrBytes,
       spawnFailed,

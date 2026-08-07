@@ -286,7 +286,7 @@ export async function registerBuiltinTools(
     tags: ['shell'],
   });
 
-  // run_runtime_task — delegate to an external agent runtime (codex/grok).
+  // run_runtime_task — delegate to an external agent runtime.
   // Runs in the gateway process (spawns the CLI directly); on remote executor
   // nodes the CLI is absent and the tool reports a clear error. The CLI
   // process is not inside the agent sandbox, so network/credentials work;
@@ -296,11 +296,11 @@ export async function registerBuiltinTools(
     const prompt = String(args.prompt ?? '');
     if (!prompt.trim()) return { content: '', error: 'prompt is required' };
     const result = await runExternalRuntime({
-      kind: kind as 'codex' | 'grok',
+      kind: kind as 'claude-code' | 'codex' | 'grok',
       prompt,
       timeoutSec: Number(args.timeoutSec ?? 300),
       workspaceRoot,
-      sessionId: `agent-cx-${randomUUID()}`,
+      sessionId: `agent-${kind}-${randomUUID()}`,
     });
     return {
       content: result.content.slice(0, 12_000) || (result.exitCode === 0 ? '(no stdout)' : '(no output)'),
@@ -310,11 +310,11 @@ export async function registerBuiltinTools(
     type: 'function',
     function: {
       name: 'run_runtime_task',
-      description: 'Delegate a task to an external agent runtime CLI (codex or grok) and return its stdout. Use for deep investigation, long analysis, or tasks better suited to an external coding agent. The CLI runs in the gateway process (not the sandbox), so it has network and host access; require explicit approval.',
+      description: 'Delegate a task to an external agent runtime CLI (Claude Code, Codex, or Grok) and return bounded redacted stdout. Use for deep investigation, long analysis, or tasks better suited to an external coding agent. The CLI runs in the gateway process (not the sandbox), so it has network and host access; require explicit approval.',
       parameters: {
         type: 'object',
         properties: {
-          kind: { type: 'string', enum: ['codex', 'grok'], description: 'Runtime to invoke' },
+          kind: { type: 'string', enum: ['claude-code', 'codex', 'grok'], description: 'Runtime to invoke' },
           prompt: { type: 'string', description: 'Full self-contained prompt for the external agent' },
           timeoutSec: { type: 'number', description: 'Timeout in seconds (default 300, max 1800)' },
         },
