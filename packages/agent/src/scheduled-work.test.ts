@@ -531,6 +531,15 @@ test('approving a run recovers the slot skipped by concurrency_limit as an appro
     const approved = await approveScheduledWorkRun(run.id, { ownerId: 'operator' });
     assert.equal(approved.status, 'queued');
 
+    // The missed slot must be marked as recovered so a later approval cannot
+    // create a duplicate catch-up run.
+    const marked = await getDb().query(
+      `SELECT result_summary_json->>'caughtUpBy' AS caught_up_by
+       FROM scheduled_work_item_runs WHERE id=$1`,
+      [skippedId],
+    );
+    assert.ok(marked.rows[0]?.caught_up_by, 'missed slot must be marked caughtUpBy');
+
     // The catch-up run must be queued, approved (no second approval round trip)
     // and reference the missed slot.
     const queued = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
@@ -538,9 +547,21 @@ test('approving a run recovers the slot skipped by concurrency_limit as an appro
     assert.ok(catchUp, 'a catch-up run must be queued after approval');
     assert.equal(catchUp.resultSummary?.approvedBy, 'operator');
     assert.equal(catchUp.resultSummary?.catchUpOf, skippedId);
+    assert.equal(marked.rows[0]!.caught_up_by, catchUp.id,
+      'caughtUpBy must point at the catch-up run');
     const executed = await executeScheduledWorkRun(catchUp);
     assert.ok(['succeeded', 'no_op'].includes(executed),
       `catch-up run must execute without another approval, got ${executed}`);
+
+    // A second approval must not recover the same missed slot again.
+    const again = await getDb().query(
+      `SELECT count(*)::int AS n FROM scheduled_work_item_runs
+       WHERE schedule_id=$1 AND status='skipped' AND scheduled_for > $2
+         AND result_summary_json->>'reason'='concurrency_limit'
+         AND result_summary_json->>'caughtUpBy' IS NULL`,
+      [schedule.id, '2026-07-20T00:01:00.000Z'],
+    );
+    assert.equal(again.rows[0]!.n, 0, 'recovered slot must not be found again');
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
