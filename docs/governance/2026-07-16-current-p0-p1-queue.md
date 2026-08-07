@@ -386,3 +386,31 @@ The todo is considered closed for dispatch purposes: canary execution is
 complete and advisory. Do not re-dispatch; revisit only for the formal
 sample-gate comparison and any rollback exercise. Default kernel stays
 production baseline; `POST /execution-experiments/:id/rollback` remains wired.
+
+### 2026-08-08 optimization-2026-08 batch + GA/自举闭环 addendum
+
+**optimization-2026-08 批次(PR #218 设计落库,2026-08-07 04:12)全部 backlog 未开始**,执行顺序按设计 4→1→3→2→5→6→7→8:
+
+| # | 任务 | 优先级 | 状态(2026-08-08) |
+| --- | --- | --- | --- |
+| P0-4 | self-check 结构化输出契约(D4) | P0 | ✅ PR #230 |
+| P0-1 | 沙箱 native 后端 deny 化 | P0 | ✅ PR #231 |
+| P0-3 | compaction 失败补偿 | P0 | ✅ PR #232 |
+| P0-2 | kind 衰减 + refCount 保护 | P0 | ✅ PR #233 |
+| P1-5 | memory 写入门禁 + 投毒标记 | P1 | backlog |
+| P1-6 | shell env 最小化 + sentinel | P1 | backlog |
+| P1-7 | 沙箱绕过回归测试集 | P1 | backlog(依赖 P0-1) |
+| P1-8 | graph 分支失败取消兄弟 | P1 | backlog |
+
+**GA/自举闭环三断点(2026-08-08 实证)已修复**:PR #229(finding→todo 接线 +
+adversarial SQL bug + drift 指标死规则激活)。修复后 self_bootstrap/
+adversarial_review 的 findings 会按 dimension 建/归档 todo,drift 规则可触发。
+
+**残余缺口(本轮分析确认)**:
+1. governance_jobs 重复行(consistency_audit/dead_letter/event_retention 各 3 行)—
+   待 DB 清理(保留 active 行)
+2. 降频恢复路径:weekly→manual 降频链已移除 + seed 恢复 active+manual
+   autoFix job(PR #234);paused job 的 maybeAutoRecoverPaused 仍无调用路径(待接线)
+3. GitHub 镜像落后、GHCR latest 停留 08-04、CD 合同未定义
+4. Stage B 残留(phase latency/commit-boundary)、Stage E 图级 provenance、
+   Tier3(G10/G12/G13)、K4 正式 sample-gate 对比、CI 资源基线 5/10
