@@ -19,6 +19,22 @@ These are related but not the same problem:
 This ADR defines the `los` fallback gate and keeps legacy fallback policy out
 of `los` unless an active dependency appears.
 
+## 2026-08-07 Reconciliation
+
+LOS now has explicit external-runtime delegation through
+`POST /runtimes/:kind/run`, the internal `run_runtime_task` tool, and the
+message-router commands for Codex and Claude Code. These are named,
+operator-controlled invocations; they are not an automatic provider fallback
+and do not replace the LOS execution kernel.
+
+The shared implementation is `packages/agent/src/runtime-task.ts`, governed by
+`contracts/external-runtime.yaml`. It emits `runtime.started`,
+`runtime.process`, `runtime.output`, `runtime.completed`, `runtime.error`, and
+`runtime.cancelled`, kills the child on abort, returns bounded redacted stdout,
+and writes compact evidence to `session_events`. The earlier statements below
+that no Codex adapter existed are historical evidence from 2026-06-03, not
+current runtime truth.
+
 ## Current Evidence
 
 1. `projects/los` has no current `core-loop.mjs` reference in active source.
@@ -29,9 +45,9 @@ of `los` unless an active dependency appears.
 4. `packages/agent/src/session-events.ts` is the append-only ledger for
    los-owned run evidence.
 5. `packages/agent/src/task-runs.ts` is the task lifecycle ledger.
-6. Current child-process execution in active `los` code is limited to existing
-   bounded surfaces such as the shell sandbox and executor maintenance runner.
-   There is no Reasonix/Codex CLI fallback adapter.
+6. At the time of this decision, there was no Reasonix/Codex CLI fallback
+   adapter. Explicit external-runtime adapters were added later and remain
+   distinct from automatic fallback selection.
 7. `packages/agent/src/todo-seeds.ts` contains
    `todo-los-cli-fallback-gate`, which asks for cwd, permission, budget,
    transcript, exit-code, task/session evidence, and deactivation conditions.
@@ -70,15 +86,16 @@ A CLI fallback may be added only when an ADR or contract proves all of these:
 
 ## Required Event Shape
 
-A future fallback implementation should emit compact events equivalent to:
+A fallback or explicit external-runtime implementation emits compact events
+equivalent to the implemented external-runtime protocol:
 
 ```text
-fallback.started
-fallback.command
-fallback.output_summary
-fallback.result
-fallback.failed
-fallback.cancelled
+runtime.started
+runtime.process
+runtime.output
+runtime.completed
+runtime.error
+runtime.cancelled
 ```
 
 Each event must carry the same context fields used by the current event ledger:
@@ -117,8 +134,9 @@ not a `los` implementation task.
 
 1. `todo-los-cli-fallback-gate` is complete as a gate-definition task after
    this ADR.
-2. Implementing a fallback adapter remains a separate future task and requires
-   the criteria above.
+2. Explicit external-runtime delegation is implemented. Automatic fallback
+   selection remains a separate future task and still requires the criteria
+   above.
 3. Existing `session_events` and `task_runs` stay the required evidence layer
    for any fallback path.
 4. ADR 0015, ADR 0016, and ADR 0017 continue to apply: external transcripts,

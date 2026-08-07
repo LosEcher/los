@@ -11,6 +11,11 @@ agent CLI spans into los `session_events` and the in-process event bus. It is
 not a general OpenTelemetry Collector, not a metrics backend, and not a
 substitute for los-owned run/task/verification evidence.
 
+External-runtime correctness does not depend on OTel. The shared runtime
+service always streams bounded stdout and persists compact `runtime.*`
+evidence. OTel is supplementary provider telemetry when the external CLI is
+both compatible and configured to export it.
+
 Primary implementation:
 
 - `packages/agent/src/runtime-adapter/otel-bridge.ts`
@@ -37,6 +42,7 @@ Optional external collector is OUTSIDE this path:
 | Bridge `/health` | bridge process | process is listening |
 | `GET /runtimes/bridge/status` | gateway | whether the in-process bridge server handle is running |
 | `session_events` rows | PostgreSQL | spans were mapped and persisted |
+| `runtime.*` rows | PostgreSQL | LOS observed the external child lifecycle and bounded output summary |
 | External collector UI | third party | collector received export traffic; **not** los verification |
 
 ## Port, Host, And Protocol
@@ -51,10 +57,19 @@ Optional external collector is OUTSIDE this path:
 | Logs path | `POST /v1/logs` | Accepted and ACKed; **not processed** |
 | Health path | `GET /health` | `{ status, service: "los-otel-bridge", uptime }` |
 
-The gateway does **not** auto-start the bridge on `pnpm start`. Start paths:
+The gateway attempts to auto-start the bridge during `pnpm start`. A bind
+failure is non-fatal, so an already-running gateway can still serve runtime
+requests without OTel ingestion. Explicit start paths are:
 
-1. Operator API: `POST /runtimes/bridge/start` (requires operator auth when enabled)
-2. Runtime helpers: Claude Code / Codex run routes start a bridge if one is not already running
+1. Gateway startup: `startOtelBridge({ source: "gateway" })` (best effort)
+2. Operator API: `POST /runtimes/bridge/start` (requires operator auth when enabled)
+3. Runtime helpers: Claude Code / Codex run routes start a bridge if one is not already running
+
+`GET /runtimes/capabilities` reports `telemetry: optional_otel` for Codex and
+Claude Code. CLI availability and version compatibility do not prove that OTel
+export is enabled. In particular, Codex OTel is disabled by default and its
+own `[otel]` configuration must enable an exporter; environment variables and
+a healthy bridge alone are insufficient evidence that events will arrive.
 
 ## Gateway Control Plane
 
@@ -95,6 +110,10 @@ curl -fsS http://127.0.0.1:4318/health
 If this fails while gateway status says `running: false`, start the bridge.
 If gateway says `running: true` but `/health` fails, treat the process state as
 broken and restart the bridge via the operator API or process recovery.
+
+For runtime-result diagnosis, inspect the `runtime.started` through terminal
+`runtime.*` sequence first. Use bridge health and provider-native OTel rows only
+as secondary telemetry evidence.
 
 ## External Collector Boundary
 
@@ -147,7 +166,7 @@ until headers/attributes are fixed.
 
 1. Replacing Prometheus/Grafana or a production collector mesh.
 2. Using bridge ingest as `canMarkSucceeded()` or verification evidence.
-3. Auto-starting the bridge for every gateway process without an explicit path.
+3. Treating a best-effort gateway auto-start as proof that a CLI exported telemetry.
 4. Treating external collector success as los execution success.
 
 ## Related
