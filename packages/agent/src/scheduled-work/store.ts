@@ -205,8 +205,9 @@ export async function createManualScheduledWorkRun(input: {
 
 /**
  * Find the most recent run slot that was skipped by concurrency_limit after
- * the given time. Used by approval to recover slots lost while a run waited
- * for operator approval (P0-2).
+ * the given time and has not yet been recovered by a catch-up run. Used by
+ * approval to recover slots lost while a run waited for operator approval
+ * (P0-2).
  */
 export async function findMissedScheduledRun(input: {
   scheduleId: string; after: Date;
@@ -216,6 +217,7 @@ export async function findMissedScheduledRun(input: {
     `SELECT * FROM scheduled_work_item_runs
      WHERE schedule_id=$1 AND status='skipped' AND scheduled_for > $2
        AND result_summary_json->>'reason' = 'concurrency_limit'
+       AND result_summary_json->>'caughtUpBy' IS NULL
      ORDER BY scheduled_for DESC LIMIT 1`,
     [input.scheduleId, input.after],
   );
@@ -226,7 +228,8 @@ export async function findMissedScheduledRun(input: {
  * Insert an approved catch-up run for a missed slot. The run is queued so the
  * scheduled-work tick loop executes it without another approval round trip.
  * scheduled_for is set to now to avoid the UNIQUE(schedule_id, scheduled_for)
- * conflict with the skipped row that still owns the original slot.
+ * conflict with the skipped row that still owns the original slot. The missed
+ * slot is marked caughtUpBy so a later approval cannot recover it twice.
  */
 export async function createCatchUpScheduledWorkRun(input: {
   scheduleId: string; ownerId: string; missedRunId: string; maxAttempts: number;
@@ -241,6 +244,12 @@ export async function createCatchUpScheduledWorkRun(input: {
      RETURNING *`,
     [`schedule-run-${randomUUID()}`, input.scheduleId, slot, input.maxAttempts,
       JSON.stringify({ approvedBy: input.ownerId, catchUpOf: input.missedRunId })],
+  );
+  await getDb().query(
+    `UPDATE scheduled_work_item_runs
+     SET result_summary_json = result_summary_json || $2::jsonb, updated_at = now()
+     WHERE id=$1`,
+    [input.missedRunId, JSON.stringify({ caughtUpBy: rows.rows[0]!.id })],
   );
   return runFromRow(rows.rows[0]!);
 }
