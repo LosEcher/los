@@ -1,0 +1,125 @@
+contract: los.external-runtime
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Operator-controlled protocol for discovering and invoking bounded external
+  agent runtimes. Runtime capability profiles describe current mechanical
+  behavior and advisory routing hints; they do not grant authority or replace
+  LOS RunContract, tool policy, verification, or execution-kernel ownership.
+type: stream
+routes:
+  - method: GET
+    path: /runtimes/capabilities
+    response:
+      generatedAt: date-time
+      runtimes: ExternalRuntimeCapability[]
+  - method: POST
+    path: /runtimes/:kind/run
+    request: ExternalRuntimeRunRequest
+    response:
+      transport: text/event-stream
+      events:
+        - runtime.started
+        - runtime.process
+        - runtime.output
+        - runtime.completed
+        - runtime.error
+        - runtime.cancelled
+operatorControl:
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
+  requiredPrincipal: operator
+  routes:
+    - GET /runtimes/capabilities
+    - POST /runtimes/:kind/run
+schemas:
+  ExternalRuntimeRunRequest:
+    required: [prompt]
+    fields:
+      prompt: non-empty string
+      workspaceRoot: optional readable directory; defaults to gateway cwd
+      sessionId: optional caller-provided correlation id
+      tenantId: optional LOS tenant id
+      projectId: optional LOS project id
+      timeoutMs: optional integer from 1000 through 600000
+      extraArgs: optional runtime-specific CLI arguments; forbidden for Grok
+      env: optional runtime-specific environment overrides; forbidden for Grok
+  ExternalRuntimeCapability:
+    required:
+      - kind
+      - displayName
+      - implementation
+      - available
+      - invocationModes
+      - mechanics
+      - routingHints
+    fields:
+      kind: stable adapter id such as codex, grok, claude-code, reasonix, or pi-external
+      displayName: operator-facing runtime name
+      implementation: runnable | planned | unavailable
+      available: live local availability probe result
+      unavailableReason: bounded reason without paths, credentials, or raw command output
+      invocationModes: http | agent_tool | message_command
+      mechanics:
+        streaming: lifecycle | lifecycle_and_output
+        boundedOutput: boolean
+        disconnectCancellation: boolean
+        resume: boolean
+        telemetry: none | optional_otel | required_otel
+        telemetryCompatibility: compatible | incompatible | not_applicable
+        durableEvidence: none | lifecycle | lifecycle_and_output_summary
+      routingHints:
+        advisoryOnly: true
+        specialties: bounded labels such as coding, review, research, or planning
+        notes: bounded non-secret operator guidance
+  ExternalRuntimeEvent:
+    required: [type, sessionId, traceId, kind, occurredAt]
+    fields:
+      type: runtime.started | runtime.process | runtime.output | runtime.completed | runtime.error | runtime.cancelled
+      sessionId: LOS session correlation id
+      traceId: LOS trace correlation id
+      kind: external runtime kind
+      occurredAt: date-time
+      sequence: monotonic integer within one invocation
+      payload: bounded event-specific fields
+eventSemantics:
+  runtime.started: accepted request and resolved bounded execution context
+  runtime.process: spawned child process; pid may be omitted when unavailable
+  runtime.output: bounded and redacted stdout result, never raw stderr
+  runtime.completed: terminal normal process exit, including non-zero exit status
+  runtime.error: terminal adapter or spawn failure
+  runtime.cancelled: terminal cancellation after caller disconnect or abort signal
+durableEvidence:
+  store: session_events
+  sourcePrefix: "external-runtime:"
+  persisted:
+    - lifecycle event type, runtime kind, sequence, status, timing, and correlation ids
+    - bounded output byte counts, truncation flag, and redacted output summary
+  forbidden:
+    - raw prompt
+    - raw stderr
+    - auth material or environment values
+    - unbounded stdout or full external transcript
+capabilityBoundary:
+  runtimeProfiles:
+    authority: contracts plus TypeScript capability profile registry and live probes
+    purpose: current machine-readable execution behavior for LOS and external callers
+  skills:
+    authority: repeatable delegation workflow only
+    purpose: runtime selection, prompt construction, approval, and acceptance evidence
+    forbidden: claiming installed state, effective provider/model, credentials, or route availability
+  executionKernel:
+    authority: contracts/execution-kernel.yaml
+    purpose: in-process LOS-owned kernel SPI including PiKernelAdapter
+  futureAdapters:
+    - Reasonix may implement this external-runtime worker protocol without becoming an execution kernel.
+    - An external Pi orchestrator may call this HTTP protocol; in-process Pi remains an ExecutionKernel implementation.
+    - New adapters must declare planned or unavailable until availability, cancellation, output, evidence, and tests match their profile.
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm --filter @los/gateway test
+  - pnpm check
+  - pnpm run gate
