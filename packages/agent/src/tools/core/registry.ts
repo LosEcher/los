@@ -18,8 +18,7 @@ import { registerPatchTools } from '../builtin/patch-tools.js';
 import { registerTodoTools } from '../builtin/todo-tools.js';
 import { registerSqlQueryTool } from '../builtin/sql-query-tool.js';
 import { runSandboxedShell } from '../external/shell-sandbox.js';
-import { spawnCodex } from '../../runtime-adapter/codex.js';
-import { spawnGrok } from '../../runtime-adapter/grok.js';
+import { runExternalRuntime } from '../../runtime-task.js';
 import { randomUUID } from 'node:crypto';
 import {
   MCPToolBridge,
@@ -296,36 +295,17 @@ export async function registerBuiltinTools(
     const kind = String(args.kind ?? '');
     const prompt = String(args.prompt ?? '');
     if (!prompt.trim()) return { content: '', error: 'prompt is required' };
-    const requestedTimeout = Number(args.timeoutSec ?? 300);
-    const timeoutMs = Math.max(30, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 300, 1800)) * 1000;
-    if (kind === 'codex') {
-      const handle = spawnCodex({
-        sessionId: `agent-cx-${randomUUID()}`,
-        workspaceRoot,
-        prompt,
-        otelEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://127.0.0.1:4318',
-        timeoutMs,
-        outputLimitBytes: 128_000,
-      });
-      const result = await handle.output;
-      return {
-        content: result.output.slice(0, 12_000) || (result.exitCode === 0 ? '(no stdout)' : '(no output)'),
-        error: result.exitCode === 0 ? undefined
-          : `codex exited with code ${result.exitCode}${result.spawnFailed ? ' (spawn failed)' : ''}`
-            + (result.truncated ? ' (stdout truncated)' : ''),
-      };
-    }
-    if (kind === 'grok') {
-      const handle = spawnGrok({ workspaceRoot, prompt, timeoutMs: Number(timeoutMs) });
-      const settled = await handle.settled;
-      const text = settled.output.text || (settled.exit.exitCode === 0 ? '(no stdout)' : '(no output)');
-      return {
-        content: text.slice(0, 12_000),
-        error: settled.exit.exitCode === 0 ? undefined
-          : `grok exited with code ${settled.exit.exitCode}${settled.output.errorCode ? ` (${settled.output.errorCode})` : ''}`,
-      };
-    }
-    return { content: '', error: `unsupported runtime kind: ${kind} (supported: codex, grok)` };
+    const result = await runExternalRuntime({
+      kind: kind as 'codex' | 'grok',
+      prompt,
+      timeoutSec: Number(args.timeoutSec ?? 300),
+      workspaceRoot,
+      sessionId: `agent-cx-${randomUUID()}`,
+    });
+    return {
+      content: result.content.slice(0, 12_000) || (result.exitCode === 0 ? '(no stdout)' : '(no output)'),
+      error: result.error,
+    };
   }, {
     type: 'function',
     function: {
