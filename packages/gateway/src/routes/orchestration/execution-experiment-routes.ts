@@ -6,6 +6,7 @@ import {
   runScheduledAgentTask, loadRunSpec, createRunSpec, approveRunSpecPhase,
   authorizeRunSpecKernelCanary, rollbackRunSpecExecutionKernel,
   createK4ExecutionKernelSelection, validateK4ExecutionKernelSelection,
+  findActiveTaskRunByDedupeKey,
 } from '@los/agent';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { getConfig } from '@los/infra/config';
@@ -28,6 +29,7 @@ type ExecutionExperimentRouteDependencies = {
   loadRunSpec: typeof loadRunSpec;
   approveExecutionExperiment: typeof approveExecutionExperiment;
   authorizeRunSpecKernelCanary: typeof authorizeRunSpecKernelCanary;
+  findActiveTaskRunByDedupeKey: typeof findActiveTaskRunByDedupeKey;
   requireOperator: typeof requireOperator;
   runIdempotentJson: typeof runIdempotentJson;
   runScheduledAgentTask: typeof runScheduledAgentTask;
@@ -46,6 +48,7 @@ const defaultDependencies: ExecutionExperimentRouteDependencies = {
   loadRunSpec,
   approveExecutionExperiment,
   authorizeRunSpecKernelCanary,
+  findActiveTaskRunByDedupeKey,
   requireOperator,
   runIdempotentJson,
   runScheduledAgentTask,
@@ -198,6 +201,7 @@ async function handleSelectCandidate(
           actor: context.userId,
           now: selectedAt,
         }) : undefined,
+        recoveryPolicy: isK4Candidate ? 'explicit_only' : undefined,
       },
     });
     const updated = await dependencies.setExecutionExperimentCandidate(id, candidateId, scope);
@@ -353,11 +357,34 @@ async function handleExecute(
         requireCanaryAuthorization: true,
       });
       if (policyError) throw new Error(policyError);
+      if (current.runContract?.recoveryPolicy !== 'explicit_only') {
+        throw new Error('K4 candidate run spec must declare recoveryPolicy=explicit_only; recreate the candidate so gateway restart cannot re-execute it');
+      }
     }
     if (current.runContract?.executionKernel?.disposition !== 'planning') {
       await dependencies.transitionExecutionState({ entityType: 'run_spec', entityId: candidateId, to: 'running', sessionId: current.sessionId, reason: 'execution_experiment_started' });
     }
+    const dedupeKey = k4Candidate ? `k4:${id}:candidate:${current.runContract?.planRevision ?? 1}` : undefined;
+    // Exactly-once guard before the experiment transitions to running: a
+    // duplicate execute whose attempt is still queued/running returns
+    // immediately. The dedupe key is stable for the candidate's whole
+    // lifetime (planRevision is not bumped by approval/authorization), so the
+    // check protects concurrent and gateway-restart retries alike. The
+    // run_spec running transition above is idempotent, so the duplicate
+    // cannot fail there.
+    if (dedupeKey) {
+      const active = await dependencies.findActiveTaskRunByDedupeKey(dedupeKey);
+      if (active) {
+        return { experiment, candidateRunSpecId: candidateId, result: { status: 'deduplicated', sessionId: current.sessionId, taskRun: active }, deduplicated: true };
+      }
+    }
     await dependencies.transitionExecutionExperiment(id, 'running', 'execution_experiment_started', scope);
+    const disposition: 'planning' | 'execution' =
+      current.runContract?.executionKernel?.disposition === 'planning'
+        ? 'planning'
+        : current.runContract?.phase === 'planning'
+          ? 'planning'
+          : 'execution';
     const result = await dependencies.runScheduledAgentTask({
       prompt: current.prompt, sessionId: current.sessionId, runSpecId: current.id, provider: current.provider,
       model: current.model, systemPrompt: current.systemPrompt, workspaceRoot: current.workspaceRoot,
@@ -367,13 +394,24 @@ async function handleExecute(
       tenantId: current.tenantId, projectId: current.projectId, userId: current.userId,
       executionKernelKind: current.runContract?.executionKernel?.selected.kind,
       runContract: current.runContract,
+      disposition,
+      // Exactly-once: duplicate executes deduplicate against the active
+      // attempt (checked above before state transitions, and again inside the
+      // scheduler for the race window) instead of re-running the provider.
+      dedupeKey,
       sandboxMode: k4Candidate ? 'readonly' : undefined,
       executor: k4Candidate
         ? { enabled: false }
         : { enabled: config.executor.enabled, nodeUrls: config.executor.meshNodes, agentKey: config.executor.agentKey, nodeId: config.executor.nodeId },
       onTaskEvent: () => undefined,
     });
-    if (k4Candidate?.disposition === 'planning') {
+    if (result.status === 'deduplicated') {
+      // A concurrent duplicate execute hit the active attempt; the owning
+      // request still owns completion. Do not apply completion or advance the
+      // experiment state for this request.
+      return { experiment, candidateRunSpecId: candidateId, result, deduplicated: true };
+    }
+    if (current.runContract?.executionKernel?.disposition === 'planning') {
       const final = await dependencies.transitionExecutionExperiment(id, 'blocked', 'candidate_plan_awaiting_approval', scope);
       return { experiment: final, candidateRunSpecId: candidateId, result };
     }

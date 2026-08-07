@@ -5,6 +5,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '@los/infra/config';
+import type { DbConnection } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { reclaimOrphanedRuns } from './chat-session-helpers.js';
 import { ensureGovernanceJobStore, seedGovernanceJobs, setupGovernanceWake, resumeAnsweredAsksForRunSpec, setupScheduledWorkWake } from '@los/agent';
@@ -97,6 +98,38 @@ async function reconcileRuntimeFreshness(): Promise<void> {
   }
 }
 
+/**
+ * Select sessions that accumulated observations since their last compaction.
+ * Candidate = session with at least one non-archived, non-compacted observation
+ * ("new observations" semantics). Sessions whose observations were all processed
+ * by a previous compaction are excluded.
+ */
+export interface AutoCompactCandidate {
+  sessionId: string;
+  oldestObs: string;
+  obsCount: string;
+}
+
+export async function selectAutoCompactCandidates(
+  db: DbConnection,
+  limit = 20,
+): Promise<AutoCompactCandidate[]> {
+  const rows = await db.query<{ session_id: string; oldest_obs: string; obs_count: string }>(
+    `SELECT o.session_id,
+            MIN(o.created_at)::text AS oldest_obs,
+            COUNT(*)::text AS obs_count
+     FROM observations o
+     WHERE o.session_id IS NOT NULL
+       AND COALESCE(o.metadata_json->>'archived', 'false') = 'false'
+       AND COALESCE(o.metadata_json->>'compacted', 'false') = 'false'
+     GROUP BY o.session_id
+     ORDER BY MIN(o.created_at)
+     LIMIT $1`,
+    [String(limit)],
+  );
+  return rows.rows.map(r => ({ sessionId: r.session_id, oldestObs: r.oldest_obs, obsCount: r.obs_count }));
+}
+
 async function runMemoryMaintenance(): Promise<void> {
   import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore, shouldTriggerCompaction }) => {
     const retention = await applyRetentionPolicy().catch((err) => {
@@ -122,35 +155,25 @@ async function runMemoryMaintenance(): Promise<void> {
       await ensureMemoryCompactionStore();
       const db = getDb();
 
-      // Find uncompacted sessions with observations
-      const rows = await db.query<{ session_id: string; oldest_obs: string; obs_count: string }>(
-        `SELECT o.session_id,
-                MIN(o.created_at)::text AS oldest_obs,
-                COUNT(*)::text AS obs_count
-         FROM observations o
-         LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
-         WHERE o.session_id IS NOT NULL
-           AND mc.id IS NULL
-           AND COALESCE(o.metadata_json->>'archived', 'false') = 'false'
-         GROUP BY o.session_id
-         LIMIT 20`,
-      );
+      const candidates = await selectAutoCompactCandidates(db);
 
       let decayCompacted = 0;
       let scheduledCompacted = 0;
       let autoArchived = 0;
       const SAFETY_NET_HOURS = 24;
 
-      for (const { session_id: sessionId, oldest_obs, obs_count } of rows.rows) {
-        const obsCount = Number(obs_count);
-        const oldest = new Date(oldest_obs);
+      for (const { sessionId, oldestObs, obsCount } of candidates) {
+        const obsCountNum = Number(obsCount);
+        const oldest = new Date(oldestObs);
         const hoursSinceOldest = (Date.now() - oldest.getTime()) / 3_600_000;
 
         // Rule 1: decay-based trigger
         try {
           const decision = await shouldTriggerCompaction(sessionId);
           if (decision.triggered) {
-            await compactSession({ sessionId, autoTrigger: 'decay' });
+            // force=true: bypass compactSession dedup so sessions compacted by
+            // event-driven checkpoints can be re-compacted on new observations.
+            await compactSession({ sessionId, autoTrigger: 'decay', force: true });
             decayCompacted += 1;
             continue;
           }
@@ -169,9 +192,9 @@ async function runMemoryMaintenance(): Promise<void> {
         }
 
         // Rule 2: 24h safety net for sessions with at least some observations
-        if (obsCount >= 10 && hoursSinceOldest >= SAFETY_NET_HOURS) {
+        if (obsCountNum >= 10 && hoursSinceOldest >= SAFETY_NET_HOURS) {
           try {
-            await compactSession({ sessionId, autoTrigger: 'scheduled' });
+            await compactSession({ sessionId, autoTrigger: 'scheduled', force: true });
             scheduledCompacted += 1;
           } catch (err) {
             log.warn(`Safety-net compact failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);

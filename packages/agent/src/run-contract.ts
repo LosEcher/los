@@ -139,7 +139,17 @@ export interface RunContractMetadata {
   /** Result of the last post-execution goal self-check (persisted for audit). */
   selfCheckResult?: Record<string, unknown>;
   executionKernel?: ExecutionKernelSelection;
+  /**
+   * Crash/startup recovery policy. `automatic` (default) lets the gateway
+   * recovery scanner re-dispatch the run when no matching attempt exists.
+   * `explicit_only` excludes the run from automatic recovery: a new attempt
+   * requires an explicit operator action. Used by K4 execution experiments so
+   * a gateway restart can never re-run a baseline/candidate by itself.
+   */
+  recoveryPolicy?: RecoveryPolicy;
 }
+
+export type RecoveryPolicy = 'automatic' | 'explicit_only';
 
 /**
  * A file to inject into the agent's context during a specific workflow phase.
@@ -310,6 +320,7 @@ export type RunContractMetadataInput = Partial<{
   selfCheckEnabled: unknown;
   selfCheckResult: unknown;
   executionKernel: unknown;
+  recoveryPolicy: unknown;
 }>;
 
 const ARRAY_FIELDS: Array<keyof Pick<
@@ -395,6 +406,9 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
   const executionKernel = normalizeExecutionKernelSelection(raw.executionKernel);
   if (executionKernel) out.executionKernel = executionKernel;
 
+  const recoveryPolicy = normalizeRecoveryPolicy(raw.recoveryPolicy);
+  if (recoveryPolicy) out.recoveryPolicy = recoveryPolicy;
+
   if (!hasRunContractValue(out)) return undefined;
   return out;
 }
@@ -422,6 +436,11 @@ function normalizeRunContractMode(value: unknown): RunContractMode | undefined {
 
 function normalizeExecutionMode(value: unknown): ExecutionMode | undefined {
   if (value === 'lightweight' || value === 'standard' || value === 'heavyweight') return value;
+  return undefined;
+}
+
+function normalizeRecoveryPolicy(value: unknown): RecoveryPolicy | undefined {
+  if (value === 'automatic' || value === 'explicit_only') return value;
   return undefined;
 }
 
@@ -476,6 +495,7 @@ function hasRunContractValue(contract: RunContractMetadata): boolean {
   if (contract.hooks && (contract.hooks.afterCreate || contract.hooks.afterStart || contract.hooks.afterFinish || contract.hooks.afterArchive)) return true;
   if (contract.selfCheckEnabled !== undefined) return true;
   if (contract.selfCheckResult) return true;
+  if (contract.recoveryPolicy) return true;
   return ARRAY_FIELDS.some((field) => contract[field].length > 0);
 }
 

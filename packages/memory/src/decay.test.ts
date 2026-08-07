@@ -263,6 +263,42 @@ test('shouldTriggerCompaction: high stale ratio triggers', async () => {
   }
 });
 
+test('shouldTriggerCompaction: compacted observations are excluded from decay scoring', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const sessionId = `trig-compacted-${Date.now()}`;
+  try {
+    await ensureMemoryStore();
+    // 20 old, low-value observations — would trigger by rule 1
+    for (let i = 0; i < 20; i++) {
+      await addObservation({ title: `old-${i}`, kind: 'note', sessionId });
+    }
+    await getDb().query(
+      `UPDATE observations SET created_at = now() - interval '100 hours',
+         metadata_json = $2::jsonb WHERE session_id = $1`,
+      [sessionId, JSON.stringify({ referenceCount: 0, toolStatus: 'failed' })],
+    );
+    const before = await shouldTriggerCompaction(sessionId);
+    assert.equal(before.triggered, true);
+    assert.equal(before.reason, 'low_decay');
+
+    // After a compaction marks them processed, the same observations must no
+    // longer drive the trigger ("new observations" semantics).
+    await getDb().query(
+      `UPDATE observations SET metadata_json = jsonb_set(metadata_json, '{compacted}', 'true')
+       WHERE session_id = $1`,
+      [sessionId],
+    );
+    const after = await shouldTriggerCompaction(sessionId);
+    assert.equal(after.triggered, false);
+    assert.equal(after.reason, 'none');
+    assert.equal(after.observationCount, 0);
+  } finally {
+    await getDb().query('DELETE FROM observations WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
 test('shouldTriggerCompaction: fresh session does not trigger', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

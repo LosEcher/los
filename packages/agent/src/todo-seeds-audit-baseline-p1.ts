@@ -18,7 +18,7 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       '当前 P0-3 被推迟到 P1：stale candidate auto-marking, cross-session pattern aggregation, evidence decay scoring。\n' +
       '来源: los-mimo-p0-evaluation-2026-06-17',
     kind: 'task',
-    status: 'backlog',
+    status: 'done',
     priority: 'P1',
     source: 'audit-2026-06-24',
     stageId: 'p1-iteration-fixes',
@@ -30,6 +30,7 @@ export const AUDIT_BASELINE_P1_TODO_SEED: CreateTodoInput[] = [
       files: ['packages/memory/src/core/compaction.ts'],
       subtaskPlan: 'daily-gaps-2026-07-27',
       subtaskFile: 'packages/agent/src/todo-seeds-daily-gaps.ts',
+      closedNote: '2026-08-07: all 5 sub-tasks closed (sd-decay-model / sd-calculate / sd-trigger / sd-maintenance / sd-cross-session). decay scoring + auto-trigger + maintenance wiring + cross-session aggregation verified: @los/memory 96/96 tests, @los/gateway focused tests pass',
     },
   },
   {

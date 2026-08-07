@@ -12,7 +12,8 @@ import {
 import { createTaskRun, loadTaskRun } from '@los/agent/task-runs';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { listSessionEvents } from '@los/agent/session-events';
-import { reapExpiredExecutionLeases } from './server-maintenance.js';
+import { ensureMemoryStore } from '@los/memory';
+import { reapExpiredExecutionLeases, selectAutoCompactCandidates } from './server-maintenance.js';
 
 test('periodic lease reaper fails exhausted graph work and records durable evidence', async () => {
   const config = await loadConfig();
@@ -92,6 +93,48 @@ test('periodic lease reaper fails exhausted graph work and records durable evide
     await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
     await getDb().query('DELETE FROM task_runs WHERE id = $1', [taskRunId]).catch(() => undefined);
     await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('selectAutoCompactCandidates: only sessions with observations accumulated since last compaction', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const freshSession = `ac-fresh-${suffix}`;
+  const compactedSession = `ac-compacted-${suffix}`;
+  const archivedSession = `ac-archived-${suffix}`;
+  try {
+    await ensureMemoryStore();
+    const insert = (sessionId: string, title: string, metadata: Record<string, unknown>) =>
+      getDb().query(
+        `INSERT INTO observations (session_id, title, kind, metadata_json, created_at)
+         VALUES ($1, $2, 'note', $3::jsonb, now() - interval '100 hours')`,
+        [sessionId, title, JSON.stringify(metadata)],
+      );
+    // 12 new (non-compacted) observations — must appear as candidate
+    for (let i = 0; i < 12; i++) {
+      await insert(freshSession, `f-${i}`, { referenceCount: 0, toolStatus: 'failed' });
+    }
+    // 12 observations already processed by a compaction — must be excluded
+    for (let i = 0; i < 12; i++) {
+      await insert(compactedSession, `c-${i}`, { referenceCount: 0, toolStatus: 'failed', compacted: true });
+    }
+    // Archived observations — must be excluded
+    await insert(archivedSession, 'a-0', { archived: true });
+
+    const candidates = await selectAutoCompactCandidates(getDb());
+    const sessions = candidates.map(c => c.sessionId);
+    assert.ok(sessions.includes(freshSession), 'session with new observations must be a candidate');
+    assert.equal(sessions.includes(compactedSession), false, 'fully compacted session must not be a candidate');
+    assert.equal(sessions.includes(archivedSession), false, 'archived-only session must not be a candidate');
+    const fresh = candidates.find(c => c.sessionId === freshSession);
+    assert.equal(fresh?.obsCount, '12');
+  } finally {
+    await getDb().query(
+      "DELETE FROM observations WHERE session_id = ANY($1::text[])",
+      [[freshSession, compactedSession, archivedSession]],
+    ).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

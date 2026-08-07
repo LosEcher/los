@@ -31,6 +31,7 @@ const sharedProcessTestFiles = [
   'src/routes/orchestration/operator-write-routes.test.ts',
   'src/routes/providers/provider-account-routes.test.ts',
   'src/scheduled-work-routes.test.ts',
+  'src/routes/server-helpers.test.ts',
   'src/service-routes.test.ts',
   'src/settings-routes.test.ts',
   'src/ssh-config-import.test.ts',

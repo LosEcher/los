@@ -59,7 +59,11 @@ export function normalizeNonNegativeInteger(value: unknown, fallback: number): n
 }
 
 export function normalizeBoundedInteger(value: unknown, fallback: number, min: number, max: number): number {
-  const n = typeof value === 'string' ? parseInt(value) : fallback;
+  const n = typeof value === 'string'
+    ? parseInt(value)
+    : typeof value === 'number'
+      ? value
+      : NaN;
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
 }

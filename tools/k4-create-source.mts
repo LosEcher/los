@@ -14,41 +14,38 @@ const sessionId = `session-k4-source-${Date.now()}`;
 await createRunSpec({
   id: runSpecId,
   sessionId,
-  prompt: 'K4 canary source run (audit, read-only). Baseline run for the Pi K4 execution-kernel experiment.',
+  tenantId: 'local',
+  projectId: 'los',
+  prompt: 'Read packages/agent/package.json and report the exact values of the "name" and "version" fields as JSON. Make at most one read_file call. Do not write anything and do not use any other tool.',
   workspaceRoot: '/Users/echerlos/projects/los-workspace/projects/los',
   toolMode: 'read-only',
-  runContract: { mode: 'audit', executionMode: 'heavyweight', phase: 'planning' },
+  allowedTools: ['read_file'],
+  maxLoops: 3,
+  timeoutMs: 90_000,
+  runContract: { mode: 'audit', executionMode: 'heavyweight', phase: 'planning', recoveryPolicy: 'explicit_only' },
 });
 
 await persistRunSpecPlan(runSpecId, {
   plan: [
     {
       id: 's1',
-      title: 'Inspect P1 queue document',
-      description: 'Read docs/governance/2026-07-16-current-p0-p1-queue.md and list the open P1 items with their state.',
+      title: 'Read package manifest',
+      description: 'Read packages/agent/package.json once and report the name and version fields.',
       dependsOnIds: [],
-      editableSurfaces: ['docs/governance/2026-07-16-current-p0-p1-queue.md'],
-      completionCriteria: 'Open P1 items listed with their queue-document state',
-    },
-    {
-      id: 's2',
-      title: 'Summarize remaining gaps',
-      description: 'Produce a short summary of the open P1 gaps and the next operator action for each.',
-      dependsOnIds: ['s1'],
       editableSurfaces: [],
-      completionCriteria: 'Gap summary produced with next actions',
+      completionCriteria: 'name and version reported as JSON',
     },
   ],
   verifications: [
     {
       id: 'v1',
       kind: 'command',
-      description: 'queue document exists',
-      command: 'test -f docs/governance/2026-07-16-current-p0-p1-queue.md',
+      description: 'package manifest exists',
+      command: 'test -f packages/agent/package.json',
     },
   ],
   actor: 'operator',
-  summary: 'K4 canary source plan (operator-constructed)',
+  summary: 'K4-R2 source plan: bounded single-file read (operator-constructed)',
 });
 
 await approveRunSpecPhase(runSpecId, {
