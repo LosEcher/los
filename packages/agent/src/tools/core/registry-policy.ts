@@ -117,6 +117,14 @@ export const READ_ONLY_BUILTIN_TOOLS = [
   'get_symbols',
   'find_in_code',
   'todo_list',
+  // Subagent tools stay available in read-only mode: query/kill/list are
+  // pure control-plane reads, and spawn_agent always runs the child with
+  // read-only tools (children cannot spawn further agents), so no write
+  // capability leaks through the subagent path.
+  'spawn_agent',
+  'query_agent',
+  'kill_agent',
+  'list_agents',
 ] as const;
 
 export function normalizeCapability(name: string, capability: Partial<ToolCapability> = {}): ToolCapability {

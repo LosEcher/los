@@ -1,4 +1,4 @@
-export { captureDailyAgentQuality } from './collector.js';
+export { backfillDailyAgentQualitySnapshots, captureDailyAgentQuality } from './collector.js';
 export {
   getDailyAgentQualityBaseline,
   listDailyAgentQualityScopes,

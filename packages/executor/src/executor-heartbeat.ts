@@ -1,7 +1,18 @@
 import { hostname } from 'node:os';
 import type { ExecutorNodeConnectMode, ExecutorNodeKind } from '@los/agent';
+import { getAvailableSandbox } from '@los/agent';
 import { collectResourceMetrics, resolveResourceCapabilities } from './resource-metrics.js';
 import type { ExecutorRuntimeLifecycle } from './runtime-lifecycle.js';
+
+/**
+ * Resolve the sandbox capability value reported in the node heartbeat.
+ * Returns a concrete OS backend name when one is installed (linux-bwrap /
+ * macos-sandbox-exec); otherwise keeps the legacy `tool_policy` marker.
+ */
+function detectSandboxBackend(): string {
+  const backend = getAvailableSandbox();
+  return backend === 'native' ? 'tool_policy' : backend;
+}
 
 export async function heartbeatNode(
   nodeId: string,
@@ -24,7 +35,11 @@ export async function heartbeatNode(
     file_sync_scan: true,
     file_sync_deep_verify: true,
     shell: true,
-    sandbox: 'tool_policy',
+    // Report the real OS isolation backend when one exists. `tool_policy` (the
+    // legacy default) and `native` intentionally do NOT satisfy a sandbox
+    // requirement — only a concrete backend (linux-bwrap / macos-sandbox-exec)
+    // unlocks sandboxMode='sandbox' execution on this node.
+    sandbox: detectSandboxBackend(),
     ...resolveResourceCapabilities(),
   };
   if (fileSyncFolders && fileSyncFolders.length > 0) {

@@ -126,15 +126,20 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
           throw new _RunSuccessGateError(input.entityId, `phase '${entity.contract.phase}' must transition to 'verifying' first`);
         }
         const planRevision = entity.contract?.planRevision ?? 1;
-        const verificationRows = await client.query<{ check_name: string; status: string }>(
-          `SELECT check_name, status FROM verification_records
+        const verificationRows = await client.query<{ check_name: string; command: string | null; status: string }>(
+          `SELECT check_name, command, status FROM verification_records
            WHERE run_spec_id = $1 AND plan_revision = $2 AND required = TRUE
            FOR UPDATE`,
           [input.entityId, planRevision],
         );
+        // Match both the record's check_name (verification id) and its command
+        // text (requiredChecks are keyed by full command in the contract).
         const successDecision = canMarkSucceeded(
           entity.contract,
-          verificationRows.rows.map((row) => ({ requirementId: row.check_name, status: row.status })),
+          verificationRows.rows.flatMap((row) => [
+            { requirementId: row.check_name, status: row.status },
+            ...(row.command ? [{ requirementId: row.command, status: row.status }] : []),
+          ]),
         );
         if (!successDecision.allowed) {
           throw new _RunSuccessGateError(input.entityId, successDecision.reason ?? 'verification gate rejected success');

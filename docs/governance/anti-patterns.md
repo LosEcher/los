@@ -217,3 +217,26 @@ Real cases in los:
 
 **Code**: `docs/governance/code-first-determinism.md`,
 `packages/agent/src/system-prompt.ts`, `packages/agent/src/context-monitor.ts`
+
+## AP12: Todo Status Not Following Task-Run Outcome
+
+**Symptom**: A `todos` row stays `in_progress` (or `ready`) long after the
+underlying `task_runs`/`run_specs` row reached `succeeded`/`blocked`/`failed`,
+because the integration path writes task-run state but never writes back the
+todo completion.
+
+**Consequence**: Zombie `in_progress` todos accumulate and look like active
+work. Inventory passes (08-05/08-08) found 15 feed-analysis todos stuck
+`in_progress` since 07-12/07-20 while their task runs had succeeded. `ready`
+queues can also be flooded by machine-generated todos (08-05: 95 file-size /
+migration-drift rows with no owner), drowning human attention.
+
+**Prevention**: The owning integration path must reconcile todo status from
+the task-run outcome in the same transaction (or a bounded follow-up sweep),
+not leave completion to manual passes. Machine-generated todos must carry an
+owner/title contract and a bounded count; bulk-demotion to `backlog` with a
+`metadata_json` note (`demotedFrom`, `demotedBy`, `reason`) is the sanctioned
+cleanup (see `docs/operations/2026-08-05-runtime-inventory.md` §0.6).
+
+**Code**: feed-analysis integration (`docs/adr/0026`), `packages/agent/src/todo*`,
+`docs/governance/2026-08-06-daily-use-gap-analysis.md` §2026-08-08 Cleanup Record

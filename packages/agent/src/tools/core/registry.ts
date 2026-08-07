@@ -18,6 +18,9 @@ import { registerPatchTools } from '../builtin/patch-tools.js';
 import { registerTodoTools } from '../builtin/todo-tools.js';
 import { registerSqlQueryTool } from '../builtin/sql-query-tool.js';
 import { runSandboxedShell } from '../external/shell-sandbox.js';
+import { spawnCodex } from '../../runtime-adapter/codex.js';
+import { spawnGrok } from '../../runtime-adapter/grok.js';
+import { randomUUID } from 'node:crypto';
 import {
   MCPToolBridge,
   registryRecordToConfig,
@@ -282,6 +285,73 @@ export async function registerBuiltinTools(
     sandboxRequired: true,
     needsApproval: true,
     tags: ['shell'],
+  });
+
+  // run_runtime_task — delegate to an external agent runtime (codex/grok).
+  // Runs in the gateway process (spawns the CLI directly); on remote executor
+  // nodes the CLI is absent and the tool reports a clear error. The CLI
+  // process is not inside the agent sandbox, so network/credentials work;
+  // approval is required because it executes arbitrary external agent work.
+  registry.register('run_runtime_task', async (args) => {
+    const kind = String(args.kind ?? '');
+    const prompt = String(args.prompt ?? '');
+    if (!prompt.trim()) return { content: '', error: 'prompt is required' };
+    const requestedTimeout = Number(args.timeoutSec ?? 300);
+    const timeoutMs = Math.max(30, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 300, 1800)) * 1000;
+    if (kind === 'codex') {
+      const handle = spawnCodex({
+        sessionId: `agent-cx-${randomUUID()}`,
+        workspaceRoot,
+        prompt,
+        otelEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://127.0.0.1:4318',
+        timeoutMs,
+        outputLimitBytes: 128_000,
+      });
+      const result = await handle.output;
+      return {
+        content: result.output.slice(0, 12_000) || (result.exitCode === 0 ? '(no stdout)' : '(no output)'),
+        error: result.exitCode === 0 ? undefined
+          : `codex exited with code ${result.exitCode}${result.spawnFailed ? ' (spawn failed)' : ''}`
+            + (result.truncated ? ' (stdout truncated)' : ''),
+      };
+    }
+    if (kind === 'grok') {
+      const handle = spawnGrok({ workspaceRoot, prompt, timeoutMs: Number(timeoutMs) });
+      const settled = await handle.settled;
+      const text = settled.output.text || (settled.exit.exitCode === 0 ? '(no stdout)' : '(no output)');
+      return {
+        content: text.slice(0, 12_000),
+        error: settled.exit.exitCode === 0 ? undefined
+          : `grok exited with code ${settled.exit.exitCode}${settled.output.errorCode ? ` (${settled.output.errorCode})` : ''}`,
+      };
+    }
+    return { content: '', error: `unsupported runtime kind: ${kind} (supported: codex, grok)` };
+  }, {
+    type: 'function',
+    function: {
+      name: 'run_runtime_task',
+      description: 'Delegate a task to an external agent runtime CLI (codex or grok) and return its stdout. Use for deep investigation, long analysis, or tasks better suited to an external coding agent. The CLI runs in the gateway process (not the sandbox), so it has network and host access; require explicit approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['codex', 'grok'], description: 'Runtime to invoke' },
+          prompt: { type: 'string', description: 'Full self-contained prompt for the external agent' },
+          timeoutSec: { type: 'number', description: 'Timeout in seconds (default 300, max 1800)' },
+        },
+        required: ['kind', 'prompt'],
+      },
+    },
+  }, {
+    riskLevel: 'L2',
+    permissions: ['runtime:spawn'],
+    timeoutMs: 1_800_000,
+    retryable: false,
+    idempotent: false,
+    costLevel: 'high',
+    sideEffect: true,
+    sandboxRequired: false,
+    needsApproval: true,
+    tags: ['runtime'],
   });
 
   // list_directory

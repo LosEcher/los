@@ -50,6 +50,7 @@ export const TOOL_NAMES = {
   run_background: 'run_background',
   job_output: 'job_output',
   stop_job: 'stop_job',
+  run_runtime_task: 'run_runtime_task',
   list_jobs: 'list_jobs',
 
   // Web
@@ -138,6 +139,12 @@ const TOOLSETS: Record<string, ToolsetDefinition> = {
     includes: [],
   },
 
+  runtime: {
+    description: 'External agent runtimes: delegate tasks to codex/grok CLIs (approval required)',
+    tools: [TOOL_NAMES.run_runtime_task],
+    includes: [],
+  },
+
   web: {
     description: 'Web access: search (DuckDuckGo), fetch (HTTP GET), request (full HTTP client)',
     tools: [TOOL_NAMES.web_search, TOOL_NAMES.web_fetch, TOOL_NAMES.http_request],
@@ -206,7 +213,7 @@ const TOOLSETS: Record<string, ToolsetDefinition> = {
   coding: {
     description: 'Full coding toolset: files, shell, edit, search, code intel, web, planning, coordination. Default.',
     tools: [],
-    includes: ['file', 'shell', 'edit', 'search', 'code_intel', 'web', 'planning', 'coordination'],
+    includes: ['file', 'shell', 'edit', 'search', 'code_intel', 'web', 'planning', 'coordination', 'runtime'],
     posture: true,
   },
 

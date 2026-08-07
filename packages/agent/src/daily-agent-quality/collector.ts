@@ -1,4 +1,5 @@
 import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
 
 import { ensureRunEvalStore } from '../run-evals.js';
 import { ensureSessionEventStore } from '../session-events.js';
@@ -20,7 +21,10 @@ import type {
   DailyQualityMetricSources,
 } from './types.js';
 
+const log = getLogger('daily-agent-quality');
+
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_BACKFILL_DAYS = 14;
 
 export async function captureDailyAgentQuality(input: CaptureDailyAgentQualityInput): Promise<{
   snapshot: DailyAgentQualitySnapshot;
@@ -58,6 +62,92 @@ export async function captureDailyAgentQuality(input: CaptureDailyAgentQualityIn
   });
   return { snapshot, evidenceWindow: baseline.evidenceWindow };
 }
+
+/**
+ * Backfill quality snapshots for dates missing in the recent window
+ * (2026-08-07 B 项). Snapshots are captured by the gateway in-process
+ * maintenance loop, so days when the gateway was offline are permanently
+ * missing and the gap breaks self_bootstrap trend detection (the observed
+ * 2026-07-28~08-03 7-day gap). Window-based metrics (schedule / recovery /
+ * provider evals) are rebuilt from persisted run tables and are exact;
+ * inbox and verification reflect current state and cannot be rebuilt, so
+ * they are recorded empty rather than contaminating history with today's
+ * state. Only dates strictly before today are backfilled (today's snapshot
+ * is produced by the regular capture).
+ */
+export async function backfillDailyAgentQualitySnapshots(input: {
+  tenantId?: string;
+  projectId: string;
+  now?: Date;
+  maxBackfillDays?: number;
+}): Promise<{ backfilled: string[] }> {
+  const tenantId = input.tenantId ?? 'local';
+  const now = input.now ?? new Date();
+  const maxDays = Math.min(30, Math.max(1, Math.floor(input.maxBackfillDays ?? DEFAULT_BACKFILL_DAYS)));
+  await Promise.all([
+    ensureScheduledWorkStore(),
+    ensureTaskRunStore(),
+    ensureSessionEventStore(),
+    ensureRunEvalStore(),
+  ]);
+  const db = getDb();
+  const existing = await db.query<{ d: string }>(
+    `SELECT DISTINCT snapshot_date::text AS d FROM daily_agent_quality_snapshots
+     WHERE tenant_id=$1 AND project_id=$2`,
+    [tenantId, input.projectId],
+  );
+  const have = new Set(existing.rows.map(row => row.d));
+  const today = now.toISOString().slice(0, 10);
+  const missing: string[] = [];
+  for (let offset = 1; offset <= maxDays; offset += 1) {
+    const day = new Date(now.getTime() - offset * DEFAULT_WINDOW_MS).toISOString().slice(0, 10);
+    if (day >= today) continue;
+    if (!have.has(day)) missing.push(day);
+  }
+  missing.sort();
+
+  const backfilled: string[] = [];
+  for (const day of missing) {
+    const capturedAt = new Date(`${day}T12:00:00.000Z`);
+    const windowStart = new Date(capturedAt.getTime() - DEFAULT_WINDOW_MS);
+    const sources = await loadMetricSources({
+      tenantId,
+      projectId: input.projectId,
+      windowStart,
+      windowEnd: capturedAt,
+    });
+    const snapshot = await upsertDailyAgentQualitySnapshot({
+      tenantId,
+      projectId: input.projectId,
+      snapshotDate: day,
+      capturedAt: capturedAt.toISOString(),
+      windowStart: windowStart.toISOString(),
+      windowEnd: capturedAt.toISOString(),
+      inbox: EMPTY_INBOX_METRICS,
+      schedule: _summarizeSchedule(sources.scheduleRuns),
+      recovery: _summarizeRecovery({ ...sources, inboxEntries: [] }),
+      verification: EMPTY_VERIFICATION_METRICS,
+      providerQuality: _summarizeProviderQuality(sources.providerEvals),
+    });
+    void snapshot;
+    backfilled.push(day);
+  }
+  if (backfilled.length > 0) {
+    log.info(`Daily agent quality: backfilled ${backfilled.length} missing snapshot date(s) for ${tenantId}/${input.projectId}: ${backfilled.join(', ')}`);
+  }
+  return { backfilled };
+}
+
+const EMPTY_INBOX_METRICS = {
+  actionableCount: 0, approvalRequired: 0, recoveryRequired: 0,
+  verificationBlocked: 0, reviewReady: 0, running: 0, unknown: 0,
+  over24h: 0, over72h: 0,
+};
+
+const EMPTY_VERIFICATION_METRICS = {
+  workItems: 0, required: 0, succeeded: 0, skipped: 0,
+  failed: 0, pending: 0, missing: 0, coverage: 1,
+};
 
 async function loadMetricSources(input: {
   tenantId: string;

@@ -53,7 +53,9 @@ export function validatePlanningOutputPayload(
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('Invalid planning output: expected object');
   }
-  const raw = input as Record<string, unknown>;
+  // Strip NUL bytes before validation: PostgreSQL rejects \u0000 in text/jsonb,
+  // and NUL in model output carries no plan meaning.
+  const raw = stripNulChars(input) as Record<string, unknown>;
   const unexpectedKeys = Object.keys(raw).filter(key => !['summary', 'plan', 'verifications'].includes(key));
   if (unexpectedKeys.length > 0) {
     throw new Error(`Invalid planning output: unexpected fields ${unexpectedKeys.join(', ')}`);
@@ -78,6 +80,19 @@ export function validatePlanningOutputPayload(
     verifications: normalized?.verifications ?? [],
     summary: normalizeOptionalString(raw.summary),
   };
+}
+
+function stripNulChars(value: unknown): unknown {
+  if (typeof value === 'string') return value.replaceAll('\u0000', '');
+  if (Array.isArray(value)) return value.map(stripNulChars);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = stripNulChars(item);
+    }
+    return out;
+  }
+  return value;
 }
 
 function formatPlanningContract(contract: RunContractMetadata | undefined): string[] {

@@ -54,8 +54,14 @@ work.
 
 Runner requirements are Linux containers, Git, Bash, Node 22+, Corepack, pnpm
 9, service containers, and outbound access to the package registry. The
-Windows labels require the locally provisioned Node 24, Playwright, and
-`postgres:16` images because its Podman VM cannot reliably pull Docker Hub.
+Windows labels reference the locally provisioned Node 24, Playwright, and
+`postgres:16` images; since 2026-08-05 the VM can also pull Docker Hub images
+directly through registry mirrors (`docker.1panel.live` / `docker.m.daocloud.io`
+in `/etc/containers/registries.conf`, verified with `podman pull
+postgres:16-alpine`). The locally provisioned images remain the pinned,
+trusted baseline and rollback material; see
+`docs/operations/2026-07-17-forgejo-runner-ci-optimization.md` §2026-08-05 for
+the full change record and the failed mirrored-networking attempt.
 The base CI image must provide jj 0.39.0 and pnpm 9.0.0 and is built with
 `tools/build-forgejo-ci-image.sh`. The Playwright derivative is built and
 smoke-tested with `tools/build-forgejo-playwright-image.sh`, then exported to

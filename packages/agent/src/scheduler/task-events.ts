@@ -1,6 +1,9 @@
 import { appendSessionEvent } from '../session-events.js';
+import { getLogger } from '@los/infra/logger';
 import type { TaskRunRecord } from '../task-runs.js';
 import type { ScheduledTaskEventType } from './types.js';
+
+const log = getLogger('task-events');
 
 export async function emitTaskEvent(
   sessionId: string,
@@ -8,6 +11,7 @@ export async function emitTaskEvent(
   taskRun: TaskRunRecord,
   extraPayload: Record<string, unknown> = {},
 ): Promise<void> {
+  const startedAt = Date.now();
   await appendSessionEvent({
     sessionId,
     tenantId: taskRun.tenantId,
@@ -35,4 +39,10 @@ export async function emitTaskEvent(
       ...extraPayload,
     },
   });
+  const durationMs = Date.now() - startedAt;
+  if (durationMs > 500) {
+    // Perf diagnostic: abnormally slow event writes show up here (e.g. the
+    // 30-80s self_check_completed insert delays observed 2026-08-06).
+    log.warn(`emitTaskEvent ${type} took ${durationMs}ms (session=${sessionId})`);
+  }
 }

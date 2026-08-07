@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { ExecutorCapabilityRequirement } from '@los/agent/scheduler';
 import {
   createScheduledWorkItem,
   executeScheduledWorkRun,
@@ -156,6 +157,18 @@ function normalizeCreateInput(
   body: Record<string, unknown>,
   context: ReturnType<typeof getRequestContext>,
 ): CreateScheduledWorkItemInput {
+  // Fail fast instead of silently falling back to a default template: a wrong
+  // templateId or a nested `runTemplate` object (the API only accepts flat
+  // fields) otherwise creates a schedule that runs the wrong template with no
+  // error surfaced. D3.
+  if (body.templateId !== undefined
+    && !(['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'] as const)
+      .includes(body.templateId as never)) {
+    throw new Error(`invalid templateId: ${String(body.templateId)}`);
+  }
+  if (body.runTemplate !== undefined) {
+    throw new Error('nested runTemplate is not accepted; use flat fields: templateId, goalTemplate, editableSurfaces, requiredChecks');
+  }
   const templateId = normalizeEnum(
     body.templateId,
     ['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'] as const,
@@ -173,7 +186,11 @@ function normalizeCreateInput(
       goalTemplate: normalizeString(body.goalTemplate) ?? defaultGoal(templateId),
       editableSurfaces: isExecution ? normalizeStringArray(body.editableSurfaces) : [],
       requiredChecks: isExecution ? normalizeStringArray(body.requiredChecks) : [],
-      toolMode: isExecution ? 'project-write' : 'read-only',
+      toolMode: isExecution ? normalizeToolMode(body.toolMode) : 'read-only',
+      sandboxMode: isExecution ? normalizeSandboxMode(body.sandboxMode) : undefined,
+      executor: isExecution ? normalizeExecutorConfig(body.executor) : undefined,
+      maxLoops: isExecution ? normalizeMaxLoops(body.maxLoops) : undefined,
+      workspaceRoot: isExecution ? normalizeWorkspaceRoot(body.workspaceRoot) : undefined,
       feedAnalysisRequest: templateId === 'scheduled_feed_analysis'
         ? normalizeFeedAnalysisRequest(body.feedAnalysisRequest)
         : undefined,
@@ -200,8 +217,7 @@ function normalizeUpdateInput(body: Record<string, unknown>): UpdateScheduledWor
 
 function normalizeTrigger(value: unknown): ScheduledWorkTrigger {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const kind = normalizeEnum(input.kind, ['cron', 'interval', 'once'], 'cron');
-  const expression = normalizeString(input.expression);
+  const kind = normalizeEnum(input.kind, ['cron', 'interval', 'once'], 'cron');  const expression = normalizeString(input.expression);
   const timezone = normalizeString(input.timezone);
   if (!expression || !timezone) throw new Error('trigger expression and timezone are required');
   return { kind, expression, timezone };
@@ -227,6 +243,62 @@ function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map(v => typeof v === 'string' ? v.trim() : '').filter(Boolean))];
 }
+
+function normalizeMaxLoops(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 200) {
+    throw new Error(`maxLoops must be an integer in [1,200], got: ${String(value)}`);
+  }
+  return Math.floor(parsed);
+}
+
+function normalizeToolMode(value: unknown): 'all' | 'project-write' {
+  return value === 'all' ? 'all' : 'project-write';
+}
+
+function normalizeSandboxMode(value: unknown): 'readonly' | 'workspace-write' | 'sandbox' | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'readonly' || value === 'workspace-write' || value === 'sandbox') return value;
+  throw new Error(`sandboxMode must be one of readonly, workspace-write, sandbox, got: ${String(value)}`);
+}
+
+function normalizeWorkspaceRoot(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !value.startsWith('/')) {
+    throw new Error('workspaceRoot must be an absolute path');
+  }
+  return value.trim();
+}
+
+function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['executor'] {
+  if (value === undefined || value === null) return undefined;
+  const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('executor must be an object');
+  }
+  const nodeUrls = normalizeStringArray(input.nodeUrls);
+  const requiredCapabilities = normalizeStringArray(input.requiredCapabilities)
+    .filter((c): c is ExecutorCapabilityRequirement => EXECUTOR_CAPABILITIES.includes(c as ExecutorCapabilityRequirement));
+  const nodeId = normalizeString(input.nodeId);
+  const agentKey = normalizeString(input.agentKey);
+  return {
+    ...(input.enabled === undefined ? {} : { enabled: Boolean(input.enabled) }),
+    ...(nodeId ? { nodeId } : {}),
+    ...(nodeUrls.length > 0 ? { nodeUrls } : {}),
+    ...(agentKey ? { agentKey } : {}),
+    ...(requiredCapabilities.length > 0 ? { requiredCapabilities } : {}),
+    ...(input.requiresBuild === undefined ? {} : { requiresBuild: Boolean(input.requiresBuild) }),
+    ...(input.requiresDeploy === undefined ? {} : { requiresDeploy: Boolean(input.requiresDeploy) }),
+    ...(normalizeNumber(input.leaseMs) ? { leaseMs: normalizeNumber(input.leaseMs) } : {}),
+    ...(normalizeNumber(input.heartbeatMs) ? { heartbeatMs: normalizeNumber(input.heartbeatMs) } : {}),
+  };
+}
+
+const EXECUTOR_CAPABILITIES: readonly string[] = [
+  'workspace_read', 'workspace_write', 'shell', 'sandbox', 'network_egress',
+  'heavy_task_safe', 'deploy_safe',
+];
 
 function normalizeFeedAnalysisRequest(value: unknown): ScheduledWorkRunTemplate['feedAnalysisRequest'] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

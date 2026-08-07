@@ -185,9 +185,17 @@ export class _XaiOAuthStore {
 
 export const _xaiOAuthStore = new _XaiOAuthStore();
 
+// Test-only injection point for chmod behaviour (see xai-oauth.test.ts). The
+// default implementation is tryChmod's built-in chmodSync call.
+export type _ChmodImpl = (path: string, mode: number) => void;
+let _chmodImpl: _ChmodImpl | null = null;
+export function _setChmodImplForTest(impl: _ChmodImpl | null): void {
+  _chmodImpl = impl;
+}
+
 function readLosStore(path: string): Record<string, unknown> {
   ensurePrivateDirectory(dirname(path));
-  if (process.platform !== 'win32') chmodSync(path, 0o600);
+  tryChmod(path, 0o600);
   return readStore(path);
 }
 
@@ -229,9 +237,9 @@ function writeStoreAtomically(path: string, store: Record<string, unknown>): voi
       flag: 'wx',
       mode: 0o600,
     });
-    if (process.platform !== 'win32') chmodSync(tempPath, 0o600);
+    tryChmod(tempPath, 0o600);
     renameSync(tempPath, path);
-    if (process.platform !== 'win32') chmodSync(path, 0o600);
+    tryChmod(path, 0o600);
   } finally {
     rmSync(tempPath, { force: true });
   }
@@ -239,7 +247,22 @@ function writeStoreAtomically(path: string, store: Record<string, unknown>): voi
 
 function ensurePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') chmodSync(path, 0o700);
+  tryChmod(path, 0o700);
+}
+
+// Best-effort hardening: chmod may be denied by macOS TCC (e.g. accessing
+// ~/.los without Full Disk Access) or by OS sandboxes. Reads and writes must
+// still succeed in those environments — private modes are already enforced at
+// creation time (mkdirSync mode 0o700, writeFileSync mode 0o600), so a failed
+// chmod only means we could not re-assert the mode on an existing path.
+function tryChmod(path: string, mode: number): void {
+  if (process.platform === 'win32') return;
+  try {
+    if (_chmodImpl) _chmodImpl(path, mode);
+    else chmodSync(path, mode);
+  } catch (error) {
+    console.warn(`[xai-oauth] chmod ${path} to ${mode.toString(8)} failed: ${(error as Error).message}`);
+  }
 }
 
 function readLockId(path: string): string | undefined {

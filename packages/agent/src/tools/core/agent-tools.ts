@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { getLogger } from '@los/infra/logger';
 import { resolveIdentityLevelForExecutionPath } from '../../identity-loader.js';
 import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
 import { createRunSpec, ensureRunSpecStore, listCompletedChildRunSpecs, listRunSpecsForSession, updateRunSpecResult, type RunSpecResult } from '../../run-specs.js';
@@ -206,7 +207,10 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
       },
     },
   }, {
-    riskLevel: 'L1',
+    // L0 so read-only mode (maxRiskLevel L0) can spawn read-only children;
+    // sideEffect stays true so the tool is never replayed on retry. The child
+    // inherits read-only tools and cannot spawn further agents.
+    riskLevel: 'L0',
     permissions: ['agent:spawn'],
     timeoutMs: 600_000,
     retryable: false,
@@ -364,11 +368,21 @@ function inheritRunContractMetadata(
   parent: SpawnAgentRunnerOptions['runContractMetadata'],
 ): SpawnAgentRunnerOptions['runContractMetadata'] {
   if (!parent) return undefined;
+  let clone: SpawnAgentRunnerOptions['runContractMetadata'];
   try {
-    return structuredClone(parent);
+    clone = structuredClone(parent);
   } catch {
-    return JSON.parse(JSON.stringify(parent)) as SpawnAgentRunnerOptions['runContractMetadata'];
+    clone = JSON.parse(JSON.stringify(parent)) as SpawnAgentRunnerOptions['runContractMetadata'];
   }
+  // Runtime scheduler details (execution-kernel selection and route state)
+  // are parent-run metadata written during execution. Children must not
+  // inherit them: a partial executionKernel object fails run-spec contract
+  // validation, and route/kernel choices are re-resolved for the child.
+  if (clone && typeof clone === 'object') {
+    const { executionKernel: _kernel, requestedExecutionKernel: _requestedKernel, ...rest } = clone as Record<string, unknown>;
+    clone = rest as SpawnAgentRunnerOptions['runContractMetadata'];
+  }
+  return clone;
 }
 
 export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnAgentRunner {
@@ -405,8 +419,19 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         runContract: childRunContractMetadata,
       });
       childRunSpecId = specId;
-    } catch {
-      childRunSpecId = undefined; // ensure caller never sees stale ID
+    } catch (error) {
+      // Durable lineage is best-effort: the child still runs, but without a
+      // run_spec it cannot be recovered after a restart. Log loudly so the
+      // gap is visible instead of silently swallowed.
+      const contractKeys = childRunContractMetadata ? Object.keys(childRunContractMetadata).join(',') : '(none)';
+      const runContractKeys = (childRunContractMetadata?.runContract && typeof childRunContractMetadata.runContract === 'object')
+        ? Object.keys(childRunContractMetadata.runContract).join(',')
+        : '(none)';
+      getLogger('agent-tools').warn(
+        `child run_spec persistence failed; child will not survive restart: ${error instanceof Error ? error.message : String(error)} [contractKeys=${contractKeys} runContractKeys=${runContractKeys}]`,
+        { childSessionId },
+      );
+      childRunSpecId = undefined;
     }
 
     // Background mode: fire-and-forget with AbortController

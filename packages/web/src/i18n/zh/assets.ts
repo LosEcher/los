@@ -127,6 +127,8 @@ export const zhAssets: AssetsKeys = {
   'assets.mcp.capabilitiesBlocked': '{available} 可用 / {blocked} 已阻止',
   'assets.mcp.capabilitySummary': '{status} | {classification} | {description}',
   'assets.mcp.blockedReason': '已阻止：{reason}',
+  'assets.mcp.capabilityDetail': '{classification} | {description}',
+  'assets.mcp.toolBlockedTitle': '工具已阻止',
   'assets.mcp.serverDetailTitle': '服务器详情',
   'assets.mcp.verify': '验证',
   'assets.mcp.enable': '启用',

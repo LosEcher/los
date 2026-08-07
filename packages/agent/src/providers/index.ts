@@ -107,7 +107,7 @@ export function getProviderConfig(name: string) {
     // OAuth credentials are resolved lazily by the async transport immediately
     // before each request, so single-use refresh tokens can be rotated safely.
     if ((p as Record<string, unknown>).authMode === 'oauth') {
-      if (name === 'xai') return p;
+      if (name === 'xai' || name === 'kimi') return p;
       throw new Error(`Provider '${name}' has no supported OAuth credential resolver.`);
     }
     throw new Error(`Provider '${name}' has no API key.`);
@@ -197,24 +197,52 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         }).catch(() => {});
         throw err;
       }
-      recordProviderCall({
-        traceId: options.traceId ?? traceId ?? '',
-        sessionId: options.sessionId,
-        provider: name, model, endpoint: '/chat/completions', method: 'POST',
-        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
-        status: res.status, durationMs: Date.now() - fetchStart,
-        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
-      }).catch(() => {});
-
       if (!res.ok) {
         const err = await res.text();
+        const failedAt = Date.now();
+        recordProviderCall({
+          traceId: options.traceId ?? traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/chat/completions', method: 'POST',
+          stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+          status: res.status, durationMs: failedAt - fetchStart,
+          headersDurationMs: failedAt - fetchStart,
+          errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}`,
+        }).catch(() => {});
         throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       if (options.onDelta) {
-        return await readOpenAIStreamResponse(res, model, name, options.onDelta, options.traceId ?? traceId);
+        // Streamed response: record completion only after the stream is fully
+        // consumed so durationMs covers the whole call (P0-2).
+        const headersAt = Date.now();
+        const result = await readOpenAIStreamResponse(res, model, name, options.onDelta, options.traceId ?? traceId);
+        const doneAt = Date.now();
+        recordProviderCall({
+          traceId: options.traceId ?? traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/chat/completions', method: 'POST',
+          stream: true, requestPayloadSize: bodyStr.length,
+          status: 200, durationMs: doneAt - fetchStart,
+          headersDurationMs: headersAt - fetchStart,
+          bodyDurationMs: doneAt - headersAt,
+        }).catch(() => {});
+        return result;
       }
+      // Non-streaming success: single record after the body is read — this is
+      // where DeepSeek hidden-thinking tokens cost 30-80s (P0-2).
+      const headersAt = Date.now();
       const data = await res.json() as any;
+      const bodyDoneAt = Date.now();
+      recordProviderCall({
+        traceId: options.traceId ?? traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model, endpoint: '/chat/completions', method: 'POST',
+        stream: false, requestPayloadSize: bodyStr.length,
+        status: 200, durationMs: bodyDoneAt - fetchStart,
+        headersDurationMs: headersAt - fetchStart,
+        bodyDurationMs: bodyDoneAt - headersAt,
+      }).catch(() => {});
       const choice = data.choices?.[0];
       const msg = choice?.message;
 

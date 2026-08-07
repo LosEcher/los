@@ -246,4 +246,22 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     config: { targetRepo: '/Users/echerlos/syncthing/project/lot2extension/go-backend', projectName: 'lot2extension' },
     initialStaggerMs: 210 * 60 * 1000,
   },
+  {
+    // Adversarial review (2026-08-07): daily, module-scoped first, whole-system
+    // later (总-分-总). Gate auto-downgrades cadence once enough runs give data.
+    jobType: 'adversarial_review',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-adversarial-review',
+    config: { module: 'all' },
+    initialStaggerMs: 15 * 60 * 1000,
+  },
+  {
+    // Self-bootstrap (2026-08-07, A 项): quality snapshot → improvement todo,
+    // and todo lifecycle refresh for stale in_progress tasks.
+    jobType: 'self_bootstrap',
+    cadence: 'daily',
+    dedupeKey: 'gov-job-self-bootstrap',
+    config: { staleDays: 14, reviewedWithinDays: 7 },
+    initialStaggerMs: 45 * 60 * 1000,
+  },
 ];

@@ -50,7 +50,15 @@ schemas:
       goalTemplate: string
       editableSurfaces: []
       requiredChecks: string[]
-      toolMode: [read-only, project-write]
+      toolMode: [read-only, project-write, all]
+      sandboxMode:
+        optional: true
+        enum: [readonly, workspace-write, sandbox]
+        description: >
+          Isolation level for scheduled_execution runs. `sandbox` requires a
+          node whose capabilities.sandbox is a real OS backend (e.g.
+          linux-bwrap, macos-sandbox-exec); `tool_policy`/`native` nodes are
+          rejected at executor selection. Defaults to workspace-write.
       feedAnalysisRequest:
         optional: true
         reference: los.integration-feed-analysis FeedAnalysisDispatchRequest excluding sourceJobId

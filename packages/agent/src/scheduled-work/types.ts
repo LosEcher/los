@@ -1,5 +1,6 @@
 import type { WorkItemMode } from '../work-items/types.js';
 import type { FeedAnalysisDispatchRequest } from '../integration/feed-analysis-types.js';
+import type { ScheduledExecutorConfig } from '../scheduler/types.js';
 
 export type ScheduledTriggerKind = 'cron' | 'interval' | 'once';
 export type ScheduledWorkStatus = 'enabled' | 'paused' | 'retired';
@@ -31,8 +32,24 @@ export interface ScheduledWorkRunTemplate {
   goalTemplate: string;
   editableSurfaces: string[];
   requiredChecks: string[];
-  toolMode: 'read-only' | 'project-write';
+  toolMode: 'read-only' | 'project-write' | 'all';
+  /** Isolation level for scheduled_execution runs. `sandbox` requires an
+   *  executor node whose capabilities.sandbox is a real OS backend
+   *  (linux-bwrap / macos-sandbox-exec); selection rejects
+   *  tool_policy/native nodes. Defaults to workspace-write. */
+  sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
   feedAnalysisRequest?: Omit<FeedAnalysisDispatchRequest, 'sourceJobId'>;
+  /** Optional executor placement for scheduled_execution runs (wires the
+   *  otherwise unused remote-executor channel; see executor-client.ts). */
+  executor?: ScheduledExecutorConfig;
+  /** Override for the agent loop's maxLoops (default 20). */
+  maxLoops?: number;
+  /** Workspace root override for remote execution: the default is the
+   *  gateway's absolute workspace path, which does not exist on remote
+   *  executor nodes. Point this at a node-local path (e.g.
+   *  /opt/los/los-workspace or /rclone-hub/sub-store) so the remote agent
+   *  can read/write real files. */
+  workspaceRoot?: string;
 }
 
 export interface ScheduledWorkItem {

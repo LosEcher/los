@@ -1,11 +1,12 @@
 contract: los.provider-account-runtime
-version: 0.1.0
+version: 0.2.0
 status: implemented
 owner: packages/infra
 description: >
   Discover and explicitly adopt an existing Grok CLI login as an opaque
   provider account reference, then run the Grok external runtime without
-  exposing or persisting its credential material.
+  exposing or persisting its credential material. Also syncs remote model
+  catalogs for OpenAI-compatible providers through their /models endpoint.
 type: object
 routes:
   - method: GET
@@ -20,6 +21,17 @@ routes:
     path: /providers/accounts/grok
     response:
       account: ProviderAccountSummary
+  - method: POST
+    path: /providers/:name/models/sync
+    request:
+      applyModel: string | null
+    response:
+      provider: string
+      baseUrl: string
+      count: integer
+      models: ModelId[]
+      applied: boolean
+      appliedModel: string | null
   - method: POST
     path: /runtimes/grok/run
     request:
@@ -41,6 +53,7 @@ operatorControl:
   requiredPrincipal: operator
   routes:
     - POST /providers/accounts/grok
+    - POST /providers/:name/models/sync
     - POST /runtimes/grok/run
 accountDiscovery:
   sources:
@@ -86,6 +99,8 @@ fields:
     authMode: oidc | external | api_key | legacy | unknown | null
     sourceKind: inline_env | explicit_path | grok_home | default_home
     reason: string | null
+  ModelId:
+    id: string
 redaction:
   - Never return GROK_AUTH, raw auth file contents, file paths, access tokens,
     refresh tokens, API keys, cookies, auth snapshots, email, user id, team id,

@@ -57,13 +57,19 @@ test('resolveExecutor skips candidates missing required capabilities', async () 
 });
 
 test('configured executor URLs are marked as degraded placement', async () => {
-  const resolved = await resolveExecutor(
-    { enabled: true, nodeUrls: ['http://127.0.0.1:18093'] },
-    { toolMode: 'read-only', sandboxMode: 'readonly' },
-  );
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    const resolved = await resolveExecutor(
+      { enabled: true, nodeUrls: ['http://127.0.0.1:18093'] },
+      { toolMode: 'read-only', sandboxMode: 'readonly' },
+    );
 
-  assert.equal(resolved?.decision.placementTier, 'degraded');
-  assert.deepEqual(resolved?.decision.requiredCapabilities, ['workspace_read']);
+    assert.equal(resolved?.decision.placementTier, 'degraded');
+    assert.deepEqual(resolved?.decision.requiredCapabilities, ['workspace_read']);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
 });
 
 test('resolveExecutor rejects warning-level memory pressure for heavy work', async () => {

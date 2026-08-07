@@ -123,6 +123,8 @@ export const enAssets = {
   'assets.mcp.capabilitiesBlocked': '{available} available / {blocked} blocked',
   'assets.mcp.capabilitySummary': '{status} | {classification} | {description}',
   'assets.mcp.blockedReason': 'blocked: {reason}',
+  'assets.mcp.capabilityDetail': '{classification} | {description}',
+  'assets.mcp.toolBlockedTitle': 'tool blocked',
   'assets.mcp.serverDetailTitle': 'Server Detail',
   'assets.mcp.verify': 'verify',
   'assets.mcp.enable': 'enable',

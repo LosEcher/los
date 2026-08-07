@@ -39,14 +39,18 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     if (input.runTemplate.mode !== 'execution') {
       throw new Error('scheduled_execution must use execution mode');
     }
-    if (input.runTemplate.toolMode !== 'project-write') {
-      throw new Error('scheduled_execution requires project-write tool mode');
+    if (input.runTemplate.toolMode !== 'project-write' && input.runTemplate.toolMode !== 'all') {
+      throw new Error('scheduled_execution requires project-write (or all with sandboxMode=sandbox) tool mode');
     }
     if (input.runTemplate.editableSurfaces.length === 0) {
       throw new Error('scheduled_execution requires at least one editable surface');
     }
     if (input.runTemplate.requiredChecks.length === 0) {
       throw new Error('scheduled_execution requires at least one required check');
+    }
+    if (input.runTemplate.maxLoops !== undefined
+      && (input.runTemplate.maxLoops < 1 || input.runTemplate.maxLoops > 200)) {
+      throw new Error('maxLoops must be in [1,200]');
     }
     return; // skip feed-analysis and read-only checks
   }

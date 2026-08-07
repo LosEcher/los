@@ -21,7 +21,7 @@ const LEGAL_TRANSITIONS: Record<ScheduledWorkRunStatus, ScheduledWorkRunStatus[]
   queued: ['claimed', 'skipped', 'cancelled'],
   claimed: ['running', 'awaiting_approval', 'skipped', 'failed', 'cancelled'],
   running: ['claimed', 'succeeded', 'no_op', 'failed', 'cancelled'],
-  awaiting_approval: ['claimed', 'cancelled'],
+  awaiting_approval: ['claimed', 'queued', 'cancelled'],
   failed: ['claimed'],
   succeeded: [], no_op: [], skipped: [], cancelled: [],
 };

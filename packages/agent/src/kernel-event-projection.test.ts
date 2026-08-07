@@ -152,6 +152,50 @@ test('kernel event projection summarizes tool and checkpoint payloads without ra
   assert.equal(JSON.stringify([tool, checkpoint]).includes('secret.txt'), false);
 });
 
+test('kernel event projector skips message.delta writes but keeps sequence advancing', async () => {
+  const writes: SessionEventWrite[] = [];
+  const project = _createKernelEventProjector(context, async write => {
+    writes.push(write);
+  });
+
+  await project({
+    sequence: 0,
+    type: 'kernel.started',
+    occurredAt: '2026-07-22T00:00:00.000Z',
+    kernel,
+    payload: {},
+  });
+  await project({
+    sequence: 1,
+    type: 'message.delta',
+    occurredAt: '2026-07-22T00:00:01.000Z',
+    kernel,
+    turn: 1,
+    payload: { delta: { provider: 'fixture', model: 'fixture-model', textDelta: 'a' } },
+  });
+  await project({
+    sequence: 2,
+    type: 'message.delta',
+    occurredAt: '2026-07-22T00:00:02.000Z',
+    kernel,
+    turn: 1,
+    payload: { delta: { provider: 'fixture', model: 'fixture-model', textDelta: 'b' } },
+  });
+  // Sequence must still advance past the skipped deltas (drift check stays intact).
+  await project({
+    sequence: 3,
+    type: 'message.completed',
+    occurredAt: '2026-07-22T00:00:03.000Z',
+    kernel,
+    turn: 1,
+    payload: { text: 'ab', reasoningContent: '', toolCalls: [] },
+  });
+
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes.map(write => write.type), ['kernel.started', 'message.completed']);
+  assert.deepEqual(writes.map(write => write.payload?.sequence), [0, 3]);
+});
+
 test('kernel event projector durably appends canonical evidence to session_events', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
@@ -177,6 +221,14 @@ test('kernel event projector durably appends canonical evidence to session_event
     });
     await project({
       sequence: 1,
+      type: 'message.delta',
+      occurredAt: '2026-07-22T00:00:00.500Z',
+      kernel,
+      turn: 1,
+      payload: { delta: { provider: 'fixture', model: 'fixture-model', textDelta: 'raw delta' } },
+    });
+    await project({
+      sequence: 2,
       type: 'kernel.finished',
       occurredAt: '2026-07-22T00:00:01.000Z',
       kernel,
@@ -193,7 +245,7 @@ test('kernel event projector durably appends canonical evidence to session_event
 
     const events = await listSessionEvents(sessionId);
     assert.deepEqual(events.map(event => event.type), ['kernel.started', 'kernel.finished']);
-    assert.deepEqual(events.map(event => event.payload.sequence), [0, 1]);
+    assert.deepEqual(events.map(event => event.payload.sequence), [0, 2]);
     assert.ok(events.every(event => event.visibility === 'audit'));
     assert.ok(events.every(event => event.source === 'los.kernel.los'));
     assert.equal(JSON.stringify(events).includes('raw final response'), false);

@@ -10,7 +10,9 @@ rules, generic coding habits, and legacy project facts out of this file.
 
 ## Before Acting
 
-1. Read `AGENTS.md` — including the Unconditional Pre-Action Gate and self-check.
+1. Read `AGENTS.md` — hard invariants (AP1/AP2/AP3/AP5/AP7/AP9/AP11),
+   Change Rules, Operator Consent, and Workflow Routing (closeout evidence
+   requirements).
 2. For workspace-boundary questions, read `../../AGENTS.md` and `../../WORKSPACE.md`.
 3. If `.jj/` exists, use `jj status` for local version-control truth.
 4. Identify the affected surface before editing:
@@ -52,8 +54,25 @@ Steps:
    - `executor_nodes`
    - relevant API responses such as `/nodes` and `/services`
 3. Do not treat SOCKS/proxy reachability as gateway or executor health.
-4. If stop/start behavior is involved, verify the stop path writes offline state
+4. Verify the DB instance before trusting rows: after the 2026-08-05 split,
+   the authoritative runtime DB is the local Homebrew postgres on
+   `127.0.0.1:55432`; the `docker los-postgres` container was stopped
+   (archive dump in `.los-runtime/db-backups/`). Check `lsof -nP -i :55432`
+   and the `.env` `DATABASE_URL` comment before querying — "连错库" rows
+   (stale governance jobs, empty schedules) are a known false-signal source.
+5. gateway.log is not a real-time observable surface: `tools/los.sh` truncates
+   it on start and stdout buffering can lag hours (observed 8h gap 2026-08-05).
+   Judge the runtime loop by DB rows (`scheduled_work_item_runs`,
+   `governance_jobs.last_run_at`) and `/health`, not by log freshness.
+6. If stop/start behavior is involved, verify the stop path writes offline state
    before claiming registry truth is synchronized.
+7. Remote execution (2026-08-06): scheduled_execution supports
+   `runTemplate.executor` (nodeUrls/agentKey) + `workspaceRoot` override +
+   `maxLoops`; tasks run on remote nodes via agent_http (e.g. node34). The
+   agent tool `run_runtime_task` (L2, approval) delegates to codex/grok CLIs
+   from within a task. Async approval: `approve` queues the run
+   (`awaiting_approval -> queued`, resultSummary.approvedBy), executed by the
+   ~30s tick. Approve HTTP returns immediately.
 
 Evidence to report:
 
@@ -150,6 +169,10 @@ Steps:
    review.
 4. Convert unresolved drift into a concrete doc, ADR, test, operation smoke, or
    todo item.
+5. For doc-vs-repo drift checks, run the `los-doc-drift-sweep` skill checklist
+   (doc anchors, command surface, ADR numbering, memory vs persisted truth).
+   Loop/scheduled-task candidates are listed in `periodic-analysis.md` →
+   "Loop / Scheduled-Task Candidates".
 
 Evidence to report:
 
@@ -208,7 +231,7 @@ and a next action.
 
 Related:
 
-- `AGENTS.md` → Session Closeout Gate
+- `AGENTS.md` → Workflow Routing (session closeout reporting requirements)
 - `docs/governance/branch-lifecycle.md`
 - `tools/branch-closeout.sh`, `tools/branch-prune-origin.sh`
 - `tools/mirror-github-main.sh` for optional GitHub mirror PR path after Forgejo merge

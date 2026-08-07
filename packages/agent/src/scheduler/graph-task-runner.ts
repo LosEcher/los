@@ -127,6 +127,13 @@ export async function runClaimedAgentGraphTask(
     const prompt = input.resolveTaskPrompt
       ? await input.resolveTaskPrompt(task, completedStages)
       : task.prompt ?? task.title;
+    // The worker inherits the parent run spec contract, whose goal covers the
+    // whole graph. Override the self-check contract so the post-execution
+    // gate judges this worker against its own task prompt (see
+    // ScheduledAgentTaskInput.selfCheckContract).
+    const workerSelfCheckContract = input.runContract
+      ? { ...input.runContract, goal: prompt, stopConditions: [] }
+      : undefined;
     const result = await runScheduledAgentTask({
       ...input,
       workspaceRoot: workspaceRootForTask(task, input.workspaceRoot),
@@ -144,6 +151,7 @@ export async function runClaimedAgentGraphTask(
       runSpecId,
       sessionId,
       verificationOwner: input.requireVerifier ? 'graph' : 'task',
+      selfCheckContract: workerSelfCheckContract,
       dedupeKey: undefined,
       metadata: {
         ...(input.metadata ?? {}),

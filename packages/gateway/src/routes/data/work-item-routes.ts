@@ -333,7 +333,10 @@ async function handleStartWorkItem(
       toolMode: 'read-only',
       allowedTools: [],
       toolRetry: {},
-      maxLoops: 4,
+      // Planning needs enough rounds for read-only investigation plus the
+      // submit_run_contract submission (default 20 rounds got exhausted by
+      // investigation alone in dogfood runs).
+      maxLoops: 60,
       timeoutMs: undefined,
       mcpServers: [],
       runContract: {

@@ -96,6 +96,13 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
   event_retention: [],
   code_topology_audit: [],
   dead_letter: [],
+  adversarial_review: [
+    { metric: 'findingCount', direction: 'higher', thresholdPercent: 30, label: 'Adversarial findings increased >30%' },
+  ],
+  self_bootstrap: [
+    { metric: 'qualityDegradation', direction: 'higher', thresholdPercent: 30, label: 'Quality degradation findings increased >30%' },
+    { metric: 'todoStaleness', direction: 'higher', thresholdPercent: 30, label: 'Stale todo findings increased >30%' },
+  ],
 };
 
 // ── Core ─────────────────────────────────────────────────

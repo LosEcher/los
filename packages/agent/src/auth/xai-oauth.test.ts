@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { _XaiOAuthStore } from './xai-oauth-store.js';
+import { _setChmodImplForTest, _XaiOAuthStore } from './xai-oauth-store.js';
 import {
   _resolveXaiOAuthCredential,
   XaiOAuthError,
@@ -151,6 +151,32 @@ test('file lock makes a sibling resolver adopt the rotated token', async (t) => 
   assert.equal(refreshCalls, 1);
   assert.equal(first.apiKey, second.apiKey);
   assert.equal(sibling.load()?.tokens.refresh_token, 'refresh-rotated');
+});
+
+test('xAI auth store survives chmod denial (macOS TCC EPERM) on read and write', async (t) => {
+  const { store } = createFixture(t);
+  await store.save(createState(jwtIn(60), 'refresh-1'));
+  t.mock.method(console, 'warn', () => {});
+  _setChmodImplForTest(() => {
+    const error = new Error('EPERM: operation not permitted, chmod') as NodeJS.ErrnoException;
+    error.code = 'EPERM';
+    throw error;
+  });
+  t.after(() => _setChmodImplForTest(null));
+
+  // 读取路径:chmod 被拒后仍能加载已有凭证。
+  assert.equal(store.load()?.tokens.refresh_token, 'refresh-1');
+
+  // 写入路径(原子写 + 目录)同样不受影响,且权限由创建时 mode 保证。
+  const next = await store.save(createState(jwtIn(120), 'refresh-2'), {
+    expectedGeneration: 1,
+  });
+  assert.equal(next.credential_generation, 2);
+  assert.equal(store.load()?.tokens.refresh_token, 'refresh-2');
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(dirname(store.authPath)).mode & 0o777, 0o700);
+    assert.equal(statSync(store.authPath).mode & 0o777, 0o600);
+  }
 });
 
 function createFixture(t: test.TestContext): { root: string; store: _XaiOAuthStore } {

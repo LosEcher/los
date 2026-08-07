@@ -17,7 +17,7 @@ import {
   type ReviewPacket,
 } from './self-check.js';
 import type { AgentResult } from './loop.js';
-import type { Provider, ProviderResponse, Message, ToolDef } from './providers/types.js';
+import type { Provider, ProviderResponse, Message, ToolDef, ChatOptions } from './providers/types.js';
 
 function createFakeProvider(responseText: string): Provider {
   return {
@@ -164,6 +164,22 @@ test('parseSelfCheckResponse fallback on garbled text', () => {
   assert.equal(result.gaps[0].condition, 'self_check_parse');
 });
 
+test('parseSelfCheckResponse extracts JSON wrapped in tool-call noise', () => {
+  const noisy = '<tool_calls>\n<read_file file="docs/governance/anti-patterns.md" />\n' +
+    '{"goalMet": true, "stopConditionsMet": [true], "summaryOfEvidence": "read the doc", "confidence": 0.8, "gaps": []}\n' +
+    '</tool_calls>';
+  const result = parseSelfCheckResponse(noisy, 1);
+  assert.equal(result.goalMet, true);
+  assert.equal(result.confidence, 0.8);
+  assert.deepEqual(result.stopConditionsMet, [true]);
+});
+
+test('parseSelfCheckResponse extracts JSON with prose prefix', () => {
+  const result = parseSelfCheckResponse('Here is my assessment: {"goalMet": false, "stopConditionsMet": [false], "summaryOfEvidence": "x", "confidence": 0.3, "gaps": [{"condition":"g","detail":"d","suggestion":"s"}]}', 1);
+  assert.equal(result.goalMet, false);
+  assert.equal(result.confidence, 0.3);
+});
+
 test('parseSelfCheckResponse fallback on empty string', () => {
   const result = parseSelfCheckResponse('', 1);
   assert.equal(result.goalMet, false);
@@ -184,6 +200,91 @@ test('parseSelfCheckResponse normalizes mismatched stop conditions count', () =>
   );
   assert.deepEqual(result.stopConditionsMet, [false, false, false]);
   assert.equal(result.confidence, 0.5);
+});
+
+// ── Unit: runPostExecutionSelfCheck pass semantics ──
+
+test('selfCheckPassed requires only goalMet, not stop conditions', async () => {
+  // Regression: a task that completes normally never triggers a stop condition
+  // (e.g. scheduled execution's 'operator cancels schedule'), so a goalMet=true
+  // verdict with stopConditionsMet=[false] must still pass; otherwise every
+  // well-finished scheduled task is blocked and the circuit breaker trips.
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      stopConditions: ['operator cancels schedule'],
+      provider: createFakeProvider(
+        JSON.stringify({
+          goalMet: true,
+          stopConditionsMet: [false],
+          summaryOfEvidence: 'task completed normally, no cancellation observed',
+          confidence: 0.95,
+          gaps: [],
+        }),
+      ),
+    }),
+  );
+  assert.equal(result.goalMet, true);
+  assert.equal(result.selfCheckPassed, true);
+  assert.deepEqual(result.stopConditionsMet, [false]);
+});
+
+test('selfCheckPassed false when goal not met even if stop conditions met', async () => {
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      provider: createFakeProvider(
+        JSON.stringify({
+          goalMet: false,
+          stopConditionsMet: [true, true],
+          summaryOfEvidence: 'partial work only',
+          confidence: 0.4,
+          gaps: [{ condition: 'goal', detail: 'output missing', suggestion: 're-run' }],
+        }),
+      ),
+    }),
+  );
+  assert.equal(result.goalMet, false);
+  assert.equal(result.selfCheckPassed, false);
+});
+
+test('self-check passes modelSettings and sessionId to the judge call', async () => {
+  let capturedOptions: unknown;
+  const capturingProvider: Provider = {
+    ...createFakeProvider('{"goalMet": true, "stopConditionsMet": [false], "summaryOfEvidence": "ok", "confidence": 0.9, "gaps": []}'),
+    chat: async (_m: Message[], _t?: ToolDef[], options?: ChatOptions) => {
+      capturedOptions = options;
+      return { text: '{"goalMet": true, "stopConditionsMet": [false], "summaryOfEvidence": "ok", "confidence": 0.9, "gaps": []}', toolCalls: [], usage: { promptTokens: 1, completionTokens: 1 }, model: 'test' };
+    },
+  };
+  const result = await runPostExecutionSelfCheck(
+    makeInput({
+      provider: capturingProvider,
+      sessionId: 'session-abc',
+      modelSettings: { thinking: 'disabled', maxTokens: 1024 },
+    }),
+  );
+  assert.equal(result.selfCheckPassed, true);
+  const opts = capturedOptions as ChatOptions;
+  assert.equal(opts.sessionId, 'session-abc');
+  assert.deepEqual(opts.modelSettings, { thinking: 'disabled', maxTokens: 1024 });
+  assert.ok(opts.signal instanceof AbortSignal, 'timeout signal must be attached');
+});
+
+test('self-check timeout aborts the judge call with a timeout gap', async () => {
+  const hangingProvider: Provider = {
+    ...createFakeProvider(''),
+    chat: async (_m: Message[], _t?: ToolDef[], options?: ChatOptions) => {
+      // Honor the abort signal: never resolve, reject on abort.
+      return await new Promise<ProviderResponse>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    },
+  };
+  const result = await runPostExecutionSelfCheck(
+    makeInput({ provider: hangingProvider, timeoutMs: 100 }),
+  );
+  assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.gaps[0]?.condition, 'self_check_timeout');
 });
 
 // ── Unit: shouldRunSelfCheck ──
@@ -239,7 +340,11 @@ test('SelfCheckResult.selfCheckPassed = false when goalMet is false', async () =
   assert.equal(result.confidence, 0.2);
 });
 
-test('SelfCheckResult.selfCheckPassed = false when stop condition not met', async () => {
+test('SelfCheckResult.selfCheckPassed = true when goal met even if a stop condition was not triggered', async () => {
+  // Stop conditions are audit information; a normally-completed task (e.g.
+  // scheduled execution where 'operator cancels schedule' never fires) must
+  // not be failed for not triggering them. This test pins the fixed semantics
+  // (previously: goalMet=true + stopConditionsMet=[true,false] → failed).
   const result = await runPostExecutionSelfCheck(
     makeInput({
       provider: createFakeProvider(
@@ -253,7 +358,7 @@ test('SelfCheckResult.selfCheckPassed = false when stop condition not met', asyn
       ),
     }),
   );
-  assert.equal(result.selfCheckPassed, false);
+  assert.equal(result.selfCheckPassed, true);
 });
 
 test('SelfCheckResult selfCheckPassed = true when stop conditions empty and goal met', async () => {
