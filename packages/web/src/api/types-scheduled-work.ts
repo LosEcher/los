@@ -1,6 +1,7 @@
 export type ScheduledTriggerKind = 'cron' | 'interval' | 'once';
 export type ScheduledWorkStatus = 'enabled' | 'paused' | 'retired';
 export type ScheduledApprovalPolicy = 'read_only_auto' | 'preapproved_scope' | 'each_run';
+export type ScheduledApprovalTimeoutAction = 'deny' | 'approve';
 export type ScheduledConcurrencyPolicy = 'skip' | 'queue_one' | 'parallel';
 export type ScheduledCatchUpPolicy = 'skip' | 'run_once';
 export type ScheduledCircuitState = 'closed' | 'open' | 'half_open';
@@ -38,6 +39,8 @@ export type ScheduledWorkItem = {
     feedAnalysisRequest?: Record<string, unknown>;
   };
   approvalPolicy: ScheduledApprovalPolicy;
+  approvalTimeoutMs: number;
+  approvalTimeoutAction: ScheduledApprovalTimeoutAction;
   concurrencyPolicy: ScheduledConcurrencyPolicy;
   catchUpPolicy: ScheduledCatchUpPolicy;
   maxConcurrentRuns: number;

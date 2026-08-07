@@ -336,6 +336,7 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       parsed.type === 'operator_attention' ||
       parsed.type === 'run.operator_attention_required' ||
       parsed.type === 'run.recovery_required' ||
+      parsed.type === 'scheduled_work.denied' ||
       (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
       parsed.type === 'session.blocked' ||
       parsed.type === 'session.error';

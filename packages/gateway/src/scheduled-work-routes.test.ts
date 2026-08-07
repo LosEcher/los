@@ -43,6 +43,13 @@ test('scheduled work routes preview, enforce operator writes, and expose history
         createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
       };
     },
+    deny: async () => {
+      return {
+        id: 'schedule-run-2', scheduleId: schedule.id, scheduledFor: '2026-07-20T01:00:00.000Z',
+        triggerKind: 'manual', status: 'cancelled', attemptCount: 1, maxAttempts: 2,
+        createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
+      };
+    },
     execute: async () => 'succeeded',
   };
   registerScheduledWorkRoutes(app, deps);
@@ -122,6 +129,7 @@ test('scheduled work routes reject invalid templateId and nested runTemplate (fa
     trigger: async () => { throw new Error('unexpected'); },
     retry: async () => { throw new Error('unexpected'); },
     approve: async () => { throw new Error('unexpected'); },
+    deny: async () => { throw new Error('unexpected'); },
     execute: async () => { throw new Error('unexpected'); },
   };
   const app = Fastify();
@@ -206,7 +214,8 @@ function fixtureSchedule() {
       templateId: 'morning_inbox_digest' as const, mode: 'audit' as const,
       goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only' as const,
     },
-    approvalPolicy: 'read_only_auto' as const, concurrencyPolicy: 'skip' as const, catchUpPolicy: 'skip' as const,
+    approvalPolicy: 'read_only_auto' as const, approvalTimeoutMs: 1_800_000, approvalTimeoutAction: 'deny' as const,
+    concurrencyPolicy: 'skip' as const, catchUpPolicy: 'skip' as const,
     maxConcurrentRuns: 1, maxLatenessMs: 3_600_000, maxAttempts: 2, retryBackoffMs: 60_000,
     failureThreshold: 3, nextRunAt: '2026-07-20T00:00:00.000Z', circuitState: 'closed' as const,
     consecutiveFailures: 0, consecutiveNoOps: 0, revision: 1, metadata: {},
