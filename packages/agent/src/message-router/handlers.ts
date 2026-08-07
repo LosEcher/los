@@ -6,11 +6,10 @@
 
 import { listTodos, loadTodo, createTodo } from '@los/agent/todos';
 import {
-  runClaudeCodeWithBridge,
-  claudeCodeSupportsOtel,
-  spawnCodex,
-  codexSupportsOtel,
+  claudeCodeAvailable,
+  codexAvailable,
 } from '@los/agent/runtime-adapter';
+import { runExternalRuntime } from '../runtime-task.js';
 import type { Config } from '@los/infra/config';
 import { listGovernanceJobs } from '../governance-jobs-crud.js';
 import { runGovernanceSweep } from '../governance-sweeper.js';
@@ -133,48 +132,41 @@ function createRuntimeHandler(): HandlerDescriptor {
       if (i.type !== 'runtime') return { handled: false };
       try {
         if (i.kind === 'claude-code') {
-          if (!claudeCodeSupportsOtel()) {
+          if (!claudeCodeAvailable()) {
             await ctx.reply('Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code');
             return { handled: true, error: 'claude_code_not_available' };
           }
           await ctx.reply(`🔄 Starting Claude Code: "${i.prompt.slice(0, 100)}…"`);
-
-          const { handle, bridgeStop } = await runClaudeCodeWithBridge({
-            kind: 'claude-code' as const,
+          const result = await runExternalRuntime({
+            kind: 'claude-code',
             sessionId: `msgrouter-cc-${Date.now()}`,
             workspaceRoot: process.cwd(),
             prompt: i.prompt,
             timeoutMs: 300_000,
           });
-          const exit = await handle.exited;
-          await bridgeStop();
-
-          const text = exit.exitCode === 0
+          const text = result.exitCode === 0
             ? `✅ Claude Code completed (exit 0)`
-            : `⚠️ Claude Code exited with code ${exit.exitCode}${exit.signal ? ` (signal: ${exit.signal})` : ''}`;
+            : `⚠️ Claude Code failed: ${result.error ?? `exit ${result.exitCode}`}`;
           await ctx.reply(text);
           return { handled: true, text };
         }
 
         if (i.kind === 'codex') {
-          if (!codexSupportsOtel()) {
+          if (!codexAvailable()) {
             await ctx.reply('Codex CLI not found. Install and try again.');
             return { handled: true, error: 'codex_not_available' };
           }
           await ctx.reply(`🔄 Starting Codex: "${i.prompt.slice(0, 100)}…"`);
-
-          const handle = spawnCodex({
+          const result = await runExternalRuntime({
+            kind: 'codex',
             sessionId: `msgrouter-cx-${Date.now()}`,
             workspaceRoot: process.cwd(),
             prompt: i.prompt,
-            otelEndpoint: 'http://127.0.0.1:4318',
             timeoutMs: 300_000,
           });
-          const exit = await handle.exited;
-
-          const text = exit.exitCode === 0
+          const text = result.exitCode === 0
             ? `✅ Codex completed (exit 0)`
-            : `⚠️ Codex exited with code ${exit.exitCode}${exit.signal ? ` (signal: ${exit.signal})` : ''}`;
+            : `⚠️ Codex failed: ${result.error ?? `exit ${result.exitCode}`}`;
           await ctx.reply(text);
           return { handled: true, text };
         }

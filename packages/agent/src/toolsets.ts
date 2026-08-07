@@ -140,7 +140,7 @@ const TOOLSETS: Record<string, ToolsetDefinition> = {
   },
 
   runtime: {
-    description: 'External agent runtimes: delegate tasks to codex/grok CLIs (approval required)',
+    description: 'External agent runtimes: delegate tasks to Claude Code, Codex, or Grok CLIs (approval required)',
     tools: [TOOL_NAMES.run_runtime_task],
     includes: [],
   },
