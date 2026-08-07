@@ -12,7 +12,7 @@ import {
 } from './policy.js';
 import { ensureScheduledWorkStore } from './schema.js';
 import type {
-  CreateScheduledWorkItemInput, ScheduledWorkItem, ScheduledWorkItemRun,
+  CreateScheduledWorkItemInput, ScheduledApprovalTimeoutAction, ScheduledWorkItem, ScheduledWorkItemRun,
   ScheduledWorkRunStatus, UpdateScheduledWorkItemInput,
 } from './types.js';
 
@@ -35,15 +35,19 @@ export async function createScheduledWorkItem(input: CreateScheduledWorkItemInpu
   const rows = await getDb().query<ScheduledWorkRow>(
     `INSERT INTO scheduled_work_items (
        id, tenant_id, project_id, user_id, title, trigger_json, run_template_json,
-       approval_policy, concurrency_policy, catch_up_policy, max_concurrent_runs,
+       approval_policy, approval_timeout_ms, approval_timeout_action,
+       concurrency_policy, catch_up_policy, max_concurrent_runs,
        max_lateness_ms, max_attempts, retry_backoff_ms, failure_threshold,
        next_run_at, metadata_json
-     ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
+     ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb)
      RETURNING *`,
     [
       `schedule-${randomUUID()}`, input.tenantId ?? 'local', input.projectId.trim(), input.userId ?? null,
       input.title.trim(), JSON.stringify(input.trigger), JSON.stringify(input.runTemplate),
-      input.approvalPolicy ?? 'read_only_auto', input.concurrencyPolicy ?? 'skip', input.catchUpPolicy ?? 'skip',
+      input.approvalPolicy ?? 'read_only_auto',
+      boundedInt(input.approvalTimeoutMs, 0, 31 * 86_400_000, 1_800_000),
+      input.approvalTimeoutAction ?? 'deny',
+      input.concurrencyPolicy ?? 'skip', input.catchUpPolicy ?? 'skip',
       boundedInt(input.maxConcurrentRuns, 1, 8, 1), boundedInt(input.maxLatenessMs, 0, 31 * 86_400_000, 3_600_000),
       boundedInt(input.maxAttempts, 1, 10, 2), boundedInt(input.retryBackoffMs, 1_000, 86_400_000, 60_000),
       boundedInt(input.failureThreshold, 1, 20, 3), nextRunAt, JSON.stringify(input.metadata ?? {}),
@@ -85,12 +89,16 @@ export async function updateScheduledWorkItem(id: string, input: UpdateScheduled
   const rows = await getDb().query<ScheduledWorkRow>(
     `UPDATE scheduled_work_items SET
        title=$2, status=$3, trigger_json=$4::jsonb, approval_policy=$5,
-       concurrency_policy=$6, catch_up_policy=$7, max_concurrent_runs=$8,
-       max_lateness_ms=$9, failure_threshold=$10, metadata_json=$11::jsonb,
-       next_run_at=$12, revision=revision+1, updated_at=now()
+       approval_timeout_ms=$6, approval_timeout_action=$7,
+       concurrency_policy=$8, catch_up_policy=$9, max_concurrent_runs=$10,
+       max_lateness_ms=$11, failure_threshold=$12, metadata_json=$13::jsonb,
+       next_run_at=$14, revision=revision+1, updated_at=now()
      WHERE id=$1 RETURNING *`,
     [id, input.title?.trim() || current.title, input.status ?? current.status, JSON.stringify(trigger),
-      input.approvalPolicy ?? current.approvalPolicy, input.concurrencyPolicy ?? current.concurrencyPolicy,
+      input.approvalPolicy ?? current.approvalPolicy,
+      boundedInt(input.approvalTimeoutMs, 0, 31 * 86_400_000, current.approvalTimeoutMs),
+      input.approvalTimeoutAction ?? current.approvalTimeoutAction,
+      input.concurrencyPolicy ?? current.concurrencyPolicy,
       input.catchUpPolicy ?? current.catchUpPolicy,
       boundedInt(input.maxConcurrentRuns, 1, 8, current.maxConcurrentRuns),
       boundedInt(input.maxLatenessMs, 0, 31 * 86_400_000, current.maxLatenessMs),
@@ -440,7 +448,9 @@ function boundedInt(value: number | undefined, min: number, max: number, fallbac
 
 type ScheduledWorkRow = Record<string, unknown> & {
   id: string; tenant_id: string; project_id: string; user_id: string | null; title: string; status: string;
-  trigger_json: unknown; run_template_json: unknown; approval_policy: string; concurrency_policy: string; catch_up_policy: string;
+  trigger_json: unknown; run_template_json: unknown; approval_policy: string;
+  approval_timeout_ms: number; approval_timeout_action: string;
+  concurrency_policy: string; catch_up_policy: string;
   max_concurrent_runs: number; max_lateness_ms: number; max_attempts: number; retry_backoff_ms: number;
   failure_threshold: number; next_run_at: Date | string; circuit_state: string; circuit_opened_at: Date | string | null;
   consecutive_failures: number; consecutive_no_ops: number; recovery_work_item_id: string | null; revision: number;
@@ -461,6 +471,8 @@ function scheduleFromRow(row: ScheduledWorkRow): ScheduledWorkItem {
     trigger: objectValue(row.trigger_json) as unknown as ScheduledWorkItem['trigger'],
     runTemplate: objectValue(row.run_template_json) as unknown as ScheduledWorkItem['runTemplate'],
     approvalPolicy: row.approval_policy as ScheduledWorkItem['approvalPolicy'],
+    approvalTimeoutMs: row.approval_timeout_ms,
+    approvalTimeoutAction: row.approval_timeout_action as ScheduledApprovalTimeoutAction,
     concurrencyPolicy: row.concurrency_policy as ScheduledWorkItem['concurrencyPolicy'],
     catchUpPolicy: row.catch_up_policy as ScheduledWorkItem['catchUpPolicy'],
     maxConcurrentRuns: row.max_concurrent_runs, maxLatenessMs: row.max_lateness_ms, maxAttempts: row.max_attempts,

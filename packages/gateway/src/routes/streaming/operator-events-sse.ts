@@ -75,6 +75,8 @@ export function registerOperatorEvents(app: FastifyInstance): void {
       'run.operator_attention_required',
       'run.recovery_required',
       'run.plan_approved',
+      'scheduled_work.approved',
+      'scheduled_work.denied',
       'session.blocked',
       'session.error',
     ];

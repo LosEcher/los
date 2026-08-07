@@ -33,6 +33,8 @@ type FormState = {
   onceAt: string;
   timezone: string;
   approvalPolicy: ScheduledApprovalPolicy;
+  approvalTimeoutMinutes: string;
+  approvalTimeoutAction: 'deny' | 'approve';
   concurrencyPolicy: ScheduledConcurrencyPolicy;
   catchUpPolicy: ScheduledCatchUpPolicy;
   feedAnalysisRequest: string;
@@ -82,7 +84,10 @@ export function SchedulesPage() {
       }
       return postJson<CreateScheduledWorkResponse>('/scheduled-work-items', {
         projectId: form.projectId.trim(), title: form.title.trim(), templateId: form.templateId,
-        trigger, approvalPolicy: form.approvalPolicy, concurrencyPolicy: form.concurrencyPolicy,
+        trigger, approvalPolicy: form.approvalPolicy,
+        approvalTimeoutMs: Math.max(0, Math.round(Number(form.approvalTimeoutMinutes) * 60_000)) || undefined,
+        approvalTimeoutAction: form.approvalTimeoutAction,
+        concurrencyPolicy: form.concurrencyPolicy,
         catchUpPolicy: form.catchUpPolicy,
         editableSurfaces: form.templateId === 'scheduled_execution'
           ? form.editableSurfaces.split(',').map(s => s.trim()).filter(Boolean)
@@ -190,6 +195,7 @@ export function SchedulesPage() {
                 <ScheduleFact label={t('ops.schedules.factStatus')} value={active.status} />
                 <ScheduleFact label={t('ops.schedules.factNextRun')} value={formatDate(active.nextRunAt)} />
                 <ScheduleFact label={t('ops.schedules.factApproval')} value={approvalLabel(t, active.approvalPolicy)} />
+                <ScheduleFact label={t('ops.schedules.factApprovalTimeout')} value={`${Math.round(active.approvalTimeoutMs / 60_000)}m · ${active.approvalTimeoutAction === 'approve' ? t('ops.schedules.timeoutActionApprove') : t('ops.schedules.timeoutActionDeny')}`} />
                 <ScheduleFact label={t('ops.schedules.factConcurrency')} value={active.concurrencyPolicy.replaceAll('_', ' ')} />
                 <ScheduleFact label={t('ops.schedules.factCatchUp')} value={active.catchUpPolicy.replaceAll('_', ' ')} />
                 <ScheduleFact label={t('ops.schedules.factCircuit')} value={t('ops.schedules.circuitValue', { circuitState: active.circuitState, failures: active.consecutiveFailures })} tone={active.circuitState === 'open' ? 'danger' : 'ok'} />
@@ -245,6 +251,8 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
         {form.preset === 'once' ? <label><span>{t('ops.schedules.formRunAt')}</span><input type="datetime-local" value={form.onceAt} onChange={event => set('onceAt', event.target.value)} required /></label> : null}
         <label><span>{t('ops.schedules.formTimezone')}</span><input value={form.timezone} onChange={event => set('timezone', event.target.value)} required /></label>
         <label><span>{t('ops.schedules.formApproval')}</span><select value={form.approvalPolicy} onChange={event => set('approvalPolicy', event.target.value as ScheduledApprovalPolicy)}><option value="read_only_auto">{t('ops.schedules.approvalReadOnlyAuto')}</option><option value="preapproved_scope">{t('ops.schedules.approvalPreapprovedScope')}</option><option value="each_run">{t('ops.schedules.approvalEachRun')}</option></select></label>
+        <label><span>{t('ops.schedules.formApprovalTimeout')}</span><input type="number" min="0" step="1" value={form.approvalTimeoutMinutes} onChange={event => set('approvalTimeoutMinutes', event.target.value)} /></label>
+        <label><span>{t('ops.schedules.formApprovalTimeoutAction')}</span><select value={form.approvalTimeoutAction} onChange={event => set('approvalTimeoutAction', event.target.value as 'deny' | 'approve')}><option value="deny">{t('ops.schedules.timeoutActionDeny')}</option><option value="approve">{t('ops.schedules.timeoutActionApprove')}</option></select></label>
         <label><span>{t('ops.schedules.formConcurrency')}</span><select value={form.concurrencyPolicy} onChange={event => set('concurrencyPolicy', event.target.value as ScheduledConcurrencyPolicy)}><option value="skip">{t('ops.schedules.concurrencySkip')}</option><option value="queue_one">{t('ops.schedules.concurrencyQueueOne')}</option><option value="parallel">{t('ops.schedules.concurrencyParallel')}</option></select></label>
         <label><span>{t('ops.schedules.formCatchUp')}</span><select value={form.catchUpPolicy} onChange={event => set('catchUpPolicy', event.target.value as ScheduledCatchUpPolicy)}><option value="skip">{t('ops.schedules.catchUpSkipLate')}</option><option value="run_once">{t('ops.schedules.catchUpRunOnce')}</option></select></label>
         {form.templateId === 'scheduled_feed_analysis' ? (
@@ -283,7 +291,8 @@ function initialForm(t: (key: string) => string): FormState {
     title: t('ops.schedules.templateMorningDigest'), projectId: getCurrentProjectId() ?? 'los',
     templateId: 'morning_inbox_digest', preset: 'daily', time: '08:30', weekday: '1',
     interval: '6h', onceAt: '', timezone: DEFAULT_TIMEZONE,
-    approvalPolicy: 'read_only_auto', concurrencyPolicy: 'skip', catchUpPolicy: 'skip',
+    approvalPolicy: 'read_only_auto', approvalTimeoutMinutes: '30', approvalTimeoutAction: 'deny',
+    concurrencyPolicy: 'skip', catchUpPolicy: 'skip',
     editableSurfaces: '', requiredChecks: '',
     feedAnalysisRequest: JSON.stringify({
       sourceSystem: 'lot2extension',

@@ -4,6 +4,7 @@ import {
   createScheduledWorkItem,
   executeScheduledWorkRun,
   approveScheduledWorkRun,
+  denyScheduledWorkRun,
   listScheduledWorkItemRuns,
   listScheduledWorkItems,
   loadScheduledWorkItem,
@@ -30,6 +31,7 @@ export type ScheduledWorkRouteDeps = {
   trigger: typeof triggerScheduledWorkItem;
   retry: typeof retryScheduledWorkRun;
   approve: typeof approveScheduledWorkRun;
+  deny: typeof denyScheduledWorkRun;
   execute: typeof executeScheduledWorkRun;
 };
 
@@ -37,7 +39,7 @@ const defaultDeps: ScheduledWorkRouteDeps = {
   create: createScheduledWorkItem, list: listScheduledWorkItems, load: loadScheduledWorkItem,
   update: updateScheduledWorkItem, listRuns: listScheduledWorkItemRuns,
   preview: previewScheduledOccurrences, trigger: triggerScheduledWorkItem,
-  retry: retryScheduledWorkRun, approve: approveScheduledWorkRun, execute: executeScheduledWorkRun,
+  retry: retryScheduledWorkRun, approve: approveScheduledWorkRun, deny: denyScheduledWorkRun, execute: executeScheduledWorkRun,
 };
 
 export function registerScheduledWorkRoutes(
@@ -151,6 +153,18 @@ export function registerScheduledWorkRoutes(
       return reply.status(409).send({ error: errorMessage(error) });
     }
   });
+
+  app.post('/scheduled-work-item-runs/:id/deny', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const context = getRequestContext(req);
+    try {
+      const run = await deps.deny(id, { ownerId: `manual:${context.userId ?? 'operator'}` });
+      return { runId: run.id, status: run.status };
+    } catch (error) {
+      return reply.status(409).send({ error: errorMessage(error) });
+    }
+  });
 }
 
 function normalizeCreateInput(
@@ -196,6 +210,8 @@ function normalizeCreateInput(
         : undefined,
     },
     approvalPolicy: normalizeEnum(body.approvalPolicy, ['read_only_auto', 'preapproved_scope', 'each_run'] as const, isExecution ? 'preapproved_scope' : 'read_only_auto'),
+    approvalTimeoutMs: normalizeNumber(body.approvalTimeoutMs),
+    approvalTimeoutAction: optionalEnum(body.approvalTimeoutAction, ['deny', 'approve'] as const),
     concurrencyPolicy: normalizeEnum(body.concurrencyPolicy, ['skip', 'queue_one', 'parallel'] as const, 'skip'),
     catchUpPolicy: normalizeEnum(body.catchUpPolicy, ['skip', 'run_once'] as const, 'skip'),
     maxConcurrentRuns: normalizeNumber(body.maxConcurrentRuns), maxLatenessMs: normalizeNumber(body.maxLatenessMs),
@@ -208,6 +224,8 @@ function normalizeUpdateInput(body: Record<string, unknown>): UpdateScheduledWor
     title: normalizeString(body.title), status: normalizeStatus(body.status),
     trigger: body.trigger === undefined ? undefined : normalizeTrigger(body.trigger),
     approvalPolicy: optionalEnum(body.approvalPolicy, ['read_only_auto', 'preapproved_scope', 'each_run'] as const),
+    approvalTimeoutMs: normalizeNumber(body.approvalTimeoutMs),
+    approvalTimeoutAction: optionalEnum(body.approvalTimeoutAction, ['deny', 'approve'] as const),
     concurrencyPolicy: optionalEnum(body.concurrencyPolicy, ['skip', 'queue_one', 'parallel'] as const),
     catchUpPolicy: optionalEnum(body.catchUpPolicy, ['skip', 'run_once'] as const),
     maxConcurrentRuns: normalizeNumber(body.maxConcurrentRuns), maxLatenessMs: normalizeNumber(body.maxLatenessMs),
