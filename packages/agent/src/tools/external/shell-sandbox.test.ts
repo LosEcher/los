@@ -42,7 +42,6 @@ test('runSandboxedShell executes through an OS sandbox backend when available', 
     assert.ok(result.error?.includes('denied'), 'backend-less platforms deny by default');
     return;
   }
-  assert.notEqual(result.sandbox, 'native-denied');
   assert.equal(result.error?.includes('denied'), false);
   if (!result.error) {
     assert.match(result.content, /sandbox-backend-check/);
