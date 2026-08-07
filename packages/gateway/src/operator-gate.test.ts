@@ -38,6 +38,7 @@ function buildConfig(opts: { authEnabled: boolean; operatorToken?: string }): Co
       defaultModel: 'deepseek-v4-flash',
       maxLoops: 20,
       sandboxMode: 'workspace-write',
+      allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
     },
     judge: {},

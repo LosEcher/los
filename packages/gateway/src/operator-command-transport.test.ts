@@ -19,7 +19,9 @@ function config(): Config {
     } },
     agent: {
       defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20,
-      sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false },
+      sandboxMode: 'workspace-write',
+      allowNativeShell: false,
+      identity: { name: 'default', inheritForChildren: false },
     },
     judge: {},
     review: { enabled: false, roles: {} },

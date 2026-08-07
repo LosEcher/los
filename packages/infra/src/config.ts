@@ -80,6 +80,11 @@ export const ConfigSchema = z.object({
     defaultModel: z.string().default(DEFAULT_AGENT_MODEL),
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
+    /** When no OS sandbox backend is available, deny shell execution instead
+     *  of falling back to an unconstrained native shell (Claude-style deny).
+     *  Set true only when the environment is trusted (e.g. a container that
+     *  is its own isolation boundary). */
+    allowNativeShell: z.coerce.boolean().default(false),
     systemPrompt: z.string().optional(),
     /** Comma-separated toolset names. Defaults to "coding". Use "all" for everything. */
     enabledToolsets: z.string().optional(),
@@ -216,7 +221,7 @@ export async function loadConfig(opts?: {
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173', localEndpoints: DEFAULT_LOCAL_ENDPOINTS },
     auth: { enabled: false },
     integrations: { feedAnalysis: {} },
-    agent: { defaultProvider: DEFAULT_AGENT_PROVIDER, defaultModel: DEFAULT_AGENT_MODEL, maxLoops: 20, sandboxMode: 'workspace-write', identity: { name: 'default', inheritForChildren: false } },
+    agent: { defaultProvider: DEFAULT_AGENT_PROVIDER, defaultModel: DEFAULT_AGENT_MODEL, maxLoops: 20, sandboxMode: 'workspace-write', allowNativeShell: false, identity: { name: 'default', inheritForChildren: false } },
     memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},
