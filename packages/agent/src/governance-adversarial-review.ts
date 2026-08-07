@@ -109,8 +109,10 @@ export async function runAdversarialReviewAudit(
       const rows = await getDb().query<{ provider: string; calls: string }>(
         `SELECT p.provider, coalesce(t.calls, 0)::text AS calls
          FROM (
-           SELECT DISTINCT provider FROM provider_call_telemetry
+           SELECT provider, count(*)::bigint AS calls
+           FROM provider_call_telemetry
            WHERE created_at > $1
+           GROUP BY provider
          ) t
          RIGHT JOIN (
            SELECT unnest(ARRAY['deepseek','xai','kimi','minimax','packycode','custom','deepseek-anthropic']) AS provider

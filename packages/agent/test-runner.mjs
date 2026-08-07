@@ -101,6 +101,7 @@ const isolatedGroupA = [
   'src/executor-nodes.test.ts',
   'src/external-tool-summary.test.ts',
   'src/feed-analysis-integration.test.ts',
+  'src/governance-adversarial-review.test.ts',
   'src/governance-drift-sweeper.test.ts',
   'src/governance-jobs.test.ts',
   'src/governance-sweep-todos.test.ts',

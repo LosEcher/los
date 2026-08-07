@@ -155,6 +155,18 @@ function extractMetrics(jobType: GovernanceJobType, resultSummary: Record<string
     metrics.filesOver500 = Number(resultSummary.filesOver500Count ?? resultSummary.filesOver500 ?? 0);
   }
 
+  if (jobType === 'adversarial_review') {
+    metrics.findingCount = Number(resultSummary.findingCount ?? 0);
+  }
+
+  if (jobType === 'self_bootstrap') {
+    const findings = Array.isArray(resultSummary.findings)
+      ? resultSummary.findings as Array<{ dimension: string }>
+      : [];
+    metrics.qualityDegradation = findings.filter(f => f.dimension === 'quality_degradation').length;
+    metrics.todoStaleness = findings.filter(f => f.dimension === 'todo_lifecycle').length;
+  }
+
   return metrics;
 }
 

@@ -121,3 +121,75 @@ test('hotspot findings remain idempotent and archive after resolution', async ()
     await getDb().query('DELETE FROM todos WHERE tenant_id = $1 AND project_id = $2', [scope, scope]);
   }
 });
+
+test('self_bootstrap and adversarial_review findings create dimension todos and archive on resolution', async () => {
+  const scope = `bootstrap-finding-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const makeJob = (jobType: 'self_bootstrap' | 'adversarial_review', id: string): GovernanceJob => ({
+    id,
+    jobType,
+    cadence: 'daily',
+    status: 'active',
+    config: {},
+    tenantId: scope,
+    projectId: scope,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    consecutiveNoOps: 0,
+    consecutiveFailures: 0,
+    circuitState: 'closed',
+  });
+
+  const bootstrapActive = {
+    findingCount: 2,
+    findings: [
+      { dimension: 'quality_degradation', severity: 'warn', detail: 'schedule.failureRate up 45%' },
+      { dimension: 'todo_lifecycle', severity: 'info', detail: 'todo abc in_progress for 20d' },
+    ],
+  };
+  const adversarialActive = {
+    findingCount: 2,
+    findings: [
+      { dimension: 'metric_semantics', severity: 'warn', detail: '103 rows lack body_duration_ms' },
+      { dimension: 'provider_ready_vs_usable', severity: 'warn', detail: 'provider kimi: 0 calls in 7d' },
+    ],
+  };
+
+  try {
+    // First run creates one todo per known dimension.
+    assert.equal(await createTodosFromFindings(makeJob('self_bootstrap', 'bs-first'), bootstrapActive, false), 2);
+    assert.equal(await createTodosFromFindings(makeJob('adversarial_review', 'adv-first'), adversarialActive, false), 2);
+    let findings = await listTodos({ tenantId: scope, projectId: scope, source: 'governance_sweep', limit: 20 });
+    assert.equal(findings.length, 4);
+    const auditTypes = findings.map(todo => todo.metadata.auditType).sort();
+    assert.deepEqual(auditTypes, [
+      'metricSemantics', 'providerReadyVsUsable', 'qualityDegradation', 'todoStaleness',
+    ]);
+
+    // Idempotent: second run with the same findings does not duplicate.
+    assert.equal(await createTodosFromFindings(makeJob('self_bootstrap', 'bs-second'), bootstrapActive, false), 2);
+    assert.equal(await createTodosFromFindings(makeJob('adversarial_review', 'adv-second'), adversarialActive, false), 2);
+    findings = await listTodos({ tenantId: scope, projectId: scope, source: 'governance_sweep', limit: 20 });
+    assert.equal(findings.length, 4);
+
+    // Resolved: dimension missing from findings archives its todo.
+    assert.equal(await createTodosFromFindings(makeJob('self_bootstrap', 'bs-resolved'), { findingCount: 0, findings: [] }, false), 0);
+    assert.equal(await createTodosFromFindings(makeJob('adversarial_review', 'adv-resolved'), { findingCount: 1, findings: [{ dimension: 'stuck_approval', severity: 'warn', detail: 'x' }] }, false), 1);
+    findings = await listTodos({
+      tenantId: scope,
+      projectId: scope,
+      source: 'governance_sweep',
+      includeArchived: true,
+      limit: 20,
+    });
+    assert.equal(findings.length, 5);
+    const byType = (auditType: string) => findings.find(todo => todo.metadata.auditType === auditType);
+    assert.ok(byType('qualityDegradation')?.archivedAt);
+    assert.ok(byType('todoStaleness')?.archivedAt);
+    assert.ok(byType('metricSemantics')?.archivedAt);
+    assert.ok(byType('providerReadyVsUsable')?.archivedAt);
+    assert.equal(byType('stuckApproval')?.archivedAt, undefined);
+    assert.equal(byType('stuckApproval')?.metadata.dimension, 'stuck_approval');
+  } finally {
+    await getDb().query('DELETE FROM todos WHERE tenant_id = $1 AND project_id = $2', [scope, scope]);
+  }
+});
