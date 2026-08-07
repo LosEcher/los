@@ -138,3 +138,38 @@ test('selectAutoCompactCandidates: only sessions with observations accumulated s
     await closeDb().catch(() => undefined);
   }
 });
+
+// ── Compaction failure compensation (P0-3) ──────────────
+
+test('compaction backoff: failure counting, exponential backoff and clearing', async () => {
+  const { _recordCompactionFailure, _compactionBackoffElapsed, _clearCompactionFailure, _resetCompactionBackoff } =
+    await import('./server-maintenance.js');
+  _resetCompactionBackoff();
+  const sessionId = `backoff-test-${Date.now()}`;
+  try {
+    // Never failed → no backoff.
+    assert.equal(_compactionBackoffElapsed(sessionId), true);
+
+    // First failure: 1h backoff.
+    const t0 = 1_000_000;
+    assert.equal(_recordCompactionFailure(sessionId, t0), 1);
+    assert.equal(_compactionBackoffElapsed(sessionId, t0 + 30 * 60_000), false);
+    assert.equal(_compactionBackoffElapsed(sessionId, t0 + 60 * 60_000), true);
+
+    // Second failure: 2h backoff (exponential).
+    assert.equal(_recordCompactionFailure(sessionId, t0 + 60 * 60_000), 2);
+    assert.equal(_compactionBackoffElapsed(sessionId, t0 + 60 * 60_000 + 90 * 60_000), false);
+    assert.equal(_compactionBackoffElapsed(sessionId, t0 + 60 * 60_000 + 2 * 3600_000), true);
+
+    // Third failure: 4h backoff.
+    assert.equal(_recordCompactionFailure(sessionId, t0 + 3 * 3600_000), 3);
+    assert.equal(_compactionBackoffElapsed(sessionId, t0 + 3 * 3600_000 + 3 * 3600_000), false);
+
+    // Success clears the state.
+    _clearCompactionFailure(sessionId);
+    assert.equal(_compactionBackoffElapsed(sessionId), true);
+    assert.equal(_recordCompactionFailure(sessionId, t0 + 10 * 3600_000), 1, 'count resets after clear');
+  } finally {
+    _resetCompactionBackoff();
+  }
+});

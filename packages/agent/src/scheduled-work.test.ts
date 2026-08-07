@@ -423,8 +423,7 @@ test('each_run approval queues the run and the tick loop executes it (async appr
   }
 });
 
-test('approve rejects runs that are not awaiting_approval', async () => {
-  const schedule = await createScheduledWorkItem({
+test('approve rejects runs that are not awaiting_approval', async () => {  const schedule = await createScheduledWorkItem({
     projectId: 'los', title: `scheduled-approve-bad-${Date.now()}`,
     trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
     runTemplate: {
@@ -446,6 +445,253 @@ test('approve rejects runs that are not awaiting_approval', async () => {
     await executeScheduledWorkRun(run); // read_only_auto executes directly
     await assert.rejects(
       approveScheduledWorkRun(run.id, { ownerId: 'operator' }),
+      /must be awaiting_approval/,
+    );
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('awaiting_approval emits an operator attention event for notification consumers', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-notify-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'each_run', catchUpPolicy: 'run_once', maxAttempts: 2,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      createManualScheduledWorkRun,
+      executeScheduledWorkRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    const outcome = await executeScheduledWorkRun(run);
+    assert.equal(outcome, 'awaiting_approval');
+    const rows = await getDb().query(
+      `SELECT payload_json FROM session_events
+       WHERE type='run.operator_attention_required' AND source='scheduled-work'
+         AND payload_json::text LIKE '%' || $1 || '%'
+       ORDER BY id DESC LIMIT 1`,
+      [run.id],
+    );
+    assert.ok(rows.rows.length > 0, 'an operator attention event must be emitted for the awaiting run');
+    const raw = rows.rows[0]!.payload_json as unknown;
+    const payload = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown>;
+    assert.equal(payload.runId, run.id);
+    assert.equal(payload.scheduleId, schedule.id);
+    assert.ok(payload.scheduleTitle);
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('approving a run recovers the slot skipped by concurrency_limit as an approved catch-up run', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-catchup-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'each_run', catchUpPolicy: 'run_once', maxAttempts: 2,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      approveScheduledWorkRun,
+      claimQueuedScheduledWorkRuns,
+      createManualScheduledWorkRun,
+      executeScheduledWorkRun,
+      loadScheduledWorkItemRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    await executeScheduledWorkRun(run);
+    assert.equal((await loadScheduledWorkItemRun(run.id))?.status, 'awaiting_approval');
+
+    // Simulate a later slot skipped by concurrency_limit while the run waited.
+    const skipped = await getDb().query(
+      `INSERT INTO scheduled_work_item_runs (
+         id, schedule_id, scheduled_for, trigger_kind, status, attempt_count, max_attempts,
+         result_summary_json, completed_at
+       ) VALUES ($1,$2,$3,'scheduled','skipped',1,2,$4::jsonb,now())
+       RETURNING id`,
+      [`schedule-run-skipped-${Date.now()}`, schedule.id, '2026-07-20T02:00:00.000Z',
+        JSON.stringify({ reason: 'concurrency_limit' })],
+    );
+    const skippedId = skipped.rows[0]!.id as string;
+
+    const approved = await approveScheduledWorkRun(run.id, { ownerId: 'operator' });
+    assert.equal(approved.status, 'queued');
+
+    // The missed slot must be marked as recovered so a later approval cannot
+    // create a duplicate catch-up run.
+    const marked = await getDb().query(
+      `SELECT result_summary_json->>'caughtUpBy' AS caught_up_by
+       FROM scheduled_work_item_runs WHERE id=$1`,
+      [skippedId],
+    );
+    assert.ok(marked.rows[0]?.caught_up_by, 'missed slot must be marked caughtUpBy');
+
+    // The catch-up run must be queued, approved (no second approval round trip)
+    // and reference the missed slot.
+    const queued = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
+    const catchUp = queued.find(item => item.triggerKind === 'retry');
+    assert.ok(catchUp, 'a catch-up run must be queued after approval');
+    assert.equal(catchUp.resultSummary?.approvedBy, 'operator');
+    assert.equal(catchUp.resultSummary?.catchUpOf, skippedId);
+    assert.equal(marked.rows[0]!.caught_up_by, catchUp.id,
+      'caughtUpBy must point at the catch-up run');
+    const executed = await executeScheduledWorkRun(catchUp);
+    assert.ok(['succeeded', 'no_op'].includes(executed),
+      `catch-up run must execute without another approval, got ${executed}`);
+
+    // A second approval must not recover the same missed slot again.
+    const again = await getDb().query(
+      `SELECT count(*)::int AS n FROM scheduled_work_item_runs
+       WHERE schedule_id=$1 AND status='skipped' AND scheduled_for > $2
+         AND result_summary_json->>'reason'='concurrency_limit'
+         AND result_summary_json->>'caughtUpBy' IS NULL`,
+      [schedule.id, '2026-07-20T00:01:00.000Z'],
+    );
+    assert.equal(again.rows[0]!.n, 0, 'recovered slot must not be found again');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('approval timeout auto-denies stale awaiting runs by default and records audit', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-timeout-deny-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'each_run', catchUpPolicy: 'run_once', maxAttempts: 2,
+    approvalTimeoutMs: 30_000, approvalTimeoutAction: 'deny',
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      createManualScheduledWorkRun,
+      executeScheduledWorkRun,
+      expireAwaitingApprovalRuns,
+      loadScheduledWorkItemRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    await executeScheduledWorkRun(run);
+    assert.equal((await loadScheduledWorkItemRun(run.id))?.status, 'awaiting_approval');
+
+    // Not yet timed out → untouched.
+    const early = await expireAwaitingApprovalRuns({ ownerId: 'scheduler', now: new Date() });
+    assert.deepEqual(early, { autoApproved: [], autoDenied: [] });
+    assert.equal((await loadScheduledWorkItemRun(run.id))?.status, 'awaiting_approval');
+
+    // Simulate the run waiting past its approval timeout, then sweep.
+    await getDb().query(
+      `UPDATE scheduled_work_item_runs SET updated_at = now() - interval '31 seconds' WHERE id=$1`,
+      [run.id],
+    );
+    const expired = await expireAwaitingApprovalRuns({ ownerId: 'scheduler', now: new Date() });
+    assert.deepEqual(expired.autoDenied, [run.id]);
+    const denied = await loadScheduledWorkItemRun(run.id);
+    assert.equal(denied?.status, 'cancelled');
+    assert.equal(denied?.resultSummary?.deniedBy, 'auto:approval_timeout');
+    assert.equal(denied?.resultSummary?.deniedReason, 'approval_timeout');
+
+    // Audit event with actor and action.
+    const rows = await getDb().query(
+      `SELECT payload_json FROM session_events
+       WHERE type='scheduled_work.denied' AND source='scheduled-work'
+         AND payload_json::text LIKE '%' || $1 || '%'
+       ORDER BY id DESC LIMIT 1`,
+      [run.id],
+    );
+    assert.ok(rows.rows.length > 0, 'denial audit event must be recorded');
+    const raw = rows.rows[0]!.payload_json as unknown;
+    const payload = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown>;
+    assert.equal(payload.actor, 'auto:approval_timeout');
+    assert.equal(payload.action, 'denied');
+    assert.equal(payload.approvalTimeoutMs, 30_000);
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('approval timeout auto-approves when the schedule opts in', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-timeout-approve-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'each_run', catchUpPolicy: 'run_once', maxAttempts: 2,
+    approvalTimeoutMs: 30_000, approvalTimeoutAction: 'approve',
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      createManualScheduledWorkRun,
+      executeScheduledWorkRun,
+      expireAwaitingApprovalRuns,
+      loadScheduledWorkItemRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    await executeScheduledWorkRun(run);
+    await getDb().query(
+      `UPDATE scheduled_work_item_runs SET updated_at = now() - interval '31 seconds' WHERE id=$1`,
+      [run.id],
+    );
+    const expired = await expireAwaitingApprovalRuns({ ownerId: 'scheduler', now: new Date() });
+    assert.deepEqual(expired.autoApproved, [run.id]);
+    const approved = await loadScheduledWorkItemRun(run.id);
+    assert.equal(approved?.status, 'queued');
+    assert.equal(approved?.resultSummary?.approvedBy, 'auto:approval_timeout');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('denyScheduledWorkRun cancels an awaiting run and records the denial', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-deny-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'each_run', catchUpPolicy: 'run_once', maxAttempts: 2,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const {
+      createManualScheduledWorkRun,
+      denyScheduledWorkRun,
+      executeScheduledWorkRun,
+      loadScheduledWorkItemRun,
+    } = await import('./scheduled-work/index.js');
+    const run = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a', scheduledFor: new Date('2026-07-20T00:01:00.000Z'),
+    });
+    await executeScheduledWorkRun(run);
+    const cancelled = await denyScheduledWorkRun(run.id, { ownerId: 'manual:operator' });
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal((await loadScheduledWorkItemRun(run.id))?.resultSummary?.deniedBy, 'manual:operator');
+    await assert.rejects(
+      denyScheduledWorkRun(run.id, { ownerId: 'manual:operator' }),
       /must be awaiting_approval/,
     );
   } finally {

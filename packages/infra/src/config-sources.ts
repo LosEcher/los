@@ -23,6 +23,7 @@ const ENV_MAP: [string, string][] = [
   ['LOS_FEED_ANALYSIS_CALLBACK_POLL_MS', 'integrations.feedAnalysis.callbackPollMs'],
   ['AGENT_DEFAULT_PROVIDER', 'agent.defaultProvider'], ['AGENT_DEFAULT_MODEL', 'agent.defaultModel'],
   ['AGENT_MAX_LOOPS', 'agent.maxLoops'], ['AGENT_SANDBOX_MODE', 'agent.sandboxMode'],
+  ['AGENT_ALLOW_NATIVE_SHELL', 'agent.allowNativeShell'],
   ['AGENT_SYSTEM_PROMPT', 'agent.systemPrompt'], ['AGENT_IDENTITY_NAME', 'agent.identity.name'],
   ['AGENT_IDENTITY_LEVEL', 'agent.identity.level'], ['JUDGE_SYSTEM_PROMPT', 'judge.systemPrompt'],
   ['REVIEW_ENABLED', 'review.enabled'], ['MEMORY_FTS_ENABLED', 'memory.ftsEnabled'],

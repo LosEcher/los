@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import type { GovernanceJob } from './governance-jobs-types.js';
-import type { CreateTodoInput } from './todo-types.js';
+import type { CreateTodoInput, TodoPriority } from './todo-types.js';
 
 const log = getLogger('governance-jobs');
 
@@ -50,6 +50,63 @@ async function syncFindingTodo(
   if (todo.archivedAt) await todos.unarchiveTodo(todo.id);
   return 1;
 }
+
+/**
+ * Dimension→todo mapping for the self_bootstrap / adversarial_review jobs.
+ * Both jobs emit `findings: [{ dimension, severity, detail }]`; every known
+ * dimension is synced each run so resolved findings archive their todo.
+ */
+interface DimensionTodoSpec {
+  auditType: string;
+  priority: TodoPriority;
+  title: (count: number, dimension: string) => string;
+  description: (count: number, detail: string) => string;
+}
+
+const DIMENSION_TODO_SPECS: Record<string, Record<string, DimensionTodoSpec>> = {
+  self_bootstrap: {
+    quality_degradation: {
+      auditType: 'qualityDegradation',
+      priority: 'P1',
+      title: (count) => `Bootstrap: ${count} quality degradation finding(s)`,
+      description: (count, detail) =>
+        `Self-bootstrap audit found ${count} quality degradation signal(s) in daily_agent_quality_snapshots. ${detail}`,
+    },
+    todo_lifecycle: {
+      auditType: 'todoStaleness',
+      priority: 'P2',
+      title: (count) => `Bootstrap: ${count} stale in_progress todo(s) need refresh`,
+      description: (count, detail) =>
+        `Self-bootstrap audit found ${count} in_progress todo(s) older than staleDays without a recent statusReview. ${detail}`,
+    },
+  },
+  adversarial_review: {
+    metric_semantics: {
+      auditType: 'metricSemantics',
+      priority: 'P1',
+      title: (count) => `Adversarial: ${count} telemetry metric-semantics finding(s)`,
+      description: (count, detail) => `Adversarial review found ${count} metric-semantics issue(s). ${detail}`,
+    },
+    process_residue: {
+      auditType: 'processResidue',
+      priority: 'P1',
+      title: (count) => `Adversarial: ${count} lingering gateway process(es)`,
+      description: (count, detail) => `Adversarial review found ${count} process-residue issue(s). ${detail}`,
+    },
+    stuck_approval: {
+      auditType: 'stuckApproval',
+      priority: 'P1',
+      title: (count) => `Adversarial: ${count} stuck approval queue(s)`,
+      description: (count, detail) => `Adversarial review found ${count} stuck-approval issue(s). ${detail}`,
+    },
+    provider_ready_vs_usable: {
+      auditType: 'providerReadyVsUsable',
+      priority: 'P1',
+      title: (count) => `Adversarial: ${count} ready-but-unused provider(s)`,
+      description: (count, detail) => `Adversarial review found ${count} provider(s) ready per discovery with 0 telemetry calls. ${detail}`,
+    },
+  },
+};
 
 export async function createTodosFromFindings(
   job: GovernanceJob,
@@ -273,6 +330,34 @@ export async function createTodosFromFindings(
           source: 'governance_sweep',
           metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: 'reflectionSummary' },
       });
+    }
+
+    if (job.jobType === 'self_bootstrap' || job.jobType === 'adversarial_review') {
+      const specs = DIMENSION_TODO_SPECS[job.jobType] ?? {};
+      const findings = Array.isArray(summary.findings)
+        ? summary.findings as Array<{ dimension: string; detail?: string }>
+        : [];
+      const counts = new Map<string, { count: number; detail: string }>();
+      for (const finding of findings) {
+        const hit = counts.get(finding.dimension) ?? { count: 0, detail: '' };
+        hit.count += 1;
+        if (finding.detail) hit.detail = finding.detail;
+        counts.set(finding.dimension, hit);
+      }
+      // Always sync every known dimension so resolved findings archive their
+      // todo on the next run (same pattern as reflection/hotspot).
+      for (const [dimension, spec] of Object.entries(specs)) {
+        const hit = counts.get(dimension);
+        created += await syncFindingTodo(todos, job, spec.auditType, hit !== undefined && hit.count > 0, {
+            title: spec.title(hit?.count ?? 0, dimension),
+            description: spec.description(hit?.count ?? 0, hit?.detail ?? ''),
+            kind: 'task',
+            status: 'backlog',
+            priority: spec.priority,
+            source: 'governance_sweep',
+            metadata: { sweepJobId: job.id, sweepJobType: job.jobType, auditType: spec.auditType, dimension },
+        });
+      }
     }
 
     if (job.jobType === 'branch_cleanup') {

@@ -210,6 +210,92 @@ interface ParsedSelfCheckResult {
   gaps: SelfCheckGap[];
 }
 
+export interface ValidatedSelfCheckOutput {
+  goalMet: boolean;
+  stopConditionsMet: boolean[];
+  summaryOfEvidence: string;
+  confidence: number;
+  gaps: SelfCheckGap[];
+}
+
+export type SelfCheckValidationResult =
+  | { ok: true; output: ValidatedSelfCheckOutput }
+  | { ok: false; reason: string };
+
+/**
+ * Centralized contract validation for the judge output shape
+ * (contracts/self-check-output.yaml). Key fields are strict: a missing or
+ * mistyped goalMet/summaryOfEvidence/confidence/gaps fails explicitly instead
+ * of silently defaulting (previously a malformed judge response could degrade
+ * to a false goalMet=false without an attributable reason). Tolerances kept:
+ * stopConditionsMet length mismatches normalize to all-false (models
+ * frequently miscount), and the JSON-extraction tolerances live in
+ * parseSelfCheckResponse.
+ */
+export function _validateSelfCheckOutput(
+  parsed: unknown,
+  expectedStopCount: number,
+): SelfCheckValidationResult {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, reason: 'response is not a JSON object' };
+  }
+  const record = parsed as Record<string, unknown>;
+
+  if (typeof record.goalMet !== 'boolean') {
+    return { ok: false, reason: 'goalMet must be a boolean' };
+  }
+  if (!Array.isArray(record.stopConditionsMet)) {
+    return { ok: false, reason: 'stopConditionsMet must be an array' };
+  }
+  if (!record.stopConditionsMet.every(item => typeof item === 'boolean')) {
+    return { ok: false, reason: 'stopConditionsMet entries must be booleans' };
+  }
+  if (typeof record.summaryOfEvidence !== 'string') {
+    return { ok: false, reason: 'summaryOfEvidence must be a string' };
+  }
+  if (typeof record.confidence !== 'number' || !Number.isFinite(record.confidence)) {
+    return { ok: false, reason: 'confidence must be a finite number' };
+  }
+  if (record.confidence < 0 || record.confidence > 1) {
+    return { ok: false, reason: 'confidence must be within [0, 1]' };
+  }
+  if (!Array.isArray(record.gaps)) {
+    return { ok: false, reason: 'gaps must be an array' };
+  }
+  const gaps: SelfCheckGap[] = [];
+  for (const item of record.gaps) {
+    if (typeof item !== 'object' || item === null) {
+      return { ok: false, reason: 'gaps entries must be objects' };
+    }
+    const gap = item as Record<string, unknown>;
+    if (typeof gap.condition !== 'string' || typeof gap.detail !== 'string' || typeof gap.suggestion !== 'string') {
+      return { ok: false, reason: 'gap entries need string condition/detail/suggestion' };
+    }
+    gaps.push({
+      condition: gap.condition.trim(),
+      detail: gap.detail.trim(),
+      suggestion: gap.suggestion.trim(),
+    });
+  }
+
+  // Tolerance path: models frequently miscount stop conditions; normalize to
+  // all-false rather than failing the whole self-check.
+  const stopConditionsMet = record.stopConditionsMet.length === expectedStopCount
+    ? record.stopConditionsMet
+    : Array(expectedStopCount).fill(false);
+
+  return {
+    ok: true,
+    output: {
+      goalMet: record.goalMet,
+      stopConditionsMet,
+      summaryOfEvidence: record.summaryOfEvidence.trim(),
+      confidence: record.confidence,
+      gaps,
+    },
+  };
+}
+
 export function parseSelfCheckResponse(
   text: string,
   expectedStopCount: number,
@@ -257,48 +343,13 @@ export function parseSelfCheckResponse(
       }
     }
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return fail(`unparseable JSON response: ${text.slice(0, 200)}`);
+
+  const validation = _validateSelfCheckOutput(parsed, expectedStopCount);
+  if (!validation.ok) {
+    return fail(`invalid self-check contract: ${validation.reason}`);
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return fail('response is not a JSON object');
-  }
-
-  const goalMet = typeof parsed.goalMet === 'boolean' ? parsed.goalMet : false;
-
-  let stopConditionsMet: boolean[];
-  if (Array.isArray(parsed.stopConditionsMet)) {
-    stopConditionsMet = parsed.stopConditionsMet.map(item => typeof item === 'boolean' ? item : false);
-  } else {
-    stopConditionsMet = Array(expectedStopCount).fill(false);
-  }
-  if (stopConditionsMet.length !== expectedStopCount) {
-    stopConditionsMet = Array(expectedStopCount).fill(false);
-  }
-
-  const summaryOfEvidence = typeof parsed.summaryOfEvidence === 'string'
-    ? parsed.summaryOfEvidence.trim()
-    : '';
-
-  const gaps: SelfCheckGap[] = [];
-  if (Array.isArray(parsed.gaps)) {
-    for (const item of parsed.gaps) {
-      if (item && typeof item === 'object') {
-        gaps.push({
-          condition: typeof (item as any).condition === 'string' ? (item as any).condition.trim() : '',
-          detail: typeof (item as any).detail === 'string' ? (item as any).detail.trim() : '',
-          suggestion: typeof (item as any).suggestion === 'string' ? (item as any).suggestion.trim() : '',
-        });
-      }
-    }
-  }
-
-  const confidence = typeof parsed.confidence === 'number'
-    ? Math.max(0, Math.min(1, parsed.confidence))
-    : (goalMet ? 0.5 : 0);
-
-  return { goalMet, stopConditionsMet, summaryOfEvidence, confidence, gaps };
+  return validation.output;
 }
 
 export function shouldRunSelfCheck(

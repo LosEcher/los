@@ -8,6 +8,10 @@ export type ScheduledApprovalPolicy = 'read_only_auto' | 'preapproved_scope' | '
 export type ScheduledConcurrencyPolicy = 'skip' | 'queue_one' | 'parallel';
 export type ScheduledCatchUpPolicy = 'skip' | 'run_once';
 export type ScheduledCircuitState = 'closed' | 'open' | 'half_open';
+/** What the scheduler does with an awaiting_approval run once its approval
+ *  timeout elapses. 'deny' is the conservative default; individual schedules
+ *  may override to 'approve' when unattended auto-execution is intended. */
+export type ScheduledApprovalTimeoutAction = 'deny' | 'approve';
 export type ScheduledWorkRunStatus =
   | 'queued'
   | 'claimed'
@@ -62,6 +66,10 @@ export interface ScheduledWorkItem {
   trigger: ScheduledWorkTrigger;
   runTemplate: ScheduledWorkRunTemplate;
   approvalPolicy: ScheduledApprovalPolicy;
+  /** How long an awaiting_approval run waits before the scheduler auto-disposes it. */
+  approvalTimeoutMs: number;
+  /** Auto-disposition after approvalTimeoutMs: deny (default) or approve. */
+  approvalTimeoutAction: ScheduledApprovalTimeoutAction;
   concurrencyPolicy: ScheduledConcurrencyPolicy;
   catchUpPolicy: ScheduledCatchUpPolicy;
   maxConcurrentRuns: number;
@@ -110,6 +118,8 @@ export interface CreateScheduledWorkItemInput {
   trigger: ScheduledWorkTrigger;
   runTemplate: ScheduledWorkRunTemplate;
   approvalPolicy?: ScheduledApprovalPolicy;
+  approvalTimeoutMs?: number;
+  approvalTimeoutAction?: ScheduledApprovalTimeoutAction;
   concurrencyPolicy?: ScheduledConcurrencyPolicy;
   catchUpPolicy?: ScheduledCatchUpPolicy;
   maxConcurrentRuns?: number;
@@ -126,6 +136,8 @@ export interface UpdateScheduledWorkItemInput {
   status?: ScheduledWorkStatus;
   trigger?: ScheduledWorkTrigger;
   approvalPolicy?: ScheduledApprovalPolicy;
+  approvalTimeoutMs?: number;
+  approvalTimeoutAction?: ScheduledApprovalTimeoutAction;
   concurrencyPolicy?: ScheduledConcurrencyPolicy;
   catchUpPolicy?: ScheduledCatchUpPolicy;
   maxConcurrentRuns?: number;

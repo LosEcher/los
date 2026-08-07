@@ -7,4 +7,3 @@
 # denies the command (inside.txt is never written). CI containers lack
 # sandbox-exec so the test is skipped there; pre-existing, unrelated to any
 # review change.
-src/tools/registry.test.ts

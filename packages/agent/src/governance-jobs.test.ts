@@ -145,6 +145,63 @@ test('governance jobs: seedGovernanceJobs backfills autoFix onto pre-existing jo
   }
 });
 
+test('governance jobs: seedGovernanceJobs recovers active manual autoFix jobs to seed cadence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  try {
+    await ensureGovernanceJobStore();
+    // Wipe consistency_audit seeds so we can plant a manual-cadence job.
+    await getDb().query("DELETE FROM governance_jobs WHERE job_type = 'consistency_audit'").catch(() => undefined);
+
+    const stuck = await createGovernanceJob({
+      jobType: 'consistency_audit',
+      cadence: 'manual',
+      status: 'active',
+      config: {},
+      dedupeKey: `gov-test-manual-recover-${Date.now()}`,
+    });
+    assert.equal(stuck.cadence, 'manual');
+
+    // Re-seed — an active+manual autoFix job is a downgraded-then-forgotten
+    // job; seed restores its declared cadence (daily for consistency_audit).
+    await seedGovernanceJobs();
+    const reloaded = await getGovernanceJob(stuck.id);
+    assert.equal(reloaded?.cadence, 'daily', 'active+manual autoFix job must be recovered to seed cadence');
+
+    await deleteGovernanceJob(stuck.id).catch(() => undefined);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('governance jobs: seedGovernanceJobs leaves paused manual jobs untouched', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  try {
+    await ensureGovernanceJobStore();
+    await getDb().query("DELETE FROM governance_jobs WHERE job_type = 'consistency_audit'").catch(() => undefined);
+
+    const paused = await createGovernanceJob({
+      jobType: 'consistency_audit',
+      cadence: 'manual',
+      status: 'paused',
+      config: {},
+      dedupeKey: `gov-test-paused-manual-${Date.now()}`,
+    });
+
+    await seedGovernanceJobs();
+    const reloaded = await getGovernanceJob(paused.id);
+    assert.equal(reloaded?.cadence, 'manual', 'paused (operator-stopped) job must stay manual');
+    assert.equal(reloaded?.status, 'paused');
+
+    await deleteGovernanceJob(paused.id).catch(() => undefined);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
 test('governance jobs: listDueGovernanceJobs filters by cadence到期', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);

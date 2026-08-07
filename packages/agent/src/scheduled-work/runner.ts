@@ -1,4 +1,5 @@
 import { getLogger } from '@los/infra/logger';
+import { getDb } from '@los/infra/db';
 import { listManagedWorkspaces } from '../managed-workspace-store.js';
 
 import { listExecutorNodes } from '../executor-nodes.js';
@@ -12,13 +13,15 @@ import {
   stopProviderProbeLoop,
 } from '../providers/provider-probe.js';
 import { runScheduledAgentTask } from '../scheduler.js';
+import { appendSessionEvent } from '../session-events.js';
 import { listServiceInstances } from '../service-instances.js';
 import { createTodo } from '../todos.js';
 import { listInboxEntries } from '../work-items/projection.js';
 import {
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   claimDueScheduledWorkItems, claimQueuedScheduledWorkRuns,
-  createManualScheduledWorkRun, loadScheduledWorkItem, loadScheduledWorkItemRun,
+  createCatchUpScheduledWorkRun, createManualScheduledWorkRun,
+  findMissedScheduledRun, loadScheduledWorkItem, loadScheduledWorkItemRun,
   recoverExpiredScheduledWorkRuns, recoverOpenScheduledWorkCircuits,
   recordScheduledRunOutcome,
   transitionScheduledWorkRun,
@@ -53,8 +56,14 @@ export interface ScheduledWorkTickResult {
 export async function runScheduledWorkTick(input: {
   ownerId: string; now?: Date; leaseMs?: number; limit?: number;
 }): Promise<ScheduledWorkTickResult> {
-  // G4: open circuits whose recovery window elapsed become half_open, letting
-  // exactly one probe run through before the next claim pass.
+  // Approval timeout sweep: awaiting_approval runs whose wait exceeded the
+  // schedule's approvalTimeoutMs are auto-disposed (deny by default, approve
+  // when the schedule opts in). Runs transition atomically so concurrent
+  // gateway instances cannot double-dispose.
+  const expired = await expireAwaitingApprovalRuns({ ownerId: input.ownerId, now: input.now });
+  if (expired.autoApproved.length > 0 || expired.autoDenied.length > 0) {
+    log.info(`Scheduled work approval timeout disposed ${expired.autoApproved.length} approved / ${expired.autoDenied.length} denied run(s)`);
+  }
   const recoveredCircuits = await recoverOpenScheduledWorkCircuits(input);
   if (recoveredCircuits.length > 0) {
     log.info(`Scheduled work circuit recovered ${recoveredCircuits.length} open schedule(s) to half_open for a probe run`);
@@ -120,6 +129,31 @@ export async function executeScheduledWorkRun(
       message: 'This schedule requires operator approval for each execution.',
     });
     await transitionScheduledWorkRun(run.id, 'awaiting_approval', { workItemId });
+    // P0-1: surface the approval request through the operator attention event
+    // stream. SSE consumers (/operator/events/live, wechat-bot, telegram-bot)
+    // pick up run.operator_attention_required automatically, so the operator
+    // is notified instead of the run silently waiting for approval.
+    try {
+      await appendSessionEvent({
+        sessionId: `scheduled:${run.id}`,
+        type: 'run.operator_attention_required',
+        source: 'scheduled-work',
+        payload: {
+          event: 'scheduled_run_approval_required',
+          scheduleId: schedule.id,
+          scheduleTitle: schedule.title,
+          runId: run.id,
+          workItemId,
+          scheduledFor: run.scheduledFor,
+          reason: `定时任务「${schedule.title}」等待审批 (scheduled ${run.scheduledFor})`,
+          entityId: run.id,
+          entityType: 'scheduled_work_run',
+        },
+      });
+    } catch (error) {
+      // Notification is best-effort; never block the approval transition.
+      log.warn(`scheduled approval notification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return 'awaiting_approval';
   }
   await transitionScheduledWorkRun(run.id, 'running', {
@@ -385,6 +419,7 @@ async function createScheduleWorkItem(
  * awaiting_approval → claimed → running (state machine permits both hops) and
  * the template executes without re-checking the approval policy (the operator
  * approval is the check). Reuses the ordinary outcome/error transitions.
+ * Every approval (manual or auto-timeout) is recorded as an audit event.
  */
 export async function approveScheduledWorkRun(
   runId: string,
@@ -406,5 +441,147 @@ export async function approveScheduledWorkRun(
     ownerId: input.ownerId,
     resultSummary: { ...(run.resultSummary ?? {}), approvedBy: input.ownerId },
   });
+
+  await recordApprovalAudit({
+    runId: run.id, scheduleId: schedule.id, scheduleTitle: schedule.title,
+    scheduledFor: run.scheduledFor, actor: input.ownerId, action: 'approved',
+    timeoutMs: schedule.approvalTimeoutMs,
+  });
+
+  // P0-2: while this run waited for approval, later slots of the same
+  // schedule were skipped by concurrency_limit (awaiting_approval occupies
+  // the single concurrent slot). Recover the most recent missed slot as an
+  // approved catch-up run so the analysis is not silently lost. The catch-up
+  // run is queued (not executed inline) and carries approvedBy so it skips
+  // the approval gate on execution.
+  try {
+    const missed = await findMissedScheduledRun({ scheduleId: schedule.id, after: new Date(run.scheduledFor) });
+    if (missed) {
+      await createCatchUpScheduledWorkRun({
+        scheduleId: schedule.id,
+        ownerId: input.ownerId,
+        missedRunId: missed.id,
+        maxAttempts: schedule.maxAttempts,
+      });
+      log.info(`Scheduled work approval queued catch-up run for missed slot ${missed.scheduledFor} (${schedule.title})`);
+    }
+  } catch (error) {
+    // Catch-up is best-effort; the approved run itself already transitioned.
+    log.warn(`Scheduled work catch-up failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return queued;
+}
+
+/**
+ * Deny an awaiting_approval scheduled run. The run is cancelled and the
+ * denial is recorded on the run itself (deniedBy) and as an audit event.
+ */
+export async function denyScheduledWorkRun(
+  runId: string,
+  input: { ownerId: string },
+): Promise<ScheduledWorkItemRun> {
+  const run = await loadScheduledWorkItemRun(runId);
+  if (!run) throw new Error(`Scheduled work run not found: ${runId}`);
+  if (run.status !== 'awaiting_approval') {
+    throw new Error(`run must be awaiting_approval to deny (status=${run.status})`);
+  }
+  const schedule = await loadScheduledWorkItem(run.scheduleId);
+  if (!schedule) throw new Error('schedule disappeared before denial');
+  const cancelled = await transitionScheduledWorkRun(run.id, 'cancelled', {
+    ownerId: input.ownerId,
+    resultSummary: { ...(run.resultSummary ?? {}), deniedBy: input.ownerId, deniedReason: 'operator_denied' },
+  });
+  await recordApprovalAudit({
+    runId: run.id, scheduleId: schedule.id, scheduleTitle: schedule.title,
+    scheduledFor: run.scheduledFor, actor: input.ownerId, action: 'denied',
+    timeoutMs: schedule.approvalTimeoutMs,
+  });
+  return cancelled;
+}
+
+/**
+ * Sweep awaiting_approval runs whose approval wait exceeded the schedule's
+ * approvalTimeoutMs and dispose them per approvalTimeoutAction ('deny' by
+ * default, 'approve' when the schedule opts in). Transitions are atomic
+ * (WHERE status='awaiting_approval') so concurrent gateway instances dispose
+ * each run exactly once.
+ */
+export async function expireAwaitingApprovalRuns(input: {
+  ownerId: string; now?: Date;
+}): Promise<{ autoApproved: string[]; autoDenied: string[] }> {
+  const now = input.now ?? new Date();
+  const rows = await getDb().query<{
+    id: string; schedule_id: string; scheduled_for: Date | string;
+    title: string; approval_timeout_ms: number; approval_timeout_action: string;
+  }>(
+    `SELECT r.id, r.schedule_id, r.scheduled_for, s.title,
+            s.approval_timeout_ms, s.approval_timeout_action
+     FROM scheduled_work_item_runs r
+     JOIN scheduled_work_items s ON s.id = r.schedule_id
+     WHERE r.status = 'awaiting_approval' AND s.status = 'enabled'
+       AND s.approval_timeout_ms > 0
+       AND r.updated_at + make_interval(secs => s.approval_timeout_ms / 1000.0) <= $1
+     ORDER BY r.updated_at LIMIT 50`,
+    [now],
+  );
+  const autoApproved: string[] = [];
+  const autoDenied: string[] = [];
+  for (const row of rows.rows) {
+    const actor = 'auto:approval_timeout';
+    try {
+      if (row.approval_timeout_action === 'approve') {
+        await approveScheduledWorkRun(row.id, { ownerId: actor });
+        autoApproved.push(row.id);
+      } else {
+        const run = await loadScheduledWorkItemRun(row.id);
+        if (!run || run.status !== 'awaiting_approval') continue;
+        await transitionScheduledWorkRun(row.id, 'cancelled', {
+          ownerId: actor,
+          resultSummary: { ...(run.resultSummary ?? {}), deniedBy: actor, deniedReason: 'approval_timeout' },
+        });
+        await recordApprovalAudit({
+          runId: row.id, scheduleId: row.schedule_id, scheduleTitle: row.title,
+          scheduledFor: isoString(row.scheduled_for), actor, action: 'denied',
+          timeoutMs: row.approval_timeout_ms,
+        });
+        autoDenied.push(row.id);
+      }
+    } catch (error) {
+      // Another instance may have disposed the run concurrently; skip.
+      log.warn(`Approval timeout dispose failed for ${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { autoApproved, autoDenied };
+}
+
+async function recordApprovalAudit(input: {
+  runId: string; scheduleId: string; scheduleTitle: string; scheduledFor: string;
+  actor: string; action: 'approved' | 'denied'; timeoutMs: number;
+}): Promise<void> {
+  try {
+    await appendSessionEvent({
+      sessionId: `scheduled:${input.runId}`,
+      type: input.action === 'approved' ? 'scheduled_work.approved' : 'scheduled_work.denied',
+      source: 'scheduled-work',
+      payload: {
+        event: input.action === 'approved' ? 'scheduled_run_approved' : 'scheduled_run_denied',
+        runId: input.runId,
+        scheduleId: input.scheduleId,
+        scheduleTitle: input.scheduleTitle,
+        scheduledFor: input.scheduledFor,
+        actor: input.actor,
+        action: input.action,
+        approvalTimeoutMs: input.timeoutMs,
+        entityId: input.runId,
+        entityType: 'scheduled_work_run',
+      },
+    });
+  } catch (error) {
+    // Audit is best-effort; never break the approval transition.
+    log.warn(`Scheduled work approval audit failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function isoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : value;
 }

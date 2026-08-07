@@ -61,7 +61,19 @@ governance gate 自动降频。
 - **A. 自举执行层**:quality 快照 → 自动改进任务;todo 生命周期刷新
 - **B. 观测深化**:事件表 schema/retention 强化;task-events 告警接入
 - **C. 远程能力**:sandbox 升级(B backlog);NAS34 漂移校验 schedule
-- **D. 治理**:kimi 重登后 provider 盘点;runtime 工具实际使用验证
+- **D. 治理**(2026-08-08 更新):
+  - ✅ provider 盘点:7 providers / 1 account(`xai-grok-default` active);
+    kimi provider 存在但凭据过期(`expires_at 2026-08-06T15:56Z`,文件
+    `~/.kimi-code/credentials/kimi-code.json`)
+  - ✅ runtime 工具实际使用验证:codex(`git --version`,输出
+    `git version 2.50.1`)与 grok(echo 任务)真实任务经
+    `POST /runtimes/:kind/run` 端到端成功,六事件流完整,
+    `session_events` 持久化验证(`external-runtime:` source,8 行事件)
+  - ⏳ kimi 恢复:凭据文件 mtime 2026-08-06T23:41(北京),access_token
+    15 分钟短效已过期但 refresh_token 仍在(678 字符)—— 终端环境
+    (有磁盘访问权限)运行 `kimi -p "hi"` 可自动刷新;仅刷新失效时
+    才需 `kimi login`。自动化环境 mkdir `~/.kimi-code/sessions/`
+    报 EPERM(TCC 限制,非认证问题)
 - **E. 待用户确认**:todo-los-context-engineering-phase 已按证据关闭;
   ci-resource-baseline / ci-cd-observability 等 CI 恢复后继续
 

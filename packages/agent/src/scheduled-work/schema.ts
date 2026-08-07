@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS scheduled_work_items (
   title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'enabled',
   trigger_json JSONB NOT NULL, run_template_json JSONB NOT NULL,
   approval_policy TEXT NOT NULL DEFAULT 'read_only_auto',
+  approval_timeout_ms INTEGER NOT NULL DEFAULT 1800000,
+  approval_timeout_action TEXT NOT NULL DEFAULT 'deny',
   concurrency_policy TEXT NOT NULL DEFAULT 'skip', catch_up_policy TEXT NOT NULL DEFAULT 'skip',
   max_concurrent_runs INTEGER NOT NULL DEFAULT 1, max_lateness_ms INTEGER NOT NULL DEFAULT 3600000,
   max_attempts INTEGER NOT NULL DEFAULT 2, retry_backoff_ms INTEGER NOT NULL DEFAULT 60000,
@@ -20,6 +22,7 @@ CREATE TABLE IF NOT EXISTS scheduled_work_items (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT scheduled_work_items_status_chk CHECK (status IN ('enabled', 'paused', 'retired')),
   CONSTRAINT scheduled_work_items_approval_chk CHECK (approval_policy IN ('read_only_auto', 'preapproved_scope', 'each_run')),
+  CONSTRAINT scheduled_work_items_timeout_action_chk CHECK (approval_timeout_action IN ('deny', 'approve')),
   CONSTRAINT scheduled_work_items_concurrency_chk CHECK (concurrency_policy IN ('skip', 'queue_one', 'parallel')),
   CONSTRAINT scheduled_work_items_catch_up_chk CHECK (catch_up_policy IN ('skip', 'run_once')),
   CONSTRAINT scheduled_work_items_circuit_chk CHECK (circuit_state IN ('closed', 'open', 'half_open'))
