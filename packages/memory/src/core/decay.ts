@@ -165,8 +165,12 @@ export interface SessionDecayResult {
 }
 
 /**
- * Query all non-archived observations in a session and compute decay scores
- * for each. Returns per-observation scores plus session-level aggregates.
+ * Query all non-archived, non-compacted observations in a session and compute
+ * decay scores for each. Observations already processed by a compaction
+ * (`metadata_json.compacted=true`) are excluded so decay reflects only the
+ * observations accumulated since the last compaction ("new observations"
+ * semantics of the auto-trigger rules). Returns per-observation scores plus
+ * session-level aggregates.
  */
 export async function calculateDecayScores(sessionId: string): Promise<SessionDecayResult> {
   const db = getDb();
@@ -184,6 +188,7 @@ export async function calculateDecayScores(sessionId: string): Promise<SessionDe
      FROM observations
      WHERE session_id = $1
        AND COALESCE(metadata_json->>'archived', 'false') = 'false'
+       AND COALESCE(metadata_json->>'compacted', 'false') = 'false'
      ORDER BY created_at`,
     [sessionId],
   );
@@ -307,6 +312,7 @@ export async function aggregateCrossSessionDecay(
      WHERE session_id != $1
        AND kind IS NOT NULL
        AND COALESCE(metadata_json->>'archived', 'false') = 'false'
+       AND COALESCE(metadata_json->>'compacted', 'false') = 'false'
      GROUP BY kind
      HAVING COUNT(DISTINCT session_id) >= 2
      ORDER BY session_count DESC

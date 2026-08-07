@@ -243,6 +243,10 @@ test('run_runtime_task validates input and enforces L2 risk gate', async () => {
     });
     await registerBuiltinTools(registry, { workspaceRoot });
 
+    const runtimeDefinition = registry.getDefinitions().find(definition => definition.function.name === 'run_runtime_task');
+    const runtimeKind = (runtimeDefinition?.function.parameters as any)?.properties?.kind;
+    assert.deepEqual(runtimeKind?.enum, ['claude-code', 'codex', 'grok']);
+
     // Empty prompt → validation error without spawning anything.
     const empty = await registry.execute({
       name: 'run_runtime_task',

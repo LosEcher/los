@@ -69,6 +69,7 @@ const sharedProcessTestFiles = [
   'src/run-contract.test.ts',
   'src/run-state-vocabulary.test.ts',
   'src/runtime-adapter/grok.test.ts',
+  'src/runtime-task.test.ts',
   'src/scenario-economics-runner.test.ts',
   'src/scheduler/ssh-client.test.ts',
   'src/security-gate.test.ts',

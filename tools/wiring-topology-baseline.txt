@@ -252,6 +252,7 @@ gateway|packages/gateway/src/routes/server-helpers.ts|sanitizeServiceId  # zero 
 gateway|packages/gateway/src/routes/streaming/stream-backoff.ts|BACKOFF_DEFAULTS  # zero callers (orphan)
 gateway|packages/gateway/src/routes/streaming/stream-backoff.ts|createBackoffScheduler  # zero callers (orphan)
 gateway|packages/gateway/src/routes/streaming/ws-routes.ts|pushWsEvent  # zero callers (orphan)
+gateway|packages/gateway/src/server-maintenance.ts|selectAutoCompactCandidates  # test-only caller (no production caller)
 infra|packages/infra/src/db.ts|getDbType  # zero callers (orphan)
 infra|packages/infra/src/discovery.ts|hasAnyProvider  # zero callers (orphan)
 infra|packages/infra/src/discovery/readiness.ts|providerApiKeyEnv  # test-only caller (no production caller)

@@ -9,10 +9,12 @@
  * Falls back to --debug stdout parsing for older versions.
  */
 
-import { spawn, type ChildProcess, execSync } from 'node:child_process';
+import { spawn, type ChildProcess, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
+import { redactExternalSummaryText } from '../external-tool-summary.js';
 import type { RuntimeAdapterConfig, RuntimeHandle } from './types.js';
+import { resolveRuntimeCommand } from './command.js';
 
 const log = getLogger('claude-code-adapter');
 
@@ -26,6 +28,21 @@ export interface ClaudeCodeSpawnInput extends RuntimeAdapterConfig {
   claudePath?: string;
   /** Additional CLI args */
   extraArgs?: string[];
+  /** Max stdout bytes retained for callers (default 128k, clamp [4k, 512k]). */
+  outputLimitBytes?: number;
+}
+
+export interface ClaudeCodeRuntimeOutput {
+  text: string;
+  capturedBytes: number;
+  totalBytes: number;
+  stderrBytes: number;
+  truncated: boolean;
+  spawnFailed: boolean;
+}
+
+export interface ClaudeCodeRuntimeHandle extends RuntimeHandle {
+  output: Promise<ClaudeCodeRuntimeOutput>;
 }
 
 /**
@@ -34,12 +51,21 @@ export interface ClaudeCodeSpawnInput extends RuntimeAdapterConfig {
  */
 export function claudeCodeSupportsOtel(claudePath = 'claude'): boolean {
   try {
-    const out = execSync(`${claudePath} --version`, { encoding: 'utf-8', timeout: 5_000 }).trim();
+    const out = execFileSync(resolveRuntimeCommand(claudePath), ['--version'], { encoding: 'utf-8', timeout: 5_000 }).trim();
     // Claude Code version format: "Claude Code v1.x.x" or just "1.x.x"
     const versionMatch = out.match(/(\d+)\.(\d+)/);
     if (!versionMatch) return false;
     const major = Number(versionMatch[1]);
     return major >= 1;
+  } catch {
+    return false;
+  }
+}
+
+export function claudeCodeAvailable(claudePath = 'claude'): boolean {
+  try {
+    execFileSync(resolveRuntimeCommand(claudePath), ['--version'], { encoding: 'utf-8', timeout: 5_000 });
+    return true;
   } catch {
     return false;
   }
@@ -51,7 +77,7 @@ export function claudeCodeSupportsOtel(claudePath = 'claude'): boolean {
  * Claude Code runs in the given workspaceRoot. All telemetry flows to otelEndpoint.
  * The adapter does NOT parse stdout — the OTel bridge handles all event mapping.
  */
-export function spawnClaudeCode(input: ClaudeCodeSpawnInput): RuntimeHandle {
+export function spawnClaudeCode(input: ClaudeCodeSpawnInput): ClaudeCodeRuntimeHandle {
   const {
     sessionId = `cc-${randomUUID()}`,
     workspaceRoot,
@@ -110,26 +136,37 @@ export function spawnClaudeCode(input: ClaudeCodeSpawnInput): RuntimeHandle {
 
   log.info(`Spawning Claude Code: ${claudePath} ${args.join(' ')} (cwd: ${workspaceRoot})`);
 
-  const proc: ChildProcess = spawn(claudePath, args, {
+  const proc: ChildProcess = spawn(resolveRuntimeCommand(claudePath), args, {
     cwd: workspaceRoot,
     env: {
       ...process.env,
       ...otelEnv,
       ...extraEnv,
     },
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
   });
 
-  // Collect stdout/stderr for debugging but don't parse them for events
-  let stdout = '';
-  let stderr = '';
-  proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
-  proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf-8'); });
+  const outputLimitBytes = Math.max(4_096, Math.min(512_000, input.outputLimitBytes ?? 128_000));
+  const retained: Buffer[] = [];
+  let capturedBytes = 0;
+  let totalBytes = 0;
+  let stderrBytes = 0;
+  let spawnFailed = false;
+  proc.stdout?.on('data', (chunk: Buffer) => {
+    totalBytes += chunk.byteLength;
+    const remaining = outputLimitBytes - capturedBytes;
+    if (remaining <= 0) return;
+    const bounded = chunk.byteLength <= remaining ? chunk : chunk.subarray(0, remaining);
+    retained.push(bounded);
+    capturedBytes += bounded.byteLength;
+  });
+  proc.stderr?.on('data', (chunk: Buffer) => { stderrBytes += chunk.byteLength; });
+  proc.on('error', () => { spawnFailed = true; });
 
   const exited = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     proc.on('close', (exitCode, signal) => {
-      log.info(`Claude Code exited: code=${exitCode}, signal=${signal ?? 'none'}, stdout=${stdout.length}B, stderr=${stderr.length}B`);
+      log.info(`Claude Code exited: code=${exitCode}, signal=${signal ?? 'none'}, stdout=${capturedBytes}/${totalBytes}B, stderr=${stderrBytes}B`);
       resolve({ exitCode, signal });
     });
     proc.on('error', (err) => {
@@ -143,6 +180,14 @@ export function spawnClaudeCode(input: ClaudeCodeSpawnInput): RuntimeHandle {
     pid: proc.pid,
     kill: (signal) => proc.kill(signal),
     exited,
+    output: exited.then(() => ({
+      text: redactExternalSummaryText([Buffer.concat(retained).toString('utf8')]).values[0] ?? '',
+      capturedBytes,
+      totalBytes,
+      stderrBytes,
+      truncated: capturedBytes < totalBytes,
+      spawnFailed,
+    })),
   };
 }
 
@@ -153,7 +198,7 @@ export function spawnClaudeCode(input: ClaudeCodeSpawnInput): RuntimeHandle {
  */
 export async function runClaudeCodeWithBridge(
   input: Omit<ClaudeCodeSpawnInput, 'otelEndpoint'> & { bridgePort?: number },
-): Promise<{ handle: RuntimeHandle; bridgeStop: () => Promise<void> }> {
+): Promise<{ handle: ClaudeCodeRuntimeHandle; bridgeStop: () => Promise<void> }> {
   // Dynamically import to avoid circular dependency
   const { startOtelBridge, isOtelBridgeRunning } = await import('./otel-bridge.js');
 
@@ -164,9 +209,15 @@ export async function runClaudeCodeWithBridge(
     otelEndpoint = `http://127.0.0.1:${input.bridgePort ?? 4318}`;
     bridgeStop = async () => {}; // Don't stop an externally-managed bridge
   } else {
-    const bridge = await startOtelBridge({ port: input.bridgePort, source: 'claude-code' });
-    otelEndpoint = `http://127.0.0.1:${bridge.port}`;
-    bridgeStop = bridge.stop;
+    try {
+      const bridge = await startOtelBridge({ port: input.bridgePort, source: 'claude-code' });
+      otelEndpoint = `http://127.0.0.1:${bridge.port}`;
+      bridgeStop = bridge.stop;
+    } catch (error) {
+      otelEndpoint = `http://127.0.0.1:${input.bridgePort ?? 4318}`;
+      bridgeStop = async () => {};
+      log.warn(`Claude Code OTel bridge unavailable; continuing without LOS OTel ingest: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   const handle = spawnClaudeCode({ ...input, otelEndpoint });

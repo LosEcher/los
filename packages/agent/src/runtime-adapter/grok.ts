@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import { redactExternalSummaryText } from '../external-tool-summary.js';
 import type { RuntimeHandle } from './types.js';
+import { resolveRuntimeCommand } from './command.js';
 
 const log = getLogger('grok-adapter');
 const GROK_DEFAULT_MODEL = 'grok-4.5';
@@ -42,7 +43,7 @@ export function spawnGrok(input: GrokSpawnInput): GrokRuntimeHandle {
   const timeoutMs = normalizeTimeout(input.timeoutMs);
   const outputLimitBytes = normalizeOutputLimit(input.outputLimitBytes);
   const grokPath = input.grokPath ?? 'grok';
-  const proc: ChildProcess = spawn(grokPath, _buildGrokArgs(input.prompt), {
+  const proc: ChildProcess = spawn(resolveRuntimeCommand(grokPath), _buildGrokArgs(input.prompt), {
     cwd: input.workspaceRoot,
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],

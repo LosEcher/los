@@ -3,6 +3,10 @@
  */
 
 export {
+  resolveRuntimeCommand,
+} from './command.js';
+
+export {
   startOtelBridge,
   isOtelBridgeRunning,
   type OtelBridgeConfig,
@@ -11,14 +15,20 @@ export {
 export {
   spawnClaudeCode,
   runClaudeCodeWithBridge,
+  claudeCodeAvailable,
   claudeCodeSupportsOtel,
   type ClaudeCodeSpawnInput,
+  type ClaudeCodeRuntimeHandle,
+  type ClaudeCodeRuntimeOutput,
 } from './claude-code.js';
 
 export {
   spawnCodex,
+  codexAvailable,
   codexSupportsOtel,
   type CodexSpawnInput,
+  type CodexRuntimeHandle,
+  type CodexRuntimeOutput,
 } from './codex.js';
 
 export {

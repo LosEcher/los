@@ -1,9 +1,8 @@
 /**
- * @los/gateway runtime-adapter routes — API for running external agent CLIs.
+ * @los/gateway runtime-adapter routes — operator API for external agent CLIs.
  *
- * POST /runtimes/:kind/run  — spawn an external agent and stream events back
- * POST /runtimes/bridge/start — start the OTel bridge (if not auto-started)
- * GET  /runtimes/bridge/status — check OTel bridge status
+ * GET  /runtimes/capabilities — discover live and planned runtime profiles
+ * POST /runtimes/:kind/run   — stream one bounded external-runtime invocation
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -11,16 +10,22 @@ import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  claudeCodeAvailable,
   getGrokRuntimeModel,
-  spawnGrok,
-  runClaudeCodeWithBridge,
-  startOtelBridge,
   isOtelBridgeRunning,
-  claudeCodeSupportsOtel,
-  type RuntimeKind,
-  type GrokRuntimeHandle,
+  runClaudeCodeWithBridge,
+  spawnCodex,
+  spawnGrok,
+  startOtelBridge,
+  codexAvailable,
+  type ClaudeCodeRuntimeHandle,
 } from '@los/agent/runtime-adapter';
-import { getConfig } from '@los/infra/config';
+import {
+  getExternalRuntimeCapabilities,
+  runExternalRuntime,
+  type ExternalRuntimeEvent,
+  type RuntimeTaskKind,
+} from '@los/agent/runtime-task';
 import { scanGrokAccount, type GrokAccountCandidate } from '@los/infra/discovery';
 import { getLogger } from '@los/infra/logger';
 import {
@@ -49,15 +54,33 @@ export interface GrokRuntimeRouteDependencies {
   scanGrokAccount: () => GrokAccountCandidate;
   loadProviderAccount: (id: string) => Promise<ProviderAccountRecord | null>;
   setProviderAccountState: (input: SetProviderAccountStateInput) => Promise<ProviderAccountRecord>;
-  spawnGrok: (input: {
-    prompt: string;
-    workspaceRoot: string;
-    sessionId: string;
-    timeoutMs?: number;
-  }) => GrokRuntimeHandle;
+  spawnGrok: typeof spawnGrok;
+  persistRuntimeEvent?: (event: ExternalRuntimeEvent) => Promise<void>;
 }
 
-const DEFAULT_GROK_DEPENDENCIES: GrokRuntimeRouteDependencies = {
+export interface CodexRuntimeDependencies {
+  codexAvailable?: () => boolean;
+  /** Compatibility injection for the pre-#220 tests; availability no longer implies configured OTel export. */
+  codexSupportsOtel?: () => boolean;
+  spawnCodex?: typeof spawnCodex;
+  isOtelBridgeRunning?: () => boolean;
+  startOtelBridge?: typeof startOtelBridge;
+}
+
+export interface ClaudeRuntimeDependencies {
+  claudeCodeAvailable?: () => boolean;
+  runClaudeCodeWithBridge?: (input: Parameters<typeof runClaudeCodeWithBridge>[0]) => Promise<{
+    handle: ClaudeCodeRuntimeHandle;
+    bridgeStop: () => Promise<void>;
+  }>;
+}
+
+export interface RuntimeAdapterRouteDependencies extends GrokRuntimeRouteDependencies {
+  codex?: CodexRuntimeDependencies;
+  claude?: ClaudeRuntimeDependencies;
+}
+
+const DEFAULT_DEPENDENCIES: RuntimeAdapterRouteDependencies = {
   scanGrokAccount,
   loadProviderAccount,
   setProviderAccountState,
@@ -67,35 +90,36 @@ const DEFAULT_GROK_DEPENDENCIES: GrokRuntimeRouteDependencies = {
 async function handleRunRuntime(
   req: FastifyRequest,
   reply: FastifyReply,
-  grokDeps: GrokRuntimeRouteDependencies,
+  deps: RuntimeAdapterRouteDependencies,
 ): Promise<unknown> {
   if (!(await requireOperator(req, reply))) return;
   const { kind } = req.params as { kind: string };
   const body = (req.body ?? {}) as RunRuntimeBody;
-
-  if (!body.prompt || typeof body.prompt !== 'string') {
+  if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
     return reply.status(400).send({ error: 'prompt is required' });
   }
-
-  // ── Route handler shared setup (SSE) ──────────────────
-  // Setup SSE reply and send helper at route scope so both branches can use it.
-  const setupSSE = () => {
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
+  if (kind === 'gemini') {
+    return reply.status(501).send({ error: 'not_implemented', message: 'Gemini CLI adapter is not implemented.' });
+  }
+  if (!isRuntimeTaskKind(kind)) {
+    return reply.status(400).send({
+      error: 'unknown_runtime',
+      message: `Unknown runtime kind: ${kind}. Supported: claude-code, codex, grok`,
     });
-    return (event: string, data: unknown) => {
-      reply.raw.write(`event: ${event}\n`);
-      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-  };
+  }
+  if (body.timeoutMs !== undefined && !isRuntimeTimeout(body.timeoutMs)) {
+    return reply.status(400).send({
+      error: 'invalid_timeout',
+      message: 'timeoutMs must be an integer between 1000 and 600000',
+    });
+  }
 
-  const workspaceRoot = body.workspaceRoot ?? process.cwd();
-  const sessionId = body.sessionId ?? `ext-${kind}-${randomUUID()}`;
-  const traceId = randomUUID();
+  const workspace = validateWorkspace(body.workspaceRoot ?? process.cwd());
+  if (!workspace.ok) {
+    return reply.status(400).send({ error: 'invalid_workspace', message: workspace.message });
+  }
 
+  let grokAccount: ProviderAccountRecord | undefined;
   if (kind === 'grok') {
     if (Object.hasOwn(body, 'env') || Object.hasOwn(body, 'extraArgs')) {
       return reply.status(400).send({
@@ -103,265 +127,162 @@ async function handleRunRuntime(
         message: 'Grok runtime does not accept browser-supplied env or extraArgs',
       });
     }
-    const validatedWorkspace = validateGrokWorkspace(workspaceRoot);
-    if (!validatedWorkspace.ok) {
-      return reply.status(400).send({ error: 'invalid_workspace', message: validatedWorkspace.message });
-    }
-    if (body.timeoutMs !== undefined && !isGrokTimeout(body.timeoutMs)) {
-      return reply.status(400).send({
-        error: 'invalid_timeout',
-        message: 'timeoutMs must be an integer between 1000 and 600000',
-      });
-    }
-
-    const account = await grokDeps.loadProviderAccount('xai-grok-default');
+    const account = await deps.loadProviderAccount('xai-grok-default');
     if (!isActiveGrokAccount(account)) {
       return reply.status(409).send({
         error: 'grok_account_not_active',
         message: 'Adopt the discovered Grok CLI login before running this runtime',
       });
     }
-    const candidate = grokDeps.scanGrokAccount();
+    const candidate = deps.scanGrokAccount();
     if (!candidate.available) {
-      return reply.status(503).send({
-        error: 'grok_login_unavailable',
-        reason: candidate.reason,
-      });
+      return reply.status(503).send({ error: 'grok_login_unavailable', reason: candidate.reason });
     }
+    grokAccount = account;
+  }
+  if (kind === 'codex' && !resolveCodexAvailability(deps)) {
+    return reply.status(400).send({ error: 'codex_not_available', message: 'Codex CLI not found. Install and try again.' });
+  }
+  if (kind === 'claude-code' && !(deps.claude?.claudeCodeAvailable ?? claudeCodeAvailable)()) {
+    return reply.status(400).send({
+      error: 'claude_code_not_available',
+      message: 'Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code',
+    });
+  }
 
-    const send = setupSSE();
-    send('runtime.started', {
+  const sessionId = body.sessionId ?? `ext-${kind}-${randomUUID()}`;
+  const traceId = randomUUID();
+  const send = setupSSE(reply);
+  const controller = new AbortController();
+  const cancelOnDisconnect = () => controller.abort();
+  reply.raw.once('close', cancelOnDisconnect);
+
+  try {
+    const result = await runExternalRuntime({
       kind,
+      prompt: body.prompt,
+      workspaceRoot: workspace.path,
       sessionId,
       traceId,
-      workspaceRoot: validatedWorkspace.path,
-      providerAccountId: account.id,
-      model: getGrokRuntimeModel(),
+      tenantId: body.tenantId,
+      projectId: body.projectId,
+      timeoutMs: body.timeoutMs,
+      extraArgs: body.extraArgs,
+      env: body.env,
+      signal: controller.signal,
+      providerAccountId: grokAccount?.id,
+      model: kind === 'grok' ? getGrokRuntimeModel() : undefined,
+      onEvent: event => send(event.type, event),
+    }, {
+      spawnGrok: deps.spawnGrok,
+      spawnCodex: deps.codex?.spawnCodex ?? spawnCodex,
+      runClaudeCodeWithBridge: deps.claude?.runClaudeCodeWithBridge ?? runClaudeCodeWithBridge,
+      isOtelBridgeRunning: deps.codex?.isOtelBridgeRunning ?? isOtelBridgeRunning,
+      startOtelBridge: deps.codex?.startOtelBridge ?? startOtelBridge,
+      ...(deps.persistRuntimeEvent ? { persistEvent: deps.persistRuntimeEvent } : {}),
     });
-
-    try {
-      const handle = grokDeps.spawnGrok({
-        sessionId,
-        workspaceRoot: validatedWorkspace.path,
-        prompt: body.prompt,
-        timeoutMs: body.timeoutMs,
-      });
-      send('runtime.process', {
-        sessionId,
-        pid: handle.pid,
-        providerAccountId: account.id,
-      });
-      const [exit, output] = await Promise.all([handle.exited, handle.output]);
-      if (output.errorCode) {
-        send('runtime.error', {
-          sessionId,
-          traceId,
-          providerAccountId: account.id,
-          error: output.errorCode,
-        });
-      } else {
-        if (exit.exitCode === 0) {
-          try {
-            await grokDeps.setProviderAccountState({
-              id: account.id,
-              expectedCredentialGeneration: account.credentialGeneration,
-              state: 'active',
-              verifiedAt: new Date().toISOString(),
-            });
-          } catch {
-            log.warn(`Could not record Grok verification for account=${account.id}`);
-          }
-        }
-        send('runtime.output', {
-          sessionId,
-          providerAccountId: account.id,
-          text: output.text,
-          capturedBytes: output.capturedBytes,
-          totalBytes: output.totalBytes,
-          truncated: output.truncated,
-        });
-        send('runtime.completed', {
-          sessionId,
-          traceId,
-          providerAccountId: account.id,
-          exitCode: exit.exitCode,
-          signal: exit.signal,
-          status: exit.exitCode === 0 ? 'success' : 'failed',
-        });
-      }
-    } catch {
-      send('runtime.error', {
-        sessionId,
-        traceId,
-        providerAccountId: account.id,
-        error: 'grok_runtime_failed',
-      });
-    } finally {
-      reply.raw.end();
+    if (kind === 'grok' && result.exitCode === 0 && !result.spawnFailed && !result.error && grokAccount) {
+      await recordGrokVerification(deps, grokAccount);
     }
-    return;
+  } finally {
+    reply.raw.removeListener('close', cancelOnDisconnect);
+    reply.raw.end();
   }
+}
 
-  if (kind === 'claude-code') {
-    // Check Claude Code availability
-    if (!claudeCodeSupportsOtel()) {
-      return reply.status(400).send({
-        error: 'claude_code_not_available',
-        message: 'Claude Code CLI not found or version < 1.0. Install with: npm install -g @anthropic-ai/claude-code',
-      });
-    }
-
-    const send = setupSSE();
-
-    send('runtime.started', {
-      kind,
-      sessionId,
-      traceId,
-      workspaceRoot,
-      prompt: body.prompt.slice(0, 200),
-    });
-
-    try {
-      const { handle, bridgeStop } = await runClaudeCodeWithBridge({
-        kind: 'claude-code' as const,
-        sessionId,
-        workspaceRoot,
-        prompt: body.prompt,
-        tenantId: body.tenantId,
-        projectId: body.projectId,
-        traceId,
-        timeoutMs: body.timeoutMs,
-        extraArgs: body.extraArgs ?? [],
-        env: body.env,
-      });
-
-      send('runtime.process', {
-        sessionId,
-        pid: handle.pid,
-      });
-
-      const exit = await handle.exited;
-      await bridgeStop();
-
-      send('runtime.completed', {
-        sessionId,
-        traceId,
-        exitCode: exit.exitCode,
-        signal: exit.signal,
-        status: exit.exitCode === 0 ? 'success' : 'failed',
-      });
-    } catch (err: any) {
-      send('runtime.error', {
-        sessionId,
-        traceId,
-        error: err?.message ?? String(err),
-      });
-    } finally {
-      reply.raw.end();
-    }
-    return;
-  }
-
-  if (kind === 'codex') {
-    const send = setupSSE();
-    try {
-      const { spawnCodex, codexSupportsOtel, startOtelBridge, isOtelBridgeRunning } = await import('@los/agent/runtime-adapter');
-
-      if (!codexSupportsOtel()) {
-        return reply.status(400).send({
-          error: 'codex_not_available',
-          message: 'Codex CLI not found. Install and try again.',
-        });
-      }
-
-      let otelEndpoint: string;
-      let bridgeStop = async () => {};
-      if (isOtelBridgeRunning()) {
-        otelEndpoint = 'http://127.0.0.1:4318';
-      } else {
-        const bridge = await startOtelBridge({ source: 'codex' });
-        otelEndpoint = `http://127.0.0.1:${bridge.port}`;
-        bridgeStop = bridge.stop;
-      }
-
-      const handle = spawnCodex({
-        sessionId,
-        workspaceRoot,
-        prompt: body.prompt,
-        otelEndpoint,
-        tenantId: body.tenantId,
-        projectId: body.projectId,
-        traceId,
-        timeoutMs: body.timeoutMs,
-        extraArgs: body.extraArgs ?? [],
-        env: body.env,
-      });
-
-      send('runtime.process', { sessionId, pid: handle.pid });
-
-      const exit = await handle.exited;
-      await bridgeStop();
-
-      send('runtime.completed', {
-        sessionId, traceId,
-        exitCode: exit.exitCode,
-        signal: exit.signal,
-        status: exit.exitCode === 0 ? 'success' : 'failed',
-      });
-    } catch (err: any) {
-      send('runtime.error', { sessionId, traceId, error: err?.message ?? String(err) });
-    } finally {
-      reply.raw.end();
-    }
-    return;
-  }
-
-  if (kind === 'gemini') {
-    return reply.status(501).send({
-      error: 'not_implemented',
-      message: 'Gemini CLI adapter: reuses OTel bridge when Gemini CLI supports OTLP export. Fallback stdout parser not yet implemented.',
-    });
-  }
-
-  return reply.status(400).send({
-    error: 'unknown_runtime',
-    message: `Unknown runtime kind: ${kind}. Supported: claude-code, codex, grok`,
-  });
+async function handleCapabilities(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  deps: RuntimeAdapterRouteDependencies,
+): Promise<unknown> {
+  if (!(await requireOperator(req, reply))) return;
+  const [account, candidate] = await Promise.all([
+    deps.loadProviderAccount('xai-grok-default'),
+    Promise.resolve(deps.scanGrokAccount()),
+  ]);
+  const grokAvailable = isActiveGrokAccount(account) && candidate.available;
+  return {
+    generatedAt: new Date().toISOString(),
+    runtimes: getExternalRuntimeCapabilities({
+      codex: {
+        available: resolveCodexAvailability(deps),
+        reason: 'codex_cli_not_available',
+      },
+      grok: {
+        available: grokAvailable,
+        reason: !isActiveGrokAccount(account) ? 'grok_account_not_active' : candidate.reason ?? 'grok_login_unavailable',
+      },
+      claudeCode: {
+        available: (deps.claude?.claudeCodeAvailable ?? claudeCodeAvailable)(),
+        reason: 'claude_code_cli_not_available',
+      },
+    }),
+  };
 }
 
 async function handleBridgeStart(req: FastifyRequest, reply: FastifyReply) {
   if (!(await requireOperator(req, reply))) return;
-  if (isOtelBridgeRunning()) {
-    return { status: 'already_running' };
-  }
+  if (isOtelBridgeRunning()) return { status: 'already_running' };
   try {
     const bridge = await startOtelBridge({ source: 'gateway' });
     log.info(`OTel bridge started on port ${bridge.port} via API`);
     return { status: 'started', port: bridge.port };
-  } catch (err: any) {
-    return reply.status(500).send({ error: err?.message ?? String(err) });
+  } catch (error) {
+    return reply.status(500).send({ error: error instanceof Error ? error.message : String(error) });
   }
 }
 
-async function handleBridgeStatus(_req: FastifyRequest, _reply: FastifyReply) {
-  return {
-    running: isOtelBridgeRunning(),
-  };
+function handleBridgeStatus() {
+  return { running: isOtelBridgeRunning() };
 }
 
 export function registerRuntimeAdapterRoutes(
   app: FastifyInstance,
-  messageRouter?: MessageRouter,
-  grokDeps: GrokRuntimeRouteDependencies = DEFAULT_GROK_DEPENDENCIES,
+  _messageRouter?: MessageRouter,
+  deps: RuntimeAdapterRouteDependencies = DEFAULT_DEPENDENCIES,
 ): void {
-  const config = getConfig();
-
-  // ── Run external agent ───────────────────────────────────
-  app.post('/runtimes/:kind/run', (req, reply) => handleRunRuntime(req, reply, grokDeps));
-
-  // ── OTel bridge management ───────────────────────────────
+  app.get('/runtimes/capabilities', (req, reply) => handleCapabilities(req, reply, deps));
+  app.post('/runtimes/:kind/run', (req, reply) => handleRunRuntime(req, reply, deps));
   app.post('/runtimes/bridge/start', (req, reply) => handleBridgeStart(req, reply));
-  app.get('/runtimes/bridge/status', (req, reply) => handleBridgeStatus(req, reply));
+  app.get('/runtimes/bridge/status', () => handleBridgeStatus());
+}
+
+function setupSSE(reply: FastifyReply): (event: string, data: unknown) => void {
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  return (event, data) => {
+    if (reply.raw.destroyed || reply.raw.writableEnded) return;
+    reply.raw.write(`event: ${event}\n`);
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+}
+
+async function recordGrokVerification(
+  deps: RuntimeAdapterRouteDependencies,
+  account: ProviderAccountRecord,
+): Promise<void> {
+  try {
+    await deps.setProviderAccountState({
+      id: account.id,
+      expectedCredentialGeneration: account.credentialGeneration,
+      state: 'active',
+      verifiedAt: new Date().toISOString(),
+    });
+  } catch {
+    log.warn(`Could not record Grok verification for account=${account.id}`);
+  }
+}
+
+function resolveCodexAvailability(deps: RuntimeAdapterRouteDependencies): boolean {
+  return (deps.codex?.codexAvailable ?? deps.codex?.codexSupportsOtel ?? codexAvailable)();
+}
+
+function isRuntimeTaskKind(kind: string): kind is RuntimeTaskKind {
+  return kind === 'claude-code' || kind === 'codex' || kind === 'grok';
 }
 
 function isActiveGrokAccount(account: ProviderAccountRecord | null): account is ProviderAccountRecord {
@@ -373,7 +294,7 @@ function isActiveGrokAccount(account: ProviderAccountRecord | null): account is 
     && account.state === 'active';
 }
 
-function validateGrokWorkspace(value: string): { ok: true; path: string } | { ok: false; message: string } {
+function validateWorkspace(value: string): { ok: true; path: string } | { ok: false; message: string } {
   if (typeof value !== 'string' || !value.trim()) {
     return { ok: false, message: 'workspaceRoot must be a non-empty directory path' };
   }
@@ -386,6 +307,6 @@ function validateGrokWorkspace(value: string): { ok: true; path: string } | { ok
   }
 }
 
-function isGrokTimeout(value: number): boolean {
+function isRuntimeTimeout(value: number): boolean {
   return Number.isInteger(value) && value >= 1_000 && value <= 600_000;
 }

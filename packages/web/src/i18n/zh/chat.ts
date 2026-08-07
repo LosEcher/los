@@ -183,6 +183,7 @@ export const zhChat: ChatKeys = {
   'chat.stream.ok': '成功',
   'chat.stream.failed': '失败',
   'chat.stream.runtimeError': '运行时错误: {error}',
+  'chat.stream.runtimeCancelled': '运行时已取消',
   'chat.stream.unknown': '未知',
 
   // ── Session inspector summaries ────────────────────
