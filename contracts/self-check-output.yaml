@@ -1,0 +1,58 @@
+contract: los.self-check-output
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Structured JSON output contract for the post-execution self-check judge
+  call. The judge returns this shape; los validates it with a single
+  centralized function instead of hand-rolled field checks. Invalid output
+  surfaces as an explicit self_check_parse gap (never a silent default
+  verdict).
+type: object
+schemas:
+  SelfCheckGap:
+    required: [condition, detail, suggestion]
+    condition:
+      type: string
+      minLength: 1
+    detail:
+      type: string
+    suggestion:
+      type: string
+    severity:
+      type: string
+      enum: [info, warn, high]
+      optional: true
+  SelfCheckOutput:
+    required: [goalMet, stopConditionsMet, summaryOfEvidence, confidence, gaps]
+    goalMet:
+      type: boolean
+    stopConditionsMet:
+      type: array
+      items:
+        type: boolean
+      note: length must equal the run's stop-condition count; mismatches normalize to all-false (tolerance path)
+    summaryOfEvidence:
+      type: string
+    confidence:
+      type: number
+      minimum: 0
+      maximum: 1
+    gaps:
+      type: array
+      items:
+        $ref: "#/schemas/SelfCheckGap"
+judgePrompt:
+  - "Return JSON only with keys: goalMet, stopConditionsMet, summaryOfEvidence, confidence, gaps"
+  - "Each gap needs string condition/detail/suggestion; confidence is 0.0-1.0"
+persistence: none
+nonGoals:
+  - Storing judge output beyond the existing task-run self-check fields.
+  - Guaranteeing provider-independent formatting (tolerances remain for fences and tool-call noise).
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm check
+  - pnpm run gate
+references:
+  - docs/research/optimization-plan-2026-08.md (P0-4 / D4)

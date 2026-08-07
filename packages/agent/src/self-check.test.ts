@@ -8,6 +8,7 @@ import {
   runPostExecutionSelfCheck,
   buildSelfCheckPrompt,
   parseSelfCheckResponse,
+  _validateSelfCheckOutput,
   shouldRunSelfCheck,
   summarizeAgentContext,
   buildReviewPacket,
@@ -200,6 +201,82 @@ test('parseSelfCheckResponse normalizes mismatched stop conditions count', () =>
   );
   assert.deepEqual(result.stopConditionsMet, [false, false, false]);
   assert.equal(result.confidence, 0.5);
+});
+
+test('parseSelfCheckResponse contract: missing goalMet fails explicitly', () => {
+  const result = parseSelfCheckResponse(
+    JSON.stringify({
+      stopConditionsMet: [true],
+      summaryOfEvidence: 'x',
+      confidence: 0.5,
+      gaps: [],
+    }),
+    1,
+  );
+  assert.equal(result.goalMet, false);
+  assert.equal(result.gaps[0].condition, 'self_check_parse');
+  assert.match(result.gaps[0].detail, /goalMet must be a boolean/);
+});
+
+test('parseSelfCheckResponse contract: missing confidence no longer silently defaults', () => {
+  // Regression: previously a missing confidence degraded to 0.5 when goalMet,
+  // making the verdict indistinguishable from a real judge call.
+  const result = parseSelfCheckResponse(
+    JSON.stringify({
+      goalMet: true,
+      stopConditionsMet: [true],
+      summaryOfEvidence: 'x',
+      gaps: [],
+    }),
+    1,
+  );
+  assert.equal(result.gaps[0].condition, 'self_check_parse');
+  assert.match(result.gaps[0].detail, /confidence must be a finite number/);
+});
+
+test('parseSelfCheckResponse contract: non-array gaps fails explicitly', () => {
+  const result = parseSelfCheckResponse(
+    JSON.stringify({
+      goalMet: true,
+      stopConditionsMet: [true],
+      summaryOfEvidence: 'x',
+      confidence: 0.9,
+      gaps: 'none',
+    }),
+    1,
+  );
+  assert.equal(result.gaps[0].condition, 'self_check_parse');
+  assert.match(result.gaps[0].detail, /gaps must be an array/);
+});
+
+test('parseSelfCheckResponse contract: malformed gap entry fails explicitly', () => {
+  const result = parseSelfCheckResponse(
+    JSON.stringify({
+      goalMet: true,
+      stopConditionsMet: [true],
+      summaryOfEvidence: 'x',
+      confidence: 0.9,
+      gaps: [{ condition: 'g' }],
+    }),
+    1,
+  );
+  assert.equal(result.gaps[0].condition, 'self_check_parse');
+  assert.match(result.gaps[0].detail, /string condition\/detail\/suggestion/);
+});
+
+test('_validateSelfCheckOutput accepts a fully valid output', () => {
+  const validation = _validateSelfCheckOutput({
+    goalMet: true,
+    stopConditionsMet: [true, false],
+    summaryOfEvidence: '  evidence here  ',
+    confidence: 0.8,
+    gaps: [{ condition: 'c', detail: 'd', suggestion: 's' }],
+  }, 2);
+  assert.equal(validation.ok, true);
+  if (validation.ok) {
+    assert.equal(validation.output.summaryOfEvidence, 'evidence here');
+    assert.deepEqual(validation.output.stopConditionsMet, [true, false]);
+  }
 });
 
 // ── Unit: runPostExecutionSelfCheck pass semantics ──
@@ -578,7 +655,7 @@ test('integration: self-check with gaps produces structured gap report', async (
 
 // ── Confidence-specific tests ──
 
-test('confidence default: goalMet=true without explicit confidence gives 0.5', () => {
+test('confidence default: goalMet=true without explicit confidence fails contract', () => {
   const result = parseSelfCheckResponse(
     JSON.stringify({
       goalMet: true,
@@ -588,11 +665,11 @@ test('confidence default: goalMet=true without explicit confidence gives 0.5', (
     }),
     1,
   );
-  assert.equal(result.goalMet, true);
-  assert.equal(result.confidence, 0.5);
+  assert.equal(result.goalMet, false);
+  assert.equal(result.gaps[0].condition, 'self_check_parse');
 });
 
-test('confidence default: goalMet=false without explicit confidence gives 0', () => {
+test('confidence default: goalMet=false without explicit confidence fails contract', () => {
   const result = parseSelfCheckResponse(
     JSON.stringify({
       goalMet: false,
@@ -602,21 +679,22 @@ test('confidence default: goalMet=false without explicit confidence gives 0', ()
     }),
     1,
   );
-  assert.equal(result.confidence, 0);
+  assert.equal(result.gaps[0].condition, 'self_check_parse');
 });
 
-test('confidence clamped to [0, 1] range', () => {
+test('confidence out of [0, 1] range fails contract instead of clamping', () => {
   const high = parseSelfCheckResponse(
     JSON.stringify({ goalMet: true, stopConditionsMet: [], summaryOfEvidence: '', confidence: 2.5, gaps: [] }),
     0,
   );
-  assert.equal(high.confidence, 1);
+  assert.equal(high.gaps[0].condition, 'self_check_parse');
+  assert.match(high.gaps[0].detail, /confidence must be within \[0, 1\]/);
 
   const low = parseSelfCheckResponse(
     JSON.stringify({ goalMet: false, stopConditionsMet: [], summaryOfEvidence: '', confidence: -0.5, gaps: [] }),
     0,
   );
-  assert.equal(low.confidence, 0);
+  assert.equal(low.gaps[0].condition, 'self_check_parse');
 });
 
 test('CONFIDENCE_GATE_THRESHOLD is a number between 0 and 1', () => {
