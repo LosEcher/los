@@ -64,6 +64,36 @@ test('decayScore: reference count boosts score', () => {
   assert.ok(multiRef.score > singleRef.score, '2+ refs should outscore 1 ref');
 });
 
+test('decayScore: referenceCount >= 1 is never marked stale (hard reference protection)', () => {
+  // Old + unreferenced + failed tool: all factors push the score below the
+  // threshold; a single reference must override the stale verdict.
+  const old = hoursAgo(72);
+  const referenced = decayScore({ createdAt: old, referenceCount: 1, toolStatus: 'failed' });
+  assert.ok(referenced.score < STALE_THRESHOLD, `score ${referenced.score} must be below threshold for this scenario`);
+  assert.equal(referenced.stale, false, 'referenced observation must not be stale');
+
+  const multiRef = decayScore({ createdAt: old, referenceCount: 2, toolStatus: 'failed' });
+  assert.equal(multiRef.stale, false);
+});
+
+test('decayScore: kind decay rate adjusts the score and is absent by default', () => {
+  const fresh = hoursAgo(1);
+  const noKind = decayScore({ createdAt: fresh, referenceCount: 0 });
+  assert.equal(noKind.factors.kind, 1, 'default behavior unchanged without kindDecayRate');
+
+  const slowKind = decayScore({ createdAt: fresh, referenceCount: 0, kindDecayRate: 0.2 });
+  assert.equal(slowKind.factors.kind, 0.8);
+  assert.ok(slowKind.score < noKind.score, 'higher kind decay rate lowers the score');
+
+  const fastKind = decayScore({ createdAt: fresh, referenceCount: 0, kindDecayRate: 1.0 });
+  assert.equal(fastKind.factors.kind, 0.1, 'kindFactor floored at 0.1');
+  assert.ok(fastKind.score < slowKind.score);
+
+  // Out-of-range rates are clamped.
+  const clamped = decayScore({ createdAt: fresh, referenceCount: 0, kindDecayRate: 2.0 });
+  assert.equal(clamped.factors.kind, 0.1);
+});
+
 test('decayScore: score is always in [0, 1]', () => {
   const extremes: DecayObservation[] = [
     { createdAt: now(), referenceCount: 10, toolStatus: 'running' },
