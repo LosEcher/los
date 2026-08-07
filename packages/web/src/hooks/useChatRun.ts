@@ -213,7 +213,7 @@ export function useChatRun(options: {
         setRows(prev => [...prev, { id: crypto.randomUUID(), event: 'runtime.started', message: tt('chat.startingRuntime', { runtime: o.runtimeKind }), level: 'ok' as const }]);
         await streamRuntime({ kind: o.runtimeKind, prompt: text, workspaceRoot: o.workspaceRoot.trim() || undefined, timeoutMs: o.timeoutMs }, controller.signal, ({ event, data }) => {
           setRows(prev => [...prev, streamRow(event, data)]);
-          if (event === 'runtime.completed' || event === 'runtime.error') void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          if (event === 'runtime.completed' || event === 'runtime.error' || event === 'runtime.cancelled') void queryClient.invalidateQueries({ queryKey: ['sessions'] });
         });
       }
     } catch (err) {
