@@ -74,8 +74,9 @@ function dependencies(options: {
       return { ...account, state: input.state, verifiedAt: input.verifiedAt ?? undefined };
     },
     scanGrokAccount: () => options.candidate ?? candidate,
+    persistRuntimeEvent: async () => undefined,
     spawnGrok: input => {
-      calls.push(input);
+      calls.push({ ...input });
       return handle(options.output);
     },
   };

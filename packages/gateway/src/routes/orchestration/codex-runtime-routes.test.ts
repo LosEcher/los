@@ -32,6 +32,7 @@ function dependencies(codex: RuntimeAdapterRouteDependencies['codex']): RuntimeA
     spawnGrok: () => {
       throw new Error('spawnGrok should not be called in codex tests');
     },
+    persistRuntimeEvent: async () => undefined,
     codex,
   };
 }
@@ -79,6 +80,7 @@ test('codex runtime streams runtime.process/completed events on success', async 
         spawnFailed: false,
         truncated: false,
         outputBytes: 18,
+        totalBytes: 18,
         stderrBytes: 0,
       }),
     }) as unknown as CodexRuntimeHandle,
@@ -93,8 +95,28 @@ test('codex runtime streams runtime.process/completed events on success', async 
     assert.equal(response.statusCode, 200);
     assert.match(response.headers['content-type'] ?? '', /text\/event-stream/);
     assert.match(response.body, /event: runtime\.process/);
+    assert.match(response.body, /event: runtime\.output/);
+    assert.match(response.body, /codex review output/);
     assert.match(response.body, /event: runtime\.completed/);
     assert.match(response.body, /"exitCode":0/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('runtime capabilities expose live mechanics and planned Reasonix/Pi adapters', async () => {
+  const app = await buildApp(dependencies({ codexAvailable: () => true }));
+  try {
+    const response = await app.inject({ method: 'GET', url: '/runtimes/capabilities' });
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as { runtimes: Array<Record<string, any>> };
+    const codex = body.runtimes.find(runtime => runtime.kind === 'codex');
+    assert.equal(codex?.implementation, 'runnable');
+    assert.equal(codex?.mechanics.streaming, 'lifecycle_and_output');
+    assert.equal(codex?.mechanics.disconnectCancellation, true);
+    assert.equal(codex?.mechanics.telemetry, 'optional_otel');
+    assert.equal(body.runtimes.find(runtime => runtime.kind === 'reasonix')?.implementation, 'planned');
+    assert.equal(body.runtimes.find(runtime => runtime.kind === 'pi-external')?.implementation, 'planned');
   } finally {
     await app.close();
   }
