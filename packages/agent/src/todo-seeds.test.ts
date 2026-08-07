@@ -65,10 +65,9 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
 
   ['todo-los-p1-perf-metrics', ['P1', 'backlog']],
   ['todo-los-p1-cbm-ab-inject', ['P1', 'backlog']],
-  ['todo-los-p1-stale-detection', ['P1', 'backlog']],
   ['todo-los-p1-supply-chain-full', ['P1', 'backlog']],
   ['todo-los-p1-turbo-cache', ['P1', 'backlog']],
-  // daily-gaps-2026-07-27 sub-tasks (29 items; cr-* all 5 closed 2026-08-08)
+  // daily-gaps-2026-07-27 sub-tasks (29 items; cr-* all 5 closed 2026-08-08, sd-* all 5 closed 2026-08-07)
   ['todo-los-gap-dt-protocol', ['P1', 'backlog']],
   ['todo-los-gap-dt-wire', ['P1', 'backlog']],
   ['todo-los-gap-dt-loop-setup', ['P1', 'backlog']],
@@ -80,11 +79,6 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-gap-ch-postcompact-retools', ['P1', 'backlog']],
   ['todo-los-gap-ch-postcompact-metrics', ['P1', 'backlog']],
   ['todo-los-gap-ch-postcompact-notify', ['P1', 'backlog']],
-  ['todo-los-gap-sd-decay-model', ['P1', 'backlog']],
-  ['todo-los-gap-sd-calculate', ['P1', 'backlog']],
-  ['todo-los-gap-sd-trigger', ['P1', 'backlog']],
-  ['todo-los-gap-sd-maintenance', ['P1', 'backlog']],
-  ['todo-los-gap-sd-cross-session', ['P1', 'backlog']],
   ['todo-los-gap-ae-mode', ['P1', 'backlog']],
   ['todo-los-gap-ae-architect', ['P1', 'backlog']],
   ['todo-los-gap-ae-editor', ['P1', 'backlog']],
