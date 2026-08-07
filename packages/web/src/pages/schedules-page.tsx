@@ -189,7 +189,7 @@ export function SchedulesPage() {
               <div className="schedule-facts">
                 <ScheduleFact label={t('ops.schedules.factStatus')} value={active.status} />
                 <ScheduleFact label={t('ops.schedules.factNextRun')} value={formatDate(active.nextRunAt)} />
-                <ScheduleFact label={t('ops.schedules.factApproval')} value={active.approvalPolicy.replaceAll('_', ' ')} />
+                <ScheduleFact label={t('ops.schedules.factApproval')} value={approvalLabel(t, active.approvalPolicy)} />
                 <ScheduleFact label={t('ops.schedules.factConcurrency')} value={active.concurrencyPolicy.replaceAll('_', ' ')} />
                 <ScheduleFact label={t('ops.schedules.factCatchUp')} value={active.catchUpPolicy.replaceAll('_', ' ')} />
                 <ScheduleFact label={t('ops.schedules.factCircuit')} value={t('ops.schedules.circuitValue', { circuitState: active.circuitState, failures: active.consecutiveFailures })} tone={active.circuitState === 'open' ? 'danger' : 'ok'} />
@@ -266,8 +266,16 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
   );
 }
 
-function ScheduleFact({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'ok' }) {
-  return <div className={`work-fact ${tone ?? ''}`}><span>{label}</span><strong>{value}</strong></div>;
+function approvalLabel(t: (key: string) => string, policy: ScheduledApprovalPolicy): string {
+  const key = policy === 'read_only_auto'
+    ? 'ops.schedules.approvalReadOnlyAuto'
+    : policy === 'preapproved_scope'
+      ? 'ops.schedules.approvalPreapprovedScope'
+      : 'ops.schedules.approvalEachRun';
+  return t(key);
+}
+
+function ScheduleFact({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'ok' }) {  return <div className={`work-fact ${tone ?? ''}`}><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function initialForm(t: (key: string) => string): FormState {
