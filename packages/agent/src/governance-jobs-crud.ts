@@ -316,6 +316,21 @@ export async function seedGovernanceJobs(opts?: {
       // loop never closes for jobs seeded early.
       if (seed.autoFix) {
         for (const job of existing) {
+          // Recover auto-downgraded jobs: cadence=manual while status=active
+          // means the no-op throttle previously downgraded it into a dead
+          // state (weekly→manual floor removed 2026-08). Operator "stop"
+          // intent is expressed via status=paused, which seed never touches.
+          if (job.status === 'active' && job.cadence === 'manual' && seed.cadence !== 'manual') {
+            try {
+              const updated = await updateGovernanceJob(job.id, { cadence: seed.cadence });
+              log.info(`GA loop: recovered ${job.jobType} from manual to ${seed.cadence} cadence (${job.id})`);
+              results.push(updated ?? job);
+            } catch (err) {
+              log.warn(`Failed to recover cadence for "${seed.dedupeKey}": ${err instanceof Error ? err.message : String(err)}`);
+              results.push(job);
+            }
+            continue;
+          }
           const dbAutoFix = job.autoFix;
           const seedAutoFix = seed.autoFix;
           const dbEnabled = dbAutoFix?.autoFixEnabled;
