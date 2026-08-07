@@ -130,6 +130,52 @@ export async function selectAutoCompactCandidates(
   return rows.rows.map(r => ({ sessionId: r.session_id, oldestObs: r.oldest_obs, obsCount: r.obs_count }));
 }
 
+/**
+ * Compaction failure compensation (optimization plan P0-3).
+ *
+ * compactSession failures used to be silent (decay path) or single-line warn
+ * (safety net). Now every failure is counted per session; retries respect an
+ * exponential backoff (1h × 2^(failCount-1), capped at 24h — the maintenance
+ * loop runs daily, so a session in backoff is skipped until the window
+ * elapses), and a warn is emitted with the attempt count. A successful
+ * compaction clears the session's failure state.
+ */
+interface CompactionFailureState {
+  failCount: number;
+  lastFailAt: number;
+}
+
+const COMPACTION_BACKOFF = new Map<string, CompactionFailureState>();
+
+const COMPACTION_BACKOFF_BASE_MS = 3600_000; // 1h
+const COMPACTION_BACKOFF_CAP_MS = 24 * 3600_000; // 24h
+
+export function _recordCompactionFailure(sessionId: string, now = Date.now()): number {
+  const entry = COMPACTION_BACKOFF.get(sessionId) ?? { failCount: 0, lastFailAt: 0 };
+  entry.failCount += 1;
+  entry.lastFailAt = now;
+  COMPACTION_BACKOFF.set(sessionId, entry);
+  return entry.failCount;
+}
+
+export function _compactionBackoffElapsed(sessionId: string, now = Date.now()): boolean {
+  const entry = COMPACTION_BACKOFF.get(sessionId);
+  if (!entry) return true;
+  const backoffMs = Math.min(
+    COMPACTION_BACKOFF_CAP_MS,
+    COMPACTION_BACKOFF_BASE_MS * 2 ** Math.max(0, entry.failCount - 1),
+  );
+  return now - entry.lastFailAt >= backoffMs;
+}
+
+export function _clearCompactionFailure(sessionId: string): void {
+  COMPACTION_BACKOFF.delete(sessionId);
+}
+
+export function _resetCompactionBackoff(): void {
+  COMPACTION_BACKOFF.clear();
+}
+
 async function runMemoryMaintenance(): Promise<void> {
   import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore, shouldTriggerCompaction }) => {
     const retention = await applyRetentionPolicy().catch((err) => {
@@ -171,10 +217,17 @@ async function runMemoryMaintenance(): Promise<void> {
         try {
           const decision = await shouldTriggerCompaction(sessionId);
           if (decision.triggered) {
-            // force=true: bypass compactSession dedup so sessions compacted by
-            // event-driven checkpoints can be re-compacted on new observations.
-            await compactSession({ sessionId, autoTrigger: 'decay', force: true });
-            decayCompacted += 1;
+            if (!_compactionBackoffElapsed(sessionId)) continue;
+            try {
+              // force=true: bypass compactSession dedup so sessions compacted by
+              // event-driven checkpoints can be re-compacted on new observations.
+              await compactSession({ sessionId, autoTrigger: 'decay', force: true });
+              _clearCompactionFailure(sessionId);
+              decayCompacted += 1;
+            } catch (err) {
+              const fails = _recordCompactionFailure(sessionId);
+              log.warn(`Decay compact failed for ${sessionId} (attempt ${fails}): ${err instanceof Error ? err.message : String(err)}`);
+            }
             continue;
           }
         } catch (err) {
@@ -192,12 +245,14 @@ async function runMemoryMaintenance(): Promise<void> {
         }
 
         // Rule 2: 24h safety net for sessions with at least some observations
-        if (obsCountNum >= 10 && hoursSinceOldest >= SAFETY_NET_HOURS) {
+        if (obsCountNum >= 10 && hoursSinceOldest >= SAFETY_NET_HOURS && _compactionBackoffElapsed(sessionId)) {
           try {
             await compactSession({ sessionId, autoTrigger: 'scheduled', force: true });
+            _clearCompactionFailure(sessionId);
             scheduledCompacted += 1;
           } catch (err) {
-            log.warn(`Safety-net compact failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+            const fails = _recordCompactionFailure(sessionId);
+            log.warn(`Safety-net compact failed for ${sessionId} (attempt ${fails}): ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       }
