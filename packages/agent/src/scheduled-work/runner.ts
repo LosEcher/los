@@ -12,13 +12,15 @@ import {
   stopProviderProbeLoop,
 } from '../providers/provider-probe.js';
 import { runScheduledAgentTask } from '../scheduler.js';
+import { appendSessionEvent } from '../session-events.js';
 import { listServiceInstances } from '../service-instances.js';
 import { createTodo } from '../todos.js';
 import { listInboxEntries } from '../work-items/projection.js';
 import {
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   claimDueScheduledWorkItems, claimQueuedScheduledWorkRuns,
-  createManualScheduledWorkRun, loadScheduledWorkItem, loadScheduledWorkItemRun,
+  createCatchUpScheduledWorkRun, createManualScheduledWorkRun,
+  findMissedScheduledRun, loadScheduledWorkItem, loadScheduledWorkItemRun,
   recoverExpiredScheduledWorkRuns, recoverOpenScheduledWorkCircuits,
   recordScheduledRunOutcome,
   transitionScheduledWorkRun,
@@ -120,6 +122,31 @@ export async function executeScheduledWorkRun(
       message: 'This schedule requires operator approval for each execution.',
     });
     await transitionScheduledWorkRun(run.id, 'awaiting_approval', { workItemId });
+    // P0-1: surface the approval request through the operator attention event
+    // stream. SSE consumers (/operator/events/live, wechat-bot, telegram-bot)
+    // pick up run.operator_attention_required automatically, so the operator
+    // is notified instead of the run silently waiting for approval.
+    try {
+      await appendSessionEvent({
+        sessionId: `scheduled:${run.id}`,
+        type: 'run.operator_attention_required',
+        source: 'scheduled-work',
+        payload: {
+          event: 'scheduled_run_approval_required',
+          scheduleId: schedule.id,
+          scheduleTitle: schedule.title,
+          runId: run.id,
+          workItemId,
+          scheduledFor: run.scheduledFor,
+          reason: `定时任务「${schedule.title}」等待审批 (scheduled ${run.scheduledFor})`,
+          entityId: run.id,
+          entityType: 'scheduled_work_run',
+        },
+      });
+    } catch (error) {
+      // Notification is best-effort; never block the approval transition.
+      log.warn(`scheduled approval notification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return 'awaiting_approval';
   }
   await transitionScheduledWorkRun(run.id, 'running', {
@@ -406,5 +433,27 @@ export async function approveScheduledWorkRun(
     ownerId: input.ownerId,
     resultSummary: { ...(run.resultSummary ?? {}), approvedBy: input.ownerId },
   });
+
+  // P0-2: while this run waited for approval, later slots of the same
+  // schedule were skipped by concurrency_limit (awaiting_approval occupies
+  // the single concurrent slot). Recover the most recent missed slot as an
+  // approved catch-up run so the analysis is not silently lost. The catch-up
+  // run is queued (not executed inline) and carries approvedBy so it skips
+  // the approval gate on execution.
+  try {
+    const missed = await findMissedScheduledRun({ scheduleId: schedule.id, after: new Date(run.scheduledFor) });
+    if (missed) {
+      await createCatchUpScheduledWorkRun({
+        scheduleId: schedule.id,
+        ownerId: input.ownerId,
+        missedRunId: missed.id,
+        maxAttempts: schedule.maxAttempts,
+      });
+      log.info(`Scheduled work approval queued catch-up run for missed slot ${missed.scheduledFor} (${schedule.title})`);
+    }
+  } catch (error) {
+    // Catch-up is best-effort; the approved run itself already transitioned.
+    log.warn(`Scheduled work catch-up failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return queued;
 }

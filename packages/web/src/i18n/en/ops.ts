@@ -174,7 +174,7 @@ export const enOps = {
   'ops.schedules.formTimezone': 'Timezone',
   'ops.schedules.formApproval': 'Approval',
   'ops.schedules.approvalReadOnlyAuto': 'Read-only auto',
-  'ops.schedules.approvalPreapprovedScope': 'Preapproved scope',
+  'ops.schedules.approvalPreapprovedScope': 'Preapproved scope (manual approval before each run)',
   'ops.schedules.approvalEachRun': 'Each run',
   'ops.schedules.formConcurrency': 'Concurrency',
   'ops.schedules.concurrencySkip': 'Skip',

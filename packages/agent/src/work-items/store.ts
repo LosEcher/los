@@ -40,13 +40,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_work_item_runs_unique_task_run
   ON work_item_runs(work_item_id, task_run_id) WHERE task_run_id IS NOT NULL;
 `;
 
-let initialized = false;
+let initPromise: Promise<void> | undefined;
 
 export async function ensureWorkItemStore(): Promise<void> {
-  if (initialized) return;
-  await ensureTodoStore();
-  await getDb().exec(SCHEMA);
-  initialized = true;
+  // Concurrency-safe: callers may race (e.g. listInboxEntries fans out
+  // projectPersistedWorkItem in Promise.all). A bare boolean flag lets two
+  // callers run the DDL simultaneously, and PostgreSQL's implicit composite
+  // type creation for CREATE TABLE collides on pg_type_typname_nsp_index.
+  if (!initPromise) {
+    initPromise = (async () => {
+      await ensureTodoStore();
+      await getDb().exec(SCHEMA);
+    })().catch((error) => {
+      initPromise = undefined;
+      throw error;
+    });
+  }
+  await initPromise;
 }
 
 export async function linkWorkItemRun(input: LinkWorkItemRunInput): Promise<WorkItemRunLink> {

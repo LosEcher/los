@@ -4,7 +4,8 @@ export {
   createScheduledWorkItem, loadScheduledWorkItem, listScheduledWorkItems, updateScheduledWorkItem,
   listScheduledWorkItemRuns, loadScheduledWorkItemRun, claimDueScheduledWorkItems,
   claimQueuedScheduledWorkRuns, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
-  createManualScheduledWorkRun, transitionScheduledWorkRun, recordScheduledRunOutcome,
+  createManualScheduledWorkRun, createCatchUpScheduledWorkRun, findMissedScheduledRun,
+  transitionScheduledWorkRun, recordScheduledRunOutcome,
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem, recoverOpenScheduledWorkCircuits,
 } from './store.js';
 export {

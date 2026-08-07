@@ -178,7 +178,7 @@ export const zhOps: OpsKeys = {
   'ops.schedules.formTimezone': '时区',
   'ops.schedules.formApproval': '审批',
   'ops.schedules.approvalReadOnlyAuto': '只读自动',
-  'ops.schedules.approvalPreapprovedScope': '预批准范围',
+  'ops.schedules.approvalPreapprovedScope': '预批准范围（执行前需人工审批）',
   'ops.schedules.approvalEachRun': '每次运行',
   'ops.schedules.formConcurrency': '并发',
   'ops.schedules.concurrencySkip': '跳过',
