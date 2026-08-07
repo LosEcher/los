@@ -118,6 +118,48 @@ test('detectGovernanceDrift maps thresholds and direction for every governed job
       current: { filesOver700: 1, filesOver500Count: 109 },
       expectedMetrics: ['filesOver700'],
     },
+    {
+      jobType: 'adversarial_review',
+      previous: {
+        findingCount: 5,
+        findings: [
+          { dimension: 'metric_semantics', severity: 'warn', detail: 'a' },
+          { dimension: 'metric_semantics', severity: 'warn', detail: 'b' },
+          { dimension: 'stuck_approval', severity: 'warn', detail: 'c' },
+          { dimension: 'stuck_approval', severity: 'warn', detail: 'd' },
+          { dimension: 'provider_ready_vs_usable', severity: 'warn', detail: 'e' },
+        ],
+      },
+      current: {
+        findingCount: 7,
+        findings: [
+          { dimension: 'metric_semantics', severity: 'warn', detail: 'a' },
+          { dimension: 'metric_semantics', severity: 'warn', detail: 'b' },
+          { dimension: 'metric_semantics', severity: 'warn', detail: 'c' },
+          { dimension: 'stuck_approval', severity: 'warn', detail: 'd' },
+          { dimension: 'stuck_approval', severity: 'warn', detail: 'e' },
+          { dimension: 'stuck_approval', severity: 'warn', detail: 'f' },
+          { dimension: 'provider_ready_vs_usable', severity: 'warn', detail: 'g' },
+        ],
+      },
+      expectedMetrics: ['findingCount'],
+    },
+    {
+      jobType: 'self_bootstrap',
+      previous: {
+        findingCount: 1,
+        findings: [{ dimension: 'quality_degradation', severity: 'warn', detail: 'a' }],
+      },
+      current: {
+        findingCount: 3,
+        findings: [
+          { dimension: 'quality_degradation', severity: 'warn', detail: 'a' },
+          { dimension: 'quality_degradation', severity: 'high', detail: 'b' },
+          { dimension: 'todo_lifecycle', severity: 'info', detail: 'c' },
+        ],
+      },
+      expectedMetrics: ['qualityDegradation', 'todoStaleness'],
+    },
   ];
 
   for (const scenario of scenarios) {
