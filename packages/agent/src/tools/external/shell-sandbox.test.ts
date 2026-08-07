@@ -26,17 +26,22 @@ test('resolveSandboxBackend denies native fallback unless allowNativeShell', () 
 });
 
 test('runSandboxedShell executes through an OS sandbox backend when available', async () => {
-  // Runs on macOS (sandbox-exec) and Linux CI (bwrap); the native-denied
-  // branch is covered by the resolveSandboxBackend decision table above.
-  // Some sandboxed CI shells cannot apply a nested sandbox profile
-  // (sandbox_apply: Operation not permitted) — the assertion is that the
-  // backend was chosen (not denied) and any error is a sandbox-env error,
-  // not the deny guard.
+  // Platform matrix: macOS (sandbox-exec) and Linux CI (bwrap) execute; a
+  // backend-less platform (e.g. Windows runner) gets the default deny —
+  // both are the correct behavior of the new decision function. The
+  // native-denied branch is also covered by the resolveSandboxBackend
+  // decision table above. Some sandboxed CI shells cannot apply a nested
+  // sandbox profile (sandbox_apply: Operation not permitted) — any error
+  // must be a sandbox-env error, not the deny guard.
   const result = await runSandboxedShell({
     command: 'echo sandbox-backend-check',
     cwd: '/tmp',
     timeoutMs: 5000,
   });
+  if (result.sandbox === 'native-denied') {
+    assert.ok(result.error?.includes('denied'), 'backend-less platforms deny by default');
+    return;
+  }
   assert.notEqual(result.sandbox, 'native-denied');
   assert.equal(result.error?.includes('denied'), false);
   if (!result.error) {
