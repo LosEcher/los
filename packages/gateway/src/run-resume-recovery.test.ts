@@ -138,3 +138,51 @@ test('recovery re-tags the owning work item link as recovery lineage', async () 
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
   }
 });
+
+test('startup recovery skips runs whose contract declares recoveryPolicy=explicit_only', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-recover-explicit-only-${suffix}`;
+  const sessionId = `session-recover-explicit-only-${suffix}`;
+  const dispatched: string[] = [];
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'K4 baseline — operator-owned, never auto-recovered',
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      runContract: {
+        mode: 'audit',
+        executionMode: 'standard',
+        phase: 'planning',
+        planRevision: 1,
+        recoveryPolicy: 'explicit_only',
+        plan: [{
+          id: 'step-1',
+          title: 'Inspect',
+          description: 'Read-only inspection.',
+          dependsOnIds: [],
+          editableSurfaces: [],
+          completionCriteria: 'Evidence persisted.',
+        }],
+        requiredChecks: ['k4: evidence persisted'],
+        verifications: [{ id: 'v1', kind: 'command', description: 'evidence exists', command: 'true' }],
+      },
+    });
+    await approveRunSpecPhase(runSpecId, { actor: 'operator:test' });
+
+    const recovery = await recoverApprovedRunDispatches({
+      dispatch: async (id) => {
+        dispatched.push(id);
+        return { runSpecId: id, status: 'deduplicated', planRevision: 1 };
+      },
+    });
+    assert.ok(!recovery.runSpecIds.includes(runSpecId), 'explicit_only run must not be auto-recovered');
+    assert.ok(!dispatched.includes(runSpecId));
+  } finally {
+    await getDb().query('DELETE FROM task_runs WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM execution_outbox WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+  }
+});

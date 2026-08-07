@@ -9,6 +9,7 @@ import {
   saveSession,
   type RunSpecRecord,
   type ScheduledAgentTaskResult,
+  type ScheduledExecutorConfig,
 } from '@los/agent';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { linkWorkItemRun, listWorkItemRunLinksForRunSpec } from '@los/agent/work-items';
@@ -27,6 +28,15 @@ export interface PersistedRunDispatchResult {
 
 export interface PersistedRunDispatchOptions {
   schedule?: typeof runScheduledAgentTask;
+  /**
+   * Override the revision-scoped dedupe key. The default is
+   * `run:<runSpecId>:<mode>:<planRevision>`; K4 experiment dispatches use
+   * `k4:<experiment>:baseline|candidate:<revision>` so they never collide
+   * with ordinary run recovery.
+   */
+  dedupeKey?: string;
+  /** Override executor routing (e.g. force local execution for K4 source runs). */
+  executor?: ScheduledExecutorConfig;
 }
 
 /**
@@ -46,7 +56,7 @@ export async function dispatchPersistedRunSpec(
   const workItemId = links[0]?.workItemId;
   const config = getConfig();
   const disposition = mode === 'planning' ? 'planning' : 'execution';
-  const dedupeKey = `run:${runSpecId}:${mode}:${planRevision}`;
+  const dedupeKey = options.dedupeKey ?? `run:${runSpecId}:${mode}:${planRevision}`;
   // Planning is always read-only; execution may write when the contract
   // declares editable surfaces. Work-item runs are created with toolMode
   // 'read-only' for the planning phase — lift it for execution so the agent
@@ -117,7 +127,7 @@ export async function dispatchPersistedRunSpec(
       disposition,
       dedupeKey,
       metadata: { dispatchSource: 'persisted-run-resume', mode, planRevision },
-      executor: {
+      executor: options.executor ?? {
         enabled: config.executor.enabled,
         nodeUrls: config.executor.meshNodes,
         agentKey: config.executor.agentKey,

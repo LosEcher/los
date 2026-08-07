@@ -108,3 +108,79 @@ test('approved execution rehydrates the persisted request envelope and plan', as
     await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
   }
 });
+
+test('dispatch accepts a K4 dedupe-key override and local executor override', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-k4-dispatch-${suffix}`;
+  const sessionId = `session-k4-dispatch-${suffix}`;
+  const taskRunId = `task-k4-dispatch-${suffix}`;
+  let scheduledInput: ScheduledAgentTaskInput | undefined;
+
+  try {
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'K4 baseline run',
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      runContract: {
+        mode: 'audit',
+        executionMode: 'standard',
+        phase: 'planning',
+        planRevision: 1,
+        recoveryPolicy: 'explicit_only',
+        plan: [{
+          id: 'step-1',
+          title: 'Inspect',
+          description: 'Read-only inspection.',
+          dependsOnIds: [],
+          editableSurfaces: [],
+          completionCriteria: 'Evidence persisted.',
+        }],
+        requiredChecks: ['k4: evidence persisted'],
+        verifications: [{ id: 'v1', kind: 'command', description: 'evidence exists', command: 'true' }],
+      },
+    });
+    await approveRunSpecPhase(runSpecId, { actor: 'operator:test' });
+
+    const result = await dispatchPersistedRunSpec(runSpecId, 'execution', {
+      dedupeKey: `k4:experiment-x:baseline:${runSpecId}:1`,
+      executor: { enabled: false },
+      schedule: async (input): Promise<ScheduledAgentTaskResult> => {
+        scheduledInput = input;
+        return {
+          status: 'deduplicated',
+          sessionId,
+          taskRun: {
+            id: taskRunId,
+            sessionId,
+            runSpecId,
+            traceId: `trace-${suffix}`,
+            dedupeKey: `k4:experiment-x:baseline:${runSpecId}:1`,
+            workspaceRoot: input.workspaceRoot ?? process.cwd(),
+            toolMode: input.toolMode ?? 'read-only',
+            status: 'running',
+            attempt: 1,
+            promptPreview: input.prompt.slice(0, 200),
+            metadata: {},
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            leaseVersion: 1,
+          },
+        };
+      },
+    });
+
+    assert.equal(result.status, 'deduplicated');
+    assert.ok(scheduledInput);
+    assert.equal(scheduledInput.dedupeKey, `k4:experiment-x:baseline:${runSpecId}:1`);
+    assert.equal(scheduledInput.toolMode, 'read-only');
+    assert.deepEqual(scheduledInput.executor, { enabled: false });
+    assert.equal(scheduledInput.runContract?.recoveryPolicy, 'explicit_only');
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM verification_records WHERE run_spec_id = $1', [runSpecId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+  }
+});

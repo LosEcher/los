@@ -228,6 +228,14 @@ properties:
       planRevision:
         type: integer
         minimum: 1
+      recoveryPolicy:
+        type: string
+        enum: [automatic, explicit_only]
+        description: >
+          Crash/startup recovery policy. automatic (default) lets the gateway
+          recovery scanner re-dispatch the run when no matching attempt exists;
+          explicit_only excludes the run from automatic recovery so a gateway
+          restart can never re-execute it (used by K4 execution experiments).
       planParentRevision:
         type: integer
         minimum: 1

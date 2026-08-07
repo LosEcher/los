@@ -104,5 +104,22 @@ describe('pre-action-gate', () => {
       const signal = extractFragilitySignal(events);
       assert.equal(signal.fragileFiles.size, 0);
     });
+
+    it('fragile-file wording distinguishes read-only operations from writes', () => {
+      const fragileFiles = new Set(['src/fragile.ts']);
+      const read = preActionGate('read_file', { path: 'src/fragile.ts' }, { fragileFiles }, true);
+      assert.equal(read.fragileFile, true);
+      assert.match(read.warnings[0]!, /is being read/);
+      assert.match(read.warnings[0]!, /does not modify/);
+      assert.doesNotMatch(read.warnings[0]!, /is being modified/);
+
+      const write = preActionGate('write_file', { path: 'src/fragile.ts' }, { fragileFiles }, false);
+      assert.match(write.warnings[0]!, /is being modified/);
+
+      // Unknown tools default to write wording (fail-safe).
+      const unknown = preActionGate('list_directory', { path: 'src/fragile.ts' }, { fragileFiles });
+      assert.match(unknown.warnings[0]!, /is being modified/);
+    });
   });
 });
+

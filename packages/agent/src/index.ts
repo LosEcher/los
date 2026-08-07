@@ -15,7 +15,7 @@
 
 export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, type ToolCallStateTransition, type TurnSummary, type CheckpointState, type ModelDiagnosticConfig, type ModelDiagnosticConcept, type ModelDiagnosticInput, type ModelDiagnosticKind, type ModelDiagnosticMode, type ModelDiagnosticPhase, type ModelDiagnosticProbe, type ModelDiagnosticRecommendation, type ModelDiagnosticRiskLevel, type ModelDiagnosticSnapshot, type ToolPreflightDiagnostic } from './loop.js';
 export { getDefaultSystemPrompt } from './loop/message-builder.js';
-export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type AgentTaskGraphStageOutput, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
+export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type AgentTaskGraphStageOutput, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledExecutorConfig, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
 export { resumeAnsweredAsksForRunSpec } from './scheduler/resume-tasks.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
@@ -33,7 +33,7 @@ export { applyToolCallRecoveryTransitionForRunSpec, evaluateToolCallRecovery, re
 export { ExecutionTransitionError, assertExecutionTransition, canTransitionExecutionState, evaluateExecutionTransition, executionTransitionEventType, isTerminalExecutionState, type ExecutionEntityType, type ExecutionState, type ExecutionStateByEntity, type ExecutionTransitionInput, type ExecutionTransitionResult } from './execution-transitions.js';
 export { ensureRunSpecStore, claimRunSpec, createRunSpec, approveRunSpecPhase, loadRunSpec, reviseRunSpecPlan, listRunSpecs, listRunSpecsForSession, type RunSpecRecord, type RunSpecStatus, type CreateRunSpecInput } from './run-specs.js';
 export { assertPersistedRunSpecKernelSelection, authorizeRunSpecKernelCanary, rollbackRunSpecExecutionKernel } from './run-spec-kernel-selection.js';
-export { createK4ExecutionKernelSelection, executionKernelIdentitiesEqual, getLosKernelSelectionIdentity, getPiK4KernelSelectionIdentity, normalizeExecutionKernelSelection, validateK4ExecutionKernelSelection, type ExecutionKernelCandidateDisposition, type ExecutionKernelSelection } from './execution-kernel-selection.js';
+export { applyK4ExecutionKernelRollback, createK4ExecutionKernelSelection, executionKernelIdentitiesEqual, getLosKernelSelectionIdentity, getPiK4KernelSelectionIdentity, grantK4CanaryAuthorization, normalizeExecutionKernelSelection, validateK4ExecutionKernelSelection, type ExecutionKernelCandidateDisposition, type ExecutionKernelSelection } from './execution-kernel-selection.js';
 export { persistRunSpecPlan } from './run-spec-plans.js';
 export {
   buildPlanningPrompt,

@@ -92,7 +92,15 @@ async function executeBrokeredTool(
   ) as ReturnType<typeof tools.evaluateTool>;
 
   if (decision.allowed && preActionGateConfig) {
-    const preCheck = preActionGate(request.name, request.arguments, preActionGateConfig);
+    // readOnlyOperation comes from the registered capability metadata
+    // (sideEffect: false), so fragile-file wording matches the actual
+    // operation instead of always claiming the path "is being modified".
+    const preCheck = preActionGate(
+      request.name,
+      request.arguments,
+      preActionGateConfig,
+      capability?.sideEffect === false,
+    );
     if (preCheck.warnings.length > 0) {
       await emitEvent({
         type: 'tool.warned',

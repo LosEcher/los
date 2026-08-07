@@ -40,6 +40,8 @@ import {
   type UnifiedMessage,
 } from './channel/index.js';
 import {
+  alertRequiresDecision,
+  alertTitle,
   buildAlertMessage,
   buildCompletionMessage,
   buildMediaMessage,
@@ -220,24 +222,10 @@ function formatAlertForWeclaw(alert: OperatorAlert): string {
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
   const sid = alert.sessionId;
   const runId = alert.runSpecId ?? alert.taskRunId;
+  const title = alertTitle(alert);
 
-  // tool.denied is already terminal — do not ask operator to approve/deny again.
-  if (kind === 'already_denied') {
-    const lines = [
-      `${icon} 工具已拒绝（无需操作）`,
-      alert.toolName ? `工具: ${alert.toolName}` : '',
-      alert.reason ? `原因: ${alert.reason}` : '',
-      '',
-      `Session: ${sid}`,
-      '说明: 策略已自动拒绝，不会执行。',
-      '查询: ',
-      `#status ${sid}`,
-    ].filter(Boolean);
-    return lines.join('\n');
-  }
-
-  const lines: string[] = [`${icon} 需要你确认`];
-  if (alert.toolName) lines.push(`工具: ${alert.toolName}`);
+  const lines: string[] = [`${icon} ${title}`];
+  if (alert.toolName) lines.push(`操作: ${alert.toolName}`);
   if (alert.reason) lines.push(`原因: ${alert.reason}`);
   if (alert.warnings?.length) {
     for (const w of alert.warnings.slice(0, 3)) lines.push(`注意: ${w}`);
@@ -245,11 +233,19 @@ function formatAlertForWeclaw(alert: OperatorAlert): string {
   if (alert.flaggedFiles?.length) {
     lines.push(`文件: ${alert.flaggedFiles.slice(0, 3).join(', ')}`);
   }
+  if (kind === 'already_denied') {
+    lines.push('说明: 策略已自动拒绝，不会执行。');
+  }
+  if (kind === 'info') {
+    lines.push('说明: 任务已继续执行，本条无需回复。');
+  }
   lines.push('');
   lines.push(`Session: ${sid}`);
   if (runId) lines.push(`Run: ${runId}`);
   lines.push('');
-  if (runId) {
+  // Approval commands only for actionable alerts; informational notices must
+  // not advertise #approve-phase/#verify-run.
+  if (kind === 'needs_decision' && runId) {
     lines.push('【计划审批】每次只发一行（不要连粘）:');
     lines.push(`#approve-phase ${runId}`);
     lines.push(`#verify-run ${runId}`);
@@ -373,11 +369,19 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       || undefined;
 
     const isDenied = parsed.type === 'tool.denied' || payload.allowed === false;
+    // Title is decided by the action semantics; severity only sets the color.
     const kind = isDenied
       ? 'already_denied' as const
-      : (parsed.type === 'run.operator_attention_required' || parsed.type === 'operator_attention' || parsed.type === 'session.blocked')
+      : (parsed.type === 'run.operator_attention_required' || parsed.type === 'operator_attention' || parsed.type === 'session.blocked' || parsed.type === 'run.recovery_required')
         ? 'needs_decision' as const
         : 'info' as const;
+    const title = isDenied
+      ? '工具已拒绝'
+      : kind === 'needs_decision'
+        ? '等待你审批'
+        : parsed.type === 'tool.warned'
+          ? '风险提示｜任务已继续（无需回复）'
+          : '通知';
 
     // Dedup tool.denied more aggressively (same session+tool within window)
     const toolName = parsed.toolName ?? payload.tool_name;
@@ -394,6 +398,7 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
                 isDenied ? 'info' :
                 parsed.type === 'tool.warned' ? 'warning' : 'info',
       kind,
+      title,
       callId: payload.callId ?? payload.call_id,
       warnings: payload.warnings,
       flaggedFiles: payload.flaggedFiles,

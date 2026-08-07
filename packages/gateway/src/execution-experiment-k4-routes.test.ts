@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import {
   createK4ExecutionKernelSelection,
   getLosKernelSelectionIdentity,
+  grantK4CanaryAuthorization,
   type ExecutionExperimentRecord,
   type RunSpecRecord,
 } from '@los/agent';
@@ -299,6 +300,192 @@ test('K4 draft creation rejects an inexact kernel identity before persistence', 
     assert.equal(response.statusCode, 422);
     assert.match(response.json().error, /exact pi@0.81.1\+los.3/);
     assert.equal(creates, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+function authorizedK4Candidate(disposition: 'planning' | 'inspection', phase: 'planning' | 'plan_approved'): RunSpecRecord {
+  const candidate = runSpec('run-experiment-k4-candidate');
+  const selection = grantK4CanaryAuthorization(
+    createK4ExecutionKernelSelection({ experimentId: 'experiment-k4', disposition, actor: 'operator:select' }),
+    'operator:authorize',
+  );
+  candidate.runContract = {
+    ...candidate.runContract!,
+    phase,
+    planParentRunSpecId: 'source-run',
+    recoveryPolicy: 'explicit_only',
+    executionKernel: selection,
+  };
+  return candidate;
+}
+
+test('K4 inspection execute passes disposition=execution and the k4 dedupe key to the scheduler', async () => {
+  const record = experiment('approved', 'run-experiment-k4-candidate');
+  const source = runSpec();
+  const candidate = authorizedK4Candidate('inspection', 'plan_approved');
+  const scheduled: Array<Record<string, unknown>> = [];
+  const app = await createApp({
+    async loadExecutionExperiment() { return record; },
+    async loadRunSpec(id) { return id === source.id ? source : candidate; },
+    async findActiveTaskRunByDedupeKey() { return null; },
+    async runScheduledAgentTask(input) {
+      scheduled.push(input as unknown as Record<string, unknown>);
+      return { status: 'completed', sessionId: candidate.sessionId, taskRun: { id: 'task-k4', status: 'succeeded' }, result: { text: 'ok', loopCount: 1, totalTokens: 10 } } as any;
+    },
+    async transitionExecutionExperiment(_id, status) { return { ...record, status }; },
+    async applyDirectRunCompletionStatus() { return { status: 'succeeded' } as any; },
+    async transitionExecutionState() { return undefined as any; },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/execution-experiments/experiment-k4/execute',
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0]!.disposition, 'execution');
+    assert.equal(scheduled[0]!.dedupeKey, 'k4:experiment-k4:candidate:1');
+    assert.equal(scheduled[0]!.sandboxMode, 'readonly');
+    assert.deepEqual(scheduled[0]!.executor, { enabled: false });
+    assert.equal(scheduled[0]!.executionKernelKind, 'pi');
+  } finally {
+    await app.close();
+  }
+});
+
+test('K4 planning execute passes disposition=planning to the scheduler (regression: plan_approved misclassified as execution)', async () => {
+  const record = {
+    ...experiment('approved', 'run-experiment-k4-candidate'),
+    configDiff: [
+      { path: 'executionKernel', value: { kind: 'pi', version: '0.81.1+los.3', protocolVersion: '0.1.0', disposition: 'planning' } },
+      { path: 'toolMode', value: 'read-only' },
+    ],
+  };
+  const source = runSpec();
+  // The 2026-08-07 canary mismatch: candidate contract declared
+  // disposition=planning but the scheduler ran execution because the phase
+  // had been approved to plan_approved. The explicit disposition must win.
+  const candidate = authorizedK4Candidate('planning', 'plan_approved');
+  const scheduled: Array<Record<string, unknown>> = [];
+  const app = await createApp({
+    async loadExecutionExperiment() { return record; },
+    async loadRunSpec(id) { return id === source.id ? source : candidate; },
+    async findActiveTaskRunByDedupeKey() { return null; },
+    async runScheduledAgentTask(input) {
+      scheduled.push(input as unknown as Record<string, unknown>);
+      return { status: 'awaiting_approval', sessionId: candidate.sessionId, taskRun: { id: 'task-k4', status: 'blocked' }, result: { text: 'plan', loopCount: 1, totalTokens: 10 }, planRevision: 1, planStepCount: 2 } as any;
+    },
+    async transitionExecutionExperiment(_id, status) { return { ...record, status }; },
+    async transitionExecutionState() { return undefined as any; },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/execution-experiments/experiment-k4/execute',
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().experiment.status, 'blocked');
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0]!.disposition, 'planning');
+    assert.equal(scheduled[0]!.dedupeKey, 'k4:experiment-k4:candidate:1');
+    assert.equal((scheduled[0]!.runContract as { executionKernel?: { disposition?: string } }).executionKernel?.disposition, 'planning');
+  } finally {
+    await app.close();
+  }
+});
+
+test('K4 execute fails closed when the candidate lacks recoveryPolicy=explicit_only', async () => {
+  const record = experiment('approved', 'run-experiment-k4-candidate');
+  const source = runSpec();
+  const candidate = authorizedK4Candidate('inspection', 'plan_approved');
+  delete candidate.runContract!.recoveryPolicy;
+  let scheduled = 0;
+  const app = await createApp({
+    async loadExecutionExperiment() { return record; },
+    async loadRunSpec(id) { return id === source.id ? source : candidate; },
+    async runScheduledAgentTask() { scheduled += 1; throw new Error('must not schedule'); },
+    async transitionExecutionExperiment() { return record; },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/execution-experiments/experiment-k4/execute',
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 422);
+    assert.match(response.json().error, /recoveryPolicy=explicit_only/);
+    assert.equal(scheduled, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('K4 execute returns deduplicated without advancing completion or experiment state', async () => {
+  const record = experiment('approved', 'run-experiment-k4-candidate');
+  const source = runSpec();
+  const candidate = authorizedK4Candidate('inspection', 'plan_approved');
+  let completions = 0;
+  let transitions: Array<{ id: string; status: string }> = [];
+  const app = await createApp({
+    async loadExecutionExperiment() { return record; },
+    async loadRunSpec(id) { return id === source.id ? source : candidate; },
+    async findActiveTaskRunByDedupeKey() { return null; },
+    async runScheduledAgentTask() {
+      return { status: 'deduplicated', sessionId: candidate.sessionId, taskRun: { id: 'task-k4-existing', status: 'running' } } as any;
+    },
+    async applyDirectRunCompletionStatus() { completions += 1; return { status: 'succeeded' } as any; },
+    async transitionExecutionExperiment(_id, status) { transitions = [...transitions, { id: _id, status }]; return { ...record, status }; },
+    async transitionExecutionState() { return undefined as any; },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/execution-experiments/experiment-k4/execute',
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().deduplicated, true);
+    assert.equal(completions, 0, 'duplicate execute must not apply completion');
+    // The race-window fallback: the pre-check missed (no active attempt yet),
+    // so the experiment was already transitioned to running; the deduplicated
+    // result must not advance it further (no blocked/succeeded/failed).
+    assert.deepEqual(transitions, [{ id: 'experiment-k4', status: 'running' }]);
+  } finally {
+    await app.close();
+  }
+});
+
+test('K4 execute returns early when an active attempt already exists for the dedupe key', async () => {
+  const record = experiment('approved', 'run-experiment-k4-candidate');
+  const source = runSpec();
+  const candidate = authorizedK4Candidate('inspection', 'plan_approved');
+  let scheduled = 0;
+  let transitions: Array<{ id: string; status: string }> = [];
+  const app = await createApp({
+    async loadExecutionExperiment() { return record; },
+    async loadRunSpec(id) { return id === source.id ? source : candidate; },
+    async findActiveTaskRunByDedupeKey(key) {
+      assert.equal(key, 'k4:experiment-k4:candidate:1');
+      return { id: 'task-k4-active', sessionId: candidate.sessionId, status: 'running' } as any;
+    },
+    async runScheduledAgentTask() { scheduled += 1; throw new Error('must not schedule'); },
+    async transitionExecutionExperiment(_id, status) { transitions = [...transitions, { id: _id, status }]; return { ...record, status }; },
+    async transitionExecutionState() { return undefined as any; },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/execution-experiments/experiment-k4/execute',
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().deduplicated, true);
+    assert.equal(scheduled, 0);
+    assert.deepEqual(transitions, [], 'duplicate execute must not transition experiment to running');
   } finally {
     await app.close();
   }
