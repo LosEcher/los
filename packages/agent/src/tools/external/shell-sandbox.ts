@@ -11,10 +11,41 @@ export interface SandboxedShellInput {
   timeoutMs: number;
 }
 
+export interface SandboxedShellOptions {
+  /** Permit the unconstrained native shell when no OS sandbox backend is
+   *  available. Defaults to false: execution is denied instead (Claude-style
+   *  deny; wired to config agent.allowNativeShell). */
+  allowNativeShell?: boolean;
+}
+
 export interface SandboxedShellResult {
   content: string;
   error?: string;
   sandbox: string;
+}
+
+/** Decision of which backend runs a shell command (or whether it is denied). */
+export type SandboxDecision = 'macos-sandbox-exec' | 'linux-bwrap' | 'native' | 'native-denied';
+
+/**
+ * Pure backend-selection decision, separated from execFile side effects so
+ * tests can cover every platform/availability/allow combination.
+ */
+export function resolveSandboxBackend(
+  osPlatform: string,
+  sandboxExecAvailable: boolean,
+  bwrapAvailable: boolean,
+  allowNativeShell: boolean,
+): SandboxDecision {
+  if (osPlatform === 'darwin') {
+    if (sandboxExecAvailable) return 'macos-sandbox-exec';
+    return allowNativeShell ? 'native' : 'native-denied';
+  }
+  if (osPlatform === 'linux') {
+    if (bwrapAvailable) return 'linux-bwrap';
+    return allowNativeShell ? 'native' : 'native-denied';
+  }
+  return allowNativeShell ? 'native' : 'native-denied';
 }
 
 /**
@@ -31,30 +62,35 @@ export function getAvailableSandbox(): string {
   return 'native';
 }
 
-export async function runSandboxedShell(input: SandboxedShellInput): Promise<SandboxedShellResult> {
-  // 1. macOS: sandbox-exec
-  if (platform() === 'darwin') {
-    const sandboxExec = findExecutable('/usr/bin/sandbox-exec');
-    if (sandboxExec) {
-      return runWithMacSandboxExec(sandboxExec, input);
-    }
-    log.warn('macOS detected but sandbox-exec not found; falling back to native');
-    return runWithNativeShell(input);
-  }
+export async function runSandboxedShell(
+  input: SandboxedShellInput,
+  options: SandboxedShellOptions = {},
+): Promise<SandboxedShellResult> {
+  const allowNative = options.allowNativeShell === true;
+  const decision = resolveSandboxBackend(
+    platform(),
+    findExecutable('/usr/bin/sandbox-exec') !== null,
+    findExecutable('/usr/bin/bwrap') !== null,
+    allowNative,
+  );
 
-  // 2. Linux: bubblewrap (bwrap)
-  if (platform() === 'linux') {
-    const bwrap = findExecutable('/usr/bin/bwrap');
-    if (bwrap) {
-      return runWithBwrap(bwrap, input);
+  switch (decision) {
+    case 'macos-sandbox-exec':
+      return runWithMacSandboxExec('/usr/bin/sandbox-exec', input);
+    case 'linux-bwrap':
+      return runWithBwrap('/usr/bin/bwrap', input);
+    case 'native':
+      log.warn('no OS sandbox backend available; allowNativeShell=true — running unconstrained native shell');
+      return runWithNativeShell(input);
+    case 'native-denied': {
+      log.warn('no OS sandbox backend available and allowNativeShell=false; denying shell execution');
+      return {
+        content: '',
+        error: 'shell execution denied: no sandbox backend available and native fallback is disabled (set AGENT_ALLOW_NATIVE_SHELL=true / agent.allowNativeShell to allow unconstrained execution)',
+        sandbox: 'native-denied',
+      };
     }
-    log.warn('Linux detected but bwrap not found; falling back to native (containerized env is acceptable)');
-    return runWithNativeShell(input);
   }
-
-  // 3. Other platforms: native fallback
-  log.warn(`Platform ${platform()} has no sandbox; using native shell fallback`);
-  return runWithNativeShell(input);
 }
 
 // ── macOS sandbox-exec ──────────────────────────────────

@@ -6,6 +6,7 @@
  */
 
 import { getLogger } from '@los/infra/logger';
+import { loadConfig } from '@los/infra/config';
 import type { ToolDef } from '../../providers/index.js';
 import { isMCPToolAllowed, normalizeMCPToolPolicy } from '../../mcp-distribution-policy.js';
 import { projectCanToolCapability } from '../../cantool-capability-adapter.js';
@@ -254,6 +255,8 @@ export async function registerBuiltinTools(
       command,
       cwd,
       timeoutMs: timeout * 1000,
+    }, {
+      allowNativeShell: (await loadConfig()).agent.allowNativeShell,
     });
     return result.error
       ? { content: result.content, error: result.error }

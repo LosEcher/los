@@ -78,6 +78,7 @@ const sharedProcessTestFiles = [
   'src/session-recovery-checkpoints.test.ts',
   'src/session-trace.test.ts',
   'src/session.test.ts',
+  'src/tools/external/shell-sandbox.test.ts',
   'src/spec-loader.test.ts',
   'src/static-analysis.test.ts',
   'src/static-graph-baselines.test.ts',
