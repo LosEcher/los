@@ -218,3 +218,12 @@ test('plan validation compares canonical ids and dependencies', () => {
   assert.equal(normalized[0]?.id, 'step-1');
   assert.deepEqual(normalized[0]?.editableSurfaces, ['src/a.ts']);
 });
+
+test('E22 — recoveryPolicy normalizes to automatic or explicit_only only', () => {
+  const explicit = normalizeRunContractMetadata({ recoveryPolicy: 'explicit_only' });
+  assert.equal(explicit?.recoveryPolicy, 'explicit_only');
+  const automatic = normalizeRunContractMetadata({ recoveryPolicy: 'automatic' });
+  assert.equal(automatic?.recoveryPolicy, 'automatic');
+  const invalid = normalizeRunContractMetadata({ recoveryPolicy: 'always' });
+  assert.equal(invalid?.recoveryPolicy, undefined);
+});

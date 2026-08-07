@@ -19,9 +19,9 @@ import {
 } from '../channel/types.js';
 
 export type OperatorAlertKind =
-  | 'needs_decision'   // operator must act (attention / blocked)
+  | 'needs_decision'   // operator must act (persisted approval request)
   | 'already_denied'   // tool already denied — informational only
-  | 'info';            // other notices
+  | 'info';            // advisory notice (e.g. tool.warned) — no action
 
 export interface OperatorAlert {
   sessionId: string;
@@ -31,6 +31,12 @@ export interface OperatorAlert {
   severity: 'critical' | 'warning' | 'info';
   /** How the bot should phrase the alert (needs action vs FYI). */
   kind?: OperatorAlertKind;
+  /**
+   * Action-driven title. When absent the channel formatter derives it from
+   * `kind`: needs_decision → "等待你审批", already_denied → "工具已拒绝",
+   * info → "风险提示，任务继续". Severity only controls the icon/color.
+   */
+  title?: string;
   callId?: string;
   warnings?: string[];
   flaggedFiles?: string[];
@@ -40,6 +46,21 @@ export interface OperatorAlert {
   taskRunId?: string;
   /** Attached media (screenshots, output files, etc.) */
   media?: Array<{ type: 'image' | 'file'; url: string; fileName?: string }>;
+}
+
+const KIND_TITLES: Record<OperatorAlertKind, string> = {
+  needs_decision: '等待你审批',
+  already_denied: '工具已拒绝',
+  info: '风险提示，任务继续',
+};
+
+/** True when the alert carries a pending operator decision and may offer approval commands. */
+export function alertRequiresDecision(alert: Pick<OperatorAlert, 'kind'>): boolean {
+  return (alert.kind ?? 'needs_decision') === 'needs_decision';
+}
+
+export function alertTitle(alert: Pick<OperatorAlert, 'kind' | 'title'>): string {
+  return alert.title ?? KIND_TITLES[alert.kind ?? 'needs_decision'];
 }
 
 /**
@@ -63,15 +84,18 @@ export function buildAlertMessage(
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
   const tool = alert.toolName ? ` \`${alert.toolName}\`` : '';
   const kind = alert.kind ?? 'needs_decision';
+  const title = alertTitle(alert);
+  const actionable = alertRequiresDecision(alert);
 
-  let text = kind === 'already_denied'
-    ? `${icon} 工具已拒绝（无需操作）${tool}`
-    : `${icon} 需要你确认${tool}`;
+  let text = `${icon} ${title}${tool}`;
   if (alert.reason) {
     text += `\n${alert.reason}`;
   }
   if (kind === 'already_denied') {
     text += '\n策略已自动拒绝，不会执行。';
+  }
+  if (kind === 'info') {
+    text += '\n任务已继续执行，本条无需回复。';
   }
   if (alert.warnings?.length) {
     text += '\n';
@@ -90,14 +114,15 @@ export function buildAlertMessage(
     fileName: m.fileName,
   }));
 
-  // No approve/deny buttons when already denied
-  const actions: MessageAction[] = kind === 'already_denied'
-    ? [{ text: '📊 Status', value: 'status', type: 'default' }]
-    : [
+  // Approve/deny actions only for actionable alerts; everything else gets a
+  // read-only Status action so the operator can inspect without acting.
+  const actions: MessageAction[] = actionable
+    ? [
         { text: '✅ Approve', value: 'approve', type: 'primary' },
         { text: '❌ Deny', value: 'deny', type: 'danger' },
         { text: '↗ Escalate', value: 'escalate', type: 'default' },
-      ];
+      ]
+    : [{ text: '📊 Status', value: 'status', type: 'default' }];
 
   return {
     id: `alert-${randomUUID()}`,

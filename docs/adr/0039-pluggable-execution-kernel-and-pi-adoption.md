@@ -41,7 +41,45 @@
   matches, the candidate plan is approved when required, and a separate
   operator canary-authorization event exists. Rollback selects the exact LOS
   adapter on the same run spec, revokes canary authorization, and appends an
-  operator-attributed history entry. No provider-backed K4 canary has run.
+  operator-attributed history entry. The first provider-backed K4 canary ran
+  on 2026-08-07 (experiment `experiment-fd64e658-2e6d-4e04-b49a-9c6e5f809e72`,
+  source run `run-k4-source-1786059479165`, candidate
+  `run-experiment-fd64e658-2e6d-4e04-b49a-9c6e5f809e72-candidate`): the
+  candidate was selected (draft), the experiment and candidate plan were
+  approved, canary authorization was granted, and the Pi planning canary
+  executed through the canonical adapter with a full `los.kernel.pi` event
+  chain. That first canary was later invalidated as a planning-behavior
+  sample: the candidate RunContract declared `disposition=planning` but the
+  scheduler ran execution (16 loops) because
+  `POST /execution-experiments/:id/execute` did not forward the candidate
+  disposition and the run spec phase had been approved to `plan_approved`.
+  The control path and Pi event-chain evidence remain valid; the
+  planning-behavior and quality sample does not. The invalid candidate was
+  transitioned to `blocked` so startup recovery cannot re-run it. K4-R2
+  (2026-08-07) fixed the mismatch and the exactly-once surface:
+  `handleExecute` now passes the persisted kernel disposition to the
+  scheduler (planning stays planning even after plan approval; inspection
+  maps to execution), K4 executes carry a revision-scoped `dedupeKey`
+  (`k4:<experiment>:candidate:<revision>`) with a pre-dispatch active-attempt
+  guard plus a post-dispatch `deduplicated` early return, K4 run contracts
+  declare `recoveryPolicy=explicit_only`, and the gateway recovery scanner
+  excludes `explicit_only` runs from automatic re-dispatch. The source-run
+  tool path now goes through the single `dispatchPersistedRunSpec` entry with
+  a persisted `k4:baseline:<runSpecId>:<revision>` dedupe key.
+  `normalizeBoundedInteger` accepts JSON numbers (the first K4-R2 experiment
+  creation silently dropped `eventCursor` when the route received a numeric
+  JSON value). The K4-R2 inspection canary then ran (experiment
+  `experiment-ec181ed7-9ea7-4f30-9b91-87d3566c46ee`, source run
+  `run-k4-source-1786065793190`, candidate
+  `run-experiment-ec181ed7-9ea7-4f30-9b91-87d3566c46ee-candidate`): baseline
+  (LOS kernel) and candidate (Pi `0.81.1+los.3`, inspection) each executed
+  exactly one attempt with zero writes, matching kernel identity, a bounded
+  single-file read task (`packages/agent/package.json` via `read_file`, 2
+  turns / maxLoops=3), and complete canonical evidence; the candidate
+  succeeded after its verification record passed. Planning canary collection
+  is deferred until the planning phase vs canary authorization conflict is
+  resolved (planning disposition currently requires phase `planning`, so a
+  plan-approved planning canary fails closed in the scheduler).
 - Supersedes: ADR 0007 for execution-kernel ownership and default-runtime
   selection only
 

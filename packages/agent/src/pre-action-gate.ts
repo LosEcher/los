@@ -98,6 +98,11 @@ export function preActionGateConfigFromAgentOptions(
  * Check whether a tool call should be warned about before execution.
  * This is a pre-action gate that runs AFTER phase policy but BEFORE tool execution.
  *
+ * `readOnlyOperation` distinguishes read tools (read_file, list_directory, ...)
+ * from write/unknown tools so fragile-file wording matches the actual
+ * operation semantics. Unknown tools default to the write wording (fail-safe:
+ * a warning that overstates risk is safer than one that understates it).
+ *
  * Usage in tool-runner.ts:
  *   const preCheck = preActionGate(tc.function.name, args, config);
  *   if (preCheck.warnings.length > 0) {
@@ -108,6 +113,7 @@ export function preActionGate(
   toolName: string,
   args: Record<string, unknown>,
   config: PreActionGateConfig = {},
+  readOnlyOperation = false,
 ): PreActionCheck {
   const warnings: string[] = [];
   const failurePatterns: string[] = [];
@@ -132,7 +138,9 @@ export function preActionGate(
     if (config.fragileFiles?.has(fp)) {
       fragileFile = true;
       flaggedFiles.push(fp);
-      warnings.push(`⚠ Fragile file '${fp}' is being modified. Known to have caused regressions.`);
+      warnings.push(readOnlyOperation
+        ? `⚠ Fragile file '${fp}' is being read. Known to have caused regressions; this read does not modify it.`
+        : `⚠ Fragile file '${fp}' is being modified. Known to have caused regressions.`);
     }
   }
 

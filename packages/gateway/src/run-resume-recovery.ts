@@ -69,6 +69,7 @@ async function listApprovedRunsWithoutExecutionAttempt(limit = DEFAULT_RECOVERY_
       OR
       (run_spec.status = 'running' AND run_spec.run_contract_json->>'phase' = 'executing')
     )
+      AND COALESCE(run_spec.run_contract_json->>'recoveryPolicy', 'automatic') = 'automatic'
       AND NOT EXISTS (
         SELECT 1
         FROM task_runs AS task_run
