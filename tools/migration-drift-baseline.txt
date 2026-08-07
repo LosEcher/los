@@ -1,2 +1,0 @@
-COLUMNS|[ensure-only] run_specs|parent_run_spec_id|text|YES|
-INDEXES|[ensure-only] run_specs|idx_run_specs_parent|CREATE INDEX idx_run_specs_parent ON public.run_specs USING btree (parent_run_spec_id)
