@@ -53,6 +53,7 @@ export EXECUTOR_VERSION="${EXECUTOR_VERSION:-$LOS_VERSION}"
 # ── Proxy env export helper (launchctl drops parent env) ─
 _dotenv_proxy_exports() {
   local exports=""
+  [ -n "${PATH-}" ] && exports="$exports export PATH=$(shell_quote "$PATH");"
   [ -n "${HTTPS_PROXY-}" ] && exports="$exports export HTTPS_PROXY='$HTTPS_PROXY';"
   [ -n "${HTTP_PROXY-}" ] && exports="$exports export HTTP_PROXY='$HTTP_PROXY';"
   [ -n "${NO_PROXY-}" ] && exports="$exports export NO_PROXY='$NO_PROXY';"
