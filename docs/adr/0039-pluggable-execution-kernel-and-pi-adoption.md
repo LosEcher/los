@@ -141,6 +141,27 @@ Web / CLI / MCP / Gateway / Scheduler
 
 The protocol draft lives in `contracts/execution-kernel.yaml`.
 
+## External Worker Boundary
+
+`ExecutionKernel` and an external agent worker are separate extension points:
+
+| Extension point | Examples | Owner and call path |
+| --- | --- | --- |
+| In-process execution kernel | `LosKernelAdapter`, `PiKernelAdapter` | Scheduler selects through the LOS kernel registry and ToolBroker |
+| External bounded worker | Codex, Grok, Claude Code, future Reasonix | Operator or governed tool calls `contracts/external-runtime.yaml` through HTTP/tool/message invocation |
+
+Pi remains an in-process `ExecutionKernel` when LOS uses it to run governed
+turns. A separate Pi-based orchestrator may act as an external client or future
+`pi-external` worker, but that does not change the kernel registry or grant it
+ToolBroker authority.
+
+Runtime capabilities are not primarily encoded as Skills. Machine-readable
+truth belongs in contracts, TypeScript capability profiles, live availability
+probes, and `GET /runtimes/capabilities`. A Skill may describe the repeatable
+delegation workflow—selection, prompt construction, approval, and acceptance
+evidence—but must not claim installed state, effective provider/model, or
+route availability.
+
 ## Ownership Boundary
 
 | Concern | LOS | Execution kernel |
@@ -473,6 +494,7 @@ The decision is implemented only when:
 ## References
 
 - `contracts/execution-kernel.yaml`
+- `contracts/external-runtime.yaml`
 - `contracts/execution-pairwise-eval.yaml`
 - `docs/adr/0007-provider-loop-first-model-profiles.md`
 - `docs/adr/0018-cli-fallback-gate.md`

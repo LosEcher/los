@@ -18,6 +18,7 @@
 | `kernel` | 执行内核事件 |
 | `hook` | Lifecycle hook 事件 |
 | `operator` | 操作员控制事件 |
+| `runtime` | 外部 agent CLI 运行事件 |
 
 ## 完整类型列表
 
@@ -68,6 +69,20 @@
 |------|------|------|
 | `kernel.started` | 内核启动 | `execution-kernel.ts` |
 | `kernel.finished` | 内核完成 | `execution-kernel.ts` |
+
+### Runtime 域 (`runtime.*`)
+| 类型 | 描述 | 来源 |
+|------|------|------|
+| `runtime.started` | 外部运行时请求已接受 | `runtime-task.ts` |
+| `runtime.process` | 外部子进程已生成 | `runtime-task.ts` |
+| `runtime.output` | 有界、脱敏输出及字节摘要 | `runtime-task.ts` |
+| `runtime.completed` | 子进程正常结束，包括非零退出 | `runtime-task.ts` |
+| `runtime.error` | 适配器或生成进程失败 | `runtime-task.ts` |
+| `runtime.cancelled` | 调用方断连或 AbortSignal 取消 | `runtime-task.ts` |
+
+外部运行时事件以 `external-runtime:<kind>` 作为 source，持久层只保留
+生命周期字段和最多 2000 字符的脱敏输出摘要；原始 prompt、stderr、环境变量、
+鉴权材料和完整 transcript 不进入 `session_events`。
 
 ### Hook 域 (`hook.*`)
 | 类型 | 描述 | 来源 |
