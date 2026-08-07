@@ -28,7 +28,7 @@ export const SUPPRESSED_STREAM_EVENTS = new Set([
 
 // Runtime SSE events visible in the stream UI
 const VISIBLE_RUNTIME_EVENTS = new Set([
-  'runtime.started', 'runtime.process', 'runtime.output', 'runtime.completed', 'runtime.error',
+  'runtime.started', 'runtime.process', 'runtime.output', 'runtime.completed', 'runtime.error', 'runtime.cancelled',
 ]);
 
 export function readyStreamRows(): StreamRow[] {
@@ -289,6 +289,7 @@ export function streamRow(event: string, data: Record<string, unknown>): StreamR
   if (event === 'runtime.output') return { id: crypto.randomUUID(), event, message: String(data.text ?? ''), meta: data.truncated ? tt('chat.stream.truncatedAt', { bytes: String(data.capturedBytes ?? '?') }) : tt('chat.stream.bytes', { bytes: String(data.capturedBytes ?? 0) }), level: data.truncated ? 'warn' : 'normal' };
   if (event === 'runtime.completed') return { id: crypto.randomUUID(), event, message: tt('chat.stream.completedExit', { code: String(data.exitCode ?? '?') }), meta: data.status === 'success' ? tt('chat.stream.ok') : tt('chat.stream.failed'), level: data.status === 'success' ? 'ok' : 'error' };
   if (event === 'runtime.error') return { id: crypto.randomUUID(), event, message: tt('chat.stream.runtimeError', { error: String(data.error ?? tt('chat.stream.unknown')) }), level: 'error' };
+  if (event === 'runtime.cancelled') return { id: crypto.randomUUID(), event, message: tt('chat.stream.runtimeCancelled'), level: 'warn' };
   return { id: crypto.randomUUID(), event, message: JSON.stringify(data) };
 }
 

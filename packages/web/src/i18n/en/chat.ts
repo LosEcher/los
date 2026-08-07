@@ -179,6 +179,7 @@ export const enChat = {
   'chat.stream.ok': 'OK',
   'chat.stream.failed': 'FAILED',
   'chat.stream.runtimeError': 'Runtime error: {error}',
+  'chat.stream.runtimeCancelled': 'Runtime cancelled',
   'chat.stream.unknown': 'unknown',
 
   // ── Session inspector summaries ────────────────────
