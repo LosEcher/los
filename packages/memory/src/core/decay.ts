@@ -38,6 +38,9 @@
  */
 
 import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
+
+const log = getLogger('memory-decay');
 
 /** Score below which an observation is considered stale. */
 export const STALE_THRESHOLD = 0.3;
@@ -49,6 +52,12 @@ export interface DecayObservation {
   referenceCount: number;
   /** Associated tool call status, if any. */
   toolStatus?: 'running' | 'requested' | 'succeeded' | 'failed' | 'cancelled';
+  /** Observation kind (e.g. 'episodic' | 'procedural' | 'semantic'). */
+  kind?: string;
+  /** Per-kind cross-session decay rate (0-1, higher = decays faster). When
+   *  set, kindFactor = 1 - kindDecayRate. Absent → no kind adjustment
+   *  (default behavior unchanged). */
+  kindDecayRate?: number;
 }
 
 export interface DecayScoreResult {
@@ -59,6 +68,7 @@ export interface DecayScoreResult {
     recency: number;
     referenceCount: number;
     toolStatus: number;
+    kind: number;
   };
 }
 
@@ -106,21 +116,27 @@ function toolStatusFactor(status?: string): number {
  * Compute the decay score for a single observation.
  *
  * Returns a clamped [0,1] score and a breakdown of contributing factors.
- * Scores below {@link STALE_THRESHOLD} are marked stale.
+ * Scores below {@link STALE_THRESHOLD} are marked stale — except that
+ * observations with referenceCount ≥ 1 are never marked stale (hard
+ * reference protection: referenced observations retain value even when
+ * the age/recency/tool factors push the raw score below the threshold).
  */
 export function decayScore(obs: DecayObservation): DecayScoreResult {
   const base = baseScore(obs.createdAt);
   const recency = recencyFactor(obs.createdAt);
   const referenceCount = referenceCountFactor(obs.referenceCount);
   const toolStatus = toolStatusFactor(obs.toolStatus);
+  const kind = obs.kindDecayRate === undefined
+    ? 1.0
+    : Math.max(0.1, Number((1 - Math.max(0, Math.min(1, obs.kindDecayRate))).toFixed(4)));
 
-  const raw = base * recency * referenceCount * toolStatus;
+  const raw = base * recency * referenceCount * toolStatus * kind;
   const score = Math.min(1, Math.max(0, Number(raw.toFixed(4))));
 
   return {
     score,
-    stale: score < STALE_THRESHOLD,
-    factors: { base, recency, referenceCount, toolStatus },
+    stale: obs.referenceCount >= 1 ? false : score < STALE_THRESHOLD,
+    factors: { base, recency, referenceCount, toolStatus, kind },
   };
 }
 
@@ -179,12 +195,14 @@ export async function calculateDecayScores(sessionId: string): Promise<SessionDe
     created_at: string;
     reference_count: string;
     tool_status: string | null;
+    kind: string | null;
   }>(
     `SELECT
        id::text,
        created_at,
        COALESCE((metadata_json->>'referenceCount')::int, 0)::text AS reference_count,
-       metadata_json->>'toolStatus' AS tool_status
+       metadata_json->>'toolStatus' AS tool_status,
+       kind AS kind
      FROM observations
      WHERE session_id = $1
        AND COALESCE(metadata_json->>'archived', 'false') = 'false'
@@ -193,10 +211,25 @@ export async function calculateDecayScores(sessionId: string): Promise<SessionDe
     [sessionId],
   );
 
+  // Per-kind cross-session decay adjustment: kinds that decay fast across
+  // other sessions get a lower kindFactor here (kindFactor = 1 - decayRate).
+  // One aggregation query per scoring run; empty when no cross-session data.
+  const kindDecayRates = new Map<string, number>();
+  try {
+    for (const pattern of await aggregateCrossSessionDecay(sessionId)) {
+      kindDecayRates.set(pattern.kind, pattern.decayRate);
+    }
+  } catch (err) {
+    // Cross-session aggregation is an enhancement; scoring must not fail on it.
+    log.warn(`kind decay aggregation failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const observations: DecayObservation[] = rows.rows.map(r => ({
     createdAt: new Date(r.created_at),
     referenceCount: Number(r.reference_count),
     toolStatus: (r.tool_status as DecayObservation['toolStatus']) ?? undefined,
+    kind: r.kind ?? undefined,
+    kindDecayRate: r.kind ? kindDecayRates.get(r.kind) : undefined,
   }));
 
   const aggregate = decayScores(observations);
