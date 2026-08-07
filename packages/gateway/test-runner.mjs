@@ -28,6 +28,7 @@ const sharedProcessTestFiles = [
   'src/rate-limit.test.ts',
   'src/request-context.test.ts',
   'src/routes/orchestration/grok-runtime-routes.test.ts',
+  'src/routes/orchestration/codex-runtime-routes.test.ts',
   'src/routes/orchestration/operator-write-routes.test.ts',
   'src/routes/providers/provider-account-routes.test.ts',
   'src/scheduled-work-routes.test.ts',

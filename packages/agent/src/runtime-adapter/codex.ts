@@ -36,10 +36,13 @@ export interface CodexSpawnInput {
 export function codexSupportsOtel(codexPath = 'codex'): boolean {
   try {
     const out = execSync(`${codexPath} --version`, { encoding: 'utf-8', timeout: 5_000 }).trim();
-    // Assume OTel support for versions >= 1.0
+    // OTel support: >= 1.0, or 0.146+ (OTel env support landed in 0.146,
+    // verified 2026-08 via los runtime-adapter).
     const versionMatch = out.match(/(\d+)\.(\d+)/);
     if (!versionMatch) return false;
-    return Number(versionMatch[1]) >= 1;
+    const major = Number(versionMatch[1]);
+    const minor = Number(versionMatch[2]);
+    return major >= 1 || (major === 0 && minor >= 146);
   } catch {
     return false;
   }

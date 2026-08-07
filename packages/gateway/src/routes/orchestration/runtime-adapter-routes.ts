@@ -19,6 +19,7 @@ import {
   claudeCodeSupportsOtel,
   type RuntimeKind,
   type GrokRuntimeHandle,
+  type CodexRuntimeHandle,
 } from '@los/agent/runtime-adapter';
 import { getConfig } from '@los/infra/config';
 import { scanGrokAccount, type GrokAccountCandidate } from '@los/infra/discovery';
@@ -57,6 +58,19 @@ export interface GrokRuntimeRouteDependencies {
   }) => GrokRuntimeHandle;
 }
 
+/** Codex runtime dependencies; when absent the branch uses dynamic import. */
+export interface CodexRuntimeDependencies {
+  codexSupportsOtel?: () => boolean;
+  spawnCodex?: (input: Record<string, unknown>) => CodexRuntimeHandle;
+  isOtelBridgeRunning?: () => boolean;
+  startOtelBridge?: (input: { source: string }) => Promise<{ port: number; stop: () => Promise<void> }>;
+}
+
+export interface RuntimeAdapterRouteDependencies extends GrokRuntimeRouteDependencies {
+  /** Overrides for the codex branch (defaults to dynamic import). */
+  codex?: CodexRuntimeDependencies;
+}
+
 const DEFAULT_GROK_DEPENDENCIES: GrokRuntimeRouteDependencies = {
   scanGrokAccount,
   loadProviderAccount,
@@ -67,7 +81,7 @@ const DEFAULT_GROK_DEPENDENCIES: GrokRuntimeRouteDependencies = {
 async function handleRunRuntime(
   req: FastifyRequest,
   reply: FastifyReply,
-  grokDeps: GrokRuntimeRouteDependencies,
+  deps: RuntimeAdapterRouteDependencies,
 ): Promise<unknown> {
   if (!(await requireOperator(req, reply))) return;
   const { kind } = req.params as { kind: string };
@@ -114,14 +128,14 @@ async function handleRunRuntime(
       });
     }
 
-    const account = await grokDeps.loadProviderAccount('xai-grok-default');
+    const account = await deps.loadProviderAccount('xai-grok-default');
     if (!isActiveGrokAccount(account)) {
       return reply.status(409).send({
         error: 'grok_account_not_active',
         message: 'Adopt the discovered Grok CLI login before running this runtime',
       });
     }
-    const candidate = grokDeps.scanGrokAccount();
+    const candidate = deps.scanGrokAccount();
     if (!candidate.available) {
       return reply.status(503).send({
         error: 'grok_login_unavailable',
@@ -140,7 +154,7 @@ async function handleRunRuntime(
     });
 
     try {
-      const handle = grokDeps.spawnGrok({
+      const handle = deps.spawnGrok({
         sessionId,
         workspaceRoot: validatedWorkspace.path,
         prompt: body.prompt,
@@ -162,7 +176,7 @@ async function handleRunRuntime(
       } else {
         if (exit.exitCode === 0) {
           try {
-            await grokDeps.setProviderAccountState({
+            await deps.setProviderAccountState({
               id: account.id,
               expectedCredentialGeneration: account.credentialGeneration,
               state: 'active',
@@ -263,16 +277,24 @@ async function handleRunRuntime(
   }
 
   if (kind === 'codex') {
+    // Availability check BEFORE setupSSE: once SSE headers are written the
+    // reply can only stream events — reply.status() after that throws
+    // "Cannot write headers after they are sent to the client".
+    const adapter = deps.codex ?? await import('@los/agent/runtime-adapter');
+    const codexSupportsOtel = adapter.codexSupportsOtel ?? (await import('@los/agent/runtime-adapter')).codexSupportsOtel;
+
+    if (!codexSupportsOtel()) {
+      return reply.status(400).send({
+        error: 'codex_not_available',
+        message: 'Codex CLI not found. Install and try again.',
+      });
+    }
+
     const send = setupSSE();
     try {
-      const { spawnCodex, codexSupportsOtel, startOtelBridge, isOtelBridgeRunning } = await import('@los/agent/runtime-adapter');
-
-      if (!codexSupportsOtel()) {
-        return reply.status(400).send({
-          error: 'codex_not_available',
-          message: 'Codex CLI not found. Install and try again.',
-        });
-      }
+      const spawnCodex = adapter.spawnCodex ?? (await import('@los/agent/runtime-adapter')).spawnCodex;
+      const startOtelBridge = adapter.startOtelBridge ?? (await import('@los/agent/runtime-adapter')).startOtelBridge;
+      const isOtelBridgeRunning = adapter.isOtelBridgeRunning ?? (await import('@los/agent/runtime-adapter')).isOtelBridgeRunning;
 
       let otelEndpoint: string;
       let bridgeStop = async () => {};
@@ -352,12 +374,12 @@ async function handleBridgeStatus(_req: FastifyRequest, _reply: FastifyReply) {
 export function registerRuntimeAdapterRoutes(
   app: FastifyInstance,
   messageRouter?: MessageRouter,
-  grokDeps: GrokRuntimeRouteDependencies = DEFAULT_GROK_DEPENDENCIES,
+  deps: RuntimeAdapterRouteDependencies = DEFAULT_GROK_DEPENDENCIES,
 ): void {
   const config = getConfig();
 
   // ── Run external agent ───────────────────────────────────
-  app.post('/runtimes/:kind/run', (req, reply) => handleRunRuntime(req, reply, grokDeps));
+  app.post('/runtimes/:kind/run', (req, reply) => handleRunRuntime(req, reply, deps));
 
   // ── OTel bridge management ───────────────────────────────
   app.post('/runtimes/bridge/start', (req, reply) => handleBridgeStart(req, reply));

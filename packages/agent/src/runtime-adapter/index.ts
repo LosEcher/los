@@ -19,6 +19,8 @@ export {
   spawnCodex,
   codexSupportsOtel,
   type CodexSpawnInput,
+  type CodexRuntimeHandle,
+  type CodexRuntimeOutput,
 } from './codex.js';
 
 export {
