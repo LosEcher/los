@@ -3973,8 +3973,7 @@ button:disabled {
   .session-row,
   .todo-row,
   .log-row,
-  .stream-row,
-  .chat-context-bar {
+  .stream-row {
     grid-template-columns: 1fr;
   }
 
@@ -4013,31 +4012,113 @@ button:disabled {
     width: min(300px, calc(100vw - 36px));
   }
 
-  /* Keep plan-approval / steering reachable under sticky mobile chrome. */
+  /* Chat mobile: keep plan-approval / steering above sticky chrome and clickable. */
+  .chat-grid {
+    min-height: 0;
+    gap: var(--space-3);
+  }
+
+  .chat-grid > .main-panel {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    max-height: none;
+    min-height: calc(100dvh - 148px);
+  }
+
+  .chat-grid > .main-panel > .panel-head {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 12px;
+  }
+
+  .chat-grid > .main-panel > .chat-context-bar {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    grid-template-columns: none;
+    position: relative;
+    z-index: 3;
+  }
+
+  .chat-grid > .main-panel > .chat-context-bar .context-chip {
+    flex: 0 0 auto;
+    min-width: 108px;
+    padding: 8px 10px;
+  }
+
+  .chat-grid > .main-panel > .chat-timeline {
+    flex: 1 1 auto;
+    min-height: 180px;
+    max-height: min(48dvh, 420px);
+  }
+
+  .chat-timeline-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 8;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 16px rgb(0 0 0 / 0.18);
+    scroll-margin-top: 76px;
+    scroll-margin-bottom: 12px;
+  }
+
+  .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 7;
+    background: var(--surface);
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
   .skill-picker {
     padding: 4px 8px;
     gap: 2px;
   }
+
   .skill-picker-hint {
     display: none;
   }
-  .chat-grid > .main-panel {
-    height: auto;
-    max-height: none;
-    min-height: 0;
+
+  /* Empty skill picker: one quiet line, no box bulk. */
+  .skill-picker:not(:has(.skill-chip-row)) {
+    border: 0;
+    background: transparent;
+    padding: 0;
   }
-  .chat-timeline-footer {
-    position: relative;
-    z-index: 6;
+
+  .skill-picker:not(:has(.skill-chip-row)) .skill-picker-head {
+    opacity: 0.72;
+    font-size: 11px;
+    gap: 6px;
+  }
+
+  .operator-steering-bar,
+  .plan-approval-strip,
+  .approval-summary,
+  .approval-summary-toggle {
+    scroll-margin-top: 76px;
+    scroll-margin-bottom: 12px;
+  }
+
+  /* Run Evidence is secondary on phone — collapse vertical cost. */
+  .chat-grid > .inspector {
+    position: static;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  .chat-grid > .inspector .panel-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     background: var(--surface);
-  }
-  .composer {
-    position: relative;
-    z-index: 4;
-  }
-  .chat-context-bar {
-    position: relative;
-    z-index: 3;
   }
 }
 

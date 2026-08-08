@@ -22,8 +22,7 @@ test('project-write Chat creates one Work Item before streaming and reuses it', 
   await (await firstResponse).finished();
   await expect(prompt).toBeEnabled();
   await expect(page.getByText('Plan Ready')).toBeVisible();
-  // Mobile sticky chrome can intercept pointer events on the plan-approval strip.
-  await page.getByRole('button', { name: 'Approve & Execute' }).evaluate((el: HTMLElement) => el.click());
+  await page.getByRole('button', { name: 'Approve & Execute' }).click();
   await expect.poll(() => records.some(record => record.path === '/runs/run-chat-e2e/approve')).toBe(true);
   expect(records.find(record => record.path === '/runs/run-chat-e2e/approve')?.body).toEqual({
     planRevision: 2,
