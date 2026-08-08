@@ -218,7 +218,17 @@ async function handleRunEvalCompare(req: FastifyRequest, reply: FastifyReply) {
     return reply.status(400).send({ error: 'baselineFrom, baselineTo, candidateFrom, and candidateTo are required' });
   }
   try {
-    const result = await compareRunEvals({ baselineFrom, baselineTo, candidateFrom, candidateTo });
+    const parsed = parseRunEvalQuery(query);
+    const result = await compareRunEvals({
+      baselineFrom,
+      baselineTo,
+      candidateFrom,
+      candidateTo,
+      runSpecId: parsed.runSpecId as string | undefined,
+      provider: parsed.provider as string | undefined,
+      model: parsed.model as string | undefined,
+      includeNoise: parsed.includeNoise as boolean | undefined,
+    });
     return result;
   } catch (err) {
     return reply.status(422).send({ error: err instanceof Error ? err.message : String(err) });

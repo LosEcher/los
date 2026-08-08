@@ -1,10 +1,5 @@
 # Known Test Failures Baseline — intermittent infra test failures (Promise resolution / DB race)
 # These are pre-existing and vary per run; not caused by any code change under review.
-# Last updated: 2026-08-08
+# Last updated: 2026-08-09
 #
-# 2026-07-31: registry sandbox test ("all mode executes shell commands through
-# the OS sandbox", src/tools/registry.test.ts) fails on macOS where
-# /usr/bin/sandbox-exec exists but fully denies the command (inside.txt is
-# never written). CI containers lack sandbox-exec so the test is skipped
-# there; pre-existing, unrelated to any review change.
-src/tools/registry.test.ts
+# (empty — no known intermittent failures currently)

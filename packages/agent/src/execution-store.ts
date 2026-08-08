@@ -260,6 +260,26 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
     attempt: input.attempt ?? result.entity.attempt,
   });
 
+  // Phase 2 fleet quality: project a single run_eval after terminal run_spec
+  // transitions. Best-effort only — never blocks or rolls back the transition.
+  if (input.entityType === 'run_spec') {
+    const terminal = input.to === 'succeeded'
+      || input.to === 'failed'
+      || input.to === 'blocked'
+      || input.to === 'cancelled';
+    if (terminal) {
+      void import('./run-evals/terminal-projection.js').then(({ scheduleTerminalRunEval }) => {
+        scheduleTerminalRunEval({
+          runSpecId: input.entityId,
+          sessionId: result.entity.sessionId,
+          taskRunId: result.entity.taskRunId,
+          status: String(input.to),
+          reason: input.reason,
+        });
+      }).catch(() => undefined);
+    }
+  }
+
   return {
     entityType: input.entityType,
     entityId: input.entityId,
