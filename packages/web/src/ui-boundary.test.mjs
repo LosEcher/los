@@ -254,6 +254,49 @@ test('daily workflow opens on Inbox and keeps Inbox, Work, Chat, Sessions first'
   assert.match(inboxPage, /getJson<InboxResponse>\('\/inbox\?limit=100'\)/);
 });
 
+test('W4 nav converges daily path, demotes Todos, and keeps Tasks/Run specs in Ops', () => {
+  assert.equal(EN['nav.section.daily'], 'Daily');
+  assert.equal(EN['nav.section.library'], 'Library');
+  assert.equal(EN['nav.section.advanced'], 'Advanced');
+  assert.equal(EN['nav.section.operations'], 'Ops · troubleshoot');
+  assert.equal(EN['nav.todos'], 'Todos (legacy)');
+  assert.equal(EN['nav.tasks'], 'Task runs');
+  assert.equal(EN['nav.runSpecs'], 'Run specs');
+  assert.equal(EN['nav.brandSubtitle'], 'daily agent workspace');
+  // Daily strip: no StatusPill noise (showStatus: false).
+  assert.match(app, /id: 'inbox'[^]*showStatus: false/);
+  assert.match(app, /id: 'work'[^]*showStatus: false/);
+  assert.match(app, /id: 'schedules'[^]*showStatus: false/);
+  assert.match(app, /id: 'chat'[^]*showStatus: false/);
+  assert.match(app, /item\.showStatus === false \? null/);
+  // Todos is advanced/compat, not daily; Tasks + Run specs stay under operations.
+  assert.match(app, /id: 'todos'[^]*sectionKey: 'nav\.section\.advanced'/);
+  assert.match(app, /id: 'tasks'[^]*audience: 'operations'/);
+  assert.match(app, /id: 'run-specs'[^]*audience: 'operations'/);
+  assert.match(app, /function navEyebrow/);
+  // Ops deep-link expands the collapsible section.
+  assert.match(app, /item\?\.audience === 'operations'/);
+  assert.match(app, /setOpsExpanded\(true\)/);
+});
+
+test('Inbox decision rows use human copy and a single primary CTA without technical ids', () => {
+  assert.equal(EN['work.inbox.needLabel'], 'You need to:');
+  assert.equal(EN['work.inbox.effectLabel'], 'This button will:');
+  assert.equal(EN['work.inbox.action.review_plan'], 'Review plan');
+  assert.match(inboxPage, /export function buildInboxDecision/);
+  assert.match(inboxPage, /data-testid="inbox-decision-row"/);
+  assert.match(inboxPage, /data-testid="inbox-primary-action"/);
+  assert.match(inboxPage, /inbox-primary-cta/);
+  assert.match(inboxPage, /work\.inbox\.needLabel/);
+  assert.match(inboxPage, /work\.inbox\.whyLabel/);
+  assert.match(inboxPage, /work\.inbox\.effectLabel/);
+  // Default meta must not surface runSpecId codes; plan approval is on Work, not a second Inbox CTA.
+  assert.doesNotMatch(inboxPage, /entry\.runSpecId\.slice|runSpecId\.slice\(0,\s*12\)/);
+  assert.doesNotMatch(between(inboxPage, 'function InboxRow', 'function SummaryCount'), /onApprovePlan|approve-action/);
+  assert.match(styles, /\.inbox-decision/);
+  assert.match(styles, /\.inbox-primary-cta/);
+});
+
 test('Schedules exposes bounded presets, trigger preview, operator actions, and run history', () => {
   assert.equal(EN['nav.schedules'], 'Schedules');
   assert.match(app, /\{ id: 'schedules', labelKey: 'nav.schedules'/);
@@ -322,6 +365,31 @@ test('Work reviews plans in the daily surface and proxies Work Item routes', () 
   assert.match(viteConfig, /'\/inbox': 'http:\/\/127\.0\.0\.1:8080'/);
   assert.match(viteConfig, /'\/work-items': 'http:\/\/127\.0\.0\.1:8080'/);
   assert.match(styles, /@media \(max-width: 780px\)[^]*\.daily-split,[^]*\.work-split/);
+});
+
+test('Work decision layer uses Outcome Card and folds technical evidence behind Debug', () => {
+  const workGuidance = readFileSync(new URL('./pages/work-guidance.tsx', import.meta.url), 'utf8');
+  assert.equal(EN['work.tech.summary'], 'Technical details');
+  assert.equal(EN['work.debugLabel'], 'Debug');
+  assert.equal(EN['work.outcome.checksLabel'], 'Checks');
+  assert.match(workPage, /<OutcomeCard item=\{item\} \/>/);
+  assert.match(workPage, /work-primary-cta/);
+  assert.match(workPage, /data-testid="work-technical-details"/);
+  assert.match(workPage, /data-testid="work-action-strip"/);
+  assert.match(workPage, /readWorkDebugPreference/);
+  assert.match(workPage, /writeWorkDebugPreference/);
+  assert.match(workPage, /primaryActionKey/);
+  // Technical ids live only inside TechnicalEvidence / Lineage (folded), not the default decision strip.
+  assert.match(workPage, /function TechnicalEvidence/);
+  assert.match(workPage, /function Lineage/);
+  assert.doesNotMatch(between(workPage, '<OutcomeCard item={item} />', '<WorkReviewPanel'), /latestRunSpecId|latestTaskRunId|lineage-section/);
+  assert.match(workGuidance, /data-testid="work-outcome-card"/);
+  assert.match(workGuidance, /export function buildWorkOutcome/);
+  assert.match(workGuidance, /export function primaryActionKey/);
+  assert.match(workGuidance, /WORK_DEBUG_STORAGE_KEY/);
+  assert.match(styles, /\.outcome-card/);
+  assert.match(styles, /\.work-technical/);
+  assert.match(styles, /\.work-primary-cta/);
 });
 
 test('project-write chat intake creates and reuses a Work Item before streaming', () => {
