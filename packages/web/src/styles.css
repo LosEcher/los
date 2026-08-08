@@ -4012,6 +4012,33 @@ button:disabled {
     grid-template-columns: 1fr;
     width: min(300px, calc(100vw - 36px));
   }
+
+  /* Keep plan-approval / steering reachable under sticky mobile chrome. */
+  .skill-picker {
+    padding: 4px 8px;
+    gap: 2px;
+  }
+  .skill-picker-hint {
+    display: none;
+  }
+  .chat-grid > .main-panel {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+  .chat-timeline-footer {
+    position: relative;
+    z-index: 6;
+    background: var(--surface);
+  }
+  .composer {
+    position: relative;
+    z-index: 4;
+  }
+  .chat-context-bar {
+    position: relative;
+    z-index: 3;
+  }
 }
 
 /* ── Evals dashboard ─────────────────────────────── */

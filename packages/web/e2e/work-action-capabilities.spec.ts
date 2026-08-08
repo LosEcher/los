@@ -51,9 +51,10 @@ test('Work reloads revised approval capabilities and hides unavailable actions',
   await page.goto('/#work');
   await expect(page.getByRole('heading', { name: 'Capability approval item' })).toBeVisible();
   await page.getByLabel('Approval reason').fill('reviewed revision one');
-  await page.getByRole('button', { name: 'Approve plan' }).click();
+  await page.getByRole('button', { name: /Approve plan/ }).click();
 
-  await expect(page.getByText('409 Conflict')).toBeVisible();
+  // UI maps approval_capability_stale to a human-readable banner (not raw "409 Conflict").
+  await expect(page.getByText(/plan changed after this approval/i)).toBeVisible();
   await expect(page.getByText('revision 2', { exact: true })).toBeVisible();
   expect(approvalBodies[0]).toMatchObject({
     runSpecId: 'run-capability',
@@ -62,22 +63,22 @@ test('Work reloads revised approval capabilities and hides unavailable actions',
   });
 
   await page.getByLabel('Approval reason').fill('reviewed revision two');
-  await page.getByRole('button', { name: 'Approve plan' }).click();
+  await page.getByRole('button', { name: /Approve plan/ }).click();
   await expect.poll(() => approvalBodies.length).toBe(2);
   expect(approvalBodies[1]).toMatchObject({
     runSpecId: 'run-capability',
     planRevision: 2,
     contractHash: 'sha256:work-capability-2',
   });
-  await expect(page.getByRole('button', { name: 'Approve plan' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Approve plan/ })).toHaveCount(0);
 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Capability approval item' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve plan' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Approve plan/ })).toHaveCount(0);
 
   await page.getByRole('button', { name: /Failed planning item/ }).click();
   await expect(page.getByRole('heading', { name: 'Failed planning item' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve plan' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Approve plan/ })).toHaveCount(0);
   await expect(page.getByLabel('Approval reason')).toHaveCount(0);
 });
 
