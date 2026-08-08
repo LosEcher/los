@@ -5,6 +5,7 @@ import { getDb } from '@los/infra/db';
 
 import {
   claimDueScheduledWorkItems,
+  claimQueuedScheduledWorkRuns,
   createScheduledWorkItem,
   loadScheduledWorkItem,
   _deriveScheduledFeedAnalysisDispatch,
@@ -61,6 +62,74 @@ test('due schedule claim is unique and an expired lease consumes one retry attem
     assert.equal(recovery.recovered.length, 1);
     assert.equal(recovery.recovered[0]?.attemptCount, 2);
     assert.equal(recovery.recovered[0]?.claimOwner, 'scheduler-b');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('due and queued claims share the schedule concurrency lock', async () => {
+  const now = new Date('2026-07-20T00:02:00.000Z');
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-claim-race-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit', goalTemplate: 'Summarize Inbox',
+      editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    catchUpPolicy: 'run_once', maxConcurrentRuns: 1,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    await getDb().query(
+      `INSERT INTO scheduled_work_item_runs
+         (id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts,result_summary_json)
+       VALUES ($1,$2,$3,'retry','queued',1,2,'{}'::jsonb)`,
+      [`scheduled-queued-race-${Date.now()}`, schedule.id, '2026-07-20T00:00:30.000Z'],
+    );
+    const [due, queued] = await Promise.all([
+      claimDueScheduledWorkItems({ ownerId: 'due-owner', now, limit: 1 }),
+      claimQueuedScheduledWorkRuns({ ownerId: 'queued-owner', now, limit: 1 }),
+    ]);
+    const active = await getDb().query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM scheduled_work_item_runs
+       WHERE schedule_id=$1 AND status IN ('queued','claimed','running','awaiting_approval')`,
+      [schedule.id],
+    );
+    assert.ok(Number(active.rows[0]!.count) <= 1, `active runs exceeded limit: due=${due.length}, queued=${queued.length}`);
+    assert.equal(due.length + queued.length, 1, 'exactly one claim should reserve the single slot');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('queued claims honor maxConcurrentRuns greater than one', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-claim-cap-${Date.now()}`,
+    trigger: { kind: 'interval', expression: '1h', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit', goalTemplate: 'Summarize Inbox',
+      editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    maxConcurrentRuns: 2,
+  });
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      await getDb().query(
+        `INSERT INTO scheduled_work_item_runs
+           (id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts,result_summary_json)
+         VALUES ($1,$2,$3,'retry','queued',1,2,'{}'::jsonb)`,
+        [`scheduled-queued-cap-${Date.now()}-${index}`, schedule.id,
+          new Date(Date.now() + index * 1_000)],
+      );
+    }
+    const claimed = await claimQueuedScheduledWorkRuns({ ownerId: 'queued-owner', limit: 10 });
+    assert.equal(claimed.length, 2);
+    const pending = await getDb().query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM scheduled_work_item_runs
+       WHERE schedule_id=$1 AND status='queued'`,
+      [schedule.id],
+    );
+    assert.equal(pending.rows[0]!.count, '1');
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
@@ -542,8 +611,15 @@ test('approving a run recovers the slot skipped by concurrency_limit as an appro
 
     // The catch-up run must be queued, approved (no second approval round trip)
     // and reference the missed slot.
-    const queued = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
-    const catchUp = queued.find(item => item.triggerKind === 'retry');
+    let queued = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
+    let catchUp = queued.find(item => item.triggerKind === 'retry');
+    // maxConcurrentRuns=1 means the originally approved slot may occupy the
+    // only claim slot first; the catch-up is then picked by the next tick.
+    if (!catchUp) {
+      for (const item of queued) await executeScheduledWorkRun(item);
+      queued = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
+      catchUp = queued.find(item => item.triggerKind === 'retry');
+    }
     assert.ok(catchUp, 'a catch-up run must be queued after approval');
     assert.equal(catchUp.resultSummary?.approvedBy, 'operator');
     assert.equal(catchUp.resultSummary?.catchUpOf, skippedId);

@@ -23,6 +23,7 @@ export async function heartbeatNode(
   lifecycle: ExecutorRuntimeLifecycle,
   gatewayUrl?: string,
   fileSyncFolders?: Array<{ name: string; localPath: string; mode?: string }>,
+  agentKey?: string,
 ): Promise<void> {
   const capabilities: Record<string, unknown> = {
     run_agent: lifecycle.acceptingTasks,
@@ -82,7 +83,10 @@ export async function heartbeatNode(
   if (gatewayUrl) {
     const res = await fetch(`${gatewayUrl}/nodes/heartbeat`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(agentKey ? { authorization: `Bearer ${agentKey}` } : {}),
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10_000),
     });

@@ -6,7 +6,7 @@ import { verifyJwt, getJwtSecret } from './auth-store.js';
  * Paths that never require auth.
  */
 const EXACT_PUBLIC_PATHS = ['/', '/favicon.ico'];
-const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/nodes/heartbeat', '/auth/login', '/auth/register', '/auth/status'];
+const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/auth/login', '/auth/register', '/auth/status'];
 
 /** Paths that are public only for specific HTTP methods. */
 const METHOD_PUBLIC_PATHS: Record<string, Set<string>> = {
@@ -24,6 +24,15 @@ export default async function authMiddleware(
   const { config } = opts;
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
+    // Executor heartbeats are a control-plane write, even when user auth is
+    // disabled for local development. When a shared executor key is configured
+    // it is the only credential accepted for this route.
+    if (isExecutorHeartbeatPath(req.url, req.method) && config.executor.agentKey) {
+      const bearer = extractBearerToken(req);
+      if (bearer && bearer === config.executor.agentKey) return;
+      return reply.code(401).send({ error: 'executor heartbeat authentication required' });
+    }
+
     if (!config.auth.enabled) return;
 
     if (isPublicPath(req.url, req.method)) return;
@@ -80,4 +89,9 @@ function isPublicPath(url: string | undefined, method: string): boolean {
   if (methods && methods.has(method)) return true;
   if (PREFIX_PUBLIC_PATHS.some(p => path.startsWith(p))) return true;
   return false;
+}
+
+function isExecutorHeartbeatPath(url: string | undefined, method: string): boolean {
+  if (method !== 'POST' || !url) return false;
+  return (url.split('?')[0] || url) === '/nodes/heartbeat';
 }

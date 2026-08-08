@@ -17,6 +17,7 @@ import type {
 } from './types.js';
 
 const ACTIVE_SQL = "('queued','claimed','running','awaiting_approval')";
+const CLAIMED_ACTIVE_SQL = "('claimed','running','awaiting_approval')";
 const LEGAL_TRANSITIONS: Record<ScheduledWorkRunStatus, ScheduledWorkRunStatus[]> = {
   queued: ['claimed', 'skipped', 'cancelled'],
   claimed: ['running', 'awaiting_approval', 'skipped', 'failed', 'cancelled'],
@@ -267,24 +268,59 @@ export async function claimQueuedScheduledWorkRuns(input: {
 }): Promise<ScheduledWorkItemRun[]> {
   await ensureScheduledWorkStore();
   const now = input.now ?? new Date();
-  const rows = await getDb().query<ScheduledWorkRunRow>(
-    `WITH selected AS (
-       SELECT r.id FROM scheduled_work_item_runs r
-       JOIN scheduled_work_items s ON s.id=r.schedule_id
-       WHERE r.status='queued' AND s.status='enabled' AND s.circuit_state IN ('closed','half_open')
-         AND NOT EXISTS (
-           SELECT 1 FROM scheduled_work_item_runs active
-           WHERE active.schedule_id=r.schedule_id AND active.status IN ('claimed','running','awaiting_approval')
-         )
-       ORDER BY r.scheduled_for,r.id LIMIT $1 FOR UPDATE OF r SKIP LOCKED
-     )
-     UPDATE scheduled_work_item_runs r SET status='claimed',claim_owner=$2,
-       lease_expires_at=$3,updated_at=now()
-     FROM selected WHERE r.id=selected.id RETURNING r.*`,
-    [Math.min(50, Math.max(1, input.limit ?? 10)), input.ownerId,
-      new Date(now.getTime() + (input.leaseMs ?? 60_000))],
-  );
-  return rows.rows.map(runFromRow);
+  const target = Math.min(50, Math.max(1, input.limit ?? 10));
+  const claimed: ScheduledWorkItemRun[] = [];
+  await withDbClient(async client => {
+    await client.query('BEGIN');
+    try {
+      // Lock the schedule row together with the queued run. Due-slot claims
+      // use the same schedule-row lock, so active-count checks cannot race a
+      // concurrent due claim from another gateway process.
+      const blockedSchedules: string[] = [];
+      for (let attempt = 0; claimed.length < target && attempt < target * 4; attempt += 1) {
+        const selected = await client.query<ScheduledWorkRunRow & { max_concurrent_runs: number; circuit_state: string }>(
+          `SELECT r.*, s.max_concurrent_runs
+             FROM scheduled_work_item_runs r
+             JOIN scheduled_work_items s ON s.id=r.schedule_id
+            WHERE r.status='queued' AND s.status='enabled'
+              AND s.circuit_state IN ('closed','half_open')
+              AND NOT (r.schedule_id = ANY($1::text[]))
+            ORDER BY r.scheduled_for,r.id
+            LIMIT 1 FOR UPDATE OF s,r SKIP LOCKED`,
+          [blockedSchedules],
+        );
+        const row = selected.rows[0];
+        if (!row) break;
+        const active = await client.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM scheduled_work_item_runs
+            WHERE schedule_id=$1 AND status IN ${CLAIMED_ACTIVE_SQL}`,
+          [row.schedule_id],
+        );
+        if (Number(active.rows[0]?.count ?? 0) >= row.max_concurrent_runs) {
+          blockedSchedules.push(row.schedule_id);
+          continue;
+        }
+        const updated = await client.query<ScheduledWorkRunRow>(
+          `UPDATE scheduled_work_item_runs
+              SET status='claimed',claim_owner=$2,lease_expires_at=$3,updated_at=now()
+            WHERE id=$1 AND status='queued' RETURNING *`,
+          [row.id, input.ownerId, new Date(now.getTime() + (input.leaseMs ?? 60_000))],
+        );
+        if (updated.rows[0]) {
+          claimed.push(runFromRow(updated.rows[0]));
+          // A half_open schedule admits exactly one probe until its outcome
+          // closes or re-opens the circuit, including queued retry runs.
+          if (row.circuit_state === 'half_open') blockedSchedules.push(row.schedule_id);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  });
+  return claimed;
 }
 
 export async function recoverExpiredScheduledWorkRuns(input: {

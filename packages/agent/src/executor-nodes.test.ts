@@ -172,6 +172,55 @@ test('executor heartbeat preserves draining status until promoted', async () => 
   }
 });
 
+test('executor heartbeat claims are untrusted until probed and endpoint changes invalidate verification', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const nodeId = `test-heartbeat-untrusted-${Date.now()}`;
+  try {
+    await ensureExecutorNodeStore();
+
+    const heartbeat = await upsertExecutorNodeHeartbeat({
+      nodeId,
+      nodeKind: 'executor',
+      baseUrl: 'http://127.0.0.1:8090',
+      connectModes: ['agent_http'],
+      connectConfig: { agent_http: { baseUrl: 'http://127.0.0.1:8090' } },
+      capabilities: { run_agent: true },
+    });
+    assert.equal((heartbeat.verified.agent_http as Record<string, unknown>).ok, false);
+    assert.equal(heartbeat.execution.candidate, false);
+
+    const probed = await recordExecutorNodeProbe({
+      nodeId,
+      status: 'online',
+      connectModes: ['agent_http'],
+      connectConfig: { agent_http: { baseUrl: 'http://127.0.0.1:8090' } },
+      verified: {
+        agent_http: {
+          ok: true,
+          source: 'probe',
+          endpoint: 'http://127.0.0.1:8090/health',
+        },
+      },
+    });
+    assert.equal(probed.execution.candidate, true);
+
+    const hijacked = await upsertExecutorNodeHeartbeat({
+      nodeId,
+      nodeKind: 'executor',
+      baseUrl: 'http://attacker.invalid:8090',
+      connectModes: ['agent_http'],
+      connectConfig: { agent_http: { baseUrl: 'http://attacker.invalid:8090' } },
+      capabilities: { run_agent: true },
+    });
+    assert.equal((hijacked.verified.agent_http as Record<string, unknown>).ok, false);
+    assert.equal(hijacked.execution.candidate, false);
+  } finally {
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
 test('executor heartbeat merges runtime modes with existing management paths', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
