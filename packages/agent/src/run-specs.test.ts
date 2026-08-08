@@ -12,6 +12,7 @@ import {
   reviseRunSpecPlan,
   updateRunSpecResult,
 } from './run-specs.js';
+import { _validateRunSpecResult as validateRunSpecResult } from './run-spec-result.js';
 import { listVerificationRecordsForRunSpec } from './verification-records.js';
 import { transitionExecutionState } from './execution-store.js';
 import { listSessionEvents } from './session-events.js';
@@ -720,6 +721,49 @@ test('updateRunSpecResult persists a failed subagent result with error', async (
     const loaded = await loadRunSpec(id);
     assert.equal(loaded?.result?.status, 'failed');
     assert.equal(loaded?.result?.error, 'loop budget exhausted');
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('validateRunSpecResult accepts a complete valid result and normalizes optional fields', () => {
+  const valid = validateRunSpecResult({
+    status: 'completed',
+    text: 'done',
+    loopCount: 3,
+    totalTokens: 1200,
+    completedAt: '2026-08-08T10:00:00.000Z',
+  });
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.result.status, 'completed');
+    assert.equal(valid.result.loopCount, 3);
+    assert.equal(valid.result.error, undefined);
+  }
+});
+
+test('validateRunSpecResult rejects malformed payloads explicitly', () => {
+  assert.equal(validateRunSpecResult(null).ok, false);
+  assert.equal(validateRunSpecResult({ status: 'running', text: 'x', completedAt: '2026-08-08T10:00:00Z' }).ok, false);
+  assert.equal(validateRunSpecResult({ status: 'completed', text: 42, completedAt: '2026-08-08T10:00:00Z' }).ok, false);
+  assert.equal(validateRunSpecResult({ status: 'completed', text: 'x', completedAt: 'not-a-date' }).ok, false);
+  assert.equal(validateRunSpecResult({ status: 'completed', text: 'x', completedAt: '2026-08-08T10:00:00Z', loopCount: -1 }).ok, false);
+  assert.equal(validateRunSpecResult({ status: 'completed', text: 'x', completedAt: '2026-08-08T10:00:00Z', totalTokens: 1.5 }).ok, true);
+});
+
+test('updateRunSpecResult rejects contract-violating results before persistence', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    await ensureRunSpecStore();
+    await assert.rejects(
+      () => updateRunSpecResult('no-such-run-spec', {
+        status: 'completed' as const,
+        text: 'x',
+        completedAt: 'bad-date',
+      }),
+      /run-spec result contract validation failed/,
+    );
   } finally {
     await closeDb().catch(() => undefined);
   }

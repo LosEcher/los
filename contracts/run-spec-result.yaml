@@ -1,0 +1,48 @@
+contract: los.run-spec-result
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Structured JSON contract for run_specs.result_json — the durable outcome of
+  a completed/failed subagent (or delegated) run persisted via
+  updateRunSpecResult. los validates writes with a single centralized
+  function instead of untyped JSON.stringify passthrough; invalid input is
+  rejected explicitly (never silently persisted).
+type: object
+schemas:
+  RunSpecResult:
+    required: [status, text, completedAt]
+    status:
+      type: string
+      enum: [completed, failed]
+    text:
+      type: string
+    loopCount:
+      type: number
+      minimum: 0
+      optional: true
+    totalTokens:
+      type: number
+      minimum: 0
+      optional: true
+    error:
+      type: string
+      optional: true
+    completedAt:
+      type: string
+      format: date-time
+persistence:
+  - run_specs.result_json (JSONB)
+validation:
+  - updateRunSpecResult rejects invalid shapes before the UPDATE
+  - normalizeRunSpecResult (read path) keeps its tolerant coercion
+nonGoals:
+  - Changing run_spec status transitions (owned by scheduler/approval paths).
+  - Enforcing the shape of runContract/goal inside result_json (separate contract).
+verification:
+  - ./tools/check-contracts.sh
+  - pnpm --filter @los/agent test
+  - pnpm check
+references:
+  - docs/research/optimization-plan-2026-08.md (D2 / result persistence)
+  - contracts/self-check-output.yaml (shared validation style with D4)
