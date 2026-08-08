@@ -137,6 +137,7 @@ export const zhAssets2: Assets2Keys = {
   'assets.obs.sectionAria': '执行可观测投影',
   'assets.obs.title': '执行投影',
   'assets.obs.loading': '正在加载执行投影...',
+  'assets.obs.unavailable': '该会话尚无执行投影。',
   'assets.obs.loadError': '投影不可用：{error}',
   'assets.obs.fingerprintKnown': '指纹已知',
   'assets.obs.fingerprintUnknown': '指纹未知',

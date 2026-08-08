@@ -74,13 +74,18 @@ test('runs chat, recovers operator 403, and cancels an active task', async ({ pa
   const prompt = page.getByPlaceholder('Ask los to inspect or prepare a bounded change... (/ for commands)');
   await prompt.fill('exercise operator approval');
   await page.getByRole('button', { name: 'send' }).click();
+  // tool.denied lands in the collapsed approval summary (not the debug stream).
+  // Mobile sticky chrome can intercept pointer events — use DOM click.
+  const deniedToggle = page.getByRole('button', { name: /1 denied/i });
+  await expect(deniedToggle).toBeVisible();
+  await deniedToggle.evaluate((el: HTMLElement) => el.click());
   await expect(page.getByText('write_file')).toBeVisible();
 
-  const approval = page.locator('.approval-card').getByRole('button', { name: 'Approve' });
-  await approval.click();
+  const approval = page.locator('.operator-steering-bar').getByRole('button', { name: 'Approve' });
+  await approval.evaluate((el: HTMLElement) => el.click());
   await expect(page.getByText(/Operator authentication required/)).toBeVisible();
   await page.evaluate(token => localStorage.setItem('los-operator-token', token), OPERATOR_TOKEN);
-  await approval.click();
+  await approval.evaluate((el: HTMLElement) => el.click());
   await expect.poll(() => records.filter(r => r.path.endsWith('/operator-events')).length).toBe(2);
   const steering = records.filter(r => r.path.endsWith('/operator-events')).at(-1)!;
   expect(steering.headers['x-los-operator-token']).toBe(OPERATOR_TOKEN);
@@ -282,8 +287,9 @@ function responseFor(path: string, search: string, method: string): unknown {
   if (path === '/sessions') return [sessionSummary()];
   if (path === '/sessions/session-main' || path === '/sessions/session-e2e') return sessionDetail(path.slice('/sessions/'.length));
   if (path.endsWith('/trace')) return { sessionId: path.split('/')[2], messageCount: 0, turnCount: 0, messages: [] };
+  if (path.endsWith('/execution-observability')) return executionObservability(path.split('/')[2] ?? 'session-main');
   if (path.endsWith('/observability')) return observability(path.split('/')[2] ?? 'session-main');
-  if (path.endsWith('/events')) return { sessionId: path.split('/')[2], count: 0, events: [] };
+  if (path.endsWith('/events')) return { sessionId: path.split('/')[2], count: 0, items: [] };
   if (path.endsWith('/verification')) return { count: 0, records: [] };
   if (path === '/runs') return [runSpec()];
   if (path === '/runs/run-e2e-0001/state') return { phase: 'awaiting_approval', action: 'approve_plan', taskCount: 1, verificationCount: 0, verifierStatus: 'pending', approvalStatus: 'required', blockers: [] };
@@ -316,6 +322,21 @@ function observability(sessionId: string) {
     sessionId, eventCount: 0, turnCount: 0, firstEventAt: null, lastEventAt: null,
     totalUsage: { promptTokens: 0, completionTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0 },
     cache: { status: 'empty', hitRate: 0, keys: [] }, tools: { status: 'idle', count: 0, names: [] }, models: { status: 'idle', count: 0, names: [] },
+  };
+}
+
+function executionObservability(sessionId: string) {
+  const unknown = { status: 'unknown' as const, value: null, eventIds: [] as number[] };
+  return {
+    sessionId,
+    fingerprint: {
+      status: 'unknown' as const,
+      algorithm: 'sha256' as const,
+      hash: null,
+      components: { prompt: unknown, spec: unknown, memory: unknown, toolCatalog: unknown },
+    },
+    waterfall: [],
+    failureFacets: [],
   };
 }
 

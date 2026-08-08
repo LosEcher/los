@@ -40,7 +40,7 @@ export function ExecutionObservabilityPanel({
           <Activity size={14} />
           <strong>{t('assets.obs.title')}</strong>
         </div>
-        {query.data ? (
+        {isObservabilityProjection(query.data) ? (
           <Badge tone={query.data.fingerprint.status === 'known' ? 'ok' : 'muted'}>
             {query.data.fingerprint.status === 'known'
               ? t('assets.obs.fingerprintKnown')
@@ -56,9 +56,29 @@ export function ExecutionObservabilityPanel({
         </div>
       ) : null}
 
-      {query.data ? <ObservabilityBody data={query.data} compact={compact} /> : null}
+      {isObservabilityProjection(query.data) ? (
+        <ObservabilityBody data={query.data} compact={compact} />
+      ) : query.data && !query.isLoading ? (
+        <EmptyText text={t('assets.obs.unavailable')} />
+      ) : null}
     </section>
   );
+}
+
+/** Guard incomplete API payloads so Chat/Sessions never white-screen on partial mocks or older gateways. */
+export function isObservabilityProjection(
+  value: unknown,
+): value is ExecutionObservabilityProjection {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  const fingerprint = record.fingerprint;
+  if (!fingerprint || typeof fingerprint !== 'object') return false;
+  const fp = fingerprint as Record<string, unknown>;
+  if (fp.status !== 'known' && fp.status !== 'unknown') return false;
+  if (!fp.components || typeof fp.components !== 'object') return false;
+  if (!Array.isArray(record.waterfall)) return false;
+  if (!Array.isArray(record.failureFacets)) return false;
+  return true;
 }
 
 function ObservabilityBody({

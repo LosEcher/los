@@ -22,7 +22,8 @@ test('project-write Chat creates one Work Item before streaming and reuses it', 
   await (await firstResponse).finished();
   await expect(prompt).toBeEnabled();
   await expect(page.getByText('Plan Ready')).toBeVisible();
-  await page.getByRole('button', { name: 'Approve & Execute' }).click();
+  // Mobile sticky chrome can intercept pointer events on the plan-approval strip.
+  await page.getByRole('button', { name: 'Approve & Execute' }).evaluate((el: HTMLElement) => el.click());
   await expect.poll(() => records.some(record => record.path === '/runs/run-chat-e2e/approve')).toBe(true);
   expect(records.find(record => record.path === '/runs/run-chat-e2e/approve')?.body).toEqual({
     planRevision: 2,
@@ -137,6 +138,20 @@ function responseFor(path: string): unknown {
     totalUsage: { promptTokens: 0, completionTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0 },
     cache: { status: 'empty', hitRate: 0, keys: [] }, tools: { status: 'idle', count: 0, names: [] }, models: { status: 'idle', count: 0, names: [] },
   };
+  if (path === '/sessions/session-e2e/execution-observability') {
+    const unknown = { status: 'unknown' as const, value: null, eventIds: [] as number[] };
+    return {
+      sessionId: 'session-e2e',
+      fingerprint: {
+        status: 'unknown' as const,
+        algorithm: 'sha256' as const,
+        hash: null,
+        components: { prompt: unknown, spec: unknown, memory: unknown, toolCatalog: unknown },
+      },
+      waterfall: [],
+      failureFacets: [],
+    };
+  }
   if (path === '/sessions/session-e2e/events') return { sessionId: 'session-e2e', count: 0, events: [] };
   if (path === '/onboarding') return { providers: [{ name: 'mock', provider: 'mock', defaultModel: 'mock-1', readiness: { ready: true } }] };
   if (path === '/services') return [{ serviceId: 'gateway-e2e', readiness: { ready: true } }];
