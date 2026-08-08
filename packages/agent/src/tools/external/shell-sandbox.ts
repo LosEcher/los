@@ -79,11 +79,20 @@ export interface SandboxedShellInput {
   timeoutMs: number;
 }
 
+/** Sandbox isolation level. Maps to config agent.sandboxMode. */
+export type SandboxMode = 'readonly' | 'workspace-write' | 'sandbox';
+
 export interface SandboxedShellOptions {
   /** Permit the unconstrained native shell when no OS sandbox backend is
    *  available. Defaults to false: execution is denied instead (Claude-style
    *  deny; wired to config agent.allowNativeShell). */
   allowNativeShell?: boolean;
+  /** Filesystem/network isolation level. Defaults to 'workspace-write':
+   *  read-only root, writes confined to the workspace cwd (current
+   *  behavior). 'readonly' denies writes entirely; 'sandbox' keeps the OS
+   *  sandbox with workspace writes (alias for the strictest enforced
+   *  profile). Wired to config agent.sandboxMode. */
+  sandboxMode?: SandboxMode;
 }
 
 export interface SandboxedShellResult {
@@ -135,6 +144,7 @@ export async function runSandboxedShell(
   options: SandboxedShellOptions = {},
 ): Promise<SandboxedShellResult> {
   const allowNative = options.allowNativeShell === true;
+  const sandboxMode = options.sandboxMode ?? 'workspace-write';
   const decision = resolveSandboxBackend(
     platform(),
     findExecutable('/usr/bin/sandbox-exec') !== null,
@@ -144,9 +154,9 @@ export async function runSandboxedShell(
 
   switch (decision) {
     case 'macos-sandbox-exec':
-      return runWithMacSandboxExec('/usr/bin/sandbox-exec', input);
+      return runWithMacSandboxExec('/usr/bin/sandbox-exec', input, sandboxMode);
     case 'linux-bwrap':
-      return runWithBwrap('/usr/bin/bwrap', input);
+      return runWithBwrap('/usr/bin/bwrap', input, sandboxMode);
     case 'native':
       log.warn('no OS sandbox backend available; allowNativeShell=true — running unconstrained native shell');
       return runWithNativeShell(input);
@@ -163,20 +173,65 @@ export async function runSandboxedShell(
 
 // ── macOS sandbox-exec ──────────────────────────────────
 
-function runWithMacSandboxExec(
-  sandboxExec: string,
-  input: SandboxedShellInput,
-): Promise<SandboxedShellResult> {
-  const cwd = realpathSync(input.cwd);
-  const profile = [
+/**
+ * Build the macOS sandbox-exec profile for a workspace cwd.
+ *
+ * Profile differences by sandboxMode (default behavior for
+ * 'workspace-write'/'sandbox' is unchanged):
+ * - 'readonly':       no write permission at all (read-only root + cwd)
+ * - 'workspace-write': reads anywhere, writes confined to cwd (current profile)
+ * - 'sandbox':        same enforced profile as workspace-write (OS sandbox is
+ *                     the strictest backend we run; network stays denied)
+ */
+export function _buildMacSandboxProfile(cwd: string, sandboxMode: SandboxMode = 'workspace-write'): string {
+  const writeClause = sandboxMode === 'readonly'
+    ? []
+    : [`(allow file-write* (subpath "${escapeSandboxString(cwd)}"))`];
+  return [
     '(version 1)',
     '(deny default)',
     '(allow process*)',
     '(allow sysctl-read)',
     '(allow file-read*)',
-    `(allow file-write* (subpath "${escapeSandboxString(cwd)}"))`,
+    ...writeClause,
     '(deny network*)',
   ].join('\n');
+}
+
+/**
+ * Build bubblewrap args for a workspace cwd.
+ *
+ * - 'readonly':        cwd mounted read-only (--ro-bind)
+ * - 'workspace-write': cwd mounted writable (--bind, current behavior)
+ * - 'sandbox':         same as workspace-write
+ */
+export function _buildBwrapArgs(
+  bwrapPath: string,
+  cwd: string,
+  command: string,
+  sandboxMode: SandboxMode = 'workspace-write',
+): string[] {
+  const bindFlag = sandboxMode === 'readonly' ? '--ro-bind' : '--bind';
+  return [
+    '--ro-bind', '/', '/',
+    bindFlag, cwd, cwd,
+    '--chdir', cwd,
+    '--unshare-net',
+    '--die-with-parent',
+    '--proc', '/proc',
+    '--dev', '/dev',
+    '--tmpfs', '/tmp',
+    '--', '/bin/bash', '--noprofile', '--norc', '-lc', command,
+  ];
+}
+
+function runWithMacSandboxExec(
+  sandboxExec: string,
+  input: SandboxedShellInput,
+  sandboxMode: SandboxMode,
+): Promise<SandboxedShellResult> {
+  const cwd = realpathSync(input.cwd);
+  const profile = _buildMacSandboxProfile(cwd, sandboxMode);
 
   return new Promise((resolve) => {
     execFile(
@@ -206,20 +261,11 @@ function runWithMacSandboxExec(
 function runWithBwrap(
   bwrapPath: string,
   input: SandboxedShellInput,
+  sandboxMode: SandboxMode,
 ): Promise<SandboxedShellResult> {
   const cwd = realpathSync(input.cwd);
   // Create a minimal container: read-only root, writable cwd, no network
-  const args = [
-    '--ro-bind', '/', '/',
-    '--bind', cwd, cwd,
-    '--chdir', cwd,
-    '--unshare-net',
-    '--die-with-parent',
-    '--proc', '/proc',
-    '--dev', '/dev',
-    '--tmpfs', '/tmp',
-    '--', '/bin/bash', '--noprofile', '--norc', '-lc', input.command,
-  ];
+  const args = _buildBwrapArgs(bwrapPath, cwd, input.command, sandboxMode);
 
   return new Promise((resolve) => {
     execFile(
