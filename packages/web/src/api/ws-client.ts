@@ -2,7 +2,12 @@
  * WebSocket client for los session event streams.
  * Connects to GET /sessions/:id/stream/ws (NDJSON transport).
  * Provides reconnection with backoff and since-based catch-up replay.
+ *
+ * Browser WebSocket cannot set custom headers, so auth tokens are passed as
+ * query params (gateway auth-middleware accepts access_token / operator_token).
  */
+
+import { getAuthToken, getOperatorToken } from './client.js';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'closed';
 
@@ -41,8 +46,14 @@ export function connectWsStream(
   function connect() {
     if (closed) return;
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    const sinceParam = lastId > 0 ? `?since=${lastId}` : '';
-    const url = `${protocol}://${location.host}/sessions/${sessionId}/stream/ws${sinceParam}`;
+    const params = new URLSearchParams();
+    if (lastId > 0) params.set('since', String(lastId));
+    const authToken = getAuthToken();
+    const operatorToken = getOperatorToken();
+    if (authToken) params.set('access_token', authToken);
+    if (operatorToken) params.set('operator_token', operatorToken);
+    const qs = params.toString();
+    const url = `${protocol}://${location.host}/sessions/${sessionId}/stream/ws${qs ? `?${qs}` : ''}`;
 
     try {
       socket = new WebSocket(url);

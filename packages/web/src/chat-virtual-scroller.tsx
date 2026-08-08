@@ -64,7 +64,6 @@ export function ChatVirtualScroller({
         ref={parentRef}
         className="virtual-scroller-viewport"
         onScroll={handleScroll}
-        style={{ height: '100%', overflow: 'auto' }}
       >
         <div
           style={{

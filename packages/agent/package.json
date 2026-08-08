@@ -42,6 +42,8 @@
     "./mcp-distribution-policy": "./src/mcp-distribution-policy.ts",
     "./cantool-capability-adapter": "./src/cantool-capability-adapter.ts",
     "./skills": "./src/skills.ts",
+    "./skill-frontmatter": "./src/skill-frontmatter.ts",
+    "./skill-runtime": "./src/skill-runtime.ts",
     "./skill-distribution": "./src/skill-distribution.ts",
     "./rules": "./src/rules.ts",
     "./tools": "./src/tools/core/registry.ts",

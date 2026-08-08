@@ -92,6 +92,7 @@ export function useChatRun(options: {
       if (['turn', 'done', 'tool.result', 'tool.call', 'tool.call.upsert', 'model.response', 'model.delta', 'context.fill'].some(e => event.startsWith(e))) {
         void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
         void queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
+        void queryClient.invalidateQueries({ queryKey: ['session-execution-observability', sessionId] });
       }
     },
   });
@@ -234,6 +235,7 @@ export function useChatRun(options: {
       void queryClient.invalidateQueries({ queryKey: ['chat-session', sessionId] });
       void queryClient.invalidateQueries({ queryKey: ['chat-session-trace', sessionId] });
       void queryClient.invalidateQueries({ queryKey: ['chat-session-observability', sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ['session-execution-observability', sessionId] });
     }
   }
 

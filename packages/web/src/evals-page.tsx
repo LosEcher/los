@@ -61,6 +61,7 @@ export function EvalsPage() {
   const [runSpecId, setRunSpecId] = useState('');
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
+  const [includeNoise, setIncludeNoise] = useState(false);
   const [baselineFrom, setBaselineFrom] = useState('');
   const [baselineTo, setBaselineTo] = useState('');
   const [candidateFrom, setCandidateFrom] = useState('');
@@ -99,16 +100,18 @@ export function EvalsPage() {
   if (runSpecId.trim()) sharedParams.set('runSpecId', runSpecId.trim());
   if (provider.trim()) sharedParams.set('provider', provider.trim());
   if (model.trim()) sharedParams.set('model', model.trim());
+  // Fleet default excludes backlog noise; opt-in restores document snapshots.
+  if (includeNoise) sharedParams.set('includeNoise', 'true');
 
   const summary = useQuery({
-    queryKey: ['evals-summary', runSpecId, provider, model],
+    queryKey: ['evals-summary', runSpecId, provider, model, includeNoise],
     queryFn: () => getJson<EvalSummary>(`/run-evals/summary?${sharedParams.toString()}`),
     enabled: mode === 'summary',
     refetchInterval: 30_000,
   });
 
   const compare = useQuery({
-    queryKey: ['evals-compare', runSpecId, provider, model, baselineFrom, baselineTo, candidateFrom, candidateTo],
+    queryKey: ['evals-compare', runSpecId, provider, model, includeNoise, baselineFrom, baselineTo, candidateFrom, candidateTo],
     queryFn: () => {
       const params = new URLSearchParams(sharedParams);
       if (baselineFrom) params.set('baselineFrom', baselineFrom);
@@ -166,6 +169,14 @@ export function EvalsPage() {
             value={model}
             onChange={e => setModel(e.target.value)}
           />
+          <label className="filter-check">
+            <input
+              type="checkbox"
+              checked={includeNoise}
+              onChange={e => setIncludeNoise(e.target.checked)}
+            />
+            <span>{t('ops.evals.includeNoise')}</span>
+          </label>
         </div> : null}
 
         {mode !== 'daily' ? <div className="toolbar-actions">

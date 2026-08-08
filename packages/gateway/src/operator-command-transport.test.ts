@@ -22,6 +22,7 @@ function config(): Config {
       sandboxMode: 'workspace-write',
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
+      skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
     },
     judge: {},
     review: { enabled: false, roles: {} },

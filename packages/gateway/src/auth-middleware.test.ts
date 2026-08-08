@@ -51,6 +51,63 @@ test('executor heartbeat requires the shared agent key when configured', async (
   }
 });
 
+test('auth middleware accepts access_token query for browser WebSocket/EventSource', async () => {
+  const app = Fastify({ logger: false });
+  await authMiddleware(app, { config: configForAuth(true) });
+  app.get('/sessions/:id/stream/ws', async () => ({ ok: true }));
+  app.get('/sessions/:id/events/live', async () => ({ ok: true }));
+
+  try {
+    const missing = await app.inject({ method: 'GET', url: '/sessions/s1/stream/ws' });
+    assert.equal(missing.statusCode, 401);
+
+    const viaQuery = await app.inject({
+      method: 'GET',
+      url: '/sessions/s1/stream/ws?access_token=test-token',
+    });
+    assert.equal(viaQuery.statusCode, 200);
+
+    const live = await app.inject({
+      method: 'GET',
+      url: '/sessions/s1/events/live?access_token=test-token',
+    });
+    assert.equal(live.statusCode, 200);
+
+    const wrong = await app.inject({
+      method: 'GET',
+      url: '/sessions/s1/stream/ws?access_token=wrong',
+    });
+    assert.equal(wrong.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test('auth middleware keeps PWA shell assets public without credentials', async () => {
+  const app = Fastify({ logger: false });
+  await authMiddleware(app, { config: configForAuth(true) });
+  for (const path of ['/', '/favicon.ico', '/manifest.webmanifest', '/icon.svg', '/sw.js', '/assets/app.js']) {
+    app.get(path, async () => ({ path }));
+  }
+  app.get('/chat', async () => ({ ok: true }));
+
+  try {
+    for (const path of ['/', '/favicon.ico', '/manifest.webmanifest', '/icon.svg', '/sw.js', '/assets/app.js']) {
+      const response = await app.inject({ method: 'GET', url: path });
+      assert.equal(response.statusCode, 200, `${path} should be public`);
+    }
+    // Query string must not break exact public matches.
+    const manifestWithQuery = await app.inject({ method: 'GET', url: '/manifest.webmanifest?v=1' });
+    assert.equal(manifestWithQuery.statusCode, 200);
+
+    // API surfaces stay protected.
+    const chat = await app.inject({ method: 'GET', url: '/chat' });
+    assert.equal(chat.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
 test('auth middleware requires the configured token outside public paths', async () => {
   const app = Fastify({ logger: false });
   await authMiddleware(app, { config: configForAuth(true) });
@@ -228,6 +285,7 @@ function configForAuth(enabled: boolean): Config {
       sandboxMode: 'workspace-write',
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
+      skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
     },
     judge: {},
     review: { enabled: false, roles: {} },

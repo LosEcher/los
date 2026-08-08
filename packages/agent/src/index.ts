@@ -81,7 +81,7 @@ export {
 } from './integration/feed-analysis-callback-outbox.js';
 export { writeDeadLetterEvent, writeDeadLetterForExpiredTasks, listDeadLetterEvents, acknowledgeDeadLetterEvent, ensureDeadLetterStore, type DeadLetterEventRecord, type DeadLetterResolution, type ResolveDeadLetterInput, type DLQReason, type ListDeadLetterOptions } from './dead-letter.js';
 export { summarizeDeadLetterEvents, requeueDeadLetterEvent, type DeadLetterReasonSummary, type DeadLetterSummary, type DeadLetterRequeueResult, type DeadLetterRequeueOptions } from './dead-letter-recovery.js';
-export { ensureRunEvalStore, compareRunEvals, listRunEvals, listPairwiseRunEvals, recordFailoverEval, recordPairwiseRunEval, recordRunEval, summarizeRunEvals, cancelPairwiseSampleGate, evaluatePairwiseSampleGate, listPairwiseSampleGates, loadPairwiseSampleGate, registerPairwiseSampleGate, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordPairwiseRunEvalInput, type RecordRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type RunEvalEvidenceChannel, type RunEvalRubricSnapshot, type RunEvalRubricCriterion, type RunEvalCriterionScore, type RunEvalPairwiseVerdict, type SummarizeRunEvalsOptions, type SampleGateEvaluation, type SampleGateRegistration, type SampleGateScope, type SampleGateStatus } from './run-evals.js';
+export { ensureRunEvalStore, compareRunEvals, listRunEvals, listPairwiseRunEvals, recordFailoverEval, recordPairwiseRunEval, recordRunEval, scheduleTerminalRunEval, summarizeRunEvals, cancelPairwiseSampleGate, evaluatePairwiseSampleGate, listPairwiseSampleGates, loadPairwiseSampleGate, registerPairwiseSampleGate, type CompareRunEvalsOptions, type ListRunEvalsOptions, type RecordPairwiseRunEvalInput, type RecordRunEvalInput, type RecordTerminalRunEvalInput, type RunEvalComparison, type RunEvalFailoverScope, type RunEvalRecord, type RunEvalSummary, type RunEvalSummaryGroup, type RunEvalVerificationStatus, type RunEvalEvidenceChannel, type RunEvalRubricSnapshot, type RunEvalRubricCriterion, type RunEvalCriterionScore, type RunEvalPairwiseVerdict, type SummarizeRunEvalsOptions, type SampleGateEvaluation, type SampleGateRegistration, type SampleGateScope, type SampleGateStatus } from './run-evals.js';
 export { getDailyAgentScenarioCorpus, recordDailyAgentScenarioEconomics, summarizeDailyAgentScenarioEconomics, type DailyAgentScenarioDefinition, type DailyAgentScenarioEconomicsOptions, type DailyAgentScenarioHardAssertion, type DailyAgentScenarioLane, type DailyAgentScenarioRole, type DailyAgentScenarioRouteReason, type RecordDailyAgentScenarioEconomicsInput } from './scenario-economics.js';
 export { ensureExecutionExperimentStore, createExecutionExperiment, loadExecutionExperiment, setExecutionExperimentCandidate, approveExecutionExperiment, transitionExecutionExperiment, type ExecutionExperimentRecord, type ExecutionExperimentStatus, type ExecutionExperimentSource, type ExecutionExperimentConfigDiff, type CreateExecutionExperimentInput, type ExecutionExperimentScope } from './execution-experiments.js';
 export { getEvalBacklogCases, recordEvalBacklogSnapshot, type EvalBacklogCase } from './eval-backlog-runner.js';
@@ -122,6 +122,16 @@ export {
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
 export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureSkillStore, upsertSkill, loadSkill, listSkills, deleteSkill, incrementSkillUsage, skillDirForScope, syncSkillsToDir, loadSkillsFromDir, type SkillRecord, type SkillRunMode, type SkillScope, type SkillLayer, type UpsertSkillInput } from './skills.js';
+export {
+  selectSkillsForRun,
+  recordSkillUsage,
+  mergeSkillAllowedTools,
+  skillSelectedEventPayload,
+  type SkillSelectionInput,
+  type SkillSelectionResult,
+  type SelectedSkill,
+} from './skill-runtime.js';
+export { parseSkillFrontmatter } from './skill-frontmatter.js';
 export { ensureRuleStore, upsertRule, loadRule, listRules, updateRuleStatus, deleteRule, ruleDirForScope, syncRulesToDir, loadRulesFromDir, type RuleRecord, type RuleScope, type RuleSeverity, type RuleEnforcementMode, type RuleStatus, type RuleLayer, type UpsertRuleInput } from './rules.js';
 export { runPostExecutionSelfCheck, shouldRunSelfCheck, buildSelfCheckPrompt, parseSelfCheckResponse, summarizeAgentContext, buildReviewPacket, type SelfCheckGap, type SelfCheckInput, type SelfCheckResult, type ReviewPacket } from './self-check.js';
 export { reflectOnFailure, formatReflectionSummary, type ReflectionResult } from './reflection.js';

@@ -88,7 +88,10 @@ export const zhWork: WorkKeys = {
   'work.form.project': '项目',
   'work.form.mode': '模式',
   'work.form.tools': '工具',
+  'work.form.permission': '权限',
   'work.form.priority': '优先级',
+  'work.form.advanced': '高级',
+  'work.form.advancedHint': '标题、模式、范围、检查与停止条件',
   'work.form.evidenceRequired': '必需证据',
   'work.form.nonGoals': '非目标',
   'work.form.editableSurfacesPlaceholder': '每行一个路径',
@@ -103,7 +106,7 @@ export const zhWork: WorkKeys = {
   'work.mode.closeout': '收尾',
   'work.mode.feedAnalysis': 'Feed 分析',
   'work.toolMode.readOnly': '只读',
-  'work.toolMode.projectWrite': '项目写入',
+  'work.toolMode.projectWrite': '可写项目',
 
   // ── Plan review ────────────────────────────────────
   'work.plan.title': '计划审阅',

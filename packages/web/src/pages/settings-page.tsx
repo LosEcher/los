@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Save } from 'lucide-react';
+import { Trash2, Save, Monitor, Moon, Sun } from 'lucide-react';
 import {
   getJson,
   deleteJson,
@@ -16,6 +16,7 @@ import {
   EmptyText,
 } from '../ui.js';
 import { useI18n } from '../i18n';
+import { useTheme, type ThemeMode } from '../hooks/useTheme.js';
 
 type Cfg = Record<string, Record<string, unknown>>;
 
@@ -86,6 +87,7 @@ function SectionHeader({ title, onSave, saving }: { title: string; onSave?: () =
 
 export function SettingsPage() {
   const { t } = useI18n();
+  const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode } = useTheme();
   const queryClient = useQueryClient();
   const saveSection = useSaveSection(queryClient);
 
@@ -145,7 +147,7 @@ export function SettingsPage() {
   useEffect(() => { setAuthEnabled(Boolean(authCfg.enabled)); }, [authCfg.enabled]);
 
   return (
-    <section className="panel-grid settings-grid">
+    <section className="panel-grid settings-grid ops-page">
       <div className="panel">
         <div className="panel-head">
           <div>
@@ -153,6 +155,39 @@ export function SettingsPage() {
             <p>{t('pages.settings.subtitle')}</p>
           </div>
           <StatusPill status="live" />
+        </div>
+
+        {/* ── Appearance (local UI only) ────────────────── */}
+        <SectionHeader title={t('pages.settings.section.appearance')} />
+        <div className="settings-appearance">
+          <div className="settings-appearance-row">
+            <span className="settings-appearance-label">{t('pages.settings.field.theme')}</span>
+            <div className="theme-switch" role="radiogroup" aria-label={t('pages.settings.field.theme')}>
+              {([
+                { id: 'dark' as ThemeMode, icon: Moon, labelKey: 'pages.settings.theme.dark' },
+                { id: 'light' as ThemeMode, icon: Sun, labelKey: 'pages.settings.theme.light' },
+                { id: 'system' as ThemeMode, icon: Monitor, labelKey: 'pages.settings.theme.system' },
+              ]).map(option => {
+                const Icon = option.icon;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={themeMode === option.id}
+                    className={themeMode === option.id ? 'active' : ''}
+                    onClick={() => setThemeMode(option.id)}
+                  >
+                    <Icon size={14} />
+                    {t(option.labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <p className="settings-appearance-hint">
+            {t('pages.settings.theme.hint', { resolved: t(`pages.settings.theme.${themeResolved}`) })}
+          </p>
         </div>
 
         {/* ── Auth ──────────────────────────────────────── */}

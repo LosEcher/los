@@ -109,6 +109,8 @@ export type RunEvalQuery = {
   createdFrom?: string; createdTo?: string;
   baselineFrom?: string; baselineTo?: string;
   candidateFrom?: string; candidateTo?: string;
+  /** When true, include eval-backlog / document noise in fleet summary. */
+  includeNoise?: string;
   limit?: string;
 };
 
@@ -123,6 +125,9 @@ export function parseRunEvalQuery(query: RunEvalQuery): Record<string, unknown> 
   }
   if (query.success === 'true') out.success = true;
   else if (query.success === 'false') out.success = false;
+  // Fleet views default to excludeNoise; only pass true when UI opts in.
+  if (query.includeNoise === 'true') out.includeNoise = true;
+  else if (query.includeNoise === 'false') out.includeNoise = false;
   out.limit = normalizeBoundedInteger(query.limit, 100, 1, 1000);
   return out;
 }

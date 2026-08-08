@@ -46,6 +46,15 @@ import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.
 import { runScheduledTaskExecution } from './scheduled-task-execution.js';
 import { completeScheduledTask, handleScheduledTaskError } from './scheduled-task-terminal.js';
 import { markProviderProbeActivity } from '../providers/provider-probe.js';
+import {
+  selectSkillsForRun,
+  recordSkillUsage,
+  mergeSkillAllowedTools,
+  skillSelectedEventPayload,
+} from '../skill-runtime.js';
+import { appendSessionEvent } from '../session-events.js';
+import { getConfig } from '@los/infra/config';
+
 export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Promise<ScheduledAgentTaskResult> {
   // Keep provider probe cadence in the active (60s) band while tasks run.
   markProviderProbeActivity();
@@ -79,8 +88,59 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
     toolMode,
     executorEnabled: input.executor?.enabled === true,
   });
-  const runtimePrompt = promptForDisposition(input.prompt, disposition, planningTransport, runContract);
+  let runtimePrompt = promptForDisposition(input.prompt, disposition, planningTransport, runContract);
   const workspaceRoot = input.workspaceRoot ?? process.cwd();
+  // Skill runtime: user-turn attachment (AP11-safe). Shared for chat + scheduler/work.
+  let effectiveAllowedTools = input.allowedTools ? [...input.allowedTools] : undefined;
+  try {
+    const skillsCfg = (getConfig().agent as { skills?: {
+      runtimeEnabled?: boolean;
+      autoInject?: boolean;
+      maxAutoSkills?: number;
+      maxSkillTokens?: number;
+    } }).skills ?? {};
+    const manualFromMeta = Array.isArray(input.metadata?.manualSkillIds)
+      ? (input.metadata!.manualSkillIds as unknown[]).map(String)
+      : undefined;
+    const skillSelection = await selectSkillsForRun({
+      prompt: runtimePrompt,
+      workspaceRoot,
+      projectId: input.projectId,
+      tenantId: input.tenantId,
+      manualSkillIds: manualFromMeta,
+      runtimeEnabled: skillsCfg.runtimeEnabled !== false,
+      autoEnabled: skillsCfg.autoInject === true,
+      maxAutoSkills: skillsCfg.maxAutoSkills,
+      maxSkillTokens: skillsCfg.maxSkillTokens,
+    });
+    if (skillSelection.selected.length > 0) {
+      runtimePrompt = skillSelection.effectivePrompt;
+      effectiveAllowedTools = mergeSkillAllowedTools(
+        input.allowedTools,
+        skillSelection.selected.map(s => s.allowedTools),
+      );
+      await recordSkillUsage(skillSelection.selected);
+      await appendSessionEvent({
+        sessionId,
+        tenantId: input.tenantId,
+        projectId: input.projectId,
+        userId: input.userId,
+        requestId: input.requestId,
+        traceId,
+        type: 'skill.selected',
+        payload: skillSelectedEventPayload(skillSelection),
+      }).catch(() => undefined);
+    } else if (skillSelection.cleanedPrompt !== runtimePrompt) {
+      // Strip /skill directives even when no skill was found
+      runtimePrompt = skillSelection.cleanedPrompt || runtimePrompt;
+    }
+  } catch {
+    // Fail open for skill selection — do not block the run
+  }
+  // Thread allowlist into execution input without mutating caller's object identity beyond clone
+  if (effectiveAllowedTools) {
+    input = { ...input, allowedTools: effectiveAllowedTools };
+  }
   const timeoutMs = normalizePositiveInteger(input.timeoutMs);
   const leaseMs = normalizePositiveInteger(input.executor?.leaseMs) ?? 30_000;
   const heartbeatMs = normalizePositiveInteger(input.executor?.heartbeatMs) ?? Math.max(1_000, Math.floor(leaseMs / 3));

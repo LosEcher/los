@@ -40,7 +40,7 @@ export function DiagnosticsPage() {
   const healthList = providerHealth.data ?? [];
 
   return (
-    <section className="panel-grid">
+    <section className="panel-grid ops-page">
       {/* ── Traces ──────────────────────────────────── */}
       <div className="panel">
         <div className="panel-head">
@@ -55,19 +55,17 @@ export function DiagnosticsPage() {
           empty={t('ops.diagnostics.noTraces')}
           rows={traceList}
           renderRow={(trace) => (
-            <div key={trace.traceId} className="record-row">
+            <div key={trace.traceId} className="record-row record-row-stack">
               <div className="record-main">
                 <div className="record-header">
-                  <strong className="record-title" style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                    {trace.traceId.slice(0, 16)}
-                  </strong>
+                  <strong className="record-title">{trace.traceId.slice(0, 16)}</strong>
                   {trace.errorCount > 0 ? <span className="status-pill live">{t('ops.diagnostics.errorsLabel', { count: trace.errorCount })}</span> : null}
                 </div>
                 <div className="record-meta">
                   {trace.sessionId ? <span>{t('ops.diagnostics.sessionShort', { id: trace.sessionId.slice(0, 12) })}</span> : null}
-                  {trace.provider ? <span> · {trace.provider}/{trace.model}</span> : null}
-                  <span> · {t('ops.diagnostics.eventsLabel', { count: trace.eventCount })}</span>
-                  <span> · {new Date(trace.createdAt).toLocaleString()}</span>
+                  {trace.provider ? <span>{trace.provider}/{trace.model}</span> : null}
+                  <span>{t('ops.diagnostics.eventsLabel', { count: trace.eventCount })}</span>
+                  <span>{new Date(trace.createdAt).toLocaleString()}</span>
                 </div>
               </div>
             </div>

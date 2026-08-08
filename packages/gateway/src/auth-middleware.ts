@@ -4,8 +4,16 @@ import { verifyJwt, getJwtSecret } from './auth-store.js';
 
 /**
  * Paths that never require auth.
+ * PWA shell assets are fetched by the browser without app headers, so they must
+ * stay public even when LOS_AUTH_ENABLED=true (same class as / and /assets/).
  */
-const EXACT_PUBLIC_PATHS = ['/', '/favicon.ico'];
+const EXACT_PUBLIC_PATHS = new Set([
+  '/',
+  '/favicon.ico',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/sw.js',
+]);
 const PREFIX_PUBLIC_PATHS = ['/health', '/onboarding', '/api/integrations', '/assets/', '/auth/login', '/auth/register', '/auth/status'];
 
 /** Paths that are public only for specific HTTP methods. */
@@ -37,21 +45,20 @@ export default async function authMiddleware(
 
     if (isPublicPath(req.url, req.method)) return;
 
-    // 1. Operator token (strongest auth path): x-los-operator-token header
+    // 1. Operator token (strongest auth path): header or query (browser WS/SSE)
     if (config.auth.operatorToken) {
-      const opToken = req.headers['x-los-operator-token'];
-      const opNormalized = Array.isArray(opToken) ? opToken[0] : opToken;
-      if (opNormalized === config.auth.operatorToken) return;
+      const opToken = extractOperatorToken(req);
+      if (opToken === config.auth.operatorToken) return;
     }
 
-    // 2. JWT Bearer token (user login)
+    // 2. JWT Bearer token (user login) — header only (avoid putting JWT in query logs)
     const bearerToken = extractBearerToken(req);
     if (bearerToken) {
       const payload = verifyJwt(bearerToken, getJwtSecret());
       if (payload) return; // Valid JWT → authenticated
     }
 
-    // 3. Static auth token (legacy backward compatibility)
+    // 3. Static auth token (legacy): header, Bearer non-JWT, or query for WS/SSE
     const staticToken = extractAuthToken(req);
     if (config.auth.token && staticToken === config.auth.token) return;
 
@@ -68,7 +75,7 @@ function extractBearerToken(req: FastifyRequest): string | undefined {
   return match?.[1]?.trim() || undefined;
 }
 
-/** Resolve auth token from los header or standard Bearer scheme (legacy static token). */
+/** Resolve auth token from los header, Bearer scheme, or query (browser WS/SSE). */
 function extractAuthToken(req: FastifyRequest): string | undefined {
   const headerToken = req.headers['x-los-auth-token'];
   const fromHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
@@ -78,13 +85,30 @@ function extractAuthToken(req: FastifyRequest): string | undefined {
   const bearer = extractBearerToken(req);
   if (bearer && !bearer.includes('.')) return bearer;
 
+  // Browser WebSocket / EventSource cannot set custom headers — accept query tokens.
+  const query = req.query as Record<string, unknown> | undefined;
+  const fromQuery = query?.access_token ?? query?.token;
+  if (typeof fromQuery === 'string' && fromQuery.trim()) return fromQuery.trim();
+
+  return undefined;
+}
+
+function extractOperatorToken(req: FastifyRequest): string | undefined {
+  const headerToken = req.headers['x-los-operator-token'];
+  const fromHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
+  if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader.trim();
+
+  const query = req.query as Record<string, unknown> | undefined;
+  const fromQuery = query?.operator_token;
+  if (typeof fromQuery === 'string' && fromQuery.trim()) return fromQuery.trim();
+
   return undefined;
 }
 
 function isPublicPath(url: string | undefined, method: string): boolean {
   if (!url) return false;
-  if (EXACT_PUBLIC_PATHS.includes(url)) return true;
   const path = url.split('?')[0] || url;
+  if (EXACT_PUBLIC_PATHS.has(path)) return true;
   const methods = METHOD_PUBLIC_PATHS[path];
   if (methods && methods.has(method)) return true;
   if (PREFIX_PUBLIC_PATHS.some(p => path.startsWith(p))) return true;
