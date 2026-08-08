@@ -164,7 +164,11 @@ export const enAssets = {
 
   // ── Skills ───────────────────────────────────────────
   'assets.skills.title': 'Skills',
-  'assets.skills.subtitle': 'Reusable agent instruction bundles. Define once, reference from chat runs.',
+  'assets.skills.subtitle': 'Reusable agent instruction bundles. Define once, attach from Chat (manual) or enable auto inject.',
+  'assets.skills.runtimeTitle': 'Runtime',
+  'assets.skills.runtimeBody': 'Chat and scheduled work call selectSkillsForRun. Manual: Chat chips or /skill name. Auto inject is off by default (LOS_SKILLS_AUTO). Usage count and last used update after a real run attaches the skill.',
+  'assets.skills.runtimeWired': 'Wired for Chat and scheduled work',
+  'assets.skills.runtimeAutoOff': 'Auto inject: off (default)',
   'assets.skills.allScopes': 'all scopes',
   'assets.skills.sync': 'sync',
   'assets.skills.inspect': 'inspect',

@@ -58,6 +58,8 @@ export function useChatRun(options: {
   frequencyPenalty: string;
   provider: string;
   model: string;
+  /** Skill names selected in the composer for this send. */
+  manualSkillIds?: string[];
   activeTodoContext: TodoItem | null;
   boundTodoId: string | null;
   onWorkItemBound?: (todo: TodoItem) => void;
@@ -191,6 +193,7 @@ export function useChatRun(options: {
           toolRetry: buildToolRetryPayload({ maxAttempts: o.toolRetryMaxAttempts, baseDelayMs: o.toolRetryBaseDelayMs, maxDelayMs: o.toolRetryMaxDelayMs }),
           modelSettings: buildModelSettingsPayload({ temperature: o.temperature, topP: o.topP, maxTokens: o.maxTokens, presencePenalty: o.presencePenalty, frequencyPenalty: o.frequencyPenalty }),
         };
+        const skillIds = (o.manualSkillIds ?? []).map(id => id.trim()).filter(Boolean);
         await streamChat({
           prompt: text,
           sessionId: branchFromRef.current ? undefined : (sessionId ?? undefined),
@@ -202,6 +205,7 @@ export function useChatRun(options: {
           workspaceRoot: o.workspaceRoot.trim() || undefined,
           toolMode: o.toolMode,
           allowedTools: composerPayload.allowedTools,
+          manualSkillIds: skillIds.length > 0 ? skillIds : undefined,
           maxLoops: o.maxLoops,
           traceId: resolvedTodo?.traceId,
           dedupeKey: resolvedTodo ? `todo:${resolvedTodo.id}:${Date.now()}` : undefined,
@@ -210,6 +214,9 @@ export function useChatRun(options: {
           runContract: readRunContract(resolvedTodo ?? null),
           todoId: resolvedTodo?.id,
         }, controller.signal, ({ event, data }) => onStreamEvent(event, data));
+        if (skillIds.length > 0) {
+          void queryClient.invalidateQueries({ queryKey: ['skills'] });
+        }
       } else {
         setRows(prev => [...prev, { id: crypto.randomUUID(), event: 'runtime.started', message: tt('chat.startingRuntime', { runtime: o.runtimeKind }), level: 'ok' as const }]);
         await streamRuntime({ kind: o.runtimeKind, prompt: text, workspaceRoot: o.workspaceRoot.trim() || undefined, timeoutMs: o.timeoutMs }, controller.signal, ({ event, data }) => {

@@ -168,7 +168,11 @@ export const zhAssets: AssetsKeys = {
 
   // ── Skills ───────────────────────────────────────────
   'assets.skills.title': '技能',
-  'assets.skills.subtitle': '可复用的 Agent 指令包。定义一次，即可在聊天运行中引用。',
+  'assets.skills.subtitle': '可复用的 Agent 指令包。定义一次，可从 Chat 手动附加，或开启自动注入。',
+  'assets.skills.runtimeTitle': '运行时',
+  'assets.skills.runtimeBody': 'Chat 与定时任务都会调用 selectSkillsForRun。手动：Chat 芯片或 /skill 名称。自动注入默认关闭（LOS_SKILLS_AUTO）。真实运行附加技能后会更新使用次数与最近使用时间。',
+  'assets.skills.runtimeWired': '已接入 Chat 与定时任务',
+  'assets.skills.runtimeAutoOff': '自动注入：关闭（默认）',
   'assets.skills.allScopes': '全部作用域',
   'assets.skills.sync': '同步',
   'assets.skills.inspect': '检查',

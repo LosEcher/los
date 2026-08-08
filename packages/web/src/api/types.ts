@@ -248,6 +248,8 @@ export type ChatPayload = {
   workspaceRoot?: string;
   toolMode: ToolMode;
   allowedTools?: string[];
+  /** Explicit skill names for manual invoke (gateway → skill-runtime). */
+  manualSkillIds?: string[];
   maxLoops?: number;
   traceId?: string;
   dedupeKey?: string;
