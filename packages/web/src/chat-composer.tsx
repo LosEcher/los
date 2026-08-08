@@ -1,6 +1,8 @@
-import { Send, Square, Wrench, Zap } from 'lucide-react';
-import { type FormEvent, useState, useRef, useEffect, useCallback } from 'react';
+import { Send, Square, Wrench, Zap, BookOpen } from 'lucide-react';
+import { type FormEvent, useState, useRef, useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { ProviderModelsResponse, RuntimeKind, ToolMode } from './api';
+import { getJson } from './api';
 import { RunField } from './chat-ui.js';
 import { ProjectSelector } from './project-selector.js';
 import { providerRoutesFromModels } from './chat-helpers.js';
@@ -15,10 +17,21 @@ const SLASH_COMMANDS = [
   { cmd: '/retry', descKey: 'chat.slash.retry' },
   { cmd: '/abort', descKey: 'chat.slash.abort' },
   { cmd: '/files', descKey: 'chat.slash.files' },
+  { cmd: '/skill ', descKey: 'chat.slash.skill' },
   { cmd: '/mode ', descKey: 'chat.slash.mode' },
   { cmd: '/provider ', descKey: 'chat.slash.provider' },
   { cmd: '/model ', descKey: 'chat.slash.model' },
 ];
+
+type SkillPickerItem = {
+  id: string;
+  name: string;
+  description: string;
+  runMode: string;
+  enabled: boolean;
+  usageCount: number;
+  metadata: Record<string, unknown>;
+};
 
 type SlashCommand = { cmd: string; descKey: string };
 
@@ -58,9 +71,27 @@ export function ChatComposer(props: {
   advancedState: ChatAdvancedSettingsState;
   onAdvancedChange: (patch: Partial<ChatAdvancedSettingsState>) => void;
   advancedCount: number;
+
+  /** Skill names selected for the next send (manual invoke). */
+  selectedSkillIds: string[];
+  onSelectedSkillIdsChange: (ids: string[]) => void;
 }) {
   const { t } = useI18n();
   const providerRoutes = providerRoutesFromModels(props.modelRoutes);
+  const skillsQuery = useQuery({
+    queryKey: ['skills', 'chat-picker'],
+    queryFn: () => getJson<SkillPickerItem[]>('/skills?enabled=true'),
+    staleTime: 30_000,
+  });
+  const invocableSkills = useMemo(() => {
+    const list = skillsQuery.data ?? [];
+    return list.filter(skill => {
+      if (!skill.enabled) return false;
+      if (skill.metadata?.userInvocable === false) return false;
+      if (skill.metadata?.['user-invocable'] === false) return false;
+      return true;
+    });
+  }, [skillsQuery.data]);
   const selectedRoute = providerRoutes.find(route => route.provider === props.provider) ?? providerRoutes[0] ?? null;
   const modelOptions = (() => {
     const ids = new Set<string>();
@@ -86,6 +117,15 @@ export function ChatComposer(props: {
     textareaRef.current?.focus();
   }, [props.onPromptChange]);
 
+  const toggleSkill = useCallback((name: string) => {
+    const selected = props.selectedSkillIds;
+    if (selected.includes(name)) {
+      props.onSelectedSkillIdsChange(selected.filter(id => id !== name));
+    } else {
+      props.onSelectedSkillIdsChange([...selected, name]);
+    }
+  }, [props.selectedSkillIds, props.onSelectedSkillIdsChange]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!visible) return;
     if (e.key === 'Tab' || e.key === 'Enter') {
@@ -105,6 +145,14 @@ export function ChatComposer(props: {
 
   const handleChange = (value: string) => {
     props.onPromptChange(value);
+    // `/skill name` → also pin skill for this send when name matches a registry skill
+    const skillMatch = value.match(/^\/skill(?:s)?\s+(\S+)/i);
+    if (skillMatch) {
+      const name = skillMatch[1]!;
+      if (invocableSkills.some(s => s.name === name) && !props.selectedSkillIds.includes(name)) {
+        props.onSelectedSkillIdsChange([...props.selectedSkillIds, name]);
+      }
+    }
     if (value.startsWith('/') && !value.includes(' ')) {
       setShowSlashMenu(true);
       setSlashIndex(0);
@@ -181,6 +229,45 @@ export function ChatComposer(props: {
           advancedCount={props.advancedCount}
         />
       </div>
+      {props.runtimeKind === 'los' ? (
+        <div className="skill-picker" aria-label={t('chat.skills.pickerAria')}>
+          <div className="skill-picker-head">
+            <BookOpen size={13} aria-hidden="true" />
+            <span>{t('chat.skills.label')}</span>
+            <span className="skill-picker-hint">{t('chat.skills.autoOffHint')}</span>
+            {skillsQuery.isLoading ? <span className="skill-picker-hint">{t('chat.skills.loading')}</span> : null}
+            {!skillsQuery.isLoading && invocableSkills.length === 0 ? (
+              <span className="skill-picker-hint">{t('chat.skills.empty')}</span>
+            ) : null}
+          </div>
+          {invocableSkills.length > 0 ? (
+            <div className="skill-chip-row">
+              {invocableSkills.map(skill => {
+                const active = props.selectedSkillIds.includes(skill.name);
+                return (
+                  <button
+                    key={skill.id || skill.name}
+                    type="button"
+                    className={`skill-chip${active ? ' active' : ''}`}
+                    title={skill.description || skill.name}
+                    aria-pressed={active}
+                    disabled={props.running}
+                    onClick={() => toggleSkill(skill.name)}
+                  >
+                    {skill.name}
+                    {skill.runMode === 'auto' ? <span className="skill-chip-badge">auto</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {props.selectedSkillIds.length > 0 ? (
+            <p className="skill-picker-selected">
+              {t('chat.skills.selected', { count: props.selectedSkillIds.length, names: props.selectedSkillIds.join(', ') })}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="composer-input-wrap">
         <textarea
           ref={textareaRef}

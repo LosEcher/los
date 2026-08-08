@@ -868,6 +868,124 @@ p {
   min-width: 0;
 }
 
+.skill-picker {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgb(24 26 20 / 0.55);
+}
+
+.skill-picker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.skill-picker-head > span:first-of-type {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.skill-picker-hint {
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.skill-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.skill-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.skill-chip.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+
+.skill-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.skill-chip-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.skill-picker-selected {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.skill-runtime-banner {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgb(24 26 20 / 0.45);
+}
+
+.skill-runtime-banner strong {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.skill-runtime-banner p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.skill-runtime-pill {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--line));
+  color: var(--ok);
+  font-size: 11px;
+}
+
+.skill-runtime-pill.muted {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
 .route-dot {
   width: 7px;
   height: 7px;

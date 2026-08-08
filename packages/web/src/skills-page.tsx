@@ -143,6 +143,12 @@ export function SkillsPage() {
             </div>
           </div>
           <StatusPill status="live" />
+          <div className="skill-runtime-banner" role="note">
+            <strong>{t('assets.skills.runtimeTitle')}</strong>
+            <span className="skill-runtime-pill">{t('assets.skills.runtimeWired')}</span>
+            <span className="skill-runtime-pill muted">{t('assets.skills.runtimeAutoOff')}</span>
+            <p>{t('assets.skills.runtimeBody')}</p>
+          </div>
           <div className="toolbar">
             <select value={scopeFilter} onChange={e => setScopeFilter(e.target.value)}>
               <option value="">{t('assets.skills.allScopes')}</option>
