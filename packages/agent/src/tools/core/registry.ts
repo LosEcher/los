@@ -246,6 +246,7 @@ export async function registerBuiltinTools(
 
   // run_shell
   registry.register('run_shell', async (args) => {
+    const cfg = await loadConfig();
     const command = String(args.command ?? '');
     const cwd = args.cwd ? safeWorkspacePath(workspaceRoot, String(args.cwd)) : workspaceRoot;
     const requestedTimeout = Number(args.timeoutSec ?? 30);
@@ -256,7 +257,8 @@ export async function registerBuiltinTools(
       cwd,
       timeoutMs: timeout * 1000,
     }, {
-      allowNativeShell: (await loadConfig()).agent.allowNativeShell,
+      allowNativeShell: cfg.agent.allowNativeShell,
+      sandboxMode: cfg.agent.sandboxMode,
     });
     return result.error
       ? { content: result.content, error: result.error }

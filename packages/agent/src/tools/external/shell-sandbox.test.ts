@@ -6,6 +6,8 @@ import {
   runSandboxedShell,
   buildSandboxEnv,
   redactSensitiveOutput,
+  _buildMacSandboxProfile,
+  _buildBwrapArgs,
   ENV_REDACTED_SENTINEL,
   SANDBOX_ENV_ALLOWLIST,
 } from './shell-sandbox.js';
@@ -113,6 +115,50 @@ test('redactSensitiveOutput replaces real sensitive values in command output', (
   // benign values are untouched
   const clean = redactSensitiveOutput('no secrets here', env);
   assert.equal(clean, 'no secrets here');
+});
+
+// ── sandbox profile parameterization (E4) ────────────────
+
+test('buildMacSandboxProfile defaults to workspace-write (cwd writable, network denied)', () => {
+  const profile = _buildMacSandboxProfile('/ws/proj');
+  assert.match(profile, /\(allow file-write\* \(subpath "\/ws\/proj"\)\)/);
+  assert.match(profile, /\(deny network\*\)/);
+  assert.match(profile, /\(deny default\)/);
+});
+
+test('buildMacSandboxProfile readonly mode denies writes entirely', () => {
+  const profile = _buildMacSandboxProfile('/ws/proj', 'readonly');
+  assert.ok(!profile.includes('file-write'), 'readonly profile must not allow any writes');
+  assert.match(profile, /\(allow file-read\*\)/);
+  assert.match(profile, /\(deny network\*\)/);
+});
+
+test('buildMacSandboxProfile sandbox mode matches workspace-write enforcement', () => {
+  const strict = _buildMacSandboxProfile('/ws/proj', 'sandbox');
+  const current = _buildMacSandboxProfile('/ws/proj', 'workspace-write');
+  assert.equal(strict, current);
+});
+
+test('buildBwrapArgs defaults to writable cwd bind', () => {
+  const args = _buildBwrapArgs('/usr/bin/bwrap', '/ws/proj', 'echo hi');
+  const bindIdx = args.indexOf('--bind');
+  assert.ok(bindIdx >= 0, 'default bwrap mounts cwd writable');
+  assert.equal(args[bindIdx + 1], '/ws/proj');
+  assert.equal(args[bindIdx + 2], '/ws/proj');
+});
+
+test('buildBwrapArgs readonly mode mounts cwd read-only', () => {
+  const args = _buildBwrapArgs('/usr/bin/bwrap', '/ws/proj', 'echo hi', 'readonly');
+  assert.ok(!args.includes('--bind'), 'readonly must not use writable bind');
+  // first --ro-bind is the read-only root, last one is the workspace cwd
+  const firstRo = args.indexOf('--ro-bind');
+  assert.equal(args[firstRo + 1], '/');
+  const cwdRo = args.lastIndexOf('--ro-bind');
+  assert.equal(args[cwdRo + 1], '/ws/proj');
+  assert.equal(args[cwdRo + 2], '/ws/proj');
+  // root stays read-only, network stays unshared, shell command is last
+  assert.equal(args[args.length - 1], 'echo hi');
+  assert.ok(args.includes('--unshare-net'));
 });
 
 test('runSandboxedShell env is minimized and sensitive values are sentineled', async () => {

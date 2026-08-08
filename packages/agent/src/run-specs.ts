@@ -99,15 +99,8 @@ export interface CreateRunSpecInput {
   runContract?: RunContractMetadataInput;
 }
 
-export type RunSpecResult = {
-  /** 'completed' when the run finished normally, 'failed' when it threw. */
-  status: 'completed' | 'failed';
-  text: string;
-  loopCount?: number;
-  totalTokens?: number;
-  error?: string;
-  completedAt: string;
-};
+import { _validateRunSpecResult, type RunSpecResult } from './run-spec-result.js';
+export type { RunSpecResult, RunSpecResultValidation } from './run-spec-result.js';
 
 // ── Schema ──────────────────────────────────────────────
 
@@ -292,11 +285,15 @@ export async function updateRunSpecResult(
   runSpecId: string,
   result: RunSpecResult,
 ): Promise<RunSpecRecord | null> {
+  const validation = _validateRunSpecResult(result);
+  if (!validation.ok) {
+    throw new Error(`run-spec result contract validation failed: ${validation.reason}`);
+  }
   await ensureRunSpecStore();
   const db = getDb();
   const rows = await db.query<RunSpecRow>(
     'UPDATE run_specs SET result_json = $2::jsonb, updated_at = now() WHERE id = $1 RETURNING *',
-    [runSpecId, JSON.stringify(result)],
+    [runSpecId, JSON.stringify(validation.result)],
   );
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }
