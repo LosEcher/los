@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bug,
@@ -15,18 +15,16 @@ import {
 } from 'lucide-react';
 
 import {
-  getCurrentProjectId,
   getJson,
   postJson,
-  type CreateWorkItemPayload,
   type RunContractDraft,
   type TodoStatus,
-  type WorkItemMode,
   type WorkItemProjection,
   type WorkItemListResponse,
 } from '../api/index.js';
 import { formatDate } from '../ui.js';
 import { useI18n } from '../i18n';
+import { StructuredCreateForm } from './work-create-form.js';
 import { WorkReviewPanel } from './work-review-panel.js';
 import {
   OutcomeCard,
@@ -36,21 +34,6 @@ import {
   readWorkDebugPreference,
   writeWorkDebugPreference,
 } from './work-guidance.js';
-
-type WorkFormState = {
-  projectId: string;
-  title: string;
-  goal: string;
-  description: string;
-  mode: WorkItemMode;
-  toolMode: 'read-only' | 'project-write';
-  priority: 'P0' | 'P1' | 'P2' | 'P3';
-  editableSurfaces: string;
-  nonGoals: string;
-  requiredChecks: string;
-  stopConditions: string;
-  evidenceRequired: string;
-};
 
 type RuntimeInspect = {
   nodes: Array<{ kind: string; record: { runContract?: RunContractDraft } }>;
@@ -379,47 +362,6 @@ function TechnicalEvidence({ item, runContract }: { item: WorkItemProjection; ru
   );
 }
 
-function StructuredCreateForm({ onCreated }: { onCreated: (item: WorkItemProjection) => void }) {
-  const { t } = useI18n();
-  const [form, setForm] = useState<WorkFormState>(() => initialForm());
-  const create = useMutation({
-    mutationFn: () => postJson<WorkItemProjection>('/work-items', buildCreateWorkItemPayload(form)),
-    onSuccess: onCreated,
-  });
-  const set = <K extends keyof WorkFormState>(key: K, value: WorkFormState[K]) => setForm(current => ({ ...current, [key]: value }));
-  const submit = (event: FormEvent) => { event.preventDefault(); if (form.goal.trim()) create.mutate(); };
-  return (
-    <form className="work-create" onSubmit={submit}>
-      <div className="work-create-lead">
-        <label><span>{t('work.form.goal')}</span><textarea rows={3} required value={form.goal} onChange={event => set('goal', event.target.value)} placeholder={t('work.form.goalPlaceholder')} /></label>
-        <label><span>{t('work.form.title')}</span><input value={form.title} onChange={event => set('title', event.target.value)} placeholder={t('work.form.titlePlaceholder')} /></label>
-        <label><span>{t('work.form.description')}</span><textarea rows={2} value={form.description} onChange={event => set('description', event.target.value)} placeholder={t('work.form.descriptionPlaceholder')} /></label>
-      </div>
-      <div className="work-create-contract">
-        <div className="work-create-controls">
-          <label><span>{t('work.form.project')}</span><input required value={form.projectId} onChange={event => set('projectId', event.target.value)} /></label>
-          <label><span>{t('work.form.mode')}</span><select value={form.mode} onChange={event => set('mode', event.target.value as WorkItemMode)}><option value="execution">{t('work.mode.execution')}</option><option value="audit">{t('work.mode.audit')}</option><option value="governance">{t('work.mode.governance')}</option><option value="closeout">{t('work.mode.closeout')}</option><option value="feed-analysis-ingress">{t('work.mode.feedAnalysis')}</option></select></label>
-          <label><span>{t('work.form.tools')}</span><select value={form.toolMode} onChange={event => set('toolMode', event.target.value as WorkFormState['toolMode'])}><option value="read-only">{t('work.toolMode.readOnly')}</option><option value="project-write">{t('work.toolMode.projectWrite')}</option></select></label>
-          <label><span>{t('work.form.priority')}</span><select value={form.priority} onChange={event => set('priority', event.target.value as WorkFormState['priority'])}><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></label>
-        </div>
-        <div className="work-create-lists">
-          <LineField label={t('work.contract.editableSurfaces')} value={form.editableSurfaces} onChange={value => set('editableSurfaces', value)} placeholder={t('work.form.editableSurfacesPlaceholder')} />
-          <LineField label={t('work.contract.requiredChecks')} value={form.requiredChecks} onChange={value => set('requiredChecks', value)} placeholder={t('work.form.requiredChecksPlaceholder')} />
-          <LineField label={t('work.contract.stopConditions')} value={form.stopConditions} onChange={value => set('stopConditions', value)} placeholder={t('work.form.stopConditionsPlaceholder')} />
-          <LineField label={t('work.form.evidenceRequired')} value={form.evidenceRequired} onChange={value => set('evidenceRequired', value)} placeholder={t('work.form.evidenceRequiredPlaceholder')} />
-          <LineField label={t('work.form.nonGoals')} value={form.nonGoals} onChange={value => set('nonGoals', value)} placeholder={t('work.form.nonGoalsPlaceholder')} />
-        </div>
-        <div className="work-create-submit"><span>{t('work.form.draftNote')}</span><button className="btn" type="submit" disabled={create.isPending || !form.goal.trim()}><Plus size={14} /> {create.isPending ? t('work.creating') : t('work.createWork')}</button></div>
-        {create.error ? <div className="daily-error">{t('work.createFailed', { error: String(create.error) })}</div> : null}
-      </div>
-    </form>
-  );
-}
-
-function LineField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
-  return <label><span>{label}</span><textarea rows={3} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} /></label>;
-}
-
 function EvidenceBlock({ label, children }: { label: string; children: ReactNode }) {
   return <section className="evidence-block"><h3>{label}</h3>{children}</section>;
 }
@@ -463,23 +405,6 @@ function PlanReview({ contract, debugMode }: { contract?: RunContractDraft; debu
 function Lineage({ item }: { item: WorkItemProjection }) {
   const { t } = useI18n();
   return <section className="contract-section lineage-section"><h3>{t('work.lineage.title')}</h3><dl><div><dt>{t('work.lineage.workItem')}</dt><dd>{item.id}</dd></div><div><dt>{t('work.lineage.runSpec')}</dt><dd>{item.evidence.latestRunSpecId ?? t('common.none')}</dd></div><div><dt>{t('work.lineage.taskRun')}</dt><dd>{item.evidence.latestTaskRunId ?? t('common.none')}</dd></div><div><dt>{t('work.lineage.session')}</dt><dd>{item.evidence.latestSessionId ?? t('common.none')}</dd></div></dl></section>;
-}
-
-export function buildCreateWorkItemPayload(form: WorkFormState): CreateWorkItemPayload {
-  return {
-    projectId: form.projectId.trim(), title: form.title.trim() || undefined, goal: form.goal.trim(), description: form.description.trim() || undefined,
-    mode: form.mode, toolMode: form.toolMode, priority: form.priority,
-    editableSurfaces: lines(form.editableSurfaces), nonGoals: lines(form.nonGoals), requiredChecks: lines(form.requiredChecks),
-    stopConditions: lines(form.stopConditions), evidenceRequired: lines(form.evidenceRequired),
-  };
-}
-
-function initialForm(): WorkFormState {
-  return { projectId: getCurrentProjectId() ?? 'los', title: '', goal: '', description: '', mode: 'execution', toolMode: 'project-write', priority: 'P2', editableSurfaces: '', nonGoals: '', requiredChecks: '', stopConditions: '', evidenceRequired: '' };
-}
-
-function lines(value: string): string[] {
-  return [...new Set(value.split('\n').map(line => line.trim()).filter(Boolean))];
 }
 
 function runContractFromInspect(data: RuntimeInspect | undefined): RunContractDraft | undefined {

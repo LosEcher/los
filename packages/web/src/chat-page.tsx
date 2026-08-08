@@ -37,7 +37,7 @@ import { useChatSession } from './hooks/useChatSession.js';
 import { mergeLiveToolCalls } from './hooks/useLiveToolCalls.js';
 import { useChatRun } from './hooks/useChatRun.js';
 import {
-  ApprovalCard,
+  ApprovalSummary,
   OperatorSteeringBar,
   ContextNotification,
   CancelledBanner,
@@ -45,6 +45,7 @@ import {
 } from './chat-approval.js';
 import { FilesPanel } from './chat-files-panel.js';
 import { ChatPlanApproval } from './chat-plan-approval.js';
+import { ExecutionObservabilityPanel } from './pages/execution-observability-panel.js';
 
 export function ChatPage({
   selectedSessionId,
@@ -317,7 +318,8 @@ export function ChatPage({
           debugMode={debugMode}
           onDebugModeChange={setDebugMode}
           running={run.running}
-          notices={(
+          approvalEvents={run.approvalEvents}
+          footer={(
             <>
               {run.contextNotifs.length > 0 && (
                 <div className="context-notif-strip">
@@ -325,17 +327,14 @@ export function ChatPage({
                 </div>
               )}
               {run.cancelled && <CancelledBanner />}
-              {sessionId ? (
-                <OperatorSteeringBar sessionId={sessionId} disabled={!run.running && run.approvalEvents.length === 0} />
-              ) : null}
-              {run.approvalEvents.length > 0 && (
-                <div className="approval-strip">
-                  {run.approvalEvents.map(ae => (
-                    <ApprovalCard key={ae.id} event={ae} sessionId={sessionId} />
-                  ))}
-                </div>
-              )}
               <ChatPlanApproval running={run.running} workItemId={activeTodoContext?.id} />
+              <ApprovalSummary events={run.approvalEvents} />
+              {sessionId ? (
+                <OperatorSteeringBar
+                  sessionId={sessionId}
+                  disabled={!run.running && run.approvalEvents.length === 0}
+                />
+              ) : null}
             </>
           )}
         >
@@ -373,6 +372,7 @@ export function ChatPage({
           <Fact label={t('chat.fact.settings')} value={metadataText(JSON.stringify(sessionMetadata.modelSettings ?? {})) ?? '{}'} />
           <Fact label={t('chat.fact.tokens')} value={String(sessionObservability.data?.totalUsage.totalTokens ?? 0)} />
         </div>
+        <ExecutionObservabilityPanel sessionId={sessionId} compact />
       </aside>
 
       <FilesPanel workspaceRoot={workspaceRoot} open={showFiles} onClose={() => setShowFiles(false)} />

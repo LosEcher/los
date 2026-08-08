@@ -27,6 +27,9 @@ import {
   TerminalSquare,
   Zap,
   Wrench,
+  Moon,
+  Sun,
+  Monitor,
 } from 'lucide-react';
 import {
   getJson,
@@ -66,6 +69,7 @@ import { EvalsPage } from './evals-page';
 import { PairwiseEvalsPage } from './pairwise-evals-page';
 import { formatDuration, StatusPill, type StatusState } from './ui';
 import { LANGS, useI18n } from './i18n';
+import { useTheme, type ThemeMode } from './hooks/useTheme';
 import { AuthBanner } from './auth-banner';
 import { LoginPage, isAuthenticated, logout } from './pages/login-page';
 import { OnboardingPage } from './pages/onboarding-page';
@@ -166,6 +170,7 @@ function pageFromHash(): PageId {
 
 export function App() {
   const { t, lang, setLang } = useI18n();
+  const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const [page, setPage] = useState<PageId>(pageFromHash);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
@@ -422,6 +427,28 @@ export function App() {
             <Metric label={t('nav.metric.health')} value={healthText(health.data?.status, t)} tone={health.data?.status === 'ok' ? 'ok' : 'warn'} />
             <Metric label={t('nav.metric.uptime')} value={formatDuration(health.data?.uptime ?? 0)} />
             <Metric label={t('nav.metric.mode')} value={t('common.localMesh')} />
+            <div className="theme-switch theme-switch-compact" role="radiogroup" aria-label={t('pages.settings.field.theme')}>
+              {([
+                { id: 'dark' as ThemeMode, icon: Moon, titleKey: 'pages.settings.theme.dark' },
+                { id: 'light' as ThemeMode, icon: Sun, titleKey: 'pages.settings.theme.light' },
+                { id: 'system' as ThemeMode, icon: Monitor, titleKey: 'pages.settings.theme.system' },
+              ]).map(option => {
+                const Icon = option.icon;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={themeMode === option.id}
+                    title={t(option.titleKey)}
+                    className={themeMode === option.id ? 'active' : ''}
+                    onClick={() => setThemeMode(option.id)}
+                  >
+                    <Icon size={14} />
+                  </button>
+                );
+              })}
+            </div>
             <div className="lang-switch" role="group" aria-label={t('nav.languageAria')}>
               {LANGS.map(l => (
                 <button
@@ -452,7 +479,7 @@ export function App() {
         {page === 'artifacts' && <ArtifactsPage />}
         {page === 'rules' && <RulesPage />}
         {page === 'evals' && <EvalsPage />}
-        {page === 'pairwise' && <PairwiseEvalsPage />}
+        {page === 'pairwise' && <PairwiseEvalsPage onOpenRun={openRun} onOpenSession={continueSession} />}
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}
         {page === 'diagnostics' && <DiagnosticsPage />}

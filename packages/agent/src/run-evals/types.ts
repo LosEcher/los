@@ -125,6 +125,11 @@ export interface ListRunEvalsOptions {
   verificationStatus?: RunEvalVerificationStatus | string;
   failureClass?: string;
   failoverScope?: RunEvalFailoverScope | string;
+  /**
+   * When false (default for summarize/compare fleet views), exclude document
+   * backlog / synthetic noise rows. Explicit true includes them.
+   */
+  includeNoise?: boolean;
   limit?: number;
 }
 

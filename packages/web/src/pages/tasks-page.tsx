@@ -96,7 +96,7 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
   });
 
   return (
-    <section className="panel-grid detail-grid">
+    <section className="panel-grid detail-grid ops-page">
       <div className="panel">
         <div className="panel-head">
           <div>
@@ -104,7 +104,7 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
             <p>{t('ops.tasks.subtitle')}</p>
           </div>
           <div className="toolbar">
-            <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+            <select className="filter-select" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
               <option value="">{t('ops.tasks.filterAllStatus')}</option>
               <option value="queued">{t('ops.tasks.statusQueued')}</option>
               <option value="running">{t('ops.tasks.statusRunning')}</option>

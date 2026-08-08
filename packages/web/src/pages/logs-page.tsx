@@ -40,19 +40,19 @@ export function LogsPage() {
   const hasEntries = (logs.data?.entries?.length ?? 0) > 0;
 
   return (
-    <section className="panel">
+    <section className="panel ops-page">
       <div className="panel-head">
         <div>
           <h2>{t('nav.logs')}</h2>
           <p>{t('ops.logs.subtitle')}</p>
         </div>
         <div className="toolbar">
-          <select value={selectedFile} onChange={event => setFile(event.target.value)} disabled={!hasFiles}>
+          <select className="filter-select" value={selectedFile} onChange={event => setFile(event.target.value)} disabled={!hasFiles}>
             {hasFiles
               ? (files.data ?? []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)
               : <option value="">{t('ops.logs.noLogFiles')}</option>}
           </select>
-          <select value={level} onChange={event => setLevel(event.target.value)}>
+          <select className="filter-select" value={level} onChange={event => setLevel(event.target.value)}>
             <option value="">{t('ops.logs.allLevels')}</option>
             <option value="debug">debug</option>
             <option value="info">info</option>

@@ -29,6 +29,7 @@ const mcpPage = readFileSync(new URL('./mcp-page.tsx', import.meta.url), 'utf8')
 const mcpCreate = readFileSync(new URL('./mcp-server-create.tsx', import.meta.url), 'utf8');
 const inboxPage = readFileSync(new URL('./pages/inbox-page.tsx', import.meta.url), 'utf8');
 const workPage = readFileSync(new URL('./pages/work-page.tsx', import.meta.url), 'utf8');
+const workCreateForm = readFileSync(new URL('./pages/work-create-form.tsx', import.meta.url), 'utf8');
 const workReviewPanel = readFileSync(new URL('./pages/work-review-panel.tsx', import.meta.url), 'utf8');
 const schedulesPage = readFileSync(new URL('./pages/schedules-page.tsx', import.meta.url), 'utf8');
 const evalsPage = readFileSync(new URL('./evals-page.tsx', import.meta.url), 'utf8');
@@ -174,14 +175,20 @@ test('run specs operator actions send actor/reason contract, not approved/note',
   assert.doesNotMatch(runSpecsPage, /note:\s*approvalNote/);
 });
 
-test('chat ApprovalCard is interactive via operator-events and WS steering is wired', () => {
+test('chat timeline is append-down with tool gates inline and footer steering', () => {
   assert.match(chatApproval, /function OperatorSteeringBar/);
+  assert.match(chatApproval, /export function ApprovalSummary/);
   assert.match(chatApproval, /postOperatorSteering/);
   assert.match(chatApproval, /instruction:\s*'approve'/);
   assert.match(chatPage, /OperatorSteeringBar/);
   assert.match(chatPage, /sessionId=\{sessionId\}/);
-  assert.match(chatPage, /notices=\{/);
-  assert.match(chatMessages, /\{notices\}[\s\S]*\{debugMode \?/);
+  assert.match(chatPage, /footer=\{/);
+  assert.match(chatPage, /ApprovalSummary/);
+  assert.match(chatPage, /approvalEvents=\{run\.approvalEvents\}/);
+  assert.doesNotMatch(chatPage, /className="approval-strip"/);
+  assert.match(chatMessages, /className="chat-timeline"/);
+  assert.match(chatMessages, /className="chat-timeline-footer"/);
+  assert.match(chatMessages, /Tools first/);
 });
 
 test('Chat plan approval preserves the Work capability revision binding', () => {
@@ -344,14 +351,39 @@ test('Daily Quality keeps the 28-day evidence window and metric families separat
 
 test('new Work sends a structured contract draft and does not dispatch directly', () => {
   assert.equal(EN['work.form.draftNote'], 'Creates a draft only. Execution starts after operator action.');
-  assert.match(workPage, /postJson<WorkItemProjection>\('\/work-items', buildCreateWorkItemPayload\(form\)\)/);
-  assert.match(workPage, /mode: form\.mode/);
-  assert.match(workPage, /toolMode: form\.toolMode/);
-  assert.match(workPage, /editableSurfaces: lines\(form\.editableSurfaces\)/);
-  assert.match(workPage, /requiredChecks: lines\(form\.requiredChecks\)/);
-  assert.match(workPage, /stopConditions: lines\(form\.stopConditions\)/);
-  assert.match(workPage, /t\('work\.form\.draftNote'\)/);
-  assert.doesNotMatch(between(workPage, 'function StructuredCreateForm', 'function LineField'), /postJson[^\n]+\/chat/);
+  assert.equal(EN['work.form.permission'], 'Permission');
+  assert.equal(EN['work.form.advanced'], 'Advanced');
+  assert.match(workPage, /StructuredCreateForm/);
+  assert.match(workCreateForm, /postJson<WorkItemProjection>\('\/work-items', buildCreateWorkItemPayload\(form\)\)/);
+  assert.match(workCreateForm, /mode: form\.mode/);
+  assert.match(workCreateForm, /toolMode: form\.toolMode/);
+  assert.match(workCreateForm, /editableSurfaces: lines\(form\.editableSurfaces\)/);
+  assert.match(workCreateForm, /requiredChecks: lines\(form\.requiredChecks\)/);
+  assert.match(workCreateForm, /stopConditions: lines\(form\.stopConditions\)/);
+  assert.match(workCreateForm, /t\('work\.form\.draftNote'\)/);
+  assert.doesNotMatch(between(workCreateForm, 'export function StructuredCreateForm', 'function LineField'), /postJson[^\n]+\/chat/);
+});
+
+test('Work create form is two-tier: default goal/permission/priority, advanced holds contract fields', () => {
+  const createForm = between(workCreateForm, 'export function StructuredCreateForm', 'function LineField');
+  assert.match(createForm, /className="work-create-defaults"/);
+  assert.match(createForm, /t\('work\.form\.goal'\)/);
+  assert.match(createForm, /t\('work\.form\.permission'\)/);
+  assert.match(createForm, /t\('work\.form\.priority'\)/);
+  assert.match(createForm, /className="work-create-advanced"/);
+  assert.match(createForm, /t\('work\.form\.advanced'\)/);
+  assert.match(createForm, /countAdvancedOverrides\(form\)/);
+  // Mode enum (incl. feed-analysis) and contract lists live only under advanced.
+  assert.match(createForm, /work-create-advanced[\s\S]*feed-analysis-ingress/);
+  assert.match(createForm, /work-create-advanced[\s\S]*editableSurfaces/);
+  assert.match(createForm, /work-create-advanced[\s\S]*requiredChecks/);
+  assert.match(createForm, /work-create-advanced[\s\S]*stopConditions/);
+  // Default strip must not surface mode enum or feed-analysis option.
+  const defaults = between(createForm, 'work-create-defaults', 'work-create-advanced');
+  assert.doesNotMatch(defaults, /feed-analysis-ingress/);
+  assert.doesNotMatch(defaults, /work\.form\.mode/);
+  assert.match(styles, /\.work-create-advanced/);
+  assert.match(styles, /\.work-create-defaults/);
 });
 
 test('Work reviews plans in the daily surface and proxies Work Item routes', () => {

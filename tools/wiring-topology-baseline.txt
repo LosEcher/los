@@ -138,7 +138,6 @@ agent|packages/agent/src/session-events.ts|projectSessionObservability  # zero c
 agent|packages/agent/src/session-recovery.ts|CHECKPOINT_VERSION  # zero callers (orphan)
 agent|packages/agent/src/session-recovery.ts|isCheckpointVersionSupported  # test-only caller (no production caller)
 agent|packages/agent/src/session-trace.ts|validateTraceCompleteness  # test-only caller (no production caller)
-agent|packages/agent/src/skills.ts|incrementSkillUsage  # zero callers (orphan)
 agent|packages/agent/src/skills.ts|skillDirForScope  # zero callers (orphan)
 agent|packages/agent/src/spec-loader.ts|loadAllSpecs  # test-only caller (no production caller)
 agent|packages/agent/src/spec-loader.ts|loadSpecsForFiles  # test-only caller (no production caller)

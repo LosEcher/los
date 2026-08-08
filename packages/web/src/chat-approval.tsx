@@ -1,10 +1,10 @@
 /**
- * Tool approval notification cards and interactive operator steering.
- * - ApprovalCard: shows tool.approved / tool.denied outcomes
- * - OperatorSteeringBar: posts approve/deny/escalate via operator-events
+ * Tool approval outcomes + operator steering.
+ * Status is shown inline on ToolCards in the timeline; this module provides
+ * compact footer summary and the sticky OperatorSteeringBar.
  */
-import { useState } from 'react';
-import { Wrench, Check, X, AlertTriangle, Clock, ArrowUpRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Check, X, AlertTriangle, Clock, ArrowUpRight, ChevronDown } from 'lucide-react';
 import { postOperatorSteering } from './api/index.js';
 import { useI18n } from './i18n';
 
@@ -20,42 +20,13 @@ export type ApprovalEvent = {
   createdAt: number;
 };
 
-export function ApprovalCard({
-  event,
-  sessionId,
-  onSteered,
-}: {
-  event: ApprovalEvent;
-  sessionId?: string | null;
-  onSteered?: (instruction: string) => void;
-}) {
+/** Compact status-only row (debug / expanded summary). No top-of-page stacking. */
+export function ApprovalCard({ event }: { event: ApprovalEvent }) {
   const { t } = useI18n();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function steer(instruction: 'approve' | 'deny' | 'escalate') {
-    if (!sessionId || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await postOperatorSteering(sessionId, {
-        instruction,
-        reason: `web ApprovalCard ${instruction} for ${event.toolName}`,
-        turnBoundary: 'immediate',
-      });
-      onSteered?.(instruction);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className={`approval-card ${event.allowed ? 'approved' : 'denied'}`}>
       <div className="approval-card-head">
         {event.allowed ? <Check size={13} /> : <X size={13} />}
-        <Wrench size={12} />
         <strong>{event.toolName}</strong>
         <span className="approval-verdict">
           {event.allowed ? t('chat.approval.approved') : t('chat.approval.denied')}
@@ -63,31 +34,51 @@ export function ApprovalCard({
         {event.capability ? <span className="approval-cap">{event.capability}</span> : null}
       </div>
       {event.reason ? <p className="approval-reason">{event.reason}</p> : null}
-      {event.argsPreview ? (
-        <details className="approval-args">
-          <summary>{t('chat.approval.args')}</summary>
-          <code>{event.argsPreview}</code>
-        </details>
-      ) : null}
-      {sessionId ? (
-        <div className="approval-actions" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-          <button type="button" className="tiny-btn" disabled={busy} onClick={() => void steer('approve')}>
-            <Check size={12} /> {t('chat.approve')}
-          </button>
-          <button type="button" className="tiny-btn" disabled={busy} onClick={() => void steer('deny')}>
-            <X size={12} /> {t('chat.deny')}
-          </button>
-          <button type="button" className="tiny-btn" disabled={busy} onClick={() => void steer('escalate')}>
-            <ArrowUpRight size={12} /> {t('chat.escalate')}
-          </button>
-        </div>
-      ) : null}
-      {error ? <div className="error-banner" style={{ marginTop: 6 }}>{error}</div> : null}
     </div>
   );
 }
 
-/** Always-visible session steering when a chat session is active. */
+/** Footer chip: how many tools gated this run, expand for list. */
+export function ApprovalSummary({ events }: { events: ApprovalEvent[] }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const { approved, denied } = useMemo(() => {
+    let approvedCount = 0;
+    let deniedCount = 0;
+    for (const event of events) {
+      if (event.allowed) approvedCount += 1;
+      else deniedCount += 1;
+    }
+    return { approved: approvedCount, denied: deniedCount };
+  }, [events]);
+
+  if (events.length === 0) return null;
+
+  return (
+    <div className="approval-summary">
+      <button
+        type="button"
+        className="approval-summary-toggle"
+        onClick={() => setOpen(value => !value)}
+        aria-expanded={open}
+      >
+        <ChevronDown size={14} className={open ? 'is-open' : undefined} />
+        <span>
+          {approved > 0 ? t('chat.approval.summaryApproved', { count: approved }) : null}
+          {approved > 0 && denied > 0 ? ' · ' : null}
+          {denied > 0 ? t('chat.approval.summaryDenied', { count: denied }) : null}
+        </span>
+      </button>
+      {open ? (
+        <div className="approval-summary-list">
+          {events.map(event => <ApprovalCard key={event.id} event={event} />)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Sticky session steering — sits under the timeline, above the composer. */
 export function OperatorSteeringBar({
   sessionId,
   disabled,
@@ -120,8 +111,8 @@ export function OperatorSteeringBar({
   }
 
   return (
-    <div className="operator-steering-bar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 16px' }}>
-      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t('chat.operator')}</span>
+    <div className="operator-steering-bar">
+      <span className="operator-steering-label">{t('chat.operator')}</span>
       <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('approve')}>
         <Check size={12} /> {t('chat.approve')}
       </button>
@@ -131,8 +122,8 @@ export function OperatorSteeringBar({
       <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('escalate')}>
         <ArrowUpRight size={12} /> {t('chat.escalate')}
       </button>
-      {status ? <span style={{ fontSize: 12, color: 'var(--ok, green)' }}>{status}</span> : null}
-      {error ? <span style={{ fontSize: 12, color: 'var(--danger, red)' }}>{error}</span> : null}
+      {status ? <span className="operator-steering-ok">{status}</span> : null}
+      {error ? <span className="operator-steering-err">{error}</span> : null}
     </div>
   );
 }

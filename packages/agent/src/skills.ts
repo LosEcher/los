@@ -11,6 +11,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 
 import { join, resolve, relative } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 import { contentVersionHash } from './distribution-version.js';
+import { parseSkillFrontmatter } from './skill-frontmatter.js';
 
 const log = getLogger('skills');
 
@@ -372,38 +373,19 @@ export function loadSkillsFromDir(
 }
 
 function parseSkillMarkdown(raw: string, filename: string): UpsertSkillInput | null {
-  const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!match) {
-    const name = filename.replace(/\.md$/i, '');
-    assertSafeName(name);
-    return { name, content: raw, metadata: {}, enabled: true };
-  }
-
-  const frontmatter = match[1]!;
-  const content = match[2]!.trim();
-  const metadata: Record<string, unknown> = {};
-  let name = '';
-  let enabled = true;
-  let category: string | undefined;
-  let description: string | undefined;
-  let runMode: SkillRunMode | undefined;
-
-  for (const line of frontmatter.split('\n')) {
-    const kv = line.match(/^(\w+):\s*(.+)$/);
-    if (!kv) continue;
-    const [, key, value] = kv;
-    const trimmed = value!.trim();
-    if (key === 'name') name = trimmed;
-    else if (key === 'enabled') enabled = trimmed !== 'false';
-    else if (key === 'category') category = trimmed;
-    else if (key === 'description') description = trimmed;
-    else if (key === 'runMode' && (trimmed === 'auto' || trimmed === 'manual')) runMode = trimmed;
-    else metadata[key] = trimmed;
-  }
-
-  if (!name) return null;
-  assertSafeName(name);
-  return { name, category, description, runMode, content, metadata, enabled };
+  const parsed = parseSkillFrontmatter(raw, filename);
+  if (!parsed) return null;
+  assertSafeName(parsed.name);
+  return {
+    name: parsed.name,
+    category: parsed.category,
+    description: parsed.description,
+    runMode: parsed.runMode,
+    content: parsed.content,
+    metadata: parsed.metadata,
+    enabled: parsed.enabled,
+    tags: parsed.tags,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────

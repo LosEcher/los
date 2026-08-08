@@ -15,6 +15,10 @@ test('sessionEventVisibility: governance lifecycle is audit', () => {
   assert.equal(sessionEventVisibility('governance.job.completed'), 'audit');
 });
 
+test('sessionEventVisibility: skill lifecycle is audit', () => {
+  assert.equal(sessionEventVisibility('skill.selected'), 'audit');
+});
+
 test('sessionEventVisibility: coordinator decisions are audit', () => {
   assert.equal(sessionEventVisibility('coordinator.intake_resolved'), 'audit');
   assert.equal(sessionEventVisibility('coordinator.intake_blocked'), 'audit');

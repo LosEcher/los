@@ -226,6 +226,12 @@ test('uses Inbox and Work for plan review and structured creation', async ({ pag
 
   await page.getByRole('button', { name: 'New work' }).click();
   await page.getByLabel('Goal', { exact: true }).fill('Create a bounded daily workflow task');
+  // Default strip: goal + permission + priority. Contract fields live under Advanced.
+  await expect(page.getByLabel('Permission')).toBeVisible();
+  await expect(page.getByLabel('Priority')).toBeVisible();
+  await expect(page.getByLabel('Mode')).toBeHidden();
+  await page.locator('details.work-create-advanced > summary').click();
+  await expect(page.getByLabel('Mode')).toBeVisible();
   await page.getByLabel('Editable surfaces').fill('packages/web/src/pages');
   await page.getByLabel('Required checks').fill('pnpm --filter @los/web test');
   await page.getByLabel('Stop conditions').fill('scope expands');

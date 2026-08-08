@@ -107,3 +107,74 @@ export type SessionObservability = {
     names: string[];
   };
 };
+
+/** GET /sessions/:id/execution-observability — P0 run projection. */
+export type ExecutionVersionEvidence = {
+  status: 'known' | 'unknown';
+  value: string | null;
+  eventIds: number[];
+};
+
+export type ExecutionFingerprint = {
+  status: 'known' | 'unknown';
+  algorithm: 'sha256';
+  hash: string | null;
+  components: {
+    prompt: ExecutionVersionEvidence;
+    spec: ExecutionVersionEvidence;
+    memory: ExecutionVersionEvidence;
+    toolCatalog: ExecutionVersionEvidence;
+  };
+};
+
+export type ExecutionDurationEvidence = {
+  durationMs: number;
+  eventIds: number[];
+};
+
+export type ExecutionCountEvidence = {
+  count: number;
+  eventIds: number[];
+};
+
+export type ExecutionTokenEvidence = {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  totalTokens: number;
+  eventIds: number[];
+};
+
+export type ExecutionTurnWaterfall = {
+  turn: number;
+  modelWait: ExecutionDurationEvidence;
+  toolWait: ExecutionDurationEvidence;
+  retries: ExecutionCountEvidence;
+  errors: ExecutionCountEvidence;
+  denied: ExecutionCountEvidence;
+  tokens: ExecutionTokenEvidence;
+};
+
+export type ExecutionFailureFacetCategory =
+  | 'provider'
+  | 'tool'
+  | 'policy'
+  | 'verification'
+  | 'context'
+  | 'recovery';
+
+export type ExecutionFailureFacet = {
+  category: ExecutionFailureFacetCategory;
+  code: string;
+  message: string | null;
+  eventIds: number[];
+  verificationRecordIds: string[];
+};
+
+export type ExecutionObservabilityProjection = {
+  sessionId: string;
+  fingerprint: ExecutionFingerprint;
+  waterfall: ExecutionTurnWaterfall[];
+  failureFacets: ExecutionFailureFacet[];
+};

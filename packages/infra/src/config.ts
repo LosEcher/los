@@ -96,6 +96,17 @@ export const ConfigSchema = z.object({
       /** Whether child/spawned agents inherit parent identity (default: false). */
       inheritForChildren: z.coerce.boolean().default(false),
     }).default({}),
+    /**
+     * Skill runtime (configure-surface P0-1).
+     * Skills attach as user-turn content (not system prefix) for AP11 cache safety.
+     * autoInject defaults OFF until harness evidence is collected.
+     */
+    skills: z.object({
+      runtimeEnabled: z.coerce.boolean().default(true),
+      autoInject: z.coerce.boolean().default(false),
+      maxAutoSkills: z.coerce.number().int().positive().max(20).default(3),
+      maxSkillTokens: z.coerce.number().int().positive().default(2500),
+    }).default({}),
   }),
 
   // Judge model for post-execution goal evaluation (P0-2).
@@ -221,7 +232,15 @@ export async function loadConfig(opts?: {
     server: { port: 8080, host: '127.0.0.1', corsOrigin: 'http://localhost:5173', localEndpoints: DEFAULT_LOCAL_ENDPOINTS },
     auth: { enabled: false },
     integrations: { feedAnalysis: {} },
-    agent: { defaultProvider: DEFAULT_AGENT_PROVIDER, defaultModel: DEFAULT_AGENT_MODEL, maxLoops: 20, sandboxMode: 'workspace-write', allowNativeShell: false, identity: { name: 'default', inheritForChildren: false } },
+    agent: {
+      defaultProvider: DEFAULT_AGENT_PROVIDER,
+      defaultModel: DEFAULT_AGENT_MODEL,
+      maxLoops: 20,
+      sandboxMode: 'workspace-write',
+      allowNativeShell: false,
+      identity: { name: 'default', inheritForChildren: false },
+      skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
+    },
     memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },
     providers: {},

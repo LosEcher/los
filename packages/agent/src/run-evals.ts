@@ -45,6 +45,10 @@ export {
   type SampleGateEvaluation, type SampleGateRegistration, type SampleGateScope,
   type SampleGateStatus,
 } from './run-evals/sample-gate.js';
+export {
+  scheduleTerminalRunEval,
+  type RecordTerminalRunEvalInput,
+} from './run-evals/terminal-projection.js';
 
 import {
   addOptionalClause,
@@ -327,6 +331,13 @@ function buildRunEvalFilter(options: SummarizeRunEvalsOptions): { where: string;
     params.push(createdTo);
     clauses.push(`created_at <= $${params.length}::timestamptz`);
   }
+  // Fleet default: hide document backlog / synthetic noise unless includeNoise=true.
+  // When a specific runSpecId is requested, keep full history for that run.
+  if (options.includeNoise !== true && !normalizeOptionalString(options.runSpecId)) {
+    clauses.push(`run_spec_id <> 'eval-backlog'`);
+    clauses.push(`COALESCE(provider, '') <> 'backlog'`);
+    clauses.push(`COALESCE(summary_json->>'kind', '') <> 'eval_backlog_snapshot'`);
+  }
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '', params };
 }
 
@@ -341,6 +352,7 @@ function normalizeSummaryOptions(options: SummarizeRunEvalsOptions): SummarizeRu
     verificationStatus: normalizeOptionalString(options.verificationStatus),
     failureClass: normalizeOptionalString(options.failureClass),
     failoverScope: normalizeFailoverScope(options.failoverScope),
+    includeNoise: options.includeNoise,
     createdFrom: normalizeOptionalIsoLike(options.createdFrom, 'createdFrom'),
     createdTo: normalizeOptionalIsoLike(options.createdTo, 'createdTo'),
     limit: normalizeLimit(options.limit),
@@ -367,6 +379,7 @@ function normalizeCompareOptions(options: CompareRunEvalsOptions): CompareRunEva
     success: options.success,
     verificationStatus: normalizeOptionalString(options.verificationStatus),
     failureClass: normalizeOptionalString(options.failureClass),
+    includeNoise: options.includeNoise,
     baselineFrom, baselineTo, candidateFrom, candidateTo,
     limit: normalizeLimit(options.limit),
   };

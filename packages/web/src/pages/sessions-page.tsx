@@ -7,6 +7,7 @@ import {
   HIDDEN_INSPECTOR_EVENTS,
   TurnGroup,
 } from './session-inspector.js';
+import { ExecutionObservabilityPanel } from './execution-observability-panel.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
@@ -302,6 +303,7 @@ function SessionInspector({
           <Fact label={t('assets.label.models')} value={observability.data.models.names.join(', ') || observability.data.models.status} />
         </div>
       ) : null}
+      <ExecutionObservabilityPanel sessionId={sessionId} />
       {detail.data ? (
         <div className="definition-list compact-definition-list">
           <Definition term={t('assets.label.created')} text={formatDate(detail.data.createdAt)} />
