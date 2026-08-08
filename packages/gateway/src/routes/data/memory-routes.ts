@@ -15,6 +15,9 @@ import {
   canWriteToScope,
   canDeleteMemory,
   evaluatePromotion,
+  validateMemoryWrite,
+  detectPoisoning,
+  isMemoryWriteError,
   type MemoryScope,
   type MemoryAccessContext,
 } from '@los/memory';
@@ -150,6 +153,27 @@ export function registerMemoryRoutes(
     const context = getRequestContext(req);
     await deps.ensureMemoryStore();
 
+    // Write gate: structural/source constraints before any DB work (422, not 500)
+    const normalizedSessionId = normalizeOptionalString(sessionId);
+    const violations = validateMemoryWrite({
+      title,
+      summary,
+      kind,
+      tags: normalizeStringArray(tags),
+      content,
+      metadata,
+      source,
+      sessionId: normalizedSessionId,
+      nodeId: normalizeOptionalString(nodeId),
+    });
+    if (violations.length > 0) {
+      return reply.status(422).send({
+        error: 'Unprocessable Entity',
+        detail: 'Memory write rejected by write gate',
+        violations,
+      });
+    }
+
     // Scope enforcement: caller must be able to write at the requested scope
     const targetScope = normalizeScope(requestedScope ?? 'session');
     const acl = buildAccessContext(deps, req, targetScope, { sessionId: sessionId });
@@ -162,32 +186,63 @@ export function registerMemoryRoutes(
       });
     }
 
-    const obs = await deps.addObservation({
-      title, summary, kind,
-      tags: normalizeStringArray(tags),
-      content,
-      source,
-      metadata: normalizeMemoryMetadata(metadata, {
-        scope: targetScope,
-        memoryLayer: metadata?.memoryLayer ?? 'episodic',
-        archived: false,
-        observerType: metadata?.observerType ?? 'user',
-      }),
-      sessionId: normalizeOptionalString(sessionId),
-      tenantId: context.tenantId,
-      projectId: context.projectId,
-      userId: context.userId,
-      nodeId: normalizeOptionalString(nodeId),
-      requestId: context.requestId,
-      traceId: context.traceId,
-    });
-    return obs;
+    let obs;
+    try {
+      obs = await deps.addObservation({
+        title, summary, kind,
+        tags: normalizeStringArray(tags),
+        content,
+        source,
+        metadata: normalizeMemoryMetadata(metadata, {
+          scope: targetScope,
+          memoryLayer: metadata?.memoryLayer ?? 'episodic',
+          archived: false,
+          observerType: metadata?.observerType ?? 'user',
+        }),
+        sessionId: normalizedSessionId,
+        tenantId: context.tenantId,
+        projectId: context.projectId,
+        userId: context.userId,
+        nodeId: normalizeOptionalString(nodeId),
+        requestId: context.requestId,
+        traceId: context.traceId,
+      });
+    } catch (err) {
+      // Store-layer write gate (defense in depth) → 422 like the pre-check
+      if (isMemoryWriteError(err)) {
+        return reply.status(422).send({
+          error: 'Unprocessable Entity',
+          detail: 'Memory write rejected by write gate',
+          violations: err.violations,
+        });
+      }
+      throw err;
+    }
+    // Surface poisoning auto-flag when content matched an injection pattern
+    const poisonFlag = (obs.metadata as Record<string, unknown>).poisonFlag;
+    return poisonFlag ? { ...obs, poisoning: poisonFlag } : obs;
   });
 
   app.patch('/memory/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as any;
     await deps.ensureMemoryStore();
+    // Write gate: structural/source constraints on the patch payload (422, not 500)
+    const violations = validateMemoryWrite({
+      title: normalizeOptionalString(body.title),
+      summary: normalizeOptionalString(body.summary),
+      kind: normalizeOptionalString(body.kind),
+      tags: body.tags === undefined ? undefined : normalizeStringArray(body.tags),
+      content: normalizeOptionalString(body.content),
+      metadata: body.metadata === undefined ? undefined : normalizeMemoryMetadata(body.metadata),
+    }, { partial: true });
+    if (violations.length > 0) {
+      return reply.status(422).send({
+        error: 'Unprocessable Entity',
+        detail: 'Memory write rejected by write gate',
+        violations,
+      });
+    }
     const obs = await deps.updateObservation(parseInt(id), {
       title: normalizeOptionalString(body.title),
       summary: normalizeOptionalString(body.summary),

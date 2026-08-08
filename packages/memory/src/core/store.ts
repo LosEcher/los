@@ -35,6 +35,27 @@ export interface Observation {
 }
 
 import type { ObserverType } from '../types.js';
+import {
+  validateMemoryWrite,
+  detectPoisoning,
+  buildPoisonFlag,
+  type MemoryWriteViolation,
+} from './write-gate.js';
+
+/** Thrown when a memory write fails the structural/source gate. */
+export class MemoryWriteError extends Error {
+  readonly violations: MemoryWriteViolation[];
+  constructor(violations: MemoryWriteViolation[]) {
+    super(`Memory write rejected: ${violations.map(v => `${v.field}: ${v.message}`).join('; ')}`);
+    this.name = 'MemoryWriteError';
+    this.violations = violations;
+  }
+}
+
+/** Type guard for MemoryWriteError (wiring-friendly: called with parens). */
+export function isMemoryWriteError(err: unknown): err is MemoryWriteError {
+  return err instanceof MemoryWriteError;
+}
 
 /** Dedupe key format: alphanumeric + : _ - .  only, 1-128 chars (slug-safe). */
 const DEDUPE_KEY_RE = /^[a-zA-Z0-9:_\-.]+$/;
@@ -167,10 +188,21 @@ export async function addObservation(obs: {
   await ensureMemoryStore();
   const db = getDb();
 
+  // Write gate: structural/source constraints before any DB work
+  const violations = validateMemoryWrite(obs);
+  if (violations.length > 0) {
+    throw new MemoryWriteError(violations);
+  }
+
+  // Poisoning detection: matching content is written but tagged (keep evidence, attribute)
+  const poison = detectPoisoning({ title: obs.title, summary: obs.summary, content: obs.content });
+
   // Merge observerType into metadata for JSONB storage (no schema change)
-  const mergedMetadata = obs.observerType
-    ? { ...(obs.metadata ?? {}), observerType: obs.observerType }
-    : (obs.metadata ?? {});
+  const mergedMetadata = {
+    ...(obs.metadata ?? {}),
+    ...(poison ? buildPoisonFlag(poison, obs.source) : {}),
+    ...(obs.observerType ? { observerType: obs.observerType } : {}),
+  };
 
   // Enforce maxObservations cap
   const maxObs = getConfig().memory.maxObservations;
@@ -233,6 +265,29 @@ export async function updateObservation(
   const content = updates.content ?? existing.content;
   const metadata = updates.metadata ?? existing.metadata;
 
+  // Write gate on the merged result (update paths can also smuggle oversized content)
+  const violations = validateMemoryWrite({ title, summary, kind, tags, content, metadata, source: existing.source });
+  if (violations.length > 0) {
+    throw new MemoryWriteError(violations);
+  }
+
+  // Poisoning detection on merged content; merge with any existing flag without
+  // overwriting an earlier manual flag (manual reason/flaggedAt survive auto-detection).
+  const poison = detectPoisoning({ title, summary, content });
+  const existingFlag = (metadata.poisonFlag ?? {}) as Record<string, unknown>;
+  const autoFlag = poison ? buildPoisonFlag(poison, existing.source).poisonFlag : null;
+  const effectiveMetadata = autoFlag
+    ? {
+        ...metadata,
+        poisonFlag: {
+          ...existingFlag,
+          ...autoFlag,
+          reason: existingFlag.reason ?? autoFlag.reason,
+          flaggedAt: existingFlag.flaggedAt ?? autoFlag.flaggedAt,
+        },
+      }
+    : metadata;
+
   const rows = await db.query<ObservationRow>(`
     UPDATE observations
     SET title = $1,
@@ -244,7 +299,7 @@ export async function updateObservation(
         updated_at = now()
     WHERE id = $7
     RETURNING *
-  `, [title, summary, kind, JSON.stringify(tags), content, JSON.stringify(metadata), id]);
+  `, [title, summary, kind, JSON.stringify(tags), content, JSON.stringify(effectiveMetadata), id]);
 
   return rows.rows[0] ? rowToObservation(rows.rows[0]) : null;
 }
@@ -356,6 +411,29 @@ export async function deleteObservation(id: number): Promise<boolean> {
   const db = getDb();
   const rows = await db.query<{ id: number }>('DELETE FROM observations WHERE id = $1 RETURNING id', [id]);
   return rows.rows.length > 0;
+}
+
+/**
+ * Tag an existing observation as suspicious WITHOUT deleting it — evidence is
+ * retained and attributable (poisoning defense: "keep evidence, tag it").
+ * Merges into metadata.poisonFlag; the observation remains searchable.
+ */
+export async function flagObservationAsSuspicious(
+  id: number,
+  reason: string,
+  flaggedBy?: string,
+): Promise<Observation | null> {
+  await ensureMemoryStore();
+  const existing = await getObservation(id);
+  if (!existing) return null;
+  const prevFlag = (existing.metadata.poisonFlag ?? {}) as Record<string, unknown>;
+  const poisonFlag = {
+    ...prevFlag,
+    flaggedAt: new Date().toISOString(),
+    reason,
+    ...(flaggedBy ? { flaggedBy } : {}),
+  };
+  return updateObservation(id, { metadata: { ...existing.metadata, poisonFlag } });
 }
 
 export async function searchObservations(query: string, opts?: {
