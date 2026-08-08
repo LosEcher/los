@@ -84,6 +84,7 @@ export function ChatPage({
   const [toolRetryMaxDelayMs, setToolRetryMaxDelayMs] = useState('');
   const [debugMode, setDebugMode] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
 
   const {
     provider, setProvider,
@@ -107,6 +108,7 @@ export function ChatPage({
     toolRetryMaxAttempts, toolRetryBaseDelayMs, toolRetryMaxDelayMs,
     temperature, topP, maxTokens, presencePenalty, frequencyPenalty,
     provider, model,
+    manualSkillIds: selectedSkillIds,
     activeTodoContext, boundTodoId,
     onWorkItemBound: (todo) => {
       bindTodo(todo);
@@ -355,6 +357,7 @@ export function ChatPage({
           onRuntimeKindChange={setRuntimeKind} grokRuntimeEnabled={grokRuntimeEnabled} workspaceRoot={workspaceRoot}
           onWorkspaceRootChange={setWorkspaceRoot} defaultWorkspace={defaultWorkspace}
           advancedState={advancedState} onAdvancedChange={onAdvancedChange} advancedCount={advancedCount}
+          selectedSkillIds={selectedSkillIds} onSelectedSkillIdsChange={setSelectedSkillIds}
         />
       </div>
 
