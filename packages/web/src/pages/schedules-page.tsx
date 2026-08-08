@@ -133,17 +133,21 @@ export function SchedulesPage() {
   const active = detail.data?.schedule ?? list.data?.results.find(item => item.id === activeId) ?? null;
   const actionError = create.error ?? updateStatus.error ?? triggerNow.error ?? retryRun.error;
 
+  const total = list.data?.count ?? 0;
+  const enabled = list.data?.results.filter(item => item.status === 'enabled').length ?? 0;
+  const openCircuits = list.data?.results.filter(item => item.circuitState === 'open').length ?? 0;
+
   return (
-    <div className="schedules-page">
+    <div className="daily-page schedules-page">
       <div className="daily-toolbar">
-        <div className="daily-summary">
-          <span>{t('ops.schedules.countLabel', { count: list.data?.count ?? 0 })}</span>
-          <span>{t('ops.schedules.enabledCountLabel', { count: list.data?.results.filter(item => item.status === 'enabled').length ?? 0 })}</span>
-          <span>{t('ops.schedules.openCircuitsLabel', { count: list.data?.results.filter(item => item.circuitState === 'open').length ?? 0 })}</span>
+        <div className="attention-summary schedule-summary" aria-label={t('nav.schedules')}>
+          <div className="summary-count"><span>{t('ops.schedules.summaryTotal')}</span><strong>{total}</strong></div>
+          <div className="summary-count ok"><span>{t('ops.schedules.summaryEnabled')}</span><strong>{enabled}</strong></div>
+          <div className={`summary-count${openCircuits > 0 ? ' danger' : ' info'}`}><span>{t('ops.schedules.summaryCircuits')}</span><strong>{openCircuits}</strong></div>
         </div>
-        <div className="work-action-strip">
+        <div className="daily-toolbar-actions">
           <button className="icon-btn" type="button" title={t('ops.schedules.refreshTitle')} aria-label={t('ops.schedules.refreshTitle')} onClick={() => list.refetch()}>
-            <RefreshCcw size={15} />
+            <RefreshCcw size={15} className={list.isFetching ? 'spin' : ''} />
           </button>
           <button className="btn" type="button" onClick={() => setShowCreate(value => !value)}>
             {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? t('common.close') : t('ops.schedules.newScheduleButton')}
@@ -160,12 +164,15 @@ export function SchedulesPage() {
           {list.isError ? <div className="daily-error">{String(list.error)}</div> : null}
           {list.data?.results.map(item => (
             <button key={item.id} type="button" className="schedule-list-row" data-active={activeId === item.id} onClick={() => setSelectedId(item.id)}>
-              <span className={`schedule-state ${item.status}`} />
+              <span className={`schedule-state ${item.status}`} title={item.status} aria-label={item.status} />
               <span className="work-list-copy">
                 <strong>{item.title}</strong>
                 <small>{item.trigger.kind} · {item.trigger.expression} · {item.trigger.timezone}</small>
               </span>
-              <span className="schedule-next">{formatDate(item.nextRunAt)}</span>
+              <span className="schedule-next">
+                <span className="schedule-next-label">{t('ops.schedules.nextShort')}</span>
+                {formatDate(item.nextRunAt)}
+              </span>
             </button>
           ))}
           {!list.isLoading && list.data?.results.length === 0 ? <div className="daily-empty">{t('ops.schedules.emptyList')}</div> : null}

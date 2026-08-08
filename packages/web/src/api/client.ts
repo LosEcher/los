@@ -10,21 +10,44 @@ export class AuthError extends Error {
   }
 }
 
-function checkResponse(res: Response): void {
-  if (!res.ok) {
-    const err = res.status === 401
-      ? new AuthError('Authentication required — set auth token in Settings', res.status)
-      : res.status === 403
-        ? new AuthError('Operator authentication required — set operator token in Settings', res.status)
-        : new Error(`${res.status} ${res.statusText}`);
-    throw err;
+async function throwHttpError(res: Response): Promise<never> {
+  const detail = await readErrorDetail(res);
+  if (res.status === 401) {
+    throw new AuthError('Authentication required — set auth token in Settings', res.status);
   }
+  if (res.status === 403) {
+    throw new AuthError('Operator authentication required — set operator token in Settings', res.status);
+  }
+  const base = `${res.status} ${res.statusText}`;
+  throw new Error(detail ? `${base}: ${detail}` : base);
+}
+
+async function readErrorDetail(res: Response): Promise<string> {
+  try {
+    const text = await res.text();
+    if (!text.trim()) return '';
+    try {
+      const body = JSON.parse(text) as Record<string, unknown>;
+      const parts = [body.blocker, body.reason, body.message, body.error]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map(value => value.trim());
+      return [...new Set(parts)].join(' — ');
+    } catch {
+      return text.slice(0, 300).trim();
+    }
+  } catch {
+    return '';
+  }
+}
+
+async function checkResponse(res: Response): Promise<void> {
+  if (!res.ok) await throwHttpError(res);
 }
 
 export async function getJson<T>(path: string): Promise<T> {
   const headers = buildHeaders();
   const res = await fetch(path, { headers });
-  checkResponse(res);
+  await checkResponse(res);
   return await res.json() as T;
 }
 
@@ -35,14 +58,14 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
     headers,
     body: JSON.stringify(body),
   });
-  checkResponse(res);
+  await checkResponse(res);
   return await res.json() as T;
 }
 
 export async function deleteJson<T>(path: string): Promise<T> {
   const headers = buildHeaders();
   const res = await fetch(path, { method: 'DELETE', headers });
-  checkResponse(res);
+  await checkResponse(res);
   return await res.json() as T;
 }
 
@@ -53,7 +76,7 @@ export async function patchJson<T>(path: string, body: unknown): Promise<T> {
     headers,
     body: JSON.stringify(body),
   });
-  checkResponse(res);
+  await checkResponse(res);
   return await res.json() as T;
 }
 
@@ -69,12 +92,12 @@ export async function streamChat(
     body: JSON.stringify(payload),
     signal,
   });
-  if (!res.ok || !res.body) {
-    checkResponse(res);
-    throw new Error(`${res.status} ${res.statusText}`);
+  const body = res.body;
+  if (!res.ok || !body) {
+    await throwHttpError(res);
+    return;
   }
-
-  await readSSEStream(res.body, onEvent);
+  await readSSEStream(body, onEvent);
 }
 
 export async function streamRuntime(
@@ -89,12 +112,12 @@ export async function streamRuntime(
     body: JSON.stringify(payload),
     signal,
   });
-  if (!res.ok || !res.body) {
-    checkResponse(res);
-    throw new Error(`${res.status} ${res.statusText}`);
+  const body = res.body;
+  if (!res.ok || !body) {
+    await throwHttpError(res);
+    return;
   }
-
-  await readSSEStream(res.body, onEvent);
+  await readSSEStream(body, onEvent);
 }
 
 async function readSSEStream(body: ReadableStream<Uint8Array>, onEvent: (event: StreamEvent) => void): Promise<void> {

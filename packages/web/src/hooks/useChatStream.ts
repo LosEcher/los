@@ -3,6 +3,7 @@
  * Primary: WebSocket (ws-client.ts). Fallback: SSE EventSource (/sessions/:id/events/live).
  */
 import { useEffect, useRef, useState } from 'react';
+import { getAuthToken, getOperatorToken } from '../api/client.js';
 import { connectWsStream, type WsConnectionState, type WsStreamEvent } from '../api/ws-client.js';
 
 export type StreamEventCallback = (event: string, data: Record<string, unknown>) => void;
@@ -42,7 +43,14 @@ export function useChatStream({
 
     fallbackTimer = setTimeout(() => {
       if (ws.connectionState !== 'connected') {
-        const es = new EventSource(`/sessions/${sessionId}/events/live`);
+        // EventSource cannot set headers; pass tokens as query (same as WS).
+        const params = new URLSearchParams();
+        const authToken = getAuthToken();
+        const operatorToken = getOperatorToken();
+        if (authToken) params.set('access_token', authToken);
+        if (operatorToken) params.set('operator_token', operatorToken);
+        const qs = params.toString();
+        const es = new EventSource(`/sessions/${sessionId}/events/live${qs ? `?${qs}` : ''}`);
         sseFallback = es;
         es.addEventListener('session.event', () => {
           // EventSource only signals that new events exist — the trace poll

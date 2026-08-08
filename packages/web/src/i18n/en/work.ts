@@ -84,7 +84,10 @@ export const enWork = {
   'work.form.project': 'Project',
   'work.form.mode': 'Mode',
   'work.form.tools': 'Tools',
+  'work.form.permission': 'Permission',
   'work.form.priority': 'Priority',
+  'work.form.advanced': 'Advanced',
+  'work.form.advancedHint': 'Title, mode, scope, checks, and stop conditions',
   'work.form.evidenceRequired': 'Evidence required',
   'work.form.nonGoals': 'Non-goals',
   'work.form.editableSurfacesPlaceholder': 'One path per line',
@@ -98,8 +101,8 @@ export const enWork = {
   'work.mode.governance': 'governance',
   'work.mode.closeout': 'closeout',
   'work.mode.feedAnalysis': 'feed analysis',
-  'work.toolMode.readOnly': 'read only',
-  'work.toolMode.projectWrite': 'project write',
+  'work.toolMode.readOnly': 'Read only',
+  'work.toolMode.projectWrite': 'Can edit project',
 
   // ── Plan review ────────────────────────────────────
   'work.plan.title': 'Plan review',

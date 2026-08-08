@@ -110,7 +110,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
   const busy = approveRun.isPending || rejectRun.isPending || verifyRun.isPending;
 
   return (
-    <section className="panel-grid">
+    <section className="panel-grid ops-page">
       <div className="panel">
         <div className="panel-head">
           <div>
@@ -126,26 +126,22 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
           renderRow={(r) => (
             <div
               key={r.id}
-              className={`record-row ${selectedId === r.id ? 'record-selected' : ''}`}
+              className={`record-row record-row-stack ${selectedId === r.id ? 'record-selected' : ''}`}
+              data-active={selectedId === r.id}
               onClick={() => setSelectedId(selectedId === r.id ? null : r.id)}
-              style={{ cursor: 'pointer' }}
             >
               <div className="record-main">
                 <div className="record-header">
-                  <strong className="record-title" style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                    {r.id.slice(0, 16)}
-                  </strong>
-                  <span className={`status-pill ${r.status === 'succeeded' ? 'live' : r.status === 'failed' ? 'reserved' : 'partial'}`}>
-                    {r.status}
-                  </span>
+                  <strong className="record-title">{r.id.slice(0, 16)}</strong>
+                  <span className={`status-text ${r.status}`}>{r.status}</span>
                 </div>
                 <div className="record-meta">
                   {r.provider ? <span>{r.provider}/{r.model}</span> : null}
-                  {r.sessionId ? <span> · {t('ops.runSpecs.sessionShort', { sessionId: r.sessionId.slice(0, 12) })}</span> : null}
-                  <span> · {new Date(r.createdAt).toLocaleString()}</span>
+                  {r.sessionId ? <span>{t('ops.runSpecs.sessionShort', { sessionId: r.sessionId.slice(0, 12) })}</span> : null}
+                  <span>{new Date(r.createdAt).toLocaleString()}</span>
                 </div>
                 {r.prompt ? (
-                  <div className="record-detail" style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 4 }}>
+                  <div className="record-detail">
                     {r.prompt.length > 200 ? r.prompt.slice(0, 200) + '...' : r.prompt}
                   </div>
                 ) : null}

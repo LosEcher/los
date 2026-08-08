@@ -60,7 +60,7 @@ export function DeadLetterPage() {
   const acked = events.filter(e => e.acknowledgedAt);
 
   return (
-    <section className="panel-grid">
+    <section className="panel-grid ops-page">
       <div className="panel">
         <div className="panel-head">
           <div>
@@ -98,7 +98,7 @@ export function DeadLetterPage() {
                   {e.acknowledgedAt ? <span> · {t('ops.deadLetter.ackedPrefix', { date: new Date(e.acknowledgedAt).toLocaleString() })}</span> : null}
                 </div>
                 {e.originalError ? (
-                  <div className="record-detail" style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 4 }}>
+                  <div className="record-detail">
                     {e.originalError.length > 300 ? e.originalError.slice(0, 300) + '...' : e.originalError}
                   </div>
                 ) : null}
