@@ -23,6 +23,7 @@ export async function probeNode(node: ExecutorNodeRecord): Promise<{
       verified[mode] = {
         ok: true,
         checked_at: new Date().toISOString(),
+        source: 'probe',
         endpoint: probe.endpoint,
         kind: probe.kind,
       };

@@ -20,6 +20,37 @@ test('auth middleware allows requests when auth is disabled', async () => {
   }
 });
 
+test('executor heartbeat requires the shared agent key when configured', async () => {
+  const app = Fastify({ logger: false });
+  const cfg = configForAuth(false);
+  cfg.executor.agentKey = 'executor-heartbeat-key';
+  await authMiddleware(app, { config: cfg });
+  app.post('/nodes/heartbeat', async () => ({ ok: true }));
+
+  try {
+    const missing = await app.inject({ method: 'POST', url: '/nodes/heartbeat', payload: {} });
+    assert.equal(missing.statusCode, 401);
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { authorization: 'Bearer wrong-key' },
+      payload: {},
+    });
+    assert.equal(invalid.statusCode, 401);
+
+    const valid = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { authorization: 'Bearer executor-heartbeat-key' },
+      payload: {},
+    });
+    assert.equal(valid.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test('auth middleware requires the configured token outside public paths', async () => {
   const app = Fastify({ logger: false });
   await authMiddleware(app, { config: configForAuth(true) });

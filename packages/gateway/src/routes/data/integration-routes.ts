@@ -195,11 +195,15 @@ function normalizeIntegrationContext(
   sourceSystem: string,
 ): RequestContext {
   const actor = normalizeHeader(req.headers['x-actor-id']);
+  // This function runs only after verifyIntegrationAuth succeeds, so the
+  // integration contract may explicitly accept service-scoped routing hints.
+  const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
+  const projectId = normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los';
   return {
     ...context,
-    tenantId: context.tenantId === 'unknown' ? 'local' : context.tenantId,
-    projectId: context.projectId === 'unknown' ? config.defaultProjectId ?? 'los' : context.projectId,
-    userId: context.userId === 'unknown' ? actor ?? `integration:${sourceSystem}` : context.userId,
+    tenantId,
+    projectId,
+    userId: actor ?? `integration:${sourceSystem}`,
   };
 }
 
