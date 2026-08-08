@@ -150,6 +150,9 @@ export async function runClaimedAgentGraphTask(
       agentTaskLease: { taskId: task.id, leaseVersion: task.leaseVersion },
       runSpecId,
       sessionId,
+      // Batch-level abort signal: a failed sibling cancels running workers
+      // (graph fail-fast), and external cancellation propagates to workers.
+      signal: input.signal,
       verificationOwner: input.requireVerifier ? 'graph' : 'task',
       selfCheckContract: workerSelfCheckContract,
       dedupeKey: undefined,
@@ -165,10 +168,19 @@ export async function runClaimedAgentGraphTask(
     });
 
     if (result.status === 'cancelled') {
+      // Attribute sibling-cancellations: the batch abort reason (AbortError
+      // message) carries which sibling failed; prefer it over the generic
+      // registry default 'cancelled'.
+      const signalReason = input.signal?.reason instanceof Error && input.signal.reason.name === 'AbortError'
+        ? input.signal.reason.message
+        : undefined;
+      const cancelReason = (result.reason && result.reason !== 'cancelled')
+        ? result.reason
+        : (signalReason ?? result.reason);
       await updateClaimedAgentTaskStatus(task, nodeId, 'cancelled', {
         taskRunId,
         attemptId,
-        cancelReason: result.reason,
+        cancelReason,
       });
       await createAgentTaskAttempt({
         id: attemptId,
@@ -180,14 +192,14 @@ export async function runClaimedAgentGraphTask(
         model: selection.model,
         nodeId: result.taskRun.nodeId ?? nodeId,
         taskRunId,
-        error: result.reason,
+        error: cancelReason,
         toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
       });
       await sendWorkerMessage({
         dispatchId: attemptId,
         taskId: task.id,
         type: 'worker_done',
-        payload: { error: result.reason ?? 'cancelled' },
+        payload: { error: cancelReason ?? 'cancelled' },
       }).catch(() => undefined);
       return { taskId: task.id, taskRunId, attemptId, status: 'cancelled' };
     }

@@ -1,4 +1,5 @@
 import { appendSessionEvent } from '../session-events.js';
+import { getLogger } from '@los/infra/logger';
 import { claimReadyAgentTasks, ensureAgentTaskGraphStore } from '../agent-task-graph.js';
 import {
   getAgentTaskGraphCompletion,
@@ -11,10 +12,13 @@ import {
 import { _RunSuccessGateError, transitionExecutionState } from '../execution-store.js';
 import { ensureRunSpecVerificationPhase } from '../run-phase-transitions.js';
 import type { RunSpecStatus } from '../run-specs.js';
+import { linkAbortSignal } from './abort-registry.js';
 import { normalizeOptionalString, normalizePositiveInteger } from './helpers.js';
 import { resumeBlockedTaskRunsWithAnswers } from './resume-tasks.js';
 import { runClaimedAgentGraphTask } from './graph-task-runner.js';
 import type { RunAgentTaskGraphSerialInput, RunAgentTaskGraphSerialResult } from './types.js';
+
+const log = getLogger('agent-graph-runner');
 
 export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInput): Promise<RunAgentTaskGraphSerialResult> {
   await ensureAgentTaskGraphStore();
@@ -60,9 +64,66 @@ export async function runAgentTaskGraphSerial(input: RunAgentTaskGraphSerialInpu
     const completedStages = executedTasks
       .map(task => task.stageOutput)
       .filter((stage): stage is NonNullable<typeof stage> => Boolean(stage));
-    const executed = await Promise.all(tasks.map(task => runClaimedAgentGraphTask(task, input, completedStages)));
-    executedTasks.push(...executed);
-    if (executed.some(task => task.status !== 'succeeded' && task.recoveryFollowUpQueued !== true)) break;
+
+    // Graph fail-fast: when a batch worker fails (and is not a queued recovery
+    // follow-up), abort the batch so running sibling workers are cancelled
+    // instead of burning compute on a graph that is already failed. External
+    // cancellation (input.signal) keeps propagating through the batch signal.
+    const batchController = new AbortController();
+    const unlinkExternalSignal = linkAbortSignal(input.signal, batchController);
+    let firstFailure: { taskId: string; status: string } | null = null;
+    try {
+      const executed = await Promise.all(tasks.map(async task => {
+        const result = await runClaimedAgentGraphTask(task, {
+          ...input,
+          signal: batchController.signal,
+        }, completedStages);
+        if (
+          firstFailure === null
+          && result.status !== 'succeeded'
+          && result.recoveryFollowUpQueued !== true
+        ) {
+          firstFailure = { taskId: task.id, status: result.status };
+          // Abort with an AbortError so downstream handlers (isAbortError /
+          // abortErrorFromSignal) classify the sibling cancellation correctly.
+          const abortError = new Error(`sibling_failed:${task.id}:${result.status}`);
+          abortError.name = 'AbortError';
+          batchController.abort(abortError);
+          if (input.sessionId) {
+            try {
+              await appendSessionEvent({
+                sessionId: input.sessionId,
+                tenantId: input.tenantId,
+                projectId: input.projectId,
+                userId: input.userId,
+                nodeId: input.nodeId,
+                requestId: input.requestId,
+                traceId: input.traceId,
+                type: 'agent_graph.sibling_failed',
+                payload: {
+                  graphId: input.graphId,
+                  failedTaskId: task.id,
+                  status: result.status,
+                  // Batch siblings at abort time; those still running are
+                  // cancelled, already-finished ones are unaffected.
+                  siblingTaskIds: tasks.filter(t => t.id !== task.id).map(t => t.id),
+                  reason: `fail-fast: ${result.status} in batch`,
+                },
+              });
+            } catch (err) {
+              // Event emission must never escalate a worker failure into a
+              // graph-level exception.
+              log.warn(`agent_graph.sibling_failed event failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        }
+        return result;
+      }));
+      executedTasks.push(...executed);
+      if (executed.some(task => task.status !== 'succeeded' && task.recoveryFollowUpQueued !== true)) break;
+    } finally {
+      unlinkExternalSignal();
+    }
   }
 
   const completion = await getAgentTaskGraphCompletion(input.graphId, {

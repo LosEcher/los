@@ -1145,6 +1145,100 @@ test('scheduler queues retry follow-up attempts for recoverable tool failures', 
   }
 });
 
+test('scheduler cancels running sibling workers when a batch worker fails (graph fail-fast)', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `graph-failfast-${suffix}`;
+  const sessionId = `session-failfast-${suffix}`;
+  const nodeId = `test-failfast-executor-${suffix}`;
+
+  // TASK-A fails hard; TASK-B is a slow worker that must be cancelled by
+  // fail-fast before it finishes; TASK-C completes fast and is unaffected.
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/v1/tasks/run-agent') {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    const body = JSON.parse(await readRequestBody(req)) as { prompt?: string };
+    const prompt = String(body.prompt ?? '');
+    if (prompt.includes('TASK-A')) {
+      res.statusCode = 500;
+      sendJson(res, { error: 'simulated worker failure for TASK-A' });
+      return;
+    }
+    if (prompt.includes('TASK-B')) {
+      await delay(1500);
+      if (res.destroyed) return; // client aborted by fail-fast
+      sendJson(res, {
+        events: [],
+        deltas: [],
+        result: { text: 'completed TASK-B', turns: [], loopCount: 0, totalTokens: { prompt: 0, completion: 0 }, messages: [] },
+      });
+      return;
+    }
+    sendJson(res, {
+      events: [],
+      deltas: [],
+      result: { text: 'completed TASK-C', turns: [], loopCount: 0, totalTokens: { prompt: 0, completion: 0 }, messages: [] },
+    });
+  });
+
+  try {
+    await createAgentTask({ id: `${graphId}-A`, graphId, sessionId, role: 'executor', title: 'Execute A', prompt: 'TASK-A', priority: 10 });
+    await createAgentTask({ id: `${graphId}-B`, graphId, sessionId, role: 'executor', title: 'Execute B', prompt: 'TASK-B', priority: 20 });
+    await createAgentTask({ id: `${graphId}-C`, graphId, sessionId, role: 'executor', title: 'Execute C', prompt: 'TASK-C', priority: 30 });
+
+    await listen(server);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const result = await runAgentTaskGraphSerial({
+      graphId,
+      sessionId,
+      workspaceRoot: process.cwd(),
+      maxParallelTasks: 3,
+      editableSurfaceMode: 'ignore',
+      executor: {
+        enabled: true,
+        nodeUrls: [baseUrl],
+        nodeId,
+      },
+    });
+
+    const statuses = new Map(result.executedTasks.map(task => [task.taskId, task.status]));
+    assert.equal(statuses.get(`${graphId}-A`), 'failed');
+    assert.equal(statuses.get(`${graphId}-B`), 'cancelled', 'slow sibling must be cancelled by fail-fast');
+    assert.equal(statuses.get(`${graphId}-C`), 'succeeded', 'fast sibling completes unaffected');
+    assert.equal(result.completion.status, 'failed');
+
+    // Cancellation is attributable: the attempt error carries the sibling reason
+    const attemptsB = await listAgentTaskAttempts(`${graphId}-B`);
+    assert.match(attemptsB[0]?.error ?? '', /sibling_failed/);
+
+    // Observable: a session event records which task failed and which siblings were cancelled
+    const events = await listSessionEvents(sessionId, 100);
+    const failFastEvent = events.find(event => event.type === 'agent_graph.sibling_failed');
+    assert.ok(failFastEvent, 'agent_graph.sibling_failed event must be recorded');
+    assert.equal(failFastEvent?.payload.failedTaskId, `${graphId}-A`);
+    const siblingIds = (failFastEvent?.payload as { siblingTaskIds?: string[] }).siblingTaskIds ?? [];
+    assert.deepEqual(
+      [...siblingIds].sort(),
+      [`${graphId}-B`, `${graphId}-C`].sort(),
+    );
+  } finally {
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_runs WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_attempts WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM task_edges WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await getDb().query('DELETE FROM agent_tasks WHERE graph_id = $1', [graphId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+    await closeServer(server);
+  }
+});
+
 test('scheduler blocks run spec completion when verifier is required but missing', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
