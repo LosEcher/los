@@ -384,3 +384,84 @@ export function scopeToCandidateStatus(scope: MemoryScope): CandidateStatus {
     case 'global':  return 'active';
   }
 }
+
+// ── Tenant / project boundary (orthogonal to scope rank) ──
+
+export interface TenantProjectBoundary {
+  tenantId?: string | null;
+  projectId?: string | null;
+  isOperator?: boolean;
+}
+
+/**
+ * Cross-tenant/project ownership gate for observation rows.
+ *
+ * Scope rank (session/project/user/global) answers "how broad is this
+ * memory?". This gate answers "is the row in *my* tenant/project?".
+ * Hierarchical scope MUST NOT override a mismatched project boundary —
+ * otherwise a project-scoped caller can delete another project's
+ * session-scoped observation by id (AP-memory boundary).
+ *
+ * Rules:
+ * - Operator → allow
+ * - Target missing tenant or project → deny (fail closed for unscoped legacy rows)
+ * - Else exact tenant+project match → allow
+ */
+export function ownsObservationBoundary(
+  requester: TenantProjectBoundary,
+  observation: TenantProjectBoundary,
+): boolean {
+  if (requester.isOperator) return true;
+  const targetTenant = (observation.tenantId ?? '').trim();
+  const targetProject = (observation.projectId ?? '').trim();
+  if (!targetTenant || !targetProject) return false;
+  const reqTenant = (requester.tenantId ?? '').trim();
+  const reqProject = (requester.projectId ?? '').trim();
+  if (!reqTenant || !reqProject) return false;
+  return reqTenant === targetTenant && reqProject === targetProject;
+}
+
+/**
+ * Combined gate used by HTTP mutation routes: tenant/project ownership
+ * first, then hierarchical scope ACL. Scope rank never overrides a
+ * mismatched tenant/project boundary.
+ */
+export function canMutateObservation(input: {
+  requester: TenantProjectBoundary & {
+    requesterScope: MemoryScope;
+    userId?: string | null;
+  };
+  observation: TenantProjectBoundary & {
+    scope: MemoryScope;
+    sessionId?: string | null;
+    userId?: string | null;
+  };
+  /** Caller session id when checking session-scoped rows. */
+  callerSessionId?: string | null;
+  action: 'write' | 'delete';
+}): boolean {
+  if (!ownsObservationBoundary(input.requester, input.observation)) {
+    return false;
+  }
+  const acl: MemoryAccessContext = {
+    requesterScope: input.requester.requesterScope,
+    targetScope: input.observation.scope,
+    isOperator: input.requester.isOperator,
+    sameSession: Boolean(
+      input.callerSessionId
+      && input.observation.sessionId
+      && input.callerSessionId === input.observation.sessionId,
+    ),
+    sameProject: true, // ownership already proved project boundary
+    sameUser: Boolean(
+      input.requester.userId
+      && input.observation.userId
+      && input.requester.userId === input.observation.userId,
+    ),
+  };
+
+  if (input.action === 'delete') {
+    return canDeleteMemory(acl);
+  }
+  return canWriteToScope(acl);
+}

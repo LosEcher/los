@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS observations (
   node_id TEXT,
   request_id TEXT,
   trace_id TEXT,
+  dedupe_key TEXT,
   search_vector tsvector GENERATED ALWAYS AS (
     to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(content, '') || ' ' || coalesce(tags_json::text, ''))
   ) STORED,
@@ -105,6 +106,7 @@ ALTER TABLE observations ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE observations ADD COLUMN IF NOT EXISTS node_id TEXT;
 ALTER TABLE observations ADD COLUMN IF NOT EXISTS request_id TEXT;
 ALTER TABLE observations ADD COLUMN IF NOT EXISTS trace_id TEXT;
+ALTER TABLE observations ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_obs_kind ON observations(kind);
 CREATE INDEX IF NOT EXISTS idx_obs_source ON observations(source);
@@ -112,6 +114,14 @@ CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id);
 CREATE INDEX IF NOT EXISTS idx_obs_tenant_project ON observations(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_obs_request ON observations(request_id);
 CREATE INDEX IF NOT EXISTS idx_obs_trace ON observations(trace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_scope_dedupe
+  ON observations (
+    COALESCE(tenant_id, ''),
+    COALESCE(project_id, ''),
+    COALESCE(user_id, ''),
+    dedupe_key
+  )
+  WHERE dedupe_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_obs_search ON observations USING GIN (search_vector);
 CREATE INDEX IF NOT EXISTS idx_obs_tags_json ON observations USING GIN (tags_json);
@@ -307,13 +317,9 @@ export async function updateObservation(
 /**
  * Idempotent observation write: insert or update based on a caller-provided dedupe key.
  *
- * When `dedupeKey` is provided, this function checks for an existing observation
- * with the same key and updates it in-place (merging content/metadata). Without a
- * dedupe key it behaves like {@link addObservation} (pure INSERT).
- *
- * **Design note**: The current implementation uses check-then-insert/update.
- * A future migration should add `dedupe_key TEXT UNIQUE` to the observations table
- * and replace this with true `ON CONFLICT ... DO UPDATE` for full atomicity.
+ * When `dedupeKey` is provided, one scope-aware INSERT ... ON CONFLICT statement
+ * updates the existing observation in-place. Without a key it behaves like
+ * {@link addObservation} (pure INSERT).
  *
  * @param dedupeKey — caller-scoped unique key, e.g. `${sessionId}:${kind}:${title}`.
  *   Validated via {@link validateDedupeKey}. When omitted, a new row is always inserted.
@@ -346,64 +352,62 @@ export async function upsertObservation(
   await ensureMemoryStore();
   const db = getDb();
 
-  // Without a dedupe key, fall through to plain insert
-  if (!obs.dedupeKey) {
-    return addObservation(obs);
-  }
-
-  // Validate slug format before any DB work
+  if (!obs.dedupeKey) return addObservation(obs);
   validateDedupeKey(obs.dedupeKey);
+  const violations = validateMemoryWrite(obs);
+  if (violations.length > 0) throw new MemoryWriteError(violations);
 
-  // Merge dedupeKey into metadata for storage
+  const poison = detectPoisoning({ title: obs.title, summary: obs.summary, content: obs.content });
   const mergedMetadata = {
     ...(obs.metadata ?? {}),
     dedupeKey: obs.dedupeKey,
+    ...(poison ? buildPoisonFlag(poison, obs.source) : {}),
     ...(obs.observerType ? { observerType: obs.observerType } : {}),
   };
-
-  // Check for existing observation with the same dedupe key
-  const existingRows = await db.query<ObservationRow>(
-    `SELECT * FROM observations
-     WHERE metadata_json ->> 'dedupeKey' = $1
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [obs.dedupeKey],
-  );
-
-  if (existingRows.rows[0]) {
-    const existing = rowToObservation(existingRows.rows[0]);
-    // Update in-place: merge tags, replace content/summary
-    const mergedTags = [
-      ...new Set([...(existing.tags ?? []), ...(obs.tags ?? [])]),
-    ];
-    return (await updateObservation(existing.id, {
-      title: obs.title,
-      summary: obs.summary ?? existing.summary,
-      kind: obs.kind ?? existing.kind,
-      tags: mergedTags,
-      content: obs.content ?? existing.content,
-      metadata: mergedMetadata,
-    }))!;
-  }
-
-  // No existing match → insert via addObservation (which handles the cap)
-  return addObservation({
-    title: obs.title,
-    summary: obs.summary,
-    kind: obs.kind,
-    tags: obs.tags,
-    content: obs.content,
-    metadata: mergedMetadata,
-    observerType: obs.observerType,
-    source: obs.source,
-    sessionId: obs.sessionId,
-    tenantId: obs.tenantId,
-    projectId: obs.projectId,
-    userId: obs.userId,
-    nodeId: obs.nodeId,
-    requestId: obs.requestId,
-    traceId: obs.traceId,
-  });
+  const maxObs = getConfig().memory.maxObservations;
+  const rows = await db.query<ObservationRow>(`
+    INSERT INTO observations (
+      title, summary, kind, tags_json, content, metadata_json, source, session_id,
+      tenant_id, project_id, user_id, node_id, request_id, trace_id, dedupe_key
+    )
+    SELECT $1, COALESCE($2, ''), COALESCE($3, 'note'), $4::jsonb,
+           COALESCE($5, ''), $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    WHERE (SELECT count(*) FROM observations) < $16
+       OR EXISTS (
+         SELECT 1 FROM observations
+         WHERE COALESCE(tenant_id, '') = COALESCE($9, '')
+           AND COALESCE(project_id, '') = COALESCE($10, '')
+           AND COALESCE(user_id, '') = COALESCE($11, '')
+           AND dedupe_key = $15
+       )
+    ON CONFLICT (
+      COALESCE(tenant_id, ''), COALESCE(project_id, ''),
+      COALESCE(user_id, ''), dedupe_key
+    ) WHERE dedupe_key IS NOT NULL
+    DO UPDATE SET
+      title = EXCLUDED.title,
+      summary = CASE WHEN $2::text IS NULL THEN observations.summary ELSE EXCLUDED.summary END,
+      kind = CASE WHEN $3::text IS NULL THEN observations.kind ELSE EXCLUDED.kind END,
+      tags_json = COALESCE((
+        SELECT jsonb_agg(tag ORDER BY tag)
+        FROM (
+          SELECT jsonb_array_elements_text(observations.tags_json) AS tag
+          UNION
+          SELECT jsonb_array_elements_text(EXCLUDED.tags_json) AS tag
+        ) merged_tags
+      ), '[]'::jsonb),
+      content = CASE WHEN $5::text IS NULL THEN observations.content ELSE EXCLUDED.content END,
+      metadata_json = EXCLUDED.metadata_json
+    RETURNING *
+  `, [
+    obs.title, obs.summary ?? null, obs.kind ?? null, JSON.stringify(obs.tags ?? []),
+    obs.content ?? null, JSON.stringify(mergedMetadata), obs.source ?? 'user',
+    obs.sessionId ?? null, obs.tenantId ?? null, obs.projectId ?? null,
+    obs.userId ?? null, obs.nodeId ?? null, obs.requestId ?? null,
+    obs.traceId ?? null, obs.dedupeKey, maxObs,
+  ]);
+  if (rows.rows[0]) return rowToObservation(rows.rows[0]);
+  throw new Error(`Memory cap reached: ${maxObs} observations`);
 }
 
 export async function deleteObservation(id: number): Promise<boolean> {

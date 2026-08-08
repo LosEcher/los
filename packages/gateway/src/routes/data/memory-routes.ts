@@ -11,21 +11,22 @@ import { syncMemoryMd } from '@los/memory';
 import {
   resolveMemoryScope,
   normalizeScope,
-  canAccessMemory,
   canWriteToScope,
   canDeleteMemory,
+  ownsObservationBoundary,
+  canMutateObservation,
   evaluatePromotion,
   validateMemoryWrite,
-  detectPoisoning,
   isMemoryWriteError,
   type MemoryScope,
   type MemoryAccessContext,
+  type Observation,
 } from '@los/memory';
 import { ensureRunEvalStore } from '@los/agent';
 import { ensureTaskRunStore } from '@los/agent/task-runs';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, type RequestContext } from '../../request-context.js';
 import {
   normalizeOptionalString,
   normalizeStringArray,
@@ -38,6 +39,7 @@ type MemoryRouteDependencies = {
   addObservation: typeof addObservation;
   applyRetentionPolicy: typeof applyRetentionPolicy;
   canDeleteMemory: typeof canDeleteMemory;
+  canMutateObservation: typeof canMutateObservation;
   canWriteToScope: typeof canWriteToScope;
   checkMemoryIntegrity: typeof checkMemoryIntegrity;
   compactSession: typeof compactSession;
@@ -51,6 +53,7 @@ type MemoryRouteDependencies = {
   getObservation: typeof getObservation;
   getStats: typeof getStats;
   listCompactions: typeof listCompactions;
+  ownsObservationBoundary: typeof ownsObservationBoundary;
   resolveMemoryScope: typeof resolveMemoryScope;
   retrieveActiveRules: typeof retrieveActiveRules;
   routeMemoryRetrieval: typeof routeMemoryRetrieval;
@@ -62,6 +65,7 @@ const defaultDependencies: MemoryRouteDependencies = {
   addObservation,
   applyRetentionPolicy,
   canDeleteMemory,
+  canMutateObservation,
   canWriteToScope,
   checkMemoryIntegrity,
   compactSession,
@@ -75,6 +79,7 @@ const defaultDependencies: MemoryRouteDependencies = {
   getObservation,
   getStats,
   listCompactions,
+  ownsObservationBoundary,
   resolveMemoryScope,
   retrieveActiveRules,
   routeMemoryRetrieval,
@@ -84,6 +89,110 @@ const defaultDependencies: MemoryRouteDependencies = {
 };
 
 const log = getLogger('memory-routes');
+
+export function _resolveMemorySearchScope(
+  context: Pick<RequestContext, 'tenantId' | 'projectId' | 'userId' | 'isOperator'>,
+  query: { tenantId?: string; projectId?: string; userId?: string },
+): { tenantId?: string; projectId?: string; userId?: string } {
+  if (context.isOperator) {
+    return {
+      tenantId: query.tenantId,
+      projectId: query.projectId,
+      userId: query.userId,
+    };
+  }
+  return {
+    tenantId: context.tenantId,
+    projectId: context.projectId,
+    userId: context.userId,
+  };
+}
+
+/** Deny cross-tenant/project mutation when the row is owned by another scope. */
+export function _assertObservationOwnership(
+  deps: Pick<MemoryRouteDependencies, 'ownsObservationBoundary' | 'resolveMemoryScope' | 'canMutateObservation'>,
+  req: { headers: Record<string, string | string[] | undefined> },
+  existing: Pick<Observation, 'tenantId' | 'projectId' | 'sessionId' | 'userId' | 'metadata'>,
+  action: 'write' | 'delete',
+  opts: { callerSessionId?: string | null } = {},
+): { ok: true } | { ok: false; status: 403; body: Record<string, unknown> } {
+  const ctx = getRequestContext(req as any);
+  const targetScope = normalizeScope(existing.metadata?.scope as string | undefined);
+  const requesterScope = deps.resolveMemoryScope({
+    sessionId: opts.callerSessionId,
+    tenantId: ctx.tenantId,
+    projectId: ctx.projectId,
+    userId: ctx.userId,
+  });
+  const allowed = deps.canMutateObservation({
+    requester: {
+      tenantId: ctx.tenantId,
+      projectId: ctx.projectId,
+      isOperator: ctx.isOperator,
+      requesterScope,
+      userId: ctx.userId,
+    },
+    observation: {
+      tenantId: existing.tenantId,
+      projectId: existing.projectId,
+      scope: targetScope,
+      sessionId: existing.sessionId,
+      userId: existing.userId,
+    },
+    callerSessionId: opts.callerSessionId,
+    action,
+  });
+  if (!allowed) {
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        error: 'Forbidden',
+        detail: `Cannot ${action} observation outside your tenant/project boundary or scope rank`,
+        observationTenantId: existing.tenantId ?? null,
+        observationProjectId: existing.projectId ?? null,
+        yourTenantId: ctx.tenantId,
+        yourProjectId: ctx.projectId,
+        observationScope: targetScope,
+        yourScope: requesterScope,
+      },
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * PATCH must not elevate metadata.scope — promotion is a gated endpoint.
+ * Returns the sanitized metadata merge or a denial reason.
+ */
+export function _sanitizePatchMetadata(
+  existing: Record<string, unknown>,
+  patch: Record<string, unknown> | undefined,
+): { ok: true; metadata: Record<string, unknown> } | { ok: false; reason: string } {
+  if (patch === undefined) {
+    return { ok: true, metadata: existing };
+  }
+  const next = { ...existing, ...patch };
+  const prevScope = normalizeScope(existing.scope as string | undefined);
+  const nextScope = normalizeScope(next.scope as string | undefined);
+  if (nextScope !== prevScope) {
+    return {
+      ok: false,
+      reason: `metadata.scope cannot be changed via PATCH (from ${prevScope} to ${nextScope}); use POST /memory/:id/promote`,
+    };
+  }
+  // Prevent clearing poisonFlag or forging compaction attestation via free-form metadata
+  if (existing.poisonFlag && patch.poisonFlag === null) {
+    return { ok: false, reason: 'poisonFlag cannot be cleared via PATCH' };
+  }
+  if (patch.compactionAttested === true && existing.compactionAttested !== true) {
+    return { ok: false, reason: 'compactionAttested cannot be set via PATCH' };
+  }
+  if (patch.promotable === true && existing.promotable !== true) {
+    return { ok: false, reason: 'promotable cannot be set via PATCH' };
+  }
+  return { ok: true, metadata: next };
+}
 
 /** Build an access context from the request context, sessionId, and target scope.
  *  Operator status is taken from the validated RequestContext (gated on operatorToken),
@@ -126,9 +235,7 @@ export function registerMemoryRoutes(
 
     // ACL enforcement: if auth is enabled, scope read results to the caller's
     // tenant/project/user context. Operator can see everything.
-    const effectiveTenantId = ctx.isOperator ? (query.tenantId ?? undefined) : (query.tenantId ?? ctx.tenantId);
-    const effectiveProjectId = ctx.isOperator ? (query.projectId ?? undefined) : (query.projectId ?? ctx.projectId);
-    const effectiveUserId = ctx.isOperator ? (query.userId ?? undefined) : (query.userId ?? ctx.userId);
+    const effectiveScope = _resolveMemorySearchScope(ctx, query);
 
     const results = await deps.searchObservations(query.q ?? '', {
       kind: query.kind,
@@ -138,9 +245,9 @@ export function registerMemoryRoutes(
       memoryLayer: query.memoryLayer,
       archived: parseOptionalBoolean(query.archived),
       sessionId: query.sessionId,
-      tenantId: effectiveTenantId,
-      projectId: effectiveProjectId,
-      userId: effectiveUserId,
+      tenantId: effectiveScope.tenantId,
+      projectId: effectiveScope.projectId,
+      userId: effectiveScope.userId,
       requestId: query.requestId,
       traceId: query.traceId,
       limit: normalizeBoundedInteger(query.limit, 20, 1, 200),
@@ -227,6 +334,19 @@ export function registerMemoryRoutes(
     const { id } = req.params as { id: string };
     const body = req.body as any;
     await deps.ensureMemoryStore();
+    const existing = await deps.getObservation(parseInt(id));
+    if (!existing) {
+      reply.code(404);
+      return { error: 'Not found' };
+    }
+
+    const ownership = _assertObservationOwnership(deps, req, existing, 'write', {
+      callerSessionId: existing.sessionId ?? null,
+    });
+    if (!ownership.ok) {
+      return reply.status(ownership.status).send(ownership.body);
+    }
+
     // Write gate: structural/source constraints on the patch payload (422, not 500)
     const violations = validateMemoryWrite({
       title: normalizeOptionalString(body.title),
@@ -243,13 +363,29 @@ export function registerMemoryRoutes(
         violations,
       });
     }
+
+    let nextMetadata: Record<string, unknown> | undefined;
+    if (body.metadata !== undefined) {
+      const sanitized = _sanitizePatchMetadata(
+        existing.metadata as Record<string, unknown>,
+        normalizeMemoryMetadata(body.metadata),
+      );
+      if (!sanitized.ok) {
+        return reply.status(422).send({
+          error: 'Unprocessable Entity',
+          detail: sanitized.reason,
+        });
+      }
+      nextMetadata = sanitized.metadata;
+    }
+
     const obs = await deps.updateObservation(parseInt(id), {
       title: normalizeOptionalString(body.title),
       summary: normalizeOptionalString(body.summary),
       kind: normalizeOptionalString(body.kind),
       tags: body.tags === undefined ? undefined : normalizeStringArray(body.tags),
       content: normalizeOptionalString(body.content),
-      metadata: body.metadata === undefined ? undefined : normalizeMemoryMetadata(body.metadata),
+      metadata: nextMetadata,
     });
     if (!obs) {
       reply.code(404);
@@ -269,23 +405,11 @@ export function registerMemoryRoutes(
     // unless the caller has a higher scope or is an operator.
     const callerSessionId = (req.query as { sessionId?: string }).sessionId ?? null;
 
-    // Scope enforcement: can the caller delete at the observation's scope?
-    const targetScope = normalizeScope(existing.metadata.scope as string);
-    const acl: MemoryAccessContext = {
-      ...buildAccessContext(deps, req, targetScope, {
-        sessionId: callerSessionId,
-        targetSessionId: existing.sessionId,
-        targetProjectId: existing.projectId,
-        targetUserId: existing.userId,
-      }),
-    };
-    if (!deps.canDeleteMemory(acl)) {
-      return reply.status(403).send({
-        error: 'Forbidden',
-        detail: `Cannot delete observation at scope ${targetScope} from scope ${acl.requesterScope}`,
-        observationScope: targetScope,
-        yourScope: acl.requesterScope,
-      });
+    const ownership = _assertObservationOwnership(deps, req, existing, 'delete', {
+      callerSessionId,
+    });
+    if (!ownership.ok) {
+      return reply.status(ownership.status).send(ownership.body);
     }
 
     const ok = await deps.deleteObservation(parseInt(id));
@@ -380,15 +504,22 @@ export function registerMemoryRoutes(
   app.post('/memory/sync-md', async (req) => {
     const body = req.body as {
       workspaceRoot: string; scope?: string; memoryLayer?: string;
-      archived?: boolean; projectId?: string;
+      archived?: boolean; projectId?: string; tenantId?: string;
     };
+    const context = getRequestContext(req);
     await deps.ensureMemoryStore();
+    // Non-operators cannot pivot project/tenant via body (search-scope forge).
+    const effectiveScope = _resolveMemorySearchScope(context, {
+      tenantId: body.tenantId,
+      projectId: body.projectId,
+    });
     const observations = await deps.searchObservations('', {
       limit: 50,
       scope: body.scope,
       memoryLayer: body.memoryLayer,
       archived: body.archived,
-      projectId: body.projectId,
+      tenantId: effectiveScope.tenantId,
+      projectId: effectiveScope.projectId,
     });
     deps.syncMemoryMd(body.workspaceRoot, observations);
     return { ok: true, count: observations.length };
@@ -412,22 +543,37 @@ export function registerMemoryRoutes(
 
   // Auto-compact: find uncompacted sessions (>1h old) and compact them.
   // Called by the scheduler or governance sweeper periodically.
-  app.post('/memory/auto-compact', async () => {
+  app.post('/memory/auto-compact', async (req) => {
+    const context = getRequestContext(req);
     await deps.ensureMemoryStore();
     await deps.ensureMemoryCompactionStore();
     await deps.ensureRunEvalStore();
     await deps.ensureTaskRunStore();
 
     const db = getDb();
-    const rows = await db.query<{ session_id: string }>(
-      `SELECT DISTINCT o.session_id
-       FROM observations o
-       LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
-       WHERE o.session_id IS NOT NULL
-         AND mc.id IS NULL
-         AND o.created_at < now() - INTERVAL '1 hour'
-       LIMIT 10`,
-    );
+    // Non-operators only compact their own tenant/project sessions.
+    const rows = context.isOperator
+      ? await db.query<{ session_id: string }>(
+          `SELECT DISTINCT o.session_id
+           FROM observations o
+           LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
+           WHERE o.session_id IS NOT NULL
+             AND mc.id IS NULL
+             AND o.created_at < now() - INTERVAL '1 hour'
+           LIMIT 10`,
+        )
+      : await db.query<{ session_id: string }>(
+          `SELECT DISTINCT o.session_id
+           FROM observations o
+           LEFT JOIN memory_compactions mc ON o.session_id = mc.session_id
+           WHERE o.session_id IS NOT NULL
+             AND mc.id IS NULL
+             AND o.created_at < now() - INTERVAL '1 hour'
+             AND o.tenant_id = $1
+             AND o.project_id = $2
+           LIMIT 10`,
+          [context.tenantId, context.projectId],
+        );
 
     const sessionIds = rows.rows.map(r => r.session_id).filter(Boolean);
     if (sessionIds.length === 0) {
@@ -439,7 +585,11 @@ export function registerMemoryRoutes(
 
     for (const sessionId of sessionIds) {
       try {
-        const result = await deps.compactSession({ sessionId });
+        const result = await deps.compactSession({
+          sessionId,
+          tenantId: context.isOperator ? undefined : context.tenantId,
+          projectId: context.isOperator ? undefined : context.projectId,
+        });
         if (result) {
           compacted.push(sessionId);
         }
@@ -459,6 +609,17 @@ export function registerMemoryRoutes(
     await deps.ensureMemoryStore();
     const obs = await deps.getObservation(parseInt(id));
     if (!obs) return reply.status(404).send({ error: 'Not found' });
+
+    // Cross-project promote is operator-only; ownership fails closed otherwise.
+    if (!deps.ownsObservationBoundary(
+      { tenantId: ctx.tenantId, projectId: ctx.projectId, isOperator: ctx.isOperator },
+      { tenantId: obs.tenantId, projectId: obs.projectId },
+    )) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        detail: 'Cannot promote observation outside your tenant/project boundary',
+      });
+    }
 
     const fromScope = normalizeScope(obs.metadata.scope as string);
     const evidence = {
