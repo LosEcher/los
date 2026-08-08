@@ -30,12 +30,15 @@ test('heartbeat reports a real sandbox backend when one exists, never native/non
       ['agent_http'],
       fakeLifecycle,
       'http://127.0.0.1:18099',
+      undefined,
+      'heartbeat-key',
     );
   } finally {
     globalThis.fetch = originalFetch;
   }
 
   assert.equal(captured.length, 1);
+  assert.equal(captured[0].init.headers.authorization, 'Bearer heartbeat-key');
   const body = JSON.parse(captured[0].init.body) as { capabilities: Record<string, unknown> };
   const sandbox = body.capabilities.sandbox;
   const detected = getAvailableSandbox();

@@ -52,6 +52,36 @@ function registerImmediateIntervalTask(
   });
 }
 
+/** Async interval with single-flight execution and graceful shutdown. */
+function registerAsyncIntervalTask(
+  app: FastifyInstance,
+  label: string,
+  intervalMs: number,
+  task: () => Promise<void>,
+  initialDelayMs?: number,
+): void {
+  const initialDelay = initialDelayMs ?? Math.min(1_000, intervalMs);
+  let closed = false;
+  let running: Promise<void> | null = null;
+  const invoke = (): void => {
+    if (closed || running) return;
+    running = Promise.resolve()
+      .then(task)
+      .catch((error) => {
+        log.warn(`${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => { running = null; });
+  };
+  const timeout = setTimeout(invoke, initialDelay);
+  const timer = setInterval(invoke, intervalMs);
+  app.addHook('onClose', async () => {
+    closed = true;
+    clearTimeout(timeout);
+    clearInterval(timer);
+    if (running) await running;
+  });
+}
+
 /** One-shot async setup after delayMs; the resolved cleanup runs on onClose. */
 function registerAsyncSetupTask(
   app: FastifyInstance,
@@ -177,7 +207,15 @@ export function _resetCompactionBackoff(): void {
 }
 
 async function runMemoryMaintenance(): Promise<void> {
-  import('@los/memory').then(async ({ applyRetentionPolicy, checkMemoryIntegrity, compactSession, ensureMemoryCompactionStore, shouldTriggerCompaction }) => {
+  try {
+    const {
+      applyRetentionPolicy,
+      checkMemoryIntegrity,
+      compactSession,
+      ensureMemoryCompactionStore,
+      shouldTriggerCompaction,
+      archiveStaleObservations,
+    } = await import('@los/memory');
     const retention = await applyRetentionPolicy().catch((err) => {
       log.warn(`Memory retention failed: ${err.message ?? String(err)}`);
       return null;
@@ -237,7 +275,6 @@ async function runMemoryMaintenance(): Promise<void> {
         // Auto-marking: archive individually stale plain observations (approved
         // operator policy); runs even when the session does not trigger compaction.
         try {
-          const { archiveStaleObservations } = await import('@los/memory');
           const marked = await archiveStaleObservations(sessionId);
           autoArchived += marked.archivedCount;
         } catch (err) {
@@ -263,9 +300,9 @@ async function runMemoryMaintenance(): Promise<void> {
     } catch (err) {
       log.warn(`Auto-compact maintenance failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }).catch((err) => {
+  } catch (err) {
     log.warn(`Memory maintenance import failed: ${err instanceof Error ? err.message : String(err)}`);
-  });
+  }
 }
 
 async function triggerFileSyncScans(agentKey: string): Promise<void> {
@@ -419,7 +456,7 @@ export function registerServerMaintenance(
 
   // ── Daily memory maintenance (retention + integrity + auto-compact) ──
   const RETENTION_MS = 24 * 60 * 60 * 1000;
-  registerImmediateIntervalTask(app, RETENTION_MS, () => void runMemoryMaintenance(), 10_000);
+  registerAsyncIntervalTask(app, 'Memory maintenance', RETENTION_MS, runMemoryMaintenance, 10_000);
 
   // ── Governance sweep wake (PG-queue claim loop) ──────────
   // Replaces the old setInterval(6h) sweep. Now uses:

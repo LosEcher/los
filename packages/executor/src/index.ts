@@ -129,7 +129,7 @@ export async function startExecutor() {
 
   const reportHeartbeat = createHeartbeatReporter(async () => {
     const folders = await resolveFileSyncFolders();
-    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders);
+    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey);
   }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
 
   // Self-scheduling heartbeat: fires immediately, then waits
@@ -228,6 +228,7 @@ export async function startExecutor() {
       lifecycle,
       gatewayUrl,
       await resolveFileSyncFolders(),
+      agentKey,
     ),
   });
 

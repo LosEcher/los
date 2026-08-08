@@ -1,5 +1,5 @@
 contract: los.memory
-version: 0.1.0
+version: 0.2.0
 status: draft
 owner: packages/memory
 description: >
@@ -55,6 +55,11 @@ routes:
       count: integer
       results: observations.rows
     description: Search observations with full-text search and multi-facet filters.
+    authorization: >
+      tenantId, projectId, and userId query overrides are honored only for a
+      validated operator. Other callers are restricted to the tenant, project,
+      and user scope derived from authenticated request context; raw scope
+      headers are not authorization claims.
   - method: POST
     path: /memory
     request:
@@ -259,6 +264,14 @@ sourceOfTruth:
   - observations
   - memory_compactions
   - procedural_candidates
+storage:
+  observationDedupe:
+    column: observations.dedupe_key
+    scope: [tenant_id, project_id, user_id]
+    guarantee: >
+      Non-null dedupe keys are unique within their tenant/project/user scope.
+      Writes use one INSERT ... ON CONFLICT DO UPDATE statement so concurrent
+      retries cannot create duplicate observations.
 retrieval:
   layers:
     - working

@@ -1,7 +1,7 @@
 /**
  * @los/agent/governance-self-bootstrap — Self-bootstrap auditor (A 项).
  *
- * Two deterministic checks that close the observation→improvement loop:
+ * Three deterministic checks that close the observation→improvement loop:
  * 1. quality_degradation: daily_agent_quality_snapshots trend — recent 3-day
  *    mean vs prior 7-day median for schedule.failureRate / inbox.reviewReady /
  *    inbox.recoveryRequired; degradation > threshold yields a finding so the
@@ -11,15 +11,19 @@
  *    statusReview are flagged so long-running tasks get periodic refresh
  *    (the 2026-08-07 zombie-todo finding: 6 in_progress items untouched for
  *    weeks). Items reviewed within the last reviewedWithinDays are skipped.
+ * 3. todo_outcome_drift (AP12): open todos whose linked task_run / feed-analysis
+ *    dispatch is already terminal are auto-reconciled (when dryRun=false) so
+ *    zombie in_progress rows cannot accumulate past one sweep cycle.
  */
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import type { GovernanceJob } from './governance-jobs-types.js';
+import { reconcileOpenTodosFromOutcomes } from './todo-outcome-sync.js';
 
 const log = getLogger('governance-self-bootstrap');
 
 export interface SelfBootstrapFinding {
-  dimension: 'quality_degradation' | 'todo_lifecycle';
+  dimension: 'quality_degradation' | 'todo_lifecycle' | 'todo_outcome_drift';
   severity: 'info' | 'warn' | 'high';
   detail: string;
 }
@@ -50,12 +54,14 @@ function readNested(record: Record<string, unknown>, path: string): number {
 
 export async function runSelfBootstrapAudit(
   job: GovernanceJob,
-  options: { now?: Date } = {},
+  options: { now?: Date; dryRun?: boolean } = {},
 ): Promise<Record<string, unknown>> {
   const now = options.now ?? new Date();
+  const dryRun = options.dryRun === true;
   const staleDays = Number(job.config?.staleDays ?? 14);
   const reviewedWithinDays = Number(job.config?.reviewedWithinDays ?? 7);
   const findings: SelfBootstrapFinding[] = [];
+  let outcomeReconcile: Record<string, unknown> | undefined;
 
   // ── 1. Quality degradation trend ─────────────────────────
   try {
@@ -127,10 +133,44 @@ export async function runSelfBootstrapAudit(
     log.warn(`self-bootstrap todo-lifecycle check failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // ── 3. AP12 todo outcome drift (auto-heal when not dry-run) ──
+  try {
+    const report = await reconcileOpenTodosFromOutcomes({
+      limit: Number(job.config?.outcomeReconcileLimit ?? 100),
+      dryRun,
+    });
+    outcomeReconcile = {
+      scanned: report.scanned,
+      drifted: report.drifted,
+      applied: report.applied,
+      dryRun: report.dryRun,
+      sample: report.items.slice(0, 10).map(i => ({
+        todoId: i.todoId,
+        from: i.fromStatus,
+        to: i.toStatus,
+        source: i.source,
+        applied: i.applied,
+      })),
+    };
+    if (report.drifted > 0) {
+      findings.push({
+        dimension: 'todo_outcome_drift',
+        severity: report.drifted > 10 ? 'warn' : 'info',
+        detail: dryRun
+          ? `${report.drifted} open todo(s) lag terminal task/dispatch outcomes (dry-run; not applied)`
+          : `reconciled ${report.applied}/${report.drifted} open todo(s) from terminal task/dispatch outcomes`,
+      });
+    }
+  } catch (err) {
+    log.warn(`self-bootstrap todo-outcome reconcile failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return {
     checkedAt: now.toISOString(),
     staleDays,
     reviewedWithinDays,
+    dryRun,
+    outcomeReconcile,
     findingCount: findings.length,
     findings,
   };

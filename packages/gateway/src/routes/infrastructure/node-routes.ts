@@ -21,6 +21,7 @@ import {
   probeNode,
   readString,
 } from '../node-probes.js';
+import { requireOperator } from '../../request-context.js';
 
 export type NodeRouteDependencies = {
   listExecutorNodes: typeof listExecutorNodes;
@@ -29,6 +30,7 @@ export type NodeRouteDependencies = {
   upsertExecutorNode: typeof upsertExecutorNode;
   upsertExecutorNodeHeartbeat: typeof upsertExecutorNodeHeartbeat;
   ensureExecutorNodeStore: typeof ensureExecutorNodeStore;
+  requireOperator: typeof requireOperator;
 };
 
 const defaultDependencies: NodeRouteDependencies = {
@@ -38,6 +40,7 @@ const defaultDependencies: NodeRouteDependencies = {
   upsertExecutorNode,
   upsertExecutorNodeHeartbeat,
   ensureExecutorNodeStore,
+  requireOperator,
 };
 
 type NodeEditorBody = {
@@ -70,12 +73,14 @@ export function registerNodeRoutes(
   app: FastifyInstance,
   deps: NodeRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/nodes', async () => {
+  app.get('/nodes', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
     await deps.ensureExecutorNodeStore();
     return await deps.listExecutorNodes();
   });
 
   app.patch('/nodes/:id', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as NodeEditorBody | undefined;
     const nodeId = normalizeOptionalString(id);
@@ -129,6 +134,7 @@ export function registerNodeRoutes(
   });
 
   app.post('/nodes/:id/probe', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const nodeId = normalizeOptionalString(id);
     if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
@@ -160,6 +166,7 @@ export function registerNodeRoutes(
   });
 
   app.post('/nodes/:id/ssh-run', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const nodeId = normalizeOptionalString(id);
     if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
@@ -180,6 +187,7 @@ export function registerNodeRoutes(
   });
 
   app.post('/nodes/import-ssh-config', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
     const body = req.body as SshImportRequestBody | undefined;
     const content = normalizeOptionalString(body?.content);
     if (!content) return reply.status(422).send({ error: 'content is required' });

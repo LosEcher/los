@@ -79,6 +79,13 @@ const DIMENSION_TODO_SPECS: Record<string, Record<string, DimensionTodoSpec>> = 
       description: (count, detail) =>
         `Self-bootstrap audit found ${count} in_progress todo(s) older than staleDays without a recent statusReview. ${detail}`,
     },
+    todo_outcome_drift: {
+      auditType: 'todoOutcomeDrift',
+      priority: 'P1',
+      title: (count) => `Bootstrap: ${count} todo(s) lag terminal task outcomes (AP12)`,
+      description: (count, detail) =>
+        `Self-bootstrap audit found ${count} open todo(s) whose linked task_run or feed-analysis dispatch is already terminal. ${detail}`,
+    },
   },
   adversarial_review: {
     metric_semantics: {

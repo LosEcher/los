@@ -11,6 +11,8 @@ import {
   canAccessMemory,
   canWriteToScope,
   canDeleteMemory,
+  ownsObservationBoundary,
+  canMutateObservation,
   evaluatePromotion,
   nextScope,
   candidateStatusToScope,
@@ -248,5 +250,84 @@ describe('scopeToCandidateStatus', () => {
     assert.strictEqual(scopeToCandidateStatus('project'), 'review');
     assert.strictEqual(scopeToCandidateStatus('user'), 'approved');
     assert.strictEqual(scopeToCandidateStatus('global'), 'active');
+  });
+});
+
+describe('ownsObservationBoundary', () => {
+  it('allows operator across projects', () => {
+    assert.strictEqual(ownsObservationBoundary(
+      { tenantId: 't1', projectId: 'p1', isOperator: true },
+      { tenantId: 't2', projectId: 'p2' },
+    ), true);
+  });
+
+  it('allows exact tenant+project match', () => {
+    assert.strictEqual(ownsObservationBoundary(
+      { tenantId: 't1', projectId: 'p1' },
+      { tenantId: 't1', projectId: 'p1' },
+    ), true);
+  });
+
+  it('denies cross-project and cross-tenant', () => {
+    assert.strictEqual(ownsObservationBoundary(
+      { tenantId: 't1', projectId: 'p1' },
+      { tenantId: 't1', projectId: 'p2' },
+    ), false);
+    assert.strictEqual(ownsObservationBoundary(
+      { tenantId: 't1', projectId: 'p1' },
+      { tenantId: 't2', projectId: 'p1' },
+    ), false);
+  });
+
+  it('fails closed for unscoped legacy rows', () => {
+    assert.strictEqual(ownsObservationBoundary(
+      { tenantId: 't1', projectId: 'p1' },
+      { tenantId: null, projectId: 'p1' },
+    ), false);
+    assert.strictEqual(ownsObservationBoundary(
+      { tenantId: 't1', projectId: 'p1' },
+      { tenantId: 't1', projectId: undefined },
+    ), false);
+  });
+});
+
+describe('canMutateObservation', () => {
+  it('denies higher-scope delete across project boundary (adversarial)', () => {
+    // Project-scoped caller must NOT delete another project's session row
+    // just because requesterScope rank > targetScope rank.
+    assert.strictEqual(canMutateObservation({
+      requester: {
+        tenantId: 't1', projectId: 'mine', requesterScope: 'project', isOperator: false,
+      },
+      observation: {
+        tenantId: 't1', projectId: 'other', scope: 'session', sessionId: 's-other',
+      },
+      callerSessionId: 's-mine',
+      action: 'delete',
+    }), false);
+  });
+
+  it('allows same-project write at equal or lower scope', () => {
+    assert.strictEqual(canMutateObservation({
+      requester: {
+        tenantId: 't1', projectId: 'p1', requesterScope: 'project', isOperator: false,
+      },
+      observation: {
+        tenantId: 't1', projectId: 'p1', scope: 'session', sessionId: 's1',
+      },
+      action: 'write',
+    }), true);
+  });
+
+  it('denies same-project write to higher scope without operator', () => {
+    assert.strictEqual(canMutateObservation({
+      requester: {
+        tenantId: 't1', projectId: 'p1', requesterScope: 'session', isOperator: false,
+      },
+      observation: {
+        tenantId: 't1', projectId: 'p1', scope: 'global',
+      },
+      action: 'write',
+    }), false);
   });
 });
