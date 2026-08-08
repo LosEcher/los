@@ -17,11 +17,23 @@ import {
 /**
  * Get the most recent checkpoint for a session. Returns null if no
  * checkpoint or compaction exists for this session.
+ *
+ * Access-context options are REQUIRED from gateway routes: `tenantId` and
+ * `projectId` scope the lookup so an authenticated user can never read a
+ * checkpoint owned by another tenant/project (cross-tenant read guard).
+ * NULL-owned rows (legacy/unattributed) stay visible, matching
+ * listCompactions() semantics; attributed rows must match exactly.
+ *
+ * Fail-closed: when `options` is omitted entirely, only legacy rows with no
+ * tenant/project ownership are visible — a future caller that forgets the
+ * access context cannot read attributed rows again.
  */
 export async function getLatestCheckpoint(
   sessionId: string,
+  options?: { tenantId?: string | null; projectId?: string | null },
 ): Promise<MemoryCompaction | null> {
   await ensureMemoryCompactionStore();
+  const scopeProvided = options !== undefined;
   const rows = await getDb().query<{
     id: string; session_id: string; run_spec_id: string | null;
     tenant_id: string | null; project_id: string | null;
@@ -32,9 +44,11 @@ export async function getLatestCheckpoint(
   }>(
     `SELECT * FROM memory_compactions
      WHERE session_id = $1
+       AND (tenant_id IS NULL OR ($2::boolean AND ($3::text IS NULL OR tenant_id = $3)))
+       AND (project_id IS NULL OR ($2::boolean AND ($4::text IS NULL OR project_id = $4)))
      ORDER BY created_at DESC, id
      LIMIT 1`,
-    [sessionId],
+    [sessionId, scopeProvided, options?.tenantId ?? null, options?.projectId ?? null],
   );
   if (!rows.rows[0]) return null;
 

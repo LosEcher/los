@@ -89,6 +89,25 @@ test('PATCH cannot elevate metadata.scope or forge compaction attestation', () =
   }
 });
 
+test('PATCH cannot clear or replace poisonFlag with non-null values', () => {
+  const base = {
+    scope: 'session',
+    poisonFlag: { pattern: 'instruction-override', reason: 'injected', flaggedAt: '2026-08-08T00:00:00Z' },
+  };
+  // false / 0 / empty string / empty object / re-shaped object all count as tampering.
+  assert.equal(_sanitizePatchMetadata(base, { poisonFlag: false }).ok, false);
+  assert.equal(_sanitizePatchMetadata(base, { poisonFlag: 0 }).ok, false);
+  assert.equal(_sanitizePatchMetadata(base, { poisonFlag: '' }).ok, false);
+  assert.equal(_sanitizePatchMetadata(base, { poisonFlag: {} }).ok, false);
+  assert.equal(_sanitizePatchMetadata(base, { poisonFlag: { pattern: 'other' } }).ok, false);
+  // PATCH of unrelated keys still passes with the mark intact.
+  const untouched = _sanitizePatchMetadata(base, { note: 'still poisoned' });
+  assert.equal(untouched.ok, true);
+  if (untouched.ok) {
+    assert.deepEqual(untouched.metadata.poisonFlag, base.poisonFlag);
+  }
+});
+
 test('ownership helper denies cross-project mutate even when scope rank would allow delete', () => {
   // Mirrors the HTTP gate used by PATCH/DELETE: tenant/project first.
   assert.equal(ownsObservationBoundary(

@@ -195,21 +195,55 @@ export async function claimDueScheduledWorkItems(input: {
 export async function createManualScheduledWorkRun(input: {
   scheduleId: string; ownerId: string; scheduledFor?: Date; leaseMs?: number;
 }): Promise<ScheduledWorkItemRun> {
-  const schedule = await loadScheduledWorkItem(input.scheduleId);
-  if (!schedule) throw new Error('schedule not found');
-  if (schedule.status === 'retired') throw new Error('retired schedule cannot be triggered');
-  if (schedule.circuitState === 'open') throw new Error('schedule circuit is open');
+  await ensureScheduledWorkStore();
   const slot = input.scheduledFor ?? new Date();
-  const rows = await getDb().query<ScheduledWorkRunRow>(
-    `INSERT INTO scheduled_work_item_runs (
-       id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts,claim_owner,lease_expires_at
-     ) VALUES ($1,$2,$3,'manual','claimed',1,$4,$5,$6)
-     ON CONFLICT (schedule_id,scheduled_for) DO UPDATE SET updated_at=scheduled_work_item_runs.updated_at
-     RETURNING *`,
-    [`schedule-run-${randomUUID()}`, schedule.id, slot, schedule.maxAttempts, input.ownerId,
-      new Date(slot.getTime() + (input.leaseMs ?? 60_000))],
-  );
-  return runFromRow(rows.rows[0]!);
+  return withDbClient(async client => {
+    await client.query('BEGIN');
+    try {
+      // Manual triggers live in the same run ledger as due claims (ADR 0034
+      // #1/#7): lock the schedule row and enforce maxConcurrentRuns with the
+      // same concurrency policy. `skip` refuses the trigger; `queue_one`
+      // queues it for the tick loop when no queued run is waiting.
+      const locked = await client.query<ScheduledWorkRow>(
+        'SELECT * FROM scheduled_work_items WHERE id=$1 FOR UPDATE', [input.scheduleId],
+      );
+      const schedule = locked.rows[0] ? scheduleFromRow(locked.rows[0]) : null;
+      if (!schedule) throw new Error('schedule not found');
+      if (schedule.status === 'retired') throw new Error('retired schedule cannot be triggered');
+      if (schedule.circuitState === 'open') throw new Error('schedule circuit is open');
+      const active = await client.query<{ count: string; queued: string }>(
+        `SELECT count(*)::text AS count,
+           count(*) FILTER (WHERE status='queued')::text AS queued
+         FROM scheduled_work_item_runs WHERE schedule_id=$1 AND status IN ${ACTIVE_SQL}`,
+        [schedule.id],
+      );
+      const activeCount = Number(active.rows[0]?.count ?? 0);
+      const queuedCount = Number(active.rows[0]?.queued ?? 0);
+      let status: ScheduledWorkRunStatus = 'claimed';
+      if (activeCount >= schedule.maxConcurrentRuns) {
+        if (schedule.concurrencyPolicy === 'queue_one' && queuedCount === 0) {
+          status = 'queued';
+        } else {
+          throw new Error(`concurrency limit reached for schedule (maxConcurrentRuns=${schedule.maxConcurrentRuns})`);
+        }
+      }
+      const rows = await client.query<ScheduledWorkRunRow>(
+        `INSERT INTO scheduled_work_item_runs (
+           id,schedule_id,scheduled_for,trigger_kind,status,attempt_count,max_attempts,claim_owner,lease_expires_at
+         ) VALUES ($1,$2,$3,'manual',$4,1,$5,$6,$7)
+         ON CONFLICT (schedule_id,scheduled_for) DO UPDATE SET updated_at=scheduled_work_item_runs.updated_at
+         RETURNING *`,
+        [`schedule-run-${randomUUID()}`, schedule.id, slot, status, schedule.maxAttempts,
+          status === 'claimed' ? input.ownerId : null,
+          status === 'claimed' ? new Date(slot.getTime() + (input.leaseMs ?? 60_000)) : null],
+      );
+      await client.query('COMMIT');
+      return runFromRow(rows.rows[0]!);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 /**

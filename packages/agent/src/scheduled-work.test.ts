@@ -774,3 +774,86 @@ test('denyScheduledWorkRun cancels an awaiting run and records the denial', asyn
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }
 });
+
+test('manual trigger refuses when maxConcurrentRuns is exhausted (skip policy)', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-manual-skip-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'read_only_auto', concurrencyPolicy: 'skip',
+    catchUpPolicy: 'run_once', maxAttempts: 2, maxConcurrentRuns: 1,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const { createManualScheduledWorkRun } = await import('./scheduled-work/index.js');
+    const first = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a',
+    });
+    assert.equal(first.status, 'claimed');
+    // A second manual trigger while the first run is active must be refused
+    // (manual runs share the same ledger and concurrency policy, ADR 0034).
+    await assert.rejects(
+      createManualScheduledWorkRun({
+        scheduleId: schedule.id, ownerId: 'scheduler-a',
+        scheduledFor: new Date(Date.now() + 1000),
+      }),
+      /concurrency limit reached/,
+    );
+    // After the run becomes terminal, manual triggering works again.
+    await getDb().query(
+      `UPDATE scheduled_work_item_runs SET status='succeeded', completed_at=now() WHERE id=$1`,
+      [first.id],
+    );
+    const second = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a',
+      scheduledFor: new Date(Date.now() + 2000),
+    });
+    assert.equal(second.status, 'claimed');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('manual trigger queues instead of claiming under queue_one when the slot is busy', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-manual-queue-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    approvalPolicy: 'read_only_auto', concurrencyPolicy: 'queue_one',
+    catchUpPolicy: 'run_once', maxAttempts: 2, maxConcurrentRuns: 1,
+    now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const { claimQueuedScheduledWorkRuns, createManualScheduledWorkRun } = await import('./scheduled-work/index.js');
+    const first = await createManualScheduledWorkRun({ scheduleId: schedule.id, ownerId: 'scheduler-a' });
+    const queued = await createManualScheduledWorkRun({
+      scheduleId: schedule.id, ownerId: 'scheduler-a',
+      scheduledFor: new Date(Date.now() + 1000),
+    });
+    assert.equal(queued.status, 'queued');
+    assert.equal(queued.claimOwner, undefined, 'queued run must not carry a lease owner');
+
+    // While the claimed run is active, the tick must NOT claim the queued one
+    // (maxConcurrentRuns still applies to queued claims).
+    const busy = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
+    assert.ok(!busy.some(r => r.id === queued.id),
+      'queued run must wait while the active slot is occupied');
+
+    // Once the active run is terminal, the tick loop picks the queued run up.
+    await getDb().query(
+      `UPDATE scheduled_work_item_runs SET status='succeeded', completed_at=now() WHERE id=$1`,
+      [first.id],
+    );
+    const claimed = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
+    assert.ok(claimed.some(r => r.id === queued.id),
+      'queued manual run must be claimable once the active slot frees up');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
