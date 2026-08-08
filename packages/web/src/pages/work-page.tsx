@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Bug,
   Check,
   ChevronRight,
   FileCheck2,
@@ -27,7 +28,14 @@ import {
 import { formatDate } from '../ui.js';
 import { useI18n } from '../i18n';
 import { WorkReviewPanel } from './work-review-panel.js';
-import { NextStepGuide, attentionLabel, friendlyWorkError } from './work-guidance.js';
+import {
+  OutcomeCard,
+  attentionLabel,
+  friendlyWorkError,
+  primaryActionKey,
+  readWorkDebugPreference,
+  writeWorkDebugPreference,
+} from './work-guidance.js';
 
 type WorkFormState = {
   projectId: string;
@@ -67,6 +75,9 @@ export function WorkPage({
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [approvalReason, setApprovalReason] = useState('');
+  const [debugMode, setDebugMode] = useState(() => readWorkDebugPreference());
+  const [techOpen, setTechOpen] = useState(() => readWorkDebugPreference());
+
   const list = useQuery({
     queryKey: ['work-items', status],
     queryFn: () => getJson<WorkItemListResponse>(`/work-items?limit=100${status ? `&status=${status}` : ''}`),
@@ -93,10 +104,17 @@ export function WorkPage({
     enabled: Boolean(runSpecId),
   });
   const runContract = useMemo(() => runContractFromInspect(inspect.data) ?? item?.runContractDraft, [inspect.data, item]);
+  const primary = availableActions ? primaryActionKey(availableActions) : null;
 
   useEffect(() => {
     if (selectedWorkItemId && !list.isLoading) void detail.refetch();
   }, [selectedWorkItemId]);
+
+  const setDebug = (enabled: boolean) => {
+    setDebugMode(enabled);
+    writeWorkDebugPreference(enabled);
+    if (enabled) setTechOpen(true);
+  };
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['work-items'] });
@@ -131,7 +149,7 @@ export function WorkPage({
   });
 
   return (
-    <section className="daily-page work-page">
+    <section className="daily-page work-page" data-debug={debugMode ? 'true' : 'false'}>
       <div className="daily-toolbar">
         <div className="work-filters">
           <label className="work-search"><Search size={14} /><input aria-label={t('work.searchAria')} value={search} onChange={event => setSearch(event.target.value)} placeholder={t('work.searchAria')} /></label>
@@ -146,6 +164,16 @@ export function WorkPage({
           <span>{t('work.count', { shown: visibleItems.length, total: list.data?.count ?? 0 })}</span>
         </div>
         <div className="daily-toolbar-actions">
+          <label className="work-debug-toggle" title={t('work.debugTitle')}>
+            <Bug size={14} aria-hidden />
+            <input
+              type="checkbox"
+              checked={debugMode}
+              onChange={event => setDebug(event.target.checked)}
+              aria-label={t('work.debugLabel')}
+            />
+            <span>{t('work.debugLabel')}</span>
+          </label>
           <button className="icon-btn" type="button" title={t('work.refreshTitle')} aria-label={t('work.refreshTitle')} onClick={refresh}>
             <RefreshCcw size={15} />
           </button>
@@ -184,7 +212,10 @@ export function WorkPage({
               onClick={() => onSelectedWorkItemChange(candidate.id)}
             >
               <span className={`priority-mark ${candidate.priority.toLowerCase()}`}>{candidate.priority}</span>
-              <span className="work-list-copy"><strong>{candidate.title}</strong><small>{candidate.projectId} · {formatDate(candidate.updatedAt)}</small></span>
+              <span className="work-list-copy">
+                <strong>{candidate.title}</strong>
+                <small>{candidate.projectId} · {formatDate(candidate.updatedAt)}{debugMode ? ` · ${candidate.id}` : ''}</small>
+              </span>
               <span className={`attention-state ${candidate.attentionState}`}>{attentionLabel(candidate.attentionState)}</span>
               <ChevronRight size={14} />
             </button>
@@ -195,71 +226,74 @@ export function WorkPage({
           {!item ? <div className="daily-empty"><FileCheck2 size={22} /><strong>{t('work.selectTitle')}</strong><span>{t('work.selectHint')}</span></div> : (
             <>
               <header className="work-detail-head">
-                <div><span className="eyebrow">{item.projectId} / {item.priority}</span><h2>{item.title}</h2><p>{item.goal}</p></div>
+                <div>
+                  <span className="eyebrow">{item.projectId} / {item.priority}</span>
+                  <h2>{item.title}</h2>
+                  <p>{item.goal}</p>
+                </div>
                 <span className={`attention-state ${item.attentionState}`}>{attentionLabel(item.attentionState)}</span>
               </header>
 
-              <NextStepGuide item={item} />
+              <OutcomeCard item={item} />
 
-              <div className="work-action-strip">
-                {availableActions?.startWork ? <button className="btn" type="button" title={availableActions.startWork.effect} onClick={() => onStartWork(item)}><Play size={14} /> {availableActions.startWork.label}</button> : null}
+              <div className="work-action-strip" data-testid="work-action-strip">
+                {availableActions?.startWork ? (
+                  <button
+                    className={primary === 'startWork' ? 'btn work-primary-cta' : 'ghost-btn'}
+                    type="button"
+                    title={availableActions.startWork.effect}
+                    onClick={() => onStartWork(item)}
+                  >
+                    <Play size={14} /> {availableActions.startWork.label}
+                  </button>
+                ) : null}
                 {availableActions?.approvePlan ? (
-                  <button className="btn" type="button" title={availableActions.approvePlan.effect} disabled={approve.isPending} onClick={() => approve.mutate(availableActions.approvePlan!)}><Check size={14} /> {approve.isPending ? t('work.approving') : availableActions.approvePlan.label}</button>
+                  <button
+                    className={primary === 'approvePlan' ? 'btn work-primary-cta' : 'ghost-btn'}
+                    type="button"
+                    title={availableActions.approvePlan.effect}
+                    disabled={approve.isPending}
+                    onClick={() => approve.mutate(availableActions.approvePlan!)}
+                  >
+                    <Check size={14} /> {approve.isPending ? t('work.approving') : availableActions.approvePlan.label}
+                  </button>
                 ) : null}
                 {availableActions?.runVerification ? (
-                  <button className="btn" type="button" title={availableActions.runVerification.effect} disabled={verify.isPending} onClick={() => verify.mutate(availableActions.runVerification!)}><ShieldCheck size={14} /> {verify.isPending ? t('work.runningChecks') : availableActions.runVerification.label}</button>
+                  <button
+                    className={primary === 'runVerification' ? 'btn work-primary-cta' : 'ghost-btn'}
+                    type="button"
+                    title={availableActions.runVerification.effect}
+                    disabled={verify.isPending}
+                    onClick={() => verify.mutate(availableActions.runVerification!)}
+                  >
+                    <ShieldCheck size={14} /> {verify.isPending ? t('work.runningChecks') : availableActions.runVerification.label}
+                  </button>
                 ) : null}
-                {availableActions?.inspectRun ? <button className="ghost-btn" type="button" title={availableActions.inspectRun.effect} onClick={() => onOpenRun(availableActions.inspectRun!.payload.runSpecId)}><FileCheck2 size={14} /> {availableActions.inspectRun.label}</button> : null}
-                {availableActions?.continueSession ? <button className="ghost-btn" type="button" title={availableActions.continueSession.effect} onClick={() => onOpenSession(availableActions.continueSession!.payload.sessionId)}><MessageSquare size={14} /> {availableActions.continueSession.label}</button> : null}
+                {availableActions?.continueSession ? (
+                  <button
+                    className={primary === 'continueSession' ? 'btn work-primary-cta' : 'ghost-btn'}
+                    type="button"
+                    title={availableActions.continueSession.effect}
+                    onClick={() => onOpenSession(availableActions.continueSession!.payload.sessionId)}
+                  >
+                    <MessageSquare size={14} /> {availableActions.continueSession.label}
+                  </button>
+                ) : null}
+                {availableActions?.inspectRun ? (
+                  <button
+                    className="ghost-btn"
+                    type="button"
+                    title={availableActions.inspectRun.effect}
+                    onClick={() => onOpenRun(availableActions.inspectRun!.payload.runSpecId)}
+                  >
+                    <FileCheck2 size={14} /> {availableActions.inspectRun.label}
+                  </button>
+                ) : null}
               </div>
               {availableActions?.approvePlan ? (
                 <label className="approval-reason"><span>{t('work.approvalReasonLabel')}</span><input value={approvalReason} onChange={event => setApprovalReason(event.target.value)} placeholder={t('work.approvalReasonPlaceholder')} /></label>
               ) : null}
               {approve.error || verify.error ? <div className="daily-error">{friendlyWorkError(approve.error ?? verify.error)}</div> : null}
-
-              <div className="work-evidence-grid">
-                {item.feedAnalysis ? (
-                  <>
-                    <EvidenceBlock label={t('work.ev.dispatch')}>
-                      <FactLine label={t('work.fact.status')} value={item.feedAnalysis.dispatchStatus} tone={item.feedAnalysis.dispatchStatus === 'failed' ? 'danger' : 'info'} />
-                      <FactLine label={t('work.fact.source')} value={item.feedAnalysis.sourceSystem} />
-                      <FactLine label={t('work.fact.job')} value={item.feedAnalysis.sourceJobId} />
-                      <FactLine label={t('work.fact.delivery')} value={item.feedAnalysis.deliveryMode} />
-                    </EvidenceBlock>
-                    <EvidenceBlock label={t('work.ev.losExecution')}>
-                      <FactLine label={t('work.fact.run')} value={item.evidence.runSpecStatus ?? t('work.notLinked')} />
-                      <FactLine label={t('work.fact.task')} value={item.evidence.taskRunStatus ?? t('work.notLinked')} />
-                      <FactLine label={t('work.fact.runSpec')} value={item.evidence.latestRunSpecId ?? t('common.none')} />
-                      <FactLine label={t('work.fact.taskRun')} value={item.evidence.latestTaskRunId ?? t('common.none')} />
-                    </EvidenceBlock>
-                    <EvidenceBlock label={t('work.ev.validatedResult')}>
-                      <FactLine label={t('work.fact.available')} value={item.feedAnalysis.resultAvailable ? t('work.yes') : t('work.no')} tone={item.feedAnalysis.resultAvailable ? 'ok' : 'warn'} />
-                      <FactLine label={t('work.fact.errorCode')} value={item.feedAnalysis.errorCode ?? t('common.none')} tone={item.feedAnalysis.errorCode ? 'danger' : undefined} />
-                      <FactLine label={t('work.fact.updated')} value={formatDate(item.feedAnalysis.updatedAt)} />
-                    </EvidenceBlock>
-                    <EvidenceBlock label={t('work.ev.callback')}>
-                      <FactLine label={t('work.fact.status')} value={item.feedAnalysis.callback.latestStatus.replaceAll('_', ' ')} tone={item.feedAnalysis.callback.deadLetterCount ? 'danger' : item.feedAnalysis.callback.deliveredCount ? 'ok' : undefined} />
-                      <FactLine label={t('work.fact.events')} value={String(item.feedAnalysis.callback.eventCount)} />
-                      <FactLine label={t('work.fact.delivered')} value={String(item.feedAnalysis.callback.deliveredCount)} />
-                      <FactLine label={t('work.fact.deadLetters')} value={String(item.feedAnalysis.callback.deadLetterCount)} tone={item.feedAnalysis.callback.deadLetterCount ? 'danger' : undefined} />
-                      <FactLine label={t('work.fact.latency')} value={item.feedAnalysis.callback.latestLatencyMs === undefined ? t('work.na') : `${item.feedAnalysis.callback.latestLatencyMs} ms`} />
-                    </EvidenceBlock>
-                  </>
-                ) : null}
-                <EvidenceBlock label={t('work.ev.contract')}>
-                  <FactLine label={t('work.fact.mode')} value={String(runContract?.mode ?? t('common.unknown'))} />
-                  <FactLine label={t('work.fact.tools')} value={String(runContract?.toolMode ?? 'read-only')} />
-                  <FactLine label={t('work.fact.phase')} value={String(runContract?.phase ?? 'created')} />
-                  <FactLine label={t('work.fact.status')} value={item.status} />
-                </EvidenceBlock>
-                <EvidenceBlock label={t('work.ev.verification')}>
-                  <FactLine label={t('work.fact.passed')} value={String(item.evidence.verificationSucceeded)} tone="ok" />
-                  <FactLine label={t('work.fact.skipped')} value={String(item.evidence.verificationSkipped)} />
-                  <FactLine label={t('work.fact.pending')} value={String(item.evidence.verificationPending)} tone="warn" />
-                  <FactLine label={t('work.fact.failed')} value={String(item.evidence.verificationFailed)} tone="danger" />
-                  <FactLine label={t('work.fact.required')} value={String(item.evidence.verificationRequired)} />
-                </EvidenceBlock>
-              </div>
 
               <WorkReviewPanel
                 item={item}
@@ -268,16 +302,80 @@ export function WorkPage({
                 onDecision={(decision, reason, dirtyPaths) => review.mutate({ decision, reason, dirtyPaths })}
               />
 
-              <PlanReview contract={runContract} />
+              <PlanReview contract={runContract} debugMode={debugMode} />
               <ContractSection title={t('work.contract.editableSurfaces')} items={runContract?.editableSurfaces ?? []} empty={t('work.contract.noWritableScope')} />
               <ContractSection title={t('work.contract.requiredChecks')} items={runContract?.requiredChecks ?? []} empty={t('work.contract.noChecks')} />
               <ContractSection title={t('work.contract.stopConditions')} items={runContract?.stopConditions ?? []} empty={t('work.contract.noStopConditions')} />
-              <Lineage item={item} />
+
+              <details
+                className="work-technical"
+                open={techOpen || debugMode}
+                onToggle={event => setTechOpen((event.target as HTMLDetailsElement).open)}
+                data-testid="work-technical-details"
+              >
+                <summary className="work-technical-summary">
+                  <span>{t('work.tech.summary')}</span>
+                  <small>{t('work.tech.hint')}</small>
+                </summary>
+                <TechnicalEvidence item={item} runContract={runContract} />
+              </details>
             </>
           )}
         </aside>
       </div>
     </section>
+  );
+}
+
+function TechnicalEvidence({ item, runContract }: { item: WorkItemProjection; runContract?: RunContractDraft }) {
+  const { t } = useI18n();
+  return (
+    <div className="work-technical-body">
+      <div className="work-evidence-grid">
+        {item.feedAnalysis ? (
+          <>
+            <EvidenceBlock label={t('work.ev.dispatch')}>
+              <FactLine label={t('work.fact.status')} value={item.feedAnalysis.dispatchStatus} tone={item.feedAnalysis.dispatchStatus === 'failed' ? 'danger' : 'info'} />
+              <FactLine label={t('work.fact.source')} value={item.feedAnalysis.sourceSystem} />
+              <FactLine label={t('work.fact.job')} value={item.feedAnalysis.sourceJobId} />
+              <FactLine label={t('work.fact.delivery')} value={item.feedAnalysis.deliveryMode} />
+            </EvidenceBlock>
+            <EvidenceBlock label={t('work.ev.losExecution')}>
+              <FactLine label={t('work.fact.run')} value={item.evidence.runSpecStatus ?? t('work.notLinked')} />
+              <FactLine label={t('work.fact.task')} value={item.evidence.taskRunStatus ?? t('work.notLinked')} />
+              <FactLine label={t('work.fact.runSpec')} value={item.evidence.latestRunSpecId ?? t('common.none')} />
+              <FactLine label={t('work.fact.taskRun')} value={item.evidence.latestTaskRunId ?? t('common.none')} />
+            </EvidenceBlock>
+            <EvidenceBlock label={t('work.ev.validatedResult')}>
+              <FactLine label={t('work.fact.available')} value={item.feedAnalysis.resultAvailable ? t('work.yes') : t('work.no')} tone={item.feedAnalysis.resultAvailable ? 'ok' : 'warn'} />
+              <FactLine label={t('work.fact.errorCode')} value={item.feedAnalysis.errorCode ?? t('common.none')} tone={item.feedAnalysis.errorCode ? 'danger' : undefined} />
+              <FactLine label={t('work.fact.updated')} value={formatDate(item.feedAnalysis.updatedAt)} />
+            </EvidenceBlock>
+            <EvidenceBlock label={t('work.ev.callback')}>
+              <FactLine label={t('work.fact.status')} value={item.feedAnalysis.callback.latestStatus.replaceAll('_', ' ')} tone={item.feedAnalysis.callback.deadLetterCount ? 'danger' : item.feedAnalysis.callback.deliveredCount ? 'ok' : undefined} />
+              <FactLine label={t('work.fact.events')} value={String(item.feedAnalysis.callback.eventCount)} />
+              <FactLine label={t('work.fact.delivered')} value={String(item.feedAnalysis.callback.deliveredCount)} />
+              <FactLine label={t('work.fact.deadLetters')} value={String(item.feedAnalysis.callback.deadLetterCount)} tone={item.feedAnalysis.callback.deadLetterCount ? 'danger' : undefined} />
+              <FactLine label={t('work.fact.latency')} value={item.feedAnalysis.callback.latestLatencyMs === undefined ? t('work.na') : `${item.feedAnalysis.callback.latestLatencyMs} ms`} />
+            </EvidenceBlock>
+          </>
+        ) : null}
+        <EvidenceBlock label={t('work.ev.contract')}>
+          <FactLine label={t('work.fact.mode')} value={String(runContract?.mode ?? t('common.unknown'))} />
+          <FactLine label={t('work.fact.tools')} value={String(runContract?.toolMode ?? 'read-only')} />
+          <FactLine label={t('work.fact.phase')} value={String(runContract?.phase ?? 'created')} />
+          <FactLine label={t('work.fact.status')} value={item.status} />
+        </EvidenceBlock>
+        <EvidenceBlock label={t('work.ev.verification')}>
+          <FactLine label={t('work.fact.passed')} value={String(item.evidence.verificationSucceeded)} tone="ok" />
+          <FactLine label={t('work.fact.skipped')} value={String(item.evidence.verificationSkipped)} />
+          <FactLine label={t('work.fact.pending')} value={String(item.evidence.verificationPending)} tone="warn" />
+          <FactLine label={t('work.fact.failed')} value={String(item.evidence.verificationFailed)} tone="danger" />
+          <FactLine label={t('work.fact.required')} value={String(item.evidence.verificationRequired)} />
+        </EvidenceBlock>
+      </div>
+      <Lineage item={item} />
+    </div>
   );
 }
 
@@ -322,7 +420,7 @@ function LineField({ label, value, onChange, placeholder }: { label: string; val
   return <label><span>{label}</span><textarea rows={3} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} /></label>;
 }
 
-function EvidenceBlock({ label, children }: { label: string; children: React.ReactNode }) {
+function EvidenceBlock({ label, children }: { label: string; children: ReactNode }) {
   return <section className="evidence-block"><h3>{label}</h3>{children}</section>;
 }
 
@@ -334,7 +432,7 @@ function ContractSection({ title, items, empty }: { title: string; items: string
   return <section className="contract-section"><h3>{title}</h3>{items.length ? <ol>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ol> : <p>{empty}</p>}</section>;
 }
 
-function PlanReview({ contract }: { contract?: RunContractDraft }) {
+function PlanReview({ contract, debugMode }: { contract?: RunContractDraft; debugMode: boolean }) {
   const { t } = useI18n();
   const plan = contract?.plan ?? [];
   const verifications = contract?.verifications ?? [];
@@ -342,7 +440,10 @@ function PlanReview({ contract }: { contract?: RunContractDraft }) {
     <div className="contract-section-heading"><h3>{t('work.plan.title')}</h3><span>{contract?.planRevision ? t('work.plan.revision', { n: contract.planRevision }) : t('work.plan.draft')}</span></div>
     {plan.length === 0 ? <p>{t('work.plan.none')}</p> : <ol className="plan-step-list">
       {plan.map((step, index) => <li key={`${step.id ?? 'step'}-${index}`} className="plan-step">
-        <div className="plan-step-title"><strong>{step.title ?? step.id ?? t('work.plan.stepFallback', { n: index + 1 })}</strong><span>{step.id ?? `step-${index + 1}`}</span></div>
+        <div className="plan-step-title">
+          <strong>{step.title ?? step.id ?? t('work.plan.stepFallback', { n: index + 1 })}</strong>
+          {debugMode ? <span>{step.id ?? `step-${index + 1}`}</span> : null}
+        </div>
         <p>{step.description ?? t('work.plan.noDescription')}</p>
         <dl className="plan-step-facts">
           <div><dt>{t('work.plan.dependsOn')}</dt><dd>{step.dependsOnIds?.length ? step.dependsOnIds.join(', ') : t('common.none')}</dd></div>

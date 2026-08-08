@@ -2557,6 +2557,36 @@ button:disabled {
   min-width: 0;
 }
 
+.inbox-decision {
+  display: grid;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.inbox-decision p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inbox-decision b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.inbox-primary-cta {
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.inbox-primary-cta:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .attention-title-line strong,
 .work-list-copy strong {
   overflow: hidden;
@@ -2708,9 +2738,10 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.next-step-guide {
+.next-step-guide,
+.outcome-card {
   display: grid;
-  grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(180px, .7fr) minmax(0, 2.6fr);
   gap: 14px;
   align-items: start;
   padding: 13px 20px;
@@ -2718,12 +2749,114 @@ button:disabled {
   background: color-mix(in srgb, var(--surface) 92%, var(--info) 8%);
 }
 
-.next-step-guide.warn { background: color-mix(in srgb, var(--surface) 91%, var(--warn) 9%); }
-.next-step-guide.ok { background: color-mix(in srgb, var(--surface) 91%, var(--ok) 9%); }
-.next-step-guide > div { display: grid; gap: 4px; }
-.next-step-guide strong { font-size: 13px; }
-.next-step-guide p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
-.next-step-guide b { color: var(--text); font-weight: 600; }
+.next-step-guide.warn,
+.outcome-card.warn { background: color-mix(in srgb, var(--surface) 91%, var(--warn) 9%); }
+.next-step-guide.ok,
+.outcome-card.ok { background: color-mix(in srgb, var(--surface) 91%, var(--ok) 9%); }
+.next-step-guide > div,
+.outcome-card > div:first-child { display: grid; gap: 4px; }
+.next-step-guide strong,
+.outcome-card strong { font-size: 13px; }
+.next-step-guide p,
+.outcome-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.next-step-guide b,
+.outcome-card b { color: var(--text); font-weight: 600; }
+
+.outcome-card-body {
+  display: grid;
+  gap: 8px;
+}
+
+.outcome-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.outcome-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.outcome-line span { color: var(--faint); }
+.outcome-line strong { font-weight: 600; color: var(--text); }
+.outcome-line.ok strong { color: var(--ok); }
+.outcome-line.warn strong { color: var(--warn); }
+.outcome-line.danger strong { color: var(--danger, #c44); }
+.outcome-line.info strong { color: var(--info, var(--text)); }
+
+.work-primary-cta {
+  font-weight: 600;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6a8) 45%, transparent);
+}
+
+.work-debug-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.work-debug-toggle input {
+  margin: 0;
+  accent-color: var(--accent, #6a8);
+}
+
+.work-page[data-debug='true'] .work-debug-toggle {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+  background: color-mix(in srgb, var(--surface) 88%, var(--warn) 12%);
+}
+
+.work-technical {
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 96%, var(--muted) 4%);
+}
+
+.work-technical-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 12px 20px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.work-technical-summary::-webkit-details-marker { display: none; }
+.work-technical-summary::before {
+  content: '▸';
+  color: var(--faint);
+  font-size: 11px;
+}
+.work-technical[open] > .work-technical-summary::before { content: '▾'; }
+
+.work-technical-summary small {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.work-technical-body {
+  border-top: 1px solid var(--line);
+}
+
+.work-technical .lineage-section {
+  border-top: 1px solid var(--line);
+}
 
 .approval-reason {
   display: grid;
@@ -3339,7 +3472,8 @@ button:disabled {
   .work-create-lists,
   .schedule-form-fields { grid-template-columns: 1fr; }
   .approval-reason { grid-template-columns: 1fr; }
-  .next-step-guide { grid-template-columns: 1fr; gap: 8px; }
+  .next-step-guide,
+  .outcome-card { grid-template-columns: 1fr; gap: 8px; }
   .verification-record,
   .workspace-record,
   .result-review-record { grid-template-columns: 1fr; }
