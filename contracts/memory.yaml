@@ -79,8 +79,20 @@ routes:
         type: string
       nodeId:
         type: string
-    response: observation.row
-    description: Create a new observation. Metadata defaults to scope=project, memoryLayer=semantic, archived=false.
+    response:
+      oneOf:
+        - observation.row
+        - observation.row_with_poisoning:
+            type: object
+            description: Observation whose content matched an injection pattern; written but tagged with metadata.poisonFlag for attribution.
+        - error: Unprocessable Entity (422) with violations array
+    errors:
+      - 422: Write gate rejection (title/summary/content/kind/source length, control characters, tags shape, metadata size, observerType whitelist). Violations are returned as [{ field, message }].
+    description: >
+      Create a new observation. Metadata defaults to scope=project, memoryLayer=semantic,
+      archived=false. All writes pass the memory write gate (structural constraints +
+      observerType whitelist); content matching instruction-override or
+      identity-impersonation patterns is written but flagged with metadata.poisonFlag.
   - method: PATCH
     path: /memory/:id
     request:
