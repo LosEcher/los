@@ -4,6 +4,19 @@
 > 评审：第一评审（Reasonix 主会话分析）+ 第二评审（独立子代理，只读核对实现）
 > 外部 CLI 评审尝试：codex 0.146.1 exec 因环境限制失败（`failed to initialize in-process app-server client: Operation not permitted`，Reasonix bash 沙箱无 app-server）；grok 0.2.118 headless 失败（`Device not configured`，无 tty）。**建议在正常终端重跑**：`codex exec "评审 docs/research/competitive-snapshot-2026-08.md..."`（codex review 子命令亦可）。本设计基于两轮 Reasonix 侧评审。
 
+## 零、执行状态（2026-08-08 收尾）
+
+P0 四项已全部交付合入（08-08 批次），DB todo 已回写 done：
+
+| # | 任务 | 合入 commit | todo |
+|---|---|---|---|
+| 4 | self-check schema 契约（D4） | `1494df0d`（自举三断点批次） | `todo-los-structural-D4-output-contract` ✅ |
+| 1 | 沙箱 native 后端 deny 化 | `115ba34c` | `todo-los-opt-sandbox-native-deny` ✅ |
+| 3 | compaction 失败补偿 | `2dd8a5a9` | `todo-los-opt-compaction-retry` ✅ |
+| 2 | 按 kind 衰减 + refCount 保护 | `e84c9f94` | `todo-los-opt-decay-kind-ref` ✅ |
+
+验证：self-check 45/45、shell-sandbox 10/10、server-maintenance 3/3、decay 21/21 全绿。剩余 P1 四项（memory 写入门禁 → shell env 最小化 → 沙箱绕过回归测试 → graph fail-fast）按本节原顺序执行；其中 shell env 最小化 + 沙箱回归测试已随 `92aa3585`（shell env 最小化+sentinel+沙箱有效性回归测试）合入，待核对 todo 状态。
+
 ## 一、snapshot 8 项候选的评审修正
 
 | 候选项 | 评审结论 | 修正后定位 |
