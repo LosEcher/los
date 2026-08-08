@@ -14,7 +14,7 @@ import { hostname } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import gatewayPackage from '../package.json' with { type: 'json' };
-import { getConfig, setConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
+import { getConfig, loadConfig, printConfigDiagnostics } from '@los/infra/config';
 import { initDb, getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { migrateDir } from '@los/infra/migrate';
@@ -39,6 +39,7 @@ import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-r
 import { registerMetricsRoutes } from './routes/infrastructure/metrics-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
 import { registerAuthRoutes } from './routes/auth-routes.js';
+import { registerSettingsRoutes } from './routes/infrastructure/settings-routes.js';
 import { ensureAllStores } from './bootstrap.js';
 import { registerChatRoute } from './chat-route.js';
 import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
@@ -191,83 +192,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     };
   });
 
-  app.get('/settings', async () => ({
-    server: { port: config.server.port, host: config.server.host, corsOrigin: config.server.corsOrigin },
-    defaultProjectId: config.defaultProjectId,
-    auth: { enabled: config.auth.enabled },
-    agent: {
-      defaultProvider: config.agent.defaultProvider,
-      defaultModel: config.agent.defaultModel,
-      maxLoops: config.agent.maxLoops,
-      sandboxMode: config.agent.sandboxMode,
-      systemPrompt: config.agent.systemPrompt ?? null,
-      identity: {
-        name: config.agent.identity.name,
-        level: config.agent.identity.level ?? null,
-        inheritForChildren: config.agent.identity.inheritForChildren,
-      },
-    },
-    judge: {
-      provider: config.judge.provider ?? null,
-      model: config.judge.model ?? null,
-      systemPrompt: config.judge.systemPrompt ?? null,
-    },
-    review: {
-      enabled: config.review.enabled,
-      roles: Object.fromEntries(
-        Object.entries(config.review.roles).map(([name, r]) => [name, {
-          provider: r.provider ?? null,
-          model: r.model ?? null,
-          systemPrompt: r.systemPrompt ?? null,
-          blockingSeverity: r.blockingSeverity,
-          enabled: r.enabled,
-        }])
-      ),
-    },
-    memory: {
-      ftsEnabled: config.memory.ftsEnabled,
-      maxObservations: config.memory.maxObservations,
-      selfReflectionEnabled: config.memory.selfReflectionEnabled,
-    },
-    executor: {
-      enabled: config.executor.enabled,
-      nodeId: config.executor.nodeId,
-      nodeUrl: config.executor.nodeUrl,
-      connectModes: config.executor.connectModes,
-      meshNodes: config.executor.meshNodes,
-      meshNodeCount: config.executor.meshNodes.length,
-    },
-    providers: Object.entries(config.providers).map(([name, p]) => ({
-      name, enabled: p.enabled ?? false,
-      hasApiKey: typeof p.apiKey === 'string' && p.apiKey.length > 0,
-      model: p.model ?? null, weight: p.weight ?? null,
-    })),
-  }));
-
-  app.patch('/settings', async (req, reply) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return reply.status(400).send({ error: 'Request body must be a JSON object' });
-    }
-    const current = getConfig();
-    // Deep-merge the patch into current config. Only allow top-level keys
-    // that exist in the current config to prevent injection.
-    const merged = { ...current } as Record<string, unknown>;
-    for (const [key, val] of Object.entries(body)) {
-      if (val && typeof val === 'object' && !Array.isArray(val) &&
-          key in merged && merged[key] && typeof merged[key] === 'object') {
-        (merged as Record<string, unknown>)[key] = {
-          ...(merged[key] as Record<string, unknown>),
-          ...(val as Record<string, unknown>),
-        };
-      }
-    }
-    setConfig(merged as ReturnType<typeof getConfig>);
-    log.info('Settings updated via PATCH');
-    return { ok: true };
-  });
-
   // ── Logs & extracted routes ─────────────────────────
+  registerSettingsRoutes(app);
   registerLogRoutes(app, { runtimeLogDir: RUNTIME_LOG_DIR, runtimeLogPath: RUNTIME_LOG_PATH });
   registerArtifactRoutes(app, { storageRoot: ARTIFACT_STORAGE_ROOT, executorAgentKey: config.executor.agentKey });
   registerNodeCommandRoutes(app, { executorAgentKey: config.executor.agentKey });
