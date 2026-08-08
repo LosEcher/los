@@ -162,7 +162,7 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
     }
     case 'self_bootstrap': {
       const { runSelfBootstrapAudit } = await import('./governance-self-bootstrap.js');
-      return runSelfBootstrapAudit(job);
+      return runSelfBootstrapAudit(job, { dryRun });
     }
     case 'dead_letter': {
       const { runDeadLetterGovernance } = await import('./dead-letter-governance.js');

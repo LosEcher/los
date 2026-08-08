@@ -149,6 +149,7 @@ const isolatedGroupC = [
   'src/task-runs.test.ts',
   'src/task-runs/blocked-resume.test.ts',
   'src/todo-dispatch.test.ts',
+  'src/todo-outcome-sync.test.ts',
   'src/todos.test.ts',
   'src/tool-call-recovery.test.ts',
   'src/verification-records.test.ts',

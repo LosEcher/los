@@ -134,6 +134,8 @@ export {
   canAccessMemory,
   canWriteToScope,
   canDeleteMemory,
+  ownsObservationBoundary,
+  canMutateObservation,
   evaluatePromotion,
   nextScope,
   candidateStatusToScope,
@@ -141,6 +143,7 @@ export {
   type MemoryScope,
   type MemoryAccessContext,
   type ScopeResolutionInput,
+  type TenantProjectBoundary,
   type PromotionEvidence,
   type PromotionDecision,
 } from './core/scope-acl.js';

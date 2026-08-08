@@ -3,50 +3,90 @@ import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 
 import { loadConfig, getConfig, setConfig } from '@los/infra/config';
+import { closeDb, initDb } from '@los/infra/db';
+import { createServer } from './server.js';
+import { _buildSettingsResponse } from './routes/infrastructure/settings-routes.js';
 
-test('GET /settings returns current config shape', async () => {
+test('public settings omit prompts and executor topology while private settings retain them', async () => {
   await loadConfig();
-  // Import after loadConfig to avoid circular init issues
-  // We test the raw route by registering it manually on a new Fastify instance
-  const app = Fastify({ logger: false });
+  const config = structuredClone(getConfig());
+  config.agent.systemPrompt = 'agent-secret-prompt';
+  config.judge.systemPrompt = 'judge-secret-prompt';
+  config.executor.nodeUrl = 'http://executor.internal:8090';
+  config.executor.meshNodes = ['http://mesh.internal:8090'];
 
-  // Replicate GET /settings handler
-  app.get('/settings', async () => {
-    const config = getConfig();
-    return {
-      server: { port: config.server.port, host: config.server.host, corsOrigin: config.server.corsOrigin },
-      defaultProjectId: config.defaultProjectId,
-      auth: { enabled: config.auth.enabled },
-      agent: {
-        defaultProvider: config.agent.defaultProvider,
-        defaultModel: config.agent.defaultModel,
-        maxLoops: config.agent.maxLoops,
-        sandboxMode: config.agent.sandboxMode,
-        systemPrompt: config.agent.systemPrompt ?? null,
-        identity: {
-          name: config.agent.identity.name,
-          level: config.agent.identity.level ?? null,
-          inheritForChildren: config.agent.identity.inheritForChildren,
-        },
-      },
-      providers: [],
-      memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false },
-      judge: {},
-      review: { enabled: false, roles: {} },
-      executor: { enabled: false, connectModes: [], meshNodes: [], meshNodeCount: 0 },
-    };
+  const publicSettings = _buildSettingsResponse(config, false);
+  assert.equal(typeof (publicSettings.agent as Record<string, unknown>).defaultProvider, 'string');
+  assert.equal(publicSettings.server, undefined);
+  assert.equal((publicSettings.agent as Record<string, unknown>).systemPrompt, undefined);
+  assert.equal((publicSettings.judge as Record<string, unknown>).systemPrompt, undefined);
+  assert.deepEqual(publicSettings.executor, { enabled: config.executor.enabled });
+
+  const privateSettings = _buildSettingsResponse(config, true);
+  assert.equal((privateSettings.agent as Record<string, unknown>).systemPrompt, 'agent-secret-prompt');
+  assert.equal((privateSettings.judge as Record<string, unknown>).systemPrompt, 'judge-secret-prompt');
+  assert.equal((privateSettings.executor as Record<string, unknown>).nodeUrl, 'http://executor.internal:8090');
+  assert.deepEqual((privateSettings.executor as Record<string, unknown>).meshNodes, ['http://mesh.internal:8090']);
+});
+
+test('private settings read and settings mutation require operator access', async () => {
+  await loadConfig();
+  const original = structuredClone(getConfig());
+  const testConfig = structuredClone(original);
+  testConfig.auth = {
+    enabled: true,
+    token: 'settings-user-token',
+    operatorToken: 'settings-operator-token',
+  };
+  setConfig(testConfig);
+  await initDb(testConfig.databaseUrl);
+
+  const app = await createServer({
+    serviceId: 'gateway-settings-test',
+    bindUrl: 'http://127.0.0.1:0',
+    publicUrl: 'http://127.0.0.1:0',
+    hostLabel: 'settings-test',
   });
 
   try {
-    const res = await app.inject({ method: 'GET', url: '/settings' });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(typeof body.agent.defaultProvider, 'string');
-    assert.equal(typeof body.agent.defaultModel, 'string');
-    assert.equal(typeof body.agent.maxLoops, 'number');
-    assert.equal(typeof body.server.port, 'number');
+    const publicResponse = await app.inject({ method: 'GET', url: '/settings' });
+    assert.equal(publicResponse.statusCode, 200);
+
+    const userHeaders = { 'x-los-auth-token': 'settings-user-token' };
+    const privateUserResponse = await app.inject({
+      method: 'GET',
+      url: '/settings/private',
+      headers: userHeaders,
+    });
+    assert.equal(privateUserResponse.statusCode, 403);
+
+    const patchUserResponse = await app.inject({
+      method: 'PATCH',
+      url: '/settings',
+      headers: userHeaders,
+      payload: { agent: { maxLoops: 42 } },
+    });
+    assert.equal(patchUserResponse.statusCode, 403);
+
+    const operatorHeaders = { 'x-los-operator-token': 'settings-operator-token' };
+    const privateOperatorResponse = await app.inject({
+      method: 'GET',
+      url: '/settings/private',
+      headers: operatorHeaders,
+    });
+    assert.equal(privateOperatorResponse.statusCode, 200);
+
+    const patchOperatorResponse = await app.inject({
+      method: 'PATCH',
+      url: '/settings',
+      headers: operatorHeaders,
+      payload: { agent: { maxLoops: testConfig.agent.maxLoops } },
+    });
+    assert.equal(patchOperatorResponse.statusCode, 200);
   } finally {
+    setConfig(original);
     await app.close();
+    await closeDb();
   }
 });
 

@@ -55,12 +55,17 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
     const isAuthenticated = isOperator || hasStaticAccess || !!jwtPayload;
 
     if (config.auth.enabled) {
-      // Prefer JWT claims over headers for identity
-      const tenantId = normalizeHeader(req.headers['x-tenant-id']) ?? 'local';
-      const projectId = normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los';
+      // Scope headers are routing hints, not authorization claims. Only a
+      // validated operator may override the configured tenant/project scope.
+      const tenantId = isOperator
+        ? normalizeHeader(req.headers['x-tenant-id']) ?? 'local'
+        : 'local';
+      const projectId = isOperator
+        ? normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los'
+        : config.defaultProjectId ?? 'los';
       const userId = jwtPayload?.sub
-        ?? normalizeHeader(req.headers['x-user-id'])
-        ?? 'unknown';
+        ?? (isOperator ? normalizeHeader(req.headers['x-user-id']) : undefined)
+        ?? (hasStaticAccess ? SHARED_ACCESS_SUBJECT : 'unknown');
 
       if (!jwtPayload && _requiresActorContext(req.url)) {
         const hdrUser = normalizeHeader(req.headers['x-user-id']);

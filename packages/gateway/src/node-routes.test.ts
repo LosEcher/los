@@ -38,7 +38,36 @@ const stubDeps: NodeRouteDependencies = {
     stubNodes.set(input.nodeId, updated);
     return updated as any;
   },
+  requireOperator: async () => true,
 };
+
+test('node infrastructure routes require operator access', async () => {
+  const app = Fastify({ logger: false });
+  const gatedDeps: NodeRouteDependencies = {
+    ...stubDeps,
+    requireOperator: async (_req, reply) => {
+      await reply.code(403).send({ error: 'operator token required' });
+      return false;
+    },
+  };
+  registerNodeRoutes(app, gatedDeps);
+
+  const requests = [
+    { method: 'GET', url: '/nodes' },
+    { method: 'PATCH', url: '/nodes/node-1', payload: { status: 'offline' } },
+    { method: 'POST', url: '/nodes/node-1/probe' },
+    { method: 'POST', url: '/nodes/node-1/ssh-run', payload: { command: 'id' } },
+    { method: 'POST', url: '/nodes/import-ssh-config', payload: { content: 'Host node-1' } },
+  ] as const;
+
+  for (const request of requests) {
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 403, `${request.method} ${request.url} must be operator-only`);
+    assert.deepEqual(response.json(), { error: 'operator token required' });
+  }
+
+  await app.close();
+});
 
 test('node heartbeat persists executor draining status and active task count', async () => {
   const nodeId = `test-heartbeat-draining-${Date.now()}`;

@@ -59,6 +59,7 @@
     "./pre-action-evidence": "./src/pre-action-evidence.ts",
     "./message-router": "./src/message-router/index.ts",
     "./todo-dispatch": "./src/todo-dispatch.ts",
+    "./todo-outcome-sync": "./src/todo-outcome-sync.ts",
     "./auth/login": "./src/auth/xai-oauth-login.ts",
     "./auth/proxy-fetch": "./src/auth/proxy-fetch.ts",
     "./coordination": "./src/coordination/index.ts",
