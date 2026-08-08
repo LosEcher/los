@@ -133,6 +133,7 @@ export const enAssets2 = {
   'assets.obs.sectionAria': 'Execution observability',
   'assets.obs.title': 'Execution projection',
   'assets.obs.loading': 'Loading execution projection...',
+  'assets.obs.unavailable': 'No execution projection for this session yet.',
   'assets.obs.loadError': 'Projection unavailable: {error}',
   'assets.obs.fingerprintKnown': 'fingerprint known',
   'assets.obs.fingerprintUnknown': 'fingerprint unknown',

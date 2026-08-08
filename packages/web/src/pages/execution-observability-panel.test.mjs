@@ -15,11 +15,15 @@ describe('execution observability panel wiring', () => {
     const panel = read('pages/execution-observability-panel.tsx');
     assert.match(panel, /execution-observability/);
     assert.match(panel, /export function ExecutionObservabilityPanel/);
+    assert.match(panel, /export function isObservabilityProjection/);
     assert.match(panel, /export function summarizeWaterfall/);
     assert.match(panel, /export function formatDurationMs/);
     assert.match(panel, /failureFacets/);
     assert.match(panel, /fingerprint/);
     assert.match(panel, /waterfall/);
+    // Incomplete payloads (e2e mocks / older gateways) must not crash Chat/Sessions.
+    assert.match(panel, /assets\.obs\.unavailable/);
+    assert.match(panel, /fp\.status !== 'known' && fp\.status !== 'unknown'/);
   });
 
   it('is mounted on Sessions and Chat inspectors', () => {
