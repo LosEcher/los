@@ -12,22 +12,41 @@ import {
   Zap,
 } from 'lucide-react';
 
-import { getJson, postJson, type InboxEntry, type InboxResponse, type WorkItemAttentionState, type WorkItemProjection } from '../api/index.js';
+import {
+  getJson,
+  postJson,
+  type InboxEntry,
+  type InboxResponse,
+  type WorkItemAttentionState,
+  type WorkItemNextAction,
+  type WorkItemProjection,
+} from '../api/index.js';
 import { formatDate } from '../ui.js';
 import { tt, useI18n } from '../i18n';
 
 type InboxFilter = 'all' | 'decision' | 'recovery' | 'review' | 'running';
 
+type InboxPrimaryKind = 'start' | 'open';
+
+type InboxDecision = {
+  need: string;
+  why: string;
+  effect: string;
+  primaryKind: InboxPrimaryKind;
+  primaryLabel: string;
+};
+
 export function InboxPage({
   onOpenWork,
   onOpenRun,
   onOpenSession,
-  onApprovePlan,
+  onApprovePlan: _onApprovePlan,
   onStartWork,
 }: {
   onOpenWork: (id: string) => void;
   onOpenRun: (id: string) => void;
   onOpenSession: (id: string) => void;
+  /** Kept for App wiring; plan approval happens on Work after review (W3 single-CTA). */
   onApprovePlan: (runSpecId: string) => void;
   onStartWork?: (item: WorkItemProjection) => void;
 }) {
@@ -51,7 +70,6 @@ export function InboxPage({
           const projection = await getJson<WorkItemProjection>(`/work-items/${data.id}`);
           onStartWork(projection);
         } catch {
-          // fallback: navigate to work detail if projection fetch fails
           onOpenWork(data.id);
         }
       } else {
@@ -130,8 +148,7 @@ export function InboxPage({
             <InboxRow
               key={entry.id}
               entry={entry}
-              onAction={() => openEntry(entry, { onOpenWork, onOpenRun, onOpenSession })}
-              onApprovePlan={() => entry.approvePlan && onApprovePlan(entry.approvePlan.runSpecId)}
+              onOpen={() => openEntry(entry, { onOpenWork, onOpenRun, onOpenSession })}
               onStartWork={onStartWork && entry.workItemId
                 ? () => {
                   getJson<WorkItemProjection>(`/work-items/${entry.workItemId}`).then(onStartWork).catch(() => onOpenWork(entry.workItemId!));
@@ -145,44 +162,130 @@ export function InboxPage({
   );
 }
 
-function InboxRow({ entry, onAction, onApprovePlan, onStartWork }: { entry: InboxEntry; onAction: () => void; onApprovePlan: () => void; onStartWork?: () => void }) {
+function InboxRow({
+  entry,
+  onOpen,
+  onStartWork,
+}: {
+  entry: InboxEntry;
+  onOpen: () => void;
+  onStartWork?: () => void;
+}) {
   const { t } = useI18n();
+  const decision = buildInboxDecision(entry, Boolean(onStartWork), t);
   const Icon = attentionIcon(entry.attentionState);
-  const canApprove = entry.attentionState === 'approval_required' && entry.approvePlan;
-  const canStart = entry.nextAction === 'start' && onStartWork;
+  const runPrimary = () => {
+    if (decision.primaryKind === 'start' && onStartWork) {
+      onStartWork();
+      return;
+    }
+    onOpen();
+  };
+
   return (
-    <article className="attention-row" data-attention={entry.attentionState}>
+    <article className="attention-row" data-attention={entry.attentionState} data-testid="inbox-decision-row">
       <div className="attention-icon"><Icon size={16} /></div>
       <div className="attention-copy">
         <div className="attention-title-line">
           <strong>{entry.title}</strong>
-          <span className="attention-state">{stateLabel(entry.attentionState, t)}</span>
+          <span className={`attention-state ${entry.attentionState}`}>{stateLabel(entry.attentionState, t)}</span>
+        </div>
+        <div className="inbox-decision" aria-label={t('work.inbox.decisionAria')}>
+          <p className="inbox-decision-need"><b>{t('work.inbox.needLabel')}</b> {decision.need}</p>
+          <p className="inbox-decision-why"><b>{t('work.inbox.whyLabel')}</b> {decision.why}</p>
+          <p className="inbox-decision-effect"><b>{t('work.inbox.effectLabel')}</b> {decision.effect}</p>
         </div>
         <div className="attention-meta">
           <span>{entry.projectId}</span>
-          <span>{entry.source ?? entry.sourceKind.replaceAll('_', ' ')}</span>
-          {entry.connector ? <span>{t('work.inbox.connector', { dispatch: entry.connector.dispatchStatus, result: entry.connector.resultAvailable ? t('work.inbox.resultReady') : t('work.inbox.resultPending'), callback: entry.connector.callbackStatus.replaceAll('_', ' ') })}</span> : null}
+          <span>{sourceKindLabel(entry.sourceKind, t)}</span>
+          {entry.connector ? <span>{connectorLabel(entry.connector, t)}</span> : null}
           <time dateTime={entry.updatedAt}>{formatDate(entry.updatedAt)}</time>
-          {entry.runSpecId ? <code>{entry.runSpecId.slice(0, 12)}</code> : null}
         </div>
       </div>
       <div className="attention-actions">
-        {canApprove && (
-          <button className="attention-action approve-action" type="button" onClick={onApprovePlan}>
-            {t('work.inbox.approve')} <ChevronRight size={14} />
-          </button>
-        )}
-        {canStart && (
-          <button className="attention-action start-action" type="button" onClick={onStartWork}>
-            <Play size={13} /> {t('work.inbox.start')} <ChevronRight size={14} />
-          </button>
-        )}
-        <button className="attention-action" type="button" onClick={onAction}>
-          {actionLabel(entry, t)} <ChevronRight size={14} />
+        <button
+          className={`attention-action inbox-primary-cta${decision.primaryKind === 'start' ? ' start-action' : ''}`}
+          type="button"
+          onClick={runPrimary}
+          title={decision.effect}
+          data-testid="inbox-primary-action"
+        >
+          {decision.primaryKind === 'start' ? <Play size={13} /> : null}
+          {decision.primaryLabel}
+          <ChevronRight size={14} />
         </button>
       </div>
     </article>
   );
+}
+
+/** Pure decision copy for tests and rendering. */
+export function buildInboxDecision(
+  entry: InboxEntry,
+  canStart: boolean,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): InboxDecision {
+  const startPrimary = entry.nextAction === 'start' && canStart && Boolean(entry.workItemId);
+  if (startPrimary) {
+    return {
+      need: t('work.inbox.need.start'),
+      why: t('work.inbox.why.start'),
+      effect: t('work.inbox.effect.start'),
+      primaryKind: 'start',
+      primaryLabel: t('work.inbox.start'),
+    };
+  }
+
+  switch (entry.attentionState) {
+    case 'approval_required':
+      return {
+        need: t('work.inbox.need.approval'),
+        why: t('work.inbox.why.approval'),
+        effect: t('work.inbox.effect.approval'),
+        primaryKind: 'open',
+        primaryLabel: t('work.inbox.action.review_plan'),
+      };
+    case 'verification_blocked':
+      return {
+        need: t('work.inbox.need.verification'),
+        why: t('work.inbox.why.verification'),
+        effect: t('work.inbox.effect.verification'),
+        primaryKind: 'open',
+        primaryLabel: t('work.inbox.action.inspect_verification'),
+      };
+    case 'recovery_required':
+      return {
+        need: t('work.inbox.need.recovery'),
+        why: t('work.inbox.why.recovery'),
+        effect: t('work.inbox.effect.recovery'),
+        primaryKind: 'open',
+        primaryLabel: t('work.inbox.action.recover'),
+      };
+    case 'review_ready':
+      return {
+        need: t('work.inbox.need.review'),
+        why: t('work.inbox.why.review'),
+        effect: t('work.inbox.effect.review'),
+        primaryKind: 'open',
+        primaryLabel: t('work.inbox.action.review_changes'),
+      };
+    case 'running':
+      return {
+        need: t('work.inbox.need.running'),
+        why: t('work.inbox.why.running'),
+        effect: t('work.inbox.effect.running'),
+        primaryKind: 'open',
+        primaryLabel: t('work.inbox.action.view_progress'),
+      };
+    default:
+      return {
+        need: t('work.inbox.need.inspect'),
+        why: t('work.inbox.why.inspect'),
+        effect: t('work.inbox.effect.inspect'),
+        primaryKind: 'open',
+        primaryLabel: actionLabelFromNext(entry.nextAction, t),
+      };
+  }
 }
 
 function SummaryCount({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -231,13 +334,33 @@ function stateLabel(state: WorkItemAttentionState, t: (key: string) => string): 
   return t(key) ?? state.replaceAll('_', ' ');
 }
 
-function actionLabel(entry: InboxEntry, t: (key: string) => string): string {
-  const labels: Record<string, string> = {
+function sourceKindLabel(kind: InboxEntry['sourceKind'], t: (key: string) => string): string {
+  const key = `work.inbox.source.${kind}`;
+  const label = t(key);
+  return label === key ? kind.replaceAll('_', ' ') : label;
+}
+
+function connectorLabel(
+  connector: NonNullable<InboxEntry['connector']>,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  if (connector.kind !== 'feed_analysis') {
+    return t('work.inbox.connectorGeneric');
+  }
+  if (connector.callbackStatus === 'dead_letter') return t('work.inbox.connector.deadLetter');
+  if (connector.resultAvailable) return t('work.inbox.connector.resultReady');
+  if (connector.dispatchStatus === 'failed') return t('work.inbox.connector.dispatchFailed');
+  return t('work.inbox.connector.waiting');
+}
+
+function actionLabelFromNext(next: WorkItemNextAction, t: (key: string) => string): string {
+  const labels: Partial<Record<WorkItemNextAction, string>> = {
     review_plan: 'work.inbox.action.review_plan',
     inspect_verification: 'work.inbox.action.inspect_verification',
     recover: 'work.inbox.action.recover',
     inspect_run: 'work.inbox.action.inspect_run',
     review_changes: 'work.inbox.action.review_changes',
+    start: 'work.inbox.start',
   };
-  return t(labels[entry.nextAction] ?? 'work.inbox.action.inspect');
+  return t(labels[next] ?? 'work.inbox.action.inspect');
 }

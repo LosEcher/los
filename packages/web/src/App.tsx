@@ -109,41 +109,54 @@ type NavItem = {
   badge?: number;
   sectionKey?: string;
   audience: NavAudience;
+  /** When false, hide StatusPill — daily decision pages stay quiet. Default true. */
+  showStatus?: boolean;
 };
 
+/**
+ * W4 navigation contract:
+ * - Daily (top, no pill): Inbox → Work → Schedules → Chat
+ * - Library: Sessions / Memory / Artifacts (history & evidence)
+ * - Advanced: Todos (legacy ledger; Work is the product path)
+ * - Configure / Ops: setup and troubleshooting (ops collapsed by default)
+ */
 const NAV: NavItem[] = [
-  // ── Workspace (daily workflow) ──────────────────────────
-  { id: 'inbox', labelKey: 'nav.inbox', icon: Inbox, status: 'live', audience: 'workspace' },
-  { id: 'work', labelKey: 'nav.work', icon: BriefcaseBusiness, status: 'live', audience: 'workspace' },
-  { id: 'schedules', labelKey: 'nav.schedules', icon: CalendarClock, status: 'live', audience: 'workspace' },
-  { id: 'chat', labelKey: 'nav.chat', icon: MessageSquare, status: 'live', audience: 'workspace' },
-  { id: 'sessions', labelKey: 'nav.sessions', icon: ListChecks, status: 'live', audience: 'workspace' },
-  { id: 'todos', labelKey: 'nav.todos', icon: ClipboardList, status: 'live', audience: 'workspace' },
-  { id: 'memory', labelKey: 'nav.memory', icon: MemoryStick, status: 'live', audience: 'workspace' },
-  { id: 'artifacts', labelKey: 'nav.artifacts', icon: Archive, status: 'live', audience: 'workspace' },
+  // ── Daily workflow (decision path) ──────────────────────
+  { id: 'inbox', labelKey: 'nav.inbox', icon: Inbox, status: 'live', audience: 'workspace', showStatus: false },
+  { id: 'work', labelKey: 'nav.work', icon: BriefcaseBusiness, status: 'live', audience: 'workspace', showStatus: false },
+  { id: 'schedules', labelKey: 'nav.schedules', icon: CalendarClock, status: 'live', audience: 'workspace', showStatus: false },
+  { id: 'chat', labelKey: 'nav.chat', icon: MessageSquare, status: 'live', audience: 'workspace', showStatus: false },
+
+  // ── Library (history / knowledge) ───────────────────────
+  { id: 'sessions', labelKey: 'nav.sessions', icon: ListChecks, status: 'partial', audience: 'workspace', sectionKey: 'nav.section.library' },
+  { id: 'memory', labelKey: 'nav.memory', icon: MemoryStick, status: 'partial', audience: 'workspace' },
+  { id: 'artifacts', labelKey: 'nav.artifacts', icon: Archive, status: 'partial', audience: 'workspace' },
+
+  // ── Advanced (compat / non-default) ─────────────────────
+  { id: 'todos', labelKey: 'nav.todos', icon: ClipboardList, status: 'partial', audience: 'workspace', sectionKey: 'nav.section.advanced' },
 
   // ── Communication ─────────────────────────────────────
-  { id: 'communication-accounts', labelKey: 'nav.communicationAccounts', icon: MessageSquare, status: 'live', audience: 'workspace', sectionKey: 'nav.section.communication' },
+  { id: 'communication-accounts', labelKey: 'nav.communicationAccounts', icon: MessageSquare, status: 'partial', audience: 'workspace', sectionKey: 'nav.section.communication' },
 
   // ── Configure (setup, rarely changed) ────────────────────
   { id: 'setup', labelKey: 'nav.setup', icon: Wrench, status: 'live', audience: 'configure', sectionKey: 'nav.section.configure' },
-  { id: 'providers', labelKey: 'nav.providers', icon: Brain, status: 'live', audience: 'configure' },
-  { id: 'skills', labelKey: 'nav.skills', icon: Zap, status: 'live', audience: 'configure' },
-  { id: 'rules', labelKey: 'nav.rules', icon: Shield, status: 'live', audience: 'configure' },
-  { id: 'mcp', labelKey: 'nav.mcp', icon: Server, status: 'live', audience: 'configure' },
-  { id: 'settings', labelKey: 'nav.settings', icon: Settings, status: 'live', audience: 'configure' },
+  { id: 'providers', labelKey: 'nav.providers', icon: Brain, status: 'partial', audience: 'configure' },
+  { id: 'skills', labelKey: 'nav.skills', icon: Zap, status: 'partial', audience: 'configure' },
+  { id: 'rules', labelKey: 'nav.rules', icon: Shield, status: 'partial', audience: 'configure' },
+  { id: 'mcp', labelKey: 'nav.mcp', icon: Server, status: 'partial', audience: 'configure' },
+  { id: 'settings', labelKey: 'nav.settings', icon: Settings, status: 'partial', audience: 'configure' },
 
-  // ── Operations (debug / incident investigation) ──────────
-  { id: 'tasks', labelKey: 'nav.tasks', icon: Activity, status: 'live', audience: 'operations', sectionKey: 'nav.section.operations' },
-  { id: 'evals', labelKey: 'nav.evals', icon: BarChart3, status: 'live', audience: 'operations' },
-  { id: 'pairwise', labelKey: 'nav.pairwise', icon: Scale, status: 'live', audience: 'operations' },
-  { id: 'run-specs', labelKey: 'nav.runSpecs', icon: ScrollText, status: 'live', audience: 'operations' },
-  { id: 'nodes', labelKey: 'nav.nodes', icon: Network, status: 'live', audience: 'operations' },
-  { id: 'services', labelKey: 'nav.services', icon: Activity, status: 'live', audience: 'operations' },
-  { id: 'logs', labelKey: 'nav.logs', icon: TerminalSquare, status: 'live', audience: 'operations' },
+  // ── Operations (troubleshoot / evidence dump) ───────────
+  { id: 'tasks', labelKey: 'nav.tasks', icon: Activity, status: 'partial', audience: 'operations', sectionKey: 'nav.section.operations' },
+  { id: 'run-specs', labelKey: 'nav.runSpecs', icon: ScrollText, status: 'partial', audience: 'operations' },
+  { id: 'evals', labelKey: 'nav.evals', icon: BarChart3, status: 'partial', audience: 'operations' },
+  { id: 'pairwise', labelKey: 'nav.pairwise', icon: Scale, status: 'partial', audience: 'operations' },
+  { id: 'nodes', labelKey: 'nav.nodes', icon: Network, status: 'partial', audience: 'operations' },
+  { id: 'services', labelKey: 'nav.services', icon: Activity, status: 'partial', audience: 'operations' },
+  { id: 'logs', labelKey: 'nav.logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
+  { id: 'file-sync', labelKey: 'nav.fileSync', icon: Archive, status: 'partial', audience: 'operations' },
   { id: 'dead-letter', labelKey: 'nav.dlq', icon: Skull, status: 'reserved', audience: 'operations' },
   { id: 'diagnostics', labelKey: 'nav.diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
-  { id: 'file-sync', labelKey: 'nav.fileSync', icon: Archive, status: 'live', audience: 'operations' },
 ];
 
 function pageFromHash(): PageId {
@@ -177,6 +190,15 @@ export function App() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  // Deep-link into Ops should expand the collapsible section so the active item is visible.
+  useEffect(() => {
+    const item = NAV.find(n => n.id === page);
+    if (item?.audience === 'operations') {
+      setOpsExpanded(true);
+      try { localStorage.setItem('los.nav.opsExpanded', 'true'); } catch { /* ignore */ }
+    }
+  }, [page]);
 
   const navigate = (id: PageId) => {
     setPage(id);
@@ -363,7 +385,9 @@ export function App() {
                     {item.id === 'sessions' && sessionCount.data !== undefined ? (
                       <span className="nav-badge">{sessionCount.data}</span>
                     ) : null}
-                    <StatusPill status={itemStatus(item.id, item.status)} />
+                    {item.showStatus === false ? null : (
+                      <StatusPill status={itemStatus(item.id, item.status)} />
+                    )}
                   </button>
                 )}
               </div>
@@ -391,7 +415,7 @@ export function App() {
         <AuthBanner />
         <header className="topbar">
           <div>
-            <div className="eyebrow">{t('nav.workspace')}</div>
+            <div className="eyebrow">{navEyebrow(active, t)}</div>
             <h1>{t(active.labelKey)}</h1>
           </div>
           <div className="topbar-metrics">
@@ -464,6 +488,13 @@ function workItemAsTodo(item: WorkItemProjection): TodoItem {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
+}
+
+function navEyebrow(item: NavItem, t: (key: string) => string): string {
+  if (item.audience === 'operations') return t('nav.section.operations');
+  if (item.audience === 'configure') return t('nav.section.configure');
+  if (item.sectionKey) return t(item.sectionKey);
+  return t('nav.section.daily');
 }
 
 function healthText(status: string | undefined, t: (key: string) => string): string {
