@@ -136,20 +136,34 @@ test('request principal distinguishes access token from operator token', async (
     const ordinary = await app.inject({
       method: 'GET',
       url: '/principal',
-      headers: { 'x-los-auth-token': 'test-token', 'x-user-id': 'claimed-user' },
+      headers: {
+        'x-los-auth-token': 'test-token',
+        'x-tenant-id': 'forged-tenant',
+        'x-project-id': 'forged-project',
+        'x-user-id': 'claimed-user',
+      },
     });
     assert.equal(ordinary.json().kind, 'authenticated');
     assert.equal(ordinary.json().subject, 'authenticated:shared-token');
-    assert.equal(ordinary.json().userId, 'claimed-user');
+    assert.equal(ordinary.json().tenantId, 'local');
+    assert.equal(ordinary.json().projectId, 'los');
+    assert.equal(ordinary.json().userId, 'authenticated:shared-token');
 
     const operator = await app.inject({
       method: 'GET',
       url: '/principal',
-      headers: { 'x-los-operator-token': 'op-secret', 'x-user-id': 'forged-operator-name' },
+      headers: {
+        'x-los-operator-token': 'op-secret',
+        'x-tenant-id': 'operator-tenant',
+        'x-project-id': 'operator-project',
+        'x-user-id': 'operator-name',
+      },
     });
     assert.equal(operator.json().kind, 'operator');
     assert.equal(operator.json().subject, 'operator:shared-token');
-    assert.equal(operator.json().userId, 'forged-operator-name');
+    assert.equal(operator.json().tenantId, 'operator-tenant');
+    assert.equal(operator.json().projectId, 'operator-project');
+    assert.equal(operator.json().userId, 'operator-name');
     assert.deepEqual(operator.json().capabilities, ['operator:*']);
   } finally {
     await app.close();

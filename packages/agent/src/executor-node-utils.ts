@@ -92,6 +92,8 @@ export function isWildcardExecutorUrl(value: string | undefined): boolean {
 
 export function buildHeartbeatVerification(
   existing: Record<string, unknown>,
+  existingConnectConfig: Record<string, unknown>,
+  existingBaseUrl: string | undefined,
   connectModes: ExecutorNodeConnectMode[],
   input: ExecutorNodeHeartbeatInput,
 ): Record<string, unknown> {
@@ -102,11 +104,19 @@ export function buildHeartbeatVerification(
     if (mode !== 'agent_http' && mode !== 'agent_http_ndjson') continue;
     const modeConfig = normalizeJsonObject(config[mode] ?? config.agent_http);
     verified[mode] = {
-      ok: true,
+      ok: false,
       checked_at: checkedAt,
       source: 'heartbeat',
       endpoint: normalizeOptionalString(modeConfig.healthUrl) ?? normalizeOptionalString(modeConfig.baseUrl) ?? input.baseUrl,
+      reason: 'heartbeat_claim_requires_active_probe',
     };
+
+    const prior = normalizeJsonObject(existing[mode]);
+    const previousEndpoint = resolveExecutorEndpoint(existingConnectConfig, mode, existingBaseUrl);
+    const incomingEndpoint = resolveExecutorEndpoint(config, mode, input.baseUrl);
+    if (prior.ok === true && prior.source !== 'heartbeat' && previousEndpoint && incomingEndpoint && previousEndpoint === incomingEndpoint) {
+      verified[mode] = prior;
+    }
   }
   return verified;
 }

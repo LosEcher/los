@@ -336,6 +336,8 @@ test('feed analysis store enforces business idempotency and atomically persists 
     const dispatch = await loadFeedAnalysisDispatch(dispatchId);
     assert.equal(dispatch?.status, 'completed');
     assert.equal(dispatch?.resultAvailable, true);
+    // AP12: linked work-item todo must follow terminal dispatch outcome
+    assert.equal((await loadTodo(workItemId!))?.status, 'done');
     const loaded = await loadFeedAnalysisResult(dispatchId);
     assert.equal(loaded?.summary, result.summary);
     const artifacts = await getDb().query<{ count: string }>(

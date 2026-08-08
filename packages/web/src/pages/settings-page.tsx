@@ -24,7 +24,7 @@ type Cfg = Record<string, Record<string, unknown>>;
 function useSaveSection(queryClient: ReturnType<typeof useQueryClient>) {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => patchJson('/settings', body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings', 'private'] }),
   });
 }
 
@@ -91,8 +91,8 @@ export function SettingsPage() {
 
   const health = useQuery({ queryKey: ['health'], queryFn: () => getJson<Health>('/health') });
   const settings = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => getJson<Cfg>('/settings'),
+    queryKey: ['settings', 'private'],
+    queryFn: () => getJson<Cfg>('/settings/private'),
     staleTime: 30_000,
   });
   const projects = useQuery({

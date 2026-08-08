@@ -24,6 +24,7 @@ import { existsSync } from 'node:fs';
 import type { ScheduledTaskEvent } from './scheduler/types.js';
 import { runScheduledAgentTask } from './scheduler/scheduled-task-runner.js';
 import { loadTodo, updateTodo, type TodoRecord } from './todos.js';
+import { applyTodoOutcomeFromScheduledEvent } from './todo-outcome-sync.js';
 import { getLogger } from '@los/infra/logger';
 import { linkWorkItemRun } from './work-items/store.js';
 
@@ -178,48 +179,30 @@ export async function dispatchTodo(
           taskRunId: event.taskRun.id,
         });
       });
-      // Map task lifecycle events to todo status transitions
-      if (event.type === 'task.failed' || event.type === 'task.blocked') {
-        await updateTodo(id, {
-          status: 'blocked',
-          taskRunId: event.taskRun.id,
+      // AP12: shared write-back — task lifecycle owns todo terminal status.
+      await applyTodoOutcomeFromScheduledEvent({
+        todoId: id,
+        eventType: event.type,
+        taskRunId: event.taskRun.id,
+        sessionId: event.taskRun.sessionId,
+        source: 'todo-dispatch',
+        baseMetadata: todo.metadata,
+        lastRun: {
+          event: event.type,
+          status: event.taskRun.status,
           sessionId: event.taskRun.sessionId,
-          metadata: {
-            ...todo.metadata,
-            dispatchReady: false,
-            lastRun: {
-              event: event.type,
-              status: event.taskRun.status,
-              sessionId: event.taskRun.sessionId,
-              taskRunId: event.taskRun.id,
-              traceId: event.taskRun.traceId,
-              reason: 'Task execution failed or blocked',
-              updatedAt: new Date().toISOString(),
-            },
-          },
-        }).catch(() => undefined);
-      } else if (event.type === 'task.succeeded') {
-        await updateTodo(id, {
-          status: 'done',
           taskRunId: event.taskRun.id,
-          sessionId: event.taskRun.sessionId,
-        }).catch(() => undefined);
-      } else if (event.type === 'task.cancelled') {
-        await updateTodo(id, {
-          status: 'cancelled',
+          traceId: event.taskRun.traceId,
+          updatedAt: new Date().toISOString(),
+        },
+      }).catch(error => {
+        log.warn('Failed to apply todo outcome from task event', {
+          error,
+          todoId: id,
+          eventType: event.type,
           taskRunId: event.taskRun.id,
-          sessionId: event.taskRun.sessionId,
-          metadata: {
-            ...todo.metadata,
-            cancelReason: 'Task cancelled during execution',
-          },
-        }).catch(() => undefined);
-      } else if (event.type === 'task.running') {
-        await updateTodo(id, {
-          taskRunId: event.taskRun.id,
-          sessionId: event.taskRun.sessionId,
-        }).catch(() => undefined);
-      }
+        });
+      });
     },
   });
 
