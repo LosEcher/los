@@ -5,6 +5,74 @@ import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('agent');
 
+// ── Environment minimization ─────────────────────────────
+//
+// Three backends inherit process.env via execFile by default. To minimize
+// credential leakage we (1) pass only an allowlist of safe variables,
+// (2) substitute sensitive variables with a sentinel value so programs see a
+// stable placeholder instead of a real credential, and (3) redact real
+// sensitive values from command output.
+
+/** Sentinel substituted for sensitive environment values. */
+export const ENV_REDACTED_SENTINEL = '__LOS_REDACTED__';
+
+/** Variables that are always safe to pass to a sandboxed shell. */
+export const SANDBOX_ENV_ALLOWLIST = ['PATH', 'HOME', 'LANG', 'LC_ALL'];
+
+/** Key prefixes that mark an environment variable as sensitive (never passed verbatim). */
+export const SENSITIVE_ENV_PREFIXES = [
+  'TOKEN', 'TOK_', 'SECRET', 'PASSWORD', 'PASSWD', 'PASS_',
+  'API_KEY', 'APIKEY', 'CREDENTIAL', 'AUTH', 'PRIVATE_KEY', 'PRIVATE_',
+  'AWS_ACCESS', 'AWS_SECRET', 'AZURE_', 'GCP_', 'OPENAI_API', 'ANTHROPIC_API',
+];
+
+function isSensitiveEnvKey(key: string): boolean {
+  const upper = key.toUpperCase();
+  return SENSITIVE_ENV_PREFIXES.some(p => upper.startsWith(p) || upper.includes(p.toUpperCase()));
+}
+
+function isAllowedEnvKey(key: string): boolean {
+  if (SANDBOX_ENV_ALLOWLIST.includes(key)) return true;
+  return key.startsWith('LC_');
+}
+
+/**
+ * Build the minimal environment for a sandboxed shell:
+ * - allowlisted safe variables pass through verbatim;
+ * - every other variable is dropped, except sensitive ones which are passed
+ *   with a sentinel value so tooling sees a stable placeholder, never a secret.
+ */
+export function buildSandboxEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!key) continue;
+    if (isAllowedEnvKey(key)) {
+      result[key] = value;
+    } else if (isSensitiveEnvKey(key)) {
+      result[key] = ENV_REDACTED_SENTINEL;
+    }
+    // non-allowed, non-sensitive variables are dropped entirely
+  }
+  return result;
+}
+
+/**
+ * Redact real sensitive environment values from command output.
+ * Guards against a command echoing an inherited credential back into the
+ * transcript even when the env itself is minimized (defense in depth).
+ */
+export function redactSensitiveOutput(text: string, env: NodeJS.ProcessEnv = process.env): string {
+  let out = text;
+  for (const [key, value] of Object.entries(env)) {
+    if (!key || !value || value.length < 4) continue;
+    if (!isSensitiveEnvKey(key)) continue;
+    if (out.includes(value)) {
+      out = out.split(value).join(ENV_REDACTED_SENTINEL);
+    }
+  }
+  return out;
+}
+
 export interface SandboxedShellInput {
   command: string;
   cwd: string;
@@ -119,11 +187,12 @@ function runWithMacSandboxExec(
         timeout: input.timeoutMs,
         maxBuffer: 1024 * 1024,
         encoding: 'utf-8',
+        env: buildSandboxEnv(),
       },
       (err, stdout, stderr) => {
-        const error = err ? String(stderr || err.message) : undefined;
+        const error = err ? redactSensitiveOutput(String(stderr || err.message)) : undefined;
         resolve({
-          content: String(stdout ?? ''),
+          content: redactSensitiveOutput(String(stdout ?? '')),
           error,
           sandbox: 'macos-sandbox-exec',
         });
@@ -161,11 +230,12 @@ function runWithBwrap(
         timeout: input.timeoutMs,
         maxBuffer: 1024 * 1024,
         encoding: 'utf-8',
+        env: buildSandboxEnv(),
       },
       (err, stdout, stderr) => {
-        const error = err ? String(stderr || err.message) : undefined;
+        const error = err ? redactSensitiveOutput(String(stderr || err.message)) : undefined;
         resolve({
-          content: String(stdout ?? ''),
+          content: redactSensitiveOutput(String(stdout ?? '')),
           error,
           sandbox: 'linux-bwrap',
         });
@@ -187,13 +257,14 @@ function runWithNativeShell(input: SandboxedShellInput): Promise<SandboxedShellR
         timeout: input.timeoutMs,
         maxBuffer: 1024 * 1024,
         encoding: 'utf-8',
+        env: buildSandboxEnv(),
       },
       (err, stdout, stderr) => {
         // Prepend a sandbox warning so the model knows it's unconstrained
         const warning = '[sandbox: native — no filesystem/network isolation]\n';
-        const error = err ? String(stderr || err.message) : undefined;
+        const error = err ? redactSensitiveOutput(String(stderr || err.message)) : undefined;
         resolve({
-          content: warning + String(stdout ?? ''),
+          content: warning + redactSensitiveOutput(String(stdout ?? '')),
           error,
           sandbox: 'native',
         });

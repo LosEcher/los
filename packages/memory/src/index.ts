@@ -10,6 +10,9 @@ export {
   getObservation,
   updateObservation,
   deleteObservation,
+  flagObservationAsSuspicious,
+  MemoryWriteError,
+  isMemoryWriteError,
   searchObservations,
   getStats,
   listEntities,
@@ -21,6 +24,23 @@ export {
   type EntityCooccurrence,
   type EntitySearchOptions,
 } from './core/store.js';
+
+export {
+  validateMemoryWrite,
+  detectPoisoning,
+  ALLOWED_OBSERVER_TYPES,
+  MEMORY_TITLE_MAX,
+  MEMORY_SUMMARY_MAX,
+  MEMORY_CONTENT_MAX,
+  MEMORY_KIND_MAX,
+  MEMORY_SOURCE_MAX,
+  MEMORY_TAGS_MAX,
+  MEMORY_TAG_MAX,
+  MEMORY_METADATA_MAX_BYTES,
+  type MemoryWriteInput,
+  type MemoryWriteViolation,
+  type PoisonDetection,
+} from './core/write-gate.js';
 
 export type { ObserverType } from './types.js';
 
