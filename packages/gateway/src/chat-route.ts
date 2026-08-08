@@ -148,6 +148,9 @@ export function registerChatRoute(
       : undefined;
     const toolMode = normalizeToolMode(body.toolMode);
     const allowedTools = normalizeAllowedTools(body.allowedTools);
+    const manualSkillIds = Array.isArray(body.manualSkillIds)
+      ? body.manualSkillIds.map(item => String(item).trim()).filter(Boolean)
+      : undefined;
     const maxLoops = normalizePositiveInteger(body.maxLoops);
     const context = getRequestContext(req);
     const principal = getMessagePrincipal(req);
@@ -279,7 +282,7 @@ export function registerChatRoute(
       const result = await runChat({
         prompt, sessionId, systemPrompt, provider, model, providerFallback,
         modelSettings: modelSettings as Record<string, unknown> | undefined,
-        workspaceRoot, toolMode, sandboxMode, allowedTools, maxLoops, timeoutMs,
+        workspaceRoot, toolMode, sandboxMode, allowedTools, manualSkillIds, maxLoops, timeoutMs,
         toolRetry: toolRetry as Record<string, unknown> | undefined,
         mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
         identityName, identityLevel,

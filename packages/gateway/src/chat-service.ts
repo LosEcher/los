@@ -58,6 +58,8 @@ export async function runChat(params: {
   toolMode: string;
   sandboxMode?: string;
   allowedTools: string[] | undefined;
+  /** Optional explicit skill names/ids for manual invoke (Chat picker / API). */
+  manualSkillIds?: string[];
   maxLoops: number | undefined;
   timeoutMs: number | undefined;
   toolRetry: Record<string, unknown> | undefined;
@@ -89,7 +91,7 @@ export async function runChat(params: {
 }): Promise<ChatResult> {
   const {
     prompt, sessionId, systemPrompt, provider, model, providerFallback, modelSettings,
-    workspaceRoot, toolMode, allowedTools, maxLoops, timeoutMs, toolRetry,
+    workspaceRoot, toolMode, allowedTools, manualSkillIds, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
     traceId, dedupeKey, signal, sid, tenantId, projectId, userId, actorSubject, requestId,
     runContract, intakeResolution, requestedProjectId, requestedWorkspaceRoot,
@@ -295,6 +297,7 @@ export async function runChat(params: {
         tenantId,
         projectId,
         userId,
+        ...(manualSkillIds && manualSkillIds.length > 0 ? { manualSkillIds } : {}),
       },
       ...createChatTaskHooks({ sid, runSpecId, requestId, tenantId, projectId, userId, traceId,
         provider, model, workspaceRoot, toolMode, config, resumedSession, ctx, send }),

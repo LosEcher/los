@@ -25,6 +25,8 @@ export interface ChatRequestBody {
   toolMode?: ToolMode;
   sandboxMode?: SandboxMode;
   allowedTools?: RunSpecRequest['allowedTools'];
+  /** Explicit skill names or scoped ids for manual invoke (Chat picker / API). */
+  manualSkillIds?: string[];
   maxLoops?: RunSpecRequest['maxLoops'];
   traceId?: RunSpecRequest['traceId'];
   dedupeKey?: RunSpecRequest['dedupeKey'];
