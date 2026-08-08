@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getDb, withDbClient, type DbTransactionClient } from '@los/infra/db';
 import { ensureTodoStore } from '../todos.js';
+import { syncTodoFromFeedAnalysisDispatch } from '../todo-outcome-sync.js';
 import {
   _FEED_ANALYSIS_RESULT_VERSION,
   type CreateFeedAnalysisDispatchInput,
@@ -11,6 +12,19 @@ import {
   type FeedAnalysisStatus,
   FeedAnalysisError,
 } from './feed-analysis-types.js';
+
+/** AP12 helper: map dispatch record onto linked work-item todo. */
+async function syncFeedAnalysisWorkItemOutcome(record: FeedAnalysisDispatchRecord): Promise<void> {
+  await syncTodoFromFeedAnalysisDispatch({
+    workItemId: record.workItemId,
+    status: record.status,
+    taskRunId: record.taskRunId,
+    sessionId: record.sessionId,
+    dispatchId: record.id,
+    errorCode: record.errorCode,
+    errorMessage: record.errorMessage,
+  });
+}
 
 export type { CreateFeedAnalysisDispatchInput, FeedAnalysisDispatchRecord } from './feed-analysis-types.js';
 
@@ -164,7 +178,7 @@ export async function emitFeedAnalysisStatus(
   error?: { code: string; message: string },
 ): Promise<FeedAnalysisDispatchRecord> {
   await ensureFeedAnalysisStore();
-  return await withDbClient(async (client) => {
+  const record = await withDbClient(async (client) => {
     await client.query('BEGIN');
     try {
       const selected = await client.query<FeedAnalysisDispatchRow>(
@@ -187,6 +201,9 @@ export async function emitFeedAnalysisStatus(
       throw cause;
     }
   });
+  // AP12: owning path writes todo status when the dispatch reaches a mapped state.
+  await syncFeedAnalysisWorkItemOutcome(record).catch(() => undefined);
+  return record;
 }
 
 export async function saveFeedAnalysisResult(
@@ -196,6 +213,7 @@ export async function saveFeedAnalysisResult(
   await ensureFeedAnalysisStore();
   const digest = digestJson({ ...result, resultDigest: undefined });
   const persisted = { ...result, schemaVersion: _FEED_ANALYSIS_RESULT_VERSION, resultDigest: digest } as FeedAnalysisResultEnvelope;
+  let completed: FeedAnalysisDispatchRecord | undefined;
   await withDbClient(async (client) => {
     await client.query('BEGIN');
     try {
@@ -228,11 +246,15 @@ export async function saveFeedAnalysisResult(
       `, [dispatchId]);
       await _insertFeedAnalysisCallbackEvent(client, updated.rows[0]!, 'completed', undefined, persisted);
       await client.query('COMMIT');
+      completed = rowToDispatch(updated.rows[0]!);
     } catch (cause) {
       await client.query('ROLLBACK');
       throw cause;
     }
   });
+  if (completed) {
+    await syncFeedAnalysisWorkItemOutcome(completed).catch(() => undefined);
+  }
   return persisted;
 }
 export async function loadFeedAnalysisResult(dispatchId: string): Promise<FeedAnalysisResultEnvelope | null> {

@@ -102,6 +102,7 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
   self_bootstrap: [
     { metric: 'qualityDegradation', direction: 'higher', thresholdPercent: 30, label: 'Quality degradation findings increased >30%' },
     { metric: 'todoStaleness', direction: 'higher', thresholdPercent: 30, label: 'Stale todo findings increased >30%' },
+    { metric: 'todoOutcomeDrift', direction: 'higher', thresholdPercent: 30, label: 'Todo outcome drift findings increased >30%' },
   ],
 };
 
@@ -165,6 +166,7 @@ function extractMetrics(jobType: GovernanceJobType, resultSummary: Record<string
       : [];
     metrics.qualityDegradation = findings.filter(f => f.dimension === 'quality_degradation').length;
     metrics.todoStaleness = findings.filter(f => f.dimension === 'todo_lifecycle').length;
+    metrics.todoOutcomeDrift = findings.filter(f => f.dimension === 'todo_outcome_drift').length;
   }
 
   return metrics;
