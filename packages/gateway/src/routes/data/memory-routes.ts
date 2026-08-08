@@ -181,9 +181,13 @@ export function _sanitizePatchMetadata(
       reason: `metadata.scope cannot be changed via PATCH (from ${prevScope} to ${nextScope}); use POST /memory/:id/promote`,
     };
   }
-  // Prevent clearing poisonFlag or forging compaction attestation via free-form metadata
-  if (existing.poisonFlag && patch.poisonFlag === null) {
-    return { ok: false, reason: 'poisonFlag cannot be cleared via PATCH' };
+  // Prevent clearing or replacing poisonFlag or forging compaction
+  // attestation via free-form metadata. The flag is write-once: any patch
+  // value different from the existing mark — null, false, 0, or a re-shaped
+  // object — is tampering, not just `null`.
+  if (existing.poisonFlag && patch.poisonFlag !== undefined
+    && JSON.stringify(patch.poisonFlag) !== JSON.stringify(existing.poisonFlag)) {
+    return { ok: false, reason: 'poisonFlag cannot be modified via PATCH' };
   }
   if (patch.compactionAttested === true && existing.compactionAttested !== true) {
     return { ok: false, reason: 'compactionAttested cannot be set via PATCH' };
@@ -460,11 +464,20 @@ export function registerMemoryRoutes(
     return { count: compactions.length, compactions };
   });
 
-  // Checkpoint recovery: get the latest checkpoint for a session
+  // Checkpoint recovery: get the latest checkpoint for a session.
+  // ACL: non-operators are pinned to their own tenant/project; operators may
+  // target another scope via query params (same rule as /memory search).
   app.get('/memory/checkpoint/:sessionId', async (req) => {
     const { sessionId } = req.params as { sessionId: string };
     if (!sessionId) return { checkpoint: null };
-    const checkpoint = await deps.getLatestCheckpoint(sessionId);
+    const context = getRequestContext(req);
+    const effectiveScope = _resolveMemorySearchScope(context, req.query as {
+      tenantId?: string; projectId?: string; userId?: string;
+    });
+    const checkpoint = await deps.getLatestCheckpoint(sessionId, {
+      tenantId: effectiveScope.tenantId,
+      projectId: effectiveScope.projectId,
+    });
     return { checkpoint };
   });
 
