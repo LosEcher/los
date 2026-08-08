@@ -191,6 +191,14 @@ export async function applyTodoOutcomeFromScheduledEvent(input: {
   baseMetadata?: Record<string, unknown>;
   lastRun?: Record<string, unknown>;
 }): Promise<ApplyTodoOutcomeResult> {
+  // Reload the todo at callback time so the dispatch-time metadata snapshot
+  // never clobbers updates made during execution (operator annotations,
+  // statusReview, etc.). The callback owns lineage/outcome fields only;
+  // baseMetadata merely fills keys that no longer exist at callback time.
+  const latestTodo = await loadTodo(input.todoId);
+  const mergedBase = input.baseMetadata && latestTodo?.metadata
+    ? { ...input.baseMetadata, ...latestTodo.metadata }
+    : (input.baseMetadata ?? latestTodo?.metadata);
   const target = todoStatusFromScheduledEventType(input.eventType);
   if (!target) {
     // Progress-only: attach lineage without forcing a status change when already in_progress.
@@ -202,7 +210,7 @@ export async function applyTodoOutcomeFromScheduledEvent(input: {
         sessionId: input.sessionId,
         reason: `scheduler event ${input.eventType}`,
         source: input.source ?? 'todo-dispatch',
-        extraMetadata: input.baseMetadata,
+        extraMetadata: mergedBase,
       });
     }
     return { applied: false, todo: null, skippedReason: 'non_terminal_event' };
@@ -216,7 +224,7 @@ export async function applyTodoOutcomeFromScheduledEvent(input: {
     reason: `scheduler event ${input.eventType}`,
     source: input.source ?? 'todo-dispatch',
     extraMetadata: {
-      ...input.baseMetadata,
+      ...mergedBase,
       ...(input.lastRun ? { lastRun: input.lastRun } : {}),
       ...(target === 'blocked' || target === 'cancelled'
         ? { dispatchReady: false }
@@ -292,7 +300,10 @@ export async function reconcileOpenTodosFromOutcomes(
   const dryRun = options.dryRun === true;
   const items: TodoOutcomeDriftItem[] = [];
 
-  // Path A: todos.task_run_id → terminal task_runs
+  // Path A: todos.task_run_id → terminal task_runs. A todo re-opened after
+  // its linked run completed (reopened_at > tr.completed_at) starts a new
+  // work cycle — its stale lineage must NOT re-close it. Only runs that
+  // completed after the reopen (or todos never reopened) are reconciled.
   const byTaskRun = await getDb().query<{
     todo_id: string;
     title: string;
@@ -308,6 +319,8 @@ export async function reconcileOpenTodosFromOutcomes(
      WHERE t.archived_at IS NULL
        AND t.status IN ('ready', 'in_progress', 'backlog')
        AND tr.status IN ('succeeded', 'failed', 'cancelled', 'blocked')
+       AND (t.reopened_at IS NULL
+            OR (tr.completed_at IS NOT NULL AND t.reopened_at < tr.completed_at))
      ORDER BY t.updated_at ASC
      LIMIT $1`,
     [limit],
@@ -350,6 +363,8 @@ export async function reconcileOpenTodosFromOutcomes(
          WHERE t.archived_at IS NULL
            AND t.status IN ('ready', 'in_progress', 'backlog')
            AND d.status IN ('completed', 'failed', 'cancelled', 'result_ready')
+           AND (t.reopened_at IS NULL
+                OR (d.completed_at IS NOT NULL AND t.reopened_at < d.completed_at))
          ORDER BY t.updated_at ASC
          LIMIT $1`,
         [remaining],

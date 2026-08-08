@@ -62,6 +62,7 @@ const isolatedDatabaseTestFiles = [
   'src/idempotency-atomic.test.ts',
   'src/integration-routes.test.ts',
   'src/metrics-routes.test.ts',
+  'src/memory-checkpoint-routes.test.ts',
   'src/memory-scope-routes.test.ts',
   'src/node-command-routes.test.ts',
   'src/provider-compat-routes.test.ts',
