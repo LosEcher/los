@@ -1,22 +1,26 @@
 /**
- * Usage + daily digest routes — L1 runtime evidence only.
+ * Usage + daily digest + runtime health routes — L1 runtime evidence only.
  *
  * GET /usage/summary
  * GET /ops/daily-digest
+ * GET /ops/runtime-health
  */
 
 import type { FastifyInstance } from 'fastify';
 import { getDailyDigest, type DailyDigestQuery } from '@los/agent/daily-digest';
+import { getRuntimeHealth } from '@los/agent/runtime-health';
 import { getUsageSummary, type UsageSummaryQuery } from '@los/agent/usage-summary';
 
 type UsageRouteDependencies = {
   getUsageSummary: typeof getUsageSummary;
   getDailyDigest: typeof getDailyDigest;
+  getRuntimeHealth: typeof getRuntimeHealth;
 };
 
 const defaultDependencies: UsageRouteDependencies = {
   getUsageSummary,
   getDailyDigest,
+  getRuntimeHealth,
 };
 
 export function registerUsageRoutes(
@@ -53,6 +57,16 @@ export function registerUsageRoutes(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(400).send({ error: 'invalid_daily_digest_query', message });
+    }
+  });
+
+  // Aggregated board only — never claims work (2026-08-09 control-plane decision).
+  app.get('/ops/runtime-health', async (_req, reply) => {
+    try {
+      return await dependencies.getRuntimeHealth();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(500).send({ error: 'runtime_health_failed', message });
     }
   });
 }
