@@ -71,12 +71,21 @@ export function registerWorkItemRoutes(
   });
 
   app.get('/work-items', async (req) => {
-    const query = req.query as { projectId?: string; status?: string; limit?: string };
+    const query = req.query as {
+      projectId?: string;
+      status?: string;
+      limit?: string;
+      excludeTerminal?: string | boolean;
+    };
     const context = getRequestContext(req);
+    const status = normalizeTodoStatus(query.status);
+    // Specific status wins; excludeTerminal only applies to unscoped lists.
+    const excludeTerminal = status ? undefined : normalizeBoolean(query.excludeTerminal);
     const results = await deps.listWorkItemProjections({
       tenantId: context.tenantId,
       projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
-      status: normalizeTodoStatus(query.status),
+      status,
+      excludeTerminal,
       limit: normalizePositiveInteger(query.limit),
     });
     return { count: results.length, results };
@@ -280,6 +289,12 @@ function normalizeTodoStatus(value: unknown): TodoStatus | undefined {
     || value === 'done'
     || value === 'cancelled'
   ) return value;
+  return undefined;
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (value === true || value === 'true' || value === '1') return true;
+  if (value === false || value === 'false' || value === '0') return false;
   return undefined;
 }
 

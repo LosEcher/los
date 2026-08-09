@@ -39,6 +39,19 @@ type RuntimeInspect = {
   nodes: Array<{ kind: string; record: { runContract?: RunContractDraft } }>;
 };
 
+/** List scope: open = non-terminal; all = every status; otherwise a concrete TodoStatus. */
+type WorkStatusFilter = TodoStatus | 'open' | 'all';
+
+function workItemsListUrl(filter: WorkStatusFilter): string {
+  const params = new URLSearchParams({ limit: '100' });
+  if (filter === 'open') {
+    params.set('excludeTerminal', 'true');
+  } else if (filter !== 'all') {
+    params.set('status', filter);
+  }
+  return `/work-items?${params.toString()}`;
+}
+
 export function WorkPage({
   selectedWorkItemId,
   onSelectedWorkItemChange,
@@ -54,7 +67,8 @@ export function WorkPage({
 }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
-  const [status, setStatus] = useState<TodoStatus | ''>('');
+  // Default to open work only — terminal done/cancelled P0 seeds used to flood the list.
+  const [statusFilter, setStatusFilter] = useState<WorkStatusFilter>('open');
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [approvalReason, setApprovalReason] = useState('');
@@ -62,8 +76,8 @@ export function WorkPage({
   const [techOpen, setTechOpen] = useState(() => readWorkDebugPreference());
 
   const list = useQuery({
-    queryKey: ['work-items', status],
-    queryFn: () => getJson<WorkItemListResponse>(`/work-items?limit=100${status ? `&status=${status}` : ''}`),
+    queryKey: ['work-items', statusFilter],
+    queryFn: () => getJson<WorkItemListResponse>(workItemsListUrl(statusFilter)),
     refetchInterval: 15_000,
   });
   const activeId = selectedWorkItemId ?? list.data?.results[0]?.id ?? null;
@@ -144,13 +158,19 @@ export function WorkPage({
       <div className="daily-toolbar work-toolbar-list">
         <div className="work-filters">
           <label className="work-search"><Search size={14} /><input aria-label={t('work.searchAria')} value={search} onChange={event => setSearch(event.target.value)} placeholder={t('work.searchAria')} /></label>
-          <select aria-label={t('work.statusAria')} value={status} onChange={event => setStatus(event.target.value as TodoStatus | '')}>
-            <option value="">{t('work.filter.all')}</option>
+          <select
+            aria-label={t('work.statusAria')}
+            value={statusFilter}
+            onChange={event => setStatusFilter(event.target.value as WorkStatusFilter)}
+          >
+            <option value="open">{t('work.filter.open')}</option>
+            <option value="all">{t('work.filter.all')}</option>
             <option value="backlog">{t('work.status.backlog')}</option>
             <option value="ready">{t('work.status.ready')}</option>
             <option value="in_progress">{t('work.status.inProgress')}</option>
             <option value="blocked">{t('work.status.blocked')}</option>
             <option value="done">{t('work.status.done')}</option>
+            <option value="cancelled">{t('work.status.cancelled')}</option>
           </select>
           <span>{t('work.count', { shown: visibleItems.length, total: list.data?.count ?? 0 })}</span>
         </div>
@@ -189,7 +209,11 @@ export function WorkPage({
           {list.isLoading ? <div className="daily-skeleton"><i /><i /><i /></div> : null}
           {list.error ? <div className="daily-error">{t('work.unavailable', { error: String(list.error) })}</div> : null}
           {!list.isLoading && !list.error && list.data?.results.length === 0 ? (
-            <div className="daily-empty"><FileCheck2 size={22} /><strong>{t('work.emptyTitle')}</strong><span>{t('work.emptyHint')}</span></div>
+            <div className="daily-empty">
+              <FileCheck2 size={22} />
+              <strong>{t('work.emptyTitle')}</strong>
+              <span>{statusFilter === 'open' ? t('work.emptyOpenHint') : t('work.emptyHint')}</span>
+            </div>
           ) : null}
           {!list.isLoading && !list.error && list.data?.results.length !== 0 && visibleItems.length === 0 ? (
             <div className="daily-empty"><Search size={22} /><strong>{t('work.noMatchTitle')}</strong><span>{t('work.noMatchHint')}</span></div>
