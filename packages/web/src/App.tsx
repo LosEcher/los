@@ -43,6 +43,7 @@ import {
 import {
   CommunicationAccountsPage,
   DeadLetterPage,
+  GovernancePage,
   DiagnosticsPage,
   FileSyncPage,
   LogsPage,
@@ -95,6 +96,7 @@ type PageId =
   | 'nodes'
   | 'logs'
   | 'dead-letter'
+  | 'governance'
   | 'diagnostics'
   | 'file-sync'
   | 'run-specs'
@@ -160,6 +162,7 @@ const NAV: NavItem[] = [
   { id: 'logs', labelKey: 'nav.logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
   { id: 'file-sync', labelKey: 'nav.fileSync', icon: Archive, status: 'partial', audience: 'operations' },
   { id: 'dead-letter', labelKey: 'nav.dlq', icon: Skull, status: 'reserved', audience: 'operations' },
+  { id: 'governance', labelKey: 'nav.governance', icon: Shield, status: 'live', audience: 'operations' },
   { id: 'diagnostics', labelKey: 'nav.diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
 ];
 
@@ -482,6 +485,7 @@ export function App() {
         {page === 'pairwise' && <PairwiseEvalsPage onOpenRun={openRun} onOpenSession={continueSession} />}
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}
+        {page === 'governance' && <GovernancePage />}
         {page === 'diagnostics' && <DiagnosticsPage />}
         {page === 'file-sync' && <FileSyncPage />}
         {page === 'run-specs' && <RunSpecsPage selectedRunSpecId={selectedRunSpecId} />}

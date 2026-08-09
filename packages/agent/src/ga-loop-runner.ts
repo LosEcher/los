@@ -321,23 +321,24 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
 
     phases.push({ phase: 'escalated', enteredAt: new Date().toISOString(), attemptNumber: maxAttempts, detail: escalatedReason });
 
-    // Best-effort escalation event — must not abort the sweep
-    if (opts.sessionId) {
-      try {
-        await appendSessionEvent({
-          sessionId: opts.sessionId,
-          type: 'governance.job.escalated',
-          source: 'governance',
-          tenantId: job.tenantId ?? undefined,
-          projectId: job.projectId ?? undefined,
-          payload: {
-            jobId: job.id, jobType: job.jobType,
-            escalatedReason, maxAttempts,
-            fixApplied, fixSucceeded, verificationPassed,
-          },
-        });
-      } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
-    }
+    // Operator-visible escalation (WeChat / Web / operator SSE) — best-effort.
+    const { emitGovernanceOperatorNotify } = await import('./governance-notify.js');
+    await emitGovernanceOperatorNotify({
+      sessionId: opts.sessionId,
+      jobType: job.jobType,
+      jobId: job.id,
+      kind: 'escalation',
+      severity: 'warning',
+      title: `GA 升级：${job.jobType} 需要人工处理`,
+      detail: escalatedReason,
+      extra: {
+        maxAttempts,
+        fixApplied,
+        fixSucceeded,
+        verificationPassed,
+        escalatedReason,
+      },
+    });
   }
 
   // ── Step 5: Update state ────────────────────────────

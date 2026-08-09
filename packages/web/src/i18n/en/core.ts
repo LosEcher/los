@@ -33,6 +33,7 @@ export const enCore = {
   'nav.services': 'Services',
   'nav.logs': 'Logs',
   'nav.dlq': 'DLQ',
+  'nav.governance': 'Governance',
   'nav.diagnostics': 'Diagnostics',
   'nav.fileSync': 'File sync',
 

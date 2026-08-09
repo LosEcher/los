@@ -37,6 +37,7 @@ export const zhCore: CoreKeys = {
   'nav.services': '服务',
   'nav.logs': '日志',
   'nav.dlq': 'DLQ',
+  'nav.governance': '治理',
   'nav.diagnostics': '诊断',
   'nav.fileSync': '文件同步',
 

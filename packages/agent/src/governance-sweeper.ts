@@ -227,6 +227,28 @@ export async function runGovernanceSweep(
     });
   } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
+  // Operator digest when the sweep produced todos or errors (avoid no-op spam).
+  if (!dryRun && (findingsCreated > 0 || errors.length > 0)) {
+    const { emitGovernanceOperatorNotify } = await import('./governance-notify.js');
+    await emitGovernanceOperatorNotify({
+      sessionId: sweepSessionId,
+      jobType: 'sweep',
+      kind: 'sweep_digest',
+      severity: errors.length > 0 ? 'warning' : 'info',
+      title: `治理扫尾：${results.length} job，${findingsCreated} 条 todo，${errors.length} 错误`,
+      detail: errors.length > 0
+        ? errors.slice(0, 3).join('; ')
+        : `jobsRun=${results.length}; findingsCreated=${findingsCreated}`,
+      findingCount: findingsCreated,
+      extra: {
+        jobsRun: results.length,
+        jobsSkipped: dueJobs.length - results.length,
+        errorCount: errors.length,
+        hasDrift: Boolean(driftReport),
+      },
+    });
+  }
+
   return {
     dryRun, jobsRun: results.length, jobsSkipped: dueJobs.length - results.length, findingsCreated, errors, results,
     ...(driftReport ? { drift: driftReport } : {}),

@@ -23,6 +23,7 @@ const sharedProcessTestFiles = [
   'src/routes/providers/provider-model-sync-routes.test.ts',
   'src/routes/tools/mcp-routes.test.ts',
   'src/routes/tools/skill-routes.test.ts',
+  'src/routes/infrastructure/governance-routes.test.ts',
   'src/provider-routes.test.ts',
   'src/run-evals-pairwise-routes.test.ts',
   'src/rate-limit.test.ts',

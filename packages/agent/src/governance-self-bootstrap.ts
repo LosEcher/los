@@ -165,7 +165,7 @@ export async function runSelfBootstrapAudit(
     log.warn(`self-bootstrap todo-outcome reconcile failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  return {
+  const result = {
     checkedAt: now.toISOString(),
     staleDays,
     reviewedWithinDays,
@@ -174,4 +174,27 @@ export async function runSelfBootstrapAudit(
     findingCount: findings.length,
     findings,
   };
+
+  // Notify operator when bootstrap finds real drift (skip dry-run + empty).
+  if (!dryRun && findings.length > 0) {
+    const high = findings.filter(f => f.severity === 'high' || f.severity === 'warn');
+    if (high.length > 0) {
+      const { emitGovernanceOperatorNotify } = await import('./governance-notify.js');
+      const top = high.slice(0, 3).map(f => `[${f.dimension}] ${f.detail}`).join('; ');
+      await emitGovernanceOperatorNotify({
+        jobType: job.jobType,
+        jobId: job.id,
+        kind: 'bootstrap_finding',
+        severity: high.some(f => f.severity === 'high') ? 'warning' : 'info',
+        title: `自举发现 ${findings.length} 项（${high.length} 需关注）`,
+        detail: top,
+        findingCount: findings.length,
+        extra: {
+          dimensions: [...new Set(findings.map(f => f.dimension))],
+        },
+      });
+    }
+  }
+
+  return result;
 }

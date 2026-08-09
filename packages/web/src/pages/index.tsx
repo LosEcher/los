@@ -5,6 +5,7 @@ export { ProvidersPage } from './providers-page.js';
 export { LogsPage } from './logs-page.js';
 export { SettingsPage } from './settings-page.js';
 export { DeadLetterPage } from './dead-letter-page.js';
+export { GovernancePage } from './governance-page.js';
 export { DiagnosticsPage } from './diagnostics-page.js';
 export { FileSyncPage } from './file-sync-page.js';
 export { RunSpecsPage } from './run-specs-page.js';
