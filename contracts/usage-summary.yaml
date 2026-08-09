@@ -1,0 +1,84 @@
+contract: los.usage-summary
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  L1 runtime usage cube for los-owned model calls. Aggregates session_events
+  model.response token/cost evidence and provider_call_telemetry latency/fill.
+  Does not include external CLI fleets (Claude Code / Codex / ccusage / ccglass).
+type: object
+routes:
+  - method: GET
+    path: /usage/summary
+    purpose: Return runtime usage totals and breakdowns for a time window.
+    query:
+      from: optional ISO timestamp inclusive lower bound; default now-7d
+      to: optional ISO timestamp exclusive upper bound; default now
+      provider: optional exact provider filter
+      model: optional exact model filter
+    response: UsageSummary
+schemas:
+  UsageSummary:
+    required: [evidenceClass, from, to, totals, byProviderModel, byDay, callTelemetry]
+    evidenceClass:
+      enum: [los_runtime]
+    totals:
+      fields:
+        - modelResponseCount
+        - sessionCount
+        - promptTokens
+        - completionTokens
+        - cacheHitTokens
+        - cacheMissTokens
+        - totalTokens
+        - estimatedCostUsd
+        - cacheSavingsUsd
+        - cacheHitRate
+    byProviderModel:
+      itemFields:
+        - provider
+        - model
+        - modelResponseCount
+        - sessionCount
+        - promptTokens
+        - completionTokens
+        - cacheHitTokens
+        - cacheMissTokens
+        - estimatedCostUsd
+        - cacheSavingsUsd
+    byDay:
+      itemFields:
+        - day
+        - modelResponseCount
+        - sessionCount
+        - promptTokens
+        - completionTokens
+        - cacheHitTokens
+        - estimatedCostUsd
+    callTelemetry:
+      itemFields:
+        - provider
+        - model
+        - callCount
+        - errorCount
+        - avgDurationMs
+        - withUsageCount
+        - usageFillRate
+safety:
+  - evidenceClass is always los_runtime for this contract version.
+  - External CLI history (ccusage/ccglass/T3) must use a separate evidence class.
+  - Aggregates contain no prompts, tool args, credentials, or raw transcripts.
+  - Window is capped at 90 days.
+nonGoals:
+  - Wire-level request inspection (L2 glass).
+  - Importing Claude Code / Codex local JSONL fleets (L3).
+  - Billing-grade invoice reconciliation with provider dashboards.
+  - Per-agent-identity breakdown (planned P1 when identity is written on events).
+references:
+  - docs/operations/2026-08-09-usage-hub-design.md
+  - docs/adr/0019-external-summary-ingestion-contract.md
+  - contracts/daily-agent-quality.yaml
+verification:
+  - ./tools/check-contracts.sh
+  - packages/agent usage-summary tests
+  - packages/gateway usage-routes tests

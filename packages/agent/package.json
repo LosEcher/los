@@ -73,7 +73,8 @@
     ,"./execution-experiments": "./src/execution-experiments.ts",
     "./work-items": "./src/work-items/index.ts",
     "./scheduled-work": "./src/scheduled-work/index.ts",
-    "./daily-agent-quality": "./src/daily-agent-quality/index.ts"
+    "./daily-agent-quality": "./src/daily-agent-quality/index.ts",
+    "./usage-summary": "./src/usage-summary.ts"
   },
   "scripts": {
     "build": "tsc",
