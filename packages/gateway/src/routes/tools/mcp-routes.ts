@@ -20,11 +20,16 @@ import {
 } from '@los/agent/mcp-distribution';
 import type { MCPAuthConfig, MCPToolPolicy } from '@los/agent/mcp-distribution-policy';
 import {
+  resolveMCPCredentialRef,
+  type MCPResolvedCredential,
+  type ResolveMCPCredentialOptions,
+} from '@los/agent/mcp-credential-resolver';
+import {
   projectCanToolCapability,
   summarizeCanToolCapabilities,
   type MCPAdapterConfig,
 } from '@los/agent/cantool-capability-adapter';
-import { MCPClient } from '@los/agent';
+import { MCPClient, registryRecordToConfig } from '@los/agent';
 import { getLogger } from '@los/infra/logger';
 
 export type MCPRouteDependencies = {
@@ -43,6 +48,7 @@ export type MCPRouteDependencies = {
   upsertMCPServer: typeof upsertMCPServer;
   MCPClient: typeof MCPClient;
   ensureMCPServerStore: typeof ensureMCPServerStore;
+  resolveMCPCredentialRef: typeof resolveMCPCredentialRef;
 };
 
 const defaultDependencies: MCPRouteDependencies = {
@@ -61,6 +67,7 @@ const defaultDependencies: MCPRouteDependencies = {
   upsertMCPServer,
   MCPClient,
   ensureMCPServerStore,
+  resolveMCPCredentialRef,
 };
 
 const log = getLogger('gateway');
@@ -195,7 +202,33 @@ async function verifyRegisteredServer(req: any, reply: any, deps: MCPRouteDepend
     return reply.status(400).send({ ok: false, serverId: id, error: unsupported });
   }
 
-  const client = new deps.MCPClient({ command: server.command!, args: server.args, env: server.env });
+  const resolved = await deps.resolveMCPCredentialRef(server.authConfig, {
+    serverId: id,
+    transport: server.transport,
+  } satisfies ResolveMCPCredentialOptions);
+  if (!resolved.ok) {
+    await deps.updateMCPServerStatus(id, { status: 'error', lastError: resolved.reason }, query.tenantId, query.projectId);
+    return reply.status(400).send({ ok: false, serverId: id, error: resolved.reason });
+  }
+
+  const config = registryRecordToConfig({
+    id: server.id,
+    command: server.command,
+    args: server.args,
+    url: server.url,
+    transport: server.transport,
+    headers: mergeRecords(server.headers, resolved.headers),
+    env: mergeRecords(server.env, resolved.env),
+    toolPolicy: server.toolPolicy,
+    adapterConfig: server.adapterConfig,
+  });
+  if (!config) {
+    const error = 'MCP server connection config is incomplete';
+    await deps.updateMCPServerStatus(id, { status: 'error', lastError: error }, query.tenantId, query.projectId);
+    return reply.status(400).send({ ok: false, serverId: id, error });
+  }
+
+  const client = new deps.MCPClient(config);
   try {
     await client.connect();
     const tools = client.getTools();
@@ -231,6 +264,7 @@ async function verifyRegisteredServer(req: any, reply: any, deps: MCPRouteDepend
       ok: true,
       serverId: id,
       toolCount: tools.length,
+      credentialBackend: resolved.backend === 'none' ? undefined : resolved.backend,
       adapterEvidence: {
         serverName: identity.name,
         serverVersion: identity.version,
@@ -283,11 +317,22 @@ function toPublicMCPInput(input: object): Record<string, unknown> {
 }
 
 function verificationBlocker(server: MCPServerRecord): string | undefined {
-  if (server.authConfig.mode !== 'none') return `MCP auth mode ${server.authConfig.mode} has no credential resolver`;
+  // oauth remains fail-closed; credential_ref is resolved below (may still 400).
+  if (server.authConfig.mode === 'oauth') return 'unsupported auth mode oauth';
   if (server.transport === 'stdio' && !server.command) return 'stdio command is missing';
   if (server.transport !== 'stdio' && !server.url) return 'remote transport url is missing';
   return undefined;
 }
+
+function mergeRecords(
+  base: Record<string, string> | undefined,
+  overlay: Record<string, string>,
+): Record<string, string> {
+  return { ...(base ?? {}), ...overlay };
+}
+
+// Keep type imported for future DI of resolver options without widening public surface.
+export type { MCPResolvedCredential };
 
 function normalizeTransport(value: unknown): MCPTransport | undefined {
   return value === 'stdio' || value === 'sse' || value === 'streamable-http' ? value : undefined;

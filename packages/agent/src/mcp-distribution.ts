@@ -7,6 +7,7 @@ import {
   type UpsertMCPServerInput,
 } from './mcp-servers.js';
 import {
+  mcpCredentialRefShapeError,
   mcpDistributionVersionHash,
   normalizeMCPAuthConfig,
   normalizeMCPToolPolicy,
@@ -76,7 +77,12 @@ export function inspectMCPServer(input: MCPInspectInput): MCPInspection {
     envKeys: [],
   });
   const blockers: string[] = [];
-  if (authConfig.mode !== 'none') blockers.push(`auth mode ${authConfig.mode} has no credential resolver`);
+  if (authConfig.mode === 'oauth') {
+    blockers.push('unsupported auth mode oauth');
+  } else if (authConfig.mode === 'credential_ref') {
+    const shapeError = mcpCredentialRefShapeError(authConfig.credentialRef);
+    if (shapeError) blockers.push(shapeError);
+  }
   if (adapterConfig.kind === 'cantool' && normalized.transport !== 'stdio') {
     blockers.push('CanTool adapter requires stdio transport');
   }
