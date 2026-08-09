@@ -7,14 +7,18 @@ import {
   claimDueScheduledWorkItems,
   claimQueuedScheduledWorkRuns,
   createScheduledWorkItem,
+  heartbeatScheduledWorkRun,
   loadScheduledWorkItem,
+  loadScheduledWorkItemRun,
   _deriveScheduledFeedAnalysisDispatch,
   previewScheduledOccurrences,
   recordScheduledRunOutcome,
   recoverExpiredScheduledWorkRuns,
   recoverOpenScheduledWorkCircuits,
   shouldSkipLateRun,
+  transitionScheduledWorkRun,
 } from './scheduled-work/index.js';
+import { createTaskRun, ensureTaskRunStore } from './task-runs.js';
 
 test('scheduled trigger preview handles DST gaps and overlaps deterministically', () => {
   const spring = previewScheduledOccurrences({
@@ -62,6 +66,147 @@ test('due schedule claim is unique and an expired lease consumes one retry attem
     assert.equal(recovery.recovered.length, 1);
     assert.equal(recovery.recovered[0]?.attemptCount, 2);
     assert.equal(recovery.recovered[0]?.claimOwner, 'scheduler-b');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('expired lease recovery skips runs with an active schedule-exec task', async () => {
+  // Regression for 2026-08-09: 60s lease expiry reclaimed a still-running
+  // scheduled_execution, second execute hit schedule-exec-${run.id} dedupe and
+  // marked the run failed while the first task succeeded.
+  await ensureTaskRunStore();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-dedupe-skip-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    catchUpPolicy: 'run_once', maxAttempts: 3, now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  let taskId: string | undefined;
+  try {
+    const [run] = await claimDueScheduledWorkItems({
+      ownerId: 'scheduler-a', now: new Date('2026-07-20T00:02:00.000Z'), leaseMs: 500,
+    });
+    assert.ok(run);
+    await transitionScheduledWorkRun(run!.id, 'running', {
+      ownerId: 'scheduler-a',
+      leaseExpiresAt: new Date('2026-07-20T00:02:00.500Z'),
+    });
+    taskId = `task-schedule-exec-${Date.now()}`;
+    await createTaskRun({
+      id: taskId,
+      sessionId: `session-${taskId}`,
+      dedupeKey: `schedule-exec-${run!.id}`,
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      promptPreview: 'active schedule-exec fixture',
+      status: 'running',
+    });
+
+    const recovery = await recoverExpiredScheduledWorkRuns({
+      ownerId: 'scheduler-b', now: new Date('2026-07-20T00:02:05.000Z'), leaseMs: 1_000,
+    });
+    assert.equal(recovery.recovered.length, 0, 'must not reclaim while schedule-exec task is active');
+    assert.equal(recovery.exhausted.length, 0);
+    const still = await loadScheduledWorkItemRun(run!.id);
+    assert.equal(still?.status, 'running');
+    assert.equal(still?.claimOwner, 'scheduler-a');
+    assert.equal(still?.attemptCount, 1);
+  } finally {
+    if (taskId) await getDb().query('DELETE FROM task_runs WHERE id=$1', [taskId]);
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('expired lease recovery finalizes runs whose schedule-exec task already succeeded', async () => {
+  await ensureTaskRunStore();
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-finalize-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    catchUpPolicy: 'run_once', maxAttempts: 3, now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  let taskId: string | undefined;
+  try {
+    const [run] = await claimDueScheduledWorkItems({
+      ownerId: 'scheduler-a', now: new Date('2026-07-20T00:02:00.000Z'), leaseMs: 500,
+    });
+    assert.ok(run);
+    await transitionScheduledWorkRun(run!.id, 'running', {
+      ownerId: 'scheduler-a',
+      leaseExpiresAt: new Date('2026-07-20T00:02:00.500Z'),
+    });
+    taskId = `task-schedule-done-${Date.now()}`;
+    await createTaskRun({
+      id: taskId,
+      sessionId: `session-${taskId}`,
+      dedupeKey: `schedule-exec-${run!.id}`,
+      workspaceRoot: process.cwd(),
+      toolMode: 'read-only',
+      promptPreview: 'terminal schedule-exec fixture',
+      status: 'succeeded',
+    });
+
+    const recovery = await recoverExpiredScheduledWorkRuns({
+      ownerId: 'scheduler-b', now: new Date('2026-07-20T00:02:05.000Z'), leaseMs: 1_000,
+    });
+    assert.equal(recovery.recovered.length, 0, 'must not re-execute after agent already succeeded');
+    const sealed = await loadScheduledWorkItemRun(run!.id);
+    assert.equal(sealed?.status, 'succeeded');
+    assert.equal(sealed?.taskRunId, taskId);
+  } finally {
+    if (taskId) await getDb().query('DELETE FROM task_runs WHERE id=$1', [taskId]);
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('execution lease heartbeat renews a running scheduled work run', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-heartbeat-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'morning_inbox_digest', mode: 'audit',
+      goalTemplate: 'Summarize Inbox', editableSurfaces: [], requiredChecks: [], toolMode: 'read-only',
+    },
+    catchUpPolicy: 'run_once', maxAttempts: 2, now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  try {
+    const [run] = await claimDueScheduledWorkItems({
+      ownerId: 'scheduler-a', now: new Date('2026-07-20T00:02:00.000Z'), leaseMs: 1_000,
+    });
+    assert.ok(run);
+    const started = new Date('2026-07-20T00:02:00.000Z');
+    await transitionScheduledWorkRun(run!.id, 'running', {
+      ownerId: 'scheduler-a',
+      leaseExpiresAt: new Date(started.getTime() + 1_000),
+    });
+    const renewedAt = new Date('2026-07-20T00:02:30.000Z');
+    const heartbeated = await heartbeatScheduledWorkRun({
+      runId: run!.id,
+      ownerId: 'scheduler-a',
+      now: renewedAt,
+      leaseMs: 30 * 60_000,
+    });
+    assert.ok(heartbeated?.leaseExpiresAt);
+    assert.equal(
+      new Date(heartbeated!.leaseExpiresAt!).getTime(),
+      renewedAt.getTime() + 30 * 60_000,
+    );
+
+    // Wrong owner must not renew.
+    const stolen = await heartbeatScheduledWorkRun({
+      runId: run!.id,
+      ownerId: 'scheduler-b',
+      now: renewedAt,
+      leaseMs: 30 * 60_000,
+    });
+    assert.equal(stolen, null);
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }

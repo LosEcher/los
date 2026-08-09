@@ -18,17 +18,25 @@ import { listServiceInstances } from '../service-instances.js';
 import { createTodo } from '../todos.js';
 import { listInboxEntries } from '../work-items/projection.js';
 import {
+  startScheduledWorkExecutionHeartbeat,
+  waitForAdoptedScheduleTask,
+} from './execution-lease.js';
+import { defaultScheduledWorkExecutionLeaseMs } from './lease.js';
+import { recoverExpiredScheduledWorkRuns } from './recovery.js';
+import {
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   claimDueScheduledWorkItems, claimQueuedScheduledWorkRuns,
   createCatchUpScheduledWorkRun, createManualScheduledWorkRun,
-  findMissedScheduledRun, loadScheduledWorkItem, loadScheduledWorkItemRun,
-  recoverExpiredScheduledWorkRuns, recoverOpenScheduledWorkCircuits,
+  findMissedScheduledRun,
+  loadScheduledWorkItem, loadScheduledWorkItemRun,
+  recoverOpenScheduledWorkCircuits,
   recordScheduledRunOutcome,
   transitionScheduledWorkRun,
 } from './store.js';
 import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome } from './types.js';
 
 const log = getLogger('scheduled-work');
+const TERMINAL_SCHEDULED_RUN = new Set(['succeeded', 'no_op', 'failed', 'cancelled', 'skipped']);
 
 async function resolveWorkspaceRoot(projectId: string): Promise<string> {
   try {
@@ -159,21 +167,38 @@ export async function executeScheduledWorkRun(
     }
     return 'awaiting_approval';
   }
+  // Long agent work needs an execution lease well beyond the short claim lease,
+  // plus heartbeats so the tick reaper does not reclaim mid-flight.
+  const executionLeaseMs = defaultScheduledWorkExecutionLeaseMs();
   await transitionScheduledWorkRun(run.id, 'running', {
+    ownerId: run.claimOwner ?? undefined,
+    leaseExpiresAt: new Date(Date.now() + executionLeaseMs),
+  });
+  const stopHeartbeat = startScheduledWorkExecutionHeartbeat({
+    runId: run.id,
     ownerId: run.claimOwner,
-    leaseExpiresAt: run.leaseExpiresAt ? new Date(run.leaseExpiresAt) : undefined,
+    leaseMs: executionLeaseMs,
   });
   try {
     const outcome = await executeTemplate(schedule, run);
-    const completed = await transitionScheduledWorkRun(run.id, outcome.status, {
-      // Merge with the existing result summary so approval markers
-      // (approvedBy) survive execution (2026-08-07 regression: outcome
-      // summary overwrote the approval record).
-      resultSummary: { ...(run.resultSummary ?? {}), ...outcome.summary },
-      workItemId: outcome.workItemId,
-      runSpecId: outcome.runSpecId,
-      taskRunId: outcome.taskRunId,
-    });
+    let completed: ScheduledWorkItemRun;
+    try {
+      completed = await transitionScheduledWorkRun(run.id, outcome.status, {
+        // Merge with the existing result summary so approval markers
+        // (approvedBy) survive execution (2026-08-07 regression: outcome
+        // summary overwrote the approval record).
+        resultSummary: { ...(run.resultSummary ?? {}), ...outcome.summary },
+        workItemId: outcome.workItemId,
+        runSpecId: outcome.runSpecId,
+        taskRunId: outcome.taskRunId,
+      });
+    } catch {
+      // Dual-owner race: original + adopted reclaim both try to terminalize.
+      const raced = await loadScheduledWorkItemRun(run.id);
+      if (raced && (raced.status === 'succeeded' || raced.status === 'no_op')) return raced.status;
+      if (raced && TERMINAL_SCHEDULED_RUN.has(raced.status)) return 'failed';
+      throw new Error('scheduled work run changed concurrently while completing');
+    }
     const updated = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: outcome.status });
     if (outcome.status === 'succeeded' && !outcome.workItemId) {
       const workItemId = await createScheduleWorkItem(updated.schedule, completed, 'succeeded', outcome.summary, outcome.title);
@@ -181,8 +206,21 @@ export async function executeScheduledWorkRun(
     }
     return outcome.status;
   } catch (error) {
+    // Another owner (or a racing original) may already have terminalized the run.
+    // Do not overwrite a real success with a false failure from a late reclaim.
+    const current = await loadScheduledWorkItemRun(run.id);
+    if (current && TERMINAL_SCHEDULED_RUN.has(current.status)) {
+      if (current.status === 'succeeded' || current.status === 'no_op') return current.status;
+      return 'failed';
+    }
     const message = error instanceof Error ? error.message : String(error);
-    await transitionScheduledWorkRun(run.id, 'failed', { error: message });
+    try {
+      await transitionScheduledWorkRun(run.id, 'failed', { error: message });
+    } catch {
+      const raced = await loadScheduledWorkItemRun(run.id);
+      if (raced && (raced.status === 'succeeded' || raced.status === 'no_op')) return raced.status;
+      return 'failed';
+    }
     const updated = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
     if (updated.circuitOpened) {
       const workItemId = await createScheduleWorkItem(updated.schedule, run, 'failed', {
@@ -195,6 +233,8 @@ export async function executeScheduledWorkRun(
     }
     log.warn(`Scheduled work failed for ${schedule.id}: ${message}`);
     return 'failed';
+  } finally {
+    stopHeartbeat();
   }
 }
 
@@ -331,6 +371,32 @@ async function executeTemplate(
         runSpecId: result.taskRun?.runSpecId,
         taskRunId: result.taskRun?.id,
       };
+    }
+    // Same-run dedupe key means the original attempt is still the owner of the
+    // agent work. Adopt its terminal outcome instead of failing the schedule
+    // run with "Scheduled execution deduplicated" while the first task succeeds.
+    if (result.status === 'deduplicated') {
+      const adopted = await waitForAdoptedScheduleTask(
+        result.taskRun,
+        defaultScheduledWorkExecutionLeaseMs(),
+      );
+      if (adopted.status === 'succeeded') {
+        return {
+          status: 'succeeded',
+          title: `${schedule.title}: execution completed (adopted)`,
+          summary: {
+            adopted: true,
+            sessionId: result.sessionId,
+            taskRunId: adopted.id,
+            runSpecId: adopted.runSpecId,
+          },
+          runSpecId: adopted.runSpecId,
+          taskRunId: adopted.id,
+        };
+      }
+      throw new Error(
+        `Scheduled execution adopted task ${adopted.status}${adopted.id ? ` (${adopted.id})` : ''}`,
+      );
     }
     // blocked / cancelled / failed → surface as run failure for circuit breaker
     const reason = 'reason' in result ? (result as { reason?: string }).reason : result.status;
