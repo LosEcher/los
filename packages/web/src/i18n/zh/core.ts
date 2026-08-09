@@ -6,6 +6,10 @@ export const zhCore: CoreKeys = {
   // ── Brand / shell ────────────────────────────────────
   'nav.brandSubtitle': '日常 Agent 工作台',
   'nav.primaryAria': '主导航',
+  'nav.mobileTabsAria': '日常标签',
+  'nav.more': '更多',
+  'nav.moreAria': '更多页面',
+  'nav.closeMore': '关闭更多菜单',
   'nav.workspace': '工作区',
   'nav.section.daily': '日常',
   'nav.section.library': '资料库',

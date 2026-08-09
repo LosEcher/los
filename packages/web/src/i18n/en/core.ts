@@ -2,6 +2,10 @@ export const enCore = {
   // ── Brand / shell ────────────────────────────────────
   'nav.brandSubtitle': 'daily agent workspace',
   'nav.primaryAria': 'Primary',
+  'nav.mobileTabsAria': 'Daily tabs',
+  'nav.more': 'More',
+  'nav.moreAria': 'More pages',
+  'nav.closeMore': 'Close more menu',
   'nav.workspace': 'Workspace',
   'nav.section.daily': 'Daily',
   'nav.section.library': 'Library',

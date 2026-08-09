@@ -1,41 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity,
-  Archive,
-  BarChart3,
   Boxes,
-  Brain,
-  BriefcaseBusiness,
-  Bug,
-  CircleDollarSign,
   ChevronDown,
   ChevronRight,
-  ClipboardList,
-  Inbox,
-  ListChecks,
-  MemoryStick,
-  MessageSquare,
-  Network,
-  Play,
-  ScrollText,
-  CalendarClock,
-  Server,
-  Scale,
-  Settings,
-  Shield,
-  Skull,
-  TerminalSquare,
-  Zap,
-  Wrench,
   Moon,
   Sun,
   Monitor,
+  Play,
 } from 'lucide-react';
 import {
   getJson,
   postJson,
   type Health,
+  type InboxResponse,
   type SessionSummary,
   type TodoItem,
   type MemoryStats,
@@ -77,115 +55,31 @@ import { AuthBanner } from './auth-banner';
 import { LoginPage, isAuthenticated, logout } from './pages/login-page';
 import { OnboardingPage } from './pages/onboarding-page';
 import { getAuthToken } from './api';
+import { NAV, buildHash, parseHash, type NavItem, type PageId } from './nav-config';
+import { MobileTabBar, MoreSheet } from './mobile-nav';
 
-type PageId =
-  | 'inbox'
-  | 'work'
-  | 'schedules'
-  | 'chat'
-  | 'sessions'
-  | 'todos'
-  | 'tasks'
-  | 'memory'
-  | 'providers'
-  | 'skills'
-  | 'mcp'
-  | 'services'
-  | 'artifacts'
-  | 'rules'
-  | 'evals'
-  | 'usage'
-  | 'pairwise'
-  | 'nodes'
-  | 'logs'
-  | 'dead-letter'
-  | 'governance'
-  | 'diagnostics'
-  | 'file-sync'
-  | 'run-specs'
-  | 'communication-accounts'
-  | 'setup'
-  | 'settings'
-  | 'onboarding';
-
-type NavAudience = 'workspace' | 'configure' | 'operations';
-
-type NavItem = {
-  id: PageId;
-  labelKey: string;
-  icon: typeof MessageSquare;
-  status: StatusState;
-  badge?: number;
-  sectionKey?: string;
-  audience: NavAudience;
-  /** When false, hide StatusPill — daily decision pages stay quiet. Default true. */
-  showStatus?: boolean;
-};
-
-/**
- * W4 navigation contract:
- * - Daily (top, no pill): Inbox → Work → Schedules → Chat
- * - Library: Sessions / Memory / Artifacts (history & evidence)
- * - Advanced: Todos (legacy ledger; Work is the product path)
- * - Configure / Ops: setup and troubleshooting (ops collapsed by default)
- */
-const NAV: NavItem[] = [
-  // ── Daily workflow (decision path) ──────────────────────
-  { id: 'inbox', labelKey: 'nav.inbox', icon: Inbox, status: 'live', audience: 'workspace', showStatus: false },
-  { id: 'work', labelKey: 'nav.work', icon: BriefcaseBusiness, status: 'live', audience: 'workspace', showStatus: false },
-  { id: 'schedules', labelKey: 'nav.schedules', icon: CalendarClock, status: 'live', audience: 'workspace', showStatus: false },
-  { id: 'chat', labelKey: 'nav.chat', icon: MessageSquare, status: 'live', audience: 'workspace', showStatus: false },
-
-  // ── Library (history / knowledge) ───────────────────────
-  { id: 'sessions', labelKey: 'nav.sessions', icon: ListChecks, status: 'partial', audience: 'workspace', sectionKey: 'nav.section.library' },
-  { id: 'memory', labelKey: 'nav.memory', icon: MemoryStick, status: 'partial', audience: 'workspace' },
-  { id: 'artifacts', labelKey: 'nav.artifacts', icon: Archive, status: 'partial', audience: 'workspace' },
-
-  // ── Advanced (compat / non-default) ─────────────────────
-  { id: 'todos', labelKey: 'nav.todos', icon: ClipboardList, status: 'partial', audience: 'workspace', sectionKey: 'nav.section.advanced' },
-
-  // ── Communication ─────────────────────────────────────
-  { id: 'communication-accounts', labelKey: 'nav.communicationAccounts', icon: MessageSquare, status: 'partial', audience: 'workspace', sectionKey: 'nav.section.communication' },
-
-  // ── Configure (setup, rarely changed) ────────────────────
-  { id: 'setup', labelKey: 'nav.setup', icon: Wrench, status: 'live', audience: 'configure', sectionKey: 'nav.section.configure' },
-  { id: 'providers', labelKey: 'nav.providers', icon: Brain, status: 'partial', audience: 'configure' },
-  { id: 'skills', labelKey: 'nav.skills', icon: Zap, status: 'partial', audience: 'configure' },
-  { id: 'rules', labelKey: 'nav.rules', icon: Shield, status: 'partial', audience: 'configure' },
-  { id: 'mcp', labelKey: 'nav.mcp', icon: Server, status: 'partial', audience: 'configure' },
-  { id: 'settings', labelKey: 'nav.settings', icon: Settings, status: 'partial', audience: 'configure' },
-
-  // ── Operations (troubleshoot / evidence dump) ───────────
-  { id: 'tasks', labelKey: 'nav.tasks', icon: Activity, status: 'partial', audience: 'operations', sectionKey: 'nav.section.operations' },
-  { id: 'run-specs', labelKey: 'nav.runSpecs', icon: ScrollText, status: 'partial', audience: 'operations' },
-  { id: 'evals', labelKey: 'nav.evals', icon: BarChart3, status: 'partial', audience: 'operations' },
-  { id: 'usage', labelKey: 'nav.usage', icon: CircleDollarSign, status: 'live', audience: 'operations' },
-  { id: 'pairwise', labelKey: 'nav.pairwise', icon: Scale, status: 'partial', audience: 'operations' },
-  { id: 'nodes', labelKey: 'nav.nodes', icon: Network, status: 'partial', audience: 'operations' },
-  { id: 'services', labelKey: 'nav.services', icon: Activity, status: 'partial', audience: 'operations' },
-  { id: 'logs', labelKey: 'nav.logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
-  { id: 'file-sync', labelKey: 'nav.fileSync', icon: Archive, status: 'partial', audience: 'operations' },
-  { id: 'dead-letter', labelKey: 'nav.dlq', icon: Skull, status: 'reserved', audience: 'operations' },
-  { id: 'governance', labelKey: 'nav.governance', icon: Shield, status: 'live', audience: 'operations' },
-  { id: 'diagnostics', labelKey: 'nav.diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
-];
-
-function pageFromHash(): PageId {
-  const raw = window.location.hash.replace(/^#/, '');
-  return NAV.find(n => n.id === raw)?.id ?? 'inbox';
+function initialRoute() {
+  const route = parseHash();
+  // `#inbox?id=` is a deep-link alias for opening Work detail.
+  if (route.page === 'inbox' && route.workItemId) {
+    return { page: 'work' as const, workItemId: route.workItemId };
+  }
+  return route;
 }
 
 export function App() {
   const { t, lang, setLang } = useI18n();
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
-  const [page, setPage] = useState<PageId>(pageFromHash);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const boot = initialRoute();
+  const [page, setPage] = useState<PageId>(boot.page);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(boot.sessionId ?? null);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
-  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(boot.workItemId ?? null);
   const [selectedRunSpecId, setSelectedRunSpecId] = useState<string | null>(null);
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(() => isAuthenticated());
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Operations section collapsible — default collapsed, persisted in localStorage
   const [opsExpanded, setOpsExpanded] = useState(() => {
@@ -198,7 +92,24 @@ export function App() {
   };
 
   useEffect(() => {
-    const onHashChange = () => setPage(pageFromHash());
+    const applyRoute = () => {
+      const route = parseHash();
+      if (route.page === 'inbox' && route.workItemId) {
+        setPage('work');
+        setSelectedWorkItemId(route.workItemId);
+        const next = buildHash({ page: 'work', workItemId: route.workItemId });
+        if (window.location.hash.replace(/^#/, '') !== next) {
+          window.location.hash = next;
+        }
+        return;
+      }
+      setPage(route.page);
+      if (route.workItemId) setSelectedWorkItemId(route.workItemId);
+      if (route.sessionId) setSelectedSessionId(route.sessionId);
+    };
+    // Normalize boot deep-links once (e.g. #inbox?id= → #work/<id>).
+    applyRoute();
+    const onHashChange = () => applyRoute();
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
@@ -212,9 +123,19 @@ export function App() {
     }
   }, [page]);
 
-  const navigate = (id: PageId) => {
+  const navigate = (id: PageId, opts?: { workItemId?: string | null; sessionId?: string | null }) => {
     setPage(id);
-    window.location.hash = id;
+    // Bare Work/Chat tab clears deep-link selection so phone returns to list/empty chat.
+    if (opts && 'workItemId' in opts) setSelectedWorkItemId(opts.workItemId ?? null);
+    else if (id === 'work' && !opts) setSelectedWorkItemId(null);
+    if (opts && 'sessionId' in opts) setSelectedSessionId(opts.sessionId ?? null);
+    else if (id === 'chat' && !opts) setSelectedSessionId(null);
+    window.location.hash = buildHash({
+      page: id,
+      workItemId: id === 'work' ? (opts?.workItemId ?? undefined) : undefined,
+      sessionId: id === 'chat' ? (opts?.sessionId ?? undefined) : undefined,
+    });
+    setMoreOpen(false);
   };
   const health = useQuery({
     queryKey: ['health'],
@@ -280,14 +201,12 @@ export function App() {
 
   const active = NAV.find(item => item.id === page) ?? NAV[0]!;
   const continueSession = (id: string) => {
-    setSelectedSessionId(id);
     setBranchFromSession(null);
-    navigate('chat');
+    navigate('chat', { sessionId: id });
   };
   const branchSession = (id: string) => {
-    setSelectedSessionId(null);
     setBranchFromSession(id);
-    navigate('chat');
+    navigate('chat', { sessionId: null });
   };
   const openTodo = (id: string) => {
     setSelectedTodoId(id);
@@ -296,23 +215,30 @@ export function App() {
   const runTodo = (todo: TodoItem) => {
     setSelectedTodoId(todo.id);
     setActiveTodoContext(todo);
-    setSelectedSessionId(todo.sessionId ?? null);
-    navigate('chat');
+    navigate('chat', { sessionId: todo.sessionId ?? null });
   };
   const openWork = (id: string) => {
-    setSelectedWorkItemId(id);
-    navigate('work');
+    navigate('work', { workItemId: id });
   };
   const openRun = (id: string) => {
     setSelectedRunSpecId(id);
     navigate('run-specs');
   };
   const startWork = (item: WorkItemProjection) => {
-    setSelectedWorkItemId(item.id);
     setActiveTodoContext(workItemAsTodo(item));
-    setSelectedSessionId(null);
-    navigate('chat');
+    navigate('chat', { workItemId: item.id, sessionId: null });
   };
+  const selectWorkItem = (id: string | null) => {
+    setSelectedWorkItemId(id);
+    window.location.hash = buildHash({ page: 'work', workItemId: id ?? undefined });
+  };
+
+  const inboxBadge = useQuery({
+    queryKey: ['inbox', 'badge'],
+    queryFn: () => getJson<InboxResponse>('/inbox?limit=100'),
+    refetchInterval: 15_000,
+    select: data => (data.results ?? []).filter(entry => entry.attentionState !== 'none' && entry.attentionState !== 'running').length,
+  });
   const queryClient = useQueryClient();
   const approvePlan = useMutation({
     mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/approve`, { reason: 'plan reviewed from inbox' }),
@@ -325,13 +251,15 @@ export function App() {
     if (!approvePlan.isPending) approvePlan.mutate(runSpecId);
   };
 
+  const activeLabelKey = page === 'onboarding' ? 'nav.onboarding' : active.labelKey;
+
   return (
     <>
       {authEnabled && !authenticated ? (
         <LoginPage onLogin={() => setAuthenticated(true)} />
       ) : (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="app-shell" data-page={page}>
+      <aside className="sidebar desktop-sidebar">
         <div className="brand-block">
           <div className="brand-mark"><Boxes size={18} /></div>
           <div>
@@ -427,8 +355,8 @@ export function App() {
         <AuthBanner />
         <header className="topbar">
           <div>
-            <div className="eyebrow">{navEyebrow(active, t)}</div>
-            <h1>{t(active.labelKey)}</h1>
+            <div className="eyebrow">{page === 'onboarding' ? t('nav.section.configure') : navEyebrow(active, t)}</div>
+            <h1>{t(activeLabelKey)}</h1>
           </div>
           <div className="topbar-metrics">
             <Metric label={t('nav.metric.health')} value={healthText(health.data?.status, t)} tone={health.data?.status === 'ok' ? 'ok' : 'warn'} />
@@ -472,7 +400,7 @@ export function App() {
         </header>
 
         {page === 'inbox' && <InboxPage onOpenWork={openWork} onOpenRun={openRun} onOpenSession={continueSession} onApprovePlan={handleApprovePlan} onStartWork={startWork} />}
-        {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={setSelectedWorkItemId} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
+        {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={selectWorkItem} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
         {page === 'schedules' && <SchedulesPage />}
         {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} branchFromSession={branchFromSession} onBranchConsumed={() => setBranchFromSession(null)} activeTodoContext={activeTodoContext} onTodoContextSet={setActiveTodoContext} onTodoContextClear={() => setActiveTodoContext(null)} />}
         {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} onBranchSession={branchSession} onSelectTodo={openTodo} />}
@@ -500,6 +428,25 @@ export function App() {
         {page === 'setup' && <SetupPage />}
         {page === 'onboarding' && <OnboardingPage onReady={() => navigate('chat')} />}
       </main>
+
+      <MobileTabBar
+        page={page}
+        onNavigate={navigate}
+        moreOpen={moreOpen}
+        onMoreClick={() => setMoreOpen(open => !open)}
+        inboxBadge={inboxBadge.data ?? 0}
+      />
+      <MoreSheet
+        open={moreOpen}
+        page={page}
+        onClose={() => setMoreOpen(false)}
+        onNavigate={navigate}
+        needsOnboarding={Boolean(needsOnboarding)}
+        sessionCount={sessionCount.data}
+        itemStatus={itemStatus}
+        opsExpanded={opsExpanded}
+        onToggleOps={toggleOps}
+      />
     </div>
       )}
     </>

@@ -39,7 +39,8 @@ Loaded first from `main.tsx` before `styles.css`.
 
 | Pattern | Classes / notes |
 |---|---|
-| App shell | `.app-shell`, `.sidebar`, `.main` — sticky nav, content flex |
+| App shell | `.app-shell`, `.sidebar` / `.desktop-sidebar`, `.workspace` — desktop sticky nav; phone uses `.mobile-tab-bar` + `.more-sheet` |
+| Phone tabs | `--mobile-tab-height`, `--touch-target` (44px); sticky composer/approvals sit above the tab bar |
 | Panel | `.panel`, `.panel-head` — card chrome for page sections |
 | Buttons | `.btn` primary, `.ghost-btn` secondary, `.tiny-btn` compact, `.btn-danger` |
 | Chat timeline | `.chat-timeline` flex column; scroll middle; sticky footer actions |
