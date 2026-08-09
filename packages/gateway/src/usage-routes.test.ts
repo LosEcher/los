@@ -66,3 +66,52 @@ test('GET /usage/summary returns 400 for invalid window', async () => {
     await app.close();
   }
 });
+
+test('GET /ops/daily-digest returns composed L1 digest', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, config);
+  registerUsageRoutes(app);
+  try {
+    const day = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const response = await app.inject({
+      method: 'GET',
+      url: `/ops/daily-digest?day=${day}&projectId=los`,
+    });
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      evidenceClass: string;
+      day: string;
+      schedule: { runTotals: { runCount: number } };
+      usage: { totals: { modelResponseCount: number } };
+      cadenceRecommendations: unknown[];
+      highlights: string[];
+    };
+    assert.equal(body.evidenceClass, 'los_runtime');
+    assert.equal(body.day, day);
+    assert.ok(Array.isArray(body.cadenceRecommendations));
+    assert.ok(Array.isArray(body.highlights));
+    assert.ok(typeof body.schedule.runTotals.runCount === 'number');
+    assert.ok(typeof body.usage.totals.modelResponseCount === 'number');
+  } finally {
+    await closeDb().catch(() => undefined);
+    await app.close();
+  }
+});
+
+test('GET /ops/daily-digest returns 400 for invalid day', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, config);
+  registerUsageRoutes(app);
+  try {
+    const response = await app.inject({ method: 'GET', url: '/ops/daily-digest?day=not-a-day' });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error, 'invalid_daily_digest_query');
+  } finally {
+    await closeDb().catch(() => undefined);
+    await app.close();
+  }
+});

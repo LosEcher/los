@@ -285,6 +285,18 @@ export const zhOps2: Ops2Keys = {
   'ops.usage.colErrors': '错误',
   'ops.usage.colAvgMs': '平均 ms',
   'ops.usage.colUsageFill': 'Usage 填充',
+  'ops.usage.digestTitle': '每日摘要（{day}）',
+  'ops.usage.digestSchedule': '定时运行',
+  'ops.usage.digestEnabled': '启用中的定时',
+  'ops.usage.digestRuns': '运行数',
+  'ops.usage.digestOk': '成功',
+  'ops.usage.digestFail': '失败',
+  'ops.usage.digestCancel': '取消',
+  'ops.usage.colSeverity': '级别',
+  'ops.usage.colAction': '动作',
+  'ops.usage.colSchedule': '定时任务',
+  'ops.usage.colCadence': '频率',
+  'ops.usage.colRationale': '理由',
 
   // ── Reserved page (reserved-page.tsx) ────────────────
   'ops.reserved.initialPolicyTitle': '初始策略',

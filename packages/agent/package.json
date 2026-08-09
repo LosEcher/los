@@ -74,7 +74,8 @@
     "./work-items": "./src/work-items/index.ts",
     "./scheduled-work": "./src/scheduled-work/index.ts",
     "./daily-agent-quality": "./src/daily-agent-quality/index.ts",
-    "./usage-summary": "./src/usage-summary.ts"
+    "./usage-summary": "./src/usage-summary.ts",
+    "./daily-digest": "./src/daily-digest.ts"
   },
   "scripts": {
     "build": "tsc",
