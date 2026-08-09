@@ -7,6 +7,7 @@ export { SettingsPage } from './settings-page.js';
 export { DeadLetterPage } from './dead-letter-page.js';
 export { GovernancePage } from './governance-page.js';
 export { DiagnosticsPage } from './diagnostics-page.js';
+export { UsagePage } from './usage-page.js';
 export { FileSyncPage } from './file-sync-page.js';
 export { RunSpecsPage } from './run-specs-page.js';
 export { ReservedPage } from './reserved-page.js';

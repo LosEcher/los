@@ -37,6 +37,7 @@ import { registerManagedWorkspaceRoutes } from './routes/orchestration/managed-w
 import { registerScheduledWorkRoutes } from './routes/orchestration/scheduled-work-routes.js';
 import { registerDiagnosticsRoutes } from './routes/infrastructure/diagnostics-routes.js';
 import { registerMetricsRoutes } from './routes/infrastructure/metrics-routes.js';
+import { registerUsageRoutes } from './routes/infrastructure/usage-routes.js';
 import { registerGovernanceRoutes } from './routes/infrastructure/governance-routes.js';
 import { registerAuthRoutes } from './routes/auth-routes.js';
 import { registerSettingsRoutes } from './routes/infrastructure/settings-routes.js';
@@ -206,6 +207,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerScheduledWorkRoutes(app);
   registerDiagnosticsRoutes(app);
   registerMetricsRoutes(app);
+  registerUsageRoutes(app);
   registerGovernanceRoutes(app);
   registerAuthRoutes(app, { config });
   registerNodeRoutes(app);

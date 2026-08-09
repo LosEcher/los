@@ -31,6 +31,7 @@ export const zhCore: CoreKeys = {
   'nav.settings': '设置',
   'nav.tasks': '任务运行',
   'nav.evals': '评测',
+  'nav.usage': '用量',
   'nav.pairwise': '对比评测',
   'nav.runSpecs': '运行规格',
   'nav.nodes': '节点',
