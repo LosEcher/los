@@ -223,6 +223,16 @@ async function listCommand(
 async function healthCommand(globalArgs: string[], argv: string[]): Promise<void> {
   const parsed = mergeParsed(parseArgs(globalArgs), parseArgs(argv));
   const json = booleanFlag(parsed, 'json');
+  const full = booleanFlag(parsed, 'full') || booleanFlag(parsed, 'runtime');
+  if (full) {
+    const value = await getJson(`${gatewayUrl(parsed)}/ops/runtime-health`, parsed);
+    if (json) {
+      console.log(JSON.stringify(value, null, 2));
+      return;
+    }
+    renderRuntimeHealth(value);
+    return;
+  }
   const value = await getJson(`${gatewayUrl(parsed)}/health`, parsed);
   if (json) {
     console.log(JSON.stringify(value));
@@ -230,7 +240,39 @@ async function healthCommand(globalArgs: string[], argv: string[]): Promise<void
   }
   const record = asRecord(value);
   console.log(`status=${String(record.status ?? 'unknown')}`);
-  console.log(`service=${String(record.service ?? 'los')}`);
+  console.log(`service=${String(record.serviceId ?? record.service ?? 'los')}`);
+  if (record.ready !== undefined) console.log(`ready=${String(record.ready)}`);
+}
+
+function renderRuntimeHealth(value: unknown): void {
+  const data = asRecord(value);
+  const services = asRecord(data.services);
+  const executors = asRecord(data.executors);
+  const schedules = asRecord(data.schedules);
+  const governance = asRecord(data.governance);
+  console.log(`runtime-health overall=${String(data.overall ?? '?')} at=${String(data.generatedAt ?? '')}`);
+  for (const b of asArray(data.blockers)) console.log(`  blocker: ${String(b)}`);
+  for (const w of asArray(data.warnings)) console.log(`  warning: ${String(w)}`);
+  console.log(
+    `  services total=${String(services.total ?? 0)} ready=${String(services.ready ?? 0)} `
+    + `draining=${String(services.draining ?? 0)} offline=${String(services.offline ?? 0)}`,
+  );
+  console.log(
+    `  executors total=${String(executors.total ?? 0)} online=${String(executors.online ?? 0)} `
+    + `candidates=${String(executors.candidates ?? 0)}`,
+  );
+  console.log(
+    `  schedules enabled=${String(schedules.enabled ?? 0)} open_circuits=${String(schedules.openCircuits ?? 0)} `
+    + `failed_24h=${String(schedules.failedRuns24h ?? 0)} expired_lease_running=${String(schedules.runningWithExpiredLease ?? 0)}`,
+  );
+  console.log(
+    `  governance active=${String(governance.active ?? 0)} paused=${String(governance.paused ?? 0)} `
+    + `circuit_open=${String(governance.circuitOpen ?? 0)} overdue=${String(governance.overdue ?? 0)}`,
+  );
+  const policy = asRecord(data.policy);
+  if (policy.controlPlane) {
+    console.log(`  policy controlPlane=${String(policy.controlPlane)} upgrade=${String(policy.upgradePath ?? '')}`);
+  }
 }
 
 async function getJson(url: string, parsed?: ParsedArgs): Promise<unknown> {
@@ -530,6 +572,10 @@ function parseJsonRecord(raw: string): JsonRecord {
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function stringValue(value: unknown): string | undefined {

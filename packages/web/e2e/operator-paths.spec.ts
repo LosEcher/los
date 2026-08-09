@@ -142,7 +142,8 @@ test('continues a session and sends a branch as a new chat', async ({ page }) =>
 
   await page.getByRole('button', { name: /session-main/ }).click();
   await page.getByRole('button', { name: 'continue' }).click();
-  await expect(page).toHaveURL(/#chat$/);
+  // Deep-link may include ?session= after continue.
+  await expect(page).toHaveURL(/#chat(\?|$)/);
   await expect(page.getByText('session-main', { exact: true }).first()).toBeVisible();
 
   await page.goto('/#sessions');
@@ -197,7 +198,8 @@ test('uses Inbox and Work for plan review and structured creation', async ({ pag
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible();
   await expect(page.getByText('Review the structured plan')).toBeVisible();
   await page.getByRole('button', { name: 'Review plan' }).click();
-  await expect(page).toHaveURL(/#work$/);
+  // Work deep-link is #work/<id> (or bare #work on list).
+  await expect(page).toHaveURL(/#work(\/|$|\?)/);
   await expect(page.getByRole('heading', { name: 'Inspect the Web-first plan' })).toBeVisible();
   await expect(page.getByText('Persist the structured contract')).toBeVisible();
 
@@ -212,6 +214,9 @@ test('uses Inbox and Work for plan review and structured creation', async ({ pag
     reason: 'scope and checks reviewed in Work',
   });
 
+  // Phone Work stack: leave the current detail before selecting another item.
+  const workBack = page.getByRole('button', { name: /back|返回/i });
+  if (await workBack.isVisible()) await workBack.click();
   await page.getByRole('button', { name: /Review completed Web changes/ }).click();
   await expect(page.getByRole('heading', { name: 'Verification and changes' })).toBeVisible();
   await expect(page.getByText('web focused tests')).toBeVisible();
@@ -228,6 +233,8 @@ test('uses Inbox and Work for plan review and structured creation', async ({ pag
     closeoutReport: { dirtyPaths: [], checks: ['web focused tests'] },
   });
 
+  // Phone: New work lives on the list toolbar, not the detail stack.
+  if (await workBack.isVisible()) await workBack.click();
   await page.getByRole('button', { name: 'New work' }).click();
   await page.getByLabel('Goal', { exact: true }).fill('Create a bounded daily workflow task');
   // Default strip: goal + permission + priority. Contract fields live under Advanced.

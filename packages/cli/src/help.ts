@@ -21,6 +21,7 @@ Usage:
   los sessions follow <session-id> [--interval-ms N] [--max-idle-ms N]
   los tasks [--gateway URL] [--json]
   los health [--gateway URL] [--json]
+  los health --full [--gateway URL] [--json]
   los mcp serve [--gateway URL]
 
 Global:
@@ -87,6 +88,11 @@ Usage:
 Digest:
   Daily Execution Digest: schedules + usage + quality + cadence recommendations.
   Default day is yesterday UTC.
+
+Health:
+  Default hits GET /health (process liveness summary).
+  --full / --runtime hits GET /ops/runtime-health: services, executors,
+  schedule failures, governance circuits. Read-only; does not claim work.
 
 Governance:
   todo-reconcile         Dry-run compare code todo seeds with the DB todo ledger

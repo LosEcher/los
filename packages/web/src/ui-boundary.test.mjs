@@ -23,6 +23,8 @@ const chatApproval = readFileSync(new URL('./chat-approval.tsx', import.meta.url
 const deadLetterPage = readFileSync(new URL('./pages/dead-letter-page.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+const navConfig = readFileSync(new URL('./nav-config.ts', import.meta.url), 'utf8');
+const mobileNav = readFileSync(new URL('./mobile-nav.tsx', import.meta.url), 'utf8');
 const setupPage = readFileSync(new URL('./pages/setup-page.tsx', import.meta.url), 'utf8');
 const skillsPage = readFileSync(new URL('./skills-page.tsx', import.meta.url), 'utf8');
 const mcpPage = readFileSync(new URL('./mcp-page.tsx', import.meta.url), 'utf8');
@@ -38,7 +40,8 @@ const dailyQualityView = readFileSync(new URL('./pages/daily-quality-view.tsx', 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
   assert.equal(EN['chat.runChoicesAria'], 'run choices');
   assert.equal(EN['chat.runEvidence'], 'Run Evidence');
-  const composer = between(chatComposer, '<form className="composer"', '</form>');
+  // Form may span multiple attributes (className + data-debug for phone power fields).
+  const composer = between(chatComposer, 'className="composer"', '</form>');
   const inspector = between(chatPage, '<aside className="panel inspector">', '</aside>');
 
   assert.match(composer, /className="composer-toolbar"/);
@@ -48,6 +51,8 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
   assert.match(composer, /label=\{t\('chat\.toolsSkills'\)\}/);
   assert.match(composer, /label=\{t\('chat\.executionDir'\)\}/);
   assert.match(composer, /ChatAdvancedSettings/);
+  assert.match(composer, /composer-power-fields/);
+  assert.match(composer, /data-debug=\{props\.debugMode \? 'true' : 'false'\}/);
   assert.match(chatPage, /refetchInterval: run\.running \? 4_000 : false/);
   assert.match(useChatRun, /useChatStream/);
   assert.match(useChatStream, /connectWsStream/);
@@ -252,12 +257,16 @@ test('skill and MCP distribution require inspect before apply and expose rollbac
 test('daily workflow opens on Inbox and keeps Inbox, Work, Chat, Sessions first', () => {
   assert.equal(EN['nav.inbox'], 'Inbox');
   assert.equal(EN['nav.work'], 'Work');
-  assert.match(app, /\{ id: 'inbox', labelKey: 'nav.inbox'/);
-  assert.match(app, /\{ id: 'work', labelKey: 'nav.work'/);
-  assert.match(app, /\{ id: 'inbox'[^]*\{ id: 'work'[^]*\{ id: 'chat'[^]*\{ id: 'sessions'/);
-  assert.match(app, /\?\.id \?\? 'inbox'/);
+  // NAV table lives in nav-config.ts; App wires pages and mobile shell.
+  assert.match(navConfig, /\{ id: 'inbox', labelKey: 'nav.inbox'/);
+  assert.match(navConfig, /\{ id: 'work', labelKey: 'nav.work'/);
+  assert.match(navConfig, /\{ id: 'inbox'[^]*\{ id: 'work'[^]*\{ id: 'chat'[^]*\{ id: 'sessions'/);
+  assert.match(navConfig, /'inbox'/);
+  assert.match(app, /from '\.\/nav-config'/);
   assert.match(app, /page === 'inbox' && <InboxPage/);
   assert.match(app, /page === 'work' && <WorkPage/);
+  assert.match(app, /MobileTabBar/);
+  assert.match(mobileNav, /MOBILE_TAB_IDS/);
   assert.match(inboxPage, /getJson<InboxResponse>\('\/inbox\?limit=100'\)/);
 });
 
@@ -270,20 +279,24 @@ test('W4 nav converges daily path, demotes Todos, and keeps Tasks/Run specs in O
   assert.equal(EN['nav.tasks'], 'Task runs');
   assert.equal(EN['nav.runSpecs'], 'Run specs');
   assert.equal(EN['nav.brandSubtitle'], 'daily agent workspace');
-  // Daily strip: no StatusPill noise (showStatus: false).
-  assert.match(app, /id: 'inbox'[^]*showStatus: false/);
-  assert.match(app, /id: 'work'[^]*showStatus: false/);
-  assert.match(app, /id: 'schedules'[^]*showStatus: false/);
-  assert.match(app, /id: 'chat'[^]*showStatus: false/);
+  // Daily strip: no StatusPill noise (showStatus: false) — owned by nav-config.
+  assert.match(navConfig, /id: 'inbox'[^]*showStatus: false/);
+  assert.match(navConfig, /id: 'work'[^]*showStatus: false/);
+  assert.match(navConfig, /id: 'schedules'[^]*showStatus: false/);
+  assert.match(navConfig, /id: 'chat'[^]*showStatus: false/);
   assert.match(app, /item\.showStatus === false \? null/);
   // Todos is advanced/compat, not daily; Tasks + Run specs stay under operations.
-  assert.match(app, /id: 'todos'[^]*sectionKey: 'nav\.section\.advanced'/);
-  assert.match(app, /id: 'tasks'[^]*audience: 'operations'/);
-  assert.match(app, /id: 'run-specs'[^]*audience: 'operations'/);
+  assert.match(navConfig, /id: 'todos'[^]*sectionKey: 'nav\.section\.advanced'/);
+  assert.match(navConfig, /id: 'tasks'[^]*audience: 'operations'/);
+  assert.match(navConfig, /id: 'run-specs'[^]*audience: 'operations'/);
   assert.match(app, /function navEyebrow/);
   // Ops deep-link expands the collapsible section.
   assert.match(app, /item\?\.audience === 'operations'/);
   assert.match(app, /setOpsExpanded\(true\)/);
+  // Phone tabs: Inbox/Work/Chat; Schedules stays in More (not a bottom tab).
+  assert.match(navConfig, /MOBILE_TAB_IDS = \['inbox', 'work', 'chat'\]/);
+  assert.match(navConfig, /export function buildHash/);
+  assert.match(navConfig, /export function parseHash/);
 });
 
 test('Inbox decision rows use human copy and a single primary CTA without technical ids', () => {
@@ -306,7 +319,7 @@ test('Inbox decision rows use human copy and a single primary CTA without techni
 
 test('Schedules exposes bounded presets, trigger preview, operator actions, and run history', () => {
   assert.equal(EN['nav.schedules'], 'Schedules');
-  assert.match(app, /\{ id: 'schedules', labelKey: 'nav.schedules'/);
+  assert.match(navConfig, /\{ id: 'schedules', labelKey: 'nav.schedules'/);
   assert.match(app, /page === 'schedules' && <SchedulesPage/);
   assert.match(schedulesPage, /getJson<ScheduledWorkListResponse>\('\/scheduled-work-items\?limit=100'\)/);
   assert.match(schedulesPage, /getJson<ScheduledWorkPreviewResponse>\(previewPath\(trigger\)\)/);

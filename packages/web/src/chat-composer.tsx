@@ -75,6 +75,9 @@ export function ChatComposer(props: {
   /** Skill names selected for the next send (manual invoke). */
   selectedSkillIds: string[];
   onSelectedSkillIdsChange: (ids: string[]) => void;
+
+  /** When true, phone shell shows provider/runtime advanced controls. */
+  debugMode?: boolean;
 }) {
   const { t } = useI18n();
   const providerRoutes = providerRoutesFromModels(props.modelRoutes);
@@ -162,60 +165,73 @@ export function ChatComposer(props: {
   };
 
   return (
-    <form className="composer" onSubmit={props.onSubmit}>
+    <form
+      className="composer"
+      data-debug={props.debugMode ? 'true' : 'false'}
+      onSubmit={props.onSubmit}
+    >
       <div className="composer-toolbar" aria-label={t('chat.runChoicesAria')}>
         <span
           className={`route-dot ${selectedRoute?.ok ? 'ok' : 'partial'}`}
           title={selectedRoute?.baseUrl ?? selectedRoute?.error ?? t('chat.discoveryPending')}
         />
-        <RunField label={t('chat.runtime')} title={t('chat.runtimeTitle')}>
-          <Zap size={13} />
-          <select value={props.runtimeKind} onChange={event => props.onRuntimeKindChange(event.target.value as RuntimeKind | 'los')}>
-            <option value="los">{t('chat.agentLos')}</option>
-            <option value="claude-code">Claude Code</option>
-            <option value="codex">Codex</option>
-            {props.grokRuntimeEnabled || props.runtimeKind === 'grok' ? (
-              <option value="grok" disabled={!props.grokRuntimeEnabled}>
-                {props.grokRuntimeEnabled ? t('chat.grokExisting') : t('chat.grokUnavailable')}
-              </option>
-            ) : null}
-          </select>
-        </RunField>
+        <div className="composer-power-fields">
+          <RunField label={t('chat.runtime')} title={t('chat.runtimeTitle')}>
+            <Zap size={13} />
+            <select value={props.runtimeKind} onChange={event => props.onRuntimeKindChange(event.target.value as RuntimeKind | 'los')}>
+              <option value="los">{t('chat.agentLos')}</option>
+              <option value="claude-code">Claude Code</option>
+              <option value="codex">Codex</option>
+              {props.grokRuntimeEnabled || props.runtimeKind === 'grok' ? (
+                <option value="grok" disabled={!props.grokRuntimeEnabled}>
+                  {props.grokRuntimeEnabled ? t('chat.grokExisting') : t('chat.grokUnavailable')}
+                </option>
+              ) : null}
+            </select>
+          </RunField>
+          {props.runtimeKind === 'los' ? (
+            <>
+              <RunField label={t('chat.provider')} title={t('chat.providerTitle')}>
+                {props.providerOptions.length > 0 ? (
+                  <select value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }}>
+                    {props.providerOptions.map(option => (
+                      <option value={option.id} key={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder={t('chat.providerId')} />
+                )}
+              </RunField>
+              <RunField label={t('chat.model')} title={t('chat.modelTitle')}>
+                {modelOptions.length > 0 ? (
+                  <select value={props.model} onChange={event => props.onModelChange(event.target.value)}>
+                    {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
+                  </select>
+                ) : (
+                  <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? t('chat.providerDefault')} />
+                )}
+              </RunField>
+            </>
+          ) : (
+            <span className="route-dot warn" title={t('chat.externalRuntime', { runtime: props.runtimeKind })} />
+          )}
+          <ChatAdvancedSettings
+            state={props.advancedState}
+            onChange={props.onAdvancedChange}
+            advancedCount={props.advancedCount}
+          />
+        </div>
         {props.runtimeKind === 'los' ? (
-          <>
-            <RunField label={t('chat.provider')} title={t('chat.providerTitle')}>
-              {props.providerOptions.length > 0 ? (
-                <select value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }}>
-                  {props.providerOptions.map(option => (
-                    <option value={option.id} key={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input value={props.provider} onChange={event => { props.onProviderChange(event.target.value); props.onModelChange(''); }} placeholder={t('chat.providerId')} />
-              )}
-            </RunField>
-            <RunField label={t('chat.model')} title={t('chat.modelTitle')}>
-              {modelOptions.length > 0 ? (
-                <select value={props.model} onChange={event => props.onModelChange(event.target.value)}>
-                  {modelOptions.map(option => <option value={option} key={option}>{option}</option>)}
-                </select>
-              ) : (
-                <input value={props.model} onChange={event => props.onModelChange(event.target.value)} placeholder={selectedRoute?.model ?? t('chat.providerDefault')} />
-              )}
-            </RunField>
-            <RunField label={t('chat.toolsSkills')} title={t('chat.toolsSkillsTitle')}>
-              <Wrench size={13} />
-              <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
-                <option value="read-only">{t('chat.modeReadOnly')}</option>
-                <option value="project-write">{t('chat.modeProjectWrite')}</option>
-              </select>
-            </RunField>
-          </>
-        ) : (
-          <span className="route-dot warn" title={t('chat.externalRuntime', { runtime: props.runtimeKind })} />
-        )}
+          <RunField label={t('chat.toolsSkills')} title={t('chat.toolsSkillsTitle')}>
+            <Wrench size={13} />
+            <select value={props.toolMode} onChange={event => props.onToolModeChange(event.target.value as ToolMode)}>
+              <option value="read-only">{t('chat.modeReadOnly')}</option>
+              <option value="project-write">{t('chat.modeProjectWrite')}</option>
+            </select>
+          </RunField>
+        ) : null}
         <RunField label={t('chat.executionDir')} title={t('chat.executionDirTitle', { default: props.defaultWorkspace || t('chat.loadingEllipsis') })} variant="group">
           <ProjectSelector
             workspaceRoot={props.workspaceRoot}
@@ -223,14 +239,9 @@ export function ChatComposer(props: {
             defaultWorkspace={props.defaultWorkspace}
           />
         </RunField>
-        <ChatAdvancedSettings
-          state={props.advancedState}
-          onChange={props.onAdvancedChange}
-          advancedCount={props.advancedCount}
-        />
       </div>
       {props.runtimeKind === 'los' ? (
-        <div className="skill-picker" aria-label={t('chat.skills.pickerAria')}>
+        <div className="skill-picker composer-power-fields" aria-label={t('chat.skills.pickerAria')}>
           <div className="skill-picker-head">
             <BookOpen size={13} aria-hidden="true" />
             <span>{t('chat.skills.label')}</span>

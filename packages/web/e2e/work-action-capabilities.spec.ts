@@ -48,7 +48,8 @@ test('Work reloads revised approval capabilities and hides unavailable actions',
     return json(route, {});
   });
 
-  await page.goto('/#work');
+  // Deep-link into the work item so phone list→detail stack opens the detail pane.
+  await page.goto('/#work/work-capability');
   await expect(page.getByRole('heading', { name: 'Capability approval item' })).toBeVisible();
   await page.getByLabel('Approval reason').fill('reviewed revision one');
   await page.getByRole('button', { name: /Approve plan/ }).click();
@@ -76,6 +77,9 @@ test('Work reloads revised approval capabilities and hides unavailable actions',
   await expect(page.getByRole('heading', { name: 'Capability approval item' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Approve plan/ })).toHaveCount(0);
 
+  // Phone detail stack: go back to list (if shown), then open the failed item.
+  const back = page.getByRole('button', { name: /back|返回/i });
+  if (await back.isVisible()) await back.click();
   await page.getByRole('button', { name: /Failed planning item/ }).click();
   await expect(page.getByRole('heading', { name: 'Failed planning item' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Approve plan/ })).toHaveCount(0);

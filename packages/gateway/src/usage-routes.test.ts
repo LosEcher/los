@@ -115,3 +115,31 @@ test('GET /ops/daily-digest returns 400 for invalid day', async () => {
     await app.close();
   }
 });
+
+test('GET /ops/runtime-health returns synthesizer board', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, config);
+  registerUsageRoutes(app);
+  try {
+    const response = await app.inject({ method: 'GET', url: '/ops/runtime-health' });
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      evidenceClass: string;
+      overall: string;
+      policy: { controlPlane: string; noMainGaDaemon: boolean };
+      services: { total: number };
+      schedules: { enabled: number };
+    };
+    assert.equal(body.evidenceClass, 'los_runtime');
+    assert.ok(['ok', 'degraded', 'critical'].includes(body.overall));
+    assert.equal(body.policy.controlPlane, 'gateway_embedded_timers');
+    assert.equal(body.policy.noMainGaDaemon, true);
+    assert.ok(typeof body.services.total === 'number');
+    assert.ok(typeof body.schedules.enabled === 'number');
+  } finally {
+    await closeDb().catch(() => undefined);
+    await app.close();
+  }
+});

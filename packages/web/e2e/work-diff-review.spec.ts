@@ -29,7 +29,7 @@ const SAMPLE_DIFF = [
 test('Work diff review renders line-level unified view and side-by-side switch', async ({ page }) => {
   await seedTokens(page);
   await mockGateway(page);
-  await page.goto('/#work');
+  await page.goto('/#work/work-diff-e2e');
 
   await expect(page.getByRole('heading', { name: 'Diff review item' })).toBeVisible();
   await page.getByRole('button', { name: 'View diff' }).click();
@@ -62,7 +62,7 @@ test('Work diff review renders line-level unified view and side-by-side switch',
 test('Work diff review collapses large files and expands on demand', async ({ page }) => {
   await seedTokens(page);
   await mockGateway(page);
-  await page.goto('/#work');
+  await page.goto('/#work/work-diff-e2e');
 
   await page.getByRole('button', { name: 'View diff' }).click();
   await page.getByText('src/big.ts', { exact: true }).click();
