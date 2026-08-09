@@ -17,10 +17,16 @@ test('language switcher toggles the shell between EN and 中文 and persists', a
   await page.getByRole('button', { name: '中文' }).click();
   await expect(page.getByRole('heading', { name: '收件箱' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-  await expect(page.locator('.nav-item', { hasText: '工作台' })).toBeVisible();
-  await expect(page.locator('.nav-item', { hasText: '对话' })).toBeVisible();
-  // tt()-driven content (module-level translation) must flip in the same render
-  await expect(page.getByText('42秒')).toBeVisible();
+  // Desktop: sidebar nav items. Phone: bottom daily tabs (both exist in DOM; only one is visible).
+  await expect(page.locator('.nav-item:visible, .mobile-tab:visible', { hasText: '工作台' })).toBeVisible();
+  await expect(page.locator('.nav-item:visible, .mobile-tab:visible', { hasText: '对话' })).toBeVisible();
+  // tt()-driven content: desktop shows localized uptime; phone hides metrics and uses tab labels.
+  const uptimeZh = page.locator('.topbar-metrics .metric:visible', { hasText: '42秒' });
+  if (await uptimeZh.count()) {
+    await expect(uptimeZh).toBeVisible();
+  } else {
+    await expect(page.locator('.mobile-tab:visible', { hasText: '更多' })).toBeVisible();
+  }
 
   // Choice persists across reload
   await page.reload();

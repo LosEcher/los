@@ -37,6 +37,8 @@ test('mobile viewport still renders the app shell', async ({ page }) => {
   }, { auth: 'pwa-e2e-auth' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await expect(page.getByText('los console', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible();
+  // Phone shell: daily bottom tabs + page title (desktop brand lives in the sidebar).
+  await expect(page.getByRole('navigation', { name: /daily tabs|日常标签/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Inbox|收件箱/i })).toBeVisible();
+  await expect(page.locator('.mobile-tab-bar .mobile-tab', { hasText: /Work|工作台/i })).toBeVisible();
 });

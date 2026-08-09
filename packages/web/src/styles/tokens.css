@@ -92,6 +92,8 @@
   --sidebar-width: 248px;
   --sidebar-collapsed: 64px;
   --topbar-height: 52px;
+  --mobile-tab-height: 56px;
+  --touch-target: 44px;
   --chat-inspector-width: min(300px, 28vw);
   --content-max: 1280px;
   --page-pad: var(--space-4);
@@ -112,7 +114,9 @@
   --z-base: 0;
   --z-sticky: 20;
   --z-dropdown: 40;
+  --z-mobile-tab: 55;
   --z-drawer: 60;
+  --z-more-sheet: 70;
   --z-modal: 80;
   --z-toast: 100;
 
