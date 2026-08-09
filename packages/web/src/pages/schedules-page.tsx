@@ -48,10 +48,25 @@ type FeedAnalysisRequestValidation =
 
 const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
+/** active = non-retired (default operator view); all = every status; else concrete status. */
+type ScheduleStatusFilter = 'active' | 'all' | 'enabled' | 'paused' | 'retired';
+
+function schedulesListUrl(filter: ScheduleStatusFilter): string {
+  const params = new URLSearchParams({ limit: '100' });
+  if (filter === 'active') {
+    params.set('excludeRetired', 'true');
+  } else if (filter !== 'all') {
+    params.set('status', filter);
+  }
+  return `/scheduled-work-items?${params.toString()}`;
+}
+
 export function SchedulesPage() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>('active');
+  const [goalExpanded, setGoalExpanded] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<FormState>(() => initialForm(t));
   const trigger = useMemo(() => buildTrigger(form), [form]);
@@ -60,8 +75,8 @@ export function SchedulesPage() {
     [form.feedAnalysisRequest, t],
   );
   const list = useQuery({
-    queryKey: ['scheduled-work-items'],
-    queryFn: () => getJson<ScheduledWorkListResponse>('/scheduled-work-items?limit=100'),
+    queryKey: ['scheduled-work-items', statusFilter],
+    queryFn: () => getJson<ScheduledWorkListResponse>(schedulesListUrl(statusFilter)),
     refetchInterval: 15_000,
   });
   const activeId = selectedId ?? list.data?.results[0]?.id ?? null;
@@ -132,6 +147,8 @@ export function SchedulesPage() {
   });
   const active = detail.data?.schedule ?? list.data?.results.find(item => item.id === activeId) ?? null;
   const actionError = create.error ?? updateStatus.error ?? triggerNow.error ?? retryRun.error;
+  const goalText = active?.runTemplate.goalTemplate?.trim() ?? '';
+  const goalNeedsCollapse = goalText.length > 160 || goalText.split('\n').length > 3;
 
   const total = list.data?.count ?? 0;
   const enabled = list.data?.results.filter(item => item.status === 'enabled').length ?? 0;
@@ -139,19 +156,36 @@ export function SchedulesPage() {
 
   return (
     <div className="daily-page schedules-page">
-      <div className="daily-toolbar">
+      <div className="daily-toolbar schedule-toolbar">
         <div className="attention-summary schedule-summary" aria-label={t('nav.schedules')}>
           <div className="summary-count"><span>{t('ops.schedules.summaryTotal')}</span><strong>{total}</strong></div>
           <div className="summary-count ok"><span>{t('ops.schedules.summaryEnabled')}</span><strong>{enabled}</strong></div>
           <div className={`summary-count${openCircuits > 0 ? ' danger' : ' info'}`}><span>{t('ops.schedules.summaryCircuits')}</span><strong>{openCircuits}</strong></div>
         </div>
-        <div className="daily-toolbar-actions">
-          <button className="icon-btn" type="button" title={t('ops.schedules.refreshTitle')} aria-label={t('ops.schedules.refreshTitle')} onClick={() => list.refetch()}>
-            <RefreshCcw size={15} className={list.isFetching ? 'spin' : ''} />
-          </button>
-          <button className="btn" type="button" onClick={() => setShowCreate(value => !value)}>
-            {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? t('common.close') : t('ops.schedules.newScheduleButton')}
-          </button>
+        <div className="schedule-toolbar-controls">
+          <select
+            aria-label={t('ops.schedules.statusAria')}
+            value={statusFilter}
+            onChange={event => {
+              setStatusFilter(event.target.value as ScheduleStatusFilter);
+              setSelectedId(null);
+              setGoalExpanded(false);
+            }}
+          >
+            <option value="active">{t('ops.schedules.filter.active')}</option>
+            <option value="all">{t('ops.schedules.filter.all')}</option>
+            <option value="enabled">{t('ops.schedules.filter.enabled')}</option>
+            <option value="paused">{t('ops.schedules.filter.paused')}</option>
+            <option value="retired">{t('ops.schedules.filter.retired')}</option>
+          </select>
+          <div className="daily-toolbar-actions">
+            <button className="icon-btn" type="button" title={t('ops.schedules.refreshTitle')} aria-label={t('ops.schedules.refreshTitle')} onClick={() => list.refetch()}>
+              <RefreshCcw size={15} className={list.isFetching ? 'spin' : ''} />
+            </button>
+            <button className="btn" type="button" onClick={() => setShowCreate(value => !value)}>
+              {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? t('common.close') : t('ops.schedules.newScheduleButton')}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -163,7 +197,16 @@ export function SchedulesPage() {
           {list.isLoading ? <div className="daily-empty">{t('ops.schedules.loadingList')}</div> : null}
           {list.isError ? <div className="daily-error">{String(list.error)}</div> : null}
           {list.data?.results.map(item => (
-            <button key={item.id} type="button" className="schedule-list-row" data-active={activeId === item.id} onClick={() => setSelectedId(item.id)}>
+            <button
+              key={item.id}
+              type="button"
+              className="schedule-list-row"
+              data-active={activeId === item.id}
+              onClick={() => {
+                setSelectedId(item.id);
+                setGoalExpanded(false);
+              }}
+            >
               <span className={`schedule-state ${item.status}`} title={item.status} aria-label={item.status} />
               <span className="work-list-copy">
                 <strong>{item.title}</strong>
@@ -175,7 +218,11 @@ export function SchedulesPage() {
               </span>
             </button>
           ))}
-          {!list.isLoading && list.data?.results.length === 0 ? <div className="daily-empty">{t('ops.schedules.emptyList')}</div> : null}
+          {!list.isLoading && list.data?.results.length === 0 ? (
+            <div className="daily-empty">
+              {statusFilter === 'active' ? t('ops.schedules.emptyActiveList') : t('ops.schedules.emptyList')}
+            </div>
+          ) : null}
         </div>
 
         <div className="schedule-detail">
@@ -185,7 +232,18 @@ export function SchedulesPage() {
                 <div>
                   <div className="eyebrow">{active.runTemplate.templateId.replaceAll('_', ' ')}</div>
                   <h2>{active.title}</h2>
-                  <p>{active.runTemplate.goalTemplate}</p>
+                  <div className="schedule-goal" data-expanded={goalExpanded || !goalNeedsCollapse ? 'true' : 'false'}>
+                    <p>{goalText || t('ops.schedules.noGoal')}</p>
+                    {goalNeedsCollapse ? (
+                      <button
+                        type="button"
+                        className="ghost-btn schedule-goal-toggle"
+                        onClick={() => setGoalExpanded(value => !value)}
+                      >
+                        {goalExpanded ? t('ops.schedules.goalCollapse') : t('ops.schedules.goalExpand')}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="work-action-strip">
                   {active.status !== 'retired' ? (

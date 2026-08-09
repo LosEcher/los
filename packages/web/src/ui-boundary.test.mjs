@@ -321,8 +321,13 @@ test('Schedules exposes bounded presets, trigger preview, operator actions, and 
   assert.equal(EN['nav.schedules'], 'Schedules');
   assert.match(navConfig, /\{ id: 'schedules', labelKey: 'nav.schedules'/);
   assert.match(app, /page === 'schedules' && <SchedulesPage/);
-  assert.match(schedulesPage, /getJson<ScheduledWorkListResponse>\('\/scheduled-work-items\?limit=100'\)/);
+  // Default operator view is active-only (excludeRetired), not the full archive.
+  assert.match(schedulesPage, /function schedulesListUrl\(filter: ScheduleStatusFilter\)/);
+  assert.match(schedulesPage, /params\.set\('excludeRetired', 'true'\)/);
+  assert.match(schedulesPage, /getJson<ScheduledWorkListResponse>\(schedulesListUrl\(statusFilter\)\)/);
+  assert.match(schedulesPage, /useState<ScheduleStatusFilter>\('active'\)/);
   assert.match(schedulesPage, /getJson<ScheduledWorkPreviewResponse>\(previewPath\(trigger\)\)/);
+  assert.match(schedulesPage, /schedule-goal/);
   assert.match(schedulesPage, /postJson<CreateScheduledWorkResponse>\('\/scheduled-work-items'/);
   assert.match(schedulesPage, /patchJson<ScheduledWorkItem>\(`\/scheduled-work-items\/\$\{id\}`/);
   assert.match(schedulesPage, /postJson\(`\/scheduled-work-items\/\$\{id\}\/trigger`/);

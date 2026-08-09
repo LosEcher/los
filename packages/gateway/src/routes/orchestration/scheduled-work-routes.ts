@@ -57,11 +57,19 @@ export function registerScheduledWorkRoutes(
   });
 
   app.get('/scheduled-work-items', async req => {
-    const query = req.query as { projectId?: string; status?: string; limit?: string };
+    const query = req.query as {
+      projectId?: string;
+      status?: string;
+      limit?: string;
+      excludeRetired?: string | boolean;
+    };
     const context = getRequestContext(req);
+    const status = normalizeStatus(query.status);
     const results = await deps.list({
       projectId: normalizeString(query.projectId) ?? context.projectId,
-      status: normalizeStatus(query.status),
+      status,
+      // Concrete status wins; excludeRetired only for unscoped lists.
+      excludeRetired: status ? undefined : normalizeBoolean(query.excludeRetired),
       limit: normalizeLimit(query.limit),
     });
     return { count: results.length, results };
@@ -243,6 +251,11 @@ function normalizeTrigger(value: unknown): ScheduledWorkTrigger {
 
 function normalizeStatus(value: unknown): 'enabled' | 'paused' | 'retired' | undefined {
   return optionalEnum(value, ['enabled', 'paused', 'retired']);
+}
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (value === true || value === 'true' || value === '1') return true;
+  if (value === false || value === 'false' || value === '0') return false;
+  return undefined;
 }
 function normalizeString(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function normalizeNumber(value: unknown): number | undefined { return typeof value === 'number' && Number.isFinite(value) ? value : undefined; }

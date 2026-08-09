@@ -2588,17 +2588,19 @@ button:disabled {
 }
 
 /*
- * Work page: pin the shell to the viewport and give list/detail independent
- * scroll regions. Without this, desktop lists grow unbounded and
+ * Work + Schedules: pin the shell to the viewport and give list/detail
+ * independent scroll regions. Without this, desktop lists grow unbounded and
  * .daily-page { overflow:hidden } clips content with no usable pane scroll.
  */
-.app-shell[data-page='work'] {
+.app-shell[data-page='work'],
+.app-shell[data-page='schedules'] {
   height: 100dvh;
   max-height: 100dvh;
   overflow: hidden;
 }
 
-.app-shell[data-page='work'] .workspace {
+.app-shell[data-page='work'] .workspace,
+.app-shell[data-page='schedules'] .workspace {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2607,11 +2609,14 @@ button:disabled {
 }
 
 .app-shell[data-page='work'] .workspace > .topbar,
-.app-shell[data-page='work'] .workspace > .auth-banner {
+.app-shell[data-page='work'] .workspace > .auth-banner,
+.app-shell[data-page='schedules'] .workspace > .topbar,
+.app-shell[data-page='schedules'] .workspace > .auth-banner {
   flex-shrink: 0;
 }
 
-.app-shell[data-page='work'] .work-page {
+.app-shell[data-page='work'] .work-page,
+.app-shell[data-page='schedules'] .schedules-page {
   flex: 1 1 auto;
   min-height: 0;
   height: auto;
@@ -2621,7 +2626,10 @@ button:disabled {
 }
 
 .app-shell[data-page='work'] .work-toolbar-list,
-.app-shell[data-page='work'] .work-create {
+.app-shell[data-page='work'] .work-create,
+.app-shell[data-page='schedules'] .schedule-toolbar,
+.app-shell[data-page='schedules'] .schedule-create,
+.app-shell[data-page='schedules'] .schedules-page > .daily-error {
   flex-shrink: 0;
 }
 
@@ -3715,8 +3723,10 @@ button:disabled {
 /* Schedules (token-aligned, mirrors Work split) */
 
 .schedules-page {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  min-height: 0;
 }
 
 .schedules-page > .daily-error {
@@ -3724,6 +3734,23 @@ button:disabled {
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   min-height: 48px;
+}
+
+.schedule-toolbar {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.schedule-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.schedule-toolbar-controls select {
+  width: auto;
+  min-width: 140px;
 }
 
 .schedule-summary {
@@ -3813,16 +3840,24 @@ button:disabled {
 .schedule-split {
   display: grid;
   grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
-  min-height: calc(100vh - 220px);
+  flex: 1 1 auto;
+  min-height: min(70dvh, calc(100dvh - 220px));
   border: 0;
   background: transparent;
   border-radius: 0;
   overflow: hidden;
 }
 
+.app-shell[data-page='schedules'] .schedule-split {
+  min-height: 0;
+}
+
 .schedule-list {
   border-right: 1px solid var(--line);
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--surface) 55%, transparent);
 }
 
@@ -3885,6 +3920,9 @@ button:disabled {
 
 .schedule-detail {
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 0;
   background: var(--surface);
 }
@@ -3896,6 +3934,7 @@ button:disabled {
   gap: var(--space-5);
   padding: var(--space-5);
   border-bottom: 1px solid var(--line);
+  max-width: min(52rem, 100%);
 }
 
 .schedule-detail-head > div:first-child { display: grid; gap: var(--space-2); min-width: 0; }
@@ -3904,7 +3943,42 @@ button:disabled {
   font-size: var(--text-xl);
   line-height: var(--leading-tight);
 }
-.schedule-detail-head p { max-width: 720px; font-size: var(--text-sm); }
+
+.schedule-goal {
+  display: grid;
+  gap: var(--space-2);
+  max-width: min(52rem, 100%);
+}
+
+.schedule-goal p {
+  margin: 0;
+  max-width: min(52rem, 100%);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.schedule-goal[data-expanded='false'] p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.schedule-goal-toggle {
+  justify-self: start;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.schedule-facts,
+.schedule-history-head,
+.schedule-history {
+  max-width: min(52rem, 100%);
+}
 
 .schedule-facts {
   display: grid;
@@ -4110,14 +4184,17 @@ button:disabled {
 
 @media (max-width: 780px) {
   /* Phone uses document scroll + list/detail stack; release desktop viewport pin. */
-  .app-shell[data-page='work'] {
+  .app-shell[data-page='work'],
+  .app-shell[data-page='schedules'] {
     height: auto;
     max-height: none;
     overflow: visible;
   }
 
   .app-shell[data-page='work'] .workspace,
-  .app-shell[data-page='work'] .work-page {
+  .app-shell[data-page='work'] .work-page,
+  .app-shell[data-page='schedules'] .workspace,
+  .app-shell[data-page='schedules'] .schedules-page {
     height: auto;
     overflow: visible;
   }
