@@ -5,7 +5,8 @@
  * strategy (compression thresholds, semantic eviction policy) are modified.
  * See docs/governance/code-first-determinism.md for the full checklist.
  */
-export const SYSTEM_PROMPT_VERSION = '1.3.1';
+/** Bumped for operator rules system segment + learned procedural title (P0-2). */
+export const SYSTEM_PROMPT_VERSION = '1.4.0';
 
 /**
  * Context-window strategy version: tracks compression, compaction, eviction, and

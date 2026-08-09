@@ -24,6 +24,7 @@ export interface PreparedChatContextPolicy {
   systemPrompt: string;
   policy: ChatContextPolicyDecision;
   event: SessionEventRecord;
+  operatorRuleGateRules: import('@los/agent').OperatorRuleGateRule[];
 }
 
 export async function prepareChatContextPolicy(
@@ -61,10 +62,19 @@ export async function prepareChatContextPolicy(
       memoryLayers: augmented.policy.memory.queriedLayers,
       activeRuleCount: augmented.policy.memory.activeRuleCount,
       observationCount: augmented.policy.memory.observationCount,
+      operatorRuleCount: augmented.policy.operatorRules.count,
+      operatorRequiredCount: augmented.policy.operatorRules.requiredCount,
+      operatorBlockCount: augmented.policy.operatorRules.blockCount,
+      operatorRulesInjected: augmented.policy.operatorRules.injected,
       codeGraphEnabled: augmented.policy.codeGraph.enabled,
       codeGraphSelected: augmented.policy.codeGraph.selected,
       codeGraphInjected: augmented.policy.codeGraph.injected,
     },
   });
-  return { systemPrompt: augmented.systemPrompt, policy: augmented.policy, event };
+  return {
+    systemPrompt: augmented.systemPrompt,
+    policy: augmented.policy,
+    event,
+    operatorRuleGateRules: augmented.operatorRuleGateRules,
+  };
 }

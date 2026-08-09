@@ -71,6 +71,11 @@ export interface AgentConfig {
   };
   /** Advisory checks against persisted tool-failure and fragile-file evidence. */
   preActionGate?: AgentPreActionGateConfig;
+  /**
+   * Operator rules hard gate (configure-surface P0-2).
+   * Preloaded once per run — broker must not hit DB.
+   */
+  operatorRulesGate?: import('../operator-rules-runtime.js').OperatorRulesGateConfig;
   signal?: AbortSignal;
   maxContextTokens?: number;
   contextCompression?: ContextCompressionConfig;

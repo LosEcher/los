@@ -71,7 +71,7 @@ test('formatRulesForPrompt formats rules with severity icons', () => {
     },
   ];
   const result = formatRulesForPrompt(rules);
-  assert.ok(result.includes('## Active Procedural Rules'));
+  assert.ok(result.includes('## Learned Procedural Rules (memory)'));
   assert.ok(result.includes('⚡ test-rule'));
   assert.ok(result.includes('85%'));
   assert.ok(result.includes('Always read files before editing.'));
@@ -353,7 +353,7 @@ test('augmentSystemPrompt appends active rules section', () => {
     queriedLayers: ['procedural'],
   });
   assert.ok(result.augmentedPrompt.startsWith(base));
-  assert.ok(result.augmentedPrompt.includes('## Active Procedural Rules'));
+  assert.ok(result.augmentedPrompt.includes('## Learned Procedural Rules (memory)'));
   assert.ok(result.augmentedPrompt.includes('Always verify before writing.'));
 });
 

@@ -36,6 +36,7 @@ function buildConfig(): Config {
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
       skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
+      rules: { operatorInject: true, enforcementEnabled: true, maxPromptRules: 20 },
     },
     judge: {},
     review: { enabled: false, roles: {} },
