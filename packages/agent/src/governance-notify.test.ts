@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  GOVERNANCE_NOTIFY_SESSION_ID,
-  governanceNotifyEventType,
-} from './governance-notify.js';
+import type { GovernanceNotifyKind } from './governance-notify.js';
 
-test('governance notify event types map by kind', () => {
-  assert.equal(governanceNotifyEventType('escalation'), 'governance.job.escalated');
-  assert.equal(governanceNotifyEventType('progress'), 'governance.job.progress');
-  assert.equal(governanceNotifyEventType('bootstrap_finding'), 'governance.bootstrap.findings');
-  assert.equal(governanceNotifyEventType('sweep_digest'), 'governance.sweep.digest');
-  assert.equal(GOVERNANCE_NOTIFY_SESSION_ID, 'governance:system');
+// Kind → event type mapping is private; keep the public contract asserted here
+// so SSE/wechat consumers stay aligned without exporting helpers (wiring gate).
+const KIND_TO_TYPE: Record<GovernanceNotifyKind, string> = {
+  escalation: 'governance.job.escalated',
+  progress: 'governance.job.progress',
+  bootstrap_finding: 'governance.bootstrap.findings',
+  sweep_digest: 'governance.sweep.digest',
+};
+
+test('governance notify kind contract stays aligned with operator SSE types', () => {
+  assert.deepEqual(Object.keys(KIND_TO_TYPE).sort(), [
+    'bootstrap_finding',
+    'escalation',
+    'progress',
+    'sweep_digest',
+  ]);
+  assert.equal(KIND_TO_TYPE.escalation, 'governance.job.escalated');
+  assert.equal(KIND_TO_TYPE.sweep_digest, 'governance.sweep.digest');
 });

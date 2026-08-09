@@ -12,7 +12,7 @@ import { appendSessionEvent } from './session-events.js';
 const log = getLogger('governance-notify');
 
 /** Stable synthetic session for governance-originated operator events. */
-export const GOVERNANCE_NOTIFY_SESSION_ID = 'governance:system';
+const GOVERNANCE_NOTIFY_SESSION_ID = 'governance:system';
 
 export type GovernanceNotifyKind =
   | 'escalation'
@@ -35,10 +35,8 @@ export interface GovernanceNotifyInput {
   extra?: Record<string, unknown>;
 }
 
-/**
- * Map notification kind to session event type consumed by operator SSE + bots.
- */
-export function governanceNotifyEventType(kind: GovernanceNotifyKind): string {
+/** Map notification kind to session event type consumed by operator SSE + bots. */
+function eventTypeForKind(kind: GovernanceNotifyKind): string {
   switch (kind) {
     case 'escalation':
       return 'governance.job.escalated';
@@ -56,7 +54,7 @@ export async function emitGovernanceOperatorNotify(
   input: GovernanceNotifyInput,
 ): Promise<void> {
   const sessionId = input.sessionId?.trim() || GOVERNANCE_NOTIFY_SESSION_ID;
-  const type = governanceNotifyEventType(input.kind);
+  const type = eventTypeForKind(input.kind);
   const severity = input.severity ?? (input.kind === 'escalation' ? 'warning' : 'info');
   try {
     await appendSessionEvent({
