@@ -54,6 +54,7 @@ import {
   StatusPill,
 } from '../ui';
 import { ProviderAccountsPanel } from './provider-accounts-panel.js';
+import { ProviderCompatPanel } from './provider-compat-panel.js';
 import { useI18n } from '../i18n';
 
 type RunStateProjection = {
@@ -103,6 +104,7 @@ export function ProvidersPage() {
 
   // Track which provider is being edited inline, plus edit form state
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [selectedCompatProvider, setSelectedCompatProvider] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
     model?: string; baseUrl?: string; apiKey?: string; enabled?: boolean; weight?: number;
   }>({});
@@ -210,6 +212,14 @@ export function ProvidersPage() {
                     ) : (
                       <span className="status-text dim">{t('pages.providers.discoveryOnly')}</span>
                     )}
+                    <button
+                      type="button"
+                      className="tiny-btn"
+                      onClick={() => setSelectedCompatProvider(name)}
+                      title={t('pages.providers.compatRunTitle')}
+                    >
+                      {t('pages.providers.compatSelect')}
+                    </button>
                   </span>
                 </div>
                 {isEditing && cfg ? (
@@ -295,6 +305,19 @@ export function ProvidersPage() {
           <Definition term={t('pages.providers.defAccount')} text={t('pages.providers.defAccountText')} />
           <Definition term={t('pages.providers.defModel')} text={t('pages.providers.defModelText')} />
         </div>
+        <div className="section-divider" />
+        {selectedCompatProvider || providers[0] ? (
+          <ProviderCompatPanel
+            providerName={selectedCompatProvider ?? String(providers[0]?.name ?? providers[0]?.provider ?? '')}
+            model={
+              selectedCompatProvider
+                ? configProviders.get(selectedCompatProvider)?.model
+                : configProviders.get(String(providers[0]?.name ?? providers[0]?.provider ?? ''))?.model
+            }
+          />
+        ) : (
+          <EmptyText text={t('pages.providers.compatPickProvider')} />
+        )}
       </aside>
     </section>
   );
