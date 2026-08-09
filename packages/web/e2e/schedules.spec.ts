@@ -7,6 +7,7 @@ const NOW = '2026-07-18T08:00:00.000Z';
 type RequestRecord = {
   path: string;
   method: string;
+  search: string;
   headers: Record<string, string>;
   body?: Record<string, unknown>;
 };
@@ -18,6 +19,13 @@ test('creates and operates a bounded schedule with preview and history', async (
 
   await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Runtime readiness check' })).toBeVisible();
+  // Oracle: default list is active-only (exclude retired), not the full archive.
+  await expect.poll(() => records.some(record =>
+    record.method === 'GET'
+    && record.path === '/scheduled-work-items'
+    && record.search.includes('excludeRetired=true'),
+  )).toBe(true);
+  await expect(page.getByLabel('Schedule status filter')).toHaveValue('active');
   await page.getByRole('button', { name: 'New schedule' }).click();
   await page.getByLabel('Title').fill('Daily operator inbox');
   await page.getByLabel('Template').selectOption('morning_inbox_digest');
@@ -112,7 +120,13 @@ function scheduleRun(scheduleId = 'schedule-e2e') {
 function requestRecord(request: Request, url: URL): RequestRecord {
   let body: Record<string, unknown> | undefined;
   try { body = request.postDataJSON() as Record<string, unknown>; } catch { /* no JSON body */ }
-  return { path: url.pathname, method: request.method(), headers: request.headers(), body };
+  return {
+    path: url.pathname,
+    method: request.method(),
+    search: url.search,
+    headers: request.headers(),
+    body,
+  };
 }
 
 function isAsset(path: string): boolean {

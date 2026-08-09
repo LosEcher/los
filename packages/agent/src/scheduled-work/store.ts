@@ -65,13 +65,27 @@ export async function loadScheduledWorkItem(id: string): Promise<ScheduledWorkIt
   return rows.rows[0] ? scheduleFromRow(rows.rows[0]) : null;
 }
 
-export async function listScheduledWorkItems(input: { projectId?: string; status?: string; limit?: number } = {}): Promise<ScheduledWorkItem[]> {
+export async function listScheduledWorkItems(input: {
+  projectId?: string;
+  status?: string;
+  /** When true and no concrete status is set, hide retired rows (active operator view). */
+  excludeRetired?: boolean;
+  limit?: number;
+} = {}): Promise<ScheduledWorkItem[]> {
   await ensureScheduledWorkStore();
+  const status = input.status ?? null;
+  // Concrete status wins; excludeRetired only applies to unscoped lists.
+  const excludeRetired = !status && input.excludeRetired === true;
   const rows = await getDb().query<ScheduledWorkRow>(
     `SELECT * FROM scheduled_work_items
-     WHERE ($1::text IS NULL OR project_id=$1) AND ($2::text IS NULL OR status=$2)
-     ORDER BY updated_at DESC LIMIT $3`,
-    [input.projectId ?? null, input.status ?? null, Math.min(200, Math.max(1, input.limit ?? 50))],
+     WHERE ($1::text IS NULL OR project_id=$1)
+       AND ($2::text IS NULL OR status=$2)
+       AND ($3::boolean IS NOT TRUE OR status <> 'retired')
+     ORDER BY
+       CASE status WHEN 'enabled' THEN 0 WHEN 'paused' THEN 1 WHEN 'retired' THEN 2 ELSE 3 END,
+       updated_at DESC
+     LIMIT $4`,
+    [input.projectId ?? null, status, excludeRetired, Math.min(200, Math.max(1, input.limit ?? 50))],
   );
   return rows.rows.map(scheduleFromRow);
 }
