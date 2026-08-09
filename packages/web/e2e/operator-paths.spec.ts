@@ -75,17 +75,16 @@ test('runs chat, recovers operator 403, and cancels an active task', async ({ pa
   await prompt.fill('exercise operator approval');
   await page.getByRole('button', { name: 'send' }).click();
   // tool.denied lands in the collapsed approval summary (not the debug stream).
-  // Mobile sticky chrome can intercept pointer events — use DOM click.
   const deniedToggle = page.getByRole('button', { name: /1 denied/i });
   await expect(deniedToggle).toBeVisible();
-  await deniedToggle.evaluate((el: HTMLElement) => el.click());
+  await deniedToggle.click();
   await expect(page.getByText('write_file')).toBeVisible();
 
   const approval = page.locator('.operator-steering-bar').getByRole('button', { name: 'Approve' });
-  await approval.evaluate((el: HTMLElement) => el.click());
+  await approval.click();
   await expect(page.getByText(/Operator authentication required/)).toBeVisible();
   await page.evaluate(token => localStorage.setItem('los-operator-token', token), OPERATOR_TOKEN);
-  await approval.evaluate((el: HTMLElement) => el.click());
+  await approval.click();
   await expect.poll(() => records.filter(r => r.path.endsWith('/operator-events')).length).toBe(2);
   const steering = records.filter(r => r.path.endsWith('/operator-events')).at(-1)!;
   expect(steering.headers['x-los-operator-token']).toBe(OPERATOR_TOKEN);
