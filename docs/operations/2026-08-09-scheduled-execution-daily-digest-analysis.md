@@ -1,7 +1,7 @@
 # Scheduled execution vs daily summary — 2026-08-09
 
-> Status: analysis only (no code change in this note). Grounded in local DB
-> `55432/los` after Usage Hub P0 merge.
+> Status: **implemented** (read path). Grounded in local DB `55432/los`.
+> Surfaces: `GET /ops/daily-digest`, `los digest`, `#usage` digest panel.
 
 ## Question
 
@@ -67,16 +67,27 @@ loop), composed of:
 - Do not mix external CLI fleets into the digest (keep evidenceClass labels).
 - Do not auto-mark analysis schedules healthy from readiness probe success.
 
-### Smallest ship path
+### Smallest ship path — landed
 
-1. `GET /ops/daily-digest?day=YYYY-MM-DD` (compose existing tables).
-2. CLI `los digest --day yesterday`.
-3. Optional schedule `templateId: daily_execution_digest` (audit-only first).
+1. `GET /ops/daily-digest?day=YYYY-MM-DD` ✅
+2. CLI `los digest [--day YYYY-MM-DD]` ✅
+3. Web `#usage` digest + cadence table ✅
+4. Optional schedule `templateId: daily_execution_digest` — still optional follow-up
+
+## Cadence recommendations (live heuristics)
+
+| Schedule | Current | Recommendation | Why |
+| --- | --- | --- | --- |
+| dogfood runtime readiness | 5m (~288/day) | **15m** | Always succeeds in ~0.02s; dogfood does not need sub-5m |
+| log freshness V3 | 10m (~144/day) | **30m** | Same; lag detection does not need 10m |
+| network-observe v5 ×2 | daily 09:00 | **retire one duplicate** | Two enabled rows, same title |
+| surge / NAS / network-observe | 6h / daily | **fix approval**, not cadence | Cancels are `approval_timeout` on `each_run` |
 
 ## Evidence commands
 
 ```bash
-psql … -c "SELECT status, COUNT(*) FROM scheduled_work_item_runs WHERE created_at > now()-interval '7 days' GROUP BY 1"
+los digest
+curl -H "x-los-auth-token: …" 'http://127.0.0.1:8080/ops/daily-digest'
 curl -H "x-los-auth-token: …" http://127.0.0.1:8080/usage/summary
 curl -H "x-los-auth-token: …" http://127.0.0.1:8080/daily-agent-quality/baseline?days=7
 ```

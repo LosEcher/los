@@ -281,6 +281,18 @@ export const enOps2 = {
   'ops.usage.colErrors': 'Errors',
   'ops.usage.colAvgMs': 'Avg ms',
   'ops.usage.colUsageFill': 'Usage fill',
+  'ops.usage.digestTitle': 'Daily digest ({day})',
+  'ops.usage.digestSchedule': 'Schedule runs',
+  'ops.usage.digestEnabled': 'Enabled schedules',
+  'ops.usage.digestRuns': 'Runs',
+  'ops.usage.digestOk': 'Succeeded',
+  'ops.usage.digestFail': 'Failed',
+  'ops.usage.digestCancel': 'Cancelled',
+  'ops.usage.colSeverity': 'Severity',
+  'ops.usage.colAction': 'Action',
+  'ops.usage.colSchedule': 'Schedule',
+  'ops.usage.colCadence': 'Cadence',
+  'ops.usage.colRationale': 'Rationale',
 
   // ── Reserved page (reserved-page.tsx) ────────────────
   'ops.reserved.initialPolicyTitle': 'Initial Policy',

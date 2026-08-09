@@ -10,6 +10,7 @@ Usage:
   los provider <list|promote> [options]
   los evals <list|summary|compare|record> [options]
   los usage [--days N] [--from ISO] [--to ISO] [--provider NAME] [--model NAME] [--json]
+  los digest [--day YYYY-MM-DD] [--project ID] [--json]
   los governance <todo-reconcile|runtime-cleanup|status-constraints> [options]
   los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
@@ -82,6 +83,10 @@ Evals:
 Usage:
   L1 runtime usage cube from session model.response + provider_call_telemetry.
   Does not include external Claude Code / Codex local history.
+
+Digest:
+  Daily Execution Digest: schedules + usage + quality + cadence recommendations.
+  Default day is yesterday UTC.
 
 Governance:
   todo-reconcile         Dry-run compare code todo seeds with the DB todo ledger

@@ -6,6 +6,7 @@ import { compatCommand } from './compat.js';
 import { deadLetterCommand } from './dead-letter.js';
 import { evalsCommand } from './evals.js';
 import { usageCommand } from './usage.js';
+import { digestCommand } from './digest.js';
 import { externalSummariesCommand } from './external-summaries.js';
 import { governanceCommand } from './governance.js';
 import { printChatHelp, printHelp } from './help.js';
@@ -104,6 +105,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'usage') {
     await usageCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'digest') {
+    await digestCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'governance' || command === 'gov') {
