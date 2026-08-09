@@ -113,6 +113,7 @@ const isolatedGroupA = [
   'src/governance-wake.test.ts',
   'src/kernel-event-projection.test.ts',
   'src/managed-workspaces.test.ts',
+  'src/mcp-credential-resolver.test.ts',
   'src/mcp-distribution.test.ts',
   'src/message-router/handlers-run-contract.test.ts',
 ];

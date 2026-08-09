@@ -175,11 +175,13 @@ The Web `MCP Servers` page uses a separate registration lifecycle:
 4. Pin a reviewed version or rollback from the version history.
 
 MCP responses expose environment key names only, never values. New Web/API
-registrations do not accept raw environment secrets. `credential_ref` and
-`oauth` store only an opaque reference and currently fail closed because LOS
-does not yet implement an MCP credential resolver. SSE and streamable HTTP
-registrations are inspectable but are not executable; stdio with auth mode
-`none` is the supported runtime path.
+registrations do not accept raw environment secrets. `credential_ref` stores an
+opaque approved secret ref (`env:VAR` or `local-file:los-auth/<key>`); verify
+resolves it into in-memory child env (stdio) or Authorization headers (remote)
+and never returns raw secrets. `oauth` remains fail-closed. SSE and
+streamable-HTTP registrations are executable after verify+enable when `url` is
+present and auth resolves; stdio with auth mode `none` remains the simplest
+supported path.
 
 `pnpm help` is pnpm's own help command. Use `pnpm run help` for los help.
 

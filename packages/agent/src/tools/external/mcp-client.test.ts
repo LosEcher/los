@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { createToolRegistry, registerBuiltinTools } from '../core/registry.js';
-import { MCPClient } from './mcp-client.js';
+import { MCPClient, registryRecordToConfig } from './mcp-client.js';
 import { normalizeMCPAdapterConfig } from '../../cantool-capability-adapter.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/mcp-echo-server.mjs', import.meta.url));
@@ -21,6 +21,36 @@ test('stdio MCP performs handshake, discovery, and tool call', async () => {
   } finally {
     await client.close();
   }
+});
+
+test('registryRecordToConfig prefers explicit remote transport over command-shaped defaults', () => {
+  const remote = registryRecordToConfig({
+    id: 'remote',
+    args: [],
+    env: {},
+    url: 'https://example.invalid/mcp',
+    transport: 'streamable-http',
+    headers: { Authorization: 'Bearer x' },
+  });
+  assert.deepEqual(remote, {
+    url: 'https://example.invalid/mcp',
+    transport: 'streamable-http',
+    headers: { Authorization: 'Bearer x' },
+    serverId: 'remote',
+    toolPolicy: undefined,
+    adapterConfig: undefined,
+  });
+
+  const stdio = registryRecordToConfig({
+    id: 'stdio',
+    command: process.execPath,
+    args: ['a.js'],
+    env: { A: '1' },
+    transport: 'stdio',
+  });
+  assert.equal(stdio?.transport, 'stdio');
+  assert.equal(stdio?.command, process.execPath);
+  assert.deepEqual(stdio?.env, { A: '1' });
 });
 
 test('registry MCP tool policy filters denied and non-allowed tools', async () => {

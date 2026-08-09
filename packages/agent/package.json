@@ -40,6 +40,7 @@
     "./mcp-servers": "./src/mcp-servers.ts",
     "./mcp-distribution": "./src/mcp-distribution.ts",
     "./mcp-distribution-policy": "./src/mcp-distribution-policy.ts",
+    "./mcp-credential-resolver": "./src/mcp-credential-resolver.ts",
     "./cantool-capability-adapter": "./src/cantool-capability-adapter.ts",
     "./skills": "./src/skills.ts",
     "./skill-frontmatter": "./src/skill-frontmatter.ts",

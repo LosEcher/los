@@ -75,6 +75,32 @@ test('MCP auth and tool policy are separate fail-closed controls', () => {
   assert.equal(isMCPToolAllowed(policy, 'read'), true);
   assert.equal(isMCPToolAllowed(policy, 'delete'), false);
   assert.equal(isMCPToolAllowed(policy, 'other'), false);
+
+  const credential = inspectMCPServer({
+    id: 'cred-fixture',
+    transport: 'streamable-http',
+    url: 'https://example.invalid/mcp',
+    authConfig: { mode: 'credential_ref', credentialRef: 'env:MCP_TOKEN' },
+    toolPolicy: { allow: ['read'], deny: [], riskLevel: 'L1' },
+  });
+  assert.equal(credential.executionSupported, true);
+  assert.deepEqual(credential.blockers, []);
+
+  assert.throws(() => inspectMCPServer({
+    id: 'bad-ref',
+    transport: 'stdio',
+    command: process.execPath,
+    authConfig: { mode: 'credential_ref', credentialRef: 'vault:not-approved' },
+  }), /approved opaque backend reference/);
+
+  const external = inspectMCPServer({
+    id: 'external-ref',
+    transport: 'stdio',
+    command: process.execPath,
+    authConfig: { mode: 'credential_ref', credentialRef: 'external:vault/mcp' },
+  });
+  assert.equal(external.executionSupported, false);
+  assert.match(external.blockers.join(' '), /backend_not_implemented/);
 });
 
 test('CanTool inspect fixes the local adapter identity and narrows policy to reviewed L0 capabilities', () => {

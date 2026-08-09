@@ -29,6 +29,7 @@ import { createDeferredRegistry } from '../tools/core/deferred-registry.js';
 import type { MCPServerRegistryRecord } from '../tools/external/mcp-client.js';
 import { listMCPServers } from '../mcp-servers.js';
 import { mcpServerExecutionBlocker } from '../mcp-distribution-policy.js';
+import { resolveMCPCredentialRef } from '../mcp-credential-resolver.js';
 import { createSpawnAgentRunner, registerSpawnAgentTool, registerAgentQueryKillTools, type ChildAgentRunner } from '../tools/core/agent-tools.js';
 import { createEventEmitter, type SessionEventContext, type SessionEventCallback } from '../event-emitter.js';
 import { appendSessionEvent } from '../session-events.js';
@@ -279,23 +280,34 @@ export async function completeAgentSetup(
         projectId: config.projectId,
         enabled: true,
       });
-      mcpRegistryRecords = registryServers
-        .filter(server => {
-          const blocker = mcpServerExecutionBlocker(server);
-          if (blocker) setup.log.warn(`Skipping MCP server [${server.id}]: ${blocker}`);
-          return !blocker;
-        })
-        .map(s => ({
-          id: s.id,
-          command: s.command,
-          args: s.args,
-          url: s.url,
-          transport: s.transport as 'stdio' | 'sse' | 'streamable-http' | undefined,
-          headers: s.headers,
-          env: s.env,
-          toolPolicy: s.toolPolicy,
-          adapterConfig: s.adapterConfig,
-        }));
+      const resolvedRecords: MCPServerRegistryRecord[] = [];
+      for (const server of registryServers) {
+        const blocker = mcpServerExecutionBlocker(server);
+        if (blocker) {
+          setup.log.warn(`Skipping MCP server [${server.id}]: ${blocker}`);
+          continue;
+        }
+        const resolved = await resolveMCPCredentialRef(server.authConfig, {
+          serverId: server.id,
+          transport: server.transport,
+        });
+        if (!resolved.ok) {
+          setup.log.warn(`Skipping MCP server [${server.id}]: ${resolved.reason}`);
+          continue;
+        }
+        resolvedRecords.push({
+          id: server.id,
+          command: server.command,
+          args: server.args,
+          url: server.url,
+          transport: server.transport as 'stdio' | 'sse' | 'streamable-http' | undefined,
+          headers: { ...(server.headers ?? {}), ...resolved.headers },
+          env: { ...server.env, ...resolved.env },
+          toolPolicy: server.toolPolicy,
+          adapterConfig: server.adapterConfig,
+        });
+      }
+      mcpRegistryRecords = resolvedRecords;
     } catch (err: any) {
       setup.log.warn(`Failed to load MCP servers from registry: ${err.message ?? String(err)}`);
     }

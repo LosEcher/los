@@ -1,3 +1,4 @@
+import { isApprovedSecretRef } from '@los/infra/provider-accounts';
 import { contentVersionHash } from './distribution-version.js';
 import type { MCPAdapterConfig } from './cantool-capability-adapter.js';
 
@@ -36,6 +37,11 @@ export function normalizeMCPAuthConfig(value: unknown): MCPAuthConfig {
   const credentialRef = typeof raw.credentialRef === 'string' ? raw.credentialRef.trim() : '';
   if (!credentialRef) throw new Error(`credentialRef is required for MCP auth mode ${mode}`);
   if (/\s/.test(credentialRef) || credentialRef.length > 256) throw new Error('credentialRef must be an opaque identifier');
+  // credential_ref must use the same approved secret-ref shape as provider_accounts.
+  // oauth remains opaque-only until OAuth transport is implemented (fail-closed at runtime).
+  if (mode === 'credential_ref' && !isApprovedSecretRef(credentialRef)) {
+    throw new Error('credentialRef must be an approved opaque backend reference');
+  }
   return { mode, credentialRef };
 }
 
@@ -84,7 +90,13 @@ export function mcpServerExecutionBlocker(server: {
   if (!server.enabled) return 'server is disabled';
   if (server.status !== 'connected') return `server status is ${server.status}`;
   if (server.pinnedVersionHash && server.pinnedVersionHash !== server.versionHash) return 'pinned version does not match current version';
-  if (server.authConfig.mode !== 'none') return `auth mode ${server.authConfig.mode} has no credential resolver`;
+  if (server.authConfig.mode === 'oauth') return 'unsupported auth mode oauth';
+  if (server.authConfig.mode === 'credential_ref') {
+    const shapeError = mcpCredentialRefShapeError(server.authConfig.credentialRef);
+    if (shapeError) return shapeError;
+  } else if (server.authConfig.mode !== 'none') {
+    return `unsupported auth mode ${server.authConfig.mode}`;
+  }
   if (server.transport === 'stdio' && !server.command) return 'stdio command is missing';
   if (server.transport !== 'stdio' && !server.url) return 'remote transport url is missing';
   return undefined;
@@ -103,6 +115,17 @@ export function mcpVersionSnapshot(record: MCPDistributionConfig & {
     toolPolicy: record.toolPolicy,
     ...(record.adapterConfig?.kind === 'cantool' ? { adapterConfig: record.adapterConfig } : {}),
   };
+}
+
+/** Shape gate for credential_ref — approved secret ref + v1 backends only. */
+export function mcpCredentialRefShapeError(ref: string | undefined): string | undefined {
+  if (!ref || !ref.trim()) return 'credential_ref not resolved';
+  const trimmed = ref.trim();
+  if (!isApprovedSecretRef(trimmed)) return 'credential_ref not resolved';
+  if (trimmed.startsWith('env:') || trimmed.startsWith('local-file:los-auth/')) return undefined;
+  if (trimmed.startsWith('external:') || trimmed.startsWith('adapter:')) return 'backend_not_implemented';
+  if (trimmed.startsWith('local-file:')) return 'local_file_prefix_not_allowed';
+  return 'credential_ref not resolved';
 }
 
 function normalizeNames(value: unknown): string[] {
