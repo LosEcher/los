@@ -117,13 +117,16 @@ export async function executeScheduledWorkRun(
 ): Promise<'succeeded' | 'no_op' | 'awaiting_approval' | 'failed'> {
   const schedule = await loadScheduledWorkItem(run.scheduleId);
   if (!schedule) throw new Error('schedule disappeared before execution');
-  const feedAnalysisPreapproved = schedule.runTemplate.templateId === 'scheduled_feed_analysis'
-    && schedule.approvalPolicy === 'preapproved_scope';
+  // preapproved_scope means the operator already authorized the schedule's
+  // scope at create/update time. Only each_run requires a per-execution wait.
+  // (2026-08-09: network-observe/surge/NAS spent days cancelling on
+  // approval_timeout because preapproved_scope incorrectly still waited.)
+  const scopePreapproved = schedule.approvalPolicy === 'preapproved_scope';
   // A run that was explicitly approved (approveScheduledWorkRun marks it with
   // resultSummary.approvedBy and queues it) is allowed through; anything else
   // under a non-auto approval policy must wait for operator approval.
   const approved = run.resultSummary?.approvedBy !== undefined;
-  if (schedule.approvalPolicy !== 'read_only_auto' && !feedAnalysisPreapproved && !approved) {
+  if (schedule.approvalPolicy !== 'read_only_auto' && !scopePreapproved && !approved) {
     const workItemId = await createScheduleWorkItem(schedule, run, 'awaiting_approval', {
       approvalPolicy: schedule.approvalPolicy,
       message: 'This schedule requires operator approval for each execution.',
