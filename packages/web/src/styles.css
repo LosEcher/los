@@ -2003,6 +2003,74 @@ button:disabled {
   word-break: break-word;
 }
 
+.provider-compat-panel {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.provider-compat-panel .muted-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.compat-run-result {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.compat-run-result.is-ok {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+}
+
+.compat-run-result.is-fail {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+.compat-failure-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.compat-cli-equivalent {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.compat-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.compat-evidence-list li {
+  display: grid;
+  grid-template-columns: 14px auto auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.compat-evidence-list li.is-pass strong {
+  color: var(--ok);
+}
+
+.compat-evidence-list li.is-fail strong {
+  color: var(--danger);
+}
+
 .memory-row {
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 14px 16px;
