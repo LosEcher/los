@@ -132,9 +132,9 @@ export function formatRulesForPrompt(rules: ActiveRule[]): string {
   if (rules.length === 0) return '';
 
   const lines: string[] = [
-    '## Active Procedural Rules',
+    '## Learned Procedural Rules (memory)',
     'The following rules have been learned from past sessions and operator review.',
-    'Apply them when relevant to the current task.',
+    'They are advisory memory — operator rules take precedence when both apply.',
     '',
   ];
 

@@ -175,6 +175,18 @@ export async function runChat(params: {
     identityLevel: identityLevel as IdentityLevel | undefined,
   });
   const effectiveSystemPrompt = preparedContext.systemPrompt;
+  const operatorRulesGate = (() => {
+    try {
+      const rulesCfg = (config.agent as { rules?: { enforcementEnabled?: boolean } })?.rules;
+      if (rulesCfg?.enforcementEnabled === false) return { enabled: false as const };
+      return {
+        enabled: true as const,
+        rules: preparedContext.operatorRuleGateRules,
+      };
+    } catch {
+      return { enabled: false as const };
+    }
+  })();
   relaySessionEvent(send, preparedContext.event);
 
   // ── CBM shadow mode: measure code graph queries without injecting ──
@@ -276,6 +288,7 @@ export async function runChat(params: {
       timeoutMs,
       toolRetry,
       mcpServers,
+      operatorRulesGate,
       runContract: effectiveRunContract,
       disposition: preparedDisposition.disposition,
       log,

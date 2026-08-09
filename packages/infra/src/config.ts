@@ -107,6 +107,15 @@ export const ConfigSchema = z.object({
       maxAutoSkills: z.coerce.number().int().positive().max(20).default(3),
       maxSkillTokens: z.coerce.number().int().positive().default(2500),
     }).default({}),
+    /**
+     * Operator rules (configure-surface P0-2).
+     * Inject into system prompt + required/block hard gate in the tool broker.
+     */
+    rules: z.object({
+      operatorInject: z.coerce.boolean().default(true),
+      enforcementEnabled: z.coerce.boolean().default(true),
+      maxPromptRules: z.coerce.number().int().positive().max(100).default(20),
+    }).default({}),
   }),
 
   // Judge model for post-execution goal evaluation (P0-2).
@@ -240,6 +249,7 @@ export async function loadConfig(opts?: {
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
       skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
+      rules: { operatorInject: true, enforcementEnabled: true, maxPromptRules: 20 },
     },
     memory: { ftsEnabled: true, maxObservations: 10000, persistChatDefault: true, selfReflectionEnabled: false, codeGraph: { enabled: false, shadowMode: false, injectArchitecture: false, cbmCommand: 'codebase-memory-mcp', cbmArgs: [], maxPromptTokens: 400 } },
     executor: { enabled: false, nodeKind: 'executor', connectModes: [], meshNodes: [] },

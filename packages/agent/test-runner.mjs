@@ -80,6 +80,7 @@ const sharedProcessTestFiles = [
   'src/session.test.ts',
   'src/skill-frontmatter.test.ts',
   'src/skill-runtime.test.ts',
+  'src/operator-rules-runtime.test.ts',
   'src/tools/external/shell-sandbox.test.ts',
   'src/spec-loader.test.ts',
   'src/static-analysis.test.ts',

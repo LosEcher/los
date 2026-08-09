@@ -24,7 +24,9 @@ export type ToolExecutionReasonCode =
   | 'tool_capability_missing'
   | 'tool_risk_exceeded'
   | 'tool_writes_disabled'
-  | 'tool_sandbox_required';
+  | 'tool_sandbox_required'
+  | 'phase_blocked'
+  | 'operator_rule_block';
 
 export interface ToolCapability {
   name: string;

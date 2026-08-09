@@ -133,6 +133,18 @@ export {
 } from './skill-runtime.js';
 export { parseSkillFrontmatter } from './skill-frontmatter.js';
 export { ensureRuleStore, upsertRule, loadRule, listRules, updateRuleStatus, deleteRule, ruleDirForScope, syncRulesToDir, loadRulesFromDir, type RuleRecord, type RuleScope, type RuleSeverity, type RuleEnforcementMode, type RuleStatus, type RuleLayer, type UpsertRuleInput } from './rules.js';
+export {
+  listActiveOperatorRules,
+  selectOperatorRulesForRun,
+  injectOperatorRulesIntoSystemPrompt,
+  buildOperatorRulesGateConfig,
+  evaluateOperatorRuleGate,
+  type OperatorRuleGateRule,
+  type OperatorRulesGateConfig,
+  type OperatorRuleGateDecision,
+  type OperatorRulesSelection,
+  type OperatorRuleMatchSpec,
+} from './operator-rules-runtime.js';
 export { runPostExecutionSelfCheck, shouldRunSelfCheck, buildSelfCheckPrompt, parseSelfCheckResponse, summarizeAgentContext, buildReviewPacket, type SelfCheckGap, type SelfCheckInput, type SelfCheckResult, type ReviewPacket } from './self-check.js';
 export { reflectOnFailure, formatReflectionSummary, type ReflectionResult } from './reflection.js';
 export { scanProject, scanFiles, loadRuleFiles, discoverFiles, languageFromFilePath, buildStaticAnalysisPayload, type StaticAnalysisEventPayload, type StaticAnalysisFinding, type StaticAnalysisRule, type StaticAnalysisScanOptions, type StaticAnalysisScanResult, type StaticAnalysisConstraint, type StaticAnalysisRange, type StaticAnalysisPosition } from './static-analysis/index.js';
