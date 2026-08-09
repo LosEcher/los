@@ -1,9 +1,18 @@
 export { validateScheduledTrigger, previewScheduledOccurrences, nextScheduledOccurrence, nextOccurrenceAfterSlot, shouldSkipLateRun } from './policy.js';
 export { ensureScheduledWorkStore } from './schema.js';
 export {
+  claimLeaseExpiry,
+  defaultScheduledWorkExecutionLeaseMs,
+  scheduledWorkExecutionHeartbeatMs,
+} from './lease.js';
+export {
+  heartbeatScheduledWorkRun,
+  recoverExpiredScheduledWorkRuns,
+} from './recovery.js';
+export {
   createScheduledWorkItem, loadScheduledWorkItem, listScheduledWorkItems, updateScheduledWorkItem,
   listScheduledWorkItemRuns, loadScheduledWorkItemRun, claimDueScheduledWorkItems,
-  claimQueuedScheduledWorkRuns, recoverExpiredScheduledWorkRuns, retryScheduledWorkRun,
+  claimQueuedScheduledWorkRuns, retryScheduledWorkRun,
   createManualScheduledWorkRun, createCatchUpScheduledWorkRun, findMissedScheduledRun,
   transitionScheduledWorkRun, recordScheduledRunOutcome,
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem, recoverOpenScheduledWorkCircuits,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { getDb, withDbClient } from '@los/infra/db';
 
+import { claimLeaseExpiry } from './lease.js';
 import {
   CIRCUIT_RECOVERY_WINDOW_MS,
   nextOccurrenceAfterSlot,
@@ -18,6 +19,7 @@ import type {
 
 const ACTIVE_SQL = "('queued','claimed','running','awaiting_approval')";
 const CLAIMED_ACTIVE_SQL = "('claimed','running','awaiting_approval')";
+
 const LEGAL_TRANSITIONS: Record<ScheduledWorkRunStatus, ScheduledWorkRunStatus[]> = {
   queued: ['claimed', 'skipped', 'cancelled'],
   claimed: ['running', 'awaiting_approval', 'skipped', 'failed', 'cancelled'],
@@ -173,7 +175,7 @@ export async function claimDueScheduledWorkItems(input: {
            ON CONFLICT (schedule_id,scheduled_for) DO NOTHING RETURNING *`,
           [`schedule-run-${randomUUID()}`, schedule.id, slot, status, schedule.maxAttempts,
             status === 'claimed' ? input.ownerId : null,
-            status === 'claimed' ? new Date(now.getTime() + (input.leaseMs ?? 60_000)) : null,
+            status === 'claimed' ? claimLeaseExpiry(now, input.leaseMs) : null,
             JSON.stringify(reason ? { reason } : {}), status === 'skipped' ? now : null],
         );
         const next = nextOccurrenceAfterSlot(schedule.trigger, slot);
@@ -235,7 +237,7 @@ export async function createManualScheduledWorkRun(input: {
          RETURNING *`,
         [`schedule-run-${randomUUID()}`, schedule.id, slot, status, schedule.maxAttempts,
           status === 'claimed' ? input.ownerId : null,
-          status === 'claimed' ? new Date(slot.getTime() + (input.leaseMs ?? 60_000)) : null],
+          status === 'claimed' ? claimLeaseExpiry(slot, input.leaseMs) : null],
       );
       await client.query('COMMIT');
       return runFromRow(rows.rows[0]!);
@@ -339,7 +341,7 @@ export async function claimQueuedScheduledWorkRuns(input: {
           `UPDATE scheduled_work_item_runs
               SET status='claimed',claim_owner=$2,lease_expires_at=$3,updated_at=now()
             WHERE id=$1 AND status='queued' RETURNING *`,
-          [row.id, input.ownerId, new Date(now.getTime() + (input.leaseMs ?? 60_000))],
+          [row.id, input.ownerId, claimLeaseExpiry(now, input.leaseMs)],
         );
         if (updated.rows[0]) {
           claimed.push(runFromRow(updated.rows[0]));
@@ -357,39 +359,6 @@ export async function claimQueuedScheduledWorkRuns(input: {
   return claimed;
 }
 
-export async function recoverExpiredScheduledWorkRuns(input: {
-  ownerId: string; now?: Date; leaseMs?: number; limit?: number;
-}): Promise<{ recovered: ScheduledWorkItemRun[]; exhausted: ScheduledWorkItemRun[] }> {
-  await ensureScheduledWorkStore();
-  const now = input.now ?? new Date();
-  const limit = Math.min(50, Math.max(1, input.limit ?? 10));
-  const recovered = await getDb().query<ScheduledWorkRunRow>(
-    `WITH selected AS (
-       SELECT r.id FROM scheduled_work_item_runs r
-       JOIN scheduled_work_items s ON s.id=r.schedule_id
-       WHERE r.status IN ('claimed','running') AND r.lease_expires_at <= $1
-         AND r.attempt_count < r.max_attempts AND s.circuit_state IN ('closed','half_open')
-       ORDER BY r.lease_expires_at,r.id LIMIT $2 FOR UPDATE OF r SKIP LOCKED
-     )
-     UPDATE scheduled_work_item_runs r SET status='claimed',trigger_kind='retry',
-       attempt_count=attempt_count+1,claim_owner=$3,lease_expires_at=$4,error=NULL,updated_at=now()
-     FROM selected WHERE r.id=selected.id RETURNING r.*`,
-    [now, limit, input.ownerId, new Date(now.getTime() + (input.leaseMs ?? 60_000))],
-  );
-  const exhausted = await getDb().query<ScheduledWorkRunRow>(
-    `WITH selected AS (
-       SELECT id FROM scheduled_work_item_runs
-       WHERE status IN ('claimed','running') AND lease_expires_at <= $1 AND attempt_count >= max_attempts
-       ORDER BY lease_expires_at,id LIMIT $2 FOR UPDATE SKIP LOCKED
-     )
-     UPDATE scheduled_work_item_runs r SET status='failed',error='lease expired and retry limit exhausted',
-       lease_expires_at=NULL,completed_at=now(),updated_at=now()
-     FROM selected WHERE r.id=selected.id RETURNING r.*`,
-    [now, limit],
-  );
-  return { recovered: recovered.rows.map(runFromRow), exhausted: exhausted.rows.map(runFromRow) };
-}
-
 export async function retryScheduledWorkRun(input: {
   runId: string; ownerId: string; now?: Date; leaseMs?: number;
 }): Promise<ScheduledWorkItemRun> {
@@ -404,7 +373,7 @@ export async function retryScheduledWorkRun(input: {
     `UPDATE scheduled_work_item_runs SET status='claimed',trigger_kind='retry',
        attempt_count=attempt_count+1,claim_owner=$2,lease_expires_at=$3,error=NULL,completed_at=NULL,updated_at=now()
      WHERE id=$1 AND status='failed' AND attempt_count < max_attempts RETURNING *`,
-    [input.runId, input.ownerId, new Date(now.getTime() + (input.leaseMs ?? 60_000))],
+    [input.runId, input.ownerId, claimLeaseExpiry(now, input.leaseMs)],
   );
   if (!rows.rows[0]) throw new Error('scheduled work run changed concurrently');
   return runFromRow(rows.rows[0]);
