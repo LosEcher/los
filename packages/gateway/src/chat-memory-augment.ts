@@ -7,7 +7,7 @@
  * is appended after.
  *
  * Prompt composition chain:
- *   identity block → base system prompt → procedural rules → memory observations
+ *   identity → base → operator rules → learned procedural → observations
  */
 
 import {
@@ -20,7 +20,11 @@ import {
   resolveAgentIdentity,
   resolveIdentityLevelForExecutionPath,
   formatIdentityForPrompt,
+  listActiveOperatorRules,
+  selectOperatorRulesForRun,
+  injectOperatorRulesIntoSystemPrompt,
   type IdentityLevel,
+  type OperatorRuleGateRule,
 } from '@los/agent';
 import { getConfig } from '@los/infra/config';
 import {
@@ -44,6 +48,13 @@ export interface ChatContextPolicyDecision {
     activeRuleCount: number;
     observationCount: number;
   };
+  operatorRules: {
+    count: number;
+    requiredCount: number;
+    blockCount: number;
+    machineEnforceableCount: number;
+    injected: boolean;
+  };
   codeGraph: {
     enabled: boolean;
     selected: boolean;
@@ -54,6 +65,8 @@ export interface ChatContextPolicyDecision {
 export interface AugmentedChatSystemPrompt {
   systemPrompt: string;
   policy: ChatContextPolicyDecision;
+  /** Preloaded gate rules for AgentConfig.operatorRulesGate (no second DB hit). */
+  operatorRuleGateRules: OperatorRuleGateRule[];
 }
 
 /**
@@ -116,6 +129,39 @@ export async function augmentChatSystemPrompt(params: {
     }
   }
 
+  // ── Operator rules (before learned procedural) ─────────
+  const rulesCfg = (() => {
+    try {
+      return getConfig().agent?.rules ?? { operatorInject: true, enforcementEnabled: true, maxPromptRules: 20 };
+    } catch {
+      return { operatorInject: true, enforcementEnabled: true, maxPromptRules: 20 };
+    }
+  })();
+  let operatorRuleGateRules: OperatorRuleGateRule[] = [];
+  let operatorSelection = {
+    count: 0,
+    requiredCount: 0,
+    blockCount: 0,
+    machineEnforceableCount: 0,
+    injected: false,
+  };
+  try {
+    if (rulesCfg.operatorInject !== false || rulesCfg.enforcementEnabled !== false) {
+      operatorRuleGateRules = await listActiveOperatorRules({ maxRules: rulesCfg.maxPromptRules ?? 20 });
+      const selected = selectOperatorRulesForRun(operatorRuleGateRules);
+      operatorSelection = {
+        count: selected.rules.length,
+        requiredCount: selected.requiredCount,
+        blockCount: selected.blockCount,
+        machineEnforceableCount: selected.machineEnforceableCount,
+        injected: false,
+      };
+    }
+  } catch {
+    // Operator rules load is best-effort for prompt; enforcement can still fail open later.
+    operatorRuleGateRules = [];
+  }
+
   // ── Memory augmentation ────────────────────────────────
   try {
     const retrieval = await routeMemoryRetrieval({
@@ -147,20 +193,34 @@ export async function augmentChatSystemPrompt(params: {
       }
     }
 
-    // Compose: identity block → augmented prompt (base + memory + code context)
+    if (rulesCfg.operatorInject !== false && operatorRuleGateRules.length > 0) {
+      const block = selectOperatorRulesForRun(operatorRuleGateRules).promptBlock;
+      promptWithCode = injectOperatorRulesIntoSystemPrompt(promptWithCode, block);
+      operatorSelection = { ...operatorSelection, injected: Boolean(block) };
+    }
+
+    // Compose: identity block → augmented prompt (base + operator + memory + code)
     return buildResult(
       identityBlock ? identityBlock + '\n\n' + promptWithCode : promptWithCode,
       {
-        status: activeRuleCount + observationCount > 0 ? 'applied' : 'not_applied',
+        status: activeRuleCount + observationCount > 0 || operatorSelection.injected
+          ? 'applied'
+          : 'not_applied',
         queriedLayers: retrieval.queriedLayers,
         activeRuleCount,
         observationCount,
       },
     );
   } catch {
-    // Memory retrieval is best-effort; fall back to base prompt + identity
+    // Memory retrieval is best-effort; fall back to base prompt + identity + operator
+    let fallback = baseSystemPrompt;
+    if (rulesCfg.operatorInject !== false && operatorRuleGateRules.length > 0) {
+      const block = selectOperatorRulesForRun(operatorRuleGateRules).promptBlock;
+      fallback = injectOperatorRulesIntoSystemPrompt(fallback, block);
+      operatorSelection = { ...operatorSelection, injected: Boolean(block) };
+    }
     return buildResult(
-      identityBlock ? identityBlock + '\n\n' + baseSystemPrompt : baseSystemPrompt,
+      identityBlock ? identityBlock + '\n\n' + fallback : fallback,
       { status: 'fallback', queriedLayers: [], activeRuleCount: 0, observationCount: 0 },
     );
   }
@@ -171,10 +231,12 @@ export async function augmentChatSystemPrompt(params: {
   ): AugmentedChatSystemPrompt {
     return {
       systemPrompt,
+      operatorRuleGateRules,
       policy: {
         baseSystemPromptSource,
         identity: { name: agentName, level: identityLevel, injected: Boolean(identityBlock) },
         memory,
+        operatorRules: operatorSelection,
         codeGraph: {
           enabled: codeGraphEnabled,
           selected: codeGraphSelected,

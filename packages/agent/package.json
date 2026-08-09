@@ -46,6 +46,7 @@
     "./skill-runtime": "./src/skill-runtime.ts",
     "./skill-distribution": "./src/skill-distribution.ts",
     "./rules": "./src/rules.ts",
+    "./operator-rules-runtime": "./src/operator-rules-runtime.ts",
     "./tools": "./src/tools/core/registry.ts",
     "./tools/mcp-client": "./src/tools/external/mcp-client.ts",
     "./cancellation": "./src/cancellation.ts",

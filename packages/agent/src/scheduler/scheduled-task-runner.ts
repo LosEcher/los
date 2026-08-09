@@ -137,6 +137,42 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   } catch {
     // Fail open for skill selection — do not block the run
   }
+  // Operator rules: inject prompt (non-chat paths) + preload hard gate (no per-tool DB).
+  try {
+    if (!input.operatorRulesGate) {
+      const rulesCfg = (getConfig().agent as { rules?: {
+        operatorInject?: boolean;
+        enforcementEnabled?: boolean;
+        maxPromptRules?: number;
+      } }).rules ?? {};
+      const {
+        listActiveOperatorRules,
+        selectOperatorRulesForRun,
+        injectOperatorRulesIntoSystemPrompt,
+        buildOperatorRulesGateConfig,
+      } = await import('../operator-rules-runtime.js');
+      const gateRules = (rulesCfg.operatorInject !== false || rulesCfg.enforcementEnabled !== false)
+        ? await listActiveOperatorRules({ maxRules: rulesCfg.maxPromptRules ?? 20 })
+        : [];
+      if (rulesCfg.operatorInject !== false && gateRules.length > 0) {
+        const block = selectOperatorRulesForRun(gateRules).promptBlock;
+        const basePrompt = input.systemPrompt ?? '';
+        input = {
+          ...input,
+          systemPrompt: injectOperatorRulesIntoSystemPrompt(basePrompt, block),
+        };
+      }
+      input = {
+        ...input,
+        operatorRulesGate: buildOperatorRulesGateConfig(
+          gateRules,
+          rulesCfg.enforcementEnabled !== false,
+        ),
+      };
+    }
+  } catch {
+    // Fail open for operator rules load — do not block the run
+  }
   // Thread allowlist into execution input without mutating caller's object identity beyond clone
   if (effectiveAllowedTools) {
     input = { ...input, allowedTools: effectiveAllowedTools };

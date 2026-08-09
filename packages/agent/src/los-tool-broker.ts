@@ -9,6 +9,7 @@ import { assertNotAborted, inferToolSource, previewText, summarizeCapability, wi
 import type { AgentConfig } from './loop/types.js';
 import { createPreActionFailureEvidence } from './pre-action-evidence.js';
 import { preActionGate, type PreActionGateConfig } from './pre-action-gate.js';
+import { evaluateOperatorRuleGate } from './operator-rules-runtime.js';
 import type { PersistedToolResultEvidence } from './semantic-eviction.js';
 import type { ToolRegistry } from './tools/core/registry.js';
 
@@ -87,7 +88,7 @@ async function executeBrokeredTool(
     },
   });
 
-  const decision = applyPhaseGate(
+  let decision = applyPhaseGate(
     tools.evaluateTool(request.name), request.name, config.runContractMetadata,
   ) as ReturnType<typeof tools.evaluateTool>;
 
@@ -114,6 +115,58 @@ async function executeBrokeredTool(
           failurePatterns: preCheck.failurePatterns,
           fragileFile: preCheck.fragileFile,
           flaggedFiles: preCheck.flaggedFiles,
+        },
+      });
+    }
+  }
+
+  // Operator rules hard gate (after capability/phase, before execute). Pure — no DB.
+  if (decision.allowed) {
+    const ruleDecision = evaluateOperatorRuleGate(
+      request.name,
+      request.arguments,
+      config.operatorRulesGate,
+    );
+    if (ruleDecision.action === 'warn' && ruleDecision.reason) {
+      await emitEvent({
+        type: 'rule.enforced',
+        turn: request.turn,
+        toolName: request.name,
+        parentEventId: planEvent?.id ?? callEvent?.id,
+        payload: {
+          callId: request.callId,
+          ruleId: ruleDecision.ruleId,
+          ruleName: ruleDecision.ruleName,
+          severity: ruleDecision.severity,
+          enforcementMode: ruleDecision.enforcementMode,
+          action: 'warn',
+          toolName: request.name,
+          reason: ruleDecision.reason,
+        },
+      });
+    }
+    if (!ruleDecision.allowed) {
+      decision = {
+        allowed: false,
+        reason: ruleDecision.reason ?? 'blocked by operator rule',
+        reasonCode: 'operator_rule_block',
+        capability: decision.capability,
+        policy: decision.policy,
+      };
+      await emitEvent({
+        type: 'rule.enforced',
+        turn: request.turn,
+        toolName: request.name,
+        parentEventId: planEvent?.id ?? callEvent?.id,
+        payload: {
+          callId: request.callId,
+          ruleId: ruleDecision.ruleId,
+          ruleName: ruleDecision.ruleName,
+          severity: ruleDecision.severity,
+          enforcementMode: ruleDecision.enforcementMode,
+          action: 'block',
+          toolName: request.name,
+          reason: ruleDecision.reason,
         },
       });
     }
