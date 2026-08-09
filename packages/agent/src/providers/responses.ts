@@ -1,6 +1,6 @@
 import type { ModelProfile } from '../model-profiles.js';
 import { AgentError } from '../error-base.js';
-import { recordProviderCall } from './telemetry.js';
+import { recordProviderCall, telemetryUsageFromProvider } from './telemetry.js';
 import { buildOpenAIModelSettings } from '../model-settings.js';
 import { buildOpenAICompatUrl, drainSseBuffer, repairToolCallArguments } from './openai-utils.js';
 import type {
@@ -126,26 +126,52 @@ export function createOpenAIResponsesProvider(cfg: ResponsesConfig): Provider {
         }).catch(() => {});
         throw err;
       }
-      recordProviderCall({
-        traceId: options.traceId ?? '',
-        sessionId: options.sessionId,
-        provider: name, model, endpoint: '/responses', method: 'POST',
-        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
-        status: res.status, durationMs: Date.now() - fetchStart,
-        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
-      }).catch(() => {});
 
       if (!res.ok) {
         const err = await res.text();
+        recordProviderCall({
+          traceId: options.traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/responses', method: 'POST',
+          stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+          status: res.status, durationMs: Date.now() - fetchStart,
+          errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}`,
+        }).catch(() => {});
         throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
       if (options.onDelta) {
-        return await readResponsesStreamResponse(res, model, name, options.onDelta);
+        const headersAt = Date.now();
+        const result = await readResponsesStreamResponse(res, model, name, options.onDelta);
+        const doneAt = Date.now();
+        recordProviderCall({
+          traceId: options.traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model: result.model ?? model, endpoint: '/responses', method: 'POST',
+          stream: true, requestPayloadSize: bodyStr.length,
+          status: 200, durationMs: doneAt - fetchStart,
+          headersDurationMs: headersAt - fetchStart,
+          bodyDurationMs: doneAt - headersAt,
+          usage: telemetryUsageFromProvider(result.usage),
+        }).catch(() => {});
+        return result;
       }
 
+      const headersAt = Date.now();
       const data = await res.json() as any;
-      return parseResponsesSyncResponse(data, model, name);
+      const bodyDoneAt = Date.now();
+      const result = parseResponsesSyncResponse(data, model, name);
+      recordProviderCall({
+        traceId: options.traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model: result.model ?? model, endpoint: '/responses', method: 'POST',
+        stream: false, requestPayloadSize: bodyStr.length,
+        status: 200, durationMs: bodyDoneAt - fetchStart,
+        headersDurationMs: headersAt - fetchStart,
+        bodyDurationMs: bodyDoneAt - headersAt,
+        usage: telemetryUsageFromProvider(result.usage),
+      }).catch(() => {});
+      return result;
     },
 
     async listModels(options: { signal?: AbortSignal } = {}): Promise<ProviderModelInfo[]> {
