@@ -55,6 +55,29 @@ export type UsageSummaryResponse = {
 
 const DAYS = 7;
 
+type DailyDigestResponse = {
+  day: string;
+  highlights: string[];
+  schedule: {
+    enabledCount: number;
+    runTotals: {
+      runCount: number;
+      succeeded: number;
+      failed: number;
+      cancelled: number;
+    };
+  };
+  cadenceRecommendations: Array<{
+    scheduleId: string;
+    title: string;
+    severity: string;
+    action: string;
+    currentExpression: string;
+    recommendedExpression?: string;
+    rationale: string;
+  }>;
+};
+
 export function UsagePage() {
   const { t } = useI18n();
   const from = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -62,6 +85,11 @@ export function UsagePage() {
     queryKey: ['usage-summary', DAYS],
     queryFn: () => getJson<UsageSummaryResponse>(`/usage/summary?from=${encodeURIComponent(from)}`),
     refetchInterval: 60_000,
+  });
+  const digest = useQuery({
+    queryKey: ['daily-digest'],
+    queryFn: () => getJson<DailyDigestResponse>('/ops/daily-digest'),
+    refetchInterval: 120_000,
   });
 
   if (query.isLoading) return <div className="loading-block">{t('ops.usage.loading')}</div>;
@@ -85,13 +113,60 @@ export function UsagePage() {
         <div className="quality-evidence-range">
           <span>{t('ops.usage.lastDays', { days: DAYS })}</span>
         </div>
-        <Button variant="ghost" onClick={() => query.refetch()} disabled={query.isFetching} title={t('ops.usage.refreshTitle')}>
-          <RefreshCw size={14} className={query.isFetching ? 'spin' : ''} />
+        <Button
+          variant="ghost"
+          onClick={() => { void query.refetch(); void digest.refetch(); }}
+          disabled={query.isFetching || digest.isFetching}
+          title={t('ops.usage.refreshTitle')}
+        >
+          <RefreshCw size={14} className={query.isFetching || digest.isFetching ? 'spin' : ''} />
           {t('ops.usage.refresh')}
         </Button>
       </section>
 
       <p className="usage-note">{t('ops.usage.l1Note')}</p>
+
+      {digest.data ? (
+        <section className="usage-table-section">
+          <h3>{t('ops.usage.digestTitle', { day: digest.data.day })}</h3>
+          <ul className="usage-note">
+            {digest.data.highlights.map(line => <li key={line}>{line}</li>)}
+          </ul>
+          <div className="quality-metric-groups">
+            <MetricGroup title={t('ops.usage.digestSchedule')} metrics={[
+              [t('ops.usage.digestEnabled'), count(digest.data.schedule.enabledCount)],
+              [t('ops.usage.digestRuns'), count(digest.data.schedule.runTotals.runCount)],
+              [t('ops.usage.digestOk'), count(digest.data.schedule.runTotals.succeeded)],
+              [t('ops.usage.digestFail'), count(digest.data.schedule.runTotals.failed)],
+              [t('ops.usage.digestCancel'), count(digest.data.schedule.runTotals.cancelled)],
+            ]} />
+          </div>
+          {digest.data.cadenceRecommendations.length > 0 ? (
+            <table className="usage-table">
+              <thead>
+                <tr>
+                  <th>{t('ops.usage.colSeverity')}</th>
+                  <th>{t('ops.usage.colAction')}</th>
+                  <th>{t('ops.usage.colSchedule')}</th>
+                  <th>{t('ops.usage.colCadence')}</th>
+                  <th>{t('ops.usage.colRationale')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {digest.data.cadenceRecommendations.map(row => (
+                  <tr key={`${row.scheduleId}:${row.action}`}>
+                    <td>{row.severity}</td>
+                    <td>{row.action}</td>
+                    <td>{row.title}</td>
+                    <td>{row.recommendedExpression ? `${row.currentExpression} → ${row.recommendedExpression}` : row.currentExpression}</td>
+                    <td>{row.rationale}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="quality-metric-groups">
         <MetricGroup title={t('ops.usage.groupTotals')} metrics={[

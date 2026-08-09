@@ -1,0 +1,68 @@
+contract: los.daily-digest
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Read-only L1 Daily Execution Digest composing scheduled_work runs, usage
+  summary, latest daily_agent_quality snapshot, and cadence recommendations.
+  No new ledger; no external CLI fleets.
+type: object
+routes:
+  - method: GET
+    path: /ops/daily-digest
+    purpose: Return the composed daily digest for a UTC calendar day.
+    query:
+      day: optional YYYY-MM-DD UTC; default yesterday UTC
+      projectId: optional project for quality snapshot; default los
+      tenantId: optional tenant; default local
+    response: DailyDigest
+schemas:
+  DailyDigest:
+    required:
+      - evidenceClass
+      - day
+      - from
+      - to
+      - generatedAt
+      - schedule
+      - usage
+      - quality
+      - cadenceRecommendations
+      - highlights
+    evidenceClass:
+      enum: [los_runtime]
+    schedule:
+      fields: [enabledCount, runTotals, bySchedule]
+    cadenceRecommendations:
+      itemFields:
+        - scheduleId
+        - title
+        - severity
+        - currentExpression
+        - recommendedExpression
+        - action
+        - rationale
+        - estimatedDailyRunsCurrent
+        - estimatedDailyRunsRecommended
+      actionEnum:
+        - keep
+        - reduce_frequency
+        - retire_duplicate
+        - fix_approval_policy
+        - investigate
+safety:
+  - evidenceClass is always los_runtime.
+  - Aggregates contain no prompts, tool args, credentials, or raw transcripts.
+  - Cadence recommendations are advisory; applying them requires operator PATCH.
+nonGoals:
+  - Auto-mutating schedule cadence without operator consent.
+  - External Claude/Codex fleet ingestion.
+  - Generating LLM narrative reports.
+references:
+  - docs/operations/2026-08-09-scheduled-execution-daily-digest-analysis.md
+  - contracts/usage-summary.yaml
+  - contracts/daily-agent-quality.yaml
+verification:
+  - ./tools/check-contracts.sh
+  - packages/agent daily-digest tests
+  - packages/gateway daily-digest-routes tests
