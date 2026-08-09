@@ -81,7 +81,19 @@ loop), composed of:
 | dogfood runtime readiness | 5m (~288/day) | **15m** | Always succeeds in ~0.02s; dogfood does not need sub-5m |
 | log freshness V3 | 10m (~144/day) | **30m** | Same; lag detection does not need 10m |
 | network-observe v5 ×2 | daily 09:00 | **retire one duplicate** | Two enabled rows, same title |
-| surge / NAS / network-observe | 6h / daily | **fix approval**, not cadence | Cancels are `approval_timeout` on `each_run` |
+| surge / NAS / network-observe | 6h / daily | **fix preapproved_scope semantics** | Was waiting per-run then `approval_timeout` deny |
+
+### Approval fix (landed 2026-08-09)
+
+Root cause: `executeScheduledWorkRun` only treated `preapproved_scope` as auto for
+`scheduled_feed_analysis`, so `scheduled_execution` still entered
+`awaiting_approval` and cancelled after 30m with `deniedReason=approval_timeout`.
+
+Code change (`packages/agent/src/scheduled-work/runner.ts`): **any**
+`approvalPolicy === 'preapproved_scope'` skips the per-run wait.
+
+Host config belt-and-suspenders: network-observe v5 / surge v4 / NAS34 set
+`approvalTimeoutAction=approve`.
 
 ## Evidence commands
 
