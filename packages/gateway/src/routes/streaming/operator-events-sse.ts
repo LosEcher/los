@@ -79,6 +79,11 @@ export function registerOperatorEvents(app: FastifyInstance): void {
       'scheduled_work.denied',
       'session.blocked',
       'session.error',
+      // GA / self-bootstrap operator surface (WeChat + web consumers)
+      'governance.job.escalated',
+      'governance.job.progress',
+      'governance.bootstrap.findings',
+      'governance.sweep.digest',
     ];
 
     const pollAndSend = async () => {
