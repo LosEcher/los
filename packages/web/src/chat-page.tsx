@@ -358,6 +358,7 @@ export function ChatPage({
           onWorkspaceRootChange={setWorkspaceRoot} defaultWorkspace={defaultWorkspace}
           advancedState={advancedState} onAdvancedChange={onAdvancedChange} advancedCount={advancedCount}
           selectedSkillIds={selectedSkillIds} onSelectedSkillIdsChange={setSelectedSkillIds}
+          debugMode={debugMode}
         />
       </div>
 

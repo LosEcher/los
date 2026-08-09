@@ -130,10 +130,63 @@ export const NAV: NavItem[] = [
   { id: 'diagnostics', labelKey: 'nav.diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
 ];
 
+export type HashRoute = {
+  page: PageId;
+  /** Selected work item for `#work/<id>` or `#work?id=` / `#inbox?id=` open-work. */
+  workItemId?: string;
+  /** Chat session deep link `#chat?session=`. */
+  sessionId?: string;
+};
+
+/** Parse location.hash into page + optional deep-link ids. */
+export function parseHash(rawHash = typeof window !== 'undefined' ? window.location.hash : ''): HashRoute {
+  const raw = rawHash.replace(/^#/, '').trim();
+  if (!raw) return { page: 'inbox' };
+
+  const workPath = raw.match(/^work\/([^/?#]+)\/?$/);
+  if (workPath?.[1]) {
+    return { page: 'work', workItemId: safeDecode(workPath[1]) };
+  }
+
+  const [pathPart, query = ''] = raw.split('?');
+  const path = pathPart || 'inbox';
+  const params = new URLSearchParams(query);
+  const page: PageId = NAV.find(n => n.id === path)?.id
+    ?? (path === 'onboarding' ? 'onboarding' : 'inbox');
+
+  const workItemId = params.get('id')?.trim() || undefined;
+  const sessionId = params.get('session')?.trim() || undefined;
+
+  if (page === 'work' && workItemId) return { page, workItemId };
+  if (page === 'inbox' && workItemId) return { page, workItemId };
+  if (page === 'chat' && sessionId) return { page, sessionId: safeDecode(sessionId) };
+  return { page };
+}
+
 export function pageFromHash(): PageId {
-  const raw = window.location.hash.replace(/^#/, '');
-  return NAV.find(n => n.id === raw)?.id
-    ?? (raw === 'onboarding' ? 'onboarding' : 'inbox');
+  return parseHash().page;
+}
+
+/** Build a hash fragment (without leading `#`) for navigation. */
+export function buildHash(route: { page: PageId; workItemId?: string; sessionId?: string }): string {
+  if (route.page === 'work' && route.workItemId) {
+    return `work/${encodeURIComponent(route.workItemId)}`;
+  }
+  if (route.page === 'chat' && route.sessionId) {
+    return `chat?session=${encodeURIComponent(route.sessionId)}`;
+  }
+  if (route.page === 'inbox' && route.workItemId) {
+    return `inbox?id=${encodeURIComponent(route.workItemId)}`;
+  }
+  return route.page;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 /** Group More-sheet entries for phone secondary nav. */

@@ -3078,6 +3078,14 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+.work-mobile-back {
+  display: none;
+}
+
+.composer-power-fields {
+  display: contents;
+}
+
 .work-detail-head h2 {
   margin: var(--space-1) 0 var(--space-2);
   font-size: var(--text-xl);
@@ -4094,6 +4102,90 @@ button:disabled {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .mobile-tab-icon-wrap {
+    position: relative;
+    display: inline-flex;
+    line-height: 0;
+  }
+
+  .mobile-tab-badge {
+    position: absolute;
+    top: -6px;
+    right: -10px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: var(--radius-pill);
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  /* Work list → detail stack on phone */
+  .work-page[data-mobile-pane='list'] .work-detail {
+    display: none;
+  }
+
+  .work-page[data-mobile-pane='detail'] .work-list,
+  .work-page[data-mobile-pane='detail'] .work-toolbar-list,
+  .work-page[data-mobile-pane='detail'] .work-create {
+    display: none;
+  }
+
+  .work-page[data-mobile-pane='detail'] .work-split {
+    grid-template-columns: 1fr;
+  }
+
+  .work-page[data-mobile-pane='detail'] .work-detail {
+    display: block;
+    min-height: calc(100dvh - 160px);
+  }
+
+  .work-mobile-back {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    min-height: var(--touch-target);
+    margin-bottom: var(--space-2);
+  }
+
+  .work-mobile-back-icon {
+    transform: rotate(180deg);
+  }
+
+  .work-detail-head {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .work-page[data-mobile-pane='detail'] .work-action-strip {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .work-page[data-mobile-pane='detail'] .work-primary-cta,
+  .work-page[data-mobile-pane='detail'] .work-action-strip .btn {
+    min-height: var(--touch-target);
+  }
+
+  /* Chat: hide power controls on phone unless debug is on */
+  .composer:not([data-debug='true']) .composer-power-fields {
+    display: none;
+  }
+
+  .chat-grid > .inspector {
+    max-height: 180px;
   }
 
   .more-sheet-root {

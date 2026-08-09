@@ -31,9 +31,11 @@ type MobileTabBarProps = {
   onNavigate: (id: PageId) => void;
   moreOpen: boolean;
   onMoreClick: () => void;
+  /** Attention count for Inbox tab badge (decisions waiting on operator). */
+  inboxBadge?: number;
 };
 
-export function MobileTabBar({ page, onNavigate, moreOpen, onMoreClick }: MobileTabBarProps) {
+export function MobileTabBar({ page, onNavigate, moreOpen, onMoreClick, inboxBadge = 0 }: MobileTabBarProps) {
   const { t } = useI18n();
   const moreActive = moreOpen || isMoreShellPage(page);
 
@@ -43,6 +45,7 @@ export function MobileTabBar({ page, onNavigate, moreOpen, onMoreClick }: Mobile
         const item = TAB_META[id];
         const Icon = item.icon;
         const active = !moreOpen && page === id;
+        const badge = id === 'inbox' && inboxBadge > 0 ? inboxBadge : 0;
         return (
           <button
             key={id}
@@ -50,9 +53,13 @@ export function MobileTabBar({ page, onNavigate, moreOpen, onMoreClick }: Mobile
             className="mobile-tab"
             data-active={active ? 'true' : 'false'}
             aria-current={active ? 'page' : undefined}
+            aria-label={badge > 0 ? `${t(item.labelKey)} (${badge})` : undefined}
             onClick={() => onNavigate(id)}
           >
-            <Icon size={20} aria-hidden />
+            <span className="mobile-tab-icon-wrap">
+              <Icon size={20} aria-hidden />
+              {badge > 0 ? <span className="mobile-tab-badge">{badge > 99 ? '99+' : badge}</span> : null}
+            </span>
             <span>{t(item.labelKey)}</span>
           </button>
         );

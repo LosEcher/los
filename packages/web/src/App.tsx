@@ -13,6 +13,7 @@ import {
   getJson,
   postJson,
   type Health,
+  type InboxResponse,
   type SessionSummary,
   type TodoItem,
   type MemoryStats,
@@ -54,16 +55,26 @@ import { AuthBanner } from './auth-banner';
 import { LoginPage, isAuthenticated, logout } from './pages/login-page';
 import { OnboardingPage } from './pages/onboarding-page';
 import { getAuthToken } from './api';
-import { NAV, pageFromHash, type NavItem, type PageId } from './nav-config';
+import { NAV, buildHash, parseHash, type NavItem, type PageId } from './nav-config';
 import { MobileTabBar, MoreSheet } from './mobile-nav';
+
+function initialRoute() {
+  const route = parseHash();
+  // `#inbox?id=` is a deep-link alias for opening Work detail.
+  if (route.page === 'inbox' && route.workItemId) {
+    return { page: 'work' as const, workItemId: route.workItemId };
+  }
+  return route;
+}
 
 export function App() {
   const { t, lang, setLang } = useI18n();
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
-  const [page, setPage] = useState<PageId>(pageFromHash);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const boot = initialRoute();
+  const [page, setPage] = useState<PageId>(boot.page);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(boot.sessionId ?? null);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
-  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(boot.workItemId ?? null);
   const [selectedRunSpecId, setSelectedRunSpecId] = useState<string | null>(null);
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
@@ -81,7 +92,24 @@ export function App() {
   };
 
   useEffect(() => {
-    const onHashChange = () => setPage(pageFromHash());
+    const applyRoute = () => {
+      const route = parseHash();
+      if (route.page === 'inbox' && route.workItemId) {
+        setPage('work');
+        setSelectedWorkItemId(route.workItemId);
+        const next = buildHash({ page: 'work', workItemId: route.workItemId });
+        if (window.location.hash.replace(/^#/, '') !== next) {
+          window.location.hash = next;
+        }
+        return;
+      }
+      setPage(route.page);
+      if (route.workItemId) setSelectedWorkItemId(route.workItemId);
+      if (route.sessionId) setSelectedSessionId(route.sessionId);
+    };
+    // Normalize boot deep-links once (e.g. #inbox?id= → #work/<id>).
+    applyRoute();
+    const onHashChange = () => applyRoute();
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
@@ -95,9 +123,18 @@ export function App() {
     }
   }, [page]);
 
-  const navigate = (id: PageId) => {
+  const navigate = (id: PageId, opts?: { workItemId?: string | null; sessionId?: string | null }) => {
     setPage(id);
-    window.location.hash = id;
+    // Bare Work/Chat tab clears deep-link selection so phone returns to list/empty chat.
+    if (opts && 'workItemId' in opts) setSelectedWorkItemId(opts.workItemId ?? null);
+    else if (id === 'work' && !opts) setSelectedWorkItemId(null);
+    if (opts && 'sessionId' in opts) setSelectedSessionId(opts.sessionId ?? null);
+    else if (id === 'chat' && !opts) setSelectedSessionId(null);
+    window.location.hash = buildHash({
+      page: id,
+      workItemId: id === 'work' ? (opts?.workItemId ?? undefined) : undefined,
+      sessionId: id === 'chat' ? (opts?.sessionId ?? undefined) : undefined,
+    });
     setMoreOpen(false);
   };
   const health = useQuery({
@@ -164,14 +201,12 @@ export function App() {
 
   const active = NAV.find(item => item.id === page) ?? NAV[0]!;
   const continueSession = (id: string) => {
-    setSelectedSessionId(id);
     setBranchFromSession(null);
-    navigate('chat');
+    navigate('chat', { sessionId: id });
   };
   const branchSession = (id: string) => {
-    setSelectedSessionId(null);
     setBranchFromSession(id);
-    navigate('chat');
+    navigate('chat', { sessionId: null });
   };
   const openTodo = (id: string) => {
     setSelectedTodoId(id);
@@ -180,23 +215,30 @@ export function App() {
   const runTodo = (todo: TodoItem) => {
     setSelectedTodoId(todo.id);
     setActiveTodoContext(todo);
-    setSelectedSessionId(todo.sessionId ?? null);
-    navigate('chat');
+    navigate('chat', { sessionId: todo.sessionId ?? null });
   };
   const openWork = (id: string) => {
-    setSelectedWorkItemId(id);
-    navigate('work');
+    navigate('work', { workItemId: id });
   };
   const openRun = (id: string) => {
     setSelectedRunSpecId(id);
     navigate('run-specs');
   };
   const startWork = (item: WorkItemProjection) => {
-    setSelectedWorkItemId(item.id);
     setActiveTodoContext(workItemAsTodo(item));
-    setSelectedSessionId(null);
-    navigate('chat');
+    navigate('chat', { workItemId: item.id, sessionId: null });
   };
+  const selectWorkItem = (id: string | null) => {
+    setSelectedWorkItemId(id);
+    window.location.hash = buildHash({ page: 'work', workItemId: id ?? undefined });
+  };
+
+  const inboxBadge = useQuery({
+    queryKey: ['inbox', 'badge'],
+    queryFn: () => getJson<InboxResponse>('/inbox?limit=100'),
+    refetchInterval: 15_000,
+    select: data => (data.results ?? []).filter(entry => entry.attentionState !== 'none' && entry.attentionState !== 'running').length,
+  });
   const queryClient = useQueryClient();
   const approvePlan = useMutation({
     mutationFn: (runSpecId: string) => postJson(`/runs/${runSpecId}/approve`, { reason: 'plan reviewed from inbox' }),
@@ -358,7 +400,7 @@ export function App() {
         </header>
 
         {page === 'inbox' && <InboxPage onOpenWork={openWork} onOpenRun={openRun} onOpenSession={continueSession} onApprovePlan={handleApprovePlan} onStartWork={startWork} />}
-        {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={setSelectedWorkItemId} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
+        {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={selectWorkItem} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
         {page === 'schedules' && <SchedulesPage />}
         {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} branchFromSession={branchFromSession} onBranchConsumed={() => setBranchFromSession(null)} activeTodoContext={activeTodoContext} onTodoContextSet={setActiveTodoContext} onTodoContextClear={() => setActiveTodoContext(null)} />}
         {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} onBranchSession={branchSession} onSelectTodo={openTodo} />}
@@ -392,6 +434,7 @@ export function App() {
         onNavigate={navigate}
         moreOpen={moreOpen}
         onMoreClick={() => setMoreOpen(open => !open)}
+        inboxBadge={inboxBadge.data ?? 0}
       />
       <MoreSheet
         open={moreOpen}

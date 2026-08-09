@@ -131,9 +131,17 @@ export function WorkPage({
     onSuccess: refresh,
   });
 
+  // Phone stack: only show detail when the operator explicitly selected (or deep-linked) an id.
+  // Desktop keeps split view with the first list row as a soft default via activeId.
+  const mobilePane = selectedWorkItemId ? 'detail' : 'list';
+
   return (
-    <section className="daily-page work-page" data-debug={debugMode ? 'true' : 'false'}>
-      <div className="daily-toolbar">
+    <section
+      className="daily-page work-page"
+      data-debug={debugMode ? 'true' : 'false'}
+      data-mobile-pane={mobilePane}
+    >
+      <div className="daily-toolbar work-toolbar-list">
         <div className="work-filters">
           <label className="work-search"><Search size={14} /><input aria-label={t('work.searchAria')} value={search} onChange={event => setSearch(event.target.value)} placeholder={t('work.searchAria')} /></label>
           <select aria-label={t('work.statusAria')} value={status} onChange={event => setStatus(event.target.value as TodoStatus | '')}>
@@ -209,7 +217,16 @@ export function WorkPage({
           {!item ? <div className="daily-empty"><FileCheck2 size={22} /><strong>{t('work.selectTitle')}</strong><span>{t('work.selectHint')}</span></div> : (
             <>
               <header className="work-detail-head">
-                <div>
+                <button
+                  type="button"
+                  className="work-mobile-back ghost-btn"
+                  onClick={() => onSelectedWorkItemChange(null)}
+                  aria-label={t('common.back')}
+                >
+                  <ChevronRight size={16} className="work-mobile-back-icon" aria-hidden />
+                  {t('common.back')}
+                </button>
+                <div className="work-detail-title">
                   <span className="eyebrow">{item.projectId} / {item.priority}</span>
                   <h2>{item.title}</h2>
                   <p>{item.goal}</p>
