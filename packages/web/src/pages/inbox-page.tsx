@@ -8,6 +8,7 @@ import {
   Play,
   Plus,
   RefreshCcw,
+  Shield,
   ShieldAlert,
   Zap,
 } from 'lucide-react';
@@ -23,6 +24,30 @@ import {
 } from '../api/index.js';
 import { formatDate } from '../ui.js';
 import { tt, useI18n } from '../i18n';
+
+type GovernanceJobSummary = {
+  id: string;
+  jobType: string;
+  status: string;
+  circuitState: string;
+  escalated: boolean;
+  findingCount: number | null;
+  autoFixEnabled: boolean;
+  lastRunAt: string | null;
+};
+
+type GovernanceListResponse = {
+  count: number;
+  attentionCount: number;
+  jobs: GovernanceJobSummary[];
+};
+
+function isGovernanceAttention(job: GovernanceJobSummary): boolean {
+  return job.escalated
+    || job.circuitState === 'open'
+    || job.status === 'paused'
+    || (job.findingCount ?? 0) > 0;
+}
 
 type InboxFilter = 'all' | 'decision' | 'recovery' | 'review' | 'running';
 
@@ -59,6 +84,17 @@ export function InboxPage({
     queryFn: () => getJson<InboxResponse>('/inbox?limit=100'),
     refetchInterval: 10_000,
   });
+  const governance = useQuery({
+    queryKey: ['governance-jobs', 'inbox'],
+    queryFn: () => getJson<GovernanceListResponse>('/governance/jobs'),
+    refetchInterval: 30_000,
+  });
+  const runGovJob = useMutation({
+    mutationFn: (jobType: string) => postJson(`/governance/jobs/${jobType}/run`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['governance-jobs'] });
+    },
+  });
   const quickMutation = useMutation({
     mutationFn: (goal: string) => postJson<{ id: string }>('/work-items/quick', { goal }),
     onSuccess: async (data) => {
@@ -84,6 +120,11 @@ export function InboxPage({
   }, [quickGoal, quickMutation]);
   const entries = inbox.data?.results ?? [];
   const visible = useMemo(() => entries.filter(entry => matchesFilter(entry, filter)), [entries, filter]);
+  const govAttention = useMemo(
+    () => (governance.data?.jobs ?? []).filter(isGovernanceAttention).slice(0, 5),
+    [governance.data?.jobs],
+  );
+  const govCount = governance.data?.attentionCount ?? govAttention.length;
 
   return (
     <section className="daily-page inbox-page">
@@ -93,9 +134,17 @@ export function InboxPage({
           <SummaryCount label={t('work.inbox.sum.recovery')} value={count(entries, ['recovery_required'])} tone="danger" />
           <SummaryCount label={t('work.inbox.sum.review')} value={count(entries, ['review_ready'])} tone="ok" />
           <SummaryCount label={t('work.inbox.sum.running')} value={count(entries, ['running'])} tone="info" />
+          <SummaryCount label={t('work.inbox.sum.governance')} value={govCount} tone={govCount > 0 ? 'warn' : 'info'} />
         </div>
-        <button className="icon-btn" type="button" title={t('work.inbox.refresh')} aria-label={t('work.inbox.refresh')} onClick={() => inbox.refetch()} disabled={inbox.isFetching}>
-          <RefreshCcw size={15} className={inbox.isFetching ? 'spin' : ''} />
+        <button
+          className="icon-btn"
+          type="button"
+          title={t('work.inbox.refresh')}
+          aria-label={t('work.inbox.refresh')}
+          onClick={() => { inbox.refetch(); governance.refetch(); }}
+          disabled={inbox.isFetching || governance.isFetching}
+        >
+          <RefreshCcw size={15} className={inbox.isFetching || governance.isFetching ? 'spin' : ''} />
         </button>
       </div>
 
@@ -120,6 +169,43 @@ export function InboxPage({
           {quickMutation.isPending ? t('work.inbox.creating') : <><Plus size={14} /> {t('work.inbox.create')}</>}
         </button>
       </div>
+
+      {govAttention.length > 0 ? (
+        <section className="inbox-governance-strip" aria-label={t('work.inbox.governanceAria')}>
+          <div className="inbox-governance-head">
+            <Shield size={15} />
+            <strong>{t('work.inbox.governanceTitle')}</strong>
+            <span className="muted">{t('work.inbox.governanceHint', { n: String(govCount) })}</span>
+            <button type="button" className="link-btn" onClick={() => { window.location.hash = 'governance'; }}>
+              {t('work.inbox.governanceOpen')}
+            </button>
+          </div>
+          <ul className="inbox-governance-list">
+            {govAttention.map(job => (
+              <li key={job.id} className="inbox-governance-row">
+                <code>{job.jobType}</code>
+                <span className="muted">
+                  {job.escalated
+                    ? t('work.inbox.governanceEscalated')
+                    : job.circuitState === 'open'
+                      ? t('work.inbox.governanceCircuit')
+                      : job.status === 'paused'
+                        ? t('work.inbox.governancePaused')
+                        : t('work.inbox.governanceFindings', { n: String(job.findingCount ?? 0) })}
+                </span>
+                <button
+                  type="button"
+                  className="ghost-btn tiny-btn"
+                  disabled={runGovJob.isPending}
+                  onClick={() => runGovJob.mutate(job.jobType)}
+                >
+                  {t('work.inbox.governanceRun')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="daily-split">
         <nav className="attention-filters" aria-label={t('work.inbox.filtersAria')}>

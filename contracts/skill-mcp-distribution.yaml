@@ -1,5 +1,5 @@
 contract: los.skill-mcp-distribution
-version: 0.2.0
+version: 0.3.0
 status: implemented
 owner: packages/agent
 description: >
@@ -35,6 +35,12 @@ routes:
       path: /mcp-servers/:id/pin
     - method: POST
       path: /mcp-servers/:id/rollback
+    - method: POST
+      path: /mcp-servers/:id/verify
+      behavior: >
+        resolve credential_ref when present, build full MCPServerConfig
+        (stdio command/args/env or remote url/transport/headers), connect,
+        discover tools; responses never include raw secrets
 versioning:
   algorithm: sha256
   encoding: lowercase hexadecimal
@@ -55,13 +61,21 @@ mcpAuthentication:
     credentialRef: opaque string | null
   separation: authConfig and toolPolicy are independent persisted objects
   secretStorage: raw access tokens, refresh tokens, cookies, API keys, and OAuth payloads are forbidden
-  responseRedaction: API responses expose envKeys but never env values
+  responseRedaction: API responses expose envKeys but never env values or header values
+  credentialRefValidation: >
+    credential_ref must match the same approved secret-ref shape as
+    provider_accounts.secretRef (env:, local-file:, external:, adapter:)
   currentExecution:
     stdioWithoutAuth: supported after explicit verification and enablement
-    credentialRef: fail-closed until a credential resolver is implemented
+    credentialRef: >
+      supported for env: and local-file:los-auth/* after verify+enable;
+      stdio injects resolved values into child env; remote injects
+      Authorization Bearer headers in-memory; external:* and adapter:*
+      remain fail-closed (backend_not_implemented); missing env or
+      local-file secret fails closed at verify
     oauth: fail-closed until OAuth transport and credential resolution are implemented
-    sse: fail-closed
-    streamableHttp: fail-closed
+    sse: supported after verify+enable when url present and auth resolved
+    streamableHttp: supported after verify+enable when url present and auth resolved
 mcpToolPolicy:
   shape:
     allow: string[]
@@ -116,8 +130,8 @@ registrationSafety:
     - enabled is true
     - status is connected
     - pinnedVersionHash is empty or equals versionHash
-    - transport is stdio
-    - auth mode is none
+    - transport connection metadata is present (stdio command or remote url)
+    - auth mode is none, or credential_ref with approved env:/local-file:los-auth/* shape
 verification:
   - ./tools/check-contracts.sh
   - pnpm --filter @los/agent test

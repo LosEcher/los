@@ -21,6 +21,7 @@ const sharedProcessTestFiles = [
   'src/ga-branch-hygiene.test.ts',
   'src/ga-circuit-breaker.test.ts',
   'src/ga-loop-integration.test.ts',
+  'src/governance-notify.test.ts',
   'src/governance-auditors-supply-chain.test.ts',
   'src/governance-auditors-migration.test.ts',
   'src/governance-reconciliation.test.ts',
@@ -113,6 +114,7 @@ const isolatedGroupA = [
   'src/governance-wake.test.ts',
   'src/kernel-event-projection.test.ts',
   'src/managed-workspaces.test.ts',
+  'src/mcp-credential-resolver.test.ts',
   'src/mcp-distribution.test.ts',
   'src/message-router/handlers-run-contract.test.ts',
 ];
@@ -135,6 +137,7 @@ const isolatedGroupB = [
   'src/run-specs.test.ts',
   'src/runtime-evidence-graph.test.ts',
   'src/scenario-economics.test.ts',
+  'src/usage-summary.test.ts',
   'src/scheduled-work.test.ts',
   'src/scheduler-kernel-shadow.test.ts',
   'src/scheduler-planning.test.ts',

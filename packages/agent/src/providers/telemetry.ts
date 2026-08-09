@@ -29,8 +29,39 @@ export interface ProviderCallTelemetry {
   errorCode?: string;
   errorMessage?: string;
   rateLimitResetMs?: number;
-  usage?: { promptTokens: number; completionTokens: number };
+  /** Token usage from the provider response. Prefer writing this on success paths. */
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    cacheHitTokens?: number;
+    cacheMissTokens?: number;
+    totalTokens?: number;
+  };
   createdAt?: string;
+}
+
+/** Normalize ProviderResponse-style usage for telemetry JSON persistence. */
+export function telemetryUsageFromProvider(usage?: {
+  promptTokens?: number;
+  completionTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  totalTokens?: number;
+} | null): ProviderCallTelemetry['usage'] | undefined {
+  if (!usage) return undefined;
+  const promptTokens = Number(usage.promptTokens ?? 0);
+  const completionTokens = Number(usage.completionTokens ?? 0);
+  if (!Number.isFinite(promptTokens) && !Number.isFinite(completionTokens)) return undefined;
+  const cacheHitTokens = usage.cacheHitTokens;
+  const cacheMissTokens = usage.cacheMissTokens;
+  const totalTokens = usage.totalTokens;
+  return {
+    promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+    completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+    ...(cacheHitTokens !== undefined ? { cacheHitTokens: Number(cacheHitTokens) || 0 } : {}),
+    ...(cacheMissTokens !== undefined ? { cacheMissTokens: Number(cacheMissTokens) || 0 } : {}),
+    ...(totalTokens !== undefined ? { totalTokens: Number(totalTokens) || 0 } : {}),
+  };
 }
 
 const SCHEMA = `

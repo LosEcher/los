@@ -1,0 +1,239 @@
+import { useQuery } from '@tanstack/react-query';
+import { CircleDollarSign, RefreshCw } from 'lucide-react';
+
+import { getJson } from '../api/index.js';
+import { Button } from '../ui.js';
+import { useI18n } from '../i18n';
+
+export type UsageSummaryResponse = {
+  evidenceClass: 'los_runtime';
+  from: string;
+  to: string;
+  totals: {
+    modelResponseCount: number;
+    sessionCount: number;
+    promptTokens: number;
+    completionTokens: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    totalTokens: number;
+    estimatedCostUsd: number;
+    cacheSavingsUsd: number;
+    cacheHitRate: number | null;
+  };
+  byProviderModel: Array<{
+    provider: string;
+    model: string;
+    modelResponseCount: number;
+    sessionCount: number;
+    promptTokens: number;
+    completionTokens: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    estimatedCostUsd: number;
+    cacheSavingsUsd: number;
+  }>;
+  byDay: Array<{
+    day: string;
+    modelResponseCount: number;
+    sessionCount: number;
+    promptTokens: number;
+    completionTokens: number;
+    cacheHitTokens: number;
+    estimatedCostUsd: number;
+  }>;
+  callTelemetry: Array<{
+    provider: string;
+    model: string;
+    callCount: number;
+    errorCount: number;
+    avgDurationMs: number | null;
+    withUsageCount: number;
+    usageFillRate: number | null;
+  }>;
+};
+
+const DAYS = 7;
+
+export function UsagePage() {
+  const { t } = useI18n();
+  const from = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const query = useQuery({
+    queryKey: ['usage-summary', DAYS],
+    queryFn: () => getJson<UsageSummaryResponse>(`/usage/summary?from=${encodeURIComponent(from)}`),
+    refetchInterval: 60_000,
+  });
+
+  if (query.isLoading) return <div className="loading-block">{t('ops.usage.loading')}</div>;
+  if (query.error) {
+    return <div className="daily-error">{t('ops.usage.unavailablePrefix', { error: String(query.error) })}</div>;
+  }
+  if (!query.data) return null;
+
+  const { totals, byProviderModel, byDay, callTelemetry, evidenceClass } = query.data;
+
+  return (
+    <div className="daily-quality usage-page" aria-live="polite">
+      <section className="quality-evidence-band">
+        <div className="quality-evidence-main">
+          <CircleDollarSign size={18} />
+          <div>
+            <span className="quality-kicker">{t('ops.usage.evidenceClassLabel')}</span>
+            <strong>{evidenceClass}</strong>
+          </div>
+        </div>
+        <div className="quality-evidence-range">
+          <span>{t('ops.usage.lastDays', { days: DAYS })}</span>
+        </div>
+        <Button variant="ghost" onClick={() => query.refetch()} disabled={query.isFetching} title={t('ops.usage.refreshTitle')}>
+          <RefreshCw size={14} className={query.isFetching ? 'spin' : ''} />
+          {t('ops.usage.refresh')}
+        </Button>
+      </section>
+
+      <p className="usage-note">{t('ops.usage.l1Note')}</p>
+
+      <div className="quality-metric-groups">
+        <MetricGroup title={t('ops.usage.groupTotals')} metrics={[
+          [t('ops.usage.metricResponses'), count(totals.modelResponseCount)],
+          [t('ops.usage.metricSessions'), count(totals.sessionCount)],
+          [t('ops.usage.metricPromptTokens'), count(totals.promptTokens)],
+          [t('ops.usage.metricCompletionTokens'), count(totals.completionTokens)],
+          [t('ops.usage.metricCacheHit'), count(totals.cacheHitTokens)],
+          [t('ops.usage.metricCacheMiss'), count(totals.cacheMissTokens)],
+          [t('ops.usage.metricCacheHitRate'), percent(totals.cacheHitRate)],
+          [t('ops.usage.metricCost'), money(totals.estimatedCostUsd)],
+          [t('ops.usage.metricCacheSavings'), money(totals.cacheSavingsUsd)],
+        ]} />
+      </div>
+
+      <section className="usage-table-section">
+        <h3>{t('ops.usage.byProviderModel')}</h3>
+        {byProviderModel.length === 0 ? (
+          <div className="daily-empty"><span>{t('ops.usage.empty')}</span></div>
+        ) : (
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>{t('ops.usage.colProvider')}</th>
+                <th>{t('ops.usage.colModel')}</th>
+                <th>{t('ops.usage.colResponses')}</th>
+                <th>{t('ops.usage.colCost')}</th>
+                <th>{t('ops.usage.colPrompt')}</th>
+                <th>{t('ops.usage.colCompletion')}</th>
+                <th>{t('ops.usage.colCacheHit')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byProviderModel.map(row => (
+                <tr key={`${row.provider}:${row.model}`}>
+                  <td>{row.provider}</td>
+                  <td>{row.model}</td>
+                  <td>{count(row.modelResponseCount)}</td>
+                  <td>{money(row.estimatedCostUsd)}</td>
+                  <td>{count(row.promptTokens)}</td>
+                  <td>{count(row.completionTokens)}</td>
+                  <td>{count(row.cacheHitTokens)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="usage-table-section">
+        <h3>{t('ops.usage.byDay')}</h3>
+        {byDay.length === 0 ? (
+          <div className="daily-empty"><span>{t('ops.usage.empty')}</span></div>
+        ) : (
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>{t('ops.usage.colDay')}</th>
+                <th>{t('ops.usage.colResponses')}</th>
+                <th>{t('ops.usage.colSessions')}</th>
+                <th>{t('ops.usage.colCost')}</th>
+                <th>{t('ops.usage.colPrompt')}</th>
+                <th>{t('ops.usage.colCompletion')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byDay.map(row => (
+                <tr key={row.day}>
+                  <td>{row.day}</td>
+                  <td>{count(row.modelResponseCount)}</td>
+                  <td>{count(row.sessionCount)}</td>
+                  <td>{money(row.estimatedCostUsd)}</td>
+                  <td>{count(row.promptTokens)}</td>
+                  <td>{count(row.completionTokens)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="usage-table-section">
+        <h3>{t('ops.usage.callTelemetry')}</h3>
+        <p className="usage-note">{t('ops.usage.callTelemetryNote')}</p>
+        {callTelemetry.length === 0 ? (
+          <div className="daily-empty"><span>{t('ops.usage.empty')}</span></div>
+        ) : (
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>{t('ops.usage.colProvider')}</th>
+                <th>{t('ops.usage.colModel')}</th>
+                <th>{t('ops.usage.colCalls')}</th>
+                <th>{t('ops.usage.colErrors')}</th>
+                <th>{t('ops.usage.colAvgMs')}</th>
+                <th>{t('ops.usage.colUsageFill')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {callTelemetry.map(row => (
+                <tr key={`call:${row.provider}:${row.model}`}>
+                  <td>{row.provider}</td>
+                  <td>{row.model}</td>
+                  <td>{count(row.callCount)}</td>
+                  <td>{count(row.errorCount)}</td>
+                  <td>{row.avgDurationMs == null ? '—' : Math.round(row.avgDurationMs)}</td>
+                  <td>{percent(row.usageFillRate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MetricGroup({ title, metrics }: { title: string; metrics: Array<[string, string]> }) {
+  return (
+    <div className="quality-metric-group">
+      <h3>{title}</h3>
+      <dl>
+        {metrics.map(([label, value]) => (
+          <div key={label} className="quality-metric-row">
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function count(n: number): string {
+  return Number.isFinite(n) ? n.toLocaleString() : '0';
+}
+
+function money(n: number): string {
+  return `$${(Number.isFinite(n) ? n : 0).toFixed(4)}`;
+}
+
+function percent(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return `${(n * 100).toFixed(1)}%`;
+}

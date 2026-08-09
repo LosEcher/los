@@ -26,7 +26,7 @@ import { buildOpenAICompatUrl, drainSseBuffer, repairJson, repairToolCallArgumen
 import { mergeToolCallDeltas, mergeSplitToolCalls } from './delta-repair.js';
 import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIResponsesProvider } from './responses.js';
-import { recordProviderCall } from './telemetry.js';
+import { recordProviderCall, telemetryUsageFromProvider } from './telemetry.js';
 import { incrementRepairCounter } from './repair-telemetry.js';
 
 // Proxy support — when HTTPS_PROXY or HTTP_PROXY is set, route all outbound
@@ -214,18 +214,20 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
 
       if (options.onDelta) {
         // Streamed response: record completion only after the stream is fully
-        // consumed so durationMs covers the whole call (P0-2).
+        // consumed so durationMs covers the whole call (P0-2). Include usage
+        // so call-level telemetry can feed the L1 usage cube.
         const headersAt = Date.now();
         const result = await readOpenAIStreamResponse(res, model, name, options.onDelta, options.traceId ?? traceId);
         const doneAt = Date.now();
         recordProviderCall({
           traceId: options.traceId ?? traceId ?? '',
           sessionId: options.sessionId,
-          provider: name, model, endpoint: '/chat/completions', method: 'POST',
+          provider: name, model: result.model ?? model, endpoint: '/chat/completions', method: 'POST',
           stream: true, requestPayloadSize: bodyStr.length,
           status: 200, durationMs: doneAt - fetchStart,
           headersDurationMs: headersAt - fetchStart,
           bodyDurationMs: doneAt - headersAt,
+          usage: telemetryUsageFromProvider(result.usage),
         }).catch(() => {});
         return result;
       }
@@ -234,15 +236,6 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
       const headersAt = Date.now();
       const data = await res.json() as any;
       const bodyDoneAt = Date.now();
-      recordProviderCall({
-        traceId: options.traceId ?? traceId ?? '',
-        sessionId: options.sessionId,
-        provider: name, model, endpoint: '/chat/completions', method: 'POST',
-        stream: false, requestPayloadSize: bodyStr.length,
-        status: 200, durationMs: bodyDoneAt - fetchStart,
-        headersDurationMs: headersAt - fetchStart,
-        bodyDurationMs: bodyDoneAt - headersAt,
-      }).catch(() => {});
       const choice = data.choices?.[0];
       const msg = choice?.message;
 
@@ -282,19 +275,32 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         ?? data?.choices?.[0]?.finish_reason
         ?? undefined;
 
+      const usage = {
+        promptTokens: data.usage?.prompt_tokens ?? data.usage?.input_tokens ?? 0,
+        completionTokens: data.usage?.completion_tokens ?? data.usage?.output_tokens ?? 0,
+        cacheHitTokens: data.usage?.prompt_cache_hit_tokens ?? data.usage?.cache_read_input_tokens ?? 0,
+        cacheMissTokens: data.usage?.prompt_cache_miss_tokens ?? data.usage?.cache_creation_input_tokens ?? 0,
+        totalTokens: data.usage?.total_tokens ?? undefined,
+      };
+      const effectiveModel = data.model ?? model;
+      recordProviderCall({
+        traceId: options.traceId ?? traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model: effectiveModel, endpoint: '/chat/completions', method: 'POST',
+        stream: false, requestPayloadSize: bodyStr.length,
+        status: 200, durationMs: bodyDoneAt - fetchStart,
+        headersDurationMs: headersAt - fetchStart,
+        bodyDurationMs: bodyDoneAt - headersAt,
+        usage: telemetryUsageFromProvider(usage),
+      }).catch(() => {});
+
       return {
         text: msg?.content ?? '',
         toolCalls,
         reasoningContent,
         finishReason: normalizeFinishReason(rawFinishReason, 'openai'),
-        usage: {
-          promptTokens: data.usage?.prompt_tokens ?? data.usage?.input_tokens ?? 0,
-          completionTokens: data.usage?.completion_tokens ?? data.usage?.output_tokens ?? 0,
-          cacheHitTokens: data.usage?.prompt_cache_hit_tokens ?? data.usage?.cache_read_input_tokens ?? 0,
-          cacheMissTokens: data.usage?.prompt_cache_miss_tokens ?? data.usage?.cache_creation_input_tokens ?? 0,
-          totalTokens: data.usage?.total_tokens ?? undefined,
-        },
-        model: data.model ?? model,
+        usage,
+        model: effectiveModel,
       };
     },
 

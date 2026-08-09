@@ -240,20 +240,27 @@ function formatAlertForWeclaw(alert: OperatorAlert): string {
     lines.push('说明: 任务已继续执行，本条无需回复。');
   }
   lines.push('');
-  lines.push(`Session: ${sid}`);
-  if (runId) lines.push(`Run: ${runId}`);
+  const isGovernance = String(alert.type ?? '').startsWith('governance.');
+  if (isGovernance) {
+    lines.push('说明: 打开 Web → Ops → 治理 查看并操作（暂停/恢复/立即运行）。');
+  } else {
+    lines.push(`Session: ${sid}`);
+    if (runId) lines.push(`Run: ${runId}`);
+  }
   lines.push('');
-  // Approval commands only for actionable alerts; informational notices must
-  // not advertise #approve-phase/#verify-run.
-  if (kind === 'needs_decision' && runId) {
+  // Approval commands only for actionable run alerts; informational notices must
+  // not advertise #approve-phase/#verify-run. Governance uses the Web ops page.
+  if (kind === 'needs_decision' && runId && !isGovernance) {
     lines.push('【计划审批】每次只发一行（不要连粘）:');
     lines.push(`#approve-phase ${runId}`);
     lines.push(`#verify-run ${runId}`);
     lines.push('');
     lines.push('说明: #approve-phase 只批计划；#verify-run 跑 requiredChecks（空则空跑 succeeded）。');
   }
-  lines.push('【会话级】每次只发一行:');
-  lines.push(`#status ${sid}`);
+  if (!isGovernance) {
+    lines.push('【会话级】每次只发一行:');
+    lines.push(`#status ${sid}`);
+  }
   return lines.join('\n');
 }
 
@@ -330,6 +337,12 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
     if (eventType !== 'session.event') return;
 
     const payload = parsed.payload ?? {};
+    const isGovernanceEvent =
+      parsed.type === 'governance.job.escalated'
+      || parsed.type === 'governance.job.progress'
+      || parsed.type === 'governance.bootstrap.findings'
+      || parsed.type === 'governance.sweep.digest';
+
     const isOperatorAttention =
       parsed.type === 'tool.warned' ||
       parsed.type === 'tool.denied' ||
@@ -339,13 +352,17 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       parsed.type === 'scheduled_work.denied' ||
       (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
       parsed.type === 'session.blocked' ||
-      parsed.type === 'session.error';
+      parsed.type === 'session.error' ||
+      isGovernanceEvent;
 
     if (!isOperatorAttention) return;
     console.log(`[events] attention type=${parsed.type} session=${parsed.sessionId ?? ''}`);
 
     const sessionId = parsed.sessionId ?? '';
-    const dedupKey = `${sessionId}:${parsed.type}`;
+    // Governance digests dedupe by jobType so hourly jobs don't spam.
+    const dedupKey = isGovernanceEvent
+      ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
+      : `${sessionId}:${parsed.type}`;
 
     if (recentAlerts.get(dedupKey) && Date.now() - recentAlerts.get(dedupKey)! < ALERT_DEDUP_MS) return;
     recentAlerts.set(dedupKey, Date.now());
@@ -373,16 +390,25 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
     // Title is decided by the action semantics; severity only sets the color.
     const kind = isDenied
       ? 'already_denied' as const
-      : (parsed.type === 'run.operator_attention_required' || parsed.type === 'operator_attention' || parsed.type === 'session.blocked' || parsed.type === 'run.recovery_required')
+      : (parsed.type === 'run.operator_attention_required'
+        || parsed.type === 'operator_attention'
+        || parsed.type === 'session.blocked'
+        || parsed.type === 'run.recovery_required'
+        || parsed.type === 'governance.job.escalated'
+        || payload.requiresDecision === true)
         ? 'needs_decision' as const
         : 'info' as const;
     const title = isDenied
       ? '工具已拒绝'
-      : kind === 'needs_decision'
-        ? '等待你审批'
-        : parsed.type === 'tool.warned'
-          ? '风险提示｜任务已继续（无需回复）'
-          : '通知';
+      : typeof payload.title === 'string' && payload.title.trim()
+        ? payload.title.trim()
+        : kind === 'needs_decision'
+          ? (isGovernanceEvent ? '治理需要处理' : '等待你审批')
+          : parsed.type === 'tool.warned'
+            ? '风险提示｜任务已继续（无需回复）'
+            : isGovernanceEvent
+              ? '治理进度'
+              : '通知';
 
     // Dedup tool.denied more aggressively (same session+tool within window)
     const toolName = parsed.toolName ?? payload.tool_name;
@@ -390,14 +416,21 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
     if (isDenied && recentAlerts.get(denyKey) && Date.now() - recentAlerts.get(denyKey)! < ALERT_DEDUP_MS) return;
     if (isDenied) recentAlerts.set(denyKey, Date.now());
 
+    const govDetail = typeof payload.detail === 'string' ? payload.detail : undefined;
+    const govJob = typeof payload.jobType === 'string' ? payload.jobType : undefined;
     const alert: OperatorAlert = {
       sessionId,
       type: parsed.type,
       toolName,
-      reason: payload.reason ?? payload.error ?? parsed.type,
-      severity: parsed.type === 'session.error' || payload.knownFailure ? 'critical' :
+      reason: govDetail
+        ?? payload.reason
+        ?? payload.error
+        ?? (govJob ? `job=${govJob}` : undefined)
+        ?? parsed.type,
+      severity: parsed.type === 'session.error' || payload.knownFailure || payload.severity === 'critical' ? 'critical' :
                 isDenied ? 'info' :
-                parsed.type === 'tool.warned' ? 'warning' : 'info',
+                parsed.type === 'tool.warned' || parsed.type === 'governance.job.escalated' || payload.severity === 'warning' ? 'warning' :
+                'info',
       kind,
       title,
       callId: payload.callId ?? payload.call_id,

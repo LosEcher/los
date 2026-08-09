@@ -272,9 +272,15 @@ export interface MCPServerRegistryRecord {
 /**
  * Convert a registry record to MCP client config.
  * Supports stdio (command), SSE, and streamable-http (url) transports.
+ * Prefer explicit transport when set so remote verify is not forced through stdio.
  */
 export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServerConfig | null {
-  if (record.command) {
+  const transport = record.transport
+    ?? (record.command ? 'stdio' : record.url ? 'sse' : undefined);
+  if (!transport) return null;
+
+  if (transport === 'stdio') {
+    if (!record.command) return null;
     return {
       command: record.command,
       args: record.args.length > 0 ? record.args : undefined,
@@ -285,17 +291,16 @@ export function registryRecordToConfig(record: MCPServerRegistryRecord): MCPServ
       adapterConfig: record.adapterConfig,
     };
   }
-  if (record.url) {
-    return {
-      url: record.url,
-      transport: record.transport ?? 'sse',
-      headers: record.headers,
-      serverId: record.id,
-      toolPolicy: record.toolPolicy,
-      adapterConfig: record.adapterConfig,
-    };
-  }
-  return null;
+
+  if (!record.url) return null;
+  return {
+    url: record.url,
+    transport,
+    headers: record.headers && Object.keys(record.headers).length > 0 ? record.headers : undefined,
+    serverId: record.id,
+    toolPolicy: record.toolPolicy,
+    adapterConfig: record.adapterConfig,
+  };
 }
 
 // ── MCP Tool Bridge ─────────────────────────────────────

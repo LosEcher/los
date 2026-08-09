@@ -8,6 +8,7 @@ import {
   Brain,
   BriefcaseBusiness,
   Bug,
+  CircleDollarSign,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -43,7 +44,9 @@ import {
 import {
   CommunicationAccountsPage,
   DeadLetterPage,
+  GovernancePage,
   DiagnosticsPage,
+  UsagePage,
   FileSyncPage,
   LogsPage,
   MemoryPage,
@@ -91,10 +94,12 @@ type PageId =
   | 'artifacts'
   | 'rules'
   | 'evals'
+  | 'usage'
   | 'pairwise'
   | 'nodes'
   | 'logs'
   | 'dead-letter'
+  | 'governance'
   | 'diagnostics'
   | 'file-sync'
   | 'run-specs'
@@ -154,12 +159,14 @@ const NAV: NavItem[] = [
   { id: 'tasks', labelKey: 'nav.tasks', icon: Activity, status: 'partial', audience: 'operations', sectionKey: 'nav.section.operations' },
   { id: 'run-specs', labelKey: 'nav.runSpecs', icon: ScrollText, status: 'partial', audience: 'operations' },
   { id: 'evals', labelKey: 'nav.evals', icon: BarChart3, status: 'partial', audience: 'operations' },
+  { id: 'usage', labelKey: 'nav.usage', icon: CircleDollarSign, status: 'live', audience: 'operations' },
   { id: 'pairwise', labelKey: 'nav.pairwise', icon: Scale, status: 'partial', audience: 'operations' },
   { id: 'nodes', labelKey: 'nav.nodes', icon: Network, status: 'partial', audience: 'operations' },
   { id: 'services', labelKey: 'nav.services', icon: Activity, status: 'partial', audience: 'operations' },
   { id: 'logs', labelKey: 'nav.logs', icon: TerminalSquare, status: 'partial', audience: 'operations' },
   { id: 'file-sync', labelKey: 'nav.fileSync', icon: Archive, status: 'partial', audience: 'operations' },
   { id: 'dead-letter', labelKey: 'nav.dlq', icon: Skull, status: 'reserved', audience: 'operations' },
+  { id: 'governance', labelKey: 'nav.governance', icon: Shield, status: 'live', audience: 'operations' },
   { id: 'diagnostics', labelKey: 'nav.diagnostics', icon: Bug, status: 'reserved', audience: 'operations' },
 ];
 
@@ -479,9 +486,11 @@ export function App() {
         {page === 'artifacts' && <ArtifactsPage />}
         {page === 'rules' && <RulesPage />}
         {page === 'evals' && <EvalsPage />}
+        {page === 'usage' && <UsagePage />}
         {page === 'pairwise' && <PairwiseEvalsPage onOpenRun={openRun} onOpenSession={continueSession} />}
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}
+        {page === 'governance' && <GovernancePage />}
         {page === 'diagnostics' && <DiagnosticsPage />}
         {page === 'file-sync' && <FileSyncPage />}
         {page === 'run-specs' && <RunSpecsPage selectedRunSpecId={selectedRunSpecId} />}

@@ -1,6 +1,6 @@
 import type { ModelProfile } from '../model-profiles.js';
 import { AgentError } from '../error-base.js';
-import { recordProviderCall } from './telemetry.js';
+import { recordProviderCall, telemetryUsageFromProvider } from './telemetry.js';
 import { buildAnthropicModelSettings } from '../model-settings.js';
 import type {
   ChatOptions,
@@ -130,21 +130,22 @@ export function createAnthropicProvider(cfg: AnthropicConfig): Provider {
         }).catch(() => {});
         throw err;
       }
-      recordProviderCall({
-        traceId: options.traceId ?? '',
-        sessionId: options.sessionId,
-        provider: name, model, endpoint: '/v1/messages', method: 'POST',
-        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
-        status: res.status, durationMs: Date.now() - fetchStart,
-        ...(res.ok ? {} : { errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}` }),
-      }).catch(() => {});
-
       if (!res.ok) {
         const err = await res.text();
+        recordProviderCall({
+          traceId: options.traceId ?? '',
+          sessionId: options.sessionId,
+          provider: name, model, endpoint: '/v1/messages', method: 'POST',
+          stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+          status: res.status, durationMs: Date.now() - fetchStart,
+          errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}`,
+        }).catch(() => {});
         throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
       }
 
+      const headersAt = Date.now();
       const data = await res.json() as any;
+      const bodyDoneAt = Date.now();
 
       // Parse response back to OpenAI-compatible format
       let text = '';
@@ -168,21 +169,34 @@ export function createAnthropicProvider(cfg: AnthropicConfig): Provider {
         }
       }
 
+      const usage = {
+        promptTokens: data.usage?.input_tokens ?? 0,
+        completionTokens: data.usage?.output_tokens ?? 0,
+        cacheHitTokens: data.usage?.cache_read_input_tokens ?? 0,
+        cacheMissTokens: data.usage?.cache_creation_input_tokens ?? 0,
+        totalTokens: data.usage?.input_tokens != null && data.usage?.output_tokens != null
+          ? (data.usage.input_tokens + data.usage.output_tokens)
+          : undefined,
+      };
+      const effectiveModel = data.model ?? model;
+      recordProviderCall({
+        traceId: options.traceId ?? '',
+        sessionId: options.sessionId,
+        provider: name, model: effectiveModel, endpoint: '/v1/messages', method: 'POST',
+        stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
+        status: 200, durationMs: bodyDoneAt - fetchStart,
+        headersDurationMs: headersAt - fetchStart,
+        bodyDurationMs: bodyDoneAt - headersAt,
+        usage: telemetryUsageFromProvider(usage),
+      }).catch(() => {});
+
       return {
         text,
         toolCalls,
         reasoningContent,
         finishReason: normalizeFinishReason(data.stop_reason, 'anthropic'),
-        usage: {
-          promptTokens: data.usage?.input_tokens ?? 0,
-          completionTokens: data.usage?.output_tokens ?? 0,
-          cacheHitTokens: data.usage?.cache_read_input_tokens ?? 0,
-          cacheMissTokens: data.usage?.cache_creation_input_tokens ?? 0,
-          totalTokens: data.usage?.input_tokens != null && data.usage?.output_tokens != null
-            ? (data.usage.input_tokens + data.usage.output_tokens)
-            : undefined,
-        },
-        model: data.model ?? model,
+        usage,
+        model: effectiveModel,
       };
     },
   };

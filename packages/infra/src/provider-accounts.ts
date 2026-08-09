@@ -282,7 +282,8 @@ function validateNodeScope(
   }
 }
 
-function isApprovedSecretRef(value: string): boolean {
+/** Approved opaque secret-ref shape shared by provider accounts and MCP credential_ref. */
+export function isApprovedSecretRef(value: string): boolean {
   return /^(?:local-file:[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._/-]{0,190}|env:[A-Z][A-Z0-9_]{1,127}|external:[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._/-]{0,190}|adapter:[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._/-]{0,190})$/.test(value);
 }
 
