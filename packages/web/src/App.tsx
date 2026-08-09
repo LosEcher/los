@@ -8,6 +8,7 @@ import {
   Brain,
   BriefcaseBusiness,
   Bug,
+  CircleDollarSign,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -45,6 +46,7 @@ import {
   DeadLetterPage,
   GovernancePage,
   DiagnosticsPage,
+  UsagePage,
   FileSyncPage,
   LogsPage,
   MemoryPage,
@@ -92,6 +94,7 @@ type PageId =
   | 'artifacts'
   | 'rules'
   | 'evals'
+  | 'usage'
   | 'pairwise'
   | 'nodes'
   | 'logs'
@@ -156,6 +159,7 @@ const NAV: NavItem[] = [
   { id: 'tasks', labelKey: 'nav.tasks', icon: Activity, status: 'partial', audience: 'operations', sectionKey: 'nav.section.operations' },
   { id: 'run-specs', labelKey: 'nav.runSpecs', icon: ScrollText, status: 'partial', audience: 'operations' },
   { id: 'evals', labelKey: 'nav.evals', icon: BarChart3, status: 'partial', audience: 'operations' },
+  { id: 'usage', labelKey: 'nav.usage', icon: CircleDollarSign, status: 'live', audience: 'operations' },
   { id: 'pairwise', labelKey: 'nav.pairwise', icon: Scale, status: 'partial', audience: 'operations' },
   { id: 'nodes', labelKey: 'nav.nodes', icon: Network, status: 'partial', audience: 'operations' },
   { id: 'services', labelKey: 'nav.services', icon: Activity, status: 'partial', audience: 'operations' },
@@ -482,6 +486,7 @@ export function App() {
         {page === 'artifacts' && <ArtifactsPage />}
         {page === 'rules' && <RulesPage />}
         {page === 'evals' && <EvalsPage />}
+        {page === 'usage' && <UsagePage />}
         {page === 'pairwise' && <PairwiseEvalsPage onOpenRun={openRun} onOpenSession={continueSession} />}
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}

@@ -6722,3 +6722,34 @@ button:disabled {
   margin-top: 8px;
   font-size: 12px;
 }
+
+/* Usage page (L1 runtime cube) */
+.usage-page .usage-note {
+  margin: 8px 0 14px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.usage-table-section {
+  margin-top: 18px;
+}
+.usage-table-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.usage-table th,
+.usage-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,0.25));
+  vertical-align: top;
+}
+.usage-table th {
+  color: var(--muted);
+  font-weight: 600;
+}

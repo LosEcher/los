@@ -9,6 +9,7 @@ Usage:
   los compat [options] [provider[:model]...]
   los provider <list|promote> [options]
   los evals <list|summary|compare|record> [options]
+  los usage [--days N] [--from ISO] [--to ISO] [--provider NAME] [--model NAME] [--json]
   los governance <todo-reconcile|runtime-cleanup|status-constraints> [options]
   los external-summaries <list|import> [options]
   los artifacts <list|put|get|delete> [options]
@@ -77,6 +78,10 @@ External summaries:
 Evals:
   list | summary | compare | record --run RUN_ID --success true|false
   Record, list, summarize, or compare run quality eval metrics.
+
+Usage:
+  L1 runtime usage cube from session model.response + provider_call_telemetry.
+  Does not include external Claude Code / Codex local history.
 
 Governance:
   todo-reconcile         Dry-run compare code todo seeds with the DB todo ledger

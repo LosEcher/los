@@ -36,3 +36,7 @@ across gateway restarts (unlike in-process counters).
 
 - `packages/infra/src/metrics.ts` — Prometheus rendering (no external dependency)
 - `packages/gateway/src/routes/infrastructure/metrics-routes.ts` — `/metrics` route
+
+## Related: Usage summary
+
+`GET /usage/summary` exposes the L1 runtime usage cube (session model.response tokens/cost + provider_call_telemetry fill/latency). See `docs/operations/2026-08-09-usage-hub-design.md` and `contracts/usage-summary.yaml`.

@@ -137,6 +137,7 @@ const isolatedGroupB = [
   'src/run-specs.test.ts',
   'src/runtime-evidence-graph.test.ts',
   'src/scenario-economics.test.ts',
+  'src/usage-summary.test.ts',
   'src/scheduled-work.test.ts',
   'src/scheduler-kernel-shadow.test.ts',
   'src/scheduler-planning.test.ts',

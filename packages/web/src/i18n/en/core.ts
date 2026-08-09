@@ -27,6 +27,7 @@ export const enCore = {
   'nav.settings': 'Settings',
   'nav.tasks': 'Task runs',
   'nav.evals': 'Evals',
+  'nav.usage': 'Usage',
   'nav.pairwise': 'Pairwise',
   'nav.runSpecs': 'Run specs',
   'nav.nodes': 'Nodes',
