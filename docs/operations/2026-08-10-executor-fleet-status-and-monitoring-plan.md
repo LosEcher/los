@@ -142,16 +142,42 @@ Implementation (no storm):
   `fleetResources` / `formatFleetResourceSummary()` in a later extract.  
 - Optional schedule template `fleet_resource_snapshot` still open (P2-ish).
 
-#### P2 — Per-node host checks (bounded, pinned)
+#### P2 — Per-node host checks (bounded, pinned) — **Done** 2026-08-10
 
 | Node | Check owner | Cadence | Command surface |
 | --- | --- | --- | --- |
-| node34 | existing NAS34 schedule (fix self-check) | daily | pin node34, real network, write baseline JSON |
-| oracle | new light schedule or maintenance | 6–12h | `free -m`, unit active, listen `0.0.0.0:8091` |
-| desktop | Task Scheduler + local health | 6–12h | `schtasks` state, `curl 127.0.0.1:8090/health` via win-los **or** registry only |
-| mbp | dogfood + local los status | 15m | already covered |
+| node34 | `fleet_host_check` → ssh `localnode34-r-t` | ≥15m cooldown; schedule 6–12h | unit active, local health `:8090`, listen, free/swap |
+| oracle | same → ssh `oracle-t` | same | unit active, local health `:8091`, listen, free/swap |
+| desktop | same → ssh `win-los` | same | Task Scheduler `los-executor` status + local health `:8090` |
+| mbp | dogfood + local los status | 15m | already covered (no SSH) |
 
-Hard rate limits for any SSH-based check: **≤1 concurrent**, **≥15m per host**, fail soft.
+Hard rate limits: **serial hosts**, **≥15m per host** (unless `--force`), fail soft.
+
+Implementation:
+
+- Modules: `fleet-host-checks.ts` + `fleet-host-check-ssh.ts`
+- Template: `fleet_host_check` (governance, no provider)
+- Manual: `./packages/gateway/node_modules/.bin/tsx tools/fleet-host-check.mts [--force|--dry-run]`
+- Env: `LOS_FLEET_HOST_CHECKS` (see `.env.example`); `none` disables
+- Alerts: `ops.fleet_host_check` session events, 30m/node cooldown
+
+Create schedule (example, 6h interval) — live id may already exist:
+
+```bash
+curl -fsS -X POST \
+  -H "x-los-operator-token: $LOS_OPERATOR_TOKEN" \
+  -H "x-los-auth-token: $LOS_AUTH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  http://127.0.0.1:8080/scheduled-work-items \
+  -d '{
+    "title":"fleet host check (remotes)",
+    "templateId":"fleet_host_check",
+    "trigger":{"kind":"interval","expression":"6h","timezone":"Asia/Shanghai"},
+    "approvalPolicy":"read_only_auto"
+  }'
+```
+
+Operator-created 2026-08-10: `schedule-d0388df2-cc54-4e37-a964-7035b96303f4` (enabled, 6h).
 
 #### P3 — Operator UX
 

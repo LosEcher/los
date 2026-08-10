@@ -31,6 +31,7 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     'scheduled_feed_analysis',
     'scheduled_execution',
     'daily_execution_digest',
+    'fleet_host_check',
   ];
   if (!validTemplates.includes(input.runTemplate.templateId)) {
     throw new Error('unsupported schedule template');

@@ -340,6 +340,60 @@ async function executeTemplate(
       },
     };
   }
+  if (schedule.runTemplate.templateId === 'fleet_host_check') {
+    const { runFleetHostChecks } = await import('../fleet-host-checks.js');
+    const report = await runFleetHostChecks({
+      tenantId: schedule.tenantId,
+      projectId: schedule.projectId,
+      scheduleId: schedule.id,
+      runId: run.id,
+      // Schedule cadence owns spacing; still honor per-host cooldown unless force.
+      force: false,
+    });
+    const attention = [...report.failed, ...report.degraded];
+    if (attention.length === 0) {
+      return {
+        status: report.checked.length === 0 ? 'no_op' : 'succeeded',
+        title: report.checked.length === 0
+          ? `${schedule.title}: no hosts checked`
+          : `${schedule.title}: ${report.ok.length} host(s) ok`,
+        summary: {
+          assessedAt: report.assessedAt,
+          checked: report.checked,
+          skipped: report.skipped,
+          ok: report.ok,
+          failed: report.failed,
+          degraded: report.degraded,
+          alertsEmitted: report.alertsEmitted,
+          results: report.results.map((r) => ({
+            nodeId: r.nodeId,
+            status: r.status,
+            detail: r.detail,
+            durationMs: r.durationMs,
+          })),
+        },
+      };
+    }
+    return {
+      status: 'succeeded',
+      title: `${schedule.title}: host attention ${attention.join(',')}`,
+      summary: {
+        assessedAt: report.assessedAt,
+        checked: report.checked,
+        skipped: report.skipped,
+        ok: report.ok,
+        failed: report.failed,
+        degraded: report.degraded,
+        alertsEmitted: report.alertsEmitted,
+        results: report.results.map((r) => ({
+          nodeId: r.nodeId,
+          status: r.status,
+          detail: r.detail,
+          durationMs: r.durationMs,
+        })),
+      },
+    };
+  }
   if (schedule.runTemplate.templateId === 'scheduled_execution') {
     const dedupeKey = `schedule-exec-${run.id}`;
     const disposition = schedule.runTemplate.mode === 'execution' ? 'execution' as const : 'planning' as const;

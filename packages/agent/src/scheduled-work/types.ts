@@ -27,7 +27,8 @@ export type ScheduledWorkTemplateId =
   | 'runtime_readiness'
   | 'scheduled_feed_analysis'
   | 'scheduled_execution'
-  | 'daily_execution_digest';
+  | 'daily_execution_digest'
+  | 'fleet_host_check';
 
 export interface ScheduledWorkTrigger {
   kind: ScheduledTriggerKind;
