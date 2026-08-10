@@ -1,0 +1,218 @@
+# Executor fleet status + monitoring plan — 2026-08-10
+
+> Status: **live board snapshot + follow-up plan** (evening CST).  
+> Evidence markers: `[E]` command/API/SSH; `[I]` inference; `[U]` unverified.
+
+## 1. Current board (snapshot ~22:01 CST / 14:01 UTC) `[E]`
+
+Control plane stays on MBP. Default execution stays on `mbp-executor-1`. Remotes are overflow / data-local / Windows canary.
+
+| Layer | Component | State |
+| --- | --- | --- |
+| Control plane | gateway `:8080` | online, ready, pid managed |
+| Control plane | local executor `:8090` | online, candidate |
+| Channel | wechat-bot | process healthy; mode=disabled in status |
+| Durable state | Postgres `127.0.0.1:55432` + Tailscale bind | sole truth surface |
+
+### Fleet executors
+
+| nodeId | Role | status | candidate | version | mem avail/total (MB) | notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `mbp-executor-1` | **default** | online | true | `0.1.0+b155625e98013` | ~22G / 32G | macos-sandbox; primary interactive path |
+| `node34-executor-1` | pinned / NAS-local | online | true | `0.1.0+b98714c660d7c` | ~4.7G / 9.9G | linux-bwrap; path flaps → false offline history |
+| `oracle-executor` | overflow light | online | true | `0.1.0+b98714c660d7c` | ~0.4G / 0.95G | **low RAM**; bind fixed tonight |
+| `desktop-r45553o` | Windows canary | online | true | `0.1.0+b155625e98013` | ~25G / 28G | first durable deploy tonight |
+
+`runtime-health`: `overall=ok`, `candidates=4`, `online=4`, no blockers/warnings.  
+Registry still lists non-fleet rows (`oracle-t`, `localnode34`, …) — ssh_target / historical; not candidates.
+
+### Enabled schedules (supervision-related)
+
+| Title | Template | Cadence intent |
+| --- | --- | --- |
+| dogfood runtime readiness check | `runtime_readiness` | ~15m fleet attention board |
+| gateway/executor log freshness (V3) | `runtime_readiness` | log mtime (weak signal) |
+| NAS34 drift check | `scheduled_execution` | daily-ish; needs real network on node34 |
+| daily execution digest (WeChat) | `daily_execution_digest` | 08:30 local |
+| surge / network-observe | `scheduled_execution` | domain analysis, not node health |
+
+---
+
+## 2. What changed tonight `[E]`
+
+### 2.1 Rate-limited recovery (code, local jj)
+
+- Gateway **auto-probe**: online + `run_agent` + only `verification:*:not_confirmed` → probe with caps **2/tick · 2s gap · 5m cooldown · 120s interval**.  
+- `runtime-health` + readiness runner: **fleet** offline / online-unverified warnings (not only zero candidates).  
+- Heartbeat **jitter**; file-sync list-refresh **backoff to 15m** on PG path outages.
+
+### 2.2 `oracle-executor` bind fix
+
+- Symptom: process healthy, local `/health` ok, remote probe **connection refused**.  
+- Cause: missing `EXECUTOR_HOST` → default `127.0.0.1`.  
+- Fix: `EXECUTOR_HOST=0.0.0.0` in `/opt/los/.env`, restart unit.  
+- Result: listen `0.0.0.0:8091`, remote health + candidate=true.
+
+### 2.3 `desktop-r45553o` Windows deploy (canary)
+
+| Item | Value |
+| --- | --- |
+| Path | `C:\los` |
+| Node URL | `http://100.90.170.58:8090` |
+| Process | Scheduled Task **`los-executor`** (AtStartup + restart policy) |
+| Start scripts | `C:\los\run-executor-task.ps1`, `install-task.ps1` |
+| Firewall | `los-executor-8090` inbound TCP 8090 |
+| PG | MBP `pg_hba`: `host los los 100.64.0.0/10 scram-sha-256` (Tailscale CGNAT) |
+| Known gap | migration path WARN `packages\infra\packages\infra\migrations` (non-fatal); not a formal Windows service (nssm) yet |
+
+SSH-attached process **dies when session ends** — Task Scheduler is required for durability.
+
+### 2.4 node34 same-day lesson (earlier)
+
+Registry offline while process healthy: Tailscale path timeout to MBP gateway/PG → reaper offline → hb recover without active probe → non-candidate until probe/auto-probe.
+
+---
+
+## 3. Placement policy (unchanged)
+
+1. `default` → `mbp-executor-1`  
+2. `pin(nodeId|nodeUrls)` → schedules (NAS34, data-local)  
+3. capability → `linux-bwrap` node34; `macos-sandbox-exec` MBP; Windows experimental  
+4. overflow light → oracle only when mem pressure allows  
+5. Do **not** move control plane primary to NAS/Windows  
+
+---
+
+## 4. Monitoring / supervision plan (follow-up)
+
+Goal: know **status + resources** per fleet node without request storms.
+
+### 4.1 Truth surfaces (ordered)
+
+| Priority | Surface | Use for |
+| --- | --- | --- |
+| 1 | DB / `GET /nodes` + `execution.candidate` | registry truth, capacity from heartbeat |
+| 2 | `GET /ops/runtime-health` | aggregated degraded/critical board |
+| 3 | Active probe `POST /nodes/:id/probe` | only on gap or cooldown expiry (auto-probe already) |
+| 4 | Host process (`systemctl` / Task Scheduler / local health) | when registry disagrees with intent |
+| 5 | Logs / journal | root-cause, not primary “is up” signal |
+
+**Do not**: poll every node health URL every few seconds from schedules; rely on heartbeat capacity + rate-limited auto-probe.
+
+### 4.2 Already in place (use as-is)
+
+| Mechanism | Covers | Gap |
+| --- | --- | --- |
+| Heartbeat + stale reaper | process→gateway liveness | false offline on path flap |
+| Auto-probe (gateway) | online-unverified → candidate | fails closed on dead remote health |
+| `runtime-health` fleet warnings | offline fleet / online unverified | no resource thresholds yet |
+| dogfood readiness | fleet offline/unverified summary | still succeeds (attention title), not WeChat |
+| daily digest | day rollup | lag; not minute-level |
+| Capacity on heartbeat | mem/cpu/load fields when reported | uneven across platforms; no alerts |
+
+### 4.3 Recommended next work (priority order)
+
+#### P0 — Node status supervision (low churn)
+
+1. **Named fleet inventory** (config or metadata):  
+   `mbp-executor-1`, `node34-executor-1`, `oracle-executor`, `desktop-r45553o`  
+   so ssh_target / retired rows never enter “fleet offline” noise again.  
+2. **dogfood / readiness**: if any **named** fleet node is offline or online-unverified for ≥2 consecutive ticks → emit operator attention event (WeChat-capable) with **dedupe key** `fleet:{nodeId}:{day}` and min interval **30m**.  
+3. Keep auto-probe caps; document them in runbook (already 2/5m/120s).
+
+#### P1 — Resource supervision (from heartbeat capacity, no extra probes)
+
+Thresholds (starting defaults; tune after a week of data):
+
+| Signal | Warning | Critical | Suggested action |
+| --- | --- | --- | --- |
+| `memoryAvailableMb / memoryTotalMb` | < 15% | < 5% (already blocks candidate) | drain / stop overflow to oracle |
+| `cpuLoad1m / cpuCores` | > 2.0 | > 4.0 | avoid heavy pin |
+| `swapUsedMb / swapTotalMb` (if present) | > 50% | > 80% | restart / free mem |
+| `activeTaskCount` | > 0 for long window on oracle | — | oracle is light-only |
+| heartbeat age | > 45s | > 90s (reaper) | path/gateway check |
+
+Implementation sketch (no storm):
+
+- Extend `getRuntimeHealth()` to compute `resourceWarnings[]` from **last heartbeat capacity only**.  
+- Surface in `/ops/runtime-health` and daily digest section “fleet resources”.  
+- Optional schedule template `fleet_resource_snapshot` every **30–60m**, governance mode, no provider.
+
+#### P2 — Per-node host checks (bounded, pinned)
+
+| Node | Check owner | Cadence | Command surface |
+| --- | --- | --- | --- |
+| node34 | existing NAS34 schedule (fix self-check) | daily | pin node34, real network, write baseline JSON |
+| oracle | new light schedule or maintenance | 6–12h | `free -m`, unit active, listen `0.0.0.0:8091` |
+| desktop | Task Scheduler + local health | 6–12h | `schtasks` state, `curl 127.0.0.1:8090/health` via win-los **or** registry only |
+| mbp | dogfood + local los status | 15m | already covered |
+
+Hard rate limits for any SSH-based check: **≤1 concurrent**, **≥15m per host**, fail soft.
+
+#### P3 — Operator UX
+
+1. Console `#usage` / schedules deep links already partially wired; add **fleet card** on usage or nodes page: status · candidate · mem% · last probe.  
+2. WeChat: only **state transitions** (candidate lost/restored), not every tick.  
+3. Daily digest: table of fleet rows from last heartbeat snapshot.
+
+### 4.4 Explicit non-goals (for now)
+
+- Moving gateway HA off MBP  
+- Treating desktop as production default  
+- Continuous active probing of all nodes  
+- Merging external CI runner metrics into executor fleet board without labels  
+
+---
+
+## 5. Operator cheat sheet
+
+```bash
+# Board
+curl -fsS -H "x-los-operator-token: $LOS_OPERATOR_TOKEN" http://127.0.0.1:8080/ops/runtime-health | jq .
+curl -fsS -H "x-los-operator-token: $LOS_OPERATOR_TOKEN" http://127.0.0.1:8080/nodes \
+  | jq -r '.[] | select(.execution.candidate or (.capabilities.run_agent==true and .nodeKind=="executor"))
+    | [.nodeId,.status,(.execution.candidate|tostring),.version,.lastHeartbeatAt] | @tsv'
+
+# One probe (manual; auto-probe also runs)
+curl -fsS -X POST -H "x-los-operator-token: $LOS_OPERATOR_TOKEN" \
+  http://127.0.0.1:8080/nodes/<nodeId>/probe | jq '{status:.probe.status,candidate:.node.execution.candidate}'
+
+# Host process truth
+./tools/los.sh status
+ssh localnode34-r-t 'systemctl is-active los-executor; curl -fsS http://127.0.0.1:8090/health'
+ssh oracle-t 'systemctl is-active los-executor; ss -lntp | rg 8091; curl -fsS http://127.0.0.1:8091/health'
+ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/health'
+```
+
+### Recover patterns
+
+| Symptom | First check | Fix |
+| --- | --- | --- |
+| online, candidate=false, verification gap | auto-probe log / manual probe | wait cooldown or `POST …/probe` |
+| remote health refused, local health ok | `ss`/`netstat` bind | set `EXECUTOR_HOST=0.0.0.0` |
+| registry offline, process up | journal heartbeat timeouts | gateway up? Tailscale? PG path? |
+| Windows dead after SSH start | Task Scheduler | `schtasks /Run /TN los-executor` |
+| PG auth fail from remote | `pg_hba` | Tailscale `100.64.0.0/10` + scram |
+
+---
+
+## 6. Residual risks
+
+| Risk | Severity | Mitigation |
+| --- | --- | --- |
+| MBP sleep / gateway down | high for all remotes | anti-sleep / second gateway (open) |
+| oracle OOM (~1GB) | medium | light tasks only; mem warning in health |
+| Windows task not “service-grade” | medium | nssm/service later; task restart policy now |
+| migration path WARN on Windows | low | fix getMigrateDir for win paths |
+| NAS34 schedule self-check false fail | medium | pin + non-sandbox network |
+| Version skew (mbp/desktop vs node34/oracle) | low | redeploy remotes when shipping |
+
+---
+
+## 7. Related
+
+- `docs/operations/2026-08-10-control-plane-vs-executor-and-node-recovery.md`  
+- `packages/gateway/src/node-auto-probe.ts`  
+- `packages/agent/src/runtime-health.ts`  
+- `tools/deploy-to-remote.sh` (Linux)  
+- Windows: `C:\los\run-executor-task.ps1`, task `los-executor`  

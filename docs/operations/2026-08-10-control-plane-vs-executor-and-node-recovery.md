@@ -210,6 +210,9 @@ Result: `verified.agent_http(_ndjson).ok=true`, `execution.candidate=true`.
 | Auto-probe after heartbeat recovery when verified is heartbeat-only claim | medium | **Done** — gateway `node-auto-probe` (2/tick, 2s gap, 5m cooldown, 120s interval) |
 | Heartbeat multi-node recovery stampede | low | **Done** — jitter ≤2s on heartbeat interval |
 | File-sync list-refresh storm during PG path outage | medium | **Done** — exponential backoff to 15m + log throttle |
+| oracle bind `EXECUTOR_HOST=0.0.0.0` | high | **Done** 2026-08-10 evening — candidate restored |
+| desktop-r45553o Windows canary deploy | medium | **Done** 2026-08-10 evening — Task Scheduler `los-executor` |
+| Named fleet inventory + resource thresholds + transition alerts | medium | open — see `2026-08-10-executor-fleet-status-and-monitoring-plan.md` |
 | NAS34 schedule: pin + non-sandbox network for TCP reachability self-check | medium | open (1 fail 2026-08-10) |
 
 ---
@@ -221,4 +224,5 @@ Result: `verified.agent_http(_ndjson).ok=true`, `execution.candidate=true`.
 - ADR 0012 service cluster roadmap  
 - `docs/operations/2026-08-03-node-inventory.md`  
 - `docs/operations/node-deployment-runbook.md`  
+- `docs/operations/2026-08-10-executor-fleet-status-and-monitoring-plan.md` — **current fleet board + monitoring backlog**  
 - `tools/deploy-to-remote.sh`
