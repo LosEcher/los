@@ -16,6 +16,24 @@ routes:
       projectId: optional project for quality snapshot; default los
       tenantId: optional tenant; default local
     response: DailyDigest
+  - method: POST
+    path: /ops/daily-digest/push
+    purpose: >
+      Compose the digest and emit session event ops.daily_digest for operator
+      SSE consumers (WeChat bot). Does not call WeClaw directly.
+    body:
+      day: optional YYYY-MM-DD UTC; default yesterday UTC
+      projectId: optional
+      tenantId: optional
+    response: { ok, day, eventEmitted, enabledCount, runTotals, messagePreview }
+delivery:
+  - scheduled templateId: daily_execution_digest (cron; read_only_auto)
+  - POST /ops/daily-digest/push for operator/manual backfill
+  - WeChat via wechat-bot SSE on ops.daily_digest
+  - Message deep links (LOS_WEB_BASE_URL):
+      - #usage?day=YYYY-MM-DD — day digest on Usage page
+      - #schedules?id=<scheduleId> — schedule detail + run history
+      - #chat?session=<sessionId> — agent transcript for a run
 schemas:
   DailyDigest:
     required:

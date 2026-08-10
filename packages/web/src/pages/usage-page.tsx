@@ -78,8 +78,9 @@ type DailyDigestResponse = {
   }>;
 };
 
-export function UsagePage() {
+export function UsagePage({ day }: { day?: string | null } = {}) {
   const { t } = useI18n();
+  const digestDay = typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
   const from = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000).toISOString();
   const query = useQuery({
     queryKey: ['usage-summary', DAYS],
@@ -87,8 +88,12 @@ export function UsagePage() {
     refetchInterval: 60_000,
   });
   const digest = useQuery({
-    queryKey: ['daily-digest'],
-    queryFn: () => getJson<DailyDigestResponse>('/ops/daily-digest'),
+    queryKey: ['daily-digest', digestDay ?? 'default'],
+    queryFn: () => getJson<DailyDigestResponse>(
+      digestDay
+        ? `/ops/daily-digest?day=${encodeURIComponent(digestDay)}`
+        : '/ops/daily-digest',
+    ),
     refetchInterval: 120_000,
   });
 

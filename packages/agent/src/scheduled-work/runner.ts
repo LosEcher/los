@@ -322,6 +322,24 @@ async function executeTemplate(
       summary: { inboxCount: entries.length, byAttention },
     };
   }
+  if (schedule.runTemplate.templateId === 'daily_execution_digest') {
+    const { publishDailyDigest } = await import('../daily-digest.js');
+    const published = await publishDailyDigest(
+      { projectId: schedule.projectId, tenantId: schedule.tenantId },
+      { scheduleId: schedule.id, runId: run.id },
+    );
+    return {
+      status: 'succeeded',
+      title: `${schedule.title}: day=${published.digest.day}`,
+      summary: {
+        day: published.digest.day,
+        eventEmitted: published.eventEmitted,
+        enabledCount: published.digest.schedule.enabledCount,
+        runTotals: published.digest.schedule.runTotals,
+        highlightCount: published.digest.highlights.length,
+      },
+    };
+  }
   if (schedule.runTemplate.templateId === 'scheduled_execution') {
     const dedupeKey = `schedule-exec-${run.id}`;
     const disposition = schedule.runTemplate.mode === 'execution' ? 'execution' as const : 'planning' as const;

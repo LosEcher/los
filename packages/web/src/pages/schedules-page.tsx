@@ -13,6 +13,7 @@ import {
   type ScheduledConcurrencyPolicy,
   type ScheduledWorkDetailResponse,
   type ScheduledWorkItem,
+  type ScheduledWorkItemRun,
   type ScheduledWorkListResponse,
   type ScheduledWorkPreviewResponse,
   type ScheduledWorkTemplateId,
@@ -61,10 +62,18 @@ function schedulesListUrl(filter: ScheduleStatusFilter): string {
   return `/scheduled-work-items?${params.toString()}`;
 }
 
-export function SchedulesPage() {
+export function SchedulesPage({
+  selectedScheduleId = null,
+  onSelectedScheduleChange,
+  onOpenSession,
+}: {
+  selectedScheduleId?: string | null;
+  onSelectedScheduleChange?: (id: string | null) => void;
+  onOpenSession?: (sessionId: string) => void;
+} = {}) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>('active');
   const [goalExpanded, setGoalExpanded] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -79,7 +88,13 @@ export function SchedulesPage() {
     queryFn: () => getJson<ScheduledWorkListResponse>(schedulesListUrl(statusFilter)),
     refetchInterval: 15_000,
   });
-  const activeId = selectedId ?? list.data?.results[0]?.id ?? null;
+  // Prefer controlled deep-link id, then local click, then first list row.
+  const activeId = selectedScheduleId ?? localSelectedId ?? list.data?.results[0]?.id ?? null;
+  const selectSchedule = (id: string) => {
+    setLocalSelectedId(id);
+    setGoalExpanded(false);
+    onSelectedScheduleChange?.(id);
+  };
   const detail = useQuery({
     queryKey: ['scheduled-work-item', activeId],
     queryFn: () => getJson<ScheduledWorkDetailResponse>(`/scheduled-work-items/${activeId}`),
@@ -116,7 +131,7 @@ export function SchedulesPage() {
       });
     },
     onSuccess: async result => {
-      setSelectedId(result.schedule.id);
+      selectSchedule(result.schedule.id);
       setShowCreate(false);
       setForm(initialForm(t));
       await queryClient.invalidateQueries({ queryKey: ['scheduled-work-items'] });
@@ -168,8 +183,9 @@ export function SchedulesPage() {
             value={statusFilter}
             onChange={event => {
               setStatusFilter(event.target.value as ScheduleStatusFilter);
-              setSelectedId(null);
+              setLocalSelectedId(null);
               setGoalExpanded(false);
+              // Keep controlled deep-link selection unless operator clears via bare nav.
             }}
           >
             <option value="active">{t('ops.schedules.filter.active')}</option>
@@ -202,10 +218,7 @@ export function SchedulesPage() {
               type="button"
               className="schedule-list-row"
               data-active={activeId === item.id}
-              onClick={() => {
-                setSelectedId(item.id);
-                setGoalExpanded(false);
-              }}
+              onClick={() => selectSchedule(item.id)}
             >
               <span className={`schedule-state ${item.status}`} title={item.status} aria-label={item.status} />
               <span className="work-list-copy">
@@ -270,16 +283,31 @@ export function SchedulesPage() {
                 <CalendarClock size={17} />
               </div>
               <div className="schedule-history">
-                {detail.data?.runs.map(run => (
-                  <div className="schedule-run-row" key={run.id}>
-                    <span className={`run-state ${run.status}`}>{run.status.replaceAll('_', ' ')}</span>
-                    <div><strong>{formatDate(run.scheduledFor)}</strong><small>{t('ops.schedules.attemptLabel', { triggerKind: run.triggerKind, attempt: run.attemptCount, maxAttempts: run.maxAttempts })}</small></div>
-                    <code>{run.workItemId ?? run.id}</code>
-                    {run.status === 'failed' && run.attemptCount < run.maxAttempts ? (
-                      <button className="icon-btn" type="button" title={t('ops.schedules.retryRunTitle')} aria-label={t('ops.schedules.retryRunAria', { id: run.id })} disabled={retryRun.isPending} onClick={() => retryRun.mutate(run.id)}><RotateCcw size={14} /></button>
-                    ) : <span />}
-                  </div>
-                ))}
+                {detail.data?.runs.map(run => {
+                  const sessionId = sessionIdFromRun(run);
+                  return (
+                    <div className="schedule-run-row" key={run.id}>
+                      <span className={`run-state ${run.status}`}>{run.status.replaceAll('_', ' ')}</span>
+                      <div>
+                        <strong>{formatDate(run.scheduledFor)}</strong>
+                        <small>{t('ops.schedules.attemptLabel', { triggerKind: run.triggerKind, attempt: run.attemptCount, maxAttempts: run.maxAttempts })}</small>
+                        {sessionId && onOpenSession ? (
+                          <button
+                            type="button"
+                            className="link-btn schedule-open-session"
+                            onClick={() => onOpenSession(sessionId)}
+                          >
+                            打开会话
+                          </button>
+                        ) : null}
+                      </div>
+                      <code>{run.workItemId ?? run.id}</code>
+                      {run.status === 'failed' && run.attemptCount < run.maxAttempts ? (
+                        <button className="icon-btn" type="button" title={t('ops.schedules.retryRunTitle')} aria-label={t('ops.schedules.retryRunAria', { id: run.id })} disabled={retryRun.isPending} onClick={() => retryRun.mutate(run.id)}><RotateCcw size={14} /></button>
+                      ) : <span />}
+                    </div>
+                  );
+                })}
                 {detail.data?.runs.length === 0 ? <div className="daily-empty">{t('ops.schedules.noRunsRecorded')}</div> : null}
               </div>
             </>
@@ -346,6 +374,13 @@ function approvalLabel(t: (key: string) => string, policy: ScheduledApprovalPoli
       ? 'ops.schedules.approvalPreapprovedScope'
       : 'ops.schedules.approvalEachRun';
   return t(key);
+}
+
+function sessionIdFromRun(run: ScheduledWorkItemRun): string | undefined {
+  const summary = run.resultSummary;
+  if (!summary || typeof summary !== 'object') return undefined;
+  const sid = (summary as Record<string, unknown>).sessionId;
+  return typeof sid === 'string' && sid.trim() ? sid.trim() : undefined;
 }
 
 function ScheduleFact({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'ok' }) {  return <div className={`work-fact ${tone ?? ''}`}><span>{label}</span><strong>{value}</strong></div>;

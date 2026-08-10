@@ -7,10 +7,14 @@
  */
 
 import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
 import { getDailyAgentQualityBaseline } from './daily-agent-quality/store.js';
 import type { DailyAgentQualitySnapshot } from './daily-agent-quality/types.js';
+import { appendSessionEvent } from './session-events.js';
 import { ensureScheduledWorkStore } from './scheduled-work/schema.js';
 import { getUsageSummary, type UsageSummary } from './usage-summary.js';
+
+const log = getLogger('daily-digest');
 
 export type DigestEvidenceClass = 'los_runtime';
 
@@ -42,6 +46,10 @@ export interface DigestScheduleRow {
   lastStatus?: string;
   lastCompletedAt?: string;
   lastSummaryReason?: string;
+  /** sessionId from the most recent run (any status), if present. */
+  lastSessionId?: string;
+  /** sessionId from the most recent failed/cancelled/awaiting run in the day window. */
+  attentionSessionId?: string;
 }
 
 export interface DigestCadenceRecommendation {
@@ -104,6 +112,7 @@ interface ScheduleAggRow {
   last_status: string | null;
   last_completed_at: Date | string | null;
   last_summary: unknown;
+  attention_summary: unknown;
 }
 
 function num(value: string | null | undefined): number {
@@ -151,6 +160,32 @@ function summaryReason(summary: unknown): string | undefined {
   }
   if (typeof rec.deniedBy === 'string') return String(rec.deniedBy);
   return undefined;
+}
+
+function summarySessionId(summary: unknown): string | undefined {
+  if (!summary || typeof summary !== 'object') return undefined;
+  const rec = summary as Record<string, unknown>;
+  const sid = rec.sessionId ?? rec.session_id;
+  return typeof sid === 'string' && sid.trim() ? sid.trim() : undefined;
+}
+
+/** Public web base for deep links in WeChat/digest (no trailing slash). */
+export function resolveWebBaseUrl(): string {
+  const raw = (
+    process.env.LOS_WEB_BASE_URL
+    ?? process.env.LOS_PUBLIC_URL
+    ?? process.env.LOS_GATEWAY_URL
+    ?? 'http://127.0.0.1:8080'
+  ).trim();
+  return raw.replace(/\/+$/, '');
+}
+
+export function webDeepLink(
+  hash: string,
+  baseUrl: string = resolveWebBaseUrl(),
+): string {
+  const fragment = hash.startsWith('#') ? hash : `#${hash}`;
+  return `${baseUrl}/${fragment}`;
 }
 
 function buildCadenceRecommendations(rows: DigestScheduleRow[]): DigestCadenceRecommendation[] {
@@ -309,6 +344,14 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
          schedule_id, status, completed_at, result_summary_json
        FROM scheduled_work_item_runs
        ORDER BY schedule_id, scheduled_for DESC
+     ),
+     last_attention AS (
+       SELECT DISTINCT ON (schedule_id)
+         schedule_id, result_summary_json
+       FROM scheduled_work_item_runs
+       WHERE scheduled_for >= $1::timestamptz AND scheduled_for < $2::timestamptz
+         AND status IN ('failed', 'cancelled', 'awaiting_approval')
+       ORDER BY schedule_id, scheduled_for DESC
      )
      SELECT
        s.id AS schedule_id,
@@ -331,15 +374,18 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
        ))::text AS other,
        lr.status AS last_status,
        lr.completed_at AS last_completed_at,
-       lr.result_summary_json AS last_summary
+       lr.result_summary_json AS last_summary,
+       la.result_summary_json AS attention_summary
      FROM scheduled_work_items s
      LEFT JOIN day_runs r ON r.schedule_id = s.id
      LEFT JOIN last_run lr ON lr.schedule_id = s.id
+     LEFT JOIN last_attention la ON la.schedule_id = s.id
      WHERE s.status IN ('enabled', 'paused')
         OR EXISTS (SELECT 1 FROM day_runs dr WHERE dr.schedule_id = s.id)
      GROUP BY s.id, s.title, s.status, s.run_template_json, s.trigger_json,
               s.approval_policy, s.approval_timeout_action,
-              lr.status, lr.completed_at, lr.result_summary_json
+              lr.status, lr.completed_at, lr.result_summary_json,
+              la.result_summary_json
      ORDER BY COUNT(r.id) DESC, s.title ASC`,
     [window.from, window.to],
   );
@@ -368,6 +414,8 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
         : String(row.last_completed_at))
       : undefined,
     lastSummaryReason: summaryReason(row.last_summary),
+    lastSessionId: summarySessionId(row.last_summary),
+    attentionSessionId: summarySessionId(row.attention_summary) ?? summarySessionId(row.last_summary),
   }));
 
   const runTotals = bySchedule.reduce(
@@ -411,4 +459,242 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
     cadenceRecommendations,
     highlights: buildHighlights(scheduleBlock, usage, cadenceRecommendations),
   };
+}
+
+/** Human cadence label for WeChat (Chinese, no raw cron when avoidable). */
+function formatCadenceZh(row: DigestScheduleRow): string {
+  const expr = (row.expression || '').trim();
+  if (row.triggerKind === 'interval' || /^\d+[mhd]$/i.test(expr)) {
+    const m = /^(\d+)(m|h|d)$/i.exec(expr);
+    if (m) {
+      const n = Number(m[1]);
+      const u = m[2]!.toLowerCase();
+      if (u === 'm') return n === 1 ? '每分钟' : `每 ${n} 分钟`;
+      if (u === 'h') return n === 1 ? '每小时' : `每 ${n} 小时`;
+      if (u === 'd') return n === 1 ? '每天' : `每 ${n} 天`;
+    }
+  }
+  if (row.triggerKind === 'cron' || expr.includes('*')) {
+    // Common daily-at-hour patterns: "0 9 * * *" → 每天 09:00
+    const daily = /^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*$/.exec(expr);
+    if (daily) {
+      const min = daily[1]!.padStart(2, '0');
+      const hour = daily[2]!.padStart(2, '0');
+      const tz = row.timezone ? `（${row.timezone}）` : '';
+      return `每天 ${hour}:${min}${tz}`;
+    }
+    return expr ? `定时 ${expr}` : '定时任务';
+  }
+  if (row.triggerKind === 'once') return '一次性';
+  return expr || row.triggerKind || '任务';
+}
+
+function statusIcon(row: DigestScheduleRow): string {
+  if (row.status === 'retired' || row.status === 'paused') return '⏸';
+  if (row.failed > 0) return '❌';
+  if (row.cancelled > 0 || row.awaitingApproval > 0) return '⚠️';
+  if (row.runCount === 0) return '·';
+  return '✅';
+}
+
+function formatRunOutcomeZh(row: DigestScheduleRow): string {
+  if (row.runCount === 0) return '当日未触发';
+  const parts: string[] = [];
+  if (row.succeeded > 0) parts.push(`成功 ${row.succeeded}`);
+  if (row.failed > 0) parts.push(`失败 ${row.failed}`);
+  if (row.cancelled > 0) parts.push(`取消 ${row.cancelled}`);
+  if (row.skipped > 0) parts.push(`跳过 ${row.skipped}`);
+  if (row.awaitingApproval > 0) parts.push(`待审批 ${row.awaitingApproval}`);
+  if (row.other > 0) parts.push(`其他 ${row.other}`);
+  return `共 ${row.runCount} 次 · ${parts.join(' · ')}`;
+}
+
+function shortModelName(provider: string, model: string): string {
+  const m = model.replace(/^.*\//, '');
+  if (provider && !m.toLowerCase().includes(provider.toLowerCase())) {
+    return `${provider} / ${m}`;
+  }
+  return m || provider || '未知模型';
+}
+
+function actionLabelZh(action: DigestCadenceRecommendation['action']): string {
+  switch (action) {
+    case 'reduce_frequency': return '建议降频';
+    case 'retire_duplicate': return '建议下线重复项';
+    case 'fix_approval_policy': return '建议修正审批策略';
+    case 'investigate': return '建议排查';
+    case 'keep': return '可保持';
+    default: return action;
+  }
+}
+
+/**
+ * Operator-facing Chinese text for WeChat / mobile push.
+ * Prefer short lines, plain language, no raw API jargon.
+ */
+export function formatDailyDigestMessage(digest: DailyDigest): string {
+  const t = digest.schedule.runTotals;
+  const lines: string[] = [
+    `📊 执行日报 · ${digest.day}`,
+    `（UTC 自然日；北京时间约 ${digest.day} 08:00 → 次日 08:00）`,
+    '',
+    '【总览】',
+    `启用任务 ${digest.schedule.enabledCount} 个 · 共执行 ${t.runCount} 次`,
+    `成功 ${t.succeeded} · 失败 ${t.failed} · 取消 ${t.cancelled}`
+      + (t.awaitingApproval > 0 ? ` · 待审批 ${t.awaitingApproval}` : '')
+      + (t.skipped > 0 ? ` · 跳过 ${t.skipped}` : ''),
+  ];
+
+  const usage = digest.usage.totals;
+  const top = digest.usage.byProviderModel[0];
+  lines.push('', '【模型用量】');
+  const cache = usage.cacheHitRate == null
+    ? '缓存 n/a'
+    : `缓存命中 ${(usage.cacheHitRate * 100).toFixed(0)}%`;
+  lines.push(
+    `调用 ${usage.modelResponseCount} 次 · 约 $${usage.estimatedCostUsd.toFixed(2)} · ${cache}`,
+  );
+  if (top) {
+    lines.push(`主力 ${shortModelName(top.provider, top.model)}（${top.modelResponseCount} 次）`);
+  }
+
+  // Prefer enabled + anything that actually ran; drop retired zero-signal noise last.
+  const rows = [...digest.schedule.bySchedule]
+    .filter(row => row.runCount > 0 || row.status === 'enabled')
+    .sort((a, b) => {
+      const score = (r: DigestScheduleRow) =>
+        (r.failed > 0 ? 1000 : 0) + (r.cancelled > 0 ? 100 : 0) + r.runCount;
+      return score(b) - score(a);
+    })
+    .slice(0, 12);
+
+  if (rows.length > 0) {
+    lines.push('', '【任务明细】');
+    for (const row of rows) {
+      const state =
+        row.status === 'enabled' ? ''
+          : row.status === 'paused' ? '（已暂停）'
+            : row.status === 'retired' ? '（已下线）'
+              : `（${row.status}）`;
+      lines.push(`${statusIcon(row)} ${row.title}${state}`);
+      lines.push(`   ${formatCadenceZh(row)} · ${formatRunOutcomeZh(row)}`);
+    }
+  }
+
+  const base = resolveWebBaseUrl();
+  const attention = rows.filter(r =>
+    r.status === 'enabled' && (r.failed > 0 || r.cancelled > 0 || r.awaitingApproval > 0),
+  );
+  if (attention.length > 0) {
+    lines.push('', '【需关注】');
+    for (const row of attention.slice(0, 5)) {
+      const why: string[] = [];
+      if (row.failed > 0) why.push(`${row.failed} 次失败`);
+      if (row.cancelled > 0) why.push(`${row.cancelled} 次取消`);
+      if (row.awaitingApproval > 0) why.push(`${row.awaitingApproval} 次待审批`);
+      lines.push(`· ${row.title}：${why.join('、')}`);
+      const sessionId = row.attentionSessionId ?? row.lastSessionId;
+      if (sessionId) {
+        lines.push(`  会话：${webDeepLink(`#chat?session=${encodeURIComponent(sessionId)}`, base)}`);
+      }
+      lines.push(`  任务：${webDeepLink(`#schedules?id=${encodeURIComponent(row.scheduleId)}`, base)}`);
+    }
+  }
+
+  // Analysis-style enabled runs with session content (even when all succeeded)
+  const analysisWithSession = rows.filter(r =>
+    r.status === 'enabled'
+    && r.runCount > 0
+    && (r.templateId === 'scheduled_execution' || r.templateId === 'scheduled_feed_analysis')
+    && Boolean(r.lastSessionId || r.attentionSessionId)
+    && !attention.some(a => a.scheduleId === r.scheduleId),
+  ).slice(0, 3);
+  if (analysisWithSession.length > 0) {
+    lines.push('', '【可查看执行】');
+    for (const row of analysisWithSession) {
+      const sessionId = row.attentionSessionId ?? row.lastSessionId!;
+      lines.push(`· ${row.title}`);
+      lines.push(`  ${webDeepLink(`#chat?session=${encodeURIComponent(sessionId)}`, base)}`);
+    }
+  }
+
+  const recs = digest.cadenceRecommendations
+    .filter(r => r.severity === 'action' || r.severity === 'warn')
+    .slice(0, 4);
+  if (recs.length > 0) {
+    lines.push('', '【建议】');
+    for (const r of recs) {
+      const tip = r.recommendedExpression
+        ? ` → 可改为 ${r.recommendedExpression}`
+        : '';
+      lines.push(`· ${actionLabelZh(r.action)}：${r.title}${tip}`);
+    }
+  }
+
+  if (t.failed === 0 && t.cancelled === 0 && t.awaitingApproval === 0 && t.runCount > 0) {
+    lines.push('', '状态：当日无失败/取消，整体正常。');
+  }
+
+  lines.push('', '【链接】');
+  lines.push(`日报：${webDeepLink(`#usage?day=${encodeURIComponent(digest.day)}`, base)}`);
+  lines.push('（手机需可访问该地址；本机请用电脑浏览器打开）');
+  return lines.join('\n');
+}
+
+export interface PublishDailyDigestOptions {
+  scheduleId?: string;
+  runId?: string;
+  /** When true, compose but skip session event (tests). Default false. */
+  dryRun?: boolean;
+}
+
+/**
+ * Compose (or reuse) the daily digest and emit `ops.daily_digest` for operator
+ * SSE / WeChat. Does not call WeClaw directly — delivery is channel-side.
+ */
+export async function publishDailyDigest(
+  query: DailyDigestQuery = {},
+  options: PublishDailyDigestOptions = {},
+): Promise<{ digest: DailyDigest; message: string; eventEmitted: boolean }> {
+  const digest = await getDailyDigest(query);
+  const message = formatDailyDigestMessage(digest);
+  if (options.dryRun) {
+    return { digest, message, eventEmitted: false };
+  }
+  const severity =
+    digest.schedule.runTotals.failed > 0
+    || digest.schedule.runTotals.cancelled > 0
+    || digest.schedule.runTotals.awaitingApproval > 0
+      ? 'warning'
+      : 'info';
+  try {
+    await appendSessionEvent({
+      sessionId: `ops:daily-digest:${digest.day}`,
+      type: 'ops.daily_digest',
+      source: 'ops',
+      tenantId: query.tenantId?.trim() || 'local',
+      projectId: query.projectId?.trim() || 'los',
+      payload: {
+        kind: 'daily_execution_digest',
+        severity,
+        title: `执行汇总 ${digest.day}`,
+        detail: message,
+        reason: message,
+        day: digest.day,
+        from: digest.from,
+        to: digest.to,
+        requiresDecision: false,
+        scheduleId: options.scheduleId ?? null,
+        runId: options.runId ?? null,
+        enabledCount: digest.schedule.enabledCount,
+        runTotals: digest.schedule.runTotals,
+      },
+    });
+    return { digest, message, eventEmitted: true };
+  } catch (err) {
+    log.warn(
+      `daily digest notify failed day=${digest.day}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { digest, message, eventEmitted: false };
+  }
 }

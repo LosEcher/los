@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { loadConfig } from '@los/infra/config';
 import { closeDb, getDb, initDb } from '@los/infra/db';
 import { ensureScheduledWorkStore } from './scheduled-work/schema.js';
-import { getDailyDigest } from './daily-digest.js';
+import { formatDailyDigestMessage, getDailyDigest, publishDailyDigest } from './daily-digest.js';
 
 test('getDailyDigest aggregates schedules and emits cadence recommendations', async () => {
   const config = await loadConfig();
@@ -135,4 +135,39 @@ test('getDailyDigest aggregates schedules and emits cadence recommendations', as
 
 test('getDailyDigest rejects invalid day', async () => {
   await assert.rejects(() => getDailyDigest({ day: '08-09-2026' }), /YYYY-MM-DD/);
+});
+
+test('formatDailyDigestMessage is Chinese and mobile-readable', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    const day = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const digest = await getDailyDigest({ day, projectId: 'los' });
+    const text = formatDailyDigestMessage(digest);
+    assert.match(text, new RegExp(day));
+    assert.match(text, /执行日报/);
+    assert.match(text, /【总览】/);
+    assert.match(text, /【任务明细】|【模型用量】/);
+    assert.match(text, /#usage\?day=/);
+    assert.doesNotMatch(text, /\bn=\d+/);
+    assert.doesNotMatch(text, /\bok=\d+/);
+    assert.doesNotMatch(text, /cache_hit_rate=/);
+    assert.ok(text.length > 40);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('publishDailyDigest dryRun skips session event', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  try {
+    const day = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const result = await publishDailyDigest({ day, projectId: 'los' }, { dryRun: true });
+    assert.equal(result.eventEmitted, false);
+    assert.equal(result.digest.day, day);
+    assert.match(result.message, /执行日报/);
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
 });

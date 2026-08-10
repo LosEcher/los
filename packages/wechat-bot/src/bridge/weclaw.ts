@@ -262,8 +262,20 @@ export interface WeClawSendResult {
   error?: string;
 }
 
+const WECLAW_SEND_MAX_ATTEMPTS = 3;
+
+function isRetryableWeclawSendError(message: string): boolean {
+  return /prepare failed|ret=-2|EOF|timeout|ECONNRESET|ECONNREFUSED|fetch failed|503|502|504/i
+    .test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
  * Send a message to WeChat via WeClaw's HTTP API.
+ * Retries transient iLink failures (prepare failed / EOF) with short backoff.
  */
 export async function weclawSend(input: WeClawSendInput, config: WeClawConfig = {}): Promise<WeClawSendResult> {
   const addr = config.apiAddr ?? process.env.WECLAW_API_ADDR ?? DEFAULT_API_ADDR;
@@ -272,28 +284,44 @@ export async function weclawSend(input: WeClawSendInput, config: WeClawConfig = 
     return { ok: false, error: 'no recipient: set WECLAW_DEFAULT_TO or pass "to" param' };
   }
 
-  try {
-    const body: Record<string, unknown> = { to };
-    if (input.text) body.text = input.text;
-    if (input.mediaUrl) body.media_url = input.mediaUrl;
+  const body: Record<string, unknown> = { to };
+  if (input.text) body.text = input.text;
+  if (input.mediaUrl) body.media_url = input.mediaUrl;
 
-    const res = await fetch(`http://${addr}/api/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
+  let lastError = 'weclaw send failed';
+  for (let attempt = 1; attempt <= WECLAW_SEND_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(`http://${addr}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      return { ok: false, error: `weclaw API ${res.status}: ${errText.slice(0, 200)}` };
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        lastError = `weclaw API ${res.status}: ${errText.slice(0, 200)}`;
+        if (attempt < WECLAW_SEND_MAX_ATTEMPTS && isRetryableWeclawSendError(lastError)) {
+          log.warn(`weclaw send retry ${attempt}/${WECLAW_SEND_MAX_ATTEMPTS}: ${lastError}`);
+          await sleep(attempt * 1500);
+          continue;
+        }
+        return { ok: false, error: lastError };
+      }
+
+      const data = await res.json() as Record<string, unknown>;
+      return { ok: true, messageId: (data?.message_id as string) ?? undefined };
+    } catch (err) {
+      lastError = (err as Error).message;
+      if (attempt < WECLAW_SEND_MAX_ATTEMPTS && isRetryableWeclawSendError(lastError)) {
+        log.warn(`weclaw send retry ${attempt}/${WECLAW_SEND_MAX_ATTEMPTS}: ${lastError}`);
+        await sleep(attempt * 1500);
+        continue;
+      }
+      return { ok: false, error: lastError };
     }
-
-    const data = await res.json() as Record<string, unknown>;
-    return { ok: true, messageId: (data?.message_id as string) ?? undefined };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
   }
+  return { ok: false, error: lastError };
 }
 
 /**

@@ -116,6 +116,36 @@ test('GET /ops/daily-digest returns 400 for invalid day', async () => {
   }
 });
 
+test('POST /ops/daily-digest/push emits digest event envelope', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, config);
+  registerUsageRoutes(app);
+  try {
+    const day = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/ops/daily-digest/push',
+      payload: { day, projectId: 'los' },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      day: string;
+      eventEmitted: boolean;
+      messagePreview: string;
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.day, day);
+    assert.equal(body.eventEmitted, true);
+    assert.match(body.messagePreview, /执行日报|执行汇总/);
+  } finally {
+    await closeDb().catch(() => undefined);
+    await app.close();
+  }
+});
+
 test('GET /ops/runtime-health returns synthesizer board', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
