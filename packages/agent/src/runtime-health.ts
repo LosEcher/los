@@ -113,6 +113,27 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
   const online = executorItems.filter((n) => n.status === 'online').length;
   if (candidates === 0) warnings.push('executors:no_candidate');
 
+  // Fleet = real agent executors (exclude ssh_target / historical noise).
+  // Warn when a fleet member is offline or online-but-not-candidate so pinned
+  // schedules and remote work surface as degraded even if MBP stays candidate.
+  const fleet = executors.filter(
+    (node) => node.nodeKind === 'executor' && node.capabilities?.run_agent === true,
+  );
+  const offlineFleet = fleet.filter((node) => node.status !== 'online');
+  const onlineUnverified = fleet.filter(
+    (node) => node.status === 'online' && node.execution.candidate !== true,
+  );
+  if (offlineFleet.length > 0) {
+    warnings.push(
+      `executors:offline_fleet=${offlineFleet.length}:${offlineFleet.map((n) => n.nodeId).slice(0, 4).join(',')}`,
+    );
+  }
+  if (onlineUnverified.length > 0) {
+    warnings.push(
+      `executors:online_unverified=${onlineUnverified.length}:${onlineUnverified.map((n) => n.nodeId).slice(0, 4).join(',')}`,
+    );
+  }
+
   if (scheduleStats.openCircuits > 0) {
     warnings.push(`schedules:open_circuits=${scheduleStats.openCircuits}`);
   }

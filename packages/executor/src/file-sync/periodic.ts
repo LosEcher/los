@@ -9,6 +9,19 @@ import { runSyncQueue } from './sync-runner.js';
 
 const log = getLogger('file-sync-periodic');
 
+/** Base list-refresh interval (healthy path). */
+export const PERIODIC_LIST_REFRESH_BASE_MS = 60_000;
+/** Cap list-refresh backoff when PG/path is down (15m). */
+export const PERIODIC_LIST_REFRESH_MAX_MS = 15 * 60_000;
+
+/** Pure backoff for list-folder refresh failures — avoids DB request storms. */
+export function _listRefreshBackoffMs(consecutiveFailures: number, baseMs = PERIODIC_LIST_REFRESH_BASE_MS, maxMs = PERIODIC_LIST_REFRESH_MAX_MS): number {
+  if (consecutiveFailures <= 0) return baseMs;
+  // 1→2m, 2→4m, 3→8m, 4+→15m (with base 60s)
+  const exp = Math.min(consecutiveFailures, 4);
+  return Math.min(maxMs, baseMs * (2 ** exp));
+}
+
 export function startPeriodicSync(nodeId: string): () => void {
   const store = createFileSyncStore();
   const scanner = createScanner(store, nodeId);
@@ -18,9 +31,13 @@ export function startPeriodicSync(nodeId: string): () => void {
   }>();
   let listRefreshTimer: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
+  let listRefreshFailures = 0;
+  let nextListRefreshAt = 0;
 
   async function refreshAndSchedule() {
     if (stopped) return;
+    const now = Date.now();
+    if (now < nextListRefreshAt) return;
     try {
       const folders = await store.listFolders(nodeId);
       const schedulableFolders = _selectSchedulablePeriodicFolders(folders);
@@ -62,15 +79,30 @@ export function startPeriodicSync(nodeId: string): () => void {
           log.info(`periodic sync stopped for unscheduled folder ${id}`);
         }
       }
+
+      if (listRefreshFailures > 0) {
+        log.info(`periodic sync list refresh recovered after ${listRefreshFailures} consecutive failure(s)`);
+      }
+      listRefreshFailures = 0;
+      nextListRefreshAt = Date.now() + PERIODIC_LIST_REFRESH_BASE_MS;
     } catch (err) {
-      log.warn(`periodic sync refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+      listRefreshFailures += 1;
+      const backoff = _listRefreshBackoffMs(listRefreshFailures);
+      nextListRefreshAt = Date.now() + backoff;
+      // Log first failure and then every 4th to avoid log storms during path outages.
+      if (listRefreshFailures === 1 || listRefreshFailures % 4 === 0) {
+        log.warn(
+          `periodic sync refresh failed (${listRefreshFailures} consecutive, next in ${Math.round(backoff / 1000)}s): ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
   // Initial refresh
   refreshAndSchedule().catch(() => {});
-  // Re-list folders every 60s to pick up new registrations
-  listRefreshTimer = setInterval(() => refreshAndSchedule(), 60_000);
+  // Tick every 60s; actual DB refresh respects nextListRefreshAt backoff.
+  listRefreshTimer = setInterval(() => refreshAndSchedule(), PERIODIC_LIST_REFRESH_BASE_MS);
 
   return () => {
     stopped = true;

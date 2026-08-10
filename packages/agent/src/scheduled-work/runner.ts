@@ -421,17 +421,46 @@ async function executeTemplate(
     throw new Error(`Scheduled execution ${result.status}${reason ? `: ${reason}` : ''}`);
   }
   const [nodes, services] = await Promise.all([listExecutorNodes(), listServiceInstances()]);
-  const unavailableNodes = nodes.filter(node => node.status !== 'online');
-  const unavailableServices = services.filter(service => service.status !== 'online');
-  if (unavailableNodes.length === 0 && unavailableServices.length === 0) {
-    return { status: 'no_op', summary: { nodes: nodes.length, services: services.length, unavailable: 0 } };
+  // Fleet executors only — ignore ssh_target / fixture noise that always look "unavailable".
+  const fleet = nodes.filter(
+    node => node.nodeKind === 'executor' && node.capabilities?.run_agent === true,
+  );
+  const offlineFleet = fleet.filter(node => node.status !== 'online');
+  const onlineUnverified = fleet.filter(
+    node => node.status === 'online' && node.execution.candidate !== true,
+  );
+  // Active gateways only: not ready, or online without readiness, count as attention.
+  // Historical offline gateway rows (old ports) are noise and no longer listed.
+  const unavailableServices = services.filter(service => {
+    if (service.serviceKind !== 'gateway') return false;
+    if (service.status === 'online') return service.readiness?.ready !== true;
+    // Offline gateway is attention only when it still has a recent heartbeat (< 24h).
+    const hb = Date.parse(service.lastHeartbeatAt ?? '');
+    return Number.isFinite(hb) && Date.now() - hb < 24 * 60 * 60_000;
+  });
+  if (offlineFleet.length === 0 && onlineUnverified.length === 0 && unavailableServices.length === 0) {
+    return {
+      status: 'no_op',
+      summary: {
+        nodes: nodes.length,
+        fleet: fleet.length,
+        services: services.length,
+        candidates: fleet.filter(n => n.execution.candidate).length,
+        unavailable: 0,
+      },
+    };
   }
   return {
     status: 'succeeded',
     title: `${schedule.title}: runtime attention required`,
     summary: {
-      nodes: nodes.length, services: services.length,
-      unavailableNodes: unavailableNodes.map(node => node.nodeId),
+      nodes: nodes.length,
+      fleet: fleet.length,
+      services: services.length,
+      offlineFleet: offlineFleet.map(node => node.nodeId),
+      onlineUnverified: onlineUnverified.map(node => node.nodeId),
+      // Keep legacy key for digests that still read unavailableNodes.
+      unavailableNodes: offlineFleet.map(node => node.nodeId),
       unavailableServices: unavailableServices.map(service => service.serviceId),
     },
   };

@@ -206,8 +206,10 @@ Result: `verified.agent_http(_ndjson).ok=true`, `execution.candidate=true`.
 | node34 disk/container hygiene | medium | open |
 | Control-plane anti-sleep / second gateway | when 24×7 is hard requirement | open |
 | Rotate agent key if vultr unit bak exposed it | medium | open (operator decision) |
-| dogfood/runtime-health: fail or alert when **named** pinned nodes leave candidate set | medium | open |
-| Auto-probe after heartbeat recovery when verified is heartbeat-only claim | medium | open |
+| dogfood/runtime-health: warn when fleet offline or online-unverified | medium | **Done** — `runtime-health` + readiness runner fleet filter |
+| Auto-probe after heartbeat recovery when verified is heartbeat-only claim | medium | **Done** — gateway `node-auto-probe` (2/tick, 2s gap, 5m cooldown, 120s interval) |
+| Heartbeat multi-node recovery stampede | low | **Done** — jitter ≤2s on heartbeat interval |
+| File-sync list-refresh storm during PG path outage | medium | **Done** — exponential backoff to 15m + log throttle |
 | NAS34 schedule: pin + non-sandbox network for TCP reachability self-check | medium | open (1 fail 2026-08-10) |
 
 ---
