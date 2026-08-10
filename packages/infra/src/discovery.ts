@@ -59,6 +59,7 @@ export {
 export {
   ccSwitchProviderFromRow,
   parseCodexRouteConfig,
+  parseGrokbuildConfig,
 } from './discovery/provider-parsers.js';
 export { scanGrokAccount, scanKimiCode } from './discovery/scanners.js';
 export type {

@@ -185,7 +185,17 @@ Operator-created 2026-08-10: `schedule-d0388df2-cc54-4e37-a964-7035b96303f4` (en
    `packages/web/src/fleet-card.tsx` reads `/ops/runtime-health`  
    (status · candidate · mem free% · swap% · heartbeat · findings).  
 2. WeChat: only **state transitions** (candidate lost/restored), not every tick — still open.  
-3. Daily digest: table of fleet rows from last heartbeat snapshot — deferred (700-line gate).
+3. **Done (D1/D3)**: daily digest highlights + WeChat section **舰队 / Provider**  
+   via `daily-digest-ops.ts` (fleet capacity snapshot + deepseek/packycode/xai/codex readiness).
+
+### PackyCode Grok (cc-switch) — 2026-08-10
+
+- cc-switch `app_type=grokbuild` **PackyCode** (is_current):  
+  `models_base_url=https://slb-v1.api.fan/v1`, `api_backend=responses`, model `grok-4.5`.
+- los discovery: `cc-switch/grokbuild/PackyCode` → provider **`packycode`** with  
+  `apiShape=openai-responses`, preferred when active (overwrites codex GPT packy defaults).
+- Live probe: `POST …/v1/responses` model=grok-4.5 → **200**.  
+- DeepSeek v4-flash remains direct `deepseek` default for light planning.
 
 ### 4.4 Explicit non-goals (for now)
 

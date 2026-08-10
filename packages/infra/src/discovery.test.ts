@@ -10,6 +10,7 @@ import {
   ccSwitchProviderFromRow,
   describeProviderReadiness,
   parseCodexRouteConfig,
+  parseGrokbuildConfig,
   providerApiKeyEnv,
   summarizeProviderReadiness,
   type DiscoveredProvider,
@@ -123,6 +124,41 @@ base_url = "https://www.packyapi.com/v1"
     baseUrl: 'https://www.packyapi.com/v1',
     model: 'gpt-5.5',
   });
+});
+
+test('cc-switch grokbuild PackyCode imports as packycode with responses shape', () => {
+  const toml = `
+[models]
+default = "grok-4.5"
+
+[model."grok-4.5"]
+model = "grok-4.5"
+name = "PackyCode"
+api_backend = "responses"
+api_key = "sk-packy-grok-test"
+context_window = 500000
+
+[endpoints]
+models_base_url = "https://slb-v1.api.fan/v1"
+`;
+  const parsed = parseGrokbuildConfig(toml);
+  assert.equal(parsed.defaultModel, 'grok-4.5');
+  assert.equal(parsed.apiBackend, 'responses');
+  assert.equal(parsed.baseUrl, 'https://slb-v1.api.fan/v1');
+  assert.equal(parsed.apiKey, 'sk-packy-grok-test');
+
+  const provider = ccSwitchProviderFromRow({
+    app_type: 'grokbuild',
+    name: 'PackyCode',
+    is_current: 1,
+    settings_config: JSON.stringify({ config: toml }),
+  });
+  assert.equal(provider?.name, 'packycode');
+  assert.equal(provider?.defaultModel, 'grok-4.5');
+  assert.equal(provider?.apiShape, 'openai-responses');
+  assert.equal(provider?.baseUrl, 'https://slb-v1.api.fan/v1');
+  assert.equal(provider?.prefer, true);
+  assert.equal(provider?.source, 'cc-switch/grokbuild/PackyCode');
 });
 
 test('cc-switch rows import executable Claude-compatible DeepSeek and MiniMax providers', () => {

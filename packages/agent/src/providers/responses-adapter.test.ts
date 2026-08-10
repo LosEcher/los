@@ -63,7 +63,7 @@ function mockSseResponse(payloads: string[]): Response {
 
 // ── wire_api parsing ────────────────────────────────────
 
-test('parseCodexRouteConfig extracts wire_api from cc-switch Codex TOML but strips it for packycode (unsupported endpoint)', () => {
+test('parseCodexRouteConfig preserves wire_api=responses for packycode (Grok/Packy responses route)', () => {
   const route = parseCodexRouteConfig(`
 model_provider = "packy"
 model = "gpt-5.5"
@@ -77,9 +77,8 @@ wire_api = "responses"
   assert.equal(route.providerName, 'packycode');
   assert.equal(route.baseUrl, 'https://www.packyapi.com/v1');
   assert.equal(route.model, 'gpt-5.5');
-  // PackyCode does not support /v1/responses — wireApi must be stripped
-  // so los falls back to openai-chat-completions.
-  assert.equal(route.wireApi, undefined);
+  // Packy Grok (and some Packy models) use Responses API — keep wire_api.
+  assert.equal(route.wireApi, 'responses');
 });
 
 test('parseCodexRouteConfig omits wire_api when not present', () => {
@@ -95,7 +94,7 @@ base_url = "https://api.openai.com/v1"
   assert.equal(route.wireApi, undefined);
 });
 
-test('parseCodexRouteConfig with wire_api=responses maps packyapi to packycode but strips wireApi', () => {
+test('parseCodexRouteConfig with wire_api=responses maps packyapi to packycode and keeps wireApi', () => {
   const route = parseCodexRouteConfig(`
 model_provider = "p"
 model = "gpt-5.4"
@@ -106,8 +105,7 @@ wire_api = "responses"
 `);
 
   assert.equal(route.providerName, 'packycode');
-  // PackyCode does not support /v1/responses — wireApi must be undefined.
-  assert.equal(route.wireApi, undefined);
+  assert.equal(route.wireApi, 'responses');
 });
 
 // ── Message conversion ───────────────────────────────────

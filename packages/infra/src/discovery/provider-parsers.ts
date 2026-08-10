@@ -21,12 +21,15 @@ export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
     }
   }
 
-  if (baseUrl.includes('packyapi.com') || providerName.toLowerCase() === 'packycode') {
+  if (
+    baseUrl.includes('packyapi.com')
+    || baseUrl.includes('api.fan')
+    || providerName.toLowerCase() === 'packycode'
+  ) {
     providerName = 'packycode';
-    // PackyCode does not support the OpenAI Responses API endpoint (/v1/responses).
-    // Codex may set wire_api="responses" for its own internal routing, but that
-    // format is not available through the PackyCode proxy — force Chat Completions.
-    wireApi = undefined;
+    // Codex Packy GPT routes historically forced chat completions. Keep wire_api
+    // when the operator explicitly set responses (some Packy models need it);
+    // Grok-on-Packy is discovered from grokbuild rows with api_backend=responses.
   }
 
   return { providerName, baseUrl, model, ...(wireApi ? { wireApi } : {}) };
@@ -55,12 +58,99 @@ function extractApiKeyFromCodexAuth(auth: Record<string, any> | null): string | 
   return readString(auth?.OPENAI_API_KEY) ?? readString(auth?.tokens?.access_token);
 }
 
+/**
+ * Parse cc-switch grokbuild TOML settings (PackyCode Grok uses responses API).
+ *
+ * Example:
+ *   [models]
+ *   default = "grok-4.5"
+ *   [model."grok-4.5"]
+ *   model = "grok-4.5"
+ *   api_backend = "responses"
+ *   api_key = "sk-..."
+ *   [endpoints]
+ *   models_base_url = "https://slb-v1.api.fan/v1"
+ */
+export function parseGrokbuildConfig(toml: string): {
+  defaultModel?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  apiBackend?: string;
+  modelName?: string;
+} {
+  const defaultModel = toml.match(/^default\s*=\s*"(.+)"$/m)?.[1]
+    ?? toml.match(/\[models\][\s\S]*?^default\s*=\s*"(.+)"$/m)?.[1];
+  const endpointsBase = toml.match(/models_base_url\s*=\s*"(.+)"/m)?.[1];
+  // Prefer the default model section for api_key / backend.
+  let apiKey: string | undefined;
+  let apiBackend: string | undefined;
+  let modelName: string | undefined;
+  if (defaultModel) {
+    const escaped = defaultModel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const section = new RegExp(
+      `\\[model\\."${escaped}"\\]\\n(.*?)(?=\\n\\[|$)`,
+      's',
+    );
+    const body = toml.match(section)?.[1] ?? '';
+    apiKey = body.match(/^api_key\s*=\s*"(.+)"$/m)?.[1];
+    apiBackend = body.match(/^api_backend\s*=\s*"(.+)"$/m)?.[1];
+    modelName = body.match(/^model\s*=\s*"(.+)"$/m)?.[1] ?? defaultModel;
+  }
+  if (!apiKey) {
+    apiKey = toml.match(/^api_key\s*=\s*"(.+)"$/m)?.[1];
+  }
+  if (!apiBackend) {
+    apiBackend = toml.match(/^api_backend\s*=\s*"(.+)"$/m)?.[1];
+  }
+  return {
+    defaultModel: modelName ?? defaultModel,
+    apiKey,
+    baseUrl: endpointsBase,
+    apiBackend,
+    modelName,
+  };
+}
+
+function isPackyHost(value: string | undefined, accountName: string): boolean {
+  const hay = `${value ?? ''} ${accountName}`.toLowerCase();
+  return hay.includes('packy') || hay.includes('api.fan') || hay.includes('packyapi');
+}
+
 export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredProvider | null {
   const config = parseJsonObject(row.settings_config) ?? {};
   const env = parseJsonObject(config.env) ?? {};
   const appType = readString(row.app_type)?.toLowerCase();
   const accountName = readString(row.name) ?? 'default';
   const isCurrent = row.is_current === 1 || row.is_current === true;
+
+  if (appType === 'grokbuild' || appType === 'grok') {
+    const toml = readString(config.config) ?? '';
+    if (!toml) return null;
+    const parsed = parseGrokbuildConfig(toml);
+    if (!parsed.apiKey) return null;
+    const packy = isPackyHost(parsed.baseUrl, accountName);
+    const apiShape = parsed.apiBackend?.toLowerCase() === 'responses'
+      ? 'openai-responses'
+      : undefined;
+    // PackyCode Grok (cc-switch current) → packycode provider so los uses the
+    // same operator route; native xAI OAuth remains the separate `xai` entry.
+    const name = packy ? 'packycode' : 'xai';
+    return {
+      name,
+      apiKey: parsed.apiKey,
+      baseUrl: parsed.baseUrl ?? (packy ? undefined : requireProviderDefaults('xai').baseUrl),
+      defaultModel: parsed.defaultModel ?? requireProviderDefaults('xai').defaultModel,
+      apiShape,
+      available: true,
+      source: `cc-switch/grokbuild/${accountName}`,
+      sourceTool: 'cc-switch',
+      importable: true,
+      prefer: isCurrent,
+      note: isCurrent
+        ? 'Currently active in cc-switch (grokbuild)'
+        : 'cc-switch grokbuild account',
+    };
+  }
 
   if (appType === 'codex') {
     const route = readString(config.config)
@@ -79,11 +169,14 @@ export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredPro
       apiKey,
       baseUrl: route.baseUrl,
       defaultModel: route.model,
+      // Keep wire_api for non-packy; packy codex GPT often needs chat.
+      // Grok-on-packy is handled by grokbuild rows (responses).
       apiShape: mapWireApiToShape(route.wireApi),
       available: true,
       source: `cc-switch/codex/${accountName}`,
       sourceTool: 'cc-switch',
       importable: true,
+      prefer: isCurrent,
       note: isCurrent ? 'Currently active in cc-switch' : undefined,
     };
   }

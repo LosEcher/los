@@ -48,3 +48,4 @@ packages/agent/src/scheduler-decision-ledger.ts
 packages/agent/src/tools/core/agent-tools.ts
 packages/agent/src/scheduled-work/runner.ts
 packages/agent/src/scheduled-work/store.ts
+packages/agent/src/daily-digest.ts

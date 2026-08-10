@@ -2,8 +2,6 @@ import { getLogger } from '@los/infra/logger';
 import { getDb } from '@los/infra/db';
 import { listManagedWorkspaces } from '../managed-workspace-store.js';
 
-import { listExecutorNodes } from '../executor-nodes.js';
-import { dispatchFeedAnalysisJob } from '../integration/feed-analysis-ingress.js';
 import type { FeedAnalysisDispatchRequest } from '../integration/feed-analysis-types.js';
 import {
   getAllCachedProbeResults,
@@ -14,9 +12,7 @@ import {
 } from '../providers/provider-probe.js';
 import { runScheduledAgentTask } from '../scheduler.js';
 import { appendSessionEvent } from '../session-events.js';
-import { listServiceInstances } from '../service-instances.js';
 import { createTodo } from '../todos.js';
-import { listInboxEntries } from '../work-items/projection.js';
 import {
   startScheduledWorkExecutionHeartbeat,
   waitForAdoptedScheduleTask,
@@ -33,6 +29,13 @@ import {
   recordScheduledRunOutcome,
   transitionScheduledWorkRun,
 } from './store.js';
+import {
+  handleDailyExecutionDigest,
+  handleFleetHostCheck,
+  handleMorningInboxDigest,
+  handleRuntimeReadiness,
+  handleScheduledFeedAnalysis,
+} from './run-handlers.js';
 import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome } from './types.js';
 
 const log = getLogger('scheduled-work');
@@ -281,118 +284,21 @@ async function executeTemplate(
   run: ScheduledWorkItemRun,
 ): Promise<ScheduledWorkRunOutcome> {
   if (schedule.runTemplate.templateId === 'scheduled_feed_analysis') {
-    const derived = _deriveScheduledFeedAnalysisDispatch(schedule, run);
-    const result = await dispatchFeedAnalysisJob(derived.request, derived.idempotencyKey, {
-      workspaceRoot: await resolveWorkspaceRoot(schedule.projectId),
-      tenantId: schedule.tenantId,
-      projectId: schedule.projectId,
-      userId: schedule.userId,
-      requestId: run.id,
-      maxInlineBytes: 1024 * 1024,
-      maxItems: 500,
-      materialHosts: [],
-      materialFetchTimeoutMs: 10_000,
-    });
-    return {
-      status: 'succeeded',
-      title: `${schedule.title}: dispatch accepted`,
-      summary: {
-        accepted: result.dispatchState.accepted,
-        dispatchId: result.dispatch.id,
-        dispatchStatus: result.dispatch.status,
-        workItemId: result.dispatch.workItemId,
-        runSpecId: result.dispatch.runId,
-        resultAvailable: result.dispatchState.resultAvailable,
-        callbackComplete: false,
-      },
-      workItemId: result.dispatch.workItemId,
-      runSpecId: result.dispatch.runId,
-    };
+    return handleScheduledFeedAnalysis(
+      schedule,
+      run,
+      await resolveWorkspaceRoot(schedule.projectId),
+      _deriveScheduledFeedAnalysisDispatch,
+    );
   }
   if (schedule.runTemplate.templateId === 'morning_inbox_digest') {
-    const entries = await listInboxEntries({ projectId: schedule.projectId, limit: 100 });
-    if (entries.length === 0) return { status: 'no_op', summary: { inboxCount: 0 } };
-    const byAttention = entries.reduce<Record<string, number>>((counts, entry) => {
-      counts[entry.attentionState] = (counts[entry.attentionState] ?? 0) + 1;
-      return counts;
-    }, {});
-    return {
-      status: 'succeeded',
-      title: `${schedule.title}: ${entries.length} item${entries.length === 1 ? '' : 's'} need attention`,
-      summary: { inboxCount: entries.length, byAttention },
-    };
+    return handleMorningInboxDigest(schedule);
   }
   if (schedule.runTemplate.templateId === 'daily_execution_digest') {
-    const { publishDailyDigest } = await import('../daily-digest.js');
-    const published = await publishDailyDigest(
-      { projectId: schedule.projectId, tenantId: schedule.tenantId },
-      { scheduleId: schedule.id, runId: run.id },
-    );
-    return {
-      status: 'succeeded',
-      title: `${schedule.title}: day=${published.digest.day}`,
-      summary: {
-        day: published.digest.day,
-        eventEmitted: published.eventEmitted,
-        enabledCount: published.digest.schedule.enabledCount,
-        runTotals: published.digest.schedule.runTotals,
-        highlightCount: published.digest.highlights.length,
-      },
-    };
+    return handleDailyExecutionDigest(schedule, run);
   }
   if (schedule.runTemplate.templateId === 'fleet_host_check') {
-    const { runFleetHostChecks } = await import('../fleet-host-checks.js');
-    const report = await runFleetHostChecks({
-      tenantId: schedule.tenantId,
-      projectId: schedule.projectId,
-      scheduleId: schedule.id,
-      runId: run.id,
-      // Schedule cadence owns spacing; still honor per-host cooldown unless force.
-      force: false,
-    });
-    const attention = [...report.failed, ...report.degraded];
-    if (attention.length === 0) {
-      return {
-        status: report.checked.length === 0 ? 'no_op' : 'succeeded',
-        title: report.checked.length === 0
-          ? `${schedule.title}: no hosts checked`
-          : `${schedule.title}: ${report.ok.length} host(s) ok`,
-        summary: {
-          assessedAt: report.assessedAt,
-          checked: report.checked,
-          skipped: report.skipped,
-          ok: report.ok,
-          failed: report.failed,
-          degraded: report.degraded,
-          alertsEmitted: report.alertsEmitted,
-          results: report.results.map((r) => ({
-            nodeId: r.nodeId,
-            status: r.status,
-            detail: r.detail,
-            durationMs: r.durationMs,
-          })),
-        },
-      };
-    }
-    return {
-      status: 'succeeded',
-      title: `${schedule.title}: host attention ${attention.join(',')}`,
-      summary: {
-        assessedAt: report.assessedAt,
-        checked: report.checked,
-        skipped: report.skipped,
-        ok: report.ok,
-        failed: report.failed,
-        degraded: report.degraded,
-        alertsEmitted: report.alertsEmitted,
-        results: report.results.map((r) => ({
-          nodeId: r.nodeId,
-          status: r.status,
-          detail: r.detail,
-          durationMs: r.durationMs,
-        })),
-      },
-    };
+    return handleFleetHostCheck(schedule, run);
   }
   if (schedule.runTemplate.templateId === 'scheduled_execution') {
     const dedupeKey = `schedule-exec-${run.id}`;
@@ -474,63 +380,8 @@ async function executeTemplate(
     const reason = 'reason' in result ? (result as { reason?: string }).reason : result.status;
     throw new Error(`Scheduled execution ${result.status}${reason ? `: ${reason}` : ''}`);
   }
-  const [nodes, services] = await Promise.all([listExecutorNodes(), listServiceInstances()]);
-  // Named fleet (LOS_FLEET_NODE_IDS) + consecutive-tick attention events.
-  const { tickNamedFleetWatch } = await import('../fleet-inventory.js');
-  const fleetTick = await tickNamedFleetWatch(nodes, {
-    tenantId: schedule.tenantId,
-    projectId: schedule.projectId,
-    scheduleId: schedule.id,
-    runId: run.id,
-  });
-  const fleetSnap = fleetTick.snapshot;
-  // Active gateways only: not ready, or online without readiness, count as attention.
-  // Historical offline gateway rows (old ports) are noise and no longer listed.
-  const unavailableServices = services.filter(service => {
-    if (service.serviceKind !== 'gateway') return false;
-    if (service.status === 'online') return service.readiness?.ready !== true;
-    // Offline gateway is attention only when it still has a recent heartbeat (< 24h).
-    const hb = Date.parse(service.lastHeartbeatAt ?? '');
-    return Number.isFinite(hb) && Date.now() - hb < 24 * 60 * 60_000;
-  });
-  if (fleetSnap.attentionNodeIds.length === 0 && unavailableServices.length === 0) {
-    return {
-      status: 'no_op',
-      summary: {
-        nodes: nodes.length,
-        fleetNamed: fleetSnap.namedIds.length,
-        fleetHealthy: fleetSnap.healthy.length,
-        services: services.length,
-        candidates: fleetSnap.healthy.length,
-        unavailable: 0,
-        fleetAlertsEmitted: fleetTick.alertedNodeIds,
-      },
-    };
-  }
-  return {
-    status: 'succeeded',
-    title: `${schedule.title}: runtime attention required`,
-    summary: {
-      nodes: nodes.length,
-      fleetNamed: fleetSnap.namedIds.length,
-      fleetHealthy: fleetSnap.healthy.length,
-      services: services.length,
-      offlineFleet: fleetSnap.offline,
-      onlineUnverified: fleetSnap.onlineUnverified,
-      missingFleet: fleetSnap.missing,
-      // Keep legacy key for digests that still read unavailableNodes.
-      unavailableNodes: [...fleetSnap.offline, ...fleetSnap.missing],
-      unavailableServices: unavailableServices.map(service => service.serviceId),
-      fleetAlertsEmitted: fleetTick.alertedNodeIds,
-      fleetEmissions: fleetTick.emissions.map((e) => ({
-        nodeId: e.nodeId,
-        health: e.health,
-        consecutiveUnhealthy: e.consecutiveUnhealthy,
-        eventEmitted: e.eventEmitted,
-        skippedReason: e.skippedReason,
-      })),
-    },
-  };
+  // Default / runtime_readiness template.
+  return handleRuntimeReadiness(schedule, run);
 }
 
 export function _deriveScheduledFeedAnalysisDispatch(
