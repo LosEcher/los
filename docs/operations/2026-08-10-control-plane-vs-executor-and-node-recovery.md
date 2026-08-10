@@ -157,7 +157,46 @@ LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET=oracle-t \
 
 ---
 
-## 6. Follow-ups
+## 6. Same-day re-offline (2026-08-10 ~20:20–21:05 CST) `[E]`
+
+After the morning redeploy recovery, `node34-executor-1` flipped registry-offline again
+while the **process stayed healthy**.
+
+### Evidence
+
+| Surface | Observation |
+| --- | --- |
+| `systemctl` | `los-executor` active, `NRestarts=0`, `ActiveEnterTimestamp=15:33 CST` |
+| Local `/health` | `status=ok`, `acceptingTasks=true`, version `0.1.0+b98714c660d7c` |
+| Journal | `node heartbeat failed … timeout` then `heartbeat recovered after N consecutive failures` (20:42, 21:04) |
+| Journal | continuous `file-sync-periodic` / PG `Connection terminated due to connection timeout` (~20:20–20:55) |
+| Registry | reaper set offline when heartbeats missed; after hb returned, `status=online` but `candidate=false` |
+
+### Root cause (this episode)
+
+**Not process death.** Path instability **node34 → MBP control plane** over Tailscale:
+
+1. Heartbeat POST to gateway timed out → stale-online reaper → registry offline.  
+2. File-sync to Postgres `:55432` also timed out in the same window (same path family).  
+3. When heartbeats resumed, verification stayed `heartbeat_claim_requires_active_probe` → **online but not candidate**.
+
+### Recovery applied 21:11 CST
+
+```bash
+curl -X POST -H "x-los-operator-token: $LOS_OPERATOR_TOKEN" \
+  http://127.0.0.1:8080/nodes/node34-executor-1/probe
+```
+
+Result: `verified.agent_http(_ndjson).ok=true`, `execution.candidate=true`.
+
+### Supervision gaps observed
+
+- `dogfood runtime readiness` **succeeded** while listing `node34-executor-1` in `unavailableNodes` — reports, does not fail closed.  
+- `/ops/runtime-health` only warns when **zero** candidates (`executors:no_candidate`); a single pinned node offline is silent if MBP remains candidate.  
+- Log-freshness schedule is a weak signal (log mtime ≠ registry truth).  
+- After auto-recover to online, **candidate still needs probe** (or a future auto-probe-on-online).
+
+## 7. Follow-ups
 
 | Item | Priority | Status |
 | --- | --- | --- |
@@ -167,10 +206,13 @@ LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET=oracle-t \
 | node34 disk/container hygiene | medium | open |
 | Control-plane anti-sleep / second gateway | when 24×7 is hard requirement | open |
 | Rotate agent key if vultr unit bak exposed it | medium | open (operator decision) |
+| dogfood/runtime-health: fail or alert when **named** pinned nodes leave candidate set | medium | open |
+| Auto-probe after heartbeat recovery when verified is heartbeat-only claim | medium | open |
+| NAS34 schedule: pin + non-sandbox network for TCP reachability self-check | medium | open (1 fail 2026-08-10) |
 
 ---
 
-## 7. Related docs
+## 8. Related docs
 
 - ADR 0010 node connectivity taxonomy  
 - ADR 0011 node ops / artifact transfer  
