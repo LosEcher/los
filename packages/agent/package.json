@@ -77,7 +77,8 @@
     "./usage-summary": "./src/usage-summary.ts",
     "./daily-digest": "./src/daily-digest.ts",
     "./runtime-health": "./src/runtime-health.ts",
-    "./fleet-inventory": "./src/fleet-inventory.ts"
+    "./fleet-inventory": "./src/fleet-inventory.ts",
+    "./fleet-resources": "./src/fleet-resources.ts"
   },
   "scripts": {
     "build": "tsc",

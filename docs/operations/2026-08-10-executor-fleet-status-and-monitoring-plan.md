@@ -120,7 +120,7 @@ Goal: know **status + resources** per fleet node without request storms.
 3. **dogfood readiness** (`runtime_readiness` template): each tick updates `fleet_watch_state`; after **≥2 consecutive** unhealthy ticks emits `ops.fleet_attention` (SSE + WeChat), **30m/node cooldown**.  
 4. Env: `LOS_FLEET_ALERT_CONSECUTIVE_TICKS`, `LOS_FLEET_ALERT_COOLDOWN_MS`.
 
-#### P1 — Resource supervision (from heartbeat capacity, no extra probes)
+#### P1 — Resource supervision (from heartbeat capacity, no extra probes) — **Done** 2026-08-10
 
 Thresholds (starting defaults; tune after a week of data):
 
@@ -129,14 +129,18 @@ Thresholds (starting defaults; tune after a week of data):
 | `memoryAvailableMb / memoryTotalMb` | < 15% | < 5% (already blocks candidate) | drain / stop overflow to oracle |
 | `cpuLoad1m / cpuCores` | > 2.0 | > 4.0 | avoid heavy pin |
 | `swapUsedMb / swapTotalMb` (if present) | > 50% | > 80% | restart / free mem |
-| `activeTaskCount` | > 0 for long window on oracle | — | oracle is light-only |
-| heartbeat age | > 45s | > 90s (reaper) | path/gateway check |
+| `activeTaskCount` | > 0 on light/oracle (constrained or ≤2GB) | — | oracle is light-only |
+| heartbeat age | > 45s | > 90s | path/gateway check |
 
-Implementation sketch (no storm):
+Implementation (no storm):
 
-- Extend `getRuntimeHealth()` to compute `resourceWarnings[]` from **last heartbeat capacity only**.  
-- Surface in `/ops/runtime-health` and daily digest section “fleet resources”.  
-- Optional schedule template `fleet_resource_snapshot` every **30–60m**, governance mode, no provider.
+- Module: `packages/agent/src/fleet-resources.ts` — pure eval from last heartbeat.  
+- `getRuntimeHealth()` → `fleetResources` block + top-level `warnings[]` codes
+  (`resource:memory_low|swap_high|…:<nodeId>`).  
+- Live board: `GET /ops/runtime-health` (auth).  
+- Daily digest section deferred: `daily-digest.ts` is at the 700-line gate; consume
+  `fleetResources` / `formatFleetResourceSummary()` in a later extract.  
+- Optional schedule template `fleet_resource_snapshot` still open (P2-ish).
 
 #### P2 — Per-node host checks (bounded, pinned)
 
@@ -206,6 +210,7 @@ ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/h
 | migration path WARN on Windows | low | fix getMigrateDir for win paths |
 | NAS34 schedule self-check false fail | medium | pin + non-sandbox network |
 | Version skew (mbp/desktop vs node34/oracle) | low | redeploy remotes when shipping |
+| node34 swap high from nmem growth | medium | see §8; nmem MemorySwapMax=1G |
 
 ---
 
@@ -214,5 +219,52 @@ ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/h
 - `docs/operations/2026-08-10-control-plane-vs-executor-and-node-recovery.md`  
 - `packages/gateway/src/node-auto-probe.ts`  
 - `packages/agent/src/runtime-health.ts`  
+- `packages/agent/src/fleet-inventory.ts`  
+- `packages/agent/src/fleet-resources.ts`  
 - `tools/deploy-to-remote.sh` (Linux)  
 - Windows: `C:\los\run-executor-task.ps1`, task `los-executor`  
+
+---
+
+## 8. node34 swap incident — 2026-08-10 evening `[E]`
+
+### Symptom
+
+`resource:swap_high:node34-executor-1` on `/ops/runtime-health` — host swap ~67% used
+(~4.0 / 5.9 GiB) while executor stayed `online` + `candidate=true`.
+
+### Root cause (not los-executor)
+
+| Process | Role | Before |
+| --- | --- | --- |
+| `nmem.service` (`nmem-server`) | Nowledge Mem on node34 | ~4.5 GiB RSS + **~3.1 GiB swap** (largest consumer) |
+| `los-executor` | fleet executor | ~131 MiB; not the cause |
+| residual | mysqld / bytebase / gnome | ~0.5 GiB swap after cleanup |
+
+`nmem` drop-in previously set `MemoryHigh=4G` / `MemoryMax=6G` but
+**`MemorySwapMax=infinity`**, so growth parked into host swap instead of being
+capped. Pattern matches 2026-07 CI notes (nmem 2→4.8 GiB).
+
+### Actions taken
+
+1. Updated `/etc/systemd/system/nmem.service.d/memory-limit.conf`:
+   `MemoryHigh=3G`, `MemoryMax=4G`, **`MemorySwapMax=1G`**.
+2. `systemctl daemon-reload && systemctl restart nmem.service`.
+3. Verified `nmem status ok`, `los-executor` still active, health `:8090` ok.
+
+### Result (host, ~+5s after restart)
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Swap used | 4.0 GiB (~67%) | **1.0 GiB (~17%)** |
+| Mem available | ~4.6 GiB | **~6.8 GiB** |
+| nmem MemoryCurrent | ~3.4 GiB | ~1.1–1.9 GiB |
+| nmem limits | high 4G / max 6G / swap ∞ | high 3G / max 4G / **swap 1G** |
+
+### Operator notes
+
+- Do **not** restart `los-executor` for this class of alert; inspect host swap
+  consumers (`VmSwap` / `nmem.service`) first.
+- Recurrence: if nmem hits MemoryMax/SwapMax and degrades, journal will show
+  cgroup pressure; consider moving nmem off node34 or raising host RAM.
+- API key may appear in nmem journal on start — treat as secret, do not paste.

@@ -10,6 +10,11 @@ import { getDb } from '@los/infra/db';
 
 import { listExecutorNodes } from './executor-nodes.js';
 import { evaluateNamedFleet, resolveNamedFleetNodeIds } from './fleet-inventory.js';
+import {
+  evaluateNamedFleetResources,
+  type FleetResourceFinding,
+  type FleetResourceNodeSnapshot,
+} from './fleet-resources.js';
 import { listGovernanceJobs } from './governance-jobs.js';
 import { ensureScheduledWorkStore } from './scheduled-work/schema.js';
 import { listServiceInstances } from './service-instances.js';
@@ -57,6 +62,17 @@ export interface RuntimeHealthReport {
     onlineUnverified: string[];
     missing: string[];
     attentionNodeIds: string[];
+  };
+  /**
+   * Fleet resources from last heartbeat capacity only (P1).
+   * Does not issue probes; thresholds in fleet-resources.ts.
+   */
+  fleetResources: {
+    assessedAt: string;
+    nodes: FleetResourceNodeSnapshot[];
+    findings: FleetResourceFinding[];
+    warningCount: number;
+    criticalCount: number;
   };
   schedules: {
     enabled: number;
@@ -142,6 +158,11 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
     );
   }
 
+  // P1: resource thresholds from heartbeat capacity (no extra probes).
+  const fleetResources = evaluateNamedFleetResources(executors, namedIds);
+  for (const code of fleetResources.criticalCodes) warnings.push(code);
+  for (const code of fleetResources.warningCodes) warnings.push(code);
+
   if (scheduleStats.openCircuits > 0) {
     warnings.push(`schedules:open_circuits=${scheduleStats.openCircuits}`);
   }
@@ -190,6 +211,13 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
       onlineUnverified: fleetSnap.onlineUnverified,
       missing: fleetSnap.missing,
       attentionNodeIds: fleetSnap.attentionNodeIds,
+    },
+    fleetResources: {
+      assessedAt: fleetResources.assessedAt,
+      nodes: fleetResources.nodes,
+      findings: fleetResources.findings,
+      warningCount: fleetResources.warningCodes.length,
+      criticalCount: fleetResources.criticalCodes.length,
     },
     schedules: {
       enabled: scheduleStats.enabled,
