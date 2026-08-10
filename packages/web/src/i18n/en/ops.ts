@@ -259,4 +259,23 @@ export const enOps = {
   'ops.nodes.userUnknown': 'user?',
   'ops.nodes.writeAction': 'write',
   'ops.nodes.previewAction': 'preview',
+
+  // ── Fleet card (fleet-card.tsx) ──────────────────────
+  'ops.fleet.cardTitle': 'Fleet board',
+  'ops.fleet.loading': 'Loading fleet health…',
+  'ops.fleet.unavailable': 'Fleet board unavailable: {error}',
+  'ops.fleet.summary': '{healthy}/{named} healthy · overall {overall}',
+  'ops.fleet.attention': 'Attention: {nodes}',
+  'ops.fleet.empty': 'No named fleet capacity rows yet.',
+  'ops.fleet.light': 'light',
+  'ops.fleet.colStatus': 'status',
+  'ops.fleet.colCandidate': 'candidate',
+  'ops.fleet.colMem': 'mem free',
+  'ops.fleet.colSwap': 'swap used',
+  'ops.fleet.colTasks': 'tasks',
+  'ops.fleet.colHeartbeat': 'heartbeat',
+  'ops.fleet.candYes': 'yes',
+  'ops.fleet.candNo': 'no',
+  'ops.fleet.assessedAt': 'Resources assessed {at}',
+  'ops.fleet.findingCounts': 'warn {warn} · crit {crit}',
 } as const;

@@ -263,4 +263,23 @@ export const zhOps: OpsKeys = {
   'ops.nodes.userUnknown': '用户?',
   'ops.nodes.writeAction': '写入',
   'ops.nodes.previewAction': '预览',
+
+  // ── Fleet card (fleet-card.tsx) ──────────────────────
+  'ops.fleet.cardTitle': '舰队看板',
+  'ops.fleet.loading': '正在加载舰队健康…',
+  'ops.fleet.unavailable': '舰队看板不可用：{error}',
+  'ops.fleet.summary': '健康 {healthy}/{named} · overall {overall}',
+  'ops.fleet.attention': '需关注：{nodes}',
+  'ops.fleet.empty': '尚无命名舰队资源行。',
+  'ops.fleet.light': '轻量',
+  'ops.fleet.colStatus': '状态',
+  'ops.fleet.colCandidate': '候选',
+  'ops.fleet.colMem': '可用内存',
+  'ops.fleet.colSwap': 'swap 占用',
+  'ops.fleet.colTasks': '任务',
+  'ops.fleet.colHeartbeat': '心跳',
+  'ops.fleet.candYes': '是',
+  'ops.fleet.candNo': '否',
+  'ops.fleet.assessedAt': '资源评估于 {at}',
+  'ops.fleet.findingCounts': '警告 {warn} · 严重 {crit}',
 } satisfies OpsKeys;

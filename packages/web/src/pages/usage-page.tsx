@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CircleDollarSign, RefreshCw } from 'lucide-react';
 
 import { getJson } from '../api/index.js';
+import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
 import { useI18n } from '../i18n';
 
@@ -130,6 +131,8 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
       </section>
 
       <p className="usage-note">{t('ops.usage.l1Note')}</p>
+
+      <FleetCard compact />
 
       {digest.data ? (
         <section className="usage-table-section">

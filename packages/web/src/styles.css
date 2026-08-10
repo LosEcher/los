@@ -1643,6 +1643,101 @@ button:disabled {
   grid-template-columns: minmax(220px, 1fr) 100px 86px minmax(160px, 1.2fr) 88px 132px;
 }
 
+.fleet-card {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 10px);
+  background: var(--panel-soft, rgba(0, 0, 0, 0.12));
+}
+
+.fleet-card-compact {
+  margin-bottom: var(--space-3);
+}
+
+.fleet-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fleet-card-head .title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fleet-card-head p {
+  margin: 0.15rem 0 0;
+}
+
+.fleet-card-attention {
+  margin: 0;
+  color: var(--warn, #e0a44a);
+  font-size: var(--text-sm);
+}
+
+.fleet-card-warnings {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.fleet-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+
+.fleet-card-node {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 8px);
+  background: var(--panel, rgba(0, 0, 0, 0.18));
+}
+
+.fleet-card-node header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fleet-card-node dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.fleet-card-node dt {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.fleet-card-node dd {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.fleet-card-findings {
+  margin: 0;
+  color: var(--warn, #e0a44a);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-card-foot {
+  margin: 0;
+}
+
 .todo-row {
   grid-template-columns: minmax(260px, 1fr) 68px 118px 92px 132px;
 }

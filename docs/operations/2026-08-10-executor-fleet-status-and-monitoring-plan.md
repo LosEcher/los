@@ -179,11 +179,13 @@ curl -fsS -X POST \
 
 Operator-created 2026-08-10: `schedule-d0388df2-cc54-4e37-a964-7035b96303f4` (enabled, 6h).
 
-#### P3 — Operator UX
+#### P3 — Operator UX — **partial** 2026-08-10
 
-1. Console `#usage` / schedules deep links already partially wired; add **fleet card** on usage or nodes page: status · candidate · mem% · last probe.  
-2. WeChat: only **state transitions** (candidate lost/restored), not every tick.  
-3. Daily digest: table of fleet rows from last heartbeat snapshot.
+1. **Done**: fleet card on **Nodes** (full) and **Usage** (compact) —  
+   `packages/web/src/fleet-card.tsx` reads `/ops/runtime-health`  
+   (status · candidate · mem free% · swap% · heartbeat · findings).  
+2. WeChat: only **state transitions** (candidate lost/restored), not every tick — still open.  
+3. Daily digest: table of fleet rows from last heartbeat snapshot — deferred (700-line gate).
 
 ### 4.4 Explicit non-goals (for now)
 
