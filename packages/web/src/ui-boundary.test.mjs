@@ -320,7 +320,8 @@ test('Inbox decision rows use human copy and a single primary CTA without techni
 test('Schedules exposes bounded presets, trigger preview, operator actions, and run history', () => {
   assert.equal(EN['nav.schedules'], 'Schedules');
   assert.match(navConfig, /\{ id: 'schedules', labelKey: 'nav.schedules'/);
-  assert.match(app, /page === 'schedules' && <SchedulesPage/);
+  // App may wrap SchedulesPage across lines with props (selectedScheduleId).
+  assert.match(app, /page === 'schedules' &&[\s\S]{0,80}<SchedulesPage/);
   // Default operator view is active-only (excludeRetired), not the full archive.
   assert.match(schedulesPage, /function schedulesListUrl\(filter: ScheduleStatusFilter\)/);
   assert.match(schedulesPage, /params\.set\('excludeRetired', 'true'\)/);

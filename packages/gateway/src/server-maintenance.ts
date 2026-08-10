@@ -17,6 +17,7 @@ import { publishExecutionOutboxBatch } from '@los/agent/execution-outbox';
 import { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs } from './execution-lease-reaper.js';
 import { sweepSymbolCache } from './chat-cbm-symbol-cache.js';
 import { registerDailyAgentQualityMaintenance } from './daily-agent-quality-maintenance.js';
+import { registerNodeAutoProbe } from './node-auto-probe.js';
 
 export { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs };
 
@@ -453,6 +454,11 @@ export function registerServerMaintenance(
 
   // ── Runtime registry freshness reconciliation (60s) ──────────
   registerImmediateIntervalTask(app, 60_000, () => void reconcileRuntimeFreshness(), 60_000);
+
+  // ── Rate-limited auto-probe for online-but-unverified executors ──
+  // Restores candidate=true after heartbeat recovery without operator POST /probe.
+  // Caps: 2 probes / 120s tick, 2s gap, 5m per-node cooldown (see node-auto-probe.ts).
+  registerNodeAutoProbe(app);
 
   // ── Daily memory maintenance (retention + integrity + auto-compact) ──
   const RETENTION_MS = 24 * 60 * 60 * 1000;

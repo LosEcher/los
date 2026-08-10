@@ -25,7 +25,14 @@ export function validateScheduledTrigger(trigger: ScheduledWorkTrigger): void {
 export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInput): void {
   if (!input.projectId.trim() || !input.title.trim()) throw new Error('projectId and title are required');
   validateScheduledTrigger(input.trigger);
-  const validTemplates = ['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'];
+  const validTemplates = [
+    'morning_inbox_digest',
+    'runtime_readiness',
+    'scheduled_feed_analysis',
+    'scheduled_execution',
+    'daily_execution_digest',
+    'fleet_host_check',
+  ];
   if (!validTemplates.includes(input.runTemplate.templateId)) {
     throw new Error('unsupported schedule template');
   }

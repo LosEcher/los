@@ -18,6 +18,15 @@ test('getRuntimeHealth returns L1 board with policy markers', async () => {
     assert.ok(Array.isArray(report.warnings));
     assert.ok(typeof report.services.total === 'number');
     assert.ok(typeof report.executors.total === 'number');
+    assert.ok(Array.isArray(report.fleet.namedIds));
+    assert.ok(report.fleet.namedIds.length >= 1);
+    assert.ok(typeof report.fleet.healthy === 'number');
+    assert.ok(Array.isArray(report.fleet.attentionNodeIds));
+    assert.ok(report.fleetResources);
+    assert.ok(Array.isArray(report.fleetResources.nodes));
+    assert.ok(Array.isArray(report.fleetResources.findings));
+    assert.ok(typeof report.fleetResources.warningCount === 'number');
+    assert.ok(typeof report.fleetResources.criticalCount === 'number');
     assert.ok(typeof report.schedules.enabled === 'number');
     assert.ok(typeof report.governance.active === 'number');
     assert.equal(report.policy.controlPlane, 'gateway_embedded_timers');

@@ -218,6 +218,14 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
 }
 
 function formatAlertForWeclaw(alert: OperatorAlert): string {
+  // Pre-formatted daily digest body — send as-is (already includes title + rows).
+  if (alert.type === 'ops.daily_digest' && alert.reason?.trim()) {
+    return alert.reason.trim();
+  }
+  if (alert.type === 'ops.fleet_attention' && alert.reason?.trim()) {
+    return alert.reason.trim();
+  }
+
   const kind = alert.kind ?? 'needs_decision';
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
   const sid = alert.sessionId;
@@ -342,6 +350,8 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       || parsed.type === 'governance.job.progress'
       || parsed.type === 'governance.bootstrap.findings'
       || parsed.type === 'governance.sweep.digest';
+    const isDailyDigest = parsed.type === 'ops.daily_digest';
+    const isFleetAttention = parsed.type === 'ops.fleet_attention';
 
     const isOperatorAttention =
       parsed.type === 'tool.warned' ||
@@ -353,16 +363,24 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
       parsed.type === 'session.blocked' ||
       parsed.type === 'session.error' ||
-      isGovernanceEvent;
+      isGovernanceEvent ||
+      isDailyDigest ||
+      isFleetAttention;
 
     if (!isOperatorAttention) return;
     console.log(`[events] attention type=${parsed.type} session=${parsed.sessionId ?? ''}`);
 
     const sessionId = parsed.sessionId ?? '';
     // Governance digests dedupe by jobType so hourly jobs don't spam.
-    const dedupKey = isGovernanceEvent
-      ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
-      : `${sessionId}:${parsed.type}`;
+    // Daily digest dedupes by calendar day so re-pushes within the window collapse.
+    // Fleet attention dedupes by node+day (DB also enforces 30m cooldown).
+    const dedupKey = isDailyDigest
+      ? `ops:daily_digest:${String(payload.day ?? sessionId)}`
+      : isFleetAttention
+        ? `ops:fleet:${String(payload.nodeId ?? sessionId)}:${String(payload.day ?? '')}`
+      : isGovernanceEvent
+        ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
+        : `${sessionId}:${parsed.type}`;
 
     if (recentAlerts.get(dedupKey) && Date.now() - recentAlerts.get(dedupKey)! < ALERT_DEDUP_MS) return;
     recentAlerts.set(dedupKey, Date.now());

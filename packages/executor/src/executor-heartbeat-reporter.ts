@@ -11,6 +11,13 @@ interface HeartbeatReporterOptions {
   backoffFactor?: number;
   /** Cap for the backed-off interval (default 15m). */
   maxBackoffMs?: number;
+  /**
+   * Max random jitter added to the next interval (default 10% of interval, capped
+   * at 2s). Spreads multi-node recovery so remotes do not stampede the gateway.
+   */
+  jitterMs?: number;
+  /** Injected RNG for tests; defaults to Math.random. */
+  random?: () => number;
 }
 
 export interface HeartbeatReporter {
@@ -41,6 +48,8 @@ export function createHeartbeatReporter(
   const baseIntervalMs = options.baseIntervalMs ?? 10_000;
   const backoffFactor = options.backoffFactor ?? 3;
   const maxBackoffMs = options.maxBackoffMs ?? 900_000;
+  const jitterMs = options.jitterMs;
+  const random = options.random ?? Math.random;
   for (const [name, value] of Object.entries({
     reminderEvery,
     baseIntervalMs,
@@ -50,6 +59,9 @@ export function createHeartbeatReporter(
     if (!Number.isInteger(value) || value < 1) {
       throw new Error(`${name} must be a positive integer`);
     }
+  }
+  if (jitterMs !== undefined && (!Number.isInteger(jitterMs) || jitterMs < 0)) {
+    throw new Error('jitterMs must be a non-negative integer');
   }
 
   let consecutiveFailures = 0;
@@ -72,9 +84,14 @@ export function createHeartbeatReporter(
       }
     },
     nextIntervalMs() {
-      if (consecutiveFailures === 0) return baseIntervalMs;
-      const backedOff = baseIntervalMs * backoffFactor ** consecutiveFailures;
-      return Math.min(backedOff, maxBackoffMs);
+      const raw = consecutiveFailures === 0
+        ? baseIntervalMs
+        : Math.min(baseIntervalMs * backoffFactor ** consecutiveFailures, maxBackoffMs);
+      const maxJitter = jitterMs ?? Math.min(2_000, Math.floor(raw * 0.1));
+      if (maxJitter <= 0) return raw;
+      // random() may be 0..1 inclusive in tests; clamp so jitter stays in [0, maxJitter].
+      const unit = Math.min(1, Math.max(0, random()));
+      return raw + Math.round(unit * maxJitter);
     },
   };
 }

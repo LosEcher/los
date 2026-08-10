@@ -3,23 +3,30 @@
  *
  * GET /usage/summary
  * GET /ops/daily-digest
+ * POST /ops/daily-digest/push  — emit ops.daily_digest for channel bots
  * GET /ops/runtime-health
  */
 
 import type { FastifyInstance } from 'fastify';
-import { getDailyDigest, type DailyDigestQuery } from '@los/agent/daily-digest';
+import {
+  getDailyDigest,
+  publishDailyDigest,
+  type DailyDigestQuery,
+} from '@los/agent/daily-digest';
 import { getRuntimeHealth } from '@los/agent/runtime-health';
 import { getUsageSummary, type UsageSummaryQuery } from '@los/agent/usage-summary';
 
 type UsageRouteDependencies = {
   getUsageSummary: typeof getUsageSummary;
   getDailyDigest: typeof getDailyDigest;
+  publishDailyDigest: typeof publishDailyDigest;
   getRuntimeHealth: typeof getRuntimeHealth;
 };
 
 const defaultDependencies: UsageRouteDependencies = {
   getUsageSummary,
   getDailyDigest,
+  publishDailyDigest,
   getRuntimeHealth,
 };
 
@@ -57,6 +64,31 @@ export function registerUsageRoutes(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(400).send({ error: 'invalid_daily_digest_query', message });
+    }
+  });
+
+  /** Compose digest and emit session event for WeChat/Telegram SSE consumers. */
+  app.post('/ops/daily-digest/push', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const query = req.query as Record<string, unknown>;
+    const input: DailyDigestQuery = {
+      day: optionalString(body.day) ?? optionalString(query.day),
+      projectId: optionalString(body.projectId) ?? optionalString(query.projectId),
+      tenantId: optionalString(body.tenantId) ?? optionalString(query.tenantId),
+    };
+    try {
+      const result = await dependencies.publishDailyDigest(input);
+      return {
+        ok: true,
+        day: result.digest.day,
+        eventEmitted: result.eventEmitted,
+        enabledCount: result.digest.schedule.enabledCount,
+        runTotals: result.digest.schedule.runTotals,
+        messagePreview: result.message.slice(0, 280),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(400).send({ error: 'daily_digest_push_failed', message });
     }
   });
 

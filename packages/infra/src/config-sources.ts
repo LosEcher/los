@@ -143,16 +143,31 @@ export async function mergeDiscoveredProviders(config: Record<string, unknown>):
   const { providers: discovered } = await discoverAll();
   if (!config.providers) config.providers = {};
   const providers = config.providers as Record<string, any>;
-  for (const dp of discovered) {
+  // Non-prefer first, then prefer (active cc-switch accounts overwrite).
+  const ordered = [...discovered].sort(
+    (a, b) => Number(Boolean(a.prefer)) - Number(Boolean(b.prefer)),
+  );
+  for (const dp of ordered) {
     if (!providers[dp.name]) providers[dp.name] = {};
     const p = providers[dp.name];
-    if (!p.apiKey && dp.apiKey) p.apiKey = dp.apiKey;
-    if (!p.baseUrl && dp.baseUrl) p.baseUrl = dp.baseUrl;
-    if (!p.model && dp.defaultModel) p.model = dp.defaultModel;
-    if (!p.apiShape && dp.apiShape) p.apiShape = dp.apiShape;
+    const prefer = dp.prefer === true;
+    if (prefer || !p.apiKey) {
+      if (dp.apiKey) p.apiKey = dp.apiKey;
+    }
+    if (prefer || !p.baseUrl) {
+      if (dp.baseUrl) p.baseUrl = dp.baseUrl;
+    }
+    if (prefer || !p.model) {
+      if (dp.defaultModel) p.model = dp.defaultModel;
+    }
+    if (prefer || !p.apiShape) {
+      if (dp.apiShape) p.apiShape = dp.apiShape;
+    }
     if (!p.authMode && dp.authMode) p.authMode = dp.authMode;
     if (p.enabled === undefined) p.enabled = dp.available;
-    if (!p.source && dp.source) p.source = dp.source;
+    if (prefer || !p.source) {
+      if (dp.source) p.source = dp.source;
+    }
   }
   return config;
 }

@@ -76,7 +76,10 @@
     "./daily-agent-quality": "./src/daily-agent-quality/index.ts",
     "./usage-summary": "./src/usage-summary.ts",
     "./daily-digest": "./src/daily-digest.ts",
-    "./runtime-health": "./src/runtime-health.ts"
+    "./runtime-health": "./src/runtime-health.ts",
+    "./fleet-inventory": "./src/fleet-inventory.ts",
+    "./fleet-resources": "./src/fleet-resources.ts",
+    "./fleet-host-checks": "./src/fleet-host-checks.ts"
   },
   "scripts": {
     "build": "tsc",

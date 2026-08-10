@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CircleDollarSign, RefreshCw } from 'lucide-react';
 
 import { getJson } from '../api/index.js';
+import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
 import { useI18n } from '../i18n';
 
@@ -78,8 +79,9 @@ type DailyDigestResponse = {
   }>;
 };
 
-export function UsagePage() {
+export function UsagePage({ day }: { day?: string | null } = {}) {
   const { t } = useI18n();
+  const digestDay = typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
   const from = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000).toISOString();
   const query = useQuery({
     queryKey: ['usage-summary', DAYS],
@@ -87,8 +89,12 @@ export function UsagePage() {
     refetchInterval: 60_000,
   });
   const digest = useQuery({
-    queryKey: ['daily-digest'],
-    queryFn: () => getJson<DailyDigestResponse>('/ops/daily-digest'),
+    queryKey: ['daily-digest', digestDay ?? 'default'],
+    queryFn: () => getJson<DailyDigestResponse>(
+      digestDay
+        ? `/ops/daily-digest?day=${encodeURIComponent(digestDay)}`
+        : '/ops/daily-digest',
+    ),
     refetchInterval: 120_000,
   });
 
@@ -125,6 +131,8 @@ export function UsagePage() {
       </section>
 
       <p className="usage-note">{t('ops.usage.l1Note')}</p>
+
+      <FleetCard compact />
 
       {digest.data ? (
         <section className="usage-table-section">
