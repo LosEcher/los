@@ -112,13 +112,13 @@ Goal: know **status + resources** per fleet node without request storms.
 
 ### 4.3 Recommended next work (priority order)
 
-#### P0 — Node status supervision (low churn)
+#### P0 — Node status supervision (low churn) — **Done** 2026-08-10
 
-1. **Named fleet inventory** (config or metadata):  
-   `mbp-executor-1`, `node34-executor-1`, `oracle-executor`, `desktop-r45553o`  
-   so ssh_target / retired rows never enter “fleet offline” noise again.  
-2. **dogfood / readiness**: if any **named** fleet node is offline or online-unverified for ≥2 consecutive ticks → emit operator attention event (WeChat-capable) with **dedupe key** `fleet:{nodeId}:{day}` and min interval **30m**.  
-3. Keep auto-probe caps; document them in runbook (already 2/5m/120s).
+1. **Named fleet inventory** via `LOS_FLEET_NODE_IDS` (default four active executors).  
+   Module: `packages/agent/src/fleet-inventory.ts`.  
+2. **`/ops/runtime-health`**: `fleet` block + warnings `fleet:offline|online_unverified|missing`.  
+3. **dogfood readiness** (`runtime_readiness` template): each tick updates `fleet_watch_state`; after **≥2 consecutive** unhealthy ticks emits `ops.fleet_attention` (SSE + WeChat), **30m/node cooldown**.  
+4. Env: `LOS_FLEET_ALERT_CONSECUTIVE_TICKS`, `LOS_FLEET_ALERT_COOLDOWN_MS`.
 
 #### P1 — Resource supervision (from heartbeat capacity, no extra probes)
 

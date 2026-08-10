@@ -9,6 +9,7 @@
 import { getDb } from '@los/infra/db';
 
 import { listExecutorNodes } from './executor-nodes.js';
+import { evaluateNamedFleet, resolveNamedFleetNodeIds } from './fleet-inventory.js';
 import { listGovernanceJobs } from './governance-jobs.js';
 import { ensureScheduledWorkStore } from './scheduled-work/schema.js';
 import { listServiceInstances } from './service-instances.js';
@@ -47,6 +48,15 @@ export interface RuntimeHealthReport {
       lastHeartbeatAt: string;
       blockers: string[];
     }>;
+  };
+  /** Named fleet (LOS_FLEET_NODE_IDS) — supervision surface for P0 alerts. */
+  fleet: {
+    namedIds: string[];
+    healthy: number;
+    offline: string[];
+    onlineUnverified: string[];
+    missing: string[];
+    attentionNodeIds: string[];
   };
   schedules: {
     enabled: number;
@@ -113,24 +123,22 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
   const online = executorItems.filter((n) => n.status === 'online').length;
   if (candidates === 0) warnings.push('executors:no_candidate');
 
-  // Fleet = real agent executors (exclude ssh_target / historical noise).
-  // Warn when a fleet member is offline or online-but-not-candidate so pinned
-  // schedules and remote work surface as degraded even if MBP stays candidate.
-  const fleet = executors.filter(
-    (node) => node.nodeKind === 'executor' && node.capabilities?.run_agent === true,
-  );
-  const offlineFleet = fleet.filter((node) => node.status !== 'online');
-  const onlineUnverified = fleet.filter(
-    (node) => node.status === 'online' && node.execution.candidate !== true,
-  );
-  if (offlineFleet.length > 0) {
+  // Named fleet only — ignore ssh_target / incidental executor rows.
+  const namedIds = resolveNamedFleetNodeIds();
+  const fleetSnap = evaluateNamedFleet(executors, namedIds);
+  if (fleetSnap.offline.length > 0) {
     warnings.push(
-      `executors:offline_fleet=${offlineFleet.length}:${offlineFleet.map((n) => n.nodeId).slice(0, 4).join(',')}`,
+      `fleet:offline=${fleetSnap.offline.length}:${fleetSnap.offline.slice(0, 4).join(',')}`,
     );
   }
-  if (onlineUnverified.length > 0) {
+  if (fleetSnap.onlineUnverified.length > 0) {
     warnings.push(
-      `executors:online_unverified=${onlineUnverified.length}:${onlineUnverified.map((n) => n.nodeId).slice(0, 4).join(',')}`,
+      `fleet:online_unverified=${fleetSnap.onlineUnverified.length}:${fleetSnap.onlineUnverified.slice(0, 4).join(',')}`,
+    );
+  }
+  if (fleetSnap.missing.length > 0) {
+    warnings.push(
+      `fleet:missing=${fleetSnap.missing.length}:${fleetSnap.missing.slice(0, 4).join(',')}`,
     );
   }
 
@@ -174,6 +182,14 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
       candidates,
       online,
       items: executorItems,
+    },
+    fleet: {
+      namedIds: fleetSnap.namedIds,
+      healthy: fleetSnap.healthy.length,
+      offline: fleetSnap.offline,
+      onlineUnverified: fleetSnap.onlineUnverified,
+      missing: fleetSnap.missing,
+      attentionNodeIds: fleetSnap.attentionNodeIds,
     },
     schedules: {
       enabled: scheduleStats.enabled,

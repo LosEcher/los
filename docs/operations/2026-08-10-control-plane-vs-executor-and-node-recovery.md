@@ -212,7 +212,8 @@ Result: `verified.agent_http(_ndjson).ok=true`, `execution.candidate=true`.
 | File-sync list-refresh storm during PG path outage | medium | **Done** — exponential backoff to 15m + log throttle |
 | oracle bind `EXECUTOR_HOST=0.0.0.0` | high | **Done** 2026-08-10 evening — candidate restored |
 | desktop-r45553o Windows canary deploy | medium | **Done** 2026-08-10 evening — Task Scheduler `los-executor` |
-| Named fleet inventory + resource thresholds + transition alerts | medium | open — see `2026-08-10-executor-fleet-status-and-monitoring-plan.md` |
+| Named fleet inventory + consecutive-tick `ops.fleet_attention` | medium | **Done** — `fleet-inventory.ts` + readiness tick + WeChat/SSE |
+| Resource thresholds from heartbeat capacity | medium | open — see monitoring plan P1 |
 | NAS34 schedule: pin + non-sandbox network for TCP reachability self-check | medium | open (1 fail 2026-08-10) |
 
 ---

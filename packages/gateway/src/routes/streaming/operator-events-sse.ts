@@ -86,6 +86,8 @@ export function registerOperatorEvents(app: FastifyInstance): void {
       'governance.sweep.digest',
       // Daily execution digest (scheduled template + POST /ops/daily-digest/push)
       'ops.daily_digest',
+      // Named fleet consecutive-tick attention (dogfood readiness → WeChat)
+      'ops.fleet_attention',
     ];
 
     const pollAndSend = async () => {

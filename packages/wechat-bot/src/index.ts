@@ -222,6 +222,9 @@ function formatAlertForWeclaw(alert: OperatorAlert): string {
   if (alert.type === 'ops.daily_digest' && alert.reason?.trim()) {
     return alert.reason.trim();
   }
+  if (alert.type === 'ops.fleet_attention' && alert.reason?.trim()) {
+    return alert.reason.trim();
+  }
 
   const kind = alert.kind ?? 'needs_decision';
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
@@ -348,6 +351,7 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       || parsed.type === 'governance.bootstrap.findings'
       || parsed.type === 'governance.sweep.digest';
     const isDailyDigest = parsed.type === 'ops.daily_digest';
+    const isFleetAttention = parsed.type === 'ops.fleet_attention';
 
     const isOperatorAttention =
       parsed.type === 'tool.warned' ||
@@ -360,7 +364,8 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       parsed.type === 'session.blocked' ||
       parsed.type === 'session.error' ||
       isGovernanceEvent ||
-      isDailyDigest;
+      isDailyDigest ||
+      isFleetAttention;
 
     if (!isOperatorAttention) return;
     console.log(`[events] attention type=${parsed.type} session=${parsed.sessionId ?? ''}`);
@@ -368,8 +373,11 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
     const sessionId = parsed.sessionId ?? '';
     // Governance digests dedupe by jobType so hourly jobs don't spam.
     // Daily digest dedupes by calendar day so re-pushes within the window collapse.
+    // Fleet attention dedupes by node+day (DB also enforces 30m cooldown).
     const dedupKey = isDailyDigest
       ? `ops:daily_digest:${String(payload.day ?? sessionId)}`
+      : isFleetAttention
+        ? `ops:fleet:${String(payload.nodeId ?? sessionId)}:${String(payload.day ?? '')}`
       : isGovernanceEvent
         ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
         : `${sessionId}:${parsed.type}`;

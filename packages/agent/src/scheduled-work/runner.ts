@@ -421,14 +421,15 @@ async function executeTemplate(
     throw new Error(`Scheduled execution ${result.status}${reason ? `: ${reason}` : ''}`);
   }
   const [nodes, services] = await Promise.all([listExecutorNodes(), listServiceInstances()]);
-  // Fleet executors only — ignore ssh_target / fixture noise that always look "unavailable".
-  const fleet = nodes.filter(
-    node => node.nodeKind === 'executor' && node.capabilities?.run_agent === true,
-  );
-  const offlineFleet = fleet.filter(node => node.status !== 'online');
-  const onlineUnverified = fleet.filter(
-    node => node.status === 'online' && node.execution.candidate !== true,
-  );
+  // Named fleet (LOS_FLEET_NODE_IDS) + consecutive-tick attention events.
+  const { tickNamedFleetWatch } = await import('../fleet-inventory.js');
+  const fleetTick = await tickNamedFleetWatch(nodes, {
+    tenantId: schedule.tenantId,
+    projectId: schedule.projectId,
+    scheduleId: schedule.id,
+    runId: run.id,
+  });
+  const fleetSnap = fleetTick.snapshot;
   // Active gateways only: not ready, or online without readiness, count as attention.
   // Historical offline gateway rows (old ports) are noise and no longer listed.
   const unavailableServices = services.filter(service => {
@@ -438,15 +439,17 @@ async function executeTemplate(
     const hb = Date.parse(service.lastHeartbeatAt ?? '');
     return Number.isFinite(hb) && Date.now() - hb < 24 * 60 * 60_000;
   });
-  if (offlineFleet.length === 0 && onlineUnverified.length === 0 && unavailableServices.length === 0) {
+  if (fleetSnap.attentionNodeIds.length === 0 && unavailableServices.length === 0) {
     return {
       status: 'no_op',
       summary: {
         nodes: nodes.length,
-        fleet: fleet.length,
+        fleetNamed: fleetSnap.namedIds.length,
+        fleetHealthy: fleetSnap.healthy.length,
         services: services.length,
-        candidates: fleet.filter(n => n.execution.candidate).length,
+        candidates: fleetSnap.healthy.length,
         unavailable: 0,
+        fleetAlertsEmitted: fleetTick.alertedNodeIds,
       },
     };
   }
@@ -455,13 +458,23 @@ async function executeTemplate(
     title: `${schedule.title}: runtime attention required`,
     summary: {
       nodes: nodes.length,
-      fleet: fleet.length,
+      fleetNamed: fleetSnap.namedIds.length,
+      fleetHealthy: fleetSnap.healthy.length,
       services: services.length,
-      offlineFleet: offlineFleet.map(node => node.nodeId),
-      onlineUnverified: onlineUnverified.map(node => node.nodeId),
+      offlineFleet: fleetSnap.offline,
+      onlineUnverified: fleetSnap.onlineUnverified,
+      missingFleet: fleetSnap.missing,
       // Keep legacy key for digests that still read unavailableNodes.
-      unavailableNodes: offlineFleet.map(node => node.nodeId),
+      unavailableNodes: [...fleetSnap.offline, ...fleetSnap.missing],
       unavailableServices: unavailableServices.map(service => service.serviceId),
+      fleetAlertsEmitted: fleetTick.alertedNodeIds,
+      fleetEmissions: fleetTick.emissions.map((e) => ({
+        nodeId: e.nodeId,
+        health: e.health,
+        consecutiveUnhealthy: e.consecutiveUnhealthy,
+        eventEmitted: e.eventEmitted,
+        skippedReason: e.skippedReason,
+      })),
     },
   };
 }
