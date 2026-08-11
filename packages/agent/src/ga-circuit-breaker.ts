@@ -94,12 +94,13 @@ export function evaluateLoopGate(job: GovernanceJob): ThrottleDecision {
     const downgradeMap: Record<string, GovernanceCadence> = {
       hourly: 'daily',
       daily: 'weekly',
-      // weekly is the floor: auto-downgrade never reaches 'manual', so an
+      weekly: 'monthly',
+      // monthly is the floor: auto-downgrade never reaches 'manual', so an
       // autoFix job cannot be downgraded into a dead state with no recovery
       // path (observed 2026-08: consistency_audit stuck at manual). Manual
       // cadence is reserved for explicit operator intent (status 'paused'
       // covers "stop this job").
-      weekly: 'weekly',
+      monthly: 'monthly',
     };
     const newCadence = downgradeMap[job.cadence] ?? 'manual';
     if (newCadence !== job.cadence) {

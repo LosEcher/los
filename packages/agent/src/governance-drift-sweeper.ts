@@ -104,6 +104,11 @@ const DRIFT_RULES: Record<GovernanceJobType, DriftRule[]> = {
     { metric: 'todoStaleness', direction: 'higher', thresholdPercent: 30, label: 'Stale todo findings increased >30%' },
     { metric: 'todoOutcomeDrift', direction: 'higher', thresholdPercent: 30, label: 'Todo outcome drift findings increased >30%' },
   ],
+  language_audit: [
+    { metric: 'workFindingCount', direction: 'higher', thresholdPercent: 30, label: 'Language work findings increased >30%' },
+    { metric: 'bareCompletionClaimRate', direction: 'higher', thresholdPercent: 40, label: 'Bare completion claim rate increased >40%' },
+    { metric: 'meanCompliance', direction: 'lower', thresholdPercent: 15, label: 'Mean language compliance dropped >15%' },
+  ],
 };
 
 // ── Core ─────────────────────────────────────────────────
@@ -167,6 +172,16 @@ function extractMetrics(jobType: GovernanceJobType, resultSummary: Record<string
     metrics.qualityDegradation = findings.filter(f => f.dimension === 'quality_degradation').length;
     metrics.todoStaleness = findings.filter(f => f.dimension === 'todo_lifecycle').length;
     metrics.todoOutcomeDrift = findings.filter(f => f.dimension === 'todo_outcome_drift').length;
+  }
+
+  if (jobType === 'language_audit') {
+    metrics.workFindingCount = Number(resultSummary.workFindingCount ?? resultSummary.findingCount ?? 0);
+    const langMetrics = resultSummary.metrics as Record<string, unknown> | undefined;
+    if (langMetrics) {
+      metrics.bareCompletionClaimRate = Number(langMetrics.bareCompletionClaimRate ?? 0);
+      metrics.meanCompliance = Number(langMetrics.meanCompliance ?? 0);
+      metrics.evidenceMarkerRate = Number(langMetrics.evidenceMarkerRate ?? 0);
+    }
   }
 
   return metrics;

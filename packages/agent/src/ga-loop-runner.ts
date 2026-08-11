@@ -457,6 +457,22 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       const candidateIds = Array.isArray(summary.candidateIds) ? summary.candidateIds.length : 0;
       return eligible > 0 || candidateIds > 0;
     }
+    case 'language_audit': {
+      // Only warn/high work findings count; info (samples/promotion) is observation.
+      const work = typeof summary.workFindingCount === 'number' ? summary.workFindingCount : 0;
+      if (work > 0) return true;
+      const findings = Array.isArray(summary.findings)
+        ? summary.findings as Array<{ severity?: string }>
+        : [];
+      return findings.some(f => f.severity === 'warn' || f.severity === 'high');
+    }
+    case 'adversarial_review':
+    case 'self_bootstrap': {
+      const count = typeof summary.findingCount === 'number' ? summary.findingCount : 0;
+      if (count > 0) return true;
+      const findings = Array.isArray(summary.findings) ? summary.findings : [];
+      return findings.length > 0;
+    }
     default:
       return false;
   }

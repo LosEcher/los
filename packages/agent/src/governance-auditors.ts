@@ -164,6 +164,11 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
       const { runSelfBootstrapAudit } = await import('./governance-self-bootstrap.js');
       return runSelfBootstrapAudit(job, { dryRun });
     }
+    case 'language_audit': {
+      // Static import keeps language-contract scoring symbols reachable for AP10 wiring.
+      const { runLanguageAudit } = await import('./governance-language-audit.js');
+      return runLanguageAudit(job, { dryRun });
+    }
     case 'dead_letter': {
       const { runDeadLetterGovernance } = await import('./dead-letter-governance.js');
       return runDeadLetterGovernance({ dryRun: true, limit: Number(job.config.requeueLimit ?? 25) });

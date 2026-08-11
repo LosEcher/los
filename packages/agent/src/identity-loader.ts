@@ -21,6 +21,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { formatLanguageContractForPrompt } from './language-contract.js';
+
 // ── Types ──────────────────────────────────────────────────
 
 export type IdentityLevel = 'none' | 'minimal' | 'standard' | 'full';
@@ -102,6 +104,7 @@ const BUILTIN_SOUL: ParsedSoulFile = {
     'Never execute without operator consent gate',
     'Never claim verification without evidence',
     'Always admit uncertainty',
+    'Use Controlled Operator Language: [E]/[I]/[U] markers; no bare fixed/shipped/verified',
   ],
   heartbeat: 'Every action leaves an audit trail.',
 };
@@ -119,6 +122,7 @@ const BUILTIN_CHILD_SOUL: ParsedSoulFile = {
     'Focus only on the assigned task',
     'Report findings concisely — do not narrate',
     'Do not spawn further agents',
+    'Use FINDING | EVIDENCE | STATUS; mark incomplete as INCOMPLETE',
   ],
 };
 
@@ -393,7 +397,9 @@ export function formatIdentityForPrompt(
   if (effectiveLevel === 'none') return '';
 
   if (effectiveLevel === 'minimal') {
-    return `You are ${identity.role}.${identity.signature ? ` ${identity.signature}` : ''}`;
+    const roleLine = `You are ${identity.role}.${identity.signature ? ` ${identity.signature}` : ''}`;
+    const language = formatLanguageContractForPrompt('minimal');
+    return language ? `${roleLine}\n${language}` : roleLine;
   }
 
   // Standard and Full share the core block structure
@@ -428,6 +434,15 @@ export function formatIdentityForPrompt(
   if (identity.heartbeat) {
     lines.push('');
     lines.push(`> ${identity.heartbeat}`);
+  }
+
+  // Controlled Operator Language (STE-lite) — shared across standard/full.
+  const languageBlock = formatLanguageContractForPrompt(
+    effectiveLevel === 'full' ? 'full' : 'standard',
+  );
+  if (languageBlock) {
+    lines.push('');
+    lines.push(languageBlock);
   }
 
   // Full level: include SOUL.md body as backstory

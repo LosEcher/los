@@ -22,8 +22,8 @@ Four levels control how much identity is injected into system prompts:
 |-------|---------|---------------|----------|
 | `none` | Empty string — no identity injected | 0 tokens | Self-check judge (must be objective) |
 | `minimal` | `"You are [role]."` — one line | ~5 tokens | Child agents, pre-execution phases |
-| `standard` | Multi-block: name, role, style, values, boundaries, heartbeat | ~50-80 tokens | Gateway chat, scheduler executor tasks |
-| `full` | Standard + backstory narrative | ~150+ tokens | Future: long-running agent personas |
+| `standard` | Multi-block: name, role, style, values, boundaries, heartbeat, **Language contract** | ~90-120 tokens | Gateway chat, scheduler executor tasks |
+| `full` | Standard + backstory narrative | ~180+ tokens | Future: long-running agent personas |
 
 ### Resolution Chain
 
@@ -41,7 +41,7 @@ Each layer partially overrides — setting only `style` at project level inherit
 | Execution Path | Identity Level | Memory Level | Configurable? |
 |---|---|---|---|
 | Gateway Chat (`/chat`) | Standard | Ephemeral + Procedural | API body + config |
-| Child/Spawned (`spawn_agent`) | Minimal | None | Fixed (role label) |
+| Child/Spawned (`spawn_agent`) | Minimal | None | Fixed (role + Language minimal line) |
 | Remote Executor | Minimal | None (self-managed) | Fixed |
 | Scheduler Graph - executor/planner | Standard | Ephemeral + Procedural | Task metadata |
 | Scheduler Graph - verifier | None | None | Fixed |
@@ -69,9 +69,23 @@ boundaries:
   - Never execute without operator consent gate
   - Never claim verification without evidence
   - Always admit uncertainty
+  - Use Controlled Operator Language: [E]/[I]/[U] markers; no bare fixed/shipped/verified
 heartbeat: "Every action leaves an audit trail."
 ---
 ```
+
+### Controlled Operator Language (STE-lite)
+
+Identity prompts inject a Language block from `language-contract.ts`
+(`formatLanguageContractForPrompt`). Do not hardcode a second copy in
+`message-builder.ts` beyond short summary rules that reference the same markers.
+
+- standard/full: full Language section (`[E]`/`[I]`/`[U]`, banned bare claims)
+- minimal: one-line FINDING | EVIDENCE | STATUS rules
+- none: no language injection (judge/verifier)
+
+Weekly observation: governance job `language_audit` (cadence weekly, promotable
+to monthly). See `docs/governance/language-contract-observation.md`.
 
 ### Anti-Pattern: AP9 — Hardcoded Agent Identity
 
