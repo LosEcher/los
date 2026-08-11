@@ -2,22 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  LANGUAGE_CONTRACT_MINIMAL,
-  LANGUAGE_CONTRACT_STANDARD,
-  LANGUAGE_CONTRACT_VERSION,
   aggregateLanguageScores,
   evaluateLanguageThresholds,
   formatLanguageContractForPrompt,
+  languageContractVersion,
   scoreLanguageContract,
 } from './language-contract.js';
 
 test('language contract version and prompt blocks are non-empty', () => {
-  assert.ok(LANGUAGE_CONTRACT_VERSION);
-  assert.ok(LANGUAGE_CONTRACT_STANDARD.includes('[E]'));
-  assert.ok(LANGUAGE_CONTRACT_MINIMAL.includes('FINDING'));
+  assert.ok(languageContractVersion());
   assert.equal(formatLanguageContractForPrompt('none'), '');
+  assert.ok(formatLanguageContractForPrompt('minimal').includes('FINDING'));
   assert.ok(formatLanguageContractForPrompt('minimal').includes('INCOMPLETE'));
   assert.ok(formatLanguageContractForPrompt('standard').includes('Language'));
+  assert.ok(formatLanguageContractForPrompt('standard').includes('[E]'));
 });
 
 test('scoreLanguageContract rewards evidence markers and penalizes bare claims', () => {

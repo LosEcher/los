@@ -13,10 +13,10 @@ import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import type { GovernanceCadence, GovernanceJob } from './governance-jobs-types.js';
 import {
-  DEFAULT_LANGUAGE_THRESHOLDS,
-  LANGUAGE_CONTRACT_VERSION,
   aggregateLanguageScores,
+  defaultLanguageThresholds,
   evaluateLanguageThresholds,
+  languageContractVersion,
   scoreLanguageContract,
   type LanguageContractScore,
   type LanguageContractThresholds,
@@ -69,16 +69,17 @@ function readThresholds(config: Record<string, unknown>): LanguageContractThresh
   const nested = (config.thresholds && typeof config.thresholds === 'object' && !Array.isArray(config.thresholds))
     ? config.thresholds as Record<string, unknown>
     : {};
+  const defaults = defaultLanguageThresholds();
   return {
-    evidenceMarkerRateMin: readNumber(nested, 'evidenceMarkerRateMin', DEFAULT_LANGUAGE_THRESHOLDS.evidenceMarkerRateMin),
-    bareCompletionClaimRateMax: readNumber(nested, 'bareCompletionClaimRateMax', DEFAULT_LANGUAGE_THRESHOLDS.bareCompletionClaimRateMax),
-    processNarrationRateMax: readNumber(nested, 'processNarrationRateMax', DEFAULT_LANGUAGE_THRESHOLDS.processNarrationRateMax),
-    avgHedgeMax: readNumber(nested, 'avgHedgeMax', DEFAULT_LANGUAGE_THRESHOLDS.avgHedgeMax),
-    meanComplianceMin: readNumber(nested, 'meanComplianceMin', DEFAULT_LANGUAGE_THRESHOLDS.meanComplianceMin),
+    evidenceMarkerRateMin: readNumber(nested, 'evidenceMarkerRateMin', defaults.evidenceMarkerRateMin),
+    bareCompletionClaimRateMax: readNumber(nested, 'bareCompletionClaimRateMax', defaults.bareCompletionClaimRateMax),
+    processNarrationRateMax: readNumber(nested, 'processNarrationRateMax', defaults.processNarrationRateMax),
+    avgHedgeMax: readNumber(nested, 'avgHedgeMax', defaults.avgHedgeMax),
+    meanComplianceMin: readNumber(nested, 'meanComplianceMin', defaults.meanComplianceMin),
   };
 }
 
-export async function loadLanguageAuditSamples(options: {
+async function loadLanguageAuditSamples(options: {
   lookbackDays: number;
   sampleLimit: number;
   minTextChars: number;
@@ -259,7 +260,7 @@ export async function runLanguageAudit(
           workFindingCount,
           JSON.stringify(findings),
           cadenceRecommendation ?? null,
-          LANGUAGE_CONTRACT_VERSION,
+          languageContractVersion(),
         ],
       );
     } catch (err) {
@@ -269,7 +270,7 @@ export async function runLanguageAudit(
 
   return {
     auditedAt: now.toISOString(),
-    contractVersion: LANGUAGE_CONTRACT_VERSION,
+    contractVersion: languageContractVersion(),
     lookbackDays,
     windowStart: windowStart.toISOString(),
     windowEnd: windowEnd.toISOString(),

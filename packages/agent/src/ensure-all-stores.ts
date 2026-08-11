@@ -98,4 +98,8 @@ export async function ensureAllAgentStores(): Promise<void> {
   // surface. The direct call keeps the wiring visible to the static check.
   const gateStore = await import('./run-evals/sample-gate.js');
   await gateStore.ensureSampleGateStore();
+
+  // Language-contract weekly audit snapshots (Controlled Operator Language).
+  const languageAudit = await import('./governance-language-audit.js');
+  await languageAudit.ensureLanguageContractSnapshotStore();
 }

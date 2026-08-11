@@ -165,6 +165,7 @@ export async function runJobAudit(job: GovernanceJob, dryRun: boolean): Promise<
       return runSelfBootstrapAudit(job, { dryRun });
     }
     case 'language_audit': {
+      // Static import keeps language-contract scoring symbols reachable for AP10 wiring.
       const { runLanguageAudit } = await import('./governance-language-audit.js');
       return runLanguageAudit(job, { dryRun });
     }

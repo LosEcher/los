@@ -7,10 +7,15 @@
  * Scoring is pure and deterministic so weekly governance can measure drift.
  */
 
-export const LANGUAGE_CONTRACT_VERSION = '1.0.0';
+/** Bumped when scoring rules or prompt blocks change (observation snapshots). */
+const LANGUAGE_CONTRACT_VERSION = '1.0.0';
+
+export function languageContractVersion(): string {
+  return LANGUAGE_CONTRACT_VERSION;
+}
 
 /** Standard-level language block injected into identity prompts. */
-export const LANGUAGE_CONTRACT_STANDARD = [
+const LANGUAGE_CONTRACT_STANDARD = [
   '## Language (operator contract)',
   '1. Lead with the answer. Then evidence.',
   '2. One status word per claim — use runtime terms only:',
@@ -23,7 +28,7 @@ export const LANGUAGE_CONTRACT_STANDARD = [
 ].join('\n');
 
 /** Minimal-level language rules (child / remote / pre-execution). */
-export const LANGUAGE_CONTRACT_MINIMAL = [
+const LANGUAGE_CONTRACT_MINIMAL = [
   'Language: report FINDING | EVIDENCE | STATUS only.',
   'No process narration (no "Let me…", "Spawning…", "I will…").',
   'If incomplete: INCOMPLETE: <reason>. Never claim done/fixed/shipped without an evidence pointer.',
@@ -58,7 +63,7 @@ export interface LanguageContractThresholds {
   meanComplianceMin: number;
 }
 
-export const DEFAULT_LANGUAGE_THRESHOLDS: LanguageContractThresholds = {
+const DEFAULT_LANGUAGE_THRESHOLDS: LanguageContractThresholds = {
   // Start conservative: markers are new; ramp later via job config.
   evidenceMarkerRateMin: 0.10,
   bareCompletionClaimRateMax: 0.15,
@@ -66,6 +71,10 @@ export const DEFAULT_LANGUAGE_THRESHOLDS: LanguageContractThresholds = {
   avgHedgeMax: 8,
   meanComplianceMin: 0.45,
 };
+
+export function defaultLanguageThresholds(): LanguageContractThresholds {
+  return { ...DEFAULT_LANGUAGE_THRESHOLDS };
+}
 
 const EVIDENCE_MARKER_RE = /\[(E|I|U)\]/g;
 const BARE_COMPLETION_RE =
@@ -215,7 +224,7 @@ export interface LanguageThresholdFinding {
 
 export function evaluateLanguageThresholds(
   metrics: LanguageSampleMetrics,
-  thresholds: LanguageContractThresholds = DEFAULT_LANGUAGE_THRESHOLDS,
+  thresholds: LanguageContractThresholds = defaultLanguageThresholds(),
   options: { minSamplesForThresholds?: number } = {},
 ): LanguageThresholdFinding[] {
   const minSamples = options.minSamplesForThresholds ?? 8;
