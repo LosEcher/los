@@ -50,6 +50,7 @@ import {
 import {
   weclawSend,
   weclawHealth,
+  getWeclawSendHealth,
   startWeclaw,
   stopWeclaw,
   findWeclawBinary,
@@ -169,12 +170,18 @@ channels.push(createWebChannel({
   losAuthToken: LOS_AUTH_TOKEN,
   losOperatorToken: LOS_OPERATOR_TOKEN,
   healthSnapshot: () => {
-    const externalReady = weclawAvailable || wxpusherConfigured;
+    const send = getWeclawSendHealth();
+    // HTTP /health alone is false-green when iLink prepare/send is broken.
+    const weclawDeliveryReady = weclawAvailable && send.sendHealthy;
+    const externalReady = weclawDeliveryReady || wxpusherConfigured;
     return {
       ready: sseLive && externalReady,
       sseConnected: sseLive,
       externalReady,
       weclawAvailable,
+      weclawSendHealthy: send.sendHealthy,
+      weclawSendFailures: send.consecutiveFailures,
+      weclawLastSendError: send.lastError,
       wxpusherConfigured,
     };
   },
@@ -187,7 +194,11 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
     `[alert] deliver kind=${alert.kind ?? 'needs_decision'} type=${alert.type} session=${alert.sessionId} run=${alert.runSpecId ?? alert.taskRunId ?? '-'}`,
   );
 
-  // 1. Try WeClaw first (bidirectional WeChat)
+  let imDelivered = false;
+  let weclawError: string | undefined;
+
+  // 1. Try WeClaw first (bidirectional WeChat). Still attempt when HTTP is up
+  // even if send health is degraded — a successful send clears the counter.
   if (weclawAvailable && WECLAW_DEFAULT_TO) {
     const text = formatAlertForWeclaw(alert);
     const result = await weclawSend({ text }, weclawConfig);
@@ -195,6 +206,7 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
       console.log(`[weclaw] sent ok session=${alert.sessionId}`);
       return;
     }
+    weclawError = result.error;
     console.error(`[weclaw] send failed: ${result.error}`);
     // Fall through to other channels
   } else if (!WECLAW_DEFAULT_TO) {
@@ -211,9 +223,24 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
       });
       await channel.send(message);
       console.log(`[${channel.kind}] sent ok session=${alert.sessionId}`);
+      if (channel.kind === 'weixin') imDelivered = true;
     } catch (err) {
       console.error(`[${channel.kind}] send failed: ${(err as Error).message}`);
     }
+  }
+
+  // Daily digest / fleet alerts must not look "delivered" when only the local
+  // web event store accepted them — operator IM never saw the message.
+  if (
+    !imDelivered
+    && (alert.type === 'ops.daily_digest' || alert.type === 'ops.fleet_attention')
+  ) {
+    console.error(
+      `[alert] IM delivery failed type=${alert.type} session=${alert.sessionId}`
+      + ` weclaw=${weclawError ?? (weclawAvailable ? 'skipped' : 'offline')}`
+      + ` wxpusher=${wxpusherConfigured ? 'attempted' : 'not_configured'}`
+      + ' — re-login WeClaw (Web #communication-accounts) or configure WxPusher',
+    );
   }
 }
 

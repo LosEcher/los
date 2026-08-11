@@ -59,4 +59,10 @@ if validate_wechat_channel_config >/dev/null 2>&1; then
   exit 1
 fi
 
+# launchd wrapper must honor mode=disabled (do not keep orphan wechat-bot alive).
+wrapper="$ROOT/tools/los-wechat-bot-launchd.sh"
+grep -q 'wechat_enabled' "$wrapper"
+grep -q 'LOS_WECHAT_BOT_MODE' "$wrapper"
+grep -q 'stop_bot' "$wrapper"
+
 echo "channel lifecycle checks passed"

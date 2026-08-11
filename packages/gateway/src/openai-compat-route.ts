@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { MessageRouter } from '@los/agent/message-router';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
+import { getDefaultProjectId, resolveConfiguredProjectOwner } from './project-store.js';
 import { getMessagePrincipal, getRequestContext } from './request-context.js';
 
 interface OpenAIChatRequest {
@@ -22,13 +23,27 @@ interface OpenAIChatRequest {
   temperature?: number;
 }
 
+type OpenAICompatibleRouteDependencies = {
+  runChat: typeof runChat;
+  getDefaultProjectId: typeof getDefaultProjectId;
+  resolveConfiguredProjectOwner: typeof resolveConfiguredProjectOwner;
+};
+
+const defaultDependencies: OpenAICompatibleRouteDependencies = {
+  runChat,
+  getDefaultProjectId,
+  resolveConfiguredProjectOwner,
+};
+
 export function registerOpenAICompatibleRoute(
   app: FastifyInstance,
   config: ReturnType<typeof import('@los/infra/config').getConfig>,
   defaultWorkspaceRoot: string,
   gatewayServiceId?: string,
   messageRouter?: MessageRouter,
+  overrides: Partial<OpenAICompatibleRouteDependencies> = {},
 ): void {
+  const dependencies = { ...defaultDependencies, ...overrides };
   app.post('/v1/chat/completions', async (req: any, reply: any) => {
     const body = req.body as OpenAIChatRequest;
     const context = getRequestContext(req);
@@ -89,6 +104,25 @@ export function registerOpenAICompatibleRoute(
       }
     }
 
+    const requestedProjectId = normalizeHeader(req.headers['x-project-id']);
+    const storedDefaultProjectId = dependencies.getDefaultProjectId();
+    const intakeResolution = dependencies.resolveConfiguredProjectOwner({
+      contextProjectId: requestedProjectId,
+      defaultProjectId: storedDefaultProjectId ?? config.defaultProjectId,
+      defaultWorkspaceRoot: storedDefaultProjectId ? undefined : defaultWorkspaceRoot,
+    });
+    if (intakeResolution.status === 'blocked') {
+      return reply.status(400).send({
+        error: {
+          message: intakeResolution.blocker ?? 'Project owner resolution blocked.',
+          type: 'invalid_request_error',
+          code: intakeResolution.reason,
+        },
+      });
+    }
+    const workspaceRoot = intakeResolution.workspaceRoot!;
+    const projectId = intakeResolution.ownerRepo!;
+
     const ctx: ChatRunContext = { activeTaskRunId: undefined, activeRunSpecId: undefined, lastCheckpoint: null };
     let resultText = '';
     let finalStatus = 'failed';
@@ -106,18 +140,20 @@ export function registerOpenAICompatibleRoute(
     };
 
     try {
-      await (runChat as any)({
+      await dependencies.runChat({
         prompt,
         sessionId: sid,
         systemPrompt: systemPrompt || undefined,
         provider: body.model ?? config.agent.defaultProvider,
         model: body.model ? undefined : config.agent.defaultModel,
+        providerFallback: undefined,
         modelSettings: undefined,
-        workspaceRoot: defaultWorkspaceRoot,
+        workspaceRoot,
         // WeChat channel: keep risk low — L2 shell was flooding deny alerts.
         // Operator can still use CLI/Web with higher toolMode when needed.
         toolMode: 'read-only',
         allowedTools: undefined,
+        manualSkillIds: undefined,
         maxLoops: Math.min(8, body.max_tokens ? Math.min(body.max_tokens, config.agent.maxLoops) : 8),
         timeoutMs: undefined,
         toolRetry: undefined,
@@ -131,13 +167,18 @@ export function registerOpenAICompatibleRoute(
         dedupeKey: undefined,
         sid,
         tenantId: context.tenantId,
-        projectId: context.projectId,
+        projectId,
         userId: context.userId,
         actorSubject: principal.subject,
         requestId: context.requestId,
         runContract: undefined,
+        intakeResolution,
+        requestedProjectId,
+        requestedWorkspaceRoot: undefined,
         config,
         gatewayServiceId,
+        identityName: undefined,
+        identityLevel: undefined,
         log: context.log,
         ctx,
         send,
@@ -171,4 +212,11 @@ export function registerOpenAICompatibleRoute(
       });
     }
   });
+}
+
+function normalizeHeader(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  return trimmed || undefined;
 }
