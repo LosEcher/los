@@ -19,8 +19,11 @@ Use this workflow for:
 
 1. daily runtime and execution-health checks;
 2. weekly documentation and ADR/source drift review;
-3. monthly agent-use and provider-governance review;
-4. preparing a governance report before using `los` for larger autonomous
+3. weekly Controlled Operator Language audit (`language_audit` job — see
+   `docs/governance/language-contract-observation.md`); promote to monthly
+   after clean windows;
+4. monthly agent-use and provider-governance review;
+5. preparing a governance report before using `los` for larger autonomous
    execution.
 
 Do not use it to store raw transcripts, auth snapshots, API keys, local browser
