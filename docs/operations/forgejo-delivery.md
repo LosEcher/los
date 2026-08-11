@@ -20,6 +20,20 @@ completed.
 5. Never print, commit, log, or save the credential record returned by
    `git credential fill`. Do not use `set -x` while credentials are loaded.
 
+## Blocked P0: `todo-los-review-20260728-forgejo-sync`
+
+Code remediation dependencies are complete. The remaining blocker is **explicit
+delivery authorization** only — not further implementation.
+
+| Check | How |
+| --- | --- |
+| Deps done | `todo-los-review-20260728-recovery-tests`, `…-acp-dispatch`, `…-provider-routing` are `done` in the todo ledger |
+| Authority remote | `git remote get-url origin` must be Forgejo; GitHub is mirror-only |
+| Divergence | `git rev-list --left-right --count origin/main...github/main` — if Forgejo is already ahead, prefer closing the todo as superseded rather than replaying a stale `sync/github-main-to-forgejo` branch |
+| When authorized | Open a **fresh** PR for any remaining delta, wait for exact-head CI, merge via Forgejo UI/API; never force-push `main` |
+
+Do not treat green local gates or GitHub PR merges as Forgejo delivery evidence.
+
 ## Remote And Network Truth
 
 Derive the effective server and repository from `origin`; do not copy a stale

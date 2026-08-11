@@ -244,7 +244,7 @@ roadmap-sync completion, optimization demotion to P2, and otel-docs done.
 | `todo-los-ci-cd-observability-20260725` | plan | `in_progress` | No | Correctness children done; open for resource baseline 5/10 |
 | `todo-los-execution-lab` | phase | `in_progress` | No | Projection/experiment/rubric done; sample gate next |
 | `todo-los-daily-agent-product` | phase | `in_progress` | No | `p0AuthorizedScopeComplete=true`; holds roadmap/canary linkage |
-| `todo-los-pi-k4-readonly-canary` | task | `backlog` | Only with consent | `authorization=not_granted`, `providerCanaryExecuted=false` |
+| `todo-los-pi-k4-readonly-canary` | task | `backlog` | Only with **fresh** consent | historical canaries executed (advisory); `nextAuthorization=not_granted`, `providerCanaryExecuted=true` |
 
 #### Wave 0 evidence and todo mutations [E]
 
@@ -380,12 +380,43 @@ Full evidence: `docs/operations/2026-08-03-k4-canary.md`.
 | Pi kernel evidence | `kernel.started`/`kernel.finished` session events; 1 loop, 287 completion tokens [E] |
 | Outcome | experiment blocked (`candidate_plan_awaiting_approval`); results remain advisory until formal pairwise sample-gate pass and rollback gates |
 | Defects fixed (PR #154) | approve no longer auto-dispatches K4 candidates; kernel assertion accepts running experiments |
-| Todo row | Not present in runtime DB ledger (per 2026-07-31 note); status recorded here as the owning governance surface |
+| Todo row | Present in runtime DB; calibrated 2026-08-11 (see addendum below) |
 
-The todo is considered closed for dispatch purposes: canary execution is
-complete and advisory. Do not re-dispatch; revisit only for the formal
-sample-gate comparison and any rollback exercise. Default kernel stays
-production baseline; `POST /execution-experiments/:id/rollback` remains wired.
+Do not re-dispatch without **fresh** consent. Default kernel stays production
+baseline; `POST /execution-experiments/:id/rollback` remains wired.
+
+### 2026-08-11 operator attention addendum (canary ledger + forgejo-sync)
+
+**Pi K4 ledger calibration [E]**
+
+Runtime DB previously showed `metadata.authorization=not_granted` and
+`providerCanaryExecuted=false` while session events recorded
+`run.kernel_canary_authorized` on 2026-08-07 for:
+
+| Experiment | Candidate outcome | Notes |
+| --- | --- | --- |
+| `experiment-ec181ed7-9ea7-4f30-9b91-87d3566c46ee` | candidate **succeeded** (inspection) | `grantedBy=unknown` (actor collapse) |
+| `experiment-fd64e658-2e6d-4e04-b49a-9c6e5f809e72` | candidate **blocked** (planning) | missing `recoveryPolicy` on older path |
+
+Calibrated todo fields: `providerCanaryExecuted=true`,
+`nextAuthorization=not_granted`, historical canary refs preserved.
+Runtime fail-closed truth remains `canaryAuthorization` + authorization event
+(not the todo projection). Phase-1 gates reject `unknown`/`anonymous` canary
+actors and map bare operator-token requests to `operator:shared-token`.
+
+**forgejo-sync delivery prep [E]** (no merge without delivery authorization)
+
+| Item | Value |
+| --- | --- |
+| Todo | `todo-los-review-20260728-forgejo-sync` |
+| Status | `blocked` P0 — only remaining blocked P0 |
+| Deps | recovery-tests / acp-dispatch / provider-routing all `done` |
+| Blocker | **explicit delivery authorization only** |
+| Remotes | `origin` = Forgejo authority; `github` mirror lags (`origin/main` ahead) |
+| Action when authorized | re-evaluate whether github→forgejo PR is still needed vs close as superseded; do **not** force-push or bypass protection |
+
+Provider note (probe, not delivery): minimax `/anthropic/models` returns 404
+(unhealthy probe path); deepseek-anthropic `/models` 401 is treated reachable.
 
 ### 2026-08-08 optimization-2026-08 batch + GA/自举闭环 addendum
 
