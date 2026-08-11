@@ -1643,6 +1643,101 @@ button:disabled {
   grid-template-columns: minmax(220px, 1fr) 100px 86px minmax(160px, 1.2fr) 88px 132px;
 }
 
+.fleet-card {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 10px);
+  background: var(--panel-soft, rgba(0, 0, 0, 0.12));
+}
+
+.fleet-card-compact {
+  margin-bottom: var(--space-3);
+}
+
+.fleet-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fleet-card-head .title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fleet-card-head p {
+  margin: 0.15rem 0 0;
+}
+
+.fleet-card-attention {
+  margin: 0;
+  color: var(--warn, #e0a44a);
+  font-size: var(--text-sm);
+}
+
+.fleet-card-warnings {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.fleet-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+
+.fleet-card-node {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 8px);
+  background: var(--panel, rgba(0, 0, 0, 0.18));
+}
+
+.fleet-card-node header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fleet-card-node dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.fleet-card-node dt {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.fleet-card-node dd {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.fleet-card-findings {
+  margin: 0;
+  color: var(--warn, #e0a44a);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-card-foot {
+  margin: 0;
+}
+
 .todo-row {
   grid-template-columns: minmax(260px, 1fr) 68px 118px 92px 132px;
 }
@@ -2587,6 +2682,52 @@ button:disabled {
   overflow: hidden;
 }
 
+/*
+ * Work + Schedules: pin the shell to the viewport and give list/detail
+ * independent scroll regions. Without this, desktop lists grow unbounded and
+ * .daily-page { overflow:hidden } clips content with no usable pane scroll.
+ */
+.app-shell[data-page='work'],
+.app-shell[data-page='schedules'] {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-shell[data-page='work'] .workspace,
+.app-shell[data-page='schedules'] .workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-shell[data-page='work'] .workspace > .topbar,
+.app-shell[data-page='work'] .workspace > .auth-banner,
+.app-shell[data-page='schedules'] .workspace > .topbar,
+.app-shell[data-page='schedules'] .workspace > .auth-banner {
+  flex-shrink: 0;
+}
+
+.app-shell[data-page='work'] .work-page,
+.app-shell[data-page='schedules'] .schedules-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-shell[data-page='work'] .work-toolbar-list,
+.app-shell[data-page='work'] .work-create,
+.app-shell[data-page='schedules'] .schedule-toolbar,
+.app-shell[data-page='schedules'] .schedule-create,
+.app-shell[data-page='schedules'] .schedules-page > .daily-error {
+  flex-shrink: 0;
+}
+
 .daily-toolbar {
   min-height: 56px;
   display: flex;
@@ -3019,12 +3160,21 @@ button:disabled {
 .work-split {
   display: grid;
   grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
-  min-height: calc(100vh - 210px);
+  flex: 1 1 auto;
+  min-height: min(70dvh, calc(100dvh - 210px));
+  overflow: hidden;
+}
+
+.app-shell[data-page='work'] .work-split {
+  min-height: 0;
 }
 
 .work-list {
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 55%, transparent);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .work-list-row {
@@ -3065,6 +3215,9 @@ button:disabled {
 
 .work-detail {
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding-bottom: var(--space-6);
   background: var(--surface);
 }
@@ -3076,6 +3229,19 @@ button:disabled {
   gap: var(--space-5);
   padding: var(--space-5);
   border-bottom: 1px solid var(--line);
+  max-width: min(52rem, 100%);
+}
+
+/* Keep long prose readable on ultrawide; action strip stays full pane width. */
+.work-detail > .outcome-card,
+.work-detail > .approval-reason,
+.work-detail > .daily-error,
+.work-detail > .work-review-panel,
+.work-detail > .plan-review,
+.work-detail > .contract-section,
+.work-detail > .work-technical,
+.work-detail > .daily-empty {
+  max-width: min(52rem, 100%);
 }
 
 .work-mobile-back {
@@ -3652,8 +3818,10 @@ button:disabled {
 /* Schedules (token-aligned, mirrors Work split) */
 
 .schedules-page {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  min-height: 0;
 }
 
 .schedules-page > .daily-error {
@@ -3661,6 +3829,23 @@ button:disabled {
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   min-height: 48px;
+}
+
+.schedule-toolbar {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.schedule-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.schedule-toolbar-controls select {
+  width: auto;
+  min-width: 140px;
 }
 
 .schedule-summary {
@@ -3750,16 +3935,24 @@ button:disabled {
 .schedule-split {
   display: grid;
   grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
-  min-height: calc(100vh - 220px);
+  flex: 1 1 auto;
+  min-height: min(70dvh, calc(100dvh - 220px));
   border: 0;
   background: transparent;
   border-radius: 0;
   overflow: hidden;
 }
 
+.app-shell[data-page='schedules'] .schedule-split {
+  min-height: 0;
+}
+
 .schedule-list {
   border-right: 1px solid var(--line);
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--surface) 55%, transparent);
 }
 
@@ -3822,6 +4015,9 @@ button:disabled {
 
 .schedule-detail {
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 0;
   background: var(--surface);
 }
@@ -3833,6 +4029,7 @@ button:disabled {
   gap: var(--space-5);
   padding: var(--space-5);
   border-bottom: 1px solid var(--line);
+  max-width: min(52rem, 100%);
 }
 
 .schedule-detail-head > div:first-child { display: grid; gap: var(--space-2); min-width: 0; }
@@ -3841,7 +4038,42 @@ button:disabled {
   font-size: var(--text-xl);
   line-height: var(--leading-tight);
 }
-.schedule-detail-head p { max-width: 720px; font-size: var(--text-sm); }
+
+.schedule-goal {
+  display: grid;
+  gap: var(--space-2);
+  max-width: min(52rem, 100%);
+}
+
+.schedule-goal p {
+  margin: 0;
+  max-width: min(52rem, 100%);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.schedule-goal[data-expanded='false'] p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.schedule-goal-toggle {
+  justify-self: start;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.schedule-facts,
+.schedule-history-head,
+.schedule-history {
+  max-width: min(52rem, 100%);
+}
 
 .schedule-facts {
   display: grid;
@@ -4046,6 +4278,22 @@ button:disabled {
 }
 
 @media (max-width: 780px) {
+  /* Phone uses document scroll + list/detail stack; release desktop viewport pin. */
+  .app-shell[data-page='work'],
+  .app-shell[data-page='schedules'] {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .app-shell[data-page='work'] .workspace,
+  .app-shell[data-page='work'] .work-page,
+  .app-shell[data-page='schedules'] .workspace,
+  .app-shell[data-page='schedules'] .schedules-page {
+    height: auto;
+    overflow: visible;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
     /* Reserve space for fixed bottom tabs + home indicator */

@@ -172,14 +172,16 @@ test('K4 canary authorization requires approved experiment, approved plan, and e
     executionKernel: createK4ExecutionKernelSelection({ experimentId: record.id, disposition: 'inspection', actor: 'operator:select' }),
   };
   let authorizations = 0;
+  let authorizedActor: string | undefined;
   const app = await createApp({
     async loadExecutionExperiment() { return record; },
     async loadRunSpec() { return candidate; },
-    async authorizeRunSpecKernelCanary() {
+    async authorizeRunSpecKernelCanary(input) {
       authorizations += 1;
+      authorizedActor = input.actor;
       return {
         ...candidate.runContract!.executionKernel!,
-        canaryAuthorization: { status: 'granted' as const, grantedBy: 'operator:authorize', grantedAt: new Date().toISOString() },
+        canaryAuthorization: { status: 'granted' as const, grantedBy: input.actor, grantedAt: new Date().toISOString() },
       };
     },
   });
@@ -188,7 +190,7 @@ test('K4 canary authorization requires approved experiment, approved plan, and e
       method: 'POST',
       url: '/execution-experiments/experiment-k4/authorize-canary',
       payload: { confirmCandidateRunSpecId: 'wrong-run' },
-      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test', 'x-user-id': 'operator:authorize' },
     });
     assert.equal(rejected.statusCode, 422);
     assert.equal(authorizations, 0);
@@ -197,11 +199,46 @@ test('K4 canary authorization requires approved experiment, approved plan, and e
       method: 'POST',
       url: '/execution-experiments/experiment-k4/authorize-canary',
       payload: { confirmCandidateRunSpecId: candidate.id },
-      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test' },
+      headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test', 'x-user-id': 'operator:authorize' },
     });
     assert.equal(authorized.statusCode, 200);
     assert.equal(authorized.json().executionKernel.canaryAuthorization.status, 'granted');
     assert.equal(authorizations, 1);
+    assert.equal(authorizedActor, 'operator:authorize');
+  } finally {
+    await app.close();
+  }
+});
+
+test('K4 canary authorization refuses unknown/anonymous actors', async () => {
+  const record = experiment('approved', 'run-experiment-k4-candidate');
+  const candidate = runSpec(record.candidateRunSpecId);
+  candidate.runContract = {
+    ...candidate.runContract!,
+    phase: 'plan_approved',
+    executionKernel: createK4ExecutionKernelSelection({ experimentId: record.id, disposition: 'inspection', actor: 'operator:select' }),
+  };
+  let authorizations = 0;
+  const app = await createApp({
+    async loadExecutionExperiment() { return record; },
+    async loadRunSpec() { return candidate; },
+    async authorizeRunSpecKernelCanary() {
+      authorizations += 1;
+      throw new Error('must not authorize with unknown actor');
+    },
+  });
+  try {
+    for (const actor of ['unknown', 'anonymous']) {
+      const denied = await app.inject({
+        method: 'POST',
+        url: '/execution-experiments/experiment-k4/authorize-canary',
+        payload: { confirmCandidateRunSpecId: candidate.id },
+        headers: { 'x-tenant-id': 'tenant-test', 'x-project-id': 'project-test', 'x-user-id': actor },
+      });
+      assert.equal(denied.statusCode, 409, actor);
+      assert.match(denied.json().error, /auditable operator actor/);
+    }
+    assert.equal(authorizations, 0);
   } finally {
     await app.close();
   }

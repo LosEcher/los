@@ -13,26 +13,45 @@ export async function probeNode(node: ExecutorNodeRecord): Promise<{
   verified: Record<string, unknown>;
   lastProbeError?: string;
 }> {
+  // Probe every declared connect mode. Candidate eligibility uses the preferred
+  // mode (agent_http_ndjson over agent_http); short-circuiting on the first
+  // success left preferred modes as verification:…:not_confirmed while status
+  // looked healthy.
   const modes = normalizeConnectModes(node.connectModes);
   const verified: Record<string, unknown> = {};
   let lastError: string | undefined;
+  let anyOk = false;
+  const checkedAt = new Date().toISOString();
 
   for (const mode of modes) {
     const probe = await probeMode(node, mode);
     if (probe.ok) {
+      anyOk = true;
       verified[mode] = {
         ok: true,
-        checked_at: new Date().toISOString(),
+        checked_at: checkedAt,
         source: 'probe',
         endpoint: probe.endpoint,
         kind: probe.kind,
       };
-      return {
-        status: 'online',
-        verified,
-      };
+      continue;
     }
     lastError = probe.error;
+    verified[mode] = {
+      ok: false,
+      checked_at: checkedAt,
+      source: 'probe',
+      endpoint: probe.endpoint,
+      kind: probe.kind,
+      reason: probe.error ?? 'probe failed',
+    };
+  }
+
+  if (anyOk) {
+    return {
+      status: 'online',
+      verified,
+    };
   }
 
   return {
@@ -46,7 +65,11 @@ export async function probeMode(
   node: ExecutorNodeRecord,
   mode: ExecutorNodeConnectMode,
 ): Promise<{ ok: boolean; endpoint?: string; kind: string; error?: string }> {
-  const config = normalizeJsonObject(node.connectConfig[mode]);
+  // Prefer mode-specific config; agent_http_ndjson commonly inherits agent_http.
+  const config = normalizeJsonObject(
+    node.connectConfig[mode]
+      ?? (mode === 'agent_http_ndjson' ? node.connectConfig.agent_http : undefined),
+  );
   const endpoint = resolveEndpoint(node, mode, config);
 
   if (mode === 'agent_http' || mode === 'agent_http_ndjson' || mode === 'http_health' || mode === 'cf_tunnel_http') {

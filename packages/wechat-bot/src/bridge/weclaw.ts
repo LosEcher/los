@@ -262,42 +262,174 @@ export interface WeClawSendResult {
   error?: string;
 }
 
+const WECLAW_SEND_MAX_ATTEMPTS = 3;
+/** Consecutive send failures after which HTTP /health is treated as delivery-degraded. */
+const WECLAW_SEND_DEGRADED_AFTER = 2;
+
+export interface WeClawSendHealth {
+  consecutiveFailures: number;
+  lastError: string | null;
+  lastOkAt: string | null;
+  lastFailedAt: string | null;
+  /** False when recent sends failed even if /health still returns ok. */
+  sendHealthy: boolean;
+}
+
+let sendHealth: WeClawSendHealth = {
+  consecutiveFailures: 0,
+  lastError: null,
+  lastOkAt: null,
+  lastFailedAt: null,
+  sendHealthy: true,
+};
+
+function noteWeclawSendSuccess(): void {
+  sendHealth = {
+    consecutiveFailures: 0,
+    lastError: null,
+    lastOkAt: new Date().toISOString(),
+    lastFailedAt: sendHealth.lastFailedAt,
+    sendHealthy: true,
+  };
+}
+
+function noteWeclawSendFailure(error: string): void {
+  const consecutiveFailures = sendHealth.consecutiveFailures + 1;
+  sendHealth = {
+    consecutiveFailures,
+    lastError: error.slice(0, 300),
+    lastOkAt: sendHealth.lastOkAt,
+    lastFailedAt: new Date().toISOString(),
+    sendHealthy: consecutiveFailures < WECLAW_SEND_DEGRADED_AFTER,
+  };
+}
+
+/** Recent outbound send health (process-local; resets on bot restart). */
+export function getWeclawSendHealth(): WeClawSendHealth {
+  return { ...sendHealth };
+}
+
+/** Test helper — reset send counters without a live send. */
+export function resetWeclawSendHealthForTests(): void {
+  sendHealth = {
+    consecutiveFailures: 0,
+    lastError: null,
+    lastOkAt: null,
+    lastFailedAt: null,
+    sendHealthy: true,
+  };
+}
+
+function isRetryableWeclawSendError(message: string): boolean {
+  return /prepare failed|ret=-2|EOF|timeout|ECONNRESET|ECONNREFUSED|fetch failed|503|502|504/i
+    .test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Split long operator text into WeChat-safe chunks.
+ * iLink prepare/send is flaky on multi-KB bodies under degraded sessions.
+ */
+export function splitWeclawText(text: string, maxChars = 1800): string[] {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxChars) return [normalized];
+
+  const chunks: string[] = [];
+  let remaining = normalized;
+  while (remaining.length > maxChars) {
+    let cut = remaining.lastIndexOf('\n', maxChars);
+    if (cut < Math.floor(maxChars * 0.4)) cut = maxChars;
+    chunks.push(remaining.slice(0, cut).trimEnd());
+    remaining = remaining.slice(cut).replace(/^\n+/, '');
+  }
+  if (remaining.trim()) chunks.push(remaining.trim());
+  return chunks;
+}
+
 /**
  * Send a message to WeChat via WeClaw's HTTP API.
+ * Retries transient iLink failures (prepare failed / EOF) with short backoff.
+ * Long text is split into sequential chunks so a single oversized body does not
+ * take down the whole digest push.
  */
 export async function weclawSend(input: WeClawSendInput, config: WeClawConfig = {}): Promise<WeClawSendResult> {
   const addr = config.apiAddr ?? process.env.WECLAW_API_ADDR ?? DEFAULT_API_ADDR;
   const to = input.to ?? config.defaultTo ?? process.env.WECLAW_DEFAULT_TO;
   if (!to) {
-    return { ok: false, error: 'no recipient: set WECLAW_DEFAULT_TO or pass "to" param' };
+    const error = 'no recipient: set WECLAW_DEFAULT_TO or pass "to" param';
+    noteWeclawSendFailure(error);
+    return { ok: false, error };
   }
 
-  try {
-    const body: Record<string, unknown> = { to };
-    if (input.text) body.text = input.text;
-    if (input.mediaUrl) body.media_url = input.mediaUrl;
+  if (input.mediaUrl && !input.text) {
+    return weclawSendOnce({ to, media_url: input.mediaUrl }, addr);
+  }
 
-    const res = await fetch(`http://${addr}/api/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
+  const parts = input.text ? splitWeclawText(input.text) : [''];
+  let lastMessageId: string | undefined;
+  for (let i = 0; i < parts.length; i += 1) {
+    const body: Record<string, unknown> = { to, text: parts[i] };
+    // Attach media only on the first chunk so multi-part digests stay text-only after.
+    if (i === 0 && input.mediaUrl) body.media_url = input.mediaUrl;
+    const result = await weclawSendOnce(body, addr);
+    if (!result.ok) return result;
+    lastMessageId = result.messageId ?? lastMessageId;
+    if (i + 1 < parts.length) await sleep(400);
+  }
+  return { ok: true, messageId: lastMessageId };
+}
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      return { ok: false, error: `weclaw API ${res.status}: ${errText.slice(0, 200)}` };
+async function weclawSendOnce(
+  body: Record<string, unknown>,
+  addr: string,
+): Promise<WeClawSendResult> {
+  let lastError = 'weclaw send failed';
+  for (let attempt = 1; attempt <= WECLAW_SEND_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(`http://${addr}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        lastError = `weclaw API ${res.status}: ${errText.slice(0, 200)}`;
+        if (attempt < WECLAW_SEND_MAX_ATTEMPTS && isRetryableWeclawSendError(lastError)) {
+          log.warn(`weclaw send retry ${attempt}/${WECLAW_SEND_MAX_ATTEMPTS}: ${lastError}`);
+          await sleep(attempt * 1500);
+          continue;
+        }
+        noteWeclawSendFailure(lastError);
+        return { ok: false, error: lastError };
+      }
+
+      const data = await res.json() as Record<string, unknown>;
+      noteWeclawSendSuccess();
+      return { ok: true, messageId: (data?.message_id as string) ?? undefined };
+    } catch (err) {
+      lastError = (err as Error).message;
+      if (attempt < WECLAW_SEND_MAX_ATTEMPTS && isRetryableWeclawSendError(lastError)) {
+        log.warn(`weclaw send retry ${attempt}/${WECLAW_SEND_MAX_ATTEMPTS}: ${lastError}`);
+        await sleep(attempt * 1500);
+        continue;
+      }
+      noteWeclawSendFailure(lastError);
+      return { ok: false, error: lastError };
     }
-
-    const data = await res.json() as Record<string, unknown>;
-    return { ok: true, messageId: (data?.message_id as string) ?? undefined };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
   }
+  noteWeclawSendFailure(lastError);
+  return { ok: false, error: lastError };
 }
 
 /**
  * Check if WeClaw API is healthy.
+ * HTTP liveness alone is not delivery readiness — combine with getWeclawSendHealth().
  */
 export async function weclawHealth(config: WeClawConfig = {}): Promise<boolean> {
   const addr = config.apiAddr ?? process.env.WECLAW_API_ADDR ?? DEFAULT_API_ADDR;

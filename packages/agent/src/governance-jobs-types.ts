@@ -1,5 +1,5 @@
-export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan' | 'supply_chain_audit' | 'static_analysis' | 'performance_audit' | 'migration_drift_fix' | 'event_retention' | 'code_topology_audit' | 'dead_letter' | 'adversarial_review' | 'self_bootstrap';
-export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly';
+export type GovernanceJobType = 'consistency_audit' | 'hotspot' | 'architecture_drift' | 'memory_integrity' | 'memory_retention' | 'reflection' | 'branch_cleanup' | 'file_size' | 'related_project_scan' | 'supply_chain_audit' | 'static_analysis' | 'performance_audit' | 'migration_drift_fix' | 'event_retention' | 'code_topology_audit' | 'dead_letter' | 'adversarial_review' | 'self_bootstrap' | 'language_audit';
+export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly' | 'monthly';
 export type GovernanceJobStatus = 'active' | 'paused' | 'retired';
 export type CircuitState = 'closed' | 'half_open' | 'open';
 
@@ -148,6 +148,7 @@ export const CADENCE_THRESHOLDS: Record<Exclude<GovernanceCadence, 'manual'>, nu
   hourly: 55 * 60 * 1000,
   daily: 23 * 60 * 60 * 1000,
   weekly: (6.5 * 24 * 60 * 60 * 1000),
+  monthly: (28 * 24 * 60 * 60 * 1000),
 };
 
 /**

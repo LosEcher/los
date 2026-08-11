@@ -234,13 +234,26 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
   packycode: {
     provider: 'packycode',
     protocol: 'openai',
+    // Default chat; config.apiShape may override to openai-responses for
+    // Packy-hosted Grok (cc-switch grokbuild PackyCode uses responses).
     apiShape: 'openai-chat-completions',
     baseUrl: requireProviderDefaults('packycode').baseUrl,
     model: requireProviderDefaults('packycode').defaultModel,
     supportsTools: true,
     supportsParallelToolCalls: false,
-    supportsReasoning: false,
-    modelAliases: ['gpt-5.5'],
+    supportsReasoning: true,
+    reasoningParam: 'reasoning_effort',
+    modelAliases: [
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'grok-4.5',
+      'grok-4.3',
+      'grok-4-fast',
+    ],
     supportsToolStreaming: false,
     cachePolicy: 'none',
     toolCallRepair: 'none',

@@ -52,8 +52,8 @@ async function syncFindingTodo(
 }
 
 /**
- * Dimension→todo mapping for the self_bootstrap / adversarial_review jobs.
- * Both jobs emit `findings: [{ dimension, severity, detail }]`; every known
+ * Dimension→todo mapping for self_bootstrap / adversarial_review / language_audit.
+ * These jobs emit `findings: [{ dimension, severity, detail }]`; every known
  * dimension is synced each run so resolved findings archive their todo.
  */
 interface DimensionTodoSpec {
@@ -111,6 +111,57 @@ const DIMENSION_TODO_SPECS: Record<string, Record<string, DimensionTodoSpec>> = 
       priority: 'P1',
       title: (count) => `Adversarial: ${count} ready-but-unused provider(s)`,
       description: (count, detail) => `Adversarial review found ${count} provider(s) ready per discovery with 0 telemetry calls. ${detail}`,
+    },
+  },
+  language_audit: {
+    missing_evidence_markers: {
+      auditType: 'languageMissingEvidenceMarkers',
+      priority: 'P2',
+      title: (count) => `Language: ${count} window(s) missing [E]/[I]/[U] markers`,
+      description: (count, detail) =>
+        `Language audit found low evidence-marker rate across agent outputs. ${detail} Adjust identity Language block or closeout templates.`,
+    },
+    bare_completion_claims: {
+      auditType: 'languageBareCompletionClaims',
+      priority: 'P1',
+      title: (count) => `Language: ${count} bare completion-claim signal(s)`,
+      description: (count, detail) =>
+        `Language audit found fixed/shipped/verified/done claims without evidence pointers. ${detail}`,
+    },
+    process_narration: {
+      auditType: 'languageProcessNarration',
+      priority: 'P2',
+      title: (count) => `Language: ${count} process-narration signal(s)`,
+      description: (count, detail) =>
+        `Language audit found process narration ("Let me…", "Spawning…") above threshold. Tighten child/minimal language rules. ${detail}`,
+    },
+    low_compliance: {
+      auditType: 'languageLowCompliance',
+      priority: 'P1',
+      title: (count) => `Language: mean compliance below threshold`,
+      description: (count, detail) =>
+        `Language audit mean compliance score is below configured min. ${detail}`,
+    },
+    hedge_density: {
+      auditType: 'languageHedgeDensity',
+      priority: 'P3',
+      title: (count) => `Language: high hedge-word density`,
+      description: (count, detail) =>
+        `Language audit average hedge words per sample is high. ${detail}`,
+    },
+    insufficient_samples: {
+      auditType: 'languageInsufficientSamples',
+      priority: 'P3',
+      title: (count) => `Language: insufficient samples for rate thresholds`,
+      description: (count, detail) =>
+        `Language audit could not score enough real outputs this window. ${detail}`,
+    },
+    cadence_promotion_ready: {
+      auditType: 'languageCadencePromotion',
+      priority: 'P3',
+      title: () => `Language: ready to promote weekly → monthly`,
+      description: (_count, detail) =>
+        `Language contract clean for enough windows. Consider monthly cadence. ${detail}`,
     },
   },
 };
@@ -339,7 +390,11 @@ export async function createTodosFromFindings(
       });
     }
 
-    if (job.jobType === 'self_bootstrap' || job.jobType === 'adversarial_review') {
+    if (
+      job.jobType === 'self_bootstrap'
+      || job.jobType === 'adversarial_review'
+      || job.jobType === 'language_audit'
+    ) {
       const specs = DIMENSION_TODO_SPECS[job.jobType] ?? {};
       const findings = Array.isArray(summary.findings)
         ? summary.findings as Array<{ dimension: string; detail?: string }>

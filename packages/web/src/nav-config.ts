@@ -136,6 +136,10 @@ export type HashRoute = {
   workItemId?: string;
   /** Chat session deep link `#chat?session=`. */
   sessionId?: string;
+  /** Schedules detail deep link `#schedules?id=`. */
+  scheduleId?: string;
+  /** Usage digest day `#usage?day=YYYY-MM-DD` (UTC). */
+  day?: string;
 };
 
 /** Parse location.hash into page + optional deep-link ids. */
@@ -148,6 +152,11 @@ export function parseHash(rawHash = typeof window !== 'undefined' ? window.locat
     return { page: 'work', workItemId: safeDecode(workPath[1]) };
   }
 
+  const schedulesPath = raw.match(/^schedules\/([^/?#]+)\/?$/);
+  if (schedulesPath?.[1]) {
+    return { page: 'schedules', scheduleId: safeDecode(schedulesPath[1]) };
+  }
+
   const [pathPart, query = ''] = raw.split('?');
   const path = pathPart || 'inbox';
   const params = new URLSearchParams(query);
@@ -156,10 +165,16 @@ export function parseHash(rawHash = typeof window !== 'undefined' ? window.locat
 
   const workItemId = params.get('id')?.trim() || undefined;
   const sessionId = params.get('session')?.trim() || undefined;
+  const scheduleId = params.get('id')?.trim() || params.get('schedule')?.trim() || undefined;
+  const day = params.get('day')?.trim() || undefined;
 
   if (page === 'work' && workItemId) return { page, workItemId };
   if (page === 'inbox' && workItemId) return { page, workItemId };
   if (page === 'chat' && sessionId) return { page, sessionId: safeDecode(sessionId) };
+  if (page === 'schedules' && scheduleId) {
+    return { page, scheduleId: safeDecode(scheduleId) };
+  }
+  if (page === 'usage' && day) return { page, day };
   return { page };
 }
 
@@ -168,7 +183,13 @@ export function pageFromHash(): PageId {
 }
 
 /** Build a hash fragment (without leading `#`) for navigation. */
-export function buildHash(route: { page: PageId; workItemId?: string; sessionId?: string }): string {
+export function buildHash(route: {
+  page: PageId;
+  workItemId?: string;
+  sessionId?: string;
+  scheduleId?: string;
+  day?: string;
+}): string {
   if (route.page === 'work' && route.workItemId) {
     return `work/${encodeURIComponent(route.workItemId)}`;
   }
@@ -177,6 +198,12 @@ export function buildHash(route: { page: PageId; workItemId?: string; sessionId?
   }
   if (route.page === 'inbox' && route.workItemId) {
     return `inbox?id=${encodeURIComponent(route.workItemId)}`;
+  }
+  if (route.page === 'schedules' && route.scheduleId) {
+    return `schedules?id=${encodeURIComponent(route.scheduleId)}`;
+  }
+  if (route.page === 'usage' && route.day) {
+    return `usage?day=${encodeURIComponent(route.day)}`;
   }
   return route.page;
 }

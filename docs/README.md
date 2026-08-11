@@ -117,7 +117,8 @@ health/status endpoints, external collector boundary, and failure checks.
 
 Use `docs/governance/` for repeated analysis practices. Start with
 `governance/periodic-analysis.md` when using `los` as the main execution and
-review tool.
+review tool. Use `governance/language-contract-observation.md` for Controlled
+Operator Language (weekly → monthly audit of agent wording).
 
 Use `governance/anti-patterns.md` when reviewing repeated los development
 failure modes such as execution-state bypass, non-persisted plans, premature

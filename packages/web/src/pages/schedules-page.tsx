@@ -13,6 +13,7 @@ import {
   type ScheduledConcurrencyPolicy,
   type ScheduledWorkDetailResponse,
   type ScheduledWorkItem,
+  type ScheduledWorkItemRun,
   type ScheduledWorkListResponse,
   type ScheduledWorkPreviewResponse,
   type ScheduledWorkTemplateId,
@@ -48,10 +49,33 @@ type FeedAnalysisRequestValidation =
 
 const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-export function SchedulesPage() {
+/** active = non-retired (default operator view); all = every status; else concrete status. */
+type ScheduleStatusFilter = 'active' | 'all' | 'enabled' | 'paused' | 'retired';
+
+function schedulesListUrl(filter: ScheduleStatusFilter): string {
+  const params = new URLSearchParams({ limit: '100' });
+  if (filter === 'active') {
+    params.set('excludeRetired', 'true');
+  } else if (filter !== 'all') {
+    params.set('status', filter);
+  }
+  return `/scheduled-work-items?${params.toString()}`;
+}
+
+export function SchedulesPage({
+  selectedScheduleId = null,
+  onSelectedScheduleChange,
+  onOpenSession,
+}: {
+  selectedScheduleId?: string | null;
+  onSelectedScheduleChange?: (id: string | null) => void;
+  onOpenSession?: (sessionId: string) => void;
+} = {}) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>('active');
+  const [goalExpanded, setGoalExpanded] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<FormState>(() => initialForm(t));
   const trigger = useMemo(() => buildTrigger(form), [form]);
@@ -60,11 +84,17 @@ export function SchedulesPage() {
     [form.feedAnalysisRequest, t],
   );
   const list = useQuery({
-    queryKey: ['scheduled-work-items'],
-    queryFn: () => getJson<ScheduledWorkListResponse>('/scheduled-work-items?limit=100'),
+    queryKey: ['scheduled-work-items', statusFilter],
+    queryFn: () => getJson<ScheduledWorkListResponse>(schedulesListUrl(statusFilter)),
     refetchInterval: 15_000,
   });
-  const activeId = selectedId ?? list.data?.results[0]?.id ?? null;
+  // Prefer controlled deep-link id, then local click, then first list row.
+  const activeId = selectedScheduleId ?? localSelectedId ?? list.data?.results[0]?.id ?? null;
+  const selectSchedule = (id: string) => {
+    setLocalSelectedId(id);
+    setGoalExpanded(false);
+    onSelectedScheduleChange?.(id);
+  };
   const detail = useQuery({
     queryKey: ['scheduled-work-item', activeId],
     queryFn: () => getJson<ScheduledWorkDetailResponse>(`/scheduled-work-items/${activeId}`),
@@ -101,7 +131,7 @@ export function SchedulesPage() {
       });
     },
     onSuccess: async result => {
-      setSelectedId(result.schedule.id);
+      selectSchedule(result.schedule.id);
       setShowCreate(false);
       setForm(initialForm(t));
       await queryClient.invalidateQueries({ queryKey: ['scheduled-work-items'] });
@@ -132,6 +162,8 @@ export function SchedulesPage() {
   });
   const active = detail.data?.schedule ?? list.data?.results.find(item => item.id === activeId) ?? null;
   const actionError = create.error ?? updateStatus.error ?? triggerNow.error ?? retryRun.error;
+  const goalText = active?.runTemplate.goalTemplate?.trim() ?? '';
+  const goalNeedsCollapse = goalText.length > 160 || goalText.split('\n').length > 3;
 
   const total = list.data?.count ?? 0;
   const enabled = list.data?.results.filter(item => item.status === 'enabled').length ?? 0;
@@ -139,19 +171,37 @@ export function SchedulesPage() {
 
   return (
     <div className="daily-page schedules-page">
-      <div className="daily-toolbar">
+      <div className="daily-toolbar schedule-toolbar">
         <div className="attention-summary schedule-summary" aria-label={t('nav.schedules')}>
           <div className="summary-count"><span>{t('ops.schedules.summaryTotal')}</span><strong>{total}</strong></div>
           <div className="summary-count ok"><span>{t('ops.schedules.summaryEnabled')}</span><strong>{enabled}</strong></div>
           <div className={`summary-count${openCircuits > 0 ? ' danger' : ' info'}`}><span>{t('ops.schedules.summaryCircuits')}</span><strong>{openCircuits}</strong></div>
         </div>
-        <div className="daily-toolbar-actions">
-          <button className="icon-btn" type="button" title={t('ops.schedules.refreshTitle')} aria-label={t('ops.schedules.refreshTitle')} onClick={() => list.refetch()}>
-            <RefreshCcw size={15} className={list.isFetching ? 'spin' : ''} />
-          </button>
-          <button className="btn" type="button" onClick={() => setShowCreate(value => !value)}>
-            {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? t('common.close') : t('ops.schedules.newScheduleButton')}
-          </button>
+        <div className="schedule-toolbar-controls">
+          <select
+            aria-label={t('ops.schedules.statusAria')}
+            value={statusFilter}
+            onChange={event => {
+              setStatusFilter(event.target.value as ScheduleStatusFilter);
+              setLocalSelectedId(null);
+              setGoalExpanded(false);
+              // Keep controlled deep-link selection unless operator clears via bare nav.
+            }}
+          >
+            <option value="active">{t('ops.schedules.filter.active')}</option>
+            <option value="all">{t('ops.schedules.filter.all')}</option>
+            <option value="enabled">{t('ops.schedules.filter.enabled')}</option>
+            <option value="paused">{t('ops.schedules.filter.paused')}</option>
+            <option value="retired">{t('ops.schedules.filter.retired')}</option>
+          </select>
+          <div className="daily-toolbar-actions">
+            <button className="icon-btn" type="button" title={t('ops.schedules.refreshTitle')} aria-label={t('ops.schedules.refreshTitle')} onClick={() => list.refetch()}>
+              <RefreshCcw size={15} className={list.isFetching ? 'spin' : ''} />
+            </button>
+            <button className="btn" type="button" onClick={() => setShowCreate(value => !value)}>
+              {showCreate ? <Pause size={15} /> : <Plus size={15} />} {showCreate ? t('common.close') : t('ops.schedules.newScheduleButton')}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -163,7 +213,13 @@ export function SchedulesPage() {
           {list.isLoading ? <div className="daily-empty">{t('ops.schedules.loadingList')}</div> : null}
           {list.isError ? <div className="daily-error">{String(list.error)}</div> : null}
           {list.data?.results.map(item => (
-            <button key={item.id} type="button" className="schedule-list-row" data-active={activeId === item.id} onClick={() => setSelectedId(item.id)}>
+            <button
+              key={item.id}
+              type="button"
+              className="schedule-list-row"
+              data-active={activeId === item.id}
+              onClick={() => selectSchedule(item.id)}
+            >
               <span className={`schedule-state ${item.status}`} title={item.status} aria-label={item.status} />
               <span className="work-list-copy">
                 <strong>{item.title}</strong>
@@ -175,7 +231,11 @@ export function SchedulesPage() {
               </span>
             </button>
           ))}
-          {!list.isLoading && list.data?.results.length === 0 ? <div className="daily-empty">{t('ops.schedules.emptyList')}</div> : null}
+          {!list.isLoading && list.data?.results.length === 0 ? (
+            <div className="daily-empty">
+              {statusFilter === 'active' ? t('ops.schedules.emptyActiveList') : t('ops.schedules.emptyList')}
+            </div>
+          ) : null}
         </div>
 
         <div className="schedule-detail">
@@ -185,7 +245,18 @@ export function SchedulesPage() {
                 <div>
                   <div className="eyebrow">{active.runTemplate.templateId.replaceAll('_', ' ')}</div>
                   <h2>{active.title}</h2>
-                  <p>{active.runTemplate.goalTemplate}</p>
+                  <div className="schedule-goal" data-expanded={goalExpanded || !goalNeedsCollapse ? 'true' : 'false'}>
+                    <p>{goalText || t('ops.schedules.noGoal')}</p>
+                    {goalNeedsCollapse ? (
+                      <button
+                        type="button"
+                        className="ghost-btn schedule-goal-toggle"
+                        onClick={() => setGoalExpanded(value => !value)}
+                      >
+                        {goalExpanded ? t('ops.schedules.goalCollapse') : t('ops.schedules.goalExpand')}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="work-action-strip">
                   {active.status !== 'retired' ? (
@@ -212,16 +283,31 @@ export function SchedulesPage() {
                 <CalendarClock size={17} />
               </div>
               <div className="schedule-history">
-                {detail.data?.runs.map(run => (
-                  <div className="schedule-run-row" key={run.id}>
-                    <span className={`run-state ${run.status}`}>{run.status.replaceAll('_', ' ')}</span>
-                    <div><strong>{formatDate(run.scheduledFor)}</strong><small>{t('ops.schedules.attemptLabel', { triggerKind: run.triggerKind, attempt: run.attemptCount, maxAttempts: run.maxAttempts })}</small></div>
-                    <code>{run.workItemId ?? run.id}</code>
-                    {run.status === 'failed' && run.attemptCount < run.maxAttempts ? (
-                      <button className="icon-btn" type="button" title={t('ops.schedules.retryRunTitle')} aria-label={t('ops.schedules.retryRunAria', { id: run.id })} disabled={retryRun.isPending} onClick={() => retryRun.mutate(run.id)}><RotateCcw size={14} /></button>
-                    ) : <span />}
-                  </div>
-                ))}
+                {detail.data?.runs.map(run => {
+                  const sessionId = sessionIdFromRun(run);
+                  return (
+                    <div className="schedule-run-row" key={run.id}>
+                      <span className={`run-state ${run.status}`}>{run.status.replaceAll('_', ' ')}</span>
+                      <div>
+                        <strong>{formatDate(run.scheduledFor)}</strong>
+                        <small>{t('ops.schedules.attemptLabel', { triggerKind: run.triggerKind, attempt: run.attemptCount, maxAttempts: run.maxAttempts })}</small>
+                        {sessionId && onOpenSession ? (
+                          <button
+                            type="button"
+                            className="link-btn schedule-open-session"
+                            onClick={() => onOpenSession(sessionId)}
+                          >
+                            打开会话
+                          </button>
+                        ) : null}
+                      </div>
+                      <code>{run.workItemId ?? run.id}</code>
+                      {run.status === 'failed' && run.attemptCount < run.maxAttempts ? (
+                        <button className="icon-btn" type="button" title={t('ops.schedules.retryRunTitle')} aria-label={t('ops.schedules.retryRunAria', { id: run.id })} disabled={retryRun.isPending} onClick={() => retryRun.mutate(run.id)}><RotateCcw size={14} /></button>
+                      ) : <span />}
+                    </div>
+                  );
+                })}
                 {detail.data?.runs.length === 0 ? <div className="daily-empty">{t('ops.schedules.noRunsRecorded')}</div> : null}
               </div>
             </>
@@ -288,6 +374,13 @@ function approvalLabel(t: (key: string) => string, policy: ScheduledApprovalPoli
       ? 'ops.schedules.approvalPreapprovedScope'
       : 'ops.schedules.approvalEachRun';
   return t(key);
+}
+
+function sessionIdFromRun(run: ScheduledWorkItemRun): string | undefined {
+  const summary = run.resultSummary;
+  if (!summary || typeof summary !== 'object') return undefined;
+  const sid = (summary as Record<string, unknown>).sessionId;
+  return typeof sid === 'string' && sid.trim() ? sid.trim() : undefined;
 }
 
 function ScheduleFact({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'ok' }) {  return <div className={`work-fact ${tone ?? ''}`}><span>{label}</span><strong>{value}</strong></div>;

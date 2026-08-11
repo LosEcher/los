@@ -284,24 +284,24 @@ failures and `ready_for_k4_policy_review`. Explicit
 The pre-corpus smoke and superseded corpus `1.0.0` remain ignored. K4 policy
 review and the K4 selection/rollback implementation are complete in the
 persisted ledger (`todo-los-pi-k4-policy-review-20260726` and
-`todo-los-pi-k4-readonly-selection` both `done`). Registry admission and the
-first provider-backed canary remain blocked behind
-`todo-los-pi-k4-readonly-canary` with `authorization=not_granted`. Pi remains
-unavailable as a selected production kernel. The current LOS loop stays the
-production baseline until a real canary, formal pairwise evaluation, and
-rollback gates pass under explicit operator consent.
+`todo-los-pi-k4-readonly-selection` both `done`). Historical advisory canaries
+ran 2026-08-03/08-07; the todo remains `backlog` with
+`nextAuthorization=not_granted` and `providerCanaryExecuted=true`. Todo
+`metadata.authorization` is a consent ledger projection, **not** the runtime
+gate — fail-closed uses `executionKernel.canaryAuthorization` plus
+`run.kernel_canary_authorized`. Pi remains unavailable as a production default.
+The current LOS loop stays the production baseline until formal pairwise
+evaluation and rollback gates pass under **fresh** explicit operator consent.
 
-**K4 canary executed (2026-08-03, advisory).** Operator-authorized 2026-07-31;
-executed 2026-08-03 under `experiment-k4-canary-20260803d`: candidate
-`pi@0.81.1+los.3` planning disposition, `canaryAuthorization=granted`,
-`kernel.started`/`kernel.finished` session events on record, candidate ended
-`blocked` at `candidate_plan_awaiting_approval`. Two defects found and fixed in
-that batch. Verdict is **advisory only**: the pairwise sample gate
-(`sample-gate-k4-20260803`, n=1 pair, tie 20:20) passed the pipeline but does
-not support statistical conclusions, and rollback gates are not yet run.
-Full record: `docs/operations/2026-08-03-k4-canary.md`. Pi still requires a
-formal pairwise evaluation plus rollback gates under explicit operator consent
-before promotion (`todo-los-pi-k4-readonly-canary`, `authorization=not_granted`).
+**K4 canary executed (2026-08-03 / 2026-08-07, advisory).** Operator-authorized
+2026-07-31; path exercised under planning/inspection dispositions with
+`canaryAuthorization=granted` and kernel session events on record. Additional
+2026-08-07 experiments
+(`experiment-ec181ed7-…` succeeded inspection; `experiment-fd64e658-…` blocked
+planning) remain historical evidence. Verdict is **advisory only**. Full
+record: `docs/operations/2026-08-03-k4-canary.md`. Further canaries require
+fresh consent (`nextAuthorization=not_granted`); promotion still needs formal
+pairwise evaluation and rollback gates.
 
 Goal: consume Pi's provider and turn-loop improvements without moving Work Item,
 RunContract, policy, tool execution, durable evidence, recovery, verification,

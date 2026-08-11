@@ -57,11 +57,19 @@ export function registerScheduledWorkRoutes(
   });
 
   app.get('/scheduled-work-items', async req => {
-    const query = req.query as { projectId?: string; status?: string; limit?: string };
+    const query = req.query as {
+      projectId?: string;
+      status?: string;
+      limit?: string;
+      excludeRetired?: string | boolean;
+    };
     const context = getRequestContext(req);
+    const status = normalizeStatus(query.status);
     const results = await deps.list({
       projectId: normalizeString(query.projectId) ?? context.projectId,
-      status: normalizeStatus(query.status),
+      status,
+      // Concrete status wins; excludeRetired only for unscoped lists.
+      excludeRetired: status ? undefined : normalizeBoolean(query.excludeRetired),
       limit: normalizeLimit(query.limit),
     });
     return { count: results.length, results };
@@ -175,9 +183,16 @@ function normalizeCreateInput(
   // templateId or a nested `runTemplate` object (the API only accepts flat
   // fields) otherwise creates a schedule that runs the wrong template with no
   // error surfaced. D3.
+  const TEMPLATE_IDS = [
+    'morning_inbox_digest',
+    'runtime_readiness',
+    'scheduled_feed_analysis',
+    'scheduled_execution',
+    'daily_execution_digest',
+    'fleet_host_check',
+  ] as const;
   if (body.templateId !== undefined
-    && !(['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'] as const)
-      .includes(body.templateId as never)) {
+    && !(TEMPLATE_IDS as readonly string[]).includes(String(body.templateId))) {
     throw new Error(`invalid templateId: ${String(body.templateId)}`);
   }
   if (body.runTemplate !== undefined) {
@@ -185,18 +200,22 @@ function normalizeCreateInput(
   }
   const templateId = normalizeEnum(
     body.templateId,
-    ['morning_inbox_digest', 'runtime_readiness', 'scheduled_feed_analysis', 'scheduled_execution'] as const,
+    TEMPLATE_IDS,
     'morning_inbox_digest',
   );
   const title = normalizeString(body.title);
   if (!title) throw new Error('title is required');
   const isExecution = templateId === 'scheduled_execution';
+  const isGovernance =
+    templateId === 'runtime_readiness'
+    || templateId === 'daily_execution_digest'
+    || templateId === 'fleet_host_check';
   return {
     tenantId: context.tenantId, projectId: normalizeString(body.projectId) ?? context.projectId,
     userId: context.userId, title, trigger: normalizeTrigger(body.trigger),
     runTemplate: {
       templateId,
-      mode: isExecution ? 'execution' : (templateId === 'runtime_readiness' ? 'governance' : 'audit'),
+      mode: isExecution ? 'execution' : (isGovernance ? 'governance' : 'audit'),
       goalTemplate: normalizeString(body.goalTemplate) ?? defaultGoal(templateId),
       editableSurfaces: isExecution ? normalizeStringArray(body.editableSurfaces) : [],
       requiredChecks: isExecution ? normalizeStringArray(body.requiredChecks) : [],
@@ -244,6 +263,11 @@ function normalizeTrigger(value: unknown): ScheduledWorkTrigger {
 function normalizeStatus(value: unknown): 'enabled' | 'paused' | 'retired' | undefined {
   return optionalEnum(value, ['enabled', 'paused', 'retired']);
 }
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (value === true || value === 'true' || value === '1') return true;
+  if (value === false || value === 'false' || value === '0') return false;
+  return undefined;
+}
 function normalizeString(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function normalizeNumber(value: unknown): number | undefined { return typeof value === 'number' && Number.isFinite(value) ? value : undefined; }
 function normalizeLimit(value: unknown): number | undefined { const parsed = Number(value); return Number.isFinite(parsed) ? Math.floor(parsed) : undefined; }
@@ -253,6 +277,12 @@ function optionalEnum<T extends string>(value: unknown, choices: readonly T[]): 
 function defaultGoal(templateId: ScheduledWorkRunTemplate['templateId']): string {
   if (templateId === 'morning_inbox_digest') return 'Summarize persisted Inbox attention without calling a provider.';
   if (templateId === 'runtime_readiness') return 'Inspect persisted LOS runtime readiness without calling a provider.';
+  if (templateId === 'daily_execution_digest') {
+    return 'Compose UTC-yesterday daily execution digest and notify operator channels via ops.daily_digest.';
+  }
+  if (templateId === 'fleet_host_check') {
+    return 'Bounded SSH host checks for named fleet remotes (unit/health/listen); rate-limited, no provider.';
+  }
   if (templateId === 'scheduled_execution') return 'Execute the scheduled task with full project-write access within the approved scope.';
   return 'Dispatch a preapproved feed-analysis request and track its result and callback evidence.';
 }

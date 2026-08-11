@@ -7,10 +7,16 @@
  */
 
 import { getDb } from '@los/infra/db';
+import { getLogger } from '@los/infra/logger';
 import { getDailyAgentQualityBaseline } from './daily-agent-quality/store.js';
 import type { DailyAgentQualitySnapshot } from './daily-agent-quality/types.js';
+import { appendSessionEvent } from './session-events.js';
 import { ensureScheduledWorkStore } from './scheduled-work/schema.js';
 import { getUsageSummary, type UsageSummary } from './usage-summary.js';
+import { formatDailyDigestMessage } from './daily-digest-format.js';
+import { appendOpsHighlights, collectDigestOpsSnapshot } from './daily-digest-ops.js';
+
+const log = getLogger('daily-digest');
 
 export type DigestEvidenceClass = 'los_runtime';
 
@@ -42,6 +48,10 @@ export interface DigestScheduleRow {
   lastStatus?: string;
   lastCompletedAt?: string;
   lastSummaryReason?: string;
+  /** sessionId from the most recent run (any status), if present. */
+  lastSessionId?: string;
+  /** sessionId from the most recent failed/cancelled/awaiting run in the day window. */
+  attentionSessionId?: string;
 }
 
 export interface DigestCadenceRecommendation {
@@ -104,6 +114,7 @@ interface ScheduleAggRow {
   last_status: string | null;
   last_completed_at: Date | string | null;
   last_summary: unknown;
+  attention_summary: unknown;
 }
 
 function num(value: string | null | undefined): number {
@@ -152,6 +163,15 @@ function summaryReason(summary: unknown): string | undefined {
   if (typeof rec.deniedBy === 'string') return String(rec.deniedBy);
   return undefined;
 }
+
+function summarySessionId(summary: unknown): string | undefined {
+  if (!summary || typeof summary !== 'object') return undefined;
+  const rec = summary as Record<string, unknown>;
+  const sid = rec.sessionId ?? rec.session_id;
+  return typeof sid === 'string' && sid.trim() ? sid.trim() : undefined;
+}
+
+export { resolveWebBaseUrl, webDeepLink } from './daily-digest-format.js';
 
 function buildCadenceRecommendations(rows: DigestScheduleRow[]): DigestCadenceRecommendation[] {
   const recs: DigestCadenceRecommendation[] = [];
@@ -309,6 +329,14 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
          schedule_id, status, completed_at, result_summary_json
        FROM scheduled_work_item_runs
        ORDER BY schedule_id, scheduled_for DESC
+     ),
+     last_attention AS (
+       SELECT DISTINCT ON (schedule_id)
+         schedule_id, result_summary_json
+       FROM scheduled_work_item_runs
+       WHERE scheduled_for >= $1::timestamptz AND scheduled_for < $2::timestamptz
+         AND status IN ('failed', 'cancelled', 'awaiting_approval')
+       ORDER BY schedule_id, scheduled_for DESC
      )
      SELECT
        s.id AS schedule_id,
@@ -331,15 +359,18 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
        ))::text AS other,
        lr.status AS last_status,
        lr.completed_at AS last_completed_at,
-       lr.result_summary_json AS last_summary
+       lr.result_summary_json AS last_summary,
+       la.result_summary_json AS attention_summary
      FROM scheduled_work_items s
      LEFT JOIN day_runs r ON r.schedule_id = s.id
      LEFT JOIN last_run lr ON lr.schedule_id = s.id
+     LEFT JOIN last_attention la ON la.schedule_id = s.id
      WHERE s.status IN ('enabled', 'paused')
         OR EXISTS (SELECT 1 FROM day_runs dr WHERE dr.schedule_id = s.id)
      GROUP BY s.id, s.title, s.status, s.run_template_json, s.trigger_json,
               s.approval_policy, s.approval_timeout_action,
-              lr.status, lr.completed_at, lr.result_summary_json
+              lr.status, lr.completed_at, lr.result_summary_json,
+              la.result_summary_json
      ORDER BY COUNT(r.id) DESC, s.title ASC`,
     [window.from, window.to],
   );
@@ -368,6 +399,8 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
         : String(row.last_completed_at))
       : undefined,
     lastSummaryReason: summaryReason(row.last_summary),
+    lastSessionId: summarySessionId(row.last_summary),
+    attentionSessionId: summarySessionId(row.attention_summary) ?? summarySessionId(row.last_summary),
   }));
 
   const runTotals = bySchedule.reduce(
@@ -398,6 +431,19 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
 
   const cadenceRecommendations = buildCadenceRecommendations(bySchedule);
   const scheduleBlock = { enabledCount, runTotals, bySchedule };
+  const baseHighlights = buildHighlights(scheduleBlock, usage, cadenceRecommendations);
+  let highlights = baseHighlights;
+  try {
+    // Static import (not dynamic) so @los/infra/db shares the same singleton
+    // as getDailyDigest's schedule queries.
+    const ops = await collectDigestOpsSnapshot();
+    highlights = appendOpsHighlights(baseHighlights, ops);
+  } catch (err) {
+    highlights = [
+      ...baseHighlights,
+      `Ops snapshot skipped: ${err instanceof Error ? err.message : String(err)}`,
+    ];
+  }
 
   return {
     evidenceClass: 'los_runtime',
@@ -409,6 +455,67 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
     usage,
     quality: { projectId, snapshot },
     cadenceRecommendations,
-    highlights: buildHighlights(scheduleBlock, usage, cadenceRecommendations),
+    highlights,
   };
+}
+
+export { formatDailyDigestMessage } from './daily-digest-format.js';
+// formatDailyDigestMessage also imported above for publishDailyDigest.
+
+export interface PublishDailyDigestOptions {
+  scheduleId?: string;
+  runId?: string;
+  /** When true, compose but skip session event (tests). Default false. */
+  dryRun?: boolean;
+}
+
+/**
+ * Compose (or reuse) the daily digest and emit `ops.daily_digest` for operator
+ * SSE / WeChat. Does not call WeClaw directly — delivery is channel-side.
+ */
+export async function publishDailyDigest(
+  query: DailyDigestQuery = {},
+  options: PublishDailyDigestOptions = {},
+): Promise<{ digest: DailyDigest; message: string; eventEmitted: boolean }> {
+  const digest = await getDailyDigest(query);
+  const message = formatDailyDigestMessage(digest);
+  if (options.dryRun) {
+    return { digest, message, eventEmitted: false };
+  }
+  const severity =
+    digest.schedule.runTotals.failed > 0
+    || digest.schedule.runTotals.cancelled > 0
+    || digest.schedule.runTotals.awaitingApproval > 0
+      ? 'warning'
+      : 'info';
+  try {
+    await appendSessionEvent({
+      sessionId: `ops:daily-digest:${digest.day}`,
+      type: 'ops.daily_digest',
+      source: 'ops',
+      tenantId: query.tenantId?.trim() || 'local',
+      projectId: query.projectId?.trim() || 'los',
+      payload: {
+        kind: 'daily_execution_digest',
+        severity,
+        title: `执行汇总 ${digest.day}`,
+        detail: message,
+        reason: message,
+        day: digest.day,
+        from: digest.from,
+        to: digest.to,
+        requiresDecision: false,
+        scheduleId: options.scheduleId ?? null,
+        runId: options.runId ?? null,
+        enabledCount: digest.schedule.enabledCount,
+        runTotals: digest.schedule.runTotals,
+      },
+    });
+    return { digest, message, eventEmitted: true };
+  } catch (err) {
+    log.warn(
+      `daily digest notify failed day=${digest.day}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { digest, message, eventEmitted: false };
+  }
 }

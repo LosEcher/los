@@ -34,6 +34,8 @@ export function sessionEventVisibility(type: string): SessionEventVisibility {
   if (type.startsWith('tool.pre_action.') || type.startsWith('tool.gate.')) return 'audit';
   // Governance sweep/job lifecycle is operator audit, not user-facing chat noise.
   if (type.startsWith('governance.')) return 'audit';
+  // Ops digests / readiness summaries are operator surfaces (WeChat SSE), not chat.
+  if (type.startsWith('ops.')) return 'audit';
   if (type.startsWith('coordinator.')) return 'audit';
   if (type.startsWith('kernel.')) return 'audit';
   if (type.startsWith('skill.')) return 'audit';

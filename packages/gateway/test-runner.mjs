@@ -10,6 +10,8 @@ const sharedProcessTestFiles = [
   'src/daily-agent-quality-routes.test.ts',
   'src/execution-experiment-k4-routes.test.ts',
   'src/managed-workspace-routes.test.ts',
+  'src/node-auto-probe.test.ts',
+  'src/node-probes.test.ts',
   'src/node-routes.test.ts',
   'src/openai-compat-route.test.ts',
   'src/operator-command-transport.test.ts',

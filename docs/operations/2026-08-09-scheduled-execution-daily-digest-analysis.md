@@ -72,7 +72,8 @@ loop), composed of:
 1. `GET /ops/daily-digest?day=YYYY-MM-DD` ✅
 2. CLI `los digest [--day YYYY-MM-DD]` ✅
 3. Web `#usage` digest + cadence table ✅
-4. Optional schedule `templateId: daily_execution_digest` — still optional follow-up
+4. Schedule `templateId: daily_execution_digest` + WeChat via `ops.daily_digest` ✅ (2026-08-10)
+5. Manual / backfill: `POST /ops/daily-digest/push` or `los digest --push --day YYYY-MM-DD` ✅
 
 ## Cadence recommendations (live heuristics)
 

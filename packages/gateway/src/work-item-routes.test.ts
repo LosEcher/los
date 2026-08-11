@@ -90,7 +90,16 @@ const stubDeps: WorkItemRouteDependencies = {
     return !!(e && typeof e.code === 'string' && ['not_found', 'run_not_succeeded'].includes(e.code as string));
   }) as any,
   listInboxEntries: async () => [],
-  listWorkItemProjections: async () => Array.from(stubStore.values()),
+  listWorkItemProjections: async (options = {}) => {
+    let items = Array.from(stubStore.values());
+    if (options.status) {
+      items = items.filter(item => item.status === options.status);
+    } else if (options.excludeTerminal) {
+      items = items.filter(item => item.status !== 'done' && item.status !== 'cancelled');
+    }
+    const limit = options.limit ?? items.length;
+    return items.slice(0, limit);
+  },
   loadWorkItemProjection: async (id) => stubStore.get(id) ?? null,
   reviewWorkItemResult: async (input) => {
     const item = stubStore.get(input.workItemId);
@@ -114,6 +123,47 @@ const stubDeps: WorkItemRouteDependencies = {
   updateBoundTodoFromRun: async () => undefined,
   dispatchPersistedRunSpec: async (runSpecId) => ({ runSpecId, status: 'succeeded' } as any),
 };
+
+test('GET /work-items honors excludeTerminal and concrete status filters', async () => {
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, await loadConfig());
+  registerWorkItemRoutes(app, stubDeps);
+  try {
+    const open = makeProjection({ id: 'wi-open-1', status: 'in_progress', title: 'Open work' });
+    const done = makeProjection({ id: 'wi-done-1', status: 'done', title: 'Done work', priority: 'P0' });
+    const cancelled = makeProjection({ id: 'wi-cancel-1', status: 'cancelled', title: 'Cancelled work' });
+    stubStore.set(open.id, open);
+    stubStore.set(done.id, done);
+    stubStore.set(cancelled.id, cancelled);
+
+    const openOnly = await app.inject({ method: 'GET', url: '/work-items?excludeTerminal=true&limit=100' });
+    assert.equal(openOnly.statusCode, 200);
+    const openIds = openOnly.json().results.map((item: { id: string }) => item.id);
+    assert.ok(openIds.includes('wi-open-1'));
+    assert.equal(openIds.includes('wi-done-1'), false);
+    assert.equal(openIds.includes('wi-cancel-1'), false);
+
+    const doneOnly = await app.inject({ method: 'GET', url: '/work-items?status=done&limit=100' });
+    assert.equal(doneOnly.statusCode, 200);
+    const doneIds = doneOnly.json().results.map((item: { id: string }) => item.id);
+    assert.deepEqual(doneIds, ['wi-done-1']);
+
+    // Concrete status wins over excludeTerminal when both are present.
+    const statusWins = await app.inject({
+      method: 'GET',
+      url: '/work-items?status=done&excludeTerminal=true&limit=100',
+    });
+    assert.equal(statusWins.statusCode, 200);
+    assert.deepEqual(
+      statusWins.json().results.map((item: { id: string }) => item.id),
+      ['wi-done-1'],
+    );
+  } finally {
+    stubStore.clear();
+    nextId = 1;
+    await app.close();
+  }
+});
 
 test('work item routes create and read a structured draft without dispatching', async () => {
   const app = Fastify({ logger: false });

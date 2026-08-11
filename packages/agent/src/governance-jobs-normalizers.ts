@@ -1,12 +1,12 @@
 import type { GovernanceJob, GovernanceJobType, GovernanceCadence, GovernanceJobStatus, GovernanceJobAutoFixConfig, CircuitState, GovernanceJobRow } from './governance-jobs-types.js';
 
 function normalizeJobType(value: string): GovernanceJobType {
-  const valid: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'file_size', 'related_project_scan', 'supply_chain_audit', 'static_analysis', 'performance_audit', 'migration_drift_fix', 'event_retention', 'code_topology_audit', 'dead_letter', 'adversarial_review', 'self_bootstrap'];
+  const valid: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'file_size', 'related_project_scan', 'supply_chain_audit', 'static_analysis', 'performance_audit', 'migration_drift_fix', 'event_retention', 'code_topology_audit', 'dead_letter', 'adversarial_review', 'self_bootstrap', 'language_audit'];
   return valid.includes(value as GovernanceJobType) ? (value as GovernanceJobType) : 'consistency_audit';
 }
 
 function normalizeCadence(value: string): GovernanceCadence {
-  const valid: GovernanceCadence[] = ['manual', 'hourly', 'daily', 'weekly'];
+  const valid: GovernanceCadence[] = ['manual', 'hourly', 'daily', 'weekly', 'monthly'];
   return valid.includes(value as GovernanceCadence) ? (value as GovernanceCadence) : 'manual';
 }
 

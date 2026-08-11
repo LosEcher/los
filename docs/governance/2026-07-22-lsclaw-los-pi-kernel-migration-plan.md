@@ -3,8 +3,10 @@
 - Date: 2026-07-22
 - Status: active plan; K0-K3 complete for exact candidate `0.81.1+los.3`; K4
   candidate persistence, explicit local per-run selection, separate canary
-  consent, transcript-drift stop, and LOS rollback are implemented. No
-  provider-backed K4 canary has run and authorization remains not granted.
+  consent, transcript-drift stop, and LOS rollback are implemented. Historical
+  advisory canaries ran 2026-08-03/08-07; **next** canary requires fresh
+  explicit consent (`nextAuthorization=not_granted`). Production default
+  remains LOS kernel.
 - Owner: `packages/agent` execution kernel and LOS governance runtime
 - Decision: `docs/adr/0039-pluggable-execution-kernel-and-pi-adoption.md`
 - Protocol: `contracts/execution-kernel.yaml`
@@ -385,8 +387,8 @@ LOS todos. Their status here must not be presented as database todo state.
 | `kernel-k2-pi-deterministic` | complete; registry admission remains separate | exact dependencies, deterministic adapter, LOS input/catalog mapping, provider telemetry, live no-tool probe, and explicit unsupported-semantic decisions |
 | `kernel-k3-shadow` | complete for exact v4 identity; K4 review remains separate | v3 remains immutable at 11/11 deterministic, 5/6 live, 16/17 observed with one `prefixed_fenced_json` failure; v4 is 11/11 deterministic, 6/6 live, 17/17 observed, zero failures, and `ready_for_k4_policy_review` |
 | `todo-los-pi-k4-policy-review-20260726` | complete in DB | K3/K4 evidence, production-registry boundary, rollback requirements, and consent boundary reviewed without provider execution |
-| `todo-los-pi-k4-readonly-selection` | in progress in DB; implementation checks complete, delivery evidence pending | exact candidate run spec, explicit local per-run selection, separate consent gate, transcript-drift stop, and LOS rollback |
-| `todo-los-pi-k4-readonly-canary` | backlog in DB; operator consent not granted | create and approve a real candidate through the K4 control path, then obtain separate consent before the first provider request |
+| `todo-los-pi-k4-readonly-selection` | done in DB | exact candidate run spec, explicit local per-run selection, separate consent gate, transcript-drift stop, and LOS rollback |
+| `todo-los-pi-k4-readonly-canary` | backlog in DB; historical canaries executed (advisory); `nextAuthorization=not_granted` | further provider canaries need fresh consent; fail-closed truth is `canaryAuthorization` + `run.kernel_canary_authorized`, not todo metadata alone |
 | `kernel-k5-k6-canary` | pending; not DB todos | write and graph-worker canaries remain outside the K4 review |
 | `kernel-k7-default-promotion` | pending | preregistered eval and default Pi decision |
 | `kernel-k8-los-replacement` | pending | independent LOS candidate and replacement economics |

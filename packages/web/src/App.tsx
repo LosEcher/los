@@ -75,6 +75,8 @@ export function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(boot.sessionId ?? null);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(boot.workItemId ?? null);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(boot.scheduleId ?? null);
+  const [usageDay, setUsageDay] = useState<string | null>(boot.day ?? null);
   const [selectedRunSpecId, setSelectedRunSpecId] = useState<string | null>(null);
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
@@ -106,6 +108,10 @@ export function App() {
       setPage(route.page);
       if (route.workItemId) setSelectedWorkItemId(route.workItemId);
       if (route.sessionId) setSelectedSessionId(route.sessionId);
+      if (route.scheduleId) setSelectedScheduleId(route.scheduleId);
+      else if (route.page === 'schedules' && !route.scheduleId) setSelectedScheduleId(null);
+      if (route.day) setUsageDay(route.day);
+      else if (route.page === 'usage' && !route.day) setUsageDay(null);
     };
     // Normalize boot deep-links once (e.g. #inbox?id= → #work/<id>).
     applyRoute();
@@ -123,17 +129,28 @@ export function App() {
     }
   }, [page]);
 
-  const navigate = (id: PageId, opts?: { workItemId?: string | null; sessionId?: string | null }) => {
+  const navigate = (id: PageId, opts?: {
+    workItemId?: string | null;
+    sessionId?: string | null;
+    scheduleId?: string | null;
+    day?: string | null;
+  }) => {
     setPage(id);
     // Bare Work/Chat tab clears deep-link selection so phone returns to list/empty chat.
     if (opts && 'workItemId' in opts) setSelectedWorkItemId(opts.workItemId ?? null);
     else if (id === 'work' && !opts) setSelectedWorkItemId(null);
     if (opts && 'sessionId' in opts) setSelectedSessionId(opts.sessionId ?? null);
     else if (id === 'chat' && !opts) setSelectedSessionId(null);
+    if (opts && 'scheduleId' in opts) setSelectedScheduleId(opts.scheduleId ?? null);
+    else if (id === 'schedules' && !opts) setSelectedScheduleId(null);
+    if (opts && 'day' in opts) setUsageDay(opts.day ?? null);
+    else if (id === 'usage' && !opts) setUsageDay(null);
     window.location.hash = buildHash({
       page: id,
       workItemId: id === 'work' ? (opts?.workItemId ?? undefined) : undefined,
       sessionId: id === 'chat' ? (opts?.sessionId ?? undefined) : undefined,
+      scheduleId: id === 'schedules' ? (opts?.scheduleId ?? undefined) : undefined,
+      day: id === 'usage' ? (opts?.day ?? undefined) : undefined,
     });
     setMoreOpen(false);
   };
@@ -231,6 +248,11 @@ export function App() {
   const selectWorkItem = (id: string | null) => {
     setSelectedWorkItemId(id);
     window.location.hash = buildHash({ page: 'work', workItemId: id ?? undefined });
+  };
+
+  const selectSchedule = (id: string | null) => {
+    setSelectedScheduleId(id);
+    window.location.hash = buildHash({ page: 'schedules', scheduleId: id ?? undefined });
   };
 
   const inboxBadge = useQuery({
@@ -401,7 +423,13 @@ export function App() {
 
         {page === 'inbox' && <InboxPage onOpenWork={openWork} onOpenRun={openRun} onOpenSession={continueSession} onApprovePlan={handleApprovePlan} onStartWork={startWork} />}
         {page === 'work' && <WorkPage selectedWorkItemId={selectedWorkItemId} onSelectedWorkItemChange={selectWorkItem} onStartWork={startWork} onOpenSession={continueSession} onOpenRun={openRun} />}
-        {page === 'schedules' && <SchedulesPage />}
+        {page === 'schedules' && (
+          <SchedulesPage
+            selectedScheduleId={selectedScheduleId}
+            onSelectedScheduleChange={selectSchedule}
+            onOpenSession={continueSession}
+          />
+        )}
         {page === 'chat' && <ChatPage selectedSessionId={selectedSessionId} onSessionSelect={setSelectedSessionId} branchFromSession={branchFromSession} onBranchConsumed={() => setBranchFromSession(null)} activeTodoContext={activeTodoContext} onTodoContextSet={setActiveTodoContext} onTodoContextClear={() => setActiveTodoContext(null)} />}
         {page === 'sessions' && <SessionsPage selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId} onContinueSession={continueSession} onBranchSession={branchSession} onSelectTodo={openTodo} />}
         {page === 'todos' && <TodosPage selectedTodoId={selectedTodoId} onTodoSelect={setSelectedTodoId} onRunTodo={runTodo} onSelectSession={continueSession} />}
@@ -414,7 +442,7 @@ export function App() {
         {page === 'artifacts' && <ArtifactsPage />}
         {page === 'rules' && <RulesPage />}
         {page === 'evals' && <EvalsPage />}
-        {page === 'usage' && <UsagePage />}
+        {page === 'usage' && <UsagePage day={usageDay} />}
         {page === 'pairwise' && <PairwiseEvalsPage onOpenRun={openRun} onOpenSession={continueSession} />}
         {page === 'nodes' && <NodesPage />}
         {page === 'dead-letter' && <DeadLetterPage />}

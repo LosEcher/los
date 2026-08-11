@@ -21,6 +21,11 @@ export interface DiscoveredProvider {
   sourceTool?: string;
   importable: boolean;
   note?: string;
+  /**
+   * When true (cc-switch is_current / active account), merge may overwrite
+   * model/baseUrl/apiShape/apiKey so the operator's active route wins.
+   */
+  prefer?: boolean;
 }
 
 export type GrokAccountAuthMode = 'oidc' | 'external' | 'api_key' | 'legacy' | 'unknown';

@@ -238,6 +238,12 @@ async function handleAuthorizeCanary(
   if (!(await dependencies.requireOperator(req, reply))) return;
   const id = (req.params as { id: string }).id;
   const context = getRequestContext(req);
+  const actor = resolveAuditableCanaryActor(context.userId);
+  if (!actor) {
+    return reply.status(409).send({
+      error: 'canary authorization requires an auditable operator actor (refusing unknown/anonymous)',
+    });
+  }
   const scope = { tenantId: context.tenantId, projectId: context.projectId };
   const experiment = await dependencies.loadExecutionExperiment(id, scope);
   if (!experiment) return reply.status(404).send({ error: 'Execution experiment not found' });
@@ -254,7 +260,7 @@ async function handleAuthorizeCanary(
     const executionKernel = await dependencies.authorizeRunSpecKernelCanary({
       runSpecId: candidate.id,
       experimentId: id,
-      actor: context.userId,
+      actor,
     });
     return { experiment, candidateRunSpecId: candidate.id, executionKernel };
   } catch (err) {
@@ -445,4 +451,16 @@ function matchesExperimentScope(
   experiment: Pick<Awaited<ReturnType<typeof loadExecutionExperiment>> & {}, 'tenantId' | 'projectId'>,
 ): boolean {
   return runSpec.tenantId === experiment.tenantId && runSpec.projectId === experiment.projectId;
+}
+
+/**
+ * Canary grants must record a stable, non-placeholder actor for audit.
+ * Runtime fail-closed for Pi is still canaryAuthorization + session event;
+ * this rejects the historical grantedBy=unknown collapse.
+ */
+function resolveAuditableCanaryActor(userId: string | undefined): string | null {
+  const actor = typeof userId === 'string' ? userId.trim() : '';
+  if (!actor) return null;
+  if (actor === 'unknown' || actor === 'anonymous') return null;
+  return actor;
 }

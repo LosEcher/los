@@ -66,7 +66,8 @@ test('heartbeat reporter backs off exponentially while failing and resets on rec
       if (attempts <= 4) throw new Error(`outage ${attempts}`);
     },
     { warn: () => undefined, info: () => undefined },
-    { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 },
+    // jitterMs: 0 keeps intervals deterministic for assertions
+    { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000, jitterMs: 0 },
   );
 
   assert.equal(reporter.nextIntervalMs(), 10_000, 'healthy interval is the base');
@@ -93,13 +94,31 @@ test('heartbeat reporter caps backoff at maxBackoffMs', async () => {
       throw new Error('persistent outage');
     },
     { warn: () => undefined, info: () => undefined },
-    { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 60_000 },
+    { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 60_000, jitterMs: 0 },
   );
 
   for (let i = 0; i < 10; i += 1) {
     await reporter.run();
   }
   assert.equal(reporter.nextIntervalMs(), 60_000, 'backoff never exceeds the cap');
+});
+
+test('heartbeat reporter adds bounded jitter to desynchronize multi-node recovery', () => {
+  let call = 0;
+  const reporter = createHeartbeatReporter(
+    async () => undefined,
+    { warn: () => undefined, info: () => undefined },
+    {
+      baseIntervalMs: 10_000,
+      jitterMs: 1_000,
+      random: () => {
+        call += 1;
+        return call === 1 ? 0 : 1;
+      },
+    },
+  );
+  assert.equal(reporter.nextIntervalMs(), 10_000, 'random=0 → no added jitter');
+  assert.equal(reporter.nextIntervalMs(), 11_000, 'random=1 → full jitterMs');
 });
 
 test('heartbeat reporter rejects invalid options', () => {

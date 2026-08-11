@@ -21,7 +21,32 @@ export async function digestCommand(globalArgs: string[], argv: string[]): Promi
   addQuery(params, 'tenantId', stringFlag(parsed, 'tenant') ?? stringFlag(parsed, 'tenant-id'));
 
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const value = await getJson(`${gatewayUrl(parsed)}/ops/daily-digest${suffix}`, parsed);
+  const base = gatewayUrl(parsed);
+
+  if (booleanFlag(parsed, 'push')) {
+    const body: Record<string, string> = {};
+    if (day && day !== 'yesterday') body.day = day;
+    const projectId = stringFlag(parsed, 'project') ?? stringFlag(parsed, 'project-id');
+    const tenantId = stringFlag(parsed, 'tenant') ?? stringFlag(parsed, 'tenant-id');
+    if (projectId) body.projectId = projectId;
+    if (tenantId) body.tenantId = tenantId;
+    const value = await postJson(`${base}/ops/daily-digest/push`, body, parsed);
+    if (booleanFlag(parsed, 'json')) {
+      console.log(JSON.stringify(value, null, 2));
+      return;
+    }
+    const rec = asRecord(value);
+    console.log(
+      `digest push day=${String(rec.day ?? '')} eventEmitted=${String(rec.eventEmitted)} `
+      + `enabled=${fmtNum(rec.enabledCount)}`,
+    );
+    if (typeof rec.messagePreview === 'string') {
+      console.log(rec.messagePreview);
+    }
+    return;
+  }
+
+  const value = await getJson(`${base}/ops/daily-digest${suffix}`, parsed);
   if (booleanFlag(parsed, 'json')) {
     console.log(JSON.stringify(value, null, 2));
     return;
@@ -84,6 +109,7 @@ Daily Execution Digest (schedules + usage + quality + cadence recommendations).
 Options:
   --day YYYY-MM-DD   UTC day (default: yesterday)
   --project ID       Quality snapshot project (default: los)
+  --push             Emit ops.daily_digest for WeChat/SSE channels
   --json             Raw JSON
   --gateway, -g URL  Gateway URL
 `);
@@ -98,6 +124,19 @@ function gatewayUrl(parsed: ParsedArgs): string {
 
 async function getJson(url: string, parsed: ParsedArgs): Promise<unknown> {
   return requestCliJson(url, { auth: resolveCliRequestAuth(parsed.flags) });
+}
+
+async function postJson(
+  url: string,
+  body: Record<string, string>,
+  parsed: ParsedArgs,
+): Promise<unknown> {
+  return requestCliJson(url, {
+    method: 'POST',
+    auth: resolveCliRequestAuth(parsed.flags),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 function parseArgs(argv: string[]): ParsedArgs {

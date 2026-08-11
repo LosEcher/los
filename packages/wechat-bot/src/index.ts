@@ -50,6 +50,7 @@ import {
 import {
   weclawSend,
   weclawHealth,
+  getWeclawSendHealth,
   startWeclaw,
   stopWeclaw,
   findWeclawBinary,
@@ -169,12 +170,18 @@ channels.push(createWebChannel({
   losAuthToken: LOS_AUTH_TOKEN,
   losOperatorToken: LOS_OPERATOR_TOKEN,
   healthSnapshot: () => {
-    const externalReady = weclawAvailable || wxpusherConfigured;
+    const send = getWeclawSendHealth();
+    // HTTP /health alone is false-green when iLink prepare/send is broken.
+    const weclawDeliveryReady = weclawAvailable && send.sendHealthy;
+    const externalReady = weclawDeliveryReady || wxpusherConfigured;
     return {
       ready: sseLive && externalReady,
       sseConnected: sseLive,
       externalReady,
       weclawAvailable,
+      weclawSendHealthy: send.sendHealthy,
+      weclawSendFailures: send.consecutiveFailures,
+      weclawLastSendError: send.lastError,
       wxpusherConfigured,
     };
   },
@@ -187,7 +194,11 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
     `[alert] deliver kind=${alert.kind ?? 'needs_decision'} type=${alert.type} session=${alert.sessionId} run=${alert.runSpecId ?? alert.taskRunId ?? '-'}`,
   );
 
-  // 1. Try WeClaw first (bidirectional WeChat)
+  let imDelivered = false;
+  let weclawError: string | undefined;
+
+  // 1. Try WeClaw first (bidirectional WeChat). Still attempt when HTTP is up
+  // even if send health is degraded — a successful send clears the counter.
   if (weclawAvailable && WECLAW_DEFAULT_TO) {
     const text = formatAlertForWeclaw(alert);
     const result = await weclawSend({ text }, weclawConfig);
@@ -195,6 +206,7 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
       console.log(`[weclaw] sent ok session=${alert.sessionId}`);
       return;
     }
+    weclawError = result.error;
     console.error(`[weclaw] send failed: ${result.error}`);
     // Fall through to other channels
   } else if (!WECLAW_DEFAULT_TO) {
@@ -211,13 +223,36 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
       });
       await channel.send(message);
       console.log(`[${channel.kind}] sent ok session=${alert.sessionId}`);
+      if (channel.kind === 'weixin') imDelivered = true;
     } catch (err) {
       console.error(`[${channel.kind}] send failed: ${(err as Error).message}`);
     }
   }
+
+  // Daily digest / fleet alerts must not look "delivered" when only the local
+  // web event store accepted them — operator IM never saw the message.
+  if (
+    !imDelivered
+    && (alert.type === 'ops.daily_digest' || alert.type === 'ops.fleet_attention')
+  ) {
+    console.error(
+      `[alert] IM delivery failed type=${alert.type} session=${alert.sessionId}`
+      + ` weclaw=${weclawError ?? (weclawAvailable ? 'skipped' : 'offline')}`
+      + ` wxpusher=${wxpusherConfigured ? 'attempted' : 'not_configured'}`
+      + ' — re-login WeClaw (Web #communication-accounts) or configure WxPusher',
+    );
+  }
 }
 
 function formatAlertForWeclaw(alert: OperatorAlert): string {
+  // Pre-formatted daily digest body — send as-is (already includes title + rows).
+  if (alert.type === 'ops.daily_digest' && alert.reason?.trim()) {
+    return alert.reason.trim();
+  }
+  if (alert.type === 'ops.fleet_attention' && alert.reason?.trim()) {
+    return alert.reason.trim();
+  }
+
   const kind = alert.kind ?? 'needs_decision';
   const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
   const sid = alert.sessionId;
@@ -342,6 +377,8 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       || parsed.type === 'governance.job.progress'
       || parsed.type === 'governance.bootstrap.findings'
       || parsed.type === 'governance.sweep.digest';
+    const isDailyDigest = parsed.type === 'ops.daily_digest';
+    const isFleetAttention = parsed.type === 'ops.fleet_attention';
 
     const isOperatorAttention =
       parsed.type === 'tool.warned' ||
@@ -353,16 +390,24 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
       parsed.type === 'session.blocked' ||
       parsed.type === 'session.error' ||
-      isGovernanceEvent;
+      isGovernanceEvent ||
+      isDailyDigest ||
+      isFleetAttention;
 
     if (!isOperatorAttention) return;
     console.log(`[events] attention type=${parsed.type} session=${parsed.sessionId ?? ''}`);
 
     const sessionId = parsed.sessionId ?? '';
     // Governance digests dedupe by jobType so hourly jobs don't spam.
-    const dedupKey = isGovernanceEvent
-      ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
-      : `${sessionId}:${parsed.type}`;
+    // Daily digest dedupes by calendar day so re-pushes within the window collapse.
+    // Fleet attention dedupes by node+day (DB also enforces 30m cooldown).
+    const dedupKey = isDailyDigest
+      ? `ops:daily_digest:${String(payload.day ?? sessionId)}`
+      : isFleetAttention
+        ? `ops:fleet:${String(payload.nodeId ?? sessionId)}:${String(payload.day ?? '')}`
+      : isGovernanceEvent
+        ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
+        : `${sessionId}:${parsed.type}`;
 
     if (recentAlerts.get(dedupKey) && Date.now() - recentAlerts.get(dedupKey)! < ALERT_DEDUP_MS) return;
     recentAlerts.set(dedupKey, Date.now());

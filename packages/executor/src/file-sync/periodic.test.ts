@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { _selectSchedulablePeriodicFolders } from './periodic.js';
+import {
+  _listRefreshBackoffMs,
+  _selectSchedulablePeriodicFolders,
+  PERIODIC_LIST_REFRESH_BASE_MS,
+  PERIODIC_LIST_REFRESH_MAX_MS,
+} from './periodic.js';
 import type { FileSyncFolder } from './store.js';
 
 function folder(input: Partial<FileSyncFolder> & {
@@ -41,4 +46,13 @@ test('periodic scheduling ignores inactive folders and duplicate paths', () => {
   ]);
 
   assert.deepEqual(selected.map(f => f.folderId), ['dupe-a']);
+});
+
+test('list refresh backoff grows exponentially and caps to avoid PG request storms', () => {
+  assert.equal(_listRefreshBackoffMs(0), PERIODIC_LIST_REFRESH_BASE_MS);
+  assert.equal(_listRefreshBackoffMs(1), 120_000);
+  assert.equal(_listRefreshBackoffMs(2), 240_000);
+  assert.equal(_listRefreshBackoffMs(3), 480_000);
+  assert.equal(_listRefreshBackoffMs(4), PERIODIC_LIST_REFRESH_MAX_MS);
+  assert.equal(_listRefreshBackoffMs(10), PERIODIC_LIST_REFRESH_MAX_MS);
 });

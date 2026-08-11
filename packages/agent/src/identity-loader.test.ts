@@ -108,11 +108,12 @@ test('formatIdentityForPrompt returns empty string for none level', () => {
   assert.equal(result, '');
 });
 
-test('formatIdentityForPrompt minimal returns role label only', () => {
+test('formatIdentityForPrompt minimal returns role label plus language line', () => {
   const result = formatIdentityForPrompt(SAMPLE_IDENTITY, 'minimal');
   assert.ok(result.startsWith('You are Test Operator'), `got: ${result.slice(0, 40)}`);
   assert.ok(!result.includes('## Identity'), 'minimal has no header section');
   assert.ok(!result.includes('Values'), 'minimal has no values');
+  assert.ok(result.includes('FINDING'), 'minimal includes language contract line');
 });
 
 test('formatIdentityForPrompt standard includes all core blocks', () => {
@@ -124,6 +125,8 @@ test('formatIdentityForPrompt standard includes all core blocks', () => {
   assert.ok(result.includes('**Temperament**: systematic'), 'includes temperament');
   assert.ok(result.includes('Never lie'), 'includes boundaries');
   assert.ok(result.includes('Leave it better than you found it'), 'includes heartbeat');
+  assert.ok(result.includes('## Language'), 'standard includes language contract');
+  assert.ok(result.includes('[E]'), 'language contract mentions evidence markers');
   assert.ok(!result.includes('## Background'), 'standard has no background narrative');
 });
 
@@ -161,8 +164,10 @@ for (const identityCase of IDENTITY_PATH_CASES) {
     } else if (level === 'minimal') {
       assert.ok(prompt.startsWith('You are'));
       assert.ok(!prompt.includes('## Identity'));
+      assert.ok(prompt.includes('FINDING') || prompt.includes('Language'), 'minimal language rules');
     } else {
       assert.ok(prompt.includes('## Identity'));
+      assert.ok(prompt.includes('## Language'), 'standard/full language contract');
       assert.ok(!prompt.includes('## Background'));
     }
   });
