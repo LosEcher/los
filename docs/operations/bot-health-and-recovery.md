@@ -41,6 +41,12 @@ mode is absent.
 ready. `optional` reports the failure without making the gateway unhealthy.
 `disabled` does not start the process.
 
+`tools/los-wechat-bot-launchd.sh` (LaunchAgent `com.los.wechat-bot`) must honor
+the same mode: when `LOS_WECHAT_BOT_MODE=disabled` it stops any orphan
+wechat-bot and does not restart it. A previous bug kept the bot alive under
+launchd even when mode was disabled, so daily digests still SSE-pushed to
+WeChat.
+
 ## Failure Modes
 
 1. `status=ok`, `ready=false`: the process is running but the gateway SSE stream is not live. Check `LOS_GATEWAY_URL`, `LOS_AUTH_TOKEN`, `LOS_OPERATOR_TOKEN`, gateway health, and bot logs. The bot retries after `SSE_RECONNECT_MS`.
@@ -50,7 +56,13 @@ ready. `optional` reports the failure without making the gateway unhealthy.
    token plus both chat and user allowlists.
 3. Endpoint unavailable: the bot process is stopped or listening on a different port. Run `pnpm run channels:status` before restarting.
 4. WeChat `weclawAvailable=false`: operator events can still reach configured fallback channels, but bidirectional WeClaw delivery is unavailable. Check `http://127.0.0.1:18011/health` and login state.
-5. Telegram polling or webhook errors: the process stays alive and retries update polling or SSE consumption. Validate the bot token, allowed chat/user IDs, webhook secret, and webhook URL.
+5. WeChat `weclawAvailable=true` but `weclawSendHealthy=false`: HTTP `/health` is
+   green while iLink send fails (typical: `ret=-2 errmsg=prepare failed`). Daily
+   digest schedule may still `succeeded` (event emitted) while IM never arrives.
+   Re-login via Web `#communication-accounts` → Start QR Login, then
+   `los digest --push --day YYYY-MM-DD`. Check `.los-runtime/wechat-bot.log` for
+   `IM delivery failed`.
+6. Telegram polling or webhook errors: the process stays alive and retries update polling or SSE consumption. Validate the bot token, allowed chat/user IDs, webhook secret, and webhook URL.
 
 ## Verification
 

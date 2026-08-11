@@ -314,7 +314,7 @@ channel_status() {
   echo "  health: status=$status ready=$ready sseConnected=$connected"
   case "$kind" in
     wechat)
-      delivery="$(printf '%s' "$payload" | jq -r '"externalReady=" + ((.externalReady // false) | tostring) + " weclawAvailable=" + ((.weclawAvailable // false) | tostring) + " wxpusherConfigured=" + ((.wxpusherConfigured // false) | tostring)')"
+      delivery="$(printf '%s' "$payload" | jq -r '"externalReady=" + ((.externalReady // false) | tostring) + " weclawAvailable=" + ((.weclawAvailable // false) | tostring) + " weclawSendHealthy=" + ((.weclawSendHealthy // true) | tostring) + " wxpusherConfigured=" + ((.wxpusherConfigured // false) | tostring)')"
       ;;
     telegram)
       delivery="telegramConnected=$(printf '%s' "$payload" | jq -r '.telegramConnected // false')"

@@ -63,8 +63,13 @@ export function registerRequestContext(app: FastifyInstance, config: Config): vo
       const projectId = isOperator
         ? normalizeHeader(req.headers['x-project-id']) ?? config.defaultProjectId ?? 'los'
         : config.defaultProjectId ?? 'los';
+      // Operator token without JWT/x-user-id must still produce an auditable
+      // actor (SHARED_OPERATOR_SUBJECT). Falling through to 'unknown' previously
+      // wrote canaryAuthorization.grantedBy=unknown on real K4 grants.
       const userId = jwtPayload?.sub
-        ?? (isOperator ? normalizeHeader(req.headers['x-user-id']) : undefined)
+        ?? (isOperator
+          ? (normalizeHeader(req.headers['x-user-id']) ?? SHARED_OPERATOR_SUBJECT)
+          : undefined)
         ?? (hasStaticAccess ? SHARED_ACCESS_SUBJECT : 'unknown');
 
       if (!jwtPayload && _requiresActorContext(req.url)) {

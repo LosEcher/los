@@ -13,7 +13,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hashInstallScript, verifyInstallScript } from './weclaw.js';
+import {
+  getWeclawSendHealth,
+  hashInstallScript,
+  resetWeclawSendHealthForTests,
+  splitWeclawText,
+  verifyInstallScript,
+} from './weclaw.js';
 
 test('hashInstallScript computes a stable sha256 hex digest', () => {
   const script = 'echo hello\n';
@@ -53,4 +59,29 @@ test('verifyInstallScript refuses on hash mismatch (tampered/replaced script)', 
   assert.ok(err);
   assert.match(err!, /sha256 mismatch/);
   assert.ok(err!.includes(expected), 'error reports the expected hash');
+});
+
+test('splitWeclawText keeps short messages intact', () => {
+  assert.deepEqual(splitWeclawText('hello'), ['hello']);
+});
+
+test('splitWeclawText splits on newlines near the limit', () => {
+  const lines = Array.from({ length: 40 }, (_, i) => `line-${i} ${'x'.repeat(40)}`);
+  const text = lines.join('\n');
+  const chunks = splitWeclawText(text, 200);
+  assert.ok(chunks.length > 1);
+  // Content is preserved (whitespace-normalized at chunk boundaries only).
+  assert.ok(chunks.join('\n').includes('line-0'));
+  assert.ok(chunks.join('\n').includes('line-39'));
+  for (const chunk of chunks) {
+    assert.ok(chunk.length <= 200, `chunk length ${chunk.length} exceeds limit`);
+  }
+});
+
+test('getWeclawSendHealth starts healthy after reset', () => {
+  resetWeclawSendHealthForTests();
+  const health = getWeclawSendHealth();
+  assert.equal(health.sendHealthy, true);
+  assert.equal(health.consecutiveFailures, 0);
+  assert.equal(health.lastError, null);
 });
