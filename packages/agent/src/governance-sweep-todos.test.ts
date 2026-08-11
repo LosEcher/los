@@ -124,7 +124,7 @@ test('hotspot findings remain idempotent and archive after resolution', async ()
 
 test('self_bootstrap and adversarial_review findings create dimension todos and archive on resolution', async () => {
   const scope = `bootstrap-finding-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const makeJob = (jobType: 'self_bootstrap' | 'adversarial_review', id: string): GovernanceJob => ({
+  const makeJob = (jobType: 'self_bootstrap' | 'adversarial_review' | 'language_audit', id: string): GovernanceJob => ({
     id,
     jobType,
     cadence: 'daily',
@@ -153,27 +153,42 @@ test('self_bootstrap and adversarial_review findings create dimension todos and 
       { dimension: 'provider_ready_vs_usable', severity: 'warn', detail: 'provider kimi: 0 calls in 7d' },
     ],
   };
+  const languageActive = {
+    findingCount: 2,
+    findings: [
+      { dimension: 'missing_evidence_markers', severity: 'warn', detail: 'marker rate 2%' },
+      { dimension: 'bare_completion_claims', severity: 'high', detail: 'bare claim rate 40%' },
+    ],
+  };
 
   try {
     // First run creates one todo per known dimension.
     assert.equal(await createTodosFromFindings(makeJob('self_bootstrap', 'bs-first'), bootstrapActive, false), 2);
     assert.equal(await createTodosFromFindings(makeJob('adversarial_review', 'adv-first'), adversarialActive, false), 2);
+    assert.equal(await createTodosFromFindings(makeJob('language_audit', 'lang-first'), languageActive, false), 2);
     let findings = await listTodos({ tenantId: scope, projectId: scope, source: 'governance_sweep', limit: 20 });
-    assert.equal(findings.length, 4);
+    assert.equal(findings.length, 6);
     const auditTypes = findings.map(todo => todo.metadata.auditType).sort();
     assert.deepEqual(auditTypes, [
-      'metricSemantics', 'providerReadyVsUsable', 'qualityDegradation', 'todoStaleness',
+      'languageBareCompletionClaims',
+      'languageMissingEvidenceMarkers',
+      'metricSemantics',
+      'providerReadyVsUsable',
+      'qualityDegradation',
+      'todoStaleness',
     ]);
 
     // Idempotent: second run with the same findings does not duplicate.
     assert.equal(await createTodosFromFindings(makeJob('self_bootstrap', 'bs-second'), bootstrapActive, false), 2);
     assert.equal(await createTodosFromFindings(makeJob('adversarial_review', 'adv-second'), adversarialActive, false), 2);
+    assert.equal(await createTodosFromFindings(makeJob('language_audit', 'lang-second'), languageActive, false), 2);
     findings = await listTodos({ tenantId: scope, projectId: scope, source: 'governance_sweep', limit: 20 });
-    assert.equal(findings.length, 4);
+    assert.equal(findings.length, 6);
 
     // Resolved: dimension missing from findings archives its todo.
     assert.equal(await createTodosFromFindings(makeJob('self_bootstrap', 'bs-resolved'), { findingCount: 0, findings: [] }, false), 0);
     assert.equal(await createTodosFromFindings(makeJob('adversarial_review', 'adv-resolved'), { findingCount: 1, findings: [{ dimension: 'stuck_approval', severity: 'warn', detail: 'x' }] }, false), 1);
+    assert.equal(await createTodosFromFindings(makeJob('language_audit', 'lang-resolved'), { findingCount: 0, findings: [] }, false), 0);
     findings = await listTodos({
       tenantId: scope,
       projectId: scope,
@@ -181,12 +196,14 @@ test('self_bootstrap and adversarial_review findings create dimension todos and 
       includeArchived: true,
       limit: 20,
     });
-    assert.equal(findings.length, 5);
+    assert.equal(findings.length, 7);
     const byType = (auditType: string) => findings.find(todo => todo.metadata.auditType === auditType);
     assert.ok(byType('qualityDegradation')?.archivedAt);
     assert.ok(byType('todoStaleness')?.archivedAt);
     assert.ok(byType('metricSemantics')?.archivedAt);
     assert.ok(byType('providerReadyVsUsable')?.archivedAt);
+    assert.ok(byType('languageMissingEvidenceMarkers')?.archivedAt);
+    assert.ok(byType('languageBareCompletionClaims')?.archivedAt);
     assert.equal(byType('stuckApproval')?.archivedAt, undefined);
     assert.equal(byType('stuckApproval')?.metadata.dimension, 'stuck_approval');
   } finally {

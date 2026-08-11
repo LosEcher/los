@@ -68,13 +68,18 @@ describe('evaluateLoopGate', () => {
     assert.equal(decision.newCadence, 'weekly');
   });
 
-  it('weekly is the downgrade floor: no-ops never downgrade to manual', () => {
-    const job = makeJob({ consecutiveNoOps: 4, cadence: 'weekly' });
-    const decision = evaluateLoopGate(job);
+  it('weekly downgrades to monthly; monthly is the floor (never manual)', () => {
+    const weekly = makeJob({ consecutiveNoOps: 3, cadence: 'weekly' });
+    const weeklyDecision = evaluateLoopGate(weekly);
+    assert.equal(weeklyDecision.action, 'downgrade');
+    assert.equal(weeklyDecision.newCadence, 'monthly');
+
+    const monthly = makeJob({ consecutiveNoOps: 4, cadence: 'monthly' });
+    const monthlyDecision = evaluateLoopGate(monthly);
     // Regression: weekly→manual previously downgraded autoFix jobs into a
     // dead state with no recovery path (consistency_audit stuck at manual).
-    assert.notEqual(decision.newCadence, 'manual');
-    assert.equal(decision.action, 'run');
+    assert.notEqual(monthlyDecision.newCadence, 'manual');
+    assert.equal(monthlyDecision.action, 'run');
   });
 
   it('opens circuit when consecutive failures >= 5', () => {

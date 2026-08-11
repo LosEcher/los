@@ -38,15 +38,17 @@ BEGIN
       ADD CONSTRAINT governance_jobs_status_chk
       CHECK (status IN ('active', 'paused', 'retired'));
   END IF;
-  IF NOT EXISTS (
+  -- Reconcile cadence check (idempotent widen to include monthly).
+  IF EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'governance_jobs_cadence_chk'
       AND conrelid = 'governance_jobs'::regclass
   ) THEN
-    ALTER TABLE governance_jobs
-      ADD CONSTRAINT governance_jobs_cadence_chk
-      CHECK (cadence IN ('manual', 'hourly', 'daily', 'weekly'));
+    ALTER TABLE governance_jobs DROP CONSTRAINT governance_jobs_cadence_chk;
   END IF;
+  ALTER TABLE governance_jobs
+    ADD CONSTRAINT governance_jobs_cadence_chk
+    CHECK (cadence IN ('manual', 'hourly', 'daily', 'weekly', 'monthly'));
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'governance_jobs_circuit_state_chk'
@@ -263,5 +265,30 @@ export const SEED_JOBS: CreateGovernanceJobInput[] = [
     dedupeKey: 'gov-job-self-bootstrap',
     config: { staleDays: 14, reviewedWithinDays: 7 },
     initialStaggerMs: 45 * 60 * 1000,
+  },
+  {
+    // Controlled Operator Language audit (STE-lite): weekly sample of agent
+    // outputs → language_contract_snapshots + dimension todos. After enough
+    // clean windows, recommend/auto-promote cadence to monthly.
+    jobType: 'language_audit',
+    cadence: 'weekly',
+    dedupeKey: 'gov-job-language-audit',
+    config: {
+      lookbackDays: 7,
+      sampleLimit: 80,
+      minTextChars: 40,
+      minSamplesForThresholds: 8,
+      promoteAfterCleanRuns: 4,
+      autoPromoteCadence: false,
+      promoteToCadence: 'monthly',
+      thresholds: {
+        evidenceMarkerRateMin: 0.10,
+        bareCompletionClaimRateMax: 0.15,
+        processNarrationRateMax: 0.30,
+        avgHedgeMax: 8,
+        meanComplianceMin: 0.45,
+      },
+    },
+    initialStaggerMs: 90 * 60 * 1000,
   },
 ];
