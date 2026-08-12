@@ -171,8 +171,12 @@ export async function augmentChatSystemPrompt(params: {
       tenantId: params.tenantId,
       projectId: params.projectId,
     });
-    const augmented = augmentSystemPrompt(baseSystemPrompt, retrieval);
+    // Policy-only default: inject active rules, not the full observation archive.
+    const augmented = augmentSystemPrompt(baseSystemPrompt, retrieval, {
+      includeObservations: false,
+    });
     const activeRuleCount = retrieval.activeRules.length;
+    // Report retrieved observation count for observability, even when not injected.
     const observationCount = Object.values(retrieval.observationsByLayer)
       .reduce((count, observations) => count + observations.length, 0);
 

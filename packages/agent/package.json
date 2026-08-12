@@ -11,6 +11,7 @@
     "./scheduler": "./src/scheduler.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
+    "./session-events-search": "./src/session-events-search.ts",
     "./operator-control": "./src/operator-control.ts",
     "./operator-companion-events": "./src/operator-companion-events.ts",
     "./session-trace": "./src/session-trace.ts",

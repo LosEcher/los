@@ -18,6 +18,7 @@ import {
   resolveMemoryLayers,
   routeMemoryRetrieval,
   augmentSystemPrompt,
+  type MemoryLayer,
 } from './core/retrieval.js';
 
 // ── resolveMemoryLayers ──────────────────────────────────
@@ -357,9 +358,9 @@ test('augmentSystemPrompt appends active rules section', () => {
   assert.ok(result.augmentedPrompt.includes('Always verify before writing.'));
 });
 
-test('augmentSystemPrompt appends observation layers when present', () => {
+test('augmentSystemPrompt policy-only default skips observation layers', () => {
   const base = 'You are a helpful assistant.';
-  const result = augmentSystemPrompt(base, {
+  const retrieval = {
     activeRules: [],
     observationsByLayer: {
       working: [{ id: 1, title: 'Current task context', summary: 'Working on feature X', kind: 'note', tags: [], content: '', metadata: {}, source: 'agent', createdAt: '', updatedAt: '' }],
@@ -368,8 +369,13 @@ test('augmentSystemPrompt appends observation layers when present', () => {
       procedural: [],
       self_reflective: [],
     },
-    queriedLayers: ['working'],
-  });
-  assert.ok(result.augmentedPrompt.includes('## Working Memory'));
-  assert.ok(result.augmentedPrompt.includes('Current task context'));
+    queriedLayers: ['working'] as MemoryLayer[],
+  };
+  const policyOnly = augmentSystemPrompt(base, retrieval);
+  assert.equal(policyOnly.augmentedPrompt, base);
+  assert.ok(!policyOnly.augmentedPrompt.includes('Working Memory'));
+
+  const withObs = augmentSystemPrompt(base, retrieval, { includeObservations: true });
+  assert.ok(withObs.augmentedPrompt.includes('## Working Memory'));
+  assert.ok(withObs.augmentedPrompt.includes('Current task context'));
 });
