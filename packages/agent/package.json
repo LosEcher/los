@@ -12,6 +12,7 @@
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
     "./operator-control": "./src/operator-control.ts",
+    "./operator-companion-events": "./src/operator-companion-events.ts",
     "./session-trace": "./src/session-trace.ts",
     "./session-trace-fixtures": "./src/session-trace-fixtures.ts",
     "./execution-observability": "./src/execution-observability.ts",

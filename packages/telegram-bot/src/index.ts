@@ -153,16 +153,21 @@ interface OperatorAttentionEvent {
     knownFailure?: boolean;
     flaggedFiles?: string[];
     reason?: string;
+    companionKind?: string;
+    companionTitle?: string;
   };
 }
 
 function formatAlert(event: OperatorAttentionEvent): string {
-  const tool = event.payload.toolName ?? 'unknown';
-  const severity = event.payload.knownFailure ? '🔴' : '⚠️';
+  const tool = event.payload.toolName;
+  const title = event.payload.companionTitle
+    ?? (event.type === 'worker.ask' ? 'Worker needs a decision' : 'Agent needs decision');
+  const severity = event.payload.knownFailure ? '🔴' : event.type === 'run.succeeded' ? '✅' : '⚠️';
   const reason = event.payload.reason ? `\n> ${event.payload.reason}` : '';
 
-  let text = `${severity} *Agent needs decision*\n`;
-  text += `Tool: \`${tool}\`${reason}\n`;
+  let text = `${severity} *${title}*\n`;
+  if (tool) text += `Tool: \`${tool}\``;
+  text += `${reason}\n`;
 
   if (event.payload.warnings?.length) {
     for (const w of event.payload.warnings.slice(0, 3)) {
@@ -174,7 +179,7 @@ function formatAlert(event: OperatorAttentionEvent): string {
     text += `Files: ${event.payload.flaggedFiles.slice(0, 5).join(', ')}\n`;
   }
 
-  text += `\nSession: \`${event.sessionId.slice(0, 8)}...\``;
+  text += `\nSession: \`${event.sessionId}\``;
   return text;
 }
 
@@ -249,16 +254,21 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
     if (eventType !== 'session.event') return;
 
     const payload = parsed.payload ?? {};
-    const isOperatorAttention =
-      parsed.type === 'tool.warned' ||
-      parsed.type === 'tool.denied' ||
-      parsed.type === 'operator_attention' ||
-      (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
-      (parsed.type === 'session.blocked');
-
-    if (!isOperatorAttention) return;
+    const { classifyCompanionSessionEvent, formatWorkerAskReason } = await import(
+      '@los/agent/operator-companion-events'
+    );
+    const classification = classifyCompanionSessionEvent({
+      type: parsed.type,
+      sessionId: parsed.sessionId,
+      toolName: parsed.toolName,
+      payload,
+    });
+    if (!classification.shouldNotify) return;
 
     const sessionId = parsed.sessionId ?? '';
+    const reason = parsed.type === 'worker.ask'
+      ? formatWorkerAskReason(payload)
+      : (payload.reason ?? payload.error ?? classification.title);
     const alert: OperatorAttentionEvent = {
       sessionId,
       type: parsed.type,
@@ -268,17 +278,22 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
         warnings: payload.warnings,
         knownFailure: payload.knownFailure,
         flaggedFiles: payload.flaggedFiles,
-        reason: payload.reason ?? payload.error,
+        reason,
         callId: payload.callId ?? payload.call_id,
+        companionKind: classification.kind,
+        companionTitle: classification.title,
       },
     };
 
     const decisionGroupId = actionRegistry.createDecisionGroupId();
+    const showButtons = classification.kind === 'needs_decision' || classification.kind === 'already_denied';
     for (const chatId of authorizedChats) {
       await sendMessage(
         chatId,
         formatAlert(alert),
-        await actionRegistry.createButtons(sessionId, alert.payload.callId ?? '', decisionGroupId),
+        showButtons
+          ? await actionRegistry.createButtons(sessionId, alert.payload.callId ?? '', decisionGroupId)
+          : undefined,
       );
     }
   } catch {

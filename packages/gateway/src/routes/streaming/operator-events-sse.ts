@@ -18,6 +18,22 @@ type OperatorLiveClient = { reply: any; lastId: number; ended: boolean };
 const liveClients = new Map<number, OperatorLiveClient>();
 let clientSeq = 0;
 
+export function _createExclusivePoll(
+  poll: () => Promise<void>,
+): () => Promise<boolean> {
+  let inFlight = false;
+  return async () => {
+    if (inFlight) return false;
+    inFlight = true;
+    try {
+      await poll();
+      return true;
+    } finally {
+      inFlight = false;
+    }
+  };
+}
+
 function makeSend(reply: { raw: { write: (chunk: string) => boolean } }) {
   return (event: string, data: unknown, eventId?: number) => {
     if (eventId !== undefined) reply.raw.write(`id: ${eventId}\n`);
@@ -109,17 +125,27 @@ export function registerOperatorEvents(app: FastifyInstance): void {
         }
       } catch { /* best-effort */ }
     };
+    const pollExclusive = _createExclusivePoll(pollAndSend);
 
     try {
-      await pollAndSend();
+      await pollExclusive();
       send('operator.ready', { lastEventId: lastId });
 
       const cid = ++clientSeq;
       liveClients.set(cid, { reply, lastId, ended: false });
 
-      const interval = setInterval(async () => {
-        try { await pollAndSend(); const c = liveClients.get(cid); if (c) c.lastId = lastId; }
-        catch { liveClients.delete(cid); clearInterval(interval); reply.raw.end(); }
+      const interval = setInterval(() => {
+        void pollExclusive()
+          .then((polled) => {
+            if (!polled) return;
+            const client = liveClients.get(cid);
+            if (client) client.lastId = lastId;
+          })
+          .catch(() => {
+            liveClients.delete(cid);
+            clearInterval(interval);
+            reply.raw.end();
+          });
       }, 1000);
 
       req.raw.on('close', () => { ended = true; liveClients.delete(cid); clearInterval(interval); });
