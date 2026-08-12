@@ -18,6 +18,12 @@ import { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs } from './execu
 import { sweepSymbolCache } from './chat-cbm-symbol-cache.js';
 import { registerDailyAgentQualityMaintenance } from './daily-agent-quality-maintenance.js';
 import { registerNodeAutoProbe } from './node-auto-probe.js';
+import {
+  isHeartbeatStaleForOutbound,
+  isRemoteCircuitOpen,
+  noteRemoteExecutorFailure,
+  noteRemoteExecutorSuccess,
+} from './remote-executor-circuit.js';
 
 export { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs };
 
@@ -313,9 +319,19 @@ async function triggerFileSyncScans(agentKey: string): Promise<void> {
     let unreachable = 0;
     let skippedUnavailable = 0;
     let skippedOverlapping = 0;
+    let skippedCircuit = 0;
     for (const node of nodes) {
       if (isRuntimeNodeUnavailableForScan(node)) {
         skippedUnavailable++;
+        continue;
+      }
+      // Boot / path flap: status may still be online while process is dead.
+      if (isHeartbeatStaleForOutbound(node.lastHeartbeatAt)) {
+        skippedUnavailable++;
+        continue;
+      }
+      if (isRemoteCircuitOpen(node.nodeId)) {
+        skippedCircuit++;
         continue;
       }
       const caps = (node.capabilities ?? {}) as Record<string, unknown>;
@@ -328,7 +344,9 @@ async function triggerFileSyncScans(agentKey: string): Promise<void> {
       const { folders, skipped } = normalizeFileSyncFoldersForScan(allFolders);
       skippedOverlapping += skipped;
       if (folders.length === 0) continue;
+      let nodeFailed = false;
       for (const entry of folders) {
+        if (nodeFailed) break;
         try {
           await fetch(`${healthUrl.replace('/health', '')}/v1/file-sync/scan`, {
             method: 'POST',
@@ -337,19 +355,30 @@ async function triggerFileSyncScans(agentKey: string): Promise<void> {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ folder: entry.folderName, mode: entry.mode }),
-            signal: AbortSignal.timeout(300_000),
+            // Connection refused should fail fast — do not hold 300s sockets on boot storms.
+            signal: AbortSignal.timeout(8_000),
           });
           triggered++;
         } catch (err) {
           unreachable++;
-          log.debug(`file-sync trigger: ${node.nodeId}/${entry.folderName} unreachable (${err instanceof Error ? err.message : String(err)})`);
+          nodeFailed = true;
+          const msg = err instanceof Error ? err.message : String(err);
+          const circuit = noteRemoteExecutorFailure(node.nodeId, msg);
+          log.debug(
+            `file-sync trigger: ${node.nodeId}/${entry.folderName} unreachable ` +
+              `(${msg}); circuit open ${Math.round((circuit.openUntil - Date.now()) / 1000)}s`,
+          );
         }
       }
+      if (!nodeFailed && folders.length > 0) {
+        noteRemoteExecutorSuccess(node.nodeId);
+      }
     }
-    if (triggered > 0 || unreachable > 0 || skippedUnavailable > 0 || skippedOverlapping > 0) {
+    if (triggered > 0 || unreachable > 0 || skippedUnavailable > 0 || skippedOverlapping > 0 || skippedCircuit > 0) {
       log.info(
         `file-sync trigger: ${triggered} scan(s) triggered, ${unreachable} unreachable, ` +
-        `${skippedUnavailable} unavailable node(s) skipped, ${skippedOverlapping} overlapping folder(s) skipped`,
+        `${skippedUnavailable} unavailable node(s) skipped, ${skippedCircuit} circuit-open skipped, ` +
+        `${skippedOverlapping} overlapping folder(s) skipped`,
       );
     }
   } catch (err) {

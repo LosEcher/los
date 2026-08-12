@@ -23,6 +23,12 @@ import {
 } from '@los/agent/executor-nodes';
 import { getLogger } from '@los/infra/logger';
 import { probeNode } from './routes/node-probes.js';
+import {
+  isHeartbeatStaleForOutbound,
+  isRemoteCircuitOpen,
+  noteRemoteExecutorFailure,
+  noteRemoteExecutorSuccess,
+} from './remote-executor-circuit.js';
 
 const log = getLogger('gateway');
 
@@ -77,6 +83,10 @@ export function isAutoProbeEligible(
   if (node.nodeKind !== 'executor') return false;
   if (node.capabilities?.run_agent !== true) return false;
   if (node.execution.candidate === true) return false;
+  // Boot grace: do not probe while heartbeats are already stale (node mid-restart).
+  if (isHeartbeatStaleForOutbound(node.lastHeartbeatAt, now)) return false;
+  // Process-local circuit from prior ECONNREFUSED / fetch failures.
+  if (isRemoteCircuitOpen(node.nodeId, now)) return false;
 
   const blockers = node.execution.blockers ?? [];
   // Only auto-heal verification debt — do not probe resource/status blockers.
@@ -154,14 +164,19 @@ export async function runNodeAutoProbeTick(
       });
       if (result.status === 'online' && !result.lastProbeError) {
         probed.push(fresh.nodeId);
+        noteRemoteExecutorSuccess(fresh.nodeId);
       } else {
         failed.push(fresh.nodeId);
+        noteRemoteExecutorFailure(
+          fresh.nodeId,
+          result.lastProbeError ?? `probe status=${result.status}`,
+        );
       }
     } catch (error) {
       failed.push(fresh.nodeId);
-      log.warn(
-        `auto-probe ${fresh.nodeId} failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const msg = error instanceof Error ? error.message : String(error);
+      noteRemoteExecutorFailure(fresh.nodeId, msg);
+      log.warn(`auto-probe ${fresh.nodeId} failed: ${msg}`);
       // Still stamp lastProbeAt via a soft record so cooldown applies.
       try {
         await record({
@@ -175,7 +190,7 @@ export async function runNodeAutoProbeTick(
           activeTaskCount: fresh.activeTaskCount,
           meshLinks: fresh.meshLinks,
           lastProbeAt: new Date(),
-          lastProbeError: error instanceof Error ? error.message : String(error),
+          lastProbeError: msg,
         });
       } catch {
         // ignore secondary write errors
