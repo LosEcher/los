@@ -95,6 +95,13 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   // 2026-07-28 two-day change review remediation (9 items)
   ['todo-los-review-20260728-remediation', ['P0', 'in_progress']],
   ['todo-los-review-20260728-forgejo-sync', ['P0', 'blocked']],
+  // 2026-08-12 UX adaptation (Beautiful UI + Pi catalog) — execution order fixed in seed metadata
+  ['todo-los-ux-daily-feel-20260812', ['P0', 'in_progress']],
+  ['todo-los-ux-ai-primitives-beautiful', ['P0', 'ready']],
+  ['todo-los-ux-annotated-plan-findings', ['P0', 'ready']],
+  ['todo-los-ux-feature-card-rework', ['P1', 'ready']],
+  ['todo-los-ux-structured-clarify-todo', ['P1', 'ready']],
+  ['todo-los-ux-channel-companion', ['P1', 'ready']],
 ] as const);
 
 test('daily agent product seeds preserve the accepted delivery order', () => {
@@ -165,6 +172,43 @@ test('2026-07-28 review remediation preserves execution and delivery ordering', 
     'todo-los-review-20260728-recovery-tests',
     'todo-los-review-20260728-acp-dispatch',
     'todo-los-review-20260728-provider-routing',
+  ]);
+});
+
+test('2026-08-12 UX adaptation seeds preserve Beautiful UI first execution order', () => {
+  const allById = new Map(LOS_PLANNING_TODO_SEED.map(todo => [todo.id, todo]));
+  const phase = allById.get('todo-los-ux-daily-feel-20260812');
+  const primitives = allById.get('todo-los-ux-ai-primitives-beautiful');
+  const annotated = allById.get('todo-los-ux-annotated-plan-findings');
+  const featureCard = allById.get('todo-los-ux-feature-card-rework');
+  const clarify = allById.get('todo-los-ux-structured-clarify-todo');
+  const channel = allById.get('todo-los-ux-channel-companion');
+  const memory = allById.get('todo-los-ux-memory-fts-policy');
+  const steer = allById.get('todo-los-ux-kernel-steer-parity');
+  const research = allById.get('todo-los-ux-research-pack');
+
+  assert.equal(phase?.status, 'in_progress');
+  assert.equal(phase?.priority, 'P0');
+  assert.deepEqual(primitives?.dependsOnIds, [phase?.id]);
+  assert.deepEqual(annotated?.dependsOnIds, [primitives?.id]);
+  assert.deepEqual(featureCard?.dependsOnIds, [annotated?.id]);
+  assert.deepEqual(clarify?.dependsOnIds, [primitives?.id]);
+  assert.deepEqual(channel?.dependsOnIds, [clarify?.id]);
+  assert.equal(primitives?.priority, 'P0');
+  assert.equal(annotated?.priority, 'P0');
+  assert.equal(featureCard?.priority, 'P1');
+  assert.equal(memory?.priority, 'P2');
+  assert.equal(steer?.priority, 'P2');
+  assert.equal(research?.priority, 'P2');
+  assert.deepEqual(phase?.metadata?.executionOrder, [
+    'todo-los-ux-ai-primitives-beautiful',
+    'todo-los-ux-annotated-plan-findings',
+    'todo-los-ux-feature-card-rework',
+    'todo-los-ux-structured-clarify-todo',
+    'todo-los-ux-channel-companion',
+    'todo-los-ux-memory-fts-policy',
+    'todo-los-ux-kernel-steer-parity',
+    'todo-los-ux-research-pack',
   ]);
 });
 
