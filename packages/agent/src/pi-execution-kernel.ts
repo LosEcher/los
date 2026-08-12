@@ -27,6 +27,10 @@ import {
 import type { AgentResult, TurnSummary } from './loop.js';
 import type { Message, ToolCall } from './providers/index.js';
 import { getPiK4KernelSelectionIdentity } from './execution-kernel-selection.js';
+import {
+  consumeOperatorControlEvents,
+  type OperatorControlCursors,
+} from './operator-control-consumer.js';
 
 const PI_K4_KERNEL_IDENTITY = getPiK4KernelSelectionIdentity();
 const PI_VERSION = PI_K4_KERNEL_IDENTITY.version;
@@ -66,8 +70,10 @@ export function _createPiExecutionKernel(
       streaming: true,
       typedTools: true,
       parallelToolCalls: true,
-      steering: false,
-      followUp: false,
+      // Operator steering/follow-up drained at Pi loop safe points via
+      // consumeOperatorControlEvents → AgentMessage injection.
+      steering: true,
+      followUp: true,
       interrupt: true,
       checkpoint: true,
       resume: true,
@@ -149,6 +155,7 @@ async function* runPiAsKernel(
         traceId: input.traceId,
       });
       const prompt: AgentMessage = { role: 'user', content: input.prompt, timestamp: now().getTime() };
+      let controlCursors: OperatorControlCursors = { steering: 0, followup: 0 };
       const messages = await runAgentLoop(
         [prompt],
         {
@@ -164,6 +171,46 @@ async function* runPiAsKernel(
           shouldStopAfterTurn: input.maxTurns
             ? () => turn >= input.maxTurns!
             : undefined,
+          // Mid-run steering: drain operator.steering at each safe point.
+          // Best-effort: fixtures/shadow runs may lack session event store; never
+          // fail the Pi loop because control drain is unavailable.
+          getSteeringMessages: async () => {
+            if (!input.sessionId) return [];
+            try {
+              const result = await consumeOperatorControlEvents({
+                sessionId: input.sessionId,
+                runSpecId: input.runSpecId,
+                taskRunId: input.taskRunId,
+                turn,
+                boundary: 'before_turn',
+                cursors: controlCursors,
+                includeFollowups: false,
+              });
+              controlCursors = result.cursors;
+              return result.consumed.map(item => losMessageToPiAgentMessage(item.message, now));
+            } catch {
+              return [];
+            }
+          },
+          // End-of-run follow-ups: drain operator.followup when the loop would stop.
+          getFollowUpMessages: async () => {
+            if (!input.sessionId) return [];
+            try {
+              const result = await consumeOperatorControlEvents({
+                sessionId: input.sessionId,
+                runSpecId: input.runSpecId,
+                taskRunId: input.taskRunId,
+                turn,
+                boundary: 'after_completion',
+                cursors: controlCursors,
+                includeFollowups: true,
+              });
+              controlCursors = result.cursors;
+              return result.consumed.map(item => losMessageToPiAgentMessage(item.message, now));
+            } catch {
+              return [];
+            }
+          },
         },
         event => projectPiEvent(event, () => turn, value => { turn = value; }, turns, deniedToolCalls, emit),
         controller.signal,
@@ -364,6 +411,29 @@ function contentText(message: { content: unknown }): string {
     return [];
   }).join('');
 }
+/** Map LOS operator control messages into Pi AgentMessage user turns. */
+function losMessageToPiAgentMessage(message: Message, now: () => Date): AgentMessage {
+  let text = '';
+  if (typeof message.content === 'string') {
+    text = message.content;
+  } else if (Array.isArray(message.content as unknown[])) {
+    text = (message.content as unknown[]).map((part: unknown) => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && 'text' in part) {
+        return String((part as { text?: unknown }).text ?? '');
+      }
+      return '';
+    }).join('');
+  } else {
+    text = String(message.content ?? '');
+  }
+  return {
+    role: 'user',
+    content: text,
+    timestamp: now().getTime(),
+  };
+}
+
 function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
   return message.role === 'assistant';
 }
