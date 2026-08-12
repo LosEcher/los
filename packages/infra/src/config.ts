@@ -233,7 +233,18 @@ let _config: Config | null = null;
 export async function loadConfig(opts?: {
   cwd?: string;
   cliOverrides?: Record<string, unknown>;
+  /** Force full reload including provider discovery network probes. */
+  forceReload?: boolean;
 }): Promise<Config> {
+  // Hot path (run_shell, maintenance, re-entry): never re-run discovery probes.
+  if (_config && !opts?.forceReload && !opts?.cliOverrides && !opts?.cwd) {
+    // Parallel package tests may setConfig({auth.enabled:true}); keep test default fail-open.
+    if (isLikelyTestProcess() && _config.auth.enabled && process.env.LOS_FORCE_AUTH_IN_TEST !== '1') {
+      _config = { ..._config, auth: { ..._config.auth, enabled: false } };
+    }
+    return _config;
+  }
+
   const cwd = resolve(opts?.cwd ?? process.cwd());
 
   // Layer 1: Built-in defaults (ensure all schema keys exist)

@@ -7,6 +7,8 @@ const sharedProcessTestFiles = [
   'src/chat-cbm-symbol-cache.test.ts',
   'src/chat-planning-disposition.test.ts',
   'src/chat-service-hooks.test.ts',
+  'src/routes/data/communication-delivery.test.ts',
+  'src/remote-executor-circuit.test.ts',
   'src/daily-agent-quality-routes.test.ts',
   'src/execution-experiment-k4-routes.test.ts',
   'src/managed-workspace-routes.test.ts',
