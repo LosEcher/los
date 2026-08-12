@@ -77,6 +77,8 @@ const sharedProcessTestFiles = [
   'src/security-gate.test.ts',
   'src/semantic-eviction.test.ts',
   'src/session-events-visibility.test.ts',
+  'src/feature-card.test.ts',
+  'src/operator-companion-events.test.ts',
   'src/session-recovery-checkpoints.test.ts',
   'src/session-trace.test.ts',
   'src/session.test.ts',

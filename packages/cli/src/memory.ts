@@ -31,8 +31,64 @@ export async function memoryCommand(globalArgs: string[], argv: string[]): Promi
     await retrieveMemory(parsed);
     return;
   }
+  if (action === 'search') {
+    await searchMemory(parsed);
+    return;
+  }
+  if (action === 'search-sessions' || action === 'sessions') {
+    await searchSessions(parsed);
+    return;
+  }
 
   throw new Error(`Unknown memory command: ${action}`);
+}
+
+async function searchMemory(parsed: ParsedArgs): Promise<void> {
+  const q = stringFlag(parsed, 'q') ?? stringFlag(parsed, 'query') ?? parsed.positionals[1];
+  if (!q) throw new Error('memory search requires --q or a query positional');
+  const params = new URLSearchParams({ q, limit: stringFlag(parsed, 'limit') ?? '20' });
+  const sessionId = stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session');
+  if (sessionId) params.set('sessionId', sessionId);
+  const data = await requestCliJson(`${gatewayUrl(parsed)}/memory?${params.toString()}`, {
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
+  });
+  if (hasFlag(parsed, 'json')) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  const results = Array.isArray((data as { results?: unknown[] }).results)
+    ? (data as { results: Array<Record<string, unknown>> }).results
+    : [];
+  console.log(`memory search: ${results.length} hit(s) for ${JSON.stringify(q)}`);
+  for (const row of results.slice(0, 20)) {
+    console.log(`- ${row.id} ${row.kind ?? ''} ${row.title ?? ''}`.trim());
+    if (row.summary) console.log(`  ${String(row.summary).slice(0, 120)}`);
+  }
+}
+
+async function searchSessions(parsed: ParsedArgs): Promise<void> {
+  const q = stringFlag(parsed, 'q') ?? stringFlag(parsed, 'query') ?? parsed.positionals[1];
+  if (!q) throw new Error('memory search-sessions requires --q or a query positional');
+  const params = new URLSearchParams({ q, limit: stringFlag(parsed, 'limit') ?? '20' });
+  const sessionId = stringFlag(parsed, 'session-id') ?? stringFlag(parsed, 'session');
+  if (sessionId) params.set('sessionId', sessionId);
+  const data = await requestCliJson(`${gatewayUrl(parsed)}/sessions/search?${params.toString()}`, {
+    auth: resolveCliRequestAuth(parsed.flags),
+    json: true,
+  });
+  if (hasFlag(parsed, 'json')) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  const results = Array.isArray((data as { results?: unknown[] }).results)
+    ? (data as { results: Array<Record<string, unknown>> }).results
+    : [];
+  console.log(`session event search: ${results.length} hit(s) for ${JSON.stringify(q)}`);
+  for (const row of results.slice(0, 20)) {
+    console.log(`- ${row.sessionId} #${row.eventId} ${row.type ?? ''} ${row.toolName ?? ''}`.trim());
+    if (row.snippet) console.log(`  ${String(row.snippet).slice(0, 140)}`);
+  }
 }
 
 async function compactMemory(parsed: ParsedArgs): Promise<void> {
@@ -245,6 +301,8 @@ Commands:
   compactions       List memory compaction records
   active-rules      List active procedural rules from compactions
   retrieve          Route memory retrieval by task state
+  search            FTS search observations (GET /memory?q=)
+  search-sessions   FTS-lite search session events (GET /sessions/search?q=)
 
 Options:
   --gateway, -g URL

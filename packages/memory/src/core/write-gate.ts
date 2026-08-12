@@ -166,6 +166,19 @@ export function validateMemoryWrite(input: MemoryWriteInput, opts: { partial?: b
     }
   }
 
+  // Secret scan — reject raw credentials before persistence (policy-only memory).
+  for (const field of ['title', 'summary', 'content', 'source'] as const) {
+    const value = input[field];
+    if (typeof value !== 'string' || !value) continue;
+    const secret = detectSecretLeak(value);
+    if (secret) {
+      violations.push({
+        field,
+        message: `possible secret material rejected (${secret}); redact before write`,
+      });
+    }
+  }
+
   return violations;
 }
 
@@ -174,6 +187,24 @@ export interface PoisonDetection {
   pattern: string;
   /** Human-readable reason, stored in metadata.poisonFlag.reason. */
   reason: string;
+}
+
+/** Reject raw credential-like material on write (Hermes-style secret scan). */
+const SECRET_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
+  { id: 'aws-access-key', pattern: /\bAKIA[0-9A-Z]{16}\b/ },
+  { id: 'github-pat', pattern: /\bghp_[A-Za-z0-9]{20,}\b/ },
+  { id: 'github-oauth', pattern: /\bgho_[A-Za-z0-9]{20,}\b/ },
+  { id: 'slack-token', pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
+  { id: 'openai-key', pattern: /\bsk-[A-Za-z0-9]{20,}\b/ },
+  { id: 'bearer-header', pattern: /\bBearer\s+[A-Za-z0-9\-._~+/]+=*\b/i },
+  { id: 'private-key-block', pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
+];
+
+function detectSecretLeak(text: string): string | null {
+  for (const { id, pattern } of SECRET_PATTERNS) {
+    if (pattern.test(text)) return id;
+  }
+  return null;
 }
 
 /** Conservative instruction-override / identity-impersonation patterns. */

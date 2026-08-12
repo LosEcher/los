@@ -24,6 +24,8 @@ export const DEFAULT_NAMED_FLEET_NODE_IDS = [
 export const DEFAULT_FLEET_ALERT_CONSECUTIVE_TICKS = 2;
 /** Min interval between attention events per node (default 30m). */
 export const DEFAULT_FLEET_ALERT_COOLDOWN_MS = 30 * 60_000;
+/** Min interval between unhealthy observations counted for the same state. */
+export const _DEFAULT_FLEET_OBSERVATION_INTERVAL_MS = 10 * 60_000;
 
 export type FleetNodeHealth = 'healthy' | 'offline' | 'online_unverified' | 'missing';
 
@@ -51,6 +53,7 @@ export interface NamedFleetSnapshot {
 export interface FleetWatchTickOptions {
   consecutiveTicks?: number;
   cooldownMs?: number;
+  minObservationIntervalMs?: number;
   now?: Date;
   tenantId?: string;
   projectId?: string;
@@ -65,7 +68,13 @@ export interface FleetAlertEmission {
   health: FleetNodeHealth;
   consecutiveUnhealthy: number;
   eventEmitted: boolean;
-  skippedReason?: 'below_threshold' | 'cooldown' | 'healthy' | 'dry_run' | 'emit_failed';
+  skippedReason?:
+    | 'below_threshold'
+    | 'cooldown'
+    | 'duplicate_observation'
+    | 'healthy'
+    | 'dry_run'
+    | 'emit_failed';
 }
 
 export interface FleetWatchTickResult {
@@ -80,8 +89,11 @@ CREATE TABLE IF NOT EXISTS fleet_watch_state (
   consecutive_unhealthy INTEGER NOT NULL DEFAULT 0,
   last_health TEXT NOT NULL DEFAULT 'unknown',
   last_alert_at TIMESTAMPTZ,
+  last_observed_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE fleet_watch_state
+  ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMPTZ;
 `;
 
 let _initialized = false;
@@ -198,6 +210,7 @@ interface FleetWatchRow {
   consecutive_unhealthy: number | string;
   last_health: string;
   last_alert_at: Date | string | null;
+  last_observed_at: Date | string | null;
   updated_at: Date | string;
 }
 
@@ -214,6 +227,8 @@ export async function tickNamedFleetWatch(
   const snapshot = evaluateNamedFleet(nodes, namedIds);
   const consecutiveTicks = options.consecutiveTicks ?? resolveFleetAlertConsecutiveTicks();
   const cooldownMs = options.cooldownMs ?? resolveFleetAlertCooldownMs();
+  const minObservationIntervalMs = options.minObservationIntervalMs
+    ?? _DEFAULT_FLEET_OBSERVATION_INTERVAL_MS;
   const now = options.now ?? new Date();
   const nowMs = now.getTime();
   const db = getDb();
@@ -228,7 +243,21 @@ export async function tickNamedFleetWatch(
     const prev = existing.rows[0];
     const prevConsecutive = Number(prev?.consecutive_unhealthy ?? 0);
     const unhealthy = assessment.health !== 'healthy';
-    const consecutive = unhealthy ? prevConsecutive + 1 : 0;
+    const lastObservedAt = prev?.last_observed_at
+      ? (prev.last_observed_at instanceof Date
+        ? prev.last_observed_at
+        : new Date(String(prev.last_observed_at)))
+      : null;
+    const lastObservedMs = lastObservedAt && Number.isFinite(lastObservedAt.getTime())
+      ? lastObservedAt.getTime()
+      : 0;
+    const duplicateObservation = unhealthy
+      && prev?.last_health === assessment.health
+      && lastObservedMs > 0
+      && nowMs - lastObservedMs < minObservationIntervalMs;
+    const consecutive = unhealthy
+      ? (duplicateObservation ? prevConsecutive : prevConsecutive + 1)
+      : 0;
     const lastAlertAt = prev?.last_alert_at
       ? (prev.last_alert_at instanceof Date
         ? prev.last_alert_at
@@ -243,15 +272,21 @@ export async function tickNamedFleetWatch(
       health: assessment.health,
       consecutiveUnhealthy: consecutive,
       eventEmitted: false,
-      skippedReason: unhealthy ? 'below_threshold' : 'healthy',
+      skippedReason: duplicateObservation
+        ? 'duplicate_observation'
+        : unhealthy
+          ? 'below_threshold'
+          : 'healthy',
     };
 
     const shouldAlert =
       unhealthy
+      && !duplicateObservation
       && consecutive >= consecutiveTicks
       && (lastAlertMs === 0 || nowMs - lastAlertMs >= cooldownMs);
 
     let nextAlertAt: Date | null = lastAlertAt;
+    const nextObservedAt = duplicateObservation ? lastObservedAt : now;
 
     if (shouldAlert) {
       if (options.dryRun) {
@@ -287,7 +322,7 @@ export async function tickNamedFleetWatch(
           };
         }
       }
-    } else if (unhealthy && consecutive >= consecutiveTicks && lastAlertMs > 0) {
+    } else if (!duplicateObservation && unhealthy && consecutive >= consecutiveTicks && lastAlertMs > 0) {
       emission = {
         ...emission,
         skippedReason: 'cooldown',
@@ -295,18 +330,21 @@ export async function tickNamedFleetWatch(
     }
 
     await db.query(
-      `INSERT INTO fleet_watch_state (node_id, consecutive_unhealthy, last_health, last_alert_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO fleet_watch_state
+         (node_id, consecutive_unhealthy, last_health, last_alert_at, last_observed_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (node_id) DO UPDATE SET
          consecutive_unhealthy = EXCLUDED.consecutive_unhealthy,
          last_health = EXCLUDED.last_health,
          last_alert_at = EXCLUDED.last_alert_at,
+         last_observed_at = EXCLUDED.last_observed_at,
          updated_at = EXCLUDED.updated_at`,
       [
         assessment.nodeId,
         consecutive,
         assessment.health,
         nextAlertAt,
+        nextObservedAt,
         now,
       ],
     );

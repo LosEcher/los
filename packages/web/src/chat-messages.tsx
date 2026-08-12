@@ -2,12 +2,21 @@
  * Chat message types, accumulation logic, and bubble rendering components.
  * Timeline order: older above, newer below (append-only). Tools live inside
  * assistant turns — not in a top-of-page approval dump.
+ *
+ * AI-native presentation (tool chips, thinking, task rows) lives in
+ * chat-ai-primitives.tsx (Beautiful UI patterns + LOS tokens).
  */
-import { type ReactNode } from 'react';
-import { Wrench } from 'lucide-react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { MarkdownBlock } from './markdown-renderer.js';
 import { ChatVirtualScroller } from './chat-virtual-scroller.js';
 import type { ApprovalEvent } from './chat-approval.js';
+import {
+  StreamingElapsed,
+  TaskRowList,
+  ThinkingBlock,
+  ToolChipList,
+  toolCallsToTaskRows,
+} from './chat-ai-primitives.js';
 import { tt, useI18n } from './i18n';
 
 // ── Types ────────────────────────────────────────────
@@ -124,81 +133,26 @@ export function readyMessages(): Message[] {
 
 // ── Components ───────────────────────────────────────
 
-export function ToolCard({
-  toolCall,
-  approval,
-}: {
-  toolCall: ToolCall;
-  approval?: ApprovalEvent;
-}) {
-  const { t } = useI18n();
-  const gate = approval
-    ? (approval.allowed ? 'approved' as const : 'denied' as const)
-    : toolCall.status === 'denied'
-      ? 'denied' as const
-      : null;
-  return (
-    <details className="tool-card" data-status={toolCall.status} data-gate={gate ?? undefined}>
-      <summary className="tool-card-head">
-        <Wrench size={12} />
-        <strong>{toolCall.toolName}</strong>
-        {toolCall.status === 'running' && <span className="tool-status running">{t('chat.tool.running')}</span>}
-        {toolCall.status === 'completed' && <span className="tool-status completed">{t('chat.tool.done')}</span>}
-        {toolCall.status === 'error' && <span className="tool-status error">{t('chat.tool.error')}</span>}
-        {toolCall.status === 'denied' && <span className="tool-status error">{t('chat.tool.denied')}</span>}
-        {gate === 'approved' && <span className="tool-gate approved">{t('chat.approval.approved')}</span>}
-        {gate === 'denied' && toolCall.status !== 'denied' && (
-          <span className="tool-gate denied">{t('chat.approval.denied')}</span>
-        )}
-        {toolCall.durationMs !== undefined && (
-          <span className="tool-duration">{formatToolDuration(toolCall.durationMs)}</span>
-        )}
-      </summary>
-      <div className="tool-card-body">
-        {toolCall.argsPreview && (
-          <div className="tool-args">
-            <span className="tool-label">{t('chat.tool.args')}</span>
-            <code>{toolCall.argsPreview}</code>
-          </div>
-        )}
-        {toolCall.resultPreview && (
-          <div className="tool-result">
-            <span className="tool-label">{t('chat.tool.result')}</span>
-            <code>{toolCall.resultPreview}</code>
-          </div>
-        )}
-        {toolCall.errorPreview && (
-          <div className="tool-result">
-            <span className="tool-label">{t('chat.tool.error')}</span>
-            <code>{toolCall.errorPreview}</code>
-          </div>
-        )}
-        {approval?.reason ? (
-          <div className="tool-result">
-            <span className="tool-label">{t('chat.approval.gate')}</span>
-            <code>{approval.reason}</code>
-          </div>
-        ) : null}
-      </div>
-    </details>
-  );
-}
-
-function formatToolDuration(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${ms}ms`;
-}
+/** @deprecated Use ToolChip from chat-ai-primitives — kept as alias for imports. */
+export { ToolChip as ToolCard } from './chat-ai-primitives.js';
 
 export function MessageBubble({
   message,
   isStreaming,
   approvalByCallId,
+  streamStartedAt,
 }: {
   message: Message;
   isStreaming?: boolean;
   approvalByCallId?: Map<string, ApprovalEvent>;
+  streamStartedAt?: number;
 }) {
   const { t } = useI18n();
+  const taskRows = useMemo(
+    () => toolCallsToTaskRows(message.toolCalls),
+    [message.toolCalls],
+  );
+
   if (message.role === 'separator') {
     return (
       <div className="chat-separator">
@@ -237,29 +191,24 @@ export function MessageBubble({
             )}
           </div>
         )}
-        {message.reasoning && message.reasoning.length > 0 && (
-          <details className="chat-reasoning">
-            <summary>{t('chat.reasoning')}</summary>
-            <p>{message.reasoning}</p>
-          </details>
-        )}
-        {/* Tools first (agent loop), then final text — chronological within the turn. */}
-        {message.toolCalls.length > 0 && (
+        {message.reasoning && message.reasoning.length > 0 ? (
+          <ThinkingBlock text={message.reasoning} streaming={isStreaming} />
+        ) : null}
+        {/* Compact tool chips first; task rows mirror status for at-a-glance progress. */}
+        {message.toolCalls.length > 0 ? (
           <div className="chat-tool-calls">
-            {message.toolCalls.map(tc => (
-              <ToolCard
-                key={tc.callId}
-                toolCall={tc}
-                approval={approvalByCallId?.get(tc.callId)}
-              />
-            ))}
+            <ToolChipList toolCalls={message.toolCalls} approvalByCallId={approvalByCallId} />
+            <TaskRowList rows={taskRows} title={t('chat.ai.tasks')} />
           </div>
-        )}
+        ) : null}
         <div className="chat-bubble-text">
           {message.content
             ? <MarkdownBlock content={message.content} />
             : (message.toolCalls.length > 0 ? null : <span className="chat-empty">{t('chat.empty')}</span>)}
         </div>
+        {isStreaming ? (
+          <StreamingElapsed active={Boolean(isStreaming)} startedAt={streamStartedAt} />
+        ) : null}
       </div>
     </div>
   );
@@ -288,6 +237,14 @@ export function ChatMessages({
   for (const event of approvalEvents ?? []) {
     if (event.callId) approvalByCallId.set(event.callId, event);
   }
+  const [streamStartedAt, setStreamStartedAt] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (running) {
+      setStreamStartedAt(prev => prev ?? Date.now());
+    } else {
+      setStreamStartedAt(undefined);
+    }
+  }, [running]);
 
   return (
     <div className="chat-timeline">
@@ -321,6 +278,7 @@ export function ChatMessages({
                   message={msg}
                   isStreaming={Boolean(running) && isLastAssistant}
                   approvalByCallId={approvalByCallId}
+                  streamStartedAt={streamStartedAt}
                 />
               );
             }}

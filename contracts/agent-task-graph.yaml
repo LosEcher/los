@@ -1,12 +1,14 @@
 contract: los.agent-task-graph
-version: 0.4.0
+version: 0.4.1
 status: draft
 owner: packages/agent
 description: >
   Contract for durable planner/executor/verifier task graphs. Governed graphs
   support two to four executor workers with non-overlapping editable surfaces,
   an independent verifier, and an integration owner derived from the validated
-  operator principal.
+  operator principal. Worker handoff prefers FeatureCard compressed context
+  (see los.feature-card); rework after reviewer reject requires a fresh worker
+  identity.
 type: object
 sourceOfTruth:
   - agent_tasks
@@ -93,6 +95,10 @@ rules:
   - request bodies cannot select or override the integration owner
   - integration requires verifier-backed completion and the same designated operator principal
   - integration records an operator intervention event and does not automatically merge, push, or release workspaces
+  - worker tasks should receive a FeatureCard (or equivalent compressed handoff), not the full coordinator transcript
+  - reviewer tasks are independent sessions/attempts and default to read-only tool mode
+  - rework after reviewer reject must spawn a new worker attempt identity (never resume the writer attempt/session/task_run)
+  - worker finish and reviewer accept/reject always emit coordinator/operator wake evidence
 leasing:
   fence:
     ownerField: claimed_by_node_id

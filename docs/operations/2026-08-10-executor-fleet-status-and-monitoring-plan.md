@@ -117,7 +117,7 @@ Goal: know **status + resources** per fleet node without request storms.
 1. **Named fleet inventory** via `LOS_FLEET_NODE_IDS` (default four active executors).  
    Module: `packages/agent/src/fleet-inventory.ts`.  
 2. **`/ops/runtime-health`**: `fleet` block + warnings `fleet:offline|online_unverified|missing`.  
-3. **dogfood readiness** (`runtime_readiness` template): each tick updates `fleet_watch_state`; after **≥2 consecutive** unhealthy ticks emits `ops.fleet_attention` (SSE + WeChat), **30m/node cooldown**.  
+3. **dogfood readiness** (`runtime_readiness` template): an on-time run updates `fleet_watch_state`; after **≥2 consecutive** unhealthy observations emits `ops.fleet_attention` (SSE + WeChat), **30m/node cooldown**. Runs starting more than 2m late do not advance watch state, and the same unhealthy state counts at most once per 10m.  
 4. Env: `LOS_FLEET_ALERT_CONSECUTIVE_TICKS`, `LOS_FLEET_ALERT_COOLDOWN_MS`.
 
 #### P1 — Resource supervision (from heartbeat capacity, no extra probes) — **Done** 2026-08-10
@@ -242,7 +242,7 @@ ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/h
 
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
-| MBP sleep / gateway down | high for all remotes | anti-sleep / second gateway (open) |
+| MBP sleep / gateway down | accepted while 24×7 is not required | late catch-up runs do not advance fleet alerts; reassess HA only if the requirement changes |
 | oracle OOM (~1GB) | medium | light tasks only; mem warning in health |
 | Windows task not “service-grade” | medium | nssm/service later; task restart policy now |
 | migration path WARN on Windows | low | fix getMigrateDir for win paths |
@@ -306,3 +306,41 @@ capped. Pattern matches 2026-07 CI notes (nmem 2→4.8 GiB).
 - Recurrence: if nmem hits MemoryMax/SwapMax and degrades, journal will show
   cgroup pressure; consider moving nmem off node34 or raising host RAM.
 - API key may appear in nmem journal on start — treat as secret, do not paste.
+
+---
+
+## 9. Expected MBP sleep hardening — 2026-08-11 `[E]`
+
+### Observation
+
+The MBP entered clamshell sleep at 19:29:56 CST. All four executor heartbeats
+stopped within four seconds. DarkWake at 19:45 and 20:19 executed overdue
+`runtime_readiness` runs before the machine returned to sleep. Two schedules
+shared that template, so they advanced the same `fleet_watch_state` counter in
+one wake window. A later SSE replay caused WeChat to send an existing event ID
+again without a new `ops.fleet_attention` row.
+
+### Decision
+
+MBP sleep is an accepted operating mode; LOS is not required to keep the MBP
+control plane available 24×7. Monitoring must therefore distinguish an on-time
+observation from sleep catch-up:
+
+1. Scheduled readiness runs starting more than 2m late report the current
+   snapshot but do not update `fleet_watch_state`.
+2. Repeated observations of the same unhealthy state within 10m do not advance
+   `consecutive_unhealthy`.
+3. Gateway operator-event polling permits one in-flight DB poll per SSE client.
+4. WeChat reconnects from its last SSE event ID and suppresses the same event ID
+   for 24h; the existing semantic fallback remains 60s for events without IDs.
+
+### Verification
+
+- `fleet-inventory.test.ts`: duplicate observation does not increment the count.
+- `scheduled-work.test.ts`: late scheduled run is skipped; manual run remains eligible.
+- `operator-events-polling.test.ts`: concurrent poll attempt is rejected.
+- `operator-alert-dedupe.test.ts`: a replay seven minutes later is suppressed.
+
+This change does not provide gateway HA while the MBP sleeps. Remote executor
+processes may remain healthy but cannot heartbeat or accept new LOS work until
+the MBP control plane becomes reachable again.

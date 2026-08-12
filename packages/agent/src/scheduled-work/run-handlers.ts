@@ -10,6 +10,18 @@ import { listServiceInstances } from '../service-instances.js';
 import { listInboxEntries } from '../work-items/projection.js';
 import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome } from './types.js';
 
+export const _FLEET_OBSERVATION_MAX_SCHEDULE_LATENESS_MS = 2 * 60_000;
+
+export function _shouldRecordFleetObservation(
+  run: Pick<ScheduledWorkItemRun, 'scheduledFor' | 'triggerKind'>,
+  now: Date = new Date(),
+): boolean {
+  if (run.triggerKind !== 'scheduled') return true;
+  const scheduledForMs = Date.parse(run.scheduledFor);
+  if (!Number.isFinite(scheduledForMs)) return false;
+  return now.getTime() - scheduledForMs <= _FLEET_OBSERVATION_MAX_SCHEDULE_LATENESS_MS;
+}
+
 export async function handleMorningInboxDigest(
   schedule: ScheduledWorkItem,
 ): Promise<ScheduledWorkRunOutcome> {
@@ -136,14 +148,22 @@ export async function handleRuntimeReadiness(
   run: ScheduledWorkItemRun,
 ): Promise<ScheduledWorkRunOutcome> {
   const [nodes, services] = await Promise.all([listExecutorNodes(), listServiceInstances()]);
-  const { tickNamedFleetWatch } = await import('../fleet-inventory.js');
-  const fleetTick = await tickNamedFleetWatch(nodes, {
-    tenantId: schedule.tenantId,
-    projectId: schedule.projectId,
-    scheduleId: schedule.id,
-    runId: run.id,
-  });
+  const { evaluateNamedFleet, tickNamedFleetWatch } = await import('../fleet-inventory.js');
+  const recordFleetObservation = _shouldRecordFleetObservation(run);
+  const fleetTick = recordFleetObservation
+    ? await tickNamedFleetWatch(nodes, {
+      tenantId: schedule.tenantId,
+      projectId: schedule.projectId,
+      scheduleId: schedule.id,
+      runId: run.id,
+    })
+    : {
+      snapshot: evaluateNamedFleet(nodes),
+      emissions: [],
+      alertedNodeIds: [],
+    };
   const fleetSnap = fleetTick.snapshot;
+  const fleetObservation = recordFleetObservation ? 'recorded' : 'skipped_late_run';
   const unavailableServices = services.filter((service) => {
     if (service.serviceKind !== 'gateway') return false;
     if (service.status === 'online') return service.readiness?.ready !== true;
@@ -160,6 +180,7 @@ export async function handleRuntimeReadiness(
         services: services.length,
         candidates: fleetSnap.healthy.length,
         unavailable: 0,
+        fleetObservation,
         fleetAlertsEmitted: fleetTick.alertedNodeIds,
       },
     };
@@ -177,6 +198,7 @@ export async function handleRuntimeReadiness(
       missingFleet: fleetSnap.missing,
       unavailableNodes: [...fleetSnap.offline, ...fleetSnap.missing],
       unavailableServices: unavailableServices.map((service) => service.serviceId),
+      fleetObservation,
       fleetAlertsEmitted: fleetTick.alertedNodeIds,
       fleetEmissions: fleetTick.emissions.map((e) => ({
         nodeId: e.nodeId,

@@ -215,44 +215,52 @@ export async function routeMemoryRetrieval(options: RetrievalOptions): Promise<R
 
 /**
  * Augment a base system prompt with memory retrieval results.
- * Appends active rules and relevant observations to the prompt.
+ *
+ * Default is **policy-only** (Hermes/pi-hermes-memory style): inject only
+ * active procedural rules. Observation archives are on-demand via
+ * `includeObservations: true` or the explicit `/memory/retrieve` path — not
+ * dumped into every chat turn.
  */
 export function augmentSystemPrompt(
   basePrompt: string,
   retrieval: RetrievalResult,
+  options?: { includeObservations?: boolean },
 ): AugmentPromptResult {
   const sections: string[] = [basePrompt];
+  const includeObservations = options?.includeObservations === true;
 
-  // Active procedural rules
+  // Active procedural rules (policy layer — always allowed when present)
   if (retrieval.activeRules.length > 0) {
     const rulesBlock = formatRulesForPrompt(retrieval.activeRules);
     if (rulesBlock) sections.push('', rulesBlock);
   }
 
-  // Relevant memory observations by layer
-  const layerLabels: Record<MemoryLayer, string> = {
-    working: 'Working Memory (current task context)',
-    episodic: 'Episodic Memory (past session experiences)',
-    semantic: 'Semantic Memory (facts and knowledge)',
-    procedural: 'Procedural Memory (learned rules)',
-    self_reflective: 'Self-Reflective Memory (agent self-knowledge)',
-  };
+  // Observation archives only when explicitly requested
+  if (includeObservations) {
+    const layerLabels: Record<MemoryLayer, string> = {
+      working: 'Working Memory (current task context)',
+      episodic: 'Episodic Memory (past session experiences)',
+      semantic: 'Semantic Memory (facts and knowledge)',
+      procedural: 'Procedural Memory (learned rules)',
+      self_reflective: 'Self-Reflective Memory (agent self-knowledge)',
+    };
 
-  for (const layer of retrieval.queriedLayers) {
-    const obs = retrieval.observationsByLayer[layer];
-    if (!obs || obs.length === 0) continue;
+    for (const layer of retrieval.queriedLayers) {
+      const obs = retrieval.observationsByLayer[layer];
+      if (!obs || obs.length === 0) continue;
 
-    const lines: string[] = [
-      '',
-      `## ${layerLabels[layer]}`,
-      '',
-    ];
+      const lines: string[] = [
+        '',
+        `## ${layerLabels[layer]}`,
+        '',
+      ];
 
-    for (const o of obs) {
-      lines.push(`- **${o.title}**: ${o.summary || o.content.slice(0, 200)}`);
+      for (const o of obs) {
+        lines.push(`- **${o.title}**: ${o.summary || o.content.slice(0, 200)}`);
+      }
+
+      sections.push(lines.join('\n'));
     }
-
-    sections.push(lines.join('\n'));
   }
 
   return {

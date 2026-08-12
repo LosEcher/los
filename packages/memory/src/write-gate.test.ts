@@ -30,6 +30,14 @@ describe('validateMemoryWrite', () => {
     assert.deepEqual(validateMemoryWrite(valid), []);
   });
 
+  it('rejects secret-like content', () => {
+    const v = validateMemoryWrite({
+      ...valid,
+      content: 'token sk-abcdefghijklmnopqrstuvwxyz0123456789',
+    });
+    assert.ok(v.some(x => x.field === 'content' && x.message.includes('secret')));
+  });
+
   it('rejects missing/empty title', () => {
     const v = validateMemoryWrite({ ...valid, title: '' });
     assert.ok(v.some(x => x.field === 'title'));

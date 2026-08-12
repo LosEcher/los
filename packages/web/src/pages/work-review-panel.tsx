@@ -5,12 +5,26 @@ import type { WorkItemProjection } from '../api/index.js';
 import { getJson, postJson } from '../api/index.js';
 import { buildSideBySideRows, collapseLargeHunks, parseDiffFileLines } from '../diff-parse.mjs';
 import type { DiffLine, ParsedDiffFile } from '../diff-parse.mjs';
+import {
+  ReviewFindingsList,
+  composeOperatorReason,
+  createReviewFinding,
+  type ReviewFinding,
+} from '../plan-annotate-ui.js';
 import { formatDate } from '../ui.js';
-import { tt, useI18n } from '../i18n';
+import { useI18n } from '../i18n';
 
 type DiffViewMode = 'unified' | 'side';
 
-function WorkspaceDiff({ workspaceId, onFilesLoaded }: { workspaceId: string; onFilesLoaded?: (paths: string[]) => void }) {
+function WorkspaceDiff({
+  workspaceId,
+  onFilesLoaded,
+  onAddFinding,
+}: {
+  workspaceId: string;
+  onFilesLoaded?: (paths: string[]) => void;
+  onAddFinding?: (finding: ReviewFinding) => void;
+}) {
   const { t } = useI18n();
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,18 +82,39 @@ function WorkspaceDiff({ workspaceId, onFilesLoaded }: { workspaceId: string; on
           {showAll ? t('work.review.collapseAll') : t('work.review.expandAll')}
         </button>
       </div>
+      {onAddFinding ? <p className="diff-pin-hint">{t('work.review.pinHint')}</p> : null}
       <div className="diff-files">
         {files.map((file, fi) => (
-          <DiffFile key={`${file.path}-${fi}`} file={file} view={view} expanded={showAll} />
+          <DiffFile
+            key={`${file.path}-${fi}`}
+            file={file}
+            view={view}
+            expanded={showAll}
+            onPinLine={onAddFinding ? (line, text) => {
+              const note = window.prompt(t('work.review.pinNotePrompt'), text.slice(0, 120));
+              if (!note?.trim()) return;
+              onAddFinding(createReviewFinding({
+                path: file.path,
+                line,
+                severity: 'warning',
+                note: note.trim(),
+              }));
+            } : undefined}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-interface DiffFileProps { file: ParsedDiffFile; view: DiffViewMode; expanded: boolean }
+interface DiffFileProps {
+  file: ParsedDiffFile;
+  view: DiffViewMode;
+  expanded: boolean;
+  onPinLine?: (line: number | null, text: string) => void;
+}
 
-function DiffFile({ file, view, expanded }: DiffFileProps) {
+function DiffFile({ file, view, expanded, onPinLine }: DiffFileProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(expanded);
   const [showAllLines, setShowAllLines] = useState(false);
@@ -100,7 +135,7 @@ function DiffFile({ file, view, expanded }: DiffFileProps) {
       ) : view === 'side' ? (
         <SideBySideDiff lines={lines} />
       ) : (
-        <UnifiedDiff lines={lines} />
+        <UnifiedDiff lines={lines} onPinLine={onPinLine} />
       )}
       {collapsed ? (
         <button className="ghost-btn diff-more-btn" type="button" onClick={() => setShowAllLines(true)}>
@@ -113,10 +148,23 @@ function DiffFile({ file, view, expanded }: DiffFileProps) {
 
 const DIFF_PREVIEW_LIMIT = 60;
 
-function UnifiedDiff({ lines }: { lines: DiffLine[] }) {
+function UnifiedDiff({
+  lines,
+  onPinLine,
+}: {
+  lines: DiffLine[];
+  onPinLine?: (line: number | null, text: string) => void;
+}) {
   return (
     <pre className="diff-content">{lines.map((line, i) => (
-      <span key={i} className={`diff-line-row ${lineClass(line)}`}>
+      <span
+        key={i}
+        className={`diff-line-row ${lineClass(line)}${onPinLine && (line.type === 'add' || line.type === 'del') ? ' pinable' : ''}`}
+        onClick={onPinLine && (line.type === 'add' || line.type === 'del')
+          ? () => onPinLine(line.newLine ?? line.oldLine ?? null, line.text)
+          : undefined}
+        title={onPinLine && (line.type === 'add' || line.type === 'del') ? 'Pin finding' : undefined}
+      >
         <span className="diff-line-num">{line.oldLine ?? ''}</span>
         <span className="diff-line-num">{line.newLine ?? ''}</span>
         <span className="diff-line-text">{line.text}{'\n'}</span>
@@ -179,12 +227,14 @@ export function WorkReviewPanel({
   const { t } = useI18n();
   const [reason, setReason] = useState('');
   const [dirtyPaths, setDirtyPaths] = useState<string[]>([]);
+  const [findings, setFindings] = useState<ReviewFinding[]>([]);
   const canDecide = Boolean(item.availableActions.reviewResult);
   const collectDiffFiles = (paths: string[]) => {
     setDirtyPaths(current => Array.from(new Set([...current, ...paths])));
   };
   const decide = (decision: 'accepted' | 'revision_requested') => {
-    onDecision(decision, reason, decision === 'accepted' ? dirtyPaths : []);
+    const composed = composeOperatorReason(reason, [], findings);
+    onDecision(decision, composed, decision === 'accepted' ? dirtyPaths : []);
   };
   return (
     <section className="work-review-panel">
@@ -200,8 +250,20 @@ export function WorkReviewPanel({
       </div>
       <div className="workspace-evidence">
         {item.changes.workspaces.length === 0 ? <p className="review-empty">{t('work.review.noWorkspace')}</p> : item.changes.workspaces.map(workspace => (
-          <WorkspaceEvidence key={workspace.workspaceId} workspace={workspace} onDiffFiles={collectDiffFiles} />
+          <WorkspaceEvidence
+            key={workspace.workspaceId}
+            workspace={workspace}
+            onDiffFiles={collectDiffFiles}
+            onAddFinding={finding => setFindings(current => [...current, finding])}
+          />
         ))}
+      </div>
+      <div className="review-findings-block">
+        <h4>{t('work.review.findingsTitle')}</h4>
+        <ReviewFindingsList
+          findings={findings}
+          onRemove={id => setFindings(current => current.filter(item => item.id !== id))}
+        />
       </div>
       {item.changes.resultReview ? (
         <div className="result-review-record"><strong>{item.changes.resultReview.decision.replaceAll('_', ' ')}</strong><span>{item.changes.resultReview.reason}</span><small>{item.changes.resultReview.actor} · {formatDate(item.changes.resultReview.decidedAt)}</small></div>
@@ -210,7 +272,7 @@ export function WorkReviewPanel({
         <div className="result-review-actions">
           <label><span>{t('work.review.decisionReason')}</span><input value={reason} onChange={event => setReason(event.target.value)} placeholder={t('work.review.decisionPlaceholder')} /></label>
           <div>
-            <button className="ghost-btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('revision_requested')}><RotateCcw size={14} /> {t('work.review.requestRevision')}</button>
+            <button className="ghost-btn" type="button" disabled={pending || (!reason.trim() && findings.length === 0)} onClick={() => decide('revision_requested')}><RotateCcw size={14} /> {t('work.review.requestRevision')}</button>
             <button className="btn" type="button" disabled={pending || !reason.trim()} onClick={() => decide('accepted')}><CheckCircle2 size={14} /> {t('work.review.acceptResult')}</button>
           </div>
         </div>
@@ -223,9 +285,11 @@ export function WorkReviewPanel({
 function WorkspaceEvidence({
   workspace,
   onDiffFiles,
+  onAddFinding,
 }: {
   workspace: WorkItemProjection['changes']['workspaces'][number];
   onDiffFiles: (paths: string[]) => void;
+  onAddFinding?: (finding: ReviewFinding) => void;
 }) {
   const { t } = useI18n();
   const [backupState, setBackupState] = useState<'idle' | 'pending' | 'created' | 'error'>('idle');
@@ -254,7 +318,11 @@ function WorkspaceEvidence({
         </button>
       )}
       {backupState === 'error' && backupError ? <p className="diff-error">{t('work.review.backupFailed', { error: backupError })}</p> : null}
-      <WorkspaceDiff workspaceId={workspace.workspaceId} onFilesLoaded={onDiffFiles} />
+      <WorkspaceDiff
+        workspaceId={workspace.workspaceId}
+        onFilesLoaded={onDiffFiles}
+        onAddFinding={onAddFinding}
+      />
     </article>
   );
 }

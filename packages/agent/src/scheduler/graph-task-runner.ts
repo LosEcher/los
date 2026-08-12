@@ -7,6 +7,16 @@ import {
   type AgentTaskRecord,
 } from '../agent-task-graph.js';
 import { _LeaseLostError } from '../execution-store.js';
+import {
+  buildCoordinatorWakeEvent,
+  canDispatchReworkWorker,
+  formatFeatureCardForReviewer,
+  formatFeatureCardForWorker,
+  validateFeatureCard,
+  type AttemptIdentity,
+  type FeatureCard,
+  type ReviewFinding,
+} from '../feature-card.js';
 import { recordSchedulerDecision } from '../scheduler-decision-ledger.js';
 import { workspaceRootForTask } from '../managed-workspaces.js';
 import { sendWorkerMessage } from '../worker-messages.js';
@@ -35,12 +45,41 @@ export async function runClaimedAgentGraphTask(
   const attempt = attempts.length + 1;
   const attemptId = `${task.id}-attempt-${attempt}-${randomUUID()}`;
   const taskRunId = `task-${randomUUID()}`;
-  const sessionId = task.sessionId ?? input.sessionId;
+  // Fresh session per attempt for rework isolation unless explicitly pinned.
+  const sessionId = normalizeOptionalString(task.metadata?.pinSessionId as string | undefined)
+    ?? (attempt > 1 ? `session-${randomUUID()}` : (task.sessionId ?? input.sessionId));
   const runSpecId = task.runSpecId ?? input.runSpecId;
   const nodeId = normalizeOptionalString(input.nodeId)
     ?? normalizeOptionalString(input.executor?.nodeId)
     ?? 'gateway-local';
   const leaseFence = { nodeId, leaseVersion: task.leaseVersion };
+
+  const reworkGate = enforceReworkIdentity(task, {
+    attemptId,
+    taskRunId,
+    sessionId,
+    role: String(task.role) === 'verifier' ? 'reviewer' : 'worker',
+  });
+  if (!reworkGate.ok) {
+    await updateClaimedAgentTaskStatus(task, nodeId, 'failed', {
+      attemptId,
+      error: `rework_identity_rejected:${reworkGate.reason}`,
+    });
+    await createAgentTaskAttempt({
+      id: attemptId,
+      graphId: task.graphId,
+      taskId: task.id,
+      attempt,
+      status: 'failed',
+      nodeId,
+      error: `rework_identity_rejected:${reworkGate.reason}`,
+    });
+    await emitCoordinatorWake(task, attemptId, 'worker_finished', {
+      error: `rework_identity_rejected:${reworkGate.reason}`,
+    });
+    return { taskId: task.id, attemptId, status: 'failed' };
+  }
+
   let selection: GraphTaskProviderModelSelection;
 
   try {
@@ -124,15 +163,23 @@ export async function runClaimedAgentGraphTask(
   });
 
   try {
-    const prompt = input.resolveTaskPrompt
-      ? await input.resolveTaskPrompt(task, completedStages)
-      : task.prompt ?? task.title;
+    const prompt = await resolveGraphTaskPrompt(task, input, completedStages);
     // The worker inherits the parent run spec contract, whose goal covers the
     // whole graph. Override the self-check contract so the post-execution
     // gate judges this worker against its own task prompt (see
     // ScheduledAgentTaskInput.selfCheckContract).
+    const featureCard = readFeatureCard(task.metadata);
+    const workerSurfaces = featureCard?.editableSurfaces
+      ?? (Array.isArray(task.metadata?.editableSurfaces)
+        ? task.metadata.editableSurfaces as string[]
+        : undefined);
     const workerSelfCheckContract = input.runContract
-      ? { ...input.runContract, goal: prompt, stopConditions: [] }
+      ? {
+          ...input.runContract,
+          goal: featureCard?.goal ?? prompt,
+          stopConditions: [],
+          ...(workerSurfaces ? { editableSurfaces: workerSurfaces } : {}),
+        }
       : undefined;
     const result = await runScheduledAgentTask({
       ...input,
@@ -271,12 +318,9 @@ export async function runClaimedAgentGraphTask(
       outputSummary,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
-    await sendWorkerMessage({
-      dispatchId: attemptId,
-      taskId: task.id,
-      type: 'worker_done',
-      payload: { summary: outputSummary },
-    }).catch(() => undefined);
+    await emitCoordinatorWake(task, attemptId, String(task.role) === 'verifier' ? 'reviewer_accepted' : 'worker_finished', {
+      summary: outputSummary,
+    });
     return {
       taskId: task.id,
       taskRunId,
@@ -313,14 +357,76 @@ export async function runClaimedAgentGraphTask(
       error: message,
       toolCallStateIds: await listToolCallStateIdsForTaskRun(taskRunId),
     });
-    await sendWorkerMessage({
-      dispatchId: attemptId,
-      taskId: task.id,
-      type: 'worker_done',
-      payload: { error: message },
-    }).catch(() => undefined);
+    await emitCoordinatorWake(task, attemptId, String(task.role) === 'verifier' ? 'reviewer_rejected' : 'worker_finished', {
+      error: message,
+    });
     return { taskId: task.id, taskRunId, attemptId, status: 'failed' };
   }
+}
+
+function readFeatureCard(metadata: Record<string, unknown> | undefined): FeatureCard | undefined {
+  const raw = metadata?.featureCard;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const card = raw as FeatureCard;
+  return validateFeatureCard(card).length === 0 ? card : undefined;
+}
+
+function enforceReworkIdentity(
+  task: AgentTaskRecord,
+  candidate: AttemptIdentity,
+): { ok: true } | { ok: false; reason: string } {
+  const writer = task.metadata?.reworkFromWriter;
+  if (!writer || typeof writer !== 'object') return { ok: true };
+  const rejected = writer as AttemptIdentity;
+  const decision = canDispatchReworkWorker(rejected, candidate);
+  if (decision.ok) return { ok: true };
+  return { ok: false, reason: decision.reason };
+}
+
+async function resolveGraphTaskPrompt(
+  task: AgentTaskRecord,
+  input: RunAgentTaskGraphSerialInput,
+  completedStages: ReadonlyArray<NonNullable<RunAgentTaskGraphSerialResult['executedTasks'][number]['stageOutput']>>,
+): Promise<string> {
+  if (input.resolveTaskPrompt) {
+    return await input.resolveTaskPrompt(task, completedStages);
+  }
+  const card = readFeatureCard(task.metadata);
+  if (card) {
+    if (String(task.role) === 'verifier') {
+      const findings = Array.isArray(task.metadata?.reviewFindings)
+        ? task.metadata.reviewFindings as ReviewFinding[]
+        : [];
+      return formatFeatureCardForReviewer(card, findings);
+    }
+    return formatFeatureCardForWorker(card);
+  }
+  return task.prompt ?? task.title;
+}
+
+async function emitCoordinatorWake(
+  task: AgentTaskRecord,
+  attemptId: string,
+  kind: 'worker_finished' | 'reviewer_accepted' | 'reviewer_rejected',
+  payload: { summary?: string; error?: string },
+): Promise<void> {
+  const wake = buildCoordinatorWakeEvent({
+    kind,
+    graphId: task.graphId,
+    taskId: task.id,
+    attemptId,
+  });
+  await sendWorkerMessage({
+    dispatchId: attemptId,
+    taskId: task.id,
+    type: 'worker_done',
+    payload: {
+      ...payload,
+      metadata: {
+        coordinatorWake: wake,
+      },
+    },
+  }).catch(() => undefined);
 }
 
 async function updateClaimedAgentTaskStatus(

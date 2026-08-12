@@ -44,7 +44,12 @@ Loaded first from `main.tsx` before `styles.css`.
 | Panel | `.panel`, `.panel-head` — card chrome for page sections |
 | Buttons | `.btn` primary, `.ghost-btn` secondary, `.tiny-btn` compact, `.btn-danger` |
 | Chat timeline | `.chat-timeline` flex column; scroll middle; sticky footer actions |
-| Tool row | `.tool-card` inside bubble; no top-of-page approval dump |
+| Thinking | `.ai-thinking` expandable reasoning inside turn (Beautiful UI) |
+| Tool chips | `.tool-chip` compact default; expand for args/result |
+| Task rows | `.task-row-list` / `.task-row` live status strip inside turn |
+| HITL card | `.hitl-card` + `.hitl-option-*` typed options (operator steer) |
+| Stream elapsed | `.ai-stream-elapsed` while assistant turn streams |
+| Tool row | legacy `.tool-card` aliases remain; prefer `.tool-chip` |
 | Inbox | `.daily-page` + `.attention-row` + `.inbox-decision` + single `.inbox-primary-cta` |
 | Work | `.work-split` list/detail; `.outcome-card`; `.work-create` two-tier form |
 | Nav active | `.nav-item[data-active]` uses `--accent-muted` + left accent bar |
