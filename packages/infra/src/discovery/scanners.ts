@@ -321,6 +321,18 @@ export function scanEnvKeys(): DiscoveredProvider[] {
 }
 
 // ── Local Endpoints ─────────────────────────────────────
+//
+// Default OFF network probes for ollama/lmstudio/vllm/llamacpp/localai.
+// Historical storm: discoverAll/loadConfig re-probed five dead 127.0.0.1 ports
+// on every call → Surge connect_failure floods (see network-observe surge reports).
+// Opt-in: LOS_ENABLE_LOCAL_ENDPOINT_PROBE=1 (still TTL-cached).
+
+const LOCAL_ENDPOINT_PROBE_TTL_MS = Math.max(
+  60_000,
+  Number(process.env.LOS_LOCAL_ENDPOINT_PROBE_TTL_MS ?? 600_000) || 600_000,
+);
+
+let localEndpointCache: { at: number; results: DiscoveredProvider[] } | null = null;
 
 export async function checkEndpoint(url: string, timeout = 2000): Promise<boolean> {
   try {
@@ -332,7 +344,28 @@ export async function checkEndpoint(url: string, timeout = 2000): Promise<boolea
   } catch { return false; }
 }
 
+/** True when local model port probing is explicitly enabled. */
+function isLocalEndpointProbeEnabled(): boolean {
+  const raw = process.env.LOS_ENABLE_LOCAL_ENDPOINT_PROBE;
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+/** Test/ops helper — drop cached local endpoint scan results. */
+function clearLocalEndpointProbeCache(): void {
+  localEndpointCache = null;
+}
+
 export async function scanLocalEndpoints(): Promise<DiscoveredProvider[]> {
+  // Kill-switch default: do not touch unlistening loopback ports.
+  if (!isLocalEndpointProbeEnabled()) {
+    return [];
+  }
+
+  const now = Date.now();
+  if (localEndpointCache && now - localEndpointCache.at < LOCAL_ENDPOINT_PROBE_TTL_MS) {
+    return localEndpointCache.results.map(r => ({ ...r }));
+  }
+
   let endpoints: Array<{ name: string; url: string; baseUrl: string; model: string }>;
   try {
     const config = getConfig();
@@ -365,6 +398,7 @@ export async function scanLocalEndpoints(): Promise<DiscoveredProvider[]> {
       });
     }
   }
+  localEndpointCache = { at: now, results: results.map(r => ({ ...r })) };
   return results;
 }
 
