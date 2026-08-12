@@ -70,6 +70,14 @@ import { loadConfig } from '@los/infra/config';
 import { closeDb, initDb } from '@los/infra/db';
 import { ensureWxPusherCallbackClaimStore } from './wxpusher-callback-store.js';
 import { createWxPusherInboundHandler } from './wxpusher-inbound-handler.js';
+import { OperatorAlertDeduper } from './operator-alert-dedupe.js';
+import { formatAlertForWeclaw } from './format-alert-weclaw.js';
+import {
+  classifyCompanionSessionEvent,
+  formatWorkerAskReason,
+  shouldDeliverToBoundSession,
+} from '@los/agent/operator-companion-events';
+import { clearBoundSession, loadBoundSession, saveBoundSession } from './session-bind.js';
 
 const runtimeConfig = await loadConfig();
 
@@ -244,67 +252,13 @@ async function deliverAlert(alert: OperatorAlert): Promise<void> {
   }
 }
 
-function formatAlertForWeclaw(alert: OperatorAlert): string {
-  // Pre-formatted daily digest body — send as-is (already includes title + rows).
-  if (alert.type === 'ops.daily_digest' && alert.reason?.trim()) {
-    return alert.reason.trim();
-  }
-  if (alert.type === 'ops.fleet_attention' && alert.reason?.trim()) {
-    return alert.reason.trim();
-  }
-
-  const kind = alert.kind ?? 'needs_decision';
-  const icon = alert.severity === 'critical' ? '🔴' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
-  const sid = alert.sessionId;
-  const runId = alert.runSpecId ?? alert.taskRunId;
-  const title = alertTitle(alert);
-
-  const lines: string[] = [`${icon} ${title}`];
-  if (alert.toolName) lines.push(`操作: ${alert.toolName}`);
-  if (alert.reason) lines.push(`原因: ${alert.reason}`);
-  if (alert.warnings?.length) {
-    for (const w of alert.warnings.slice(0, 3)) lines.push(`注意: ${w}`);
-  }
-  if (alert.flaggedFiles?.length) {
-    lines.push(`文件: ${alert.flaggedFiles.slice(0, 3).join(', ')}`);
-  }
-  if (kind === 'already_denied') {
-    lines.push('说明: 策略已自动拒绝，不会执行。');
-  }
-  if (kind === 'info') {
-    lines.push('说明: 任务已继续执行，本条无需回复。');
-  }
-  lines.push('');
-  const isGovernance = String(alert.type ?? '').startsWith('governance.');
-  if (isGovernance) {
-    lines.push('说明: 打开 Web → Ops → 治理 查看并操作（暂停/恢复/立即运行）。');
-  } else {
-    lines.push(`Session: ${sid}`);
-    if (runId) lines.push(`Run: ${runId}`);
-  }
-  lines.push('');
-  // Approval commands only for actionable run alerts; informational notices must
-  // not advertise #approve-phase/#verify-run. Governance uses the Web ops page.
-  if (kind === 'needs_decision' && runId && !isGovernance) {
-    lines.push('【计划审批】每次只发一行（不要连粘）:');
-    lines.push(`#approve-phase ${runId}`);
-    lines.push(`#verify-run ${runId}`);
-    lines.push('');
-    lines.push('说明: #approve-phase 只批计划；#verify-run 跑 requiredChecks（空则空跑 succeeded）。');
-  }
-  if (!isGovernance) {
-    lines.push('【会话级】每次只发一行:');
-    lines.push(`#status ${sid}`);
-  }
-  return lines.join('\n');
-}
-
 // ── SSE event consumer ─────────────────────────────────────────────
 
-const recentAlerts = new Map<string, number>();
+const alertDeduper = new OperatorAlertDeduper({ semanticTtlMs: ALERT_DEDUP_MS });
 let sseAbort: AbortController | null = null;
 /** Skip historical catch-up after connect; only live events after operator.ready. */
 let sseLive = false;
+let lastSseEventId = 0;
 
 async function connectSSE(): Promise<void> {
   if (sseAbort) sseAbort.abort();
@@ -312,8 +266,8 @@ async function connectSSE(): Promise<void> {
   sseLive = false;
 
   try {
-    // tail=1 starts from latest event id (no historical flood to WeChat).
-    const url = `${LOS_GATEWAY_URL}/operator/events/live?tail=1`;
+    const cursor = lastSseEventId > 0 ? `since=${lastSseEventId}` : 'tail=1';
+    const url = `${LOS_GATEWAY_URL}/operator/events/live?${cursor}`;
     console.log(`[events] SSE connecting: ${url}`);
 
     const res = await fetch(url, {
@@ -330,6 +284,7 @@ async function connectSSE(): Promise<void> {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let currentId = '';
     let currentEvent = '';
     let currentData = '';
 
@@ -342,17 +297,27 @@ async function connectSSE(): Promise<void> {
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
-        if (line.startsWith('event: ')) {
+        if (line.startsWith('id: ')) {
+          currentId = line.slice(4).trim();
+        } else if (line.startsWith('event: ')) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith('data: ')) {
           currentData = line.slice(6).trim();
         } else if (line === '' && currentData) {
           if (currentEvent === 'operator.ready') {
+            const ready = JSON.parse(currentData) as { lastEventId?: unknown };
+            const readyId = Number(ready.lastEventId);
+            if (Number.isSafeInteger(readyId) && readyId > lastSseEventId) lastSseEventId = readyId;
             sseLive = true;
             console.log('[events] SSE live — listening for new operator attention');
           } else if (sseLive) {
             await handleSSEEvent(currentEvent, currentData);
+            const deliveredId = Number(currentId);
+            if (Number.isSafeInteger(deliveredId) && deliveredId > lastSseEventId) {
+              lastSseEventId = deliveredId;
+            }
           }
+          currentId = '';
           currentEvent = '';
           currentData = '';
         }
@@ -371,33 +336,31 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
     const parsed = JSON.parse(data);
     if (eventType !== 'session.event') return;
 
-    const payload = parsed.payload ?? {};
-    const isGovernanceEvent =
-      parsed.type === 'governance.job.escalated'
-      || parsed.type === 'governance.job.progress'
-      || parsed.type === 'governance.bootstrap.findings'
-      || parsed.type === 'governance.sweep.digest';
+    const payload = (parsed.payload ?? {}) as Record<string, unknown>;
+    const sessionId = String(parsed.sessionId ?? '');
+    const classification = classifyCompanionSessionEvent({
+      type: parsed.type,
+      sessionId,
+      toolName: parsed.toolName,
+      payload,
+    });
+    if (!classification.shouldNotify) return;
+
+    const bound = loadBoundSession();
+    if (!shouldDeliverToBoundSession(bound?.sessionId, sessionId || undefined, {
+      allowGlobalOps: true,
+      eventType: String(parsed.type ?? ''),
+    })) {
+      console.log(`[events] skip unbound session type=${parsed.type} session=${sessionId} bound=${bound?.sessionId ?? '-'}`);
+      return;
+    }
+
+    console.log(`[events] attention type=${parsed.type} session=${sessionId} kind=${classification.kind}`);
+
+    const isGovernanceEvent = String(parsed.type ?? '').startsWith('governance.');
     const isDailyDigest = parsed.type === 'ops.daily_digest';
     const isFleetAttention = parsed.type === 'ops.fleet_attention';
 
-    const isOperatorAttention =
-      parsed.type === 'tool.warned' ||
-      parsed.type === 'tool.denied' ||
-      parsed.type === 'operator_attention' ||
-      parsed.type === 'run.operator_attention_required' ||
-      parsed.type === 'run.recovery_required' ||
-      parsed.type === 'scheduled_work.denied' ||
-      (parsed.type === 'execution:transition' && payload.to === 'operator_attention') ||
-      parsed.type === 'session.blocked' ||
-      parsed.type === 'session.error' ||
-      isGovernanceEvent ||
-      isDailyDigest ||
-      isFleetAttention;
-
-    if (!isOperatorAttention) return;
-    console.log(`[events] attention type=${parsed.type} session=${parsed.sessionId ?? ''}`);
-
-    const sessionId = parsed.sessionId ?? '';
     // Governance digests dedupe by jobType so hourly jobs don't spam.
     // Daily digest dedupes by calendar day so re-pushes within the window collapse.
     // Fleet attention dedupes by node+day (DB also enforces 30m cooldown).
@@ -407,17 +370,11 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
         ? `ops:fleet:${String(payload.nodeId ?? sessionId)}:${String(payload.day ?? '')}`
       : isGovernanceEvent
         ? `gov:${parsed.type}:${String(payload.jobType ?? 'sweep')}`
+        : classification.dedupeSuffix
+          ? `${sessionId}:${parsed.type}:${classification.dedupeSuffix}`
         : `${sessionId}:${parsed.type}`;
 
-    if (recentAlerts.get(dedupKey) && Date.now() - recentAlerts.get(dedupKey)! < ALERT_DEDUP_MS) return;
-    recentAlerts.set(dedupKey, Date.now());
-
-    // Cleanup old entries
-    if (recentAlerts.size > 1000) {
-      for (const [k, ts] of recentAlerts) {
-        if (Date.now() - ts > ALERT_DEDUP_MS * 2) recentAlerts.delete(k);
-      }
-    }
+    if (alertDeduper.shouldSuppress({ eventId: parsed.id, fallbackKey: dedupKey })) return;
 
     const runSpecId =
       (typeof payload.runSpecId === 'string' && payload.runSpecId)
@@ -431,56 +388,33 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       || (typeof payload.task_run_id === 'string' && payload.task_run_id)
       || undefined;
 
-    const isDenied = parsed.type === 'tool.denied' || payload.allowed === false;
-    // Title is decided by the action semantics; severity only sets the color.
-    const kind = isDenied
-      ? 'already_denied' as const
-      : (parsed.type === 'run.operator_attention_required'
-        || parsed.type === 'operator_attention'
-        || parsed.type === 'session.blocked'
-        || parsed.type === 'run.recovery_required'
-        || parsed.type === 'governance.job.escalated'
-        || payload.requiresDecision === true)
-        ? 'needs_decision' as const
-        : 'info' as const;
-    const title = isDenied
-      ? '工具已拒绝'
-      : typeof payload.title === 'string' && payload.title.trim()
-        ? payload.title.trim()
-        : kind === 'needs_decision'
-          ? (isGovernanceEvent ? '治理需要处理' : '等待你审批')
-          : parsed.type === 'tool.warned'
-            ? '风险提示｜任务已继续（无需回复）'
-            : isGovernanceEvent
-              ? '治理进度'
-              : '通知';
-
-    // Dedup tool.denied more aggressively (same session+tool within window)
     const toolName = parsed.toolName ?? payload.tool_name;
+    const isDenied = classification.kind === 'already_denied';
     const denyKey = isDenied ? `${sessionId}:denied:${toolName ?? 'tool'}` : dedupKey;
-    if (isDenied && recentAlerts.get(denyKey) && Date.now() - recentAlerts.get(denyKey)! < ALERT_DEDUP_MS) return;
-    if (isDenied) recentAlerts.set(denyKey, Date.now());
+    if (isDenied && alertDeduper.shouldSuppress({ fallbackKey: denyKey })) return;
 
     const govDetail = typeof payload.detail === 'string' ? payload.detail : undefined;
     const govJob = typeof payload.jobType === 'string' ? payload.jobType : undefined;
+    const askReason = parsed.type === 'worker.ask' ? formatWorkerAskReason(payload) : undefined;
+    const kind = classification.kind === 'success' ? 'info' as const : classification.kind;
     const alert: OperatorAlert = {
       sessionId,
       type: parsed.type,
-      toolName,
-      reason: govDetail
-        ?? payload.reason
-        ?? payload.error
+      toolName: typeof toolName === 'string' ? toolName : undefined,
+      reason: askReason
+        ?? govDetail
+        ?? (typeof payload.reason === 'string' ? payload.reason : undefined)
+        ?? (typeof payload.error === 'string' ? payload.error : undefined)
         ?? (govJob ? `job=${govJob}` : undefined)
         ?? parsed.type,
-      severity: parsed.type === 'session.error' || payload.knownFailure || payload.severity === 'critical' ? 'critical' :
-                isDenied ? 'info' :
-                parsed.type === 'tool.warned' || parsed.type === 'governance.job.escalated' || payload.severity === 'warning' ? 'warning' :
-                'info',
+      severity: classification.severity,
       kind,
-      title,
-      callId: payload.callId ?? payload.call_id,
-      warnings: payload.warnings,
-      flaggedFiles: payload.flaggedFiles,
+      title: typeof payload.title === 'string' && payload.title.trim()
+        ? payload.title.trim()
+        : classification.title,
+      callId: (payload.callId ?? payload.call_id) as string | undefined,
+      warnings: payload.warnings as string[] | undefined,
+      flaggedFiles: payload.flaggedFiles as string[] | undefined,
       runSpecId,
       taskRunId,
     };
@@ -510,6 +444,31 @@ function channelToSourceKind(kind: string): 'wx-weixin' | 'wx-web' {
     case 'web':    return 'wx-web';
     default:       return 'wx-weixin';
   }
+}
+
+async function tryHandleSessionBindCommand(ch: Channel, text: string): Promise<boolean> {
+  const bind = text.trim().match(/^#bind-session\s+(?<sid>[\w-]{8,96})\s*$/i);
+  if (bind?.groups?.sid) {
+    const state = saveBoundSession(bind.groups.sid);
+    await sendTextToChannel(ch, `✅ 已绑定会话 ${state.sessionId}\n之后只推送该会话（+ 全局 ops/governance）。\n解除: #unbind-session`);
+    return true;
+  }
+  if (/^#unbind-session\s*$/i.test(text.trim())) {
+    clearBoundSession();
+    await sendTextToChannel(ch, '✅ 已解除会话绑定；恢复推送全部会话。');
+    return true;
+  }
+  if (/^#bound-session\s*$/i.test(text.trim())) {
+    const state = loadBoundSession();
+    await sendTextToChannel(
+      ch,
+      state
+        ? `当前绑定: ${state.sessionId}\nsource=${state.source} boundAt=${state.boundAt}`
+        : '当前未绑定会话（推送全部）。可用 #bind-session <sessionId>',
+    );
+    return true;
+  }
+  return false;
 }
 
 async function sendTextToChannel(ch: Channel, text: string): Promise<void> {
@@ -640,12 +599,16 @@ async function main(): Promise<void> {
   for (const ch of channels) {
     if (ch.capabilities.upCall) {
       if (ch.kind === 'weixin') {
-        ch.onMessage(wxpusherInboundHandler);
+        ch.onMessage(async (msg: UnifiedMessage) => {
+          if (await tryHandleSessionBindCommand(ch, msg.text ?? '')) return;
+          await wxpusherInboundHandler(msg);
+        });
         console.log(`  [${ch.kind}] ✅ inbound handler registered`);
         continue;
       }
       ch.onMessage(async (msg: UnifiedMessage) => {
         try {
+          if (await tryHandleSessionBindCommand(ch, msg.text ?? '')) return;
           await router.route({ sourceKind: 'wx-web', action: msg.text, sessionId: msg.metadata.sessionId ?? '' });
         } catch (err) {
           console.error(`[router] ${ch.kind} failed: ${(err as Error).message}`);
@@ -653,6 +616,13 @@ async function main(): Promise<void> {
       });
       console.log(`  [${ch.kind}] ✅ inbound handler registered`);
     }
+  }
+
+  const bound = loadBoundSession();
+  if (bound) {
+    console.log(`  Bound session: ${bound.sessionId} (source=${bound.source})`);
+  } else {
+    console.log('  Bound session: (none — all sessions pushed; use #bind-session <id>)');
   }
 
   // 3. Connect SSE

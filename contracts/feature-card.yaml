@@ -1,0 +1,105 @@
+contract: los.feature-card
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Compressed handoff object for governed multi-agent execution. A coordinator
+  produces a FeatureCard; workers receive only the card plus workspace scope;
+  reviewers receive the card, diff, and acceptance criteria without writer
+  chain-of-thought. Rework after reject must spawn a fresh worker identity.
+type: object
+sourceOfTruth:
+  - run_specs.run_contract_json
+  - agent_tasks.metadata_json.featureCard
+  - task_attempts
+relatedContracts:
+  - los.agent-task-graph
+  - los.run-spec
+  - los.work-item
+required:
+  - goal
+  - acceptance
+  - editableSurfaces
+properties:
+  goal:
+    type: string
+    minLength: 1
+    description: Single worker-facing goal (not the full product vision).
+  acceptance:
+    type: array
+    items:
+      type: string
+    minItems: 1
+    description: Observable done criteria the reviewer can check.
+  editableSurfaces:
+    type: array
+    items:
+      type: string
+    minItems: 1
+    description: Paths the worker may write; non-overlapping across concurrent workers.
+  files:
+    type: array
+    items:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        lineRange: { type: string }
+        note: { type: string }
+    description: Scout-compressed file pointers for the worker.
+  keySymbols:
+    type: array
+    items:
+      type: string
+    description: Types/functions the worker should touch first.
+  constraints:
+    type: array
+    items:
+      type: string
+  outOfScope:
+    type: array
+    items:
+      type: string
+  verificationHints:
+    type: array
+    items:
+      type: string
+    description: Commands or checks the worker/reviewer should prefer.
+  parentWorkItemId:
+    type: string
+  parentRunSpecId:
+    type: string
+  laneId:
+    type: string
+    description: Optional feature-lane / board column id.
+reviewFindings:
+  type: object
+  required: [findings]
+  properties:
+    findings:
+      type: array
+      items:
+        type: object
+        required: [path, severity, note]
+        properties:
+          path: { type: string }
+          line: { type: [integer, "null"] }
+          severity:
+            type: string
+            enum: [critical, warning, suggestion]
+          note: { type: string }
+          sourceAttemptId: { type: string }
+rules:
+  - worker prompts must not include full coordinator vision or other workers' transcripts
+  - reviewer tools default to read-only / audit mode
+  - reject with findings schedules a new worker attempt; never resumes the writer attempt or session
+  - accept and reject both wake the coordinator / operator channel
+  - FeatureCard.editableSurfaces must be a subset of the parent RunContract editableSurfaces when both are set
+wakeEvents:
+  - graph.worker.finished
+  - graph.reviewer.accepted
+  - graph.reviewer.rejected
+  - operator.coordinator.wake
+verification:
+  - pnpm --filter @los/agent test
+  - ./tools/check-contracts.sh

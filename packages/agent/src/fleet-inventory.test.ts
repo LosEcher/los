@@ -5,6 +5,7 @@ import { closeDb, initDb } from '@los/infra/db';
 import type { ExecutorNodeRecord } from './executor-nodes.js';
 import {
   DEFAULT_NAMED_FLEET_NODE_IDS,
+  _DEFAULT_FLEET_OBSERVATION_INTERVAL_MS,
   _resetFleetWatchStoreForTests,
   classifyNamedFleetNode,
   evaluateNamedFleet,
@@ -116,6 +117,7 @@ test('tickNamedFleetWatch alerts after consecutive ticks and respects cooldown',
     const first = await tickNamedFleetWatch(bad, {
       consecutiveTicks: 2,
       cooldownMs: 30 * 60_000,
+      minObservationIntervalMs: 0,
       now: t0,
       dryRun: true,
     });
@@ -127,6 +129,7 @@ test('tickNamedFleetWatch alerts after consecutive ticks and respects cooldown',
     const second = await tickNamedFleetWatch(bad, {
       consecutiveTicks: 2,
       cooldownMs: 30 * 60_000,
+      minObservationIntervalMs: 0,
       now: t1,
       dryRun: true,
     });
@@ -137,6 +140,7 @@ test('tickNamedFleetWatch alerts after consecutive ticks and respects cooldown',
     const live = await tickNamedFleetWatch(bad, {
       consecutiveTicks: 2,
       cooldownMs: 30 * 60_000,
+      minObservationIntervalMs: 0,
       now: new Date('2026-08-10T14:16:00.000Z'),
     });
     assert.equal(live.emissions[0]?.eventEmitted, true);
@@ -146,6 +150,7 @@ test('tickNamedFleetWatch alerts after consecutive ticks and respects cooldown',
     const cooled = await tickNamedFleetWatch(bad, {
       consecutiveTicks: 2,
       cooldownMs: 30 * 60_000,
+      minObservationIntervalMs: 0,
       now: new Date('2026-08-10T14:20:00.000Z'),
     });
     assert.equal(cooled.emissions[0]?.eventEmitted, false);
@@ -161,6 +166,7 @@ test('tickNamedFleetWatch alerts after consecutive ticks and respects cooldown',
     const recovered = await tickNamedFleetWatch(good, {
       consecutiveTicks: 2,
       cooldownMs: 30 * 60_000,
+      minObservationIntervalMs: 0,
       now: new Date('2026-08-10T14:21:00.000Z'),
       dryRun: true,
     });
@@ -169,6 +175,53 @@ test('tickNamedFleetWatch alerts after consecutive ticks and respects cooldown',
 
     if (prev === undefined) delete process.env.LOS_FLEET_NODE_IDS;
     else process.env.LOS_FLEET_NODE_IDS = prev;
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('tickNamedFleetWatch counts at most one unhealthy observation per interval', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  _resetFleetWatchStoreForTests();
+  try {
+    const db = (await import('@los/infra/db')).getDb();
+    await db.exec('DROP TABLE IF EXISTS fleet_watch_state');
+    _resetFleetWatchStoreForTests();
+
+    const previous = process.env.LOS_FLEET_NODE_IDS;
+    process.env.LOS_FLEET_NODE_IDS = 'mbp-executor-1';
+    const bad = [node({
+      nodeId: 'mbp-executor-1',
+      status: 'offline',
+      execution: { candidate: false, blockers: ['status:offline'], warnings: [], mode: 'agent_http_ndjson' },
+    })];
+    const firstAt = new Date('2026-08-11T11:45:00.000Z');
+
+    const first = await tickNamedFleetWatch(bad, {
+      consecutiveTicks: 2,
+      now: firstAt,
+      dryRun: true,
+    });
+    const duplicate = await tickNamedFleetWatch(bad, {
+      consecutiveTicks: 2,
+      now: new Date(firstAt.getTime() + 1_000),
+      dryRun: true,
+    });
+    const nextWindow = await tickNamedFleetWatch(bad, {
+      consecutiveTicks: 2,
+      now: new Date(firstAt.getTime() + _DEFAULT_FLEET_OBSERVATION_INTERVAL_MS),
+      dryRun: true,
+    });
+
+    assert.equal(first.emissions[0]?.consecutiveUnhealthy, 1);
+    assert.equal(duplicate.emissions[0]?.consecutiveUnhealthy, 1);
+    assert.equal(duplicate.emissions[0]?.skippedReason, 'duplicate_observation');
+    assert.equal(nextWindow.emissions[0]?.consecutiveUnhealthy, 2);
+    assert.equal(nextWindow.emissions[0]?.skippedReason, 'dry_run');
+
+    if (previous === undefined) delete process.env.LOS_FLEET_NODE_IDS;
+    else process.env.LOS_FLEET_NODE_IDS = previous;
   } finally {
     await closeDb().catch(() => undefined);
   }

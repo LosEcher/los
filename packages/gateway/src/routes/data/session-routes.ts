@@ -61,6 +61,41 @@ export function registerSessionRoutes(
     return await deps.listSessions();
   });
 
+  /** Cross-session event search (operator recall / FTS-lite). */
+  app.get('/sessions/search', async (req) => {
+    const query = req.query as {
+      q?: string;
+      sessionId?: string;
+      limit?: string;
+      includeInternal?: string;
+    };
+    const q = typeof query.q === 'string' ? query.q.trim() : '';
+    if (!q) return { count: 0, results: [], error: 'q is required' };
+    const { searchSessionEvents } = await import('@los/agent/session-events-search');
+    const ctx = getRequestContext(req);
+    const results = await searchSessionEvents({
+      query: q,
+      sessionId: typeof query.sessionId === 'string' ? query.sessionId : undefined,
+      tenantId: ctx.isOperator ? undefined : ctx.tenantId,
+      projectId: ctx.isOperator ? undefined : ctx.projectId,
+      limit: Math.min(Math.max(Number(query.limit) || 20, 1), 100),
+      includeInternal: query.includeInternal === 'true' && ctx.isOperator,
+    });
+    return {
+      count: results.length,
+      results: results.map(hit => ({
+        sessionId: hit.sessionId,
+        eventId: hit.event.id,
+        type: hit.event.type,
+        toolName: hit.event.toolName,
+        rank: hit.rank,
+        snippet: hit.snippet,
+        createdAt: hit.event.createdAt,
+        visibility: hit.event.visibility,
+      })),
+    };
+  });
+
   app.get('/sessions/:id', async (req) => {
     const { id } = req.params as { id: string };
     await deps.ensureSessionStore();

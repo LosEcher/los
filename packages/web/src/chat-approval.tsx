@@ -1,11 +1,12 @@
 /**
  * Tool approval outcomes + operator steering.
- * Status is shown inline on ToolCards in the timeline; this module provides
- * compact footer summary and the sticky OperatorSteeringBar.
+ * Status is shown inline on tool chips in the timeline; this module provides
+ * compact footer summary and the sticky OperatorSteeringBar (HITL option card).
  */
 import { useMemo, useState } from 'react';
-import { Check, X, AlertTriangle, Clock, ArrowUpRight, ChevronDown } from 'lucide-react';
+import { Check, X, AlertTriangle, Clock, ChevronDown } from 'lucide-react';
 import { postOperatorSteering } from './api/index.js';
+import { HitlQuestionCard } from './chat-ai-primitives.js';
 import { useI18n } from './i18n';
 
 export type ApprovalEvent = {
@@ -79,6 +80,39 @@ export function ApprovalSummary({ events }: { events: ApprovalEvent[] }) {
 }
 
 /** Sticky session steering — sits under the timeline, above the composer. */
+export function WorkerAskCard({
+  question,
+  options,
+  busy,
+  onAnswer,
+}: {
+  question: string;
+  options: string[];
+  busy?: boolean;
+  onAnswer: (answer: string) => void;
+}) {
+  const { t } = useI18n();
+  const optionList = options.length > 0
+    ? options.map(option => ({
+        id: option,
+        label: option,
+        tone: 'primary' as const,
+      }))
+    : [
+        { id: 'yes', label: t('chat.ai.yes'), tone: 'primary' as const },
+        { id: 'no', label: t('chat.ai.no'), tone: 'danger' as const },
+      ];
+  return (
+    <HitlQuestionCard
+      title={t('chat.ai.workerAskTitle')}
+      body={question}
+      busy={busy}
+      options={optionList}
+      onSelect={onAnswer}
+    />
+  );
+}
+
 export function OperatorSteeringBar({
   sessionId,
   disabled,
@@ -112,18 +146,25 @@ export function OperatorSteeringBar({
 
   return (
     <div className="operator-steering-bar">
-      <span className="operator-steering-label">{t('chat.operator')}</span>
-      <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('approve')}>
-        <Check size={12} /> {t('chat.approve')}
-      </button>
-      <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('deny')}>
-        <X size={12} /> {t('chat.deny')}
-      </button>
-      <button type="button" className="tiny-btn" disabled={disabled || busy} onClick={() => void steer('escalate')}>
-        <ArrowUpRight size={12} /> {t('chat.escalate')}
-      </button>
-      {status ? <span className="operator-steering-ok">{status}</span> : null}
-      {error ? <span className="operator-steering-err">{error}</span> : null}
+      <HitlQuestionCard
+        title={t('chat.operator')}
+        body={t('chat.ai.hitlSteerBody')}
+        busy={disabled || busy}
+        options={[
+          { id: 'approve', label: t('chat.approve'), tone: 'primary', description: t('chat.ai.hitlApproveHint') },
+          { id: 'deny', label: t('chat.deny'), tone: 'danger', description: t('chat.ai.hitlDenyHint') },
+          { id: 'escalate', label: t('chat.escalate'), tone: 'neutral', description: t('chat.ai.hitlEscalateHint') },
+        ]}
+        onSelect={(id) => {
+          if (id === 'approve' || id === 'deny' || id === 'escalate') void steer(id);
+        }}
+        footer={(
+          <>
+            {status ? <span className="operator-steering-ok">{status}</span> : null}
+            {error ? <span className="operator-steering-err">{error}</span> : null}
+          </>
+        )}
+      />
     </div>
   );
 }

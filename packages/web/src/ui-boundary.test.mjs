@@ -33,6 +33,7 @@ const inboxPage = readFileSync(new URL('./pages/inbox-page.tsx', import.meta.url
 const workPage = readFileSync(new URL('./pages/work-page.tsx', import.meta.url), 'utf8');
 const workCreateForm = readFileSync(new URL('./pages/work-create-form.tsx', import.meta.url), 'utf8');
 const workReviewPanel = readFileSync(new URL('./pages/work-review-panel.tsx', import.meta.url), 'utf8');
+const workPlanReview = readFileSync(new URL('./pages/work-plan-review.tsx', import.meta.url), 'utf8');
 const schedulesPage = readFileSync(new URL('./pages/schedules-page.tsx', import.meta.url), 'utf8');
 const evalsPage = readFileSync(new URL('./evals-page.tsx', import.meta.url), 'utf8');
 const dailyQualityView = readFileSync(new URL('./pages/daily-quality-view.tsx', import.meta.url), 'utf8');
@@ -193,7 +194,10 @@ test('chat timeline is append-down with tool gates inline and footer steering', 
   assert.doesNotMatch(chatPage, /className="approval-strip"/);
   assert.match(chatMessages, /className="chat-timeline"/);
   assert.match(chatMessages, /className="chat-timeline-footer"/);
-  assert.match(chatMessages, /Tools first/);
+  assert.match(chatMessages, /ToolChipList/);
+  assert.match(chatMessages, /ThinkingBlock/);
+  assert.match(chatMessages, /TaskRowList/);
+  assert.match(chatApproval, /HitlQuestionCard/);
 });
 
 test('Chat plan approval preserves the Work capability revision binding', () => {
@@ -408,7 +412,9 @@ test('Work create form is two-tier: default goal/permission/priority, advanced h
 test('Work reviews plans in the daily surface and proxies Work Item routes', () => {
   assert.match(workPage, /getJson<RuntimeInspect>\(`\/runs\/\$\{runSpecId\}\/inspect`\)/);
   assert.match(workPage, /postJson\(`\/runs\/\$\{action\.payload\.runSpecId\}\/approve`/);
-  assert.match(workPage, /reason: approvalReason\.trim\(\)/);
+  assert.match(workPage, /buildApproveReason\(/);
+  assert.match(workPage, /buildRevisePayload\(/);
+  assert.match(workPage, /PlanAnnotator|annotations=\{planAnnotations\}/);
   assert.match(workPage, /availableActions\?\.approvePlan/);
   assert.match(workPage, /\.\.\.action\.payload/);
   assert.doesNotMatch(workPage, /item\.nextAction === 'review_plan' && runSpecId/);
@@ -472,13 +478,16 @@ test('Chat provider defaults follow the effective server configuration', () => {
 
 test('Work plan review exposes structured steps, verification mapping, and revision history', () => {
   assert.equal(EN['work.plan.revisionHistory'], 'Revision history');
-  assert.match(workPage, /t\('work\.plan\.revision', \{ n: contract\.planRevision \}\)/);
-  assert.match(workPage, /t\('work\.plan\.dependsOn'\)/);
-  assert.match(workPage, /t\('work\.plan\.writableScope'\)/);
-  assert.match(workPage, /t\('work\.plan\.doneWhen'\)/);
-  assert.match(workPage, /t\('work\.plan\.verificationMapping'\)/);
-  assert.match(workPage, /planHistory/);
-  assert.match(workPage, /t\('work\.plan\.revisionHistory'\)/);
+  assert.match(workPage, /PlanReview/);
+  assert.match(workPage, /annotations=\{planAnnotations\}/);
+  assert.match(workPlanReview, /t\('work\.plan\.revision', \{ n: contract\.planRevision \}\)/);
+  assert.match(workPlanReview, /t\('work\.plan\.dependsOn'\)/);
+  assert.match(workPlanReview, /t\('work\.plan\.writableScope'\)/);
+  assert.match(workPlanReview, /t\('work\.plan\.doneWhen'\)/);
+  assert.match(workPlanReview, /t\('work\.plan\.verificationMapping'\)/);
+  assert.match(workPlanReview, /planHistory/);
+  assert.match(workPlanReview, /t\('work\.plan\.revisionHistory'\)/);
+  assert.match(workPlanReview, /PlanAnnotator/);
 });
 
 test('Work result review exposes verification and durable workspace evidence before an operator decision', () => {
