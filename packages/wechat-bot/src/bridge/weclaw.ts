@@ -263,8 +263,8 @@ export interface WeClawSendResult {
 }
 
 const WECLAW_SEND_MAX_ATTEMPTS = 3;
-/** Consecutive send failures after which HTTP /health is treated as delivery-degraded. */
-const WECLAW_SEND_DEGRADED_AFTER = 2;
+/** Mark send path degraded after this many consecutive failed send() calls (not inner retries). */
+const WECLAW_SEND_DEGRADED_AFTER = 1;
 
 export interface WeClawSendHealth {
   consecutiveFailures: number;
@@ -300,6 +300,7 @@ function noteWeclawSendFailure(error: string): void {
     lastError: error.slice(0, 300),
     lastOkAt: sendHealth.lastOkAt,
     lastFailedAt: new Date().toISOString(),
+    // First failed outbound send is enough — do not stay green after prepare failed.
     sendHealthy: consecutiveFailures < WECLAW_SEND_DEGRADED_AFTER,
   };
 }

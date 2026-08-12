@@ -1,11 +1,11 @@
 /**
  * Communication Accounts — Channel binding and device management routes.
  *
- * GET  /communication/accounts          — list bound accounts
+ * GET  /communication/accounts          — list bound accounts + delivery layers
  * POST /communication/accounts/weclaw/qr/start — QR login session
  * GET  /communication/accounts/weclaw/qr/:id — session status
  * GET  /communication/accounts/weclaw/status — runtime status
- * POST /communication/accounts/weclaw/send — send message
+ * POST /communication/accounts/weclaw/send — send message / delivery probe
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -14,6 +14,10 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { requireOperator } from '../../request-context.js';
+import {
+  assessWeixinDelivery,
+  type WechatBotHealthSnapshot,
+} from './communication-delivery.js';
 
 interface WeixinAccount {
   accountId: string;
@@ -37,6 +41,8 @@ interface WeixinLoginSession {
 }
 
 const loginSessions = new Map<string, WeixinLoginSession>();
+
+const WECLAW_API_HOST = process.env.WECLAW_API_ADDR ?? '127.0.0.1:18011';
 
 function findWeclawBinary(): string | null {
   for (const p of [
@@ -78,11 +84,13 @@ function buildWeixinAccounts(): WeixinAccount[] {
         const data = JSON.parse(readFileSync(resolve(configDir, file), 'utf-8'));
         const accountId = (data?.ilink_bot_id ?? data?.bot_id ?? file.replace('.json', '')) as string;
         const userId = (data?.ilink_user_id ?? data?.user_id ?? '') as string || undefined;
+        const base = file.replace(/\.json$/, '');
+        const syncPath = resolve(configDir, `${base}.sync.json`);
         accounts.push({
           accountId,
           userId,
           hasToken: Boolean(data?.bot_token),
-          hasSyncState: true,
+          hasSyncState: existsSync(syncPath),
           savedAt: new Date().toISOString(),
           source: 'weclaw',
         });
@@ -94,20 +102,90 @@ function buildWeixinAccounts(): WeixinAccount[] {
   }
 }
 
-export function registerCommunicationRoutes(app: FastifyInstance): void {
-  app.get('/communication/accounts', async () => {
-    const weclaw = findWeclawBinary();
-    const accounts = buildWeixinAccounts();
-    return {
-      channels: [
-        { id: 'weixin', label: 'WeChat', status: accounts.length > 0 ? 'connected' : 'needs_binding', description: 'WeClaw bridge for bidirectional WeChat', accountCount: accounts.length, live: true },
-        { id: 'telegram', label: 'Telegram', status: 'planned', description: 'Coming soon', accountCount: 0, live: false },
-        { id: 'feishu', label: 'FlyBook', status: 'planned', description: 'Coming soon', accountCount: 0, live: false },
-        { id: 'web', label: 'Web Dashboard', status: 'live', description: 'Mobile web console', accountCount: 0, live: true },
-      ],
-      weixin: { accounts, weclawInstalled: Boolean(weclaw), weclawBinary: weclaw ?? null },
-    };
+async function probeWeclawDaemon(): Promise<boolean> {
+  try {
+    const res = await fetch(`http://${WECLAW_API_HOST}/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Probe los wechat-bot /health (process-local send counters + SSE). */
+async function probeWechatBotHealth(): Promise<WechatBotHealthSnapshot | null> {
+  const candidates = [
+    process.env.WECHAT_BOT_HEALTH_URL,
+    process.env.WEB_PORT ? `http://127.0.0.1:${process.env.WEB_PORT}/health` : undefined,
+    'http://127.0.0.1:18899/health',
+    'http://127.0.0.1:8899/health',
+  ].filter((u): u is string => Boolean(u));
+
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) continue;
+      const data = await res.json() as WechatBotHealthSnapshot & { service?: string };
+      if (data && (data.service === 'wechat-bot' || 'weclawSendHealthy' in data || 'sseConnected' in data)) {
+        return data;
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+async function buildAccountsPayload() {
+  const weclaw = findWeclawBinary();
+  const accounts = buildWeixinAccounts();
+  const daemonRunning = await probeWeclawDaemon();
+  const bot = await probeWechatBotHealth();
+  const defaultTo = getDefaultTo();
+  const delivery = assessWeixinDelivery({
+    accountCount: accounts.length,
+    hasTokenAccount: accounts.some(a => a.hasToken),
+    daemonRunning,
+    defaultToConfigured: Boolean(defaultTo),
+    bot,
   });
+
+  const statusDescription: Record<string, string> = {
+    unbound: 'No WeChat account credentials on disk',
+    daemon_down: 'WeClaw daemon /health is down',
+    credentials_only: 'Credentials present; delivery not fully ready',
+    bot_unreachable: 'Credentials + daemon ok; wechat-bot health unreachable',
+    send_degraded: 'iLink send failing (prepare/send) — re-login or check network',
+    delivery_ready: 'Credentials + daemon + bot send path ready',
+  };
+
+  return {
+    channels: [
+      {
+        id: 'weixin',
+        label: 'WeChat',
+        status: delivery.status,
+        description: statusDescription[delivery.status] ?? 'WeClaw bridge',
+        accountCount: accounts.length,
+        live: true,
+      },
+      { id: 'telegram', label: 'Telegram', status: 'planned', description: 'Coming soon', accountCount: 0, live: false },
+      { id: 'feishu', label: 'FlyBook', status: 'planned', description: 'Coming soon', accountCount: 0, live: false },
+      { id: 'web', label: 'Web Dashboard', status: 'live', description: 'Mobile web console', accountCount: 0, live: true },
+    ],
+    weixin: {
+      accounts,
+      weclawInstalled: Boolean(weclaw),
+      weclawBinary: weclaw ?? null,
+      delivery: {
+        ...delivery,
+        assessedAt: new Date().toISOString(),
+      },
+    },
+  };
+}
+
+export function registerCommunicationRoutes(app: FastifyInstance): void {
+  app.get('/communication/accounts', async () => buildAccountsPayload());
 
   app.post('/communication/accounts/weclaw/qr/start', async (req, reply) => {
     if (!(await requireOperator(req, reply))) return;
@@ -155,12 +233,24 @@ export function registerCommunicationRoutes(app: FastifyInstance): void {
   app.get('/communication/accounts/weclaw/status', async () => {
     const weclaw = findWeclawBinary();
     const accounts = buildWeixinAccounts();
-    let daemonRunning = false;
-    try { const r = await fetch('http://127.0.0.1:18011/health', { signal: AbortSignal.timeout(2000) }); daemonRunning = r.ok; } catch { /* */ }
+    const daemonRunning = await probeWeclawDaemon();
+    const bot = await probeWechatBotHealth();
+    const delivery = assessWeixinDelivery({
+      accountCount: accounts.length,
+      hasTokenAccount: accounts.some(a => a.hasToken),
+      daemonRunning,
+      defaultToConfigured: Boolean(getDefaultTo()),
+      bot,
+    });
     return {
-      installed: Boolean(weclaw), binary: weclaw ?? null, accounts, accountCount: accounts.length,
+      installed: Boolean(weclaw),
+      binary: weclaw ?? null,
+      accounts,
+      accountCount: accounts.length,
       configExists: existsSync(resolve(process.env.HOME ?? '/tmp', '.weclaw', 'config.json')),
-      daemonRunning, defaultTo: getDefaultTo(),
+      daemonRunning,
+      defaultTo: getDefaultTo(),
+      delivery,
     };
   });
 
@@ -168,20 +258,42 @@ export function registerCommunicationRoutes(app: FastifyInstance): void {
     if (!(await requireOperator(req, reply))) return;
     const body = req.body as Record<string, unknown> | undefined;
     const to = (body?.to as string) || getDefaultTo() || process.env.WECLAW_DEFAULT_TO;
-    const text = (body?.text as string) ?? '';
+    const isProbe = body?.probe === true || body?.kind === 'probe';
+    const text = typeof body?.text === 'string' && body.text.trim()
+      ? body.text
+      : (isProbe ? `los delivery probe ${new Date().toISOString()}` : '');
     const mediaUrl = (body?.media_url as string) ?? (body?.mediaUrl as string) ?? null;
     if (!to) return reply.status(400).send({ ok: false, error: 'recipient (to) required' });
+    if (!text && !mediaUrl) {
+      return reply.status(400).send({ ok: false, error: 'text or media_url required' });
+    }
     try {
       const sendBody: Record<string, unknown> = { to };
       if (text) sendBody.text = text;
       if (mediaUrl) sendBody.media_url = mediaUrl;
-      const res = await fetch('http://127.0.0.1:18011/api/send', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sendBody), signal: AbortSignal.timeout(15_000),
+      const res = await fetch(`http://${WECLAW_API_HOST}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sendBody),
+        signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) { const et = await res.text().catch(() => ''); return reply.status(502).send({ ok: false, error: `API ${res.status}: ${et.slice(0, 200)}` }); }
+      if (!res.ok) {
+        const et = await res.text().catch(() => '');
+        return reply.status(502).send({
+          ok: false,
+          error: `API ${res.status}: ${et.slice(0, 200)}`,
+          probe: isProbe,
+          hint: 'WeClaw iLink send failed — re-login via QR or check ~/.weclaw/weclaw.log',
+        });
+      }
       const data = await res.json() as Record<string, unknown>;
-      return reply.send({ ok: true, messageId: data?.message_id });
-    } catch (err) { return reply.status(502).send({ ok: false, error: (err as Error).message }); }
+      return reply.send({ ok: true, messageId: data?.message_id, probe: isProbe });
+    } catch (err) {
+      return reply.status(502).send({
+        ok: false,
+        error: (err as Error).message,
+        probe: isProbe,
+      });
+    }
   });
 }
