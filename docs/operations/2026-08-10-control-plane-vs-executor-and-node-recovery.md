@@ -204,7 +204,7 @@ Result: `verified.agent_http(_ndjson).ok=true`, `execution.candidate=true`.
 | Vultr / tencent-sin dead `GATEWAY_URL=100.75.41.120` analysis | medium | **Done** (config fixable; keep executor disabled) |
 | Scheduled remote deploy when heartbeat auth contracts change | medium | open |
 | node34 disk/container hygiene | medium | open |
-| Control-plane anti-sleep / second gateway | when 24×7 is hard requirement | open |
+| Control-plane anti-sleep / second gateway | only if 24×7 becomes a requirement | parked — MBP sleep is currently accepted; late readiness catch-up no longer advances fleet alerts |
 | Rotate agent key if vultr unit bak exposed it | medium | open (operator decision) |
 | dogfood/runtime-health: warn when fleet offline or online-unverified | medium | **Done** — `runtime-health` + readiness runner fleet filter |
 | Auto-probe after heartbeat recovery when verified is heartbeat-only claim | medium | **Done** — gateway `node-auto-probe` (2/tick, 2s gap, 5m cooldown, 120s interval) |

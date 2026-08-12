@@ -19,6 +19,10 @@ import {
   transitionScheduledWorkRun,
 } from './scheduled-work/index.js';
 import { createTaskRun, ensureTaskRunStore } from './task-runs.js';
+import {
+  _FLEET_OBSERVATION_MAX_SCHEDULE_LATENESS_MS,
+  _shouldRecordFleetObservation,
+} from './scheduled-work/run-handlers.js';
 
 test('scheduled trigger preview handles DST gaps and overlaps deterministically', () => {
   const spring = previewScheduledOccurrences({
@@ -37,6 +41,25 @@ test('catch-up policy skips only stale skip-policy slots', () => {
   const now = new Date('2026-07-19T02:00:00.000Z');
   assert.equal(shouldSkipLateRun(slot, now, 60_000, 'skip'), true);
   assert.equal(shouldSkipLateRun(slot, now, 60_000, 'run_once'), false);
+});
+
+test('late scheduled readiness runs do not advance fleet observations after sleep', () => {
+  const scheduledFor = '2026-08-11T11:41:56.000Z';
+  const withinGrace = new Date(
+    Date.parse(scheduledFor) + _FLEET_OBSERVATION_MAX_SCHEDULE_LATENESS_MS,
+  );
+  assert.equal(
+    _shouldRecordFleetObservation({ scheduledFor, triggerKind: 'scheduled' }, withinGrace),
+    true,
+  );
+  assert.equal(
+    _shouldRecordFleetObservation({ scheduledFor, triggerKind: 'scheduled' }, new Date('2026-08-11T11:45:01.000Z')),
+    false,
+  );
+  assert.equal(
+    _shouldRecordFleetObservation({ scheduledFor, triggerKind: 'manual' }, new Date('2026-08-11T12:45:01.000Z')),
+    true,
+  );
 });
 
 test('due schedule claim is unique and an expired lease consumes one retry attempt', async () => {
