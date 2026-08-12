@@ -40,6 +40,8 @@ export function sessionEventVisibility(type: string): SessionEventVisibility {
   if (type.startsWith('kernel.')) return 'audit';
   if (type.startsWith('skill.')) return 'audit';
   if (type.startsWith('rule.')) return 'audit';
+  // Background child agent lifecycle (spawn_agent mode=background)
+  if (type.startsWith('child.agent.')) return 'audit';
   if (type === 'session.started' || type === 'session.completed' ||
       type === 'tool.catalog' || type === 'model.turn.started') {
     return 'audit';

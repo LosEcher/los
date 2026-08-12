@@ -9,7 +9,13 @@ import {
   registerBuiltinTools,
   READ_ONLY_BUILTIN_TOOLS,
 } from './core/registry.js';
-import { createSpawnAgentRunner, registerSpawnAgentTool } from './core/agent-tools.js';
+import {
+  _resetTrackedAgentsForTests,
+  createSpawnAgentRunner,
+  killAgentsForParent,
+  registerAgentQueryKillTools,
+  registerSpawnAgentTool,
+} from './core/agent-tools.js';
 
 test('read-only tool mode excludes write and shell tools', async () => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-readonly-'));
@@ -408,6 +414,82 @@ test('spawn_agent inherits fallback policy unless the child overrides its route'
   assert.equal(seen[1].providerFallback, undefined);
   assert.equal(seen[1].provider, 'c');
   assert.equal(seen[1].model, 'c-1');
+});
+
+test('background spawn_agent is killed when parent signal aborts', async () => {
+  _resetTrackedAgentsForTests();
+  const parent = new AbortController();
+  let childSignal: AbortSignal | undefined;
+  const lifecycle: string[] = [];
+  let releaseChild!: () => void;
+  const childGate = new Promise<void>(resolve => {
+    releaseChild = resolve;
+  });
+
+  const runner = createSpawnAgentRunner({
+    sessionId: 'parent-cancel-session',
+    signal: parent.signal,
+    onSessionEvent: (event) => {
+      lifecycle.push(event.type);
+    },
+    runAgent: async (_prompt, config) => {
+      childSignal = config.signal;
+      await childGate;
+      if (config.signal?.aborted) {
+        throw new Error('aborted');
+      }
+      return { text: 'should not finish', turns: [], loopCount: 1, totalTokens: { prompt: 0, completion: 0 }, messages: [] };
+    },
+  });
+
+  const started = await runner({ prompt: 'long background work', mode: 'background' });
+  assert.equal(started.error, undefined);
+  const body = JSON.parse(started.content);
+  assert.equal(body.mode, 'background');
+  assert.ok(body.agentId);
+  assert.equal(childSignal?.aborted, false);
+  assert.ok(lifecycle.includes('child.agent.started'));
+
+  parent.abort();
+  // Abort listener is sync; child signal should be aborted and tracker killed.
+  assert.equal(childSignal?.aborted, true);
+
+  const queryRegistry = createToolRegistry();
+  registerAgentQueryKillTools(queryRegistry);
+  const queried = await queryRegistry.execute({ name: 'query_agent', arguments: { agentId: body.agentId } });
+  const status = JSON.parse(queried.content);
+  assert.equal(status.status, 'killed');
+  assert.equal(status.error, 'parent_cancelled');
+  assert.ok(lifecycle.includes('child.agent.killed'));
+
+  releaseChild();
+  _resetTrackedAgentsForTests();
+});
+
+test('killAgentsForParent aborts all running children for a parent session', async () => {
+  _resetTrackedAgentsForTests();
+  const gates: Array<() => void> = [];
+  const runner = createSpawnAgentRunner({
+    sessionId: 'parent-multi-children',
+    runAgent: async () => {
+      await new Promise<void>(resolve => gates.push(resolve));
+      return { text: 'done', turns: [], loopCount: 1, totalTokens: { prompt: 0, completion: 0 }, messages: [] };
+    },
+  });
+
+  const a = JSON.parse((await runner({ prompt: 'a', mode: 'background' })).content);
+  const b = JSON.parse((await runner({ prompt: 'b', mode: 'background' })).content);
+  assert.equal(killAgentsForParent('parent-multi-children'), 2);
+  assert.equal(killAgentsForParent('parent-multi-children'), 0);
+
+  const queryRegistry = createToolRegistry();
+  registerAgentQueryKillTools(queryRegistry);
+  for (const agentId of [a.agentId, b.agentId]) {
+    const status = JSON.parse((await queryRegistry.execute({ name: 'query_agent', arguments: { agentId } })).content);
+    assert.equal(status.status, 'killed');
+  }
+  for (const release of gates) release();
+  _resetTrackedAgentsForTests();
 });
 
 test('tool capability timeout is enforced during execution', async () => {
