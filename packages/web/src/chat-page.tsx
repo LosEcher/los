@@ -32,6 +32,7 @@ import { ContextChip } from './chat-ui.js';
 import { ChatComposer } from './chat-composer.js';
 import type { ChatAdvancedSettingsState } from './chat-advanced-settings.js';
 import { ChatMessages } from './chat-messages.js';
+import { TaskRowList, type TaskRowModel } from './chat-ai-primitives.js';
 import { useChatProviders } from './hooks/useChatProviders.js';
 import { useChatSession } from './hooks/useChatSession.js';
 import { mergeLiveToolCalls } from './hooks/useLiveToolCalls.js';
@@ -39,6 +40,7 @@ import { useChatRun } from './hooks/useChatRun.js';
 import {
   ApprovalSummary,
   OperatorSteeringBar,
+  WorkerAskCard,
   ContextNotification,
   CancelledBanner,
   AbortConfirmation,
@@ -46,6 +48,14 @@ import {
 import { FilesPanel } from './chat-files-panel.js';
 import { ChatPlanApproval } from './chat-plan-approval.js';
 import { ExecutionObservabilityPanel } from './pages/execution-observability-panel.js';
+
+function mapTodoStatus(status: string): TaskRowModel['status'] {
+  if (status === 'in_progress' || status === 'ready') return 'running';
+  if (status === 'done') return 'completed';
+  if (status === 'blocked') return 'blocked';
+  if (status === 'cancelled') return 'failed';
+  return 'pending';
+}
 
 export function ChatPage({
   selectedSessionId,
@@ -314,6 +324,25 @@ export function ChatPage({
           )}
           <ContextChip label={t('chat.chip.task')} value={taskRunId ?? (run.running ? t('chat.chip.value.starting') : t('chat.chip.value.idle'))} tone={run.running ? 'warn' : undefined} />
         </div>
+        {activeTodoContext || taskRunId ? (
+          <TaskRowList
+            title={t('chat.ai.tasks')}
+            rows={[
+              ...(activeTodoContext ? [{
+                id: activeTodoContext.id,
+                label: activeTodoContext.title || activeTodoContext.id,
+                detail: activeTodoContext.status,
+                status: mapTodoStatus(activeTodoContext.status),
+              } satisfies TaskRowModel] : []),
+              ...(taskRunId ? [{
+                id: taskRunId,
+                label: t('chat.chip.task'),
+                detail: taskRunId,
+                status: run.running ? 'running' as const : 'completed' as const,
+              } satisfies TaskRowModel] : []),
+            ]}
+          />
+        ) : null}
 
         <ChatMessages
           messages={run.messages}
@@ -329,6 +358,13 @@ export function ChatPage({
                 </div>
               )}
               {run.cancelled && <CancelledBanner />}
+              {run.pendingWorkerAsk ? (
+                <WorkerAskCard
+                  question={run.pendingWorkerAsk.question}
+                  options={run.pendingWorkerAsk.options}
+                  onAnswer={(answer) => { void run.answerWorkerAsk(answer); }}
+                />
+              ) : null}
               <ChatPlanApproval running={run.running} workItemId={activeTodoContext?.id} />
               <ApprovalSummary events={run.approvalEvents} />
               {sessionId ? (

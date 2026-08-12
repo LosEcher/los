@@ -126,6 +126,20 @@ export const enChat = {
   'chat.toolCallsOnly': '(tool calls only)',
   'chat.tools': 'tools: {list}',
 
+  // ── AI-native primitives (Beautiful UI patterns) ───
+  'chat.ai.thinkingLive': 'live',
+  'chat.ai.streaming': 'streaming',
+  'chat.ai.tasks': 'tasks',
+  'chat.ai.taskPending': 'pending',
+  'chat.ai.taskBlocked': 'blocked',
+  'chat.ai.hitlSteerBody': 'Choose an operator action for the active run.',
+  'chat.ai.hitlApproveHint': 'Allow pending tool work to continue',
+  'chat.ai.hitlDenyHint': 'Block pending tool work',
+  'chat.ai.hitlEscalateHint': 'Flag for higher-attention review',
+  'chat.ai.workerAskTitle': 'Worker needs a decision',
+  'chat.ai.yes': 'Yes',
+  'chat.ai.no': 'No',
+
   // ── Approval / steering ────────────────────────────
   'chat.approval.approved': 'approved',
   'chat.approval.denied': 'denied',
@@ -159,6 +173,12 @@ export const enChat = {
   'chat.plan.approveExecute': 'Approve & Execute',
   'chat.plan.dismiss': 'Dismiss',
   'chat.plan.failed': 'Approval failed: {error}',
+  'chat.plan.notesLabel': 'Approval / revision notes',
+  'chat.plan.notesPlaceholder': 'Optional free-form notes (annotations above are structured)',
+  'chat.plan.reviseWithNotes': 'Revise with notes',
+  'chat.plan.revising': 'Revising…',
+  'chat.plan.reviseNeedsAnnotation': 'Add at least one step annotation to revise',
+  'chat.plan.reviseFailed': 'Revision failed: {error}',
 
   // ── Files panel ────────────────────────────────────
   'chat.files.title': 'Workspace',

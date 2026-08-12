@@ -27,6 +27,12 @@ import { useI18n } from '../i18n';
 import { StructuredCreateForm } from './work-create-form.js';
 import { WorkReviewPanel } from './work-review-panel.js';
 import {
+  buildApproveReason,
+  buildRevisePayload,
+  type PlanAnnotation,
+} from '../plan-annotate-ui.js';
+import { PlanReview } from './work-plan-review.js';
+import {
   OutcomeCard,
   attentionLabel,
   friendlyWorkError,
@@ -72,6 +78,7 @@ export function WorkPage({
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [approvalReason, setApprovalReason] = useState('');
+  const [planAnnotations, setPlanAnnotations] = useState<PlanAnnotation[]>([]);
   const [debugMode, setDebugMode] = useState(() => readWorkDebugPreference());
   const [techOpen, setTechOpen] = useState(() => readWorkDebugPreference());
 
@@ -107,6 +114,11 @@ export function WorkPage({
     if (selectedWorkItemId && !list.isLoading) void detail.refetch();
   }, [selectedWorkItemId]);
 
+  useEffect(() => {
+    setPlanAnnotations([]);
+    setApprovalReason('');
+  }, [activeId]);
+
   const setDebug = (enabled: boolean) => {
     setDebugMode(enabled);
     writeWorkDebugPreference(enabled);
@@ -121,9 +133,18 @@ export function WorkPage({
   const approve = useMutation({
     mutationFn: (action: NonNullable<WorkItemProjection['availableActions']['approvePlan']>) => postJson(`/runs/${action.payload.runSpecId}/approve`, {
       ...action.payload,
-      reason: approvalReason.trim() || 'operator approved plan from Work',
+      reason: buildApproveReason(approvalReason.trim() || 'operator approved plan from Work', planAnnotations),
     }),
-    onSuccess: () => { setApprovalReason(''); },
+    onSuccess: () => { setApprovalReason(''); setPlanAnnotations([]); },
+    onSettled: refresh,
+  });
+  const revisePlan = useMutation({
+    mutationFn: (action: NonNullable<WorkItemProjection['availableActions']['approvePlan']>) => {
+      const plan = runContract?.plan ?? [];
+      const payload = buildRevisePayload(plan, planAnnotations, approvalReason.trim() || 'operator requested plan revision from Work');
+      return postJson(`/runs/${action.payload.runSpecId}/revise-plan`, payload);
+    },
+    onSuccess: () => { setApprovalReason(''); setPlanAnnotations([]); },
     onSettled: refresh,
   });
   const verify = useMutation({
@@ -272,15 +293,26 @@ export function WorkPage({
                   </button>
                 ) : null}
                 {availableActions?.approvePlan ? (
-                  <button
-                    className={primary === 'approvePlan' ? 'btn work-primary-cta' : 'ghost-btn'}
-                    type="button"
-                    title={availableActions.approvePlan.effect}
-                    disabled={approve.isPending}
-                    onClick={() => approve.mutate(availableActions.approvePlan!)}
-                  >
-                    <Check size={14} /> {approve.isPending ? t('work.approving') : availableActions.approvePlan.label}
-                  </button>
+                  <>
+                    <button
+                      className={primary === 'approvePlan' ? 'btn work-primary-cta' : 'ghost-btn'}
+                      type="button"
+                      title={availableActions.approvePlan.effect}
+                      disabled={approve.isPending || revisePlan.isPending}
+                      onClick={() => approve.mutate(availableActions.approvePlan!)}
+                    >
+                      <Check size={14} /> {approve.isPending ? t('work.approving') : availableActions.approvePlan.label}
+                    </button>
+                    <button
+                      className="ghost-btn"
+                      type="button"
+                      title={t('work.plan.reviseWithNotes')}
+                      disabled={approve.isPending || revisePlan.isPending || planAnnotations.length === 0}
+                      onClick={() => revisePlan.mutate(availableActions.approvePlan!)}
+                    >
+                      <RefreshCcw size={14} /> {revisePlan.isPending ? t('work.plan.revising') : t('work.plan.reviseWithNotes')}
+                    </button>
+                  </>
                 ) : null}
                 {availableActions?.runVerification ? (
                   <button
@@ -317,7 +349,9 @@ export function WorkPage({
               {availableActions?.approvePlan ? (
                 <label className="approval-reason"><span>{t('work.approvalReasonLabel')}</span><input value={approvalReason} onChange={event => setApprovalReason(event.target.value)} placeholder={t('work.approvalReasonPlaceholder')} /></label>
               ) : null}
-              {approve.error || verify.error ? <div className="daily-error">{friendlyWorkError(approve.error ?? verify.error)}</div> : null}
+              {approve.error || revisePlan.error || verify.error ? (
+                <div className="daily-error">{friendlyWorkError(approve.error ?? revisePlan.error ?? verify.error)}</div>
+              ) : null}
 
               <WorkReviewPanel
                 item={item}
@@ -326,7 +360,13 @@ export function WorkPage({
                 onDecision={(decision, reason, dirtyPaths) => review.mutate({ decision, reason, dirtyPaths })}
               />
 
-              <PlanReview contract={runContract} debugMode={debugMode} />
+              <PlanReview
+                contract={runContract}
+                debugMode={debugMode}
+                annotations={planAnnotations}
+                onAnnotationsChange={setPlanAnnotations}
+                annotateEnabled={Boolean(availableActions?.approvePlan)}
+              />
               <ContractSection title={t('work.contract.editableSurfaces')} items={runContract?.editableSurfaces ?? []} empty={t('work.contract.noWritableScope')} />
               <ContractSection title={t('work.contract.requiredChecks')} items={runContract?.requiredChecks ?? []} empty={t('work.contract.noChecks')} />
               <ContractSection title={t('work.contract.stopConditions')} items={runContract?.stopConditions ?? []} empty={t('work.contract.noStopConditions')} />
@@ -413,34 +453,6 @@ function FactLine({ label, value, tone }: { label: string; value: string; tone?:
 
 function ContractSection({ title, items, empty }: { title: string; items: string[]; empty: string }) {
   return <section className="contract-section"><h3>{title}</h3>{items.length ? <ol>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ol> : <p>{empty}</p>}</section>;
-}
-
-function PlanReview({ contract, debugMode }: { contract?: RunContractDraft; debugMode: boolean }) {
-  const { t } = useI18n();
-  const plan = contract?.plan ?? [];
-  const verifications = contract?.verifications ?? [];
-  return <section className="contract-section plan-review">
-    <div className="contract-section-heading"><h3>{t('work.plan.title')}</h3><span>{contract?.planRevision ? t('work.plan.revision', { n: contract.planRevision }) : t('work.plan.draft')}</span></div>
-    {plan.length === 0 ? <p>{t('work.plan.none')}</p> : <ol className="plan-step-list">
-      {plan.map((step, index) => <li key={`${step.id ?? 'step'}-${index}`} className="plan-step">
-        <div className="plan-step-title">
-          <strong>{step.title ?? step.id ?? t('work.plan.stepFallback', { n: index + 1 })}</strong>
-          {debugMode ? <span>{step.id ?? `step-${index + 1}`}</span> : null}
-        </div>
-        <p>{step.description ?? t('work.plan.noDescription')}</p>
-        <dl className="plan-step-facts">
-          <div><dt>{t('work.plan.dependsOn')}</dt><dd>{step.dependsOnIds?.length ? step.dependsOnIds.join(', ') : t('common.none')}</dd></div>
-          <div><dt>{t('work.plan.writableScope')}</dt><dd>{step.editableSurfaces?.length ? step.editableSurfaces.join(', ') : t('work.plan.noScopeDeclared')}</dd></div>
-          <div><dt>{t('work.plan.doneWhen')}</dt><dd>{step.completionCriteria ?? t('work.plan.noCriterion')}</dd></div>
-        </dl>
-      </li>)}
-    </ol>}
-    <div className="plan-verification-block">
-      <h4>{t('work.plan.verificationMapping')}</h4>
-      {verifications.length === 0 ? <p>{t('work.plan.noMapping')}</p> : <ul>{verifications.map(requirement => <li key={requirement.id}><strong>{requirement.id}</strong><span>{requirement.description}</span>{requirement.command ? <code>{requirement.command}</code> : null}</li>)}</ul>}
-    </div>
-    {contract?.planHistory?.length ? <div className="plan-history"><h4>{t('work.plan.revisionHistory')}</h4><ol>{contract.planHistory.map(snapshot => <li key={snapshot.revision}><strong>{t('work.plan.revision', { n: snapshot.revision })}</strong><span>{snapshot.reason ?? t('work.plan.superseded')}</span><time>{formatDate(snapshot.supersededAt)}</time></li>)}</ol></div> : null}
-  </section>;
 }
 
 function Lineage({ item }: { item: WorkItemProjection }) {

@@ -130,6 +130,20 @@ export const zhChat: ChatKeys = {
   'chat.toolCallsOnly': '（仅工具调用）',
   'chat.tools': '工具: {list}',
 
+  // ── AI-native primitives (Beautiful UI patterns) ───
+  'chat.ai.thinkingLive': '进行中',
+  'chat.ai.streaming': '流式输出中',
+  'chat.ai.tasks': '任务',
+  'chat.ai.taskPending': '待处理',
+  'chat.ai.taskBlocked': '已阻塞',
+  'chat.ai.hitlSteerBody': '为当前运行选择操作员动作。',
+  'chat.ai.hitlApproveHint': '允许待处理工具继续',
+  'chat.ai.hitlDenyHint': '阻止待处理工具',
+  'chat.ai.hitlEscalateHint': '升级为更高优先级审阅',
+  'chat.ai.workerAskTitle': 'Worker 需要你的决策',
+  'chat.ai.yes': '是',
+  'chat.ai.no': '否',
+
   // ── Approval / steering ────────────────────────────
   'chat.approval.approved': '已批准',
   'chat.approval.denied': '已拒绝',
@@ -163,6 +177,12 @@ export const zhChat: ChatKeys = {
   'chat.plan.approveExecute': '批准并执行',
   'chat.plan.dismiss': '忽略',
   'chat.plan.failed': '批准失败: {error}',
+  'chat.plan.notesLabel': '批准 / 修订备注',
+  'chat.plan.notesPlaceholder': '可选自由文本（上方标注为结构化）',
+  'chat.plan.reviseWithNotes': '按标注修订',
+  'chat.plan.revising': '修订中…',
+  'chat.plan.reviseNeedsAnnotation': '至少添加一条步骤标注才能修订',
+  'chat.plan.reviseFailed': '修订失败: {error}',
 
   // ── Files panel ────────────────────────────────────
   'chat.files.title': '工作区',

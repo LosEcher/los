@@ -40,6 +40,14 @@ import { useChatStream } from './useChatStream.js';
 import type { ApprovalEvent } from '../chat-approval.js';
 import { tt } from '../i18n';
 
+export type WorkerAskPrompt = {
+  messageId: string;
+  question: string;
+  options: string[];
+  runSpecId?: string;
+  taskRunId?: string;
+};
+
 export function useChatRun(options: {
   workspaceRoot: string;
   toolMode: ToolMode;
@@ -76,6 +84,7 @@ export function useChatRun(options: {
   const [cancelled, setCancelled] = useState(false);
   const [approvalEvents, setApprovalEvents] = useState<ApprovalEvent[]>([]);
   const [contextNotifs, setContextNotifs] = useState<Array<{ id: string; event: string; data: Record<string, unknown> }>>([]);
+  const [pendingWorkerAsk, setPendingWorkerAsk] = useState<WorkerAskPrompt | null>(null);
   const [showAbortConfirm, setShowAbortConfirm] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const branchFromRef = useRef<string | null>(null);
@@ -125,6 +134,25 @@ export function useChatRun(options: {
     if (event.startsWith('context.fill')) {
       setContextNotifs(prev => [...prev, { id: crypto.randomUUID(), event, data }]);
     }
+    if (event === 'worker.ask') {
+      const messageId = typeof data.messageId === 'string' ? data.messageId : '';
+      const question = typeof data.question === 'string' ? data.question : '';
+      const options = Array.isArray(data.options)
+        ? data.options.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+      if (messageId && question) {
+        setPendingWorkerAsk({
+          messageId,
+          question,
+          options,
+          runSpecId: typeof data.runSpecId === 'string' ? data.runSpecId : undefined,
+          taskRunId: typeof data.taskRunId === 'string' ? data.taskRunId : undefined,
+        });
+      }
+    }
+    if (event === 'worker.answered') {
+      setPendingWorkerAsk(null);
+    }
     if (!SUPPRESSED_STREAM_EVENTS.has(event)) {
       setRows(prev => [...prev, streamRow(event, data)]);
     }
@@ -144,6 +172,7 @@ export function useChatRun(options: {
     setCancelled(false);
     setApprovalEvents([]);
     setContextNotifs([]);
+    setPendingWorkerAsk(null);
     runStartRef.current = Date.now();
 
     setRows(prev => {
@@ -267,15 +296,28 @@ export function useChatRun(options: {
     setMessages([{ id: crypto.randomUUID(), role: 'system' as const, content: tt('chat.newChatReady'), meta: tt('chat.newChatMeta'), level: 'ok', toolCalls: [] }]);
   }
 
+  async function answerWorkerAsk(answer: string) {
+    if (!pendingWorkerAsk) return;
+    const runSpecId = pendingWorkerAsk.runSpecId;
+    if (!runSpecId) {
+      throw new Error('runSpecId missing for worker ask');
+    }
+    await postJson(`/runs/${runSpecId}/answer`, {
+      messageId: pendingWorkerAsk.messageId,
+      answer,
+    });
+    setPendingWorkerAsk(null);
+  }
+
   return {
     prompt, setPrompt, running, rows, setRows, messages, setMessages,
     sessionId, setSessionId, taskRunId, setTaskRunId,
-    cancelled, approvalEvents, contextNotifs, showAbortConfirm,
+    cancelled, approvalEvents, contextNotifs, pendingWorkerAsk, showAbortConfirm,
     connectionState, liveToolCalls, liveVersion,
     abortRef, branchFromRef, runStartRef,
     historyLoadedForSession, selectedSessionRef,
     handleSubmit, requestCancel, confirmCancel, dismissCancel,
-    startNewChat,
+    startNewChat, answerWorkerAsk,
   };
 }
 
