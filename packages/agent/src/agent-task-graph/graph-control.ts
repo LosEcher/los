@@ -19,6 +19,18 @@ export interface GovernedGraphWorkerInput {
   editableSurfaces: string[];
   priority?: number;
   maxAttempts?: number;
+  /** Compressed handoff for executor workers (los.feature-card). */
+  featureCard?: Record<string, unknown>;
+  /**
+   * When set, this worker is a rework attempt and must not reuse the writer
+   * attempt/session/task_run identity (see canDispatchReworkWorker).
+   */
+  reworkFromWriter?: {
+    attemptId: string;
+    taskRunId?: string;
+    sessionId?: string;
+    role?: string;
+  };
 }
 
 export interface CreateGovernedAgentTaskGraphInput {
@@ -107,6 +119,8 @@ export async function createGovernedAgentTaskGraph(
         metadata: {
           editableSurfaces: worker.editableSurfaces,
           runContract: { editableSurfaces: worker.editableSurfaces },
+          ...(worker.featureCard ? { featureCard: worker.featureCard } : {}),
+          ...(worker.reworkFromWriter ? { reworkFromWriter: worker.reworkFromWriter } : {}),
         },
       });
     }
@@ -120,7 +134,12 @@ export async function createGovernedAgentTaskGraph(
       prompt: input.verifier.prompt,
       priority: input.verifier.priority,
       maxAttempts: input.verifier.maxAttempts,
-      metadata: { graphControl: metadata },
+      metadata: {
+        graphControl: metadata,
+        // Share the first worker FeatureCard with the verifier when present so
+        // reviewer prompt formatting can stay card-scoped.
+        ...(input.workers[0]?.featureCard ? { featureCard: input.workers[0].featureCard } : {}),
+      },
     });
     for (const worker of input.workers) {
       await linkAgentTaskDependency({
