@@ -6,6 +6,11 @@ import {
   runNodeAutoProbeTick,
   selectAutoProbeTargets,
 } from './node-auto-probe.js';
+import { _resetRemoteExecutorCircuitsForTests } from './remote-executor-circuit.js';
+
+function resetCircuits(): void {
+  _resetRemoteExecutorCircuitsForTests();
+}
 
 function node(partial: Partial<ExecutorNodeRecord> & { nodeId: string }): ExecutorNodeRecord {
   const status = partial.status ?? 'online';
@@ -42,6 +47,7 @@ function node(partial: Partial<ExecutorNodeRecord> & { nodeId: string }): Execut
 }
 
 test('isAutoProbeEligible requires online executor run_agent with only verification gap', () => {
+  resetCircuits();
   assert.equal(isAutoProbeEligible(node({ nodeId: 'ok' })), true);
   assert.equal(isAutoProbeEligible(node({ nodeId: 'offline', status: 'offline' })), false);
   assert.equal(
@@ -74,6 +80,7 @@ test('isAutoProbeEligible requires online executor run_agent with only verificat
 });
 
 test('isAutoProbeEligible respects per-node cooldown from lastProbeAt', () => {
+  resetCircuits();
   const now = Date.parse('2026-08-10T13:00:00.000Z');
   const recent = node({
     nodeId: 'recent',
@@ -84,28 +91,46 @@ test('isAutoProbeEligible respects per-node cooldown from lastProbeAt', () => {
 });
 
 test('selectAutoProbeTargets sorts by freshest heartbeat and applies max selection later', () => {
+  resetCircuits();
+  const now = Date.now();
   const targets = selectAutoProbeTargets([
-    node({ nodeId: 'older', lastHeartbeatAt: '2026-08-10T12:00:00.000Z' }),
-    node({ nodeId: 'newer', lastHeartbeatAt: '2026-08-10T13:00:00.000Z' }),
+    node({ nodeId: 'older', lastHeartbeatAt: new Date(now - 20_000).toISOString() }),
+    node({ nodeId: 'newer', lastHeartbeatAt: new Date(now - 5_000).toISOString() }),
     node({ nodeId: 'skip', status: 'offline' }),
-  ]);
+  ], { now });
   assert.deepEqual(targets.map((n) => n.nodeId), ['newer', 'older']);
 });
 
+test('isAutoProbeEligible rejects stale heartbeats (boot / reboot grace)', () => {
+  resetCircuits();
+  const now = Date.now();
+  assert.equal(
+    isAutoProbeEligible(
+      node({ nodeId: 'stale', lastHeartbeatAt: new Date(now - 60_000).toISOString() }),
+      5 * 60_000,
+      now,
+    ),
+    false,
+  );
+});
+
 test('runNodeAutoProbeTick probes at most maxPerTick serially with gap and cooldown stamp', async () => {
+  resetCircuits();
   const gaps: number[] = [];
   const probed: string[] = [];
   const records: Array<{ nodeId: string; lastProbeError: string | null | undefined }> = [];
+  const now = Date.now();
   const nodes = [
-    node({ nodeId: 'a', lastHeartbeatAt: '2026-08-10T13:02:00.000Z' }),
-    node({ nodeId: 'b', lastHeartbeatAt: '2026-08-10T13:01:00.000Z' }),
-    node({ nodeId: 'c', lastHeartbeatAt: '2026-08-10T13:00:00.000Z' }),
+    node({ nodeId: 'a', lastHeartbeatAt: new Date(now - 2_000).toISOString() }),
+    node({ nodeId: 'b', lastHeartbeatAt: new Date(now - 5_000).toISOString() }),
+    node({ nodeId: 'c', lastHeartbeatAt: new Date(now - 8_000).toISOString() }),
   ];
 
   const result = await runNodeAutoProbeTick({
     maxPerTick: 2,
     minProbeGapMs: 25,
     cooldownMs: 5 * 60_000,
+    now,
     listNodes: async () => nodes,
     load: async (id) => nodes.find((n) => n.nodeId === id) ?? null,
     probe: async (n) => {
@@ -136,6 +161,7 @@ test('runNodeAutoProbeTick probes at most maxPerTick serially with gap and coold
 });
 
 test('runNodeAutoProbeTick records failed probes so cooldown still applies', async () => {
+  resetCircuits();
   const records: string[] = [];
   const n = node({ nodeId: 'flaky' });
   const result = await runNodeAutoProbeTick({
