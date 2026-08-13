@@ -43,6 +43,8 @@ test('POST /providers creates a new provider', async () => {
   assert.equal(body.provider.name, slug);
   assert.ok(body.provider.enabled);
   assert.equal(body.provider.weight, 100);
+  assert.equal(body.provider.hasApiKey, true);
+  assert.equal(body.provider.apiKey, undefined);
 });
 
 test('POST /providers rejects duplicate names', async () => {

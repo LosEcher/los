@@ -31,6 +31,7 @@ import {
 } from '@los/agent/cantool-capability-adapter';
 import { MCPClient, registryRecordToConfig } from '@los/agent';
 import { getLogger } from '@los/infra/logger';
+import { requireOperator } from '../../request-context.js';
 
 export type MCPRouteDependencies = {
   deleteMCPServer: typeof deleteMCPServer;
@@ -89,6 +90,7 @@ export function registerMCPRoutes(
   });
 
   app.post('/mcp-servers/inspect', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     try {
       const inspection = inspectBody(req.body, deps);
       return { ...inspection, normalized: toPublicMCPInput(inspection.normalized) };
@@ -106,6 +108,7 @@ export function registerMCPRoutes(
   });
 
   app.post('/mcp-servers', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as Record<string, unknown>;
     if (body.env !== undefined) {
       return reply.status(400).send({ error: 'raw env values are not accepted; use an opaque authConfig.credentialRef' });
@@ -138,6 +141,7 @@ export function registerMCPRoutes(
   });
 
   app.post('/mcp-servers/:id/pin', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as ScopeQuery & { versionHash?: string; pinned?: boolean };
     try {
@@ -151,6 +155,7 @@ export function registerMCPRoutes(
   });
 
   app.post('/mcp-servers/:id/rollback', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as ScopeQuery & { versionHash?: string };
     const versionHash = optionalString(body.versionHash);
@@ -163,6 +168,7 @@ export function registerMCPRoutes(
   });
 
   app.post('/mcp-servers/:id/enable', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as ScopeQuery & { enabled?: boolean };
     if (typeof body.enabled !== 'boolean') return reply.status(400).send({ error: 'enabled boolean is required' });
@@ -174,6 +180,7 @@ export function registerMCPRoutes(
   });
 
   app.delete('/mcp-servers/:id', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const query = req.query as ScopeQuery;
     const ok = await deps.deleteMCPServer(id, query.tenantId, query.projectId);
@@ -182,10 +189,12 @@ export function registerMCPRoutes(
   });
 
   app.post('/mcp-servers/:id/verify', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     return await verifyRegisteredServer(req, reply, deps);
   });
 
   app.post('/mcp-servers/:id/reload', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     return await verifyRegisteredServer(req, reply, deps);
   });
 }

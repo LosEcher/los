@@ -13,7 +13,7 @@ import {
   type TodoPriority,
   type TodoStatus,
 } from '@los/agent/todos';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, requireOperator } from '../../request-context.js';
 import { runIdempotentJson } from '../../idempotency.js';
 
 type TodoRouteDependencies = {
@@ -229,13 +229,15 @@ export function registerTodoRoutes(
     );
   });
 
-  app.post('/todos/seed', async (req) => {
+  app.post('/todos/seed', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as Record<string, unknown> | undefined;
     const todos = await deps.seedLosPlanningTodos({ overwrite: body?.overwrite === true });
     return { ok: true, count: todos.length, todos };
   });
 
   app.post('/todos/:id/dispatch', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as Record<string, unknown> | undefined;
     const context = getRequestContext(req);

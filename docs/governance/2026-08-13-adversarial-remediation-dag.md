@@ -9,12 +9,12 @@
 
 | ID | 项 | 严重度 | 状态 |
 | --- | --- | --- | --- |
-| P0-01 | `/chat` 拒绝非 operator 的 `mcpServers` / `toolMode=all` / `sandboxMode` / `allowedTools` / 自定义 `workspaceRoot` | P0 | 进行中 |
-| P0-02 | MCP registry 写/verify/reload `requireOperator` | P0 | 待做 |
-| P0-03 | `POST /todos/seed` 与 `POST /todos/:id/dispatch` `requireOperator` | P0 | 待做 |
-| P0-04 | Provider CRUD `requireOperator`；响应只留 `hasApiKey` | P0 | 待做 |
-| P0-05 | `spawn_agent` 钳制子 toolMode；移出只读清单与子 registry | P0 | 待做 |
-| P0-06 | 节点命令 POST、file-sync scan `requireOperator` | P0/P1 | 待做 |
+| P0-01 | `/chat` 拒绝非 operator 的 `mcpServers` / `toolMode=all` / `sandboxMode` / `allowedTools` / 自定义 `workspaceRoot` | P0 | 完成(focused test) |
+| P0-02 | MCP registry 写/verify/reload `requireOperator` | P0 | 完成(focused test) |
+| P0-03 | `POST /todos/seed` 与 `POST /todos/:id/dispatch` `requireOperator` | P0 | 完成(focused test) |
+| P0-04 | Provider CRUD `requireOperator`；响应只留 `hasApiKey` | P0 | 完成(focused test) |
+| P0-05 | `spawn_agent` 钳制子 toolMode；移出只读清单与子 registry | P0 | 进行中 |
+| P0-06 | 节点命令 POST、file-sync scan `requireOperator` | P0/P1 | 完成(focused test) |
 | P1-07 | 项目 browse/bind/delete/default `requireOperator` | P1 | 待做 |
 | P1-08 | `/chat` 与 todos/work-items 的 tenant/project 只信 `requestContext` | P1 | 待做 |
 | P1-09 | 同簇写路由: skills/rules、memory compact/sync-md、session delete/import/claim、services drain、logs | P1 | 待做 |

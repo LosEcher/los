@@ -20,7 +20,7 @@ import {
   reserveIdempotentRequest,
 } from './idempotency.js';
 import { startIdempotencyLeaseHeartbeat } from './idempotency-execution.js';
-import { getMessagePrincipal, getRequestContext } from './request-context.js';
+import { getMessagePrincipal, getRequestContext, requireOperator } from './request-context.js';
 import type { ChatRequestBody } from './chat-route-types.js';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
 import type { MessageRouter } from '@los/agent/message-router';
@@ -45,6 +45,24 @@ export function registerChatRoute(
   app.post('/chat', { bodyLimit: CHAT_BODY_LIMIT_BYTES }, async (req, reply) => {
     if (rateLimitHook) await rateLimitHook(req, reply);
     if (reply.sent) return;
+    const rawBody = (req.body ?? {}) as Record<string, unknown>;
+    const rawMcpServers = Array.isArray(rawBody.mcpServers) ? rawBody.mcpServers : undefined;
+    const rawToolMode = typeof rawBody.toolMode === 'string' ? rawBody.toolMode : undefined;
+    const rawSandboxMode = typeof rawBody.sandboxMode === 'string' ? rawBody.sandboxMode : undefined;
+    const rawAllowedTools = Array.isArray(rawBody.allowedTools) ? rawBody.allowedTools : undefined;
+    const rawWorkspaceRoot = typeof rawBody.workspaceRoot === 'string' && rawBody.workspaceRoot.trim()
+      ? rawBody.workspaceRoot.trim()
+      : undefined;
+    if (
+      ((rawMcpServers && rawMcpServers.length > 0)
+        || rawToolMode === 'all'
+        || rawSandboxMode !== undefined
+        || rawAllowedTools !== undefined
+        || rawWorkspaceRoot !== undefined)
+      && !(await requireOperator(req, reply))
+    ) {
+      return;
+    }
     const contractValidation = validateRunSpecRequest(req.body);
     if (!contractValidation.success) {
       return reply.status(400).send({
