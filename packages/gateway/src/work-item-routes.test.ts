@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import Fastify from 'fastify';
-import { loadConfig } from '@los/infra/config';
+import { loadConfig, setConfig } from '@los/infra/config';
 
 import { registerRequestContext } from './request-context.js';
 import { registerWorkItemRoutes } from './routes/data/work-item-routes.js';
@@ -322,6 +322,46 @@ test('POST /work-items/:id/start rejects already-running work items', async () =
     assert.equal(second.statusCode, 409);
     assert.match(second.json().error, /planning run already started/);
   } finally {
+    await app.close();
+  }
+});
+
+test('non-operator work item creation pins projectId to requestContext (P1-08)', async () => {
+  const previousConfig = await loadConfig();
+  const authConfig = {
+    ...previousConfig,
+    auth: { enabled: true, token: 'access-token', operatorToken: 'operator-token' },
+    defaultProjectId: 'los',
+  };
+  setConfig(authConfig);
+  let capturedProjectId: string | undefined;
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, authConfig);
+  registerWorkItemRoutes(app, {
+    ...stubDeps,
+    createWorkItem: async (input) => {
+      capturedProjectId = input.projectId;
+      return await stubDeps.createWorkItem(input);
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/work-items',
+      headers: { 'x-los-auth-token': 'access-token' },
+      payload: {
+        projectId: 'evil-project',
+        goal: 'scope isolation test',
+        mode: 'execution',
+        editableSurfaces: [],
+        requiredChecks: [],
+        stopConditions: [],
+      },
+    });
+    assert.equal(response.statusCode, 201);
+    assert.equal(capturedProjectId, 'los');
+  } finally {
+    setConfig(previousConfig);
     await app.close();
   }
 });

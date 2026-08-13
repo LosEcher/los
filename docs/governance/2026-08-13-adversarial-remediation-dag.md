@@ -16,7 +16,7 @@
 | P0-05 | `spawn_agent` 钳制子 toolMode；移出只读清单与子 registry | P0 | 完成(focused test) |
 | P0-06 | 节点命令 POST、file-sync scan `requireOperator` | P0/P1 | 完成(focused test) |
 | P1-07 | 项目 browse/bind/delete/default `requireOperator` | P1 | 完成(focused test，未推) |
-| P1-08 | `/chat` 与 todos/work-items 的 tenant/project 只信 `requestContext` | P1 | 待做 |
+| P1-08 | `/chat` 与 todos/work-items 的 tenant/project 只信 `requestContext` | P1 | 完成(focused test) |
 | P1-09 | 同簇写路由: skills/rules、memory compact/sync-md、session delete/import/claim、services drain、logs | P1 | 待做 |
 | P1-10 | tool-call fallback 禁终态覆写；修 AP1 门 | P1 | 待做 |
 | P1-11 | 调度 run 终态带 fence；丢租约 no-op | P1 | 待做 |
