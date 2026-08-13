@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { requireOperator } from '../../request-context.js';
 
 export function registerFileSyncRoutes(app: FastifyInstance, opts: { executorAgentKey?: string }): void {
   const agentKey = opts.executorAgentKey;
@@ -66,6 +67,7 @@ export function registerFileSyncRoutes(app: FastifyInstance, opts: { executorAge
   });
 
   app.post('/file-sync/scan', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const nodeId = typeof body.nodeId === 'string' ? body.nodeId : undefined;
     if (!nodeId) return reply.status(400).send({ error: 'nodeId is required' });

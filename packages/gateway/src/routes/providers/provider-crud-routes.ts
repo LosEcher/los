@@ -91,6 +91,7 @@ export function registerProviderCrudRoutes(
   });
 
   app.post('/providers', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = asRecord(req.body);
     const name = (typeof body.name === 'string' ? body.name.trim() : '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
     if (!name) {
@@ -109,10 +110,11 @@ export function registerProviderCrudRoutes(
     if (body.apiShape !== undefined) provider.apiShape = normalizeOptionalString(body.apiShape);
     config.providers[name] = provider as typeof config.providers[string];
     setConfig(config);
-    return reply.status(201).send({ ok: true, provider: { name, ...config.providers[name] } });
+    return reply.status(201).send({ ok: true, provider: toPublicProvider(name, config.providers[name]) });
   });
 
   app.patch('/providers/:name', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { name } = req.params as { name: string };
     const body = asRecord(req.body);
     const config = getConfig();
@@ -128,10 +130,11 @@ export function registerProviderCrudRoutes(
 
     config.providers[name] = { ...config.providers[name], ...updates };
     setConfig(config);
-    return { ok: true, provider: { name, ...config.providers[name] } };
+    return { ok: true, provider: toPublicProvider(name, config.providers[name]) };
   });
 
   app.delete('/providers/:name', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { name } = req.params as { name: string };
     const config = getConfig();
     if (!config.providers[name]) {
@@ -219,4 +222,13 @@ function isGrokAccount(account: ProviderAccountRecord): boolean {
 function sanitizeProviderAccount(account: ProviderAccountRecord): Omit<ProviderAccountRecord, 'secretRef'> {
   const { secretRef: _secretRef, ...summary } = account;
   return summary;
+}
+
+function toPublicProvider(name: string, provider: { apiKey?: string } & Record<string, unknown>): Record<string, unknown> {
+  const { apiKey, ...rest } = provider;
+  return {
+    name,
+    ...rest,
+    hasApiKey: typeof apiKey === 'string' && apiKey.length > 0,
+  };
 }

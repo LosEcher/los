@@ -59,7 +59,8 @@ test('POST /providers creates a new provider', async () => {
     const body = res.json();
     assert.equal(body.ok, true);
     assert.equal(body.provider.name, 'test-crud-provider');
-    assert.equal(body.provider.apiKey, 'sk-test-key');
+    assert.equal(body.provider.apiKey, undefined);
+    assert.equal(body.provider.hasApiKey, true);
     assert.equal(body.provider.baseUrl, 'https://api.test.example/v1');
     assert.equal(body.provider.model, 'test-model-v1');
     assert.equal(body.provider.enabled, true);
@@ -178,7 +179,8 @@ test('PATCH /providers/:name updates existing provider fields', async () => {
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.equal(body.ok, true);
-    assert.equal(body.provider.apiKey, 'sk-new');
+    assert.equal(body.provider.apiKey, undefined);
+    assert.equal(body.provider.hasApiKey, true);
     assert.equal(body.provider.baseUrl, 'https://new.example');
     assert.equal(body.provider.enabled, false);
   } finally {

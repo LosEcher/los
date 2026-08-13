@@ -39,6 +39,13 @@ test('sessionEventVisibility: session bookmarks are audit', () => {
   assert.equal(sessionEventVisibility('tool.catalog'), 'audit');
 });
 
+test('sessionEventVisibility: child agent lifecycle is audit', () => {
+  assert.equal(sessionEventVisibility('child.agent.started'), 'audit');
+  assert.equal(sessionEventVisibility('child.agent.completed'), 'audit');
+  assert.equal(sessionEventVisibility('child.agent.failed'), 'audit');
+  assert.equal(sessionEventVisibility('child.agent.killed'), 'audit');
+});
+
 test('sessionEventVisibility: default is public', () => {
   assert.equal(sessionEventVisibility('model.delta'), 'public');
   assert.equal(sessionEventVisibility('task.succeeded'), 'public');
