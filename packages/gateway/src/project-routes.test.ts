@@ -5,9 +5,11 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { loadConfig } from '@los/infra/config';
 import { registerProjectRoutes } from './routes/infrastructure/project-routes.js';
 
 test('/projects/browse lists local directories by absolute path', async () => {
+  await loadConfig();
   const root = mkdtempSync(join(tmpdir(), 'los-project-browse-'));
   mkdirSync(join(root, 'alpha'));
   mkdirSync(join(root, '.hidden'));
