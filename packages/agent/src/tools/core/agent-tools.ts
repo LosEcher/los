@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import { resolveIdentityLevelForExecutionPath } from '../../identity-loader.js';
-import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
+import {
+  childAllowedTools,
+  normalizeInteger,
+  normalizeMode,
+  normalizeString,
+  normalizeToolMode,
+  resolveChildToolMode,
+} from './agent-tools-policy.js';
 import { createRunSpec, ensureRunSpecStore, listCompletedChildRunSpecs, listRunSpecsForSession, updateRunSpecResult, type RunSpecResult } from '../../run-specs.js';
 import { appendSessionEvent, ensureSessionEventStore } from '../../session-events.js';
 import type { AgentConfig, AgentResult } from '../../loop.js';
@@ -29,6 +36,8 @@ export interface SpawnAgentRunnerOptions {
   modelSettings?: AgentConfig['modelSettings'];
   runContractMetadata?: AgentConfig['runContractMetadata'];
   workspaceRoot?: string;
+  /** Parent tool mode. Children cannot exceed this (read-only parent ⇒ read-only child). */
+  parentToolMode?: 'read-only' | 'project-write' | 'all';
   traceId?: string;
   requestId?: string;
   runSpecId?: string;
@@ -45,15 +54,6 @@ export interface SpawnAgentRunnerOptions {
   onSessionEvent?: (event: import('../../session-events.js').SessionEventRecord) => void | Promise<void>;
   onProviderFallback?: AgentConfig['onProviderFallback'];
 }
-
-const SUBAGENT_PROJECT_WRITE_TOOLS = [
-  'read_file',
-  'write_file',
-  'preview_patch',
-  'apply_patch',
-  'edit_file',
-  'list_directory',
-] as const;
 
 // ── Background Agent Tracker ────────────────────────────
 
@@ -279,10 +279,9 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
       },
     },
   }, {
-    // L0 so read-only mode (maxRiskLevel L0) can spawn read-only children;
-    // sideEffect stays true so the tool is never replayed on retry. The child
-    // inherits read-only tools and cannot spawn further agents.
-    riskLevel: 'L0',
+    // L1: read-only parents (maxRiskLevel L0) cannot spawn. Children never
+    // receive spawn_agent, so they cannot widen tools.
+    riskLevel: 'L1',
     permissions: ['agent:spawn'],
     timeoutMs: 600_000,
     retryable: false,
@@ -459,7 +458,7 @@ function inheritRunContractMetadata(
 
 export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnAgentRunner {
   return async (request) => {
-    const childToolMode = request.toolMode ?? 'read-only';
+    const childToolMode = resolveChildToolMode(request.toolMode, options.parentToolMode);
     const childMaxLoops = Math.max(1, Math.min(request.maxLoops ?? 8, 12));
     const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : `child:${randomUUID()}`;
     const childRunContractMetadata = inheritRunContractMetadata(options.runContractMetadata);
@@ -484,9 +483,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         model: request.model ?? options.model ?? undefined,
         workspaceRoot: options.workspaceRoot ?? '',
         toolMode: childToolMode,
-        allowedTools: childToolMode === 'read-only'
-          ? [...READ_ONLY_BUILTIN_TOOLS]
-          : [...SUBAGENT_PROJECT_WRITE_TOOLS],
+        allowedTools: [...childAllowedTools(childToolMode)],
         maxLoops: childMaxLoops,
         runContract: childRunContractMetadata,
       });
@@ -585,9 +582,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         maxLoops: childMaxLoops,
         workspaceRoot: options.workspaceRoot,
         toolMode: childToolMode,
-        allowedTools: childToolMode === 'read-only'
-          ? READ_ONLY_BUILTIN_TOOLS
-          : SUBAGENT_PROJECT_WRITE_TOOLS,
+        allowedTools: childAllowedTools(childToolMode),
         toolRetry: options.toolRetry,
         signal: abortController.signal,
         onSessionEvent: options.onSessionEvent,
@@ -660,9 +655,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
-      allowedTools: childToolMode === 'read-only'
-        ? READ_ONLY_BUILTIN_TOOLS
-        : SUBAGENT_PROJECT_WRITE_TOOLS,
+      allowedTools: childAllowedTools(childToolMode),
       toolRetry: options.toolRetry,
       signal: options.signal,
       onSessionEvent: options.onSessionEvent,
@@ -686,25 +679,4 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       }, null, 2),
     };
   };
-}
-
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeToolMode(value: unknown): SpawnAgentRequest['toolMode'] | undefined {
-  if (value === 'project-write' || value === 'read-only') return value;
-  return undefined;
-}
-
-function normalizeMode(value: unknown): SpawnAgentRequest['mode'] | undefined {
-  if (value === 'sync' || value === 'background') return value;
-  return undefined;
-}
-
-function normalizeInteger(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  return Math.floor(value);
 }

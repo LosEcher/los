@@ -357,6 +357,7 @@ test('spawn_agent child inherits parent run contract metadata', async () => {
   assert.deepEqual(seenConfig.identity, { name: 'child', level: 'minimal' });
   assert.equal(seenConfig.allowedTools.includes('spawn_agent'), false);
   assert.equal(seenConfig.allowedTools.includes('run_shell'), false);
+  assert.equal(seenConfig.toolMode, 'project-write');
   assert.equal(JSON.parse(result.content).childSessionId.startsWith('parent-session:child:'), true);
 
   // Mutation isolation: child clone must not widen the parent object (AP6)
@@ -386,6 +387,23 @@ test('spawn_agent child inherits parent run contract metadata', async () => {
   childConfig.runContractMetadata.runContract.phase = 'planning';
   assert.deepEqual(parentMeta.runContract.requiredChecks, ['pnpm --filter @los/agent test']);
   assert.equal(parentMeta.runContract.phase, 'executing');
+});
+
+test('spawn_agent clamps child toolMode to a read-only parent', async () => {
+  let seenConfig: { toolMode?: string; allowedTools?: readonly string[] } | undefined;
+  const runner = createSpawnAgentRunner({
+    parentToolMode: 'read-only',
+    runAgent: async (_prompt, config) => {
+      seenConfig = config;
+      return { text: 'ok', turns: [], loopCount: 1, totalTokens: { prompt: 0, completion: 0 }, messages: [] };
+    },
+  });
+
+  const result = await runner({ prompt: 'should stay read-only', toolMode: 'project-write' });
+  assert.equal(result.error, undefined);
+  assert.equal(seenConfig?.toolMode, 'read-only');
+  assert.equal(seenConfig?.allowedTools?.includes('write_file'), false);
+  assert.equal(seenConfig?.allowedTools?.includes('spawn_agent'), false);
 });
 
 test('spawn_agent inherits fallback policy unless the child overrides its route', async () => {
