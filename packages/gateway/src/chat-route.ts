@@ -155,11 +155,17 @@ export function registerChatRoute(
       }
     }
     const modelSettings = normalizeModelSettings(body.modelSettings);
+    const context = getRequestContext(req);
+    // Project identity (P1-08): a non-operator with auth enabled is pinned to
+    // requestContext.projectId — body.projectId and x-project-id cannot select
+    // another project. Operators and auth-disabled requests keep the original
+    // explicit-selection semantics (body ?? header, with conflict detection).
+    const bodyProjectId = normalizeOptionalString(body.projectId);
     const headerProjectId = normalizeOptionalString(Array.isArray(req.headers['x-project-id'])
       ? req.headers['x-project-id'][0]
       : req.headers['x-project-id']);
-    const bodyProjectId = normalizeOptionalString(body.projectId);
-    const requestedProjectId = bodyProjectId ?? headerProjectId;
+    const isNonOperator = config.auth.enabled && !context.isOperator;
+    const requestedProjectId = isNonOperator ? context.projectId : (bodyProjectId ?? headerProjectId);
     const requestedWorkspace = normalizeOptionalString(body.workspaceRoot);
     const requestedWorkspaceRoot = requestedWorkspace
       ? normalizeWorkspaceRoot(requestedWorkspace, defaultWorkspaceRoot)
@@ -170,7 +176,6 @@ export function registerChatRoute(
       ? body.manualSkillIds.map(item => String(item).trim()).filter(Boolean)
       : undefined;
     const maxLoops = normalizePositiveInteger(body.maxLoops);
-    const context = getRequestContext(req);
     const principal = getMessagePrincipal(req);
     const traceId = normalizeOptionalString(body.traceId) ?? context.traceId;
     const dedupeKey = normalizeOptionalString(body.dedupeKey);
@@ -199,8 +204,8 @@ export function registerChatRoute(
       : (sessionId ?? `session-${Date.now()}`);
     const storedDefaultProjectId = getDefaultProjectId();
     const intakeResolution = resolveConfiguredProjectOwner({
-      requestedProjectId: bodyProjectId,
-      contextProjectId: headerProjectId,
+      requestedProjectId: isNonOperator ? context.projectId : bodyProjectId,
+      contextProjectId: isNonOperator ? undefined : headerProjectId,
       workspaceRoot: requestedWorkspaceRoot,
       defaultProjectId: storedDefaultProjectId ?? config.defaultProjectId,
       defaultWorkspaceRoot: storedDefaultProjectId ? undefined : defaultWorkspaceRoot,

@@ -167,6 +167,35 @@ function hasOperatorAccess(req: FastifyRequest): boolean {
   return !getConfig().auth.enabled || getRequestContext(req).isOperator;
 }
 
+/**
+ * Resolve the authoritative tenant scope for a request.
+ *
+ * When auth is enabled and the requester is not an operator, the scope is
+ * fixed by requestContext (`local`) and any caller-supplied tenant override
+ * (body/query) is ignored — a role=user JWT or bare access token must not be
+ * able to reach another tenant's data. Operator or auth-disabled requests may
+ * still pass an explicit override (operators select scope via x-tenant-id,
+ * already folded into requestContext).
+ */
+export function resolveTenantScope(req: FastifyRequest, requested?: string): string {
+  const ctx = getRequestContext(req);
+  if (getConfig().auth.enabled && !ctx.isOperator) return ctx.tenantId;
+  return requested ?? ctx.tenantId;
+}
+
+/**
+ * Resolve the authoritative project scope for a request.
+ *
+ * Same boundary as resolveTenantScope: non-operators are pinned to
+ * requestContext.projectId; operators and auth-disabled requests may still
+ * select an explicit project.
+ */
+export function resolveProjectScope(req: FastifyRequest, requested?: string): string {
+  const ctx = getRequestContext(req);
+  if (getConfig().auth.enabled && !ctx.isOperator) return ctx.projectId;
+  return requested ?? ctx.projectId;
+}
+
 export function getMessagePrincipal(req: FastifyRequest): MessagePrincipal {
   const ctx = getRequestContext(req);
   const common = {
