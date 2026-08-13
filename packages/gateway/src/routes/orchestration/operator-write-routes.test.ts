@@ -15,6 +15,7 @@ import { registerMCPRoutes } from '../tools/mcp-routes.js';
 import { registerNodeCommandRoutes } from './node-command-routes.js';
 import { registerFileSyncRoutes } from '../infrastructure/file-sync-routes.js';
 import { registerChatRoute } from '../../chat-route.js';
+import { registerProjectRoutes } from '../infrastructure/project-routes.js';
 
 function config(): Config {
   return {
@@ -77,9 +78,10 @@ test('ordinary access token cannot invoke operator write routes', async () => {
   registerNodeCommandRoutes(app);
   registerFileSyncRoutes(app, {});
   registerChatRoute(app, effectiveConfig, process.cwd());
+  registerProjectRoutes(app);
 
   try {
-    const requests: Array<{ method?: 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: Record<string, unknown> }> = [
+    const requests: Array<{ method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: Record<string, unknown> }> = [
       { url: '/runs/run-test/recover', payload: {} },
       { url: '/runs/run-test/answer', payload: {} },
       { url: '/runs/run-test/verify', payload: {} },
@@ -110,6 +112,11 @@ test('ordinary access token cannot invoke operator write routes', async () => {
       { url: '/chat', payload: { prompt: 'x', sandboxMode: 'sandbox' } },
       { url: '/chat', payload: { prompt: 'x', allowedTools: ['run_shell'] } },
       { url: '/chat', payload: { prompt: 'x', workspaceRoot: '/' } },
+      { method: 'GET', url: '/projects/browse?path=/' },
+      { url: '/projects/bind', payload: { workspacePath: '/' } },
+      { method: 'DELETE', url: '/projects/los' },
+      { url: '/projects/default', payload: { projectId: 'los' } },
+      { url: '/projects/validate', payload: { workspacePath: '/' } },
     ];
     for (const request of requests) {
       const response = await app.inject({
