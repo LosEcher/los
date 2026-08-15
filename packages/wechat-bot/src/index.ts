@@ -419,6 +419,42 @@ async function handleSSEEvent(eventType: string, data: string): Promise<void> {
       taskRunId,
     };
 
+    // DSH 事件接管（S3）：governance.* 事件先 POST 到 DSH webhook；DSH 返回
+    // handled=true 表示已接管（分析+推送由其负责），本 bot 不再直发原始告警。
+    // DSH 未配置/不可达/未接管 → 走既有直发（兜底，保证通知必达）。
+    const dshWebhookUrl = process.env.DSH_EVENTS_WEBHOOK_URL;
+    if (isGovernanceEvent && dshWebhookUrl) {
+      let tookOver = false;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(dshWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: parsed.type,
+            sessionId,
+            eventId: parsed.id,
+            payload,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const result = await res.json().catch(() => ({}));
+          tookOver = result?.handled === true;
+          if (tookOver) {
+            console.log(`[events] DSH took over ${parsed.type} (${String(result.reason ?? '')}) — skip direct alert`);
+          }
+        } else {
+          console.log(`[events] DSH webhook http ${res.status} — fallback to direct alert`);
+        }
+      } catch (err) {
+        console.error(`[events] DSH webhook failed: ${err instanceof Error ? err.message : String(err)} — fallback to direct alert`);
+      }
+      if (tookOver) return;
+    }
+
     await deliverAlert(alert);
   } catch { /* parse error */ }
 }
