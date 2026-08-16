@@ -80,6 +80,14 @@ export const ConfigSchema = z.object({
     defaultModel: z.string().default(DEFAULT_AGENT_MODEL),
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
+    /** Windows shell-sandbox backend selection. 'acl' (default) uses the
+     *  zero-elevation restricted-token write-restriction backend
+     *  (@deepseek-ai/dsh-sandbox-windows-acl, no admin, blocks writes only —
+     *  reads/network unrestricted). 'runseal' uses RunSeal's Windows
+     *  reference backend when runseal.exe is installed and set up (one-time
+     *  UAC; full filesystem/network enforcement). 'auto' prefers runseal and
+     *  falls back to acl. */
+    windowsSandboxBackend: z.enum(['auto', 'runseal', 'acl']).default('acl'),
     /** Network isolation inside the OS sandbox. 'isolated' (default) keeps the
      *  sandbox network namespace (bwrap --unshare-net / sandbox-exec deny
      *  network). 'host' runs shell commands with the host network so
@@ -264,6 +272,7 @@ export async function loadConfig(opts?: {
       maxLoops: 20,
       sandboxMode: 'workspace-write',
       sandboxNetwork: 'isolated',
+      windowsSandboxBackend: 'acl',
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
       skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
