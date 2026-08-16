@@ -108,7 +108,8 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
 
   const layout = useMemo<{ nodes: LayoutNode[]; visibleIds: Set<string>; width: number; height: number } | null>(() => {
     if (!query.data) return null;
-    const visible = query.data.nodes.filter(node => layerIndex(node.kind) <= 3);
+    const nodes = query.data.nodes ?? [];
+    const visible = nodes.filter(node => layerIndex(node.kind) <= 3);
     const visibleIds = new Set(visible.map(node => node.id));
     const byLayer = new Map<number, LayoutNode[]>();
     for (const node of visible) {
@@ -150,8 +151,8 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
         {query.data ? (
           <span className="topology-stats">
             {t('assets.topology.stats', {
-              nodes: String(query.data.nodes.length),
-              edges: String(query.data.edges.length),
+              nodes: String((query.data.nodes ?? []).length),
+              edges: String((query.data.edges ?? []).length),
             })}
           </span>
         ) : null}
@@ -179,7 +180,7 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
                   <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
                 </marker>
               </defs>
-              {query.data.edges
+              {(query.data.edges ?? [])
                 .filter(edge => layout.visibleIds.has(edge.from) && layout.visibleIds.has(edge.to))
                 .map((edge, index) => {
                   const from = layout.nodes.find(node => node.id === edge.from);
@@ -257,9 +258,9 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
             <p className="topology-hint">{t('assets.topology.hint')}</p>
           )}
 
-          {query.data.warnings.length > 0 ? (
+          {(query.data.warnings ?? []).length > 0 ? (
             <ul className="topology-warnings">
-              {query.data.warnings.map((warning, index) => (
+              {(query.data.warnings ?? []).map((warning, index) => (
                 <li key={index}>{warning}</li>
               ))}
             </ul>

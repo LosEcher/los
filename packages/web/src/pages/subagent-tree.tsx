@@ -62,7 +62,8 @@ export function SubagentTree({
 
   if (!sessionId) return null;
   const data = query.data;
-  const hasTree = data && data.tree.length > 0 && data.tree.some(node => node.children.length > 0);
+  const tree = data?.tree ?? [];
+  const hasTree = data && tree.length > 0 && tree.some(node => node.children.length > 0);
 
   return (
     <section className="subagent-tree" aria-label={t('assets.subagents.sectionAria')}>
@@ -71,7 +72,7 @@ export function SubagentTree({
         <strong>{t('assets.subagents.title')}</strong>
         {data ? (
           <span className="subagent-tree-count">
-            {t('assets.subagents.count', { count: String(countNodes(data.tree)) })}
+            {t('assets.subagents.count', { count: String(countNodes(tree)) })}
           </span>
         ) : null}
       </div>
@@ -79,15 +80,15 @@ export function SubagentTree({
       {query.error ? (
         <p className="topology-error" role="alert">{t('assets.subagents.loadError', { error: String(query.error) })}</p>
       ) : null}
-      {data && data.tree.length === 0 ? (
+      {data && tree.length === 0 ? (
         <p className="timeline-hint">{t('assets.subagents.empty')}</p>
       ) : null}
-      {data && data.tree.length > 0 ? (
+      {data && tree.length > 0 ? (
         <ul className="subagent-tree-list">
-          {data.tree.map(node => <TreeNode key={node.runSpecId} node={node} depth={0} onSelectSession={onSelectSession} />)}
+          {tree.map(node => <TreeNode key={node.runSpecId} node={node} depth={0} onSelectSession={onSelectSession} />)}
         </ul>
       ) : null}
-      {data && !hasTree && data.tree.length > 0 ? (
+      {data && !hasTree && tree.length > 0 ? (
         <p className="timeline-hint">{t('assets.subagents.noChildren')}</p>
       ) : null}
     </section>
