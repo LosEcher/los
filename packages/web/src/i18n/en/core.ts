@@ -64,6 +64,10 @@ export const enCore = {
 
   // ── Common actions / state ───────────────────────────
   'common.loading': 'Loading...',
+  'common.scrollToBottom': 'Scroll to bottom',
+
+  'chat.codeCopy': 'Copy code',
+  'chat.codeCopied': 'Copied',
   'common.refresh': 'refresh',
   'common.save': 'Save',
   'common.cancel': 'Cancel',

@@ -8657,3 +8657,46 @@ button:disabled {
   gap: var(--space-4);
   padding: var(--space-4) 0;
 }
+
+/* ── Wave 3: streaming caret ────────────────────────── */
+
+.chat-message.assistant.streaming .chat-bubble-assistant::after {
+  content: '▍';
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--accent);
+  animation: caret-blink 1s steps(2, jump-none) infinite;
+}
+
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+/* ── Wave 3: code copy button ───────────────────────── */
+
+.md-code-lang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.md-code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.md-code-copy:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-message.assistant.streaming .chat-bubble-assistant::after { animation: none; }
+}

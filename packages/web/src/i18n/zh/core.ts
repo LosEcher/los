@@ -71,6 +71,10 @@ export const zhCore: CoreKeys = {
   'common.refresh': '刷新',
   'common.save': '保存',
   'common.cancel': '取消',
+  'common.scrollToBottom': '滚动到底部',
+
+  'chat.codeCopy': '复制代码',
+  'chat.codeCopied': '已复制',
   'common.close': '关闭',
   'common.add': '添加',
   'common.create': '创建',

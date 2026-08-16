@@ -41,19 +41,21 @@ const dailyQualityView = readFileSync(new URL('./pages/daily-quality-view.tsx', 
 test('chat keeps per-run choices beside the composer and evidence in the inspector', () => {
   assert.equal(EN['chat.runChoicesAria'], 'run choices');
   assert.equal(EN['chat.runEvidence'], 'Run Evidence');
-  // Form may span multiple attributes (className + data-debug for phone power fields).
-  const composer = between(chatComposer, 'className="composer"', '</form>');
+  // Wave 3: run-choice toolbar moved to ComposerToolbar (same file), rendered
+  // inside the composer form — the boundary contract is unchanged.
+  const form = between(chatComposer, 'className="composer"', '</form>');
   const inspector = between(chatPage, '<aside className="panel inspector">', '</aside>');
 
-  assert.match(composer, /className="composer-toolbar"/);
-  assert.match(composer, /aria-label=\{t\('chat\.runChoicesAria'\)\}/);
-  assert.match(composer, /label=\{t\('chat\.provider'\)\}/);
-  assert.match(composer, /label=\{t\('chat\.model'\)\}/);
-  assert.match(composer, /label=\{t\('chat\.toolsSkills'\)\}/);
-  assert.match(composer, /label=\{t\('chat\.executionDir'\)\}/);
-  assert.match(composer, /ChatAdvancedSettings/);
-  assert.match(composer, /composer-power-fields/);
-  assert.match(composer, /data-debug=\{props\.debugMode \? 'true' : 'false'\}/);
+  assert.match(chatComposer, /className="composer-toolbar"/);
+  assert.match(chatComposer, /aria-label=\{t\('chat\.runChoicesAria'\)\}/);
+  assert.match(chatComposer, /label=\{t\('chat\.provider'\)\}/);
+  assert.match(chatComposer, /label=\{t\('chat\.model'\)\}/);
+  assert.match(chatComposer, /label=\{t\('chat\.toolsSkills'\)\}/);
+  assert.match(chatComposer, /label=\{t\('chat\.executionDir'\)\}/);
+  assert.match(chatComposer, /ChatAdvancedSettings/);
+  assert.match(chatComposer, /composer-power-fields/);
+  assert.match(form, /<ComposerToolbar/);
+  assert.match(form, /data-debug=\{props\.debugMode \? 'true' : 'false'\}/);
   assert.match(chatPage, /refetchInterval: run\.running \? 4_000 : false/);
   assert.match(useChatRun, /useChatStream/);
   assert.match(useChatStream, /connectWsStream/);
@@ -62,8 +64,8 @@ test('chat keeps per-run choices beside the composer and evidence in the inspect
 
   assert.match(inspector, /\{t\('chat\.runEvidence'\)\}/);
   assert.doesNotMatch(inspector, /Run Controls/);
-  assert.doesNotMatch(composer, /Provider setup stays in Providers/);
-  assert.doesNotMatch(composer, /composer-run-panel/);
+  assert.doesNotMatch(form, /Provider setup stays in Providers/);
+  assert.doesNotMatch(form, /composer-run-panel/);
   assert.doesNotMatch(inspector, /provider endpoint/);
   assert.doesNotMatch(inspector, /provider model/);
   assert.doesNotMatch(inspector, /workspace root/);
