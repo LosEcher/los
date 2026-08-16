@@ -9,11 +9,14 @@ import type { AgentPreActionGateConfig } from '../pre-action-gate.js';
 import type { ProviderFallbackPolicy } from '../providers/provider-fallback.js';
 import type { ProviderFallbackEvent } from '../providers/provider-fallback.js';
 import type { PlanningOutput, PlanningTransport } from '../planning-output.js';
+import type { UsageFeature } from '../usage-feature.js';
 
 export interface AgentConfig {
   sessionId?: string;
   provider?: string;
   model?: string;
+  /** Usage feature attribution (roadmap R6). Defaults to 'unspecified'. */
+  feature?: UsageFeature;
   /** Explicit ordered provider/model policy. No provider switch occurs when unset. */
   providerFallback?: ProviderFallbackPolicy;
   modelSettings?: ModelSettings;

@@ -19,7 +19,7 @@ routes:
     response: UsageSummary
 schemas:
   UsageSummary:
-    required: [evidenceClass, from, to, totals, byProviderModel, byDay, callTelemetry]
+    required: [evidenceClass, from, to, totals, byProviderModel, byDay, callTelemetry, byFeature]
     evidenceClass:
       enum: [los_runtime]
     totals:
@@ -64,6 +64,20 @@ schemas:
         - avgDurationMs
         - withUsageCount
         - usageFillRate
+    byFeature:
+      description: >
+        Roadmap R6 per-product-surface attribution. feature comes from
+        provider_call_telemetry.request_meta_json (captured from 2026-08-16);
+        'unspecified' covers pre-R6 and unattributed calls. Cost joins the
+        matching model.response event by trace (L1 basis, same as byProviderModel).
+      itemFields:
+        - feature
+        - callCount
+        - errorCount
+        - avgDurationMs
+        - promptTokens
+        - completionTokens
+        - estimatedCostUsd
 safety:
   - evidenceClass is always los_runtime for this contract version.
   - External CLI history (ccusage/ccglass/T3) must use a separate evidence class.

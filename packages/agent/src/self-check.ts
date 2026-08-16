@@ -87,6 +87,7 @@ export async function runPostExecutionSelfCheck(
   try {
     const timeoutMs = input.timeoutMs ?? 60_000;
     const response = await input.provider.chat(messages, undefined, {
+      feature: 'self-check',
       signal: AbortSignal.timeout(timeoutMs),
       traceId: input.traceId,
       sessionId: input.sessionId,

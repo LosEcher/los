@@ -1,6 +1,6 @@
 import { getDb } from '@los/infra/db';
 import type { TransactionClient } from './execution-persistence.js';
-import type { VerificationRequirement } from './run-contract.js';
+import type { VerificationIndependence, VerificationRequirement } from './run-contract.js';
 
 export type VerificationRecordStatus = 'required' | 'running' | 'succeeded' | 'failed' | 'skipped';
 
@@ -14,6 +14,8 @@ export interface VerificationRecord {
   command?: string;
   assertion?: string;
   reviewer?: string;
+  /** Independence level of the check; 'unknown' when not declared. */
+  independence: VerificationIndependence;
   planRevision: number;
   status: VerificationRecordStatus;
   required: boolean;
@@ -35,6 +37,7 @@ export interface CreateVerificationRecordInput {
   command?: string;
   assertion?: string;
   reviewer?: string;
+  independence?: VerificationIndependence;
   planRevision?: number;
   status?: VerificationRecordStatus;
   required?: boolean;
@@ -60,6 +63,7 @@ CREATE TABLE IF NOT EXISTS verification_records (
   command TEXT,
   assertion TEXT,
   reviewer TEXT,
+  independence TEXT NOT NULL DEFAULT 'unknown',
   plan_revision INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'required',
   required BOOLEAN NOT NULL DEFAULT true,
@@ -74,6 +78,7 @@ CREATE TABLE IF NOT EXISTS verification_records (
 ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'command';
 ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS assertion TEXT;
 ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS reviewer TEXT;
+ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS independence TEXT NOT NULL DEFAULT 'unknown';
 ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS plan_revision INTEGER NOT NULL DEFAULT 1;
 
 CREATE INDEX IF NOT EXISTS idx_verification_records_session ON verification_records(session_id);
@@ -99,10 +104,10 @@ export async function createVerificationRecord(input: CreateVerificationRecordIn
     `
     INSERT INTO verification_records (
       id, session_id, run_spec_id, task_run_id, check_name, kind, command, assertion,
-      reviewer, plan_revision, status, required, skip_reason, output_summary, error, completed_at
+      reviewer, independence, plan_revision, status, required, skip_reason, output_summary, error, completed_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-      CASE WHEN $11 IN ('succeeded', 'failed', 'skipped') THEN now() ELSE NULL END
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+      CASE WHEN $12 IN ('succeeded', 'failed', 'skipped') THEN now() ELSE NULL END
     )
     ON CONFLICT (id) DO UPDATE SET
       task_run_id = EXCLUDED.task_run_id,
@@ -128,6 +133,7 @@ export async function createVerificationRecord(input: CreateVerificationRecordIn
       input.command ?? null,
       input.assertion ?? null,
       input.reviewer ?? null,
+      input.independence ?? 'unknown',
       input.planRevision ?? 1,
       normalizeVerificationStatus(input.status),
       input.required ?? true,
@@ -214,6 +220,7 @@ export async function seedVerificationRequirementsForRunSpec(input: {
       command: requirement.command,
       assertion: requirement.assertion,
       reviewer: requirement.reviewer,
+      independence: requirement.independence,
       planRevision,
       status: 'required',
       required: true,
@@ -238,8 +245,8 @@ export async function replaceVerificationRequirementsForRunSpec(client: Transact
     await client.query(
       `INSERT INTO verification_records (
          id, session_id, run_spec_id, check_name, kind, command, assertion, reviewer,
-         plan_revision, status, required
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'required', TRUE)`,
+         independence, plan_revision, status, required
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'required', TRUE)`,
       [
         `verification-${input.runSpecId}-r${input.planRevision}-${index + 1}`,
         input.sessionId,
@@ -249,6 +256,7 @@ export async function replaceVerificationRequirementsForRunSpec(client: Transact
         requirement.command ?? null,
         requirement.assertion ?? null,
         requirement.reviewer ?? null,
+        requirement.independence ?? 'unknown',
         input.planRevision,
       ],
     );
@@ -265,6 +273,7 @@ type VerificationRecordRow = {
   command: string | null;
   assertion: string | null;
   reviewer: string | null;
+  independence: string;
   plan_revision: number;
   status: string;
   required: boolean;
@@ -287,6 +296,7 @@ function rowToRecord(row: VerificationRecordRow): VerificationRecord {
     command: row.command ?? undefined,
     assertion: row.assertion ?? undefined,
     reviewer: row.reviewer ?? undefined,
+    independence: normalizeVerificationIndependence(row.independence),
     planRevision: row.plan_revision,
     status: normalizeVerificationStatus(row.status),
     required: row.required,
@@ -309,18 +319,31 @@ function normalizeVerificationKind(value: unknown): VerificationRequirement['kin
   return 'command';
 }
 
+function normalizeVerificationIndependence(value: unknown): VerificationIndependence {
+  if (value === 'deterministic' || value === 'separate_model' || value === 'same_model') return value;
+  return 'unknown';
+}
+
 function normalizeRequirements(
   requiredChecks: readonly string[] | undefined,
   verifications: readonly VerificationRequirement[] | undefined,
-): Array<{ checkName: string; kind: VerificationRequirement['kind']; command?: string; assertion?: string; reviewer?: string }> {
+): Array<{
+  checkName: string;
+  kind: VerificationRequirement['kind'];
+  command?: string;
+  assertion?: string;
+  reviewer?: string;
+  independence?: VerificationIndependence;
+}> {
   const requirements = [
-    ...uniqueStrings(requiredChecks ?? []).map((checkName) => ({ checkName, kind: 'command' as const, command: checkName })),
+    ...uniqueStrings(requiredChecks ?? []).map((checkName) => ({ checkName, kind: 'command' as const, command: checkName, independence: 'deterministic' as const })),
     ...(verifications ?? []).map((requirement) => ({
       checkName: requirement.id.trim(),
       kind: requirement.kind,
       command: requirement.command?.trim() || undefined,
       assertion: requirement.assertion?.trim() || undefined,
       reviewer: requirement.reviewer?.trim() || undefined,
+      independence: requirement.independence ?? 'unknown',
     })),
   ].filter((requirement) => requirement.checkName);
   return [...new Map(requirements.map((requirement) => [verificationRequirementKey(requirement), requirement])).values()];

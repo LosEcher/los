@@ -240,6 +240,7 @@ async function runRole(input: {
     const startedAt = Date.now();
     try {
       const response = await provider.chat(messagesForAttempt(userPrompt, callAttempt), undefined, {
+        feature: 'eval',
         traceId: `${input.scenarioRunId}:${input.role}:attempt-${callAttempt}`,
         sessionId: `session-${input.options.runSpecId}`,
         modelSettings: { temperature: 0, maxTokens: 700, thinking: 'disabled' },

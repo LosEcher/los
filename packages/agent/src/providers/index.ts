@@ -152,6 +152,16 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         }
         return m;
       });
+      // Request-side config snapshot for telemetry (roadmap R2a): the requested
+      // reasoning effort is the attribution key for cost/latency/quality
+      // backtests. Mirrors DSH's LlmCallConfig header snapshot.
+      const requestMeta = {
+        reasoningEffort: options.modelSettings?.reasoningEffort,
+        thinking: options.modelSettings?.thinking,
+        maxTokens: options.modelSettings?.maxTokens,
+        temperature: options.modelSettings?.temperature,
+        feature: options.feature,
+      };
       const body: Record<string, unknown> = {
         model,
         messages: serializedMessages,
@@ -193,6 +203,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
           provider: name, model, endpoint: '/chat/completions', method: 'POST',
           stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
           status: 0, durationMs: Date.now() - fetchStart,
+          requestMeta,
           errorCode: 'PROVIDER_NETWORK', errorMessage: err?.message?.slice(0, 500),
         }).catch(() => {});
         throw err;
@@ -207,6 +218,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
           stream: Boolean(options.onDelta), requestPayloadSize: bodyStr.length,
           status: res.status, durationMs: failedAt - fetchStart,
           headersDurationMs: failedAt - fetchStart,
+          requestMeta,
           errorCode: 'PROVIDER_HTTP_ERROR', errorMessage: `HTTP ${res.status}`,
         }).catch(() => {});
         throw AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', name, model, res.status, err, res.headers);
@@ -224,6 +236,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
           sessionId: options.sessionId,
           provider: name, model: result.model ?? model, endpoint: '/chat/completions', method: 'POST',
           stream: true, requestPayloadSize: bodyStr.length,
+          requestMeta,
           status: 200, durationMs: doneAt - fetchStart,
           headersDurationMs: headersAt - fetchStart,
           bodyDurationMs: doneAt - headersAt,
@@ -288,6 +301,7 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         sessionId: options.sessionId,
         provider: name, model: effectiveModel, endpoint: '/chat/completions', method: 'POST',
         stream: false, requestPayloadSize: bodyStr.length,
+          requestMeta,
         status: 200, durationMs: bodyDoneAt - fetchStart,
         headersDurationMs: headersAt - fetchStart,
         bodyDurationMs: bodyDoneAt - headersAt,

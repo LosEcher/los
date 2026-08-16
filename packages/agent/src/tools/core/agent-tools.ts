@@ -568,6 +568,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       // Fire and forget — result is stored on the tracked agent and persisted
       // to the child run_spec so it survives a process restart.
       void options.runAgent(request.prompt, {
+        feature: 'subagent',
         sessionId: childSessionId,
         provider: request.provider ?? options.provider,
         model: request.model ?? options.model,
@@ -641,6 +642,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
 
     // Sync mode (original behavior)
     const childResult = await options.runAgent(request.prompt, {
+      feature: 'subagent',
       sessionId: childSessionId,
       provider: request.provider ?? options.provider,
       model: request.model ?? options.model,

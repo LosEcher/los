@@ -1,0 +1,67 @@
+contract: los.slo-report
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Main-path SLO report (roadmap R2). Aggregates task_runs into completion,
+  intervention, recovery and latency metrics per provider/model/kernel.
+  Indicator definitions are explicit proxies (blocked ≈ awaiting operator
+  action; multi-attempt success ≈ recovery) so the report stays auditable.
+type: object
+routes:
+  - method: GET
+    path: /slo/report
+    query:
+      days: optional integer from 1 through 90 (default 7)
+    response: SloReport
+schemas:
+  SloReport:
+    required: [generatedAt, windowDays, groups]
+    fields:
+      generatedAt: date-time
+      windowDays: integer
+      groups:
+        type: array
+        items: SloGroup
+  SloGroup:
+    required:
+      - provider
+      - model
+      - kernel
+      - runs
+      - succeeded
+      - blocked
+      - failed
+      - cancelled
+      - completionRate
+      - interventionRate
+      - recoveryAttempts
+      - recoverySucceeded
+      - recoveryRate
+      - p50DurationMs
+      - p95DurationMs
+    fields:
+      provider: provider name from task_runs.provider (string)
+      model: model id from task_runs.model (string)
+      kernel: execution kernel from task_runs.metadata_json->>'executionKernel' (string, 'los' default)
+      runs: total task_runs in window (integer)
+      succeeded: count with status 'succeeded' (integer)
+      blocked: count with status 'blocked' (integer)
+      failed: count with status 'failed' (integer)
+      cancelled: count with status 'cancelled' (integer)
+      completionRate: succeeded / (succeeded + failed + blocked), 0 when denominator empty (number 0..1)
+      interventionRate: blocked / runs, 0 when no runs (number 0..1)
+      recoveryAttempts: task_runs with attempt > 1 (integer)
+      recoverySucceeded: recovery attempts that ended 'succeeded' (integer)
+      recoveryRate: recoverySucceeded / recoveryAttempts, 0 when none (number 0..1)
+      p50DurationMs: percentile 0.5 of (completed_at - started_at) in ms (integer or null)
+      p95DurationMs: percentile 0.95 of (completed_at - started_at) in ms (integer or null)
+  notes:
+    - >-
+      Indicators are proxies, not proofs: blocked includes operator-approval
+      gates and verification blockers; recovery success does not prove
+      side-effect idempotency. Cross-reference verification_records and
+      session_events before drawing conclusions (AP3 discipline).
+    - >-
+      Provider/model split is the primary dimension; kernel comes from task
+      metadata so K4/Pi shadow runs are separable from the production baseline.

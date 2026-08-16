@@ -18,6 +18,8 @@
     "./session-trace-fixtures": "./src/session-trace-fixtures.ts",
     "./execution-observability": "./src/execution-observability.ts",
     "./execution-observability-fixtures": "./src/execution-observability-fixtures.ts",
+    "./slo-report": "./src/slo-report.ts",
+    "./usage-feature": "./src/usage-feature.ts",
     "./task-runs": "./src/task-runs.ts",
     "./executor-nodes": "./src/executor-nodes.ts",
     "./service-instances": "./src/service-instances.ts",

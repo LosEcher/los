@@ -30,6 +30,20 @@ export interface ProviderCallTelemetry {
   errorCode?: string;
   errorMessage?: string;
   rateLimitResetMs?: number;
+   /**
+    * Request-side configuration snapshot (reasoning effort, sampling scalars).
+    * Mirrors DSH's LlmCallConfig-in-header approach: without the requested
+    * effort, historical data cannot attribute cost/latency/quality to the
+    * reasoning tier that was actually used.
+    */
+   requestMeta?: {
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'none';
+    thinking?: 'enabled' | 'disabled';
+    maxTokens?: number;
+    temperature?: number;
+    /** Usage feature attribution (roadmap R6). */
+    feature?: string;
+  };
   /** Token usage from the provider response. Prefer writing this on success paths. */
   usage?: {
     promptTokens: number;
@@ -86,6 +100,7 @@ CREATE TABLE IF NOT EXISTS provider_call_telemetry (
 );
 ALTER TABLE provider_call_telemetry ADD COLUMN IF NOT EXISTS headers_duration_ms INTEGER;
 ALTER TABLE provider_call_telemetry ADD COLUMN IF NOT EXISTS body_duration_ms INTEGER;
+ALTER TABLE provider_call_telemetry ADD COLUMN IF NOT EXISTS request_meta_json JSONB;
 CREATE INDEX IF NOT EXISTS idx_pct_trace_id ON provider_call_telemetry(trace_id);
 CREATE INDEX IF NOT EXISTS idx_pct_session_id ON provider_call_telemetry(session_id);
 CREATE INDEX IF NOT EXISTS idx_pct_provider ON provider_call_telemetry(provider);
@@ -122,8 +137,8 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
        (trace_id, session_id, provider, model, endpoint, method, stream,
         request_payload_size, status, duration_ms,
         headers_duration_ms, body_duration_ms,
-        error_code, error_message, rate_limit_reset_ms, usage_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+        error_code, error_message, rate_limit_reset_ms, usage_json, request_meta_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
     [
       tel.traceId,
       tel.sessionId ?? null,
@@ -141,6 +156,15 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
       errorMessage,
       tel.rateLimitResetMs ?? null,
       JSON.stringify(tel.usage ?? {}),
+       tel.requestMeta
+         ? JSON.stringify({
+             reasoningEffort: tel.requestMeta.reasoningEffort ?? null,
+             thinking: tel.requestMeta.thinking ?? null,
+             maxTokens: tel.requestMeta.maxTokens ?? null,
+             temperature: tel.requestMeta.temperature ?? null,
+             feature: tel.requestMeta.feature ?? null,
+           })
+         : null,
     ],
   );
 }

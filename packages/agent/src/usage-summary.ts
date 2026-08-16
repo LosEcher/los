@@ -69,6 +69,17 @@ export interface UsageCallTelemetryRow {
   usageFillRate: number | null;
 }
 
+/** Roadmap R6: per-product-surface usage attribution. */
+export interface UsageFeatureRow {
+  feature: string;
+  callCount: number;
+  errorCount: number;
+  avgDurationMs: number | null;
+  promptTokens: number;
+  completionTokens: number;
+  estimatedCostUsd: number;
+}
+
 export interface UsageSummary {
   evidenceClass: UsageEvidenceClass;
   from: string;
@@ -77,6 +88,8 @@ export interface UsageSummary {
   byProviderModel: UsageProviderModelRow[];
   byDay: UsageDayRow[];
   callTelemetry: UsageCallTelemetryRow[];
+  /** Per-feature call/cost attribution (R6); 'unspecified' covers pre-R6 calls. */
+  byFeature: UsageFeatureRow[];
 }
 
 interface AggRow {
@@ -315,5 +328,66 @@ export async function getUsageSummary(query: UsageSummaryQuery = {}): Promise<Us
         usageFillRate: callCount > 0 ? withUsageCount / callCount : null,
       };
     }),
+    byFeature: await buildFeatureRows(window, callFilters, callParams),
   };
+}
+
+interface FeatureRow {
+  feature: string;
+  call_count: string;
+  error_count: string;
+  avg_duration_ms: string | null;
+  prompt_tokens: string;
+  completion_tokens: string;
+  estimated_cost_usd: string;
+}
+
+/**
+ * Roadmap R6: attribute provider calls to product surfaces.
+ * Feature lives in provider_call_telemetry.request_meta_json (captured from
+ * 2026-08-16); cost joins the matching model.response event by trace so the
+ * per-feature cost cube has the same L1 basis as byProviderModel.
+ */
+async function buildFeatureRows(
+  window: { from: string; to: string },
+  callFilters: string[],
+  callParams: unknown[],
+): Promise<UsageFeatureRow[]> {
+  const db = getDb();
+  const rows = await db.query<FeatureRow>(
+    `SELECT
+        COALESCE(request_meta_json->>'feature', 'unspecified') AS feature,
+        COUNT(*)::text AS call_count,
+        SUM(CASE WHEN status >= 400 OR status = 0 THEN 1 ELSE 0 END)::text AS error_count,
+        AVG(duration_ms)::text AS avg_duration_ms,
+        SUM(COALESCE((usage_json->>'promptTokens')::numeric, 0))::text AS prompt_tokens,
+        SUM(COALESCE((usage_json->>'completionTokens')::numeric, 0))::text AS completion_tokens,
+        COALESCE(SUM(cost.cost_usd), 0)::text AS estimated_cost_usd
+      FROM provider_call_telemetry t
+      LEFT JOIN LATERAL (
+        SELECT (e.payload_json->'cost'->>'totalCostUsd')::numeric AS cost_usd
+        FROM session_events e
+        WHERE e.trace_id = t.trace_id
+          AND e.type = 'model.response'
+        ORDER BY e.created_at ASC
+        LIMIT 1
+      ) cost ON true
+      WHERE t.created_at >= $1::timestamptz
+        AND t.created_at < $2::timestamptz
+        ${callFilters.join(' ')}
+      GROUP BY 1
+      ORDER BY COUNT(*) DESC
+      LIMIT 50`,
+    callParams,
+  ).catch(() => ({ rows: [] as FeatureRow[] }));
+
+  return rows.rows.map(row => ({
+    feature: row.feature,
+    callCount: num(row.call_count),
+    errorCount: num(row.error_count),
+    avgDurationMs: row.avg_duration_ms === null ? null : num(row.avg_duration_ms),
+    promptTokens: num(row.prompt_tokens),
+    completionTokens: num(row.completion_tokens),
+    estimatedCostUsd: num(row.estimated_cost_usd),
+  }));
 }
