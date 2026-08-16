@@ -4,6 +4,7 @@ import { CircleDollarSign, RefreshCw } from 'lucide-react';
 import { getJson } from '../api/index.js';
 import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
+import { SkeletonCard } from '../components/skeleton';
 import { useI18n } from '../i18n';
 import { Sparkline } from './sparkline.js';
 import { ActivityPanel } from './activity-panel.js';
@@ -109,7 +110,13 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
     refetchInterval: 120_000,
   });
 
-  if (query.isLoading) return <div className="loading-block">{t('ops.usage.loading')}</div>;
+  if (query.isLoading) return (
+    <div className="usage-skeleton-grid" aria-busy="true">
+      <SkeletonCard />
+      <SkeletonCard />
+      <SkeletonCard />
+    </div>
+  );
   if (query.error) {
     return <div className="daily-error">{t('ops.usage.unavailablePrefix', { error: String(query.error) })}</div>;
   }

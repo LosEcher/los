@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './hooks/useTheme';
+import { ToastProvider } from './components/toast';
 import { App } from './App';
 import './styles/tokens.css';
 import './styles.css';
@@ -23,7 +24,9 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <ThemeProvider>
-          <App />
+          <ToastProvider>
+            <App />
+          </ToastProvider>
         </ThemeProvider>
       </I18nProvider>
     </QueryClientProvider>
