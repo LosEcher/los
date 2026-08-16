@@ -21,6 +21,7 @@ function config(): Config {
       defaultProvider: 'deepseek', defaultModel: 'deepseek-v4-flash', maxLoops: 20,
       sandboxMode: 'workspace-write',
       sandboxNetwork: 'isolated',
+      windowsSandboxBackend: 'acl',
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
       skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },

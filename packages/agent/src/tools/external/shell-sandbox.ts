@@ -3,6 +3,14 @@ import { accessSync, constants, realpathSync } from 'node:fs';
 import { platform } from 'node:os';
 import { getLogger } from '@los/infra/logger';
 
+import {
+  resolveWindowsAclModule,
+  runWithRunSeal,
+  runWithWindowsAcl,
+  windowsPreference,
+  type WindowsSandboxBackendPreference,
+} from './shell-sandbox-windows.js';
+
 const log = getLogger('agent');
 
 // ── Environment minimization ─────────────────────────────
@@ -109,7 +117,13 @@ export interface SandboxedShellResult {
 }
 
 /** Decision of which backend runs a shell command (or whether it is denied). */
-export type SandboxDecision = 'macos-sandbox-exec' | 'linux-bwrap' | 'native' | 'native-denied';
+export type SandboxDecision =
+  | 'macos-sandbox-exec'
+  | 'linux-bwrap'
+  | 'windows-runseal'
+  | 'windows-acl'
+  | 'native'
+  | 'native-denied';
 
 /**
  * Pure backend-selection decision, separated from execFile side effects so
@@ -120,6 +134,9 @@ export function resolveSandboxBackend(
   sandboxExecAvailable: boolean,
   bwrapAvailable: boolean,
   allowNativeShell: boolean,
+  windowsPreference: WindowsSandboxBackendPreference = 'acl',
+  runsealAvailable = false,
+  aclAvailable = false,
 ): SandboxDecision {
   if (osPlatform === 'darwin') {
     if (sandboxExecAvailable) return 'macos-sandbox-exec';
@@ -127,6 +144,15 @@ export function resolveSandboxBackend(
   }
   if (osPlatform === 'linux') {
     if (bwrapAvailable) return 'linux-bwrap';
+    return allowNativeShell ? 'native' : 'native-denied';
+  }
+  if (osPlatform === 'win32') {
+    if ((windowsPreference === 'runseal' || windowsPreference === 'auto') && runsealAvailable) {
+      return 'windows-runseal';
+    }
+    if ((windowsPreference === 'acl' || windowsPreference === 'auto') && aclAvailable) {
+      return 'windows-acl';
+    }
     return allowNativeShell ? 'native' : 'native-denied';
   }
   return allowNativeShell ? 'native' : 'native-denied';
@@ -143,6 +169,13 @@ export function getAvailableSandbox(): string {
   if (platform() === 'linux' && findExecutable('/usr/bin/bwrap')) {
     return 'linux-bwrap';
   }
+  if (platform() === 'win32') {
+    const preference = windowsPreference();
+    const runsealAvailable = preference !== 'acl' && findExecutable('runseal.exe') !== null;
+    if (runsealAvailable) return 'windows-runseal';
+    const aclAvailable = preference !== 'runseal' && resolveWindowsAclModule() !== null;
+    if (aclAvailable) return 'windows-acl';
+  }
   return 'native';
 }
 
@@ -158,6 +191,9 @@ export async function runSandboxedShell(
     findExecutable('/usr/bin/sandbox-exec') !== null,
     findExecutable('/usr/bin/bwrap') !== null,
     allowNative,
+    windowsPreference(),
+    findExecutable('runseal.exe') !== null,
+    resolveWindowsAclModule() !== null,
   );
 
   switch (decision) {
@@ -165,6 +201,10 @@ export async function runSandboxedShell(
       return runWithMacSandboxExec('/usr/bin/sandbox-exec', input, sandboxMode, networkMode);
     case 'linux-bwrap':
       return runWithBwrap('/usr/bin/bwrap', input, sandboxMode, networkMode);
+    case 'windows-runseal':
+      return runWithRunSeal(input, sandboxMode, networkMode);
+    case 'windows-acl':
+      return runWithWindowsAcl(input, sandboxMode);
     case 'native':
       log.warn('no OS sandbox backend available; allowNativeShell=true — running unconstrained native shell');
       return runWithNativeShell(input);
@@ -357,3 +397,5 @@ function findExecutable(path: string): string | null {
 function escapeSandboxString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
+
+
