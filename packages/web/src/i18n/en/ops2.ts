@@ -42,6 +42,17 @@ export const enOps2 = {
   'ops.diagnostics.thSuccessPct': 'Success %',
   'ops.diagnostics.thAvgLatency': 'Avg Latency',
   'ops.diagnostics.thRepairs': 'Repairs',
+  'ops.diagnostics.thStatus': 'Status',
+  'ops.diagnostics.detailTitle': 'Trace Detail',
+  'ops.diagnostics.requestIdLabel': 'request',
+  'ops.diagnostics.detailLoadError': 'Failed to load trace detail.',
+  'ops.diagnostics.orphanLabel': 'orphan',
+  'ops.diagnostics.spanTreeTitle': 'Span tree',
+  'ops.diagnostics.noSpanTree': 'No span tree for this trace.',
+  'ops.diagnostics.timelineTitle': 'Timeline',
+  'ops.diagnostics.noTimeline': 'No timeline entries.',
+  'ops.diagnostics.taskRunsTitle': 'Task runs',
+  'ops.diagnostics.providerCallsTitle': 'Provider calls',
 
   // ── File sync page (file-sync-page.tsx) ──────────────
   'ops.fileSync.subtitle': 'Cross-node file synchronization status and scan control.',

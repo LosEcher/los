@@ -12,6 +12,12 @@ import { ensureSessionEventStore } from '@los/agent/session-events';
 import { ensureProviderCallTelemetryStore } from '@los/agent/providers/telemetry';
 import { getRepairCounters } from '@los/agent/providers/repair-telemetry';
 import { readExecutionOutboxHealth } from '@los/agent/execution-outbox';
+import {
+  MAX_PAYLOAD_DEPTH,
+  MAX_PAYLOAD_JSON_BYTES,
+  MAX_PAYLOAD_STRING_CHARS,
+  payloadRedactorCount,
+} from '@los/agent/event-redaction';
 import { getSymbolCacheMetrics } from '../../chat-cbm-symbol-cache.js';
 
 export type DiagnosticsRouteDependencies = {
@@ -39,6 +45,7 @@ interface TraceSummary {
   lastEventAt: string | null;
   eventCount: number;
   errorCount: number;
+  model: string | null;
 }
 
 interface ProviderHealth {
@@ -48,6 +55,57 @@ interface ProviderHealth {
   errorRate: number;
   avgDurationMs: number;
   lastCallAt: string | null;
+}
+
+/** span 树节点：session_events.parent_event_id 链的可视化投影。 */
+interface SpanNode {
+  eventId: number;
+  type: string;
+  parentEventId: number | null;
+  sessionId: string;
+  turn: number;
+  model: string | null;
+  toolName: string | null;
+  createdAt: string;
+  /** parent 不在当前 trace 事件集内（跨 session 引用或链头缺失）。 */
+  orphan: boolean;
+  children: SpanNode[];
+}
+
+/** 按 parent_event_id 构建 span 树；parent 缺失（跨 session/越界）的节点作为根并标记 orphan。 */
+function buildSpanTree(rows: DbRow[]): SpanNode[] {
+  const nodes = new Map<number, SpanNode>();
+  for (const e of rows) {
+    nodes.set(e.id, {
+      eventId: e.id,
+      type: e.type,
+      parentEventId: e.parent_event_id ?? null,
+      sessionId: e.session_id,
+      turn: e.turn ?? 0,
+      model: e.model ?? null,
+      toolName: e.tool_name ?? null,
+      createdAt: e.created_at,
+      orphan: false,
+      children: [],
+    });
+  }
+  const roots: SpanNode[] = [];
+  for (const node of nodes.values()) {
+    const parent = node.parentEventId != null ? nodes.get(node.parentEventId) : undefined;
+    if (parent && parent !== node) {
+      parent.children.push(node);
+    } else {
+      if (node.parentEventId != null) node.orphan = true;
+      roots.push(node);
+    }
+  }
+  const byTime = (a: SpanNode, b: SpanNode) => String(a.createdAt).localeCompare(String(b.createdAt));
+  const sortRec = (list: SpanNode[]) => {
+    list.sort(byTime);
+    for (const n of list) sortRec(n.children);
+  };
+  sortRec(roots);
+  return roots;
 }
 
 function isValidTraceId(value: string): boolean {
@@ -66,6 +124,18 @@ export function registerDiagnosticsRoutes(
     cache: getSymbolCacheMetrics(),
   }));
 
+  // ── Redaction waterfall policy ───────────────────────────
+  app.get('/diagnostics/redaction', async () => ({
+    pipeline: 'default + registered extensions',
+    failClosed: true,
+    limits: {
+      maxStringChars: MAX_PAYLOAD_STRING_CHARS,
+      maxDepth: MAX_PAYLOAD_DEPTH,
+      maxJsonBytes: MAX_PAYLOAD_JSON_BYTES,
+    },
+    activeRedactors: payloadRedactorCount(),
+  }));
+
   // ── Trace detail ────────────────────────────────────────
   app.get('/diagnostics/:traceId', async (req, reply) => {
     const traceId = (req.params as Record<string, string>).traceId;
@@ -80,6 +150,20 @@ export function registerDiagnosticsRoutes(
     // Session events for this trace
     const events = await db.query<DbRow>(
       `SELECT * FROM session_events WHERE trace_id = $1 ORDER BY id ASC LIMIT 1000`,
+      [traceId],
+    );
+
+    // Task runs for this trace (cross-entity aggregation)
+    const taskRuns = await db.query<DbRow>(
+      `SELECT id, run_spec_id, session_id, status, provider, model, attempt, started_at, completed_at
+       FROM task_runs WHERE trace_id = $1 ORDER BY started_at ASC`,
+      [traceId],
+    );
+
+    // Todos attributed to this trace
+    const todos = await db.query<DbRow>(
+      `SELECT id, title, status, priority, kind, created_at
+       FROM todos WHERE trace_id = $1 ORDER BY created_at ASC LIMIT 100`,
       [traceId],
     );
 
@@ -167,6 +251,27 @@ export function registerDiagnosticsRoutes(
       providerCallCount: providerCalls.rows.length,
       errors,
       timeline: timeline.slice(0, 200), // cap at 200 entries
+      // P0-2 additions (backward-compatible): cross-entity aggregation + span tree.
+      taskRuns: taskRuns.rows.map(tr => ({
+        id: tr.id,
+        runSpecId: tr.run_spec_id ?? null,
+        sessionId: tr.session_id ?? null,
+        status: tr.status,
+        provider: tr.provider ?? null,
+        model: tr.model ?? null,
+        startedAt: tr.started_at ?? null,
+        completedAt: tr.completed_at ?? null,
+        attempt: tr.attempt ?? 1,
+      })),
+      todos: todos.rows.map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority ?? null,
+        kind: t.kind ?? null,
+        createdAt: t.created_at,
+      })),
+      spanTree: buildSpanTree(events.rows),
       providerCalls: providerCalls.rows.map(pc => ({
         provider: pc.provider,
         model: pc.model,
@@ -186,18 +291,21 @@ export function registerDiagnosticsRoutes(
     const db = getDb();
 
     const rows = await db.query<TraceSummary>(
-      `SELECT trace_id as "traceId",
-              MIN(request_id) as "requestId",
-              MIN(session_id) as "sessionId",
-              MIN(created_at) as "startedAt",
-              MAX(created_at) as "lastEventAt",
+      `SELECT s.trace_id as "traceId",
+              MIN(s.request_id) as "requestId",
+              MIN(s.session_id) as "sessionId",
+              MIN(s.created_at) as "startedAt",
+              MAX(s.created_at) as "lastEventAt",
               COUNT(*)::int as "eventCount",
-              COUNT(*) FILTER (WHERE type IN ('session.error','task.failed','tool.result'))
-                ::int as "errorCount"
-       FROM session_events
-       WHERE trace_id IS NOT NULL AND created_at > NOW() - INTERVAL '24 hours'
-       GROUP BY trace_id
-       ORDER BY MAX(created_at) DESC
+              COUNT(*) FILTER (WHERE s.type IN ('session.error','task.failed','tool.result'))
+                ::int as "errorCount",
+              (SELECT e2.model FROM session_events e2
+                WHERE e2.trace_id = s.trace_id AND e2.model IS NOT NULL
+                ORDER BY e2.id DESC LIMIT 1) as "model"
+       FROM session_events s
+       WHERE s.trace_id IS NOT NULL AND s.created_at > NOW() - INTERVAL '24 hours'
+       GROUP BY s.trace_id
+       ORDER BY MAX(s.created_at) DESC
        LIMIT 100`,
     );
 

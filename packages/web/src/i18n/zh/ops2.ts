@@ -46,6 +46,17 @@ export const zhOps2: Ops2Keys = {
   'ops.diagnostics.thSuccessPct': '成功率 %',
   'ops.diagnostics.thAvgLatency': '平均延迟',
   'ops.diagnostics.thRepairs': '修复',
+  'ops.diagnostics.thStatus': '状态',
+  'ops.diagnostics.detailTitle': 'Trace 详情',
+  'ops.diagnostics.requestIdLabel': 'request',
+  'ops.diagnostics.detailLoadError': '加载 trace 详情失败。',
+  'ops.diagnostics.orphanLabel': '孤儿',
+  'ops.diagnostics.spanTreeTitle': 'Span 树',
+  'ops.diagnostics.noSpanTree': '该 trace 无 span 树。',
+  'ops.diagnostics.timelineTitle': '时间线',
+  'ops.diagnostics.noTimeline': '无时间线条目。',
+  'ops.diagnostics.taskRunsTitle': '任务运行',
+  'ops.diagnostics.providerCallsTitle': 'Provider 调用',
 
   // ── File sync page (file-sync-page.tsx) ──────────────
   'ops.fileSync.subtitle': '跨节点文件同步状态与扫描控制。',

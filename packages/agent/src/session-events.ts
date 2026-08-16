@@ -12,6 +12,7 @@
 import { getDb, type DbTransactionClient } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
 import { assertSessionEventType, isKnownSessionEventType } from './event-types.js';
+import { redactPayload } from './event-redaction.js';
 
 const log = getLogger('agent');
 
@@ -249,7 +250,7 @@ export async function appendSessionEvent(
       input.cacheKey ?? null,
       input.cacheHit ?? null,
       JSON.stringify(normalizeUsage(input.usage)),
-      JSON.stringify(redactValue(input.payload ?? {})),
+      JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
       parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
   ];
@@ -321,7 +322,7 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
       input.cacheKey ?? null,
       input.cacheHit ?? null,
       JSON.stringify(normalizeUsage(input.usage)),
-      JSON.stringify(redactValue(input.payload ?? {})),
+      JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
       parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
     );
@@ -436,6 +437,38 @@ export async function listSessionEventsSince(
     [sessionId, sinceId, limit],
   );
   return rows.rows.map(rowToSessionEvent);
+}
+
+export async function listSessionEventsBefore(
+  sessionId: string,
+  beforeId: number,
+  limit = 200,
+  opts?: ListSessionEventsOptions,
+): Promise<SessionEventRecord[]> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const includeInternal = opts?.includeInternal !== false;
+  const rows = await db.query<SessionEventRow>(
+    includeInternal
+      ? `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1 AND id < $2
+    ORDER BY id DESC
+    LIMIT $3
+  `
+      : `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1 AND id < $2
+      AND coalesce(visibility, 'public') <> 'internal'
+    ORDER BY id DESC
+    LIMIT $3
+  `,
+    [sessionId, beforeId, limit],
+  );
+  // 分页窗口按 id 升序返回，前端直接前置拼接。
+  return rows.rows.reverse().map(rowToSessionEvent);
 }
 
 export async function getSessionObservability(sessionId: string): Promise<SessionObservability> {
@@ -618,21 +651,4 @@ function emptyUsage(): SessionEventUsage {
 
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-const SECRET_KEY_RE = /(secret|token|password|passphrase|api[-_]?key|authorization|cookie|credential|passwd|pwd)/i;
-
-function redactValue(value: unknown, key: string | null = null): unknown {
-  if (Array.isArray(value)) return value.map(item => redactValue(item));
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [childKey, childValue] of Object.entries(value)) {
-      out[childKey] = redactValue(childValue, childKey);
-    }
-    return out;
-  }
-  if (typeof value === 'string') {
-    if ((key && SECRET_KEY_RE.test(key)) || /^Bearer\s+/i.test(value)) return '[redacted]';
-  }
-  return value;
 }

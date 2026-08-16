@@ -9,6 +9,7 @@
  */
 
 import { getDb } from '@los/infra/db';
+import { redactPayload } from '../event-redaction.js';
 
 export interface ProviderCallTelemetry {
   id?: number;
@@ -104,6 +105,18 @@ export async function ensureProviderCallTelemetryStore(): Promise<void> {
 export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<void> {
   await ensureProviderCallTelemetryStore();
   const db = getDb();
+  // 写路径脱敏瀑布：endpoint 可能含签名/密钥查询参数，errorMessage 可能回显
+  // 响应体中的密钥形态。规范数据不重写，只作用于本写入副本（fail-closed）。
+  const redacted = redactPayload(
+    {
+      endpoint: tel.endpoint ?? '',
+      errorMessage: tel.errorMessage ?? null,
+    },
+    'telemetry.provider_call',
+  );
+  const endpoint = typeof redacted.endpoint === 'string' ? redacted.endpoint : '';
+  const errorMessage =
+    typeof redacted.errorMessage === 'string' ? redacted.errorMessage : tel.errorMessage ?? null;
   await db.query(
     `INSERT INTO provider_call_telemetry
        (trace_id, session_id, provider, model, endpoint, method, stream,
@@ -116,7 +129,7 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
       tel.sessionId ?? null,
       tel.provider,
       tel.model,
-      tel.endpoint,
+      endpoint,
       tel.method,
       tel.stream,
       tel.requestPayloadSize,
@@ -125,7 +138,7 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
       tel.headersDurationMs ?? null,
       tel.bodyDurationMs ?? null,
       tel.errorCode ?? null,
-      tel.errorMessage ?? null,
+      errorMessage,
       tel.rateLimitResetMs ?? null,
       JSON.stringify(tel.usage ?? {}),
     ],

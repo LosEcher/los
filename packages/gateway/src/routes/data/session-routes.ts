@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import {
   ensureSessionEventStore,
   listSessionEvents,
+  listSessionEventsBefore,
+  listSessionEventsSince,
   getSessionObservability,
   notifySessionEvent,
   type SessionEventRecord,
@@ -25,6 +27,8 @@ type SessionRouteDependencies = {
   deleteSession: typeof deleteSession;
   getSessionObservability: typeof getSessionObservability;
   listSessionEvents: typeof listSessionEvents;
+  listSessionEventsBefore: typeof listSessionEventsBefore;
+  listSessionEventsSince: typeof listSessionEventsSince;
   listSessions: typeof listSessions;
   listVerificationRecordsForSession: typeof listVerificationRecordsForSession;
   loadSession: typeof loadSession;
@@ -41,6 +45,8 @@ const defaultDependencies: SessionRouteDependencies = {
   deleteSession,
   getSessionObservability,
   listSessionEvents,
+  listSessionEventsBefore,
+  listSessionEventsSince,
   listSessions,
   listVerificationRecordsForSession,
   loadSession,
@@ -220,16 +226,61 @@ export function registerSessionRoutes(
     return { ok: true, runSpec: claimed, claimedBy: gatewayId };
   });
 
+  /**
+   * GET /sessions/:id/events — event ledger window.
+   * Query:
+   *   limit           page size (1..10000, default 200)
+   *   includeInternal '1'|'true' to include internal rows (default hidden)
+   *   since           event-id high-water cursor (exclusive); returns only
+   *                   events with id > since, plus nextSince for the next poll.
+   *                   Mirrors /trace/since cursor semantics for the raw ledger.
+   *   before          event-id upper bound (exclusive); returns the window of
+   *                   events with id < before in ascending order (oldest first)
+   *                   for "load earlier" pagination.
+   *   since and before are mutually exclusive; before wins when both present.
+   */
   app.get('/sessions/:id/events', async (req) => {
     const { id } = req.params as { id: string };
-    const query = req.query as { limit?: string; includeInternal?: string };
+    const query = req.query as { limit?: string; includeInternal?: string; since?: string; before?: string };
     const rawLimit = Number(query.limit ?? 200);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 10000 ? rawLimit : 200;
     // Operator UI default: hide internal state-machine noise. Pass includeInternal=1 for full ledger.
     const includeInternal = query.includeInternal === '1' || query.includeInternal === 'true';
+    const rawSince = Number(query.since ?? 0);
+    const since = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
+    const rawBefore = Number(query.before ?? 0);
+    const before = Number.isFinite(rawBefore) && rawBefore > 0 ? rawBefore : 0;
     await deps.ensureSessionEventStore();
+
+    if (before > 0) {
+      const events = await deps.listSessionEventsBefore(id, before, limit, { includeInternal });
+      return {
+        sessionId: id,
+        count: events.length,
+        events,
+        includeInternal,
+        before,
+        hasMore: events.length === limit,
+      };
+    }
+
+    if (since > 0) {
+      const events = await deps.listSessionEventsSince(id, since, limit, { includeInternal });
+      const nextSince = events.reduce((max, e) => Math.max(max, e.id), since);
+      return {
+        sessionId: id,
+        count: events.length,
+        events,
+        includeInternal,
+        since,
+        nextSince,
+        unchanged: events.length === 0,
+      };
+    }
+
     const events = await deps.listSessionEvents(id, limit, { includeInternal });
-    return { sessionId: id, count: events.length, events, includeInternal };
+    const nextSince = events.length > 0 ? events[events.length - 1].id : 0;
+    return { sessionId: id, count: events.length, events, includeInternal, since: 0, nextSince };
   });
 
   app.get('/sessions/:id/observability', async (req) => {

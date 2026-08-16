@@ -12,6 +12,8 @@ const sharedProcessTestFiles = [
   'src/coordinator/task-intake.test.ts',
   'src/eval-backlog.test.ts',
   'src/eval-runner.test.ts',
+  'src/event-redaction.test.ts',
+  'src/event-types.test.ts',
   'src/execution-kernel-registry.test.ts',
   'src/execution-kernel-selection.test.ts',
   'src/execution-kernel.test.ts',
@@ -173,6 +175,7 @@ const isolatedGroupC = [
   'src/work-items/revision-loop.test.ts',
   'src/worker-messages.test.ts',
   'src/session-recovery.test.ts',
+  'src/session-events-redaction.test.ts',
 ];
 
 const allIsolatedDatabaseTestFiles = [

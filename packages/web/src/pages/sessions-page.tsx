@@ -8,6 +8,7 @@ import {
   TurnGroup,
 } from './session-inspector.js';
 import { ExecutionObservabilityPanel } from './execution-observability-panel.js';
+import { useSessionEventStream } from '../hooks/useSessionEventStream.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
@@ -41,7 +42,6 @@ import {
   type RunSpec,
   type SessionDetail,
   type SessionEvent,
-  type SessionEventsResponse,
   type SessionObservability,
   type SessionSummary,
   type TaskRun,
@@ -231,11 +231,7 @@ function SessionInspector({
     queryFn: () => getJson<SessionDetail>(`/sessions/${sessionId}`),
     enabled: Boolean(sessionId),
   });
-  const events = useQuery({
-    queryKey: ['session-events', sessionId],
-    queryFn: () => getJson<SessionEventsResponse>(`/sessions/${sessionId}/events?limit=300`),
-    enabled: Boolean(sessionId),
-  });
+  const events = useSessionEventStream(sessionId);
   const observability = useQuery({
     queryKey: ['session-observability', sessionId],
     queryFn: () => getJson<SessionObservability>(`/sessions/${sessionId}/observability`),
@@ -320,8 +316,31 @@ function SessionInspector({
         </div>
       ) : null}
       <div className="event-timeline">
+        <div className="mini-timeline-head">
+          <strong>{t('assets.sessions.eventTimeline')}</strong>
+          <span className="inspector-live" data-state={events.wsState}>
+            {events.wsState === 'connected'
+              ? t('assets.sessions.live')
+              : events.wsState === 'reconnecting' || events.wsState === 'connecting'
+                ? t('assets.sessions.reconnecting')
+                : t('assets.sessions.polling')}
+            <em>{String(events.events.length)}</em>
+          </span>
+        </div>
+        {events.loading ? <EmptyText text={t('assets.sessions.loading')} /> : null}
+        {!events.loading && events.error ? <EmptyText text={events.error} /> : null}
+        {events.hasMoreEarlier || events.loadingEarlier ? (
+          <button
+            className="ghost-btn load-earlier"
+            type="button"
+            disabled={events.loadingEarlier}
+            onClick={events.loadEarlier}
+          >
+            {events.loadingEarlier ? t('assets.sessions.loadingEarlier') : t('assets.sessions.loadEarlier')}
+          </button>
+        ) : null}
         {(() => {
-          const visible = (events.data?.events ?? [])
+          const visible = events.events
             .filter(event => !HIDDEN_INSPECTOR_EVENTS.has(event.type))
             .slice(-80);
           // Group into turns

@@ -128,6 +128,12 @@ export const enAssets2 = {
   'assets.sessions.relatedTodos': 'Related Todos',
   'assets.sessions.noLinkedTodos': 'No linked todos found.',
   'assets.sessions.linked': 'linked',
+  'assets.sessions.eventTimeline': 'Event timeline',
+  'assets.sessions.live': 'live',
+  'assets.sessions.reconnecting': 'reconnecting',
+  'assets.sessions.polling': 'polling',
+  'assets.sessions.loadEarlier': 'load earlier',
+  'assets.sessions.loadingEarlier': 'loading earlier…',
 
   // ── Execution observability (Phase 1 real-run projection) ──
   'assets.obs.sectionAria': 'Execution observability',

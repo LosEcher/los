@@ -2399,6 +2399,50 @@ button:disabled {
   font-size: 13px;
 }
 
+.inspector-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.inspector-live::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.inspector-live[data-state='connected']::before {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 rgb(46 160 67 / 0.35);
+  animation: inspector-live-pulse 2s ease-out infinite;
+}
+
+.inspector-live[data-state='reconnecting']::before,
+.inspector-live[data-state='connecting']::before {
+  background: var(--warn);
+}
+
+.inspector-live em {
+  font-style: normal;
+  opacity: 0.75;
+}
+
+@keyframes inspector-live-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(46 160 67 / 0.35); }
+  70% { box-shadow: 0 0 0 5px rgb(46 160 67 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(46 160 67 / 0); }
+}
+
+.load-earlier {
+  width: 100%;
+  margin: 2px 0 8px;
+  font-size: 12px;
+}
+
 .mini-event {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
@@ -7735,4 +7779,80 @@ button:disabled {
 .usage-table th {
   color: var(--muted);
   font-weight: 600;
+}
+
+/* ── Diagnostics trace detail (diagnostics-page.tsx) ── */
+.record-row-button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+.record-row-button:hover {
+  background: var(--surface-2);
+}
+.record-row-button.is-selected {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.diag-subhead {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 1rem 0 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.diag-span-tree {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+.diag-span-node {
+  padding: 0.15rem 0;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.diag-span-type {
+  font-family: var(--mono);
+  color: var(--text);
+}
+.diag-span-type.is-orphan {
+  color: var(--red);
+}
+.diag-span-meta {
+  color: var(--muted);
+}
+.diag-span-time {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-left: auto;
+}
+.diag-timeline {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+.diag-timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.12rem 0;
+  font-size: 0.8rem;
+}
+.diag-timeline-summary {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -102,6 +102,17 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-ux-feature-card-rework', ['P1', 'ready']],
   ['todo-los-ux-structured-clarify-todo', ['P1', 'ready']],
   ['todo-los-ux-channel-companion', ['P1', 'ready']],
+  // 2026-08-16 observability comparison batch (P0 stage: event-enum/trace-tree/replay/redaction;
+  // P1 stage: privacy-modes/charts/metrics-expand/delta-retention/audit-search)
+  ['todo-los-obs-event-enum', ['P0', 'ready']],
+  ['todo-los-obs-trace-tree', ['P0', 'ready']],
+  ['todo-los-obs-replay-streaming', ['P0', 'ready']],
+  ['todo-los-obs-redaction', ['P0', 'ready']],
+  ['todo-los-obs-privacy-modes', ['P1', 'backlog']],
+  ['todo-los-obs-charts', ['P1', 'backlog']],
+  ['todo-los-obs-metrics-expand', ['P1', 'backlog']],
+  ['todo-los-obs-delta-retention', ['P1', 'backlog']],
+  ['todo-los-obs-audit-search', ['P1', 'backlog']],
 ] as const);
 
 test('daily agent product seeds preserve the accepted delivery order', () => {

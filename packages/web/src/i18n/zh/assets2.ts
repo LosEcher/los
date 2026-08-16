@@ -132,6 +132,12 @@ export const zhAssets2: Assets2Keys = {
   'assets.sessions.relatedTodos': '相关待办',
   'assets.sessions.noLinkedTodos': '未找到关联待办。',
   'assets.sessions.linked': '已关联',
+  'assets.sessions.eventTimeline': '事件时间线',
+  'assets.sessions.live': '实时',
+  'assets.sessions.reconnecting': '重连中',
+  'assets.sessions.polling': '轮询',
+  'assets.sessions.loadEarlier': '加载更早',
+  'assets.sessions.loadingEarlier': '正在加载更早…',
 
   // ── Execution observability (Phase 1 real-run projection) ──
   'assets.obs.sectionAria': '执行可观测投影',
