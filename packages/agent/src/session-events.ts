@@ -11,6 +11,7 @@
 
 import { getDb, type DbTransactionClient } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
+import { assertSessionEventType, isKnownSessionEventType } from './event-types.js';
 
 const log = getLogger('agent');
 
@@ -182,6 +183,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_operator_control_consumed
 
 let _initialized = false;
 
+/**
+ * 同 session 时序父链：记录每个 session 最近写入的事件 id，作为下一条事件的
+ * parent_event_id（未显式指定时）。这是最小可用的 span 链（时间序树），
+ * 供 trace 聚合/瀑布展示使用；显式语义父子（如 model.turn → tool.call →
+ * tool.result）仍可显式传 parentEventId 覆盖。模块级内存态，重启后链中断
+ * （新链从头开始），符合 append-only 账本语义。
+ */
+const lastEventIdBySession = new Map<string, number>();
+
+/** 解析事件的 parent_event_id：显式指定优先，否则用同 session 最近事件。 */
+function resolveParentEventId(input: SessionEventWrite): number | null {
+  if (input.parentEventId != null) return input.parentEventId;
+  return lastEventIdBySession.get(input.sessionId) ?? null;
+}
+
+/** 推进同 session 时序链。 */
+function advanceLastEventId(sessionId: string, eventId: number): void {
+  lastEventIdBySession.set(sessionId, eventId);
+}
+
 export async function ensureSessionEventStore(): Promise<void> {
   if (_initialized) return;
   const db = getDb();
@@ -191,9 +212,18 @@ export async function ensureSessionEventStore(): Promise<void> {
 
 export async function appendSessionEvent(
   input: SessionEventWrite,
-  options: { client?: DbTransactionClient; notify?: boolean } = {},
+  options: { client?: DbTransactionClient; notify?: boolean; failOnUnknownType?: boolean } = {},
 ): Promise<SessionEventRecord> {
   await ensureSessionEventStore();
+  // 类型注册表校验：未知类型告警（默认）或抛错（fail 模式，测试/门禁用）。
+  if (options.failOnUnknownType) {
+    assertSessionEventType(input.type, { fail: true });
+  } else if (!isKnownSessionEventType(input.type)) {
+    log.warn(
+      `Unknown session event type "${input.type}" — register it in @los/agent/event-types or fix the typo`,
+    );
+  }
+  const parentEventId = resolveParentEventId(input);
   const sql = `
     INSERT INTO session_events (
       session_id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
@@ -220,7 +250,7 @@ export async function appendSessionEvent(
       input.cacheHit ?? null,
       JSON.stringify(normalizeUsage(input.usage)),
       JSON.stringify(redactValue(input.payload ?? {})),
-      input.parentEventId ?? null,
+      parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
   ];
   const rows = options.client
@@ -231,6 +261,7 @@ export async function appendSessionEvent(
     throw new Error('Failed to append session event');
   }
   const record = rowToSessionEvent(row);
+  advanceLastEventId(record.sessionId, record.id);
 
   if (options.notify !== false) await notifySessionEvent(record);
   return record;
@@ -268,6 +299,10 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
 
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
+    assertSessionEventType(input.type, { fail: false });
+    // 批量内链：同 session 第一条继承时序父，其余 parent=null（批量写入的
+    // 事件 id 在 INSERT 后才可知，无法在循环内成链）；写入后统一推进。
+    const parentEventId = i === 0 ? resolveParentEventId(input) : null;
     const base = i * colCount;
     valuePlaceholders.push(`(${columns.map((_, j) => `$${base + j + 1}`).join(', ')})`);
     params.push(
@@ -287,7 +322,7 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
       input.cacheHit ?? null,
       JSON.stringify(normalizeUsage(input.usage)),
       JSON.stringify(redactValue(input.payload ?? {})),
-      input.parentEventId ?? null,
+      parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
     );
   }
@@ -300,6 +335,11 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
 
   const rows = await db.query<SessionEventRow>(sql, params);
   const records = rows.rows.map(rowToSessionEvent);
+
+  // 批量完成后统一推进各 session 时序链。
+  for (const record of records) {
+    advanceLastEventId(record.sessionId, record.id);
+  }
 
   // Batch notify: emit one aggregated notification per session
   const sessionIds = new Set(records.map(r => r.sessionId));
