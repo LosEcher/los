@@ -30,17 +30,19 @@ export interface ProviderCallTelemetry {
   errorCode?: string;
   errorMessage?: string;
   rateLimitResetMs?: number;
-  /**
-   * Request-side configuration snapshot (reasoning effort, sampling scalars).
-   * Mirrors DSH's LlmCallConfig-in-header approach: without the requested
-   * effort, historical data cannot attribute cost/latency/quality to the
-   * reasoning tier that was actually used.
-   */
-  requestMeta?: {
+   /**
+    * Request-side configuration snapshot (reasoning effort, sampling scalars).
+    * Mirrors DSH's LlmCallConfig-in-header approach: without the requested
+    * effort, historical data cannot attribute cost/latency/quality to the
+    * reasoning tier that was actually used.
+    */
+   requestMeta?: {
     reasoningEffort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'none';
     thinking?: 'enabled' | 'disabled';
     maxTokens?: number;
     temperature?: number;
+    /** Usage feature attribution (roadmap R6). */
+    feature?: string;
   };
   /** Token usage from the provider response. Prefer writing this on success paths. */
   usage?: {
@@ -94,7 +96,6 @@ CREATE TABLE IF NOT EXISTS provider_call_telemetry (
   error_message TEXT,
   rate_limit_reset_ms INTEGER,
   usage_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  request_meta_json JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE provider_call_telemetry ADD COLUMN IF NOT EXISTS headers_duration_ms INTEGER;
@@ -155,14 +156,15 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
       errorMessage,
       tel.rateLimitResetMs ?? null,
       JSON.stringify(tel.usage ?? {}),
-      tel.requestMeta
-        ? JSON.stringify({
-            reasoningEffort: tel.requestMeta.reasoningEffort ?? null,
-            thinking: tel.requestMeta.thinking ?? null,
-            maxTokens: tel.requestMeta.maxTokens ?? null,
-            temperature: tel.requestMeta.temperature ?? null,
-          })
-        : null,
+       tel.requestMeta
+         ? JSON.stringify({
+             reasoningEffort: tel.requestMeta.reasoningEffort ?? null,
+             thinking: tel.requestMeta.thinking ?? null,
+             maxTokens: tel.requestMeta.maxTokens ?? null,
+             temperature: tel.requestMeta.temperature ?? null,
+             feature: tel.requestMeta.feature ?? null,
+           })
+         : null,
     ],
   );
 }

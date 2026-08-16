@@ -252,6 +252,7 @@ export async function runAgent(
         traceId: config.traceId,
         sessionId: config.sessionId,
         modelSettings: config.modelSettings,
+        feature: config.feature,
         onDelta: config.onModelDelta
           ? async (delta) => {
               await config.onModelDelta?.({ ...delta, turn: i + 1, provider: provider.name });
@@ -583,6 +584,7 @@ export async function runAgent(
     traceId: config.traceId,
     sessionId: config.sessionId,
     modelSettings: config.modelSettings,
+    feature: config.feature,
     onDelta: config.onModelDelta
       ? async (delta) => {
           await config.onModelDelta?.({ ...delta, turn: maxLoops + 1, provider: provider.name });

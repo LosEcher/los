@@ -174,6 +174,7 @@ async function runSingleReviewRole(
 
   try {
     const response = await role.provider.chat(messages, undefined, {
+      feature: 'eval',
       signal: undefined,
       traceId,
     });

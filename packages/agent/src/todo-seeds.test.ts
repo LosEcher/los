@@ -114,13 +114,8 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-obs-metrics-expand', ['P1', 'backlog']],
   ['todo-los-obs-delta-retention', ['P1', 'backlog']],
   ['todo-los-obs-audit-search', ['P1', 'backlog']],
-  // 2026-08-16 product roadmap batch (R1-R6 active; R7 backlog excluded)
-  ['todo-los-rm-verification-independence', ['P0', 'in_progress']],
-  ['todo-los-rm-slo-report', ['P0', 'ready']],
-  ['todo-los-rm-fault-injection', ['P0', 'ready']],
-  ['todo-los-rm-kernel-economics', ['P1', 'ready']],
-  ['todo-los-rm-deploy-converge', ['P1', 'ready']],
-  ['todo-los-rm-paid-tier-evidence', ['P1', 'ready']],
+  // 2026-08-16 product roadmap batch (R1-R3+R5+R6 done — no longer active; R4 observation active; R7 backlog excluded)
+  ['todo-los-rm-kernel-economics', ['P1', 'in_progress']],
 ] as const);
 
 test('daily agent product seeds preserve the accepted delivery order', () => {

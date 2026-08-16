@@ -118,6 +118,7 @@ export async function runScheduledTaskExecution(context: ScheduledTaskExecutionC
   }
 
   return await executionKernel.run(runtimePrompt, {
+    feature: input.feature,
     sessionId,
     runSpecId: input.runSpecId,
     provider: initialProvider,

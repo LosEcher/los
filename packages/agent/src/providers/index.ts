@@ -155,14 +155,13 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
       // Request-side config snapshot for telemetry (roadmap R2a): the requested
       // reasoning effort is the attribution key for cost/latency/quality
       // backtests. Mirrors DSH's LlmCallConfig header snapshot.
-      const requestMeta = options.modelSettings
-        ? {
-            reasoningEffort: options.modelSettings.reasoningEffort,
-            thinking: options.modelSettings.thinking,
-            maxTokens: options.modelSettings.maxTokens,
-            temperature: options.modelSettings.temperature,
-          }
-        : undefined;
+      const requestMeta = {
+        reasoningEffort: options.modelSettings?.reasoningEffort,
+        thinking: options.modelSettings?.thinking,
+        maxTokens: options.modelSettings?.maxTokens,
+        temperature: options.modelSettings?.temperature,
+        feature: options.feature,
+      };
       const body: Record<string, unknown> = {
         model,
         messages: serializedMessages,

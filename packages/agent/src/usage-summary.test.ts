@@ -93,6 +93,45 @@ test('getUsageSummary aggregates model.response cost and tokens by provider/mode
     assert.equal(call!.withUsageCount, 1);
     assert.ok(call!.usageFillRate !== null);
     assert.ok(Math.abs((call!.usageFillRate ?? 0) - 0.5) < 1e-9);
+
+    // Roadmap R6: feature attribution. The two inserted telemetry rows carry
+    // no request_meta_json → 'unspecified'; a chat-tagged row must group
+    // under 'chat' with its trace-joined cost.
+    await getDb().query(
+      `INSERT INTO provider_call_telemetry
+         (trace_id, session_id, provider, model, endpoint, status, duration_ms, usage_json, request_meta_json)
+       VALUES
+         ($1, $2, 'deepseek', 'deepseek-v4-flash', '/chat/completions', 200, 100,
+          $3::jsonb, $4::jsonb)`,
+      [
+        `usage-trace-c-${stamp}`,
+        sessionId,
+        JSON.stringify({ promptTokens: 30, completionTokens: 5 }),
+        JSON.stringify({ feature: 'chat', reasoningEffort: 'high' }),
+      ],
+    );
+    await getDb().query(
+      `INSERT INTO session_events (
+         session_id, type, model, usage_json, payload_json, source, trace_id, created_at
+       ) VALUES ($1, 'model.response', 'deepseek-v4-flash',
+         $2::jsonb, $3::jsonb, 'los', $4, now())`,
+      [
+        sessionId,
+        JSON.stringify({ promptTokens: 30, completionTokens: 5, totalTokens: 35 }),
+        JSON.stringify({ provider: 'deepseek', cost: { totalCostUsd: 0.002 } }),
+        `usage-trace-c-${stamp}`,
+      ],
+    );
+
+    const summary2 = await getUsageSummary({ from, to, provider: 'deepseek' });
+    const chatRow = summary2.byFeature.find(row => row.feature === 'chat');
+    assert.ok(chatRow, 'byFeature contains chat');
+    assert.equal(chatRow!.callCount, 1);
+    assert.equal(chatRow!.promptTokens, 30);
+    assert.ok(Math.abs((chatRow!.estimatedCostUsd ?? 0) - 0.002) < 1e-9);
+    const unspecifiedRow = summary2.byFeature.find(row => row.feature === 'unspecified');
+    assert.ok(unspecifiedRow, 'byFeature contains unspecified for pre-R6 rows');
+    assert.equal(unspecifiedRow!.callCount, 2);
   } finally {
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query(

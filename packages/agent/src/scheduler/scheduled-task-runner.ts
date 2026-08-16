@@ -395,7 +395,7 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
   try {
     kernelShadow = startScheduledKernelShadow({ task: input, prompt: runtimePrompt, productionKernel: executionKernel.identity, sessionId, taskRunId, traceId, toolMode, remoteExecutor: Boolean(executor), config: { ...input, sessionId, taskRunId, traceId, provider: initialProvider, model: initialModel, toolMode, sandboxMode, architectEditor, signal: controller.signal, runContractMetadata: { ...running.metadata, ...(runContract ? { runContract } : {}) } } });
     const result = await runScheduledTaskExecution({
-      input,
+      input: { ...input, feature: input.feature ?? 'scheduler' },
       executionKernel,
       executor,
       taskRunId,
