@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useReducer } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Boxes,
@@ -67,17 +67,98 @@ function initialRoute() {
   return route;
 }
 
+// ── Route selection state (P0-2) ─────────────────────────
+// Converges the previous six independent useState selections into one
+// reducer. Semantics preserved: navigate(bare) clears the tab's own
+// deep-link selection; an explicit key in opts sets/clears it; route
+// applies hash state with the same truthiness rules as the old applyRoute.
+
+type RouteKey = 'sessionId' | 'todoId' | 'workItemId' | 'scheduleId' | 'day' | 'runSpecId';
+
+type RouteState = {
+  page: PageId;
+  sessionId: string | null;
+  todoId: string | null;
+  workItemId: string | null;
+  scheduleId: string | null;
+  day: string | null;
+  runSpecId: string | null;
+};
+
+type NavigateOpts = {
+  workItemId?: string | null;
+  sessionId?: string | null;
+  scheduleId?: string | null;
+  day?: string | null;
+  runSpecId?: string | null;
+};
+
+type RouteAction =
+  | ({ type: 'navigate'; page: PageId; bare: boolean } & NavigateOpts)
+  | { type: 'route'; page: PageId; sessionId?: string | null; workItemId?: string | null; scheduleId?: string | null; day?: string | null }
+  | { type: 'set'; key: RouteKey; value: string | null };
+
+function routeReducer(state: RouteState, action: RouteAction): RouteState {
+  switch (action.type) {
+    case 'navigate': {
+      const next: RouteState = { ...state, page: action.page };
+      if ('workItemId' in action) next.workItemId = action.workItemId ?? null;
+      else if (action.bare && action.page === 'work') next.workItemId = null;
+      if ('sessionId' in action) next.sessionId = action.sessionId ?? null;
+      else if (action.bare && action.page === 'chat') next.sessionId = null;
+      if ('scheduleId' in action) next.scheduleId = action.scheduleId ?? null;
+      else if (action.bare && action.page === 'schedules') next.scheduleId = null;
+      if ('day' in action) next.day = action.day ?? null;
+      else if (action.bare && action.page === 'usage') next.day = null;
+      if ('runSpecId' in action) next.runSpecId = action.runSpecId ?? null;
+      return next;
+    }
+    case 'route': {
+      const next: RouteState = { ...state, page: action.page };
+      if (action.workItemId) next.workItemId = action.workItemId;
+      if (action.sessionId) next.sessionId = action.sessionId;
+      if (action.scheduleId) next.scheduleId = action.scheduleId;
+      else if (action.page === 'schedules') next.scheduleId = null;
+      if (action.day) next.day = action.day;
+      else if (action.page === 'usage') next.day = null;
+      return next;
+    }
+    case 'set': {
+      return { ...state, [action.key]: action.value };
+    }
+  }
+}
+
 export function App() {
   const { t, lang, setLang } = useI18n();
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const boot = initialRoute();
-  const [page, setPage] = useState<PageId>(boot.page);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(boot.sessionId ?? null);
-  const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
-  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(boot.workItemId ?? null);
-  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(boot.scheduleId ?? null);
-  const [usageDay, setUsageDay] = useState<string | null>(boot.day ?? null);
-  const [selectedRunSpecId, setSelectedRunSpecId] = useState<string | null>(null);
+  // P0-2: route selection state lives in one reducer; the hash stays the
+  // external contract (parseHash/buildHash), navigate() is the single writer.
+  const [route, dispatch] = useReducer(routeReducer, {
+    page: boot.page,
+    sessionId: boot.sessionId ?? null,
+    todoId: null,
+    workItemId: boot.workItemId ?? null,
+    scheduleId: boot.scheduleId ?? null,
+    day: boot.day ?? null,
+    runSpecId: null,
+  });
+  const {
+    page,
+    sessionId: selectedSessionId,
+    todoId: selectedTodoId,
+    workItemId: selectedWorkItemId,
+    scheduleId: selectedScheduleId,
+    day: usageDay,
+    runSpecId: selectedRunSpecId,
+  } = route;
+  const setSelectedSessionId = (v: string | null) => dispatch({ type: 'set', key: 'sessionId', value: v });
+  const setSelectedTodoId = (v: string | null) => dispatch({ type: 'set', key: 'todoId', value: v });
+  const setSelectedWorkItemId = (v: string | null) => dispatch({ type: 'set', key: 'workItemId', value: v });
+  const setSelectedScheduleId = (v: string | null) => dispatch({ type: 'set', key: 'scheduleId', value: v });
+  const setUsageDay = (v: string | null) => dispatch({ type: 'set', key: 'day', value: v });
+  const setSelectedRunSpecId = (v: string | null) => dispatch({ type: 'set', key: 'runSpecId', value: v });
   const [activeTodoContext, setActiveTodoContext] = useState<TodoItem | null>(null);
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(() => isAuthenticated());
@@ -97,21 +178,21 @@ export function App() {
     const applyRoute = () => {
       const route = parseHash();
       if (route.page === 'inbox' && route.workItemId) {
-        setPage('work');
-        setSelectedWorkItemId(route.workItemId);
+        dispatch({ type: 'navigate', page: 'work', bare: false, workItemId: route.workItemId });
         const next = buildHash({ page: 'work', workItemId: route.workItemId });
         if (window.location.hash.replace(/^#/, '') !== next) {
           window.location.hash = next;
         }
         return;
       }
-      setPage(route.page);
-      if (route.workItemId) setSelectedWorkItemId(route.workItemId);
-      if (route.sessionId) setSelectedSessionId(route.sessionId);
-      if (route.scheduleId) setSelectedScheduleId(route.scheduleId);
-      else if (route.page === 'schedules' && !route.scheduleId) setSelectedScheduleId(null);
-      if (route.day) setUsageDay(route.day);
-      else if (route.page === 'usage' && !route.day) setUsageDay(null);
+      dispatch({
+        type: 'route',
+        page: route.page,
+        sessionId: route.sessionId,
+        workItemId: route.workItemId,
+        scheduleId: route.scheduleId,
+        day: route.day,
+      });
     };
     // Normalize boot deep-links once (e.g. #inbox?id= → #work/<id>).
     applyRoute();
@@ -129,22 +210,8 @@ export function App() {
     }
   }, [page]);
 
-  const navigate = (id: PageId, opts?: {
-    workItemId?: string | null;
-    sessionId?: string | null;
-    scheduleId?: string | null;
-    day?: string | null;
-  }) => {
-    setPage(id);
-    // Bare Work/Chat tab clears deep-link selection so phone returns to list/empty chat.
-    if (opts && 'workItemId' in opts) setSelectedWorkItemId(opts.workItemId ?? null);
-    else if (id === 'work' && !opts) setSelectedWorkItemId(null);
-    if (opts && 'sessionId' in opts) setSelectedSessionId(opts.sessionId ?? null);
-    else if (id === 'chat' && !opts) setSelectedSessionId(null);
-    if (opts && 'scheduleId' in opts) setSelectedScheduleId(opts.scheduleId ?? null);
-    else if (id === 'schedules' && !opts) setSelectedScheduleId(null);
-    if (opts && 'day' in opts) setUsageDay(opts.day ?? null);
-    else if (id === 'usage' && !opts) setUsageDay(null);
+  const navigate = (id: PageId, opts?: NavigateOpts) => {
+    dispatch({ type: 'navigate', page: id, bare: !opts, ...opts });
     window.location.hash = buildHash({
       page: id,
       workItemId: id === 'work' ? (opts?.workItemId ?? undefined) : undefined,

@@ -2,21 +2,31 @@
 
 /* Color / type / space tokens live in styles/tokens.css (imported first). */
 
-/* ── Global select styling ──────────────────────────── */
+/* ── Cascade layers ───────────────────────────────────
+   Layer order (first = lowest priority):
+   reset < base < components < pages < utilities.
+   Rules not yet migrated stay unlayered (highest priority);
+   migrate sections progressively — P0-1 in
+   docs/architecture/2026-08-16-web-design-analysis-and-optimization.md. */
+@layer reset, base, components, pages, utilities;
 
-select {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-sm);
-  min-height: var(--control-height-sm);
-  cursor: pointer;
-}
+/* ── Base: global element styling (base layer) ─────── */
 
-select:hover {
-  border-color: var(--line-strong);
+@layer base {
+  select {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-sm);
+    min-height: var(--control-height-sm);
+    cursor: pointer;
+  }
+
+  select:hover {
+    border-color: var(--line-strong);
+  }
 }
 
 .app-shell {
@@ -655,7 +665,11 @@ p {
 }
 
 /* ── AI-native primitives (Beautiful UI → LOS tokens) ─ */
+/* Wrapped into the components layer (P0-1) — behavior-preserving:
+   unlayered later rules (e.g. .task-row at 2104+) still win at
+   equal specificity, matching the prior source-order outcome. */
 
+@layer components {
 .ai-thinking {
   margin-bottom: var(--space-2);
   padding: var(--space-2) var(--space-3);
@@ -1327,6 +1341,7 @@ p {
   color: var(--faint);
   font-size: 10px;
 }
+} /* end @layer components (P0-1) */
 
 /* ── End new chat display ──────────────────────── */
 
@@ -1766,6 +1781,7 @@ select:focus {
 
 .primary-btn,
 .btn,
+.btn-secondary,
 .ghost-btn,
 .tiny-btn,
 .icon-btn {
@@ -1811,6 +1827,7 @@ select:focus {
   background: var(--danger);
 }
 
+.btn-secondary,
 .ghost-btn,
 .tiny-btn,
 .icon-btn {

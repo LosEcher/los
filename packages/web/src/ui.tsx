@@ -86,15 +86,20 @@ export function Button({
   children, variant, size, disabled, type, onClick, title,
 }: {
   children: ReactNode;
-  variant?: 'ghost' | 'danger' | 'primary';
+  variant?: 'ghost' | 'danger' | 'primary' | 'secondary';
   size?: 'tiny';
   disabled?: boolean;
   type?: 'button' | 'submit';
   onClick?: () => void;
   title?: string;
 }) {
+  // P0-4: default variant is now a normal-size secondary button.
+  // size is orthogonal to variant (tiny only via size="tiny").
   const cls = [
-    variant === 'danger' ? 'btn-danger' : variant === 'ghost' ? 'ghost-btn' : variant === 'primary' ? 'btn' : 'tiny-btn',
+    variant === 'danger' ? 'btn-danger'
+      : variant === 'ghost' ? 'ghost-btn'
+        : variant === 'primary' ? 'btn'
+          : 'btn-secondary',
     size === 'tiny' ? 'tiny-btn' : '',
   ].filter(Boolean).join(' ');
   return <button className={cls} type={type ?? 'button'} disabled={disabled} onClick={onClick} title={title}>{children}</button>;
