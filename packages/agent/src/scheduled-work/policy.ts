@@ -43,22 +43,7 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     if (input.approvalPolicy !== 'preapproved_scope') {
       throw new Error('scheduled_execution requires preapproved_scope approval policy');
     }
-    if (input.runTemplate.mode !== 'execution') {
-      throw new Error('scheduled_execution must use execution mode');
-    }
-    if (input.runTemplate.toolMode !== 'project-write' && input.runTemplate.toolMode !== 'all') {
-      throw new Error('scheduled_execution requires project-write (or all with sandboxMode=sandbox) tool mode');
-    }
-    if (input.runTemplate.editableSurfaces.length === 0) {
-      throw new Error('scheduled_execution requires at least one editable surface');
-    }
-    if (input.runTemplate.requiredChecks.length === 0) {
-      throw new Error('scheduled_execution requires at least one required check');
-    }
-    if (input.runTemplate.maxLoops !== undefined
-      && (input.runTemplate.maxLoops < 1 || input.runTemplate.maxLoops > 200)) {
-      throw new Error('maxLoops must be in [1,200]');
-    }
+    validateScheduledExecutionRunTemplate(input.runTemplate);
     return; // skip feed-analysis and read-only checks
   }
   if (input.runTemplate.toolMode !== 'read-only' || input.runTemplate.editableSurfaces.length > 0) {
@@ -71,6 +56,52 @@ export function validateScheduledWorkItemInput(input: CreateScheduledWorkItemInp
     validateFeedAnalysisRequest(input.runTemplate.feedAnalysisRequest);
   } else if (input.runTemplate.feedAnalysisRequest) {
     throw new Error('feedAnalysisRequest is only valid for scheduled_feed_analysis');
+  }
+}
+
+/**
+ * Validate the run template of a scheduled_execution schedule. Shared by
+ * create (via validateScheduledWorkItemInput) and update (store merge) so a
+ * template can never silently degrade into an unusable policy.
+ *
+ * Fail-loud rules (2026-08-17 NAS34 incident):
+ * - A remote executor (executor.enabled) without sandboxMode defaults the
+ *   remote agent to workspace-write → maxRiskLevel L1, denying every L2 tool
+ *   (run_shell etc.). Require an explicit sandboxMode.
+ * - A remote executor without workspaceRoot falls back to the gateway's local
+ *   workspace path, which does not exist on the node → empty workspace and
+ *   Path traversal denials for system paths. Require a node-local root.
+ */
+export function validateScheduledExecutionRunTemplate(runTemplate: ScheduledWorkItem['runTemplate']): void {
+  if (runTemplate.mode !== 'execution') {
+    throw new Error('scheduled_execution must use execution mode');
+  }
+  if (runTemplate.toolMode !== 'project-write' && runTemplate.toolMode !== 'all') {
+    throw new Error('scheduled_execution requires project-write (or all with sandboxMode=sandbox) tool mode');
+  }
+  if (runTemplate.editableSurfaces.length === 0) {
+    throw new Error('scheduled_execution requires at least one editable surface');
+  }
+  if (runTemplate.requiredChecks.length === 0) {
+    throw new Error('scheduled_execution requires at least one required check');
+  }
+  if (runTemplate.maxLoops !== undefined
+    && (runTemplate.maxLoops < 1 || runTemplate.maxLoops > 200)) {
+    throw new Error('maxLoops must be in [1,200]');
+  }
+  if (runTemplate.executor?.enabled === true) {
+    if (!runTemplate.sandboxMode) {
+      throw new Error(
+        'scheduled_execution with a remote executor requires sandboxMode (e.g. "sandbox"); '
+        + 'without it the remote agent defaults to workspace-write and denies all L2 tools (run_shell)',
+      );
+    }
+    if (!runTemplate.workspaceRoot) {
+      throw new Error(
+        'scheduled_execution with a remote executor requires workspaceRoot pointing at a node-local '
+        + 'path; the gateway workspace root does not exist on remote nodes and every read outside it fails',
+      );
+    }
   }
 }
 

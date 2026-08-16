@@ -145,6 +145,20 @@ test('buildBwrapArgs defaults to writable cwd bind', () => {
   assert.ok(bindIdx >= 0, 'default bwrap mounts cwd writable');
   assert.equal(args[bindIdx + 1], '/ws/proj');
   assert.equal(args[bindIdx + 2], '/ws/proj');
+  // Fail-closed: network namespace is isolated by default.
+  assert.ok(args.includes('--unshare-net'), 'default bwrap must isolate the network');
+});
+
+test('buildBwrapArgs networkMode=host drops --unshare-net', () => {
+  const args = _buildBwrapArgs('/usr/bin/bwrap', '/ws/proj', 'ping -c 1 1.1.1.1', 'sandbox', 'host');
+  assert.ok(!args.includes('--unshare-net'), 'host network must not unshare the net namespace');
+  assert.ok(args.includes('--bind'), 'sandbox filesystem isolation stays in place');
+});
+
+test('buildMacSandboxProfile networkMode=host drops the network deny clause', () => {
+  const profile = _buildMacSandboxProfile('/ws/proj', 'sandbox', 'host');
+  assert.ok(!profile.includes('(deny network*)'), 'host network must not deny network');
+  assert.match(profile, /\(deny default\)/, 'the rest of the sandbox profile stays intact');
 });
 
 test('buildBwrapArgs readonly mode mounts cwd read-only', () => {

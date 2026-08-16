@@ -266,6 +266,147 @@ test("scheduled work routes reject invalid templateId and nested runTemplate (fa
   }, { token: "auth-token", operatorToken: "operator-token" });
 });
 
+test("PATCH /scheduled-work-items/:id forwards flat runTemplate fields as a partial patch", async () => {
+  await withAuthConfig(async config => {
+    const schedule = fixtureSchedule();
+    let updateInput: Parameters<ScheduledWorkRouteDeps["update"]>[1] | undefined;
+    const deps: ScheduledWorkRouteDeps = {
+      preview: () => [],
+      create: async () => schedule,
+      list: async () => [schedule],
+      load: async () => schedule,
+      update: async (_id, input) => {
+        updateInput = input;
+        return { ...schedule, runTemplate: { ...schedule.runTemplate, ...(input.runTemplate ?? {}) } };
+      },
+      listRuns: async () => [],
+      trigger: async () => { throw new Error("unexpected"); },
+      retry: async () => { throw new Error("unexpected"); },
+      approve: async () => { throw new Error("unexpected"); },
+      deny: async () => { throw new Error("unexpected"); },
+      execute: async () => "succeeded",
+    };
+    const app = Fastify();
+    registerRequestContext(app, config);
+    registerScheduledWorkRoutes(app, deps);
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: "PATCH", url: `/scheduled-work-items/${schedule.id}`,
+        headers: { "x-los-operator-token": "operator-token", "content-type": "application/json" },
+        payload: {
+          sandboxMode: "sandbox", workspaceRoot: "/opt/los/los-workspace",
+          maxLoops: 30, toolMode: "all", goalTemplate: "probe v2",
+          editableSurfaces: ["/opt/los/los-workspace"], requiredChecks: ["report result"],
+        },
+      });
+      assert.equal(res.statusCode, 200, JSON.stringify(res.json()));
+      assert.deepEqual(updateInput?.runTemplate, {
+        sandboxMode: "sandbox", workspaceRoot: "/opt/los/los-workspace",
+        maxLoops: 30, toolMode: "all", goalTemplate: "probe v2",
+        editableSurfaces: ["/opt/los/los-workspace"], requiredChecks: ["report result"],
+      });
+      // Non-runTemplate policy fields still update normally.
+      assert.equal(updateInput?.status, undefined);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test("PATCH rejects nested runTemplate (flat fields only)", async () => {
+  await withAuthConfig(async config => {
+    const schedule = fixtureSchedule();
+    const deps: ScheduledWorkRouteDeps = {
+      preview: () => [],
+      create: async () => schedule,
+      list: async () => [schedule],
+      load: async () => schedule,
+      update: async () => schedule,
+      listRuns: async () => [],
+      trigger: async () => { throw new Error("unexpected"); },
+      retry: async () => { throw new Error("unexpected"); },
+      approve: async () => { throw new Error("unexpected"); },
+      deny: async () => { throw new Error("unexpected"); },
+      execute: async () => "succeeded",
+    };
+    const app = Fastify();
+    registerRequestContext(app, config);
+    registerScheduledWorkRoutes(app, deps);
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: "PATCH", url: `/scheduled-work-items/${schedule.id}`,
+        headers: { "x-los-operator-token": "operator-token", "content-type": "application/json" },
+        payload: { runTemplate: { sandboxMode: "sandbox" } },
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json().error, /nested runTemplate is not accepted on PATCH/);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test("workspaceRoot accepts Windows drive-letter absolute paths", async () => {
+  await withAuthConfig(async config => {
+    const schedule = fixtureSchedule();
+    let createdInput: Parameters<ScheduledWorkRouteDeps["create"]>[0] | undefined;
+    const deps: ScheduledWorkRouteDeps = {
+      preview: () => [],
+      create: async input => { createdInput = input; return schedule; },
+      list: async () => [schedule],
+      load: async () => schedule,
+      update: async () => schedule,
+      listRuns: async () => [],
+      trigger: async () => { throw new Error("unexpected"); },
+      retry: async () => { throw new Error("unexpected"); },
+      approve: async () => { throw new Error("unexpected"); },
+      deny: async () => { throw new Error("unexpected"); },
+      execute: async () => "succeeded",
+    };
+    const app = Fastify();
+    registerRequestContext(app, config);
+    registerScheduledWorkRoutes(app, deps);
+    await app.ready();
+    try {
+      const win = await app.inject({
+        method: "POST", url: "/scheduled-work-items",
+        headers: { "x-los-operator-token": "operator-token", "content-type": "application/json" },
+        payload: {
+          projectId: "los", title: "win-executor",
+          templateId: "scheduled_execution", goalTemplate: "probe",
+          editableSurfaces: ["C:\\Users\\los\\los"], requiredChecks: ["report OK"],
+          toolMode: "project-write", sandboxMode: "workspace-write",
+          workspaceRoot: "C:\\Users\\los\\los",
+          executor: { enabled: true, nodeId: "desktop-r45553o", nodeUrls: ["http://100.90.170.58:8090"] },
+          trigger: { kind: "once", expression: "2099-01-01T00:00:00.000Z", timezone: "Asia/Shanghai" },
+        },
+      });
+      assert.equal(win.statusCode, 201, JSON.stringify(win.json()));
+      assert.equal(createdInput?.runTemplate.workspaceRoot, "C:\\Users\\los\\los");
+
+      const rel = await app.inject({
+        method: "POST", url: "/scheduled-work-items",
+        headers: { "x-los-operator-token": "operator-token", "content-type": "application/json" },
+        payload: {
+          projectId: "los", title: "rel-workspace",
+          templateId: "scheduled_execution", goalTemplate: "probe",
+          editableSurfaces: ["C:\\Users\\los\\los"], requiredChecks: ["report OK"],
+          toolMode: "project-write", sandboxMode: "workspace-write",
+          workspaceRoot: "Users\\los\\los",
+          executor: { enabled: true, nodeId: "desktop-r45553o", nodeUrls: ["http://100.90.170.58:8090"] },
+          trigger: { kind: "once", expression: "2099-01-01T00:00:00.000Z", timezone: "Asia/Shanghai" },
+        },
+      });
+      assert.equal(rel.statusCode, 400);
+      assert.match(rel.json().error, /workspaceRoot must be an absolute path/);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 function fixtureSchedule() {
   return {
     id: "schedule-1", tenantId: "local", projectId: "los", title: "Morning digest", status: "enabled" as const,

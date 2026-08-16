@@ -8,6 +8,8 @@ import { readCurrentRunContract } from './contract-reader.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { updateTaskRunFields, type TaskRunRecord } from '../task-runs.js';
 import { emitTaskEvent } from './task-events.js';
+import { listRecentSessionEvents } from '../session-events.js';
+import { hasAwaitingOperatorEvidence, summarizeToolDenials } from './blocking-evidence.js';
 import { getConfig } from '@los/infra/config';
 import type { ScheduledAgentTaskInput, ScheduledAgentTaskResult } from './types.js';
 
@@ -30,6 +32,60 @@ export async function runGoalSelfCheck(
   if (!selfCheckContract || !shouldRunSelfCheck(selfCheckContract)) return null;
 
   const config = getConfig();
+
+  // B5 (2026-08-17): load blocking evidence from the run's session before any
+  // judge call. When the agent ended waiting on a coordinator decision
+  // (worker.ask / worker.escalation), the stop-condition self-check has
+  // nothing to verify — the run is blocked on a human, not on the goal.
+  // Surfacing that directly avoids the misleading "operator cancels schedule"
+  // failure that masked the real blocker in the NAS34 sing-box incident.
+  let sessionEvents: Array<{ type: string; toolName?: string; payload: Record<string, unknown> }> = [];
+  try {
+    sessionEvents = await listRecentSessionEvents(sessionId, 300);
+  } catch {
+    // Event evidence is best-effort; fall through to the judge paths.
+  }
+  if (hasAwaitingOperatorEvidence(sessionEvents)) {
+    const blockReason = 'Awaiting operator decision: the agent requested coordinator direction (worker.ask/escalation) and the run ended before a decision was given';
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'blocked',
+      sessionId,
+      reason: 'awaiting_operator',
+      nodeId: running.nodeId,
+      leaseVersion: running.leaseVersion,
+    });
+    await updateTaskRunFields(taskRunId, {
+      metadata: {
+        ...running.metadata,
+        blockReason,
+        loopCount: result.loopCount,
+        totalTokens: result.totalTokens,
+      },
+    });
+    await emitTaskEvent(sessionId, 'task.blocked', running as any);
+    await input.onTaskEvent?.({ type: 'task.blocked', taskRun: running as any });
+    try {
+      const { createTodo } = await import('../todos.js');
+      await createTodo({
+        title: `Awaiting operator: task ${taskRunId.slice(0, 8)} needs a coordinator decision`,
+        description: `${blockReason}\n\n${result.text.slice(0, 2000)}`,
+        kind: 'task',
+        status: 'backlog',
+        priority: 'P2',
+        source: 'awaiting_operator',
+        metadata: { sessionId, taskRunId },
+      });
+    } catch { /* Todo creation is best-effort */ }
+    return {
+      status: 'blocked',
+      sessionId,
+      taskRun: { ...(running as any), status: 'blocked' },
+      result,
+      reason: blockReason,
+    };
+  }
 
   // ── Multi-Role Review (P0) ─────────────────────────────────
   // Runs before the goal self-check. Each role evaluates the agent's output
@@ -181,9 +237,11 @@ export async function runGoalSelfCheck(
   });
 
   if (!selfCheckResult.selfCheckPassed) {
+    const denialSummary = summarizeToolDenials(sessionEvents);
     const gapSummary = selfCheckResult.gaps
       .map(g => `[${g.condition}] ${g.detail} → ${g.suggestion}`)
-      .join('; ');
+      .join('; ')
+      + (denialSummary ? ` | ${denialSummary}` : '');
 
     // Phase 4.4 Reflection闭环: analyze failure + suggest recovery
     let reflection = reflectOnFailure({ selfCheck: selfCheckResult });

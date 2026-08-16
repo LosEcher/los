@@ -239,9 +239,14 @@ function normalizeCreateInput(
 }
 
 function normalizeUpdateInput(body: Record<string, unknown>): UpdateScheduledWorkItemInput {
+  if (body.runTemplate !== undefined) {
+    throw new Error('nested runTemplate is not accepted on PATCH; use flat fields: goalTemplate, toolMode, sandboxMode, workspaceRoot, executor, maxLoops, editableSurfaces, requiredChecks');
+  }
+  const runTemplatePatch = collectRunTemplatePatch(body);
   return {
     title: normalizeString(body.title), status: normalizeStatus(body.status),
     trigger: body.trigger === undefined ? undefined : normalizeTrigger(body.trigger),
+    ...(runTemplatePatch ? { runTemplate: runTemplatePatch } : {}),
     approvalPolicy: optionalEnum(body.approvalPolicy, ['read_only_auto', 'preapproved_scope', 'each_run'] as const),
     approvalTimeoutMs: normalizeNumber(body.approvalTimeoutMs),
     approvalTimeoutAction: optionalEnum(body.approvalTimeoutAction, ['deny', 'approve'] as const),
@@ -250,6 +255,21 @@ function normalizeUpdateInput(body: Record<string, unknown>): UpdateScheduledWor
     maxConcurrentRuns: normalizeNumber(body.maxConcurrentRuns), maxLatenessMs: normalizeNumber(body.maxLatenessMs),
     failureThreshold: normalizeNumber(body.failureThreshold),
   };
+}
+
+/** Build a partial runTemplate from flat PATCH fields; undefined body fields
+ *  are omitted so the merge in the store keeps the persisted values. */
+function collectRunTemplatePatch(body: Record<string, unknown>): Record<string, unknown> | undefined {
+  const patch: Record<string, unknown> = {};
+  if (body.goalTemplate !== undefined) patch.goalTemplate = normalizeString(body.goalTemplate);
+  if (body.editableSurfaces !== undefined) patch.editableSurfaces = normalizeStringArray(body.editableSurfaces);
+  if (body.requiredChecks !== undefined) patch.requiredChecks = normalizeStringArray(body.requiredChecks);
+  if (body.toolMode !== undefined) patch.toolMode = normalizeToolMode(body.toolMode);
+  if (body.sandboxMode !== undefined) patch.sandboxMode = normalizeSandboxMode(body.sandboxMode);
+  if (body.workspaceRoot !== undefined) patch.workspaceRoot = normalizeWorkspaceRoot(body.workspaceRoot);
+  if (body.executor !== undefined) patch.executor = normalizeExecutorConfig(body.executor);
+  if (body.maxLoops !== undefined) patch.maxLoops = normalizeMaxLoops(body.maxLoops);
+  return Object.keys(patch).length > 0 ? patch : undefined;
 }
 
 function normalizeTrigger(value: unknown): ScheduledWorkTrigger {
@@ -313,10 +333,15 @@ function normalizeSandboxMode(value: unknown): 'readonly' | 'workspace-write' | 
 
 function normalizeWorkspaceRoot(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string' || !value.startsWith('/')) {
+  if (typeof value !== 'string' || !value.trim()) {
     throw new Error('workspaceRoot must be an absolute path');
   }
-  return value.trim();
+  const trimmed = value.trim();
+  const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(trimmed);
+  if (!trimmed.startsWith('/') && !isWindowsAbsolute) {
+    throw new Error('workspaceRoot must be an absolute path (POSIX / or Windows drive, e.g. C:\\los)');
+  }
+  return trimmed;
 }
 
 function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['executor'] {

@@ -259,6 +259,7 @@ export async function registerBuiltinTools(
     }, {
       allowNativeShell: cfg.agent.allowNativeShell,
       sandboxMode: cfg.agent.sandboxMode,
+      networkMode: cfg.agent.sandboxNetwork ?? 'isolated',
     });
     return result.error
       ? { content: result.content, error: result.error }

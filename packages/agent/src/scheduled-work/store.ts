@@ -8,6 +8,7 @@ import {
   nextOccurrenceAfterSlot,
   previewScheduledOccurrences,
   shouldSkipLateRun,
+  validateScheduledExecutionRunTemplate,
   validateScheduledTrigger,
   validateScheduledWorkItemInput,
 } from './policy.js';
@@ -99,19 +100,37 @@ export async function updateScheduledWorkItem(id: string, input: UpdateScheduled
     && input.approvalPolicy !== 'preapproved_scope'
   ) throw new Error('scheduled_feed_analysis requires preapproved_scope');
   if (input.trigger) validateScheduledTrigger(input.trigger);
+  // Execution-template patch: merge onto the persisted template, keep
+  // templateId/mode immutable (create a new schedule to switch templates),
+  // then re-run the same fail-loud validation as create so a patch can never
+  // degrade a remote-execution template into the L1/empty-workspace trap.
+  // The validation only applies when the resulting status is enabled — pausing
+  // or retiring a legacy broken template must stay possible.
+  const mergedRunTemplate = { ...current.runTemplate, ...(input.runTemplate ?? {}) };
+  if (input.runTemplate?.templateId !== undefined && input.runTemplate.templateId !== current.runTemplate.templateId) {
+    throw new Error('templateId cannot be changed via update; create a new schedule instead');
+  }
+  if (input.runTemplate?.mode !== undefined && input.runTemplate.mode !== current.runTemplate.mode) {
+    throw new Error('runTemplate.mode cannot be changed via update; create a new schedule instead');
+  }
+  const effectiveStatus = input.status ?? current.status;
+  if (mergedRunTemplate.templateId === 'scheduled_execution' && effectiveStatus === 'enabled') {
+    validateScheduledExecutionRunTemplate(mergedRunTemplate);
+  }
   const trigger = input.trigger ?? current.trigger;
   const nextRunAt = input.trigger || (input.status === 'enabled' && current.status !== 'enabled')
     ? previewScheduledOccurrences(trigger, new Date(), 1)[0] ?? current.nextRunAt
     : current.nextRunAt;
   const rows = await getDb().query<ScheduledWorkRow>(
     `UPDATE scheduled_work_items SET
-       title=$2, status=$3, trigger_json=$4::jsonb, approval_policy=$5,
-       approval_timeout_ms=$6, approval_timeout_action=$7,
-       concurrency_policy=$8, catch_up_policy=$9, max_concurrent_runs=$10,
-       max_lateness_ms=$11, failure_threshold=$12, metadata_json=$13::jsonb,
-       next_run_at=$14, revision=revision+1, updated_at=now()
+       title=$2, status=$3, trigger_json=$4::jsonb, run_template_json=$5::jsonb,
+       approval_policy=$6, approval_timeout_ms=$7, approval_timeout_action=$8,
+       concurrency_policy=$9, catch_up_policy=$10, max_concurrent_runs=$11,
+       max_lateness_ms=$12, failure_threshold=$13, metadata_json=$14::jsonb,
+       next_run_at=$15, revision=revision+1, updated_at=now()
      WHERE id=$1 RETURNING *`,
     [id, input.title?.trim() || current.title, input.status ?? current.status, JSON.stringify(trigger),
+      JSON.stringify(mergedRunTemplate),
       input.approvalPolicy ?? current.approvalPolicy,
       boundedInt(input.approvalTimeoutMs, 0, 31 * 86_400_000, current.approvalTimeoutMs),
       input.approvalTimeoutAction ?? current.approvalTimeoutAction,
