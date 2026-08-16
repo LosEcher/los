@@ -27,6 +27,12 @@ export const FLEET_HEARTBEAT_WARN_MS = 45_000;
 export const FLEET_HEARTBEAT_CRITICAL_MS = 90_000;
 /** Nodes at or below this total RAM are treated as light/overflow. */
 export const FLEET_LIGHT_NODE_MEMORY_TOTAL_MB = 2048;
+ /** Absolute available-memory warning (standard nodes): <512MB free. */
+const FLEET_MEM_AVAILABLE_ABS_WARN_MB = 512;
+ /** Absolute available-memory critical (standard nodes): <256MB free. */
+const FLEET_MEM_AVAILABLE_ABS_CRITICAL_MB = 256;
+ /** Absolute available-memory warning on light nodes: <256MB free. */
+const FLEET_LIGHT_MEM_AVAILABLE_ABS_WARN_MB = 256;
 
 export type FleetResourceSeverity = 'warning' | 'critical';
 
