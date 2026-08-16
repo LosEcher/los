@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { Check, X, AlertTriangle, Clock, ChevronDown } from 'lucide-react';
 import { postOperatorSteering } from './api/index.js';
 import { HitlQuestionCard } from './chat-ai-primitives.js';
+import { Modal } from './components/modal';
 import { useI18n } from './i18n';
 
 export type ApprovalEvent = {
@@ -176,26 +177,29 @@ export function AbortConfirmation({ onConfirm, onCancel, elapsedMs }: {
 }) {
   const { t } = useI18n();
   return (
-    <div className="abort-confirm-overlay">
-      <div className="abort-confirm-card">
-        <AlertTriangle size={18} />
-        <h3>{t('chat.abort.title')}</h3>
-        <p>{t('chat.abort.body')}</p>
-        {elapsedMs ? (
-          <p className="abort-elapsed">
-            <Clock size={12} /> {t('chat.abort.ranFor', { elapsed: formatElapsed(elapsedMs) })}
-          </p>
-        ) : null}
-        <div className="abort-actions">
-          <button className="primary-btn danger" type="button" onClick={onConfirm}>
-            {t('chat.abort.cancelRun')}
-          </button>
-          <button className="ghost-btn" type="button" onClick={onCancel}>
-            {t('chat.abort.keepRunning')}
-          </button>
-        </div>
+    <Modal
+      open
+      onClose={onCancel}
+      title={t('chat.abort.title')}
+      footer={(
+        <button className="primary-btn danger" type="button" onClick={onConfirm}>
+          {t('chat.abort.cancelRun')}
+        </button>
+      )}
+    >
+      <AlertTriangle size={18} />
+      <p>{t('chat.abort.body')}</p>
+      {elapsedMs ? (
+        <p className="abort-elapsed">
+          <Clock size={12} /> {t('chat.abort.ranFor', { elapsed: formatElapsed(elapsedMs) })}
+        </p>
+      ) : null}
+      <div className="abort-actions">
+        <button className="ghost-btn" type="button" onClick={onCancel}>
+          {t('chat.abort.keepRunning')}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Play, ShieldCheck } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
 import { Button, DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
+import { useToast } from '../components/toast';
 import { useI18n } from '../i18n';
 import { TopologyPanel } from './topology-panel.js';
 
@@ -45,6 +46,7 @@ export function buildRunOperatorPayload(reason: string | undefined, fallbackReas
 
 export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string | null }) {
   const { t } = useI18n();
+  const toast = useToast();
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [approvalReason, setApprovalReason] = useState('');
@@ -83,6 +85,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
     onSuccess: () => {
       invalidateRun();
       closeApprovalForm();
+      toast.success(t('ops.runSpecs.approvedToast'));
     },
   });
 
@@ -97,6 +100,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
     onSuccess: () => {
       invalidateRun();
       closeApprovalForm();
+      toast.info(t('ops.runSpecs.rejectedToast'));
     },
   });
 
@@ -104,6 +108,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
     mutationFn: (id: string) => postJson(`/runs/${id}/verify`, {}),
     onSuccess: () => {
       invalidateRun();
+      toast.success(t('ops.runSpecs.verifiedToast'));
     },
   });
 
