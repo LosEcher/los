@@ -141,6 +141,9 @@ export interface UpdateScheduledWorkItemInput {
   title?: string;
   status?: ScheduledWorkStatus;
   trigger?: ScheduledWorkTrigger;
+  /** Execution-template field patch. templateId and mode cannot be changed
+   *  through update (create a new schedule instead). */
+  runTemplate?: Partial<ScheduledWorkRunTemplate>;
   approvalPolicy?: ScheduledApprovalPolicy;
   approvalTimeoutMs?: number;
   approvalTimeoutAction?: ScheduledApprovalTimeoutAction;

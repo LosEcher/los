@@ -153,6 +153,8 @@ const isolatedGroupB = [
   'src/fleet-resources.test.ts',
   'src/runtime-health.test.ts',
   'src/scheduled-work.test.ts',
+  'src/scheduled-work/policy.test.ts',
+  'src/scheduler/blocking-evidence.test.ts',
   'src/scheduler-kernel-shadow.test.ts',
   'src/scheduler-planning.test.ts',
   'src/scheduler.test.ts',

@@ -41,7 +41,16 @@ type FormState = {
   feedAnalysisRequest: string;
   editableSurfaces: string;
   requiredChecks: string;
+  toolMode: 'all' | 'project-write';
+  sandboxMode: 'readonly' | 'workspace-write' | 'sandbox' | '';
+  workspaceRoot: string;
+  maxLoops: string;
+  executor: string;
 };
+
+type ExecutorValidation =
+  | { value: Record<string, unknown>; error?: never }
+  | { value?: never; error: string };
 
 type FeedAnalysisRequestValidation =
   | { value: Record<string, unknown>; error?: never }
@@ -83,6 +92,10 @@ export function SchedulesPage({
     () => validateFeedAnalysisRequest(form.feedAnalysisRequest, t),
     [form.feedAnalysisRequest, t],
   );
+  const executor = useMemo(
+    () => validateExecutor(form.executor, t),
+    [form.executor, t],
+  );
   const list = useQuery({
     queryKey: ['scheduled-work-items', statusFilter],
     queryFn: () => getJson<ScheduledWorkListResponse>(schedulesListUrl(statusFilter)),
@@ -112,6 +125,9 @@ export function SchedulesPage({
       if (form.templateId === 'scheduled_feed_analysis' && !feedAnalysisRequest.value) {
         throw new Error(feedAnalysisRequest.error);
       }
+      if (form.templateId === 'scheduled_execution' && form.executor.trim() && !executor.value) {
+        throw new Error(executor.error);
+      }
       return postJson<CreateScheduledWorkResponse>('/scheduled-work-items', {
         projectId: form.projectId.trim(), title: form.title.trim(), templateId: form.templateId,
         trigger, approvalPolicy: form.approvalPolicy,
@@ -125,6 +141,15 @@ export function SchedulesPage({
         requiredChecks: form.templateId === 'scheduled_execution'
           ? form.requiredChecks.split(',').map(s => s.trim()).filter(Boolean)
           : undefined,
+        toolMode: form.templateId === 'scheduled_execution' ? form.toolMode : undefined,
+        sandboxMode: form.templateId === 'scheduled_execution' && form.sandboxMode ? form.sandboxMode : undefined,
+        workspaceRoot: form.templateId === 'scheduled_execution' && form.workspaceRoot.trim()
+          ? form.workspaceRoot.trim()
+          : undefined,
+        maxLoops: form.templateId === 'scheduled_execution' && form.maxLoops.trim()
+          ? Math.max(1, Math.min(200, Math.round(Number(form.maxLoops)) || 20))
+          : undefined,
+        executor: form.templateId === 'scheduled_execution' && form.executor.trim() ? executor.value : undefined,
         feedAnalysisRequest: form.templateId === 'scheduled_feed_analysis'
           ? feedAnalysisRequest.value
           : undefined,
@@ -205,7 +230,7 @@ export function SchedulesPage({
         </div>
       </div>
 
-      {showCreate ? <ScheduleCreateForm form={form} setForm={setForm} preview={preview} create={create} feedAnalysisRequest={feedAnalysisRequest} /> : null}
+      {showCreate ? <ScheduleCreateForm form={form} setForm={setForm} preview={preview} create={create} feedAnalysisRequest={feedAnalysisRequest} executor={executor} /> : null}
       {actionError ? <div className="daily-error">{String(actionError)}</div> : null}
 
       <section className="schedule-split">
@@ -318,12 +343,13 @@ export function SchedulesPage({
   );
 }
 
-function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisRequest }: {
+function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisRequest, executor }: {
   form: FormState;
   setForm: (value: FormState) => void;
   preview: ReturnType<typeof useQuery<ScheduledWorkPreviewResponse>>;
   create: ReturnType<typeof useMutation<CreateScheduledWorkResponse, Error, void>>;
   feedAnalysisRequest: FeedAnalysisRequestValidation;
+  executor: ExecutorValidation;
 }) {
   const { t } = useI18n();
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm({ ...form, [key]: value });
@@ -354,6 +380,11 @@ function ScheduleCreateForm({ form, setForm, preview, create, feedAnalysisReques
         {form.templateId === 'scheduled_execution' ? (<>
           <label><span>{t('ops.schedules.formEditableSurfaces')}</span><input value={form.editableSurfaces} onChange={event => set('editableSurfaces', event.target.value)} placeholder={t('ops.schedules.editableSurfacesPlaceholder')} /></label>
           <label><span>{t('ops.schedules.formRequiredChecks')}</span><input value={form.requiredChecks} onChange={event => set('requiredChecks', event.target.value)} placeholder={t('ops.schedules.requiredChecksPlaceholder')} /></label>
+          <label><span>{t('ops.schedules.formToolMode')}</span><select value={form.toolMode} onChange={event => set('toolMode', event.target.value as FormState['toolMode'])}><option value="all">{t('ops.schedules.toolModeAll')}</option><option value="project-write">{t('ops.schedules.toolModeProjectWrite')}</option></select></label>
+          <label><span>{t('ops.schedules.formSandboxMode')}</span><select value={form.sandboxMode} onChange={event => set('sandboxMode', event.target.value as FormState['sandboxMode'])}><option value="">{t('ops.schedules.sandboxModeDefault')}</option><option value="workspace-write">{t('ops.schedules.sandboxWorkspaceWrite')}</option><option value="sandbox">{t('ops.schedules.sandboxSandbox')}</option><option value="readonly">{t('ops.schedules.sandboxReadonly')}</option></select></label>
+          <label><span>{t('ops.schedules.formWorkspaceRoot')}</span><input value={form.workspaceRoot} onChange={event => set('workspaceRoot', event.target.value)} placeholder={t('ops.schedules.workspaceRootPlaceholder')} /></label>
+          <label><span>{t('ops.schedules.formMaxLoops')}</span><input type="number" min="1" max="200" value={form.maxLoops} onChange={event => set('maxLoops', event.target.value)} /></label>
+          <label className="schedule-request-field"><span>{t('ops.schedules.formExecutor')}</span><textarea rows={5} value={form.executor} onChange={event => set('executor', event.target.value)} spellCheck={false} placeholder={t('ops.schedules.executorPlaceholder')} />{executor.error ? <small className="schedule-preview-error" role="alert">{executor.error}</small> : null}</label>
         </>) : null}
       </div>
       <div className="schedule-preview">
@@ -394,6 +425,7 @@ function initialForm(t: (key: string) => string): FormState {
     approvalPolicy: 'read_only_auto', approvalTimeoutMinutes: '30', approvalTimeoutAction: 'deny',
     concurrencyPolicy: 'skip', catchUpPolicy: 'skip',
     editableSurfaces: '', requiredChecks: '',
+    toolMode: 'all', sandboxMode: '', workspaceRoot: '', maxLoops: '20', executor: '',
     feedAnalysisRequest: JSON.stringify({
       sourceSystem: 'lot2extension',
       deliveryMode: 'result_returning',
@@ -441,4 +473,18 @@ function validateFeedAnalysisRequest(source: string, t: (key: string) => string)
     || (Array.isArray(request.feedObservations) && request.feedObservations.length > 0);
   if (!hasEvidence) return { error: t('ops.schedules.feedAnalysisNoEvidence') };
   return { value: request };
+}
+
+function validateExecutor(source: string, t: (key: string) => string): ExecutorValidation {
+  if (!source.trim()) return { value: {} };
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    return { error: t('ops.schedules.executorInvalidJson') };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { error: t('ops.schedules.executorNotObject') };
+  }
+  return { value: value as Record<string, unknown> };
 }

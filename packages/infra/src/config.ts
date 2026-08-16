@@ -80,6 +80,12 @@ export const ConfigSchema = z.object({
     defaultModel: z.string().default(DEFAULT_AGENT_MODEL),
     maxLoops: z.coerce.number().default(20),
     sandboxMode: z.enum(['readonly', 'workspace-write', 'sandbox']).default('workspace-write'),
+    /** Network isolation inside the OS sandbox. 'isolated' (default) keeps the
+     *  sandbox network namespace (bwrap --unshare-net / sandbox-exec deny
+     *  network). 'host' runs shell commands with the host network so
+     *  read-only diagnostics (ping/curl/probe) can reach real endpoints —
+     *  only enable for trusted read-only workloads; it weakens the sandbox. */
+    sandboxNetwork: z.enum(['isolated', 'host']).default('isolated'),
     /** When no OS sandbox backend is available, deny shell execution instead
      *  of falling back to an unconstrained native shell (Claude-style deny).
      *  Set true only when the environment is trusted (e.g. a container that
@@ -257,6 +263,7 @@ export async function loadConfig(opts?: {
       defaultModel: DEFAULT_AGENT_MODEL,
       maxLoops: 20,
       sandboxMode: 'workspace-write',
+      sandboxNetwork: 'isolated',
       allowNativeShell: false,
       identity: { name: 'default', inheritForChildren: false },
       skills: { runtimeEnabled: true, autoInject: false, maxAutoSkills: 3, maxSkillTokens: 2500 },
