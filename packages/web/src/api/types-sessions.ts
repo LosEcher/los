@@ -10,6 +10,8 @@ export type SessionSummary = {
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
+  /** Latest model.response model from the event ledger (requested ?? effective). */
+  effectiveModel?: string | null;
 };
 
 export type SessionDetail = SessionSummary & {
@@ -43,6 +45,17 @@ export type SessionEventsResponse = {
   sessionId: string;
   count: number;
   events: SessionEvent[];
+  includeInternal?: boolean;
+  /** High-water cursor (exclusive) for the next incremental poll; 0 on full pages. */
+  since?: number;
+  /** Present on since>0 responses: id to pass as the next `since`. */
+  nextSince?: number;
+  /** Present on since>0 responses: true when no new events exist. */
+  unchanged?: boolean;
+  /** Present on before>0 responses: upper bound used for this page. */
+  before?: number;
+  /** Present on before>0 responses: whether an older window exists. */
+  hasMore?: boolean;
 };
 
 export type TraceToolCall = {

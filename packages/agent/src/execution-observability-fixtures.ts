@@ -224,6 +224,7 @@ function verification(sessionId: string): VerificationRecord {
     checkName: 'pnpm check',
     kind: 'command',
     command: 'pnpm check',
+    independence: 'deterministic',
     planRevision: 1,
     status: 'failed',
     required: true,

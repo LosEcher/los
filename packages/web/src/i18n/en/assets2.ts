@@ -128,6 +128,12 @@ export const enAssets2 = {
   'assets.sessions.relatedTodos': 'Related Todos',
   'assets.sessions.noLinkedTodos': 'No linked todos found.',
   'assets.sessions.linked': 'linked',
+  'assets.sessions.eventTimeline': 'Event timeline',
+  'assets.sessions.live': 'live',
+  'assets.sessions.reconnecting': 'reconnecting',
+  'assets.sessions.polling': 'polling',
+  'assets.sessions.loadEarlier': 'load earlier',
+  'assets.sessions.loadingEarlier': 'loading earlier…',
 
   // ── Execution observability (Phase 1 real-run projection) ──
   'assets.obs.sectionAria': 'Execution observability',
@@ -160,4 +166,38 @@ export const enAssets2 = {
   'assets.obs.retryCount': '{count} retry',
   'assets.obs.errorCount': '{count} error',
   'assets.obs.deniedCount': '{count} denied',
+
+  // ── Timeline (Phase 1 gantt + inspector) ──
+  'assets.timeline.sectionAria': 'Execution timeline',
+  'assets.timeline.title': 'Timeline',
+  'assets.timeline.selectHint': 'Select a bar to inspect its event.',
+  'assets.timeline.noEvents': 'No session events yet ({sessionId}).',
+  'assets.timeline.inspectorAria': 'Timeline event inspector',
+  'assets.timeline.tool': 'tool',
+  'assets.timeline.time': 'time',
+  'assets.timeline.duration': 'duration',
+  'assets.timeline.tokens': 'Tokens',
+  'assets.timeline.parent': 'parent',
+  'assets.timeline.locate': 'locate',
+
+  // ── Subagent tree (Phase 4 lineage) ──
+  'assets.subagents.sectionAria': 'Child agent lineage',
+  'assets.subagents.title': 'Subagents',
+  'assets.subagents.count': '{count} nodes',
+  'assets.subagents.loadError': 'Subagents unavailable: {error}',
+  'assets.subagents.empty': 'This session has no run specs.',
+  'assets.subagents.noChildren': 'No child agents under this session.',
+  'assets.subagents.expand': 'expand',
+  'assets.subagents.collapse': 'collapse',
+
+  // ── Topology (Phase 2 evidence graph) ──
+  'assets.topology.sectionAria': 'Execution topology',
+  'assets.topology.title': 'Topology',
+  'assets.topology.stats': '{nodes} nodes · {edges} edges',
+  'assets.topology.selectPrompt': 'Select a run to see its evidence graph.',
+  'assets.topology.loadError': 'Topology unavailable: {error}',
+  'assets.topology.unavailable': 'No evidence graph for this run yet.',
+  'assets.topology.svgAria': 'Execution evidence graph',
+  'assets.topology.collapsed': '+{count} events / tool states / verifications (collapsed)',
+  'assets.topology.hint': 'Select a node to inspect its record.',
 } as const;

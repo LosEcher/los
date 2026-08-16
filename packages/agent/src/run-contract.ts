@@ -1,6 +1,6 @@
-import type { PlanRevisionSnapshot, PlanStep, VerificationRequirement } from './run-plan-types.js';
+import type { PlanRevisionSnapshot, PlanStep, VerificationIndependence, VerificationRequirement } from './run-plan-types.js';
 import { normalizeExecutionKernelSelection, type ExecutionKernelSelection } from './execution-kernel-selection.js';
-export type { PlanRevisionSnapshot, PlanStep, VerificationRequirement } from './run-plan-types.js';
+export type { PlanRevisionSnapshot, PlanStep, VerificationIndependence, VerificationRequirement } from './run-plan-types.js';
 export type RunContractMode = 'audit' | 'execution' | 'closeout' | 'governance' | 'feed-analysis-ingress' | 'architect-editor';
 
 /**

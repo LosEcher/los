@@ -12,6 +12,8 @@ import { DAILY_GAP_TODO_SEED } from './todo-seeds-daily-gaps.js';
 import { DAILY_GAP_WAVE3_TODO_SEED } from './todo-seeds-daily-gaps-wave3.js';
 import { REVIEW_2026_07_28_TODO_SEED } from './todo-seeds-review-2026-07-28.js';
 import { _UX_ADAPTATION_20260812_TODO_SEED } from './todo-seeds-ux-adaptation-20260812.js';
+import { OBSERVABILITY_20260816_TODO_SEED } from './todo-seeds-observability-20260816.js';
+import { PRODUCT_ROADMAP_20260816_TODO_SEED } from './todo-seeds-roadmap-20260816.js';
 
 export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   {
@@ -609,4 +611,6 @@ export const LOS_PLANNING_TODO_SEED: CreateTodoInput[] = [
   ..._UX_ADAPTATION_20260812_TODO_SEED,
   ...LOS_GOVERNANCE_TODO_SEED,
   ..._EXECUTION_LAB_TODO_SEED,
+  ...OBSERVABILITY_20260816_TODO_SEED,
+  ...PRODUCT_ROADMAP_20260816_TODO_SEED,
 ];

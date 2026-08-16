@@ -225,6 +225,15 @@ properties:
             command: { type: string }
             assertion: { type: string }
             reviewer: { type: string }
+            independence:
+              type: string
+              enum: [deterministic, separate_model, same_model, unknown]
+              description: >
+                How far this check's evidence stands from the executing model's
+                own judgment. deterministic = machine-checked command/assertion;
+                separate_model = reviewed by a different model/provider;
+                same_model = executing model self-review; unknown = not
+                declared (default). Required checks map to deterministic.
       planRevision:
         type: integer
         minimum: 1

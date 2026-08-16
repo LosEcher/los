@@ -1,4 +1,5 @@
 import { runScheduledAgentTask } from '@los/agent/scheduler';
+import { normalizeUsageFeature } from '@los/agent/usage-feature';
 import type { Config } from '@los/infra/config';
 import type { Logger } from '@los/infra/logger';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
@@ -70,6 +71,8 @@ export async function runChat(params: {
   branchAtTurn: number | undefined;
   traceId: string;
   dedupeKey: string | undefined;
+  /** Usage feature attribution (roadmap R6); defaults to 'chat'. */
+  feature?: string;
   signal?: AbortSignal;
   sid: string;
   tenantId: string;
@@ -252,6 +255,7 @@ export async function runChat(params: {
     }
 
     const scheduled = await runScheduledAgentTask({
+      feature: normalizeUsageFeature(params.feature ?? 'chat'),
       prompt,
       sessionId: sid,
       runSpecId,

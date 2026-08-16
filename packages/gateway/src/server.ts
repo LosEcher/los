@@ -54,6 +54,7 @@ import { registerMemoryRoutes } from './routes/data/memory-routes.js';
 import { registerSecurityRoutes } from './routes/data/security-routes.js';
 import { registerSessionRoutes } from './routes/data/session-routes.js';
 import { registerTraceRoutes } from './routes/data/trace-routes.js';
+import { registerSloRoutes } from './routes/data/slo-routes.js';
 import { registerSseRoutes, setupLiveEventPush, registerLiveEventRoutes } from './routes/streaming/sse-routes.js';
 import { registerOperatorEvents } from './routes/streaming/operator-events-sse.js';
 import { registerWsRoutes } from './routes/streaming/ws-routes.js';
@@ -243,6 +244,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   registerSecurityRoutes(app);
   registerSessionRoutes(app);
   registerTraceRoutes(app);
+  registerSloRoutes(app);
   registerSseRoutes(app, service.serviceId);
   registerWsRoutes(app, service.serviceId);
   registerTaskRoutes(app);

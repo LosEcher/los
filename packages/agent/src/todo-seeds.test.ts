@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { LOS_PLANNING_TODO_SEED } from './todo-seeds.js';
+import { PRODUCT_ROADMAP_20260816_TODO_SEED } from './todo-seeds-roadmap-20260816.js';
 
 const RESOLVED_P0_IDS = [
   'todo-los-p0-file-size-gate',
@@ -102,6 +103,19 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-ux-feature-card-rework', ['P1', 'ready']],
   ['todo-los-ux-structured-clarify-todo', ['P1', 'ready']],
   ['todo-los-ux-channel-companion', ['P1', 'ready']],
+  // 2026-08-16 observability comparison batch (P0 stage: event-enum/trace-tree/replay/redaction;
+  // P1 stage: privacy-modes/charts/metrics-expand/delta-retention/audit-search)
+  ['todo-los-obs-event-enum', ['P0', 'ready']],
+  ['todo-los-obs-trace-tree', ['P0', 'ready']],
+  ['todo-los-obs-replay-streaming', ['P0', 'ready']],
+  ['todo-los-obs-redaction', ['P0', 'ready']],
+  ['todo-los-obs-privacy-modes', ['P1', 'backlog']],
+  ['todo-los-obs-charts', ['P1', 'backlog']],
+  ['todo-los-obs-metrics-expand', ['P1', 'backlog']],
+  ['todo-los-obs-delta-retention', ['P1', 'backlog']],
+  ['todo-los-obs-audit-search', ['P1', 'backlog']],
+  // 2026-08-16 product roadmap batch (R1-R3+R5+R6 done — no longer active; R4 observation active; R7 backlog excluded)
+  ['todo-los-rm-kernel-economics', ['P1', 'in_progress']],
 ] as const);
 
 test('daily agent product seeds preserve the accepted delivery order', () => {
@@ -235,4 +249,23 @@ test('execution lab seeds preserve the staged priority and dependency contract',
   const projection = allById.get('todo-los-execution-observability-projection');
   assert.equal(projection?.parentId, 'todo-los-execution-lab');
   assert.ok(!projection?.dependsOnIds?.includes('todo-los-execution-lab'), 'phase parent must not block its child task');
+});
+
+test('2026-08-16 product roadmap seeds are structurally valid', () => {
+  const seeds = PRODUCT_ROADMAP_20260816_TODO_SEED;
+  assert.ok(seeds.length >= 7, 'roadmap batch must cover R1-R7');
+  assert.equal(new Set(seeds.map((seed) => seed.id)).size, seeds.length, 'roadmap seed ids must be unique');
+  assert.equal(new Set(seeds.map((seed) => seed.dedupeKey)).size, seeds.length, 'roadmap dedupeKeys must be unique');
+
+  const allById = new Map(LOS_PLANNING_TODO_SEED.map((todo) => [todo.id, todo]));
+  for (const seed of seeds) {
+    assert.ok(Array.isArray(seed.metadata?.evidence), `${seed.id} is missing evidence`);
+    assert.ok((seed.metadata?.evidence as unknown[]).length > 0, `${seed.id} has empty evidence`);
+    assert.ok(Array.isArray(seed.metadata?.validation), `${seed.id} is missing validation steps`);
+    assert.ok((seed.metadata?.validation as unknown[]).length > 0, `${seed.id} has empty validation steps`);
+    assert.equal(allById.get(seed.id)?.id, seed.id, `${seed.id} must be registered in LOS_PLANNING_TODO_SEED`);
+    for (const dependencyId of seed.dependsOnIds ?? []) {
+      assert.ok(allById.has(dependencyId), `${seed.id} depends on missing seed ${dependencyId}`);
+    }
+  }
 });

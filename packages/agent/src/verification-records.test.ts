@@ -33,6 +33,8 @@ test('verification records track required, succeeded, and skipped checks', async
     const seeded = await listVerificationRecordsForRunSpec(runSpecId);
     assert.deepEqual(seeded.map((item) => item.checkName), ['pnpm check', 'pnpm test']);
     assert.ok(seeded.every((item) => item.status === 'required'));
+    // required checks map to deterministic independence by default
+    assert.ok(seeded.every((item) => item.independence === 'deterministic'));
 
     await transitionExecutionState({
       entityType: 'verification_record',
@@ -65,6 +67,50 @@ test('verification records track required, succeeded, and skipped checks', async
     assert.equal(skipped.status, 'skipped');
     assert.equal(skipped.skipReason, 'docs-only change');
     assert.ok(skipped.completedAt);
+    // undeclared independence defaults to unknown, never inferred as independent
+    assert.equal(skipped.independence, 'unknown');
+  } finally {
+    await getDb().query('DELETE FROM verification_records WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('verification records persist declared independence levels', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `session-verification-ind-${suffix}`;
+  const runSpecId = `run-verification-ind-${suffix}`;
+  try {
+    await ensureVerificationRecordStore();
+    await seedVerificationRequirementsForRunSpec({
+      sessionId,
+      runSpecId,
+      verifications: [
+        {
+          id: 'independent-review',
+          kind: 'operator_review',
+          description: 'reviewed by a separate model',
+          reviewer: 'judge',
+          independence: 'separate_model',
+        },
+        {
+          id: 'self-check',
+          kind: 'assertion',
+          description: 'self assessment',
+          assertion: 'exit 0',
+          independence: 'same_model',
+        },
+      ],
+    });
+    const seeded = await listVerificationRecordsForRunSpec(runSpecId);
+    const byCheck = new Map(seeded.map((item) => [item.checkName, item]));
+    assert.equal(byCheck.get('independent-review')?.independence, 'separate_model');
+    assert.equal(byCheck.get('self-check')?.independence, 'same_model');
+
+    const loaded = await loadVerificationRecord(seeded[0]!.id);
+    assert.ok(loaded);
+    assert.equal(loaded.independence, byCheck.get(seeded[0]!.checkName)!.independence);
   } finally {
     await getDb().query('DELETE FROM verification_records WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await closeDb().catch(() => undefined);

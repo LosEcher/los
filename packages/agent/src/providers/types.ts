@@ -60,6 +60,8 @@ export interface ChatOptions {
   traceId?: string;
   /** Session id — passed through for provider call telemetry. */
   sessionId?: string;
+  /** Usage feature attribution (roadmap R6); recorded in request_meta_json. */
+  feature?: string;
 }
 
 export interface ProviderDelta {

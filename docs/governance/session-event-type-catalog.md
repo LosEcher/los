@@ -3,6 +3,13 @@
 **目的**: 标准化 los session 事件类型，作为 `session_events.type` 的权威参考。
 **灵感**: Deer Workflow 的标准化事件协议。
 
+> **权威来源（2026-08-16 起）**: 类型注册表在
+> `packages/agent/src/event-types.ts`（`SESSION_EVENT_TYPE_GROUPS` 精确类型 +
+> `SESSION_EVENT_TYPE_PREFIXES` 前缀族），`appendSessionEvent`/`appendSessionEvents`
+> 写入时经 `assertSessionEventType` 校验（默认告警，`failOnUnknownType` 时抛错）。
+> 本文档的域划分与完整类型列表与注册表保持一致；新增事件类型必须在注册表登记
+> （catalog 规则：PR 标记 `event-protocol-change`）。
+
 ## 命名约定
 
 事件类型遵循 `domain.action` 命名约定，用 `.` 分隔域和动作：
@@ -69,6 +76,11 @@
 |------|------|------|
 | `kernel.started` | 内核启动 | `execution-kernel.ts` |
 | `kernel.finished` | 内核完成 | `execution-kernel.ts` |
+| `kernel.failed` | 内核失败 | `execution-kernel.ts` |
+| `message.completed` | assistant 消息完成（含全文摘要） | `execution-kernel.ts` / `pi-execution-kernel.ts` |
+| `turn.completed` | 回合完成（含 summary） | `execution-kernel.ts` |
+| `tool.completed` | 工具调用完成（含 transition） | `execution-kernel.ts` |
+| `checkpoint.created` | 上下文 checkpoint 已创建 | `execution-kernel.ts` / `pi-execution-kernel.ts` |
 
 ### Runtime 域 (`runtime.*`)
 | 类型 | 描述 | 来源 |

@@ -1,0 +1,47 @@
+contract: los.metrics-activity
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Multi-agent activity timeline: per time-bucket concurrent session counts
+  (active = events with duration spanning the bucket), agent-minutes, and
+  model-response cost, plus a drill-down that lists the sessions active in one
+  bucket. Aggregates session_events (los runtime evidence) only.
+type: object
+routes:
+  - method: GET
+    path: /metrics/activity
+    purpose: Return concurrent activity buckets for a time window, and with
+      bucket=<iso> the sessions active inside that bucket.
+    query:
+      from: optional ISO timestamp inclusive lower bound; default now-24h
+      to: optional ISO timestamp exclusive upper bound; default now
+      bucketMinutes: optional bucket size in minutes; default 60; max 1440
+      bucket: optional ISO bucket start; when present, response carries the
+        sessions active in that bucket instead of the series
+    response: MetricsActivity
+schemas:
+  MetricsActivity:
+    required: [evidenceClass, from, to, bucketSizeMinutes, buckets, totals]
+    evidenceClass:
+      enum: [los_runtime]
+    buckets:
+      itemFields:
+        - bucket
+        - activeSessions
+        - agentMinutes
+        - estimatedCostUsd
+    totals:
+      fields:
+        - peakConcurrent
+        - peakBucket
+        - totalAgentMinutes
+        - totalCostUsd
+        - sessionCount
+    drilldown:
+      itemFields:
+        - sessionId
+        - activeStart
+        - activeEnd
+        - eventCount
+        - estimatedCostUsd
