@@ -64,10 +64,19 @@ export const enCore = {
 
   // ── Common actions / state ───────────────────────────
   'common.loading': 'Loading...',
+  'common.scrollToBottom': 'Scroll to bottom',
+
+  'chat.codeCopy': 'Copy code',
+  'chat.codeCopied': 'Copied',
   'common.refresh': 'refresh',
   'common.save': 'Save',
   'common.cancel': 'Cancel',
   'common.close': 'Close',
+
+  'common.paletteTitle': 'Quick nav',
+  'common.palettePlaceholder': 'Search pages…',
+  'common.paletteEmpty': 'No matches',
+  'common.paletteNewChatHint': 'start a new conversation',
   'common.add': 'Add',
   'common.create': 'Create',
   'common.delete': 'Delete',

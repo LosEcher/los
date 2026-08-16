@@ -126,6 +126,9 @@ export const zhOps: OpsKeys = {
   'ops.runSpecs.approveErrorPrefix': '批准：{error}',
   'ops.runSpecs.rejectErrorPrefix': '拒绝：{error}',
   'ops.runSpecs.verifyErrorPrefix': '验证：{error}',
+  'ops.runSpecs.approvedToast': '计划已批准',
+  'ops.runSpecs.rejectedToast': '运行已拒绝/取消',
+  'ops.runSpecs.verifiedToast': '已验证',
   'ops.runSpecs.noStateData': '无状态数据。',
 
   // ── Schedules page (schedules-page.tsx) ──────────────

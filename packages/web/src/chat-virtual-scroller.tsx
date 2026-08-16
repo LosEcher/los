@@ -7,6 +7,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useI18n } from './i18n';
 
 export function ChatVirtualScroller({
   messages,
@@ -19,6 +20,7 @@ export function ChatVirtualScroller({
   children: (index: number) => ReactNode;
   debugMode: boolean;
 }) {
+  const { t } = useI18n();
   const parentRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -100,7 +102,7 @@ export function ChatVirtualScroller({
             setShowScrollBtn(false);
           }}
         >
-          <ArrowDown size={14} /> scroll to bottom
+          <ArrowDown size={14} /> {t('common.scrollToBottom')}
         </button>
       )}
     </div>

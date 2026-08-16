@@ -23,6 +23,7 @@ import {
   type WorkItemProjection,
 } from '../api/index.js';
 import { formatDate } from '../ui.js';
+import { EmptyState } from '../components/empty-state';
 import { tt, useI18n } from '../i18n';
 
 type GovernanceJobSummary = {
@@ -221,14 +222,16 @@ export function InboxPage({
           {inbox.isLoading ? <InboxSkeleton /> : null}
           {inbox.error ? <div className="daily-error">{t('work.inbox.unavailable', { error: String(inbox.error) })}</div> : null}
           {!inbox.isLoading && !inbox.error && visible.length === 0 ? (
-            <div className="daily-empty">
-              <CheckCheck size={22} />
-              <strong>{t('work.inbox.noActionTitle')}</strong>
-              <span>{filter === 'all' ? t('work.inbox.noActionHint') : t('work.inbox.noActionFiltered', { filter: t(`work.inbox.filter.${filter}`) })}</span>
-              <span className="empty-guide-link">
-                <button type="button" className="link-btn" onClick={() => window.location.hash = 'chat'}>{t('nav.chat')}</button> {t('work.inbox.guideMid')} <button type="button" className="link-btn" onClick={() => window.location.hash = 'work'}>{t('work.inbox.guideWork')}</button>{t('work.inbox.guideEnd')}
-              </span>
-            </div>
+            <EmptyState
+              icon={<CheckCheck size={22} />}
+              title={t('work.inbox.noActionTitle')}
+              description={filter === 'all' ? t('work.inbox.noActionHint') : t('work.inbox.noActionFiltered', { filter: t(`work.inbox.filter.${filter}`) })}
+              action={(
+                <span className="empty-guide-link">
+                  <button type="button" className="link-btn" onClick={() => window.location.hash = 'chat'}>{t('nav.chat')}</button> {t('work.inbox.guideMid')} <button type="button" className="link-btn" onClick={() => window.location.hash = 'work'}>{t('work.inbox.guideWork')}</button>{t('work.inbox.guideEnd')}
+                </span>
+              )}
+            />
           ) : null}
           {visible.map(entry => (
             <InboxRow

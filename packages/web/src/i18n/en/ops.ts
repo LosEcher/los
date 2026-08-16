@@ -122,6 +122,9 @@ export const enOps = {
   'ops.runSpecs.approveErrorPrefix': 'Approve: {error}',
   'ops.runSpecs.rejectErrorPrefix': 'Reject: {error}',
   'ops.runSpecs.verifyErrorPrefix': 'Verify: {error}',
+  'ops.runSpecs.approvedToast': 'Plan approved',
+  'ops.runSpecs.rejectedToast': 'Run rejected / cancelled',
+  'ops.runSpecs.verifiedToast': 'Verification requested',
   'ops.runSpecs.noStateData': 'No state data available.',
 
   // ── Schedules page (schedules-page.tsx) ──────────────
