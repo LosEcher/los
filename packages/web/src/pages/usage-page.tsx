@@ -5,6 +5,7 @@ import { getJson } from '../api/index.js';
 import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
 import { SkeletonCard } from '../components/skeleton';
+import { formatNumber, formatTokenCount } from '../components/format';
 import { useI18n } from '../i18n';
 import { Sparkline } from './sparkline.js';
 import { ActivityPanel } from './activity-panel.js';
@@ -198,12 +199,12 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
 
       <div className="quality-metric-groups">
         <MetricGroup title={t('ops.usage.groupTotals')} metrics={[
-          [t('ops.usage.metricResponses'), count(totals.modelResponseCount)],
-          [t('ops.usage.metricSessions'), count(totals.sessionCount)],
-          [t('ops.usage.metricPromptTokens'), count(totals.promptTokens)],
-          [t('ops.usage.metricCompletionTokens'), count(totals.completionTokens)],
-          [t('ops.usage.metricCacheHit'), count(totals.cacheHitTokens)],
-          [t('ops.usage.metricCacheMiss'), count(totals.cacheMissTokens)],
+          [t('ops.usage.metricResponses'), formatNumber(totals.modelResponseCount)],
+          [t('ops.usage.metricSessions'), formatNumber(totals.sessionCount)],
+          [t('ops.usage.metricPromptTokens'), formatTokenCount(totals.promptTokens)],
+          [t('ops.usage.metricCompletionTokens'), formatTokenCount(totals.completionTokens)],
+          [t('ops.usage.metricCacheHit'), formatTokenCount(totals.cacheHitTokens)],
+          [t('ops.usage.metricCacheMiss'), formatTokenCount(totals.cacheMissTokens)],
           [t('ops.usage.metricCacheHitRate'), percent(totals.cacheHitRate)],
           [t('ops.usage.metricCost'), money(totals.estimatedCostUsd)],
           [t('ops.usage.metricCacheSavings'), money(totals.cacheSavingsUsd)],

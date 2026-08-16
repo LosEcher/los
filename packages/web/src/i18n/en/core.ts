@@ -72,6 +72,11 @@ export const enCore = {
   'common.save': 'Save',
   'common.cancel': 'Cancel',
   'common.close': 'Close',
+
+  'common.paletteTitle': 'Quick nav',
+  'common.palettePlaceholder': 'Search pages…',
+  'common.paletteEmpty': 'No matches',
+  'common.paletteNewChatHint': 'start a new conversation',
   'common.add': 'Add',
   'common.create': 'Create',
   'common.delete': 'Delete',

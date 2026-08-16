@@ -57,6 +57,7 @@ import { OnboardingPage } from './pages/onboarding-page';
 import { getAuthToken } from './api';
 import { NAV, buildHash, parseHash, type NavItem, type PageId } from './nav-config';
 import { MobileTabBar, MoreSheet } from './mobile-nav';
+import { CommandPalette } from './components/command-palette';
 
 function initialRoute() {
   const route = parseHash();
@@ -163,6 +164,19 @@ export function App() {
   const [branchFromSession, setBranchFromSession] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(() => isAuthenticated());
   const [moreOpen, setMoreOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Cmd+K / Ctrl+K opens the command palette (Wave 4, P2-3).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen(open => !open);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Operations section collapsible — default collapsed, persisted in localStorage
   const [opsExpanded, setOpsExpanded] = useState(() => {
@@ -541,6 +555,11 @@ export function App() {
         itemStatus={itemStatus}
         opsExpanded={opsExpanded}
         onToggleOps={toggleOps}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={navigate}
       />
     </div>
       )}

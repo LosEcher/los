@@ -76,6 +76,11 @@ export const zhCore: CoreKeys = {
   'chat.codeCopy': '复制代码',
   'chat.codeCopied': '已复制',
   'common.close': '关闭',
+
+  'common.paletteTitle': '快速导航',
+  'common.palettePlaceholder': '搜索页面…',
+  'common.paletteEmpty': '无匹配',
+  'common.paletteNewChatHint': '开始新会话',
   'common.add': '添加',
   'common.create': '创建',
   'common.delete': '删除',
