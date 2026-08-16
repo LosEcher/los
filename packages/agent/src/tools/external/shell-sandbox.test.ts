@@ -11,6 +11,7 @@ import {
   ENV_REDACTED_SENTINEL,
   SANDBOX_ENV_ALLOWLIST,
 } from './shell-sandbox.js';
+import { _runSealNetworkName, _runSealPolicyName } from './shell-sandbox-windows.js';
 
 test('resolveSandboxBackend prefers the OS sandbox when available', () => {
   assert.equal(resolveSandboxBackend('darwin', true, false, false), 'macos-sandbox-exec');
@@ -29,6 +30,36 @@ test('resolveSandboxBackend denies native fallback unless allowNativeShell', () 
   // other platforms
   assert.equal(resolveSandboxBackend('freebsd', false, false, false), 'native-denied');
   assert.equal(resolveSandboxBackend('freebsd', false, false, true), 'native');
+});
+
+test('resolveSandboxBackend selects the acl Windows backend by default', () => {
+  // default preference 'acl' + package installed → windows-acl
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'acl', false, true), 'windows-acl');
+  assert.equal(resolveSandboxBackend('win32', false, false, true, 'acl', true, true), 'windows-acl');
+  // acl preference ignores runseal even when present
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'acl', true, true), 'windows-acl');
+});
+
+test('resolveSandboxBackend selects runseal when configured and available', () => {
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'runseal', true, true), 'windows-runseal');
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'auto', true, true), 'windows-runseal');
+  // strict runseal preference without runseal falls through to deny (no acl fallback)
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'runseal', false, true), 'native-denied');
+  // auto without runseal falls back to acl
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'auto', false, true), 'windows-acl');
+});
+
+test('resolveSandboxBackend windows deny without any backend', () => {
+  assert.equal(resolveSandboxBackend('win32', false, false, false, 'acl', false, false), 'native-denied');
+  assert.equal(resolveSandboxBackend('win32', false, false, true, 'acl', false, false), 'native');
+});
+
+test('runSeal policy and network levels map onto los semantics', () => {
+  assert.equal(_runSealPolicyName('readonly'), 'read-only');
+  assert.equal(_runSealPolicyName('workspace-write'), 'workspace-write');
+  assert.equal(_runSealPolicyName('sandbox'), 'workspace-write');
+  assert.equal(_runSealNetworkName('isolated'), 'disabled');
+  assert.equal(_runSealNetworkName('host'), 'unmanaged');
 });
 
 test('runSandboxedShell executes through an OS sandbox backend when available', async () => {

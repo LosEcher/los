@@ -24,6 +24,7 @@ const ENV_MAP: [string, string][] = [
   ['AGENT_DEFAULT_PROVIDER', 'agent.defaultProvider'], ['AGENT_DEFAULT_MODEL', 'agent.defaultModel'],
   ['AGENT_MAX_LOOPS', 'agent.maxLoops'], ['AGENT_SANDBOX_MODE', 'agent.sandboxMode'],
   ['AGENT_SANDBOX_NETWORK', 'agent.sandboxNetwork'],
+  ['LOS_WINDOWS_SANDBOX_BACKEND', 'agent.windowsSandboxBackend'],
   ['AGENT_ALLOW_NATIVE_SHELL', 'agent.allowNativeShell'],
   ['AGENT_SYSTEM_PROMPT', 'agent.systemPrompt'], ['AGENT_IDENTITY_NAME', 'agent.identity.name'],
   ['AGENT_IDENTITY_LEVEL', 'agent.identity.level'], ['JUDGE_SYSTEM_PROMPT', 'judge.systemPrompt'],
