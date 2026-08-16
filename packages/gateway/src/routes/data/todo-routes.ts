@@ -13,7 +13,7 @@ import {
   type TodoPriority,
   type TodoStatus,
 } from '@los/agent/todos';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, requireOperator, resolveTenantScope, resolveProjectScope } from '../../request-context.js';
 import { runIdempotentJson } from '../../idempotency.js';
 
 type TodoRouteDependencies = {
@@ -61,8 +61,8 @@ export function registerTodoRoutes(
       includeArchived?: string;
     };
     return await deps.listTodos({
-      tenantId: normalizeOptionalString(query.tenantId),
-      projectId: normalizeOptionalString(query.projectId),
+      tenantId: resolveTenantScope(req, normalizeOptionalString(query.tenantId)),
+      projectId: resolveProjectScope(req, normalizeOptionalString(query.projectId)),
       status: normalizeTodoStatus(query.status),
       kind: normalizeTodoKind(query.kind),
       stageId: normalizeOptionalString(query.stageId),
@@ -90,8 +90,8 @@ export function registerTodoRoutes(
       async () => await deps.createTodo({
         title,
         description: normalizeOptionalString(body.description),
-        tenantId: normalizeOptionalString(body.tenantId) ?? context.tenantId,
-        projectId: normalizeOptionalString(body.projectId) ?? context.projectId,
+        tenantId: resolveTenantScope(req, normalizeOptionalString(body.tenantId)),
+        projectId: resolveProjectScope(req, normalizeOptionalString(body.projectId)),
         userId: normalizeOptionalString(body.userId),
         nodeId: normalizeOptionalString(body.nodeId),
         stageId: normalizeOptionalString(body.stageId),
@@ -229,13 +229,15 @@ export function registerTodoRoutes(
     );
   });
 
-  app.post('/todos/seed', async (req) => {
+  app.post('/todos/seed', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as Record<string, unknown> | undefined;
     const todos = await deps.seedLosPlanningTodos({ overwrite: body?.overwrite === true });
     return { ok: true, count: todos.length, todos };
   });
 
   app.post('/todos/:id/dispatch', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as Record<string, unknown> | undefined;
     const context = getRequestContext(req);

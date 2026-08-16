@@ -44,7 +44,11 @@ export async function summarizeDeadLetterEvents(): Promise<DeadLetterSummary> {
             COUNT(*) FILTER (WHERE acknowledged_at IS NULL)::int AS unacknowledged,
             COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL)::int AS acknowledged,
             COUNT(*) FILTER (WHERE requeued_task_run_id IS NOT NULL)::int AS requeued,
-            COUNT(*) FILTER (WHERE reason = 'lease_expired' AND acknowledged_at IS NULL AND requeued_task_run_id IS NULL)::int AS eligible,
+            COUNT(*) FILTER (WHERE reason = 'lease_expired' AND acknowledged_at IS NULL AND requeued_task_run_id IS NULL
+                             AND run_spec_id IS NOT NULL
+                             AND EXISTS (SELECT 1 FROM run_specs rs
+                                         WHERE rs.id = dead_letter_events.run_spec_id
+                                           AND rs.status NOT IN ('succeeded', 'failed', 'cancelled')))::int AS eligible,
             MIN(created_at) FILTER (WHERE acknowledged_at IS NULL) AS oldest_unacknowledged_at
      FROM dead_letter_events
      GROUP BY reason

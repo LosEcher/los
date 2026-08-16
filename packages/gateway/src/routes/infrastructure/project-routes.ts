@@ -12,6 +12,7 @@ import {
   unbindProject,
   validateProjectPath,
 } from '../../project-store.js';
+import { requireOperator } from '../../request-context.js';
 
 function sanitizeProjectId(raw: string): string {
   return raw.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+/, '').replace(/-+$/, '') || 'untitled';
@@ -76,6 +77,7 @@ export function registerProjectRoutes(app: FastifyInstance) {
 
   // ── Browse local directories for project binding ─────
   app.get('/projects/browse', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = req.query as { path?: string };
     const path = normalizeBrowsePath(query.path);
     try {
@@ -98,6 +100,7 @@ export function registerProjectRoutes(app: FastifyInstance) {
 
   // ── Bind ────────────────────────────────────────────
   app.post('/projects/bind', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as {
       workspacePath?: string;
       projectId?: string;
@@ -133,6 +136,7 @@ export function registerProjectRoutes(app: FastifyInstance) {
 
   // ── Unbind ──────────────────────────────────────────
   app.delete('/projects/:projectId', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { projectId } = req.params as { projectId: string };
     const ok = unbindProject(projectId);
     if (!ok) return reply.status(404).send({ error: 'Project not found' });
@@ -149,6 +153,7 @@ export function registerProjectRoutes(app: FastifyInstance) {
 
   // ── Set default ─────────────────────────────────────
   app.post('/projects/default', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as { projectId?: string; workspacePath?: string };
     const projectId = body.projectId?.trim();
     const workspacePath = body.workspacePath?.trim();
@@ -175,6 +180,7 @@ export function registerProjectRoutes(app: FastifyInstance) {
 
   // ── Validate path ───────────────────────────────────
   app.post('/projects/validate', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const body = req.body as { workspacePath?: string };
     const workspacePath = body.workspacePath?.trim();
     if (!workspacePath) {

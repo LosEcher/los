@@ -7,7 +7,7 @@ import {
   type NodeCommandName,
 } from '@los/agent/node-commands';
 import { loadExecutorNode } from '@los/agent/executor-nodes';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, requireOperator } from '../../request-context.js';
 
 type NodeCommandRoutesOptions = {
   executorAgentKey?: string;
@@ -52,6 +52,7 @@ export function registerNodeCommandRoutes(app: FastifyInstance, options: NodeCom
   });
 
   app.post('/nodes/:id/commands', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const body = req.body as NodeCommandBody | undefined;
     const nodeId = normalizeOptionalString(id);

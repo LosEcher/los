@@ -17,7 +17,7 @@ import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import type { TodoPriority, TodoStatus } from '@los/agent/todos';
 
 import { runIdempotentJson } from '../../idempotency.js';
-import { getRequestContext, requireOperator } from '../../request-context.js';
+import { getRequestContext, requireOperator, resolveProjectScope } from '../../request-context.js';
 import { dispatchPersistedRunSpec } from '../../run-resume-dispatch.js';
 import { updateBoundTodoFromRun } from '../../chat-session-helpers.js';
 
@@ -64,7 +64,7 @@ export function registerWorkItemRoutes(
     const context = getRequestContext(req);
     const entries = await deps.listInboxEntries({
       tenantId: context.tenantId,
-      projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
+      projectId: resolveProjectScope(req, normalizeOptionalString(query.projectId)),
       limit: normalizePositiveInteger(query.limit),
     });
     return { count: entries.length, results: entries };
@@ -83,7 +83,7 @@ export function registerWorkItemRoutes(
     const excludeTerminal = status ? undefined : normalizeBoolean(query.excludeTerminal);
     const results = await deps.listWorkItemProjections({
       tenantId: context.tenantId,
-      projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
+      projectId: resolveProjectScope(req, normalizeOptionalString(query.projectId)),
       status,
       excludeTerminal,
       limit: normalizePositiveInteger(query.limit),
@@ -96,7 +96,7 @@ export function registerWorkItemRoutes(
     const context = getRequestContext(req);
     return await deps.getWorkItemVerificationCoverage({
       tenantId: context.tenantId,
-      projectId: normalizeOptionalString(query.projectId) ?? context.projectId,
+      projectId: resolveProjectScope(req, normalizeOptionalString(query.projectId)),
       mode: normalizeMode(query.mode),
     });
   });
@@ -120,7 +120,7 @@ export function registerWorkItemRoutes(
       { route: '/work-items', method: 'POST', body, context },
       async () => await deps.createWorkItem({
         tenantId: context.tenantId,
-        projectId: validation.projectId,
+        projectId: resolveProjectScope(req, validation.projectId),
         userId: context.userId,
         title: normalizeOptionalString(body.title),
         goal: validation.goal,
@@ -141,7 +141,7 @@ export function registerWorkItemRoutes(
     const body = asObject(req.body);
     const context = getRequestContext(req);
     const goal = normalizeOptionalString(body.goal);
-    const projectId = normalizeOptionalString(body.projectId) ?? context.projectId;
+    const projectId = resolveProjectScope(req, normalizeOptionalString(body.projectId));
     if (!projectId) return reply.status(400).send({ error: 'invalid_request', message: 'projectId is required' });
     if (!goal) return reply.status(400).send({ error: 'invalid_request', message: 'goal is required' });
     const mode = normalizeMode(body.mode) ?? 'execution';

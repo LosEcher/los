@@ -23,6 +23,7 @@ import {
 import { runToolCalls } from './loop/tool-runner.js';
 import { withAbort } from './loop/utils.js';
 import { setupAgentRun, completeAgentSetup } from './loop/setup.js';
+import { killAgentsForParent } from './tools/core/agent-tools.js';
 import { runArchitectPhase } from './loop/architect-phase.js';
 import { createProvider } from './providers/index.js';
 import { healBeforeSend, repairToolCalls, StormBreaker, type RepairContext } from './providers/repair-pipeline.js';
@@ -624,6 +625,9 @@ export async function runAgent(
     planningSubmission: readPlanningSubmission(),
   };
   } finally {
+    if (config.sessionId && signal?.aborted) {
+      killAgentsForParent(config.sessionId, 'parent_cancelled');
+    }
     await mcpCleanup();
   }
 }

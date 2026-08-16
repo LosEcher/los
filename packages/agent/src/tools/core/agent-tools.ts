@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import { resolveIdentityLevelForExecutionPath } from '../../identity-loader.js';
-import { READ_ONLY_BUILTIN_TOOLS } from './registry.js';
+import {
+  childAllowedTools,
+  normalizeInteger,
+  normalizeMode,
+  normalizeString,
+  normalizeToolMode,
+  resolveChildToolMode,
+} from './agent-tools-policy.js';
 import { createRunSpec, ensureRunSpecStore, listCompletedChildRunSpecs, listRunSpecsForSession, updateRunSpecResult, type RunSpecResult } from '../../run-specs.js';
+import { appendSessionEvent, ensureSessionEventStore } from '../../session-events.js';
 import type { AgentConfig, AgentResult } from '../../loop.js';
 import type { ToolRegistry, ToolResult } from './registry.js';
 
@@ -28,6 +36,8 @@ export interface SpawnAgentRunnerOptions {
   modelSettings?: AgentConfig['modelSettings'];
   runContractMetadata?: AgentConfig['runContractMetadata'];
   workspaceRoot?: string;
+  /** Parent tool mode. Children cannot exceed this (read-only parent ⇒ read-only child). */
+  parentToolMode?: 'read-only' | 'project-write' | 'all';
   traceId?: string;
   requestId?: string;
   runSpecId?: string;
@@ -45,21 +55,15 @@ export interface SpawnAgentRunnerOptions {
   onProviderFallback?: AgentConfig['onProviderFallback'];
 }
 
-const SUBAGENT_PROJECT_WRITE_TOOLS = [
-  'read_file',
-  'write_file',
-  'preview_patch',
-  'apply_patch',
-  'edit_file',
-  'list_directory',
-] as const;
-
 // ── Background Agent Tracker ────────────────────────────
 
 interface TrackedAgent {
   agentId: string;
   childRunSpecId?: string;
   childSessionId: string;
+  /** Parent session that spawned this background child (for cancel cascade). */
+  parentSessionId?: string;
+  parentRunSpecId?: string;
   status: 'running' | 'completed' | 'failed' | 'killed';
   startedAt: number;
   prompt: string;
@@ -72,6 +76,8 @@ interface TrackedAgent {
   abortController: AbortController;
   /** Set when the agent was recovered from a persisted run_spec after a restart. */
   persisted?: boolean;
+  /** Optional lifecycle emitter (parent onSessionEvent). */
+  emitLifecycle?: (type: string, payload: Record<string, unknown>) => void;
 }
 
 const trackedAgents = new Map<string, TrackedAgent>();
@@ -90,16 +96,82 @@ function getAgent(agentId: string): TrackedAgent | undefined {
   return trackedAgents.get(agentId);
 }
 
-function killAgent(agentId: string): boolean {
+function emitChildLifecycle(agent: TrackedAgent, type: string, extra: Record<string, unknown> = {}): void {
+  const payload: Record<string, unknown> = {
+    agentId: agent.agentId,
+    childSessionId: agent.childSessionId,
+    childRunSpecId: agent.childRunSpecId ?? null,
+    parentSessionId: agent.parentSessionId ?? null,
+    parentRunSpecId: agent.parentRunSpecId ?? null,
+    status: agent.status,
+    ...extra,
+  };
+  try {
+    agent.emitLifecycle?.(type, payload);
+  } catch {
+    // In-process callback is best-effort; never break kill/complete paths.
+  }
+  // Durable audit row on the parent session when available (C1).
+  const parentSessionId = agent.parentSessionId;
+  if (!parentSessionId) return;
+  void (async () => {
+    try {
+      await ensureSessionEventStore();
+      await appendSessionEvent({
+        sessionId: parentSessionId,
+        type,
+        source: 'los.subagent',
+        turn: 0,
+        payload,
+      });
+    } catch {
+      // DB may be unavailable in unit tests / early boot.
+    }
+  })();
+}
+
+function killAgent(agentId: string, reason = 'aborted'): boolean {
   const agent = trackedAgents.get(agentId);
   if (!agent || agent.status !== 'running') return false;
   agent.abortController.abort();
   agent.status = 'killed';
+  agent.error = reason;
+  persistAgentResult(agent.childRunSpecId, {
+    status: 'failed',
+    text: '',
+    error: reason,
+  });
+  emitChildLifecycle(agent, 'child.agent.killed', { reason });
   return true;
+}
+
+/**
+ * Abort all running background children spawned under a parent session.
+ * Used when the parent run signal aborts (C0 cancel cascade).
+ */
+export function killAgentsForParent(parentSessionId: string, reason = 'parent_cancelled'): number {
+  if (!parentSessionId) return 0;
+  let killed = 0;
+  for (const agent of trackedAgents.values()) {
+    if (agent.status === 'running' && agent.parentSessionId === parentSessionId) {
+      if (killAgent(agent.agentId, reason)) killed += 1;
+    }
+  }
+  return killed;
 }
 
 function listAgents(): TrackedAgent[] {
   return [...trackedAgents.values()];
+}
+
+/** Test-only: clear in-memory background tracker (aborts running children first). */
+export function _resetTrackedAgentsForTests(): void {
+  for (const agent of [...trackedAgents.values()]) {
+    if (agent.status === 'running') {
+      agent.abortController.abort();
+    }
+  }
+  trackedAgents.clear();
 }
 
 // ── Persisted Agent Recovery ───────────────────────────
@@ -207,10 +279,9 @@ export function registerSpawnAgentTool(registry: ToolRegistry, runner: SpawnAgen
       },
     },
   }, {
-    // L0 so read-only mode (maxRiskLevel L0) can spawn read-only children;
-    // sideEffect stays true so the tool is never replayed on retry. The child
-    // inherits read-only tools and cannot spawn further agents.
-    riskLevel: 'L0',
+    // L1: read-only parents (maxRiskLevel L0) cannot spawn. Children never
+    // receive spawn_agent, so they cannot widen tools.
+    riskLevel: 'L1',
     permissions: ['agent:spawn'],
     timeoutMs: 600_000,
     retryable: false,
@@ -387,7 +458,7 @@ function inheritRunContractMetadata(
 
 export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnAgentRunner {
   return async (request) => {
-    const childToolMode = request.toolMode ?? 'read-only';
+    const childToolMode = resolveChildToolMode(request.toolMode, options.parentToolMode);
     const childMaxLoops = Math.max(1, Math.min(request.maxLoops ?? 8, 12));
     const childSessionId = options.sessionId ? `${options.sessionId}:child:${randomUUID()}` : `child:${randomUUID()}`;
     const childRunContractMetadata = inheritRunContractMetadata(options.runContractMetadata);
@@ -412,9 +483,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         model: request.model ?? options.model ?? undefined,
         workspaceRoot: options.workspaceRoot ?? '',
         toolMode: childToolMode,
-        allowedTools: childToolMode === 'read-only'
-          ? [...READ_ONLY_BUILTIN_TOOLS]
-          : [...SUBAGENT_PROJECT_WRITE_TOOLS],
+        allowedTools: [...childAllowedTools(childToolMode)],
         maxLoops: childMaxLoops,
         runContract: childRunContractMetadata,
       });
@@ -438,16 +507,63 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
     if (isBackground) {
       const abortController = new AbortController();
       const agentId = `agent-${childSessionId}`;
+      const parentSessionId = options.sessionId;
+      const lifecycleEmit = options.onSessionEvent
+        ? (type: string, payload: Record<string, unknown>) => {
+            void options.onSessionEvent?.({
+              id: 0,
+              sessionId: parentSessionId ?? childSessionId,
+              turn: 0,
+              type,
+              source: 'los.subagent',
+              payload,
+              visibility: 'audit',
+              createdAt: new Date().toISOString(),
+              requestId: options.requestId,
+              traceId: options.traceId,
+              tenantId: options.tenantId,
+              projectId: options.projectId,
+            });
+          }
+        : undefined;
+
       const tracked: TrackedAgent = {
         agentId,
         childRunSpecId,
         childSessionId,
+        parentSessionId,
+        parentRunSpecId: options.runSpecId,
         status: 'running',
         startedAt: Date.now(),
         prompt: request.prompt,
         abortController,
+        emitLifecycle: lifecycleEmit,
       };
       trackAgent(tracked);
+
+      // C0: parent abort cascades to background children (do not orphan work).
+      const parentSignal = options.signal;
+      const onParentAbort = () => {
+        killAgent(agentId, 'parent_cancelled');
+      };
+      if (parentSignal) {
+        if (parentSignal.aborted) {
+          killAgent(agentId, 'parent_cancelled');
+          return {
+            content: JSON.stringify({
+              mode: 'background',
+              agentId,
+              childRunSpecId: childRunSpecId ?? null,
+              childSessionId,
+              status: 'killed',
+              message: 'Parent already cancelled; background agent was not started.',
+            }, null, 2),
+          };
+        }
+        parentSignal.addEventListener('abort', onParentAbort, { once: true });
+      }
+
+      emitChildLifecycle(tracked, 'child.agent.started', { mode: 'background' });
 
       // Fire and forget — result is stored on the tracked agent and persisted
       // to the child run_spec so it survives a process restart.
@@ -466,9 +582,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         maxLoops: childMaxLoops,
         workspaceRoot: options.workspaceRoot,
         toolMode: childToolMode,
-        allowedTools: childToolMode === 'read-only'
-          ? READ_ONLY_BUILTIN_TOOLS
-          : SUBAGENT_PROJECT_WRITE_TOOLS,
+        allowedTools: childAllowedTools(childToolMode),
         toolRetry: options.toolRetry,
         signal: abortController.signal,
         onSessionEvent: options.onSessionEvent,
@@ -477,6 +591,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         preActionGate: options.preActionGate,
         identity: { name: 'child', level: resolveIdentityLevelForExecutionPath('child-spawned') },
       }).then(result => {
+        parentSignal?.removeEventListener('abort', onParentAbort);
         const agent = getAgent(agentId);
         if (!agent || agent.status === 'killed') return;
         agent.status = 'completed';
@@ -491,9 +606,14 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
           loopCount: result.loopCount,
           totalTokens: result.totalTokens.prompt + result.totalTokens.completion,
         });
+        emitChildLifecycle(agent, 'child.agent.completed', {
+          loopCount: result.loopCount,
+          totalTokens: result.totalTokens.prompt + result.totalTokens.completion,
+        });
         // Schedule cleanup after completion
         setTimeout(() => trackedAgents.delete(agentId), 300_000).unref();
       }).catch(err => {
+        parentSignal?.removeEventListener('abort', onParentAbort);
         const agent = getAgent(agentId);
         if (!agent || agent.status === 'killed') return;
         agent.status = 'failed';
@@ -503,6 +623,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
           text: '',
           error: err instanceof Error ? err.message : String(err),
         });
+        emitChildLifecycle(agent, 'child.agent.failed', { error: agent.error });
         // Schedule cleanup after failure
         setTimeout(() => trackedAgents.delete(agentId), 300_000).unref();
       });
@@ -534,9 +655,7 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       maxLoops: childMaxLoops,
       workspaceRoot: options.workspaceRoot,
       toolMode: childToolMode,
-      allowedTools: childToolMode === 'read-only'
-        ? READ_ONLY_BUILTIN_TOOLS
-        : SUBAGENT_PROJECT_WRITE_TOOLS,
+      allowedTools: childAllowedTools(childToolMode),
       toolRetry: options.toolRetry,
       signal: options.signal,
       onSessionEvent: options.onSessionEvent,
@@ -560,25 +679,4 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
       }, null, 2),
     };
   };
-}
-
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeToolMode(value: unknown): SpawnAgentRequest['toolMode'] | undefined {
-  if (value === 'project-write' || value === 'read-only') return value;
-  return undefined;
-}
-
-function normalizeMode(value: unknown): SpawnAgentRequest['mode'] | undefined {
-  if (value === 'sync' || value === 'background') return value;
-  return undefined;
-}
-
-function normalizeInteger(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  return Math.floor(value);
 }
