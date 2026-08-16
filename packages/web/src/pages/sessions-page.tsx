@@ -59,7 +59,8 @@ import {
   formatTime,
   RefreshQueryButton,
   StatusPill,
-} from '../ui';
+} from '../ui.js';
+import { EmptyState } from '../components/empty-state';
 import { useI18n } from '../i18n';
 
 type RunStateProjection = {
@@ -268,7 +269,11 @@ function SessionInspector({
   });
 
   if (!sessionId) {
-    return <div className="panel inspector"><EmptyText text={t('assets.sessions.selectHint')} /></div>;
+    return (
+      <div className="panel inspector">
+        <EmptyState compact title={t('assets.sessions.selectHint')} />
+      </div>
+    );
   }
 
   return (
