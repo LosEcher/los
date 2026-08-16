@@ -79,6 +79,8 @@
     "./daily-agent-quality": "./src/daily-agent-quality/index.ts",
     "./usage-summary": "./src/usage-summary.ts",
     "./metrics-trends": "./src/metrics-trends.ts",
+    "./metrics-activity": "./src/metrics-activity.ts",
+    "./session-subagents": "./src/session-subagents.ts",
     "./daily-digest": "./src/daily-digest.ts",
     "./runtime-health": "./src/runtime-health.ts",
     "./fleet-inventory": "./src/fleet-inventory.ts",

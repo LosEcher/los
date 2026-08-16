@@ -49,9 +49,47 @@ describe('timeline + topology panel wiring', () => {
     const en = read('i18n/en/assets2.ts');
     const zh = read('i18n/zh/assets2.ts');
     for (const key of ['assets.timeline.title', 'assets.timeline.selectHint', 'assets.timeline.duration',
-      'assets.topology.title', 'assets.topology.stats', 'assets.topology.hint']) {
+      'assets.topology.title', 'assets.topology.stats', 'assets.topology.hint',
+      'assets.subagents.title', 'assets.subagents.count']) {
       assert.match(en, new RegExp(`'${key}'`), `en missing ${key}`);
       assert.match(zh, new RegExp(`'${key}'`), `zh missing ${key}`);
     }
+  });
+
+  it('defines subagent tree over /sessions/:id/subagents and mounts on Sessions', () => {
+    const tree = read('pages/subagent-tree.tsx');
+    assert.match(tree, /export function SubagentTree/);
+    assert.match(tree, /session-subagents/);
+    assert.match(tree, /\/sessions\/\$\{encodeURIComponent\(sessionId!\)\}\/subagents/);
+    assert.match(tree, /parent_run_spec_id/);
+    assert.match(tree, /eventStatus/);
+    assert.match(tree, /los\.activity\.session/);
+    const sessions = read('pages/sessions-page.tsx');
+    assert.match(sessions, /SubagentTree/);
+  });
+
+  it('backend exposes GET /sessions/:id/subagents with recursive lineage', () => {
+    const subagents = read('../../../packages/agent/src/session-subagents.ts');
+    assert.match(subagents, /export async function getSessionSubagents/);
+    assert.match(subagents, /parent_run_spec_id/);
+    assert.match(subagents, /child\.agent\./);
+    assert.match(subagents, /loadLifecycleIndex/);
+    const routes = read('../../../packages/gateway/src/routes/data/session-routes.ts');
+    assert.match(routes, /getSessionSubagents/);
+    assert.match(routes, /'\/sessions\/:id\/subagents'/);
+  });
+
+  it('projects effective model from the ledger into the sessions list', () => {
+    const events = read('../../../packages/agent/src/session-events.ts');
+    assert.match(events, /export async function latestEffectiveModels/);
+    assert.match(events, /DISTINCT ON \(session_id\)/);
+    const routes = read('../../../packages/gateway/src/routes/data/session-routes.ts');
+    assert.match(routes, /latestEffectiveModels/);
+    assert.match(routes, /effectiveModel/);
+    const sessions = read('pages/sessions-page.tsx');
+    assert.match(sessions, /session\.effectiveModel/);
+    assert.match(sessions, /detail\.data\.effectiveModel/);
+    const types = read('api/types-sessions.ts');
+    assert.match(types, /effectiveModel/);
   });
 });

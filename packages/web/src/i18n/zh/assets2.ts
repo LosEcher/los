@@ -184,6 +184,16 @@ export const zhAssets2: Assets2Keys = {
   'assets.timeline.parent': '父事件',
   'assets.timeline.locate': '定位',
 
+  // ── Subagent tree（Phase 4 血缘）──
+  'assets.subagents.sectionAria': '子 agent 血缘',
+  'assets.subagents.title': '子代理',
+  'assets.subagents.count': '{count} 个节点',
+  'assets.subagents.loadError': '子代理不可用：{error}',
+  'assets.subagents.empty': '该会话没有 run spec。',
+  'assets.subagents.noChildren': '该会话下没有子 agent。',
+  'assets.subagents.expand': '展开',
+  'assets.subagents.collapse': '折叠',
+
   // ── Topology（证据图）──
   'assets.topology.sectionAria': '执行拓扑',
   'assets.topology.title': '拓扑',

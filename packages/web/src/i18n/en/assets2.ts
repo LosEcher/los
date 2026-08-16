@@ -180,6 +180,16 @@ export const enAssets2 = {
   'assets.timeline.parent': 'parent',
   'assets.timeline.locate': 'locate',
 
+  // ── Subagent tree (Phase 4 lineage) ──
+  'assets.subagents.sectionAria': 'Child agent lineage',
+  'assets.subagents.title': 'Subagents',
+  'assets.subagents.count': '{count} nodes',
+  'assets.subagents.loadError': 'Subagents unavailable: {error}',
+  'assets.subagents.empty': 'This session has no run specs.',
+  'assets.subagents.noChildren': 'No child agents under this session.',
+  'assets.subagents.expand': 'expand',
+  'assets.subagents.collapse': 'collapse',
+
   // ── Topology (Phase 2 evidence graph) ──
   'assets.topology.sectionAria': 'Execution topology',
   'assets.topology.title': 'Topology',

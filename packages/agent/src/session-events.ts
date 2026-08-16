@@ -652,3 +652,32 @@ function emptyUsage(): SessionEventUsage {
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
+
+/**
+ * Latest actually-used model per session, projected from the event ledger.
+ *
+ * Effective-model projection (display-layer fix): session metadata records the
+ * REQUESTED model (null when unspecified), while the event ledger records the
+ * model each model.response actually ran on. This returns the most recent
+ * model.response model per session so UIs can show "requested ?? effective".
+ * Pure read projection — no write path, single source of truth stays the log.
+ */
+export async function latestEffectiveModels(
+  sessionIds: readonly string[],
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (sessionIds.length === 0) return result;
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<{ session_id: string; model: string }>(
+    `SELECT DISTINCT ON (session_id) session_id, model
+       FROM session_events
+      WHERE type = 'model.response'
+        AND model IS NOT NULL AND model != ''
+        AND session_id = ANY($1::text[])
+      ORDER BY session_id, id DESC`,
+    [sessionIds],
+  );
+  for (const row of rows.rows) result.set(row.session_id, row.model);
+  return result;
+}

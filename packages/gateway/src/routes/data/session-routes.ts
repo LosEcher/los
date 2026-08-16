@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   ensureSessionEventStore,
+  latestEffectiveModels,
   listSessionEvents,
   listSessionEventsBefore,
   listSessionEventsSince,
@@ -14,6 +15,7 @@ import {
 } from '@los/agent/operator-control';
 import { ensureSessionStore, loadSession, listSessions, saveSession, deleteSession, type SessionRecord } from '@los/agent/session';
 import { claimRunSpec } from '@los/agent/run-specs';
+import { getSessionSubagents } from '@los/agent/session-subagents';
 import { listVerificationRecordsForSession } from '@los/agent';
 import { findRecoverableSessions } from '../../chat-session-helpers.js';
 import { getOperatorPrincipal, getRequestContext, requireOperator } from '../../request-context.js';
@@ -26,6 +28,7 @@ type SessionRouteDependencies = {
   claimRunSpec: typeof claimRunSpec;
   deleteSession: typeof deleteSession;
   getSessionObservability: typeof getSessionObservability;
+  latestEffectiveModels: typeof latestEffectiveModels;
   listSessionEvents: typeof listSessionEvents;
   listSessionEventsBefore: typeof listSessionEventsBefore;
   listSessionEventsSince: typeof listSessionEventsSince;
@@ -38,12 +41,14 @@ type SessionRouteDependencies = {
   saveSession: typeof saveSession;
   ensureSessionStore: typeof ensureSessionStore;
   ensureSessionEventStore: typeof ensureSessionEventStore;
+  getSessionSubagents: typeof getSessionSubagents;
 };
 
 const defaultDependencies: SessionRouteDependencies = {
   claimRunSpec,
   deleteSession,
   getSessionObservability,
+  latestEffectiveModels,
   listSessionEvents,
   listSessionEventsBefore,
   listSessionEventsSince,
@@ -56,6 +61,7 @@ const defaultDependencies: SessionRouteDependencies = {
   saveSession,
   ensureSessionStore,
   ensureSessionEventStore,
+  getSessionSubagents,
 };
 
 export function registerSessionRoutes(
@@ -64,7 +70,15 @@ export function registerSessionRoutes(
 ): void {
   app.get('/sessions', async () => {
     await deps.ensureSessionStore();
-    return await deps.listSessions();
+    const sessions = await deps.listSessions();
+    // Effective-model projection: metadata.model is the REQUESTED model (null
+    // when unspecified); the event ledger holds the model each model.response
+    // actually ran on. UIs show requested ?? effective.
+    const effective = await deps.latestEffectiveModels(sessions.map(session => session.id));
+    return sessions.map(session => ({
+      ...session,
+      effectiveModel: effective.get(session.id) ?? null,
+    }));
   });
 
   /** Cross-session event search (operator recall / FTS-lite). */
@@ -107,7 +121,8 @@ export function registerSessionRoutes(
     await deps.ensureSessionStore();
     const session = await deps.loadSession(id);
     if (!session) return { error: 'Not found' };
-    return session;
+    const effective = await deps.latestEffectiveModels([id]);
+    return { ...session, effectiveModel: effective.get(id) ?? null };
   });
 
   app.post('/sessions/:id/operator-events', async (req, reply) => {
@@ -293,6 +308,18 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const records = await deps.listVerificationRecordsForSession(id);
     return { sessionId: id, count: records.length, records };
+  });
+
+  /** Phase 4: recursive child-agent lineage for one session. */
+  app.get('/sessions/:id/subagents', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const maxDepth = normalizeBoundedInteger((req.query as { maxDepth?: string }).maxDepth, 4, 1, 8);
+    try {
+      return await deps.getSessionSubagents(id, maxDepth);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(400).send({ error: 'subagents_query_failed', message });
+    }
   });
 }
 

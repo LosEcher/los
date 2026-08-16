@@ -1,4 +1,4 @@
-import { useState, useMemo, type ChangeEvent } from 'react';
+import { useEffect, useState, useMemo, type ChangeEvent } from 'react';
 import { metadataText } from '../chat-helpers.js';
 import {
   eventCategory,
@@ -9,6 +9,7 @@ import {
 } from './session-inspector.js';
 import { ExecutionObservabilityPanel } from './execution-observability-panel.js';
 import { TimelinePanel } from './timeline-panel.js';
+import { SubagentTree } from './subagent-tree.js';
 import { useSessionEventStream } from '../hooks/useSessionEventStream.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -94,6 +95,17 @@ export function SessionsPage({
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  // Activity drill-down jump: pick up a session id left by the Activity panel.
+  useEffect(() => {
+    const target = sessionStorage.getItem('los.activity.session');
+    if (target) {
+      sessionStorage.removeItem('los.activity.session');
+      onSelectSession(target);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const sessions = useQuery({
     queryKey: ['sessions'],
     queryFn: () => getJson<SessionSummary[]>('/sessions'),
@@ -203,14 +215,14 @@ export function SessionsPage({
               </span>
               <span>{formatDate(session.updatedAt)}</span>
               <span>{metadataText(session.metadata.provider) ?? t('assets.sessions.providerUnknown')}</span>
-              <span>{metadataText(session.metadata.model) ?? t('assets.sessions.modelUnknown')}</span>
+              <span>{metadataText(session.metadata.model) ?? session.effectiveModel ?? t('assets.sessions.modelUnknown')}</span>
               <span>{metadataText(session.metadata.toolMode) ?? t('assets.state.modeUnknown')}</span>
             </button>
             );
           }}
         />
       </div>
-      <SessionInspector sessionId={selectedSessionId} onContinueSession={onContinueSession} onBranchSession={onBranchSession} onSelectTodo={onSelectTodo} />
+      <SessionInspector sessionId={selectedSessionId} onContinueSession={onContinueSession} onBranchSession={onBranchSession} onSelectTodo={onSelectTodo} onSelectSession={onSelectSession} />
     </section>
   );
 }
@@ -220,11 +232,13 @@ function SessionInspector({
   onContinueSession,
   onBranchSession,
   onSelectTodo,
+  onSelectSession,
 }: {
   sessionId: string | null;
   onContinueSession: (id: string) => void;
   onBranchSession: (id: string) => void;
   onSelectTodo: (id: string) => void;
+  onSelectSession: (id: string) => void;
 }) {
   const { t } = useI18n();
   const detail = useQuery({
@@ -278,16 +292,16 @@ function SessionInspector({
       {detail.isLoading ? <EmptyText text={t('assets.sessions.loading')} /> : null}
       {detail.data ? (
         <div className="fact-list compact-facts">
-          <Fact label={t('assets.label.provider')} value={metadataText(detail.data.metadata.provider) ?? t('assets.state.default')} />
-          <Fact label={t('assets.label.model')} value={metadataText(detail.data.metadata.model) ?? t('assets.state.default')} />
-          <Fact label={t('assets.label.toolMode')} value={metadataText(detail.data.metadata.toolMode) ?? t('common.unknown')} />
-          <Fact label={t('assets.label.workspace')} value={metadataText(detail.data.metadata.workspaceRoot) ?? t('assets.state.default')} />
-          <Fact label={t('assets.label.task')} value={metadataText(detail.data.metadata.taskRunId) ?? t('common.none')} />
-          {metadataText(detail.data.metadata.branchFrom) ? (
-            <Fact label={t('assets.label.branchFrom')} value={`${metadataText(detail.data.metadata.branchFrom)}${metadataText(detail.data.metadata.branchAtTurn) ? ` ${t('assets.sessions.atTurn', { turn: metadataText(detail.data.metadata.branchAtTurn) ?? '' })}` : ''}`} />
+          <Fact label={t('assets.label.provider')} value={metadataText(detail.data.metadata?.provider) ?? t('assets.state.default')} />
+          <Fact label={t('assets.label.model')} value={metadataText(detail.data.metadata?.model) ?? detail.data.effectiveModel ?? t('assets.state.default')} />
+          <Fact label={t('assets.label.toolMode')} value={metadataText(detail.data.metadata?.toolMode) ?? t('common.unknown')} />
+          <Fact label={t('assets.label.workspace')} value={metadataText(detail.data.metadata?.workspaceRoot) ?? t('assets.state.default')} />
+          <Fact label={t('assets.label.task')} value={metadataText(detail.data.metadata?.taskRunId) ?? t('common.none')} />
+          {metadataText(detail.data.metadata?.branchFrom) ? (
+            <Fact label={t('assets.label.branchFrom')} value={`${metadataText(detail.data.metadata?.branchFrom)}${metadataText(detail.data.metadata?.branchAtTurn) ? ` ${t('assets.sessions.atTurn', { turn: metadataText(detail.data.metadata?.branchAtTurn) ?? '' })}` : ''}`} />
           ) : null}
-          {metadataText(detail.data.metadata.resumed) === 'true' || detail.data.metadata.resumeMessageCount ? (
-            <Fact label={t('assets.label.resumed')} value={t('assets.sessions.priorMsgs', { count: String(detail.data.metadata.resumeMessageCount ?? '?') })} />
+          {metadataText(detail.data.metadata?.resumed) === 'true' || detail.data.metadata?.resumeMessageCount ? (
+            <Fact label={t('assets.label.resumed')} value={t('assets.sessions.priorMsgs', { count: String(detail.data.metadata?.resumeMessageCount ?? '?') })} />
           ) : null}
         </div>
       ) : null}
@@ -302,12 +316,13 @@ function SessionInspector({
       ) : null}
       <ExecutionObservabilityPanel sessionId={sessionId} />
       <TimelinePanel sessionId={sessionId} events={events.events} />
+      <SubagentTree sessionId={sessionId} onSelectSession={onSelectSession} />
       {detail.data ? (
         <div className="definition-list compact-definition-list">
           <Definition term={t('assets.label.created')} text={formatDate(detail.data.createdAt)} />
           <Definition term={t('assets.label.updated')} text={formatDate(detail.data.updatedAt)} />
-          <Definition term={t('assets.label.turns')} text={String(detail.data.turns.length)} />
-          <Definition term={t('assets.label.messages')} text={String(detail.data.messages.length)} />
+          <Definition term={t('assets.label.turns')} text={String(detail.data.turns?.length ?? 0)} />
+          <Definition term={t('assets.label.messages')} text={String(detail.data.messages?.length ?? 0)} />
         </div>
       ) : null}
       {verification.data && verification.data.count > 0 ? (

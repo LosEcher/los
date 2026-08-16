@@ -10,6 +10,8 @@ export type SessionSummary = {
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
+  /** Latest model.response model from the event ledger (requested ?? effective). */
+  effectiveModel?: string | null;
 };
 
 export type SessionDetail = SessionSummary & {

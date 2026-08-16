@@ -6,6 +6,7 @@ import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
 import { useI18n } from '../i18n';
 import { Sparkline } from './sparkline.js';
+import { ActivityPanel } from './activity-panel.js';
 import { UsageTrendsSection, type MetricsTrendsResponse } from './usage-trends-section.js';
 
 export type UsageSummaryResponse = {
@@ -143,6 +144,8 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
       <p className="usage-note">{t('ops.usage.l1Note')}</p>
 
       <FleetCard compact />
+
+      <ActivityPanel />
 
       {digest.data ? (
         <section className="usage-table-section">

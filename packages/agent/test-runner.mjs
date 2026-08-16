@@ -122,6 +122,8 @@ const isolatedGroupA = [
   'src/managed-workspaces.test.ts',
   'src/mcp-credential-resolver.test.ts',
   'src/mcp-distribution.test.ts',
+  'src/metrics-activity.test.ts',
+  'src/metrics-trends.test.ts',
   'src/message-router/handlers-run-contract.test.ts',
 ];
 
@@ -176,6 +178,8 @@ const isolatedGroupC = [
   'src/worker-messages.test.ts',
   'src/session-recovery.test.ts',
   'src/session-events-redaction.test.ts',
+  'src/session-events-effective.test.ts',
+  'src/session-subagents.test.ts',
 ];
 
 const allIsolatedDatabaseTestFiles = [

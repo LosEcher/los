@@ -8222,3 +8222,231 @@ button:disabled {
 .trend-delta.is-good { color: var(--success); }
 .trend-delta.is-bad { color: var(--danger); }
 .trend-delta.is-flat { color: var(--faint); }
+
+/* ── Activity panel (P0 concurrency timeline) ── */
+.activity-panel {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  flex-wrap: wrap;
+}
+.activity-window {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+.activity-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+.activity-total strong {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  margin-left: 3px;
+}
+.activity-total em {
+  font-style: normal;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin-left: 4px;
+}
+.activity-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+.activity-bar {
+  flex: 1;
+  min-width: 4px;
+  border: none;
+  border-radius: 2px 2px 0 0;
+  padding: 0;
+  background: var(--accent);
+  opacity: 0.75;
+  cursor: pointer;
+  transition: opacity 0.1s ease;
+}
+.activity-bar:hover { opacity: 1; }
+.activity-bar.is-peak { opacity: 1; background: var(--warning, #d97706); }
+.activity-bar.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+.activity-bar.is-zero { background: var(--line); opacity: 0.5; cursor: default; }
+.activity-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+.activity-drilldown {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.activity-drilldown-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.activity-session-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+}
+.activity-session-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+.activity-session-list code {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  word-break: break-all;
+}
+.activity-session-list span {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  flex: none;
+}
+
+/* ── Subagent tree (Phase 4 lineage) ── */
+.subagent-tree {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.subagent-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+}
+.subagent-tree-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+.subagent-tree-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.subagent-node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  min-height: 22px;
+  border-radius: 4px;
+  padding-right: 4px;
+}
+.subagent-node-row:hover {
+  background: var(--surface-1);
+}
+.subagent-node-toggle {
+  border: none;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  color: var(--faint);
+  cursor: pointer;
+  width: 14px;
+  flex: none;
+}
+.subagent-node-toggle-spacer {
+  width: 14px;
+  flex: none;
+}
+.subagent-node-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  text-decoration: none;
+  min-width: 0;
+}
+.subagent-node-link code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+.subagent-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--line);
+}
+.subagent-status-dot.is-succeeded, .subagent-status-dot.is-completed { background: var(--success); }
+.subagent-status-dot.is-failed { background: var(--danger); }
+.subagent-status-dot.is-killed { background: var(--warning, #d97706); }
+.subagent-status-dot.is-started, .subagent-status-dot.is-running { background: var(--accent); }
+.subagent-event {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex: none;
+}
+.subagent-event.is-completed { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.subagent-event.is-failed, .subagent-event.is-killed { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.subagent-event.is-started { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.subagent-model {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-meta {
+  margin-left: auto;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  flex: none;
+}

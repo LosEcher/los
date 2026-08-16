@@ -57,4 +57,31 @@ describe('usage trends (Phase 3) wiring', () => {
       assert.match(zh, new RegExp(`'${key}'`), `zh missing ${key}`);
     }
   });
+
+  it('defines activity panel with chart, drill-down, and session jump', () => {
+    const panel = read('pages/activity-panel.tsx');
+    assert.match(panel, /export function ActivityPanel/);
+    assert.match(panel, /metrics\/activity/);
+    assert.match(panel, /activity-bar/);
+    assert.match(panel, /drilldown/);
+    assert.match(panel, /los\.activity\.session/);
+    assert.match(panel, /peakConcurrent/);
+    const sessions = read('pages/sessions-page.tsx');
+    assert.match(sessions, /los\.activity\.session/);
+    const usage = read('pages/usage-page.tsx');
+    assert.match(usage, /ActivityPanel/);
+  });
+
+  it('backend exposes GET /metrics/activity with concurrency bucketing', () => {
+    const activity = read('../../../packages/agent/src/metrics-activity.ts');
+    assert.match(activity, /export async function getMetricsActivity/);
+    assert.match(activity, /generate_series/);
+    assert.match(activity, /COUNT\(DISTINCT e\.session_id\)/);
+    assert.match(activity, /activeSessions/);
+    assert.match(activity, /drilldown/);
+    assert.match(activity, /AT TIME ZONE 'UTC'/);
+    const routes = read('../../../packages/gateway/src/routes/infrastructure/usage-routes.ts');
+    assert.match(routes, /getMetricsActivity/);
+    assert.match(routes, /'\/metrics\/activity'/);
+  });
 });

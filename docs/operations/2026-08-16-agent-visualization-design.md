@@ -1,6 +1,6 @@
 # Agent 执行可视化设计方案 — 2026-08-16
 
-> Status: **Phase 1-3 implemented**（2026-08-16，change `orvqqppt`）
+> Status: **Phase 1-4 + P0 implemented**（2026-08-16，change `orvqqppt`）
 > 范围：los web 的 agent 执行可视化（请求轨迹 / 执行拓扑 / 模型指标），
 > 设计参考业界方案 + DeepSeek Harness（DSH）事件溯源与 UI 模式。
 
@@ -39,7 +39,58 @@
 - 实测数据：20 泳道 / 58 条块的时间线；519 节点 835 边的证据图折叠为
   2 可视节点 + 折叠计数；9 趋势卡片 + 18 sparkline + 27 环比。
 
-Phase 4（子代理树）未实现，见 §8。
+### P0 — Activity 并发时间线（AgentsView 对标，2026-08-16，change `xtysloxk`）
+
+- 后端 `packages/agent/src/metrics-activity.ts` + `GET /metrics/activity`
+  （contract `contracts/metrics-activity.yaml`）：`generate_series` 时间桶网格，
+  活跃判定 = timed 事件（model.response/tool.result）的
+  [created_at, created_at+durationMs] 区间跨越桶起点（上界 `created_at <
+  bucket+bucketSize` 防止高估）；每桶并发数/agent-minutes/成本（model.response
+  payload cost 同网格聚合）；`bucket=<iso>` 时返回该桶活跃会话钻取列表
+  （LIMIT 200，含活跃区间/事件数/成本）。坑：`to_char(timestamptz)` 用会话
+  时区导致桶标签偏移——必须 `AT TIME ZONE 'UTC'`。
+- 前端 `activity-panel.tsx`：SVG 柱状图（24 桶，峰值桶高亮、hover 提示、
+  点击钻取）+ 峰值/agent-minutes/成本/会话槽位合计 + 钻取会话列表
+  （点击跳转 Sessions 页并选中，sessionStorage 接力）。挂载于 usage 页
+  FleetCard 之后。
+- 实测：峰值并发 23、agent-minutes 3480、钻取 23 会话与系列一致；修复了
+  series JOIN 缺上界导致桶 0 高估（53→23）的 bug。
+- 测试：agent 单测 2/2（并发/成本/钻取/窗口校验）+ 页面接线断言 2 条；
+  web/agent/gateway check、55 既有测试全绿。
+
+### Phase 4 — 子代理树（2026-08-16，change `xtysloxk`）
+
+- 后端 `packages/agent/src/session-subagents.ts` + `GET /sessions/:id/subagents`
+  （contract `contracts/session-subagents.yaml`）：递归 `parent_run_spec_id`
+  血缘（默认深度 4，上限 8）；子节点带 child.agent.* 生命周期状态（事件在
+  **父会话**、按 payload.childRunSpecId 索引，一次查询）、子会话
+  model.response 的 usage/token/成本聚合、耗时（created→updated）。
+- 前端 `subagent-tree.tsx`：递归树（展开/折叠、状态点+事件徽章、耗时/token/
+  成本行尾汇总），挂载于 SessionInspector（TimelinePanel 之后）；点击节点
+  直连 `onSelectSession` 切换子会话（跨页兜底 sessionStorage 接力）。
+- 实测：真实血缘树（父 216k tokens → 4 子节点各 ~4.9k）；点击子节点 →
+  子会话详情 + 时间线，无错误。
+- **顺手修复 pre-existing bug**：SessionInspector 对 metadata/turns/messages
+  缺失的会话（子会话记录）直接白屏——加可选链保护。
+- 测试：agent 单测 1/1（递归/事件状态/usage/成本/深度上限）+ 页面接线断言；
+  全量检查绿（agent 5/5、页面 13/13、web 55）。
+
+### Effective-model 投影（展示层修复，2026-08-16，change `xtysloxk`）
+
+「模型?」根因：会话 metadata 记录的是**请求模型**（未指定时为 null，
+`model ?? null`），实际运行模型只在事件账本里。按「追加日志 + 派生投影」
+原则做纯读修复（拒绝回填双写）：
+
+- `latestEffectiveModels(sessionIds)`（session-events.ts）：`DISTINCT ON
+  (session_id) ... ORDER BY session_id, id DESC` 取每会话最新
+  model.response 的实际模型；
+- `GET /sessions` 与 `GET /sessions/:id` 返回 `effectiveModel`；
+- 前端列表行与详情面板显示 `metadata.model ?? effectiveModel ?? 占位`。
+- 实测：`chat-deepseek-1786876211597`（meta.model=null）→ 列表与详情均显示
+  `deepseek-v4-flash`（与账本一致）。
+- 测试：agent 单测 2/2（最新模型胜出/空模型过滤/空输入）+ 接线断言。
+
+Phase 4 完成，方案四视图全部落地。剩余增强见 §8（搜索 UI 等）。
 
 ## 1. 背景与目标
 
