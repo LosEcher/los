@@ -30,6 +30,12 @@ jobs:
       # ~100s of the ~2.4m gate-fast. 4x matches github's parallel jobs and
       # the runner's observed capacity (two concurrent jobs ran undegraded).
       TURBO_CONCURRENCY: 4
+      # Turbo cache persisted on the runner host like the pnpm store
+      # (~/.local/share/pnpm/store, persisted since run 137). Turbo content-
+      # hashes cache entries, so a warm directory speeds up typecheck/checks
+      # across commits without an actions/cache server dependency. Verify on
+      # the next real PR: gate-fast should drop toward ~2m with warm cache.
+      TURBO_CACHE_DIR: /root/.local/share/turbo
     steps:
       - name: Checkout
         run: |
@@ -66,6 +72,21 @@ jobs:
       - name: Fast gate (no DB, no tests)
         run: pnpm run gate -- --no-tests
 
+      # ci-gate.sh writes phase timings to /tmp/los-gate-summary.json; the
+      # Forgejo job-log API returns stale bodies (2026-08-09 PR #256), so echo
+      # the summary into the step log as a self-reported observability channel.
+      - name: Emit gate summary (gate-fast)
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f /tmp/los-gate-summary.json ]; then
+            echo "===== los gate-fast phase timing summary ====="
+            cat /tmp/los-gate-summary.json
+            echo "===== end gate summary ====="
+          else
+            echo "no /tmp/los-gate-summary.json produced"
+          fi
+
   gate-test:
     if: forgejo.event_name != 'push'
     # No `needs: gate-fast`: each job does its own checkout+install, and the
@@ -89,6 +110,10 @@ jobs:
       TEST_DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
       NODE_ENV: test
       LOS_TEST_CONCURRENCY: 2
+      # Turbo cache persisted on the runner host (same family as the pnpm
+      # store dir). Warm cache shortens the non-DB turbo work inside the test
+      # phases across commits.
+      TURBO_CACHE_DIR: /root/.local/share/turbo
 
     steps:
       - name: Checkout
@@ -127,6 +152,7 @@ jobs:
         id: test-agent
         run: |
           set -o pipefail
+          AGENT_T0=$(date +%s)
           mkdir -p /tmp/los-ci-logs
           echo "=== agent group 1/3 ===" && LOS_TEST_GROUP=1 pnpm --filter @los/agent test 2>&1 | tee /tmp/los-ci-logs/agent-g1.log | bash tools/check-known-failures.sh --allow-fixed &
           PID1=$!
@@ -137,6 +163,8 @@ jobs:
           wait $PID1; S1=$?
           wait $PID2; S2=$?
           wait $PID3; S3=$?
+          AGENT_T1=$(date +%s)
+          echo "agent-groups elapsed_sec=$((AGENT_T1 - AGENT_T0))" | tee -a /tmp/los-ci-logs/timings.txt
           [ $S1 -eq 0 ] && [ $S2 -eq 0 ] && [ $S3 -eq 0 ]
         timeout-minutes: 12
 
@@ -144,14 +172,33 @@ jobs:
         id: test-packages
         run: |
           set -o pipefail
+          PKG_T0=$(date +%s)
           mkdir -p /tmp/los-ci-logs
           pnpm --filter '@los/*' --filter '!@los/agent' test 2>&1 | tee /tmp/los-ci-logs/packages.log | bash tools/check-known-failures.sh --allow-fixed
+          PKG_T1=$(date +%s)
+          echo "packages elapsed_sec=$((PKG_T1 - PKG_T0))" | tee -a /tmp/los-ci-logs/timings.txt
         timeout-minutes: 10
 
       - name: Enforce critical module coverage
         id: test-coverage
-        run: pnpm test:coverage:critical
+        run: |
+          CVG_T0=$(date +%s)
+          pnpm test:coverage:critical
+          CVG_T1=$(date +%s)
+          echo "coverage elapsed_sec=$((CVG_T1 - CVG_T0))" | tee -a /tmp/los-ci-logs/timings.txt
         timeout-minutes: 8
+
+      - name: Emit test timings summary (gate-test)
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "===== los gate-test step timings ====="
+          if [ -f /tmp/los-ci-logs/timings.txt ]; then
+            cat /tmp/los-ci-logs/timings.txt
+          else
+            echo "no /tmp/los-ci-logs/timings.txt captured"
+          fi
+          echo "===== end timings ====="
 
       # Forgejo job-log API often returns stale/wrong task bodies (observed 2026-08-09
       # on PR #256). Emit an explicit tail into the step log so commit-status

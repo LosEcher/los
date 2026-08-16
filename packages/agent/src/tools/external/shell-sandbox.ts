@@ -93,6 +93,13 @@ export interface SandboxedShellOptions {
    *  sandbox with workspace writes (alias for the strictest enforced
    *  profile). Wired to config agent.sandboxMode. */
   sandboxMode?: SandboxMode;
+  /** Network isolation inside the OS sandbox. Defaults to 'isolated' —
+   *  fail-closed: bwrap runs with --unshare-net and sandbox-exec denies
+   *  network entirely. 'host' drops the network isolation so read-only
+   *  diagnostics (ping/curl/probes) reach real endpoints; it weakens the
+   *  sandbox and must only be enabled for trusted read-only workloads.
+   *  Wired to config agent.sandboxNetwork. */
+  networkMode?: 'isolated' | 'host';
 }
 
 export interface SandboxedShellResult {
@@ -145,6 +152,7 @@ export async function runSandboxedShell(
 ): Promise<SandboxedShellResult> {
   const allowNative = options.allowNativeShell === true;
   const sandboxMode = options.sandboxMode ?? 'workspace-write';
+  const networkMode = options.networkMode ?? 'isolated';
   const decision = resolveSandboxBackend(
     platform(),
     findExecutable('/usr/bin/sandbox-exec') !== null,
@@ -154,9 +162,9 @@ export async function runSandboxedShell(
 
   switch (decision) {
     case 'macos-sandbox-exec':
-      return runWithMacSandboxExec('/usr/bin/sandbox-exec', input, sandboxMode);
+      return runWithMacSandboxExec('/usr/bin/sandbox-exec', input, sandboxMode, networkMode);
     case 'linux-bwrap':
-      return runWithBwrap('/usr/bin/bwrap', input, sandboxMode);
+      return runWithBwrap('/usr/bin/bwrap', input, sandboxMode, networkMode);
     case 'native':
       log.warn('no OS sandbox backend available; allowNativeShell=true — running unconstrained native shell');
       return runWithNativeShell(input);
@@ -182,11 +190,17 @@ export async function runSandboxedShell(
  * - 'workspace-write': reads anywhere, writes confined to cwd (current profile)
  * - 'sandbox':        same enforced profile as workspace-write (OS sandbox is
  *                     the strictest backend we run; network stays denied)
+ *
+ * networkMode='host' drops the `(deny network*)` clause so commands can reach
+ * real endpoints (read-only diagnostics); default 'isolated' keeps it.
  */
-export function _buildMacSandboxProfile(cwd: string, sandboxMode: SandboxMode = 'workspace-write'): string {
+export function _buildMacSandboxProfile(cwd: string, sandboxMode: SandboxMode = 'workspace-write', networkMode: 'isolated' | 'host' = 'isolated'): string {
   const writeClause = sandboxMode === 'readonly'
     ? []
     : [`(allow file-write* (subpath "${escapeSandboxString(cwd)}"))`];
+  const networkClause = networkMode === 'host'
+    ? []
+    : ['(deny network*)'];
   return [
     '(version 1)',
     '(deny default)',
@@ -194,7 +208,7 @@ export function _buildMacSandboxProfile(cwd: string, sandboxMode: SandboxMode = 
     '(allow sysctl-read)',
     '(allow file-read*)',
     ...writeClause,
-    '(deny network*)',
+    ...networkClause,
   ].join('\n');
 }
 
@@ -204,19 +218,26 @@ export function _buildMacSandboxProfile(cwd: string, sandboxMode: SandboxMode = 
  * - 'readonly':        cwd mounted read-only (--ro-bind)
  * - 'workspace-write': cwd mounted writable (--bind, current behavior)
  * - 'sandbox':         same as workspace-write
+ *
+ * networkMode='host' drops `--unshare-net` (host network namespace) for
+ * read-only diagnostics; default 'isolated' keeps network isolation.
  */
 export function _buildBwrapArgs(
   bwrapPath: string,
   cwd: string,
   command: string,
   sandboxMode: SandboxMode = 'workspace-write',
+  networkMode: 'isolated' | 'host' = 'isolated',
 ): string[] {
   const bindFlag = sandboxMode === 'readonly' ? '--ro-bind' : '--bind';
+  const netArgs = networkMode === 'host'
+    ? []
+    : ['--unshare-net'];
   return [
     '--ro-bind', '/', '/',
     bindFlag, cwd, cwd,
     '--chdir', cwd,
-    '--unshare-net',
+    ...netArgs,
     '--die-with-parent',
     '--proc', '/proc',
     '--dev', '/dev',
@@ -229,9 +250,10 @@ function runWithMacSandboxExec(
   sandboxExec: string,
   input: SandboxedShellInput,
   sandboxMode: SandboxMode,
+  networkMode: 'isolated' | 'host',
 ): Promise<SandboxedShellResult> {
   const cwd = realpathSync(input.cwd);
-  const profile = _buildMacSandboxProfile(cwd, sandboxMode);
+  const profile = _buildMacSandboxProfile(cwd, sandboxMode, networkMode);
 
   return new Promise((resolve) => {
     execFile(
@@ -262,10 +284,12 @@ function runWithBwrap(
   bwrapPath: string,
   input: SandboxedShellInput,
   sandboxMode: SandboxMode,
+  networkMode: 'isolated' | 'host',
 ): Promise<SandboxedShellResult> {
   const cwd = realpathSync(input.cwd);
   // Create a minimal container: read-only root, writable cwd, no network
-  const args = _buildBwrapArgs(bwrapPath, cwd, input.command, sandboxMode);
+  // (unless networkMode='host' for trusted read-only diagnostics)
+  const args = _buildBwrapArgs(bwrapPath, cwd, input.command, sandboxMode, networkMode);
 
   return new Promise((resolve) => {
     execFile(

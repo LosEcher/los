@@ -1,5 +1,5 @@
 contract: los.scheduled-work-item
-version: 0.3.0
+version: 0.4.0
 status: implemented
 owner: packages/agent
 description: >
@@ -23,7 +23,13 @@ routes:
   - method: PATCH
     path: /scheduled-work-items/{id}
     auth: operator
-    purpose: Change enabled state or bounded policy fields and increment revision.
+    purpose: >
+      Change enabled state, bounded policy fields, or execution-template fields
+      (goalTemplate, editableSurfaces, requiredChecks, toolMode, sandboxMode,
+      workspaceRoot, executor, maxLoops — flat fields only) and increment revision.
+      templateId and mode are immutable via PATCH; create a new schedule to switch
+      templates. Remote-execution templates are fail-loud: an enabled executor
+      requires both sandboxMode and a node-local workspaceRoot.
   - method: POST
     path: /scheduled-work-items/{id}/trigger
     auth: operator
@@ -59,6 +65,22 @@ schemas:
           node whose capabilities.sandbox is a real OS backend (e.g.
           linux-bwrap, macos-sandbox-exec); `tool_policy`/`native` nodes are
           rejected at executor selection. Defaults to workspace-write.
+      workspaceRoot:
+        optional: true
+        description: >
+          Node-local workspace root override for remote execution. Without it
+          the gateway's absolute workspace path is used, which does not exist
+          on remote executor nodes (empty workspace + Path traversal denials).
+          Required (with sandboxMode) when executor.enabled is true.
+      executor:
+        optional: true
+        description: >
+          Remote executor placement for scheduled_execution runs
+          (nodeId/nodeUrls/agentKey/enabled). enabled=true requires
+          sandboxMode and workspaceRoot (fail-loud validation).
+      maxLoops:
+        optional: true
+        description: Override for the agent loop's maxLoops (default 20, bound [1,200]).
       feedAnalysisRequest:
         optional: true
         reference: los.integration-feed-analysis FeedAnalysisDispatchRequest excluding sourceJobId
@@ -76,6 +98,18 @@ schemas:
     status:
       enum: [queued, claimed, running, awaiting_approval, succeeded, no_op, skipped, failed, cancelled]
     correlationFields: [workItemId, runSpecId, taskRunId]
+  UpdateScheduledWorkItemInput:
+    description: >
+      Partial update accepted by PATCH. runTemplate is a partial patch merged
+      onto the persisted template; templateId and mode are immutable.
+    optional: [title, status, trigger, approvalPolicy, approvalTimeoutMs, approvalTimeoutAction,
+      concurrencyPolicy, catchUpPolicy, maxConcurrentRuns, maxLatenessMs, failureThreshold]
+    runTemplatePatch:
+      optional: [goalTemplate, editableSurfaces, requiredChecks, toolMode, sandboxMode,
+        workspaceRoot, executor, maxLoops]
+      note: >-
+        Remote-execution validation runs on the merged template: executor.enabled=true
+        requires sandboxMode and workspaceRoot or the PATCH is rejected (400).
 persistence:
   definitionTable: scheduled_work_items
   runTable: scheduled_work_item_runs
@@ -101,6 +135,7 @@ safety:
   - Scheduled feed-analysis requests reuse the integration contract and never persist callback credentials.
   - Routes never update scheduled run status directly.
   - P2 does not execute preapproved_scope or each_run without an approval item.
+  - 'Remote scheduled_execution templates fail loud: an enabled executor without sandboxMode or workspaceRoot is rejected at create/update instead of silently degrading to an L1-capped, empty-workspace run.'
 nonGoals:
   - Natural-language or arbitrary cron.
   - Replacing governance_jobs, lot2 scheduler, or browser timers.
