@@ -124,6 +124,7 @@ const isolatedGroupA = [
   'src/mcp-distribution.test.ts',
   'src/metrics-activity.test.ts',
   'src/metrics-trends.test.ts',
+  'src/slo-report.test.ts',
   'src/message-router/handlers-run-contract.test.ts',
 ];
 

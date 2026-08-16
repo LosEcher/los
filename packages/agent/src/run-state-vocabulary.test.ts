@@ -103,6 +103,7 @@ function verification(input: Partial<VerificationRecord>): VerificationRecord {
     runSpecId: 'run-1',
     checkName: 'pnpm check',
     kind: 'command',
+    independence: 'deterministic',
     planRevision: 1,
     status: 'required',
     required: true,
