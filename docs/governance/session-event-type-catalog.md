@@ -76,6 +76,11 @@
 |------|------|------|
 | `kernel.started` | 内核启动 | `execution-kernel.ts` |
 | `kernel.finished` | 内核完成 | `execution-kernel.ts` |
+| `kernel.failed` | 内核失败 | `execution-kernel.ts` |
+| `message.completed` | assistant 消息完成（含全文摘要） | `execution-kernel.ts` / `pi-execution-kernel.ts` |
+| `turn.completed` | 回合完成（含 summary） | `execution-kernel.ts` |
+| `tool.completed` | 工具调用完成（含 transition） | `execution-kernel.ts` |
+| `checkpoint.created` | 上下文 checkpoint 已创建 | `execution-kernel.ts` / `pi-execution-kernel.ts` |
 
 ### Runtime 域 (`runtime.*`)
 | 类型 | 描述 | 来源 |

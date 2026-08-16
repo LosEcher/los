@@ -91,6 +91,12 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'kernel.started',
     'kernel.finished',
     'kernel.failed',
+    // execution-kernel.ts / pi-execution-kernel.ts 发射的事件（2026-08-16 补注册，
+    // 此前未登记导致 appendSessionEvent 持续 WARN "Unknown session event type"）。
+    'message.completed',
+    'turn.completed',
+    'tool.completed',
+    'checkpoint.created',
   ],
   runtime: [
     'runtime.started',

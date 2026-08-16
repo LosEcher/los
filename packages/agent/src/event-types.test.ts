@@ -26,6 +26,7 @@ const REPRESENTATIVE_TYPES = [
   'provider.fallback.exhausted', 'provider.health_changed',
   'verification.running', 'verification.succeeded', 'verification.failed',
   'kernel.started', 'kernel.finished', 'kernel.failed',
+  'message.completed', 'turn.completed', 'tool.completed', 'checkpoint.created',
   'runtime.started', 'runtime.process', 'runtime.output',
   'runtime.completed', 'runtime.error', 'runtime.cancelled',
   'hook.succeeded', 'hook.failed',
