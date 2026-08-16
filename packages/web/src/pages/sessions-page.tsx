@@ -8,6 +8,7 @@ import {
   TurnGroup,
 } from './session-inspector.js';
 import { ExecutionObservabilityPanel } from './execution-observability-panel.js';
+import { TimelinePanel } from './timeline-panel.js';
 import { useSessionEventStream } from '../hooks/useSessionEventStream.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -300,6 +301,7 @@ function SessionInspector({
         </div>
       ) : null}
       <ExecutionObservabilityPanel sessionId={sessionId} />
+      <TimelinePanel sessionId={sessionId} events={events.events} />
       {detail.data ? (
         <div className="definition-list compact-definition-list">
           <Definition term={t('assets.label.created')} text={formatDate(detail.data.createdAt)} />

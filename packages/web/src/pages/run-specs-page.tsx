@@ -4,6 +4,7 @@ import { Check, X, Play, ShieldCheck } from 'lucide-react';
 import { getJson, postJson } from '../api/index.js';
 import { Button, DataTable, Fact, StatusPill, EmptyText } from '../ui.js';
 import { useI18n } from '../i18n';
+import { TopologyPanel } from './topology-panel.js';
 
 /** Matches gateway POST /runs/:id/approve|recover|verify actor field. */
 const WEB_OPERATOR_ACTOR = 'web-console';
@@ -23,7 +24,7 @@ interface RunSpec {
 interface RunStateProjection {
   phase?: string;
   action?: string;
-  blockers?: string[];
+  blockers?: Array<{ kind: string; message: string; ids?: string[] }>;
   taskCount?: number;
   verificationCount?: number;
   verifierStatus?: string;
@@ -172,7 +173,9 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
                 <div className="blocker-list">
                   <strong style={{ fontSize: 13 }}>{t('ops.runSpecs.blockersTitle')}</strong>
                   <ul style={{ margin: '4px 0 0 16px', fontSize: 13, color: 'var(--text-dim)' }}>
-                    {(runState.data.blockers ?? []).map((b, i) => <li key={i}>{b}</li>)}
+                    {(runState.data.blockers ?? []).map((b, i) => (
+                      <li key={i}>{b.message}{b.ids && b.ids.length > 0 ? ` (${b.ids.join(', ')})` : ''}</li>
+                    ))}
                   </ul>
                 </div>
               ) : null}
@@ -221,6 +224,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
               {rejectRun.error ? <div className="error-banner">{t('ops.runSpecs.rejectErrorPrefix', { error: String(rejectRun.error) })}</div> : null}
               {verifyRun.error ? <div className="error-banner">{t('ops.runSpecs.verifyErrorPrefix', { error: String(verifyRun.error) })}</div> : null}
             </div>
+            <TopologyPanel runSpecId={selectedId} />
           </>
         ) : (
           <EmptyText text={t('ops.runSpecs.noStateData')} />

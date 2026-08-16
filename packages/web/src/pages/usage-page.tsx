@@ -5,6 +5,8 @@ import { getJson } from '../api/index.js';
 import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
 import { useI18n } from '../i18n';
+import { Sparkline } from './sparkline.js';
+import { UsageTrendsSection, type MetricsTrendsResponse } from './usage-trends-section.js';
 
 export type UsageSummaryResponse = {
   evidenceClass: 'los_runtime';
@@ -94,6 +96,14 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
       digestDay
         ? `/ops/daily-digest?day=${encodeURIComponent(digestDay)}`
         : '/ops/daily-digest',
+    ),
+    refetchInterval: 120_000,
+  });
+  const trendsFrom = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const trends = useQuery({
+    queryKey: ['metrics-trends', 14],
+    queryFn: () => getJson<MetricsTrendsResponse>(
+      `/metrics/trends?from=${encodeURIComponent(trendsFrom)}`,
     ),
     refetchInterval: 120_000,
   });
@@ -271,6 +281,7 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
                 <th>{t('ops.usage.colErrors')}</th>
                 <th>{t('ops.usage.colAvgMs')}</th>
                 <th>{t('ops.usage.colUsageFill')}</th>
+                <th>{t('ops.usage.colLatencyTrend')}</th>
               </tr>
             </thead>
             <tbody>
@@ -282,14 +293,33 @@ export function UsagePage({ day }: { day?: string | null } = {}) {
                   <td>{count(row.errorCount)}</td>
                   <td>{row.avgDurationMs == null ? '—' : Math.round(row.avgDurationMs)}</td>
                   <td>{percent(row.usageFillRate)}</td>
+                  <td>
+                    <Sparkline
+                      values={trendP50Series(trends.data, row.provider, row.model)}
+                      title={t('ops.usage.trendLatencySpark', { provider: row.provider, model: row.model })}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </section>
+
+      <UsageTrendsSection data={trends.data} />
     </div>
   );
+}
+
+/** Match per-day p50 latency series from /metrics/trends for one provider/model. */
+export function trendP50Series(
+  trends: MetricsTrendsResponse | undefined,
+  provider: string,
+  model: string,
+): Array<number | null> {
+  if (!trends) return [];
+  const trend = trends.series.find(row => row.provider === provider && row.model === model);
+  return trend ? trend.points.map(point => point.p50DurationMs) : [];
 }
 
 function MetricGroup({ title, metrics }: { title: string; metrics: Array<[string, string]> }) {

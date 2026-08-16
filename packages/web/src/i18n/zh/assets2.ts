@@ -170,4 +170,28 @@ export const zhAssets2: Assets2Keys = {
   'assets.obs.retryCount': '{count} 次重试',
   'assets.obs.errorCount': '{count} 个错误',
   'assets.obs.deniedCount': '{count} 次拒绝',
+
+  // ── Timeline（甘特 + 事件检查器）──
+  'assets.timeline.sectionAria': '执行时间线',
+  'assets.timeline.title': '时间线',
+  'assets.timeline.selectHint': '点击条块查看事件详情。',
+  'assets.timeline.noEvents': '该会话暂无事件（{sessionId}）。',
+  'assets.timeline.inspectorAria': '时间线事件检查器',
+  'assets.timeline.tool': '工具',
+  'assets.timeline.time': '时间',
+  'assets.timeline.duration': '耗时',
+  'assets.timeline.tokens': 'Token 用量',
+  'assets.timeline.parent': '父事件',
+  'assets.timeline.locate': '定位',
+
+  // ── Topology（证据图）──
+  'assets.topology.sectionAria': '执行拓扑',
+  'assets.topology.title': '拓扑',
+  'assets.topology.stats': '{nodes} 节点 · {edges} 边',
+  'assets.topology.selectPrompt': '选择一个 run 查看其证据图。',
+  'assets.topology.loadError': '拓扑不可用：{error}',
+  'assets.topology.unavailable': '该 run 尚无证据图。',
+  'assets.topology.svgAria': '执行证据图',
+  'assets.topology.collapsed': '另有 {count} 个事件/工具状态/验证记录（已折叠）',
+  'assets.topology.hint': '点击节点查看其记录。',
 } satisfies Assets2Keys;
