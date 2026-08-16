@@ -290,6 +290,11 @@ function responseFor(path: string, search: string, method: string): unknown {
   if (path === '/runs/run-work-e2e/inspect') return {
     nodes: [{ kind: 'run_spec', record: { runContract: { ...workItem('work-e2e-1', true).runContractDraft, phase: 'planning', plan: [{ id: 'step-1', title: 'Persist the structured contract' }] } } }],
   };
+  // Visualization panels (obs P0 + Phase 4): empty evidence shapes keep the
+  // run-specs / sessions detail renderable under the operator-paths mocks.
+  if (path === '/runs/run-e2e-0001/inspect') return { nodes: [], edges: [], warnings: [] };
+  if (path.endsWith('/subagents')) return { tree: [] };
+  if (path.startsWith('/metrics/activity')) return { buckets: [] };
   if (path === '/sessions') return [sessionSummary()];
   if (path === '/sessions/session-main' || path === '/sessions/session-e2e') return sessionDetail(path.slice('/sessions/'.length));
   if (path.endsWith('/trace')) return { sessionId: path.split('/')[2], messageCount: 0, turnCount: 0, messages: [] };

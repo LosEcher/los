@@ -74,6 +74,7 @@ const isolatedDatabaseTestFiles = [
   'src/memory-scope-routes.test.ts',
   'src/node-command-routes.test.ts',
   'src/provider-compat-routes.test.ts',
+  'src/routes/infrastructure/diagnostics-routes.test.ts',
   'src/routes/providers/provider-compat-execute.test.ts',
   'src/routes/auth-routes.test.ts',
   'src/routes/run-routes.test.ts',

@@ -11,6 +11,8 @@
 
 import { getDb, type DbTransactionClient } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
+import { assertSessionEventType, isKnownSessionEventType } from './event-types.js';
+import { redactPayload } from './event-redaction.js';
 
 const log = getLogger('agent');
 
@@ -182,6 +184,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_operator_control_consumed
 
 let _initialized = false;
 
+/**
+ * 同 session 时序父链：记录每个 session 最近写入的事件 id，作为下一条事件的
+ * parent_event_id（未显式指定时）。这是最小可用的 span 链（时间序树），
+ * 供 trace 聚合/瀑布展示使用；显式语义父子（如 model.turn → tool.call →
+ * tool.result）仍可显式传 parentEventId 覆盖。模块级内存态，重启后链中断
+ * （新链从头开始），符合 append-only 账本语义。
+ */
+const lastEventIdBySession = new Map<string, number>();
+
+/** 解析事件的 parent_event_id：显式指定优先，否则用同 session 最近事件。 */
+function resolveParentEventId(input: SessionEventWrite): number | null {
+  if (input.parentEventId != null) return input.parentEventId;
+  return lastEventIdBySession.get(input.sessionId) ?? null;
+}
+
+/** 推进同 session 时序链。 */
+function advanceLastEventId(sessionId: string, eventId: number): void {
+  lastEventIdBySession.set(sessionId, eventId);
+}
+
 export async function ensureSessionEventStore(): Promise<void> {
   if (_initialized) return;
   const db = getDb();
@@ -191,9 +213,18 @@ export async function ensureSessionEventStore(): Promise<void> {
 
 export async function appendSessionEvent(
   input: SessionEventWrite,
-  options: { client?: DbTransactionClient; notify?: boolean } = {},
+  options: { client?: DbTransactionClient; notify?: boolean; failOnUnknownType?: boolean } = {},
 ): Promise<SessionEventRecord> {
   await ensureSessionEventStore();
+  // 类型注册表校验：未知类型告警（默认）或抛错（fail 模式，测试/门禁用）。
+  if (options.failOnUnknownType) {
+    assertSessionEventType(input.type, { fail: true });
+  } else if (!isKnownSessionEventType(input.type)) {
+    log.warn(
+      `Unknown session event type "${input.type}" — register it in @los/agent/event-types or fix the typo`,
+    );
+  }
+  const parentEventId = resolveParentEventId(input);
   const sql = `
     INSERT INTO session_events (
       session_id, tenant_id, project_id, user_id, node_id, request_id, trace_id,
@@ -219,8 +250,8 @@ export async function appendSessionEvent(
       input.cacheKey ?? null,
       input.cacheHit ?? null,
       JSON.stringify(normalizeUsage(input.usage)),
-      JSON.stringify(redactValue(input.payload ?? {})),
-      input.parentEventId ?? null,
+      JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
+      parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
   ];
   const rows = options.client
@@ -231,6 +262,7 @@ export async function appendSessionEvent(
     throw new Error('Failed to append session event');
   }
   const record = rowToSessionEvent(row);
+  advanceLastEventId(record.sessionId, record.id);
 
   if (options.notify !== false) await notifySessionEvent(record);
   return record;
@@ -268,6 +300,10 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
 
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
+    assertSessionEventType(input.type, { fail: false });
+    // 批量内链：同 session 第一条继承时序父，其余 parent=null（批量写入的
+    // 事件 id 在 INSERT 后才可知，无法在循环内成链）；写入后统一推进。
+    const parentEventId = i === 0 ? resolveParentEventId(input) : null;
     const base = i * colCount;
     valuePlaceholders.push(`(${columns.map((_, j) => `$${base + j + 1}`).join(', ')})`);
     params.push(
@@ -286,8 +322,8 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
       input.cacheKey ?? null,
       input.cacheHit ?? null,
       JSON.stringify(normalizeUsage(input.usage)),
-      JSON.stringify(redactValue(input.payload ?? {})),
-      input.parentEventId ?? null,
+      JSON.stringify(redactPayload(input.payload ?? {}, input.type)),
+      parentEventId,
       input.visibility ?? sessionEventVisibility(input.type),
     );
   }
@@ -300,6 +336,11 @@ export async function appendSessionEvents(inputs: SessionEventWrite[]): Promise<
 
   const rows = await db.query<SessionEventRow>(sql, params);
   const records = rows.rows.map(rowToSessionEvent);
+
+  // 批量完成后统一推进各 session 时序链。
+  for (const record of records) {
+    advanceLastEventId(record.sessionId, record.id);
+  }
 
   // Batch notify: emit one aggregated notification per session
   const sessionIds = new Set(records.map(r => r.sessionId));
@@ -396,6 +437,38 @@ export async function listSessionEventsSince(
     [sessionId, sinceId, limit],
   );
   return rows.rows.map(rowToSessionEvent);
+}
+
+export async function listSessionEventsBefore(
+  sessionId: string,
+  beforeId: number,
+  limit = 200,
+  opts?: ListSessionEventsOptions,
+): Promise<SessionEventRecord[]> {
+  await ensureSessionEventStore();
+  const db = getDb();
+  const includeInternal = opts?.includeInternal !== false;
+  const rows = await db.query<SessionEventRow>(
+    includeInternal
+      ? `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1 AND id < $2
+    ORDER BY id DESC
+    LIMIT $3
+  `
+      : `
+    SELECT *
+    FROM session_events
+    WHERE session_id = $1 AND id < $2
+      AND coalesce(visibility, 'public') <> 'internal'
+    ORDER BY id DESC
+    LIMIT $3
+  `,
+    [sessionId, beforeId, limit],
+  );
+  // 分页窗口按 id 升序返回，前端直接前置拼接。
+  return rows.rows.reverse().map(rowToSessionEvent);
 }
 
 export async function getSessionObservability(sessionId: string): Promise<SessionObservability> {
@@ -580,19 +653,31 @@ function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-const SECRET_KEY_RE = /(secret|token|password|passphrase|api[-_]?key|authorization|cookie|credential|passwd|pwd)/i;
-
-function redactValue(value: unknown, key: string | null = null): unknown {
-  if (Array.isArray(value)) return value.map(item => redactValue(item));
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [childKey, childValue] of Object.entries(value)) {
-      out[childKey] = redactValue(childValue, childKey);
-    }
-    return out;
-  }
-  if (typeof value === 'string') {
-    if ((key && SECRET_KEY_RE.test(key)) || /^Bearer\s+/i.test(value)) return '[redacted]';
-  }
-  return value;
+/**
+ * Latest actually-used model per session, projected from the event ledger.
+ *
+ * Effective-model projection (display-layer fix): session metadata records the
+ * REQUESTED model (null when unspecified), while the event ledger records the
+ * model each model.response actually ran on. This returns the most recent
+ * model.response model per session so UIs can show "requested ?? effective".
+ * Pure read projection — no write path, single source of truth stays the log.
+ */
+export async function latestEffectiveModels(
+  sessionIds: readonly string[],
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (sessionIds.length === 0) return result;
+  await ensureSessionEventStore();
+  const db = getDb();
+  const rows = await db.query<{ session_id: string; model: string }>(
+    `SELECT DISTINCT ON (session_id) session_id, model
+       FROM session_events
+      WHERE type = 'model.response'
+        AND model IS NOT NULL AND model != ''
+        AND session_id = ANY($1::text[])
+      ORDER BY session_id, id DESC`,
+    [sessionIds],
+  );
+  for (const row of rows.rows) result.set(row.session_id, row.model);
+  return result;
 }

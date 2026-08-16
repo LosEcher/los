@@ -1,0 +1,44 @@
+contract: los.session-subagents
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Recursive child-agent lineage for one session: run specs whose
+  parent_run_spec_id chain descends from the session's run specs, each with
+  child.agent.* lifecycle status, token usage and cost aggregated from the
+  child session's model.response events, and duration.
+type: object
+routes:
+  - method: GET
+    path: /sessions/:id/subagents
+    purpose: Return the recursive subagent tree rooted at the session's run specs.
+    query:
+      maxDepth: optional recursion depth cap; default 4; max 8
+    response: SessionSubagents
+schemas:
+  SessionSubagents:
+    required: [sessionId, roots, tree]
+    roots:
+      itemFields: [runSpecId, status]
+    tree:
+      itemFields:
+        - runSpecId
+        - sessionId
+        - status
+        - eventStatus
+        - provider
+        - model
+        - promptPreview
+        - createdAt
+        - updatedAt
+        - durationMs
+        - estimatedCostUsd
+        - usage
+        - children
+    usage:
+      fields:
+        - promptTokens
+        - completionTokens
+        - cacheHitTokens
+        - cacheMissTokens
+        - totalTokens

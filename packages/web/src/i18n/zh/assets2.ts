@@ -132,6 +132,12 @@ export const zhAssets2: Assets2Keys = {
   'assets.sessions.relatedTodos': '相关待办',
   'assets.sessions.noLinkedTodos': '未找到关联待办。',
   'assets.sessions.linked': '已关联',
+  'assets.sessions.eventTimeline': '事件时间线',
+  'assets.sessions.live': '实时',
+  'assets.sessions.reconnecting': '重连中',
+  'assets.sessions.polling': '轮询',
+  'assets.sessions.loadEarlier': '加载更早',
+  'assets.sessions.loadingEarlier': '正在加载更早…',
 
   // ── Execution observability (Phase 1 real-run projection) ──
   'assets.obs.sectionAria': '执行可观测投影',
@@ -164,4 +170,38 @@ export const zhAssets2: Assets2Keys = {
   'assets.obs.retryCount': '{count} 次重试',
   'assets.obs.errorCount': '{count} 个错误',
   'assets.obs.deniedCount': '{count} 次拒绝',
+
+  // ── Timeline（甘特 + 事件检查器）──
+  'assets.timeline.sectionAria': '执行时间线',
+  'assets.timeline.title': '时间线',
+  'assets.timeline.selectHint': '点击条块查看事件详情。',
+  'assets.timeline.noEvents': '该会话暂无事件（{sessionId}）。',
+  'assets.timeline.inspectorAria': '时间线事件检查器',
+  'assets.timeline.tool': '工具',
+  'assets.timeline.time': '时间',
+  'assets.timeline.duration': '耗时',
+  'assets.timeline.tokens': 'Token 用量',
+  'assets.timeline.parent': '父事件',
+  'assets.timeline.locate': '定位',
+
+  // ── Subagent tree（Phase 4 血缘）──
+  'assets.subagents.sectionAria': '子 agent 血缘',
+  'assets.subagents.title': '子代理',
+  'assets.subagents.count': '{count} 个节点',
+  'assets.subagents.loadError': '子代理不可用：{error}',
+  'assets.subagents.empty': '该会话没有 run spec。',
+  'assets.subagents.noChildren': '该会话下没有子 agent。',
+  'assets.subagents.expand': '展开',
+  'assets.subagents.collapse': '折叠',
+
+  // ── Topology（证据图）──
+  'assets.topology.sectionAria': '执行拓扑',
+  'assets.topology.title': '拓扑',
+  'assets.topology.stats': '{nodes} 节点 · {edges} 边',
+  'assets.topology.selectPrompt': '选择一个 run 查看其证据图。',
+  'assets.topology.loadError': '拓扑不可用：{error}',
+  'assets.topology.unavailable': '该 run 尚无证据图。',
+  'assets.topology.svgAria': '执行证据图',
+  'assets.topology.collapsed': '另有 {count} 个事件/工具状态/验证记录（已折叠）',
+  'assets.topology.hint': '点击节点查看其记录。',
 } satisfies Assets2Keys;

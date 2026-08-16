@@ -2,6 +2,8 @@
  * Usage + daily digest + runtime health routes — L1 runtime evidence only.
  *
  * GET /usage/summary
+ * GET /metrics/trends        — per-day provider/model series + window compare
+ * GET /metrics/activity      — concurrent session buckets + drill-down
  * GET /ops/daily-digest
  * POST /ops/daily-digest/push  — emit ops.daily_digest for channel bots
  * GET /ops/runtime-health
@@ -14,10 +16,14 @@ import {
   type DailyDigestQuery,
 } from '@los/agent/daily-digest';
 import { getRuntimeHealth } from '@los/agent/runtime-health';
+import { getMetricsActivity, type ActivityQuery } from '@los/agent/metrics-activity';
+import { getMetricsTrends, type TrendsQuery } from '@los/agent/metrics-trends';
 import { getUsageSummary, type UsageSummaryQuery } from '@los/agent/usage-summary';
 
 type UsageRouteDependencies = {
   getUsageSummary: typeof getUsageSummary;
+  getMetricsTrends: typeof getMetricsTrends;
+  getMetricsActivity: typeof getMetricsActivity;
   getDailyDigest: typeof getDailyDigest;
   publishDailyDigest: typeof publishDailyDigest;
   getRuntimeHealth: typeof getRuntimeHealth;
@@ -25,6 +31,8 @@ type UsageRouteDependencies = {
 
 const defaultDependencies: UsageRouteDependencies = {
   getUsageSummary,
+  getMetricsTrends,
+  getMetricsActivity,
   getDailyDigest,
   publishDailyDigest,
   getRuntimeHealth,
@@ -49,6 +57,38 @@ export function registerUsageRoutes(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(400).send({ error: 'invalid_usage_query', message });
+    }
+  });
+
+  app.get('/metrics/trends', async (req, reply) => {
+    const query = req.query as Record<string, unknown>;
+    const input: TrendsQuery = {
+      from: optionalString(query.from),
+      to: optionalString(query.to),
+      provider: optionalString(query.provider),
+      model: optionalString(query.model),
+    };
+    try {
+      return await dependencies.getMetricsTrends(input);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(400).send({ error: 'invalid_trends_query', message });
+    }
+  });
+
+  app.get('/metrics/activity', async (req, reply) => {
+    const query = req.query as Record<string, unknown>;
+    const input: ActivityQuery = {
+      from: optionalString(query.from),
+      to: optionalString(query.to),
+      bucketMinutes: query.bucketMinutes !== undefined ? Number(query.bucketMinutes) : undefined,
+      bucket: optionalString(query.bucket),
+    };
+    try {
+      return await dependencies.getMetricsActivity(input);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(400).send({ error: 'invalid_activity_query', message });
     }
   });
 
