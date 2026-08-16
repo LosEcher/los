@@ -2,11 +2,45 @@
  * Markdown renderer for assistant messages.
  * Uses react-markdown + rehype-highlight for syntax-highlighted code blocks.
  */
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
+import { Check, Copy } from 'lucide-react';
+import { useI18n } from './i18n';
 
-// ── Highlight.js theme ─────────────────────────────────
+// ── Code block with copy button (Wave 3) ────────────────
+
+function CodeBlock({ language, code }: { language: string; code: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard?.writeText(code).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    }).catch(() => { /* non-fatal */ });
+  };
+  return (
+    <div className="md-code-block">
+      <div className="md-code-lang">
+        <span>{language}</span>
+        <button
+          type="button"
+          className="md-code-copy"
+          onClick={copy}
+          aria-label={copied ? t('chat.codeCopied') : t('chat.codeCopy')}
+          title={copied ? t('chat.codeCopied') : t('chat.codeCopy')}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? t('chat.codeCopied') : t('chat.codeCopy')}
+        </button>
+      </div>
+      <pre className={`hljs language-${language}`}>
+        <code className={`language-${language}`}>{code}</code>
+      </pre>
+    </div>
+  );
+}
 
 // ── Custom components ──────────────────────────────────
 
@@ -18,16 +52,7 @@ const components: Components = {
 
     // Code block (has language-* class)
     if (match) {
-      return (
-        <div className="md-code-block">
-          <div className="md-code-lang">{match[1]}</div>
-          <pre className={`hljs language-${match[1]}`}>
-            <code className={className} {...rest}>
-              {text}
-            </code>
-          </pre>
-        </div>
-      );
+      return <CodeBlock language={match[1]} code={text} />;
     }
 
     // Inline code
