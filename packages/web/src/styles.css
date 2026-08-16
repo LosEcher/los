@@ -1781,6 +1781,7 @@ select:focus {
 
 .primary-btn,
 .btn,
+.btn-secondary,
 .ghost-btn,
 .tiny-btn,
 .icon-btn {
@@ -1826,6 +1827,7 @@ select:focus {
   background: var(--danger);
 }
 
+.btn-secondary,
 .ghost-btn,
 .tiny-btn,
 .icon-btn {
