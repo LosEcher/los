@@ -19,7 +19,7 @@ export async function runDeadLetterGovernance(options: {
   const limit = normalizeLimit(options.limit);
   const summary = await summarizeDeadLetterEvents();
   const candidates = (await listDeadLetterEvents({ reason: 'lease_expired', acknowledged: false, limit }))
-    .filter((event) => !event.requeuedTaskRunId);
+    .filter((event) => !event.requeuedTaskRunId && event.runSpecId);
   const candidateIds = candidates.map((event) => event.id);
   const requeuedTaskRunIds: string[] = [];
   const skipped: Array<{ eventId: string; reason: string }> = [];
