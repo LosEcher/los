@@ -164,6 +164,60 @@ Next work items:
 Turn unresolved drift into a concrete doc, ADR, test, or todo item. Do not leave
 it as an unowned observation.
 
+## Execution-Record Driven Review (weekly)
+
+Question: what do the persisted execution records and telemetry say about
+provider health, scheduling, node capacity, and run quality this week?
+
+The daily governance jobs already audit these surfaces automatically
+(adversarial_review, performance_audit, hotspot, fleet alerts in the daily
+digest). The weekly review synthesizes them into an operator-facing judgment
+instead of re-running the same probes. Evidence surfaces and exact SQL are in
+`docs/operations/2026-08-16-execution-record-weekly-review.md`.
+
+Minimum pass (read-only, ~10 minutes):
+
+```bash
+# 1. Governance job results — any escalation / paused / circuit state?
+export $(grep -E '^(DATABASE_URL|TEST_DATABASE_URL)=' .env | head -2)
+psql "$DATABASE_URL" -c \
+  "select job_type, cadence, status, circuit_state, consecutive_failures, last_run_at \
+   from governance_jobs order by job_type"
+
+# 2. Provider call telemetry — zero-call providers, latency outliers, error spikes
+psql "$DATABASE_URL" -c \
+  "select provider, count(*), count(*) filter (where error is not null) as errs \
+   from provider_call_telemetry where created_at > now() - interval '7 days' \
+   group by provider order by 2 desc"
+
+# 3. Dead-letter — new unrecoverable events since last review
+psql "$DATABASE_URL" -c \
+  "select reason, count(*) from dead_letter_events \
+   where created_at > now() - interval '7 days' group by reason"
+
+# 4. Fleet — node status, retired nodes, resource findings from the digest
+psql "$DATABASE_URL" -c \
+  "select node_id, node_kind, status, updated_at::date \
+   from executor_nodes order by status, node_id"
+```
+
+Then answer three questions and convert each answer into an owned item
+(doc / ADR / test / todo / provider-gate change):
+
+1. **Provider**: is every discovered provider either used or retired from the
+   discovery list? (2026-08-15 finding: packycode/custom/deepseek-anthropic
+   were "ready but unused" — the finding's 7-day window itself was unreliable,
+   so re-check with a wider window before acting.)
+2. **Scheduling**: are there stuck approvals, lease-expired retries, or
+   circuit-state changes that the daily jobs merely reported?
+3. **Node capacity**: do light nodes (<=2GB RAM, e.g. oracle-executor) show
+   absolute-memory warnings (`memory_available_abs`)? Is any node retired and
+   should its registry row be removed?
+
+Closeout: the review either has no action with evidence, creates an owning
+follow-up, or names the blocked verification surface. Record the review in
+`docs/operations/` with the same evidence markers as other dated smokes.
+
 ## Monthly Agent-Use Governance Review
 
 Question: how should `los` improve the user's agent workflow next?
