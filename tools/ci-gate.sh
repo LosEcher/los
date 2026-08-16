@@ -46,10 +46,20 @@ GATE_FAILURES=0
 START_TIME=$(date +%s)
 TEST_OUTPUT=""
 
+# Phase-timing capture for CI observability: every phase start/end is appended
+# to a temp file (bash 3.2-safe, no associative arrays), then gate_summary()
+# folds it into a JSON file (GATE_SUMMARY_FILE, default /tmp/los-gate-summary.json).
+# Workflow steps print this file so step-level timings survive the Forgejo
+# job-log API staleness (2026-08-09 PR #256) without relying on log reads.
+SUMMARY_TMP="${TMPDIR:-/tmp}/los-gate-phases.$$"
+SUMMARY_FILE="${GATE_SUMMARY_FILE:-/tmp/los-gate-summary.json}"
+rm -f "$SUMMARY_TMP" "$SUMMARY_FILE"
+
 cleanup_test_output() {
   if [ -n "$TEST_OUTPUT" ]; then
     rm -f -- "$TEST_OUTPUT"
   fi
+  rm -f -- "$SUMMARY_TMP"
 }
 
 trap cleanup_test_output EXIT
@@ -59,14 +69,17 @@ trap cleanup_test_output EXIT
 phase_start() {
   printf '\n%b━━━ Phase: %s ━━━%b\n' "$CYAN" "$1" "$NC"
   printf '    start: %s\n' "$(date '+%H:%M:%S')"
+  printf 'START\t%s\t%s\n' "$1" "$(date +%s)" >> "$SUMMARY_TMP"
 }
 
 phase_ok() {
   printf '    %b✓ %s%b (%s)\n' "$GREEN" "$1" "$NC" "$(date '+%H:%M:%S')"
+  printf 'END\t%s\t%s\tok\n' "$1" "$(date +%s)" >> "$SUMMARY_TMP"
 }
 
 phase_fail() {
   printf '    %b✗ %s%b (%s)\n' "$RED" "$1" "$NC" "$(date '+%H:%M:%S')"
+  printf 'END\t%s\t%s\tfail\n' "$1" "$(date +%s)" >> "$SUMMARY_TMP"
   GATE_FAILURES=$((GATE_FAILURES + 1))
 }
 
@@ -78,9 +91,56 @@ gate_summary() {
   printf '    elapsed:     %ds\n' "$elapsed"
   if [ "$GATE_FAILURES" -gt 0 ]; then
     printf '\n%bGATE FAILED — %d phase(s) failed%b\n' "$RED" "$GATE_FAILURES" "$NC"
+    write_gate_summary "$elapsed"
     exit 1
   fi
   printf '\n%bGATE PASSED%b\n' "$GREEN" "$NC"
+  write_gate_summary "$elapsed"
+}
+
+# Fold START/END phase records into a JSON summary file for CI step reporting.
+write_gate_summary() {
+  local elapsed="$1"
+  if [ ! -f "$SUMMARY_TMP" ]; then
+    return 0
+  fi
+  python3 - "$SUMMARY_TMP" "$SUMMARY_FILE" "$elapsed" "$PHASES_RUN" "$GATE_FAILURES" "$START_TIME" <<'PY'
+import json, os, sys
+
+tmp, out, elapsed, phases_run, failures, start_epoch = sys.argv[1:7]
+phases = []
+with open(tmp, encoding="utf-8") as fh:
+    for line in fh:
+        parts = line.rstrip("\n").split("\t")
+        if parts[0] == "START":
+            phases.append({"name": parts[1], "start_epoch": int(parts[2])})
+        elif parts[0] == "END":
+            # Close the last unclosed phase. phase_ok/phase_fail pass short
+            # names ("typecheck") while phase_start passes full titles
+            # ("Typecheck (turbo check)"), so match by order, not by name.
+            for p in reversed(phases):
+                if "end_epoch" not in p:
+                    p["end_epoch"] = int(parts[2])
+                    p["ok"] = parts[3] == "ok"
+                    p["elapsed_sec"] = p["end_epoch"] - p["start_epoch"]
+                    break
+for p in phases:
+    p.setdefault("elapsed_sec", None)
+    p.setdefault("ok", None)
+summary = {
+    "gate": "los ci-gate.sh",
+    "started_at_epoch": int(start_epoch),
+    "elapsed_sec": int(elapsed),
+    "phases_run": int(phases_run),
+    "failures": int(failures),
+    "phases": phases,
+}
+os.makedirs(os.path.dirname(out), exist_ok=True)
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=1)
+print(f"    summary: {out}")
+PY
+  rm -f "$SUMMARY_TMP"
 }
 
 PHASES_RUN=0

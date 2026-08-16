@@ -60,6 +60,22 @@ jobs:
       - name: Fast gate (no DB, no tests)
         run: pnpm run gate -- --no-tests
 
+      - name: Report gate phase summary
+        if: always()
+        run: |
+          if [ -f /tmp/los-gate-summary.json ]; then
+            cat /tmp/los-gate-summary.json
+            {
+              echo '### gate-fast phase summary'
+              echo
+              echo '```json'
+              cat /tmp/los-gate-summary.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "no /tmp/los-gate-summary.json produced"
+          fi
+
   gate-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
