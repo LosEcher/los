@@ -128,3 +128,32 @@ pre-1.0 破坏性变更风险）。
 - 原生替代草案：`tools/windows-sandbox/los-windows-sandbox.cs`（零提权 WRITE_RESTRICTED + 能力 SID 写白名单 + Job Object，csc 内置于 .NET Framework 免工具链）。**状态=DRAFT，未部署**：WRITE_RESTRICTED 交会语义需在真实节点做验证电池（workspace 可写 / 系统目录禁写 / 输出捕获 / 退出码）后才可上线。
 
 ### ③ 文档 PR —— 待推送
+
+## 2026-08-17 晚更新：验证B闭环（限制SID机制被环境级阻断）
+
+spawn-probe 隔离矩阵（14 种限制身份 × flags、桌面授权、TMP 覆盖）证明：本机任何带限制 SID 的
+token 都无法孵化子进程（0xC0000022/0xC0000142），未限制的 duplicate token 正常（exit 0）。
+system32/cmd.exe 无 Everyone ACE 解释了 {World,capSid} 读 DLL 失败；schtasks /rl highest 仍为
+deny-only Administrators（无提权），net user /add 失败（无专用沙箱用户）。RunSeal 同机制失败
+交叉印证。**决策：Win run_shell 保持 paused（fail-closed），网络探针改走固定 hash-pinned 只读
+PS 快照脚本 + Job Object 的受监督执行；RunSeal 本节点放弃；C# 沙箱保留为交互式桌面参考实现。**
+详见 2026-08-17-windows-sandbox-research.md「验证B」节。
+
+## 2026-08-17 深夜更新：hash-pinned 只读探针 runner 已落地并双节点验证
+
+实现（los 仓库，change szummzxv「feat(agent): hash-pinned read-only node probe
+runner (run_node_probe)」）：
+- tools/node-probes/los-probe-net.ps1（Win）/ los-probe-net.sh（Linux）：只读网络
+  探针（TCP/ping/HTTP + 本地服务进程），单条 JSON 输出，零磁盘写。
+- tools/windows-sandbox/los-probe-runner.cs → los-probe-runner.exe（Win 监督器）：
+  SHA-256 pin 校验（嵌入式 DefaultPins + 可选 --pins json 覆盖）+ kill-on-close
+  Job Object + 超时 + 输出捕获；未 pin/篡改一律拒绝（exit 3，fail-closed）。
+- tools/node-probes/los-probe-run.sh（Linux 监督器，同语义，sha256sum 校验）。
+- los 工具 run_node_probe（registry，shell toolset + READ_ONLY_BUILTIN_TOOLS，
+  L1/只读/免审批），Win→exe、Linux→sh；LOS_PROBE_DIR 可覆盖探针目录。
+
+验证（两端四步全过）：①pin 正确→运行并返回探针 JSON（Win 1.1.1.1:443 超时
+/8.8.8.8:53 与网关 OK/sing-box+vivaldi 在跑；node34 同样 1.1.1.1:443 失败）
+②未 pin 脚本→拒绝 ③同路径篡改→hash mismatch 拒绝（报 expected/actual）
+④还原→恢复运行。部署：Win C:\los\bin\probe\（pin 内嵌 8feb80b3…）；
+node34 /opt/los/bin/probe/（pins.sha256 0626894f…）。
