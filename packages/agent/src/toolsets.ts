@@ -52,6 +52,7 @@ export const TOOL_NAMES = {
   stop_job: 'stop_job',
   run_runtime_task: 'run_runtime_task',
   list_jobs: 'list_jobs',
+  run_node_probe: 'run_node_probe',
 
   // Web
   web_search: 'web_search',
@@ -135,6 +136,7 @@ const TOOLSETS: Record<string, ToolsetDefinition> = {
     tools: [
       TOOL_NAMES.run_shell, TOOL_NAMES.run_background,
       TOOL_NAMES.job_output, TOOL_NAMES.stop_job, TOOL_NAMES.list_jobs,
+      TOOL_NAMES.run_node_probe,
     ],
     includes: [],
   },
