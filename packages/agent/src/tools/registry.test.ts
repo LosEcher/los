@@ -27,7 +27,7 @@ test('read-only tool mode excludes write and shell tools', async () => {
 
     assert.deepEqual(
       registry.list().sort(),
-      ['directory_tree', 'find_in_code', 'get_file_info', 'get_symbols', 'glob', 'list_directory', 'read_file', 'search_content', 'search_files', 'todo_list'],
+      ['directory_tree', 'find_in_code', 'get_file_info', 'get_symbols', 'glob', 'list_directory', 'read_file', 'run_node_probe', 'search_content', 'search_files', 'todo_list'],
     );
 
     const readResult = await registry.execute({
@@ -668,4 +668,29 @@ test('tool retry does not replay non-idempotent capabilities', async () => {
   assert.equal(result.attempts, 1);
   assert.equal(result.retried, false);
   assert.deepEqual(result.retryErrors, ['write failed']);
+});
+
+test('run_node_probe is a read-only, sandbox-independent diagnostic', async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'los-agent-probe-'));
+  try {
+    const registry = createToolRegistry();
+    await registerBuiltinTools(registry, { workspaceRoot });
+
+    const cap = registry.getCapability('run_node_probe');
+    assert.ok(cap, 'run_node_probe registered');
+    assert.equal(cap.riskLevel, 'L1');
+    assert.equal(cap.sandboxRequired, false);
+    assert.equal(cap.sideEffect, false);
+    assert.equal(cap.needsApproval, false);
+    assert.equal(cap.idempotent, true);
+
+    // Unknown probe names are rejected without touching the node.
+    const bad = await registry.execute({
+      name: 'run_node_probe',
+      arguments: { probe: 'nope' },
+    });
+    assert.match(String(bad.error ?? ''), /unknown probe/);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 });

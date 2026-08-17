@@ -19,6 +19,7 @@ import { registerPatchTools } from '../builtin/patch-tools.js';
 import { registerTodoTools } from '../builtin/todo-tools.js';
 import { registerSqlQueryTool } from '../builtin/sql-query-tool.js';
 import { runSandboxedShell } from '../external/shell-sandbox.js';
+import { runProbeProcess, probeResult } from '../external/node-probe.js';
 import { runExternalRuntime } from '../../runtime-task.js';
 import { randomUUID } from 'node:crypto';
 import {
@@ -292,6 +293,68 @@ export async function registerBuiltinTools(
     tags: ['shell'],
   });
 
+  // run_node_probe — hash-pinned read-only network probe (executor nodes).
+  // The sandbox replacement for Windows nodes where run_shell is fail-closed
+  // (restricting-SID sandboxing is blocked at the mechanism level in the los
+  // service-session environment): only probe scripts whose SHA-256 matches a
+  // pinned value are executed, read-only, under a kill-on-close Job Object.
+  // Isolation guarantee = pinned read-only script, not OS token isolation.
+  // See tools/node-probes/ (los-probe-net.ps1/.sh) and
+  // tools/windows-sandbox/los-probe-runner.cs (Win supervisor).
+  registry.register('run_node_probe', async (args) => {
+    const probe = String(args.probe ?? 'net');
+    if (probe !== 'net') {
+      return { content: '', error: `unknown probe '${probe}' (supported: net)` };
+    }
+    const requested = Number(args.timeoutSec ?? 30);
+    const timeoutSec = Math.max(5, Math.min(Number.isFinite(requested) ? requested : 30, 120));
+    const probeDir = process.env.LOS_PROBE_DIR
+      ?? (process.platform === 'win32' ? 'C:\\los\\bin\\probe' : '/opt/los/bin/probe');
+    try {
+      if (process.platform === 'win32') {
+        const runner = join(probeDir, 'los-probe-runner.exe');
+        const script = join(probeDir, 'los-probe-net.ps1');
+        const raw = await runProbeProcess(runner, ['--script', script, '--timeout-ms', String(timeoutSec * 1000)]);
+        return probeResult(raw);
+      }
+      if (process.platform === 'linux') {
+        const runner = join(probeDir, 'los-probe-run.sh');
+        const script = join(probeDir, 'los-probe-net.sh');
+        const raw = await runProbeProcess('/bin/bash', [runner, script, String(timeoutSec)]);
+        return probeResult(raw);
+      }
+      return { content: '', error: `run_node_probe runs on executor nodes only (win32/linux); current platform ${process.platform}` };
+    } catch (error) {
+      return { content: '', error: `run_node_probe failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }, {
+    type: 'function',
+    function: {
+      name: 'run_node_probe',
+      description: 'Run a pinned read-only network probe on this executor node. The sandbox replacement for nodes where run_shell is fail-closed: only probe scripts whose SHA-256 matches a pin are executed (anything else is denied), and probes are read-only by construction. Currently supports probe="net": TCP connect / ping / HTTP reachability plus local service presence, as JSON. Use for connectivity, proxy, and service-health diagnostics on executor nodes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          probe: { type: 'string', description: 'Probe name (default "net")' },
+          timeoutSec: { type: 'number', description: 'Timeout in seconds (default 30, max 120)' },
+        },
+        required: [],
+      },
+    },
+  }, {
+    riskLevel: 'L1',
+    permissions: ['workspace:read'],
+    timeoutMs: 130_000,
+    retryable: true,
+    idempotent: true,
+    costLevel: 'low',
+    sideEffect: false,
+    sandboxRequired: false,
+    needsApproval: false,
+    parallelizable: true,
+    tags: ['node', 'probe', 'diagnostics'],
+  });
+
   // run_runtime_task — delegate to an external agent runtime.
   // Runs in the gateway process (spawns the CLI directly); on remote executor
   // nodes the CLI is absent and the tool reports a clear error. The CLI
@@ -481,3 +544,4 @@ export async function registerBuiltinTools(
 
   return mcpCleanup ?? (async () => {});
 }
+

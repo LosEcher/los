@@ -124,6 +124,9 @@ export const READ_ONLY_BUILTIN_TOOLS = [
   'query_agent',
   'kill_agent',
   'list_agents',
+  // run_node_probe is a pinned read-only diagnostic (network/service reads
+  // only, no writes, no arbitrary execution) — safe in read-only mode.
+  'run_node_probe',
 ] as const;
 
 export function normalizeCapability(name: string, capability: Partial<ToolCapability> = {}): ToolCapability {
