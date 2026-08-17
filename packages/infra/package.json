@@ -12,7 +12,8 @@
     "./procedural-candidates-ddl": "./src/procedural-candidates-ddl.ts",
     "./metrics": "./src/metrics.ts",
     "./provider-defaults": "./src/provider-defaults.ts",
-    "./provider-accounts": "./src/provider-accounts.ts"
+    "./provider-accounts": "./src/provider-accounts.ts",
+    "./zod": "./src/zod.ts"
   },
   "scripts": {
     "build": "tsc",

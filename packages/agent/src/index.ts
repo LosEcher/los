@@ -122,6 +122,9 @@ export {
 } from './scheduled-work/index.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
 export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
+export { ensureFleetRepairConfigStore } from './fleet-repair-config.js';
+export { ensureFleetAlertConfigStore } from './fleet-alert-config.js';
+export { ensureNodeRecoveryPolicyStore } from './node-recovery-policy.js';
 export { ensureSkillStore, upsertSkill, loadSkill, listSkills, deleteSkill, incrementSkillUsage, skillDirForScope, syncSkillsToDir, loadSkillsFromDir, type SkillRecord, type SkillRunMode, type SkillScope, type SkillLayer, type UpsertSkillInput } from './skills.js';
 export {
   selectSkillsForRun,
