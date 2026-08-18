@@ -76,6 +76,11 @@ export function getCachedHealthScore(provider: string): HealthScore | undefined 
   return healthScoreCache.get(provider);
 }
 
+/** Read all cached health scores (for dashboards / health projection endpoints). */
+export function getAllCachedHealthScores(): HealthScore[] {
+  return Array.from(healthScoreCache.values());
+}
+
 /** Test-only: clear cached scores. */
 export function _resetHealthScoreCacheForTests(): void {
   healthScoreCache.clear();

@@ -30,6 +30,51 @@ test('/providers/models exposes grouped providers and flat model records', async
   }
 });
 
+// ── Provider health projection ─────────────────────────
+
+test('/providers/health projects cached health scores (ADR 0031 snapshot)', async () => {
+  await loadConfig();
+  const app = Fastify({ logger: false });
+  registerProviderRoutes(app);
+
+  const health = await import('@los/agent/providers/health');
+
+  try {
+    health._resetHealthScoreCacheForTests();
+    health.cacheHealthScore({
+      provider: 'xai',
+      score: 0.4,
+      tier: 'unhealthy',
+      components: {
+        rttScore: 0.4,
+        successRate: 1,
+        availabilityScore: 0,
+      },
+      details: {
+        rttMs: 3000,
+        probeHealthy: false,
+        lastProbedAt: new Date().toISOString(),
+        hasProbe: true,
+        hasOutcomes: false,
+      },
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/providers/health' });
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(typeof body.probedAt, 'string');
+    assert.ok(Array.isArray(body.providers));
+    const xai = body.providers.find((p: { provider: string }) => p.provider === 'xai');
+    assert.ok(xai, 'xai score should be projected');
+    assert.equal(xai.score, 0.4);
+    assert.equal(xai.tier, 'unhealthy');
+    assert.equal(xai.details.probeHealthy, false);
+  } finally {
+    health._resetHealthScoreCacheForTests();
+    await app.close();
+  }
+});
+
 // ── Provider CRUD lifecycle tests ───────────────────────
 
 test('POST /providers creates a new provider', async () => {

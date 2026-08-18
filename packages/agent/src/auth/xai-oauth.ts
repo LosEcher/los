@@ -205,8 +205,12 @@ export async function refreshXaiOAuthToken(
     });
     clearTimeout(timer);
   } catch (err: any) {
+    // Network failures (proxy node down, timeout) surface as bare "fetch
+    // failed" today — attach the token endpoint and the effective proxy so
+    // operators can tell a Surge/proxy incident from a credential problem.
+    const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '(direct)';
     throw new XaiOAuthError(
-      `xAI token refresh failed: ${err.message}`,
+      `xAI token refresh failed: ${err.message} (endpoint=${endpoint}, proxy=${proxy})`,
       'xai_refresh_failed',
     );
   }
@@ -270,8 +274,9 @@ async function fetchOidcDiscovery(timeoutSeconds: number): Promise<{ token_endpo
     });
     clearTimeout(timer);
   } catch (err: any) {
+    const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '(direct)';
     throw new XaiOAuthError(
-      `xAI OIDC discovery failed: ${err.message}`,
+      `xAI OIDC discovery failed: ${err.message} (endpoint=${XAI_OAUTH_DISCOVERY_URL}, proxy=${proxy})`,
       'xai_discovery_failed',
     );
   }
