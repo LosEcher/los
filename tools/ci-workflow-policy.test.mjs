@@ -36,3 +36,36 @@ test('Forgejo gate-fast enables turbo typecheck concurrency', async () => {
   const forgejo = await loadWorkflow('../.forgejo/workflows/ci.yml');
   assert.equal(String(forgejo.jobs['gate-fast'].env?.TURBO_CONCURRENCY ?? ''), '4');
 });
+
+const SKIP_IF = "steps.path-gate.outputs.skip_heavy != 'true'";
+
+function laterHeavySteps(job) {
+  const idx = job.steps.findIndex((step) => step.id === 'path-gate');
+  assert.notEqual(idx, -1, 'job must have id: path-gate');
+  return {
+    pathGate: job.steps[idx],
+    later: job.steps.slice(idx + 1),
+  };
+}
+
+test('Forgejo heavy jobs skip via path-gate output, not step exit 0', async () => {
+  const forgejo = await loadWorkflow('../.forgejo/workflows/ci.yml');
+
+  for (const name of ['gate-test', 'gate-web-e2e']) {
+    const { pathGate, later } = laterHeavySteps(forgejo.jobs[name]);
+    const script = String(pathGate.run);
+    assert.match(script, /tools\/path-gate\.mjs/, `${name} must call the shared classifier`);
+    assert.doesNotMatch(script, /grep\s+-qvE/, `${name} must not inline a skip regex`);
+    assert.doesNotMatch(script, /exit 0/, `${name} must not use exit 0 as skip`);
+
+    const guarded = later.filter((step) => step.if !== 'always()' && step.if !== 'failure()');
+    assert.ok(guarded.length > 0, `${name} must have install/test steps after path-gate`);
+    for (const step of guarded) {
+      assert.equal(
+        step.if,
+        SKIP_IF,
+        `${name} step "${step.name}" must be gated by skip_heavy`,
+      );
+    }
+  }
+});

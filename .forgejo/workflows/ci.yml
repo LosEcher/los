@@ -140,26 +140,21 @@ jobs:
           git checkout --detach FETCH_HEAD
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
 
-      # Path gate: PRs touching only tools/, docs/, .forgejo/ (CI config) or
-      # root metadata cannot affect package behavior, so skip the heavy suite
-      # and web e2e here. gate-fast + gate-drift always run, so structural
-      # regressions in tools/ are still caught. Keeps tools-only PRs (deploy
-      # scripts, audit tooling) at ~2-3 min instead of ~15.
-      - name: Path gate (tools/docs-only PRs skip heavy suite)
+      # Path gate: classify via tools/path-gate.mjs (shared with gate-web-e2e).
+      # skip_heavy only skips later steps through `if:`; do not `exit 0` here.
+      # Record: docs/operations/2026-08-18-path-gate-skip-failure.md
+      - id: path-gate
+        name: Path gate (tools/docs-only PRs skip heavy suite)
         run: |
           set -euo pipefail
           auth_url="${FORGEJO_SERVER_URL#http://}"
           git remote set-url origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
           git fetch --depth=1 origin main
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
-          if git diff --name-only FETCH_HEAD HEAD | grep -qvE '^(tools/|docs/|\.forgejo/|README\.md$|LICENSE$|\.gitignore$|\.editorconfig$|\.env\.example$|pnpm-workspace\.yaml$)'; then
-            echo "PATH-GATE: non-safe paths detected — running full suite"
-          else
-            echo "PATH-GATE: only tools/docs/CI-metadata changed — skipping heavy suite"
-            exit 0
-          fi
+          node tools/path-gate.mjs --git --base FETCH_HEAD --head HEAD
 
       - name: Prepare pnpm
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         run: |
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
@@ -176,12 +171,15 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Verify jj runtime
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         run: jj --version
 
       - name: Install dependencies
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Test agent (3 groups parallel)
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         id: test-agent
         run: |
           set -o pipefail
@@ -202,6 +200,7 @@ jobs:
         timeout-minutes: 12
 
       - name: Test other packages
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         id: test-packages
         run: |
           set -o pipefail
@@ -213,6 +212,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Enforce critical module coverage
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         id: test-coverage
         run: |
           CVG_T0=$(date +%s)
@@ -267,26 +267,20 @@ jobs:
           git checkout --detach FETCH_HEAD
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
 
-      # Path gate: PRs touching only tools/, docs/, .forgejo/ (CI config) or
-      # root metadata cannot affect package behavior, so skip the heavy suite
-      # and web e2e here. gate-fast + gate-drift always run, so structural
-      # regressions in tools/ are still caught. Keeps tools-only PRs (deploy
-      # scripts, audit tooling) at ~2-3 min instead of ~15.
-      - name: Path gate (tools/docs-only PRs skip heavy suite)
+      # Path gate: same classifier as gate-test. Skip is step `if:`, not exit 0.
+      # Record: docs/operations/2026-08-18-path-gate-skip-failure.md
+      - id: path-gate
+        name: Path gate (tools/docs-only PRs skip heavy suite)
         run: |
           set -euo pipefail
           auth_url="${FORGEJO_SERVER_URL#http://}"
           git remote set-url origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
           git fetch --depth=1 origin main
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
-          if git diff --name-only FETCH_HEAD HEAD | grep -qvE '^(tools/|docs/|\.forgejo/|README\.md|LICENSE|\.gitignore|\.editorconfig|\.env\.example|pnpm-workspace\.yaml)$'; then
-            echo "PATH-GATE: non-safe paths detected — running full suite"
-          else
-            echo "PATH-GATE: only tools/docs/CI-metadata changed — skipping heavy suite"
-            exit 0
-          fi
+          node tools/path-gate.mjs --git --base FETCH_HEAD --head HEAD
 
       - name: Prepare pnpm
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         run: |
           set -euo pipefail
           node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Forgejo runner requires Node 22+')"
@@ -303,9 +297,11 @@ jobs:
           pnpm config set store-dir ~/.local/share/pnpm/store
 
       - name: Install dependencies
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Test Web operator paths
+        if: steps.path-gate.outputs.skip_heavy != 'true'
         id: web-e2e
         run: |
           set -o pipefail

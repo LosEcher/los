@@ -225,7 +225,7 @@ PHASES_RUN=$((PHASES_RUN + 1))
 
 # ── Phase 3b: CI workflow policy ───────────────────────────
 
-phase_start "CI workflow policy (job needs / concurrency invariants)"
+phase_start "CI workflow policy (job needs / concurrency / path-gate skip)"
 if ./tools/check-ci-workflow-policy.sh; then
   phase_ok "ci-workflow-policy"
 else
