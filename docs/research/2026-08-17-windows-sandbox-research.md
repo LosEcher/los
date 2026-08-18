@@ -192,3 +192,50 @@
 ### 未找到证据项
 - wincage 作为 Windows 沙箱：未找到（SourceForge "WinCaGe" 为富勒烯化学软件：https://sourceforge.net/projects/wincage/）
 - Firejail Windows 分支：未找到（Firejail 仅 Linux）
+
+---
+
+## 验证B（2026-08-17）：0xC0000142 实证隔离矩阵 —— 限制 SID 机制在本机被环境级阻断
+
+背景：验证A（linked token 死路）后，用 4 个最小 C# 工具在 desktop-r45553o 上做系统化隔离实验
+（C:\los\bin\{spawn-probe, grant-desktop, dump-dacl, los-windows-sandbox}.exe，csc 编译，EncodedCommand 通道）：
+
+### 关键新事实
+
+1. **WinSta 每次 SSH 连接都不同**（`Service-0x0-1619f75c$` / `163f618a$` / `163cee8b$`…）：
+   每个 sshd 子进程落在独立服务窗口站。→ 跨连接给 WinSta/Desktop 授权天然无效。
+2. **System32 / cmd.exe 无 Everyone ACE**（icacls 实证：只有 SYSTEM/Administrators/Users/TrustedInstaller/
+   ALL APPLICATION PACKAGES）。→ 限制身份 {World, capSid} 读不了系统 DLL → 最初的 0xC0000142 主因。
+3. **授权工具 SD 控制标志写错**（0x8000=SE_SELF_RELATIVE，正确应为 0x8007 含 SE_DACL_PRESENT=0x0004），
+   导致 WinSta/Desktop 变 NULL DACL（全放行）。即便如此沙箱仍失败 → 桌面写检查彻底排除。
+
+### spawn-probe 隔离矩阵（CreateProcessAsUser + 各种 token，无 Job/管道/沙箱目录）
+
+| 身份（限制 SID） | flags | 结果 |
+|---|---|---|
+| 无（DuplicateTokenEx 基线） | - | ✅ child exit=0 |
+| {userSid}（los 自身 SID） | none/disable | 0xC0000022 |
+| {World} / {World,capSid} | both | 0xC0000142 |
+| {Users} / {AuthUsers} / {Users,AuthUsers,capSid} / {los,Users,capSid} / {los,Users,AuthUsers,capSid} / {los,capSid} | none/both/inert/disable/wr | 全部 0xC0000022 |
+| 任意组合 + TMP 覆盖（C:\Windows\Temp） | - | 仍失败 |
+| 任意组合 + 同连接桌面 Users:(F) 自授权 | - | 仍失败 |
+
+结论：**任何携带限制 SID 的 token（无论 SID 集合多接近完整身份、flags 如何、桌面是否放行、TMP
+是否可写）都无法孵化子进程**——限制 SID 机制本身在本环境（SSH/S4U 无 logon SID + UAC 过滤
+deny-only Administrators + 服务会话 per-connection WinSta）被阻断。与 RunSeal（独立 Rust 实现）
+同样失败交叉印证，非实现缺陷。
+
+### 其余路径封闭性验证
+
+- schtasks /rl highest：whoami /groups 实证 **Administrators 仍 deny-only（High IL 但未提权）**，
+  无 logon SID → 无提权。
+- net user /add（SSH + /rl highest 两种上下文）：均失败（空输出/exit -1）→ **无法创建专用沙箱用户**
+  （Anthropic srt-win 路径需要一次性管理员，本机远程不可得）。
+- private desktop：与失败无关（桌面 DACL 已证伪）。
+
+### 决策（对齐 Codex 转向结论）
+
+限制 SID 沙箱在本机关闭：**Win 侧 run_shell 保持 paused（fail-closed）**；Win 采集节点的网络探针
+改走「**固定 hash-pinned 只读 PS 快照脚本 + Job Object kill-on-close + 输出捕获**」的受监督执行
+（隔离=脚本只读约束+hash 校验，不做 OS 级 token 隔离）；RunSeal 在此节点放弃；los-windows-sandbox.cs
+保留为参考实现（交互式桌面环境仍可能可用），STATUS 头已更新实证结论。

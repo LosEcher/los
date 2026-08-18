@@ -8,6 +8,11 @@
 
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
+import {
+  resolveFleetAlertConfig,
+  DEFAULT_FLEET_ALERT_CONSECUTIVE_TICKS,
+  DEFAULT_FLEET_ALERT_COOLDOWN_MS,
+} from './fleet-alert-config.js';
 import type { ExecutorNodeRecord } from './executor-nodes.js';
 import { appendSessionEvent } from './session-events.js';
 
@@ -21,9 +26,9 @@ export const DEFAULT_NAMED_FLEET_NODE_IDS = [
 ] as const;
 
 /** Consecutive unhealthy readiness ticks before an attention event (default 2). */
-export const DEFAULT_FLEET_ALERT_CONSECUTIVE_TICKS = 2;
+export { DEFAULT_FLEET_ALERT_CONSECUTIVE_TICKS };
 /** Min interval between attention events per node (default 30m). */
-export const DEFAULT_FLEET_ALERT_COOLDOWN_MS = 30 * 60_000;
+export { DEFAULT_FLEET_ALERT_COOLDOWN_MS };
 /** Min interval between unhealthy observations counted for the same state. */
 export const _DEFAULT_FLEET_OBSERVATION_INTERVAL_MS = 10 * 60_000;
 
@@ -225,8 +230,13 @@ export async function tickNamedFleetWatch(
   await ensureFleetWatchStore();
   const namedIds = resolveNamedFleetNodeIds();
   const snapshot = evaluateNamedFleet(nodes, namedIds);
-  const consecutiveTicks = options.consecutiveTicks ?? resolveFleetAlertConsecutiveTicks();
-  const cooldownMs = options.cooldownMs ?? resolveFleetAlertCooldownMs();
+  // Alert gates: DB (fleet_alert_config) > env (LOS_FLEET_ALERT_*) > default.
+  const alertConfig = await resolveFleetAlertConfig(process.env, {
+    consecutiveTicks: DEFAULT_FLEET_ALERT_CONSECUTIVE_TICKS,
+    cooldownMs: DEFAULT_FLEET_ALERT_COOLDOWN_MS,
+  });
+  const consecutiveTicks = options.consecutiveTicks ?? alertConfig.consecutiveTicks;
+  const cooldownMs = options.cooldownMs ?? alertConfig.cooldownMs;
   const minObservationIntervalMs = options.minObservationIntervalMs
     ?? _DEFAULT_FLEET_OBSERVATION_INTERVAL_MS;
   const now = options.now ?? new Date();

@@ -60,10 +60,19 @@ export function runPackageTests(options) {
     return;
   }
 
+  // Default node --test isolation (one process per file) — NOT
+  // --test-isolation=none: sharing one process across files lets a file that
+  // leaves handles open (app boot, DB pool) cancel later files with
+  // "Promise resolution is still pending but the event loop has already
+  // resolved" under turbo full-suite runs (observed 2026-08-17 on gateway
+  // routes tests; files passed individually). Serial concurrency keeps the
+  // order deterministic. The test setup (loadConfig + initDb) is imported per
+  // process so shared-process files that relied on the old shared-process
+  // config singleton still work under process isolation.
   runLane('shared-process', [
     '--import', 'tsx',
+    ...(options.testSetupFile ? ['--import', options.testSetupFile] : []),
     '--test',
-    '--test-isolation=none',
     '--test-concurrency', '1',
     ...options.sharedProcessTestFiles,
   ], testEnv, testRunId);

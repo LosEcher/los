@@ -273,6 +273,53 @@ export async function loadNodeCommand(commandId: string): Promise<NodeCommandRec
   return rows.rows[0] ? rowToNodeCommand(rows.rows[0]) : null;
 }
 
+export interface OutOfBandNodeCommandInput {
+  nodeId: string;
+  /** Remote lifecycle action executed over SSH by the control plane. */
+  action: 'start' | 'restart';
+  requestedBy?: string;
+  traceId?: string;
+  reason?: string;
+}
+
+/**
+ * Begin an out-of-band node command record (status=running). Unlike
+ * executeNodeCommand (executor's own command runner over agent_http), this
+ * records a lifecycle action executed by the control plane over SSH (fleet
+ * host auto-repair). Same contract surface + evidence table for operator audit.
+ */
+export async function beginOutOfBandNodeCommand(
+  input: OutOfBandNodeCommandInput,
+): Promise<NodeCommandRecord> {
+  await ensureNodeCommandStore();
+  const nodeId = requireString(input.nodeId, 'nodeId');
+  const action = input.action === 'start' || input.action === 'restart' ? input.action : 'restart';
+  const commandId = `oob-${randomUUID()}`;
+  const created = await insertNodeCommand({
+    nodeId,
+    command: 'restart',
+    status: 'running',
+    commandId,
+    requestedBy: input.requestedBy ?? 'fleet-host-check',
+    traceId: input.traceId,
+    reason: input.reason ?? `fleet auto-repair: ${action}`,
+    args: { action, transport: 'ssh' },
+  });
+  return created;
+}
+
+export async function completeOutOfBandNodeCommand(
+  commandId: string,
+  input: {
+    status: 'succeeded' | 'failed';
+    output?: Record<string, unknown>;
+    error?: string;
+  },
+): Promise<NodeCommandRecord> {
+  await ensureNodeCommandStore();
+  return completeNodeCommand(requireString(commandId, 'commandId'), input);
+}
+
 async function insertNodeCommand(input: ExecuteNodeCommandInput & {
   commandId: string;
   nodeId: string;

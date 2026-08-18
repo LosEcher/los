@@ -12,6 +12,22 @@ import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome }
 
 export const _FLEET_OBSERVATION_MAX_SCHEDULE_LATENESS_MS = 2 * 60_000;
 
+/**
+ * Pure gate for the event-driven repair trigger: auto-repair consented, at
+ * least one fleet node offline, and the fleet quorum is intact (offline share
+ * <= threshold). Guarding by quorum prevents the MBP-wake-up storm where every
+ * remote heartbeat is simultaneously stale.
+ */
+export function shouldTriggerFleetRepair(
+  offlineIds: string[],
+  namedCount: number,
+  autoRepair: boolean,
+  quorumThreshold = 0.5,
+): boolean {
+  if (!autoRepair || offlineIds.length === 0 || namedCount <= 0) return false;
+  return offlineIds.length / namedCount <= quorumThreshold;
+}
+
 export function _shouldRecordFleetObservation(
   run: Pick<ScheduledWorkItemRun, 'scheduledFor' | 'triggerKind'>,
   now: Date = new Date(),
@@ -65,6 +81,7 @@ export async function handleFleetHostCheck(
   run: ScheduledWorkItemRun,
 ): Promise<ScheduledWorkRunOutcome> {
   const { runFleetHostChecks } = await import('../fleet-host-checks.js');
+  // Repair gates resolve internally: per-node policy > global DB > env > default.
   const report = await runFleetHostChecks({
     tenantId: schedule.tenantId,
     projectId: schedule.projectId,
@@ -81,6 +98,13 @@ export async function handleFleetHostCheck(
     failed: report.failed,
     degraded: report.degraded,
     alertsEmitted: report.alertsEmitted,
+    repairs: report.repairs.map((r) => ({
+      nodeId: r.nodeId,
+      action: r.action,
+      outcome: r.outcome,
+      skipReason: r.skipReason ?? null,
+      detail: r.detail,
+    })),
     results: report.results.map((r) => ({
       nodeId: r.nodeId,
       status: r.status,
@@ -164,6 +188,42 @@ export async function handleRuntimeReadiness(
     };
   const fleetSnap = fleetTick.snapshot;
   const fleetObservation = recordFleetObservation ? 'recorded' : 'skipped_late_run';
+
+  // Event-driven repair trigger (P2'): a single node went offline in the
+  // registry while the fleet quorum is intact (<=50% offline) → run a host
+  // check + repair for exactly those nodes now, instead of waiting for the
+  // 6h fleet_host_check schedule. Repair gates (cooldown / consecutive
+  // failures / per-node policy) still apply inside runFleetHostChecks.
+  const fleetAutoRepair = process.env.LOS_FLEET_AUTO_REPAIR?.trim().toLowerCase() === 'true';
+  const offlineFleetIds = [...fleetSnap.offline, ...fleetSnap.missing];
+  let triggeredRepairs: Array<{ nodeId: string; outcome: string; detail: string }> = [];
+  if (shouldTriggerFleetRepair(offlineFleetIds, fleetSnap.namedIds.length, fleetAutoRepair)) {
+    try {
+      const { resolveFleetHostTargets, runFleetHostChecks } = await import('../fleet-host-checks.js');
+      const targets = resolveFleetHostTargets().filter((t) => offlineFleetIds.includes(t.nodeId));
+      if (targets.length > 0) {
+        // Repair gates resolve internally (per-node policy > global DB > env).
+        const repairReport = await runFleetHostChecks({
+          force: true,
+          targets,
+          autoRepair: true,
+          tenantId: schedule.tenantId,
+          projectId: schedule.projectId,
+          scheduleId: schedule.id,
+          runId: run.id,
+        });
+        triggeredRepairs = repairReport.repairs.map((r) => ({
+          nodeId: r.nodeId,
+          outcome: r.outcome,
+          detail: r.detail,
+        }));
+      }
+    } catch {
+      // Repair is best-effort; readiness outcome must not fail because of it.
+      triggeredRepairs = [];
+    }
+  }
+
   const unavailableServices = services.filter((service) => {
     if (service.serviceKind !== 'gateway') return false;
     if (service.status === 'online') return service.readiness?.ready !== true;
@@ -182,6 +242,7 @@ export async function handleRuntimeReadiness(
         unavailable: 0,
         fleetObservation,
         fleetAlertsEmitted: fleetTick.alertedNodeIds,
+        triggeredRepairs,
       },
     };
   }
@@ -207,6 +268,7 @@ export async function handleRuntimeReadiness(
         eventEmitted: e.eventEmitted,
         skippedReason: e.skippedReason,
       })),
+      triggeredRepairs,
     },
   };
 }

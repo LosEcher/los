@@ -15,7 +15,20 @@ import {
   type FleetResourceFinding,
   type FleetResourceNodeSnapshot,
 } from './fleet-resources.js';
+import {
+  DEFAULT_FLEET_REPAIR_COOLDOWN_MS,
+  DEFAULT_FLEET_REPAIR_MAX_CONSECUTIVE_FAILURES,
+  DEFAULT_FLEET_REPAIR_QUORUM_THRESHOLD,
+} from './fleet-host-repair.js';
+import { resolveGlobalRepairConfig } from './fleet-repair-config.js';
 import { listGovernanceJobs } from './governance-jobs.js';
+import {
+  loadNodeRecoveryPolicy,
+  resolveRepairConfig,
+  type GlobalRepairConfig,
+  type NodeRecoveryPolicy,
+  type ResolvedRepairConfig,
+} from './node-recovery-policy.js';
 import { ensureScheduledWorkStore } from './scheduled-work/schema.js';
 import { listServiceInstances } from './service-instances.js';
 
@@ -62,6 +75,15 @@ export interface RuntimeHealthReport {
     onlineUnverified: string[];
     missing: string[];
     attentionNodeIds: string[];
+  };
+  /** Fleet repair config — effective gates (per-node policy > global DB > env > default). */
+  fleetRepair: {
+    global: GlobalRepairConfig;
+    nodes: Array<{
+      nodeId: string;
+      effective: ResolvedRepairConfig;
+      policy: NodeRecoveryPolicy | null;
+    }>;
   };
   /**
    * Fleet resources from last heartbeat capacity only (P1).
@@ -163,6 +185,26 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
   for (const code of fleetResources.criticalCodes) warnings.push(code);
   for (const code of fleetResources.warningCodes) warnings.push(code);
 
+  // Fleet repair config (derived view): effective gates per named node.
+  const globalRepairDefaults: GlobalRepairConfig = {
+    autoRepair: false,
+    repairCooldownMs: DEFAULT_FLEET_REPAIR_COOLDOWN_MS,
+    repairMaxConsecutiveFailures: DEFAULT_FLEET_REPAIR_MAX_CONSECUTIVE_FAILURES,
+    restartUnhealthy: false,
+    quorumThreshold: DEFAULT_FLEET_REPAIR_QUORUM_THRESHOLD,
+  };
+  const globalRepair = await resolveGlobalRepairConfig(process.env, globalRepairDefaults);
+  const fleetRepairNodes = await Promise.all(
+    fleetSnap.namedIds.map(async (nodeId) => {
+      const policy = await loadNodeRecoveryPolicy(nodeId).catch(() => null);
+      return {
+        nodeId,
+        effective: resolveRepairConfig(policy, globalRepair),
+        policy,
+      };
+    }),
+  );
+
   if (scheduleStats.openCircuits > 0) {
     warnings.push(`schedules:open_circuits=${scheduleStats.openCircuits}`);
   }
@@ -211,6 +253,10 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
       onlineUnverified: fleetSnap.onlineUnverified,
       missing: fleetSnap.missing,
       attentionNodeIds: fleetSnap.attentionNodeIds,
+    },
+    fleetRepair: {
+      global: globalRepair,
+      nodes: fleetRepairNodes,
     },
     fleetResources: {
       assessedAt: fleetResources.assessedAt,
