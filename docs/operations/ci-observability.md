@@ -77,16 +77,54 @@ there.
 ## B1 verification checklist (Forgejo turbo cache)
 
 `.forgejo/workflows/ci.yml` sets `TURBO_CACHE_DIR: /root/.local/share/turbo`
-on `gate-fast` and `gate-test`, relying on the runner-host volume mapping that
-already persists `~/.local/share/pnpm/store` (run 137). On the next real PR
-check:
+on `gate-fast` (and `gate-test` as a no-op safeguard — that job's steps run
+per-package node test runners, no turbo), relying on the runner-host volume
+mapping that already persists `~/.local/share/pnpm/store` (run 137).
 
-1. gate-fast wall drops from ~2.7–4.2m toward ~2m on the second run after this
-   change (first run warms the cache).
-2. `pnpm run gate` inside the job prints turbo cache hits (`cache hit` lines).
-3. If the directory is **not** persisted (cache never warms), the runner's
-   volume mapping must be extended to `/root/.local/share/turbo`, or an
-   `actions/cache` step with a Forgejo cache server is required instead.
+**Status (verified 2026-08-18):** gate-fast measured 2.2–2.8m across runs
+646–657 after enablement (was 2.7–4.2m before), i.e. ~2m with a warm cache.
+The `Cached:` line in the typecheck phase confirms hits. The directory is
+persisted: the observe step below reports entries/size each run.
+
+**Tuning (2026-08-18, `turbo.json`):**
+
+1. `globalEnv` trimmed from `[DATABASE_URL, TEST_DATABASE_URL,
+   LOS_ALLOW_LIVE_TEST_DB, LOS_TEST_RUN_ID, NODE_ENV]` to `[NODE_ENV]`.
+   Build/check are `tsc`-only and never read the DB/test vars, and the `test`
+   task is `cache: false`, so hashing them only created cache-key volatility
+   (e.g. `LOS_TEST_RUN_ID` is a per-run UUID — any turbo invocation with it in
+   the environment silently busts the whole cache family). Keep DB/test vars
+   out of `globalEnv`; NODE_ENV stays because it can genuinely affect output
+   (vite build mode).
+2. `globalDependencies: ["tsconfig.base.json"]` added. Every package tsconfig
+   extends the root base, but turbo's default global hash does not include it
+   (`globalCacheInputs.files` was empty) — changing the base used to produce
+   stale cache hits. This is a correctness fix, not just a speed one.
+3. First run after either change is a full cache miss (global hash changed);
+   the runner warms back up on the following runs.
+
+**Machine-verified cache-hit signal (not manual):**
+
+- `tools/ci-gate.sh` phase 1 folds the turbo run summary into the gate summary
+  JSON: the emitted file gains `"turbo": {"cached", "total", "tasks",
+  "cache_hits", "cache_misses"}` (parsed from the `Cached:`/`Tasks:` summary
+  line plus per-task `cache hit`/`cache miss` lines). The workflow's
+  `Emit gate summary (gate-fast)` step prints it every run.
+- `tools/observe-turbo-cache.sh --json` (new step `Observe turbo cache
+  capacity` in gate-fast) reports the persisted directory's entry count and
+  size. Exit 2 if the directory is missing — a signal the runner volume
+  mapping broke.
+
+**If the cache is not hitting:**
+
+1. Check the gate summary `turbo` block: `cached` ≈ 0 with `total` > 0 for
+   several runs means the volume mapping broke — extend the runner's mapping
+   to `/root/.local/share/turbo`, or add an `actions/cache` step with a
+   Forgejo cache server instead.
+2. Check `observe-turbo-cache.sh` output: `exists:false` means the same thing.
+3. Structural changes (new package, lockfile bump, `turbo.json`/base-tsconfig
+   edit) legitimately cold-miss once — look for the miss pattern across
+   consecutive runs, not a single run.
 
 ## Runner health history (context)
 

@@ -26,15 +26,20 @@ jobs:
     runs-on: win-ci-jj
     timeout-minutes: 15
     env:
-      # Parallel turbo typecheck: CI has no turbo cache, so serial (1) cost
-      # ~100s of the ~2.4m gate-fast. 4x matches github's parallel jobs and
-      # the runner's observed capacity (two concurrent jobs ran undegraded).
+      # Parallel turbo typecheck. The runner cache is warm (TURBO_CACHE_DIR
+      # below), so unchanged packages are cache hits; concurrency still pays
+      # off for the changed-package rebuilds a PR normally carries. 4x matches
+      # github's parallel jobs and the runner's observed capacity (two
+      # concurrent jobs ran undegraded).
       TURBO_CONCURRENCY: 4
       # Turbo cache persisted on the runner host like the pnpm store
       # (~/.local/share/pnpm/store, persisted since run 137). Turbo content-
       # hashes cache entries, so a warm directory speeds up typecheck/checks
-      # across commits without an actions/cache server dependency. Verify on
-      # the next real PR: gate-fast should drop toward ~2m with warm cache.
+      # across commits without an actions/cache server dependency. Measured:
+      # gate-fast 2.2-2.8m since enablement (runs 646+). Hit verification is
+      # machine-readable — ci-gate.sh folds the turbo run summary into the
+      # gate summary JSON ("turbo": {cached,total,...}) emitted by the step
+      # below; the observe step reports directory capacity/persistence.
       TURBO_CACHE_DIR: /root/.local/share/turbo
     steps:
       - name: Checkout
@@ -71,6 +76,13 @@ jobs:
 
       - name: Fast gate (no DB, no tests)
         run: pnpm run gate -- --no-tests
+
+      - name: Observe turbo cache capacity
+        # Persistence telemetry for TURBO_CACHE_DIR (entries/size). Exit 2 if
+        # the directory is missing — a signal the runner volume mapping broke.
+        # Per-run hit verification lives in the gate summary's "turbo" block
+        # (emitted by the next step), not here.
+        run: ./tools/observe-turbo-cache.sh --json
 
       # ci-gate.sh writes phase timings to /tmp/los-gate-summary.json; the
       # Forgejo job-log API returns stale bodies (2026-08-09 PR #256), so echo
@@ -110,9 +122,11 @@ jobs:
       TEST_DATABASE_URL: postgres://los_ci_test:los-ci-test-only@postgres-test:5432/los_ci_test
       NODE_ENV: test
       LOS_TEST_CONCURRENCY: 2
-      # Turbo cache persisted on the runner host (same family as the pnpm
-      # store dir). Warm cache shortens the non-DB turbo work inside the test
-      # phases across commits.
+      # Turbo cache dir kept on the same persisted runner volume as gate-fast
+      # for future turbo consumers. Note: gate-test's steps today run per-
+      # package node test runners directly (no `turbo` invocation), so this is
+      # a no-op safeguard, not a working cache surface — keep in sync with
+      # gate-fast if turbo enters the test path.
       TURBO_CACHE_DIR: /root/.local/share/turbo
 
     steps:
