@@ -126,6 +126,25 @@ jobs:
           git checkout --detach FETCH_HEAD
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
 
+      # Path gate: PRs touching only tools/, docs/, .forgejo/ (CI config) or
+      # root metadata cannot affect package behavior, so skip the heavy suite
+      # and web e2e here. gate-fast + gate-drift always run, so structural
+      # regressions in tools/ are still caught. Keeps tools-only PRs (deploy
+      # scripts, audit tooling) at ~2-3 min instead of ~15.
+      - name: Path gate (tools/docs-only PRs skip heavy suite)
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git remote set-url origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin main
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          if git diff --name-only FETCH_HEAD HEAD | grep -qvE '^(tools/|docs/|\.forgejo/|README\.md|LICENSE|\.gitignore|\.editorconfig|\.env\.example|pnpm-workspace\.yaml)$'; then
+            echo "PATH-GATE: non-safe paths detected — running full suite"
+          else
+            echo "PATH-GATE: only tools/docs/CI-metadata changed — skipping heavy suite"
+            exit 0
+          fi
+
       - name: Prepare pnpm
         run: |
           set -euo pipefail
@@ -233,6 +252,25 @@ jobs:
           git fetch --depth=1 origin "$FORGEJO_SHA"
           git checkout --detach FETCH_HEAD
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+
+      # Path gate: PRs touching only tools/, docs/, .forgejo/ (CI config) or
+      # root metadata cannot affect package behavior, so skip the heavy suite
+      # and web e2e here. gate-fast + gate-drift always run, so structural
+      # regressions in tools/ are still caught. Keeps tools-only PRs (deploy
+      # scripts, audit tooling) at ~2-3 min instead of ~15.
+      - name: Path gate (tools/docs-only PRs skip heavy suite)
+        run: |
+          set -euo pipefail
+          auth_url="${FORGEJO_SERVER_URL#http://}"
+          git remote set-url origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin main
+          git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          if git diff --name-only FETCH_HEAD HEAD | grep -qvE '^(tools/|docs/|\.forgejo/|README\.md|LICENSE|\.gitignore|\.editorconfig|\.env\.example|pnpm-workspace\.yaml)$'; then
+            echo "PATH-GATE: non-safe paths detected — running full suite"
+          else
+            echo "PATH-GATE: only tools/docs/CI-metadata changed — skipping heavy suite"
+            exit 0
+          fi
 
       - name: Prepare pnpm
         run: |
