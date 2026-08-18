@@ -73,6 +73,28 @@ overhead, and a serial packages-test segment inside gate-test.
 - gate-test serial segment: packages tests run after agent groups; parallelize
   or overlap with coverage.
 
+## Follow-up (2026-08-18): turbo cache tuning
+
+B1 verified: gate-fast 2.2–2.8m on runs 646–657 (was 2.7–4.2m). The follow-up
+change (same branch family as this review) tightens the cache configuration
+and makes the checklist machine-checked:
+
+- `turbo.json`: `globalEnv` trimmed to `[NODE_ENV]` (DB/test-only vars were
+  cache-key volatility — `LOS_TEST_RUN_ID` is a per-run UUID and the `test`
+  task is `cache: false`, so hashing those vars could silently bust every
+  entry); `globalDependencies: ["tsconfig.base.json"]` added (root tsconfig
+  was not in turbo's global hash → stale cache hits on compiler-option
+  changes; verified via `turbo check --dry=json`, `globalCacheInputs.files`
+  was empty).
+- `tools/ci-gate.sh` phase 1 now folds the turbo run summary into the gate
+  summary JSON (`"turbo": {cached,total,tasks,cache_hits,cache_misses}`),
+  giving every run a machine-readable hit rate; `tools/observe-turbo-cache.sh`
+  (new) reports the persisted `TURBO_CACHE_DIR` capacity, wired as a gate-fast
+  step. CI log staleness (G1) is no longer a reason to hand-verify the cache.
+- Cost note: the `globalDependencies`/`globalEnv` change invalidates the
+  existing hash family once (one cold typecheck on the runner), then the cache
+  is stable and strictly more correct.
+
 ## Verification
 
 - `bash tools/ci-status-report.sh --trend 30` — works from recorded JSONL.

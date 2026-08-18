@@ -109,6 +109,7 @@ import json, os, sys
 
 tmp, out, elapsed, phases_run, failures, start_epoch = sys.argv[1:7]
 phases = []
+turbo_stats = {}
 with open(tmp, encoding="utf-8") as fh:
     for line in fh:
         parts = line.rstrip("\n").split("\t")
@@ -124,6 +125,15 @@ with open(tmp, encoding="utf-8") as fh:
                     p["ok"] = parts[3] == "ok"
                     p["elapsed_sec"] = p["end_epoch"] - p["start_epoch"]
                     break
+        elif parts[0] == "TURBO":
+            # TURBO\t<cached>\t<total>\t<tasks>\t<hit lines>\t<miss lines>
+            turbo_stats = {
+                "cached": int(parts[1]),
+                "total": int(parts[2]),
+                "tasks": int(parts[3]),
+                "cache_hits": int(parts[4]),
+                "cache_misses": int(parts[5]),
+            }
 for p in phases:
     p.setdefault("elapsed_sec", None)
     p.setdefault("ok", None)
@@ -135,6 +145,8 @@ summary = {
     "failures": int(failures),
     "phases": phases,
 }
+if turbo_stats:
+    summary["turbo"] = turbo_stats
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as fh:
     json.dump(summary, fh, ensure_ascii=False, indent=1)
@@ -148,11 +160,47 @@ PHASES_RUN=0
 # ── Phase 1: typecheck ─────────────────────────────────────
 
 phase_start "Typecheck (turbo check)"
-if pnpm run _typecheck; then
+TYPECHECK_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/los-typecheck-output.XXXXXX")
+if pnpm run _typecheck 2>&1 | tee "$TYPECHECK_OUTPUT"; then
   phase_ok "typecheck"
 else
   phase_fail "typecheck"
 fi
+# Turbo cache observability: fold per-task hit/miss lines and the run summary
+# ("Cached: N cached, M total" on turbo 2.9; "Tasks: ... N cached" on older)
+# into the gate summary so CI can machine-verify the persisted runner cache
+# (TURBO_CACHE_DIR) is actually hitting across commits — see
+# docs/operations/ci-observability.md (B1 checklist).
+turbo_summary="$(grep -E '^[[:space:]]*(Tasks|Cached):' "$TYPECHECK_OUTPUT" | tail -n 1 | sed -E 's/^[[:space:]]+//' || true)"
+if [ -n "$turbo_summary" ]; then
+  # Summary line shapes: turbo 2.9 "Cached: N cached, M total" (task count is
+  # not printed separately); older turbo "Tasks: N successful, M total, K cached".
+  read -r N1 N2 N3 <<< "$(printf '%s\n' "$turbo_summary" | grep -oE '[0-9]+' | tr '\n' ' ')" || true
+  case "$turbo_summary" in
+    Cached:*)
+      TURBO_TASKS="${N2:-$N1}"
+      TURBO_TOTAL="${N2:-$N1}"
+      TURBO_CACHED="${N1:-0}"
+      ;;
+    Tasks:*)
+      TURBO_TASKS="${N1:-0}"
+      TURBO_TOTAL="${N2:-0}"
+      TURBO_CACHED="${N3:-0}"
+      ;;
+    *)
+      TURBO_TASKS=""
+      TURBO_TOTAL=""
+      TURBO_CACHED=""
+      ;;
+  esac
+  if [ -n "${TURBO_TOTAL:-}" ]; then
+    TURBO_HITS="$(grep -c 'cache hit' "$TYPECHECK_OUTPUT" || true)"
+    TURBO_MISSES="$(grep -c 'cache miss' "$TYPECHECK_OUTPUT" || true)"
+    printf 'TURBO\t%s\t%s\t%s\t%s\t%s\n' "${TURBO_CACHED:-0}" "$TURBO_TOTAL" "${TURBO_TASKS:-$TURBO_TOTAL}" "${TURBO_HITS:-0}" "${TURBO_MISSES:-0}" >> "$SUMMARY_TMP"
+    printf '    %bturbo cache: %s/%s tasks cached (hit lines=%s, miss lines=%s)%b\n' "$CYAN" "${TURBO_CACHED:-0}" "$TURBO_TOTAL" "${TURBO_HITS:-0}" "${TURBO_MISSES:-0}" "$NC"
+  fi
+fi
+rm -f "$TYPECHECK_OUTPUT"
 PHASES_RUN=$((PHASES_RUN + 1))
 
 # ── Phase 2: security ─────────────────────────────────────────
