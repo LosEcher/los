@@ -391,6 +391,9 @@ export async function _applyProviderFallbackToSetup(
       await config.onProviderFallback?.(event);
     },
   });
+  config.log?.info?.(
+    `provider fallback applied: ${setup.provider.name} -> ${prepared.policy.targets.map(target => target.provider).join(' -> ')} (session=${config.sessionId ?? '?'})`,
+  );
 }
 
 async function emitProviderFallbackEvent(

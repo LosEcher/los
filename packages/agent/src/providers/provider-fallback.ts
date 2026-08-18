@@ -196,6 +196,15 @@ export function _classifyProviderFallbackFailure(error: unknown): ProviderFallba
   if (error instanceof AgentError) {
     if (error.code === 'PROVIDER_NETWORK') return 'transport';
     if (error.context.httpStatus === 429) return 'rate_limit';
+    // 403 usually means auth (do NOT fallback), but balance/quota exhaustion is
+    // also surfaced as 403 by some providers (Kimi/Moonshot error table lists
+    // 403 as insufficient balance; kimi.com answers 403 "usage limit for this
+    // billing cycle" when the monthly quota is gone). Match the message so
+    // quota exhaustion still triggers the fallback chain instead of failing
+    // the whole request.
+    if (error.context.httpStatus === 403 && /quota|balance|insufficient|credits|usage limit|usage_limit|billing/i.test(error.message ?? '')) {
+      return 'rate_limit';
+    }
     if (error.context.httpStatus === 408 || (error.context.httpStatus ?? 0) >= 500) {
       return 'provider_unavailable';
     }
