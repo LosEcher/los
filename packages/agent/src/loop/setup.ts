@@ -372,6 +372,7 @@ export async function _applyProviderFallbackToSetup(
     createProvider?: typeof createProvider;
   } = {},
 ): Promise<void> {
+  getLogger('loop').info?.(`provider fallback configured: provider=${config.provider} chain=${config.providerFallback?.targets.map(t => t.provider).join(' -> ') ?? '(none)'} session=${config.sessionId ?? '?'}`);
   if (!config.providerFallback) return;
   const evidence = await (dependencies.loadEvidence ?? listLatestProviderCompatEvidence)();
   const prepared = prepareProviderFallbackPolicy(config.providerFallback, evidence);
@@ -391,9 +392,6 @@ export async function _applyProviderFallbackToSetup(
       await config.onProviderFallback?.(event);
     },
   });
-  config.log?.info?.(
-    `provider fallback applied: ${setup.provider.name} -> ${prepared.policy.targets.map(target => target.provider).join(' -> ')} (session=${config.sessionId ?? '?'})`,
-  );
 }
 
 async function emitProviderFallbackEvent(
