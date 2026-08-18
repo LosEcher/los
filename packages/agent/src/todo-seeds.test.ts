@@ -114,6 +114,8 @@ const CURRENT_ACTIVE_P0_P1: ReadonlyMap<string, readonly [string, string]> = new
   ['todo-los-obs-metrics-expand', ['P1', 'backlog']],
   ['todo-los-obs-delta-retention', ['P1', 'backlog']],
   ['todo-los-obs-audit-search', ['P1', 'backlog']],
+  // 2026-08-18 cumora R-LOS-01: per-purpose cost attribution guard (P0)
+  ['todo-los-obs-cost-purpose', ['P0', 'ready']],
   // 2026-08-16 product roadmap batch (R1-R3+R5+R6 done — no longer active; R4 observation active; R7 backlog excluded)
   ['todo-los-rm-kernel-economics', ['P1', 'in_progress']],
   // 2026-08-19 Komodo borrow batch (P0 stage: hysteresis + maintenance window; P1: probe-processes/fleet-history/alert-routing)

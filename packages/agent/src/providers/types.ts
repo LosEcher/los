@@ -1,5 +1,6 @@
 import type { ModelProfile } from '../model-profiles.js';
 import type { ModelSettings } from '../model-settings.js';
+import type { UsageFeature } from '../usage-feature.js';
 
 export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -60,8 +61,11 @@ export interface ChatOptions {
   traceId?: string;
   /** Session id — passed through for provider call telemetry. */
   sessionId?: string;
-  /** Usage feature attribution (roadmap R6); recorded in request_meta_json. */
-  feature?: string;
+  /** Usage feature attribution (roadmap R6 / R-LOS-01); recorded in
+   *  request_meta_json. Typed union — new call sites must use a registered
+   *  purpose (compile-time guard); unknown runtime strings normalize to
+   *  'unspecified' with a warning in normalizeUsageFeature. */
+  feature?: UsageFeature;
 }
 
 export interface ProviderDelta {

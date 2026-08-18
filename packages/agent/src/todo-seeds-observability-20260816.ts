@@ -4,8 +4,42 @@ import type { CreateTodoInput } from './todo-types.js';
  * 2026-08-16 可观测性优化批次（对比 DSH 后提炼）。
  * 报告：docs/research/2026-08-16-observability-comparison-dsh.md
  * 来源：observability-comparison-2026-08-16
+ * 2026-08-18 追加 R-LOS-01（cumora 需求）——per-purpose 成本归因 guard。
  */
 export const OBSERVABILITY_20260816_TODO_SEED: CreateTodoInput[] = [
+  {
+    id: 'todo-los-obs-cost-purpose',
+    title: 'R-LOS-01 per-purpose 成本归因落地：purpose 枚举 + 机械 guard',
+    description:
+      '（Cumora R-LOS-01，LOS-自实现）usage/cost 立方已有 byFeature 聚合（getUsageByFeature），' +
+      '补 purpose 归因护栏：ChatOptions/AgentConfig.feature 收紧为 UsageFeature 联合类型（编译期），' +
+      'normalizeUsageFeature 未知 purpose 默认 warn/fail 抛错（运行时），' +
+      '源码 feature 字面量扫描测试（机械 guard：新增调用点未登记 purpose 即 CI 失败）；' +
+      'telemetry 写路径归一化未知 purpose 为 unspecified，保证 (provider, purpose) 立方只含已知 purpose。',
+    kind: 'task',
+    status: 'ready',
+    priority: 'P0',
+    source: 'cumora-requirements-2026-08-18',
+    stageId: 'observability-p0',
+    dedupeKey: 'los:todo:obs-cost-purpose',
+    metadata: {
+      problem: 'R6 byFeature 立方已有（usage-summary.ts getUsageByFeature / request_meta_json.feature），但 purpose 是自由字符串：normalizeUsageFeature 静默 fallback unspecified，providers ChatOptions.feature 为 string 类型，新增调用点未登记 purpose 无任何门禁（Cumora llm_calls 证明 purpose 枚举+每调用点归因是成本可解释前提）。',
+      solution: '①providers/types.ts ChatOptions.feature: UsageFeature（编译期 guard）；②usage-feature.ts normalizeUsageFeature(value,{fail}) 默认 warn/fail 抛错；③telemetry recordProviderCall 写路径归一化；④usage-feature.test.ts 字面量扫描测试（新增调用点未登记 purpose 即失败）。验收见 CUMORA-REQUIREMENTS-LOS-2026-08-18.md R-LOS-01。',
+      evidence: [
+        'packages/agent/src/usage-feature.ts',
+        'packages/agent/src/usage-summary.ts getUsageByFeature',
+        'packages/agent/src/providers/types.ts ChatOptions.feature',
+        'packages/agent/src/providers/telemetry.ts recordProviderCall',
+      ],
+      validation: [
+        '新增调用点未登记 purpose 时构建/CI 失败（UsageFeature 联合类型 + 字面量扫描测试）',
+        '按 (provider, purpose) 聚合可答"哪个业务烧了多少钱"（getUsageByFeature 已有测试）',
+        'pnpm --filter @los/agent check && pnpm --filter @los/agent test',
+      ],
+      referenceReport: 'dsfolder/CUMORA-REQUIREMENTS-LOS-2026-08-18.md R-LOS-01',
+      statusUpdatedAt: '2026-08-18',
+    },
+  },
   {
     id: 'todo-los-obs-event-enum',
     title: '事件类型枚举化：收敛 ~90 个散落字面量为单一注册表并加机械验证',

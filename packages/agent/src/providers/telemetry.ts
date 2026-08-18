@@ -10,6 +10,7 @@
 
 import { getDb } from '@los/infra/db';
 import { redactPayload } from '../event-redaction.js';
+import { normalizeUsageFeature } from '../usage-feature.js';
 
 export interface ProviderCallTelemetry {
   id?: number;
@@ -162,7 +163,12 @@ export async function recordProviderCall(tel: ProviderCallTelemetry): Promise<vo
              thinking: tel.requestMeta.thinking ?? null,
              maxTokens: tel.requestMeta.maxTokens ?? null,
              temperature: tel.requestMeta.temperature ?? null,
-             feature: tel.requestMeta.feature ?? null,
+             // R-LOS-01: 写路径归一化——未登记 purpose 归一为 'unspecified' 并告警，
+             // 保证 byFeature 立方只出现已知 purpose（外部配置/历史调用不污染聚合）。
+             feature:
+               tel.requestMeta.feature !== undefined
+                 ? normalizeUsageFeature(tel.requestMeta.feature)
+                 : null,
            })
          : null,
     ],
