@@ -78,13 +78,21 @@ there.
 
 `.forgejo/workflows/ci.yml` sets `TURBO_CACHE_DIR: /root/.local/share/turbo`
 on `gate-fast` (and `gate-test` as a no-op safeguard — that job's steps run
-per-package node test runners, no turbo), relying on the runner-host volume
-mapping that already persists `~/.local/share/pnpm/store` (run 137).
+per-package node test runners, no turbo).
 
-**Status (verified 2026-08-18):** gate-fast measured 2.2–2.8m across runs
-646–657 after enablement (was 2.7–4.2m before), i.e. ~2m with a warm cache.
-The `Cached:` line in the typecheck phase confirms hits. The directory is
-persisted: the observe step below reports entries/size each run.
+**Status (corrected 2026-08-18):** between B1 enablement and this correction
+the turbo cache was **not actually persisted**. The runner persists only the
+pnpm store, as a podman named volume (`forgejo-pnpm-store`); `TURBO_CACHE_DIR`
+fell in the ephemeral job-container filesystem and was wiped after every job —
+run 775 and run 776 (identical content) both reported `turbo: {cached: 0,
+total: 16}` with observe-step `entries: 16` (a shared volume would show ≥32
+entries and ≥16 hits). The 2.2–2.8m gate-fast on runs 646–657 was the
+**no-cache** value (TURBO_CONCURRENCY=4 + path-gating), not a warm-cache one.
+Fix: a second named volume `forgejo-turbo-cache` mounted at
+`/root/.local/share/turbo` (runner-host config; see
+`docs/operations/2026-08-18-runner-topology-and-turbo-persistence.md`).
+Acceptance signal: gate summary `turbo.cached > 0` on the run after the first
+cold write.
 
 **Tuning (2026-08-18, `turbo.json`):**
 
@@ -110,18 +118,20 @@ persisted: the observe step below reports entries/size each run.
   "cache_hits", "cache_misses"}` (parsed from the `Cached:`/`Tasks:` summary
   line plus per-task `cache hit`/`cache miss` lines). The workflow's
   `Emit gate summary (gate-fast)` step prints it every run.
-- `tools/observe-turbo-cache.sh --json` (new step `Observe turbo cache
-  capacity` in gate-fast) reports the persisted directory's entry count and
-  size. Exit 2 if the directory is missing — a signal the runner volume
-  mapping broke.
+- `tools/observe-turbo-cache.sh --json` (step `Observe turbo cache capacity`
+  in gate-fast) reports the persisted directory's entry count and size. Exit 2
+  if the directory is missing — a signal the runner volume is missing.
 
 **If the cache is not hitting:**
 
-1. Check the gate summary `turbo` block: `cached` ≈ 0 with `total` > 0 for
-   several runs means the volume mapping broke — extend the runner's mapping
-   to `/root/.local/share/turbo`, or add an `actions/cache` step with a
-   Forgejo cache server instead.
-2. Check `observe-turbo-cache.sh` output: `exists:false` means the same thing.
+1. Check the gate summary `turbo` block: `cached` ≈ 0 with `total` > 0 on
+   consecutive runs with unchanged package content means the volume is not
+   mounted. Verify on the runner host:
+   `podman exec forgejo-runner-win-canary sh -c "cat /data/config.yaml" | grep -E 'options:|valid_volumes'`
+   — `forgejo-turbo-cache` must appear in both. The runner host is
+   `ssh win-los` (DESKTOP-R45553O, see the 2026-08-18 runner-topology doc).
+2. Check `observe-turbo-cache.sh` output: `exists:false` means the volume is
+   not mounted (or TURBO_CACHE_DIR unset).
 3. Structural changes (new package, lockfile bump, `turbo.json`/base-tsconfig
    edit) legitimately cold-miss once — look for the miss pattern across
    consecutive runs, not a single run.
