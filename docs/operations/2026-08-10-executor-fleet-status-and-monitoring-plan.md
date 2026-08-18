@@ -59,13 +59,13 @@ Registry still lists non-fleet rows (`oracle-t`, `localnode34`, …) — ssh_tar
 | --- | --- |
 | Path | `C:\los` |
 | Node URL | `http://100.90.170.58:8090` |
-| Process | Scheduled Task **`los-executor`** (AtStartup + restart policy) |
-| Start scripts | `C:\los\run-executor-task.ps1`, `install-task.ps1` |
+| Process | nssm service **`los-executor`** (Automatic · LocalSystem · AppExit restart) — migrated from Scheduled Task 2026-08-17 |
+| Start scripts | `C:\los\run-executor-task.ps1` (watchdog loop), `C:\los\tools\nssm.exe` |
 | Firewall | `los-executor-8090` inbound TCP 8090 |
 | PG | MBP `pg_hba`: `host los los 100.64.0.0/10 scram-sha-256` (Tailscale CGNAT) |
 | Known gap | migration path WARN `packages\infra\packages\infra\migrations` (non-fatal); not a formal Windows service (nssm) yet |
 
-SSH-attached process **dies when session ends** — Task Scheduler is required for durability.
+SSH-attached process **dies when session ends** — a durable supervisor is required (now nssm service in Session 0; previously Scheduled Task with Interactive logon binding).
 
 ### 2.4 node34 same-day lesson (earlier)
 
@@ -94,7 +94,7 @@ Goal: know **status + resources** per fleet node without request storms.
 | 1 | DB / `GET /nodes` + `execution.candidate` | registry truth, capacity from heartbeat |
 | 2 | `GET /ops/runtime-health` | aggregated degraded/critical board |
 | 3 | Active probe `POST /nodes/:id/probe` | only on gap or cooldown expiry (auto-probe already) |
-| 4 | Host process (`systemctl` / Task Scheduler / local health) | when registry disagrees with intent |
+| 4 | Host process (`systemctl` / nssm service / local health) | when registry disagrees with intent |
 | 5 | Logs / journal | root-cause, not primary “is up” signal |
 
 **Do not**: poll every node health URL every few seconds from schedules; rely on heartbeat capacity + rate-limited auto-probe.
@@ -148,7 +148,7 @@ Implementation (no storm):
 | --- | --- | --- | --- |
 | node34 | `fleet_host_check` → ssh `localnode34-r-t` | ≥15m cooldown; schedule 6–12h | unit active, local health `:8090`, listen, free/swap |
 | oracle | same → ssh `oracle-t` | same | unit active, local health `:8091`, listen, free/swap |
-| desktop | same → ssh `win-los` | same | Task Scheduler `los-executor` status + local health `:8090` |
+| desktop | same → ssh `win-los` | same | nssm service `los-executor` status + local health `:8090` |
 | mbp | dogfood + local los status | 15m | already covered (no SSH) |
 
 Hard rate limits: **serial hosts**, **≥15m per host** (unless `--force`), fail soft.
@@ -178,6 +178,53 @@ curl -fsS -X POST \
 ```
 
 Operator-created 2026-08-10: `schedule-d0388df2-cc54-4e37-a964-7035b96303f4` (enabled, 6h).
+
+#### P2.5 — Auto-repair of failed hosts (2026-08-17)
+
+`fleet_host_check` now optionally repairs a failed host over the same SSH
+channel (control-plane fallback; node-side supervisor remains the primary
+self-heal path).
+
+- Enable: `LOS_FLEET_AUTO_REPAIR=true` (**off by default** — remote action,
+  operator consent required). Also `LOS_FLEET_REPAIR_COOLDOWN_MS` (default 30m),
+  `LOS_FLEET_REPAIR_MAX_CONSECUTIVE_FAILURES` (default 3).
+- **Config precedence** (per gate field): per-node `node_recovery_policy` >
+  global `fleet_repair_config` (DB) > env (`LOS_FLEET_REPAIR_*`) > default.
+  Global layer is runtime-editable and survives restarts — no .env edit:
+  `tsx tools/fleet-host-check.mts --config-set autoRepair=true,cooldownMs=1800000`
+  (`--config-get` / `--config-clear`). env remains the boot-time override only.
+- **Declarative per-node policy** (`node_recovery_policy` table): override any
+  gate per node via the CLI —
+  `tsx tools/fleet-host-check.mts --policy-set <nodeId> repairEnabled=true,cooldownMs=600000`
+  (`--policy-get <nodeId>` / `--policy-delete <nodeId>`). `repairEnabled=false`
+  is a hard per-node kill switch even when the global flag is on. Clearing a
+  field = delete the row.
+- **Config audit**: every policy/global mutation writes an `ops.config_changed`
+  session event (before/after/operator/source). Effective gates per named node
+  are exposed read-only in `GET /ops/runtime-health` → `fleetRepair`.
+- Action: unit down → `start` (`systemctl start` / `net start`). Unit up but
+  health bad → **skipped by default** (`LOS_FLEET_REPAIR_RESTART_UNHEALTHY=false`
+  — restarting a live executor can interrupt active tasks); opt-in via
+  `LOS_FLEET_REPAIR_RESTART_UNHEALTHY=true` or the policy field. Repair scripts
+  are idempotent (no-op when already up).
+- Anti-storm gates (order): feature flag → healthy → `unit_missing` (manual) →
+  repair cooldown → consecutive-failure cap (manual takeover) → **quorum guard**
+  (skips repair when >50% of fleet is offline = control-plane/network outage,
+  e.g. MBP sleep wake-up).
+- Audit: every repair attempt writes `ops.fleet_host_repair` session event;
+  state persists `last_repair_at` / `repair_failures` / `last_repair_result` in
+  `fleet_host_check_state`.
+- Convergence is confirmed by the next check/heartbeat — no polling added.
+- **Event-driven trigger (P2', 2026-08-17)**: `runtime_readiness` (~15m) now
+  detects a single fleet node offline in the registry (quorum intact, ≤50%
+  offline) and immediately runs `fleet_host_check` + repair for exactly those
+  nodes — no more waiting for the 6h schedule. Gate: `LOS_FLEET_AUTO_REPAIR=true`
+  + `shouldTriggerFleetRepair` quorum guard; all per-node gates still apply.
+- **Contract surface**: every repair writes an out-of-band `node_commands`
+  record (`oob-*` commandId, status running→succeeded/failed, args.action,
+  transport=ssh) plus `ops.fleet_host_repair_decision` and
+  `ops.fleet_host_repair` session events — the full decision trail is
+  replayable ("why repaired / why not").
 
 #### P3 — Operator UX — **partial** 2026-08-10
 
@@ -223,7 +270,7 @@ curl -fsS -X POST -H "x-los-operator-token: $LOS_OPERATOR_TOKEN" \
 ./tools/los.sh status
 ssh localnode34-r-t 'systemctl is-active los-executor; curl -fsS http://127.0.0.1:8090/health'
 ssh oracle-t 'systemctl is-active los-executor; ss -lntp | rg 8091; curl -fsS http://127.0.0.1:8091/health'
-ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/health'
+ssh win-los 'sc query los-executor & curl -sS http://127.0.0.1:8090/health'
 ```
 
 ### Recover patterns
@@ -233,7 +280,7 @@ ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/h
 | online, candidate=false, verification gap | auto-probe log / manual probe | wait cooldown or `POST …/probe` |
 | remote health refused, local health ok | `ss`/`netstat` bind | set `EXECUTOR_HOST=0.0.0.0` |
 | registry offline, process up | journal heartbeat timeouts | gateway up? Tailscale? PG path? |
-| Windows dead after SSH start | Task Scheduler | `schtasks /Run /TN los-executor` |
+| Windows executor process dead | nssm watchdog | self-heals (`AppExit Default Restart`, 5s delay; SCM recovery 5s/10s/30s); manual: `ssh win-los "net start los-executor"` |
 | PG auth fail from remote | `pg_hba` | Tailscale `100.64.0.0/10` + scram |
 
 ---
@@ -260,7 +307,7 @@ ssh win-los 'schtasks /Query /TN los-executor & curl -sS http://127.0.0.1:8090/h
 - `packages/agent/src/fleet-inventory.ts`  
 - `packages/agent/src/fleet-resources.ts`  
 - `tools/deploy-to-remote.sh` (Linux)  
-- Windows: `C:\los\run-executor-task.ps1`, task `los-executor`  
+- Windows: `C:\los\run-executor-task.ps1` (watchdog), nssm service `los-executor` (`C:\los\tools\nssm.exe`, LocalSystem)  
 
 ---
 

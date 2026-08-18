@@ -1,5 +1,12 @@
-# Known Test Failures Baseline — intermittent infra test failures (Promise resolution / DB race)
+# Known Test Failures Baseline — environment-dependent failures.
 # These are pre-existing and vary per run; not caused by any code change under review.
-# Last updated: 2026-08-09
+# Last updated: 2026-08-17
 #
-# (empty — no known intermittent failures currently)
+# 2026-08-17: gateway shared-process event-loop cancellations were ROOT-CAUSED and
+# fixed in tools/package-test-runner.mjs (process isolation + per-process setup).
+#
+# Environment: managed-workspaces spawns `jj` which lives in /opt/homebrew/bin on
+# this machine (not in turbo's PATH). Production note: managed-workspace VCS ops
+# have the same PATH dependency — consider LOS_JJ_BIN config when enabling that
+# feature in daemon environments.
+src/managed-workspaces.test.ts
