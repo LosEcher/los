@@ -367,6 +367,113 @@ test('OpenAI-compatible non-streaming failure carries the structured failure cla
   }
 });
 
+test('OpenAI-compatible chat passes providerFallback policy from the config table', async () => {
+  const effectiveConfig = config();
+  effectiveConfig.providerFallbacks = { kimi: ['deepseek', 'xai', 'packycode'] };
+  setConfig(effectiveConfig);
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, effectiveConfig);
+
+  let captured: Record<string, unknown> | undefined;
+  registerOpenAICompatibleRoute(app, effectiveConfig, '/workspace/los', undefined, undefined, {
+    getDefaultProjectId: () => undefined,
+    resolveConfiguredProjectOwner: () => ({
+      status: 'resolved',
+      ownerRepo: 'los',
+      workspaceRoot: '/workspace/los',
+      reason: 'configured_default',
+    }),
+    runChat: async params => {
+      captured = params as unknown as Record<string, unknown>;
+      params.send('done', { text: 'OK' });
+      return {
+        status: 'completed',
+        sessionId: params.sid,
+        taskRunId: 'task-fallback',
+        traceId: params.traceId,
+        result: {
+          text: 'OK',
+          loopCount: 1,
+          totalTokens: 1,
+          runCompletionStatus: null,
+          blockedVerificationRecordIds: [],
+        },
+      };
+    },
+  });
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: { model: 'kimi', messages: [{ role: 'user', content: 'hi' }] },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(captured?.providerFallback, {
+      mode: 'explicit_ordered',
+      targets: [
+        { provider: 'kimi' },
+        { provider: 'deepseek' },
+        { provider: 'xai' },
+        { provider: 'packycode' },
+      ],
+      onFailure: ['transport', 'rate_limit', 'provider_unavailable'],
+      requireCompatibilityEvidence: false,
+      maxSwitches: 3,
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test('OpenAI-compatible chat keeps fail-hard when provider has no fallback chain', async () => {
+  const effectiveConfig = config();
+  effectiveConfig.providerFallbacks = { kimi: ['deepseek'] };
+  setConfig(effectiveConfig);
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, effectiveConfig);
+
+  let captured: Record<string, unknown> | undefined;
+  registerOpenAICompatibleRoute(app, effectiveConfig, '/workspace/los', undefined, undefined, {
+    getDefaultProjectId: () => undefined,
+    resolveConfiguredProjectOwner: () => ({
+      status: 'resolved',
+      ownerRepo: 'los',
+      workspaceRoot: '/workspace/los',
+      reason: 'configured_default',
+    }),
+    runChat: async params => {
+      captured = params as unknown as Record<string, unknown>;
+      params.send('done', { text: 'OK' });
+      return {
+        status: 'completed',
+        sessionId: params.sid,
+        taskRunId: 'task-failhard',
+        traceId: params.traceId,
+        result: {
+          text: 'OK',
+          loopCount: 1,
+          totalTokens: 1,
+          runCompletionStatus: null,
+          blockedVerificationRecordIds: [],
+        },
+      };
+    },
+  });
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: { model: 'minimax', messages: [{ role: 'user', content: 'hi' }] },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(captured?.providerFallback, undefined);
+  } finally {
+    await app.close();
+  }
+});
+
 test('OpenAI-compatible /v1/models lists providers as OpenAI model objects', async () => {
   const effectiveConfig = config();
   effectiveConfig.providers = {
@@ -437,6 +544,7 @@ function config(): Config {
     judge: {},
     review: { enabled: false, roles: {} },
     providers: {},
+    providerFallbacks: {},
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

@@ -174,6 +174,15 @@ export const ConfigSchema = z.object({
     weight: z.coerce.number().default(100),
   })).default({}),
 
+  // Request-level provider failover chains for the OpenAI-compatible route
+  // (and any consumer that builds a ProviderFallbackPolicy from this table).
+  // Key = the requested provider name (the `model` field los receives),
+  // value = ordered fallback providers tried after the primary fails
+  // (quota/rate-limit/transport/5xx). The primary itself is prepended at
+  // runtime, so entries here must NOT include the key provider. A provider
+  // with no entry keeps today's fail-hard behavior.
+  providerFallbacks: z.record(z.string(), z.array(z.string())).default({}),
+
   // Memory
   memory: z.object({
     ftsEnabled: z.coerce.boolean().default(true),

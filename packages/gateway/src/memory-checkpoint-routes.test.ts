@@ -43,6 +43,7 @@ function buildConfig(): Config {
     judge: {},
     review: { enabled: false, roles: {} },
     providers: {},
+    providerFallbacks: {},
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { MessageRouter } from '@los/agent/message-router';
 import { runChat, type ChatRunContext, type SendEvent } from './chat-service.js';
+import { buildProviderFallbackPolicy } from './openai-compat-fallback.js';
 import { getDefaultProjectId, resolveConfiguredProjectOwner } from './project-store.js';
 import { getMessagePrincipal, getRequestContext } from './request-context.js';
 import { getConfig } from '@los/infra/config';
@@ -175,7 +176,7 @@ export function registerOpenAICompatibleRoute(
       systemPrompt: systemPrompt || undefined,
       provider: body.model ?? config.agent.defaultProvider,
       model: body.model ? undefined : config.agent.defaultModel,
-      providerFallback: undefined,
+      providerFallback: buildProviderFallbackPolicy(body.model, config.providerFallbacks),
       modelSettings: undefined,
       workspaceRoot,
       // WeChat channel: keep risk low — L2 shell was flooding deny alerts.
@@ -211,6 +212,7 @@ export function registerOpenAICompatibleRoute(
       log: context.log,
       ctx,
     };
+    context.log?.debug?.(`openai-compat providerFallback for model=${body.model}: ${JSON.stringify(chatParams.providerFallback)}`);
 
     if (wantStream) {
       await streamChatCompletion({
