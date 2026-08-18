@@ -16,6 +16,7 @@ the reliable channels.
 | `tools/ci-gate.sh` | gate phases; writes `/tmp/los-gate-summary.json` | per-phase elapsed seconds |
 | `tools/check-known-failures.sh` | NEW vs KNOWN test failure classification | baseline-driven |
 | `tools/observe-pnpm-store.sh` | pnpm store capacity on the runner | store KiB + filesystem |
+| `tools/path-gate.mjs` | classify PR paths; skip heavy `gate-test` / e2e steps | `skip_heavy` step output |
 
 ## Metrics persistence (A1)
 
@@ -73,6 +74,15 @@ Forgejo logs cannot be trusted for step timing, so jobs self-report:
 GitHub mirrors the gate-fast summary into `GITHUB_STEP_SUMMARY`; GitHub job
 timing is available natively through the API, so no echo channel is needed
 there.
+
+## Path-gate (docs/tools-only skip)
+
+`gate-test` and `gate-web-e2e` classify the PR path set with
+`tools/path-gate.mjs` and skip install/test steps when
+`steps.path-gate.outputs.skip_heavy == 'true'`. The jobs themselves still
+run and stay green — they are required checks. `exit 0` inside the classify
+step does **not** skip later steps (runs 779/780, PR `#295`). Record:
+`docs/operations/2026-08-18-path-gate-skip-failure.md`.
 
 ## B1 verification checklist (Forgejo turbo cache)
 
