@@ -3,11 +3,14 @@ import test from 'node:test';
 
 import type { ExecutorNodeRecord } from './executor-nodes.js';
 import {
+  assessThresholdWithHysteresis,
   evaluateFleetNodeResources,
   evaluateNamedFleetResources,
   formatFleetResourceSummary,
   FLEET_MEM_AVAILABLE_WARN_RATIO,
+  FLEET_MEM_AVAILABLE_CRITICAL_RATIO,
   FLEET_SWAP_USED_WARN_RATIO,
+  FLEET_SWAP_USED_CRITICAL_RATIO,
   FLEET_HEARTBEAT_WARN_MS,
 } from './fleet-resources.js';
 
@@ -189,4 +192,101 @@ test('cpu load thresholds only when both fields present', () => {
     now,
   );
   assert.ok(!noCpu.findings.some((f) => f.signal === 'cpu_load'));
+});
+
+// ── Hysteresis (Komodo borrow P0-1) ─────────────────────────────────────────
+
+test('assessThresholdWithHysteresis: below-direction memory semantics', () => {
+  const rule = {
+    warn: FLEET_MEM_AVAILABLE_WARN_RATIO,
+    critical: FLEET_MEM_AVAILABLE_CRITICAL_RATIO,
+    direction: 'below' as const,
+  };
+  const band = 0.03;
+  // Enter warning/critical at raw thresholds regardless of prev.
+  assert.equal(assessThresholdWithHysteresis(0.10, rule, undefined, band), 'warning');
+  assert.equal(assessThresholdWithHysteresis(0.04, rule, 'warning', band), 'critical');
+  // Defer clearing inside the band: [warn, warn+band) keeps warning.
+  assert.equal(assessThresholdWithHysteresis(0.16, rule, 'warning', band), 'warning');
+  // No prev inside the band → cleared (plain threshold behavior).
+  assert.equal(assessThresholdWithHysteresis(0.16, rule, undefined, band), undefined);
+  // Crossed back past warn+band → cleared.
+  assert.equal(assessThresholdWithHysteresis(0.19, rule, 'warning', band), undefined);
+  // Critical hysteresis: [critical, critical+band) keeps critical.
+  assert.equal(assessThresholdWithHysteresis(0.06, rule, 'critical', band), 'critical');
+  assert.equal(assessThresholdWithHysteresis(0.09, rule, 'critical', band), 'warning');
+  // band=undefined → pure threshold, prev ignored.
+  assert.equal(assessThresholdWithHysteresis(0.16, rule, 'warning', undefined), undefined);
+  assert.equal(assessThresholdWithHysteresis(0.10, rule, 'warning', undefined), 'warning');
+});
+
+test('assessThresholdWithHysteresis: above-direction swap semantics', () => {
+  const rule = {
+    warn: FLEET_SWAP_USED_WARN_RATIO,
+    critical: FLEET_SWAP_USED_CRITICAL_RATIO,
+    direction: 'above' as const,
+  };
+  const band = 0.03;
+  assert.equal(assessThresholdWithHysteresis(0.55, rule, undefined, band), 'warning');
+  assert.equal(assessThresholdWithHysteresis(0.85, rule, 'warning', band), 'critical');
+  // Defer clearing inside the band: (warn-band, warn] keeps warning.
+  assert.equal(assessThresholdWithHysteresis(0.48, rule, 'warning', band), 'warning');
+  assert.equal(assessThresholdWithHysteresis(0.48, rule, undefined, band), undefined);
+  // Crossed back past warn-band → cleared.
+  assert.equal(assessThresholdWithHysteresis(0.45, rule, 'warning', band), undefined);
+  // Critical hysteresis: (critical-band, critical] keeps critical.
+  assert.equal(assessThresholdWithHysteresis(0.79, rule, 'critical', band), 'critical');
+  assert.equal(assessThresholdWithHysteresis(0.76, rule, 'critical', band), 'warning');
+});
+
+test('evaluateFleetNodeResources: hysteresis defers warning clearing', () => {
+  const now = Date.now();
+  const base = {
+    nodeId: 'mbp',
+    capacity: { memoryTotalMb: 1000 },
+    lastHeartbeatAt: new Date(now).toISOString(),
+  };
+  // 16% available: inside the warning band.
+  const kept = evaluateFleetNodeResources(
+    'mbp',
+    node({ ...base, capacity: { memoryTotalMb: 1000, memoryAvailableMb: 160 } }),
+    now,
+    { memory_available: 'warning' },
+  );
+  assert.ok(kept.findings.some((f) => f.signal === 'memory_available' && f.severity === 'warning'));
+
+  // Same metric without prev → no finding (plain threshold behavior).
+  const plain = evaluateFleetNodeResources(
+    'mbp',
+    node({ ...base, capacity: { memoryTotalMb: 1000, memoryAvailableMb: 160 } }),
+    now,
+  );
+  assert.ok(!plain.findings.some((f) => f.signal === 'memory_available'));
+
+  // 19% available: recovered past warn+band → cleared even with prev warning.
+  const recovered = evaluateFleetNodeResources(
+    'mbp',
+    node({ ...base, capacity: { memoryTotalMb: 1000, memoryAvailableMb: 190 } }),
+    now,
+    { memory_available: 'warning' },
+  );
+  assert.ok(!recovered.findings.some((f) => f.signal === 'memory_available'));
+});
+
+test('evaluateNamedFleetResources: prevSeveritiesByNode is threaded through', () => {
+  const now = Date.now();
+  const snap = evaluateNamedFleetResources(
+    [
+      node({
+        nodeId: 'mbp',
+        capacity: { memoryTotalMb: 1000, memoryAvailableMb: 160 },
+        lastHeartbeatAt: new Date(now).toISOString(),
+      }),
+    ],
+    ['mbp'],
+    now,
+    { mbp: { memory_available: 'warning' } },
+  );
+  // In the band + prev warning → warning kept; without prev this would be clean.
+  assert.ok(snap.warningCodes.some((c) => c === 'resource:memory_low:mbp'));
 });

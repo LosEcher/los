@@ -125,6 +125,8 @@ export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeC
 export { ensureFleetRepairConfigStore } from './fleet-repair-config.js';
 export { ensureFleetAlertConfigStore } from './fleet-alert-config.js';
 export { ensureNodeRecoveryPolicyStore } from './node-recovery-policy.js';
+export { ensureFleetResourceStateStore } from './fleet-resource-state.js';
+export { ensureNodeMaintenancePolicyStore } from './node-maintenance-policy.js';
 export { ensureSkillStore, upsertSkill, loadSkill, listSkills, deleteSkill, incrementSkillUsage, skillDirForScope, syncSkillsToDir, loadSkillsFromDir, type SkillRecord, type SkillRunMode, type SkillScope, type SkillLayer, type UpsertSkillInput } from './skills.js';
 export {
   selectSkillsForRun,

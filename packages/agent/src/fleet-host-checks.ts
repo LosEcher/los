@@ -39,6 +39,10 @@ import {
 } from './node-recovery-policy.js';
 import { resolveGlobalRepairConfig } from './fleet-repair-config.js';
 import { appendSessionEvent } from './session-events.js';
+import {
+  isNodeInMaintenance,
+  loadNodeMaintenancePolicy,
+} from './node-maintenance-policy.js';
 
 const log = getLogger('fleet-host-checks');
 
@@ -326,9 +330,15 @@ export async function runFleetHostChecks(
     );
     results.push(result);
 
+    // Maintenance windows (Komodo borrow P0-2): while a node is inside a
+    // configured window, keep recording check state (diagnostic) but skip
+    // auto-repair and alert emission — the downtime is planned.
+    const maintenancePolicy = await loadNodeMaintenancePolicy(target.nodeId).catch(() => null);
+    const inMaintenance = isNodeInMaintenance(target.nodeId, now, maintenancePolicy);
+
     // --- repair phase (only for failed checks, delegated to fleet-host-repair) ---
     let repairResult: FleetHostRepairResult | null = null;
-    if (!options.dryRun && result.status === 'failed') {
+    if (!options.dryRun && result.status === 'failed' && !inMaintenance) {
       // Declarative per-node policy merges over the effective global layer
       // (explicit options override DB/env/default for tests & invocations).
       const policy = await loadNodeRecoveryPolicy(target.nodeId).catch(() => null);
@@ -365,7 +375,8 @@ export async function runFleetHostChecks(
 
     const lastAlertMs = toMs(prev?.last_alert_at);
     const shouldAlert =
-      (result.status === 'failed' || result.status === 'degraded')
+      !inMaintenance
+      && (result.status === 'failed' || result.status === 'degraded')
       && (lastAlertMs === 0 || nowMs - lastAlertMs >= alertCooldownMs)
       && !options.quiet;
 

@@ -155,6 +155,8 @@ const isolatedGroupB = [
   'src/fleet-host-checks.test.ts',
   'src/fleet-inventory.test.ts',
   'src/fleet-resources.test.ts',
+  'src/fleet-resource-state.test.ts',
+  'src/node-maintenance-policy.test.ts',
   'src/runtime-health.test.ts',
   'src/scheduled-work.test.ts',
   'src/scheduled-work/policy.test.ts',

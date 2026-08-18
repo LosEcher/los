@@ -22,6 +22,7 @@ import {
   ensureExecutionExperimentStore,
   ensureFleetAlertConfigStore, ensureFleetRepairConfigStore,
   ensureNodeCommandStore, ensureNodeRecoveryPolicyStore,
+  ensureFleetResourceStateStore, ensureNodeMaintenancePolicyStore,
   ensureProviderCompatEvidenceStore,
   ensureProviderPromotionDecisionStore, ensureRunEvalStore, ensureRunSpecStore,
   ensureSchedulerDecisionLedgerStore, ensureServiceInstanceStore, ensureSessionEventStore,
@@ -73,6 +74,8 @@ export async function ensureAllStores(): Promise<void> {
   await ensureFleetRepairConfigStore();
   await ensureFleetAlertConfigStore();
   await ensureNodeRecoveryPolicyStore();
+  await ensureFleetResourceStateStore();
+  await ensureNodeMaintenancePolicyStore();
   await ensureMCPServerStore();
   await ensureRunEvalStore();
   await ensureExecutionExperimentStore();
