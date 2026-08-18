@@ -5,6 +5,7 @@ import {
   buildAnthropicModelSettings,
   buildOpenAIModelSettings,
   normalizeModelSettings,
+  resolveEffectiveReasoningEffort,
 } from './model-settings.js';
 
 test('normalizeModelSettings clamps common runtime parameters', () => {
@@ -91,4 +92,19 @@ test('generic OpenAI settings do not emit the DeepSeek thinking object', () => {
   }, 'openai'), {
     reasoning_effort: 'high',
   });
+});
+
+test('resolveEffectiveReasoningEffort records DeepSeek default as high (R4 gap fix)', () => {
+  // explicit request wins
+  assert.equal(resolveEffectiveReasoningEffort({ reasoningEffort: 'max' }, 'deepseek', true), 'max');
+  // unset DeepSeek → server-side default 'high' (thinking on by default)
+  assert.equal(resolveEffectiveReasoningEffort(undefined, 'deepseek', true), 'high');
+  assert.equal(resolveEffectiveReasoningEffort({}, 'deepseek', true), 'high');
+  // deepseek with reasoning disabled via 'none' stays explicit
+  assert.equal(resolveEffectiveReasoningEffort({ reasoningEffort: 'none' }, 'deepseek', true), 'none');
+  // non-DeepSeek providers are not asserted (server defaults unknown)
+  assert.equal(resolveEffectiveReasoningEffort(undefined, 'xai', true), undefined);
+  assert.equal(resolveEffectiveReasoningEffort(undefined, 'openai', true), undefined);
+  // providers without reasoning support never report a default
+  assert.equal(resolveEffectiveReasoningEffort(undefined, 'deepseek', false), undefined);
 });

@@ -21,6 +21,7 @@ import { AgentError } from '../error-base.js';
 import { resolveModelProfile, type ApiShape, type ModelProfile } from '../model-profiles.js';
 import {
   buildOpenAIModelSettings,
+  resolveEffectiveReasoningEffort,
 } from '../model-settings.js';
 import { buildOpenAICompatUrl, drainSseBuffer, repairJson, repairToolCallArguments, type RepairResult } from './openai-utils.js';
 import { mergeToolCallDeltas, mergeSplitToolCalls } from './delta-repair.js';
@@ -152,12 +153,24 @@ export function createOpenAICompatProvider(cfg: OpenAIConfig): Provider {
         }
         return m;
       });
-      // Request-side config snapshot for telemetry (roadmap R2a): the requested
-      // reasoning effort is the attribution key for cost/latency/quality
-      // backtests. Mirrors DSH's LlmCallConfig header snapshot.
+      // Request-side config snapshot for telemetry (roadmap R2a/R4-fix): the
+      // effective reasoning effort is the attribution key for cost/latency/
+      // quality backtests. Mirrors DSH's LlmCallConfig header snapshot.
+      // Explicit request wins; DeepSeek's unset default is recorded as 'high'
+      // (server-side thinking on, default effort) so effort tiers are backtestable.
+      const effectiveEffort = resolveEffectiveReasoningEffort(
+        options.modelSettings,
+        profile.provider,
+        profile.supportsReasoning,
+      );
       const requestMeta = {
-        reasoningEffort: options.modelSettings?.reasoningEffort,
-        thinking: options.modelSettings?.thinking,
+        reasoningEffort: effectiveEffort,
+        thinking: options.modelSettings?.thinking
+          ?? (effectiveEffort === 'none'
+            ? 'disabled'
+            : profile.provider === 'deepseek' && profile.supportsReasoning
+              ? 'enabled'
+              : undefined),
         maxTokens: options.modelSettings?.maxTokens,
         temperature: options.modelSettings?.temperature,
         feature: options.feature,
