@@ -64,6 +64,24 @@ if [ -f "$HOME/.config/herdr/config.toml" ]; then
   printf 'config: present (%s bytes)\n' "$(wc -c < "$HOME/.config/herdr/config.toml")"
 fi
 
+printf '\n== node probes (hash-pinned read-only) ==\n'
+PROBE_DIR="/opt/los/bin/probe"
+if [ -d "$PROBE_DIR" ]; then
+  if [ -f "$PROBE_DIR/los-probe-net.sh" ] && [ -x "$PROBE_DIR/los-probe-run.sh" ] && [ -f "$PROBE_DIR/pins.sha256" ]; then
+    probe_actual="$(sha256sum "$PROBE_DIR/los-probe-net.sh" 2>/dev/null | awk '{print $1}')"
+    probe_pinned="$(awk '{print $1}' "$PROBE_DIR/pins.sha256" 2>/dev/null | tr 'A-F' 'a-f')"
+    if [ -n "$probe_actual" ] && [ "$probe_actual" = "$probe_pinned" ]; then
+      printf 'probe: OK (sha256 %s)\n' "$probe_actual"
+    else
+      printf 'probe: DRIFT (actual %s pin %s) — runner will refuse execution\n' "${probe_actual:-none}" "${probe_pinned:-none}"
+    fi
+  else
+    printf 'probe: INCOMPLETE (expected los-probe-net.sh + los-probe-run.sh + pins.sha256 in %s)\n' "$PROBE_DIR"
+  fi
+else
+  printf 'probe: NOT-DEPLOYED (%s missing; run tools/node-probes/deploy-probes.sh)\n' "$PROBE_DIR"
+fi
+
 printf '\n== los runtime ==\n'
 if [ -d /opt/los ]; then
   printf 'repo: /opt/los present\n'
