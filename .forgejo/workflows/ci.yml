@@ -138,7 +138,7 @@ jobs:
           git remote set-url origin "http://x-access-token:${FORGEJO_TOKEN}@${auth_url}/${FORGEJO_REPOSITORY}.git"
           git fetch --depth=1 origin main
           git remote set-url origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
-          if git diff --name-only FETCH_HEAD HEAD | grep -qvE '^(tools/|docs/|\.forgejo/|README\.md|LICENSE|\.gitignore|\.editorconfig|\.env\.example|pnpm-workspace\.yaml)$'; then
+          if git diff --name-only FETCH_HEAD HEAD | grep -qvE '^(tools/|docs/|\.forgejo/|README\.md$|LICENSE$|\.gitignore$|\.editorconfig$|\.env\.example$|pnpm-workspace\.yaml$)'; then
             echo "PATH-GATE: non-safe paths detected — running full suite"
           else
             echo "PATH-GATE: only tools/docs/CI-metadata changed — skipping heavy suite"
