@@ -34,6 +34,21 @@ const FLEET_MEM_AVAILABLE_ABS_CRITICAL_MB = 256;
  /** Absolute available-memory warning on light nodes: <256MB free. */
 const FLEET_LIGHT_MEM_AVAILABLE_ABS_WARN_MB = 256;
 
+/**
+ * Hysteresis bands (Komodo borrow P0-1): a warning/critical is not cleared
+ * until the metric crosses back past its threshold by at least the band.
+ * Per-signal because units differ: mem/swap are ratios (0-1), cpu load is an
+ * absolute load-per-core figure. Signals absent from this map never use
+ * hysteresis (heartbeat_age, capacity_missing, active_tasks_light_node).
+ */
+export const FLEET_RESOURCE_HYSTERESIS_BANDS: Partial<
+  Record<FleetResourceSignal, number>
+> = {
+  memory_available: 0.03,
+  swap_used: 0.03,
+  cpu_load: 0.5,
+};
+
 export type FleetResourceSeverity = 'warning' | 'critical';
 
 export type FleetResourceSignal =
@@ -52,6 +67,8 @@ export interface FleetResourceFinding {
   code: string;
   message: string;
   metrics: Record<string, number | string | boolean | null>;
+  /** Set by consumers that suppress this finding (e.g. maintenance window). */
+  suppressed?: boolean;
 }
 
 export interface FleetResourceNodeSnapshot {
@@ -106,14 +123,70 @@ export function isLightFleetNode(node: ExecutorNodeRecord | undefined, nodeId: s
   return /oracle/i.test(nodeId);
 }
 
+/** Previous severities per signal for one node (hysteresis input). */
+export type FleetResourcePrevSeverities = Partial<
+  Record<FleetResourceSignal, FleetResourceSeverity>
+>;
+
+interface ThresholdRule {
+  warn: number;
+  critical: number;
+  /** 'below': value under threshold is bad (memory available). */
+  direction: 'below' | 'above';
+}
+
+/**
+ * Pure threshold assessment with optional hysteresis.
+ *
+ * Entering an alert follows the raw threshold. Clearing or downgrading
+ * requires crossing back past the threshold by at least `band`:
+ *   below-direction: critical recovers at >= critical + band,
+ *                    warning recovers at >= warn + band.
+ *   above-direction: critical recovers at <= critical - band,
+ *                    warning recovers at <= warn - band.
+ * When `band` is undefined or `prev` is undefined, behavior is identical to
+ * the pre-hysteresis evaluation.
+ */
+export function assessThresholdWithHysteresis(
+  value: number,
+  rule: ThresholdRule,
+  prev: FleetResourceSeverity | undefined,
+  band: number | undefined,
+): FleetResourceSeverity | undefined {
+  const { warn, critical, direction } = rule;
+  const over = (v: number, threshold: number) =>
+    direction === 'below' ? v < threshold : v > threshold;
+  const recoveryThreshold = (threshold: number, withBand: boolean) => {
+    if (!withBand || band === undefined) return threshold;
+    return direction === 'below' ? threshold + band : threshold - band;
+  };
+  const pastRecovery = (v: number, threshold: number) =>
+    direction === 'below' ? v >= threshold : v <= threshold;
+
+  if (over(value, critical)) return 'critical';
+  if (band !== undefined && prev === 'critical' && !pastRecovery(value, recoveryThreshold(critical, true))) {
+    return 'critical';
+  }
+  if (over(value, warn)) return 'warning';
+  if (band !== undefined && prev === 'warning' && !pastRecovery(value, recoveryThreshold(warn, true))) {
+    return 'warning';
+  }
+  return undefined;
+}
+
 /**
  * Evaluate one fleet node from registry capacity fields only.
  * Missing capacity yields a single capacity_missing warning when the node is online.
+ *
+ * `prevSeverities` carries the previous evaluation's severity per signal so
+ * threshold hysteresis can defer clearing (see assessThresholdWithHysteresis).
+ * Omit it for plain threshold evaluation (pre-hysteresis behavior).
  */
 export function evaluateFleetNodeResources(
   nodeId: string,
   node: ExecutorNodeRecord | undefined,
   nowMs: number = Date.now(),
+  prevSeverities: FleetResourcePrevSeverities = {},
 ): FleetResourceNodeSnapshot {
   if (!node) {
     return {
@@ -161,7 +234,17 @@ export function evaluateFleetNodeResources(
   }
 
   if (memoryAvailableRatio !== undefined) {
-    if (memoryAvailableRatio < FLEET_MEM_AVAILABLE_CRITICAL_RATIO) {
+    const severity = assessThresholdWithHysteresis(
+      memoryAvailableRatio,
+      {
+        warn: FLEET_MEM_AVAILABLE_WARN_RATIO,
+        critical: FLEET_MEM_AVAILABLE_CRITICAL_RATIO,
+        direction: 'below',
+      },
+      prevSeverities.memory_available,
+      FLEET_RESOURCE_HYSTERESIS_BANDS.memory_available,
+    );
+    if (severity === 'critical') {
       findings.push({
         nodeId,
         signal: 'memory_available',
@@ -176,7 +259,7 @@ export function evaluateFleetNodeResources(
           memoryAvailableRatio,
         },
       });
-    } else if (memoryAvailableRatio < FLEET_MEM_AVAILABLE_WARN_RATIO) {
+    } else if (severity === 'warning') {
       findings.push({
         nodeId,
         signal: 'memory_available',
@@ -195,7 +278,17 @@ export function evaluateFleetNodeResources(
   }
 
   if (swapUsedRatio !== undefined && (swapTotalMb ?? 0) > 0) {
-    if (swapUsedRatio > FLEET_SWAP_USED_CRITICAL_RATIO) {
+    const severity = assessThresholdWithHysteresis(
+      swapUsedRatio,
+      {
+        warn: FLEET_SWAP_USED_WARN_RATIO,
+        critical: FLEET_SWAP_USED_CRITICAL_RATIO,
+        direction: 'above',
+      },
+      prevSeverities.swap_used,
+      FLEET_RESOURCE_HYSTERESIS_BANDS.swap_used,
+    );
+    if (severity === 'critical') {
       findings.push({
         nodeId,
         signal: 'swap_used',
@@ -210,7 +303,7 @@ export function evaluateFleetNodeResources(
           swapUsedRatio,
         },
       });
-    } else if (swapUsedRatio > FLEET_SWAP_USED_WARN_RATIO) {
+    } else if (severity === 'warning') {
       findings.push({
         nodeId,
         signal: 'swap_used',
@@ -229,7 +322,17 @@ export function evaluateFleetNodeResources(
   }
 
   if (cpuLoadPerCore !== undefined) {
-    if (cpuLoadPerCore > FLEET_CPU_LOAD_CRITICAL) {
+    const severity = assessThresholdWithHysteresis(
+      cpuLoadPerCore,
+      {
+        warn: FLEET_CPU_LOAD_WARN,
+        critical: FLEET_CPU_LOAD_CRITICAL,
+        direction: 'above',
+      },
+      prevSeverities.cpu_load,
+      FLEET_RESOURCE_HYSTERESIS_BANDS.cpu_load,
+    );
+    if (severity === 'critical') {
       findings.push({
         nodeId,
         signal: 'cpu_load',
@@ -242,7 +345,7 @@ export function evaluateFleetNodeResources(
           cpuLoadPerCore,
         },
       });
-    } else if (cpuLoadPerCore > FLEET_CPU_LOAD_WARN) {
+    } else if (severity === 'warning') {
       findings.push({
         nodeId,
         signal: 'cpu_load',
@@ -325,9 +428,12 @@ export function evaluateNamedFleetResources(
   nodes: ExecutorNodeRecord[],
   namedIds: string[] = resolveNamedFleetNodeIds(),
   nowMs: number = Date.now(),
+  prevSeveritiesByNode: Record<string, FleetResourcePrevSeverities> = {},
 ): FleetResourceSnapshot {
   const byId = new Map(nodes.map((n) => [n.nodeId, n]));
-  const assessed = namedIds.map((id) => evaluateFleetNodeResources(id, byId.get(id), nowMs));
+  const assessed = namedIds.map((id) =>
+    evaluateFleetNodeResources(id, byId.get(id), nowMs, prevSeveritiesByNode[id] ?? {}),
+  );
   const findings = assessed.flatMap((n) => n.findings);
   const warningCodes = findings
     .filter((f) => f.severity === 'warning')

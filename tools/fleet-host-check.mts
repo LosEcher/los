@@ -24,6 +24,11 @@
  *   ... --policy-get <nodeId>
  *   ... --policy-set <nodeId> repairEnabled=true,cooldownMs=600000,restartUnhealthy=false
  *   ... --policy-delete <nodeId>
+ *
+ * Per-node maintenance windows (node_maintenance_policy, Komodo borrow P0-2):
+ *   ... --maint-get <nodeId>
+ *   ... --maint-set <nodeId> start=2026-08-20T02:00:00.000Z,end=2026-08-20T03:00:00.000Z
+ *   ... --maint-clear <nodeId>
  */
 import { loadConfig } from '../packages/infra/src/config.ts';
 import { closeDb, initDb } from '../packages/infra/src/db.ts';
@@ -46,6 +51,12 @@ import {
   upsertNodeRecoveryPolicy,
   type NodeRecoveryPolicyPatch,
 } from '../packages/agent/src/node-recovery-policy.ts';
+import {
+  deleteNodeMaintenancePolicy,
+  loadNodeMaintenancePolicy,
+  upsertNodeMaintenancePolicy,
+  type NodeMaintenancePolicyPatch,
+} from '../packages/agent/src/node-maintenance-policy.ts';
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);
@@ -91,6 +102,9 @@ try {
   const policyGet = argValue('--policy-get');
   const policySet = argValue('--policy-set');
   const policyDelete = argValue('--policy-delete');
+  const maintGet = argValue('--maint-get');
+  const maintSet = argValue('--maint-set');
+  const maintClear = argValue('--maint-clear');
 
   if (configGet) {
     const c = await loadFleetRepairConfig();
@@ -150,6 +164,50 @@ try {
       console.log(JSON.stringify(saved, null, 2));
     } catch (err) {
       console.error(`policy rejected: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 2;
+    }
+  } else if (maintGet) {
+    const p = await loadNodeMaintenancePolicy(maintGet);
+    console.log(JSON.stringify(p ?? { nodeId: maintGet, policy: null }, null, 2));
+    process.exitCode = p ? 0 : 1;
+  } else if (maintClear) {
+    const removed = await deleteNodeMaintenancePolicy(maintClear, {
+      source: 'cli',
+      operator: process.env.USER,
+    });
+    console.log(JSON.stringify({ nodeId: maintClear, removed }, null, 2));
+  } else if (maintSet) {
+    const eq = maintSet.indexOf('=');
+    const nodeId = eq > 0 ? maintSet.slice(0, eq).trim() : '';
+    try {
+      // Format: start=<ISO>,end=<ISO>[,start=<ISO>,end=<ISO>...]
+      const kvRaw = eq > 0 ? maintSet.slice(eq + 1) : '';
+      const windows: Array<{ start: string; end: string }> = [];
+      let start: string | undefined;
+      for (const kv of kvRaw.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const k = kv.indexOf('=');
+        if (k <= 0) continue;
+        const key = kv.slice(0, k).trim();
+        const raw = kv.slice(k + 1).trim();
+        if (key === 'start') start = raw;
+        else if (key === 'end' && start) {
+          windows.push({ start, end: raw });
+          start = undefined;
+        }
+      }
+      if (start !== undefined) {
+        console.error('maint rejected: each window needs start=... and end=...');
+        process.exitCode = 2;
+      } else {
+        const saved = await upsertNodeMaintenancePolicy(
+          nodeId,
+          { windows } as NodeMaintenancePolicyPatch,
+          { source: 'cli', operator: process.env.USER },
+        );
+        console.log(JSON.stringify(saved, null, 2));
+      }
+    } catch (err) {
+      console.error(`maint rejected: ${err instanceof Error ? err.message : String(err)}`);
       process.exitCode = 2;
     }
   } else {

@@ -245,7 +245,11 @@ export async function resolveGlobalRepairConfig(
 // ── audit ──
 
 export interface ConfigChangeAuditInput extends ConfigChangeMeta {
-  scope: 'fleet_repair_config' | 'node_recovery_policy' | 'fleet_alert_config';
+  scope:
+    | 'fleet_repair_config'
+    | 'node_recovery_policy'
+    | 'node_maintenance_policy'
+    | 'fleet_alert_config';
   nodeId?: string;
   fields: string[];
   before: Record<string, unknown> | null;

@@ -10,6 +10,26 @@ export interface ModelSettings {
   thinking?: 'enabled' | 'disabled';
 }
 
+/**
+ * Effective reasoning effort for telemetry (roadmap R4 gap fix, 2026-08-18).
+ *
+ * The requested value wins when explicitly set. When unset, DeepSeek
+ * OpenAI-compatible calls run with server-side thinking enabled and the
+ * default effort 'high' (verified 2026-08-16) — recording that effective
+ * default instead of null is what makes effort-tier backtests possible.
+ * Other providers return undefined (their server defaults are not asserted).
+ */
+export function resolveEffectiveReasoningEffort(
+  modelSettings: ModelSettings | undefined,
+  provider: string,
+  supportsReasoning: boolean,
+): ModelSettings['reasoningEffort'] | undefined {
+  const explicit = modelSettings?.reasoningEffort;
+  if (explicit) return explicit;
+  if (supportsReasoning && provider === 'deepseek') return 'high';
+  return undefined;
+}
+
 export function normalizeModelSettings(value: unknown): ModelSettings | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;

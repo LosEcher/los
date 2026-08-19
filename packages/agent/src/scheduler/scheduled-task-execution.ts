@@ -79,6 +79,7 @@ export async function runScheduledTaskExecution(context: ScheduledTaskExecutionC
       leaseMs,
       prompt: runtimePrompt,
       config: {
+        feature: input.feature,
         sessionId,
         runSpecId: input.runSpecId,
         provider: initialProvider,
