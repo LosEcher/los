@@ -12,11 +12,13 @@ const REPRESENTATIVE_TYPES = [
   'model.response.truncated', 'model.cache', 'model.delta',
   'tool.call', 'tool.result', 'tool.catalog', 'tool.warned',
   'tool.requested', 'tool.repair', 'tool.planned', 'tool.preflight_diagnostic',
-  'tool.call.upsert',
+  'tool.call.upsert', 'tool.approved', 'tool.denied',
   'task.created', 'task.running', 'task.succeeded', 'task.failed',
   'task.cancelled', 'task.blocked', 'task.recovery_followup_queued', 'task.deduplicated',
+  'agent_task.failed', 'agent_task.requeued',
   'run.created', 'run.plan_approved', 'run.plan_revised',
   'run.recovery_required', 'run.recovery_cancelled', 'run.operator_attention_required',
+  'operator_attention_required',
   'run.blocked', 'run.verification_failed', 'run.plan_produced', 'run.plan_draft',
   'run.discovery_report', 'run.succeeded', 'run.revision_requested',
   'run.planning_started', 'run.planning_completed',
@@ -63,6 +65,8 @@ describe('event-types registry', () => {
     assert.equal(isKnownSessionEventType('skill.selected'), true);
     assert.equal(isKnownSessionEventType('rule.enforced'), true);
     assert.equal(isKnownSessionEventType('child.agent.spawned'), true);
+    assert.equal(isKnownSessionEventType('drill.event.one'), true);
+    assert.equal(isKnownSessionEventType('drill.outbox.pending'), true);
   });
 
   it('rejects unknown types', () => {

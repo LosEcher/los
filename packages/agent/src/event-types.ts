@@ -38,6 +38,8 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'tool.requested',
     'tool.repair',
     'tool.planned',
+    'tool.approved',
+    'tool.denied',
     'tool.preflight_diagnostic',
     'tool.call.upsert',
   ],
@@ -50,6 +52,8 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'task.blocked',
     'task.recovery_followup_queued',
     'task.deduplicated',
+    'agent_task.failed',
+    'agent_task.requeued',
   ],
   run: [
     'run.created',
@@ -58,6 +62,7 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'run.recovery_required',
     'run.recovery_cancelled',
     'run.operator_attention_required',
+    'operator_attention_required',
     'run.blocked',
     'run.verification_failed',
     'run.plan_produced',
@@ -165,6 +170,7 @@ const SESSION_EVENT_TYPE_PREFIXES = [
   'skill.',
   'rule.',
   'child.agent.',
+  'drill.',
 ] as const;
 
 export type SessionEventType = (typeof SESSION_EVENT_TYPE_GROUPS)[keyof typeof SESSION_EVENT_TYPE_GROUPS][number];
