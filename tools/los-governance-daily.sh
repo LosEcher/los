@@ -130,7 +130,7 @@ age_hours() { # 文件 mtime 距今小时数
 }
 if [[ -n "$LATEST_NW" ]]; then
   NW_AGE=$(age_hours "$LATEST_NW")
-  NW_VERDICT="$(awk '/^## Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_NW" | sed 's/^\*\*//; s/\*\*.*//')"
+  NW_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_NW" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
   NW_FLAG=""; [[ "$NW_AGE" -gt 36 ]] && NW_FLAG=" [STALE ${NW_AGE}h]"
   echo "- network-observe: ${NW_VERDICT:-?}（${NW_AGE}h 前报告）${NW_FLAG}"
 else
@@ -138,7 +138,7 @@ else
 fi
 if [[ -n "$LATEST_SG" ]]; then
   SG_AGE=$(age_hours "$LATEST_SG")
-  SG_VERDICT="$(grep -m1 -oE 'verdict: [a-z_]+' "$LATEST_SG" | cut -d' ' -f2)"
+  SG_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_SG" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
   SG_FLAG=""; [[ "$SG_AGE" -gt 12 ]] && SG_FLAG=" [STALE ${SG_AGE}h]"
   echo "- surge: ${SG_VERDICT:-?}（${SG_AGE}h 前报告）${SG_FLAG}"
 else
