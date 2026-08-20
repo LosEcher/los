@@ -102,6 +102,28 @@ describe('test database guard', () => {
     }
   });
 
+  it('refuses live-looking database names even when CI is set (fail-closed)', () => {
+    // Regression: GitHub runner job env intermittently fails to deliver
+    // DATABASE_URL/TEST_DATABASE_URL to test processes. The old
+    // `!process.env.CI` bypass then silently fell back to the built-in default
+    // database and failed three layers later with an opaque pg SCRAM error
+    // ("SASL: ... client password must be a string") across every DB-backed
+    // package. The guard must hold regardless of CI.
+    const savedCI = process.env.CI;
+    process.env.CI = 'true';
+    process.argv.push('/tmp/db.test.ts');
+    delete process.env.TEST_DATABASE_URL;
+    try {
+      assert.throws(
+        () => _resolveDatabaseUrlForInit('postgres://localhost:5432/los'),
+        /Refusing to run tests against non-test database "los"/,
+      );
+    } finally {
+      if (savedCI !== undefined) process.env.CI = savedCI;
+      else delete process.env.CI;
+    }
+  });
+
   it('allows explicit one-off override for live-looking test databases', () => {
     process.argv.push('/tmp/db.test.ts');
     delete process.env.TEST_DATABASE_URL;

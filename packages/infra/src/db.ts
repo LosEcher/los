@@ -83,14 +83,17 @@ export function _resolveDatabaseUrlForInit(databaseUrl?: string): string | undef
     if (testUrl) return testUrl;
 
     const candidate = databaseUrl ?? process.env.DATABASE_URL;
-    if (
-      !process.env.CI &&
-      candidate
-      && !_isSafeTestDatabaseUrl(candidate)
-      && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1'
-    ) {
+    // Fail closed in test processes regardless of CI. Previously the
+    // `!process.env.CI` bypass let a missing/unsafe TEST_DATABASE_URL silently
+    // fall back to the built-in default (postgres://localhost:5432/los) on CI
+    // runners, which surfaced three layers later as an opaque pg SCRAM error
+    // ("SASL: ... client password must be a string"). See git history
+    // (56321f52, 2026-06-13) for the original "TEST_DATABASE_URL not inherited
+    // by test processes" incident — this guard is the fail-closed half.
+    // LOS_ALLOW_LIVE_TEST_DB=1 remains the explicit one-off override.
+    if (candidate && !_isSafeTestDatabaseUrl(candidate) && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1') {
       throw new Error(
-        `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}". ` +
+        `Refusing to run tests against non-test database "${redactedDatabaseName(candidate)}" (TEST_DATABASE_URL is unset). ` +
         'Set TEST_DATABASE_URL=postgres://.../los_test or LOS_ALLOW_LIVE_TEST_DB=1 for an explicit one-off override.',
       );
     }
