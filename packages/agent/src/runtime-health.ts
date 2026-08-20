@@ -16,6 +16,16 @@ import {
   type FleetResourceNodeSnapshot,
 } from './fleet-resources.js';
 import {
+  extractSeveritiesFromFindings,
+  loadFleetResourceSeveritiesBatch,
+  saveFleetResourceSeverities,
+} from './fleet-resource-state.js';
+import {
+  loadNodeMaintenancePoliciesBatch,
+  isNodeInMaintenance,
+  type NodeMaintenancePolicy,
+} from './node-maintenance-policy.js';
+import {
   DEFAULT_FLEET_REPAIR_COOLDOWN_MS,
   DEFAULT_FLEET_REPAIR_MAX_CONSECUTIVE_FAILURES,
   DEFAULT_FLEET_REPAIR_QUORUM_THRESHOLD,
@@ -163,27 +173,54 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
 
   // Named fleet only — ignore ssh_target / incidental executor rows.
   const namedIds = resolveNamedFleetNodeIds();
+  const nowMs = Date.now();
+
+  // Maintenance windows (Komodo borrow P0-2): nodes inside a configured
+  // window have their fleet alerts suppressed (board warnings + attention +
+  // host-check repair), so planned downtime does not create noise.
+  const maintenanceByNode: Record<string, NodeMaintenancePolicy | null> =
+    await loadNodeMaintenancePoliciesBatch(namedIds).catch(() => ({}));
+  const inMaintenance = (nodeId: string) =>
+    isNodeInMaintenance(nodeId, nowMs, maintenanceByNode[nodeId] ?? null);
+
   const fleetSnap = evaluateNamedFleet(executors, namedIds);
-  if (fleetSnap.offline.length > 0) {
+  const visibleOffline = fleetSnap.offline.filter((id) => !inMaintenance(id));
+  const visibleUnverified = fleetSnap.onlineUnverified.filter((id) => !inMaintenance(id));
+  const visibleMissing = fleetSnap.missing.filter((id) => !inMaintenance(id));
+  if (visibleOffline.length > 0) {
     warnings.push(
-      `fleet:offline=${fleetSnap.offline.length}:${fleetSnap.offline.slice(0, 4).join(',')}`,
+      `fleet:offline=${visibleOffline.length}:${visibleOffline.slice(0, 4).join(',')}`,
     );
   }
-  if (fleetSnap.onlineUnverified.length > 0) {
+  if (visibleUnverified.length > 0) {
     warnings.push(
-      `fleet:online_unverified=${fleetSnap.onlineUnverified.length}:${fleetSnap.onlineUnverified.slice(0, 4).join(',')}`,
+      `fleet:online_unverified=${visibleUnverified.length}:${visibleUnverified.slice(0, 4).join(',')}`,
     );
   }
-  if (fleetSnap.missing.length > 0) {
+  if (visibleMissing.length > 0) {
     warnings.push(
-      `fleet:missing=${fleetSnap.missing.length}:${fleetSnap.missing.slice(0, 4).join(',')}`,
+      `fleet:missing=${visibleMissing.length}:${visibleMissing.slice(0, 4).join(',')}`,
     );
   }
 
   // P1: resource thresholds from heartbeat capacity (no extra probes).
-  const fleetResources = evaluateNamedFleetResources(executors, namedIds);
-  for (const code of fleetResources.criticalCodes) warnings.push(code);
-  for (const code of fleetResources.warningCodes) warnings.push(code);
+  // Hysteresis (P0-1): previous severities come from fleet_resource_state;
+  // findings inside a maintenance window are marked suppressed (kept for the
+  // board, excluded from warnings and counts). Severity state is written back
+  // fail-soft — evaluation state maintenance, not a control action.
+  const prevByNode = await loadFleetResourceSeveritiesBatch(namedIds).catch(() => ({}));
+  const fleetResources = evaluateNamedFleetResources(executors, namedIds, nowMs, prevByNode);
+  for (const node of fleetResources.nodes) {
+    if (inMaintenance(node.nodeId)) {
+      for (const finding of node.findings) finding.suppressed = true;
+    }
+    await saveFleetResourceSeverities(
+      node.nodeId,
+      extractSeveritiesFromFindings(node.findings),
+    ).catch(() => undefined);
+  }
+  const activeFindings = fleetResources.findings.filter((f) => !f.suppressed);
+  for (const finding of activeFindings) warnings.push(finding.code);
 
   // Fleet repair config (derived view): effective gates per named node.
   const globalRepairDefaults: GlobalRepairConfig = {
@@ -262,8 +299,8 @@ export async function getRuntimeHealth(): Promise<RuntimeHealthReport> {
       assessedAt: fleetResources.assessedAt,
       nodes: fleetResources.nodes,
       findings: fleetResources.findings,
-      warningCount: fleetResources.warningCodes.length,
-      criticalCount: fleetResources.criticalCodes.length,
+      warningCount: activeFindings.filter((f) => f.severity === 'warning').length,
+      criticalCount: activeFindings.filter((f) => f.severity === 'critical').length,
     },
     schedules: {
       enabled: scheduleStats.enabled,

@@ -16,6 +16,7 @@ the reliable channels.
 | `tools/ci-gate.sh` | gate phases; writes `/tmp/los-gate-summary.json` | per-phase elapsed seconds |
 | `tools/check-known-failures.sh` | NEW vs KNOWN test failure classification | baseline-driven |
 | `tools/observe-pnpm-store.sh` | pnpm store capacity on the runner | store KiB + filesystem |
+| `tools/path-gate.mjs` | classify PR paths; skip heavy `gate-test` / e2e steps | `skip_heavy` step output |
 
 ## Metrics persistence (A1)
 
@@ -74,19 +75,76 @@ GitHub mirrors the gate-fast summary into `GITHUB_STEP_SUMMARY`; GitHub job
 timing is available natively through the API, so no echo channel is needed
 there.
 
+## Path-gate (docs/tools-only skip)
+
+`gate-test` and `gate-web-e2e` classify the PR path set with
+`tools/path-gate.mjs` and skip install/test steps when
+`steps.path-gate.outputs.skip_heavy == 'true'`. The jobs themselves still
+run and stay green — they are required checks. `exit 0` inside the classify
+step does **not** skip later steps (runs 779/780, PR `#295`). Record:
+`docs/operations/2026-08-18-path-gate-skip-failure.md`.
+
 ## B1 verification checklist (Forgejo turbo cache)
 
 `.forgejo/workflows/ci.yml` sets `TURBO_CACHE_DIR: /root/.local/share/turbo`
-on `gate-fast` and `gate-test`, relying on the runner-host volume mapping that
-already persists `~/.local/share/pnpm/store` (run 137). On the next real PR
-check:
+on `gate-fast` (and `gate-test` as a no-op safeguard — that job's steps run
+per-package node test runners, no turbo).
 
-1. gate-fast wall drops from ~2.7–4.2m toward ~2m on the second run after this
-   change (first run warms the cache).
-2. `pnpm run gate` inside the job prints turbo cache hits (`cache hit` lines).
-3. If the directory is **not** persisted (cache never warms), the runner's
-   volume mapping must be extended to `/root/.local/share/turbo`, or an
-   `actions/cache` step with a Forgejo cache server is required instead.
+**Status (corrected 2026-08-18):** between B1 enablement and this correction
+the turbo cache was **not actually persisted**. The runner persists only the
+pnpm store, as a podman named volume (`forgejo-pnpm-store`); `TURBO_CACHE_DIR`
+fell in the ephemeral job-container filesystem and was wiped after every job —
+run 775 and run 776 (identical content) both reported `turbo: {cached: 0,
+total: 16}` with observe-step `entries: 16` (a shared volume would show ≥32
+entries and ≥16 hits). The 2.2–2.8m gate-fast on runs 646–657 was the
+**no-cache** value (TURBO_CONCURRENCY=4 + path-gating), not a warm-cache one.
+Fix: a second named volume `forgejo-turbo-cache` mounted at
+`/root/.local/share/turbo` (runner-host config; see
+`docs/operations/2026-08-18-runner-topology-and-turbo-persistence.md`).
+Acceptance signal: gate summary `turbo.cached > 0` on the run after the first
+cold write.
+
+**Tuning (2026-08-18, `turbo.json`):**
+
+1. `globalEnv` trimmed from `[DATABASE_URL, TEST_DATABASE_URL,
+   LOS_ALLOW_LIVE_TEST_DB, LOS_TEST_RUN_ID, NODE_ENV]` to `[NODE_ENV]`.
+   Build/check are `tsc`-only and never read the DB/test vars, and the `test`
+   task is `cache: false`, so hashing them only created cache-key volatility
+   (e.g. `LOS_TEST_RUN_ID` is a per-run UUID — any turbo invocation with it in
+   the environment silently busts the whole cache family). Keep DB/test vars
+   out of `globalEnv`; NODE_ENV stays because it can genuinely affect output
+   (vite build mode).
+2. `globalDependencies: ["tsconfig.base.json"]` added. Every package tsconfig
+   extends the root base, but turbo's default global hash does not include it
+   (`globalCacheInputs.files` was empty) — changing the base used to produce
+   stale cache hits. This is a correctness fix, not just a speed one.
+3. First run after either change is a full cache miss (global hash changed);
+   the runner warms back up on the following runs.
+
+**Machine-verified cache-hit signal (not manual):**
+
+- `tools/ci-gate.sh` phase 1 folds the turbo run summary into the gate summary
+  JSON: the emitted file gains `"turbo": {"cached", "total", "tasks",
+  "cache_hits", "cache_misses"}` (parsed from the `Cached:`/`Tasks:` summary
+  line plus per-task `cache hit`/`cache miss` lines). The workflow's
+  `Emit gate summary (gate-fast)` step prints it every run.
+- `tools/observe-turbo-cache.sh --json` (step `Observe turbo cache capacity`
+  in gate-fast) reports the persisted directory's entry count and size. Exit 2
+  if the directory is missing — a signal the runner volume is missing.
+
+**If the cache is not hitting:**
+
+1. Check the gate summary `turbo` block: `cached` ≈ 0 with `total` > 0 on
+   consecutive runs with unchanged package content means the volume is not
+   mounted. Verify on the runner host:
+   `podman exec forgejo-runner-win-canary sh -c "cat /data/config.yaml" | grep -E 'options:|valid_volumes'`
+   — `forgejo-turbo-cache` must appear in both. The runner host is
+   `ssh win-los` (DESKTOP-R45553O, see the 2026-08-18 runner-topology doc).
+2. Check `observe-turbo-cache.sh` output: `exists:false` means the volume is
+   not mounted (or TURBO_CACHE_DIR unset).
+3. Structural changes (new package, lockfile bump, `turbo.json`/base-tsconfig
+   edit) legitimately cold-miss once — look for the miss pattern across
+   consecutive runs, not a single run.
 
 ## Runner health history (context)
 

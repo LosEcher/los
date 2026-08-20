@@ -38,6 +38,7 @@
 | `run.recovery_required` | 需要恢复 | `scheduled-task-runner.ts` |
 | `run.recovery_cancelled` | 恢复已取消 | `tool-call-recovery.ts` |
 | `run.operator_attention_required` | 需要操作员关注 | `tool-call-recovery.ts` |
+| `operator_attention_required` | 死信需要操作员关注 | `dead-letter.ts` |
 | `run.blocked` | 运行被阻塞 | `scheduled-task-runner.ts` |
 
 ### Task 域 (`task.*`)

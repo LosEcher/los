@@ -15,6 +15,10 @@ import {
 } from './fleet-alert-config.js';
 import type { ExecutorNodeRecord } from './executor-nodes.js';
 import { appendSessionEvent } from './session-events.js';
+import {
+  isNodeInMaintenance,
+  loadNodeMaintenancePolicy,
+} from './node-maintenance-policy.js';
 
 const log = getLogger('fleet-inventory');
 
@@ -78,6 +82,7 @@ export interface FleetAlertEmission {
     | 'cooldown'
     | 'duplicate_observation'
     | 'healthy'
+    | 'maintenance'
     | 'dry_run'
     | 'emit_failed';
 }
@@ -251,6 +256,23 @@ export async function tickNamedFleetWatch(
       [assessment.nodeId],
     );
     const prev = existing.rows[0];
+
+    // Maintenance windows (Komodo borrow P0-2): while a node is inside a
+    // configured window, do not advance watch state and do not alert — the
+    // downtime is planned. State resumes from the pre-window values after
+    // the window ends, so a failed upgrade still alerts.
+    const maintenancePolicy = await loadNodeMaintenancePolicy(assessment.nodeId).catch(() => null);
+    if (isNodeInMaintenance(assessment.nodeId, now, maintenancePolicy)) {
+      emissions.push({
+        nodeId: assessment.nodeId,
+        health: assessment.health,
+        consecutiveUnhealthy: Number(prev?.consecutive_unhealthy ?? 0),
+        eventEmitted: false,
+        skippedReason: 'maintenance',
+      });
+      continue;
+    }
+
     const prevConsecutive = Number(prev?.consecutive_unhealthy ?? 0);
     const unhealthy = assessment.health !== 'healthy';
     const lastObservedAt = prev?.last_observed_at

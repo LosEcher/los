@@ -23,7 +23,11 @@ The workflow cancels an older in-progress run for the same ref. Each runner
 bind-mounts its own host-persistent pnpm store into its jobs, and dependency
 installation uses `--prefer-offline`. This avoids downloading and executing an
 external cache action before repository checks can start. Turbo `test` remains
-uncached and every package test command executes on every PR.
+uncached. Package tests and Web E2E run on every PR unless `tools/path-gate.mjs`
+reports `skip_heavy` (docs / tools / `.forgejo/` / listed root metadata only).
+Skip is a step-level `if:` on install and test steps; the job still succeeds
+so required checks stay present. See
+`docs/operations/2026-08-18-path-gate-skip-failure.md`.
 
 The repo-scoped `win-los-canary` runner handles `gate-fast` and `gate-test`
 through `win-ci-jj`, `gate-drift` through `win-ci`, and Web E2E through
@@ -45,8 +49,9 @@ restore a serial `needs` edge rather than raising concurrency blindly.
 
 `gate-drift` uses a PostgreSQL service with a distinct DNS name, database,
 user, and credential from `gate-test` so the two DB jobs can overlap safely.
-Policy is locked by `tools/ci-workflow-policy.test.mjs` (also invoked from
-`pnpm gate` via `tools/check-ci-workflow-policy.sh`).
+Policy is locked by `tools/ci-workflow-policy.test.mjs` and
+`tools/path-gate.test.mjs` (also invoked from `pnpm gate` via
+`tools/check-ci-workflow-policy.sh`).
 
 `.forgejo/workflows/audit.yml` runs the dependency audit manually. The daily
 schedule is disabled so an offline Windows host cannot accumulate unattended

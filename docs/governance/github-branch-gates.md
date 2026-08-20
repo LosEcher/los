@@ -123,5 +123,25 @@ equality. Prefer that script (or Forgejo push-mirror only after ruleset policy
 is re-approved) over ad-hoc `gh pr view --jq` loops that treat empty output as
 pending.
 
+### Mirror PR lane
+
+Mirror PRs (head refs starting with `mirror/`, e.g. `mirror/forgejo-main-sync`)
+carry Forgejo-validated content: the tree already passed Forgejo required CI
+before the merge that the mirror syncs. A second full GitHub test run adds no
+merge evidence but re-exposes the intermittent "test processes lost
+DATABASE_URL" runner-env class (2026-06-13 `56321f52`; 2026-08-20 PR `#256`,
+pg SCRAM "client password must be a string" across every DB-backed package)
+that blocks mirror sync.
+
+`.github/workflows/ci.yml` therefore skips the heavy `gate-test` steps
+(`Test root workspace` and `Enforce critical module coverage`) at step level
+when `github.head_ref` starts with `mirror/`, plus the resource-observation
+step that reads the skipped test's output file. The required `gate-test` check
+stays green (skipped steps do not fail a job), while `gate-fast` and
+`gate-drift` still run on mirror PRs as lightweight content validation.
+Non-mirror PRs and `main` pushes keep the full suite. The policy is locked by
+`tools/ci-workflow-policy.test.mjs` (case "GitHub gate-test heavy steps skip on
+mirror/* heads").
+
 Current primary policy and required checks are documented in
 `docs/governance/forgejo-branch-gates.md`.

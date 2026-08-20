@@ -187,6 +187,23 @@ test('provider fallback failure classification excludes parse and auth failures'
   ), undefined);
 });
 
+test('provider fallback failure classification treats 403 quota/balance as rate_limit', () => {
+  assert.equal(_classifyProviderFallbackFailure(
+    AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', 'a', 'a-1', 403, 'insufficient balance'),
+  ), 'rate_limit');
+  assert.equal(_classifyProviderFallbackFailure(
+    AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', 'a', 'a-1', 403, 'quota exceeded for this billing period'),
+  ), 'rate_limit');
+  // kimi.com: monthly usage limit exhausted (observed 2026-08-19)
+  assert.equal(_classifyProviderFallbackFailure(
+    AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', 'a', 'a-1', 403, "You've reached your usage limit for this billing cycle"),
+  ), 'rate_limit');
+  // plain auth denial must NOT be misclassified as a fallback trigger
+  assert.equal(_classifyProviderFallbackFailure(
+    AgentError.fromProviderResponse('PROVIDER_HTTP_ERROR', 'a', 'a-1', 403, 'invalid api key'),
+  ), undefined);
+});
+
 function fakeProvider(
   name: string,
   model: string,

@@ -66,6 +66,22 @@ test('gate blocks new test failures after printing the captured log tail', () =>
   }
 });
 
+test('gate folds turbo cache stats from the typecheck summary into its output', () => {
+  const fixture = runGate('success');
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    // Phase 1 parses the turbo run summary (fixture emits a turbo 2.9-style
+    // "Cached: N cached, M total" line + per-task hit/miss lines) and prints
+    // the folded stats; the same TURBO record lands in the gate summary JSON
+    // ("turbo" block) consumed by CI's emit-gate-summary steps.
+    assert.match(fixture.result.stdout, /turbo cache: 7\/16 tasks cached/);
+    assert.match(fixture.result.stdout, /hit lines=7, miss lines=9/);
+    assert.match(fixture.result.stdout, /GATE PASSED/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 function runGate(testCase) {
   const root = mkdtempSync(join(tmpdir(), 'los-ci-gate-'));
   const toolsDirectory = join(root, 'tools');
@@ -90,6 +106,19 @@ case "\${GATE_TEST_CASE:-}" in
 esac
 `);
   writeExecutable(join(binDirectory, 'pnpm'), `#!/usr/bin/env bash
+if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "_typecheck" ]; then
+  # turbo 2.9-style summary + per-task hit/miss lines (parsed by phase 1).
+  # 7 hits + 9 misses = 16 tasks, matching the "Cached: 7 cached, 16 total".
+  printf 'Tasks:    16 successful, 16 total\n'
+  printf 'Cached:    7 cached, 16 total\n'
+  for index in $(seq 0 6); do
+    printf '@los/pkg:check: cache hit, replaying logs 000000000000000%s\n' "$index"
+  done
+  for index in $(seq 7 15); do
+    printf '@los/pkg:check: cache miss, executing 000000000000000%s\n' "$index"
+  done
+  exit 0
+fi
 if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "_test" ]; then
   for index in $(seq 1 35); do
     printf 'fixture-output-%s\n' "$index"

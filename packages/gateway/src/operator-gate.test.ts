@@ -48,6 +48,7 @@ function buildConfig(opts: { authEnabled: boolean; operatorToken?: string }): Co
     judge: {},
     review: { enabled: false, roles: {} },
     providers: {},
+    providerFallbacks: {},
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,
