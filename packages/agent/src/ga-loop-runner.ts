@@ -66,6 +66,12 @@ async function applyAutoFix(
       return applyConsistencyFix(summary);
     case 'dead_letter':
       return applyDeadLetterFix(summary);
+    case 'event_retention':
+      // Compaction executes inline inside the audit (governance-auditors-event-retention),
+      // so the fix is already applied once the audit returned. Marking applied
+      // keeps the loop's fix-then-verify flow honest; the verify re-audit
+      // compacts the next batch until the backlog drains.
+      return { applied: true, detail: 'event compaction executed inline by audit' };
     case 'hotspot':
       return applyHotspotFix(summary);
     case 'branch_cleanup':
@@ -456,6 +462,14 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
       const eligible = typeof summary.requeueEligible === 'number' ? summary.requeueEligible : 0;
       const candidateIds = Array.isArray(summary.candidateIds) ? summary.candidateIds.length : 0;
       return eligible > 0 || candidateIds > 0;
+    }
+    case 'event_retention': {
+      // A non-empty backlog is a finding: the audit compacts one batch inline,
+      // and work remaining must keep the job on cadence. Without this case the
+      // no-op throttle downgraded the job to monthly and PG bloat (48k+ rows in
+      // prod) went unnoticed for weeks.
+      const er = summary.eventRetention as { totalEligible?: number } | undefined;
+      return !!er && (Number(er.totalEligible) > 0);
     }
     case 'language_audit': {
       // Only warn/high work findings count; info (samples/promotion) is observation.
