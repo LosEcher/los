@@ -1,3 +1,5 @@
+import { readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 import { getDb } from '@los/infra/db';
 import { listManagedWorkspaces } from '../managed-workspace-store.js';
@@ -23,7 +25,7 @@ import {
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem,
   claimDueScheduledWorkItems, claimQueuedScheduledWorkRuns,
   createCatchUpScheduledWorkRun, createManualScheduledWorkRun,
-  findMissedScheduledRun,
+  findLastGoodScheduledRun, findMissedScheduledRun,
   loadScheduledWorkItem, loadScheduledWorkItemRun,
   recoverOpenScheduledWorkCircuits,
   recordScheduledRunOutcome,
@@ -217,6 +219,34 @@ export async function executeScheduledWorkRun(
       return 'failed';
     }
     const message = error instanceof Error ? error.message : String(error);
+    // W-LOS-1: last-known-good fallback — a provider-network failure through
+    // the proxy must not silently kill a schedule that has a previous good
+    // result. Deliver the last good report marked stale instead (the run
+    // still records the underlying error for audit) and do not accumulate
+    // circuit-breaker failures for an outage the schedule itself survived.
+    if (/fetch failed|PROVIDER_NETWORK/.test(message)) {
+      const lastGood = await findLastGoodScheduledRun(schedule.id);
+      if (lastGood?.resultSummary?.reportPath) {
+        try {
+          await transitionScheduledWorkRun(run.id, 'succeeded', {
+            resultSummary: {
+              ...(run.resultSummary ?? {}),
+              deliveredStale: true,
+              staleFromRunId: lastGood.id,
+              staleReportPath: lastGood.resultSummary.reportPath,
+              underlyingError: message,
+            },
+          });
+          await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'succeeded' });
+          log.warn(`Scheduled work delivered stale last-known-good for ${schedule.id} (${message}); last good run ${lastGood.id}`);
+          return 'succeeded';
+        } catch (staleError) {
+          // The stale delivery itself failed (transition race, outcome
+          // write): fall through to the ordinary failure path.
+          log.warn(`Scheduled work stale delivery failed for ${schedule.id}: ${staleError instanceof Error ? staleError.message : String(staleError)}`);
+        }
+      }
+    }
     try {
       await transitionScheduledWorkRun(run.id, 'failed', { error: message });
     } catch {
@@ -279,6 +309,39 @@ export function setupScheduledWorkWake(input: {
   };
 }
 
+/**
+ * The newest report file under any of a schedule's editable surfaces
+ * (`<surface>/reports/*.md`) — the durable result artifact an agent task
+ * wrote (W-LOS-1). Recorded on success so a later provider-network failure
+ * can deliver it as a stale last-known-good report.
+ */
+async function findLatestReport(editableSurfaces: string[] | undefined): Promise<string | undefined> {
+  if (!editableSurfaces || editableSurfaces.length === 0) return undefined;
+  let latest: { path: string; mtimeMs: number } | undefined;
+  for (const surface of editableSurfaces) {
+    const reportsDir = join(surface, 'reports');
+    let entries: string[];
+    try {
+      entries = await readdir(reportsDir);
+    } catch {
+      continue; // No reports directory (yet): nothing to record.
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith('.md')) continue;
+      const path = join(reportsDir, entry);
+      try {
+        const info = await stat(path);
+        if (latest === undefined || info.mtimeMs > latest.mtimeMs) {
+          latest = { path, mtimeMs: info.mtimeMs };
+        }
+      } catch {
+        // Race: the file vanished between readdir and stat; skip it.
+      }
+    }
+  }
+  return latest?.path;
+}
+
 async function executeTemplate(
   schedule: ScheduledWorkItem,
   run: ScheduledWorkItemRun,
@@ -335,6 +398,9 @@ async function executeTemplate(
       },
     });
     if (result.status === 'completed') {
+      // W-LOS-1: record the durable result artifact so a later
+      // provider-network failure can deliver it as last-known-good.
+      const reportPath = await findLatestReport(schedule.runTemplate.editableSurfaces);
       return {
         status: 'succeeded',
         title: `${schedule.title}: execution completed`,
@@ -345,6 +411,7 @@ async function executeTemplate(
           loopCount: result.result?.loopCount,
           promptTokens: result.result?.totalTokens?.prompt,
           completionTokens: result.result?.totalTokens?.completion,
+          ...reportPath === undefined ? {} : { reportPath },
         },
         runSpecId: result.taskRun?.runSpecId,
         taskRunId: result.taskRun?.id,

@@ -159,6 +159,26 @@ export async function loadScheduledWorkItemRun(id: string): Promise<ScheduledWor
   return rows.rows[0] ? runFromRow(rows.rows[0]) : null;
 }
 
+/**
+ * The most recent succeeded run for a schedule that recorded a report path —
+ * the last-known-good delivery fallback for provider-network failures
+ * (W-LOS-1). A stale-but-real report beats no report when the LLM route is
+ * down through the proxy; the caller delivers it marked stale instead of
+ * failing the schedule run.
+ */
+export async function findLastGoodScheduledRun(scheduleId: string): Promise<ScheduledWorkItemRun | null> {
+  await ensureScheduledWorkStore();
+  const rows = await getDb().query<ScheduledWorkRunRow>(
+    `SELECT * FROM scheduled_work_item_runs
+       WHERE schedule_id=$1 AND status='succeeded' AND result_summary_json->>'reportPath' IS NOT NULL
+       ORDER BY completed_at DESC NULLS LAST, scheduled_for DESC
+       LIMIT 1`,
+    [scheduleId],
+  );
+  const row = rows.rows[0];
+  return row ? runFromRow(row) : null;
+}
+
 export async function claimDueScheduledWorkItems(input: {
   ownerId: string; now?: Date; leaseMs?: number; limit?: number;
 }): Promise<ScheduledWorkItemRun[]> {
