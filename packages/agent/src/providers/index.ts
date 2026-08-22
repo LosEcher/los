@@ -45,9 +45,18 @@ export function initGlobalProxy(): void {
   // Dynamic import in ESM context — tsx-transpiled require('undici')
   // may fail in pnpm workspace symlink chains, but import() always works.
   import('undici').then(
-    ({ ProxyAgent, setGlobalDispatcher }) => {
-      setGlobalDispatcher(new ProxyAgent({ uri: proxy }));
-      log.info(`Proxy: outbound provider calls routed through ${proxy}`);
+    ({ EnvHttpProxyAgent, ProxyAgent, setGlobalDispatcher }) => {
+      if (typeof EnvHttpProxyAgent === 'function') {
+        // EnvHttpProxyAgent reads HTTPS_PROXY/HTTP_PROXY + NO_PROXY from the
+        // environment, so operators can bypass the proxy per host. Needed for
+        // providers that are faster direct than through the tunnel — e.g.
+        // integrate.api.nvidia.com is ~2.4s direct vs 2min via Surge.
+        setGlobalDispatcher(new EnvHttpProxyAgent());
+        log.info(`Proxy: outbound provider calls routed through ${proxy} (NO_PROXY honored)`);
+      } else {
+        setGlobalDispatcher(new ProxyAgent({ uri: proxy }));
+        log.info(`Proxy: outbound provider calls routed through ${proxy}`);
+      }
     },
     () => {
       log.warn(`Proxy: HTTPS_PROXY=${proxy} is set but undici unavailable`);

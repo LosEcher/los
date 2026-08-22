@@ -7,6 +7,7 @@ import {
   claimDueScheduledWorkItems,
   claimQueuedScheduledWorkRuns,
   createScheduledWorkItem,
+  findLastGoodScheduledRun,
   heartbeatScheduledWorkRun,
   loadScheduledWorkItem,
   loadScheduledWorkItemRun,
@@ -1021,6 +1022,60 @@ test('manual trigger queues instead of claiming under queue_one when the slot is
     const claimed = await claimQueuedScheduledWorkRuns({ ownerId: 'scheduler', limit: 10 });
     assert.ok(claimed.some(r => r.id === queued.id),
       'queued manual run must be claimable once the active slot frees up');
+  } finally {
+    await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
+  }
+});
+
+test('findLastGoodScheduledRun returns the newest succeeded run that recorded a report path', async () => {
+  const schedule = await createScheduledWorkItem({
+    projectId: 'los', title: `scheduled-lastgood-${Date.now()}`,
+    trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+    runTemplate: {
+      templateId: 'scheduled_execution', mode: 'execution',
+      goalTemplate: 'Analyze', editableSurfaces: ['/tmp/los-reports'],
+      requiredChecks: ['reports-written'], toolMode: 'project-write',
+    },
+    approvalPolicy: 'preapproved_scope',
+    catchUpPolicy: 'run_once', maxAttempts: 2, now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  const insertRun = async (id: string, scheduledFor: string, completedAt: string, reportPath?: string): Promise<void> => {
+    await getDb().query(
+      `INSERT INTO scheduled_work_item_runs
+         (id, schedule_id, scheduled_for, trigger_kind, status, result_summary_json, completed_at)
+       VALUES ($1,$2,$3,'scheduled','succeeded',$4::jsonb,$5)`,
+      [id, schedule.id, new Date(scheduledFor),
+        reportPath ? JSON.stringify({ reportPath }) : JSON.stringify({}), completedAt],
+    );
+  };
+  try {
+    await insertRun('lkg-old-good', '2026-07-19T00:00:00.000Z', '2026-07-19T01:00:00.000Z', '/tmp/los-reports/reports/old.md');
+    // Newer but no report path: must NOT qualify as last-known-good.
+    await insertRun('lkg-new-noreport', '2026-07-20T00:00:00.000Z', '2026-07-20T01:00:00.000Z');
+    await insertRun('lkg-fresh-good', '2026-07-21T00:00:00.000Z', '2026-07-21T01:00:00.000Z', '/tmp/los-reports/reports/fresh.md');
+
+    const lastGood = await findLastGoodScheduledRun(schedule.id);
+    assert.ok(lastGood, 'a succeeded run with a report path must be found');
+    assert.equal(lastGood.id, 'lkg-fresh-good');
+    assert.equal(lastGood.resultSummary?.reportPath, '/tmp/los-reports/reports/fresh.md');
+
+    // A schedule with no succeeded+report run reads null.
+    const empty = await createScheduledWorkItem({
+      projectId: 'los', title: `scheduled-lastgood-empty-${Date.now()}`,
+      trigger: { kind: 'once', expression: '2026-07-20T00:01:00.000Z', timezone: 'UTC' },
+      runTemplate: {
+        templateId: 'scheduled_execution', mode: 'execution',
+        goalTemplate: 'Analyze', editableSurfaces: ['/tmp/los-reports-empty'],
+        requiredChecks: ['reports-written'], toolMode: 'project-write',
+      },
+      approvalPolicy: 'preapproved_scope',
+      catchUpPolicy: 'run_once', maxAttempts: 2, now: new Date('2026-07-20T00:00:00.000Z'),
+    });
+    try {
+      assert.equal(await findLastGoodScheduledRun(empty.id), null);
+    } finally {
+      await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [empty.id]);
+    }
   } finally {
     await getDb().query('DELETE FROM scheduled_work_items WHERE id=$1', [schedule.id]);
   }

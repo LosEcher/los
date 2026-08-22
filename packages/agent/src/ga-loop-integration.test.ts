@@ -128,6 +128,18 @@ describe('dead-letter governance ownership', () => {
   });
 });
 
+describe('event retention governance ownership', () => {
+  it('treats a non-empty backlog as a fixable finding (no-op throttle regression)', () => {
+    assert.equal(checkHasFindings('event_retention', {
+      eventRetention: { totalEligible: 48_999, totalCompacted: 5_000, sessionsProcessed: 1 },
+    }), true);
+    assert.equal(checkHasFindings('event_retention', {
+      eventRetention: { totalEligible: 0, totalCompacted: 0, sessionsProcessed: 0 },
+    }), false);
+    assert.equal(checkHasFindings('event_retention', {}), false);
+  });
+});
+
 describe('hotspot governance ownership', () => {
   it('keeps runtime cleanup manual-only when findings exist', async () => {
     const result = await applyHotspotFix({
