@@ -14,14 +14,49 @@ export type SessionAffinity = 'none' | 'provider' | 'model' | 'account';
 export type TransportHint = 'sse' | 'websocket' | 'http-stream' | 'auto';
 
 export interface ModelPricing {
-  /** USD per 1M prompt (input) tokens. */
+  /** Off-peak price per 1M cache-miss prompt (input) tokens. */
   promptTokenCostPer1M: number;
-  /** USD per 1M completion (output) tokens. */
+  /** Off-peak price per 1M completion (output) tokens. */
   completionTokenCostPer1M: number;
-  /** USD per 1M cache-hit tokens (typically cheaper than prompt). */
+  /** Off-peak price per 1M cache-hit tokens (typically cheaper than prompt). */
   cacheHitTokenCostPer1M: number;
   /** Whether promptTokens already includes cache-hit tokens. */
   promptTokensIncludeCacheHits?: boolean;
+  /** Currency of the per-1M prices (default `'usd'`). DeepSeek bills in CNY. */
+  currency?: 'cny' | 'usd';
+  /**
+   * Peak-time multiplier applied inside Beijing peak hours (DeepSeek: 2, since
+   * 2026-08-17). Weekends are always off-peak (since 2026-08-23). Default 1 =
+   * no peak pricing.
+   */
+  peakMultiplier?: number;
+  /** CNY→USD conversion: CNY per 1 USD (default {@link DEFAULT_CNY_PER_USD}). Cost fields are USD. */
+  cnyPerUsd?: number;
+  /** Pricing effective date — drift marker for periodic price audits. */
+  asOf?: string;
+}
+
+/** Default CNY→USD conversion: CNY per 1 USD. PBOC midpoint 2026-08-20/21 was
+ * 6.7808/6.7817; round to 6.8 as a stable default. Per-pricing `cnyPerUsd`
+ * overrides it; keep in sync with the rate when the midpoint drifts. */
+export const DEFAULT_CNY_PER_USD = 6.8;
+
+export type BillingPeriod = 'peak' | 'off-peak';
+
+const BEIJING_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', hour: 'numeric', hourCycle: 'h23' });
+const BEIJING_WEEKDAY_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', weekday: 'short' });
+
+/**
+ * DeepSeek billing period for a timestamp in Beijing time: peak = 09:00-12:00
+ * and 14:00-18:00 on weekdays; weekends (Sat/Sun) and everything outside peak
+ * hours are off-peak. The weekend flat rate applies since 2026-08-23.
+ */
+export function billingPeriodAt(at: Date): BillingPeriod {
+  const hour = Number(BEIJING_HOUR_FMT.format(at));
+  const weekday = BEIJING_WEEKDAY_FMT.format(at);
+  if (weekday === 'Sat' || weekday === 'Sun') return 'off-peak';
+  if ((hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)) return 'peak';
+  return 'off-peak';
 }
 
 export interface ModelCapabilityProfile {
@@ -146,18 +181,30 @@ const DEFAULT_RETRY_POLICY = {
   retryableStatusCodes: [408, 409, 429, 500, 502, 503, 504],
 };
 
+// DeepSeek V4 billing (CNY per 1M tokens, effective 2026-08-17; weekend flat
+// rate since 2026-08-23): off-peak prices below, peak = off-peak × 2 during
+// Beijing peak hours. Off-peak cache-hit input is ~1/30 of cache-miss input.
+// See https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
 const DEEPSEEK_V4_FLASH_PRICING: ModelPricing = {
-  promptTokenCostPer1M: 0.14,
-  completionTokenCostPer1M: 0.28,
-  cacheHitTokenCostPer1M: 0.0028,
+  currency: 'cny',
+  promptTokenCostPer1M: 1.5,
+  completionTokenCostPer1M: 4.5,
+  cacheHitTokenCostPer1M: 0.05,
   promptTokensIncludeCacheHits: true,
+  peakMultiplier: 2,
+  cnyPerUsd: DEFAULT_CNY_PER_USD,
+  asOf: '2026-08-17',
 };
 
 const DEEPSEEK_V4_PRO_PRICING: ModelPricing = {
-  promptTokenCostPer1M: 0.435,
-  completionTokenCostPer1M: 0.87,
-  cacheHitTokenCostPer1M: 0.003625,
+  currency: 'cny',
+  promptTokenCostPer1M: 4.5,
+  completionTokenCostPer1M: 13.5,
+  cacheHitTokenCostPer1M: 0.15,
   promptTokensIncludeCacheHits: true,
+  peakMultiplier: 2,
+  cnyPerUsd: DEFAULT_CNY_PER_USD,
+  asOf: '2026-08-17',
 };
 
 export const MODEL_PROFILES: Record<string, ModelProfile> = {
@@ -497,28 +544,40 @@ export interface CostEstimate {
 
 /**
  * Calculate estimated cost from token usage and model pricing.
+ * Prices are applied at their off-peak rate by default; when `pricing` has a
+ * `peakMultiplier` and `at` falls inside Beijing peak hours, all rates are
+ * multiplied by it. `CostEstimate` fields are always USD: CNY prices are
+ * converted with `pricing.cnyPerUsd` (or {@link DEFAULT_CNY_PER_USD}).
  * Returns null when pricing data is unavailable.
  */
 export function calculateCost(
   usage: { promptTokens: number; completionTokens: number; cacheHitTokens?: number; cacheMissTokens?: number },
   pricing: ModelPricing,
+  at: Date = new Date(),
 ): CostEstimate {
+  const peak = pricing.peakMultiplier && pricing.peakMultiplier !== 1 && billingPeriodAt(at) === 'peak'
+    ? pricing.peakMultiplier
+    : 1;
+  const promptPrice = pricing.promptTokenCostPer1M * peak;
+  const completionPrice = pricing.completionTokenCostPer1M * peak;
+  const cacheHitPrice = pricing.cacheHitTokenCostPer1M * peak;
   const cacheHitTokens = usage.cacheHitTokens ?? 0;
   const cacheMissTokens = usage.cacheMissTokens ?? 0;
   const hasCacheBreakdown = cacheHitTokens > 0 || cacheMissTokens > 0;
   const promptTokens = pricing.promptTokensIncludeCacheHits
     ? Math.max(0, hasCacheBreakdown ? cacheMissTokens : usage.promptTokens - cacheHitTokens)
     : usage.promptTokens;
-  const promptCost = (promptTokens / 1_000_000) * pricing.promptTokenCostPer1M;
-  const completionCost = (usage.completionTokens / 1_000_000) * pricing.completionTokenCostPer1M;
-  const cacheHitCost = (cacheHitTokens / 1_000_000) * pricing.cacheHitTokenCostPer1M;
-  const cacheSavings = (cacheHitTokens / 1_000_000) * (pricing.promptTokenCostPer1M - pricing.cacheHitTokenCostPer1M);
+  const promptCost = (promptTokens / 1_000_000) * promptPrice;
+  const completionCost = (usage.completionTokens / 1_000_000) * completionPrice;
+  const cacheHitCost = (cacheHitTokens / 1_000_000) * cacheHitPrice;
+  const cacheSavings = (cacheHitTokens / 1_000_000) * (promptPrice - cacheHitPrice);
+  const usdRate = pricing.currency === 'cny' ? (pricing.cnyPerUsd ?? DEFAULT_CNY_PER_USD) : 1;
   return {
-    totalCostUsd: promptCost + completionCost + cacheHitCost,
-    promptCostUsd: promptCost,
-    completionCostUsd: completionCost,
-    cacheHitCostUsd: cacheHitCost,
-    cacheSavingsUsd: cacheSavings,
+    totalCostUsd: (promptCost + completionCost + cacheHitCost) / usdRate,
+    promptCostUsd: promptCost / usdRate,
+    completionCostUsd: completionCost / usdRate,
+    cacheHitCostUsd: cacheHitCost / usdRate,
+    cacheSavingsUsd: cacheSavings / usdRate,
   };
 }
 
@@ -529,7 +588,8 @@ export function calculateCost(
 export function estimateCost(
   usage: { promptTokens: number; completionTokens: number; cacheHitTokens?: number; cacheMissTokens?: number },
   profile: ModelProfile,
+  at: Date = new Date(),
 ): CostEstimate | null {
   if (!profile.pricing) return null;
-  return calculateCost(usage, profile.pricing);
+  return calculateCost(usage, profile.pricing, at);
 }

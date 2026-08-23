@@ -16,7 +16,7 @@ import { resolveXaiOAuthCredential } from './auth/xai-oauth.js';
 import { completeAgentSetup, setupAgentRun } from './loop/setup.js';
 import type { AgentConfig, AgentResult } from './loop.js';
 import type { ModelSettings } from './model-settings.js';
-import type { ModelProfile } from './model-profiles.js';
+import { DEFAULT_CNY_PER_USD, type ModelProfile } from './model-profiles.js';
 import { getProviderConfig } from './providers/index.js';
 import { recordProviderCall, type ProviderCallTelemetry } from './providers/telemetry.js';
 import type { Message } from './providers/index.js';
@@ -131,6 +131,11 @@ async function createPiModelRuntime(
     await resolveCredential!(profile.provider);
   assertCredential(profile, pendingCredential);
   const api = toPiApi(profile);
+  // The pi kernel's cost table is USD; convert CNY-priced profiles so
+  // relative routing and any USD budgets stay currency-consistent.
+  const cnyPerUsd = profile.pricing?.currency === 'cny'
+    ? (profile.pricing.cnyPerUsd ?? DEFAULT_CNY_PER_USD)
+    : 1;
   const model: Model<Api> = {
     id: profile.model,
     name: profile.model,
@@ -140,9 +145,9 @@ async function createPiModelRuntime(
     reasoning: profile.supportsReasoning,
     input: profile.supportsVision ? ['text', 'image'] : ['text'],
     cost: {
-      input: profile.pricing?.promptTokenCostPer1M ?? 0,
-      output: profile.pricing?.completionTokenCostPer1M ?? 0,
-      cacheRead: profile.pricing?.cacheHitTokenCostPer1M ?? 0,
+      input: (profile.pricing?.promptTokenCostPer1M ?? 0) / cnyPerUsd,
+      output: (profile.pricing?.completionTokenCostPer1M ?? 0) / cnyPerUsd,
+      cacheRead: (profile.pricing?.cacheHitTokenCostPer1M ?? 0) / cnyPerUsd,
       cacheWrite: 0,
     },
     contextWindow: profile.maxInputTokens ?? 200_000,
