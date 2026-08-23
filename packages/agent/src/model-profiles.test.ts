@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { requireProviderDefaults } from '@los/infra/provider-defaults';
 
 import {
+  billingPeriodAt,
   calculateCost,
+  DEFAULT_CNY_PER_USD,
   estimateCost,
   MODEL_PROFILES,
   resolveModelCapabilityProfile,
@@ -231,18 +233,77 @@ test('DeepSeek pricing resolves by effective model', () => {
   const unknown = resolveModelProfile('deepseek', { model: 'deepseek-v5-preview' });
 
   assert.deepEqual(flash.pricing, {
-    promptTokenCostPer1M: 0.14,
-    completionTokenCostPer1M: 0.28,
-    cacheHitTokenCostPer1M: 0.0028,
+    currency: 'cny',
+    promptTokenCostPer1M: 1.5,
+    completionTokenCostPer1M: 4.5,
+    cacheHitTokenCostPer1M: 0.05,
     promptTokensIncludeCacheHits: true,
+    peakMultiplier: 2,
+    cnyPerUsd: 6.8,
+    asOf: '2026-08-17',
   });
   assert.deepEqual(pro.pricing, {
-    promptTokenCostPer1M: 0.435,
-    completionTokenCostPer1M: 0.87,
-    cacheHitTokenCostPer1M: 0.003625,
+    currency: 'cny',
+    promptTokenCostPer1M: 4.5,
+    completionTokenCostPer1M: 13.5,
+    cacheHitTokenCostPer1M: 0.15,
     promptTokensIncludeCacheHits: true,
+    peakMultiplier: 2,
+    cnyPerUsd: 6.8,
+    asOf: '2026-08-17',
   });
   assert.equal(unknown.pricing, undefined);
+});
+
+test('billingPeriodAt follows Beijing peak hours and weekend flat rate', () => {
+  const at = (iso: string) => new Date(iso);
+  // Weekday peak windows: 09:00-12:00 and 14:00-18:00 Beijing (UTC+8).
+  assert.equal(billingPeriodAt(at('2026-08-17T01:00:00Z')), 'peak');    // Mon 09:00
+  assert.equal(billingPeriodAt(at('2026-08-17T03:59:59Z')), 'peak');    // Mon 11:59
+  assert.equal(billingPeriodAt(at('2026-08-17T04:00:00Z')), 'off-peak'); // Mon 12:00
+  assert.equal(billingPeriodAt(at('2026-08-17T06:00:00Z')), 'peak');    // Mon 14:00
+  assert.equal(billingPeriodAt(at('2026-08-17T09:59:59Z')), 'peak');    // Mon 17:59
+  assert.equal(billingPeriodAt(at('2026-08-17T10:00:00Z')), 'off-peak'); // Mon 18:00
+  assert.equal(billingPeriodAt(at('2026-08-17T15:00:00Z')), 'off-peak'); // Mon 23:00
+  // Weekends are all off-peak regardless of the clock (since 2026-08-23).
+  assert.equal(billingPeriodAt(at('2026-08-22T02:00:00Z')), 'off-peak'); // Sat 10:00
+  assert.equal(billingPeriodAt(at('2026-08-23T02:00:00Z')), 'off-peak'); // Sun 10:00
+});
+
+test('calculateCost applies the peak multiplier inside peak hours only', () => {
+  const pricing = {
+    currency: 'cny' as const,
+    promptTokenCostPer1M: 1.5,
+    completionTokenCostPer1M: 4.5,
+    cacheHitTokenCostPer1M: 0.05,
+    promptTokensIncludeCacheHits: true,
+    peakMultiplier: 2,
+  };
+  const usage = { promptTokens: 1_000_000, completionTokens: 500_000, cacheHitTokens: 800_000, cacheMissTokens: 200_000 };
+  const offPeak = calculateCost(usage, pricing, new Date('2026-08-17T15:00:00Z')); // Mon 23:00
+  const peak = calculateCost(usage, pricing, new Date('2026-08-17T02:00:00Z')); // Mon 10:00
+  // Off-peak: miss 200k×1.5 + completion 500k×4.5 + hit 800k×0.05, in CNY → USD.
+  assert.ok(Math.abs(offPeak.totalCostUsd - ((0.2 * 1.5 + 0.5 * 4.5 + 0.8 * 0.05) / DEFAULT_CNY_PER_USD)) < 0.001);
+  // Peak: every rate doubles.
+  assert.ok(Math.abs(peak.totalCostUsd - 2 * ((0.2 * 1.5 + 0.5 * 4.5 + 0.8 * 0.05) / DEFAULT_CNY_PER_USD)) < 0.001);
+  // Weekend peak-hour request still bills off-peak.
+  const weekend = calculateCost(usage, pricing, new Date('2026-08-22T02:00:00Z')); // Sat 10:00
+  assert.equal(weekend.totalCostUsd, offPeak.totalCostUsd);
+});
+
+test('calculateCost converts CNY pricing to USD with a configurable rate', () => {
+  const cost = calculateCost(
+    { promptTokens: 1_000_000, completionTokens: 0 },
+    { currency: 'cny', promptTokenCostPer1M: 1, completionTokenCostPer1M: 1, cacheHitTokenCostPer1M: 0, cnyPerUsd: 7 },
+  );
+  assert.equal(cost.promptCostUsd, 1 / 7);
+  assert.equal(cost.totalCostUsd, 1 / 7);
+  // Default rate applies when cnyPerUsd is omitted.
+  const defaultRate = calculateCost(
+    { promptTokens: 1_000_000, completionTokens: 0 },
+    { currency: 'cny', promptTokenCostPer1M: 1, completionTokenCostPer1M: 1, cacheHitTokenCostPer1M: 0 },
+  );
+  assert.equal(defaultRate.promptCostUsd, 1 / DEFAULT_CNY_PER_USD);
 });
 
 test('openai and codex have pricing data', () => {
