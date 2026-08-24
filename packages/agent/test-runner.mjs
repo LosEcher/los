@@ -73,6 +73,7 @@ const sharedProcessTestFiles = [
   'src/providers/repair/healing.test.ts',
   'src/providers/repair/storm.test.ts',
   'src/providers/responses-adapter.test.ts',
+  'src/providers/token-limit-classification.test.ts',
   'src/review-runner.test.ts',
   'src/run-contract.test.ts',
   'src/run-state-vocabulary.test.ts',
