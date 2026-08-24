@@ -166,6 +166,10 @@ export const enAssets2 = {
   'assets.obs.retryCount': '{count} retry',
   'assets.obs.errorCount': '{count} error',
   'assets.obs.deniedCount': '{count} denied',
+  'assets.obs.scrubberTitle': 'Activity timeline',
+  'assets.obs.sparklineAria': 'Event-activity sparkline (event-index axis)',
+  'assets.obs.markersAria': 'Failure event markers',
+  'assets.obs.markerCount': '{count} failure markers',
 
   // ── Timeline (Phase 1 gantt + inspector) ──
   'assets.timeline.sectionAria': 'Execution timeline',

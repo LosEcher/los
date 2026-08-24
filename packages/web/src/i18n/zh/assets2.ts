@@ -170,6 +170,10 @@ export const zhAssets2: Assets2Keys = {
   'assets.obs.retryCount': '{count} 次重试',
   'assets.obs.errorCount': '{count} 个错误',
   'assets.obs.deniedCount': '{count} 次拒绝',
+  'assets.obs.scrubberTitle': '活动时间线',
+  'assets.obs.sparklineAria': '事件活动 sparkline（事件索引轴）',
+  'assets.obs.markersAria': '失败事件标记',
+  'assets.obs.markerCount': '{count} 个失败标记',
 
   // ── Timeline（甘特 + 事件检查器）──
   'assets.timeline.sectionAria': '执行时间线',

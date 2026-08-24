@@ -5694,6 +5694,71 @@ button:disabled {
   color: var(--warn);
 }
 
+/* Activity timeline (zoetrope L-1: event-index sparkline + failure markers) */
+.exec-obs-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.exec-obs-marker-count {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.exec-obs-sparkline {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 36px;
+  padding: 4px 2px 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--line) 30%, transparent);
+  overflow: hidden;
+}
+
+.exec-obs-spark-col {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.18;
+  transition: height 0.2s ease;
+}
+
+.exec-obs-spark-col.is-active {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.exec-obs-markers {
+  position: relative;
+  height: 8px;
+}
+
+.exec-obs-marker {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--danger);
+}
+
+.exec-obs-marker.is-provider,
+.exec-obs-marker.is-verification {
+  background: var(--warn);
+}
+
+.exec-obs-marker.is-recovery {
+  background: var(--info);
+}
+
 .exec-obs.is-compact .exec-obs-fingerprint {
   gap: 4px;
 }
