@@ -1,7 +1,14 @@
 import { AgentError } from '../error-base.js';
+import { classifyTokenLimitErrorFromMessage } from './token-limit-classification.js';
 import type { Provider, CreateProviderOptions, Message, ToolDef, ChatOptions, ProviderResponse } from './types.js';
 
-export type ProviderFallbackFailureClass = 'transport' | 'rate_limit' | 'provider_unavailable';
+/**
+ * 失败分类（B2 扩展）：
+ * - transport / rate_limit / provider_unavailable：既有三类；
+ * - token_limit：token 超限（输入超上下文或输出超 max_tokens）——默认不在
+ *   onFailure 里（换 provider 大概率同样超限），需要更大上下文模型时显式配置。
+ */
+export type ProviderFallbackFailureClass = 'transport' | 'rate_limit' | 'provider_unavailable' | 'token_limit';
 
 export interface ProviderFallbackTarget {
   provider: string;
@@ -194,6 +201,9 @@ function findNextFallbackIndex(
 
 export function _classifyProviderFallbackFailure(error: unknown): ProviderFallbackFailureClass | undefined {
   if (error instanceof AgentError) {
+    // B2: token 超限按消息指纹分类（跨 provider 措辞归一化）。
+    const tokenLimit = classifyTokenLimitErrorFromMessage(error.message ?? '');
+    if (tokenLimit !== undefined) return 'token_limit';
     if (error.code === 'PROVIDER_NETWORK') return 'transport';
     if (error.context.httpStatus === 429) return 'rate_limit';
     // 403 usually means auth (do NOT fallback), but balance/quota exhaustion is
@@ -223,8 +233,8 @@ function normalizeTarget(value: unknown, index: number): ProviderFallbackTarget 
 }
 
 function normalizeFailureClasses(value: unknown): ProviderFallbackFailureClass[] {
-  const allowed: ProviderFallbackFailureClass[] = ['transport', 'rate_limit', 'provider_unavailable'];
-  if (value === undefined) return allowed;
+  const allowed: ProviderFallbackFailureClass[] = ['transport', 'rate_limit', 'provider_unavailable', 'token_limit'];
+  if (value === undefined) return ['transport', 'rate_limit', 'provider_unavailable'];
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error('providerFallback.onFailure must contain at least one failure class');
   }
