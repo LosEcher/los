@@ -102,7 +102,7 @@ export function registerOpenAICompatibleRoute(
       const intent = messageRouter.resolveIntent(lastUserTurn);
       if (intent.type !== 'chat' && intent.type !== 'unknown') {
         const result = await messageRouter.route({
-          sourceKind: 'wx-weclaw',
+          sourceKind: 'http-openai-compat',
           // Single-turn only so normalizer/rawText is exactly the command line.
           messages: [{ role: 'user', content: lastUserTurn }],
           model: body.model,
