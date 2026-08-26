@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | known-failures 接 CI 时无失败返回 FIXED=1 | `--allow-fixed`(CI 模式) | 已固化(PR #152) |
 | DDL 复制漂移(governance audit 残缺建表 42703) | 对齐 @los/memory 权威 SCHEMA | 已固化(PR #146) |
-| ADR 0030-0034 五对重复编号 | Status 标注 + README 映射 | 已固化(PR #153);重编号待 archive pass |
+| ADR 0030-0034 五对重复编号 | Status 标注 + README 映射 | ✅ 已解决(2026-08-26: 非 canonical 5 份重编号 0042-0046) |
 | 记忆漂移(ci-prepare.sh"丢失") | 核实 git 历史纠正 | 记忆已纠正 |
 
 ## 二、项目内容优化建议(按优先级)

@@ -1,0 +1,22 @@
+{
+  "name": "@los/redaction",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./classification": "./src/classification.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency 1 'src/*.test.ts'",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

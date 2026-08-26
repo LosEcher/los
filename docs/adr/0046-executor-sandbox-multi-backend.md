@@ -1,4 +1,4 @@
-# ADR 0034: Executor Sandbox Multi-Backend Abstraction
+# ADR 0046: Executor Sandbox Multi-Backend Abstraction
 
 ## Status
 

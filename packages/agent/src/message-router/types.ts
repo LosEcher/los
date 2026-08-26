@@ -20,7 +20,6 @@ export type SourceKind =
   | 'http-runtime'         // POST /runtimes/:kind/run
   | 'wx-weixin'            // WxPusher up-call callback
   | 'wx-web'               // Mobile web /m/exec
-  | 'wx-weclaw'            // WeClaw (WeChat → OpenAI compat endpoint)
   | 'telegram';            // Telegram callback
 
 export type OperatorCapability =
@@ -161,7 +160,6 @@ export type NormalizerInput =
   | { sourceKind: 'http-runtime';        prompt: string; kind: string; sessionId?: string }
   | { sourceKind: 'wx-weixin';           text: string; uid?: string; metadata?: Record<string, unknown> }
   | { sourceKind: 'wx-web';              action: string; sessionId: string; callId?: string }
-  | { sourceKind: 'wx-weclaw';           messages: Array<{ role: string; content: string }>; model?: string }
   | { sourceKind: 'telegram';            data: string; chatId: number };
 
 // ── Router result ────────────────────────────────────────────────

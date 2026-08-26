@@ -13,9 +13,9 @@ import type { HandlerContext, InboundMessage, ResolvedIntent } from './types.js'
 
 function makeInbound(): InboundMessage {
   return {
-    sourceKind: 'wx-weclaw',
-    channelId: 'wechat-test',
-    channelKind: 'weixin',
+    sourceKind: 'http-chat',
+    channelId: 'chat-test',
+    channelKind: 'direct',
     rawText: '',
     rawPayload: {},
     metadata: { timestamp: new Date().toISOString() },

@@ -11,6 +11,7 @@ import {
   redactText,
   registerPayloadRedactor,
 } from './event-redaction.js';
+import { RedactedString } from '@los/redaction';
 
 test('redactPayload: secret-key patterns redact at any nesting depth', () => {
   const out = redactPayload({
@@ -124,4 +125,43 @@ test('redactPayload: input object is never mutated (canonical log not rewritten)
   const snapshot = JSON.stringify(input);
   redactPayload(input, 'tool.call');
   assert.equal(JSON.stringify(input), snapshot);
+});
+
+test('redactPayload: RedactedString 走显式 telemetry 用途（redact 模式取脱敏值）', () => {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production'; // 避免 dev 隐式序列化抛错干扰
+  try {
+    const out = redactPayload(
+      { apiKey: new RedactedString('sk-abc', 'credentials', 'provider.apiKey', 'redact') },
+      'tool.call',
+    );
+    assert.equal(out.apiKey, '[redacted:provider.apiKey]');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+});
+
+test('redactPayload: RedactedString 在 off 模式放行原文再走瀑布', () => {
+  const out = redactPayload(
+    { greeting: new RedactedString('hello world', 'unspecified', 'x', 'off') },
+    'tool.call',
+  );
+  assert.equal(out.greeting, 'hello world');
+});
+
+test('redactPayload: enforce 模式未授权用途降级为脱敏占位（fail-closed 不抛错）', () => {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    const out = redactPayload(
+      { email: new RedactedString('user@example.com', 'pii', 'user.email', 'enforce') },
+      'tool.call',
+    );
+    // enforce + telemetry 用途未授权 → 脱敏占位而非抛错
+    assert.equal(out.email, '[redacted:user.email]');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
 });

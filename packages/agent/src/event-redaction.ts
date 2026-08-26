@@ -12,7 +12,13 @@
  *
  * 注册扩展点：registerPayloadRedactor() 供 telemetry / runtime-adapter 等模块
  * 追加自定义变换（如外部 runtime 摘要的脱敏规则）。
+ *
+ * 类型级守卫（2026-08-24）：walkRedact 识别 @los/redaction 的 RedactedString，
+ * 显式按「telemetry」用途取视图；越权（enforce / CREDENTIALS 硬底线）降级为
+ * 脱敏占位，fail-closed 不抛错。
  */
+
+import { RedactedString } from '@los/redaction';
 
 // ── 常量 ──────────────────────────────────────────────
 
@@ -90,9 +96,16 @@ function transformLeaf(value: unknown, key: string | null): unknown {
 /**
  * 默认管线深度遍历。只读输入，返回脱敏后的新结构。
  * depth 从 0 计数，超出 MAX_PAYLOAD_DEPTH 的节点替换为占位字符串。
+ * 类型级守卫值（RedactedString）在此显式取「遥测用途」视图：
+ * 越权（enforce 模式未授权 / CREDENTIALS 硬底线）降级为脱敏占位，fail-closed 不抛错。
  */
 function walkRedact(value: unknown, key: string | null, depth: number): unknown {
   if (depth > MAX_PAYLOAD_DEPTH) return DEPTH_MARKER;
+  if (value instanceof RedactedString) {
+    // 类型守卫已给出分类感知视图（[redacted:field] 或 off/unspecified 原文）；
+    // 只做长度截断，不重复走 key 名规则（避免字段名信息被二次替换丢失）。
+    return truncateString(value.unwrap('telemetry', { redactUnallowedFieldsInsteadOfThrowing: true }));
+  }
   if (Array.isArray(value)) {
     // 数组元素不继承父键名（与历史 redactValue 语义一致：避免 token 族键名
     // 误伤 tokens 之类的计数数组）。

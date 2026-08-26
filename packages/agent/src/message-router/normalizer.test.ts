@@ -83,16 +83,6 @@ describe('normalizer', () => {
     assert.equal(result.metadata.sessionId, 'session-xyz');
   });
 
-  it('normalizes wx-weclaw from WeChat via OpenAI compat', () => {
-    const input: NormalizerInput = {
-      sourceKind: 'wx-weclaw',
-      messages: [{ role: 'user', content: '#task' }],
-    };
-    const result = normalizeInboundMessage(input);
-    assert.equal(result.sourceKind, 'wx-weclaw');
-    assert.equal(result.rawText, '#task');
-  });
-
   it('normalizes telegram callback data', () => {
     const input: NormalizerInput = {
       sourceKind: 'telegram',

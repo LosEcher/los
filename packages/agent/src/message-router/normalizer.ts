@@ -60,7 +60,7 @@ export function normalizeInboundMessage(input: NormalizerInput): InboundMessage 
         },
       };
 
-    // ── WeChat channels ─────────────────────────────────────
+    // ── WeChat channels (wx-weclaw removed 2026-08-26, channel retired) ──
     case 'wx-weixin':
       return {
         sourceKind: 'wx-weixin',
@@ -89,21 +89,6 @@ export function normalizeInboundMessage(input: NormalizerInput): InboundMessage 
         },
       };
 
-    case 'wx-weclaw': {
-      const wlUserMsg = (input.messages ?? [])
-        .filter(m => m.role === 'user')
-        .map(m => m.content)
-        .join('\n');
-      return {
-        sourceKind: 'wx-weclaw',
-        channelId: 'weclaw-direct',
-        channelKind: 'direct',
-        rawText: wlUserMsg,
-        rawPayload: input,
-        metadata: { timestamp: now },
-      };
-    }
-
     // ── Telegram ────────────────────────────────────────────
     case 'telegram':
       return {
@@ -131,7 +116,6 @@ function resolveChannelId(input: NormalizerInput): string {
     case 'http-runtime':       return `http-runtime-${input.kind}`;
     case 'wx-weixin':          return `weixin-${input.uid ?? 'anon'}`;
     case 'wx-web':             return 'web-mobile';
-    case 'wx-weclaw':          return 'weclaw-direct';
     case 'telegram':           return `tg-${input.chatId}`;
   }
 }
