@@ -7,6 +7,7 @@ import { Activity, AlertTriangle } from 'lucide-react';
 import { getJson, type ExecutionObservabilityProjection, type ExecutionTurnWaterfall } from '../api';
 import { Badge, EmptyText, Fact } from '../ui';
 import { useI18n } from '../i18n';
+import { buildScrubberProjection } from '../exec-obs-scrubber.mjs';
 
 const QUERY_KEY = 'session-execution-observability';
 
@@ -163,7 +164,53 @@ function ObservabilityBody({
           ) : null}
         </div>
       )}
+
+      <ActivityTimeline data={data} />
     </>
+  );
+}
+
+/**
+ * 活动时间线（zoetrope L-1 借鉴）：事件索引 sparkline + 失败 marker。
+ * sparkline 按事件索引轴（非时间线性）分桶，峰值 = 事件密集处；
+ * 失败 marker 是 past-only 语义的数据基础（position 为事件相对位置，
+ * 呈现层可用 playhead 判定"到达才显现"）。
+ */
+function ActivityTimeline({ data }: { data: ExecutionObservabilityProjection }) {
+  const { t } = useI18n();
+  const scrub = buildScrubberProjection(data, 48);
+  if (scrub.totals.turns === 0) return null;
+  const maxLevel = Math.max(...scrub.sparkline, 1);
+  return (
+    <div className="exec-obs-timeline">
+      <div className="exec-obs-kicker">
+        {t('assets.obs.scrubberTitle')}
+        {scrub.failureMarkers.length > 0 ? (
+          <span className="exec-obs-marker-count">{t('assets.obs.markerCount', { count: scrub.failureMarkers.length })}</span>
+        ) : null}
+      </div>
+      <div className="exec-obs-sparkline" role="img" aria-label={t('assets.obs.sparklineAria')}>
+        {scrub.sparkline.map((level, i) => (
+          <span
+            key={i}
+            className={`exec-obs-spark-col${level > 0 ? ' is-active' : ''}`}
+            style={{ height: `${Math.max(level > 0 ? 12 : 2, Math.round((level / maxLevel) * 100))}%` }}
+          />
+        ))}
+      </div>
+      {scrub.failureMarkers.length > 0 ? (
+        <div className="exec-obs-markers" aria-label={t('assets.obs.markersAria')}>
+          {scrub.failureMarkers.map((marker, i) => (
+            <span
+              key={`${marker.category}-${marker.code}-${i}`}
+              className={`exec-obs-marker is-${marker.category}`}
+              style={{ left: `${Math.round((marker.position ?? 0) * 100)}%` }}
+              title={`${marker.category}: ${marker.code}${marker.message ? ` — ${marker.message}` : ''}`}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
