@@ -1,4 +1,4 @@
-# ADR 0033: Provider/Tool Hot Reload
+# ADR 0045: Provider/Tool Hot Reload
 
 ## Status
 

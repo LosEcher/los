@@ -330,7 +330,7 @@ Operator decisions recorded (ask tool, 2026-07-31):
    Default LOS kernel stays production baseline; canary results remain
    advisory until a formal pairwise sample-gate pass and rollback gates.
 
-2. **Flow DSL deferred** — ADR 0030 (declarative-flow-dsl) remains design
+2. **Flow DSL deferred** — ADR 0042 (declarative-flow-dsl) remains design
    intent only; no implementation is scheduled. The decision is recorded here
    so the dangling ADR does not block Execution Lab or daily-agent work.
    Revisit only if a concrete workflow requirement emerges.

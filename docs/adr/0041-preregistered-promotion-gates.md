@@ -109,7 +109,7 @@ Candidate is **not worse** than baseline when all of:
 
 1. This ADR does not authorize any promotion.
 2. It does not set provider-tier routing thresholds for chat routing
-   (that remains ADR 0031 provider-health-aware routing scope).
+   (that remains ADR 0043 provider-health-aware routing scope).
 3. It does not waive operator approval: gates are necessary, not sufficient.
 
 ## Verification
