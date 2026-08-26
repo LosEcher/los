@@ -1,4 +1,4 @@
-# ADR 0032: ACP (Agent Client Protocol) Endpoint
+# ADR 0044: ACP (Agent Client Protocol) Endpoint
 
 ## Status
 

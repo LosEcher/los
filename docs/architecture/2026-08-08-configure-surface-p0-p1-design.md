@@ -9,7 +9,7 @@
 | **Revision** | 2 |
 | **Repo** | `/Users/echerlos/projects/los-workspace/projects/los` |
 | **Related contracts** | `contracts/skill-mcp-distribution.yaml` (target 0.3.0 after PR5) |
-| **Related ADRs / governance** | ADR 0020, ADR 0030, ADR 0033 (sketch only); AP11 / `docs/governance/code-first-determinism.md` |
+| **Related ADRs / governance** | ADR 0020, ADR 0030, ADR 0045 (sketch only); AP11 / `docs/governance/code-first-determinism.md` |
 | **Primary surfaces** | `#providers`, `#skills`, `#rules`, `#mcp` |
 | **Tracking** | Configure-surface P0/P1 design; implement via PR Plan below |
 
@@ -92,7 +92,7 @@ los 的 Configure 四页（Providers / Skills / Rules / MCP）已经具备 **注
 ### Non-Goals
 
 - Full MCP marketplace / skill marketplace / cloud catalog
-- 完整 ADR 0033 provider/tool hot reload
+- 完整 ADR 0045 provider/tool hot reload
 - OAuth full MCP flow
 - Multi-tenant SaaS skill sharing
 - Hermes-style 巨型 provider store

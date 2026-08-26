@@ -72,14 +72,18 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0039-pluggable-execution-kernel-and-pi-adoption.md` - LOS-owned governance
   with a provider-neutral execution-kernel protocol, Pi adoption gates, and
   later replacement criteria.
+- `0042-declarative-flow-dsl.md` - declarative flow DSL for agent task flows.
+- `0043-provider-health-aware-routing.md` - provider health-aware routing
+  preference and fallback policy.
+- `0044-acp-endpoint.md` - ACP (Agent Client Protocol) endpoint.
+- `0045-provider-tool-hot-reload.md` - provider/tool hot reload boundaries.
+- `0046-executor-sandbox-multi-backend.md` - executor sandbox multi-backend
+  abstraction (worktree/docker).
 
-> **Numbering conflicts**: five ADR numbers are shared by a second,
-> non-canonical document (each marked in its `Status` block). The entries
-> listed above are the canonical holders; the co-numbered files are
-> `0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
-> `0032-acp-endpoint`, `0033-provider-tool-hot-reload`, and
-> `0034-executor-sandbox-multi-backend`. Revisit numbering on the next
-> archive pass.
+> Numbering de-duplicated 2026-08-26: the five non-canonical co-numbered files
+> (`0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
+> `0032-acp-endpoint`, `0033-provider-tool-hot-reload`,
+> `0034-executor-sandbox-multi-backend`) were renumbered to `0042`–`0046`.
 
 ### Operation Smokes
 
