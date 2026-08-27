@@ -311,6 +311,7 @@ gateway|packages/gateway/src/idempotency.ts|getIdempotencyKey  # zero callers (o
 gateway|packages/gateway/src/node-auto-probe.ts|isAutoProbeEligible  # test-only caller (no production caller)
 gateway|packages/gateway/src/node-auto-probe.ts|runNodeAutoProbeTick  # test-only caller (no production caller)
 gateway|packages/gateway/src/node-auto-probe.ts|selectAutoProbeTargets  # test-only caller (no production caller)
+gateway|packages/gateway/src/node-probe-rules.ts|NODE_PROBE_SIGNALS  # zero callers (orphan)
 gateway|packages/gateway/src/recovery-experiment.ts|RECOVERY_SCENARIOS  # zero callers (orphan)
 gateway|packages/gateway/src/recovery-experiment.ts|runRecoveryExperiment  # test-only caller (no production caller)
 gateway|packages/gateway/src/routes/infrastructure/metrics-routes.ts|collectPrometheusSamples  # zero callers (orphan)

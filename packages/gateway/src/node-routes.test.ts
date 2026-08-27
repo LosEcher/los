@@ -39,6 +39,15 @@ const stubDeps: NodeRouteDependencies = {
     return updated as any;
   },
   requireOperator: async () => true,
+  appendNodeProbeEvent: async (input) => ({
+    id: 1,
+    nodeId: input.nodeId,
+    fromStatus: input.fromStatus,
+    toStatus: input.toStatus,
+    at: new Date().toISOString(),
+    detail: input.detail,
+  }),
+  listNodeProbeEvents: async (_nodeId: string, _limit?: number) => [],
 };
 
 test('node infrastructure routes require operator access', async () => {
