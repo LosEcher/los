@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  appendNodeProbeEvent,
   ensureExecutorNodeStore,
-  loadExecutorNode,
   listExecutorNodes,
+  listNodeProbeEvents,
+  loadExecutorNode,
   recordExecutorNodeProbe,
   upsertExecutorNode,
   upsertExecutorNodeHeartbeat,
@@ -21,6 +23,16 @@ import {
   probeNode,
   readString,
 } from '../node-probes.js';
+import {
+  blockerCountOf,
+  computeNodeHealthIndex,
+  hasVerificationGapOf,
+  heartbeatAgeSecOf,
+} from '../../node-health.js';
+import {
+  builtinNodeProbeRules,
+  evaluateNodeProbeRules,
+} from '../../node-probe-rules.js';
 import { requireOperator } from '../../request-context.js';
 
 export type NodeRouteDependencies = {
@@ -31,6 +43,8 @@ export type NodeRouteDependencies = {
   upsertExecutorNodeHeartbeat: typeof upsertExecutorNodeHeartbeat;
   ensureExecutorNodeStore: typeof ensureExecutorNodeStore;
   requireOperator: typeof requireOperator;
+  appendNodeProbeEvent: typeof appendNodeProbeEvent;
+  listNodeProbeEvents: typeof listNodeProbeEvents;
 };
 
 const defaultDependencies: NodeRouteDependencies = {
@@ -41,6 +55,8 @@ const defaultDependencies: NodeRouteDependencies = {
   upsertExecutorNodeHeartbeat,
   ensureExecutorNodeStore,
   requireOperator,
+  appendNodeProbeEvent,
+  listNodeProbeEvents,
 };
 
 type NodeEditorBody = {
@@ -77,6 +93,53 @@ export function registerNodeRoutes(
     if (!(await deps.requireOperator(req, reply))) return;
     await deps.ensureExecutorNodeStore();
     return await deps.listExecutorNodes();
+  });
+
+  // B7: derived node health view (continuous 0-100 + level per node), computed
+  // on read from the current record — no extra storage, mirrors PressureIndex.
+  // B9: each entry also carries declarative-rule findings over the fixed
+  // signal allow-list (evaluateNodeProbeRules).
+  app.get('/nodes/health', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
+    await deps.ensureExecutorNodeStore();
+    const nodes = await deps.listExecutorNodes(1000);
+    const now = Date.now();
+    return nodes.map((node) => {
+      const blockers = node.execution.blockers ?? [];
+      const sig = {
+        modesOk: node.verified ? Object.values(node.verified).filter((v) => (v as { ok?: boolean })?.ok === true).length : 0,
+        modesTotal: node.verified ? Object.keys(node.verified).length : 0,
+        heartbeatAgeSec: heartbeatAgeSecOf(node.lastHeartbeatAt, now),
+        blockerCount: blockerCountOf(blockers),
+        hasVerificationGap: hasVerificationGapOf(blockers),
+        recovering: node.status === 'online' && node.lastProbeError !== undefined && node.lastProbeError !== null,
+      };
+      const index = computeNodeHealthIndex(
+        node.status === 'online' ? 'online' : 'offline',
+        node.execution.candidate === true,
+        sig,
+      );
+      return {
+        nodeId: node.nodeId,
+        hostLabel: node.hostLabel ?? null,
+        status: node.status,
+        candidate: node.execution.candidate,
+        health: index,
+        findings: evaluateNodeProbeRules(builtinNodeProbeRules(), sig),
+        checkedAt: new Date(now).toISOString(),
+      };
+    });
+  });
+
+  // B6: probe transition events for one node (append-only, newest first).
+  app.get('/nodes/:id/events', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const nodeId = normalizeOptionalString(id);
+    if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
+    await deps.ensureExecutorNodeStore();
+    const events = await deps.listNodeProbeEvents(nodeId, 50);
+    return { nodeId, events };
   });
 
   app.patch('/nodes/:id', async (req, reply) => {
@@ -157,6 +220,20 @@ export function registerNodeRoutes(
       lastProbeAt: new Date(),
       lastProbeError: result.lastProbeError ?? null,
     });
+
+    // B6: persist status transitions (online↔offline) as append-only events.
+    if (result.transition) {
+      try {
+        await deps.appendNodeProbeEvent({
+          nodeId,
+          fromStatus: result.transition.from,
+          toStatus: result.transition.to,
+          detail: result.transition.to === 'online' ? 'probe recovered' : 'probe failed',
+        });
+      } catch {
+        // event persistence is best-effort; probe result still returned
+      }
+    }
 
     return {
       ok: true,

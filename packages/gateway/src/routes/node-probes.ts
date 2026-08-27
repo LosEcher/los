@@ -8,10 +8,21 @@ import { runSshCommand } from '../ssh-command-runner.js';
 
 export const PROBE_TIMEOUT_MS = 3_000;
 
+/** SSH 探测的系统信息采集命令：连通标记 + hostname + uname（OS/arch）。
+ * Windows 节点无 uname → 该行缺失被 coverage 诚实标记（B4），不伪造值。 */
+const SSH_INFO_CMD = 'echo los-probe-ok && hostname && uname -s && uname -m';
+
 export async function probeNode(node: ExecutorNodeRecord): Promise<{
   status: ExecutorNodeStatus;
   verified: Record<string, unknown>;
   lastProbeError?: string;
+  /** B4 coverage honesty: which probe channels/fields could be read. */
+  coverage?: {
+    modes: Record<string, { ok: boolean; kind: string; detail?: string }>;
+    system?: { hostname?: string; os?: string; arch?: string; unreadable: string[] };
+  };
+  /** B6 status transition detected against the node's previous status. */
+  transition?: { from: ExecutorNodeStatus; to: ExecutorNodeStatus } | null;
 }> {
   // Probe every declared connect mode. Candidate eligibility uses the preferred
   // mode (agent_http_ndjson over agent_http); short-circuiting on the first
@@ -19,12 +30,18 @@ export async function probeNode(node: ExecutorNodeRecord): Promise<{
   // looked healthy.
   const modes = normalizeConnectModes(node.connectModes);
   const verified: Record<string, unknown> = {};
+  const modeCoverage: Record<string, { ok: boolean; kind: string; detail?: string }> = {};
   let lastError: string | undefined;
   let anyOk = false;
   const checkedAt = new Date().toISOString();
 
+  // B4: merge system info from every successful SSH probe (dedupe by field).
+  let system: { hostname?: string; os?: string; arch?: string } | undefined;
+  const unreadable = new Set<string>();
+
   for (const mode of modes) {
     const probe = await probeMode(node, mode);
+    modeCoverage[mode] = { ok: probe.ok, kind: probe.kind, detail: probe.error };
     if (probe.ok) {
       anyOk = true;
       verified[mode] = {
@@ -34,6 +51,23 @@ export async function probeNode(node: ExecutorNodeRecord): Promise<{
         endpoint: probe.endpoint,
         kind: probe.kind,
       };
+      if (probe.system) {
+        if (probe.system.hostname) {
+          system = { ...system, hostname: probe.system.hostname };
+        } else {
+          unreadable.add('hostname');
+        }
+        if (probe.system.os) {
+          system = { ...system, os: probe.system.os };
+        } else {
+          unreadable.add('uname -s');
+        }
+        if (probe.system.arch) {
+          system = { ...system, arch: probe.system.arch };
+        } else {
+          unreadable.add('uname -m');
+        }
+      }
       continue;
     }
     lastError = probe.error;
@@ -47,10 +81,32 @@ export async function probeNode(node: ExecutorNodeRecord): Promise<{
     };
   }
 
+  // B4: coverage report — mark unreadable fields only when SSH probing happened
+  // and the field stayed empty despite a successful connection.
+  const sshModesProbed = modes.some((mode) => ['direct_ssh', 'tailscale_ssh', 'tailscale_native_ssh', 'cf_tunnel_ssh'].includes(mode));
+  const coverage = {
+    modes: modeCoverage,
+    system: sshModesProbed
+      ? {
+          hostname: system?.hostname,
+          os: system?.os,
+          arch: system?.arch,
+          unreadable: [...unreadable],
+        }
+      : undefined,
+  };
+
+  // B6: status transition vs the node's previous status (for eventization).
+  const previousStatus = node.status;
+  const resultStatus: ExecutorNodeStatus = anyOk ? 'online' : 'offline';
+  const transition = previousStatus !== resultStatus ? { from: previousStatus, to: resultStatus } : null;
+
   if (anyOk) {
     return {
       status: 'online',
       verified,
+      coverage,
+      transition,
     };
   }
 
@@ -58,13 +114,22 @@ export async function probeNode(node: ExecutorNodeRecord): Promise<{
     status: 'offline',
     verified,
     lastProbeError: lastError ?? 'probe failed',
+    coverage,
+    transition,
   };
 }
 
 export async function probeMode(
   node: ExecutorNodeRecord,
   mode: ExecutorNodeConnectMode,
-): Promise<{ ok: boolean; endpoint?: string; kind: string; error?: string }> {
+): Promise<{
+  ok: boolean;
+  endpoint?: string;
+  kind: string;
+  error?: string;
+  /** B4: system info gathered by this probe (SSH modes), for coverage reporting. */
+  system?: { hostname?: string; os?: string; arch?: string };
+}> {
   // Prefer mode-specific config; agent_http_ndjson commonly inherits agent_http.
   const config = normalizeJsonObject(
     node.connectConfig[mode]
@@ -100,14 +165,16 @@ export async function probeMode(
     if (mode === 'direct_ssh' || mode === 'tailscale_ssh' || mode === 'tailscale_native_ssh' || mode === 'cf_tunnel_ssh') {
       try {
         const result = await runSshCommand(node, {
-          command: 'echo los-probe-ok && hostname && uname -s',
+          command: SSH_INFO_CMD,
           timeoutMs: PROBE_TIMEOUT_MS + 2_000,
         });
         if (result.connected && result.exitCode === 0) {
+          const system = _parseSystemInfo(result.stdout ?? '');
           return {
             ok: true,
             endpoint,
             kind: 'ssh',
+            system,
           };
         }
         return {
@@ -243,4 +310,34 @@ export function readInteger(value: unknown): number | undefined {
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/**
+ * B4 coverage honesty: parse the SSH_INFO_CMD output into hostname/os/arch.
+ * Missing lines (e.g. Windows nodes without `uname`) yield undefined and are
+ * reported as `unreadable` gaps rather than fabricated values — mirroring
+ * mac-performance-monitor's unreadableProcessCount (read what you can, mark
+ * the rest, never fake zeros).
+ */
+export function _parseSystemInfo(output: string): {
+  hostname?: string;
+  os?: string;
+  arch?: string;
+  unreadable: string[];
+} {
+  const lines = (output ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  // Line 0 = los-probe-ok marker; line 1 = hostname; 2 = uname -s; 3 = uname -m.
+  const marker = lines.find((line) => line.includes('los-probe-ok'));
+  const rest = marker === undefined ? lines : lines.slice(lines.indexOf(marker) + 1);
+  const hostname = rest[0];
+  const os = rest[1];
+  const arch = rest[2];
+  const unreadable: string[] = [];
+  if (!hostname) unreadable.push('hostname');
+  if (!os) unreadable.push('uname -s');
+  if (!arch) unreadable.push('uname -m');
+  return { hostname, os, arch, unreadable };
 }

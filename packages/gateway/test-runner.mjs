@@ -14,6 +14,8 @@ const sharedProcessTestFiles = [
   'src/execution-experiment-k4-routes.test.ts',
   'src/managed-workspace-routes.test.ts',
   'src/node-auto-probe.test.ts',
+  'src/node-health.test.ts',
+  'src/node-probe-rules.test.ts',
   'src/node-probes.test.ts',
   'src/node-routes.test.ts',
   'src/openai-compat-route.test.ts',
