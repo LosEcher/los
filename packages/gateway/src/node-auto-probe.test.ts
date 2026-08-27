@@ -183,3 +183,58 @@ test('runNodeAutoProbeTick records failed probes so cooldown still applies', asy
   assert.equal(records.length, 1);
   assert.match(records[0]!, /flaky:timeout/);
 });
+
+test('runNodeAutoProbeTick persists transitions via append callback (B6)', async () => {
+  resetCircuits();
+  const events: Array<{ nodeId: string; fromStatus: string; toStatus: string; detail?: string }> = [];
+  // Auto-probe only targets online executors with verification debt.
+  const n = node({ nodeId: 'recovering', status: 'online' });
+  const result = await runNodeAutoProbeTick({
+    maxPerTick: 1,
+    minProbeGapMs: 0,
+    listNodes: async () => [n],
+    load: async () => n,
+    probe: async (node) => ({
+      status: 'online',
+      verified: { agent_http: { ok: true, source: 'probe' } },
+      // probeNode derives transition from the previous status; a fresh probe
+      // after heartbeat-flap recovery reports offline→online.
+      transition: { from: 'offline', to: 'online' },
+    }),
+    record: async (input) => node({ nodeId: input.nodeId }),
+    append: async (event) => {
+      events.push(event);
+      return { id: events.length };
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.deepEqual(result.probed, ['recovering']);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.nodeId, 'recovering');
+  assert.equal(events[0]!.fromStatus, 'offline');
+  assert.equal(events[0]!.toStatus, 'online');
+  assert.match(events[0]!.detail ?? '', /recovered/);
+});
+
+test('runNodeAutoProbeTick skips append when probe reports no transition (B6)', async () => {
+  resetCircuits();
+  let appended = 0;
+  const n = node({ nodeId: 'stable' });
+  const result = await runNodeAutoProbeTick({
+    maxPerTick: 1,
+    minProbeGapMs: 0,
+    listNodes: async () => [n],
+    load: async () => n,
+    probe: async () => ({ status: 'online', verified: { agent_http: { ok: true } } }),
+    record: async (input) => node({ nodeId: input.nodeId }),
+    append: async () => {
+      appended += 1;
+      return {};
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.deepEqual(result.probed, ['stable']);
+  assert.equal(appended, 0);
+});

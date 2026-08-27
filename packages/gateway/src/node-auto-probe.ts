@@ -15,6 +15,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import {
+  appendNodeProbeEvent,
   listExecutorNodes,
   loadExecutorNode,
   recordExecutorNodeProbe,
@@ -119,6 +120,8 @@ export async function runNodeAutoProbeTick(
     record?: typeof recordExecutorNodeProbe;
     load?: typeof loadExecutorNode;
     sleep?: (ms: number) => Promise<void>;
+    /** B6: persist probe status transitions (online↔offline). Defaults to DB append. */
+    append?: (event: { nodeId: string; fromStatus: string; toStatus: string; detail?: string }) => Promise<unknown>;
   } = {},
 ): Promise<AutoProbeTickResult> {
   const maxPerTick = options.maxPerTick ?? DEFAULTS.maxPerTick;
@@ -130,6 +133,7 @@ export async function runNodeAutoProbeTick(
   const record = options.record ?? recordExecutorNodeProbe;
   const load = options.load ?? loadExecutorNode;
   const sleep = options.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const append = options.append ?? ((event) => appendNodeProbeEvent(event));
 
   const nodes = await listNodes();
   const eligible = selectAutoProbeTargets(nodes, { cooldownMs, now });
@@ -171,6 +175,19 @@ export async function runNodeAutoProbeTick(
           fresh.nodeId,
           result.lastProbeError ?? `probe status=${result.status}`,
         );
+      }
+      // B6: persist status transitions (best-effort; probe result already recorded).
+      if (result.transition) {
+        try {
+          await append({
+            nodeId: fresh.nodeId,
+            fromStatus: result.transition.from,
+            toStatus: result.transition.to,
+            detail: result.transition.to === 'online' ? 'auto-probe recovered' : 'auto-probe failed',
+          });
+        } catch {
+          // event persistence is best-effort
+        }
       }
     } catch (error) {
       failed.push(fresh.nodeId);

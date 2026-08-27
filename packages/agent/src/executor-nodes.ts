@@ -187,6 +187,16 @@ ALTER TABLE executor_nodes ADD COLUMN IF NOT EXISTS last_probe_error TEXT;
 CREATE INDEX IF NOT EXISTS idx_executor_nodes_status ON executor_nodes(status);
 CREATE INDEX IF NOT EXISTS idx_executor_nodes_kind ON executor_nodes(node_kind);
 CREATE INDEX IF NOT EXISTS idx_executor_nodes_heartbeat ON executor_nodes(last_heartbeat_at DESC);
+
+CREATE TABLE IF NOT EXISTS node_probe_events (
+  id BIGSERIAL PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  from_status TEXT NOT NULL,
+  to_status TEXT NOT NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_node_probe_events_node ON node_probe_events(node_id, at DESC);
 `;
 
 let _initialized = false;
@@ -477,6 +487,70 @@ function mergeObjects(
 }
 
 export { type ExecutorNodeRow } from './executor-node-writer.js';
+
+/** ── B6 node probe transition events（事件溯源风格，append-only） ──────
+ * probeNode 检测到状态翻转（online↔offline）时由调用方落库；列表按节点
+ * 倒序查询。借鉴 mac-performance-monitor PressureEvents（事件 + 时间戳 +
+ * 归因），也镜像 dsh-scheduler 的 runs.jsonl 事件流语义。
+ */
+export interface NodeProbeEvent {
+  id: number;
+  nodeId: string;
+  fromStatus: string;
+  toStatus: string;
+  at: string;
+  detail?: string;
+}
+
+export async function appendNodeProbeEvent(input: {
+  nodeId: string;
+  fromStatus: string;
+  toStatus: string;
+  detail?: string;
+}): Promise<NodeProbeEvent> {
+  await ensureExecutorNodeStore();
+  const db = getDb();
+  const rows = await db.query<{ id: number; at: string }>(
+    `
+    INSERT INTO node_probe_events (node_id, from_status, to_status, detail)
+    VALUES ($1, $2, $3, $4)
+    RETURNING id, at
+    `,
+    [input.nodeId, input.fromStatus, input.toStatus, input.detail ?? null],
+  );
+  const row = rows.rows[0]!;
+  return {
+    id: row.id,
+    nodeId: input.nodeId,
+    fromStatus: input.fromStatus,
+    toStatus: input.toStatus,
+    at: toIsoString(row.at),
+    detail: input.detail,
+  };
+}
+
+export async function listNodeProbeEvents(nodeId: string, limit = 20): Promise<NodeProbeEvent[]> {
+  await ensureExecutorNodeStore();
+  const db = getDb();
+  const rows = await db.query<{ id: number; from_status: string; to_status: string; at: string; detail: string | null }>(
+    `
+    SELECT id, from_status, to_status, at, detail
+      FROM node_probe_events
+     WHERE node_id = $1
+     ORDER BY at DESC, id DESC
+     LIMIT $2
+    `,
+    [nodeId, limit],
+  );
+  return rows.rows.map((row) => ({
+    id: row.id,
+    nodeId,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    at: toIsoString(row.at),
+    detail: row.detail ?? undefined,
+  }));
+}
 
 async function writeExecutorNode(
   nodeId: string,
