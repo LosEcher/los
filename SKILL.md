@@ -1,6 +1,6 @@
 ---
 name: los-project-operations
-description: Use for repeated los-specific workflows that require current runtime evidence, ADR/source reconciliation, provider compatibility gates, gateway/executor lifecycle checks, or jj-aware closeout in /Users/echerlos/projects/los-workspace/projects/los.
+description: Use for repeated los-specific workflows that require current runtime evidence, ADR/source reconciliation, provider compatibility gates, gateway/executor lifecycle checks, or jj-aware closeout in /Users/echerlos/syncfolder/project/los-workspace/projects/los.
 ---
 
 # los Project Operations

@@ -391,3 +391,30 @@ observation from sleep catch-up:
 This change does not provide gateway HA while the MBP sleeps. Remote executor
 processes may remain healthy but cannot heartbeat or accept new LOS work until
 the MBP control plane becomes reachable again.
+
+---
+
+## 10. Fleet maintenance window for planned MBP absence — 2026-08-30
+
+Use the existing `node_maintenance_policy` suppression path for planned MBP
+sleep. The fleet helper appends one common absolute window to every named fleet
+node while preserving unrelated per-node windows. It does not provide gateway
+HA and does not keep active work alive after the MBP sleeps.
+
+```bash
+# Before leaving; refuses when any executor reports active tasks.
+pnpm fleet:maintenance start --for 8h
+
+# Inspect active/common windows after wake.
+pnpm fleet:maintenance status
+
+# Return early: clear only the window id printed by start.
+pnpm fleet:maintenance clear <window-id>
+
+# Remove expired windows without touching future ones.
+pnpm fleet:maintenance prune
+```
+
+`start` writes audited `ops.config_changed` events through the existing policy
+store. Use `--force-active` only when the operator accepts that active remote
+tasks may finish without reporting until the MBP control plane returns.

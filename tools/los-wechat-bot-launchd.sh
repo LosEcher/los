@@ -6,7 +6,7 @@
 # not restart it — previously launchd ignored mode and kept pushing digests.
 set -uo pipefail
 
-ROOT="/Users/echerlos/projects/los-workspace/projects/los"
+ROOT="/Users/echerlos/syncfolder/project/los-workspace/projects/los"
 RUNTIME_DIR="$ROOT/.los-runtime"
 BOT_LOG="$RUNTIME_DIR/wechat-bot.log"
 BOT_PID_FILE="$RUNTIME_DIR/wechat-bot.pid"

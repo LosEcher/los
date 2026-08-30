@@ -6,7 +6,7 @@
 #
 # Pulls the newest N reports + snapshots (same retention window as
 # network-observe.mjs) from:
-#   /Users/echerlos/Downloads/projects/aidebug/.network-observe/
+#   ~/syncfolder/project/aidebug/.network-observe/   (moved 2026-08 from ~/Downloads/projects/aidebug)
 # into:
 #   <los workspace>/.los-runtime/network-observe/input/
 # and writes bridge-manifest.json with sync metadata.
@@ -14,7 +14,8 @@
 # Read-only with respect to the source; only writes into the los workspace.
 set -euo pipefail
 
-SRC_ROOT="/Users/echerlos/Downloads/projects/aidebug/.network-observe"
+AIDEBUG_ROOT="${AIDEBUG_ROOT:-$HOME/syncfolder/project/aidebug}"
+SRC_ROOT="$AIDEBUG_ROOT/.network-observe"
 DST_ROOT="$(cd "$(dirname "$0")/.." && pwd)/.los-runtime/network-observe"
 DST_INPUT="$DST_ROOT/input"
 KEEP=14   # match network-observe.mjs retention window (14 days)
@@ -48,7 +49,7 @@ SURGE_DIR="$DST_ROOT/surge-input"
 mkdir -p "$SURGE_DIR"
 SURGE_TS=$(date -u +%Y-%m-%dT%H-%M-%S)
 NODE_BIN="/Users/echerlos/Library/Application Support/fnm/aliases/default/bin/node"
-if [ -x "$NODE_BIN" ] && "$NODE_BIN" /Users/echerlos/Downloads/projects/aidebug/scripts/surge-ai-window.mjs --minutes 120 --json > "$SURGE_DIR/surge-errors-$SURGE_TS.json" 2>/dev/null; then
+if [ -x "$NODE_BIN" ] && "$NODE_BIN" "$AIDEBUG_ROOT/scripts/surge-ai-window.mjs" --minutes 120 --json > "$SURGE_DIR/surge-errors-$SURGE_TS.json" 2>/dev/null; then
   # keep newest 24 surge windows
   ls -1 "$SURGE_DIR"/surge-errors-*.json 2>/dev/null | sort -r | tail -n +25 | while read -r f; do rm -f "$f"; done || true
   SURGE_WINDOWS=$(ls -1 "$SURGE_DIR"/surge-errors-*.json 2>/dev/null | wc -l | tr -d ' ')
