@@ -6,6 +6,7 @@ import { Badge, DataTable, EmptyText, Fact, Field, formatDate, RefreshQueryButto
 import { FleetCard } from './fleet-card.js';
 import { NodeEditor, NodeInspector, errorMessage, fmtMb } from './node-editor.js';
 import { useI18n } from './i18n';
+import { DEFAULT_NODE_REGISTRY_FILTER, countRegistryFilters, filterRegistryNodes, type NodeRegistryFilter } from './nodes-registry-filter.js';
 
 function shortCapFlags(capabilities: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -43,16 +44,21 @@ function diskPressure(capacity: Record<string, unknown>): { freeGb: number; tone
 export function NodesPage() {
   const { t } = useI18n();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [registryFilter, setRegistryFilter] = useState<NodeRegistryFilter>(DEFAULT_NODE_REGISTRY_FILTER);
   const [actionMessage, setActionMessage] = useState<string>(() => t('ops.nodes.registryLocalNote'));
   const nodes = useQuery({
     queryKey: ['nodes'],
     queryFn: () => getJson<Array<{ nodeId: string; nodeKind: string; status: string; connectModes: string[]; rolloutState?: string; targetVersion?: string; execution: { candidate: boolean; blockers?: string[]; warnings?: string[] }; lastHeartbeatAt: string; capacity?: Record<string, unknown>; capabilities?: Record<string, unknown> }>>('/nodes'),
     refetchInterval: 8_000,
   });
+  const registryCounts = useMemo(() => countRegistryFilters(nodes.data ?? []), [nodes.data]);
+  const visibleNodes = useMemo(
+    () => filterRegistryNodes(nodes.data ?? [], registryFilter),
+    [nodes.data, registryFilter],
+  );
   const selectedNode = useMemo(() => {
-    const all = nodes.data ?? [];
-    return all.find(node => node.nodeId === selectedNodeId) ?? all[0] ?? null;
-  }, [nodes.data, selectedNodeId]);
+    return visibleNodes.find(node => node.nodeId === selectedNodeId) ?? visibleNodes[0] ?? null;
+  }, [visibleNodes, selectedNodeId]);
 
   return (
     <section className="panel-grid settings-grid">
@@ -94,14 +100,27 @@ export function NodesPage() {
             <h2>{t('ops.nodes.registryTitle')}</h2>
             <p>{actionMessage}</p>
           </div>
-          <button type="button" className="ghost-btn" onClick={() => setSelectedNodeId(null)}>
-            <Plus size={14} /> {t('ops.nodes.newButton')}
-          </button>
+          <div className="toolbar">
+            <div className="toolbar-tabs" role="tablist" aria-label={t('ops.nodes.filterAria')}>
+              <button type="button" role="tab" aria-selected={registryFilter === 'executors'} className={`toolbar-tab ${registryFilter === 'executors' ? 'active' : ''}`} onClick={() => setRegistryFilter('executors')}>
+                {t('ops.nodes.filterExecutors', { count: registryCounts.executors })}
+              </button>
+              <button type="button" role="tab" aria-selected={registryFilter === 'ssh'} className={`toolbar-tab ${registryFilter === 'ssh' ? 'active' : ''}`} onClick={() => setRegistryFilter('ssh')}>
+                {t('ops.nodes.filterSsh', { count: registryCounts.ssh })}
+              </button>
+              <button type="button" role="tab" aria-selected={registryFilter === 'all'} className={`toolbar-tab ${registryFilter === 'all' ? 'active' : ''}`} onClick={() => setRegistryFilter('all')}>
+                {t('ops.nodes.filterAll', { count: registryCounts.all })}
+              </button>
+            </div>
+            <button type="button" className="ghost-btn" onClick={() => setSelectedNodeId(null)}>
+              <Plus size={14} /> {t('ops.nodes.newButton')}
+            </button>
+          </div>
         </div>
         <DataTable
           loading={nodes.isLoading}
           empty={t('ops.nodes.empty')}
-          rows={nodes.data ?? []}
+          rows={visibleNodes}
           renderRow={node => {
             const mem = memoryPressure(node.capacity ?? {});
             const disk = diskPressure(node.capacity ?? {});
