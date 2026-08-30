@@ -41,7 +41,7 @@ Raw evidence prohibited:
 | Goal | The concrete outcome requested by the operator. | `wire execution gap plan into todo seeds` |
 | Editable surfaces | Files or modules the agent may modify. | `docs/governance/*`, `packages/agent/src/todo-seeds-agent-workflow.ts` |
 | Owner layer | Smallest layer that should own the change. | `project docs/todos`, `ADR`, `runtime schema`, `global skill` |
-| Workspace root | Current project root used for commands and VCS. | `/Users/echerlos/projects/los-workspace/projects/los` |
+| Workspace root | Current project root used for commands and VCS. | `/Users/echerlos/syncfolder/project/los-workspace/projects/los` |
 | Provider/model | Configured route for the run when relevant. | `Codex GPT-5`, `Claude Code`, `Reasonix` |
 | Tool mode | Tool authority expected for the run. | `read-only`, `project-write`, `all` |
 | Required checks | Commands or smokes that must run before closeout. | `pnpm --filter @los/agent check`, `pnpm check` |

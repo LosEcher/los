@@ -51,7 +51,7 @@ the last 5 finished runs.
 Suggested cron (every 30 minutes):
 
 ```cron
-*/30 * * * * cd /Users/echerlos/projects/los-workspace/projects/los && \
+*/30 * * * * cd /Users/echerlos/syncfolder/project/los-workspace/projects/los && \
   bash tools/ci-health-check.sh --include-failures \
   >/tmp/ci-health.log 2>&1 || /path/to/alert-hook.sh
 ```

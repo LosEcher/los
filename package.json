@@ -28,6 +28,7 @@
     "executor:drain": "bash ./tools/executor.sh drain",
     "executor:promote": "bash ./tools/executor.sh promote",
     "executor:upgrade": "bash ./tools/executor.sh upgrade",
+    "fleet:maintenance": "./packages/gateway/node_modules/.bin/tsx tools/fleet-maintenance.mts",
     "cli": "./bin/los",
     "dev": "turbo dev",
     "build": "turbo build",
