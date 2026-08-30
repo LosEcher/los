@@ -17,7 +17,7 @@ await createRunSpec({
   tenantId: 'local',
   projectId: 'los',
   prompt: 'Read packages/agent/package.json and report the exact values of the "name" and "version" fields as JSON. Make at most one read_file call. Do not write anything and do not use any other tool.',
-  workspaceRoot: '/Users/echerlos/projects/los-workspace/projects/los',
+  workspaceRoot: '/Users/echerlos/syncfolder/project/los-workspace/projects/los',
   toolMode: 'read-only',
   allowedTools: ['read_file'],
   maxLoops: 3,
