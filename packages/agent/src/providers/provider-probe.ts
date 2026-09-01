@@ -7,6 +7,12 @@
  *
  * Cadence (ADR 0031): 60s while scheduling is active, 300s when idle.
  * RTT is exponentially smoothed (α=0.3) so scores do not thrash.
+ *
+ * Unreachable providers (timeout / ECONNREFUSED / aborted fetch) are not
+ * re-probed on that cadence: a per-provider circuit applies exponential
+ * backoff (5s…5m) and latches at 5m after 5 consecutive transport failures.
+ * A GET timeout does not fall back to HEAD — that doubled SYN storms through
+ * HTTP proxies that ignore AbortController.
  */
 
 import { getConfig } from '@los/infra/config';
@@ -17,6 +23,14 @@ import {
   type HealthScore,
   type HealthTier,
 } from './provider-health.js';
+import {
+  getProviderProbeCircuit,
+  isProviderProbeCircuitOpen,
+  isTransportProbeFailure,
+  noteProviderProbeFailure,
+  noteProviderProbeSuccess,
+  _resetProviderProbeCircuitsForTests,
+} from './provider-probe-circuit.js';
 
 const log = getLogger('provider-probe');
 
@@ -33,6 +47,14 @@ let recentSchedulingActivity = false;
 let probeLoopTimer: ReturnType<typeof setTimeout> | null = null;
 let probeLoopRunning = false;
 let probeLoopStopped = true;
+const probeInFlight = new Set<string>();
+
+type ProbeFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+interface ProbeDeps {
+  fetch?: ProbeFetch;
+  now?: () => number;
+}
 
 /** Get the latest cached probe result for a provider, or undefined. */
 export function getCachedProbeResult(provider: string): ProbeResult | undefined {
@@ -93,9 +115,8 @@ export function resolveConfiguredProbeTargets(): ProbeTarget[] {
 }
 
 /**
- * Probe a provider's base URL with a lightweight request.
- * Uses the /models endpoint when available (OpenAI-compatible),
- * falls back to HTTP HEAD on the base URL.
+ * Probe a provider's base URL with a lightweight GET /models.
+ * Transport failures open the per-provider circuit; no HEAD fallback.
  *
  * Not exported: production and tests go through probeProviders().
  */
@@ -104,8 +125,10 @@ async function probeProvider(
   baseUrl: string,
   apiKey?: string,
   timeoutMs = 5000,
+  deps: ProbeDeps = {},
 ): Promise<ProbeResult> {
-  const started = Date.now();
+  const started = (deps.now ?? Date.now)();
+  const doFetch = deps.fetch ?? fetch;
   const headers: Record<string, string> = {
     'User-Agent': 'los-provider-probe/1.0',
   };
@@ -114,21 +137,18 @@ async function probeProvider(
   }
 
   const modelsUrl = `${baseUrl.replace(/\/+$/, '')}/models`;
-
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    const response = await fetch(modelsUrl, {
+    const response = await doFetch(modelsUrl, {
       method: 'GET',
       headers,
       signal: controller.signal,
     });
-    clearTimeout(timer);
 
-    const rttMs = Date.now() - started;
+    const rttMs = Math.max(0, (deps.now ?? Date.now)() - started);
 
-    if (response.ok) {
+    if (response.ok || response.status === 401 || response.status === 403) {
       log.debug(`${provider} probe: ${rttMs}ms HTTP ${response.status}`);
       return {
         provider,
@@ -136,20 +156,7 @@ async function probeProvider(
         rttMs,
         statusCode: response.status,
         healthy: true,
-        probedAt: new Date().toISOString(),
-      };
-    }
-
-    // 401/403 = reachable even if auth-gated
-    if (response.status === 401 || response.status === 403) {
-      log.debug(`${provider} probe: ${rttMs}ms HTTP ${response.status} (auth gated, reachable)`);
-      return {
-        provider,
-        baseUrl,
-        rttMs,
-        statusCode: response.status,
-        healthy: true,
-        probedAt: new Date().toISOString(),
+        probedAt: new Date(started + rttMs).toISOString(),
       };
     }
 
@@ -160,60 +167,95 @@ async function probeProvider(
       rttMs,
       statusCode: response.status,
       healthy: false,
-      probedAt: new Date().toISOString(),
+      probedAt: new Date(started + rttMs).toISOString(),
       error: `HTTP ${response.status}`,
     };
   } catch (err) {
-    const rttMs = Date.now() - started;
+    const rttMs = Math.max(0, (deps.now ?? Date.now)() - started);
     const message = err instanceof Error ? err.message : String(err);
-
-    try {
-      const controller2 = new AbortController();
-      const timer2 = setTimeout(() => controller2.abort(), Math.min(timeoutMs, 3000));
-      const headResponse = await fetch(baseUrl, {
-        method: 'HEAD',
-        signal: controller2.signal,
-      });
-      clearTimeout(timer2);
-      const headRtt = Date.now() - started;
-
-      log.debug(`${provider} HEAD probe: ${headRtt}ms HTTP ${headResponse.status}`);
-      return {
-        provider,
-        baseUrl,
-        rttMs: headRtt,
-        statusCode: headResponse.status,
-        healthy: headResponse.status < 500,
-        probedAt: new Date().toISOString(),
-      };
-    } catch {
-      log.debug(`${provider} probe failed: ${message} (${rttMs}ms)`);
-      return {
-        provider,
-        baseUrl,
-        rttMs,
-        statusCode: 0,
-        healthy: false,
-        probedAt: new Date().toISOString(),
-        error: message,
-      };
-    }
+    log.debug(`${provider} probe failed: ${message} (${rttMs}ms)`);
+    return {
+      provider,
+      baseUrl,
+      rttMs,
+      statusCode: 0,
+      healthy: false,
+      probedAt: new Date(started + rttMs).toISOString(),
+      error: message,
+    };
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+function circuitSkipResult(
+  target: ProbeTarget,
+  now: number,
+  reason: string,
+): ProbeResult {
+  const previous = probeCache.get(target.provider);
+  const circuit = getProviderProbeCircuit(target.provider);
+  return {
+    provider: target.provider,
+    baseUrl: target.baseUrl,
+    rttMs: previous?.rttMs ?? 0,
+    statusCode: 0,
+    healthy: false,
+    probedAt: previous?.probedAt ?? new Date(now).toISOString(),
+    error: `${reason}: ${circuit?.lastError ?? previous?.error ?? 'skipped'}`,
+  };
 }
 
 /**
  * Batch probe multiple providers in parallel.
  * Results are cached with RTT exponential smoothing and sorted healthy-first.
+ * Open circuits and in-flight probes are skipped (no second TCP SYN).
  */
 export async function probeProviders(
   targets: Array<{ provider: string; baseUrl: string; apiKey?: string }>,
   timeoutMs?: number,
+  deps: ProbeDeps = {},
 ): Promise<ProbeResult[]> {
+  const now = (deps.now ?? Date.now)();
+  const pending: ProbeTarget[] = [];
+  const skipped: ProbeResult[] = [];
+
+  for (const target of targets) {
+    if (probeInFlight.has(target.provider)) {
+      skipped.push(circuitSkipResult(target, now, 'probe_in_flight'));
+      continue;
+    }
+    if (isProviderProbeCircuitOpen(target.provider, now)) {
+      skipped.push(circuitSkipResult(target, now, 'circuit_open'));
+      continue;
+    }
+    pending.push(target);
+  }
+
   const results = await Promise.allSettled(
-    targets.map(t => probeProvider(t.provider, t.baseUrl, t.apiKey, timeoutMs)),
+    pending.map(async (t) => {
+      probeInFlight.add(t.provider);
+      try {
+        const result = await probeProvider(t.provider, t.baseUrl, t.apiKey, timeoutMs, deps);
+        const observed = (deps.now ?? Date.now)();
+        if (result.healthy) {
+          noteProviderProbeSuccess(t.provider, observed);
+        } else if (isTransportProbeFailure(result.error ?? '')) {
+          const state = noteProviderProbeFailure(t.provider, result.error ?? 'transport', observed);
+          if (state.latched && state.consecutiveFailures === 5) {
+            log.warn(
+              `provider probe circuit latched for ${t.provider} after ${state.consecutiveFailures} transport failures; next probe in 5m`,
+            );
+          }
+        }
+        return result;
+      } finally {
+        probeInFlight.delete(t.provider);
+      }
+    }),
   );
 
-  const probes: ProbeResult[] = [];
+  const probes: ProbeResult[] = [...skipped];
   for (const r of results) {
     if (r.status === 'fulfilled') {
       probes.push(cacheProbeResult(r.value));
@@ -346,4 +388,6 @@ export function _resetProviderProbeStateForTests(): void {
   lastTierByProvider.clear();
   recentSchedulingActivity = false;
   probeLoopRunning = false;
+  probeInFlight.clear();
+  _resetProviderProbeCircuitsForTests();
 }

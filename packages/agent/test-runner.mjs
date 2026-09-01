@@ -67,6 +67,8 @@ const sharedProcessTestFiles = [
   'src/providers/model-routing.test.ts',
   'src/providers/provider-fallback.test.ts',
   'src/providers/provider-health.test.ts',
+  'src/providers/provider-probe-circuit.test.ts',
+  'src/providers/provider-probe.test.ts',
   'src/providers/provider-policy.test.ts',
   'src/tools/core/builtin-mcp-servers.test.ts',
   'src/providers/repair-pipeline.test.ts',
