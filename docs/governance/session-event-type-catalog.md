@@ -82,6 +82,8 @@
 | `turn.completed` | 回合完成（含 summary） | `execution-kernel.ts` |
 | `tool.completed` | 工具调用完成（含 transition） | `execution-kernel.ts` |
 | `checkpoint.created` | 上下文 checkpoint 已创建 | `execution-kernel.ts` / `pi-execution-kernel.ts` |
+| `kernel.resumed` | 内核从持久化 checkpoint 恢复继续（recovery resume 流） | `execution-kernel.ts` |
+| `kernel.shadow.compared` | Pi 内核影子对比完成（production vs shadow 哈希） | `pi-kernel-shadow.ts` |
 
 ### Runtime 域 (`runtime.*`)
 | 类型 | 描述 | 来源 |
@@ -108,6 +110,7 @@
 |------|------|------|
 | `operator.steering` | 操作员转向指令 | `operator-control.ts` |
 | `operator.followup` | 操作员跟进指令 | `operator-control.ts` |
+| `operator_attention_required` | DLQ 死信需要操作员关注（历史下划线命名，与 `run.operator_attention_required` 并存） | `dead-letter.ts` |
 
 ## Print Mode
 
@@ -119,6 +122,11 @@
 | `full` | type + 完整 payload + 元数据 | session replay、evidence、audit |
 
 API 端点 `GET /sessions/:id/events` 通过查询参数 `?mode=compact|full` 切换。
+
+### Drill 域 (`drill.*`)
+| 类型 | 描述 | 来源 |
+|------|------|------|
+| `drill.outbox.pending` | 恢复演练断言 outbox 待处理（DB 不可用演练阶段） | `recovery-experiment.ts` |
 
 ## 治理
 

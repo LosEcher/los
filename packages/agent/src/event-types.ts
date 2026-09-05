@@ -102,6 +102,9 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'turn.completed',
     'tool.completed',
     'checkpoint.created',
+    // 2026-08-18 完备性扫描补注册：execution-kernel 恢复 resume 流 / pi-kernel-shadow 对比事件。
+    'kernel.resumed',
+    'kernel.shadow.compared',
   ],
   runtime: [
     'runtime.started',
@@ -118,7 +121,11 @@ const SESSION_EVENT_TYPE_GROUPS = {
   operator: [
     'operator.steering',
     'operator.followup',
+    // dead-letter 处理直接写 session_events.type（sessionId: dlq-<id>）。
+    // 与 run.operator_attention_required 并存：前者是 DLQ 专属来源，后者是 run 生命周期。
+    'operator_attention_required',
   ],
+  drill: ['drill.outbox.pending'],
   usage: ['usage.recorded'],
   compaction: [
     'compaction.pre_compact',
