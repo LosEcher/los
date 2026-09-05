@@ -220,7 +220,10 @@ start_gateway() {
     write_pid_file "$pid" "$GW_PID_FILE" "$RUNTIME_DIR"
   fi
 
-  if wait_for_health "$pid" "$(gw_url)"; then
+  # Cold boot can exceed 60s (provider probe warm-up over proxy); the launchd
+  # wrapper's 30s cadence must never kill a still-booting gateway, so grant a
+  # 180s health window (2026-09-05 crash-loop fix).
+  if wait_for_health "$pid" "$(gw_url)" 180; then
     owner="$(port_owner "$(gw_port)" "$(gw_host)" "" "$(gw_url)" "$GW_SRC" "$GW_DIST")"
     if [ -n "$owner" ] && [ "$owner" != "unknown" ] && is_los_pid "$owner" "$GW_SRC" "$GW_DIST"; then
       pid="$owner"
@@ -312,7 +315,7 @@ start_executor() {
     write_pid_file "$pid" "$EX_PID_FILE" "$RUNTIME_DIR"
   fi
 
-  if wait_for_health "$pid" "$(ex_url)"; then
+  if wait_for_health "$pid" "$(ex_url)" 90; then
     owner="$(port_owner "$(ex_port)" "$(ex_host)" "" "$(ex_url)" "$EX_SRC" "$EX_DIST")"
     if [ -n "$owner" ] && [ "$owner" != "unknown" ] && is_los_pid "$owner" "$EX_SRC" "$EX_DIST"; then
       pid="$owner"
