@@ -87,7 +87,8 @@
     "./runtime-health": "./src/runtime-health.ts",
     "./fleet-inventory": "./src/fleet-inventory.ts",
     "./fleet-resources": "./src/fleet-resources.ts",
-    "./fleet-host-checks": "./src/fleet-host-checks.ts"
+    "./fleet-host-checks": "./src/fleet-host-checks.ts",
+    "./providers/health": "./src/providers/provider-health.ts"
   },
   "scripts": {
     "build": "tsc",

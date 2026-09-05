@@ -9,10 +9,12 @@ import { registerProviderEvidenceRoutes } from './provider-evidence-routes.js';
 import { registerProviderCrudRoutes } from './provider-crud-routes.js';
 import { registerProviderModelSyncRoutes } from './provider-model-sync-routes.js';
 import { registerProviderCompatExecuteRoutes } from './provider-compat-execute.js';
+import { registerProviderHealthRoute } from './provider-health-route.js';
 
 export function registerProviderRoutes(app: FastifyInstance): void {
   registerProviderEvidenceRoutes(app);
   registerProviderCrudRoutes(app);
   registerProviderModelSyncRoutes(app);
   registerProviderCompatExecuteRoutes(app);
+  registerProviderHealthRoute(app);
 }
