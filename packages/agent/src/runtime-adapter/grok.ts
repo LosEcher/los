@@ -6,7 +6,7 @@ import type { RuntimeHandle } from './types.js';
 import { resolveRuntimeCommand } from './command.js';
 
 const log = getLogger('grok-adapter');
-const GROK_DEFAULT_MODEL = 'grok-4.5';
+const GROK_DEFAULT_MODEL = 'grok-4.6';
 const GROK_OUTPUT_LIMIT_BYTES = 65_536;
 
 export interface GrokSpawnInput {
