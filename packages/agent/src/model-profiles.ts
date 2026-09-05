@@ -297,6 +297,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
       'gpt-5.6-sol',
       'gpt-5.6-luna',
       'gpt-5.6-terra',
+      'grok-4.6',
       'grok-4.5',
       'grok-4.3',
       'grok-4-fast',
@@ -354,6 +355,7 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     supportsReasoning: true,
     reasoningParam: 'reasoning_effort',
     modelAliases: [
+      'grok-4.6',
       'grok-4.3',
       'grok-4.5',
       'grok-4.20-multi-agent-0309',
@@ -372,10 +374,12 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
     usageMapping: OPENAI_USAGE_MAPPING,
     retryPolicy: DEFAULT_RETRY_POLICY,
     knownFailurePatterns: [],
+    // grok-4.6 = xAI 当前 frontier 默认（2026-09，docs.x.ai/developers/models）；
+    // <200k prompt: $2.00/$0.50/$6.00 per 1M（≥200k 翻倍，平铺取 <200k 档近似）。
     pricing: {
-      promptTokenCostPer1M: 1.00,
-      completionTokenCostPer1M: 2.00,
-      cacheHitTokenCostPer1M: 0.25,
+      promptTokenCostPer1M: 2.00,
+      completionTokenCostPer1M: 6.00,
+      cacheHitTokenCostPer1M: 0.50,
     },
   },
 };

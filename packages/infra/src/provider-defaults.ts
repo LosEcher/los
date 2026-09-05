@@ -21,7 +21,7 @@ const PROVIDER_DEFAULTS = {
   moonshot: { baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', apiKeyEnv: 'MOONSHOT_API_KEY' },
   zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4', apiKeyEnv: 'ZHIPU_API_KEY' },
   qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max', apiKeyEnv: 'DASHSCOPE_API_KEY' },
-  xai: { baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-4.5', apiKeyEnv: 'XAI_API_KEY' },
+  xai: { baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-4.6', apiKeyEnv: 'XAI_API_KEY' },
   ollama: { baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: 'llama3.1', checkUrl: 'http://127.0.0.1:11434/api/tags' },
   lmstudio: { baseUrl: 'http://127.0.0.1:1234/v1', defaultModel: '(auto)', checkUrl: 'http://127.0.0.1:1234/v1/models' },
   vllm: { baseUrl: 'http://127.0.0.1:8000/v1', defaultModel: '(auto)', checkUrl: 'http://127.0.0.1:8000/v1/models' },
