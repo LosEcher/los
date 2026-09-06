@@ -27,6 +27,10 @@ export interface SshRunOptions {
   cwd?: string;
   /** Environment variables to set on the remote host. */
   env?: Record<string, string>;
+  /** Optional durable correlation fields; values are never included in the command line. */
+  runId?: string;
+  sessionId?: string;
+  project?: string;
 }
 
 export interface SshRunResult {
@@ -132,6 +136,7 @@ export async function runSshCommand(
   opts: SshRunOptions,
   deps: SshRunnerDeps = {},
 ): Promise<SshRunResult> {
+  const startedAt = Date.now();
   const mode = _resolveSshRunnerMode();
   const detect = deps.detectUnirun ?? detectUnirunBinary;
   const available = await detect();
@@ -139,19 +144,66 @@ export async function runSshCommand(
   const preferUnirun =
     mode === 'unirun' || (mode === 'auto' && available);
 
-  // unirun ssh does not support remote cwd/env yet — route those to native.
-  const needsNativeOnly = Boolean(opts.cwd) || Object.keys(opts.env ?? {}).length > 0;
+  let fallbackReason: string | undefined = !preferUnirun
+    ? (mode === 'native' ? 'policy_native' : 'unirun_unavailable')
+    : undefined;
+  log.info('ssh execution selected', {
+    event: 'unirun.execution.selected',
+    runner: preferUnirun ? 'unirun' : 'native',
+    mode,
+    fallbackReason,
+    nodeId: node.nodeId,
+    project: opts.project,
+    runId: opts.runId,
+    sessionId: opts.sessionId,
+    durationMs: 0,
+  });
 
-  if (preferUnirun && !needsNativeOnly) {
+  if (preferUnirun) {
     try {
-      return await runSshUnirun(node, opts, deps.runUnirun);
+      const result = await runSshUnirun(node, opts, deps.runUnirun);
+      log.info('ssh execution completed', {
+        event: 'unirun.execution.completed',
+        runner: 'unirun',
+        nodeId: node.nodeId,
+        project: opts.project,
+        runId: opts.runId,
+        sessionId: opts.sessionId,
+        exitCode: result.exitCode,
+        connected: result.connected,
+        durationMs: Date.now() - startedAt,
+      });
+      return result;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      log.warn(`unirun ssh failed for node ${node.nodeId}, falling back to native ssh: ${msg}`);
+      log.warn('unirun ssh failed, falling back to native ssh', {
+        event: 'unirun.execution.fallback',
+        runner: 'native',
+        fallbackReason: 'unirun_error',
+        nodeId: node.nodeId,
+        project: opts.project,
+        runId: opts.runId,
+        sessionId: opts.sessionId,
+        durationMs: Date.now() - startedAt,
+        error: msg,
+      });
+      fallbackReason = 'unirun_error';
     }
   }
-
-  return (deps.runNative ?? _runSshNative)(node, opts);
+  const result = await (deps.runNative ?? _runSshNative)(node, opts);
+  log.info('ssh execution completed', {
+    event: 'unirun.execution.completed',
+    runner: 'native',
+    nodeId: node.nodeId,
+    project: opts.project,
+    runId: opts.runId,
+    sessionId: opts.sessionId,
+    exitCode: result.exitCode,
+    connected: result.connected,
+    fallbackReason,
+    durationMs: Date.now() - startedAt,
+  });
+  return result;
 }
 
 async function detectUnirunBinary(): Promise<boolean> {
@@ -195,6 +247,10 @@ export function _buildUnirunArgs(
   }
   if (typeof ssh.identity_file === 'string' && ssh.identity_file) {
     args.push('--identity', ssh.identity_file);
+  }
+  if (opts.cwd) args.push('--workdir', opts.cwd);
+  for (const [key, value] of Object.entries(opts.env ?? {})) {
+    args.push('--env', `${key}=${value}`);
   }
   const timeoutSec = Math.max(1, Math.ceil((opts.timeoutMs ?? 30_000) / 1000));
   args.push('--timeout', String(timeoutSec));

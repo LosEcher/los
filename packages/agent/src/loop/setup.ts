@@ -317,6 +317,7 @@ export async function completeAgentSetup(
   // Register builtin tools (includes MCP servers)
   const mcpCleanup = await registerBuiltinTools(setup.tools, {
     workspaceRoot: config.workspaceRoot,
+    remoteCommandRunner: config.remoteCommandRunner,
     mcpServers: config.mcpServers,
     mcpRegistryRecords,
     taskRunId: config.taskRunId,

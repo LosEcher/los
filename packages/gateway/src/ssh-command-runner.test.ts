@@ -119,15 +119,18 @@ test('invalid JSON from unirun → fallback to native', async () => {
   assert.equal(deps.calls.native, 1);
 });
 
-test('cwd/env present → native path (unirun ssh lacks remote cwd/env)', async () => {
+test('cwd/env present → unirun path with forwarded options', async () => {
   const deps = depsWith();
-  await runSshCommand(nodeWith(), { command: 'id', cwd: '/tmp' }, deps);
-  assert.equal(deps.calls.unirun.length, 0);
-  assert.equal(deps.calls.native, 1);
+  await runSshCommand(nodeWith({ host_name: 'h' }), { command: 'id', cwd: '/tmp' }, deps);
+  assert.equal(deps.calls.unirun.length, 1);
+  assert.equal(deps.calls.native, 0);
+  assert.deepEqual(deps.calls.unirun[0].slice(-2), ['--timeout', '30']);
+  assert.ok(deps.calls.unirun[0].includes('--workdir'));
   const deps2 = depsWith();
-  await runSshCommand(nodeWith(), { command: 'id', env: { A: '1' } }, deps2);
-  assert.equal(deps2.calls.unirun.length, 0);
-  assert.equal(deps2.calls.native, 1);
+  await runSshCommand(nodeWith({ host_name: 'h' }), { command: 'id', env: { A: '1' } }, deps2);
+  assert.equal(deps2.calls.unirun.length, 1);
+  assert.equal(deps2.calls.native, 0);
+  assert.ok(deps2.calls.unirun[0].includes('--env'));
 });
 
 test('missing host_name → connected=false, no unirun call', async () => {

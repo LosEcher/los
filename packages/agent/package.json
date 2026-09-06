@@ -22,6 +22,7 @@
     "./usage-feature": "./src/usage-feature.ts",
     "./task-runs": "./src/task-runs.ts",
     "./executor-nodes": "./src/executor-nodes.ts",
+    "./node-enrollment": "./src/node-enrollment.ts",
     "./service-instances": "./src/service-instances.ts",
     "./artifacts": "./src/artifacts.ts",
     "./node-commands": "./src/node-commands.ts",
