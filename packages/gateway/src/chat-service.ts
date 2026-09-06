@@ -22,6 +22,40 @@ import { createChatTaskHooks } from './chat-service-hooks.js';
 import { linkWorkItemRun } from '@los/agent/work-items';
 import { prepareChatPlanningDisposition } from './chat-planning-disposition.js';
 import { reconstructSessionContext } from '@los/agent/session-recovery';
+import { loadExecutorNode } from '@los/agent/executor-nodes';
+import { runSshCommand } from './ssh-command-runner.js';
+
+async function runGovernedRemoteCommand(input: {
+  nodeId: string;
+  command: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  timeoutMs: number;
+  sessionId?: string;
+  runSpecId?: string;
+}) {
+  const node = await loadExecutorNode(input.nodeId);
+  if (!node) {
+    return {
+      stdout: '', stderr: '', exitCode: null, connected: false,
+      error: `remote node not found: ${input.nodeId}`,
+    };
+  }
+  if (node.nodeKind !== 'ssh_target') {
+    return {
+      stdout: '', stderr: '', exitCode: null, connected: false,
+      error: `remote command requires ssh_target node: ${input.nodeId}`,
+    };
+  }
+  return runSshCommand(node, {
+    command: input.command,
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+    sessionId: input.sessionId,
+    runId: input.runSpecId,
+  });
+}
 
 export type { SendEvent } from './chat-live-events.js';
 export interface ChatRunContext {
@@ -302,6 +336,7 @@ export async function runChat(params: {
         agentKey: config.executor.agentKey,
         nodeId: config.executor.nodeId,
       },
+      remoteCommandRunner: config.executor.enabled ? runGovernedRemoteCommand : undefined,
       metadata: {
         maxLoops: maxLoops ?? config.agent.maxLoops,
         model,

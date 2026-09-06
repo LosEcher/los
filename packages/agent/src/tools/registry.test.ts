@@ -62,6 +62,46 @@ test('read-only tool mode excludes write and shell tools', async () => {
   }
 });
 
+test('run_remote_command is host-injected and returns normalized evidence', async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const registry = createToolRegistry();
+  await registerBuiltinTools(registry, {
+    sessionId: 'session-remote',
+    runSpecId: 'run-spec-remote',
+    remoteCommandRunner: async input => {
+      calls.push(input);
+      return {
+        stdout: 'ok\n', stderr: '', exitCode: 0, connected: true, durationMs: 12,
+      };
+    },
+  });
+
+  assert.ok(registry.list().includes('run_remote_command'));
+  const result = await registry.execute({
+    name: 'run_remote_command',
+    arguments: {
+      nodeId: 'node-remote', command: 'printf ok', cwd: '/srv/app',
+      env: { APP_ENV: 'test' }, timeoutSec: 7,
+    },
+  });
+  assert.equal(result.error, undefined);
+  assert.deepEqual(JSON.parse(result.content), {
+    stdout: 'ok\n', stderr: '', exitCode: 0, signal: null, connected: true,
+    timedOut: false, aborted: false, errorClass: null, durationMs: 12,
+  });
+  assert.deepEqual(calls[0], {
+    nodeId: 'node-remote', command: 'printf ok', cwd: '/srv/app',
+    env: { APP_ENV: 'test' }, timeoutMs: 7_000,
+    sessionId: 'session-remote', runSpecId: 'run-spec-remote',
+  });
+});
+
+test('run_remote_command is absent without a host adapter', async () => {
+  const registry = createToolRegistry();
+  await registerBuiltinTools(registry);
+  assert.equal(registry.list().includes('run_remote_command'), false);
+});
+
 test('tool runtime keeps workspace roots isolated per registry', async () => {
   const root = mkdtempSync(join(tmpdir(), 'los-agent-isolation-'));
   const workspaceA = join(root, 'a');
