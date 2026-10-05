@@ -126,6 +126,32 @@ base_url = "https://www.packyapi.com/v1"
   });
 });
 
+test('Codex route config recognises the current packyapi.ai endpoint as packycode', () => {
+  // name is deliberately not "packycode": recognition must come from the URL,
+  // otherwise a suffix-locked check silently stops matching when the endpoint
+  // moves to another TLD of the same family.
+  const route = parseCodexRouteConfig(`
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "custom"
+base_url = "https://www.packyapi.ai/v1"
+`);
+
+  assert.equal(route.providerName, 'packycode');
+  assert.equal(route.baseUrl, 'https://www.packyapi.ai/v1');
+});
+
+test('packycode default endpoint is not the unusable legacy packyapi.com host', () => {
+  const host = new URL(requireProviderDefaults('packycode').baseUrl).host;
+  assert.ok(
+    !host.endsWith('packyapi.com'),
+    `packycode must not default to ${host}: the legacy host resolves to a poisoned address on some resolvers and is answered with HTTP 403 in front of the origin`,
+  );
+  assert.match(host, /^(www\.)?packyapi\.ai$|^(cf|slb-v1)\.api\.fan$/);
+});
+
 test('cc-switch grokbuild PackyCode imports as packycode with responses shape', () => {
   const toml = `
 [models]

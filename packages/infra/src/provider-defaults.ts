@@ -9,7 +9,12 @@ const PROVIDER_DEFAULTS = {
   deepseek: { baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-v4-flash', apiKeyEnv: 'DEEPSEEK_API_KEY' },
   kimi: { baseUrl: 'https://api.kimi.com/coding/v1', defaultModel: 'kimi-k3', apiKeyEnv: 'KIMI_API_KEY' },
   openai: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.5', apiKeyEnv: 'OPENAI_API_KEY' },
-  packycode: { baseUrl: 'https://www.packyapi.com/v1', defaultModel: 'gpt-5.5' },
+  // The legacy www.packyapi.com host is not usable: it resolves to a poisoned
+  // address on some resolvers (observed: Meta's 2a03:2880::/32 range) and is
+  // answered with HTTP 403 in front of the origin everywhere else. Use the
+  // .ai endpoint, which resolves to Cloudflare and answers 401 for an
+  // unauthenticated /v1/models (reachable, auth required).
+  packycode: { baseUrl: 'https://www.packyapi.ai/v1', defaultModel: 'gpt-5.5' },
   codex: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.5' },
   anthropic: { baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-20250514', apiKeyEnv: 'ANTHROPIC_API_KEY' },
   claude: { baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-20250514' },
