@@ -22,7 +22,10 @@ export function parseCodexRouteConfig(toml: string): CodexRouteConfig {
   }
 
   if (
-    baseUrl.includes('packyapi.com')
+    // Match the whole packyapi family (packyapi.com legacy, packyapi.ai current)
+    // rather than one TLD: the default endpoint moved to .ai and a suffix-locked
+    // check silently stopped recognising the provider.
+    baseUrl.includes('packyapi')
     || baseUrl.includes('api.fan')
     || providerName.toLowerCase() === 'packycode'
   ) {
