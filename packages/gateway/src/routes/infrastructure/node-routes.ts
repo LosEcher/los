@@ -34,6 +34,7 @@ import {
   evaluateNodeProbeRules,
 } from '../../node-probe-rules.js';
 import { requireOperator } from '../../request-context.js';
+import { ensureNodeEnrollmentStore, issueNodeEnrollmentToken, redeemNodeEnrollmentToken, verifyNodeCredential } from '@los/agent/node-enrollment';
 
 export type NodeRouteDependencies = {
   listExecutorNodes: typeof listExecutorNodes;
@@ -93,6 +94,27 @@ export function registerNodeRoutes(
     if (!(await deps.requireOperator(req, reply))) return;
     await deps.ensureExecutorNodeStore();
     return await deps.listExecutorNodes();
+  });
+
+  app.post('/nodes/enrollment-tokens', async (req, reply) => {
+    if (!(await deps.requireOperator(req, reply))) return;
+    const body = req.body as Record<string, unknown> | undefined;
+    const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
+    if (!nodeId) return reply.status(400).send({ error: 'nodeId is required' });
+    const ttlMs = typeof body?.ttlMs === 'number' && Number.isFinite(body.ttlMs) ? body.ttlMs : undefined;
+    await ensureNodeEnrollmentStore();
+    return await issueNodeEnrollmentToken(nodeId, ttlMs);
+  });
+
+  app.post('/nodes/enroll', async (req, reply) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    const token = normalizeOptionalString(body?.token);
+    const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
+    if (!token || !nodeId) return reply.status(400).send({ error: 'token and nodeId are required' });
+    await ensureNodeEnrollmentStore();
+    const result = await redeemNodeEnrollmentToken(token, nodeId);
+    if (!result) return reply.status(401).send({ error: 'invalid, expired, consumed, or mismatched enrollment token' });
+    return result;
   });
 
   // B7: derived node health view (continuous 0-100 + level per node), computed
@@ -177,6 +199,16 @@ export function registerNodeRoutes(
     const body = req.body as Record<string, unknown> | undefined;
     const nodeId = normalizeOptionalString(body?.nodeId ?? body?.node_id);
     if (!nodeId) return reply.status(400).send({ error: 'nodeId is required' });
+
+    const credential = normalizeOptionalString(
+      (req.headers['x-los-node-credential'] as string | undefined) ?? body?.credential,
+    );
+    if (credential) {
+      const enrollment = await verifyNodeCredential(credential);
+      if (!enrollment || enrollment.nodeId !== nodeId) {
+        return reply.status(401).send({ error: 'invalid node credential' });
+      }
+    }
 
     await deps.ensureExecutorNodeStore();
     const node = await deps.upsertExecutorNodeHeartbeat({

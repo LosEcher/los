@@ -47,6 +47,7 @@ export const TOOL_NAMES = {
 
   // Shell
   run_shell: 'run_shell',
+  run_remote_command: 'run_remote_command',
   run_background: 'run_background',
   job_output: 'job_output',
   stop_job: 'stop_job',
@@ -135,6 +136,7 @@ const TOOLSETS: Record<string, ToolsetDefinition> = {
     description: 'Shell execution: run commands, background jobs, job management',
     tools: [
       TOOL_NAMES.run_shell, TOOL_NAMES.run_background,
+      TOOL_NAMES.run_remote_command,
       TOOL_NAMES.job_output, TOOL_NAMES.stop_job, TOOL_NAMES.list_jobs,
       TOOL_NAMES.run_node_probe,
     ],

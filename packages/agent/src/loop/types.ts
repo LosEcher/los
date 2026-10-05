@@ -55,6 +55,8 @@ export interface AgentConfig {
   maxLoops?: number;
   systemPrompt?: string;
   workspaceRoot?: string;
+  /** Host-injected governed remote command adapter for run_remote_command. */
+  remoteCommandRunner?: import('../tools/core/registry-policy.js').BuiltinToolOptions['remoteCommandRunner'];
   tenantId?: string;
   projectId?: string;
   userId?: string;

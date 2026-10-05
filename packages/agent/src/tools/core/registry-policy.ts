@@ -55,6 +55,27 @@ export interface ToolRegistryOptions {
 
 export interface BuiltinToolOptions {
   workspaceRoot?: string;
+  /** Optional governed remote command adapter. The host owns node auth and transport. */
+  remoteCommandRunner?: (input: {
+    nodeId: string;
+    command: string;
+    cwd?: string;
+    env?: Record<string, string>;
+    timeoutMs: number;
+    sessionId?: string;
+    runSpecId?: string;
+  }) => Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+    signal?: string | null;
+    connected: boolean;
+    error?: string;
+    timedOut?: boolean;
+    aborted?: boolean;
+    errorClass?: string | null;
+    durationMs?: number;
+  }>;
   mcpServers?: MCPServerConfig[];
   mcpRegistryRecords?: MCPServerRegistryRecord[];
   /** Task run ID for the current execution. Threaded from AgentConfig so worker

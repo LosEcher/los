@@ -12,7 +12,7 @@ import {
 test('Grok runtime arguments keep model and permission mode fixed', () => {
   assert.deepEqual(_buildGrokArgs('inspect this workspace'), [
     '--single', 'inspect this workspace',
-    '--model', 'grok-4.5',
+    '--model', 'grok-4.6',
     '--permission-mode', 'dontAsk',
   ]);
 });

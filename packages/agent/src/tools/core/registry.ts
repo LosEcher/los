@@ -293,6 +293,73 @@ export async function registerBuiltinTools(
     tags: ['shell'],
   });
 
+  // run_remote_command — host-injected transport with node authorization at the boundary.
+  if (options.remoteCommandRunner) {
+    const remoteCommandRunner = options.remoteCommandRunner;
+    registry.register('run_remote_command', async (args) => {
+      const nodeId = String(args.nodeId ?? '').trim();
+      const command = String(args.command ?? '');
+      if (!nodeId) return { content: '', error: 'nodeId is required' };
+      if (!command.trim()) return { content: '', error: 'command is required' };
+      const requestedTimeout = Number(args.timeoutSec ?? 30);
+      const timeoutSec = Math.max(1, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 30, 300));
+      const env = args.env && typeof args.env === 'object'
+        ? Object.fromEntries(Object.entries(args.env as Record<string, unknown>).map(([key, value]) => [key, String(value)]))
+        : undefined;
+      const result = await remoteCommandRunner({
+        nodeId,
+        command,
+        cwd: args.cwd ? String(args.cwd) : undefined,
+        env,
+        timeoutMs: timeoutSec * 1000,
+        sessionId: options.sessionId,
+        runSpecId: options.runSpecId,
+      });
+      const content = JSON.stringify({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        signal: result.signal ?? null,
+        connected: result.connected,
+        timedOut: result.timedOut ?? false,
+        aborted: result.aborted ?? false,
+        errorClass: result.errorClass ?? null,
+        durationMs: result.durationMs ?? null,
+      });
+      return result.error || result.exitCode !== 0
+        ? { content, error: result.error ?? `remote command exited with code ${result.exitCode}` }
+        : { content };
+    }, {
+      type: 'function',
+      function: {
+        name: 'run_remote_command',
+        description: 'Execute a non-interactive command on an authorized remote executor node through the host transport. Returns normalized JSON; use for cross-platform or remote work, not TTY/GUI tasks.',
+        parameters: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string', description: 'Authorized executor node ID' },
+            command: { type: 'string', description: 'Command to execute on the remote node' },
+            cwd: { type: 'string', description: 'Remote working directory (optional)' },
+            env: { type: 'object', additionalProperties: { type: 'string' }, description: 'Remote environment overrides (optional)' },
+            timeoutSec: { type: 'number', description: 'Timeout in seconds (default 30, max 300)' },
+          },
+          required: ['nodeId', 'command'],
+        },
+      },
+    }, {
+      riskLevel: 'L2',
+      permissions: ['node:execute'],
+      timeoutMs: 300_000,
+      retryable: false,
+      idempotent: false,
+      costLevel: 'high',
+      sideEffect: true,
+      sandboxRequired: false,
+      needsApproval: true,
+      tags: ['shell', 'remote', 'unirun'],
+    });
+  }
+
   // run_node_probe — hash-pinned read-only network probe (executor nodes).
   // The sandbox replacement for Windows nodes where run_shell is fail-closed
   // (restricting-SID sandboxing is blocked at the mechanism level in the los
@@ -544,4 +611,3 @@ export async function registerBuiltinTools(
 
   return mcpCleanup ?? (async () => {});
 }
-

@@ -37,13 +37,23 @@ Kim K3's MoonEP (MoE Expert Parallelism) demonstrates a production pattern: dyna
 
 4. **Health probe cadence**: Every 60s during active scheduling, every 300s when idle.
 
+5. **Unreachable-provider circuit** (2026-09-01): transport failures
+   (timeout, ECONNREFUSED, aborted fetch, `fetch failed`) are **not** retried
+   on the healthy cadence. Each provider has a process-local circuit:
+   exponential backoff 5s → 10s → 20s → … capped at 5 minutes, latched at
+   the cap after 5 consecutive transport failures (half-open every 5m so a
+   restarted local server is still detected). A GET timeout does not fall
+   back to HEAD. HTTP 4xx/5xx stay on the normal cadence — those hosts are
+   reachable. This is a probe-loop stop, not a config mutation (`enabled`
+   stays operator-owned).
+
 ## Consequences
 
-**Positive**: Fewer failed task runs due to unhealthy provider selection. Lower latency by preferring low-RTT providers.
+**Positive**: Fewer failed task runs due to unhealthy provider selection. Lower latency by preferring low-RTT providers. A down local inference server cannot SYN-storm an HTTP proxy.
 
-**Negative**: Adds probe traffic (one cheap HTTP request per provider per minute at most).
+**Negative**: Adds probe traffic (one cheap HTTP request per *reachable* provider per minute at most; unreachable providers back off to 5m).
 
-**Risk**: Health score could oscillate. Mitigation: exponential smoothing (α=0.3) on RTT and success rate.
+**Risk**: Health score could oscillate. Mitigation: exponential smoothing (α=0.3) on RTT and success rate. A latched circuit delays recovery up to 5 minutes after the server returns.
 
 ## References
 
