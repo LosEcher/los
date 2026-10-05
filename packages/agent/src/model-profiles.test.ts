@@ -133,7 +133,7 @@ test('packycode defaults to openai-chat-completions apiShape (PackyCode does not
   const profile = resolveModelProfile('packycode');
   assert.equal(profile.protocol, 'openai');
   assert.equal(profile.apiShape, 'openai-chat-completions');
-  assert.equal(profile.baseUrl, 'https://www.packyapi.com/v1');
+  assert.equal(profile.baseUrl, 'https://www.packyapi.ai/v1');
   assert.equal(profile.supportsTools, true);
   assert.equal(profile.supportsParallelToolCalls, false,
     'PackyCode parallel tool calls disabled to prevent streaming delta split-call bugs (L0)');
