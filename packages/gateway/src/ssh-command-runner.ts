@@ -7,14 +7,25 @@
 // cross-platform matrix — exact exit-code propagation, in-process deadline
 // with whole-tree kill, encoding pipeline (GBK/CLIXML/UTF-16LE), and a stable
 // error taxonomy — with the same SshRunResult contract. When unirun is
-// missing or the call fails, we fall back to the native ssh implementation so
-// the gateway never hard-depends on the binary.
+// missing, is too old for the flags a call needs, or the call fails, we fall
+// back to the native ssh implementation so the gateway never hard-depends on
+// the binary.
+//
+// What the binary can do is derived from `unirun --version` (see
+// unirun-capabilities.ts) instead of being assumed: remote --workdir/--env
+// need unirun >= 0.4.0, the ssh identity flags need >= 0.3.0.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 import type { ExecutorNodeRecord } from '@los/agent/executor-nodes';
+import {
+  normalizeUnirunCapabilities,
+  noUnirunCapabilities,
+  parseUnirunCapabilities,
+  resolveUnirunBinary,
+  unirunSshUsable,
+  wantsRemoteContext,
+  type UnirunCapabilities,
+} from './unirun-capabilities.js';
 
 const log = getLogger('gateway');
 
@@ -49,8 +60,9 @@ export type SshRunnerMode = 'auto' | 'unirun' | 'native';
 
 /** Injectable seams for tests (defaults are the real implementations). */
 export interface SshRunnerDeps {
-  /** Detect whether the unirun binary is available. */
-  detectUnirun?: () => Promise<boolean>;
+  /** Detect unirun availability/capabilities. `true` is shorthand for
+   *  "available and fully capable"; `false` means "no usable binary". */
+  detectUnirun?: () => Promise<UnirunCapabilities | boolean>;
   /** Run `unirun` with args; resolves {code, stdout, stderr}. */
   runUnirun?: (args: string[], timeoutMs: number) => Promise<{ code: number; stdout: string; stderr: string }>;
   /** Native ssh path (defaults to the spawn-based implementation). */
@@ -68,50 +80,10 @@ interface UnirunExecResult {
   hint: string | null;
 }
 
-/** Process-wide unirun availability cache. */
-let unirunDetected: boolean | null = null;
-/** Resolved unirun binary path (undefined = not resolved yet, null = absent). */
-let unirunBin: string | null | undefined;
-
-/**
- * Resolve the unirun binary. Gateway processes (launchd/systemd/containers)
- * often run with a minimal PATH that lacks ~/.cargo/bin, so we probe known
- * locations in addition to PATH, with LOS_UNIRUN_BIN as an explicit override.
- */
-export async function _resolveUnirunBinary(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<string | null> {
-  if (unirunBin !== undefined) return unirunBin;
-  const candidates: string[] = [];
-  if (env.LOS_UNIRUN_BIN) candidates.push(env.LOS_UNIRUN_BIN);
-  candidates.push('unirun');
-  const home = homedir();
-  candidates.push(join(home, '.cargo', 'bin', 'unirun'));
-  candidates.push('/usr/local/bin/unirun', '/opt/homebrew/bin/unirun');
-
-  for (const candidate of candidates) {
-    const ok = candidate === 'unirun'
-      ? await tryRunUnirunVersion(candidate)
-      : existsSync(candidate) && (await tryRunUnirunVersion(candidate));
-    if (ok) {
-      unirunBin = candidate;
-      return candidate;
-    }
-  }
-  unirunBin = null;
-  return null;
-}
-
-function tryRunUnirunVersion(bin: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn(bin, ['--version'], {
-      stdio: 'ignore',
-      timeout: 3_000,
-    });
-    child.on('error', () => resolve(false));
-    child.on('close', (code) => resolve(code === 0));
-  });
-}
+/** Process-wide unirun capability cache (undefined = not probed yet). */
+let unirunCaps: UnirunCapabilities | null | undefined;
+/** One-shot guard: a stale binary warns once, not once per node probe. */
+let legacyUnirunWarned = false;
 
 export function _resolveSshRunnerMode(env: NodeJS.ProcessEnv = process.env): SshRunnerMode {
   const mode = (env.LOS_SSH_RUNNER ?? 'auto').toLowerCase();
@@ -138,18 +110,36 @@ export async function runSshCommand(
 ): Promise<SshRunResult> {
   const startedAt = Date.now();
   const mode = _resolveSshRunnerMode();
-  const detect = deps.detectUnirun ?? detectUnirunBinary;
-  const available = await detect();
+  const detect = deps.detectUnirun ?? detectUnirunCapabilities;
+  const capabilities = normalizeUnirunCapabilities(await detect());
 
+  // 'unirun' is an explicit override; 'auto' still requires a binary that can
+  // take the ssh flags we build.
   const preferUnirun =
-    mode === 'unirun' || (mode === 'auto' && available);
+    mode === 'unirun' || (mode === 'auto' && capabilities.sshIdentity);
+  const useUnirun = preferUnirun && unirunSshUsable(capabilities, opts);
 
-  let fallbackReason: string | undefined = !preferUnirun
-    ? (mode === 'native' ? 'policy_native' : 'unirun_unavailable')
+  if (preferUnirun && !useUnirun && !legacyUnirunWarned) {
+    legacyUnirunWarned = true;
+    log.warn('unirun ssh too old for this call, using native ssh', {
+      event: 'unirun.execution.capability_gap',
+      runner: 'native',
+      fallbackReason: 'unirun_capability_gap',
+      nodeId: node.nodeId,
+      sshIdentity: capabilities.sshIdentity,
+      sshWorkdirEnv: capabilities.sshWorkdirEnv,
+      needsRemoteCwdEnv: wantsRemoteContext(opts),
+    });
+  }
+
+  let fallbackReason: string | undefined = !useUnirun
+    ? (mode === 'native'
+        ? 'policy_native'
+        : (preferUnirun ? 'unirun_capability_gap' : 'unirun_unavailable'))
     : undefined;
   log.info('ssh execution selected', {
     event: 'unirun.execution.selected',
-    runner: preferUnirun ? 'unirun' : 'native',
+    runner: useUnirun ? 'unirun' : 'native',
     mode,
     fallbackReason,
     nodeId: node.nodeId,
@@ -159,7 +149,7 @@ export async function runSshCommand(
     durationMs: 0,
   });
 
-  if (preferUnirun) {
+  if (useUnirun) {
     try {
       const result = await runSshUnirun(node, opts, deps.runUnirun);
       log.info('ssh execution completed', {
@@ -206,20 +196,20 @@ export async function runSshCommand(
   return result;
 }
 
-async function detectUnirunBinary(): Promise<boolean> {
-  if (unirunDetected !== null) return unirunDetected;
-  const bin = await _resolveUnirunBinary();
+async function detectUnirunCapabilities(): Promise<UnirunCapabilities> {
+  if (unirunCaps !== undefined) return unirunCaps ?? noUnirunCapabilities();
+  const bin = await resolveUnirunBinary();
   if (!bin) {
-    unirunDetected = false;
-    return false;
+    unirunCaps = null;
+    return noUnirunCapabilities();
   }
   try {
-    await runUnirunJson(['--version'], 3_000);
-    unirunDetected = true;
+    const { stdout } = await runUnirunJson(['--version'], 3_000);
+    unirunCaps = parseUnirunCapabilities(stdout);
   } catch {
-    unirunDetected = false;
+    unirunCaps = null;
   }
-  return unirunDetected;
+  return unirunCaps ?? noUnirunCapabilities();
 }
 
 function inferRemoteShell(node: Pick<ExecutorNodeRecord, 'connectConfig'>): string {
@@ -335,12 +325,12 @@ export function _sshTransportError(exitCode: number | null, stderr: string): str
 }
 
 /** Run `unirun <args>` and capture stdout/stderr; rejects on spawn failure. */
-function runUnirunJson(
+async function runUnirunJson(
   args: string[],
   timeoutMs: number,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  const bin = (await resolveUnirunBinary()) ?? 'unirun';
   return new Promise((resolve, reject) => {
-    const bin = unirunBin ?? 'unirun';
     const child = spawn(bin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: Math.max(1_000, timeoutMs + 15_000),
