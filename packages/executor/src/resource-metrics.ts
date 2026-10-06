@@ -99,6 +99,10 @@ export function resolveResourceCapabilities(): Partial<Record<string, unknown>> 
       return {
         deploy_safe: !isConstrained || swapTotalMb >= 2048,
         heavy_task_safe: !isConstrained,
+        // 类别此前只用于推导上面两个布尔值就被丢掉了，于是网关侧
+        // `evaluateExecutorNode` 的 constrained 分支永远是死代码、UI 也看不到资源类别。
+        // Linux 的约束阈值是 memTotalMb <= 2048（与 isConstrained 同源）。
+        resourceClass: isConstrained ? 'constrained_executor' : 'standard_executor',
       };
     }
 
@@ -106,7 +110,10 @@ export function resolveResourceCapabilities(): Partial<Record<string, unknown>> 
     // macOS and Windows report totalmem() in bytes via node:os.
     return {
       deploy_safe: !isConstrained,
+      // darwin/win32 无 swap 信息，heavy 的阈值是 >4096（比 Linux 更严），但**约束类别**
+      // 仍按同一个 2048 定义，避免同一台机器在不同平台的类别语义分叉。
       heavy_task_safe: memTotalMb > 4096,
+      resourceClass: isConstrained ? 'constrained_executor' : 'standard_executor',
     };
   } catch {
     return {};
