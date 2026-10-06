@@ -143,3 +143,35 @@ toolMode=all（无 sandboxMode）    → 设计上 L2 无沙箱；定时执行�
 **首例工件**：`schedule-fleet-consistency-001`「fleet consistency check (6h)」，`toolMode=project-write`、`reportDir=.los-runtime/fleet-reports`、`requiredChecks=['read_file .los-runtime/fleet/fleet-versions.json']`；判据是「进程版本 == 账本版本 == 该节点声明的 target_version」，并显式排除"网关工作树比集群目标新"这种 rollout 期的正常差异（第一版脚本就栽在这个误报上）。
 
 **尚未接的一环**：快照生产者目前是手工跑一次；要让它真正循环，需把 `--snapshot` 挂到 DSH 调度或 launchd（每 6h），并给判读任务加"快照过期即 input_stale"的门（与 network/surge 两个分析任务的 STALENESS GATE 同构）。这一步是纯配置，不需要改 los 代码。
+
+
+---
+
+## 7. 采集端挂载：两个沙箱夹出来的结论（2026-10-06 实施记录）
+
+把 §6 的两段式真正接起来时，又撞出一个必须记下来的事实：**采集端既不能在 los 沙箱里跑，也不能在 DSH 沙箱里跑。**
+
+| 尝试 | 结果 | 证据 |
+| --- | --- | --- |
+| 采集端放 **los 定时任务** | ❌ | §6 四轮：L1 不给 shell；给 shell（`sandboxMode=sandbox`）则沙箱阻断 TCP → `curl`/`psql` 全废 |
+| 采集端放 **DSH scheduler**（job-87c60739-d01，工作区 `~/.dsh/scheduler-reports`） | ❌ 且**假成功** | headless agent 跑脚本时，重定向写 `.los-runtime/fleet/…` 被拒（EPERM，目标在它工作区之外），而 run 仍记 `succeeded`；快照 mtime 根本没变（已删除该 job） |
+| 采集端放 **launchd**（`com.echerlos.los.fleet-snapshot`，6h，`RunAtLoad`） | ✅ | `runs=1`，快照 mtime 从 21:54:16 → 21:58:42，写入的是仓库真实路径 |
+
+**结论：需要网络+DB 的"采集"必须在两个沙箱之外，即 launchd（或 CI/外部 runner）。** 这与 network-observe 桥接当年的结论完全一致——不是巧合，而是同一类约束。
+
+**闭环形态（已跑通）**：
+```text
+launchd  com.echerlos.los.fleet-snapshot      每 6h  →  .los-runtime/fleet/fleet-versions.json
+los      schedule-fleet-consistency-001       每 6h  →  读快照判读 → 报告 + 台账（带 STALENESS GATE）
+DSH/看板 读报告与 todo                                   →  人工决定是否 rollout
+```
+判读端已二次复验：`succeeded`，报告时间戳与最新快照一致（`2026-10-06T13-58-42Z`）。
+
+**对 §5 第 1 条建议的修正**：`job-440be80b`（每周一 07:30 的验证资产维护）**不该迁到 los**。它的 `lastStatus=failed` 与 `exit=0` 并存，真实原因是
+`delivery missing for key "job-440be80b-ecc|2026-10-04T23:30:00.000Z"（在 ~/.dsh/storages/feishu-push 找不到 .sent）`
+—— 即**推送投递记账缺失**，属 DSH 管理面问题，迁到 los 既修不了它、也会把"能访问真机的验证"搬进一个没有网络的沙箱。正确处置：修 DSH 的投递记账（管理面 follow-up），验证本身留在 DSH/真机侧。
+
+**下一步（第 3 步，尚未开跑）**：第一个"改代码"类 E3 作业。按 §6 的阶梯，它能走的路只有前半段：
+- ✅ 可以做：在 `editableSurfaces` 内产出改动（L1 允许文件写入），并让 los 写出改动说明与自检结论；
+- ❌ 做不了：在 los 里跑测试（L1 无 shell；`sandboxMode=sandbox` 有 shell 但无网络，`pnpm`/依赖解析与 `/dev/null` 都成问题）。
+- 因此形态应是：**los 出改动 + 证据 → 外部 runner（DSH/CI）应用并跑测试 → 结果回写 los 的 verification**。这与"DSH 管理 / los 执行"一致：los 负责受治理的改动产出与账本，测试执行属于外部 runner。
