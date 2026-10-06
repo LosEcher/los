@@ -64,7 +64,7 @@ done <<< "$ROWS"
 if [[ "$SNAPSHOT" -eq 1 ]]; then
   # 采集模式：唯一需要网络/DB 的部分，必须在 los 沙箱**之外**跑（沙箱阻断 TCP）。
   # 产出工作区内的快照文件，供 los 的 project-write 任务只读判读。
-  OUT_DIR="$ROOT/.los-runtime/fleet"; mkdir -p "$OUT_DIR"
+  OUT_DIR="${LOS_FLEET_SNAPSHOT_DIR:-$ROOT/.los-runtime/fleet}"; mkdir -p "$OUT_DIR"
   {
     printf '{"capturedAt":"%s","localTarget":"%s","nodes":[' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TARGET"
     first=1
@@ -78,7 +78,19 @@ if [[ "$SNAPSHOT" -eq 1 ]]; then
     done <<< "$ROWS"
     printf ']}\n'
   } > "$OUT_DIR/fleet-versions.json"
-  echo "snapshot written: $OUT_DIR/fleet-versions.json"
+  # 自证写入成功：沙箱/权限问题曾让"写失败但脚本仍打印成功"（2026-10-06 DSH 侧 EPERM 假成功）。
+  # 只认两条硬判据：文件存在且新鲜、内容含 capturedAt 与 nodes 数组。
+  ok=1
+  [[ -s "$OUT_DIR/fleet-versions.json" ]] || ok=0
+  grep -q '"capturedAt"' "$OUT_DIR/fleet-versions.json" 2>/dev/null || ok=0
+  grep -q '"nodes":\[' "$OUT_DIR/fleet-versions.json" 2>/dev/null || ok=0
+  age=$(( $(date +%s) - $(stat -f %m "$OUT_DIR/fleet-versions.json" 2>/dev/null || echo 0) ))
+  [[ "$age" -le 120 ]] || ok=0
+  if [[ "$ok" -ne 1 ]]; then
+    echo "ERROR: snapshot write did not land (file missing/stale/malformed): $OUT_DIR/fleet-versions.json" >&2
+    exit 4
+  fi
+  echo "snapshot written: $OUT_DIR/fleet-versions.json (verified fresh, age=${age}s)"
   cat "$OUT_DIR/fleet-versions.json"
   exit 0
 fi
