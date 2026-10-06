@@ -53,6 +53,7 @@ Options:
 Environment:
   LOS_DEPLOY_AUTO_PROMOTE=0   Do not promote automatically at the end of verify
   LOS_SSH_OPTS                Extra ssh(1) options, e.g. -o ControlPath=none
+  LOS_DEPLOY_SYNC_MODE        upload (default: scp + sha256 + extract on the node) | pipe (legacy)
 
 Shortcuts:
   status              Show remote state
@@ -251,6 +252,7 @@ PREFLIGHT
 # ── Sync (tar pipe, no VCS on remote) ──────────────────────
 do_sync() {
   local log_file="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.log"
+  SYNC_EXTRACTED=0   # 供 EXIT trap 区分「还没动过节点」与「解包到一半」
   log_info "syncing code to $TS_HOST via tar pipe (log: $log_file)"
   # 收敛判定（含"中途失败"这条路径）在退出时统一执行。
   trap 'sync_convergence_guard' EXIT
@@ -287,12 +289,54 @@ do_sync() {
     turbo.json
 
   log_info "  tar: $(du -h "$tmp_tar" | cut -f1)"
+  # 与 remote_sh 的 ssh 选项保持一致：少了 BatchMode/ConnectTimeout，scp 会走交互式认证并
+  # 以 "Connection closed" 失败（实测：同一目标手动加 BatchMode 即成功）。
+  LOS_SCP_OPTS="-o BatchMode=yes -o ConnectTimeout=20 ${LOS_SSH_OPTS:-}"
 
-  # Pipe tar to remote and extract
-  cat "$tmp_tar" | remote_sh sh -c \
-    "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && chown -R los:los ." \
-    >> "$log_file" 2>&1
+  # 传输方式。默认 **upload**：先 scp 到节点 /tmp、双侧比对 sha256、再在节点本地解包。
+  # 原因是 pipe 模式（`cat tar | ssh … 'tar xzf -'`）在 SSH 控制连接中途断开时会留下
+  # **半截树** —— 2026-10-06 tencent-sin 因此崩溃掉线、vultr 树到目标但 .env 未盖章，
+  # 而且每次重试都得到不同的 build-version 摘要。已传完的文件不会因连接断开而截断，
+  # 所以 upload 是可判定的：sha256 不符就是不完整，重传即可。
+  # LOS_DEPLOY_SYNC_MODE=pipe 可回退到旧行为（仅用于对比排查）。
+  local sync_mode="${LOS_DEPLOY_SYNC_MODE:-upload}"
+  if [ "$sync_mode" = "pipe" ]; then
+    log_info "  transport: pipe (legacy)"
+    cat "$tmp_tar" | remote_sh sh -c \
+      "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && chown -R los:los ." \
+      >> "$log_file" 2>&1
+  else
+    local local_sha
+    local_sha="$(shasum -a 256 "$tmp_tar" | cut -d' ' -f1)"
+    local remote_tar="/tmp/${NODE}-sync-${TIMESTAMP}.tar.gz"
+    local ok=0
+    for attempt in 1 2 3; do
+      # 必须用 $SSH_TARGET（与 ssh 路径同一个目标），**不能**用 $TS_HOST：
+      # resolve_ts_host 会把别名解析成裸 Tailscale IP，从而丢掉 ssh config 里的
+      # Port/User/IdentityFile —— 实测表现为 "Connection closed by <ip> port 22"，
+      # 而手动用别名 scp 则成功。
+      if ! scp $LOS_SCP_OPTS "$tmp_tar" "$SSH_TARGET:$remote_tar" >> "$log_file" 2>&1; then
+        log_warn "  upload attempt $attempt failed (scp)"
+        sleep 3
+        continue
+      fi
+      local got_sha
+      got_sha="$(remote_sh sh -c "shasum -a 256 '$remote_tar' 2>/dev/null || sha256sum '$remote_tar' 2>/dev/null" | cut -d' ' -f1 | tr -d '\r')"
+      if [ "$got_sha" != "$local_sha" ]; then
+        log_warn "  upload attempt $attempt failed (sha256 mismatch: ${got_sha:-<none>})"
+        sleep 3
+        continue
+      fi
+      ok=1
+      break
+    done
+    [ "$ok" = "1" ] || die "upload to $TS_HOST failed after 3 attempts (sha256 never matched) — nothing was extracted"
+    log_info "  transport: upload (sha256 verified)"
+    remote_sh sh -c "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf '$remote_tar' && rm -f '$remote_tar' && chown -R los:los ." \
+      >> "$log_file" 2>&1
+  fi
 
+  SYNC_EXTRACTED=1
   log_info "  extracted to $REMOTE_HOME"
 
   # Normalize source modes. A file created under umask 077 lands as 0600, and
@@ -743,10 +787,16 @@ sync_convergence_guard() {
   if [ "$got" != "$BUILD_VERSION" ]; then
     if [ "$st" -eq 0 ]; then
       log_warn "  sync reported success but the node did not converge"
+      die "sync did not converge: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — re-run the sync; see docs/operations/node-deployment-runbook.md"
+    elif [ "${SYNC_EXTRACTED:-0}" = "0" ]; then
+      # 中止发生在解包之前：节点**未被改动**，仍停在它原来的修订上。这不是半截树，
+      # 不要用"must NOT be restarted"去吓人（实测会误导：vultr 那次 scp 失败即属此类）。
+      log_warn "  sync aborted BEFORE extraction (exit $st) — the node is untouched and still on '${got:-<no output>}'"
+      exit "$st"
     else
       log_warn "  sync aborted mid-way (exit $st) — checking whether the node is half-synced"
+      die "sync did not converge after extraction: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — the node may be half-synced; do NOT restart it. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
     fi
-    die "sync did not converge: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — the node is half-synced and must NOT be restarted. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
   fi
   [ "$st" -eq 0 ] && log_info "  digest verified: $got"
   return "$st"
