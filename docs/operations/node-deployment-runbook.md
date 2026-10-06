@@ -111,6 +111,25 @@ mid-transfer makes `sync` abort under `set -e` with the log ending mid-step: on
 sync on `tencent-sin`. Because the steps are idempotent, retrying the node is
 the recovery.
 
+**`sync` does not verify that the node converged — check the digest yourself.**
+The tar is streamed through a single SSH pipe (`cat tar | ssh … 'tar xzf -'`),
+so a dropped connection leaves a *partially extracted tree*, and each retry then
+produces a different `build-version` digest. On 2026-10-06 that left
+`tencent-sin` with a half-synced tree whose executor crash-looped until systemd
+gave up (`Start request repeated too quickly`). Always confirm after `sync`:
+
+```bash
+ssh <alias> 'cd <REMOTE_HOME> && bash tools/los.sh build-version'   # must equal the local target
+```
+
+If it does not (or keeps changing between attempts), stop retrying the pipe and
+use **upload-then-extract** instead: `scp` the archive to `/tmp` on the node,
+compare `shasum -a 256` on both sides, then extract locally on the node. That
+path is resilient because a dropped control connection cannot truncate an
+already-complete file. Never leave a node in a half-synced state: a partially
+written `packages/` tree is worse than the previous revision, which at least
+started.
+
 The deployed version is a deterministic digest of deployable runtime content.
 Do not override `LOS_DEPLOY_VERSION` unless reproducing an explicitly recorded
 artifact. The sync must include all workspace manifests covered by
