@@ -101,3 +101,45 @@ Date: 2026-10-06
 1. **把 `job-440be80b`（verify-los/cantool 定时验证，现 failed）迁成 los `scheduled_work_items`**：立刻得到 verification record、失败可恢复、并填上一个"los 执行 los 验证"的真实用例。
 2. **新增一个 6h 的 fleet 一致性 E3 任务**：比对 8 台 `/health.version` 与本地 `build-version` 及 `target_version`，不一致出 todo（数据已具备：本轮已写入统一 `target_version`）。
 3. **给"改代码"起一个作业模板**（`editableSurfaces` = 目标文件、`requiredChecks` = 该包测试 + tsc、`toolMode` = project-write、`sandboxMode` = workspace-write），用它跑 P0-3 作为首例，成功后把模板固化成 `docs/governance/` 下的一条可复用作业。
+
+
+---
+
+## 6. 实测：los 定时执行能做什么、不能做什么（2026-10-06 首例验证）
+
+为了让"执行用 los"从建议变成事实，用 `tools/los-fleet-consistency.sh`（确定性只读巡检）做了首个端到端验证。四轮尝试把边界钉死了：
+
+| 尝试 | 模板配置 | 结果 | 原因 |
+| --- | --- | --- | --- |
+| 1 | `toolMode=all` + `sandboxMode=workspace-write` | ❌ 失败 | `tool denials: run_shell×1 (Tool risk L2 exceeds max L1)` —— L1 不允许 shell |
+| 2 | `toolMode=all` + `sandboxMode=sandbox` | ⚠️ 有 shell 但结果不可用 | run_shell 通过，但 OS 沙箱**阻断 TCP**且 `/dev/null` 不可写 → 脚本的 `psql`/`curl` 全废（`checked=0`，exit 3） |
+| 3 | `toolMode=all` + 不设 `sandboxMode` | ❌ 失败 | 设计上该分支应退回"L2 无强制沙箱"，但 scheduled-work 层实测仍强制 L1 |
+| 4 | **`toolMode=project-write` + 文件判读** | ✅ **succeeded** | 5 轮 / 16 秒 / 57k prompt tokens；报告落在 `reportDir`，台账 `reportPath` 正确 |
+
+**风险阶梯（`packages/agent/src/loop/tool-resolver.ts:60-121`）**：
+
+```
+sandboxMode=readonly              → maxRiskLevel L0（无写、无 shell）
+sandboxMode=workspace-write
+  或 toolMode=project-write       → maxRiskLevel L1（**run_shell 被拒**）
+sandboxMode=sandbox               → maxRiskLevel L2 + 真实 OS 沙箱（shell 可用，但沙箱内无网络）
+toolMode=all（无 sandboxMode）    → 设计上 L2 无沙箱；定时执行路径实测到不了
+```
+
+**推论（这就是 los 执行面的真实边界）**：
+1. **los 的定时执行被设计成"工作区内的文件作业"**，不是"任意脚本执行器"。沙箱存在的意义正是让 agent 的写操作可限制、可复核。
+2. 因此任何**需要网络或数据库**的确定性检查，必须是"**沙箱外采集 → 沙箱内判读**"两段式；这正是 network-observe 桥接已经在用的模式，本轮把它确认为**通用形态**。
+3. 采集段天然属于 **DSH/launchd 侧（管理面）**，判读段属于 **los（执行面）** —— 与"DSH 主管理、los 按需执行"的分工完全一致。
+
+**已验证形态 A（推荐，已跑通）**：
+```text
+[DSH/launchd] bash tools/los-fleet-consistency.sh --snapshot   # 采集：需要网络+DB，落在工作区文件
+                     ↓  .los-runtime/fleet/fleet-versions.json
+[los] scheduled_work_item (project-write, 6h)                  # 判读：只读文件 + 写报告 + 出 verification
+                     ↓  .los-runtime/fleet-reports/<ts>-fleet-consistency.md
+[DSH/看板] 读报告与 todo                                        # 管理：看结论、决定是否 rollout
+```
+
+**首例工件**：`schedule-fleet-consistency-001`「fleet consistency check (6h)」，`toolMode=project-write`、`reportDir=.los-runtime/fleet-reports`、`requiredChecks=['read_file .los-runtime/fleet/fleet-versions.json']`；判据是「进程版本 == 账本版本 == 该节点声明的 target_version」，并显式排除"网关工作树比集群目标新"这种 rollout 期的正常差异（第一版脚本就栽在这个误报上）。
+
+**尚未接的一环**：快照生产者目前是手工跑一次；要让它真正循环，需把 `--snapshot` 挂到 DSH 调度或 launchd（每 6h），并给判读任务加"快照过期即 input_stale"的门（与 network/surge 两个分析任务的 STALENESS GATE 同构）。这一步是纯配置，不需要改 los 代码。
