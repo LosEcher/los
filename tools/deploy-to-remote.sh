@@ -447,12 +447,16 @@ if [ ! -f "$env_file" ]; then
   echo "WARN: $env_file missing; version stamp deferred until node configuration exists"
   exit 0
 fi
+# 用 awk + mv 而不是 `sed -i`：BSD sed(macOS) 要求 `-i ''`，GNU 形式会在 macOS 上直接
+# 失败（2026-10-07 m3pro 实测：`sed: invalid command code e`），而这一步失败会让整个 sync
+# 中止 —— 明明内容已经解包成功。可移植性在这里比简洁更重要。
 for key in LOS_VERSION EXECUTOR_VERSION; do
-  if grep -q "^${key}=" "$env_file"; then
-    sed -i "s|^${key}=.*|${key}=${build_version}|" "$env_file"
-  else
-    printf '%s=%s\n' "$key" "$build_version" >> "$env_file"
-  fi
+  awk -v k="$key" -v v="$build_version" '
+    BEGIN { done = 0 }
+    $0 ~ "^" k "=" { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "$env_file" > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
 done
 echo "version=$build_version"
 STAMP_VERSION
