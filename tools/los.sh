@@ -47,6 +47,7 @@ resolve_local_runtime_version() {
         -type f ! -name '*.tsbuildinfo' ! -name '.DS_Store' ! -name '._*' \
         ! -path 'tools/deploy-to-remote.sh' \
         ! -path 'tools/los-fleet-rollout.sh' \
+        ! -path 'tools/deploy-drivers/*' \
         ! -path 'tools/los-governance-daily.sh' \
         ! -path 'tools/los-fleet-consistency.sh' \
         ! -path 'tools/los-schedule-ctl.sh' \

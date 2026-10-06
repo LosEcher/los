@@ -188,12 +188,18 @@ roll_one() { # node_id platform alias home privilege
       [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       ;;
     windows)
-      # Windows 没有 bash/tar 语义、也没有 systemd：工具链（deploy-to-remote.sh）目前不支持它，
-      # 因此这里**明确失败**而不是假装成功。按设计文档 §4.3，Windows 需要自己的驱动脚本
-      # (tools/deploy-drivers/windows-service)；在那之前请按 runbook 的 "Windows Nodes" 一节
-      # 手工执行（scp tar → tar.exe 解包 → .env 追加版本 → Restart-Service → promote）。
-      rc=1
-      warn "  $nid: no Windows driver yet — roll it manually (docs/operations/node-deployment-runbook.md, 'Windows Nodes')"
+      # 平台差异全在驱动里（tar.exe / Restart-Service / .env 追加），编排器只管调度与判定。
+      local driver="$ROOT/tools/deploy-drivers/windows-service.sh"
+      if [[ ! -x "$driver" ]]; then
+        rc=1
+        warn "  $nid: Windows driver missing ($driver)"
+      else
+        bash "$driver" sync     "$alias_" "$home" "$TARGET" "$nid" || rc=1
+        [[ "$rc" -eq 0 ]] && { bash "$driver" activate "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
+        sleep 12
+        [[ "$rc" -eq 0 ]] && { bash "$driver" verify   "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
+        [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
+      fi
       ;;
     local)
       bash tools/los.sh restart >/dev/null 2>&1 || rc=1
@@ -210,7 +216,14 @@ roll_one() { # node_id platform alias home privilege
     return 0
   fi
   warn "  $nid: FAILED to converge"
-  record "$nid" failed "see deploy logs"
+  # 它跑的还是那个**原本能工作**的修订，把它留在 draining 只会静默损失容量；
+  # 恢复 online 并大声说明，比留下一个不明所以的"半死"节点好。
+  if [[ "$(reg_status "$nid")" != "online" ]]; then
+    promote_node "$nid" || true
+    sleep 6
+    warn "  $nid: restored to '$(reg_status "$nid")' on its previous revision ($(reg_version "$nid"))"
+  fi
+  record "$nid" failed "restored online on ${v:-previous} revision; see deploy logs"
   return 1
 }
 

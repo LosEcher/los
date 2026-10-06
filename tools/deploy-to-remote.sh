@@ -30,8 +30,23 @@ set -euo pipefail
 
 NODE="${1:-}"
 CMD="${2:-help}"
+# `tarball` 是"不需要目标节点"的工具型子命令（Windows 驱动用它拿到与 Linux 完全相同的
+# 下发内容），因此必须在按 NODE 做连通性检查**之前**处理。
+if [ "$NODE" = "tarball" ]; then
+  _out="${2:-/tmp/los-ship.tar.gz}"
+  COPYFILE_DISABLE=1 tar czf "$_out" -C "$(cd "$(dirname "$0")/.." && pwd)" \
+    --exclude='node_modules' --exclude='.git' --exclude='.jj' --exclude='.DS_Store' \
+    --exclude='._*' --exclude='packages/*/.los' --exclude='packages/*/.los/*' \
+    --exclude='.los-runtime' --exclude='tmp' --exclude='dist' --exclude='.tsbuildinfo' \
+    tools/ deploy/ packages/ contracts/ \
+    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
+    || { echo "tarball build failed" >&2; exit 1; }
+  printf '%s %s\n' "$_out" "$(shasum -a 256 "$_out" | cut -d' ' -f1)"
+  exit 0
+fi
 shift 2 2>/dev/null || true
 CMD_ARGS=("$@")
+
 
 if [ -z "$NODE" ] || [ "$NODE" = "help" ] || [ "$NODE" = "-h" ] || [ "$NODE" = "--help" ]; then
   cat <<'EOF'
@@ -250,6 +265,18 @@ PREFLIGHT
 }
 
 # ── Sync (tar pipe, no VCS on remote) ──────────────────────
+# 下发内容的唯一打包实现：Windows 驱动也调用它（`tarball` 子命令），
+# 避免"同一份文件选择"出现第 4 个拷贝（2026-10-06 的教训：两套实现必然漂移）。
+build_ship_tar() {
+  local out="$1"
+  COPYFILE_DISABLE=1 tar czf "$out" -C "$LOCAL_REPO" \
+    --exclude='node_modules' --exclude='.git' --exclude='.jj' --exclude='.DS_Store' \
+    --exclude='._*' --exclude='packages/*/.los' --exclude='packages/*/.los/*' \
+    --exclude='.los-runtime' --exclude='tmp' --exclude='dist' --exclude='.tsbuildinfo' \
+    tools/ deploy/ packages/ contracts/ \
+    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json
+}
+
 do_sync() {
   local log_file="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.log"
   SYNC_EXTRACTED=0   # 供 EXIT trap 区分「还没动过节点」与「解包到一半」
@@ -303,7 +330,7 @@ do_sync() {
   if [ "$sync_mode" = "pipe" ]; then
     log_info "  transport: pipe (legacy)"
     cat "$tmp_tar" | remote_sh sh -c \
-      "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && chown -R los:los ." \
+      "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && { chown -R los:los . 2>/dev/null || true; }" \
       >> "$log_file" 2>&1
   else
     local local_sha
@@ -332,7 +359,7 @@ do_sync() {
     done
     [ "$ok" = "1" ] || die "upload to $TS_HOST failed after 3 attempts (sha256 never matched) — nothing was extracted"
     log_info "  transport: upload (sha256 verified)"
-    remote_sh sh -c "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf '$remote_tar' && rm -f '$remote_tar' && chown -R los:los ." \
+    remote_sh sh -c "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf '$remote_tar' && rm -f '$remote_tar' && { chown -R los:los . 2>/dev/null || true; }" \
       >> "$log_file" 2>&1
   fi
 
