@@ -110,13 +110,13 @@ registry 与实测不一致 5 处：缺 `cpuCores`（vultr/tencent-sin/grok-clou
 
 | # | 缺口 | 证据 | 建议落地 |
 | --- | --- | --- | --- |
-| P0-1 | **维护窗口不阻断调度** | `isNodeInMaintenance` 仅 3 个调用点（`runtime-health.ts:184`、`fleet-inventory.ts:265`、`fleet-host-checks.ts:337`），全在告警/自修复侧；候选过滤链无调用；`node_maintenance_policy` 实际 0 行从未启用 | 在 `resolveExecutor` 的候选过滤里加维护窗口门禁（与 drain 同语义）；否则"维护窗口"这个名字在误导运维 |
+| P0-1 ✅ 已修（2026-10-06） | **维护窗口不阻断调度** | `isNodeInMaintenance` 仅 3 个调用点（`runtime-health.ts:184`、`fleet-inventory.ts:265`、`fleet-host-checks.ts:337`），全在告警/自修复侧；候选过滤链无调用；`node_maintenance_policy` 实际 0 行从未启用 | 在 `resolveExecutor` 的候选过滤里加维护窗口门禁（与 drain 同语义）；否则"维护窗口"这个名字在误导运维 |
 | P0-2 | **drain 后无自动 promote** | `node-commands.ts:151-160` promote 只手工；`upgrade` 写 draining 后返回"人工继续"；rollout 期间 8 台全部需要人工 promote | 本轮已给 `deploy-to-remote.sh` 加 `promote` 子命令 + verify 末尾警示；下一步在 verify 成功后自动 promote（需带 node id + 版本校验） |
 | P0-3 | **promote 不校验版本** | `node-commands.ts:152` 只要求 nodeId；实测 promote 输出的是 registry 里的**陈旧**版本（`b8883f8d4612c`） | promote 前拉节点 `/health`，版本不符则拒绝或标 `rolloutState:'verifying'` |
 | P0-4 | **零内容校验** | `deploy-to-remote.sh` 的 verify 只比版本字符串；Windows/macOS 无 sha 路径；实测 srsbe20 出现"`.env` 已盖章 + `/health` 报新版本，但代码仍是旧的" | verify 增加内容摘要比对（Linux/macOS 用 `build-version`；Windows 用"目标修订新增文件存在性"探针） |
 | P0-5 | **约束型节点识别是死代码** | `resourceClass` 从未落库（`capacity_json ? 'resourceClass'` 9 台全 false），`executor-nodes.ts:383` 判 `=== 'constrained_executor'` 恒 false → `capability:heavy_task_safe_false` 等 3 条 warning 永不产生 | 落库 `resourceClass`（或直接在读侧由 `capacity.memoryTotalMb` 推导），让 1G 节点的约束语义进入 warnings 与排序 |
 | P0-6 | **`target_version` 无消费点** | `grep targetVersion packages/{agent,gateway,cli}/src` 只有写入/透传，无收敛逻辑；升级全靠人工 | 让 daily governance/fleet 检查比对 `version` vs `target_version` 并出 todo；再考虑自动收敛（本轮已把 8 台显式写入同一 `target_version`，使该比对立刻可用） |
-| P0-7 | **sync 不校验远端收敛，失败会留下半截树** | `deploy-to-remote.sh` 用 `cat tar \| ssh … 'tar xzf -'` 单管道；2026-10-06 实测 tencent-sin 连传两次得到两个不同摘要（`b5131ca`/`b960509`），留下半同步的 `packages/` 使执行器崩溃重启 5 次被 systemd 放弃；vultr 同类问题表现为"树已更新但 `.env` 未盖章" | sync 结束后强制比对远端 `build-version` == 目标，不符即失败；把 upload-then-extract（scp → 双侧 sha256 → 本地解包）作为 `sync` 的默认或回退路径 |
+| P0-7 ✅ 已修（2026-10-06） | **sync 不校验远端收敛，失败会留下半截树** | `deploy-to-remote.sh` 用 `cat tar \| ssh … 'tar xzf -'` 单管道；2026-10-06 实测 tencent-sin 连传两次得到两个不同摘要（`b5131ca`/`b960509`），留下半同步的 `packages/` 使执行器崩溃重启 5 次被 systemd 放弃；vultr 同类问题表现为"树已更新但 `.env` 未盖章" | sync 结束后强制比对远端 `build-version` == 目标，不符即失败；把 upload-then-extract（scp → 双侧 sha256 → 本地解包）作为 `sync` 的默认或回退路径 |
 
 ### P1
 
