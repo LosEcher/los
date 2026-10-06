@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  los network-observe bridge — 每 2h 把 aidebug 的采集产物桥进 los workspace,
+  供 los 定时分析任务(project-write 沙箱只能读 workspace 内路径)读取。
+
+  为什么必须常驻:该桥接一旦静默失效,los 侧 input/surge-input 会冻结在最后一次
+  同步的快照上,而分析任务会按 prompt 要求「覆盖同名报告」——报告 mtime 持续刷新、
+  内容却永远停在旧窗口,治理日报的 mtime 新鲜度检查因此永远判不出 STALE。
+  已发生两次:2026-08-28(修于 69f21863)与 2026-08-31(再次静默失效 37 天)。
+
+  安装(见 tools/install-network-observe-bridge.sh):
+    bash tools/install-network-observe-bridge.sh
+  卸载:
+    launchctl bootout gui/$(id -u)/com.echerlos.los.network-observe-bridge
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.echerlos.los.network-observe-bridge</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__LOS_ROOT__/tools/sync-network-observe.sh</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>7200</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>__LOS_ROOT__/.los-runtime/network-observe/bridge.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOS_ROOT__/.los-runtime/network-observe/bridge.err.log</string>
+</dict>
+</plist>

@@ -68,7 +68,7 @@ echo "## 1. Governance jobs（异常项）"
 if [[ "$FULL" -eq 1 ]]; then
   ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs ORDER BY status, job_type, cadence;")
 else
-  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs WHERE status <> 'active' OR circuit_state <> 'closed' OR consecutive_failures > 0 ORDER BY status, job_type, cadence;")
+  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs WHERE status = 'paused' OR circuit_state <> 'closed' OR consecutive_failures > 0 ORDER BY status, job_type, cadence;")
 fi
 if [[ -n "$ROWS" ]]; then
   table "job | status | circuit | failures | last | next" "$ROWS"
@@ -128,11 +128,43 @@ age_hours() { # 文件 mtime 距今小时数
   local f="$1"
   echo $(( ($(date +%s) - $(stat -f %m "$f")) / 3600 ))
 }
+
+# ── 桥接新鲜度门（权威判据，优先于报告 mtime）─────────────
+# 桥接(com.echerlos.los.network-observe-bridge, 每 2h)一旦静默失效:
+#   input/ 冻结 → 分析任务仍按 prompt 覆盖同名报告 → 报告 mtime 永远新鲜、
+#   内容永远停在最后一个旧窗口。因此新鲜度必须看「同步时刻/最新输入快照」,
+#   不能看 reports/*-analysis.md 的 mtime。
+# 已发生两次:2026-08-28(修于 69f21863)、2026-08-31(再次静默 37 天)。
+BRIDGE_FLAG=""; BRIDGE_STATE="ok"; BRIDGE_AGE=""
+MANIFEST="$NW_DIR/bridge-manifest.json"
+# 注意:桥接批量 cp 会让同一轮的新文件 mtime 相同,`ls -t` 排序不稳定;
+# 输入文件名为 ISO 时间戳,直接用文件名排序才是「最新快照」。
+NEWEST_INPUT="$(ls -1 "$NW_DIR/input/"*.json 2>/dev/null | sort -r | head -1)"
+NEWEST_SURGE="$(ls -1 "$NW_DIR/surge-input/"*.json 2>/dev/null | sort -r | head -1)"
+INPUT_STAMP=""; [[ -n "$NEWEST_INPUT" ]] && INPUT_STAMP="$(basename "$NEWEST_INPUT" .json)"
+SURGE_STAMP=""; [[ -n "$NEWEST_SURGE" ]] && SURGE_STAMP="$(basename "$NEWEST_SURGE" .json | sed 's/^surge-errors-//')"
+if [[ -f "$MANIFEST" ]]; then
+  SYNCED_AT="$(sed -n 's/.*"syncedAt": *"\([^"]*\)".*/\1/p' "$MANIFEST" | head -1)"
+  if [[ -n "$SYNCED_AT" ]]; then
+    SYNCED_EPOCH="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$SYNCED_AT" +%s 2>/dev/null || echo "")"
+    [[ -n "$SYNCED_EPOCH" ]] && BRIDGE_AGE=$(( ($(date +%s) - SYNCED_EPOCH) / 3600 ))
+  fi
+fi
+if [[ -z "$BRIDGE_AGE" ]]; then
+  BRIDGE_STATE="STALE"; BRIDGE_FLAG=" [BRIDGE-STALE: 无 bridge-manifest.json]"
+elif [[ "$BRIDGE_AGE" -gt 4 ]]; then
+  BRIDGE_STATE="STALE(${BRIDGE_AGE}h)"
+  BRIDGE_FLAG=" [BRIDGE-STALE ${BRIDGE_AGE}h: verdict 基于旧快照 ${INPUT_STAMP:-?}]"
+else
+  BRIDGE_STATE="ok(${BRIDGE_AGE}h)"
+fi
+echo "- bridge: ${BRIDGE_STATE}（最新输入快照 ${INPUT_STAMP:-?}）"
+
 if [[ -n "$LATEST_NW" ]]; then
   NW_AGE=$(age_hours "$LATEST_NW")
   NW_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_NW" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
   NW_FLAG=""; [[ "$NW_AGE" -gt 36 ]] && NW_FLAG=" [STALE ${NW_AGE}h]"
-  echo "- network-observe: ${NW_VERDICT:-?}（${NW_AGE}h 前报告）${NW_FLAG}"
+  echo "- network-observe: ${NW_VERDICT:-?}（报告 mtime ${NW_AGE}h / 输入快照 ${INPUT_STAMP:-?}）${NW_FLAG}${BRIDGE_FLAG}"
 else
   echo "- network-observe: 无报告"
 fi
@@ -140,16 +172,18 @@ if [[ -n "$LATEST_SG" ]]; then
   SG_AGE=$(age_hours "$LATEST_SG")
   SG_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_SG" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
   SG_FLAG=""; [[ "$SG_AGE" -gt 12 ]] && SG_FLAG=" [STALE ${SG_AGE}h]"
-  echo "- surge: ${SG_VERDICT:-?}（${SG_AGE}h 前报告）${SG_FLAG}"
+  echo "- surge: ${SG_VERDICT:-?}（报告 mtime ${SG_AGE}h / 输入快照 ${SURGE_STAMP:-?}）${SG_FLAG}${BRIDGE_FLAG}"
 else
   echo "- surge: 无报告"
 fi
 echo
 
 # ── 汇总 ────────────────────────────────────────────────────
-GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE status <> 'active' OR circuit_state <> 'closed' OR consecutive_failures > 0;")
+# retired 是有意下线（如清理重复 job 后保留审计行），不是异常；
+# 只有 paused / circuit 非 closed / 连续失败才算治理异常。
+GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE status = 'paused' OR circuit_state <> 'closed' OR consecutive_failures > 0;")
 APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'awaiting_approval';")
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"

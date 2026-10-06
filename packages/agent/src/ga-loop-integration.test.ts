@@ -112,6 +112,24 @@ describe('dead-letter governance ownership', () => {
     assert.equal(checkHasFindings('dead_letter', { requeueEligible: 0, candidateIds: [] }), false);
   });
 
+  it('treats an unacknowledged backlog as a finding even when nothing is requeue-eligible', () => {
+    // Regression: requeue candidates need a non-null run_spec_id, so a backlog
+    // of ineligible events read as "no findings" → consecutive_no_ops hit the
+    // pause threshold and the job self-paused while 25 events accumulated.
+    assert.equal(checkHasFindings('dead_letter', {
+      requeueEligible: 0, candidateIds: [], unacknowledged: 25,
+    }), true);
+    assert.equal(checkHasFindings('dead_letter', {
+      requeueEligible: 0, candidateIds: [], unacknowledged: 1,
+    }), true);
+    // Fully acked queue stays a no-op — otherwise the throttle could never rest.
+    assert.equal(checkHasFindings('dead_letter', {
+      requeueEligible: 0, candidateIds: [], unacknowledged: 0,
+    }), false);
+    // Missing key (older summary shape) must not invent a finding.
+    assert.equal(checkHasFindings('dead_letter', { requeueEligible: 0, candidateIds: [] }), false);
+  });
+
   it('requeues only candidate ids from the audit summary', async () => {
     const called: string[] = [];
     const result = await applyDeadLetterFix({ candidateIds: ['dlq-1', 'dlq-2'] }, async eventId => {
