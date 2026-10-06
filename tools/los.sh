@@ -46,6 +46,7 @@ resolve_local_runtime_version() {
         -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
         -type f ! -name '*.tsbuildinfo' ! -name '.DS_Store' ! -name '._*' \
         ! -path 'tools/deploy-to-remote.sh' \
+        ! -path 'tools/los-fleet-rollout.sh' \
         ! -path 'tools/los-governance-daily.sh' \
         ! -path 'tools/los-fleet-consistency.sh' \
         ! -path 'tools/los-schedule-ctl.sh' \
