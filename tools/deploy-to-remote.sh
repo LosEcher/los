@@ -47,6 +47,13 @@ Phased commands:
   digest              Read-only: compare the node content digest against the target
   promote             Clear the restart-induced drain (needs --node-id <id>)
 
+Options:
+  --node-id <id>      Registry node id (also via LOS_REMOTE_NODE_ID); enables auto-promote after verify
+
+Environment:
+  LOS_DEPLOY_AUTO_PROMOTE=0   Do not promote automatically at the end of verify
+  LOS_SSH_OPTS                Extra ssh(1) options, e.g. -o ControlPath=none
+
 Shortcuts:
   status              Show remote state
   logs                Tail executor journal
@@ -245,6 +252,8 @@ PREFLIGHT
 do_sync() {
   local log_file="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.log"
   log_info "syncing code to $TS_HOST via tar pipe (log: $log_file)"
+  # 收敛判定（含"中途失败"这条路径）在退出时统一执行。
+  trap 'sync_convergence_guard' EXIT
 
   # Ship every workspace package so frozen-lockfile validation sees the same
   # manifests as the lockfile. Omitting runtime dependencies left stale source;
@@ -306,15 +315,40 @@ do_sync() {
   # build output are never candidates.
   local shipped_list="$LOG_BASE/${NODE}-shipped-${TIMESTAMP}.list"
   COPYFILE_DISABLE=1 tar tzf "$tmp_tar" | grep -v '/$' | LC_ALL=C sort > "$shipped_list"
-  cat "$shipped_list" | remote_sh sh -c 'cat > /tmp/los-shipped.list' >> "$log_file" 2>&1
-  remote_sh bash -s "$REMOTE_HOME" <<'PRUNE_STALE' >> "$log_file" 2>&1
+  local want_lines got_lines
+  want_lines="$(wc -l < "$shipped_list" | tr -d ' ')"
+  got_lines=""
+  for attempt in 1 2; do
+    cat "$shipped_list" | remote_sh sh -c 'cat > /tmp/los-shipped.list' >> "$log_file" 2>&1 || true
+    got_lines="$(remote_sh sh -c 'wc -l < /tmp/los-shipped.list' 2>/dev/null | tr -d ' \r' || true)"
+    [ "$got_lines" = "$want_lines" ] && break
+    log_warn "  shipped manifest upload mismatch ($got_lines/$want_lines lines), retrying"
+    sleep 3
+  done
+  if [ "$got_lines" != "$want_lines" ]; then
+    # 清单缺失必须让剪枝"跳过"而不是"全删":2026-10-06 vultr 上它曾表现为
+    # "1235 个陈旧文件",靠 >500 的闸门才没误删。
+    log_warn "  shipped manifest upload failed ($got_lines/$want_lines) — skipping the stale-file prune"
+    remote_sh sh -c 'rm -f /tmp/los-shipped.list' >> "$log_file" 2>&1 || true
+  fi
+  remote_sh bash -s "$REMOTE_HOME" <<'PRUNE_STALE'
+# 全脚本强制 C locale：两个列表用 `LC_ALL=C sort` 生成，但 comm **自身**会按环境 locale
+# 校验"是否有序"。vultr 的 LANG=en_US.UTF-8 下，comm 把 C 排序的清单判成无序 → 乱序双指针
+# 产出 1235 个假"陈旧"项（2026-10-06 实测），而 locale 为 C 的节点一切正常 —— 这正是
+# "只在部分节点发作"的原因。破坏性路径上不允许任何 locale 依赖。
+export LC_ALL=C
+export LANG=C >> "$log_file" 2>&1
 set -euo pipefail
 los_home="$1"
 cd "$los_home"
 find tools deploy packages contracts \
   -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
   -type f ! -name '*.tsbuildinfo' -print | LC_ALL=C sort > /tmp/los-present.list
-comm -23 /tmp/los-present.list /tmp/los-shipped.list > /tmp/los-stale.list || true
+LC_ALL=C comm -23 /tmp/los-present.list /tmp/los-shipped.list > /tmp/los-stale.list || true
+if [ ! -s /tmp/los-shipped.list ]; then
+  echo "prune: SKIPPED — shipped manifest missing or empty (upload failed); deleting nothing"
+  exit 0
+fi
 stale_count="$(wc -l < /tmp/los-stale.list | tr -d ' ')"
 echo "prune: $stale_count stale file(s) not in the shipped manifest"
 if [ "$stale_count" -gt 0 ]; then
@@ -353,13 +387,7 @@ echo "version=$build_version"
 STAMP_VERSION
   log_info "  version: $BUILD_VERSION"
 
-  # Fail loudly instead of returning success on a half-synced tree.
-  local remote_digest_value
-  remote_digest_value="$(remote_digest)"
-  if [ "$remote_digest_value" != "$BUILD_VERSION" ]; then
-    die "sync did not converge: remote digest '${remote_digest_value:-<no output>}' != target '$BUILD_VERSION' — the node is half-synced and must NOT be restarted. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
-  fi
-  log_info "  digest verified: $remote_digest_value"
+  log_info "  sync steps finished (convergence is asserted on exit)"
 
   # Sync systemd unit to /etc
   if remote_sh test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
@@ -555,12 +583,10 @@ do_verify() {
 
   log_info "verify complete — see $log_file"
 
-  # A restart always leaves the node draining (see do_promote). Say so loudly:
-  # a verified-but-draining node is up, healthy, and receives no work.
-  if [ -n "$NODE_ID" ]; then
-    log_warn "  registry status stays 'draining' until promoted — run: $0 $NODE promote --node-id $NODE_ID"
-  else
-    log_warn "  registry status stays 'draining' until promoted — re-run with --node-id <registry id>, then '$0 $NODE promote'"
+  # A restart always leaves the node draining (see do_promote). Close the loop
+  # here instead of leaving it to the operator's memory.
+  if ! auto_promote_after_verify; then
+    die "verified but not schedulable: $NODE_ID is still not online in the registry"
   fi
 }
 
@@ -622,6 +648,34 @@ check_conn
 # verified on all 8 nodes during the 2026-10-06 rollout.
 # Requires the registry node id; `--node-id`/LOS_REMOTE_NODE_ID or a mapping for
 # the known node names below.
+# 读注册表状态。两个坑都踩过：`nodes command <id> status` 不是有效节点命令会静默返回空；
+# 网关 /nodes 的载荷形状也会变。因此以 psql 为主(网关主机一定有),API 为备。
+registry_status() {
+  local node_id="$1" psql_bin db auth base
+  psql_bin="$(command -v psql 2>/dev/null || true)"
+  [ -n "$psql_bin" ] || psql_bin="/opt/homebrew/opt/postgresql@17/bin/psql"
+  db="$(grep -E '^DATABASE_URL=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  if [ -n "$db" ] && [ -x "$psql_bin" ]; then
+    "$psql_bin" "$db" -t -A -c "select status from executor_nodes where node_id = '$node_id'" 2>/dev/null | head -1 | tr -d ' \r'
+    return 0
+  fi
+  auth="$(grep -E '^LOS_AUTH_TOKEN=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  base="$(grep -E '^GATEWAY_URL=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  base="${base:-http://127.0.0.1:8080}"
+  curl -s -m 10 -H "Authorization: Bearer $auth" "${base%/}/nodes" 2>/dev/null | node -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      try {
+        const body = JSON.parse(s);
+        const list = body.nodes || body.results || body.items || (Array.isArray(body) ? body : []);
+        const wanted = process.argv[1];
+        const hit = list.find(n => (n.node_id || n.nodeId) === wanted);
+        process.stdout.write(hit ? String(hit.status || "") : "");
+      } catch { /* empty → caller reports unknown */ }
+    });
+  ' "$node_id"
+}
+
 do_promote() {
   local reason="deploy-to-remote verify passed $BUILD_VERSION"
   local node_id="$NODE_ID"
@@ -637,6 +691,37 @@ do_promote() {
       -t "$auth" ${op:+--operator-token "$op"} --reason "$reason" ) 2>&1 | tail -3
 }
 
+# 自动 promote：只在"内容与版本都对上"时执行，并在执行后复核注册表真的 online。
+# 依据（2026-10-06 实测）：
+#  - 每次重启都会留下 status='draining'（关机时发一次 draining 心跳，而 online 心跳不带
+#    status → resolveHeartbeatStatus 保留 draining），忘记 promote 的节点会静默不接活；
+#  - promote 会把 registry 里**陈旧**的版本置为 online（P0-3 已让 promote 支持期望版本校验）；
+#  - promote 之后仍可能被翻回 draining（oracle 实测），所以必须复核而不是相信返回值。
+auto_promote_after_verify() {
+  [[ "${LOS_DEPLOY_AUTO_PROMOTE:-1}" == "0" ]] && { log_info "  auto-promote disabled (LOS_DEPLOY_AUTO_PROMOTE=0)"; return 0; }
+  if [ -z "$NODE_ID" ]; then
+    log_warn "  auto-promote skipped: no --node-id/LOS_REMOTE_NODE_ID (node stays 'draining')"
+    return 0
+  fi
+  local got
+  got="$(remote_digest)"
+  if [ "$got" != "$BUILD_VERSION" ]; then
+    log_warn "  auto-promote REFUSED: node digest '${got:-<no output>}' != target '$BUILD_VERSION' (a stale node must not be promoted online)"
+    return 0
+  fi
+  do_promote || true
+  sleep 8
+  local st
+  st="$(registry_status "$NODE_ID")"
+  if [ "$st" != "online" ]; then
+    log_warn "  auto-promote did NOT stick: registry status='${st:-unknown}' for $NODE_ID"
+    log_warn "  the node is verified but receives no work; re-run '$0 $NODE promote --node-id $NODE_ID'"
+    return 1
+  fi
+  log_info "  auto-promote verified: $NODE_ID is online"
+  return 0
+}
+
 # ── Digest check (read-only) ───────────────────────────────
 # `sync` streams the archive through a single SSH pipe (`cat tar | ssh … 'tar xzf -'`),
 # so a connection that drops mid-transfer leaves a PARTIALLY extracted tree. On
@@ -646,6 +731,25 @@ do_promote() {
 # (scp to /tmp + shasum on both sides + extract locally on the node).
 remote_digest() {
   remote_sh sh -c "cd '$REMOTE_HOME' && bash tools/los.sh build-version" 2>/dev/null | tail -1 | tr -d '\r'
+}
+
+# 收敛判定必须"无论如何都执行":sync 的每一步都可能因 SSH 断流失败,而 set -e 会直接
+# 退出 —— 那样调用方只看到"没有输出",无法判断节点是完整的还是半截的(2026-10-06 两次
+# 事故都属于这一类:tencent-sin 半截树崩溃掉线、vultr 树到目标但 .env 未盖章)。
+sync_convergence_guard() {
+  local st=$?
+  local got
+  got="$(remote_digest 2>/dev/null)"
+  if [ "$got" != "$BUILD_VERSION" ]; then
+    if [ "$st" -eq 0 ]; then
+      log_warn "  sync reported success but the node did not converge"
+    else
+      log_warn "  sync aborted mid-way (exit $st) — checking whether the node is half-synced"
+    fi
+    die "sync did not converge: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — the node is half-synced and must NOT be restarted. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
+  fi
+  [ "$st" -eq 0 ] && log_info "  digest verified: $got"
+  return "$st"
 }
 
 do_digest() {
