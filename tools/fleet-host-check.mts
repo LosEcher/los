@@ -68,6 +68,27 @@ function argValue(flag: string): string | undefined {
   return idx >= 0 && idx + 1 < argv.length ? argv[idx + 1] : undefined;
 }
 
+/**
+ * Parse `--maint-set`. Documented shape is two argv —
+ * `--maint-set <nodeId> start=…,end=…` — but `argValue` returns only the first,
+ * so the old single-token parse yielded `nodeId=''` with an empty window list
+ * and wrote a junk `node_maintenance_policy` row with no error (2026-10-06).
+ * Both shapes are accepted now: `<nodeId>` + `<payload>`, or `<nodeId>=<payload>`.
+ */
+function parseMaintSetArg(): { nodeId: string; payload: string } | undefined {
+  const idx = argv.indexOf('--maint-set');
+  if (idx < 0 || idx + 1 >= argv.length) return undefined;
+  const first = argv[idx + 1];
+  const second = argv[idx + 2];
+  if (second !== undefined && !second.startsWith('--')) {
+    return { nodeId: first.trim(), payload: second.trim() };
+  }
+  const eq = first.indexOf('=');
+  return eq > 0
+    ? { nodeId: first.slice(0, eq).trim(), payload: first.slice(eq + 1).trim() }
+    : { nodeId: first.trim(), payload: '' };
+}
+
 /** Parse `key=value,key2=value2` into a typed gate-field patch. */
 function parseGateFields<T extends Record<string, unknown>>(
   kvRaw: string,
@@ -103,8 +124,12 @@ try {
   const policySet = argValue('--policy-set');
   const policyDelete = argValue('--policy-delete');
   const maintGet = argValue('--maint-get');
-  const maintSet = argValue('--maint-set');
   const maintClear = argValue('--maint-clear');
+  // `--maint-set` is TWO argv in the documented usage (`<nodeId>` then the
+  // `start=…,end=…` payload), but `argValue` only returns the first — parsing
+  // that single token as `nodeId=payload` silently wrote a node_id='' policy
+  // row with an empty window list (2026-10-06). Accept both shapes.
+  const maintSet = parseMaintSetArg();
 
   if (configGet) {
     const c = await loadFleetRepairConfig();
@@ -177,34 +202,42 @@ try {
     });
     console.log(JSON.stringify({ nodeId: maintClear, removed }, null, 2));
   } else if (maintSet) {
-    const eq = maintSet.indexOf('=');
-    const nodeId = eq > 0 ? maintSet.slice(0, eq).trim() : '';
+    const { nodeId, payload } = maintSet;
     try {
-      // Format: start=<ISO>,end=<ISO>[,start=<ISO>,end=<ISO>...]
-      const kvRaw = eq > 0 ? maintSet.slice(eq + 1) : '';
-      const windows: Array<{ start: string; end: string }> = [];
-      let start: string | undefined;
-      for (const kv of kvRaw.split(',').map((s) => s.trim()).filter(Boolean)) {
-        const k = kv.indexOf('=');
-        if (k <= 0) continue;
-        const key = kv.slice(0, k).trim();
-        const raw = kv.slice(k + 1).trim();
-        if (key === 'start') start = raw;
-        else if (key === 'end' && start) {
-          windows.push({ start, end: raw });
-          start = undefined;
-        }
-      }
-      if (start !== undefined) {
-        console.error('maint rejected: each window needs start=... and end=...');
+      // Fail loudly instead of writing a node_id='' row: the policy schema only
+      // validates the windows array, so an empty id used to persist silently.
+      if (!nodeId || nodeId.startsWith('--')) {
+        console.error('maint rejected: --maint-set requires a nodeId, e.g. --maint-set node34-executor-1 start=…,end=…');
         process.exitCode = 2;
       } else {
-        const saved = await upsertNodeMaintenancePolicy(
-          nodeId,
-          { windows } as NodeMaintenancePolicyPatch,
-          { source: 'cli', operator: process.env.USER },
-        );
-        console.log(JSON.stringify(saved, null, 2));
+        // Format: start=<ISO>,end=<ISO>[,start=<ISO>,end=<ISO>...]
+        const windows: Array<{ start: string; end: string }> = [];
+        let start: string | undefined;
+        for (const kv of payload.split(',').map((s) => s.trim()).filter(Boolean)) {
+          const k = kv.indexOf('=');
+          if (k <= 0) continue;
+          const key = kv.slice(0, k).trim();
+          const raw = kv.slice(k + 1).trim();
+          if (key === 'start') start = raw;
+          else if (key === 'end' && start) {
+            windows.push({ start, end: raw });
+            start = undefined;
+          }
+        }
+        if (start !== undefined) {
+          console.error('maint rejected: each window needs start=... and end=...');
+          process.exitCode = 2;
+        } else if (windows.length === 0) {
+          console.error('maint rejected: no complete start/end window parsed from the payload');
+          process.exitCode = 2;
+        } else {
+          const saved = await upsertNodeMaintenancePolicy(
+            nodeId,
+            { windows } as NodeMaintenancePolicyPatch,
+            { source: 'cli', operator: process.env.USER },
+          );
+          console.log(JSON.stringify(saved, null, 2));
+        }
       }
     } catch (err) {
       console.error(`maint rejected: ${err instanceof Error ? err.message : String(err)}`);

@@ -44,6 +44,7 @@ Phased commands:
   install-service     Install systemd unit
   restart             Restart executor service
   verify              Health check + connectivity validation
+  promote             Clear the restart-induced drain (needs --node-id <id>)
 
 Shortcuts:
   status              Show remote state
@@ -75,6 +76,19 @@ mkdir -p "$LOG_BASE"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BUILD_VERSION="${LOS_DEPLOY_VERSION:-$(bash "$LOCAL_REPO/tools/los.sh" build-version)}"
 VERIFY_GRACE_SECONDS="${LOS_DEPLOY_VERIFY_GRACE_SECONDS:-90}"
+# Extra ssh(1) options, word-split. Set LOS_SSH_OPTS='-o ControlPath=none
+# -o ControlMaster=no' to bypass ~/.ssh/config connection multiplexing: a
+# multiplexed master that drops mid-transfer makes sync abort silently (the
+# local script runs under `set -e`), which is how node34 lost its version stamp
+# and tencent-sin lost a whole sync during the 2026-10-06 rollout.
+SSH_OPTS="${LOS_SSH_OPTS:-}"
+# Registry node id, used by `promote` and by the post-verify hint.
+NODE_ID="${LOS_REMOTE_NODE_ID:-}"
+for ((i = 0; i < ${#CMD_ARGS[@]}; i++)); do
+  if [ "${CMD_ARGS[$i]}" = "--node-id" ] && [ $((i + 1)) -lt ${#CMD_ARGS[@]} ]; then
+    NODE_ID="${CMD_ARGS[$((i + 1))]}"
+  fi
+done
 
 # ── Detect Tailscale hostname ───────────────────────────────
 resolve_ts_host() {
@@ -118,7 +132,9 @@ remote_exec() {
   local remote_command
   printf -v remote_command '%q ' "$@"
   if [ "$SSH_TRANSPORT" = "ssh" ]; then
-    ssh "$SSH_TARGET" "$remote_command"
+    # $SSH_OPTS is intentionally unquoted so operators can pass several flags.
+    # shellcheck disable=SC2086
+    ssh $SSH_OPTS "$SSH_TARGET" "$remote_command"
   else
     tailscale ssh "$SSH_TARGET" -- "$remote_command"
   fi
@@ -529,6 +545,14 @@ do_verify() {
   fi
 
   log_info "verify complete — see $log_file"
+
+  # A restart always leaves the node draining (see do_promote). Say so loudly:
+  # a verified-but-draining node is up, healthy, and receives no work.
+  if [ -n "$NODE_ID" ]; then
+    log_warn "  registry status stays 'draining' until promoted — run: $0 $NODE promote --node-id $NODE_ID"
+  else
+    log_warn "  registry status stays 'draining' until promoted — re-run with --node-id <registry id>, then '$0 $NODE promote'"
+  fi
 }
 
 # ── Status ──────────────────────────────────────────────────
@@ -579,6 +603,31 @@ do_full_setup() {
 # ── Main dispatch ───────────────────────────────────────────
 check_conn
 
+# ── Promote (clear the post-restart drain) ─────────────────
+# A restart ALWAYS leaves the node `status='draining'` in the registry: the
+# executor sends one `status='draining'` heartbeat while shutting down, and
+# resolveHeartbeatStatus() preserves an existing 'draining' when a later
+# heartbeat carries no explicit status (its online heartbeats omit it on
+# purpose, so an operator-requested drain is not silently undone). Net effect: a
+# node that is up and healthy stops receiving work until someone promotes it —
+# verified on all 8 nodes during the 2026-10-06 rollout.
+# Requires the registry node id; `--node-id`/LOS_REMOTE_NODE_ID or a mapping for
+# the known node names below.
+do_promote() {
+  local reason="deploy-to-remote verify passed $BUILD_VERSION"
+  local node_id="$NODE_ID"
+  if [ -z "$node_id" ]; then
+    die "promote needs the registry node id: pass --node-id <id> or set LOS_REMOTE_NODE_ID"
+  fi
+  local auth op
+  auth="$(grep -E '^LOS_AUTH_TOKEN=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  op="$(grep -E '^LOS_OPERATOR_TOKEN=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  [ -n "$auth" ] || die "promote needs LOS_AUTH_TOKEN (repo .env)"
+  log_info "promoting $node_id (clears the restart-induced drain)"
+  ( cd "$LOCAL_REPO" && ./bin/los nodes command "$node_id" promote \
+      -t "$auth" ${op:+--operator-token "$op"} --reason "$reason" ) 2>&1 | tail -3
+}
+
 case "$CMD" in
   preflight)      do_preflight ;;
   sync)           do_sync ;;
@@ -586,6 +635,7 @@ case "$CMD" in
   install-service) do_install_service ;;
   restart)        do_restart ;;
   verify)         do_verify ;;
+  promote)        do_promote ;;
   status)         do_status ;;
   logs)           do_logs ;;
   firewall)       do_firewall ;;
