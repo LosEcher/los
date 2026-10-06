@@ -25,8 +25,12 @@ Description=los executor node
 Documentation=https://github.com/echerlos/los
 After=network-online.target
 Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# 不限流：默认的 StartLimitBurst=5 / StartLimitIntervalSec=300 会在瞬时故障（例如
+# Postgres 重启导致连不上库）连续失败 5 次后**永久放弃**，把一次可自愈的抖动变成需要人工
+# reset-failed 的容量损失 —— 2026-10-06 一次 admin_shutdown 就这样让 6 台执行器同时停摆。
+# 重启是幂等的，让它一直重试，而不是停下来等人。
+StartLimitIntervalSec=0
+StartLimitBurst=0
 
 [Service]
 Type=simple
@@ -43,8 +47,8 @@ KillSignal=SIGTERM
 # Must exceed the maximum EXECUTOR_SHUTDOWN_GRACE_MS (600000) plus close overhead.
 TimeoutStopSec=635s
 
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=10
 
 # Security hardening
 NoNewPrivileges=yes
