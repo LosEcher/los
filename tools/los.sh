@@ -26,9 +26,13 @@ resolve_local_runtime_version() {
   revision="$(
     cd "$ROOT"
     {
+      # The prune list must match what deploy-to-remote.sh actually ships, or
+      # the version can never converge across the fleet: `.los-runtime` is local
+      # runtime state that is never synced, and counting it made every node
+      # report a different hash than the gateway (observed 2026-10-06).
       find tools deploy packages contracts \
-        -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los \) -prune -o \
-        -type f ! -name '*.tsbuildinfo' -print
+        -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
+        -type f ! -name '*.tsbuildinfo' ! -name '.DS_Store' ! -name '._*' -print
       printf '%s\n' package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json
     } | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-12
   )"

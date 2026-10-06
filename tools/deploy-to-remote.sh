@@ -235,10 +235,15 @@ do_sync() {
   local tmp_tar="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.tar.gz"
 
   # Create tar from local repo — only ship what the executor needs.
-  tar czf "$tmp_tar" -C "$LOCAL_REPO" \
+  # COPYFILE_DISABLE stops bsdtar from emitting AppleDouble `._*` sidecar
+  # entries, which otherwise land on the node as junk that pollutes its
+  # content-hash version.
+  COPYFILE_DISABLE=1 tar czf "$tmp_tar" -C "$LOCAL_REPO" \
     --exclude='node_modules' \
     --exclude='.git' \
     --exclude='.jj' \
+    --exclude='.DS_Store' \
+    --exclude='._*' \
     --exclude='packages/*/.los' \
     --exclude='packages/*/.los/*' \
     --exclude='.los-runtime' \
@@ -273,6 +278,43 @@ do_sync() {
   # shipped, and already has sane modes.
   remote_sh sh -c "cd '$REMOTE_HOME' && chmod -R a+rX tools deploy contracts 2>/dev/null; find packages -name node_modules -prune -o -exec chmod a+rX {} + 2>/dev/null; true" \
     >> "$log_file" 2>&1 || true
+
+  # Prune files that no longer exist in the repo. tar extraction only adds and
+  # overwrites, so a file deleted upstream lingers on the node forever — and
+  # since `tools/los.sh build-version` hashes every source file, the node's own
+  # version then never converges to the fleet target (observed on vultr
+  # 2026-10-06: 41 stale files from the old flat packages/agent/src/tools layout
+  # kept it reporting 0.1.0+b857d2dfc47ee while the target was another hash).
+  # node_modules / dist / .turbo are pruned on both sides, so installed deps and
+  # build output are never candidates.
+  local shipped_list="$LOG_BASE/${NODE}-shipped-${TIMESTAMP}.list"
+  COPYFILE_DISABLE=1 tar tzf "$tmp_tar" | grep -v '/$' | LC_ALL=C sort > "$shipped_list"
+  cat "$shipped_list" | remote_sh sh -c 'cat > /tmp/los-shipped.list' >> "$log_file" 2>&1
+  remote_sh bash -s "$REMOTE_HOME" <<'PRUNE_STALE' >> "$log_file" 2>&1
+set -euo pipefail
+los_home="$1"
+cd "$los_home"
+find tools deploy packages contracts \
+  -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
+  -type f ! -name '*.tsbuildinfo' -print | LC_ALL=C sort > /tmp/los-present.list
+comm -23 /tmp/los-present.list /tmp/los-shipped.list > /tmp/los-stale.list || true
+stale_count="$(wc -l < /tmp/los-stale.list | tr -d ' ')"
+echo "prune: $stale_count stale file(s) not in the shipped manifest"
+if [ "$stale_count" -gt 0 ]; then
+  # Safety rails: never delete installed deps or anything outside the shipped
+  # source trees, and refuse an implausibly large delete.
+  if grep -qE '(^|/)(node_modules|\.git|\.env)(/|$)' /tmp/los-stale.list; then
+    echo "prune: ABORT — unsafe path in stale list"; head -20 /tmp/los-stale.list; exit 1
+  fi
+  if [ "$stale_count" -gt 500 ]; then
+    echo "prune: ABORT — stale count $stale_count exceeds 500"; exit 1
+  fi
+  head -20 /tmp/los-stale.list
+  xargs -a /tmp/los-stale.list -d '\n' rm -f --
+  echo "prune: removed $stale_count stale file(s)"
+fi
+PRUNE_STALE
+  log_info "  prune: done (see log)"
 
   remote_sh bash -s "$REMOTE_HOME" "$BUILD_VERSION" <<'STAMP_VERSION' >> "$log_file" 2>&1
 set -euo pipefail
