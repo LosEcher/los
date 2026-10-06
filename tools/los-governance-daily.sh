@@ -128,6 +128,25 @@ age_hours() { # 文件 mtime 距今小时数
   local f="$1"
   echo $(( ($(date +%s) - $(stat -f %m "$f")) / 3600 ))
 }
+# verdict 提取必须容忍两种模板写法：token 在标题行（"## Verdict — attention"）
+# 或在小节正文首行（"**ATTENTION** — not all clear."）。只认标题会退化成读正文
+# 首行，在编号列表格式下抽出 "1."（2026-10-06 实际发生过）。
+verdict_of() { # <报告文件> -> input_stale|all_clear|attention|high|?
+  local f="$1" v="" section=""
+  # 1) 含 "verdict" 的关键词行（新模板把 token 写进标题：## Verdict — attention）
+  v="$(grep -i 'verdict' "$f" 2>/dev/null | grep -o -i -E 'input_stale|all[ _]clear|attention|high' | head -1 || true)"
+  if [[ -z "$v" ]]; then
+    # Verdict 小节的正文（跳过空行；最多取前 10 行非空内容）
+    section="$(awk '/^##.*[Vv]erdict/{f=1;next} f && NF {print; if (++n >= 10) exit}' "$f" 2>/dev/null || true)"
+    # 2) 旧模板约定：小节首行是加粗 token（**ATTENTION** — not all clear.）
+    v="$(printf '%s\n' "$section" | grep -o -E '\*\*[^*]+\*\*' | grep -o -i -E 'input_stale|all[ _]clear|attention|high' | head -1 || true)"
+  fi
+  if [[ -z "$v" ]]; then
+    # 3) 兜底：小节正文里任意位置的首个 token
+    v="$(printf '%s\n' "$section" | grep -o -i -E 'input_stale|all[ _]clear|attention|high' | head -1 || true)"
+  fi
+  printf '%s' "${v:-?}" | tr '[:upper:]' '[:lower:]' | tr ' ' '_'
+}
 
 # ── 桥接新鲜度门（权威判据，优先于报告 mtime）─────────────
 # 桥接(com.echerlos.los.network-observe-bridge, 每 2h)一旦静默失效:
@@ -162,7 +181,7 @@ echo "- bridge: ${BRIDGE_STATE}（最新输入快照 ${INPUT_STAMP:-?}）"
 
 if [[ -n "$LATEST_NW" ]]; then
   NW_AGE=$(age_hours "$LATEST_NW")
-  NW_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_NW" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
+  NW_VERDICT="$(verdict_of "$LATEST_NW")"
   NW_FLAG=""; [[ "$NW_AGE" -gt 36 ]] && NW_FLAG=" [STALE ${NW_AGE}h]"
   echo "- network-observe: ${NW_VERDICT:-?}（报告 mtime ${NW_AGE}h / 输入快照 ${INPUT_STAMP:-?}）${NW_FLAG}${BRIDGE_FLAG}"
 else
@@ -170,7 +189,7 @@ else
 fi
 if [[ -n "$LATEST_SG" ]]; then
   SG_AGE=$(age_hours "$LATEST_SG")
-  SG_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_SG" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
+  SG_VERDICT="$(verdict_of "$LATEST_SG")"
   SG_FLAG=""; [[ "$SG_AGE" -gt 12 ]] && SG_FLAG=" [STALE ${SG_AGE}h]"
   echo "- surge: ${SG_VERDICT:-?}（报告 mtime ${SG_AGE}h / 输入快照 ${SURGE_STAMP:-?}）${SG_FLAG}${BRIDGE_FLAG}"
 else
@@ -178,7 +197,24 @@ else
 fi
 echo
 
-# ── 汇总 ────────────────────────────────────────────────────
+# ── 7. fleet executor 版本分布（漂移可见化）──────────────────
+# 版本漂移此前完全不可见：registry 的 target_version 一直为空，也没有任何
+# 报告口径统计过「谁跑在哪个修订上」。这里只做可见化 + 标出非多数版本节点，
+# 不写 target_version（未批准滚动升级前写目标版本等于记录一个假事实）。
+echo "## 7. fleet executor 版本分布（在线节点）"
+FLEET_ROWS=$(q "SELECT version || ' | ' || count(*) || ' | ' || string_agg(node_id, ', ' ORDER BY node_id) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' GROUP BY version ORDER BY count(*) DESC, version;")
+FLEET_TOTAL=$(q "SELECT count(*) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online';")
+if [[ -n "$FLEET_ROWS" ]]; then
+  table "版本 | 节点数 | 节点" "$FLEET_ROWS"
+  FLEET_DISTINCT=$(q "SELECT count(DISTINCT version) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online';")
+  FLEET_MINORITY=$(q "SELECT count(*) FROM executor_nodes e WHERE e.node_kind = 'executor' AND e.status = 'online' AND e.version <> (SELECT version FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' GROUP BY version ORDER BY count(*) DESC, version LIMIT 1);")
+  echo "- 在线 executor=${FLEET_TOTAL:-0}，版本种类=${FLEET_DISTINCT:-0}，非多数版本节点=${FLEET_MINORITY:-0}"
+  [[ "${FLEET_MINORITY:-0}" -gt 0 ]] && echo "  → 版本漂移；滚动升级未执行（需维护窗口，见 tools/deploy-to-remote.sh <node> deploy）"
+else
+  echo "- 无在线 executor 记录"
+fi
+echo
+
 # retired 是有意下线（如清理重复 job 后保留审计行），不是异常；
 # 只有 paused / circuit 非 closed / 连续失败才算治理异常。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE status = 'paused' OR circuit_state <> 'closed' OR consecutive_failures > 0;")

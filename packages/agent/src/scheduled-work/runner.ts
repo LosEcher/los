@@ -315,11 +315,20 @@ export function setupScheduledWorkWake(input: {
  * wrote (W-LOS-1). Recorded on success so a later provider-network failure
  * can deliver it as a stale last-known-good report.
  */
-async function findLatestReport(editableSurfaces: string[] | undefined): Promise<string | undefined> {
-  if (!editableSurfaces || editableSurfaces.length === 0) return undefined;
+export async function findLatestReport(
+  editableSurfaces: string[] | undefined,
+  reportDir?: string,
+): Promise<string | undefined> {
+  // `reportDir` (template-level) wins when present: a task whose surface is a
+  // shared parent must name its own output directory, otherwise every task
+  // recording under that parent resolves to the same `<surface>/reports` path
+  // and can only ever name that one sibling's artifact.
+  const reportDirs = reportDir !== undefined && reportDir !== ''
+    ? [reportDir]
+    : (editableSurfaces ?? []).map(surface => join(surface, 'reports'));
+  if (reportDirs.length === 0) return undefined;
   let latest: { path: string; mtimeMs: number } | undefined;
-  for (const surface of editableSurfaces) {
-    const reportsDir = join(surface, 'reports');
+  for (const reportsDir of reportDirs) {
     let entries: string[];
     try {
       entries = await readdir(reportsDir);
@@ -400,7 +409,10 @@ async function executeTemplate(
     if (result.status === 'completed') {
       // W-LOS-1: record the durable result artifact so a later
       // provider-network failure can deliver it as last-known-good.
-      const reportPath = await findLatestReport(schedule.runTemplate.editableSurfaces);
+      const reportPath = await findLatestReport(
+        schedule.runTemplate.editableSurfaces,
+        schedule.runTemplate.reportDir,
+      );
       return {
         status: 'succeeded',
         title: `${schedule.title}: execution completed`,

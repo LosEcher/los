@@ -299,6 +299,27 @@ export async function listDueGovernanceJobs(
 
 // ── Seed ─────────────────────────────────────────────────
 
+/**
+ * Pure seed decision for one governance seed (identified by its jobType /
+ * dedupeKey). Split out from `seedGovernanceJobs` so the classification can be
+ * tested hermetically, without a database.
+ *
+ * - `active` : a live row exists → keep it and (re)apply the seed's autoFix.
+ * - `held`   : only paused/retired rows exist → do NOT insert a second row.
+ * - `insert` : nothing exists → seed a fresh row.
+ */
+export function decideGovernanceSeedAction(
+  rows: Array<Pick<GovernanceJob, 'id' | 'status'>>,
+): { action: 'active'; activeIds: string[] } | { action: 'held'; heldIds: string[] } | { action: 'insert' } {
+  const activeIds = rows.filter(row => row.status === 'active').map(row => row.id);
+  if (activeIds.length > 0) return { action: 'active', activeIds };
+  const heldIds = rows
+    .filter(row => row.status === 'paused' || row.status === 'retired')
+    .map(row => row.id);
+  if (heldIds.length > 0) return { action: 'held', heldIds };
+  return { action: 'insert' };
+}
+
 export async function seedGovernanceJobs(opts?: {
   tenantId?: string;
   projectId?: string;
@@ -307,7 +328,32 @@ export async function seedGovernanceJobs(opts?: {
   const results: GovernanceJob[] = [];
 
   for (const seed of SEED_JOBS) {
-    const existing = await listGovernanceJobs({ jobType: seed.jobType, status: 'active' });
+    // Seed identity is the dedupe_key, so look the seed up across ALL statuses.
+    // Looking up only `active` was the duplicate-generator: a job that paused
+    // itself (no-op/failure throttle) or was retired disappeared from the
+    // lookup, `createGovernanceJob` inserted a fresh row, and the unique index
+    // (WHERE status='active') happily accepted it. Observed 2026-09/10: three
+    // dead_letter jobs with the same dedupe_key accumulated this way.
+    const allWithType = await listGovernanceJobs({ jobType: seed.jobType, limit: 50 });
+    const decision = decideGovernanceSeedAction(allWithType);
+    if (decision.action === 'held') {
+      // Respect the existing row: `paused` is the operator/throttle stop
+      // signal and `retired` is a deliberate decommission (the API only
+      // exposes active|paused, so retired is always an admin action). Neither
+      // should be silently re-created as a second job — re-enable the
+      // existing row instead of seeding a duplicate.
+      const held = allWithType.filter(job => decision.heldIds.includes(job.id));
+      log.info(
+        `GA loop: not seeding ${seed.jobType} (${seed.dedupeKey}) — existing ${held
+          .map(job => `${job.status}:${job.id}`)
+          .join(', ')}`,
+      );
+      results.push(...held);
+      continue;
+    }
+    const existing = decision.action === 'active'
+      ? allWithType.filter(job => decision.activeIds.includes(job.id))
+      : [];
     if (existing.length > 0) {
       // Backfill seed-defined autoFix onto pre-existing jobs that were
       // created before autoFix was added to the seed (or had it stripped).

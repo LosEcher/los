@@ -60,6 +60,13 @@ export interface ScheduledWorkRunTemplate {
    *  /opt/los/los-workspace or /rclone-hub/sub-store) so the remote agent
    *  can read/write real files. */
   workspaceRoot?: string;
+  /** Absolute directory this run writes its report artifact into, used to
+   *  record `resultSummary.reportPath`. Needed when `editableSurfaces` is a
+   *  shared parent (e.g. both the network and the surge analysis write under
+   *  `.los-runtime/network-observe` but into different subdirectories):
+   *  without it the recorder falls back to `<surface>/reports` and can only
+   *  ever name the network report, mis-labelling every other task's artifact. */
+  reportDir?: string;
 }
 
 export interface ScheduledWorkItem {
