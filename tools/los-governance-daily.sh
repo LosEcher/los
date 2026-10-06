@@ -209,7 +209,7 @@ echo
 # 版本漂移此前完全不可见：registry 的 target_version 一直为空，也没有任何
 # 报告口径统计过「谁跑在哪个修订上」。这里只做可见化 + 标出非多数版本节点，
 # 不写 target_version（未批准滚动升级前写目标版本等于记录一个假事实）。
-echo "## 7. fleet executor 版本分布（在线节点）"
+echo "## 7. fleet executor 版本分布与一致性（在线节点）"
 FLEET_ROWS=$(q "SELECT version || ' | ' || count(*) || ' | ' || string_agg(node_id, ', ' ORDER BY node_id) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' GROUP BY version ORDER BY count(*) DESC, version;")
 FLEET_TOTAL=$(q "SELECT count(*) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online';")
 if [[ -n "$FLEET_ROWS" ]]; then
@@ -223,6 +223,39 @@ else
 fi
 echo
 
+# ── 7b. 声明目标一致性 → todo（P0-6）─────────────────────────
+# `target_version` 在此之前**没有任何消费点**，于是"节点没落在声明目标上"这件事只能靠人
+# 肉看版本分布发现。这里把它变成可执行的 todo，并且**自动关闭**：只有"漂移存在"才留 todo，
+# 收敛后自动 done —— 否则 todo 会积累成噪音，运维就会开始忽略它。
+# 幂等键 dedupe_key 保证同一节点只留一条未完成 todo。
+q "INSERT INTO todos (id, tenant_id, project_id, user_id, node_id, title, description, kind, status, priority, source, dedupe_key)
+   SELECT 'todo-fleet-drift-' || e.node_id, 'local', 'los', 'operator', e.node_id,
+          'Fleet drift: ' || e.node_id || ' 未落在声明目标',
+          '节点实际版本 ' || e.version || ' != 声明目标 ' || COALESCE(e.target_version, '(null)')
+            || '。修复：对目标节点执行滚动升级（sync → install → restart → verify → promote），'
+            || '并把 target_version 更新为该次下发的摘要。',
+          'task', 'backlog', 'P1', 'fleet_drift', 'fleet_drift:' || e.node_id
+     FROM executor_nodes e
+    WHERE e.node_kind = 'executor' AND e.status = 'online'
+      AND e.target_version IS NOT NULL AND e.version <> e.target_version
+      AND NOT EXISTS (SELECT 1 FROM todos t WHERE t.dedupe_key = 'fleet_drift:' || e.node_id
+                        AND t.archived_at IS NULL AND t.status NOT IN ('done', 'cancelled'));" >/dev/null
+q "UPDATE todos SET status = 'done', completed_at = now(), updated_at = now(),
+        archive_reason = 'fleet converged: node now matches its declared target_version'
+    WHERE source = 'fleet_drift' AND archived_at IS NULL AND status NOT IN ('done', 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM executor_nodes e
+                       WHERE e.node_id = todos.node_id AND e.node_kind = 'executor' AND e.status = 'online'
+                         AND e.target_version IS NOT NULL AND e.version <> e.target_version);" >/dev/null
+DRIFT_OPEN=$(q "SELECT count(*) FROM todos WHERE source = 'fleet_drift' AND archived_at IS NULL AND status NOT IN ('done', 'cancelled');")
+DRIFT_NODES=$(q "SELECT count(*) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' AND target_version IS NOT NULL AND version <> target_version;")
+if [[ "${DRIFT_NODES:-0}" -gt 0 ]]; then
+  echo "- **声明目标一致性**：${DRIFT_NODES} 台未落在 target_version 上（未完成 todo=${DRIFT_OPEN}）"
+  q "SELECT '  - ' || node_id || ': ' || version || ' → ' || COALESCE(target_version, '(null)') FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' AND target_version IS NOT NULL AND version <> target_version ORDER BY node_id;"
+else
+  echo "- 声明目标一致性：全部落在 target_version 上（fleet_drift todo 已自动关闭）"
+fi
+echo
+
 # retired 是有意下线、operator 暂停是人工意图，都不算异常；
 # 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
@@ -230,4 +263,4 @@ APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'await
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"
