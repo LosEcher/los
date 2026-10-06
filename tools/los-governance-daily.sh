@@ -64,16 +64,24 @@ echo "# los 治理日报 ($NOW)"
 echo
 
 # ── 1. Governance jobs 异常 ──────────────────────────────────
+# 两种 paused 语义不同（pause_source 区分）：
+#   pause_source='operator' → 人工停止，是有意状态，不是异常，且不会被自动恢复；
+#   其余（no_op_throttle / failure_threshold / circuit_open / NULL 遗留）→ 系统自暂停，
+#   属异常（会由 sweep 预处理自动恢复）。
 echo "## 1. Governance jobs（异常项）"
 if [[ "$FULL" -eq 1 ]]; then
-  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs ORDER BY status, job_type, cadence;")
+  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || COALESCE('/' || pause_source, '') || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | noop=' || consecutive_no_ops || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs ORDER BY status, job_type, cadence;")
 else
-  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs WHERE status = 'paused' OR circuit_state <> 'closed' OR consecutive_failures > 0 ORDER BY status, job_type, cadence;")
+  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || COALESCE('/' || pause_source, '') || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0 ORDER BY status, job_type, cadence;")
 fi
 if [[ -n "$ROWS" ]]; then
   table "job | status | circuit | failures | last | next" "$ROWS"
 else
-  echo "- 无异常（全部 active / closed / 0 失败）"
+  echo "- 无异常（无系统暂停 / circuit 全 closed / 0 失败）"
+fi
+OP_PAUSED=$(q "SELECT count(*) FROM governance_jobs WHERE status = 'paused' AND pause_source = 'operator';")
+if [[ "${OP_PAUSED:-0}" -gt 0 ]]; then
+  echo "- 人工暂停（有意，不计异常，不会被自动恢复）：${OP_PAUSED} 个 → $(q "SELECT string_agg(job_type, ', ') FROM governance_jobs WHERE status = 'paused' AND pause_source = 'operator';")"
 fi
 echo
 
@@ -215,9 +223,9 @@ else
 fi
 echo
 
-# retired 是有意下线（如清理重复 job 后保留审计行），不是异常；
-# 只有 paused / circuit 非 closed / 连续失败才算治理异常。
-GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE status = 'paused' OR circuit_state <> 'closed' OR consecutive_failures > 0;")
+# retired 是有意下线、operator 暂停是人工意图，都不算异常；
+# 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
+GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
 APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'awaiting_approval';")
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")

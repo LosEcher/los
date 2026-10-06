@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS governance_jobs (
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   circuit_state TEXT NOT NULL DEFAULT 'closed',
   circuit_opened_at TIMESTAMPTZ,
+  pause_source TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -98,6 +99,24 @@ BEGIN
     WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'next_run_at'
   ) THEN
     ALTER TABLE governance_jobs ADD COLUMN next_run_at TIMESTAMPTZ;
+  END IF;
+  -- pause_source: distinguishes an operator stop (never auto-recovered) from a
+  -- throttle/circuit stop (self-healing). Existing paused rows stay NULL, which
+  -- reads as a system pause so a stuck job still recovers.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'governance_jobs' AND column_name = 'pause_source'
+  ) THEN
+    ALTER TABLE governance_jobs ADD COLUMN pause_source TEXT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'governance_jobs_pause_source_chk'
+      AND conrelid = 'governance_jobs'::regclass
+  ) THEN
+    ALTER TABLE governance_jobs
+      ADD CONSTRAINT governance_jobs_pause_source_chk
+      CHECK (pause_source IS NULL OR pause_source IN ('operator', 'no_op_throttle', 'failure_threshold', 'circuit_open'));
   END IF;
 END $$;
 

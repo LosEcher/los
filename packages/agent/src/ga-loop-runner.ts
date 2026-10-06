@@ -180,7 +180,10 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
       log.info(`GA loop: downgraded ${job.jobType} cadence from ${job.cadence} to ${gateDecision.newCadence} (${gateDecision.reason})`);
     }
     if (gateDecision.action === 'pause') {
-      await updateGovernanceJob(job.id, { status: 'paused' });
+      await updateGovernanceJob(job.id, {
+        status: 'paused',
+        pauseSource: gateDecision.pauseSource ?? 'no_op_throttle',
+      });
       log.info(`GA loop: paused ${job.jobType} (${gateDecision.reason})`);
     }
 
@@ -381,7 +384,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
 
   // ── Step 7: If circuit was opened, also pause the job ──
   if (nextState.circuitState === 'open' && job.status !== 'paused') {
-    await updateGovernanceJob(job.id, { status: 'paused' });
+    await updateGovernanceJob(job.id, { status: 'paused', pauseSource: 'circuit_open' });
     log.warn(`GA loop: circuit OPEN for ${job.jobType} (${job.id}) — job paused`);
   }
 

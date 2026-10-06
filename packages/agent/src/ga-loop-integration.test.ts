@@ -208,6 +208,52 @@ describe('GA loop circuit breaker ↔ sweeper integration', () => {
     assert.equal(maybeAutoRecoverPaused(job), true);
   });
 
+  it('never auto-recovers an operator pause, even with a closed circuit', () => {
+    // Operator stop is only lifted by a human: both the sweep pre-pass and the
+    // wake path go through this predicate.
+    const job = makeJob({ status: 'paused', circuitState: 'closed', pauseSource: 'operator' });
+    assert.equal(maybeAutoRecoverPaused(job), false);
+  });
+
+  it('never auto-recovers an operator pause even after the recovery window', () => {
+    const job = makeJob({
+      status: 'paused',
+      circuitState: 'open',
+      circuitOpenedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      pauseSource: 'operator',
+    });
+    assert.equal(maybeAutoRecoverPaused(job), false);
+  });
+
+  it('auto-recovers a self-pause (throttle or circuit) once its window elapsed', () => {
+    assert.equal(
+      maybeAutoRecoverPaused(makeJob({ status: 'paused', circuitState: 'closed', pauseSource: 'no_op_throttle' })),
+      true,
+    );
+    assert.equal(
+      maybeAutoRecoverPaused(makeJob({
+        status: 'paused',
+        circuitState: 'open',
+        circuitOpenedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+        pauseSource: 'failure_threshold',
+      })),
+      true,
+    );
+  });
+
+  it('records pause provenance on each throttle decision', () => {
+    assert.equal(
+      evaluateLoopGate(makeJob({ consecutiveFailures: 5 })).pauseSource,
+      'failure_threshold',
+    );
+    assert.equal(
+      evaluateLoopGate(makeJob({ consecutiveNoOps: 5 })).pauseSource,
+      'no_op_throttle',
+    );
+    // Non-pause decisions must not carry provenance.
+    assert.equal(evaluateLoopGate(makeJob({ consecutiveNoOps: 3 })).pauseSource, undefined);
+  });
+
   it('does not auto-recover paused jobs with recent open circuit', () => {
     const job = makeJob({ status: 'paused', circuitState: 'open', circuitOpenedAt: new Date().toISOString() });
     assert.equal(maybeAutoRecoverPaused(job), false);

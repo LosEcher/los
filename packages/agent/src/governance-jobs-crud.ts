@@ -33,8 +33,8 @@ export async function createGovernanceJob(
 
   const rows = await db.query<GovernanceJobRow>(
     `INSERT INTO governance_jobs (
-      id, job_type, cadence, status, config_json, auto_fix_config_json, dedupe_key, tenant_id, project_id, next_run_at
-    ) VALUES ($1, $2, $3, $4, $5::jsonb, $9::jsonb, $6, $7, $8, now() + ($10 || ' milliseconds')::interval)
+      id, job_type, cadence, status, pause_source, config_json, auto_fix_config_json, dedupe_key, tenant_id, project_id, next_run_at
+    ) VALUES ($1, $2, $3, $4, $11, $5::jsonb, $9::jsonb, $6, $7, $8, now() + ($10 || ' milliseconds')::interval)
     RETURNING *`,
     [
       id,
@@ -47,6 +47,7 @@ export async function createGovernanceJob(
       input.projectId ?? null,
       input.autoFix ? JSON.stringify(input.autoFix) : null,
       String(staggerMs),
+      input.pauseSource ?? null,
     ],
   );
 
@@ -157,6 +158,11 @@ export async function updateGovernanceJob(
       params.push(input.nextRunAt);
       sets.push(`next_run_at = $${params.length}::timestamptz`);
     }
+  }
+  if (input.pauseSource !== undefined) {
+    // null clears the provenance (resume); a value records why we paused.
+    params.push(input.pauseSource);
+    sets.push(`pause_source = $${params.length}`);
   }
 
   const rows = await db.query<GovernanceJobRow>(

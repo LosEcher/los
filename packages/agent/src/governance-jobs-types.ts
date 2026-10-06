@@ -3,6 +3,23 @@ export type GovernanceCadence = 'manual' | 'hourly' | 'daily' | 'weekly' | 'mont
 export type GovernanceJobStatus = 'active' | 'paused' | 'retired';
 export type CircuitState = 'closed' | 'half_open' | 'open';
 
+/**
+ * Why a job is `paused`. `paused` alone conflated two intents that must behave
+ * differently (2026-10-06):
+ *  - `operator`          — a human stopped it; it must stay stopped until a
+ *                          human resumes it. Never auto-recovered.
+ *  - everything else     — the loop's own throttle/circuit stopped it; it is a
+ *                          self-healing signal and SHOULD come back on its own.
+ * Before this field existed the two were indistinguishable, so the seed treated
+ * every paused job as "operator intent" and created a duplicate instead, while
+ * the sweep's auto-recovery could not see paused jobs at all.
+ */
+export type GovernanceJobPauseSource =
+  | 'operator'
+  | 'no_op_throttle'
+  | 'failure_threshold'
+  | 'circuit_open';
+
 export interface GovernanceJobAutoFixConfig {
   autoFixEnabled: boolean;
   maxAutoFixAttempts?: number;
@@ -54,12 +71,15 @@ export interface GovernanceJob {
   circuitOpenedAt?: string;
   /** Next scheduled run (ISO string). Used by PG-queue claim loop. */
   nextRunAt?: string;
+  /** Why the job is paused; undefined = legacy/system pause (auto-recoverable). */
+  pauseSource?: GovernanceJobPauseSource;
 }
 
 export interface CreateGovernanceJobInput {
   jobType: GovernanceJobType;
   cadence?: GovernanceCadence;
   status?: GovernanceJobStatus;
+  pauseSource?: GovernanceJobPauseSource | null;
   config?: Record<string, unknown>;
   autoFix?: GovernanceJobAutoFixConfig;
   dedupeKey?: string;
@@ -72,6 +92,8 @@ export interface CreateGovernanceJobInput {
 export interface UpdateGovernanceJobInput {
   cadence?: GovernanceCadence;
   status?: GovernanceJobStatus;
+  /** Pause provenance. Set to null to clear (e.g. on resume). */
+  pauseSource?: GovernanceJobPauseSource | null;
   config?: Record<string, unknown>;
   autoFix?: GovernanceJobAutoFixConfig;
   lastRunAt?: string;
@@ -139,6 +161,7 @@ export type GovernanceJobRow = {
   consecutive_failures: number | null;
   circuit_state: string | null;
   circuit_opened_at: Date | string | null;
+  pause_source: string | null;
   next_run_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;

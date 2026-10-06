@@ -1,4 +1,4 @@
-import type { GovernanceJob, GovernanceJobType, GovernanceCadence, GovernanceJobStatus, GovernanceJobAutoFixConfig, CircuitState, GovernanceJobRow } from './governance-jobs-types.js';
+import type { GovernanceJob, GovernanceJobType, GovernanceCadence, GovernanceJobStatus, GovernanceJobAutoFixConfig, GovernanceJobPauseSource, CircuitState, GovernanceJobRow } from './governance-jobs-types.js';
 
 function normalizeJobType(value: string): GovernanceJobType {
   const valid: GovernanceJobType[] = ['consistency_audit', 'hotspot', 'architecture_drift', 'memory_integrity', 'memory_retention', 'reflection', 'branch_cleanup', 'file_size', 'related_project_scan', 'supply_chain_audit', 'static_analysis', 'performance_audit', 'migration_drift_fix', 'event_retention', 'code_topology_audit', 'dead_letter', 'adversarial_review', 'self_bootstrap', 'language_audit'];
@@ -19,6 +19,14 @@ function normalizeCircuitState(value: string | null): CircuitState {
   const valid: CircuitState[] = ['closed', 'half_open', 'open'];
   if (value && valid.includes(value as CircuitState)) return value as CircuitState;
   return 'closed';
+}
+
+/** Unknown/NULL pause_source = legacy row, treated as a system pause. */
+function normalizePauseSource(value: string | null): GovernanceJobPauseSource | undefined {
+  const valid: GovernanceJobPauseSource[] = ['operator', 'no_op_throttle', 'failure_threshold', 'circuit_open'];
+  return value && valid.includes(value as GovernanceJobPauseSource)
+    ? (value as GovernanceJobPauseSource)
+    : undefined;
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> {
@@ -81,6 +89,7 @@ export function rowToJob(row: GovernanceJobRow): GovernanceJob {
     consecutiveFailures: typeof row.consecutive_failures === 'number' ? row.consecutive_failures : 0,
     circuitState: normalizeCircuitState(row.circuit_state ?? null),
     circuitOpenedAt: row.circuit_opened_at ? toIsoString(row.circuit_opened_at) : undefined,
+    pauseSource: normalizePauseSource(row.pause_source ?? null),
     nextRunAt: row.next_run_at ? toIsoString(row.next_run_at) : undefined,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),

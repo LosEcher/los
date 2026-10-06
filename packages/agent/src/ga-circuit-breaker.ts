@@ -8,7 +8,7 @@
  * Inspired by lsclaw's no-op throttle (downgrade after 3 zero-finding rounds, pause after 5)
  * and its CIRCUIT_OPEN scheduler state for persistent errors.
  */
-import type { GovernanceJob, CircuitState, GovernanceCadence } from './governance-jobs-types.js';
+import type { GovernanceJob, CircuitState, GovernanceCadence, GovernanceJobPauseSource } from './governance-jobs-types.js';
 
 // ── Thresholds ────────────────────────────────────────────
 
@@ -29,6 +29,12 @@ export interface ThrottleDecision {
   newCadence?: GovernanceCadence;
   newCircuitState?: CircuitState;
   newStatus?: 'paused';
+  /**
+   * Provenance for a `pause` action, persisted as governance_jobs.pause_source.
+   * It is what lets the auto-recovery path tell a self-healing throttle stop
+   * apart from a human "stop this job" — see maybeAutoRecoverPaused.
+   */
+  pauseSource?: GovernanceJobPauseSource;
 }
 
 /**
@@ -70,6 +76,7 @@ export function evaluateLoopGate(job: GovernanceJob): ThrottleDecision {
       reason: `consecutive failures ${job.consecutiveFailures} >= ${FAILURE_OPEN_THRESHOLD} — opening circuit`,
       newCircuitState: 'open',
       newStatus: 'paused',
+      pauseSource: 'failure_threshold',
     };
   }
 
@@ -87,6 +94,7 @@ export function evaluateLoopGate(job: GovernanceJob): ThrottleDecision {
       action: 'pause',
       reason: `consecutive no-ops ${job.consecutiveNoOps} >= ${NOOP_PAUSE_THRESHOLD} — pausing job`,
       newStatus: 'paused',
+      pauseSource: 'no_op_throttle',
     };
   }
 
@@ -156,10 +164,16 @@ export function computeNextState(
 
 /**
  * Check if a job should be auto-recovered from PAUSED status.
- * Called at sweep time for any paused job whose circuit was auto-opened.
+ *
+ * Two kinds of pause share the `paused` status, so the provenance decides:
+ *  - `pauseSource: 'operator'` — a human stopped this job. Always false: the
+ *    operator resumes it explicitly, no amount of time should override that.
+ *  - anything else (throttle/circuit/legacy NULL) — the loop stopped itself, so
+ *    a closed circuit or an elapsed recovery window brings it back.
  */
 export function maybeAutoRecoverPaused(job: GovernanceJob): boolean {
   if (job.status !== 'paused') return false;
+  if (job.pauseSource === 'operator') return false;
   if (job.circuitState === 'closed') return true;
   if (job.circuitState === 'open' && job.circuitOpenedAt) {
     const elapsed = Date.now() - new Date(job.circuitOpenedAt).getTime();
