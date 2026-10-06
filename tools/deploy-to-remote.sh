@@ -264,6 +264,16 @@ do_sync() {
 
   log_info "  extracted to $REMOTE_HOME"
 
+  # Normalize source modes. A file created under umask 077 lands as 0600, and
+  # `tools/los.sh build-version` hashes every source file — for an SSH user that
+  # is not the owner the read fails and the fleet version identity breaks
+  # (observed on oracle 2026-10-06: "shasum: tools/ci-health-check.sh: Permission
+  # denied" instead of a version). tar carries modes, so fixing them here makes
+  # every future sync self-healing. node_modules is pruned: it is huge, is not
+  # shipped, and already has sane modes.
+  remote_sh sh -c "cd '$REMOTE_HOME' && chmod -R a+rX tools deploy contracts 2>/dev/null; find packages -name node_modules -prune -o -exec chmod a+rX {} + 2>/dev/null; true" \
+    >> "$log_file" 2>&1 || true
+
   remote_sh bash -s "$REMOTE_HOME" "$BUILD_VERSION" <<'STAMP_VERSION' >> "$log_file" 2>&1
 set -euo pipefail
 los_home="$1"
