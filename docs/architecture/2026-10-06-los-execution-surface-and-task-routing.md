@@ -175,3 +175,36 @@ DSH/看板 读报告与 todo                                   →  人工决定
 - ✅ 可以做：在 `editableSurfaces` 内产出改动（L1 允许文件写入），并让 los 写出改动说明与自检结论；
 - ❌ 做不了：在 los 里跑测试（L1 无 shell；`sandboxMode=sandbox` 有 shell 但无网络，`pnpm`/依赖解析与 `/dev/null` 都成问题）。
 - 因此形态应是：**los 出改动 + 证据 → 外部 runner（DSH/CI）应用并跑测试 → 结果回写 los 的 verification**。这与"DSH 管理 / los 执行"一致：los 负责受治理的改动产出与账本，测试执行属于外部 runner。
+
+
+---
+
+## 8. 第 3 步首例：los 产出代码改动，外部 runner 验收（2026-10-06 实测）
+
+按 §7 末尾的形态，拿 **P0-3（promote 必须校验版本）** 做了第一个"改代码"类 E3 作业。
+
+**作业配置**：`schedule-e3-promote-version-check`，`toolMode=project-write`（L1，只用文件工具、无 shell），
+`editableSurfaces` 收敛到三个文件（`packages/agent/src/node-commands.ts`、新建的 `node-commands.test.ts`、
+`test-runner.mjs`），goal 里明确写「你在两段式流水线的生产端：**你写改动，测试由外部 runner 跑**，
+不要尝试跑测试/构建/git」。作业建为 `paused`（`once`、2099 年），只手动触发。
+
+**los 产出的改动（质量超出预期）**：
+- 把判定抽成纯函数 `evaluatePromoteVersionCheck(node, input)`（`node-commands.ts:284`）——正是"无 DB 可测"的要求；
+- promote 分支：显式期望版本不符 → `denied` 且**不写** `status='online'`；相符 → 正常 promote 并把版本写进 `rolloutMessage`；未提供期望版本 → 行为不变（向后兼容）但把记录版本写进审计消息；
+- 新增 `node-commands.test.ts`：10 个用例，且**在文件头写清了为什么不能驱动完整命令**（`executeNodeCommand` 需要 Postgres），改用纯函数 + 依赖注入模拟调用点；
+- 按包约定把新测试登记进 `test-runner.mjs`。
+
+**外部 runner（我）的验收**：`tsc --noEmit` 干净 → 新测试 10/10 → 全套 857/857 + 424/424。
+**结论：los 能产出可用的代码改动，测试确实必须在外部跑** —— 与 §6/§7 的边界判断完全一致。
+
+**这次验收还抓出一个我自己的回归**：`event-types-completeness` 门禁报
+`unregistered session event type: upstream_error ← gateway/src/openai-compat-tool-forward.ts` —— 是我上一轮
+恢复 tools 转发时只跑了该模块自己的测试、没跑全套，漏掉了这道门。已按既有机制把 `upstream_error`
+加入 non-event 白名单（附理由：它是 openai-compat 上游错误信封的 `error.type`，不是 `session_events.type`）。
+
+**关于"任务被判失败但改动可用"**：该 run 记 `failed`，唯一原因是 goal 里 MANDATORY 的变更说明文件没写
+（self-check 抓到了，机制正确）。三点观察：
+1. **self-check 是有效的**：它把"少写一个交付物"判成失败，而不是放过；
+2. **失败不等于产物无用**：改动本身完整可用，因此"run 失败 ⇒ 丢弃产物"是错的判据，人工/外部 runner 需要能接手产物；
+3. 我的 SQL 建单方式有 bug：用未加引号的 heredoc 建 goal，**反引号被 bash 当命令替换**，导致 goal 文本被破坏
+   （这轮指令因此缺了一段）。教训：往 DB 塞长文本一律用带引号的 heredoc 或文件，别用无引号 heredoc。

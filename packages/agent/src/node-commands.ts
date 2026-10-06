@@ -149,11 +149,18 @@ export async function executeNodeCommand(input: ExecuteNodeCommandInput, runtime
     }
 
     if (command === 'promote') {
+      const versionCheck = evaluatePromoteVersionCheck(node, input);
+      if (!versionCheck.allowed) {
+        return await completeNodeCommand(created.commandId, {
+          status: 'denied',
+          error: versionCheck.error,
+        });
+      }
       const saved = await upsertExecutorNode({
         nodeId,
         status: 'online',
         rolloutState: 'idle',
-        rolloutMessage: normalizeOptionalString(input.reason) ?? 'promoted',
+        rolloutMessage: versionCheck.rolloutMessage,
         activeTaskCount: node.activeTaskCount,
       });
       return await completeNodeCommand(created.commandId, {
@@ -248,6 +255,50 @@ export async function executeNodeCommand(input: ExecuteNodeCommandInput, runtime
       error: errorMessage(error),
     });
   }
+}
+
+export interface PromoteVersionCheckResult {
+  /** False when the command must complete as 'denied' instead of flipping the node online. */
+  allowed: boolean;
+  /** Set only when allowed is false; names both the expected and the recorded version. */
+  error?: string;
+  /** rollout_message for the promoted node; carries the recorded version whenever one exists. */
+  rolloutMessage: string;
+}
+
+/**
+ * P0-3: promote must not flip a node to status='online' for an operator who
+ * expects a different revision than the one recorded in the registry
+ * (observed 2026-10-06: promote returned 0.1.0+b8883f8d4612c for a fleet
+ * already on a newer revision).
+ *
+ * input.targetVersion is the optional expected version:
+ *   - provided and equal to the recorded node.version → allowed
+ *   - provided and different (or the node has none)   → denied, error names both values
+ *   - not provided                                    → allowed (backward compatible)
+ *
+ * Kept pure (no DB access) so the decision stays unit-testable: the promote
+ * branch of executeNodeCommand is its only caller and performs no version
+ * comparison of its own.
+ */
+export function evaluatePromoteVersionCheck(
+  node: Pick<ExecutorNodeRecord, 'nodeId' | 'version'>,
+  input: Pick<ExecuteNodeCommandInput, 'targetVersion' | 'reason'>,
+): PromoteVersionCheckResult {
+  const expectedVersion = normalizeOptionalString(input.targetVersion);
+  const recordedVersion = normalizeOptionalString(node.version);
+  const baseMessage = normalizeOptionalString(input.reason) ?? 'promoted';
+  const rolloutMessage = recordedVersion ? `${baseMessage} (version ${recordedVersion})` : baseMessage;
+
+  if (expectedVersion && expectedVersion !== recordedVersion) {
+    return {
+      allowed: false,
+      error: `promote denied: expected version ${expectedVersion} does not match recorded version ${recordedVersion ?? 'unknown'} for node ${node.nodeId}`,
+      rolloutMessage,
+    };
+  }
+
+  return { allowed: true, rolloutMessage };
 }
 
 export async function listNodeCommands(options: ListNodeCommandsOptions = {}): Promise<NodeCommandRecord[]> {

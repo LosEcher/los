@@ -50,6 +50,9 @@ const NON_EVENT_TYPE_LITERALS = new Set<string>([
   'authorization_code', 'code', 'Bearer',
   // openai_error
   'insufficient_permissions', 'internal_error', 'invalid_request_error',
+  // openai_error（openai-compat 客户端 tools 转发：上游错误信封里的 error.type，
+  // 不是 session_events.type；见 packages/gateway/src/openai-compat-tool-forward.ts）
+  'upstream_error',
   // payload_error（session.completed.errorSummary 错误类别）
   'max_loops_reached', 'truncated_response', 'tool_parse_error', 'tool_repair',
   // payload_error（session-recovery recoverySummary.errorEvents 类别）

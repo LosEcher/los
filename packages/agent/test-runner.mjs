@@ -50,6 +50,7 @@ const sharedProcessTestFiles = [
   'src/model-profiles.test.ts',
   'src/model-settings.test.ts',
   'src/model-tiering.test.ts',
+  'src/node-commands.test.ts',
   'src/node-recovery-policy.test.ts',
   'src/fleet-repair-config.test.ts',
   'src/fleet-alert-config.test.ts',
