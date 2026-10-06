@@ -7,6 +7,10 @@ import { upsertExecutorNode } from '../executor-nodes.js';
 import { listSchedulerDecisions } from '../scheduler-decision-ledger.js';
 import { runScheduledAgentTask } from './scheduled-task-runner.js';
 import { _compileExecutorRequirements, _ExecutorSelectionError, resolveExecutor } from './executor-client.js';
+import {
+  deleteNodeMaintenancePolicy,
+  upsertNodeMaintenancePolicy,
+} from '../node-maintenance-policy.js';
 
 test('compileExecutorRequirements derives policy and compatibility requirements', () => {
   assert.deepEqual(
@@ -135,6 +139,64 @@ test('scheduled task persists no-match executor decision evidence', async () => 
   } finally {
     await getDb().query('DELETE FROM scheduler_decisions WHERE graph_id = $1', [taskRunId]).catch(() => undefined);
     await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('resolveExecutor refuses to place work on a node inside an active maintenance window', async () => {
+  // Regression (2026-10-06): `isNodeInMaintenance` was only consulted by alert
+  // suppression and host-check repair, so windowed nodes still received work and
+  // the feature name misled operators. The window is now part of the candidate
+  // filter, evaluated live at selection time.
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const nodeId = `maint-${suffix}`;
+  const now = Date.now();
+  const intent = { toolMode: 'all', sandboxMode: 'sandbox' } as const;
+  const exec = { enabled: true, nodeId, requiredCapabilities: ['network_egress'] as const };
+
+  try {
+    await upsertExecutorNode({
+      nodeId,
+      nodeKind: 'executor',
+      status: 'online',
+      baseUrl: 'http://127.0.0.1:18094',
+      connectModes: ['agent_http'],
+      capabilities: {
+        run_agent: true,
+        workspace_write: true,
+        shell: true,
+        sandbox: 'linux-bwrap',
+        network_egress: true,
+      },
+      verified: { agent_http: { ok: true, checked_at: new Date().toISOString() } },
+    });
+
+    await upsertNodeMaintenancePolicy(
+      nodeId,
+      { windows: [{ start: new Date(now - 60_000).toISOString(), end: new Date(now + 3_600_000).toISOString() }] },
+      { source: 'test', operator: 'test' },
+    );
+
+    await assert.rejects(
+      () => resolveExecutor(exec, intent),
+      (error: unknown) => {
+        assert.ok(error instanceof _ExecutorSelectionError);
+        assert.match(String((error as Error).message), /maintenance:window_active/);
+        return true;
+      },
+    );
+
+    // Clearing the window must restore schedulability immediately — the check is
+    // live, so no node re-upsert is needed.
+    await deleteNodeMaintenancePolicy(nodeId, { source: 'test', operator: 'test' });
+    const resolved = await resolveExecutor(exec, intent);
+    assert.equal(resolved?.nodeId, nodeId);
+    assert.equal(resolved?.decision.placementTier, 'warm');
+  } finally {
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await getDb().query('DELETE FROM node_maintenance_policy WHERE node_id = $1', [nodeId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });
