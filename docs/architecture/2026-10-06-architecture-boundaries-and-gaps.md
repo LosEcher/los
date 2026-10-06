@@ -171,7 +171,7 @@ registry 与实测不一致 5 处：缺 `cpuCores`（vultr/tencent-sin/grok-clou
 
 | # | 缺口 | 证据 | 影响 |
 | --- | --- | --- | --- |
-| I-1 | **`/v1` 只有 2 个端点，无 tools / embeddings / rerank / vision**；带 `tools` 的请求被**静默忽略** | `packages/gateway/src/openai-compat-route.ts:60,74`（全仓 `/v1/` 仅此两处）；带 `tools` 的转发实现从未进入 `main`（只在 bookmark `wip/gateway-tool-forward-20260927`），网关 2026-10-06 20:38:39 重启后已失效 | 任何按 OpenAI 协议带工具调用的客户端（Codex、部分 SDK）会**无声退化**为纯对话；这是当前集成面最大的隐性风险 |
+| I-1 | `/v1` 只有 2 个端点，无 embeddings / rerank / vision（**tools 转发已于 2026-10-06 恢复到主线并实测 live**） | `packages/gateway/src/openai-compat-route.ts:60,74`；转发实现 `openai-compat-tool-forward.ts` + `route.ts:165-166`；探针 400 `tool_forward_unavailable` 已验证 | 该能力曾长期只活在未提交的工作副本，切回 `main` 重启后静默消失过一次；修复方式是把它并进主线（本轮）而非依赖工作副本 |
 | I-2 | `/v1/chat/completions` 硬编码 `toolMode:'read-only'`、`persistMemory:false`，调用方无参数可提权 | `openai-compat-route.ts:184,192` | 外部调用者无法通过 `/v1` 触发写路径，产品能力被压在只读档 |
 | I-3 | **`los mcp serve` 零消费者** | DSH/Claude/Codex 的 MCP 配置里都没有 los server（Claude=`context7,cbm,exa,nowledge-mem,pencil`；Codex 无；DSH patch 有 cbm/jj/webbridge/nowledge-mem/lot） | 4 个 MCP 工具（`los_run/los_run_state/los_run_replay/los_operator_control`）属于"建好没人用"，是低成本的接入机会 |
 | I-4 | **los 直发 IM 能力为零** | wechat `disabled`（`.env:34`）、telegram 未配置、feishu 在 los 侧仅 `status:'planned'`（`communication-routes.ts:172`）；`WECLAW_API_ADDR=127.0.0.1:18011` 仍在配置但端口无监听 | 治理日报的"推送"实际由 DSH 侧飞书渠道完成，los 自身链路是死的；配置残留会误导排障 |

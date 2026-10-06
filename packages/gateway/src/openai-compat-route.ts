@@ -22,19 +22,32 @@ import { getDefaultProjectId, resolveConfiguredProjectOwner } from './project-st
 import { getMessagePrincipal, getRequestContext } from './request-context.js';
 import { getConfig } from '@los/infra/config';
 import { discoverAll } from '@los/infra/discovery';
+import {
+  clientSuppliedTools,
+  forwardClientToolCompletion,
+  type ForwardClientToolsInput,
+} from './openai-compat-tool-forward.js';
+
+interface OpenAIChatMessage {
+  role?: string;
+  content?: unknown;
+}
 
 interface OpenAIChatRequest {
   model?: string;
-  messages: Array<{ role: string; content: string }>;
+  messages: OpenAIChatMessage[];
   stream?: boolean;
   max_tokens?: number;
   temperature?: number;
+  tools?: unknown;
+  tool_choice?: unknown;
 }
 
 type OpenAICompatibleRouteDependencies = {
   runChat: typeof runChat;
   getDefaultProjectId: typeof getDefaultProjectId;
   resolveConfiguredProjectOwner: typeof resolveConfiguredProjectOwner;
+  forwardClientTools?: (input: ForwardClientToolsInput) => Promise<void>;
 };
 
 const defaultDependencies: OpenAICompatibleRouteDependencies = {
@@ -90,9 +103,9 @@ export function registerOpenAICompatibleRoute(
     // the last user turn, otherwise "#approve …" buried after history never matches.
     let systemPrompt = '';
     const userTurns: string[] = [];
-    for (const msg of body.messages) {
-      if (msg.role === 'system') systemPrompt += msg.content + '\n';
-      else if (msg.role === 'user') userTurns.push(msg.content);
+    for (const msg of body.messages ?? []) {
+      if (msg.role === 'system' && typeof msg.content === 'string') systemPrompt += msg.content + '\n';
+      else if (msg.role === 'user' && typeof msg.content === 'string') userTurns.push(msg.content);
     }
     const lastUserTurn = (userTurns[userTurns.length - 1] ?? '').trim();
     const prompt = lastUserTurn || userTurns.join('\n').trim() || 'Hello';
@@ -146,6 +159,18 @@ export function registerOpenAICompatibleRoute(
         reply.raw.end();
         return;
       }
+    }
+
+    // Client tools are the caller's action surface. Do not fold them into runChat.
+    if (clientSuppliedTools(body) && !lastUserTurn.startsWith('#')) {
+      const forward = dependencies.forwardClientTools ?? forwardClientToolCompletion;
+      await forward({
+        reply,
+        providerName: body.model ?? config.agent.defaultProvider,
+        request: body,
+        stream: wantStream,
+      });
+      return;
     }
 
     const requestedProjectId = normalizeHeader(req.headers['x-project-id']);
