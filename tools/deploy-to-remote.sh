@@ -44,6 +44,7 @@ Phased commands:
   install-service     Install systemd unit
   restart             Restart executor service
   verify              Health check + connectivity validation
+  digest              Read-only: compare the node content digest against the target
   promote             Clear the restart-induced drain (needs --node-id <id>)
 
 Shortcuts:
@@ -352,6 +353,14 @@ echo "version=$build_version"
 STAMP_VERSION
   log_info "  version: $BUILD_VERSION"
 
+  # Fail loudly instead of returning success on a half-synced tree.
+  local remote_digest_value
+  remote_digest_value="$(remote_digest)"
+  if [ "$remote_digest_value" != "$BUILD_VERSION" ]; then
+    die "sync did not converge: remote digest '${remote_digest_value:-<no output>}' != target '$BUILD_VERSION' — the node is half-synced and must NOT be restarted. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
+  fi
+  log_info "  digest verified: $remote_digest_value"
+
   # Sync systemd unit to /etc
   if remote_sh test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
     remote_sh sh -c \
@@ -628,6 +637,31 @@ do_promote() {
       -t "$auth" ${op:+--operator-token "$op"} --reason "$reason" ) 2>&1 | tail -3
 }
 
+# ── Digest check (read-only) ───────────────────────────────
+# `sync` streams the archive through a single SSH pipe (`cat tar | ssh … 'tar xzf -'`),
+# so a connection that drops mid-transfer leaves a PARTIALLY extracted tree. On
+# 2026-10-06 that left tencent-sin half-synced (executor crash-looped until systemd
+# gave up) and vultr with the tree updated but `.env` never stamped. Compare the
+# node's own content digest against the target; on mismatch use upload-then-extract
+# (scp to /tmp + shasum on both sides + extract locally on the node).
+remote_digest() {
+  remote_sh sh -c "cd '$REMOTE_HOME' && bash tools/los.sh build-version" 2>/dev/null | tail -1 | tr -d '\r'
+}
+
+do_digest() {
+  local got
+  got="$(remote_digest)"
+  log_info "  target (local deployable digest): $BUILD_VERSION"
+  log_info "  remote ($REMOTE_HOME)             : ${got:-<no output>}"
+  if [ "$got" = "$BUILD_VERSION" ]; then
+    log_info "  digest: MATCH"
+    return 0
+  fi
+  log_warn "  digest: MISMATCH — node is not on the target revision"
+  log_warn "  a mismatch between rollouts is expected; a mismatch right after sync means a half-synced tree"
+  exit 1
+}
+
 case "$CMD" in
   preflight)      do_preflight ;;
   sync)           do_sync ;;
@@ -635,6 +669,7 @@ case "$CMD" in
   install-service) do_install_service ;;
   restart)        do_restart ;;
   verify)         do_verify ;;
+  digest)         do_digest ;;
   promote)        do_promote ;;
   status)         do_status ;;
   logs)           do_logs ;;
