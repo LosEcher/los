@@ -141,6 +141,12 @@ export async function upsertNodeMaintenancePolicy(
   meta: ConfigChangeMeta = {},
 ): Promise<NodeMaintenancePolicy> {
   const parsed = nodeMaintenancePolicyPatchSchema.parse(patch); // throws on invalid input
+  // The patch schema only validates the window list, so a caller that lost the
+  // node id could persist a junk `node_id=''` row: it suppresses nothing and is
+  // invisible to per-node reads (2026-10-06, fleet-host-check --maint-set).
+  if (!nodeId || !nodeId.trim()) {
+    throw new Error('node maintenance policy requires a non-empty nodeId');
+  }
   await ensureNodeMaintenancePolicyStore();
   const before = await loadNodeMaintenancePolicy(nodeId);
   const db = getDb();

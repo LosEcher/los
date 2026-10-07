@@ -64,16 +64,24 @@ echo "# los 治理日报 ($NOW)"
 echo
 
 # ── 1. Governance jobs 异常 ──────────────────────────────────
+# 两种 paused 语义不同（pause_source 区分）：
+#   pause_source='operator' → 人工停止，是有意状态，不是异常，且不会被自动恢复；
+#   其余（no_op_throttle / failure_threshold / circuit_open / NULL 遗留）→ 系统自暂停，
+#   属异常（会由 sweep 预处理自动恢复）。
 echo "## 1. Governance jobs（异常项）"
 if [[ "$FULL" -eq 1 ]]; then
-  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs ORDER BY status, job_type, cadence;")
+  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || COALESCE('/' || pause_source, '') || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | noop=' || consecutive_no_ops || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs ORDER BY status, job_type, cadence;")
 else
-  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs WHERE status <> 'active' OR circuit_state <> 'closed' OR consecutive_failures > 0 ORDER BY status, job_type, cadence;")
+  ROWS=$(q "SELECT job_type || ' [' || cadence || ']' || ' | ' || status || COALESCE('/' || pause_source, '') || ' | ' || circuit_state || ' | fail=' || consecutive_failures || ' | last=' || COALESCE(to_char(last_run_at, 'MM-DD HH24:MI'), '-') || ' | next=' || COALESCE(to_char(next_run_at, 'MM-DD HH24:MI'), '-') FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0 ORDER BY status, job_type, cadence;")
 fi
 if [[ -n "$ROWS" ]]; then
   table "job | status | circuit | failures | last | next" "$ROWS"
 else
-  echo "- 无异常（全部 active / closed / 0 失败）"
+  echo "- 无异常（无系统暂停 / circuit 全 closed / 0 失败）"
+fi
+OP_PAUSED=$(q "SELECT count(*) FROM governance_jobs WHERE status = 'paused' AND pause_source = 'operator';")
+if [[ "${OP_PAUSED:-0}" -gt 0 ]]; then
+  echo "- 人工暂停（有意，不计异常，不会被自动恢复）：${OP_PAUSED} 个 → $(q "SELECT string_agg(job_type, ', ') FROM governance_jobs WHERE status = 'paused' AND pause_source = 'operator';")"
 fi
 echo
 
@@ -128,28 +136,131 @@ age_hours() { # 文件 mtime 距今小时数
   local f="$1"
   echo $(( ($(date +%s) - $(stat -f %m "$f")) / 3600 ))
 }
+# verdict 提取必须容忍两种模板写法：token 在标题行（"## Verdict — attention"）
+# 或在小节正文首行（"**ATTENTION** — not all clear."）。只认标题会退化成读正文
+# 首行，在编号列表格式下抽出 "1."（2026-10-06 实际发生过）。
+verdict_of() { # <报告文件> -> input_stale|all_clear|attention|high|?
+  local f="$1" v="" section=""
+  # 1) 含 "verdict" 的关键词行（新模板把 token 写进标题：## Verdict — attention）
+  v="$(grep -i 'verdict' "$f" 2>/dev/null | grep -o -i -E 'input_stale|all[ _]clear|attention|high' | head -1 || true)"
+  if [[ -z "$v" ]]; then
+    # Verdict 小节的正文（跳过空行；最多取前 10 行非空内容）
+    section="$(awk '/^##.*[Vv]erdict/{f=1;next} f && NF {print; if (++n >= 10) exit}' "$f" 2>/dev/null || true)"
+    # 2) 旧模板约定：小节首行是加粗 token（**ATTENTION** — not all clear.）
+    v="$(printf '%s\n' "$section" | grep -o -E '\*\*[^*]+\*\*' | grep -o -i -E 'input_stale|all[ _]clear|attention|high' | head -1 || true)"
+  fi
+  if [[ -z "$v" ]]; then
+    # 3) 兜底：小节正文里任意位置的首个 token
+    v="$(printf '%s\n' "$section" | grep -o -i -E 'input_stale|all[ _]clear|attention|high' | head -1 || true)"
+  fi
+  printf '%s' "${v:-?}" | tr '[:upper:]' '[:lower:]' | tr ' ' '_'
+}
+
+# ── 桥接新鲜度门（权威判据，优先于报告 mtime）─────────────
+# 桥接(com.echerlos.los.network-observe-bridge, 每 2h)一旦静默失效:
+#   input/ 冻结 → 分析任务仍按 prompt 覆盖同名报告 → 报告 mtime 永远新鲜、
+#   内容永远停在最后一个旧窗口。因此新鲜度必须看「同步时刻/最新输入快照」,
+#   不能看 reports/*-analysis.md 的 mtime。
+# 已发生两次:2026-08-28(修于 69f21863)、2026-08-31(再次静默 37 天)。
+BRIDGE_FLAG=""; BRIDGE_STATE="ok"; BRIDGE_AGE=""
+MANIFEST="$NW_DIR/bridge-manifest.json"
+# 注意:桥接批量 cp 会让同一轮的新文件 mtime 相同,`ls -t` 排序不稳定;
+# 输入文件名为 ISO 时间戳,直接用文件名排序才是「最新快照」。
+NEWEST_INPUT="$(ls -1 "$NW_DIR/input/"*.json 2>/dev/null | sort -r | head -1)"
+NEWEST_SURGE="$(ls -1 "$NW_DIR/surge-input/"*.json 2>/dev/null | sort -r | head -1)"
+INPUT_STAMP=""; [[ -n "$NEWEST_INPUT" ]] && INPUT_STAMP="$(basename "$NEWEST_INPUT" .json)"
+SURGE_STAMP=""; [[ -n "$NEWEST_SURGE" ]] && SURGE_STAMP="$(basename "$NEWEST_SURGE" .json | sed 's/^surge-errors-//')"
+if [[ -f "$MANIFEST" ]]; then
+  SYNCED_AT="$(sed -n 's/.*"syncedAt": *"\([^"]*\)".*/\1/p' "$MANIFEST" | head -1)"
+  if [[ -n "$SYNCED_AT" ]]; then
+    SYNCED_EPOCH="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$SYNCED_AT" +%s 2>/dev/null || echo "")"
+    [[ -n "$SYNCED_EPOCH" ]] && BRIDGE_AGE=$(( ($(date +%s) - SYNCED_EPOCH) / 3600 ))
+  fi
+fi
+if [[ -z "$BRIDGE_AGE" ]]; then
+  BRIDGE_STATE="STALE"; BRIDGE_FLAG=" [BRIDGE-STALE: 无 bridge-manifest.json]"
+elif [[ "$BRIDGE_AGE" -gt 4 ]]; then
+  BRIDGE_STATE="STALE(${BRIDGE_AGE}h)"
+  BRIDGE_FLAG=" [BRIDGE-STALE ${BRIDGE_AGE}h: verdict 基于旧快照 ${INPUT_STAMP:-?}]"
+else
+  BRIDGE_STATE="ok(${BRIDGE_AGE}h)"
+fi
+echo "- bridge: ${BRIDGE_STATE}（最新输入快照 ${INPUT_STAMP:-?}）"
+
 if [[ -n "$LATEST_NW" ]]; then
   NW_AGE=$(age_hours "$LATEST_NW")
-  NW_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_NW" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
+  NW_VERDICT="$(verdict_of "$LATEST_NW")"
   NW_FLAG=""; [[ "$NW_AGE" -gt 36 ]] && NW_FLAG=" [STALE ${NW_AGE}h]"
-  echo "- network-observe: ${NW_VERDICT:-?}（${NW_AGE}h 前报告）${NW_FLAG}"
+  echo "- network-observe: ${NW_VERDICT:-?}（报告 mtime ${NW_AGE}h / 输入快照 ${INPUT_STAMP:-?}）${NW_FLAG}${BRIDGE_FLAG}"
 else
   echo "- network-observe: 无报告"
 fi
 if [[ -n "$LATEST_SG" ]]; then
   SG_AGE=$(age_hours "$LATEST_SG")
-  SG_VERDICT="$(awk '/^##.*Verdict/{f=1;next} f && NF {print; exit}' "$LATEST_SG" | sed 's/^\*\*//; s/\*\*.*//' | cut -d' ' -f1)"
+  SG_VERDICT="$(verdict_of "$LATEST_SG")"
   SG_FLAG=""; [[ "$SG_AGE" -gt 12 ]] && SG_FLAG=" [STALE ${SG_AGE}h]"
-  echo "- surge: ${SG_VERDICT:-?}（${SG_AGE}h 前报告）${SG_FLAG}"
+  echo "- surge: ${SG_VERDICT:-?}（报告 mtime ${SG_AGE}h / 输入快照 ${SURGE_STAMP:-?}）${SG_FLAG}${BRIDGE_FLAG}"
 else
   echo "- surge: 无报告"
 fi
 echo
 
-# ── 汇总 ────────────────────────────────────────────────────
-GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE status <> 'active' OR circuit_state <> 'closed' OR consecutive_failures > 0;")
+# ── 7. fleet executor 版本分布（漂移可见化）──────────────────
+# 版本漂移此前完全不可见：registry 的 target_version 一直为空，也没有任何
+# 报告口径统计过「谁跑在哪个修订上」。这里只做可见化 + 标出非多数版本节点，
+# 不写 target_version（未批准滚动升级前写目标版本等于记录一个假事实）。
+echo "## 7. fleet executor 版本分布与一致性（在线节点）"
+FLEET_ROWS=$(q "SELECT version || ' | ' || count(*) || ' | ' || string_agg(node_id, ', ' ORDER BY node_id) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' GROUP BY version ORDER BY count(*) DESC, version;")
+FLEET_TOTAL=$(q "SELECT count(*) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online';")
+if [[ -n "$FLEET_ROWS" ]]; then
+  table "版本 | 节点数 | 节点" "$FLEET_ROWS"
+  FLEET_DISTINCT=$(q "SELECT count(DISTINCT version) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online';")
+  FLEET_MINORITY=$(q "SELECT count(*) FROM executor_nodes e WHERE e.node_kind = 'executor' AND e.status = 'online' AND e.version <> (SELECT version FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' GROUP BY version ORDER BY count(*) DESC, version LIMIT 1);")
+  echo "- 在线 executor=${FLEET_TOTAL:-0}，版本种类=${FLEET_DISTINCT:-0}，非多数版本节点=${FLEET_MINORITY:-0}"
+  [[ "${FLEET_MINORITY:-0}" -gt 0 ]] && echo "  → 版本漂移；滚动升级未执行（需维护窗口，见 tools/deploy-to-remote.sh <node> deploy）"
+else
+  echo "- 无在线 executor 记录"
+fi
+echo
+
+# ── 7b. 声明目标一致性 → todo（P0-6）─────────────────────────
+# `target_version` 在此之前**没有任何消费点**，于是"节点没落在声明目标上"这件事只能靠人
+# 肉看版本分布发现。这里把它变成可执行的 todo，并且**自动关闭**：只有"漂移存在"才留 todo，
+# 收敛后自动 done —— 否则 todo 会积累成噪音，运维就会开始忽略它。
+# 幂等键 dedupe_key 保证同一节点只留一条未完成 todo。
+q "INSERT INTO todos (id, tenant_id, project_id, user_id, node_id, title, description, kind, status, priority, source, dedupe_key)
+   SELECT 'todo-fleet-drift-' || e.node_id, 'local', 'los', 'operator', e.node_id,
+          'Fleet drift: ' || e.node_id || ' 未落在声明目标',
+          '节点实际版本 ' || e.version || ' != 声明目标 ' || COALESCE(e.target_version, '(null)')
+            || '。修复：对目标节点执行滚动升级（sync → install → restart → verify → promote），'
+            || '并把 target_version 更新为该次下发的摘要。',
+          'task', 'backlog', 'P1', 'fleet_drift', 'fleet_drift:' || e.node_id
+     FROM executor_nodes e
+    WHERE e.node_kind = 'executor' AND e.status = 'online'
+      AND e.target_version IS NOT NULL AND e.version <> e.target_version
+      AND NOT EXISTS (SELECT 1 FROM todos t WHERE t.dedupe_key = 'fleet_drift:' || e.node_id
+                        AND t.archived_at IS NULL AND t.status NOT IN ('done', 'cancelled'));" >/dev/null
+q "UPDATE todos SET status = 'done', completed_at = now(), updated_at = now(),
+        archive_reason = 'fleet converged: node now matches its declared target_version'
+    WHERE source = 'fleet_drift' AND archived_at IS NULL AND status NOT IN ('done', 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM executor_nodes e
+                       WHERE e.node_id = todos.node_id AND e.node_kind = 'executor' AND e.status = 'online'
+                         AND e.target_version IS NOT NULL AND e.version <> e.target_version);" >/dev/null
+DRIFT_OPEN=$(q "SELECT count(*) FROM todos WHERE source = 'fleet_drift' AND archived_at IS NULL AND status NOT IN ('done', 'cancelled');")
+DRIFT_NODES=$(q "SELECT count(*) FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' AND target_version IS NOT NULL AND version <> target_version;")
+if [[ "${DRIFT_NODES:-0}" -gt 0 ]]; then
+  echo "- **声明目标一致性**：${DRIFT_NODES} 台未落在 target_version 上（未完成 todo=${DRIFT_OPEN}）"
+  q "SELECT '  - ' || node_id || ': ' || version || ' → ' || COALESCE(target_version, '(null)') FROM executor_nodes WHERE node_kind = 'executor' AND status = 'online' AND target_version IS NOT NULL AND version <> target_version ORDER BY node_id;"
+else
+  echo "- 声明目标一致性：全部落在 target_version 上（fleet_drift todo 已自动关闭）"
+fi
+echo
+
+# retired 是有意下线、operator 暂停是人工意图，都不算异常；
+# 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
+GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
 APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'awaiting_approval';")
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"

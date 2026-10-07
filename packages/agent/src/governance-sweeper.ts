@@ -1,7 +1,7 @@
 import { getLogger } from '@los/infra/logger';
 import { withInitDb } from '@los/infra/db';
 import { ensureGovernanceJobStore } from './governance-jobs-schema.js';
-import { listDueGovernanceJobs, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
+import { listDueGovernanceJobs, listGovernanceJobs, updateGovernanceJob, updateGovernanceJobState } from './governance-jobs-crud.js';
 import { runJobAudit } from './governance-auditors.js';
 import { buildGaLoopSummary, runGaLoop, maybeAutoRecoverPaused } from './ga-loop-runner.js';
 import { evaluateLoopGate } from './ga-circuit-breaker.js';
@@ -10,6 +10,7 @@ import { createTodosFromFindings } from './governance-sweep-todos.js';
 import { appendSessionEvent } from './session-events.js';
 import { randomUUID } from 'node:crypto';
 import type {
+  GovernanceJob,
   GovernanceJobType,
   GovernanceSweepJobResult,
   GovernanceSweepResult,
@@ -26,6 +27,50 @@ export interface RunGovernanceSweepOptions {
   now?: Date;
 }
 
+/**
+ * Bring back jobs the loop paused by itself (no-op throttle / circuit breaker).
+ *
+ * Must run outside `listDueGovernanceJobs`, which only selects
+ * `status='active'`: a paused row is invisible to the sweep loop, so putting
+ * this check inside the loop made it unreachable for exactly the rows it is
+ * meant to rescue. Operator pauses are skipped — a human stop is only lifted by
+ * a human (`pause_source='operator'`, see maybeAutoRecoverPaused).
+ */
+export async function recoverAutoPausedGovernanceJobs(opts?: {
+  tenantId?: string;
+  projectId?: string;
+}): Promise<GovernanceJob[]> {
+  const paused = await listGovernanceJobs({
+    status: 'paused',
+    tenantId: opts?.tenantId,
+    projectId: opts?.projectId,
+    limit: 200,
+  });
+  const recovered: GovernanceJob[] = [];
+  for (const job of paused) {
+    if (!maybeAutoRecoverPaused(job)) continue;
+    try {
+      const updated = await updateGovernanceJob(job.id, {
+        status: 'active',
+        // Clear the provenance: the job is running again, so a stale
+        // 'no_op_throttle' must not be carried into a future pause.
+        pauseSource: null,
+        lastRunAt: new Date().toISOString(),
+      });
+      await updateGovernanceJobState(job.id, {
+        circuitState: 'closed',
+        consecutiveFailures: 0,
+        circuitOpenedAt: null,
+      });
+      log.info(`GA loop: auto-recovered ${job.pauseSource ?? 'legacy'}-paused job ${job.jobType} (${job.id})`);
+      if (updated) recovered.push(updated);
+    } catch (err) {
+      log.warn(`GA loop: failed to auto-recover job ${job.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return recovered;
+}
+
 export async function runGovernanceSweepWithDefaultDb(
   opts?: RunGovernanceSweepOptions,
 ): Promise<GovernanceSweepResult> {
@@ -39,6 +84,17 @@ export async function runGovernanceSweep(
   const tenantId = opts?.tenantId;
   const projectId = opts?.projectId;
   await ensureGovernanceJobStore();
+
+  // Rescue jobs the loop paused itself BEFORE computing the due set. A paused
+  // job is invisible to listDueGovernanceJobs (status='active'), so the
+  // in-loop recovery further down could never fire for the very rows it exists
+  // to rescue — that is how three dead_letter jobs sat paused for weeks while
+  // the seeder quietly created duplicates (2026-09/10). Operator pauses are
+  // exempt; see maybeAutoRecoverPaused.
+  const resumed = await recoverAutoPausedGovernanceJobs({ tenantId, projectId });
+  if (resumed.length > 0) {
+    log.info(`Sweep auto-recovered ${resumed.length} self-paused job(s): ${resumed.map(job => job.jobType).join(', ')}`);
+  }
 
   const dueJobs = await listDueGovernanceJobs({
     jobTypes: opts?.jobTypes,
@@ -84,25 +140,8 @@ export async function runGovernanceSweep(
     } catch (err) { log.warn(`Session event emission failed: ${err instanceof Error ? err.message : String(err)}`); }
 
     try {
-      // ── Auto-recover paused jobs whose circuit breaker has expired ──
-      if (maybeAutoRecoverPaused(job)) {
-        try {
-          await updateGovernanceJob(job.id, {
-            status: 'active',
-            lastRunAt: new Date().toISOString(),
-          });
-          await updateGovernanceJobState(job.id, {
-            circuitState: 'closed',
-            consecutiveFailures: 0,
-            circuitOpenedAt: null,
-          });
-          log.info(`GA loop: auto-recovered paused job ${job.jobType} (${job.id})`);
-          job.status = 'active';
-          job.circuitState = 'closed';
-        } catch (err) {
-          log.warn(`GA loop: failed to auto-recover job ${job.id}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+      // Auto-recovery already ran in the pre-pass above (a paused job never
+      // reaches this loop, which only sees active jobs).
 
       // ── Gate check: skip if circuit broken or no-op throttled ──
       gateDecision = evaluateLoopGate(job);
@@ -130,7 +169,10 @@ export async function runGovernanceSweep(
             log.info(`GA loop: downgraded ${job.jobType} cadence from ${job.cadence} to ${gateDecision.newCadence}`);
           }
           if (gateDecision.action === 'pause') {
-            await updateGovernanceJob(job.id, { status: 'paused' });
+            await updateGovernanceJob(job.id, {
+              status: 'paused',
+              pauseSource: gateDecision.pauseSource ?? 'no_op_throttle',
+            });
             log.info(`GA loop: paused ${job.jobType} (${gateDecision.reason})`);
           }
 

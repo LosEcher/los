@@ -231,6 +231,9 @@ EnvironmentFile=$INSTALL_DIR/.env
 ExecStart=$NODE_PATH --import $INSTALL_DIR/node_modules/.pnpm/tsx@4.22.3/node_modules/tsx/dist/preflight.cjs $INSTALL_DIR/packages/executor/src/index.ts
 Restart=always
 RestartSec=10
+# 与 deploy/systemd/los-executor.service 一致：瞬时故障不许永久放弃
+StartLimitIntervalSec=0
+StartLimitBurst=0
 
 [Install]
 WantedBy=multi-user.target

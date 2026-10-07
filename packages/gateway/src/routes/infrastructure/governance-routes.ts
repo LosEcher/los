@@ -54,6 +54,8 @@ interface GovernanceJobSummary {
   maxAutoFixAttempts: number | null;
   stopCondition: string | null;
   circuitState: string;
+  /** 'operator' pauses are never auto-recovered; null = running or legacy. */
+  pauseSource: string | null;
   consecutiveNoOps: number;
   consecutiveFailures: number;
   lastRunAt: string | null;
@@ -95,6 +97,7 @@ function toSummary(job: any): GovernanceJobSummary {
     maxAutoFixAttempts: job.autoFix?.maxAutoFixAttempts ?? null,
     stopCondition: job.autoFix?.stopCondition ?? null,
     circuitState: job.circuitState ?? 'closed',
+    pauseSource: job.pauseSource ?? null,
     consecutiveNoOps: job.consecutiveNoOps ?? 0,
     consecutiveFailures: job.consecutiveFailures ?? 0,
     lastRunAt: job.lastRunAt ?? null,
@@ -281,7 +284,14 @@ export function registerGovernanceRoutes(
       const updated = [];
       for (const job of jobs) {
         if (job.status === 'retired') continue;
-        const next = await deps.updateGovernanceJob(job.id, { status });
+        const next = await deps.updateGovernanceJob(job.id, {
+          status,
+          // Record provenance on pause and clear it on resume: without it an
+          // operator stop is indistinguishable from a throttle stop and the
+          // sweep's auto-recovery would happily undo the operator (see
+          // maybeAutoRecoverPaused).
+          pauseSource: status === 'paused' ? 'operator' : null,
+        });
         updated.push(toSummary(next));
       }
       return reply.send({ ok: true, status, count: updated.length, jobs: updated });

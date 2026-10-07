@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  los fleet snapshot producer — 每 6h 把集群版本快照落到 los 工作区，供 los 的判读任务只读。
+
+  为什么必须由 launchd（而不是 DSH 调度器）来跑：
+  1) los 的定时执行沙箱是 L1（workspace-write），**不给 shell**；给 shell 需要 sandboxMode=sandbox，
+     而那个 OS 沙箱**阻断 TCP 与 /dev/null** —— 采集要 curl 8 台节点 + psql 查 registry，跑不动。
+  2) DSH 侧 headless agent 也有自己的沙箱，工作区是 ~/.dsh/scheduler-reports，
+     **写不进 los 仓库**（2026-10-06 实测 EPERM，且它的 run 仍报 succeeded —— 假成功）。
+  3) 因此"需要网络+DB 的采集"必须在两个沙箱之外跑：launchd。这与 network-observe 桥接
+     （com.echerlos.los.network-observe-bridge）是同一个结论、同一个安装方式。
+
+  安装：bash tools/install-los-fleet-snapshot.sh
+  卸载：bash tools/install-los-fleet-snapshot.sh --uninstall
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.echerlos.los.fleet-snapshot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__LOS_ROOT__/tools/los-fleet-consistency.sh</string>
+    <string>--snapshot</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__LOS_ROOT__</string>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOS_ROOT__/.los-runtime/fleet/snapshot.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOS_ROOT__/.los-runtime/fleet/snapshot.err.log</string>
+</dict>
+</plist>

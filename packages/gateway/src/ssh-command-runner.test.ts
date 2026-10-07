@@ -11,10 +11,8 @@ import {
   type SshRunnerDeps,
 } from './ssh-command-runner.js';
 import {
-  normalizeUnirunCapabilities,
-  parseUnirunCapabilities,
-  unirunSshUsable,
   type UnirunCapabilities,
+  type UnirunProbe,
 } from './unirun-capabilities.js';
 
 function nodeWith(ssh: Record<string, unknown> = {}) {
@@ -194,40 +192,31 @@ test('missing host_name → connected=false, no unirun call', async () => {
 });
 
 // ── capabilities ───────────────────────────────────────────────────────────
+// The probe itself (and the capability-key mapping) is covered in
+// unirun-capabilities.test.ts; here we only pin how the runner consumes it.
 
-test('parseUnirunCapabilities: floors at 0.3.0 (identity flags) and 0.4.0 (remote workdir/env)', () => {
-  assert.deepEqual(parseUnirunCapabilities('unirun 0.4.0'), FULL_CAPS);
-  assert.deepEqual(parseUnirunCapabilities('unirun 0.5.1\n'), FULL_CAPS);
-  assert.deepEqual(parseUnirunCapabilities('unirun 1.0.0-rc.1'), FULL_CAPS);
-  assert.deepEqual(parseUnirunCapabilities('unirun 0.3.0'), { sshIdentity: true, sshWorkdirEnv: false });
-  assert.deepEqual(parseUnirunCapabilities('unirun 0.2.1'), { sshIdentity: false, sshWorkdirEnv: false });
-  assert.deepEqual(parseUnirunCapabilities(''), { sshIdentity: false, sshWorkdirEnv: false });
-  assert.deepEqual(parseUnirunCapabilities('not a version'), { sshIdentity: false, sshWorkdirEnv: false });
+test('a probe-shaped detection is consumed like a bare capability set', async () => {
+  const full: UnirunProbe = {
+    bin: '/usr/local/bin/unirun',
+    staleVersion: null,
+    capabilities: FULL_CAPS,
+  };
+  const deps = depsWith({ detectUnirun: async () => full });
+  await runSshCommand(nodeWith({ host_name: 'h' }), { command: 'id', cwd: '/tmp' }, deps);
+  assert.equal(deps.calls.unirun.length, 1);
+  assert.equal(deps.calls.native, 0);
 });
 
-test('normalizeUnirunCapabilities: boolean shorthand maps to full/none', () => {
-  assert.deepEqual(normalizeUnirunCapabilities(true), FULL_CAPS);
-  assert.deepEqual(normalizeUnirunCapabilities(false), {
-    sshIdentity: false,
-    sshWorkdirEnv: false,
-  });
-  assert.deepEqual(
-    normalizeUnirunCapabilities({ sshIdentity: true, sshWorkdirEnv: false }),
-    { sshIdentity: true, sshWorkdirEnv: false },
-  );
-});
-
-test('unirunSshUsable: only a capable-enough binary serves the call', () => {
-  const legacy = { sshIdentity: true, sshWorkdirEnv: false };
-  const ancient = { sshIdentity: false, sshWorkdirEnv: false };
-  assert.equal(unirunSshUsable(FULL_CAPS, {}), true);
-  assert.equal(unirunSshUsable(FULL_CAPS, { cwd: '/tmp' }), true);
-  assert.equal(unirunSshUsable(FULL_CAPS, { env: { A: '1' } }), true);
-  assert.equal(unirunSshUsable(FULL_CAPS, { env: {} }), true);
-  assert.equal(unirunSshUsable(legacy, {}), true);
-  assert.equal(unirunSshUsable(legacy, { cwd: '/tmp' }), false);
-  assert.equal(unirunSshUsable(legacy, { env: { A: '1' } }), false);
-  assert.equal(unirunSshUsable(ancient, {}), false);
+test('an installed-but-incapable binary (stale probe) stays on native ssh', async () => {
+  const stale: UnirunProbe = {
+    bin: '/usr/local/bin/unirun',
+    staleVersion: 'unirun 0.3.0',
+    capabilities: { sshIdentity: false, sshWorkdirEnv: false },
+  };
+  const deps = depsWith({ detectUnirun: async () => stale });
+  await runSshCommand(nodeWith({ host_name: 'h' }), { command: 'id', cwd: '/tmp' }, deps);
+  assert.equal(deps.calls.unirun.length, 0);
+  assert.equal(deps.calls.native, 1);
 });
 
 // ── arg construction ───────────────────────────────────────────────────────
