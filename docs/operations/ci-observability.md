@@ -114,6 +114,18 @@ cold write.
    the environment silently busts the whole cache family). Keep DB/test vars
    out of `globalEnv`; NODE_ENV stays because it can genuinely affect output
    (vite build mode).
+
+   > **Correction (2026-10-07).** "Keep DB/test vars out of `globalEnv`" was
+   > right; the change also removed them from turbo entirely, which was not.
+   > Turbo 2.x strict env mode deletes every variable not declared in
+   > `globalEnv`/`globalPassThroughEnv` from the task process, so this trim
+   > stripped `DATABASE_URL`/`TEST_DATABASE_URL` from the `test` task and broke
+   > the GitHub `gate-test` lane on every `main` push for ~7 weeks (see
+   > `docs/governance/github-branch-gates.md`, "Accepted cost: the turbo test
+   > path is only exercised on `main`"). The two goals are not in conflict:
+   > `globalPassThroughEnv` delivers the value **and** is excluded from the task
+   > hash, so cache keys stay stable. `tools/check-turbo-env-passthrough.mjs`
+   > asserts both halves in an always-on gate phase.
 2. `globalDependencies: ["tsconfig.base.json"]` added. Every package tsconfig
    extends the root base, but turbo's default global hash does not include it
    (`globalCacheInputs.files` was empty) — changing the base used to produce

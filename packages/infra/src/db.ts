@@ -97,9 +97,18 @@ export function _resolveDatabaseUrlForInit(databaseUrl?: string): string | undef
     // `!process.env.CI` bypass let a missing/unsafe TEST_DATABASE_URL silently
     // fall back to the built-in default (postgres://localhost:5432/los) on CI
     // runners, which surfaced three layers later as an opaque pg SCRAM error
-    // ("SASL: ... client password must be a string"). See git history
-    // (56321f52, 2026-06-13) for the original "TEST_DATABASE_URL not inherited
-    // by test processes" incident — this guard is the fail-closed half.
+    // ("SASL: ... client password must be a string"). This guard is the
+    // fail-closed half.
+    //
+    // ROOT CAUSE, corrected 2026-10-07: the vars were not lost intermittently by
+    // the runner. turbo 2.x runs in strict env mode and deletes every variable
+    // from the task process that turbo.json does not declare, so `pnpm test`
+    // (tools/run-tests.sh -> `turbo test`) stripped TEST_DATABASE_URL while the
+    // job step still showed it set. 3130de14 dropped the declarations from
+    // globalEnv for cache-key stability; the fix is globalPassThroughEnv, and
+    // tools/check-turbo-env-passthrough.mjs now asserts it. Local runs masked
+    // the fault because loadEnvFile() (config-sources.ts) finds the repo-root
+    // .env and copies its keys into process.env; CI has no .env.
     // LOS_ALLOW_LIVE_TEST_DB=1 remains the explicit one-off override.
     if (candidate && !_isSafeTestDatabaseUrl(candidate) && process.env.LOS_ALLOW_LIVE_TEST_DB !== '1') {
       throw new Error(

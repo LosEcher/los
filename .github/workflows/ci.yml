@@ -145,12 +145,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Diagnose the intermittent "test processes lost DATABASE_URL" class of
-      # failures (2026-08-20 PR #256: pg SCRAM "client password must be a
-      # string" across every DB-backed package because the test process fell
-      # back to the built-in default DB). Printing presence + redacted URL
-      # turns the next occurrence into a one-line diagnosis. See git history
-      # (56321f52, 2026-06-13) for the original incident of the same class.
+      # Dump the job-level DB environment. NOTE (corrected 2026-10-07): the
+      # "test processes lost DATABASE_URL" class was never an intermittent
+      # runner-env fault. This step shows the variables as SET at job level even
+      # on runs where every test process reported them unset, because turbo
+      # deletes undeclared variables between this shell and the task process.
+      # Printing presence here is now the contrast half of that diagnosis:
+      # set here + unset in the task == turbo.json stopped declaring the
+      # variable. The primary detector is tools/check-turbo-env-passthrough.mjs.
       - name: Dump test environment diagnostics
         run: |
           echo "node: $(node -v)"
@@ -172,10 +174,20 @@ jobs:
 
       # mirror-PR lane: GitHub mirror PRs (head mirror/*) carry Forgejo-validated
       # content and do not need a second full test run here. Skipping the heavy
-      # steps at step level keeps the required gate-test check green while
-      # avoiding the intermittent "test processes lost DATABASE_URL" runner env
-      # class (2026-06-13 56321f52; 2026-08-20 PR #256) that blocks mirror sync.
+      # steps at step level keeps the required gate-test check green.
       # See docs/governance/github-branch-gates.md "Mirror PR lane".
+      #
+      # TRADE-OFF THIS LANE CREATES (2026-08-18 -> 2026-10-07 incident): because
+      # every GitHub PR head is mirror/*, the skip means this heavy lane runs for
+      # the first time on the push to main. Forgejo validates the same tree with
+      # `pnpm --filter @los/* test` (no turbo), which cannot see defects in the
+      # turbo path this lane uses (`pnpm test` -> tools/run-tests.sh -> `turbo
+      # test`). turbo.json dropped DATABASE_URL/TEST_DATABASE_URL from globalEnv
+      # (3130de14) and turbo 2.x strict env mode then deleted them from every
+      # test process, so main went red on 9 consecutive pushes while every PR
+      # stayed green. The turbo path is now covered by an always-on gate phase
+      # (tools/check-turbo-env-passthrough.mjs) that also runs on mirror PRs, so
+      # this class can no longer hide here.
       - name: Test root workspace
         if: ${{ !startsWith(github.head_ref, 'mirror/') }}
         env:

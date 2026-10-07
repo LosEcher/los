@@ -12,7 +12,10 @@
      （com.echerlos.los.network-observe-bridge）是同一个结论、同一个安装方式。
 
   安装：bash tools/install-los-fleet-snapshot.sh
-  卸载：bash tools/install-los-fleet-snapshot.sh --uninstall
+  卸载：bash tools/install-los-fleet-snapshot.sh -–uninstall
+
+  注：本注释内不能出现连续 ASCII 双连字符（libxml2 / xmllint / Python plistlib 会拒绝解析该 plist），
+      故上文标志的第二个连字符用 en dash（–）表示；复制使用时请改回两个 ASCII 连字符。
 -->
 <plist version="1.0">
 <dict>
