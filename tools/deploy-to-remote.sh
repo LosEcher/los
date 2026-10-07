@@ -30,8 +30,23 @@ set -euo pipefail
 
 NODE="${1:-}"
 CMD="${2:-help}"
+# `tarball` 是"不需要目标节点"的工具型子命令（Windows 驱动用它拿到与 Linux 完全相同的
+# 下发内容），因此必须在按 NODE 做连通性检查**之前**处理。
+if [ "$NODE" = "tarball" ]; then
+  _out="${2:-/tmp/los-ship.tar.gz}"
+  COPYFILE_DISABLE=1 tar czf "$_out" -C "$(cd "$(dirname "$0")/.." && pwd)" \
+    --exclude='node_modules' --exclude='.git' --exclude='.jj' --exclude='.DS_Store' \
+    --exclude='._*' --exclude='packages/*/.los' --exclude='packages/*/.los/*' \
+    --exclude='.los-runtime' --exclude='tmp' --exclude='dist' --exclude='.tsbuildinfo' \
+    tools/ deploy/ packages/ contracts/ \
+    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
+    || { echo "tarball build failed" >&2; exit 1; }
+  printf '%s %s\n' "$_out" "$(shasum -a 256 "$_out" | cut -d' ' -f1)"
+  exit 0
+fi
 shift 2 2>/dev/null || true
 CMD_ARGS=("$@")
+
 
 if [ -z "$NODE" ] || [ "$NODE" = "help" ] || [ "$NODE" = "-h" ] || [ "$NODE" = "--help" ]; then
   cat <<'EOF'
@@ -40,10 +55,21 @@ deploy-to-remote.sh — push los executor to a Tailscale node (no remote VCS nee
 Phased commands:
   preflight           Check remote memory/swap/disk/PSI before heavy ops
   sync                Push code via tar pipe (no git/jj on remote)
-  install             Install deps (supports --low-resource)
+  install             Install deps (pnpm) + the pinned unirun (supports --low-resource)
   install-service     Install systemd unit
   restart             Restart executor service
   verify              Health check + connectivity validation
+  digest              Read-only: compare the node content digest against the target
+  promote             Clear the restart-induced drain (needs --node-id <id>)
+
+Options:
+  --node-id <id>      Registry node id (also via LOS_REMOTE_NODE_ID); enables auto-promote after verify
+
+Environment:
+  LOS_DEPLOY_AUTO_PROMOTE=0   Do not promote automatically at the end of verify
+  LOS_SSH_OPTS                Extra ssh(1) options, e.g. -o ControlPath=none
+  LOS_DEPLOY_SYNC_MODE        upload (default: scp + sha256 + extract on the node) | pipe (legacy)
+  LOS_REQUIRE_UNIRUN=1        Fail instead of warning when the pinned unirun is missing/unusable
 
 Shortcuts:
   status              Show remote state
@@ -75,6 +101,19 @@ mkdir -p "$LOG_BASE"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BUILD_VERSION="${LOS_DEPLOY_VERSION:-$(bash "$LOCAL_REPO/tools/los.sh" build-version)}"
 VERIFY_GRACE_SECONDS="${LOS_DEPLOY_VERIFY_GRACE_SECONDS:-90}"
+# Extra ssh(1) options, word-split. Set LOS_SSH_OPTS='-o ControlPath=none
+# -o ControlMaster=no' to bypass ~/.ssh/config connection multiplexing: a
+# multiplexed master that drops mid-transfer makes sync abort silently (the
+# local script runs under `set -e`), which is how node34 lost its version stamp
+# and tencent-sin lost a whole sync during the 2026-10-06 rollout.
+SSH_OPTS="${LOS_SSH_OPTS:-}"
+# Registry node id, used by `promote` and by the post-verify hint.
+NODE_ID="${LOS_REMOTE_NODE_ID:-}"
+for ((i = 0; i < ${#CMD_ARGS[@]}; i++)); do
+  if [ "${CMD_ARGS[$i]}" = "--node-id" ] && [ $((i + 1)) -lt ${#CMD_ARGS[@]} ]; then
+    NODE_ID="${CMD_ARGS[$((i + 1))]}"
+  fi
+done
 
 # ── Detect Tailscale hostname ───────────────────────────────
 resolve_ts_host() {
@@ -118,7 +157,9 @@ remote_exec() {
   local remote_command
   printf -v remote_command '%q ' "$@"
   if [ "$SSH_TRANSPORT" = "ssh" ]; then
-    ssh "$SSH_TARGET" "$remote_command"
+    # $SSH_OPTS is intentionally unquoted so operators can pass several flags.
+    # shellcheck disable=SC2086
+    ssh $SSH_OPTS "$SSH_TARGET" "$remote_command"
   else
     tailscale ssh "$SSH_TARGET" -- "$remote_command"
   fi
@@ -225,9 +266,24 @@ PREFLIGHT
 }
 
 # ── Sync (tar pipe, no VCS on remote) ──────────────────────
+# 下发内容的唯一打包实现：Windows 驱动也调用它（`tarball` 子命令），
+# 避免"同一份文件选择"出现第 4 个拷贝（2026-10-06 的教训：两套实现必然漂移）。
+build_ship_tar() {
+  local out="$1"
+  COPYFILE_DISABLE=1 tar czf "$out" -C "$LOCAL_REPO" \
+    --exclude='node_modules' --exclude='.git' --exclude='.jj' --exclude='.DS_Store' \
+    --exclude='._*' --exclude='packages/*/.los' --exclude='packages/*/.los/*' \
+    --exclude='.los-runtime' --exclude='tmp' --exclude='dist' --exclude='.tsbuildinfo' \
+    tools/ deploy/ packages/ contracts/ \
+    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json
+}
+
 do_sync() {
   local log_file="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.log"
+  SYNC_EXTRACTED=0   # 供 EXIT trap 区分「还没动过节点」与「解包到一半」
   log_info "syncing code to $TS_HOST via tar pipe (log: $log_file)"
+  # 收敛判定（含"中途失败"这条路径）在退出时统一执行。
+  trap 'sync_convergence_guard' EXIT
 
   # Ship every workspace package so frozen-lockfile validation sees the same
   # manifests as the lockfile. Omitting runtime dependencies left stale source;
@@ -235,10 +291,15 @@ do_sync() {
   local tmp_tar="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.tar.gz"
 
   # Create tar from local repo — only ship what the executor needs.
-  tar czf "$tmp_tar" -C "$LOCAL_REPO" \
+  # COPYFILE_DISABLE stops bsdtar from emitting AppleDouble `._*` sidecar
+  # entries, which otherwise land on the node as junk that pollutes its
+  # content-hash version.
+  COPYFILE_DISABLE=1 tar czf "$tmp_tar" -C "$LOCAL_REPO" \
     --exclude='node_modules' \
     --exclude='.git' \
     --exclude='.jj' \
+    --exclude='.DS_Store' \
+    --exclude='._*' \
     --exclude='packages/*/.los' \
     --exclude='packages/*/.los/*' \
     --exclude='.los-runtime' \
@@ -256,13 +317,127 @@ do_sync() {
     turbo.json
 
   log_info "  tar: $(du -h "$tmp_tar" | cut -f1)"
+  # 与 remote_sh 的 ssh 选项保持一致：少了 BatchMode/ConnectTimeout，scp 会走交互式认证并
+  # 以 "Connection closed" 失败（实测：同一目标手动加 BatchMode 即成功）。
+  LOS_SCP_OPTS="-o BatchMode=yes -o ConnectTimeout=20 ${LOS_SSH_OPTS:-}"
 
-  # Pipe tar to remote and extract
-  cat "$tmp_tar" | remote_sh sh -c \
-    "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && chown -R los:los ." \
-    >> "$log_file" 2>&1
+  # 传输方式。默认 **upload**：先 scp 到节点 /tmp、双侧比对 sha256、再在节点本地解包。
+  # 原因是 pipe 模式（`cat tar | ssh … 'tar xzf -'`）在 SSH 控制连接中途断开时会留下
+  # **半截树** —— 2026-10-06 tencent-sin 因此崩溃掉线、vultr 树到目标但 .env 未盖章，
+  # 而且每次重试都得到不同的 build-version 摘要。已传完的文件不会因连接断开而截断，
+  # 所以 upload 是可判定的：sha256 不符就是不完整，重传即可。
+  # LOS_DEPLOY_SYNC_MODE=pipe 可回退到旧行为（仅用于对比排查）。
+  local sync_mode="${LOS_DEPLOY_SYNC_MODE:-upload}"
+  if [ "$sync_mode" = "pipe" ]; then
+    log_info "  transport: pipe (legacy)"
+    cat "$tmp_tar" | remote_sh sh -c \
+      "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf - && { chown -R los:los . 2>/dev/null || true; }" \
+      >> "$log_file" 2>&1
+  else
+    local local_sha
+    local_sha="$(shasum -a 256 "$tmp_tar" | cut -d' ' -f1)"
+    local remote_tar="/tmp/${NODE}-sync-${TIMESTAMP}.tar.gz"
+    local ok=0
+    for attempt in 1 2 3; do
+      # 必须用 $SSH_TARGET（与 ssh 路径同一个目标），**不能**用 $TS_HOST：
+      # resolve_ts_host 会把别名解析成裸 Tailscale IP，从而丢掉 ssh config 里的
+      # Port/User/IdentityFile —— 实测表现为 "Connection closed by <ip> port 22"，
+      # 而手动用别名 scp 则成功。
+      if ! scp $LOS_SCP_OPTS "$tmp_tar" "$SSH_TARGET:$remote_tar" >> "$log_file" 2>&1; then
+        log_warn "  upload attempt $attempt failed (scp)"
+        sleep 3
+        continue
+      fi
+      local got_sha
+      got_sha="$(remote_sh sh -c "shasum -a 256 '$remote_tar' 2>/dev/null || sha256sum '$remote_tar' 2>/dev/null" | cut -d' ' -f1 | tr -d '\r')"
+      if [ "$got_sha" != "$local_sha" ]; then
+        log_warn "  upload attempt $attempt failed (sha256 mismatch: ${got_sha:-<none>})"
+        sleep 3
+        continue
+      fi
+      ok=1
+      break
+    done
+    [ "$ok" = "1" ] || die "upload to $TS_HOST failed after 3 attempts (sha256 never matched) — nothing was extracted"
+    log_info "  transport: upload (sha256 verified)"
+    remote_sh sh -c "mkdir -p '$REMOTE_HOME' && cd '$REMOTE_HOME' && tar xzf '$remote_tar' && rm -f '$remote_tar' && { chown -R los:los . 2>/dev/null || true; }" \
+      >> "$log_file" 2>&1
+  fi
 
+  SYNC_EXTRACTED=1
   log_info "  extracted to $REMOTE_HOME"
+
+  # Normalize source modes. A file created under umask 077 lands as 0600, and
+  # `tools/los.sh build-version` hashes every source file — for an SSH user that
+  # is not the owner the read fails and the fleet version identity breaks
+  # (observed on oracle 2026-10-06: "shasum: tools/ci-health-check.sh: Permission
+  # denied" instead of a version). tar carries modes, so fixing them here makes
+  # every future sync self-healing. node_modules is pruned: it is huge, is not
+  # shipped, and already has sane modes.
+  remote_sh sh -c "cd '$REMOTE_HOME' && chmod -R a+rX tools deploy contracts 2>/dev/null; find packages -name node_modules -prune -o -exec chmod a+rX {} + 2>/dev/null; true" \
+    >> "$log_file" 2>&1 || true
+
+  # Prune files that no longer exist in the repo. tar extraction only adds and
+  # overwrites, so a file deleted upstream lingers on the node forever — and
+  # since `tools/los.sh build-version` hashes every source file, the node's own
+  # version then never converges to the fleet target (observed on vultr
+  # 2026-10-06: 41 stale files from the old flat packages/agent/src/tools layout
+  # kept it reporting 0.1.0+b857d2dfc47ee while the target was another hash).
+  # node_modules / dist / .turbo are pruned on both sides, so installed deps and
+  # build output are never candidates.
+  local shipped_list="$LOG_BASE/${NODE}-shipped-${TIMESTAMP}.list"
+  COPYFILE_DISABLE=1 tar tzf "$tmp_tar" | grep -v '/$' | LC_ALL=C sort > "$shipped_list"
+  local want_lines got_lines
+  want_lines="$(wc -l < "$shipped_list" | tr -d ' ')"
+  got_lines=""
+  for attempt in 1 2; do
+    cat "$shipped_list" | remote_sh sh -c 'cat > /tmp/los-shipped.list' >> "$log_file" 2>&1 || true
+    got_lines="$(remote_sh sh -c 'wc -l < /tmp/los-shipped.list' 2>/dev/null | tr -d ' \r' || true)"
+    [ "$got_lines" = "$want_lines" ] && break
+    log_warn "  shipped manifest upload mismatch ($got_lines/$want_lines lines), retrying"
+    sleep 3
+  done
+  if [ "$got_lines" != "$want_lines" ]; then
+    # 清单缺失必须让剪枝"跳过"而不是"全删":2026-10-06 vultr 上它曾表现为
+    # "1235 个陈旧文件",靠 >500 的闸门才没误删。
+    log_warn "  shipped manifest upload failed ($got_lines/$want_lines) — skipping the stale-file prune"
+    remote_sh sh -c 'rm -f /tmp/los-shipped.list' >> "$log_file" 2>&1 || true
+  fi
+  remote_sh bash -s "$REMOTE_HOME" <<'PRUNE_STALE'
+# 全脚本强制 C locale：两个列表用 `LC_ALL=C sort` 生成，但 comm **自身**会按环境 locale
+# 校验"是否有序"。vultr 的 LANG=en_US.UTF-8 下，comm 把 C 排序的清单判成无序 → 乱序双指针
+# 产出 1235 个假"陈旧"项（2026-10-06 实测），而 locale 为 C 的节点一切正常 —— 这正是
+# "只在部分节点发作"的原因。破坏性路径上不允许任何 locale 依赖。
+export LC_ALL=C
+export LANG=C >> "$log_file" 2>&1
+set -euo pipefail
+los_home="$1"
+cd "$los_home"
+find tools deploy packages contracts \
+  -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
+  -type f ! -name '*.tsbuildinfo' -print | LC_ALL=C sort > /tmp/los-present.list
+LC_ALL=C comm -23 /tmp/los-present.list /tmp/los-shipped.list > /tmp/los-stale.list || true
+if [ ! -s /tmp/los-shipped.list ]; then
+  echo "prune: SKIPPED — shipped manifest missing or empty (upload failed); deleting nothing"
+  exit 0
+fi
+stale_count="$(wc -l < /tmp/los-stale.list | tr -d ' ')"
+echo "prune: $stale_count stale file(s) not in the shipped manifest"
+if [ "$stale_count" -gt 0 ]; then
+  # Safety rails: never delete installed deps or anything outside the shipped
+  # source trees, and refuse an implausibly large delete.
+  if grep -qE '(^|/)(node_modules|\.git|\.env)(/|$)' /tmp/los-stale.list; then
+    echo "prune: ABORT — unsafe path in stale list"; head -20 /tmp/los-stale.list; exit 1
+  fi
+  if [ "$stale_count" -gt 500 ]; then
+    echo "prune: ABORT — stale count $stale_count exceeds 500"; exit 1
+  fi
+  head -20 /tmp/los-stale.list
+  xargs -a /tmp/los-stale.list -d '\n' rm -f --
+  echo "prune: removed $stale_count stale file(s)"
+fi
+PRUNE_STALE
+  log_info "  prune: done (see log)"
 
   remote_sh bash -s "$REMOTE_HOME" "$BUILD_VERSION" <<'STAMP_VERSION' >> "$log_file" 2>&1
 set -euo pipefail
@@ -273,16 +448,22 @@ if [ ! -f "$env_file" ]; then
   echo "WARN: $env_file missing; version stamp deferred until node configuration exists"
   exit 0
 fi
+# 用 awk + mv 而不是 `sed -i`：BSD sed(macOS) 要求 `-i ''`，GNU 形式会在 macOS 上直接
+# 失败（2026-10-07 m3pro 实测：`sed: invalid command code e`），而这一步失败会让整个 sync
+# 中止 —— 明明内容已经解包成功。可移植性在这里比简洁更重要。
 for key in LOS_VERSION EXECUTOR_VERSION; do
-  if grep -q "^${key}=" "$env_file"; then
-    sed -i "s|^${key}=.*|${key}=${build_version}|" "$env_file"
-  else
-    printf '%s=%s\n' "$key" "$build_version" >> "$env_file"
-  fi
+  awk -v k="$key" -v v="$build_version" '
+    BEGIN { done = 0 }
+    $0 ~ "^" k "=" { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "$env_file" > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
 done
 echo "version=$build_version"
 STAMP_VERSION
   log_info "  version: $BUILD_VERSION"
+
+  log_info "  sync steps finished (convergence is asserted on exit)"
 
   # Sync systemd unit to /etc
   if remote_sh test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
@@ -330,6 +511,37 @@ do_install() {
   fi
 
   log_info "install complete — see $log_file"
+
+  do_install_unirun
+}
+
+# ── Install pinned unirun ───────────────────────────────────
+# The gateway only dispatches `unirun ssh` for a binary that answers
+# `unirun capabilities --json` with the keys it needs
+# (packages/gateway/src/unirun-capabilities.ts); deploy/unirun-pin.txt holds the
+# version and sha256, and the installer verifies both. Audit C4/F1 found hosts
+# with an older unirun installed, which is not "missing" — it is unusable, and
+# every remote-cwd/env call silently ran on native ssh.
+#
+# A failed install warns by default rather than failing the deploy: github.com
+# is not reachable from every node, and the native fallback still works. Set
+# LOS_REQUIRE_UNIRUN=1 to make it fatal.
+do_install_unirun() {
+  local log_file="$LOG_BASE/${NODE}-unirun-${TIMESTAMP}.log"
+  log_info "installing pinned unirun on $TS_HOST (log: $log_file)"
+
+  if remote_sh sh "$REMOTE_HOME/tools/install-unirun.sh" --dest /usr/local/bin >> "$log_file" 2>&1; then
+    log_info "  $(tail -1 "$log_file")"
+    return 0
+  fi
+
+  log_warn "unirun install failed — see $log_file"
+  log_warn "this node dispatches ssh via the native fallback until it succeeds"
+  log_warn "Diagnose: $0 $NODE cmd 'sh $REMOTE_HOME/tools/install-unirun.sh --check'"
+  if [ "${LOS_REQUIRE_UNIRUN:-0}" = "1" ]; then
+    die "LOS_REQUIRE_UNIRUN=1 and the pinned unirun is not installed on $TS_HOST"
+  fi
+  return 0
 }
 
 # ── Install systemd service ─────────────────────────────────
@@ -476,7 +688,28 @@ do_verify() {
     log_warn "  .env missing on remote"
   fi
 
+  # 6. unirun (the pinned ssh transport for node dispatch — see do_install_unirun)
+  printf '\n=== unirun ===\n' >> "$log_file"
+  local unirun_state=""
+  unirun_state=$(remote_sh sh "$REMOTE_HOME/tools/install-unirun.sh" --check --dest /usr/local/bin 2>&1 || true)
+  printf '%s\n' "$unirun_state" >> "$log_file"
+  if printf '%s' "$unirun_state" | grep -q 'capabilities=ok'; then
+    log_info "  unirun: ok ($(printf '%s' "$unirun_state" | sed -n 's/^unirun: .* version=\([^ ]*\) capabilities=ok$/\1/p' | head -1))"
+  else
+    log_warn "  unirun: missing or unusable on this node — ssh dispatch falls back to native"
+    log_warn "  fix: $0 $NODE install"
+    if [ "${LOS_REQUIRE_UNIRUN:-0}" = "1" ]; then
+      return 1
+    fi
+  fi
+
   log_info "verify complete — see $log_file"
+
+  # A restart always leaves the node draining (see do_promote). Close the loop
+  # here instead of leaving it to the operator's memory.
+  if ! auto_promote_after_verify; then
+    die "verified but not schedulable: $NODE_ID is still not online in the registry"
+  fi
 }
 
 # ── Status ──────────────────────────────────────────────────
@@ -527,6 +760,140 @@ do_full_setup() {
 # ── Main dispatch ───────────────────────────────────────────
 check_conn
 
+# ── Promote (clear the post-restart drain) ─────────────────
+# A restart ALWAYS leaves the node `status='draining'` in the registry: the
+# executor sends one `status='draining'` heartbeat while shutting down, and
+# resolveHeartbeatStatus() preserves an existing 'draining' when a later
+# heartbeat carries no explicit status (its online heartbeats omit it on
+# purpose, so an operator-requested drain is not silently undone). Net effect: a
+# node that is up and healthy stops receiving work until someone promotes it —
+# verified on all 8 nodes during the 2026-10-06 rollout.
+# Requires the registry node id; `--node-id`/LOS_REMOTE_NODE_ID or a mapping for
+# the known node names below.
+# 读注册表状态。两个坑都踩过：`nodes command <id> status` 不是有效节点命令会静默返回空；
+# 网关 /nodes 的载荷形状也会变。因此以 psql 为主(网关主机一定有),API 为备。
+registry_status() {
+  local node_id="$1" psql_bin db auth base
+  psql_bin="$(command -v psql 2>/dev/null || true)"
+  [ -n "$psql_bin" ] || psql_bin="/opt/homebrew/opt/postgresql@17/bin/psql"
+  db="$(grep -E '^DATABASE_URL=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  if [ -n "$db" ] && [ -x "$psql_bin" ]; then
+    "$psql_bin" "$db" -t -A -c "select status from executor_nodes where node_id = '$node_id'" 2>/dev/null | head -1 | tr -d ' \r'
+    return 0
+  fi
+  auth="$(grep -E '^LOS_AUTH_TOKEN=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  base="$(grep -E '^GATEWAY_URL=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  base="${base:-http://127.0.0.1:8080}"
+  curl -s -m 10 -H "Authorization: Bearer $auth" "${base%/}/nodes" 2>/dev/null | node -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      try {
+        const body = JSON.parse(s);
+        const list = body.nodes || body.results || body.items || (Array.isArray(body) ? body : []);
+        const wanted = process.argv[1];
+        const hit = list.find(n => (n.node_id || n.nodeId) === wanted);
+        process.stdout.write(hit ? String(hit.status || "") : "");
+      } catch { /* empty → caller reports unknown */ }
+    });
+  ' "$node_id"
+}
+
+do_promote() {
+  local reason="deploy-to-remote verify passed $BUILD_VERSION"
+  local node_id="$NODE_ID"
+  if [ -z "$node_id" ]; then
+    die "promote needs the registry node id: pass --node-id <id> or set LOS_REMOTE_NODE_ID"
+  fi
+  local auth op
+  auth="$(grep -E '^LOS_AUTH_TOKEN=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  op="$(grep -E '^LOS_OPERATOR_TOKEN=' "$LOCAL_REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  [ -n "$auth" ] || die "promote needs LOS_AUTH_TOKEN (repo .env)"
+  log_info "promoting $node_id (clears the restart-induced drain)"
+  ( cd "$LOCAL_REPO" && ./bin/los nodes command "$node_id" promote \
+      -t "$auth" ${op:+--operator-token "$op"} --reason "$reason" ) 2>&1 | tail -3
+}
+
+# 自动 promote：只在"内容与版本都对上"时执行，并在执行后复核注册表真的 online。
+# 依据（2026-10-06 实测）：
+#  - 每次重启都会留下 status='draining'（关机时发一次 draining 心跳，而 online 心跳不带
+#    status → resolveHeartbeatStatus 保留 draining），忘记 promote 的节点会静默不接活；
+#  - promote 会把 registry 里**陈旧**的版本置为 online（P0-3 已让 promote 支持期望版本校验）；
+#  - promote 之后仍可能被翻回 draining（oracle 实测），所以必须复核而不是相信返回值。
+auto_promote_after_verify() {
+  [[ "${LOS_DEPLOY_AUTO_PROMOTE:-1}" == "0" ]] && { log_info "  auto-promote disabled (LOS_DEPLOY_AUTO_PROMOTE=0)"; return 0; }
+  if [ -z "$NODE_ID" ]; then
+    log_warn "  auto-promote skipped: no --node-id/LOS_REMOTE_NODE_ID (node stays 'draining')"
+    return 0
+  fi
+  local got
+  got="$(remote_digest)"
+  if [ "$got" != "$BUILD_VERSION" ]; then
+    log_warn "  auto-promote REFUSED: node digest '${got:-<no output>}' != target '$BUILD_VERSION' (a stale node must not be promoted online)"
+    return 0
+  fi
+  do_promote || true
+  sleep 8
+  local st
+  st="$(registry_status "$NODE_ID")"
+  if [ "$st" != "online" ]; then
+    log_warn "  auto-promote did NOT stick: registry status='${st:-unknown}' for $NODE_ID"
+    log_warn "  the node is verified but receives no work; re-run '$0 $NODE promote --node-id $NODE_ID'"
+    return 1
+  fi
+  log_info "  auto-promote verified: $NODE_ID is online"
+  return 0
+}
+
+# ── Digest check (read-only) ───────────────────────────────
+# `sync` streams the archive through a single SSH pipe (`cat tar | ssh … 'tar xzf -'`),
+# so a connection that drops mid-transfer leaves a PARTIALLY extracted tree. On
+# 2026-10-06 that left tencent-sin half-synced (executor crash-looped until systemd
+# gave up) and vultr with the tree updated but `.env` never stamped. Compare the
+# node's own content digest against the target; on mismatch use upload-then-extract
+# (scp to /tmp + shasum on both sides + extract locally on the node).
+remote_digest() {
+  remote_sh sh -c "cd '$REMOTE_HOME' && bash tools/los.sh build-version" 2>/dev/null | tail -1 | tr -d '\r'
+}
+
+# 收敛判定必须"无论如何都执行":sync 的每一步都可能因 SSH 断流失败,而 set -e 会直接
+# 退出 —— 那样调用方只看到"没有输出",无法判断节点是完整的还是半截的(2026-10-06 两次
+# 事故都属于这一类:tencent-sin 半截树崩溃掉线、vultr 树到目标但 .env 未盖章)。
+sync_convergence_guard() {
+  local st=$?
+  local got
+  got="$(remote_digest 2>/dev/null)"
+  if [ "$got" != "$BUILD_VERSION" ]; then
+    if [ "$st" -eq 0 ]; then
+      log_warn "  sync reported success but the node did not converge"
+      die "sync did not converge: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — re-run the sync; see docs/operations/node-deployment-runbook.md"
+    elif [ "${SYNC_EXTRACTED:-0}" = "0" ]; then
+      # 中止发生在解包之前：节点**未被改动**，仍停在它原来的修订上。这不是半截树，
+      # 不要用"must NOT be restarted"去吓人（实测会误导：vultr 那次 scp 失败即属此类）。
+      log_warn "  sync aborted BEFORE extraction (exit $st) — the node is untouched and still on '${got:-<no output>}'"
+      exit "$st"
+    else
+      log_warn "  sync aborted mid-way (exit $st) — checking whether the node is half-synced"
+      die "sync did not converge after extraction: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — the node may be half-synced; do NOT restart it. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
+    fi
+  fi
+  [ "$st" -eq 0 ] && log_info "  digest verified: $got"
+  return "$st"
+}
+
+do_digest() {
+  local got
+  got="$(remote_digest)"
+  log_info "  target (local deployable digest): $BUILD_VERSION"
+  log_info "  remote ($REMOTE_HOME)             : ${got:-<no output>}"
+  if [ "$got" = "$BUILD_VERSION" ]; then
+    log_info "  digest: MATCH"
+    return 0
+  fi
+  log_warn "  digest: MISMATCH — node is not on the target revision"
+  log_warn "  a mismatch between rollouts is expected; a mismatch right after sync means a half-synced tree"
+  exit 1
+}
+
 case "$CMD" in
   preflight)      do_preflight ;;
   sync)           do_sync ;;
@@ -534,6 +901,8 @@ case "$CMD" in
   install-service) do_install_service ;;
   restart)        do_restart ;;
   verify)         do_verify ;;
+  digest)         do_digest ;;
+  promote)        do_promote ;;
   status)         do_status ;;
   logs)           do_logs ;;
   firewall)       do_firewall ;;

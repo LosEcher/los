@@ -19,6 +19,7 @@ const sharedProcessTestFiles = [
   'src/node-probes.test.ts',
   'src/node-routes.test.ts',
   'src/openai-compat-route.test.ts',
+  'src/openai-compat-tool-forward.test.ts',
   'src/operator-events-polling.test.ts',
   'src/operator-command-transport.test.ts',
   'src/operator-gate.test.ts',
@@ -49,6 +50,7 @@ const sharedProcessTestFiles = [
   'src/task-dead-letter-routes.test.ts',
   'src/tool-call-upsert.test.ts',
   'src/tool-gate-routes.test.ts',
+  'src/unirun-capabilities.test.ts',
   'src/work-item-routes.test.ts',
 ];
 

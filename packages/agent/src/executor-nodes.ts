@@ -344,9 +344,13 @@ function rowToExecutorNode(row: ExecutorNodeRow): ExecutorNodeRecord {
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
+  // 类别在读取时补上：它从未落库，但 capacity/capabilities 已在库里，所以这里推导即可，
+  // 既不用迁移，也不用等所有节点升级。
+  const resourceClass = classifyResourceClass(record.capacity, record.capabilities);
+  const classified: Omit<ExecutorNodeRecord, 'execution'> = { ...record, resourceClass };
   return {
-    ...record,
-    execution: evaluateExecutorNode(record),
+    ...classified,
+    execution: evaluateExecutorNode(classified),
   };
 }
 
@@ -459,6 +463,42 @@ export function sortExecutorCandidates(
     return (b.lastHeartbeatAt ?? '').localeCompare(a.lastHeartbeatAt ?? '');
   });
   return sorted;
+}
+
+/** 与 packages/executor/src/resource-metrics.ts 的 `isConstrained` 同一阈值。 */
+export const CONSTRAINED_MEMORY_TOTAL_MB = 2048;
+
+function normalizeResourceClassValue(value: unknown): ResourceClass | undefined {
+  return value === 'control' || value === 'standard_executor' || value === 'constrained_executor'
+    ? value
+    : undefined;
+}
+
+/**
+ * 判定节点的资源类别。优先级：显式传入 > capacity.resourceClass >
+ * capabilities.resourceClass（执行器上报的平台相关值）> **按总内存兜底推导**。
+ *
+ * 兜底推导是必要的：`capacity.memoryTotalMb` 一直在落库，而类别从未落库，所以只要在读取时
+ * 推导，**未升级的节点也能立刻得到正确的类别**。否则 1GB 的机器会一直被当成普通执行器，
+ * `evaluateExecutorNode` 里那段 constrained 检查永远是死代码（2026-10-06 的实测：oracle/vultr
+ * 954/956MB，heavy_task_safe 已是 false，却没有任何地方标出"这台机器受约束"）。
+ */
+export function classifyResourceClass(
+  capacity: Record<string, unknown> | undefined,
+  capabilities?: Record<string, unknown> | undefined,
+  explicit?: unknown,
+): ResourceClass | undefined {
+  const fromExplicit = normalizeResourceClassValue(explicit);
+  if (fromExplicit) return fromExplicit;
+  const fromCapacity = normalizeResourceClassValue(capacity?.resourceClass);
+  if (fromCapacity) return fromCapacity;
+  const fromCapabilities = normalizeResourceClassValue(capabilities?.resourceClass);
+  if (fromCapabilities) return fromCapabilities;
+  const total = capacity?.memoryTotalMb;
+  if (typeof total === 'number' && Number.isFinite(total) && total > 0) {
+    return total <= CONSTRAINED_MEMORY_TOTAL_MB ? 'constrained_executor' : 'standard_executor';
+  }
+  return undefined;
 }
 
 function resolveHeartbeatStatus(

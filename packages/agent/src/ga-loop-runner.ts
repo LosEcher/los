@@ -180,7 +180,10 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
       log.info(`GA loop: downgraded ${job.jobType} cadence from ${job.cadence} to ${gateDecision.newCadence} (${gateDecision.reason})`);
     }
     if (gateDecision.action === 'pause') {
-      await updateGovernanceJob(job.id, { status: 'paused' });
+      await updateGovernanceJob(job.id, {
+        status: 'paused',
+        pauseSource: gateDecision.pauseSource ?? 'no_op_throttle',
+      });
       log.info(`GA loop: paused ${job.jobType} (${gateDecision.reason})`);
     }
 
@@ -381,7 +384,7 @@ export async function runGaLoop(opts: RunGaLoopOptions): Promise<GaLoopResult> {
 
   // ── Step 7: If circuit was opened, also pause the job ──
   if (nextState.circuitState === 'open' && job.status !== 'paused') {
-    await updateGovernanceJob(job.id, { status: 'paused' });
+    await updateGovernanceJob(job.id, { status: 'paused', pauseSource: 'circuit_open' });
     log.warn(`GA loop: circuit OPEN for ${job.jobType} (${job.id}) — job paused`);
   }
 
@@ -461,7 +464,19 @@ export function checkHasFindings(jobType: string, summary: Record<string, unknow
     case 'dead_letter': {
       const eligible = typeof summary.requeueEligible === 'number' ? summary.requeueEligible : 0;
       const candidateIds = Array.isArray(summary.candidateIds) ? summary.candidateIds.length : 0;
-      return eligible > 0 || candidateIds > 0;
+      if (eligible > 0 || candidateIds > 0) return true;
+      // An unacknowledged backlog is a finding even when nothing is
+      // requeue-eligible. Requeue candidates require a non-null run_spec_id, so
+      // lease_expired/unrecoverable events without one are permanently
+      // ineligible: the audit reported "no findings" while the backlog grew,
+      // which drove consecutive_no_ops past NOOP_PAUSE_THRESHOLD and silently
+      // paused the job. Observed 2026-09/10: 25 unacknowledged events piled up
+      // while all three dead_letter jobs sat paused and no todo was raised.
+      // Same reasoning as the event_retention case below: an unacked queue is
+      // operator work, never a no-op. Escalation (not pausing) is the correct
+      // needs-human signal — see the ga-loop escalation path.
+      const unacknowledged = typeof summary.unacknowledged === 'number' ? summary.unacknowledged : 0;
+      return unacknowledged > 0;
     }
     case 'event_retention': {
       // A non-empty backlog is a finding: the audit compacts one batch inline,

@@ -79,6 +79,30 @@ COPY --from=build /app/packages ./packages
 # Copy contracts
 COPY --from=build /app/contracts ./contracts
 
+# ── unirun (pinned) ────────────────────────────────────
+# The gateway dispatches node commands to `unirun ssh` when the binary answers
+# `unirun capabilities --json` with the keys it needs
+# (packages/gateway/src/unirun-capabilities.ts); without one it falls back to
+# native ssh. Installing it here means the image ships a build the gate accepts,
+# at a version and sha256 pinned in deploy/unirun-pin.txt (audit C4/F1: 0.3.0 was
+# installed on hosts and the gate silently idled on native ssh).
+#
+# COPY hashes file contents, so bumping the pin invalidates this layer by itself.
+# TARGETARCH is set by buildx; a plain `docker build` falls back to uname -m.
+COPY deploy/unirun-pin.txt tools/install-unirun.sh /tmp/
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH:-$(uname -m)}" in \
+      amd64|x86_64) asset=unirun-linux-x86_64-musl ;; \
+      arm64|aarch64) asset=unirun-linux-aarch64-musl ;; \
+      *) echo "unirun: unsupported architecture '${TARGETARCH:-$(uname -m)}'" >&2; exit 1 ;; \
+    esac; \
+    apk add --no-cache ca-certificates; \
+    sh /tmp/install-unirun.sh --pin /tmp/unirun-pin.txt --asset "$asset" --dest /usr/local/bin; \
+    rm -f /tmp/install-unirun.sh /tmp/unirun-pin.txt
+# Pin the resolved path so a minimal PATH cannot make the gateway miss it.
+ENV LOS_UNIRUN_BIN=/usr/local/bin/unirun
+
 # ── Entrypoint ─────────────────────────────────────────
 COPY docker-entrypoint.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh

@@ -72,6 +72,16 @@ export async function initDb(databaseUrl?: string): Promise<DbConnection> {
   _pool.on('error', (err) => {
     log.warn(`[db] connection pool error — will reconnect on next query: ${err.message}`);
   });
+  // 池级 handler 只覆盖**空闲** client。被借出（有查询在飞）的 client 上的 socket 级错误
+  // 由 Connection 自己 emit('error')，没有监听者时 Node 会把它升级成 uncaughtException
+  // 并杀掉整个进程 —— 2026-10-06 23:48 Postgres 一次 admin_shutdown(57P01) 就是这样同时
+  // 打穿了网关和 6 台执行器(崩溃栈走 pg/lib/connection.js -> Connection.emit)。这里给每个
+  // 新连接补上监听；pg 会自动丢弃坏连接，下次查询惰性重连。
+  _pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      log.warn(`[db] client connection error — the pool will reconnect: ${err.message}`);
+    });
+  });
   await _pool.query('select 1');
   log.info('Database: PostgreSQL connected');
   return wrap(_pool);

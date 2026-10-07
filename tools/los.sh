@@ -26,9 +26,43 @@ resolve_local_runtime_version() {
   revision="$(
     cd "$ROOT"
     {
+      # The prune list must match what deploy-to-remote.sh actually ships, or
+      # the version can never converge across the fleet: `.los-runtime` is local
+      # runtime state that is never synced, and counting it made every node
+      # report a different hash than the gateway (observed 2026-10-06).
+      #
+      # 摘要只应覆盖**节点实际执行/加载的内容**。以下脚本只在网关主机上跑（部署、
+      # 治理日报、launchd 守护、调度 CLI、维护窗口 CLI），把它们算进去会让"改一个网关侧
+      # 工具"也令全集群的收敛声明失效、逼出无谓滚动 —— 2026-10-07 实测：vultr 与其余 7 台
+      # 的唯一差异就是 tools/deploy-to-remote.sh，而那东西根本不需要下发到节点。
+      #
+      # 这里刻意用**排除清单**而不是包含清单，因为两个方向的失败代价不对称：
+      # 新增网关脚本若忘记排除 → 多一次无谓滚动（吵，但安全）；
+      # 包含清单若漏掉节点侧脚本 → 节点静默停在旧内容（安静，但危险）。
+      # 因此只排除"已确认与节点运行时无关"的路径，暂不扩大范围：
+      # CI/check-*/observe-*/node-probes 等模糊面故意保留在摘要内，等有"节点到底执行了什么"
+      # 的审计结论后再收。
       find tools deploy packages contracts \
-        -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los \) -prune -o \
-        -type f ! -name '*.tsbuildinfo' -print
+        -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
+        -type f ! -name '*.tsbuildinfo' ! -name '.DS_Store' ! -name '._*' \
+        ! -path 'tools/deploy-to-remote.sh' \
+        ! -path 'tools/los-fleet-rollout.sh' \
+        ! -path 'tools/deploy-drivers/*' \
+        ! -path 'tools/los-governance-daily.sh' \
+        ! -path 'tools/los-fleet-consistency.sh' \
+        ! -path 'tools/los-schedule-ctl.sh' \
+        ! -path 'tools/install-los-fleet-snapshot.sh' \
+        ! -path 'tools/install-network-observe-bridge.sh' \
+        ! -path 'tools/los-fleet-snapshot.plist' \
+        ! -path 'tools/network-observe-bridge.plist' \
+        ! -path 'tools/sync-network-observe.sh' \
+        ! -path 'tools/los-launchd.plist' \
+        ! -path 'tools/los-launchd-wrapper.sh' \
+        ! -path 'tools/los-wechat-bot-launchd.sh' \
+        ! -path 'tools/fleet-maintenance.mts' \
+        ! -path 'tools/fleet-maintenance-window.mjs' \
+        ! -path 'tools/fleet-maintenance-window.test.mjs' \
+        -print
       printf '%s\n' package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json
     } | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-12
   )"
@@ -528,6 +562,22 @@ doctor_cmd() {
       });
     "
   )
+
+  # Informational, never fatal: native ssh is a working fallback, but an
+  # installed-yet-unusable unirun must not be invisible (audit C4/F1 — a 0.3.0
+  # install made every remote-cwd/env call fall back without saying so).
+  if [ -f "$ROOT/tools/install-unirun.sh" ]; then
+    local unirun_state
+    unirun_state=$(sh "$ROOT/tools/install-unirun.sh" --check 2>&1 || true)
+    if printf '%s' "$unirun_state" | grep -q 'capabilities=ok'; then
+      echo "  unirun: ok ($(printf '%s' "$unirun_state" | sed -n 's/^unirun: .* version=\([^ ]*\) capabilities=ok$/\1/p' | head -1))"
+    elif printf '%s' "$unirun_state" | grep -q 'not installed'; then
+      echo "  unirun: absent (ssh dispatch uses the native fallback)"
+    else
+      echo "  unirun: unusable (ssh dispatch uses the native fallback)"
+      printf '%s\n' "$unirun_state" | sed 's/^/    /'
+    fi
+  fi
 
   if health_check "$(gw_url)"; then
     echo "  health: ok at $(gw_url)/health"

@@ -48,7 +48,7 @@ async function runOneSweepJob(job: GovernanceJob, dryRun: boolean, sessionId: st
 
   if (maybeAutoRecoverPaused(job)) {
     try {
-      await updateGovernanceJob(job.id, { status: 'active', lastRunAt: new Date().toISOString() });
+      await updateGovernanceJob(job.id, { status: 'active', pauseSource: null, lastRunAt: new Date().toISOString() });
       await updateGovernanceJobState(job.id, {
         circuitState: 'closed', consecutiveFailures: 0, circuitOpenedAt: null,
       });
@@ -84,7 +84,10 @@ async function runOneSweepJob(job: GovernanceJob, dryRun: boolean, sessionId: st
         await updateGovernanceJob(job.id, { cadence: gateDecision.newCadence });
       }
       if (gateDecision.action === 'pause') {
-        await updateGovernanceJob(job.id, { status: 'paused' });
+        await updateGovernanceJob(job.id, {
+          status: 'paused',
+          pauseSource: gateDecision.pauseSource ?? 'no_op_throttle',
+        });
       }
 
       if (loopResult.fixSucceeded && !loopResult.escalated) findingsCreated += 1;

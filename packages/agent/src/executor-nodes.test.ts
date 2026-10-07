@@ -14,6 +14,7 @@ import {
   upsertExecutorNode,
   upsertExecutorNodeHeartbeat,
   type ExecutorNodeRecord,
+  classifyResourceClass,
 } from './executor-nodes.js';
 
 test('executor node registry persists connectivity and capability fields', async () => {
@@ -516,3 +517,31 @@ function executorNodeRecord(nodeId: string, capacity: ExecutorNodeRecord['capaci
   };
   return { ...node, execution: evaluateExecutorNode(node) };
 }
+
+test('classifyResourceClass: explicit > capacity > capabilities > memory fallback', () => {
+  // 显式值最优先
+  assert.equal(classifyResourceClass({ memoryTotalMb: 954 }, {}, 'control'), 'control');
+  // capacity 里带类别（读取路径会把它当作权威）
+  assert.equal(
+    classifyResourceClass({ memoryTotalMb: 954, resourceClass: 'standard_executor' }, {}),
+    'standard_executor',
+  );
+  // 执行器上报在 capabilities 里的类别
+  assert.equal(
+    classifyResourceClass({ memoryTotalMb: 3656 }, { resourceClass: 'constrained_executor' }),
+    'constrained_executor',
+  );
+  // 兜底推导：与 executor 的 isConstrained 同阈值（<=2048MB）
+  // 这三条用的是 2026-10-06 的真机数据
+  assert.equal(classifyResourceClass({ memoryTotalMb: 954 }), 'constrained_executor');   // oracle
+  assert.equal(classifyResourceClass({ memoryTotalMb: 956 }), 'constrained_executor');   // vultr
+  assert.equal(classifyResourceClass({ memoryTotalMb: 2048 }), 'constrained_executor');  // 边界含
+  assert.equal(classifyResourceClass({ memoryTotalMb: 2049 }), 'standard_executor');     // 边界外
+  assert.equal(classifyResourceClass({ memoryTotalMb: 3656 }), 'standard_executor');     // tencent-sin
+  assert.equal(classifyResourceClass({ memoryTotalMb: 81701 }), 'standard_executor');    // desktop-r45553o
+  // 无数据不猜
+  assert.equal(classifyResourceClass({}), undefined);
+  assert.equal(classifyResourceClass(undefined), undefined);
+  // 非法值忽略，退回推导
+  assert.equal(classifyResourceClass({ memoryTotalMb: 954 }, {}, 'bogus'), 'constrained_executor');
+});

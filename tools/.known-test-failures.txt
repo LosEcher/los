@@ -1,12 +1,12 @@
 # Known Test Failures Baseline — environment-dependent failures.
 # These are pre-existing and vary per run; not caused by any code change under review.
-# Last updated: 2026-08-17
+# Last updated: 2026-10-07
 #
 # 2026-08-17: gateway shared-process event-loop cancellations were ROOT-CAUSED and
 # fixed in tools/package-test-runner.mjs (process isolation + per-process setup).
 #
-# Environment: managed-workspaces spawns `jj` which lives in /opt/homebrew/bin on
-# this machine (not in turbo's PATH). Production note: managed-workspace VCS ops
-# have the same PATH dependency — consider LOS_JJ_BIN config when enabling that
-# feature in daemon environments.
-src/managed-workspaces.test.ts
+# 2026-10-07: src/managed-workspaces.test.ts removed — it passes now (and in the
+# los-ci image, which ships jj). Environment note kept for the record:
+# managed-workspaces spawns `jj`, which lives in /opt/homebrew/bin on macOS and is
+# not on turbo's PATH; managed-workspace VCS ops in daemon environments have the
+# same PATH dependency — consider a LOS_JJ_BIN config if that feature is enabled.

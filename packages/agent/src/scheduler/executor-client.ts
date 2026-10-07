@@ -1,5 +1,6 @@
 import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
 import { resolveExecutorEndpoint } from '../executor-node-utils.js';
+import { isNodeInMaintenance, loadNodeMaintenancePoliciesBatch } from '../node-maintenance-policy.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
@@ -78,17 +79,48 @@ export async function resolveExecutor(
   }
 
   const nodes = await listExecutorNodes(100);
-  const candidates = nodes.filter(node => node.execution.candidate);
+
+  // Maintenance windows are evaluated HERE, at selection time, not in
+  // `evaluateExecutorNode`: that function's result is computed at upsert and
+  // persisted on the node row, while a window can be opened or cleared at any
+  // moment — a persisted blocker would go stale immediately. Until 2026-10-06
+  // `isNodeInMaintenance` was only consulted by alert suppression and
+  // host-check repair, so a node "in maintenance" still received work and the
+  // name misled operators (the policy table was never used).
+  const now = new Date();
+  const maintenanceByNode = await loadNodeMaintenancePoliciesBatch(nodes.map(node => node.nodeId))
+    .catch(() => ({} as Record<string, null>));
+  const maintenanceBlocked = new Set(
+    nodes
+      .filter(node => isNodeInMaintenance(node.nodeId, now, maintenanceByNode[node.nodeId] ?? null))
+      .map(node => node.nodeId),
+  );
+
+  const candidates = nodes.filter(node => node.execution.candidate && !maintenanceBlocked.has(node.nodeId));
   const preferredNodeId = normalizeOptionalString(config.nodeId);
   const ordered = sortExecutorCandidates(candidates, preferredNodeId);
 
   const skipped: ExecutorSelectionDecision['skipped'] = nodes
-    .filter(node => node.nodeKind === 'executor' && !node.execution.candidate)
+    .filter(node => node.nodeKind === 'executor' && !node.execution.candidate && !maintenanceBlocked.has(node.nodeId))
     .map(node => ({
       id: node.nodeId,
       reason: node.execution.blockers[0] ?? 'not_candidate',
       details: { blockers: node.execution.blockers, warnings: node.execution.warnings },
     }));
+  for (const node of nodes) {
+    // Report the window even for nodes that had other blockers, so the ledger
+    // shows the operator-provided reason instead of hiding behind a transient
+    // capability/heartbeat blocker.
+    if (maintenanceBlocked.has(node.nodeId)) {
+      const window = (maintenanceByNode[node.nodeId]?.windows ?? [])
+        .find((w) => Date.parse(w.start) <= now.getTime() && now.getTime() <= Date.parse(w.end));
+      skipped.push({
+        id: node.nodeId,
+        reason: 'maintenance:window_active',
+        details: { windowStart: window?.start, windowEnd: window?.end },
+      });
+    }
+  }
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);
     if (!url) {
@@ -142,7 +174,12 @@ export async function resolveExecutor(
     );
   }
   throw new _ExecutorSelectionError(
-    'Executor is enabled but no verified executor node candidate is available',
+    // Carry the skip reasons even when nothing was capable: an empty candidate
+    // set is most often "everything is in a maintenance window", and the
+    // operator needs to see that instead of a generic message.
+    `Executor is enabled but no verified executor node candidate is available${
+      skipped.length > 0 ? `: ${skipped.map(s => `${s.id}:${s.reason}`).join(', ')}` : ''
+    }`,
     decision,
   );
 }

@@ -1,0 +1,23 @@
+# unirun pin — single source of truth for tools/install-unirun.sh.
+#
+# Why a pin exists (audit C4/F1): the gateway only dispatches `unirun ssh` when
+# the binary answers `unirun capabilities --json` with the keys it needs, and
+# that subcommand exists from 0.5.0 on. A node with an older unirun (0.3.0 was
+# found installed) is not "unavailable" — it is installed and unusable, and every
+# call that needs remote cwd/env silently ran on native ssh instead.
+#
+# Bump procedure:
+#   1. set UNIRUN_VERSION to the new release tag (without the leading v);
+#   2. update each digest below. The assets are named
+#      unirun-<os>-<arch>[-musl] and the release URL is
+#      https://github.com/LosEcher/unirun/releases/download/v<version>/<asset>
+#      (sha256 of the raw binary, e.g. `shasum -a 256 <asset>`);
+#   3. verify the pin: sh tools/install-unirun.sh --check
+#   4. rebuild the image: docker build -t los .
+#
+# Assets without a digest are not installable by the script: it fails closed
+# rather than installing an unverified binary.
+UNIRUN_VERSION=0.5.0
+UNIRUN_SHA256_LINUX_X86_64_MUSL=41347924ecd91abc33da0351c04d922bcec60957779c7c65ba871ce6ba1dd09d
+UNIRUN_SHA256_LINUX_AARCH64_MUSL=d14058a8b0e55bd90de8b77af5a4cc53ed66233e07878d4faf673281d5ad3f9b
+UNIRUN_SHA256_MACOS_AARCH64=bad8c5c4215c66e3a019831ccdfa5a27e43acadaa4ee66b979e6b69218d9e1ed
