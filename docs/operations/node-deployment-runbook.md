@@ -80,6 +80,15 @@ Use phased commands so a failed install does not stop the serving process:
 Standard nodes may omit `--low-resource`. Installs are non-interactive and keep
 optional dependencies because `tsx` requires esbuild's platform binary.
 
+`install` also ensures the **pinned unirun** on the node
+(`tools/install-unirun.sh`, version + sha256 in `deploy/unirun-pin.txt`) and
+`verify` reports whether the node has one the gateway can use
+(`unirun: ok (<version>)` or a warning that ssh dispatch falls back to native).
+The install warns rather than fails when `github.com` is unreachable from the
+node; set `LOS_REQUIRE_UNIRUN=1` to make a missing/unusable unirun fatal. See
+`docs/operations/unirun-pin.md` for the pin, the capability keys, and the bump
+procedure.
+
 `sync` also repairs the node tree, so a rollout converges instead of drifting:
 
 - source modes are normalized to `a+rX` (a `0600` file breaks
@@ -155,6 +164,7 @@ artifact. The sync must include all workspace manifests covered by
    content: `bash tools/los.sh build-version` equals the local target digest
    registry: online, fresh heartbeat, same version, activeTaskCount=0
    process: no replaced unmanaged executor remains
+   unirun: ok (<pinned version>) — else ssh dispatch stays on native ssh
    logs: no restart loop, DB auth failure, heartbeat failure, or missing path
    ```
 

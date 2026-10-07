@@ -50,6 +50,7 @@ const sharedProcessTestFiles = [
   'src/task-dead-letter-routes.test.ts',
   'src/tool-call-upsert.test.ts',
   'src/tool-gate-routes.test.ts',
+  'src/unirun-capabilities.test.ts',
   'src/work-item-routes.test.ts',
 ];
 

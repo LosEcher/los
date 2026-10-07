@@ -563,6 +563,22 @@ doctor_cmd() {
     "
   )
 
+  # Informational, never fatal: native ssh is a working fallback, but an
+  # installed-yet-unusable unirun must not be invisible (audit C4/F1 — a 0.3.0
+  # install made every remote-cwd/env call fall back without saying so).
+  if [ -f "$ROOT/tools/install-unirun.sh" ]; then
+    local unirun_state
+    unirun_state=$(sh "$ROOT/tools/install-unirun.sh" --check 2>&1 || true)
+    if printf '%s' "$unirun_state" | grep -q 'capabilities=ok'; then
+      echo "  unirun: ok ($(printf '%s' "$unirun_state" | sed -n 's/^unirun: .* version=\([^ ]*\) capabilities=ok$/\1/p' | head -1))"
+    elif printf '%s' "$unirun_state" | grep -q 'not installed'; then
+      echo "  unirun: absent (ssh dispatch uses the native fallback)"
+    else
+      echo "  unirun: unusable (ssh dispatch uses the native fallback)"
+      printf '%s\n' "$unirun_state" | sed 's/^/    /'
+    fi
+  fi
+
   if health_check "$(gw_url)"; then
     echo "  health: ok at $(gw_url)/health"
   else

@@ -55,7 +55,7 @@ deploy-to-remote.sh — push los executor to a Tailscale node (no remote VCS nee
 Phased commands:
   preflight           Check remote memory/swap/disk/PSI before heavy ops
   sync                Push code via tar pipe (no git/jj on remote)
-  install             Install deps (supports --low-resource)
+  install             Install deps (pnpm) + the pinned unirun (supports --low-resource)
   install-service     Install systemd unit
   restart             Restart executor service
   verify              Health check + connectivity validation
@@ -69,6 +69,7 @@ Environment:
   LOS_DEPLOY_AUTO_PROMOTE=0   Do not promote automatically at the end of verify
   LOS_SSH_OPTS                Extra ssh(1) options, e.g. -o ControlPath=none
   LOS_DEPLOY_SYNC_MODE        upload (default: scp + sha256 + extract on the node) | pipe (legacy)
+  LOS_REQUIRE_UNIRUN=1        Fail instead of warning when the pinned unirun is missing/unusable
 
 Shortcuts:
   status              Show remote state
@@ -510,6 +511,37 @@ do_install() {
   fi
 
   log_info "install complete — see $log_file"
+
+  do_install_unirun
+}
+
+# ── Install pinned unirun ───────────────────────────────────
+# The gateway only dispatches `unirun ssh` for a binary that answers
+# `unirun capabilities --json` with the keys it needs
+# (packages/gateway/src/unirun-capabilities.ts); deploy/unirun-pin.txt holds the
+# version and sha256, and the installer verifies both. Audit C4/F1 found hosts
+# with an older unirun installed, which is not "missing" — it is unusable, and
+# every remote-cwd/env call silently ran on native ssh.
+#
+# A failed install warns by default rather than failing the deploy: github.com
+# is not reachable from every node, and the native fallback still works. Set
+# LOS_REQUIRE_UNIRUN=1 to make it fatal.
+do_install_unirun() {
+  local log_file="$LOG_BASE/${NODE}-unirun-${TIMESTAMP}.log"
+  log_info "installing pinned unirun on $TS_HOST (log: $log_file)"
+
+  if remote_sh sh "$REMOTE_HOME/tools/install-unirun.sh" --dest /usr/local/bin >> "$log_file" 2>&1; then
+    log_info "  $(tail -1 "$log_file")"
+    return 0
+  fi
+
+  log_warn "unirun install failed — see $log_file"
+  log_warn "this node dispatches ssh via the native fallback until it succeeds"
+  log_warn "Diagnose: $0 $NODE cmd 'sh $REMOTE_HOME/tools/install-unirun.sh --check'"
+  if [ "${LOS_REQUIRE_UNIRUN:-0}" = "1" ]; then
+    die "LOS_REQUIRE_UNIRUN=1 and the pinned unirun is not installed on $TS_HOST"
+  fi
+  return 0
 }
 
 # ── Install systemd service ─────────────────────────────────
@@ -654,6 +686,21 @@ do_verify() {
     log_info "  Check: GET <gateway>/nodes and look for node_id=$NODE"
   else
     log_warn "  .env missing on remote"
+  fi
+
+  # 6. unirun (the pinned ssh transport for node dispatch — see do_install_unirun)
+  printf '\n=== unirun ===\n' >> "$log_file"
+  local unirun_state=""
+  unirun_state=$(remote_sh sh "$REMOTE_HOME/tools/install-unirun.sh" --check --dest /usr/local/bin 2>&1 || true)
+  printf '%s\n' "$unirun_state" >> "$log_file"
+  if printf '%s' "$unirun_state" | grep -q 'capabilities=ok'; then
+    log_info "  unirun: ok ($(printf '%s' "$unirun_state" | sed -n 's/^unirun: .* version=\([^ ]*\) capabilities=ok$/\1/p' | head -1))"
+  else
+    log_warn "  unirun: missing or unusable on this node — ssh dispatch falls back to native"
+    log_warn "  fix: $0 $NODE install"
+    if [ "${LOS_REQUIRE_UNIRUN:-0}" = "1" ]; then
+      return 1
+    fi
   fi
 
   log_info "verify complete — see $log_file"
