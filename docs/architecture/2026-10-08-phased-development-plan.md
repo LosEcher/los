@@ -272,7 +272,14 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 - **顺带**：`run-diff` 在 gates.json 里 `enabled: true`（已于本日归档）⇒ 改 `false` + reason；`projection.note` 声明该文件是**派生投影、非真源**。
 
 **(b) ⬜ `fmtguard_doctor --requireVersion` 进 CI**（不自建版本门禁）
-**(c) ⬜ `verify-gate` 三态在 DSH 侧如实透传**（**不得把 exit 2 当 failed**）
+**(c) ✅ 已完成（2026-10-08）—— `verify-gate` 三态透传；修掉静默绿灯「全 `na` 被当 pass」** — `file:tools/boundary-audit.sh:1`
+
+- **契约取证**：per-check `result` 三态 `pass|fail|na`；顶层 `exitCode` 三态 `0/1/2`；顶层 `verdict` 只有 `pass|fail`。`na` 来自 check 的 `enabled=false` 与 policy 规则的 `scope` 不匹配（`policy.rs:342-350`）。
+- **静默绿灯**：verdict 原为 `if failed == 0 {"pass"}` 而 `na` **不计入** `failed` ⇒ "所有 check 都 disabled / 都作用域不匹配"报 `pass` + exit 0。且 `na` 计入 `report.checks`，故 `manifest.rs:182` 的 `empty gate = false confidence` 守卫**不触发**（只覆盖"清单为空"）。与 2026-10-08 门禁假红同类：**状态被压平**。
+- **修法**：`failed==0 && pass==0 && total>0` ⇒ `verdict:"inconclusive"` + **exit 2**（与 tool error 同码 = "判不了"，绝非"通过"）；`cmd_run` + `cmd_policy` 两条路径都改。
+- **连带真 bug**：`report::build()` 自己重算 verdict，把 `inconclusive` 覆盖回 `pass` ⇒ 退出码对但 **JSON 契约错**（插件消费的正是 JSON）。改为由调用方传入 `verdict`/`pass`，并新增 `passed` 字段（此前报告无任何 `na` 计数）。
+- **测试**：既有 `G10` 的 `na.toml` 是**混合**清单，**从未测过全 `na`**（盲区）；新增 `test/fixtures/all-na.toml` + `G10b` + 负向控制；**突变测试**确认回退修复即红。
+- **插件侧**（`dsh-verify-gate`）：`na` 用独立标记 `–`（不与"未知态 `·`"混淆）+ 三态计数行 + 全 `na` 警示"不构成通过"。
 **(d) ⬜ `sandbox-run` 按裁决 C1–C5 组件化**（起点 = `IsolationBackend` 契约 + `vcsKind`→`backend` 数据迁移）
 
 ---
