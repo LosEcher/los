@@ -294,3 +294,30 @@
 
 **为什么不与 2.5 合并**：两者属不同仓、不同语言、无依赖；合并只会让
 "哪一半没做完"不可分辨（违反本仓"一个 change 一个意图"）。
+
+---
+
+## 7. 2.4.3 执行结果（2026-10-08，已完成两侧）
+
+| 侧 | 提交 | 结果 |
+| --- | --- | --- |
+| **los（数据源）** | `3e8809ba` | `GET /cross-project/summary` 实跑：`HTTP 200`、`sessions=1105`、`byState={330,343,432}`、`projects=19`、`pain v1 totalSessions=133`、`injection rt=580/sk=359`；测试 **10/10** |
+| **dsh-dashboards（呈现）** | `e3ecea9` | 4 处 + **`DEFAULT_WIDGETS_VERSION` 1→2**；`/dashboards/widgets` 卡片 **14→16** 且两张新卡**真的在列表里**；两个代理端点实跑返回数据；测试 **116/116** |
+
+### 执行中值得记的三件事
+
+1. **尺寸门禁真的会拦人** —— 加汇总后 `dsh-session-catalog.ts` 涨到 **572 行**，
+   越过 `tools/check-structure.sh` 的 >500 线。按要求**按投影拆**（不是压行数）
+   为 235/187/178 三文件，barrel 拆三块但**公共入口名不变**。
+2. **既有测试先抓到了我** —— `host-smoke.test.mjs` 断言
+   `disk1.widgetsVersion === 1`，我 bump 到 2 后它立刻失败。
+   **测试是对的**；已更新断言并把两张新卡纳入它的覆盖
+   （那条测试正是为"新增内置项必须进既有 store"而写的，即防我这类改动）。
+3. **`degraded` 一路透传** —— los 侧产出 `{isDegraded, reasons[]}`，插件**原样透传**
+   并在字段缺失时**主动降级**（`reasons: ['los 未返回 degraded 字段（契约不符）']`），
+   而不是补一个看起来正常的默认值。**"没数据"不得被伪装成"数据是零"。**
+
+### 仍需的动作
+**重启 dsh web/desktop** 后 GUI 里才能看到两张卡（host 半包改动，
+Node ESM 按 URL 缓存，HMR 只 config-only）。web daemon 已重启并验证；
+desktop 宿主（Electron 19387）待自然重启或手动重启。
