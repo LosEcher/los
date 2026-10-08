@@ -158,8 +158,9 @@ export function unregisteredProjects(registry, entries, { days = 30, indexPath =
   const cutoff = Date.now() - days * 86400_000;
   let rows = [];
   try {
+    // 不加 -readonly：对缺失 -shm 的 WAL 库会以 (14) 失败（只跑 SELECT，不写）
     const out = execFileSync('sqlite3', [
-      '-readonly', dbPath,
+      dbPath,
       `SELECT DISTINCT cwd FROM sessions WHERE created_at > ${cutoff} ORDER BY cwd;`,
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 });
     rows = out.split('\n').map(s => s.trim()).filter(Boolean);

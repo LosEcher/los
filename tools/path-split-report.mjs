@@ -120,7 +120,11 @@ export function buildAliasMap({ cwds, roots, newRoot, declared = [], existsFn })
 function queryCwds() {
   if (!existsSync(INDEX)) return null;
   try {
-    const out = execFileSync('sqlite3', ['-readonly', INDEX,
+// 注意：不能用 `sqlite3 -readonly` —— 对**缺失 -shm 的 WAL 库**会以
+// `unable to open database file (14)` 失败（2026-10-08 实测踩到，
+// 会让检具假报"环境故障"）。本处只执行 SELECT，不写；去掉 -readonly
+// 既能读 WAL，也不会修改数据库。
+    const out = execFileSync('sqlite3', [INDEX,
       `SELECT cwd || '|' || count(*) || '|' || min(datetime(created_at/1000,'unixepoch','localtime')) || '|' || max(datetime(created_at/1000,'unixepoch','localtime')) FROM sessions GROUP BY cwd ORDER BY cwd;`],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
     return out.split('\n').filter(Boolean).map(l => {

@@ -13,7 +13,7 @@
 | **B0.0** | ✅ **已完成** — 插队修正在发生的事故 | 3 处小改 + 状态回滚 | 无 | ✅ 全部达标（见下节） |
 | **B0** | ✅ **已完成** | 决策 + 只读登记 | 无 | ✅ ADR 0047（8 条重新评估触发条件）· ✅ `capability-ownership.yaml`（26 能力/7 层）+ 校验器接进 `pnpm check` · ✅ `projects.json`（11 顶层/28 条，v2）+ 校验器接进 `pnpm check` · ✅ B0.4 三支只读脚本（`boundary-audit` / `model-route-truth` / `path-split-report`）+ 别名表已生成 |
 | **B1** | ✅ **已完成**（`file:tools/check-doc-status-anchors.mjs:1`） | 新增只读门禁 | B0 | ✅ **J1–J10 全部有机检手段**：J1/J5→`check:capability-ownership`、J9/J10→`check:project-registry`、J2/J3/J7→`audit:boundary`、J8→`audit:model-route:check`、**J4→`check:workspace-docs`**、**J6→`check:doc-anchors`**（带 baseline 棘轮 + STALE 反向检测）· ✅ **6 支检具各带负向控制**（7+11+10+12+18+15 断言）· ✅ `dsfolder/AGENTS.md` · ✅ `.gitignore` 判据修正（产物忽略 / 台账保留）· ✅ 综合验收 **15/15** · ⬜ 仅剩「把 `audit:*` 纳入常规节奏」 |
-| **B2** | 🟡 **进行中**（`file:tools/boundary-audit.sh:150`） | 接线，不改语义 | B1 | ✅ `los mcp serve` 已接线进 **Codex**（⬜ 待真实调用一次才算闭环）· ✅ **B2.3 provider 读侧统一**（三态可见，禁静默覆盖）· ✅ **B2.4 记忆三层 canonical**（`check:memory-canonical`）· ⬜ B2.1 rust 工具按裁决落地 |
+| **B2** | 🟡 **进行中**（`file:tools/boundary-audit.sh:150`） | 接线，不改语义 | B1 | ✅ `los mcp serve` 已接线进 **Codex**（⬜ 待真实调用）· ✅ **B2.3 provider 读侧统一** · ✅ **B2.4 记忆三层 canonical** · 🟡 **B2.1(a) D8 单一真源已完成**（跑出 session-index +17% 真回归）；⬜ B2.1(b)(c)(d) |
 | **B3** | 合并与退役 | 删除/合并 | B2 | `dsfolder` 结构定性落地；无 VCS 目录清零；重复实现只剩一份 |
 
 **为什么 B1 在 B2 前面**：今天"谁该消费谁"没有机械判据，先接线只会把错配固化。B1 让越界**可见且可回归**，B2 才敢动消费面。
@@ -256,6 +256,24 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 - 新增门禁：三处的写入路径不得互相写对方存储（grep 各自代码库的目标路径）。
 
 **出口判据**：capability-ownership 的 `memory` 条目有 3 个分层 owner；负向控制：模拟"los 写 `~/.dsh/memories`" → 红。
+
+---
+
+### B2.1 🟡 进行中 —— rust 工具的接线/收敛
+
+**(a) ✅ 已完成（2026-10-08）—— D8 单一真源：`rustopt` 体积预算改为「自证依据」** — `file:tools/boundary-audit.sh:1`
+
+- **实证**：`.rust-los-gov/gates.json` 的 `repos[].checks[].budget` 是硬编码绝对字节数，runner 读它传 `rustopt --budget`；实测真源在各仓 `.rustopt/runs.jsonl` ⇒ 同一数字两处。
+- **自动推导失败（已写进代码注释防重犯）**：`budget = ceil(measured × 1.05)` 用 5 个真实实例验证**五例全不符** ⇒ 不猜公式；预算本质是人工策略值（约 +5% 手工余量）。
+- **新模型**：台账 = 实测唯一真源；预算须自证 `basisMeasuredBytes` / `basisLedger` / `basisFrozenAt` + 两个**独立**比值 `driftTolerance`（依据新鲜度）与 `headroomWarnBelow`（余量线）。判据：`attested` / `attestation-stale` / `headroom-low` / `over-budget` / `no-measurement`（不算通过）/ `no-budget`（纯信息）/ `no-budget-but-measured`（真缺口）/ `disabled`。
+- **`--auto-attest`**：自动门禁每次跑都推进台账末次 ⇒ 依据必然陈旧；只在实测**仍落在已声明容差内**时刷新，**越界则保持陈旧 + rc=1 升级给人**（首跑 refreshed 4 / held 1）。
+- **实测真发现**：`session-index` 二进制 **1259552 → 1476048（+17.19%）** 首次超预算 ⇒ auto-attest 正确 hold 且未刷新 basis（不掩盖回归）。
+- **自检 46 断言**；工具 `dsfolder/scripts/{lib/rust-budget-attestation.mjs,rust-budget-check.mjs}`，提交 `d0d2c9b` + `fe30253`。
+- **顺带**：`run-diff` 在 gates.json 里 `enabled: true`（已于本日归档）⇒ 改 `false` + reason；`projection.note` 声明该文件是**派生投影、非真源**。
+
+**(b) ⬜ `fmtguard_doctor --requireVersion` 进 CI**（不自建版本门禁）
+**(c) ⬜ `verify-gate` 三态在 DSH 侧如实透传**（**不得把 exit 2 当 failed**）
+**(d) ⬜ `sandbox-run` 按裁决 C1–C5 组件化**（起点 = `IsolationBackend` 契约 + `vcsKind`→`backend` 数据迁移）
 
 ---
 

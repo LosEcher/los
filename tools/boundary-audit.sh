@@ -193,7 +193,8 @@ else
   warn "los mcp serve 未在任何宿主配置中接线（codex/claude/dsh 均无）"
 fi
 # 实际调用证据（跨会话计数；接线后需要真实会话调用过才算"用起来"）
-LOS_MCP_CALLS=$(sqlite3 -readonly "$IDX" "SELECT count(*) FROM events WHERE kind='tool/call' AND name IN ('los_run','los_run_state','los_run_replay','los_operator_control');" 2>/dev/null || echo "?")
+LOS_MCP_CALLS=$(# 不加 -readonly：对缺失 -shm 的 WAL 库会以 (14) 失败（只跑 SELECT，不写）
+sqlite3 "$IDX" "SELECT count(*) FROM events WHERE kind='tool/call' AND name IN ('los_run','los_run_state','los_run_replay','los_operator_control');" 2>/dev/null || echo "?")
 case "$LOS_MCP_CALLS" in
   0) info "全历史 MCP 调用次数=0（已接线但尚无真实调用 —— 需真实会话跑一次才算闭环）";;
   "?") skip "无法查询 session-index";;

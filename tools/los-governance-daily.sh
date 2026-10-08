@@ -289,6 +289,21 @@ fi
 echo "- 路由一致性（J8）: ${ROUTE_STATE}"
 echo
 
+# rust 体积预算依据（B2.1 D8）：台账是实测唯一真源，预算是自证依据的策略值。
+# 同样**吞掉退出码**（有缺口时非零），日报只呈现。
+BUDGET_STATE="SKIP"
+BUDGET_CHECK="$HOME/syncfolder/project/dsfolder/scripts/rust-budget-check.mjs"
+if [[ -f "$BUDGET_CHECK" ]]; then
+  BUDGET_OUT="$(node "$BUDGET_CHECK" 2>&1 || true)"
+  # 取检具自己的汇总行（成功与失败措辞不同，故直接截取而不是正则提数字）
+  BUDGET_STATE="$(printf '%s\n' "$BUDGET_OUT" | grep -E '^rust-budget-check (OK|FAILED):' | head -1 | sed 's/^rust-budget-check //' || true)"
+  BUDGET_STATE="${BUDGET_STATE:-parse-failed}"
+  BUDGET_BAD="$(printf '%s\n' "$BUDGET_OUT" | grep -E '^  - ' | head -5 || true)"
+  if [[ -n "$BUDGET_BAD" ]]; then printf '%s\n' "$BUDGET_BAD" | sed 's/^  /- /'; fi
+fi
+echo "- rust 体积预算依据（D8）: ${BUDGET_STATE}"
+echo
+
 # retired 是有意下线、operator 暂停是人工意图，都不算异常；
 # 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
@@ -296,4 +311,4 @@ APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'await
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE} 体积预算=${BUDGET_STATE}"

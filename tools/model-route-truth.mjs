@@ -114,7 +114,9 @@ export function observedModels(days = 14) {
 function trySqlite(sql, db = CC_SWITCH_DB) {
   if (!existsSync(db)) return null;
   try {
-    return execFileSync('sqlite3', ['-readonly', db, sql], {
+    // 不加 -readonly：对缺失 -shm 的 WAL 库会以 (14) 失败（只跑 SELECT，不写）。
+    // cc-switch.db 是 rollback-journal 模式，加不加都能读；统一去掉以免混淆。
+    return execFileSync('sqlite3', [db, sql], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000,
     }).trim();
   } catch { return null; }
