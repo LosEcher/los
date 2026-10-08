@@ -216,14 +216,21 @@ export {
 export {
   ensureDshSessionCatalogStore,
   projectSessionCatalog,
+  matchPainPattern,
+  PAIN_PATTERNS,
+  PAIN_PATTERN_VERSION,
+  DSH_SESSION_INDEX_DB,
+  querySqlite,
+  type CatalogProjectionResult,
+} from './dsh-session-catalog.js';
+export {
   projectSessionPain,
   projectContextInjection,
   RUNTIME_CONTEXT_MARKER,
   SKILL_CATALOG_MARKER,
   INJECTION_MARKER_VERSION,
-  matchPainPattern,
-  PAIN_PATTERNS,
-  PAIN_PATTERN_VERSION,
-  DSH_SESSION_INDEX_DB,
-  type CatalogProjectionResult,
-} from './dsh-session-catalog.js';
+} from './dsh-session-injection.js';
+export {
+  getCrossProjectSummary,
+  type CrossProjectSummary,
+} from './dsh-session-summary.js';

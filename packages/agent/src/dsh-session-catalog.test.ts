@@ -3,16 +3,19 @@ import test from 'node:test';
 import { getDb } from '@los/infra/db';
 import {
   DSH_SESSION_INDEX_DB,
-  INJECTION_MARKER_VERSION,
   PAIN_PATTERN_VERSION,
-  RUNTIME_CONTEXT_MARKER,
-  SKILL_CATALOG_MARKER,
   ensureDshSessionCatalogStore,
   matchPainPattern,
-  projectContextInjection,
   projectSessionCatalog,
-  projectSessionPain,
 } from './dsh-session-catalog.js';
+import {
+  INJECTION_MARKER_VERSION,
+  RUNTIME_CONTEXT_MARKER,
+  SKILL_CATALOG_MARKER,
+  projectContextInjection,
+  projectSessionPain,
+} from './dsh-session-injection.js';
+import { getCrossProjectSummary } from './dsh-session-summary.js';
 
 const ROOT = '/NEW/project';
 const MAP = {
@@ -137,3 +140,49 @@ test('2.4.1 NEGATIVE: a future since yields zero rows rather than throwing', asy
   assert.ok(r.status === 'ok' || r.status === 'no-alias-map' || r.status === 'degraded');
   assert.equal(r.rows, 0, '未来窗口不应产出任何行');
 });
+
+// ─────────────────────────────────────────────────────────────
+// 跨项目汇总（契约 los.cross-project-summary）
+// ─────────────────────────────────────────────────────────────
+test('summary: 有投影时 isDegraded=false，且三态与项目数自洽', async () => {
+  const s = await getCrossProjectSummary({ painLimit: 5, injectionDays: 14 })
+  assert.equal(s.evidenceClass, 'los_projection')
+  if (!s.degraded.isDegraded) {
+    assert.deepEqual(s.degraded.reasons, [])
+    assert.ok(s.catalog.sessions > 0)
+    const { current, resolved, unknown } = s.catalog.byState
+    assert.equal(current + resolved + unknown, s.catalog.sessions,
+      '三态之和必须等于会话总数（不得有会话落在三态之外而被静默丢掉）')
+    assert.ok(s.pain.patterns.length <= 5, 'painLimit 必须被遵守')
+    assert.equal(s.pain.patterns.length > 1,
+      s.pain.patterns.every((p, i, a) => i === 0 || a[i - 1]!.sessions >= p.sessions),
+      '痛点必须按 sessions 降序')
+  }
+})
+
+test('summary NEGATIVE: 投影为空时 isDegraded=true 且给出可操作原因（不得当成"确实没有"）', async () => {
+  const db = getDb()
+  // 在事务里清空三表再查，最后回滚 —— 不污染真实投影
+  await db.query('BEGIN')
+  try {
+    await db.query('DELETE FROM dsh_session_catalog')
+    await db.query('DELETE FROM dsh_session_pain')
+    await db.query('DELETE FROM dsh_context_injection')
+    const s = await getCrossProjectSummary({})
+    assert.equal(s.degraded.isDegraded, true, '★ 空投影必须显式降级')
+    assert.ok(s.degraded.reasons.length >= 3, '三张表各应贡献一条原因')
+    assert.ok(s.degraded.reasons.some((r) => r.includes('dsh_session_catalog')))
+    assert.ok(s.degraded.reasons.some((r) => r.includes('dsh_session_pain')))
+    assert.ok(s.degraded.reasons.some((r) => r.includes('dsh_context_injection')))
+    assert.equal(s.catalog.sessions, 0)
+    assert.equal(s.asOf, null, '★ 无投影时 asOf 必须为 null，不得假装 now()')
+    // 原因必须可操作（含怎么修），不是空话
+    assert.ok(s.degraded.reasons.every((r) => r.includes('project:dsh-sessions')))
+  } finally {
+    await db.query('ROLLBACK')
+  }
+  // 回滚后应恢复
+  const after = await getCrossProjectSummary({})
+  assert.ok(after.catalog.sessions > 0, '回滚后投影必须完好')
+  assert.equal(after.degraded.isDegraded, false)
+})
