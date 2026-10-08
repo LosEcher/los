@@ -95,6 +95,20 @@ node scripts/dsh-obs.mjs plugin-status session-index
 返回 `lastRunAt`/`lastDurationMs`/`lastError`/`consecutiveFails`/`dataAgeMs`/`dbBytes`
 （照 `dsh-dashboards` 的 `lib/poller.mjs` 形态，且**成功不清空 `lastError`**，不变量 O2）。
 
+## 重启状态取证（2026-10-08 19:02 实测）
+
+判据不是"用户说重启了"，而是**宿主进程启动时刻 vs 代码改动时刻**：
+
+```
+宿主进程 32564:  STARTED Thu Oct 8 10:41:42   ELAPSED 08:21:02
+当前时间:        2026-10-08 19:02:38
+status 端点:     dsh-session-index  N/A (HTTP 404)
+```
+
+宿主启动在 **10:41:42**，而 status 端点的代码改动在 **~18:50–19:00** ⇒
+**重启尚未发生**，404 是预期的。（`ps -o lstart` 是比"用户叙述"更可靠的判据 ——
+本项已实际用到。）
+
 ## 建议
 
 1. **重启本身可选**：插件已在树里，重启对 V2/V3 不产生变化（只是让新加的 bundle 显式生效）。

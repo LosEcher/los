@@ -224,3 +224,73 @@
 - **`sandbox-run` C5 的实现细节**只给到 trait 骨架，未核对它现有 `docker.rs`/`gates.rs` 的拆分是否已接近该形态（需要读那 3803 行才能给精确的迁移步）。若要做 C5，**先补这一步取证**。
 - **2.4.3 的 widget 后端路由**未定具体响应 schema（需先确定卡片要展示哪几个字段；建议在实现时与 `dsh-dashboards` 既有 `type` 的渲染约定对齐）。
 - **P1 的 L1-3 之外**，`p1-cross-project-observability.md` 里的 L2/L3 项未纳入本文。
+
+---
+
+## 6. 2.5 / 2.4.3 的前置取证（2026-10-08，已做完，未实现）
+
+### 6.1 2.5 `sandbox-run` C5 —— 取证结论
+
+**代码分布**（`src/` 共 3,803 行）：`main.rs` 888 / `docker.rs` 799 / `gates.rs` 358 /
+`scope.rs` 355 / `exec.rs` 337 / `report.rs` 279 / `sandbox.rs` 250 / `sync.rs` 225 /
+`types.rs` 205 / `events.rs` 107。
+
+**`enum Backend` 的现状**（`main.rs:94-116`）：
+
+| 位置 | 内容 | C5 后 |
+| --- | --- | --- |
+| `:94-98` | `enum Backend { Auto, Worktree, Docker }` | 保留为**解析期**类型；执行面改查注册表 |
+| `:100-115` | `fn as_str()` / `fn effective()` | `as_str` 由注册表的 `id()` 取代 |
+| `:222-231` | `--backend` 解析 `match`，未知值**已**给出"expects auto\|worktree\|docker" | 改为查表，错误信息由**表**生成（加后端自动进提示） |
+| `:425-446` | 派发 `match cfg.backend.effective()` | `trait IsolationBackend::run()` |
+
+**两处必须处理的设计要点（这是取证的价值）**：
+
+1. **两个分支的签名不同** —— `docker::run_body(&docker::DockerRun)` 收一个结构化结构体，
+   而 `run_vcs_body(cfg, &scope, vcs, cwd, log, &run_id)` 收 6 个位置参数。
+   trait 方法若直接照抄任一侧，另一侧就得额外打包 ⇒ **必须先定一个统一的
+   `BackendRunContext`**（把 `cfg`/`scope`/`vcs`/`cwd`/`log`/`run_id`/`ledger_rel`
+   收进一个结构体，`DockerRun` 的字段从它派生）。**这一步是 C5 的真正工作量所在**，
+   不是 `trait` 关键字本身。
+2. **`Auto` 已经是正确形态** —— 它由 `effective()` 在解析期解析（`:112`），
+   派发处是 `unreachable!("auto resolved before dispatch")`（`:445`）。
+   这是**对的**：`auto` 是**选择规则**不是**后端**。C5 只需保持这个性质
+   （注册表里**不放** `auto`），**不要**被"trait 化"顺手改成表项 —— 那会引入
+   一个永远不该被直接派发的伪后端。
+
+**回归锁**：`:820-834` 与 `:875-878` 已有 `Backend::Docker/Worktree/Auto` 与
+`effective()`/`as_str()` 的断言 ⇒ C5 必须让这些断言**语义上继续成立**
+（`--backend worktree|docker` 行为逐字不变），而不是删掉它们。
+
+### 6.2 2.4.3 `dsh-dashboards` widget —— 实现契约（该仓的真实改动面）
+
+**每新增一张内置卡片要动 4 处 + 1 个版本号**（`dsh-dashboards/index.mjs`）：
+
+| # | 位置 | 现值（行） | 要加什么 |
+| --- | --- | --- | --- |
+| 1 | `ALLOWED_ENDPOINTS` 白名单 | `:200` | `/dashboards/xproj/sessions`、`/dashboards/xproj/pain` |
+| 2 | `DEFAULT_WIDGETS` 卡片清单 | `:239-251` | 两张卡（照既有形状：`id`/`type`/`endpoint`/`title`/`refreshMs`） |
+| 3 | 路由名→数据函数映射 | `:1775` | 两条映射 |
+| 4 | 路由 `if` 分支 | `:2019` | 两个分支 |
+| 5 | **`DEFAULT_WIDGETS_VERSION`** | `:1422`（今日为 `1`） | **1 → 2，不可省** —— 不 bump 则对**已有安装静默不可见**（`surge-packy`/`z4pro-health` 的坑） |
+
+**数据通路的设计判断**：`dsh-dashboards` 对 los 是**代理**（`/dashboards/los/usage`
+→ los `/usage/summary`，经 `losFetch(cfg, tokens, path)`，`index.mjs:393`）⇒
+**xproj 数据应由 los 网关提供 HTTP 端点**，dashboards 只做代理 + 卡片。
+这样单向依赖，dashboards 不需要知道 Postgres。
+
+**los 侧要新增**（与 `dsh_session_catalog`/`dsh_session_pain` 同源）：
+- 一个只读路由文件（如 `packages/gateway/src/routes/xproj-routes.ts`），
+  两个端点：跨项目会话三态汇总、痛点 top-N（按 `sessions` 去重）。
+- 契约先行（`contracts/` 增条目），再实现，最后接契约检查。
+- **不得**在 dashboards 侧直连 Postgres（会破坏"los 拥有投影"的边界）。
+
+**验收（判据式，注意"路由 200 ≠ 卡片可见"这一坑）**：
+1. `DEFAULT_WIDGETS_VERSION === 2`，且已有 store 迁移为**追加**而非替换
+2. 三态单测：新项进既有 store / 已最新**零写入** / 用户删过的**不复活**
+3. `curl` 两个新端点返回非空且带 `as_of`
+4. **本机 GUI 里两张卡真的出现**（这是 `surge-packy` 的坑：
+   路由 200、`/dashboards/widgets` 也 200，但卡片就是不存在）
+
+**为什么不与 2.5 合并**：两者属不同仓、不同语言、无依赖；合并只会让
+"哪一半没做完"不可分辨（违反本仓"一个 change 一个意图"）。
