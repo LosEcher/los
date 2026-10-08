@@ -109,6 +109,46 @@ status 端点:     dsh-session-index  N/A (HTTP 404)
 **重启尚未发生**，404 是预期的。（`ps -o lstart` 是比"用户叙述"更可靠的判据 ——
 本项已实际用到。）
 
+## ★ 第一次重启的结果与我的 bug（2026-10-08 20:15 实测）
+
+**重启确实成功了**，但 V4 仍 404 —— **原因在我的代码**，且时间线可以证明：
+
+```
+desktop 宿主（19387）启动   20:14:02   ← 重启成功
+我编辑 index.mjs           20:14:46   ← 编辑在启动之后 38 秒
+```
+
+**根因**：`dsh-dashboards` 声明了 `export const inject = ['webServer']`，
+而**我的插件只声明了 `['tools']`**。Cordis 只注入被声明的服务 ⇒ `ctx.webServer`
+是 `undefined`，而我写的守卫是 `if (ctx.webServer?.register)` ⇒ **静默跳过注册**，
+日志无痕，外部表现与"代码没改"完全一样。
+
+**这与本项目一直在登记的反模式同族**："守卫/降级把失败抹掉"（对照 verify-gate 的
+"全 na 算 pass"）。写成 `if (dep?.method)` 时，`?.` 会让**装配错误**伪装成
+**可选功能缺失**。对"我声明了就该有"的依赖，守卫必须 **fail-loud**。
+
+**已修**（`dsh-session-index ad0c6b7`）：`inject = ['tools','webServer']`，
+且守卫改为 `if (!ctx.webServer?.register) ctx.logger?.error?.(...)`。
+
+**⇒ 需要再重启一次**（DSH 规则：host 插件代码改动必须重启；Node ESM 按 URL 缓存，
+HMR 只对 `cordis.patch.yml` 之类的 config 生效）。
+
+## ⚠️ 注意：有两个宿主，别测错对象
+
+| 端口 | 进程 | profile | 说明 |
+| --- | --- | --- | --- |
+| **19387** | Electron `DeepSeek Harness` | **desktop** | **本项的目标**；`dsh-obs` 需 `DSH_OBS_BASE=http://127.0.0.1:19387` |
+| 3080 | `node … web --no-open`（launchd daemon 拉起） | web | `dsh-obs` 的**默认**目标 |
+
+**我先前用默认的 3080 测，测错了对象** —— 3080 是 web daemon，与 desktop 无关。
+另：desktop 是 Electron 托管的，**`dsh-obs` 对它的 RPC 认证会因重启而失效**
+（launch token 过期），故验证优先用**直接探测路由**：
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19387/plugins/dsh-session-index/status
+```
+期望 `200`（此前为 `404`）。
+
 ## 建议
 
 1. **重启本身可选**：插件已在树里，重启对 V2/V3 不产生变化（只是让新加的 bundle 显式生效）。
