@@ -285,13 +285,14 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 - **连带真 bug**：`report::build()` 自己重算 verdict，把 `inconclusive` 覆盖回 `pass` ⇒ 退出码对但 **JSON 契约错**（插件消费的正是 JSON）。改为由调用方传入 `verdict`/`pass`，并新增 `passed` 字段（此前报告无任何 `na` 计数）。
 - **测试**：既有 `G10` 的 `na.toml` 是**混合**清单，**从未测过全 `na`**（盲区）；新增 `test/fixtures/all-na.toml` + `G10b` + 负向控制；**突变测试**确认回退修复即红。
 - **插件侧**（`dsh-verify-gate`）：`na` 用独立标记 `–`（不与"未知态 `·`"混淆）+ 三态计数行 + 全 `na` 警示"不构成通过"。
-**(d) 🟡 `sandbox-run` 按裁决 C1–C5 组件化**（`file:packages/agent/src/isolation-backends.ts:1`）
+**(d) ✅ 已完成 —— `sandbox-run` 按裁决 C1–C5 组件化**（`file:packages/agent/src/isolation-backends.ts:1`）
 
 - **C1 ✅ 已完成**（`file:contracts/isolation-backend.yaml:1`）—— `contracts/isolation-backend.yaml`（三条接口纪律作为契约条款）+ 迁移 062（`vcs_kind`→`backend`，含 CHECK 枚举与列注释；`check:migration-drift` 0 new）。
 - **C2 切片 ✅ 已完成**（`file:packages/agent/src/isolation-backends.ts:1`）—— 后端注册表 + 三支诚实的 `probe()`（`IsolationProbeResult` 用联合类型把"不可用必须有 reason"变成**编译期要求**；`auto` 在未知仓上拒绝猜；显式不可用**绝不回落**）。**剩余**：两内建后端的 `create`/`run`/`release` 真实现。
 - **C3 ✅ 已完成**（`file:packages/agent/src/isolation-backends.ts:1`）—— `docker` 委托 `sandbox-run` 的执行适配器。`RawExecutionResult` **无 verdict 字段**；`exitCode: null` = **命令未曾运行**，与 `0` 严格区分；环境故障不伪装成命令失败。**实测契约**：命令失败时 `verify.exitCode` 是**真实码**而**进程退出码恒为 1**（与"变更集为空"复用）⇒ 拿进程码当命令码是错的。测试 **13/13**（4 条关键负向控制）。
 - **C4 ✅ 已完成**（`file:packages/agent/src/managed-workspaces.ts:1`）—— `isolation.backend` 配置面接线。`ConfigSchema.isolation.backend`（`auto|jj-workspace|git-worktree|docker`，默认 `auto`）；`createManagedWorkspace` 里**解析 + probe 在任何副作用之前**（fail-closed 时账本**零记录**）；显式不可用 ⇒ 抛错带 probe 原因（**禁止静默回落**）；解析成功但 create 未接线时**明说未实现**。测试 6/6（3 条 C4 负向控制）；连带 10 个 gateway 夹具；全包 0 类型错误；12 项门禁全绿。
-- **C2 剩余 ⬜** —— 两内建后端的 `create`/`run`/`release` 真实现。**结构前瞻**：`isolation-backends.ts` 现 338 行，补完会推过 **500 行门禁** ⇒ 届时按后端拆分文件。
+- **C2 ✅ 已完成**（`file:packages/agent/src/isolation/jj-workspace.ts:1`）—— 内建后端真实现 + 按后端拆文件（`isolation/` 目录 5 个文件 87–146 行；入口 `isolation-backends.ts` 从 338 降到 92 行，未新增 grandfathered 项）。接口新增 `capturePatch()`（**补丁形态是各 VCS 自己的事**）。**接线时暴露并修掉三处"唯一路径"假设**：① create 内联 `jj workspace add`；② release 内联 `jj workspace forget`，且**目录移除归后端**（`git worktree remove` 自删目录、jj 的 `forget` 只解除登记 ⇒ 调用方再统一 `rm` 会 ENOENT 并被误记 `release_failed`）；③ backup/`getWorkspaceDiff` 内联 `jj diff`。**backup 与 release 用账本里记录的 backend，而非当前配置值**。git 后端的 `capturePatch` 先 `git add -N .`（未跟踪文件不在 `git diff` 里，否则备份会漏掉新增文件）。测试 **19/19**（含 git 仓端到端：create → backup → release 全通）。
+- **C5 ⬜ 低优先（属 `sandbox-run` 自己）** —— `enum Backend` → `trait` + 注册表，使加后端不改 `main.rs`。
 
 ---
 
