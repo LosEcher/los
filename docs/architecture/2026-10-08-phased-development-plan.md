@@ -271,7 +271,12 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 - **自检 46 断言**；工具 `dsfolder/scripts/{lib/rust-budget-attestation.mjs,rust-budget-check.mjs}`，提交 `d0d2c9b` + `fe30253`。
 - **顺带**：`run-diff` 在 gates.json 里 `enabled: true`（已于本日归档）⇒ 改 `false` + reason；`projection.note` 声明该文件是**派生投影、非真源**。
 
-**(b) ⬜ `fmtguard_doctor --requireVersion` 进 CI**（不自建版本门禁）
+**(b) ✅ 已完成（2026-10-08）—— `fmtguard doctor` 环境探测进 CI；版本契约落到实处** — `file:tools/los-governance-daily.sh:1`
+
+- **旗标名纠正**：是 `--require-version`（kebab-case），计划里写的 `--requireVersion` 不存在。
+- **位置纠正（重要）**：`--require-version` 的 `--help` 设计意图是「**use it in AGENTS.md to catch a stale install**」⇒ 属**本地/agent 侧**。CI 里二进制是本 job 刚 `cargo build` 的，版本必然等于 `Cargo.toml`，硬编码版本号是**恒真的同义反复**。故 CI 只做：`doctor` 环境探测 + 用 `cargo metadata` **派生**版本校验接口可用（`>=` 语义与退出码）+ **负向控制**（99.0.0 必须 fail-closed exit 2）。
+- **真正的半边已落地**：新增 `dsfolder/scripts/check-toolchain-freshness.mjs`（自检 16 断言），覆盖 **unirun / rustopt / fmtguard / sandbox-run / verify-gate** 五个工具的本机二进制 vs 源码版本；结果接进治理日报新行「工具链新鲜度」。判据五态（`fresh`/`stale`/`not-installed`/`no-source`/`error`，`error` **不算 fresh**）。
+- **跑出并修掉一个真问题**：`verify-gate` 本机装的是 **0.1.0 而源码 0.2.0** ⇒ **同日做的"全 na 不算 pass"三态修复在本机根本不生效**。已 `cargo install --path . --locked` 重装到 0.2.0，复核 5/5 fresh，并验证新二进制行为（全 na ⇒ `inconclusive` + exit 2）。
 **(c) ✅ 已完成（2026-10-08）—— `verify-gate` 三态透传；修掉静默绿灯「全 `na` 被当 pass」** — `file:tools/boundary-audit.sh:1`
 
 - **契约取证**：per-check `result` 三态 `pass|fail|na`；顶层 `exitCode` 三态 `0/1/2`；顶层 `verdict` 只有 `pass|fail`。`na` 来自 check 的 `enabled=false` 与 policy 规则的 `scope` 不匹配（`policy.rs:342-350`）。
