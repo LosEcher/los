@@ -304,6 +304,21 @@ fi
 echo "- rust 体积预算依据（D8）: ${BUDGET_STATE}"
 echo
 
+# 工具链新鲜度：本机二进制 vs 源码仓版本。
+# 为什么必须每天看：跑的是旧二进制时，**源码里所有修复在本机都不生效**，
+# 而任何"工具行为"结论都基于旧二进制（2026-10-08 实测 verify-gate 0.1.0 vs 0.2.0）。
+FRESH_STATE="SKIP"
+FRESH_CHECK="$HOME/syncfolder/project/dsfolder/scripts/check-toolchain-freshness.mjs"
+if [[ -f "$FRESH_CHECK" ]]; then
+  FRESH_OUT="$(node "$FRESH_CHECK" 2>&1 || true)"
+  FRESH_STATE="$(printf '%s\n' "$FRESH_OUT" | grep -E '^check-toolchain-freshness (OK|FAILED):' | head -1 | sed 's/^check-toolchain-freshness //' || true)"
+  FRESH_STATE="${FRESH_STATE:-parse-failed}"
+  FRESH_BAD="$(printf '%s\n' "$FRESH_OUT" | grep -E '^  - ' | head -5 || true)"
+  if [[ -n "$FRESH_BAD" ]]; then printf '%s\n' "$FRESH_BAD" | sed 's/^  /- /'; fi
+fi
+echo "- 工具链新鲜度: ${FRESH_STATE}"
+echo
+
 # retired 是有意下线、operator 暂停是人工意图，都不算异常；
 # 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
@@ -311,4 +326,4 @@ APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'await
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE} 体积预算=${BUDGET_STATE}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE} 体积预算=${BUDGET_STATE} 工具链=${FRESH_STATE}"
