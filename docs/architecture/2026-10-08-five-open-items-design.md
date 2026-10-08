@@ -182,6 +182,16 @@
 
 **依赖关系**：2.4.3 依赖 2.4.1（widget 读的是那三张表；表已建、catalog 已有数据，pain/injection 空表也能渲染但只有一列有值）。其余互不依赖。
 
+### 第一批执行结果（2026-10-08，已完成）
+
+| 项 | 结果 | 证据 |
+| --- | --- | --- |
+| **2.3** | ✅ 两条 bookmark 已推 `origin`（**未推 GitHub** —— 查 `ci/mirror-pr-lane` 提交原文确认 GitHub 只接收 `mirror/*` 头） | `boundary/governance-b0-b1` = `42c2be4e1b95`、`boundary/consumption-b2-b3` = `e98b84a1d634`，**双侧 sha 一致**（`jj @origin` + 独立 `git ls-remote` 交叉核对）；`main` 未移动（仍 `eae54786`） |
+| **2.2** | ✅ 报告移入 `deepseek-harness/docs/audits/2026-10-08-dsh-web-plugin-audit.md`，加归属信封 | dsfolder `git status` 未跟踪 **1 → 0**；harness `HEAD` = `5badb15009` **与报告 `auditedRev` 一致**（交叉印证）；提交 `11186127b1` |
+| 约定固化 | ✅ `dsfolder/AGENTS.md` 新增第 5 条「审计报告归**被审计主体**」 | 提交 `aec9588`（原第 5 条顺延为第 6） |
+
+**执行中的两处更正**：① 我先前说"12 个提交"**是错的** —— 实际 25 个 change / **16 个有描述提交**（成对出现的是 `jj commit` 留下的空工作副本变更）；② GitHub 推送我**特意没做**，因为查证到它只接收 `mirror/*` 头。
+
 ---
 
 ## 4. 与既有决定的相容性检查
