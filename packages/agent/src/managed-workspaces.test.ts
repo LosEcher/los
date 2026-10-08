@@ -216,22 +216,56 @@ test('C4 NEGATIVE: auto on a non-VCS directory refuses to guess', async () => {
   }
 });
 
-test('C4: a resolved but not-yet-wired backend says so instead of silently using jj', async () => {
+test('C2: the git-worktree backend actually creates and releases an isolated worktree', async () => {
   const previous = loadConfigSync();
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const root = await mkdtemp(join(tmpdir(), 'los-c4-git-'));
+  const workspaceId = `c2-git-${suffix}`;
+  const graphId = `g-${suffix}`;
+  const taskId = `t-${suffix}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c2-git-'));
   const sourceRoot = join(root, 'gitrepo');
   await execFileAsync('git', ['init', '-q', sourceRoot]);
+  await execFileAsync('git', ['-C', sourceRoot, 'config', 'user.email', 'test@example.com']);
+  await execFileAsync('git', ['-C', sourceRoot, 'config', 'user.name', 'test']);
+  await writeFile(join(sourceRoot, 'a.txt'), 'hello\n', 'utf8');
+  await execFileAsync('git', ['-C', sourceRoot, 'add', 'a.txt']);
+  await execFileAsync('git', ['-C', sourceRoot, 'commit', '-q', '-m', 'init']);
+
+  await ensureAgentTaskGraphStore();
+  await ensureManagedWorkspaceStore();
+  await createAgentTask({
+    id: taskId, graphId, role: 'executor', title: 'git worktree backend',
+    metadata: { editableSurfaces: ['a.txt'] },
+  });
   try {
-    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'git-worktree' } }));
-    await assert.rejects(
-      () => createManagedWorkspace({
-        workspaceId: `c4-git-${suffix}`, graphId: `g-${suffix}`, taskId: `t-${suffix}`,
-        projectId: 'los', sourceRoot, createdBy: 'test',
-      }),
-      /create path is not wired yet/,
-      'C2 只实现了 probe；create 未接线时必须**明说**，不得悄悄按 jj 建出来再记账成别的 backend',
-    );
+    // auto 在 git 仓上应解析为 git-worktree（而不是回落 jj）
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'auto' } }));
+    let ws;
+    try {
+      ws = await createManagedWorkspace({
+        workspaceId, graphId, taskId, projectId: 'los', sourceRoot, createdBy: 'test',
+      });
+    } catch (e) {
+      console.error('PROBE create threw:', String(e).slice(0, 400));
+      throw e;
+    }
+    console.error('PROBE created:', ws.backend, ws.status, ws.workspaceRoot);
+    assert.equal(ws.backend, 'git-worktree', 'auto 在 git 仓上必须解析为 git-worktree');
+    assert.equal(ws.status, 'active');
+    // 隔离工作树真的存在，且是**独立**于原仓的检出
+    console.error('PROBE before stat, root exists?', await stat(ws.workspaceRoot).then(()=>'yes').catch(e=>'no: '+String(e).slice(0,80)));
+    assert.equal((await stat(ws.workspaceRoot)).isDirectory(), true, 'git worktree 目录必须被创建');
+    const inWorktree = await readFile(join(ws.workspaceRoot, 'a.txt'), 'utf8');
+    assert.equal(inWorktree, 'hello\n', 'worktree 应含基线提交的内容');
+
+    // release 应经**账本里记录的那个后端**撤除（不是当前配置值）
+    console.error('PROBE before release');
+    const released = await releaseManagedWorkspace(workspaceId, 'test', { artifactStorageRoot: join(root, 'artifacts') });
+    console.error('PROBE after release', released.status);
+    assert.equal(released.status, 'released');
+    // 释放后工作树目录应已移除（`stat` 必须抛错；`assert.rejects` 的第二参需为正则/函数，
+    // 传字符串表示"预期错误消息包含它"，故这里只断言"抛错"）
+    await assert.rejects(async () => { await stat(ws.workspaceRoot); });
   } finally {
     setConfig(previous);
     await rm(root, { recursive: true, force: true });

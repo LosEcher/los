@@ -5,7 +5,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { getConfig } from '@los/infra/config';
 import { promisify } from 'node:util';
 import { putArtifact } from './artifacts.js';
-import { resolveBackend } from './isolation-backends.js';
+import { ISOLATION_BACKENDS, resolveBackend } from './isolation-backends.js';
+import { runRaw } from './isolation/types.js';
 import {
   appendManagedWorkspaceEvent,
   assignManagedWorkspaceToTask,
@@ -61,22 +62,26 @@ export async function createManagedWorkspace(input: CreateManagedWorkspaceInput)
   const resolved = await resolveBackend(requested, { repository: sourceRoot });
   if ('error' in resolved) throw new Error(resolved.error);
   const backendId = resolved.backend.id;
-  if (backendId !== 'jj-workspace') {
-    // 诚实边界：C2 只实现了 probe()，内建后端的 create/run/release 与 docker 委托
-    // 的执行面尚未接入本函数。**明说未实现**，而不是悄悄按 jj 建出来然后记账成
-    // 别的 backend —— 那会让 backend 字段与实际隔离机制不符。
-    throw new Error(
-      `isolation backend "${backendId}" resolved but its create path is not wired yet `
-      + `(C2/C3 remaining: built-in create/run/release). Only jj-workspace is executable today.`,
-    );
+  const backend = resolved.backend;
+  // 基础修订仍从 VCS 读取。**只有 jj 后端需要先确认根**；git 后端由它自己的
+  // create 处理（`git worktree add` 会在非仓时失败并给出原始 stderr）。
+  let baseRevision: string;
+  if (backendId === 'jj-workspace') {
+    await runJj(sourceRoot, ['root']);
+    baseRevision = (await runJj(sourceRoot, ['log', '-r', '@-', '--no-graph', '-T', 'commit_id.short(12)'])).trim();
+  } else if (backendId === 'git-worktree') {
+    const rev = await runRaw('git', ['rev-parse', 'HEAD'], { cwd: sourceRoot, timeoutMs: 30_000 });
+    if (rev.exitCode !== 0) throw new Error(`git rev-parse HEAD failed: ${rev.stderr.trim() || rev.stdout.trim()}`);
+    baseRevision = rev.stdout.trim().slice(0, 12);
+  } else {
+    // 委托面（docker）：隔离资源由第三方在 execute 时建立，基础修订交给它自己解析。
+    baseRevision = 'delegated';
   }
-  await runJj(sourceRoot, ['root']);
 
   const managedRoot = managedRootForSource(sourceRoot, input.projectId);
   const workspaceRoot = resolve(managedRoot, input.workspaceId);
   assertManagedPath(workspaceRoot, managedRoot);
   const workspaceName = `los-${input.workspaceId}`;
-  const baseRevision = (await runJj(sourceRoot, ['log', '-r', '@-', '--no-graph', '-T', 'commit_id.short(12)'])).trim();
   const existing = await loadManagedWorkspace(input.workspaceId);
   if (existing) return existing;
 
@@ -103,11 +108,14 @@ export async function createManagedWorkspace(input: CreateManagedWorkspaceInput)
 
   try {
     await mkdir(managedRoot, { recursive: true });
-    await runJj(sourceRoot, [
-      'workspace', 'add', '--name', workspaceName, '-r', '@-',
-      '-m', `los managed workspace for ${input.graphId}/${input.taskId}`,
-      workspaceRoot,
-    ]);
+    // 委派给解析出的后端（契约：los 拥有身份与生命周期，机制由后端提供）
+    await backend.create({
+      repository: sourceRoot,
+      path: workspaceRoot,
+      name: workspaceName,
+      baseRevision,
+      label: `los managed workspace for ${input.graphId}/${input.taskId}`,
+    });
     const active = await updateManagedWorkspace(record.workspaceId, { status: 'active' });
     await assignManagedWorkspaceToTask(active);
     await appendManagedWorkspaceEvent({
@@ -137,7 +145,13 @@ export async function backupManagedWorkspace(
 ): Promise<ManagedWorkspaceRecord> {
   const workspace = await requireActiveWorkspace(workspaceId);
   try {
-    const patch = await runJj(workspace.workspaceRoot, ['diff', '--git']);
+    // 用**账本里记录的后端**捕获补丁（不是当前配置值 —— 配置可能已改，
+    // 而这份隔离资源是当初那个后端建的）。补丁形态由后端决定。
+    const backend = ISOLATION_BACKENDS[workspace.backend];
+    if (!backend) throw new Error(`unknown isolation backend "${workspace.backend}" recorded on this workspace`);
+    const patch = await backend.capturePatch({
+      repository: workspace.sourceRoot, path: workspace.workspaceRoot,
+    });
     const artifact = await putArtifact({
       artifactId: `workspace-backup-${workspace.workspaceId}-${randomUUID()}`,
       nodeId: options.nodeId ?? 'gateway-local',
@@ -188,8 +202,19 @@ export async function releaseManagedWorkspace(
   if (actualRoot !== backedUp.workspaceRoot) throw new Error('managed workspace path changed since creation');
 
   try {
-    await runJj(backedUp.sourceRoot, ['workspace', 'forget', backedUp.workspaceName]);
-    await rm(backedUp.workspaceRoot, { recursive: true, force: false });
+    // 委派给**记录在账本里**的那个后端（不是当前配置值 —— 配置可能已改，
+    // 而这份隔离资源是当初那个后端建的）。
+    const relBackend = ISOLATION_BACKENDS[backedUp.backend];
+    if (!relBackend) throw new Error(`unknown isolation backend "${backedUp.backend}" recorded on this workspace`);
+    // 目录移除**归后端**：`git worktree remove` 自己会删目录，jj 的
+    // `workspace forget` 只解除登记。调用方若再统一 rm 一次，git 路径会因
+    // 目录已不存在而 ENOENT，并被记成 release_failed（2026-10-08 实测踩到）。
+    await relBackend.release({
+      repository: backedUp.sourceRoot,
+      path: backedUp.workspaceRoot,
+      name: backedUp.workspaceName,
+      backendState: {},
+    });
     await clearManagedWorkspaceFromTask(backedUp);
     const released = await updateManagedWorkspace(backedUp.workspaceId, {
       status: 'released',
@@ -220,7 +245,9 @@ export async function getWorkspaceDiff(workspaceId: string): Promise<string> {
   if (workspace.status !== 'active' && workspace.status !== 'backup_ready') {
     throw new Error(`managed workspace status '${workspace.status}' does not support diff; expected active or backup_ready`);
   }
-  return await runJj(workspace.workspaceRoot, ['diff', '--git']);
+  const backend = ISOLATION_BACKENDS[workspace.backend];
+  if (!backend) throw new Error(`unknown isolation backend "${workspace.backend}" recorded on this workspace`);
+  return await backend.capturePatch({ repository: workspace.sourceRoot, path: workspace.workspaceRoot });
 }
 
 export function workspaceRootForTask(
