@@ -133,6 +133,46 @@ desktop 宿主（19387）启动   20:14:02   ← 重启成功
 **⇒ 需要再重启一次**（DSH 规则：host 插件代码改动必须重启；Node ESM 按 URL 缓存，
 HMR 只对 `cordis.patch.yml` 之类的 config 生效）。
 
+## ★★ V4 已在 web 宿主上验证通过（2026-10-08 20:16）
+
+**结论：代码是对的，只剩 desktop 宿主需要重启。**
+
+web daemon（3080，源码 checkout，launchd `com.echerlos.dsh-web`）与 desktop 宿主
+符号链接到**同一份插件源** ⇒ 在 web 侧重启即可**在不打断会话的前提下**证明修复有效：
+
+```
+launchctl kickstart -k gui/$(id -u)/com.echerlos.dsh-web
+
+dsh-obs plugin-status session-index   （DSH_OBS_BASE=http://127.0.0.1:3080）
+  之前  · dsh-session-index      N/A (HTTP 404)          已实现 0/1
+  之后  ✓ dsh-session-index      v0.3.0  calls=0 failed=0 consecutiveFails=0   已实现 1/1
+```
+
+直接探测返回体：
+```json
+{"ok":true,"plugin":"dsh-session-index","version":"0.3.0",
+ "counts":{"calls":0,"failed":0,"consecutiveFails":0},
+ "detail":{"usable":true,"binaryResolved":true,"dbBytes":280498176,
+           "binary":"…/dsfolder/session-index/target/release/session-index", …},
+ "lastError":null}
+```
+
+### 我在这一项上犯了两次同类错误（都记下来）
+
+| # | 错误 | 根因 |
+| --- | --- | --- |
+| 1 | 路由**静默未注册**（404） | 只读了 `dsh-dashboards` handler 片段，漏了 `export const inject = ['webServer']` |
+| 2 | 端点 200 但**形状不被认**（`N/A (非约定形状)`） | 又只读了 handler 片段，漏了**外层信封** `ok:true`（判据在 `dsh-obs.mjs:607`） |
+
+**两次的正确做法是同一个**：**先 `curl` 一个已工作的同类实现看它的实际响应体**，
+而不是读它的源码片段。响应体是契约的最终形态 —— 比读代码更快也更准。
+（第一次那个 `if (ctx.webServer?.register)` 守卫还把装配错误伪装成了可选功能缺失，
+同属本项目一直在登记的"降级把失败抹掉"反模式。）
+
+### 剩余动作
+**只需重启 desktop 宿主（Electron，19387）** —— 我无法自行操作（我运行在其中）。
+重启后同一命令应给出 `✓ … 已实现 1/1`。
+
 ## ⚠️ 注意：有两个宿主，别测错对象
 
 | 端口 | 进程 | profile | 说明 |
