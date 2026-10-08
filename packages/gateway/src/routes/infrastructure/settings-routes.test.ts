@@ -41,6 +41,7 @@ function config(conflicts: Config['providerRouteConflicts']): Config {
     providers: {},
     providerFallbacks: {},
     providerRouteConflicts: conflicts,
+    isolation: { backend: 'auto' },
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

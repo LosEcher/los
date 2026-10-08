@@ -295,6 +295,7 @@ function configForAuth(enabled: boolean): Config {
     providers: {},
     providerFallbacks: {},
     providerRouteConflicts: [],
+    isolation: { backend: 'auto' },
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

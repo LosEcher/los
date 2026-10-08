@@ -237,6 +237,7 @@ function configWithProvider(): Config {
     },
     providerFallbacks: {},
     providerRouteConflicts: [],
+    isolation: { backend: 'auto' },
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

@@ -40,6 +40,7 @@ function buildConfig(opts: { authEnabled: boolean; operatorToken?: string }): Co
     providers: {},
     providerFallbacks: {},
     providerRouteConflicts: [],
+    isolation: { backend: 'auto' },
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

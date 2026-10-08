@@ -162,6 +162,19 @@ export const ConfigSchema = z.object({
     })).default({}),
   }).default({}),
 
+  /**
+   * 隔离后端（ADR 0047 §5.1 / contracts/isolation-backend.yaml）。
+   *
+   * `auto` 按仓的 VCS 解析（jj 仓 → jj-workspace，git 仓 → git-worktree）；
+   * **既非 jj 也非 git 时 fail-closed 报因，绝不猜**。
+   *
+   * `backend` 显式指定而该后端不可用时**必须 fail closed 并给出 probe 原因**；
+   * **静默回落到另一个后端是契约违规** —— 那会让账本里记录的 backend 字段变成谎话。
+   */
+  isolation: z.object({
+    backend: z.enum(['auto', 'jj-workspace', 'git-worktree', 'docker']).default('auto'),
+  }).default({}),
+
   // Providers (auto-discovered, can be overridden)
   providers: z.record(z.string(), z.object({
     apiKey: z.string().optional(),

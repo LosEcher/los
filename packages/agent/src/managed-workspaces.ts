@@ -2,8 +2,10 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { getConfig } from '@los/infra/config';
 import { promisify } from 'node:util';
 import { putArtifact } from './artifacts.js';
+import { resolveBackend } from './isolation-backends.js';
 import {
   appendManagedWorkspaceEvent,
   assignManagedWorkspaceToTask,
@@ -47,6 +49,27 @@ export async function createManagedWorkspace(input: CreateManagedWorkspaceInput)
   })) requireSafeId(value, name);
   const sourceRoot = await realpath(resolve(input.sourceRoot));
   if (!(await stat(sourceRoot)).isDirectory()) throw new Error('sourceRoot must be a directory');
+
+  // ── C4：解析并探测隔离后端（ADR 0047 §5.1 / contracts/isolation-backend.yaml）
+  //
+  // **必须在任何副作用之前**：探测失败要"干净地拒绝"，而不是先写一行
+  // status='creating' 再把它标成 failed —— 那会在账本里留下一条从未真实存在的记录。
+  //
+  // 语义（契约）：显式指定而不可用 ⇒ fail closed **带 probe 原因**；
+  // **静默回落到另一个后端是契约违规**（会让账本记录的 backend 变成谎话）。
+  const requested = input.backend ?? getConfig().isolation.backend;
+  const resolved = await resolveBackend(requested, { repository: sourceRoot });
+  if ('error' in resolved) throw new Error(resolved.error);
+  const backendId = resolved.backend.id;
+  if (backendId !== 'jj-workspace') {
+    // 诚实边界：C2 只实现了 probe()，内建后端的 create/run/release 与 docker 委托
+    // 的执行面尚未接入本函数。**明说未实现**，而不是悄悄按 jj 建出来然后记账成
+    // 别的 backend —— 那会让 backend 字段与实际隔离机制不符。
+    throw new Error(
+      `isolation backend "${backendId}" resolved but its create path is not wired yet `
+      + `(C2/C3 remaining: built-in create/run/release). Only jj-workspace is executable today.`,
+    );
+  }
   await runJj(sourceRoot, ['root']);
 
   const managedRoot = managedRootForSource(sourceRoot, input.projectId);
@@ -65,7 +88,7 @@ export async function createManagedWorkspace(input: CreateManagedWorkspaceInput)
     sourceRoot,
     workspaceRoot,
     workspaceName,
-    backend: input.backend ?? 'jj-workspace',
+    backend: backendId,
     baseRevision,
     status: 'creating',
     createdBy: input.createdBy,

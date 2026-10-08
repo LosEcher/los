@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { getDb } from '@los/infra/db';
+import { ConfigSchema, getConfig as loadConfigSync, setConfig } from '@los/infra/config';
 import { createAgentTask, ensureAgentTaskGraphStore, listAgentTasksForGraph } from './agent-task-graph.js';
 import { ensureArtifactStore, readArtifactContent } from './artifacts.js';
 import {
@@ -155,4 +156,84 @@ test('C1 NEGATIVE: an undeclared backend id is rejected by the CHECK constraint'
     /managed_workspaces_backend_chk|violates check constraint/i,
     '非法 backend 必须被 CHECK 拒绝，否则枚举形同虚设',
   );
+});
+
+// ─────────────────────────────────────────────────────────────
+// C4：`isolation.backend` 配置面接线（ADR 0047 §5.1）
+//
+// 契约要点：显式指定而不可用 ⇒ **fail closed 带原因**；**静默回落到另一个后端
+// 是契约违规**（会让账本里的 backend 字段变成谎话）。且解析/探测必须在**任何
+// 副作用之前** —— 否则账本里会留下一条从未真实存在的记录。
+// ─────────────────────────────────────────────────────────────
+test('C4 NEGATIVE: an explicit unavailable backend refuses BEFORE writing any ledger row', async () => {
+  const previous = loadConfigSync();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const workspaceId = `c4-refuse-${suffix}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c4-'));
+  // 既非 jj 也非 git 的目录 ⇒ auto 无法解析；显式指定 docker 也必然不可用
+  const sourceRoot = join(root, 'plain');
+  await mkdir(sourceRoot, { recursive: true });
+  await ensureManagedWorkspaceStore();
+  try {
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'docker' } }));
+    await assert.rejects(
+      () => createManagedWorkspace({
+        workspaceId, graphId: `g-${suffix}`, taskId: `t-${suffix}`,
+        projectId: 'los', sourceRoot, createdBy: 'test',
+      }),
+      /isolation backend "docker" is unavailable/,
+      '显式请求不可用的后端必须 fail-closed 并带 probe 原因',
+    );
+    // **核心**：拒绝必须"干净" —— 账本里不得留下任何痕迹
+    const rows = await getDb().query(
+      'SELECT workspace_id FROM managed_workspaces WHERE workspace_id = $1', [workspaceId]);
+    assert.equal(rows.rows.length, 0, 'fail-closed 时不得写入 managed_workspaces 行');
+  } finally {
+    setConfig(previous);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('C4 NEGATIVE: auto on a non-VCS directory refuses to guess', async () => {
+  const previous = loadConfigSync();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c4-auto-'));
+  const sourceRoot = join(root, 'plain');
+  await mkdir(sourceRoot, { recursive: true });
+  try {
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'auto' } }));
+    await assert.rejects(
+      () => createManagedWorkspace({
+        workspaceId: `c4-auto-${suffix}`, graphId: `g-${suffix}`, taskId: `t-${suffix}`,
+        projectId: 'los', sourceRoot, createdBy: 'test',
+      }),
+      /refusing to guess/,
+      'auto 在既非 jj 也非 git 的仓上必须拒绝，而不是猜一个后端',
+    );
+  } finally {
+    setConfig(previous);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('C4: a resolved but not-yet-wired backend says so instead of silently using jj', async () => {
+  const previous = loadConfigSync();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c4-git-'));
+  const sourceRoot = join(root, 'gitrepo');
+  await execFileAsync('git', ['init', '-q', sourceRoot]);
+  try {
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'git-worktree' } }));
+    await assert.rejects(
+      () => createManagedWorkspace({
+        workspaceId: `c4-git-${suffix}`, graphId: `g-${suffix}`, taskId: `t-${suffix}`,
+        projectId: 'los', sourceRoot, createdBy: 'test',
+      }),
+      /create path is not wired yet/,
+      'C2 只实现了 probe；create 未接线时必须**明说**，不得悄悄按 jj 建出来再记账成别的 backend',
+    );
+  } finally {
+    setConfig(previous);
+    await rm(root, { recursive: true, force: true });
+  }
 });
