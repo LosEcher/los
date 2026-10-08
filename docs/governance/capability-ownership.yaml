@@ -106,14 +106,14 @@ capabilities:
 
   - id: isolation-backend-registry
     owner_layer: execution
-    canonical: "IsolationBackend 接口（contracts 先行）+ isolation.backend 配置（auto|jj-workspace|git-worktree|docker）"
+    canonical: "contracts/isolation-backend.yaml（IsolationBackend 接口，含三条接口纪律）+ isolation.backend 配置（auto|jj-workspace|git-worktree|docker）"
     writers: ["los"]
     implementations:
       - { path: "packages/agent/src/managed-workspaces.ts", scope: "jj-workspace / git-worktree 两个内建后端（纯命令编排）", why_not_merge: "内建后端必须在无外部二进制依赖时也可用" }
       - { path: "dsfolder/sandbox-run", scope: "docker 后端（sandbox-run --backend docker）", why_not_merge: "容器编排属 L3 工具领域，不在 los 重写；它已是独立可发布组件且已有 Backend 枚举" }
     readers: [los/managed-workspaces]
     forbidden: "后端返回 PASS/FAIL（判定属门禁层）；显式指定后端不可用时静默回落到另一个后端（必须 fail-closed 报因）；把 vcsKind 硬编码为 'jj'"
-    evidence: "ADR 0047 第 5.1 节；sandbox-run src/main.rs:94-116（Backend::{Auto,Worktree,Docker}），los managed-workspace-types.ts:11（vcsKind 硬编码）"
+    evidence: "ADR 0047 第 5.1 节；C1 已落地（contracts/isolation-backend.yaml + 迁移 062 把 vcs_kind 改名 backend 并加 CHECK）；sandbox-run src/main.rs:94-116（Backend::{Auto,Worktree,Docker}）"
 
   - id: remote-command-normalization
     owner_layer: tool

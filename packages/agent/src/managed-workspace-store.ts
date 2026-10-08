@@ -6,6 +6,7 @@ import type {
   ManagedWorkspaceEvent,
   ManagedWorkspaceRecord,
   ManagedWorkspaceStatus,
+  ManagedWorkspaceBackendId,
 } from './managed-workspace-types.js';
 
 const SCHEMA = `
@@ -17,7 +18,11 @@ CREATE TABLE IF NOT EXISTS managed_workspaces (
   source_root TEXT NOT NULL,
   workspace_root TEXT NOT NULL UNIQUE,
   workspace_name TEXT NOT NULL UNIQUE,
-  vcs_kind TEXT NOT NULL DEFAULT 'jj',
+  -- Isolation backend id. Owned by los; a backend never writes this.
+  -- See contracts/isolation-backend.yaml (ADR 0047 §5.1, C1).
+  backend TEXT NOT NULL DEFAULT 'jj-workspace'
+    CONSTRAINT managed_workspaces_backend_chk
+    CHECK (backend IN ('jj-workspace', 'git-worktree', 'docker')),
   base_revision TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'creating',
   backup_artifact_id TEXT,
@@ -46,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_managed_workspace_events_workspace
 
 type WorkspaceRow = {
   workspace_id: string; graph_id: string; task_id: string; project_id: string;
-  source_root: string; workspace_root: string; workspace_name: string; vcs_kind: 'jj';
+  source_root: string; workspace_root: string; workspace_name: string; backend: ManagedWorkspaceBackendId;
   base_revision: string; status: ManagedWorkspaceStatus; backup_artifact_id: string | null;
   created_by: string; last_error: string | null; metadata_json: unknown;
   created_at: Date | string; updated_at: Date | string; released_at: Date | string | null;
@@ -70,13 +75,13 @@ export async function insertManagedWorkspace(input: Omit<ManagedWorkspaceRecord,
   const rows = await getDb().query<WorkspaceRow>(`
     INSERT INTO managed_workspaces (
       workspace_id, graph_id, task_id, project_id, source_root, workspace_root,
-      workspace_name, vcs_kind, base_revision, status, backup_artifact_id,
+      workspace_name, backend, base_revision, status, backup_artifact_id,
       created_by, last_error, metadata_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,'jj',$8,$9,$10,$11,$12,$13::jsonb)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
     RETURNING *
   `, [
     input.workspaceId, input.graphId, input.taskId, input.projectId, input.sourceRoot,
-    input.workspaceRoot, input.workspaceName, input.baseRevision, input.status,
+    input.workspaceRoot, input.workspaceName, input.backend, input.baseRevision, input.status,
     input.backupArtifactId ?? null, input.createdBy, input.lastError ?? null,
     JSON.stringify(input.metadata),
   ]);
@@ -175,7 +180,7 @@ export async function assignManagedWorkspaceToTask(record: ManagedWorkspaceRecor
     managedWorkspaceId: record.workspaceId,
     workspaceRoot: record.workspaceRoot,
     sourceWorkspaceRoot: record.sourceRoot,
-    workspaceVcs: record.vcsKind,
+    workspaceBackend: record.backend,
   }), record.graphId]);
   if (result.rows.length !== 1) throw new Error('task is not a queued executor in the requested graph');
 }
@@ -193,7 +198,7 @@ function rowToWorkspace(row: WorkspaceRow): ManagedWorkspaceRecord {
   return {
     workspaceId: row.workspace_id, graphId: row.graph_id, taskId: row.task_id,
     projectId: row.project_id, sourceRoot: row.source_root, workspaceRoot: row.workspace_root,
-    workspaceName: row.workspace_name, vcsKind: row.vcs_kind, baseRevision: row.base_revision,
+    workspaceName: row.workspace_name, backend: row.backend, baseRevision: row.base_revision,
     status: row.status, backupArtifactId: row.backup_artifact_id ?? undefined,
     createdBy: row.created_by, lastError: row.last_error ?? undefined,
     metadata: record(row.metadata_json), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at),

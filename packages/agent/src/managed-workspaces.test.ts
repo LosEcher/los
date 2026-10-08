@@ -97,3 +97,62 @@ test('managed jj workspace assigns a task, backs up its diff, and releases with 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────
+// C1（ADR 0047 §5.1）：`vcs_kind` → `backend`
+//
+// 背景：`vcs_kind: 'jj'` 把"哪个 VCS"与"怎么隔离"混为一谈。C1 把它改为可扩展的
+// backend id，内建 jj 后端名为 `jj-workspace`。这些断言固定住迁移后的行为，
+// 尤其是**负向控制**：CHECK 约束必须真的挡住非法 backend，否则"枚举"只是文档。
+// ─────────────────────────────────────────────────────────────
+test('C1: managed workspace records the isolation backend (default jj-workspace)', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `backend-graph-${suffix}`;
+  const taskId = `backend-task-${suffix}`;
+  const workspaceId = `backend-ws-${suffix}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-backend-'));
+  const sourceRoot = join(root, 'source');
+  await execFileAsync('jj', ['git', 'init', sourceRoot]);
+
+  await ensureAgentTaskGraphStore();
+  await ensureManagedWorkspaceStore();
+  await createAgentTask({
+    id: taskId, graphId, role: 'executor', title: 'backend field',
+    metadata: { editableSurfaces: ['src/x.ts'] },
+  });
+
+  try {
+    const ws = await createManagedWorkspace({
+      workspaceId, graphId, taskId, projectId: 'los', sourceRoot, createdBy: 'test',
+    });
+    assert.equal(ws.backend, 'jj-workspace', '缺省 backend 必须是内建 jj 后端的新名字');
+    // 旧字段名不得复现
+    assert.equal((ws as unknown as Record<string, unknown>).vcsKind, undefined);
+
+    // 从 DB 重新读出来也要是新的列
+    const rows = await getDb().query<{ backend: string }>(
+      'SELECT backend FROM managed_workspaces WHERE workspace_id = $1', [workspaceId]);
+    assert.equal(rows.rows[0]?.backend, 'jj-workspace');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('C1 NEGATIVE: an undeclared backend id is rejected by the CHECK constraint', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const workspaceId = `backend-bad-${suffix}`;
+  await ensureManagedWorkspaceStore();
+  // 绕过 TS 类型直接写库：约束必须在**数据库层**挡住，而不只是类型层。
+  // （类型只在编译期生效；这一条是运行时防线。）
+  await assert.rejects(
+    () => getDb().query(
+      `INSERT INTO managed_workspaces (
+         workspace_id, graph_id, task_id, project_id, source_root, workspace_root,
+         workspace_name, backend, base_revision, status, created_by, metadata_json
+       ) VALUES ($1,'g','t','los','/s','/w','n',$2,'rev','creating','test','{}'::jsonb)`,
+      [workspaceId, 'not-a-declared-backend'],
+    ),
+    /managed_workspaces_backend_chk|violates check constraint/i,
+    '非法 backend 必须被 CHECK 拒绝，否则枚举形同虚设',
+  );
+});

@@ -65,7 +65,7 @@ export async function createManagedWorkspace(input: CreateManagedWorkspaceInput)
     sourceRoot,
     workspaceRoot,
     workspaceName,
-    vcsKind: 'jj',
+    backend: input.backend ?? 'jj-workspace',
     baseRevision,
     status: 'creating',
     createdBy: input.createdBy,
@@ -132,7 +132,7 @@ export async function backupManagedWorkspace(
         taskId: workspace.taskId,
         projectId: workspace.projectId,
         baseRevision: workspace.baseRevision,
-        vcsKind: workspace.vcsKind,
+        backend: workspace.backend,
       },
     });
     const backedUp = await updateManagedWorkspace(workspace.workspaceId, {
