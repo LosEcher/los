@@ -285,7 +285,12 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 - **连带真 bug**：`report::build()` 自己重算 verdict，把 `inconclusive` 覆盖回 `pass` ⇒ 退出码对但 **JSON 契约错**（插件消费的正是 JSON）。改为由调用方传入 `verdict`/`pass`，并新增 `passed` 字段（此前报告无任何 `na` 计数）。
 - **测试**：既有 `G10` 的 `na.toml` 是**混合**清单，**从未测过全 `na`**（盲区）；新增 `test/fixtures/all-na.toml` + `G10b` + 负向控制；**突变测试**确认回退修复即红。
 - **插件侧**（`dsh-verify-gate`）：`na` 用独立标记 `–`（不与"未知态 `·`"混淆）+ 三态计数行 + 全 `na` 警示"不构成通过"。
-**(d) ⬜ `sandbox-run` 按裁决 C1–C5 组件化**（起点 = `IsolationBackend` 契约 + `vcsKind`→`backend` 数据迁移）
+**(d) 🟡 `sandbox-run` 按裁决 C1–C5 组件化**（`file:packages/agent/src/isolation-backends.ts:1`）
+
+- **C1 ✅ 已完成** —— `contracts/isolation-backend.yaml`（三条接口纪律作为契约条款）+ 迁移 062（`vcs_kind`→`backend`，含 CHECK 枚举与列注释；`check:migration-drift` 0 new）。
+- **C2 切片 ✅ 已完成** —— 后端注册表 + 三支诚实的 `probe()`（`IsolationProbeResult` 用联合类型把"不可用必须有 reason"变成**编译期要求**；`auto` 在未知仓上拒绝猜；显式不可用**绝不回落**）。**剩余**：两内建后端的 `create`/`run`/`release` 真实现。
+- **C3 ✅ 已完成** —— `docker` 委托 `sandbox-run` 的执行适配器。`RawExecutionResult` **无 verdict 字段**；`exitCode: null` = **命令未曾运行**，与 `0` 严格区分；环境故障不伪装成命令失败。**实测契约**：命令失败时 `verify.exitCode` 是**真实码**而**进程退出码恒为 1**（与"变更集为空"复用）⇒ 拿进程码当命令码是错的。测试 **13/13**（4 条关键负向控制）。
+- **C4 ⬜ 待做** —— 配置面（`isolation.backend` + auto + fail-closed 接线进 `createManagedWorkspace`）。
 
 ---
 
