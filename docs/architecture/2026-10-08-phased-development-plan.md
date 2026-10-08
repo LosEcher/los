@@ -322,6 +322,21 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 
 **出口判据**：P1 的 `dsh_session_catalog` 能把 214 条旧路径会话归到今天的仓；映射表缺失时降级为 `unknown` 而非静默丢弃。
 
+### B3.3 ✅ 判据依赖的一半已完成（2026-10-08）— `file:tools/lib/session-path-resolver.mjs:1`
+
+**先纠正一处**：`dsh_session_catalog` **尚不存在**（属 P1 批次，文档里仍是计划）⇒ 不假装判据已达成，而是把它**依赖的那一半**做出来并可测。
+
+- 新增 `tools/lib/session-path-resolver.mjs`：三态 `current`/`resolved`/`unknown`，并区分 unknown 的两种来源 —— **`no-map`**（映射表缺失/不可读）与 **`unmapped`**（表在但无此条目）。纪律写在文件头：**"没读到映射表" ≠ "没有需要映射的会话"**。
+- **降级路径实测**（不只看单测）：
+
+| 情形 | current | resolved | unknown |
+| --- | --- | --- | --- |
+| 别名表存在 | 13 | **8** | **6**（全为 `unmapped`） |
+| **别名表缺失** | 13 | **0** | **14**（原 8 条降级为 `no-map`） |
+
+⇒ 8 条历史路径**降级而非丢弃**，两种原因可区分。自检 **14 断言**（4 条核心负向控制）；已接 `pnpm check:session-path-resolver`。别名表版本化为 `schemaVersion: 2`（`tools/path-split-report.mjs` 的 `DECLARED_MIGRATIONS` 是声明真源）。
+- **剩余**：`dsh_session_catalog` 本体（P1 批次），届时直接消费本解析器。
+
 ---
 
 ## 每个项目的执行手册（把判据落到日常）
