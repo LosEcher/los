@@ -335,7 +335,12 @@ ADR 0031 说 MCP 是**唯一**程序化接口，但 4 个工具零消费者（V7
 | **别名表缺失** | 13 | **0** | **14**（原 8 条降级为 `no-map`） |
 
 ⇒ 8 条历史路径**降级而非丢弃**，两种原因可区分。自检 **14 断言**（4 条核心负向控制）；已接 `pnpm check:session-path-resolver`。别名表版本化为 `schemaVersion: 2`（`tools/path-split-report.mjs` 的 `DECLARED_MIGRATIONS` 是声明真源）。
-- **剩余**：`dsh_session_catalog` 本体（P1 批次），届时直接消费本解析器。
+- **✅ `dsh_session_catalog` 本体已完成（2026-10-08，属 P1 L1-2）** —— `packages/agent/src/dsh-session-catalog.ts` + 迁移 `063_dsh_session_catalog.sql`（双路径一致，`check:migration-drift` 0 new）+ 日报第 8 节「跨项目」。
+  - **真实数据端到端**：`sessions=1105`、`byState={current:330, resolved:343, unknown:432}`、`project_key` 去重 **19**、**旧路径已 resolved = 214** ⇒ 与判据"214 条旧路径会话归到今天的仓"**逐条一致**。
+  - **只读边界实测**：投射前后 `session-index.db` mtime **未变**、`~/.dsh/sessions` 无新增。
+  - **三态与 unknown 原因落库**（`path_state`/`path_reason`），unknown 行**保留不丢弃**。
+  - **性能 91s → 0.4s**：首版每 session 4 个相关子查询（1,100 session × 598k events）实测 91 秒 ⇒ 改一次 `GROUP BY` 聚合。
+  - **解析器双份实现的防漂移**：`pnpm check:session-resolver-parity` 锁住 `.mjs`（build-time）与 `.ts`（runtime）在 **11 单条 + 2 批量**用例下逐字段一致。
 
 ---
 
