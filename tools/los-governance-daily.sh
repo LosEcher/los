@@ -273,6 +273,14 @@ if [[ -n "$CROSS_DB" ]]; then
     echo "- 活跃项目（project_key 去重）: ${X_PROJ:-0}"
     echo "- **旧路径会话已归属**: ${X_OLD:-0} 条（B3.3 出口判据 = 214）"
     echo "- unknown（无法归属，**保留不丢弃**）: ${X_UNKNOWN:-0} 条"
+    # 跨项目重复痛点 top3（按 sessions 去重 —— 用 sessions 而非 occurrences，
+    # 因为"多少会话踩了这个坑"比"踩了多少次"更能代表影响面）
+    X_PAIN=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(pattern_key || ' ' || ses || ' sessions', ' / ') FROM (SELECT pattern_key, sum(sessions)::int ses FROM dsh_session_pain GROUP BY pattern_key ORDER BY ses DESC LIMIT 3) t;" 2>/dev/null)
+    echo "- 跨项目重复痛点 top3: ${X_PAIN:-（空 — 跑 \`pnpm project:dsh-sessions\`）}"
+    # 上下文注入开销（P1 §1.4 的"无度量"问题，此处变得可度量）
+    X_INJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT 'runtime_context ' || COALESCE(sum(runtime_context_injections),0) || ' 次 / skill_catalog ' || COALESCE(sum(skill_catalog_injections),0) || ' 次（14d）' FROM dsh_context_injection;" 2>/dev/null)
+    echo "- 上下文注入: ${X_INJ:-（空）}"
+
     # 新鲜度：投射落后 >6h 说明 session-index 小时任务或投射没跑
     AGE_S=$(python3 -c "
 import datetime,sys

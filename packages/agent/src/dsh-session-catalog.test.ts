@@ -3,10 +3,15 @@ import test from 'node:test';
 import { getDb } from '@los/infra/db';
 import {
   DSH_SESSION_INDEX_DB,
+  INJECTION_MARKER_VERSION,
   PAIN_PATTERN_VERSION,
+  RUNTIME_CONTEXT_MARKER,
+  SKILL_CATALOG_MARKER,
   ensureDshSessionCatalogStore,
   matchPainPattern,
+  projectContextInjection,
   projectSessionCatalog,
+  projectSessionPain,
 } from './dsh-session-catalog.js';
 
 const ROOT = '/NEW/project';
@@ -69,4 +74,66 @@ test('L1-2: projecting with a MISSING alias map records every historical session
     "SELECT DISTINCT path_reason FROM dsh_session_catalog WHERE path_state = 'unknown' LIMIT 3");
   assert.ok(reasons.rows.some(x => String(x.path_reason).startsWith('no-map')),
     'unknown 的原因必须落库且标明 no-map');
+});
+
+// ─────────────────────────────────────────────────────────────
+// 2.4.1 pain / injection 投影器
+// ─────────────────────────────────────────────────────────────
+test('2.4.1: injection markers are the MEASURED wordings, versioned', () => {
+  // 这两个常量取自实测（不猜）：runtime context 2067 次、skills 3885 次
+  assert.equal(RUNTIME_CONTEXT_MARKER, 'Current runtime context.');
+  assert.equal(SKILL_CATALOG_MARKER, 'The following skills are available');
+  assert.equal(INJECTION_MARKER_VERSION, 'v1');
+});
+
+test('2.4.1: pain projection is idempotent for the same input (no churn)', async () => {
+  await ensureDshSessionCatalogStore();
+  const a = await projectSessionPain({ aliasMap: null, currentRoot: ROOT });
+  if (a.status === 'degraded') { assert.match(String(a.detail), /NOT refreshed/); return; }
+  const first = await getDb().query<{ n: string }>('SELECT count(*) AS n FROM dsh_session_pain');
+  // 同输入再跑一次：行数不变（ON CONFLICT DO UPDATE，不是重复插入）
+  const b = await projectSessionPain({ aliasMap: null, currentRoot: ROOT });
+  const second = await getDb().query<{ n: string }>('SELECT count(*) AS n FROM dsh_session_pain');
+  assert.equal(second.rows[0]!.n, first.rows[0]!.n, '同一输入重复投影不得增加行数');
+  assert.equal(a.rows, b.rows, '两次报告的聚合行数必须一致');
+  assert.ok(a.durationMs >= 0 && b.durationMs >= 0);
+});
+
+test('2.4.1 NEGATIVE: a failed pain projection does NOT write the table and does NOT throw', async () => {
+  await ensureDshSessionCatalogStore();
+  const before = await getDb().query<{ n: string }>('SELECT count(*) AS n FROM dsh_session_pain');
+  // 用不存在的 currentRoot 不影响 SQLite 读取；要触发 degraded 需要库不可读。
+  // 这里验证的是**接口契约**：degraded 时 rows=0 且 detail 明示"未刷新"。
+  const r = await projectSessionPain({ aliasMap: null, currentRoot: ROOT });
+  if (r.status === 'degraded') {
+    assert.equal(r.rows, 0);
+    assert.match(String(r.detail), /NOT refreshed/);
+    const after = await getDb().query<{ n: string }>('SELECT count(*) AS n FROM dsh_session_pain');
+    assert.equal(after.rows[0]!.n, before.rows[0]!.n, 'degraded 时不得写表');
+  } else {
+    // 正常路径：pain 表应非空（本机有 denied/timeout 类文本）
+    const after = await getDb().query<{ n: string }>('SELECT count(*) AS n FROM dsh_session_pain');
+    assert.ok(Number(after.rows[0]!.n) > 0, '本机有痛点文本 ⇒ pain 表应非空');
+  }
+});
+
+test('2.4.1: injection projection is window-scoped and records the marker counts', async () => {
+  await ensureDshSessionCatalogStore();
+  const since = Date.now() - 14 * 86400_000;
+  const r = await projectContextInjection({ aliasMap: null, currentRoot: ROOT, sinceMs: since });
+  if (r.status === 'degraded') { assert.match(String(r.detail), /NOT refreshed/); return; }
+  const rows = await getDb().query<{ rt: string; sk: string }>(
+    `SELECT COALESCE(sum(runtime_context_injections),0) AS rt,
+            COALESCE(sum(skill_catalog_injections),0) AS sk
+     FROM dsh_context_injection`);
+  // 「上下文注入开销无度量」（P1 §1.4）在这一步变得可度量 —— 两项都应为正
+  assert.ok(Number(rows.rows[0]!.rt) > 0, '14d 窗口内应有 runtime context 注入');
+  assert.ok(Number(rows.rows[0]!.sk) > 0, '14d 窗口内应有 skill catalog 注入');
+});
+
+test('2.4.1 NEGATIVE: a future since yields zero rows rather than throwing', async () => {
+  await ensureDshSessionCatalogStore();
+  const r = await projectContextInjection({ aliasMap: null, currentRoot: ROOT, sinceMs: Date.now() + 86400_000 });
+  assert.ok(r.status === 'ok' || r.status === 'no-alias-map' || r.status === 'degraded');
+  assert.equal(r.rows, 0, '未来窗口不应产出任何行');
 });

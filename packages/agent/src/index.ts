@@ -216,6 +216,11 @@ export {
 export {
   ensureDshSessionCatalogStore,
   projectSessionCatalog,
+  projectSessionPain,
+  projectContextInjection,
+  RUNTIME_CONTEXT_MARKER,
+  SKILL_CATALOG_MARKER,
+  INJECTION_MARKER_VERSION,
   matchPainPattern,
   PAIN_PATTERNS,
   PAIN_PATTERN_VERSION,
