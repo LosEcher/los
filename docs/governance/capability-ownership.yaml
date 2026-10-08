@@ -104,6 +104,85 @@ capabilities:
     forbidden: "把隔离资源的身份/生命周期下放给某个后端组件；后端写 los 账本"
     evidence: "ADR 0047 第 5.1 节（2026-10-08 仲裁：不是单 owner，是执行面/治理面分层）"
 
+  - id: verification-three-way-division
+    owner_layer: execution
+    canonical: >
+      **三方各有其位，不合并**（V4）：
+      ① **`verify-gate`（L3 工具）** = 执行**声明式 manifest**（file/cmd/http/git/json 断言），
+         产出带三态（pass/fail/na）的报告与退出码 0/1/2；
+      ② **各仓 `test/gates.sh` 之类的仓内脚本** = 该仓**特定不变量**
+         （crate 自己的约束，外部工具无从知晓）；
+      ③ **los `verification_records`（L4）** = **执行账本**，记录"哪次 run 用了哪些 requiredChecks、
+         结果与证据哈希"。
+    writers: ["verify-gate（①）", "各仓自己（②）", "los（③，唯一）"]
+    readers: [los 门禁编排, 各仓 CI, 治理日报]
+    forbidden: >
+      **不得一刀切合并**。具体禁止：
+      · 把 verify-gate 的 manifest 执行逻辑复制进 los（已在 `verification-evidence` 声明）；
+      · 让仓内 `gates.sh` 直接写 los 账本（违反 R1 单写者：账本只由 los 写）；
+      · 把"仓特定不变量"上提到 verify-gate 的通用 manifest —— 那会把仓的知识塞进工具层
+        （违反 R2 引用方向：工具层不得知道项目）；
+      · 把 los 的 `verification_records` 当作**可执行**门禁（它只记账，不判定）。
+    evidence: >
+      ADR 0047 判据 J6（计划/实现/证据三态分离）。实测支撑：verify-gate 的
+      per-check `result` 是三态 `pass|fail|na`、顶层 `exitCode` 三态 `0/1/2`，
+      且"全 na ⇒ inconclusive + exit 2"（2026-10-08 收紧，见 `gate-verdict-classification`）；
+      各 rust 仓的仓内门禁（`cargo build --locked && bash test/gates.sh`）已作为
+      `gates.json` 的 `documented` check 被 los **编排**（不是复制）。
+    why_not_merge: >
+      "怎么执行断言"、"这个仓的独有约束是什么"、"哪次执行发生了什么" 是**三个不同问题**，
+      各有其权威面。合并任两者都会丢掉一个：合并 ①② 会让通用工具携带项目知识；
+      合并 ②③ 会让执行方给自己写证据（自证）；合并 ①③ 会让账本获得判定权。
+
+  - id: agent-skills-execution-surfaces
+    owner_layer: session
+    canonical: >
+      **两个各自独立的技能注册表，按执行面分工，不存在"投影"关系**：
+      ① 交互式会话的技能 = DSH `~/.agents/skills`（**72 条**，动态发现）；
+      ② 结构化调度/执行器路径的技能 = los `skills` 表（**35 条**，含 version_hash 用于变更检测）。
+    writers: ["DSH（①）", "los skills CRUD 路由（②）"]
+    readers: ["DSH 交互会话（①）", "los scheduled-task-runner（②）"]
+    forbidden: >
+      不得把 los `skills` 表当成 DSH `~/.agents/skills` 的**投影**（或反之）：实测两者
+      名称**只有 11/35 重叠**，且 los 侧的 `source_path` **为空**（无来源指针，不是动态投影；
+      是导入快照）。两套注册表服务**不同执行面**，合并会丢掉其中一个的独立演进。
+      也不得声称"交互式 Chat 会做技能选择" —— 2026-10-08 核实：`selectSkillsForRun` 的
+      **唯一调用方**是 `scheduler/scheduled-task-runner.ts`，los 的 Chat 路由与
+      OpenAI 兼容路由**都不做技能选择**（web i18n 文案曾如此声称，已修正）。
+    evidence: >
+      2026-10-08 实测：DSH 72 条 vs los 35 条，名称交集 11；los `skills.source_path` 全空；
+      `usage_count > 0` 的行数 = **0**（该调度路径在本机尚未被实际使用 —— 这是
+      **休眠**，不是"投影所以不消费"）。grep `selectSkillsForRun` 仅命中
+      scheduled-task-runner 与 barrel 导出。
+    why_not_merge: >
+      DSH 的技能服务于**交互式**会话（人在环、提示驱动）；los 的技能服务于**结构化调度**
+      （无人在环、预算受限、AP11 要求放在 user-turn 而非 system prompt 以保 cache）。
+      预算语义、选择时机、缓存约束都不同，强行统一会把交互面的动态发现能力与执行面的
+      预算控制能力互相掣肘。
+
+  - id: rust-format-cleanliness-vs-scoped-formatting
+    owner_layer: tool
+    canonical: "两个**不同问题**，各有唯一 owner：① 整仓 rustfmt 干净性 = `cargo fmt --all --check`（每仓 gates.json 的 `fmt` check，CI 亦跑）；② agent 改动范围内的增量格式化 = `fmtguard`（读 VCS diff 决定范围）"
+    writers: ["各 rust 仓（①）", "fmtguard（②）"]
+    readers: [各 rust 仓 CI, rust-repo-gate-run.mjs, agent 编辑流程]
+    forbidden: >
+      **两者不可互换**（2026-10-08 取证）。曾计划"各仓格式检查统一走 fmtguard、删除裸
+      cargo fmt --check" —— 该表述**不可实现**：`fmtguard` 在干净树下
+      `files_scanned = 0`（stderr: "nothing to do (no scoped .rs files)"），它格式化
+      "本次改动涉及的范围"，**答不了"整仓是否干净"**。把它当 CI 的整仓门禁使用会得到
+      **假绿**（verdict: ok 而实际一个文件都没检查）—— 与 verify-gate 的
+      "empty gate = false confidence"、"全 na 算 pass" 属**同一族**："空即通过"。
+      反方向亦不可：`cargo fmt` 会重排整个 workspace，在脏树上改写无关文件。
+    evidence: >
+      2026-10-08 实测：sandbox-run 干净树下 `fmtguard --scope-from-git` →
+      `{"verdict":"ok","files_scanned":0}` + stderr "nothing to do (no scoped .rs files)"，
+      而 `cargo fmt --check` 在同树返回 0 且确实检查了整仓；六个 rust 仓**都不是
+      workspace** ⇒ `--check` 与 `--all --check` 功能等价（统一为后者仅为前瞻）。
+      覆盖缺口已补：5 个 enabled 仓的 gates.json 均含 `fmt` check
+      （含**无法拥有 CI** 的 session-index —— 它连 .github/ 都没有）。
+    why_not_merge: >
+      "整仓干净"与"我的改动是否合规"是**不同问题**，合并会丢掉其中一个：合并到
+      cargo fmt 会重排无关文件；合并到 fmtguard 会让 CI 失去整仓保证。
   - id: isolation-backend-registry
     owner_layer: execution
     canonical: "contracts/isolation-backend.yaml（IsolationBackend 接口，含三条接口纪律）+ isolation.backend 配置（auto|jj-workspace|git-worktree|docker）"

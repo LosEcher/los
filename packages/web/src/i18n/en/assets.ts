@@ -166,7 +166,7 @@ export const enAssets = {
   'assets.skills.title': 'Skills',
   'assets.skills.subtitle': 'Reusable agent instruction bundles. Define once, attach from Chat (manual) or enable auto inject.',
   'assets.skills.runtimeTitle': 'Runtime',
-  'assets.skills.runtimeBody': 'Chat and scheduled work call selectSkillsForRun. Manual: Chat chips or /skill name. Auto inject is off by default (LOS_SKILLS_AUTO). Usage count and last used update after a real run attaches the skill.',
+  'assets.skills.runtimeBody': 'Only the structured scheduled path (scheduled-task-runner) calls selectSkillsForRun; interactive Chat and the OpenAI-compatible route do NOT select skills (verified 2026-10-08 — this copy previously claimed Chat does, which did not match the implementation). Manual: Chat chips or /skill name. Auto inject is off by default (LOS_SKILLS_AUTO). Usage count and last-used update after a real run attaches a skill — usage_count is 0 here because that path has not been exercised.',
   'assets.skills.runtimeWired': 'Wired for Chat and scheduled work',
   'assets.skills.runtimeAutoOff': 'Auto inject: off (default)',
   'assets.skills.allScopes': 'all scopes',
