@@ -79,6 +79,9 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0045-provider-tool-hot-reload.md` - provider/tool hot reload boundaries.
 - `0046-executor-sandbox-multi-backend.md` - executor sandbox multi-backend
   abstraction (worktree/docker).
+- `0047-tool-project-and-provider-boundary-ownership.md` - tool/project/provider
+  boundary ownership: layer model, single-writer rule, provider conflict
+  adjudication, memory canonical split, `dsfolder` structure, gate tri-state.
 
 > Numbering de-duplicated 2026-08-26: the five non-canonical co-numbered files
 > (`0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,

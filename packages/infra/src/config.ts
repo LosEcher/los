@@ -183,6 +183,24 @@ export const ConfigSchema = z.object({
   // with no entry keeps today's fail-hard behavior.
   providerFallbacks: z.record(z.string(), z.array(z.string())).default({}),
 
+  /**
+   * provider 路由冲突记录（ADR 0047 第 2 节 (c)：禁止静默覆盖）。
+   *
+   * 由 `mergeDiscoveredProviders` 写入：当 cc-switch 的 `is_current`（prefer）
+   * 覆盖了 config 里已有的 baseUrl/model/apiShape/apiKey 时，每次**值不同**的覆盖
+   * 记一条。**apiKey 一律记 `<redacted>`**。
+   * 空数组 = 已检测且无冲突；缺省 = 本次启动未走到该检测（解析手写 config 时）。
+   */
+  providerRouteConflicts: z.array(z.object({
+    provider: z.string(),
+    field: z.enum(['apiKey', 'baseUrl', 'model', 'apiShape']),
+    previous: z.string(),
+    next: z.string(),
+    winnerSource: z.string(),
+    loserSource: z.string().nullable(),
+    ownerLayer: z.enum(['cc-switch-desktop', 'discovery', 'config']),
+  })).default([]),
+
   // Memory
   memory: z.object({
     ftsEnabled: z.coerce.boolean().default(true),

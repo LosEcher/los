@@ -236,6 +236,7 @@ function configWithProvider(): Config {
       },
     },
     providerFallbacks: {},
+    providerRouteConflicts: [],
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

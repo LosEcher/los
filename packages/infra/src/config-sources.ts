@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import YAML from 'yaml';
 import { getLogger } from './logger.js';
 import { discoverAll } from './discovery.js';
+import { detectRouteRouting, summarizeConflicts, type ProviderRouteConflict } from './provider-route-conflicts.js';
 import { providerDefaultsForApiKeyEnv } from './provider-defaults.js';
 
 const log = getLogger('config');
@@ -145,6 +146,11 @@ export async function mergeDiscoveredProviders(config: Record<string, unknown>):
   const { providers: discovered } = await discoverAll();
   if (!config.providers) config.providers = {};
   const providers = config.providers as Record<string, any>;
+  // ADR 0047 第 2 节 (c)：prefer 覆盖必须**留痕**（禁止静默覆盖）。
+  // 冲突既要能进日志，也要能进经过 Zod 校验的 config（故 ConfigSchema 有对应字段）。
+  const conflicts: ProviderRouteConflict[] = [];
+  const sameCenter: ProviderRouteConflict[] = [];
+  const unverifiable: Array<{ provider: string; field: string; reason: string }> = [];
   // Non-prefer first, then prefer (active cc-switch accounts overwrite).
   const ordered = [...discovered].sort(
     (a, b) => Number(Boolean(a.prefer)) - Number(Boolean(b.prefer)),
@@ -153,6 +159,10 @@ export async function mergeDiscoveredProviders(config: Record<string, unknown>):
     if (!providers[dp.name]) providers[dp.name] = {};
     const p = providers[dp.name];
     const prefer = dp.prefer === true;
+    const routing = detectRouteRouting({ provider: dp.name, existing: p, incoming: dp, prefer });
+    conflicts.push(...routing.conflicts);
+    sameCenter.push(...routing.sameCenterVariants);
+    unverifiable.push(...routing.unverifiable);
     if (prefer || !p.apiKey) {
       if (dp.apiKey) p.apiKey = dp.apiKey;
     }
@@ -171,6 +181,22 @@ export async function mergeDiscoveredProviders(config: Record<string, unknown>):
       if (dp.source) p.source = dp.source;
     }
   }
+  // 只有**跨决策中心**的覆盖才进 config（`/settings/private` 会读它）——
+  // 同中心差异（如 cc-switch 的 codex vs grokbuild 路由）是合理路由，不是冲突；
+  // apiKey 因脱敏不可判等，单独在日志里明示"未验证"。
+  config.providerRouteConflicts = conflicts;   // 显式赋值（含空数组）⇒ 区分"无冲突"与"未检测"
+  try {
+    const log = getLogger('config');
+    if (conflicts.length) {
+      log.warn(`provider route conflicts (cross-center overwrite): ${summarizeConflicts(conflicts)}`);
+    }
+    if (sameCenter.length) {
+      log.info(`provider route variants within one decision center (informational): ${summarizeConflicts(sameCenter)}`);
+    }
+    if (unverifiable.length) {
+      log.warn(`provider route overwrites NOT verified (redacted fields): ${unverifiable.map(u => `${u.provider}.${u.field}`).join(', ')}`);
+    }
+  } catch { /* logger 不可用时不得影响配置合并 */ }
   return config;
 }
 

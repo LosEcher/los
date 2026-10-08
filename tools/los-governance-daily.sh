@@ -256,6 +256,39 @@ else
 fi
 echo
 
+# ── 8. 边界审计（ADR 0047 判据 J1–J10 的本机证据面）────────────
+# 为什么放进日报：这四条检具读**本机**状态（cc-switch GUI、DSH profile、
+# session-index、工作区文档），不适合进 CI，但必须有人每天看。
+#
+# **注意**：本脚本是 `set -euo pipefail`，而检具在发现 ERROR 时**故意**非零退出。
+# 因此这里必须显式吞掉退出码 —— 日报的职责是**呈现**发现，不是因发现而自杀
+# （否则有 ERROR 时整份日报发不出去，恰好丢掉最该看的内容）。
+# 需要退出码的门禁语义请直接跑 `pnpm audit:boundary` / `pnpm audit:model-route:check`。
+echo "## 8. 边界审计（ADR 0047）"
+BOUNDARY_SUMMARY="SKIP"
+if [[ -x "$ROOT/tools/boundary-audit.sh" ]]; then
+  BOUNDARY_OUT="$(bash "$ROOT/tools/boundary-audit.sh" --quiet 2>&1 || true)"
+  BOUNDARY_SUMMARY="$(printf '%s\n' "$BOUNDARY_OUT" | grep -m1 '^汇总:' | sed 's/^汇总: //' || true)"
+  BOUNDARY_SUMMARY="${BOUNDARY_SUMMARY:-SKIP}"
+  # 只列 ERROR/WARN 明细，避免日报被 OK 行淹没
+  # sed 先去掉前导空格与检具前缀，再统一加 "- "，避免 "-   WARN ..." 这种双空格
+  DETAIL="$(printf '%s\n' "$BOUNDARY_OUT" | grep -E 'ERR|WARN' | head -8 | sed -E 's/^[[:space:]]+//' || true)"
+  if [[ -n "$DETAIL" ]]; then printf '%s\n' "$DETAIL" | sed 's/^/- /'; else echo "- 无 ERROR / WARN"; fi
+else
+  echo "- SKIP: tools/boundary-audit.sh 不可执行"
+fi
+echo
+
+# 路由一致性（J8）：只在有冲突时列明细
+ROUTE_STATE="OK"
+ROUTE_CONFLICTS="$(pnpm -s audit:model-route 2>/dev/null | grep -E 'verdict   : conflict' || true)"
+if [[ -n "$ROUTE_CONFLICTS" ]]; then
+  ROUTE_STATE="CONFLICT"
+  printf '%s\n' "$ROUTE_CONFLICTS" | sed 's/^/- /'
+fi
+echo "- 路由一致性（J8）: ${ROUTE_STATE}"
+echo
+
 # retired 是有意下线、operator 暂停是人工意图，都不算异常；
 # 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
@@ -263,4 +296,4 @@ APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'await
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE}"

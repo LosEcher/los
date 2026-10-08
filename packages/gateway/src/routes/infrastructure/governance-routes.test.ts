@@ -31,6 +31,7 @@ function config(): Config {
     review: { enabled: false, roles: {} },
     providers: {},
     providerFallbacks: {},
+    providerRouteConflicts: [],
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,
