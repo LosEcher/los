@@ -192,6 +192,17 @@
 
 **执行中的两处更正**：① 我先前说"12 个提交"**是错的** —— 实际 25 个 change / **16 个有描述提交**（成对出现的是 `jj commit` 留下的空工作副本变更）；② GitHub 推送我**特意没做**，因为查证到它只接收 `mirror/*` 头。
 
+### 第二批执行结果（2026-10-08，已完成）
+
+| 项 | 结果 | 证据 |
+| --- | --- | --- |
+| **2.1 预算统一 8%** | ✅ 五仓余量一致 **7.41%**（= 1 − 1/1.08，政策的精确落点），`headroom-low` 归零 | 五个**真实** size 门禁逐仓 `exit 0`；`rust-budget-check` **7/7 attested**；提交 `b627d51` |
+| **2.4.1 pain/injection 投影器** | ✅ 真实产出：pain **40 行**（`sandbox_denied_outside_workspace` 40 sessions 居首）、injection **62 行**（14d `runtime_context=581` / `skill_catalog=360`） | 测试 **8/8**（含 3 条负向控制）；日报第 8 节新增两行；提交 `cba572a7`（已推 `origin`，sha 双侧一致 `cba572a788b8`） |
+
+**2.1 的负向控制实测**：把 fmtguard 的 basis 篡改为实测的一半（伪造 100% 漂移）⇒ `attestation-stale` + `--auto-attest` **hold 并 rc=1**，**未被自动吸收**。另观察到**真实现象**：门禁自身运行会推进台账末次实测（verify-gate 2548384 → 2564896，+0.65%），落在容差内由 `--auto-attest` 正常吸收（refreshed 5 / held 0）—— 这正是 auto-attest 存在的理由。
+
+**2.4.1 顺带修掉两个不一致**：`project:dsh-sessions` 此前**只跑 catalog**，而日报提示里写着不存在的 `--all` ⇒ CLI 改为跑全部三个投影（任一 `degraded` ⇒ 明示"未刷新"并 rc=2），提示命令一并修正。
+
 ---
 
 ## 4. 与既有决定的相容性检查
