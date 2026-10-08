@@ -27,6 +27,7 @@ import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveSessionCwds, selfTest as resolverSelfTest, RESOLUTION_STATES } from './lib/session-path-resolver.mjs';
 
 const HOME = homedir();
 const INDEX = join(HOME, '.dsh', 'storages', 'session-index.db');
@@ -183,11 +184,12 @@ function selfTest() {
 
   if (fail) { console.error(`\nself-test: ${fail} failure(s)`); process.exit(1); }
   console.log('self-test OK: 2 positive + 10 negative/edge assertions');
-  process.exit(0);
+  // 顺带跑解析器自检（B3.3 判据那一半），失败会 process.exit(1)
+  resolverSelfTest();
 }
 
 const argv = process.argv.slice(2);
-if (argv.includes('--self-test')) selfTest();
+if (argv.includes('--self-test')) { selfTest(); }
 
 const cwds = queryCwds();
 if (!cwds) {
@@ -221,6 +223,17 @@ const report = {
   aliasMap: map,
 };
 
+// ── B3.3 出口判据：用**消费方会用的那个解析器**跑一遍，证明三态可区分 ──
+// 注意这里刻意读磁盘上的别名表（可能缺失）—— 因为"表缺失"正是要验证的降级路径。
+let aliasMapOnDisk = null;
+if (existsSync(ALIAS_MAP)) {
+  try { aliasMapOnDisk = JSON.parse(readFileSync(ALIAS_MAP, 'utf8')); } catch { aliasMapOnDisk = null; }
+}
+const consumption = resolveSessionCwds(cwds.map(r => r.cwd), {
+  currentRoot: NEW_ROOT,
+  aliasMap: aliasMapOnDisk,
+});
+
 if (argv.includes('--json')) {
   console.log(JSON.stringify(report, null, 2));
 } else {
@@ -246,6 +259,18 @@ if (argv.includes('--json')) {
   console.log(`\n── unmapped 未知（读模型必须降级为 unknown，不得丢弃）: ${unknown.length} ──`);
   for (const u of unknown) console.log(`  ${u.path}   [${u.reason}]`);
   if (!unknown.length) console.log('  (none)');
+  console.log(`\n── 消费方视角（B3.3 出口判据）: 别名表${aliasMapOnDisk ? '已加载' : '**未加载（缺失/不可读）**'} ──`);
+  console.log(`   current=${consumption.byState.current} resolved=${consumption.byState.resolved} unknown=${consumption.byState.unknown}`);
+  if (!aliasMapOnDisk) {
+    console.log('   ⚠ 别名表缺失 ⇒ 全部历史会话降级为 unknown（**这是有意的降级，不是"无需映射"**）。');
+    console.log('     跑 `pnpm audit:path-split:write` 生成别名表。');
+  }
+  if (consumption.unknownCwds.length) {
+    console.log(`   unknown 清单（消费方必须保留、不得丢弃）:`);
+    for (const u of consumption.unknownCwds.slice(0, 5)) console.log(`     ${u.cwd || '(empty)'}  [${u.reason?.split(':')[0]}]`);
+    if (consumption.unknownCwds.length > 5) console.log(`     … 共 ${consumption.unknownCwds.length} 条`);
+  }
+
   console.log(`\n── 非项目 cwd（临时/调度目录等，不属待映射）: ${nonProject.length} ──`);
   for (const u of nonProject) console.log(`  ${u.path || '(empty)'}`);
 }
