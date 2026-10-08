@@ -213,3 +213,12 @@ export {
   type DailyAgentQualityBaseline, type DailyAgentQualityEvidenceWindow,
   type DailyAgentQualitySnapshot,
 } from './daily-agent-quality/index.js';
+export {
+  ensureDshSessionCatalogStore,
+  projectSessionCatalog,
+  matchPainPattern,
+  PAIN_PATTERNS,
+  PAIN_PATTERN_VERSION,
+  DSH_SESSION_INDEX_DB,
+  type CatalogProjectionResult,
+} from './dsh-session-catalog.js';

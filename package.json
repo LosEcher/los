@@ -68,7 +68,9 @@
     "check:doc-anchors:update-baseline": "node ./tools/check-doc-status-anchors.mjs --update-baseline",
     "check:workspace-docs": "node ./tools/check-workspace-docs.mjs",
     "check:memory-canonical": "pnpm exec node ./tools/check-memory-canonical.mjs",
-    "check:session-path-resolver": "node --input-type=module -e \"const m=await import('./tools/lib/session-path-resolver.mjs');m.selfTest()\""
+    "check:session-path-resolver": "node --input-type=module -e \"const m=await import('./tools/lib/session-path-resolver.mjs');m.selfTest()\"",
+    "check:session-resolver-parity": "node --import ./node_modules/.pnpm/tsx@4.22.3/node_modules/tsx/dist/loader.mjs ./tools/check-session-resolver-parity.mjs",
+    "project:dsh-sessions": "pnpm --filter @los/gateway exec node --import tsx src/project-dsh-sessions.cli.ts"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

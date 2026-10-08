@@ -256,7 +256,42 @@ else
 fi
 echo
 
-# ── 8. 边界审计（ADR 0047 判据 J1–J10 的本机证据面）────────────
+# ── 8. 跨项目事实（DSH session 只读投射，P1 L1-2）────────────
+# 数据源是 DSH 的 session-index.db，由 `pnpm project:dsh-sessions` 投影进 los。
+# 这里只**读**投影表；投射本身不在此触发（避免日报里跑重活）。
+echo "## 8. 跨项目（DSH session 只读投射）"
+CROSS_DB="${DATABASE_URL:-}"
+if [[ -n "$CROSS_DB" ]]; then
+  X_ASOF=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT max(as_of) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+  if [[ -n "$X_ASOF" ]]; then
+    X_STATES=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(path_state || '=' || n, ' ') FROM (SELECT path_state, count(*) n FROM dsh_session_catalog GROUP BY path_state ORDER BY 1) t;" 2>/dev/null)
+    X_PROJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(DISTINCT project_key) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+    X_OLD=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(*) FROM dsh_session_catalog WHERE cwd LIKE '%syncthing/project%' AND path_state='resolved';" 2>/dev/null | tr -d ' ')
+    X_UNKNOWN=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(*) FROM dsh_session_catalog WHERE path_state='unknown';" 2>/dev/null | tr -d ' ')
+    echo "- as_of: ${X_ASOF}"
+    echo "- 三态: ${X_STATES:-?}"
+    echo "- 活跃项目（project_key 去重）: ${X_PROJ:-0}"
+    echo "- **旧路径会话已归属**: ${X_OLD:-0} 条（B3.3 出口判据 = 214）"
+    echo "- unknown（无法归属，**保留不丢弃**）: ${X_UNKNOWN:-0} 条"
+    # 新鲜度：投射落后 >6h 说明 session-index 小时任务或投射没跑
+    AGE_S=$(python3 -c "
+import datetime,sys
+try:
+    t=datetime.datetime.fromisoformat('$X_ASOF'.replace('Z','+00:00'))
+    print(int((datetime.datetime.now(datetime.timezone.utc)-t).total_seconds()))
+except Exception: print(-1)")
+    if [[ "$AGE_S" -ge 0 ]] && [[ "$AGE_S" -gt 21600 ]]; then
+      echo "- **[STALE]** 投射已 $((AGE_S/3600))h 未更新（>6h）⇒ 检查 session-index 小时任务与 `pnpm project:dsh-sessions`"
+    fi
+  else
+    echo "- 投影表为空 ⇒ 跑 \`pnpm project:dsh-sessions\`（这不是"没有会话"）"
+  fi
+else
+  echo "- SKIP: DATABASE_URL 未设置"
+fi
+echo
+
+# ── 9. 边界审计（ADR 0047 判据 J1–J10 的本机证据面）────────────
 # 为什么放进日报：这四条检具读**本机**状态（cc-switch GUI、DSH profile、
 # session-index、工作区文档），不适合进 CI，但必须有人每天看。
 #
@@ -264,7 +299,7 @@ echo
 # 因此这里必须显式吞掉退出码 —— 日报的职责是**呈现**发现，不是因发现而自杀
 # （否则有 ERROR 时整份日报发不出去，恰好丢掉最该看的内容）。
 # 需要退出码的门禁语义请直接跑 `pnpm audit:boundary` / `pnpm audit:model-route:check`。
-echo "## 8. 边界审计（ADR 0047）"
+echo "## 9. 边界审计（ADR 0047）"
 BOUNDARY_SUMMARY="SKIP"
 if [[ -x "$ROOT/tools/boundary-audit.sh" ]]; then
   BOUNDARY_OUT="$(bash "$ROOT/tools/boundary-audit.sh" --quiet 2>&1 || true)"
