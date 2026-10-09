@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { getDb } from '@los/infra/db';
 import {
@@ -18,6 +19,15 @@ import {
 import { getCrossProjectSummary } from './dsh-session-summary.js';
 
 const ROOT = '/NEW/project';
+/**
+ * 源库是否在场。2026-10-09 CI 实测：本文件有两条断言**依赖开发机的真实 DSH 数据**
+ * （`~/.dsh/storages/session-index.db` 存在 + 已跑过投影），在 CI 容器里必然失败：
+ * - 「缺失别名表 ⇒ status=no-alias-map」需要源库在场，否则状态优先级先给 `degraded`；
+ * - 「回滚后投影必须完好」需要回滚前本来就有一份投影。
+ * 处理原则按本仓 T2：**显式声明前置条件**（skip 计入 skipped），不把它伪装成通过，
+ * 也不删掉真正的断言 —— 源库在场时（开发机 / 有数据的节点）两条都照常严格断言。
+ */
+const SOURCE_DB_PRESENT = existsSync(DSH_SESSION_INDEX_DB);
 const MAP = {
   version: 2,
   verified: [] as Array<{ from: string; to: string }>,
@@ -57,7 +67,9 @@ test('L1-2 NEGATIVE: a missing session-index DB yields degraded, NOT an exceptio
     ['dsh_context_injection', 'dsh_session_catalog', 'dsh_session_pain']);
 });
 
-test('L1-2: projecting with a MISSING alias map records every historical session as unknown (kept, not dropped)', async () => {
+test('L1-2: projecting with a MISSING alias map records every historical session as unknown (kept, not dropped)',
+  { skip: SOURCE_DB_PRESENT ? false : `源库缺失（${DSH_SESSION_INDEX_DB}）：无别名表判定需要源库在场；缺失源库时状态优先级先给 degraded（由上面那条 NEGATIVE 覆盖），故本环境显式 skip` },
+  async () => {
   await ensureDshSessionCatalogStore();
   const r = await projectSessionCatalog({ aliasMap: null, currentRoot: ROOT });
   assert.equal(r.status, 'no-alias-map', '别名表缺失必须是**可分辨的状态**，不是 ok');
@@ -162,6 +174,9 @@ test('summary: 有投影时 isDegraded=false，且三态与项目数自洽', asy
 
 test('summary NEGATIVE: 投影为空时 isDegraded=true 且给出可操作原因（不得当成"确实没有"）', async () => {
   const db = getDb()
+  // 回滚判据要**与环境无关**：不能断言"回滚后 sessions > 0"（那要求回滚前本来就
+  // 有投影，CI 容器没有 ⇒ 2026-10-09 gate-test 实测假红）。改为快照回滚前状态再比对。
+  const before = await getCrossProjectSummary({})
   // 在事务里清空三表再查，最后回滚 —— 不污染真实投影
   await db.query('BEGIN')
   try {
@@ -181,8 +196,10 @@ test('summary NEGATIVE: 投影为空时 isDegraded=true 且给出可操作原因
   } finally {
     await db.query('ROLLBACK')
   }
-  // 回滚后应恢复
+  // 回滚后必须精确恢复回滚前的状态（本环境有投影就恢复投影，没有就恢复"没有"）
   const after = await getCrossProjectSummary({})
-  assert.ok(after.catalog.sessions > 0, '回滚后投影必须完好')
-  assert.equal(after.degraded.isDegraded, false)
+  assert.equal(after.catalog.sessions, before.catalog.sessions,
+    '回滚后投影必须恢复到回滚前的会话数（不得依赖本机是否已有投影）')
+  assert.equal(after.degraded.isDegraded, before.degraded.isDegraded,
+    '回滚后降级态必须回到回滚前')
 })

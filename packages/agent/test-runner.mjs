@@ -101,6 +101,8 @@ const sharedProcessTestFiles = [
   'src/tools/external/shell-sandbox.test.ts',
   'src/scheduled-work/report-dir.test.ts',
   'src/scheduled-work/result-work-item.test.ts',
+  'src/session-path-resolver.test.ts',
+  'src/isolation-backends.test.ts',
   'src/spec-loader.test.ts',
   'src/static-analysis.test.ts',
   'src/static-graph-baselines.test.ts',
@@ -198,6 +200,7 @@ const isolatedGroupC = [
   'src/session-events-redaction.test.ts',
   'src/session-events-effective.test.ts',
   'src/session-subagents.test.ts',
+  'src/dsh-session-catalog.test.ts',
 ];
 
 const allIsolatedDatabaseTestFiles = [
