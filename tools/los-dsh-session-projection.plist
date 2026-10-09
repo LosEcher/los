@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  los DSH session projection — 每小时把 DSH 的 session-index 只读投影进 los Postgres。
+
+  为什么是 launchd（而不是 los 调度器 / DSH 调度器）见
+  tools/los-dsh-session-projection.sh 顶部注释；一句话：纯本地搬运，不需要模型，
+  放进 agent 调度只会把"出网/模型故障"混成"投影失败"。
+
+  安装：bash tools/install-los-dsh-session-projection.sh
+  状态：bash tools/install-los-dsh-session-projection.sh --status
+  卸载：bash tools/install-los-dsh-session-projection.sh --uninstall
+
+  RunAtLoad=false：安装脚本会同步跑一次做验收，避免 bootstrap 时并发。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.echerlos.los.dsh-session-projection</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__LOS_ROOT__/tools/los-dsh-session-projection.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__LOS_ROOT__</string>
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOS_ROOT__/.los-runtime/dsh-projection.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOS_ROOT__/.los-runtime/dsh-projection.err.log</string>
+</dict>
+</plist>

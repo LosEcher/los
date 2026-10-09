@@ -85,6 +85,23 @@ if [[ "${OP_PAUSED:-0}" -gt 0 ]]; then
 fi
 echo
 
+# ── 1b. 定时任务 circuit open（被调度排除）──────────────────
+# 口径缺口（2026-10-09 前）：circuit open 的 schedule 只出现在第 5 节「启用任务」表里，
+# 读者会以为它照常每 6h 在跑；实际它被调度 SQL 排除（`circuit_state IN ('closed','half_open')`），
+# next_run_at 会停在过去。恢复窗口 = CIRCUIT_RECOVERY_WINDOW_MS = 24h
+# （packages/agent/src/scheduled-work/policy.ts），到期后只放**一次** half_open 探测；
+# 探测失败则重新计时。这里把冷却剩余算出来，避免读成「永久冻结」。
+echo "### 1b. 定时任务 circuit open（被调度排除，24h 冷却后放一次探测）"
+CIRCUIT_ROWS=$(q "SELECT title || ' | opened=' || to_char(circuit_opened_at, 'MM-DD HH24:MI') || ' | fail=' || consecutive_failures || ' | next=' || to_char(next_run_at, 'MM-DD HH24:MI') || '（已过期 ' || round(EXTRACT(EPOCH FROM (now() - next_run_at)) / 3600) || 'h） | 冷却至=' || to_char(circuit_opened_at + interval '24 hours', 'MM-DD HH24:MI') FROM scheduled_work_items WHERE status = 'enabled' AND circuit_state <> 'closed' ORDER BY circuit_opened_at;")
+if [[ -n "$CIRCUIT_ROWS" ]]; then
+  readarray -t CIRCUIT_LINES <<< "$CIRCUIT_ROWS"
+  table "task | opened | failures | next | cooldown" "${CIRCUIT_LINES[@]}"
+  echo "- 恢复动作：冷却到期自动转 half_open 并放一次探测；如需立即恢复，人工置回 closed（会立刻按 next_run_at 到期重跑）。"
+else
+  echo "- 无（全部 closed）"
+fi
+echo
+
 # ── 2. 定时任务待审批 ───────────────────────────────────────
 echo "## 2. 定时任务待审批（awaiting_approval）"
 ROWS=$(q "SELECT r.id || ' | ' || s.title || ' | for=' || to_char(r.scheduled_for, 'MM-DD HH24:MI') || ' | policy=' || s.approval_policy || ' | timeout=' || (s.approval_timeout_ms / 60000) || 'min' FROM scheduled_work_item_runs r JOIN scheduled_work_items s ON s.id = r.schedule_id WHERE r.status = 'awaiting_approval' ORDER BY r.scheduled_for;")
@@ -221,6 +238,15 @@ if [[ -n "$FLEET_ROWS" ]]; then
 else
   echo "- 无在线 executor 记录"
 fi
+# 账本新鲜度（2026-10-09 新增）：只有一个在线计数会掩盖"从未被探测过"的孤儿行
+# ——27 个 ssh_target 是 2026-08-19 从 ~/.ssh/config 一次性导入的，没有心跳源，
+# 心跳因此集体冻在那一天；把它们的年龄显式报出来，"8/8 executor online" 才不会被误读。
+STALE_NODES=$(q "SELECT node_kind || ' | ' || count(*) || ' | ' || to_char(min(last_heartbeat_at), 'MM-DD HH24:MI') || ' → ' || to_char(max(last_heartbeat_at), 'MM-DD HH24:MI') || ' | ' || count(*) FILTER (WHERE COALESCE(last_probe_error, '') <> '') || ' 行有原因标记' FROM executor_nodes WHERE last_heartbeat_at < now() - interval '7 days' GROUP BY node_kind ORDER BY 1;")
+if [[ -n "$STALE_NODES" ]]; then
+  readarray -t STALE_LINES <<< "$STALE_NODES"
+  echo "- **账本陈旧行（心跳 >7d）**："
+  table "node_kind | 行数 | 心跳区间 | 原因" "${STALE_LINES[@]}"
+fi
 echo
 
 # ── 7b. 声明目标一致性 → todo（P0-6）─────────────────────────
@@ -260,9 +286,12 @@ echo
 # 数据源是 DSH 的 session-index.db，由 `pnpm project:dsh-sessions` 投影进 los。
 # 这里只**读**投影表；投射本身不在此触发（避免日报里跑重活）。
 echo "## 8. 跨项目（DSH session 只读投射）"
-CROSS_DB="${DATABASE_URL:-}"
+# 连接串复用脚本头部解析出的 $DB_URL（env → .env）。2026-10-09 前这里读
+# `${DATABASE_URL:-}`：正常调用（未导出 env、靠 .env 回退）时恒为空 ⇒ 本节
+# 整节 SKIP，跨项目事实面在日报里长期不可见。
+CROSS_DB="$DB_URL"
 if [[ -n "$CROSS_DB" ]]; then
-  X_ASOF=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT max(as_of) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+  X_ASOF=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT to_char(max(as_of), 'YYYY-MM-DD HH24:MI') FROM dsh_session_catalog;" 2>/dev/null)
   if [[ -n "$X_ASOF" ]]; then
     X_STATES=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(path_state || '=' || n, ' ') FROM (SELECT path_state, count(*) n FROM dsh_session_catalog GROUP BY path_state ORDER BY 1) t;" 2>/dev/null)
     X_PROJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(DISTINCT project_key) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
@@ -281,21 +310,24 @@ if [[ -n "$CROSS_DB" ]]; then
     X_INJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT 'runtime_context ' || COALESCE(sum(runtime_context_injections),0) || ' 次 / skill_catalog ' || COALESCE(sum(skill_catalog_injections),0) || ' 次（14d）' FROM dsh_context_injection;" 2>/dev/null)
     echo "- 上下文注入: ${X_INJ:-（空）}"
 
-    # 新鲜度：投射落后 >6h 说明 session-index 小时任务或投射没跑
-    AGE_S=$(python3 -c "
-import datetime,sys
-try:
-    t=datetime.datetime.fromisoformat('$X_ASOF'.replace('Z','+00:00'))
-    print(int((datetime.datetime.now(datetime.timezone.utc)-t).total_seconds()))
-except Exception: print(-1)")
-    if [[ "$AGE_S" -ge 0 ]] && [[ "$AGE_S" -gt 21600 ]]; then
-      echo "- **[STALE]** 投射已 $((AGE_S/3600))h 未更新（>6h）⇒ 检查 session-index 小时任务与 `pnpm project:dsh-sessions`"
+    # 新鲜度：投射落后 >6h 说明 session-index 小时任务或投射没跑。
+    # 年龄在 **SQL 里**算（epoch 秒），不经 shell/python 解析时间戳：2026-10-09 前的
+    # 实现先 `tr -d ' '` 把 "2026-10-08 17:47:44+08" 打成 "2026-10-0817:47:44+08"，
+    # python fromisoformat 抛错返回 -1 ⇒ [STALE] 永不触发（O3/T2「空即通过」）。
+    # 阈值可用 LOS_DSH_PROJECTION_STALE_S 覆盖（自测负向控制用）。
+    AGE_S=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - max(as_of)))::bigint, -1) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+    STALE_S="${LOS_DSH_PROJECTION_STALE_S:-21600}"
+    [[ "$STALE_S" =~ ^[0-9]+$ ]] || STALE_S=21600
+    if [[ "${AGE_S:--1}" -lt 0 ]]; then
+      echo "- **[STALE?]** 无法计算投射年龄（AGE_S=${AGE_S:--1}）—— 按「未知」处理，不得当作「新鲜」"
+    elif [[ "$AGE_S" -gt "$STALE_S" ]]; then
+      echo "- **[STALE]** 投射已 $((AGE_S/3600))h 未更新（阈值 $((STALE_S/3600))h）⇒ 检查 session-index 小时任务与 \`pnpm project:dsh-sessions\`"
     fi
   else
     echo "- 投影表为空 ⇒ 跑 \`pnpm project:dsh-sessions\`（这不是"没有会话"）"
   fi
 else
-  echo "- SKIP: DATABASE_URL 未设置"
+  echo "- SKIP: 无法解析数据库连接（DB_URL 为空）"
 fi
 echo
 
