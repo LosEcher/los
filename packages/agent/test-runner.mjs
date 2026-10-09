@@ -100,6 +100,7 @@ const sharedProcessTestFiles = [
   'src/operator-rules-runtime.test.ts',
   'src/tools/external/shell-sandbox.test.ts',
   'src/scheduled-work/report-dir.test.ts',
+  'src/scheduled-work/result-work-item.test.ts',
   'src/spec-loader.test.ts',
   'src/static-analysis.test.ts',
   'src/static-graph-baselines.test.ts',
