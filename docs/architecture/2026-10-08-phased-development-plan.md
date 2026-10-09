@@ -400,11 +400,19 @@ B0（决策+登记，1 个会话）
 
 ## 附：需要评审人先裁决的 4 件事（2026-10-08 增补）
 
-| # | 事项 | 建议 | 不做会怎样 |
+> ⚠️ **本节已被上一节的《4 项裁决结果（2026-10-08）》取代**（同日）。保留它是为了留存"裁决前的建议"这条审计链，
+> 但**不得**把这里的"建议"当作现行决定引用。尤其 **D3**：最终裁决是"**不是单 owner，是分层 + 可插拔后端**"
+> （见上方裁决表 D3、`2026-10-08-arbitration-isolation-owner-and-run-diff.md`，以及
+> `docs/governance/capability-ownership.yaml` 的 `isolation-resource-lifecycle`——它**明确禁止**把隔离资源的
+> 身份/生命周期下放给某个后端组件）。本节 `owner = sandbox-run` 是**被否决**的建议。
+>
+> 2026-10-09 修：此前本节没有取代标记，导致同一个文件里"旧建议"与"最终裁决"并存且无从分辨先后。
+
+| # | 事项 | 建议（⚠️ 已被取代，勿引用） | 不做会怎样 |
 | --- | --- | --- | --- |
 | D1 | **B0.0 是否立即修** | **立即** | 每天 15 分钟的假红 + 每轮 6 仓各一次无效 planning（实测单次 prompt 123k–168k tokens）+ 6 个 Work Item 永久 blocked |
 | D2 | **`requiredChecks` 双求值器**：拆两个字段，还是保留一个但强制声明 channel？ | **拆两个字段**（`requiredChecks.shell` / `requiredChecks.toolTrace`），因为两者语义不同且一个要 shell 一个禁 shell | 同一条缺陷换个 check 就复现；"模板已修好"但 `verification_records` 里没有对应 check |
-| D3 | **`sandbox-run` vs los `managed-workspaces` 的隔离 owner** | **owner = `sandbox-run`**（跨语言、不绑 jj），los 只负责**发起 + 记录** | 两条隔离路径各演进 ⇒"验证通过"在两条路径下含义不同（dsfolder 已挂了一个批次的未决项） |
+| D3 | **`sandbox-run` vs los `managed-workspaces` 的隔离 owner** | ~~**owner = `sandbox-run`**（跨语言、不绑 jj），los 只负责**发起 + 记录**~~ ⇒ **该建议已被否决**；最终裁决见上一节 D3（分层 + 可插拔后端；los 保留生命周期） | 两条隔离路径各演进 ⇒"验证通过"在两条路径下含义不同（dsfolder 已挂了一个批次的未决项） |
 | D4 | **`run-diff` 与 `los mcp serve`**：排期还是退役？ | `run-diff` **退役**（0.1.0 / 7 test / 3 依赖，成本最低；二进制与 `~/.cargo/bin/run-diff` 都不存在）；`los mcp serve` **接线**（ADR 0031 已 Accepted，且 `dsh-los-ops` 证明 DSH 侧确实需要 los 工具） | 两者都是"零消费者 + 无排期"，而 ADR 0031/0036 都写成已接受设计 ⇒ 每次盘点都要重新论证（评审成本） |
 
 ## 附：本轮对早先文档的三处事实纠正（写文档前必读）

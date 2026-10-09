@@ -193,7 +193,7 @@
 
 **Negative / 代价**
 - 三个 provider 中心意味着**没有单一"统一入口"**；接受这一点，代价是跨工具对齐需要 los 的冲突判定这一跳。
-- `sandbox-run` 成为隔离 owner 后，los 的 `managed-workspaces` 需要收敛定位（一次改造）。
+- 隔离面**没有单一 owner**（第 5.1 节仲裁 + `capability-ownership.yaml` 的 `isolation-resource-lifecycle`）：los 保留隔离资源的身份与生命周期（**明确禁止下放给某个后端组件**），具体机制由可插拔 `IsolationBackend` 提供。代价是 `sandbox-run`（docker 后端）与 los 内建的 `jj-workspace` / `git-worktree` 两条路径**各自演进** —— "验证通过"在两条路径下含义不同，需要门禁层统一收敛（一次改造）。
 - `~/.dsh/memories` 依赖第三方插件这一点**无法通过本 ADR 消除**，只能显式登记。
 
 **Risk / 缓解**
@@ -211,9 +211,9 @@
 3. `dsh-memory-evolve` 被上游弃用、替换或移除（则第 3 节的会话工作记忆层需要换 owner）。
 4. `dsfolder` 的子仓数量或 VCS 形态变化（新增/移除仓、或有仓获得 remote）。
 5. `verify-gate` 或 `sandbox-run` 的退出码语义变更（则第 6 节的判据与仲裁规则需要同步）。
+6. 出现第二个 operator 或第二个 `user` JWT（则第 2 节的"冲突判定权归 los"需要重新评估权限面）。
 7. `sandbox-run` 的 `Backend` 接口从 `enum` 改为 `trait` + 注册表（则第 5.1 节的 C3/C5 可合并，且 los 侧适配器可直接对接 trait）。
 8. 出现第三个需要隔离后端的场景（如 container/VM 之外的沙箱，见 ADR 0046）—— 则需重新评估 `IsolationBackend` 接口是否足够抽象。
-6. 出现第二个 operator 或第二个 `user` JWT（则第 2 节的"冲突判定权归 los"需要重新评估权限面）。
 
 ---
 
