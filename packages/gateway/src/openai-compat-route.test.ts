@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import { MessageRouter } from '@los/agent/message-router';
 import { setConfig, type Config } from '@los/infra/config';
 import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
+import { resolveClientLabel } from './client-label.js';
 import { registerRequestContext } from './request-context.js';
 
 const source = readFileSync(new URL('./openai-compat-route.ts', import.meta.url), 'utf8');
@@ -575,3 +576,26 @@ function config(): Config {
     migrationsDir: 'packages/infra/migrations',
   };
 }
+
+test('client label prefers x-los-client, falls back to user-agent, else null', () => {
+  assert.equal(
+    resolveClientLabel({ 'x-los-client': 'dsh-desktop/19387', 'user-agent': 'curl/8.7.1' }),
+    'dsh-desktop/19387',
+  );
+  assert.equal(resolveClientLabel({ 'user-agent': 'curl/8.7.1' }), 'curl/8.7.1');
+  // 缺省必须是 null：不得用 'unknown' 之类兜底把「没读到」伪装成「读到了」
+  assert.equal(resolveClientLabel({}), null);
+  assert.equal(resolveClientLabel(undefined), null);
+  assert.equal(resolveClientLabel({ 'user-agent': '   ' }), null);
+});
+
+test('client label normalizes whitespace, array headers, and length', () => {
+  assert.equal(resolveClientLabel({ 'user-agent': ['a  b', 'c'] }), 'a b');
+  const long = 'x'.repeat(200);
+  assert.equal(resolveClientLabel({ 'user-agent': long })?.length, 80);
+  assert.equal(resolveClientLabel({ 'user-agent': long }, 10)?.length, 10);
+});
+
+test('compat route wires the client label into runChat params', () => {
+  assert.match(source, /clientLabel: resolveClientLabel\(req\.headers/);
+});

@@ -27,6 +27,9 @@ import {
   forwardClientToolCompletion,
   type ForwardClientToolsInput,
 } from './openai-compat-tool-forward.js';
+// 调用方标识（x-los-client / User-Agent）：只用于给会话 metadata 记一个 label，
+// 否则"谁在用 los 网关"无法从账本回答（2026-10-09 盘点缺口）。
+import { resolveClientLabel } from './client-label.js';
 
 interface OpenAIChatMessage {
   role?: string;
@@ -198,6 +201,7 @@ export function registerOpenAICompatibleRoute(
     const chatParams: Omit<Parameters<typeof runChat>[0], 'send' | 'signal'> = {
       prompt,
       sessionId: sid,
+      clientLabel: resolveClientLabel(req.headers as Record<string, unknown>),
       systemPrompt: systemPrompt || undefined,
       provider: body.model ?? config.agent.defaultProvider,
       model: body.model ? undefined : config.agent.defaultModel,
