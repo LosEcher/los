@@ -14,7 +14,11 @@ import {
 } from '../providers/provider-probe.js';
 import { runScheduledAgentTask } from '../scheduler.js';
 import { appendSessionEvent } from '../session-events.js';
-import { createTodo } from '../todos.js';
+// 结果 todo 的投影策略拆到 result-work-item.ts：历史行为是"每次成功运行都落一条 backlog
+// todo"（dedupeKey 含 runId ⇒ 不去重），4873 条 backlog 即由此而来。
+// 注意：这里**不做别名导入**——wiring 门禁按"导出名是否出现在生产调用点"判定，
+// 别名会让新导出被记成 test-only orphan（2026-10-09 实测）。
+import { createScheduleResultWorkItem } from './result-work-item.js';
 import {
   startScheduledWorkExecutionHeartbeat,
   waitForAdoptedScheduleTask,
@@ -87,7 +91,7 @@ export async function runScheduledWorkTick(input: {
     if (updated.circuitOpened) {
       // Same operator notification as an execution failure at the threshold:
       // a lease-exhausted run opening the circuit must surface a recovery item.
-      const workItemId = await createScheduleWorkItem(updated.schedule, exhausted, 'failed', {
+      const workItemId = await createScheduleResultWorkItem(updated.schedule, exhausted, 'failed', {
         error: exhausted.error ?? 'lease expired and retry limit exhausted',
         circuitState: 'open',
         consecutiveFailures: updated.schedule.consecutiveFailures,
@@ -140,7 +144,7 @@ export async function executeScheduledWorkRun(
   // under a non-auto approval policy must wait for operator approval.
   const approved = run.resultSummary?.approvedBy !== undefined;
   if (schedule.approvalPolicy !== 'read_only_auto' && !scopePreapproved && !approved) {
-    const workItemId = await createScheduleWorkItem(schedule, run, 'awaiting_approval', {
+    const workItemId = await createScheduleResultWorkItem(schedule, run, 'awaiting_approval', {
       approvalPolicy: schedule.approvalPolicy,
       message: 'This schedule requires operator approval for each execution.',
     });
@@ -206,7 +210,7 @@ export async function executeScheduledWorkRun(
     }
     const updated = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: outcome.status });
     if (outcome.status === 'succeeded' && !outcome.workItemId) {
-      const workItemId = await createScheduleWorkItem(updated.schedule, completed, 'succeeded', outcome.summary, outcome.title);
+      const workItemId = await createScheduleResultWorkItem(updated.schedule, completed, 'succeeded', outcome.summary, outcome.title);
       await attachScheduledRunWorkItem(run.id, workItemId);
     }
     return outcome.status;
@@ -256,7 +260,7 @@ export async function executeScheduledWorkRun(
     }
     const updated = await recordScheduledRunOutcome({ scheduleId: schedule.id, status: 'failed' });
     if (updated.circuitOpened) {
-      const workItemId = await createScheduleWorkItem(updated.schedule, run, 'failed', {
+      const workItemId = await createScheduleResultWorkItem(updated.schedule, run, 'failed', {
         error: message,
         circuitState: 'open',
         consecutiveFailures: updated.schedule.consecutiveFailures,
@@ -493,36 +497,6 @@ export function _deriveScheduledFeedAnalysisDispatch(
     },
     idempotencyKey: `scheduled-feed-analysis:${schedule.id}:${stableSlot}`,
   };
-}
-
-async function createScheduleWorkItem(
-  schedule: ScheduledWorkItem,
-  run: ScheduledWorkItemRun,
-  scheduledStatus: 'awaiting_approval' | 'succeeded' | 'failed',
-  summary: Record<string, unknown>,
-  title = schedule.title,
-): Promise<string> {
-  const todo = await createTodo({
-    tenantId: schedule.tenantId, projectId: schedule.projectId, userId: schedule.userId,
-    title, description: schedule.runTemplate.goalTemplate, kind: 'task', status: 'backlog', priority: 'P2',
-    source: 'scheduled-work',
-    dedupeKey: scheduledStatus === 'failed'
-      ? `schedule-circuit:${schedule.id}:revision:${schedule.revision}`
-      : `schedule-run-result:${run.id}:${scheduledStatus}`,
-    runContract: {
-      mode: schedule.runTemplate.mode,
-      phase: scheduledStatus === 'awaiting_approval' ? 'planning' : scheduledStatus === 'failed' ? 'blocked' : 'succeeded',
-      goal: schedule.runTemplate.goalTemplate, editableSurfaces: [],
-      requiredChecks: schedule.runTemplate.requiredChecks, stopConditions: ['operator cancels schedule'],
-      evidenceRequired: ['scheduled work run record'], toolMode: 'read-only',
-      externalEvidenceAllowed: [], rawEvidenceProhibited: [],
-    },
-    metadata: {
-      createdFrom: 'scheduled-work-runner',
-      scheduledWork: { scheduleId: schedule.id, runId: run.id, status: scheduledStatus, summary },
-    },
-  });
-  return todo.id;
 }
 
 /**
