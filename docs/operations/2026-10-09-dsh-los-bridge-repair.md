@@ -134,21 +134,49 @@
 
 ---
 
-## 8. 交付记录（2026-10-09 17:30–17:55）
+## 8. 交付记录（2026-10-09 17:30–21:45，**已完成**）
 
-- **拆分**：4 个单意图 bookmark —— `fix/2026-10-09-gate-hygiene`、`fix/2026-10-09-result-todo-archive`、
-  `fix/2026-10-09-v1-client-label`、`fix/2026-10-09-dsh-bridge-repair`（本文件属最后一个）。
-  它们都基于**未交付的 `boundary/consumption-b2-b3` 线**（本机检出即该线；`main` = `eae54786`）。
-- **PR**：
-  - 基于该线的 4 个 PR：#323（门禁卫生）、#324（结果 todo 归档）、#325（client label）、#326（本文件所属桥接修复）。
-  - 但本仓 CI **只在 `base=main` 时触发**（`.forgejo/workflows/ci.yml` → `pull_request.branches: [main]`），
-    基于该线的 PR 拿不到任何 check ⇒ 另建两个 main 目标 PR：**#327**（结果 todo 归档）、**#328**（/v1 client label）。
-    #324/#325 成为重复项（保留未关：当前 TOKEN 只有仓库写权限、无 `write:issue`，无法关闭或评论）。
-- **CI 阻塞**：Forgejo runner `win-los-canary`（labels `win-ci`/`win-ci-jj`/`win-ci-playwright`）状态 **offline**；
-  宿主机 `desktop-r45553o`（100.90.170.58）在 tailnet 上 active、ping 37ms ⇒ 是 runner 服务没起，不是机器不可达。
-  #327/#328 的 4 个 required context（gate-fast / gate-test / gate-drift / gate-web-e2e）处于 pending，
-  **runner 恢复后会自行领取，无需重推**。
-- **本地等价门禁**（runner 不可用时的替代证据）：gate-hygiene head 13/13、#327 head 13/13、#328 head 13/13、
-  合并态 13/13（均 0 failures）。
-- **未做**：把 `boundary/consumption-b2-b3` 开成 main 目标 PR —— 该线是 89 文件 / +11.2k 行的在飞工作，
-  是否现在进 main 属 operator 决策；本文件所属改动依赖该线的代码（日报第 8 节），因此它必须随该线进 main。
+### 8.1 进 main 的 4 个 PR
+
+| PR | 内容 | 合并时间 |
+| --- | --- | --- |
+| [#327](http://192.168.31.34:3022/los/los/pulls/327) | `fix(scheduled-work)`: 结果 todo 归档（本次 P1-2） | 19:54 |
+| [#323](http://192.168.31.34:3022/los/los/pulls/323) | `deliver`: `boundary/consumption-b2-b3` 线进 main + gate 修复 | 20:49 |
+| [#326](http://192.168.31.34:3022/los/los/pulls/326) | `fix(ops)`: 日报三处口径 + launchd 投影调度 + 本文档/SKILL（本次 P0-2/P1-1） | 21:09 |
+| [#328](http://192.168.31.34:3022/los/los/pulls/328) | `feat(gateway)`: `/v1` client label（本次 P2-2） | 21:19 |
+
+- 关键前提：本机检出的是**未交付的边界线**（89 文件 / +11.2k 行 vs main），日报第 8 节与门禁
+  基线/测试分类都依赖该线 ⇒ 该线必须随本次一起进 main（PR #323 的 head 就是「线 + gate 修复」）。
+- 本仓 CI **只在 `base=main` 时触发**（`.forgejo/workflows/ci.yml` → `pull_request.branches: [main]`），
+  且**改 base 不会补跑** pull_request 事件 ⇒ 每次改 base 后需要一个空提交重触发（本仓 SKILL 的
+  "Retrigger a PR without touching content" 模式）。合并后 main 前进，后继 PR 需 rebase 再跑一轮
+  （Forgejo 对 `head behind base` 返回 405）。
+- 重复项 #324 / #325 仍开着：当前 TOKEN 无 `write:issue`，无法关闭或评论（需带该 scope 的 token）。
+
+### 8.2 CI 阻塞的根因与修复
+
+- **runner 离线**：Forgejo 只有一个 runner `win-los-canary`（labels win-ci/win-ci-jj/win-ci-playwright），
+  宿主机 `desktop-r45553o`（100.90.170.58）tailnet 上 active、ping 37ms，但容器
+  `forgejo-runner-win-canary` 状态 `Exited`（podman VM 正常）⇒ 是容器没起，不是机器不可达。
+  已 `podman start`；**并加自愈**：Windows 计划任务 `los-forgejo-runner-ensure`（每 15 分钟检查，
+  容器不在运行则 `podman start`；脚本 `%USERPROFILE%\los-forgejo-runner-ensure.cmd`，house 风格同 `lot2-portproxy-ensure`）。
+- **gate-test 真红（不是环境噪音）**：`packages/agent/src/dsh-session-catalog.test.ts` 有两条断言
+  依赖**开发机的真实 DSH 数据**（`~/.dsh/storages/session-index.db` 在场 + 已跑过投影）：
+  「缺失别名表 ⇒ `status=no-alias-map`」在源库缺失时先返回 `degraded`（源码 :179 早于 :228）；
+  「回滚后投影必须完好」断言 `sessions>0` 要求回滚前本来就有投影。CI 容器两者皆无 ⇒ 必然假红。
+  修复按本仓 T2：显式声明前置条件（`skip` 计入 skipped 并写明原因，不伪装成通过），第二条改为
+  「回滚后精确恢复回滚前状态」（与环境无关且更强）。验证：真实 HOME 145/145、0 skipped；
+  HOME 指向空目录（复刻 CI）144 pass + 1 explicit skip + 0 fail。
+
+### 8.3 fleet 版本对齐（P2-1 收口）
+
+- `tools/los-fleet-rollout.sh --canary`（先滚 vultr 并验收）→ 通过后 `--canary` 之外的全量滚动。
+- 结果：**8/8 online executor 全部 = `0.1.0+b20dcbe38f468`**（含 `mbp-executor-1`，也含两台 Windows 节点），
+  `tools/los-fleet-consistency.sh` verdict = **all consistent** ⇒ mbp 漂移项随之关闭。
+- 本地仓库：`main` 已对齐 `main@origin`（`aefe7583`），本次的 6 个特性 bookmark 已删除，
+  工作副本在 main 上的干净空变更。
+
+### 8.4 未做 / 残留
+
+- 归档未做：`#324/#325`（需 `write:issue` token）。
+- §8 早期版本（runner 离线时的记录）保留在 git 历史里，可追溯"当时以为阻塞"的事实。
