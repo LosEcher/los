@@ -108,7 +108,8 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
 
 test('resolveModelCapabilityProfile normalizes model aliases and scheduling-relevant capability flags', () => {
   const deepseek = resolveModelCapabilityProfile(resolveModelProfile('deepseek'));
-  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-v4-pro']);
+  // 2026-09-10 起站点现行模型名为 deepseek-flash，别名表随之扩展
+  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-flash', 'deepseek-v4-pro']);
   assert.ok(!deepseek.modelAliases.includes('deepseek-chat'));
   assert.ok(!deepseek.modelAliases.includes('deepseek-reasoner'));
   assert.equal(deepseek.tools.parallelCalls, false);
@@ -228,20 +229,24 @@ test('estimateCost returns cost for priced profiles', () => {
 });
 
 test('DeepSeek pricing resolves by effective model', () => {
+  // 2026-09-10 12:00 起站点把 flash 改名 deepseek-flash 并降价（1.5/4.5/0.05 → 1/4/0.02）。
+  const current = resolveModelProfile('deepseek', { model: 'deepseek-flash' });
   const flash = resolveModelProfile('deepseek', { model: 'deepseek-v4-flash' });
   const pro = resolveModelProfile('deepseek', { model: 'deepseek-v4-pro' });
   const unknown = resolveModelProfile('deepseek', { model: 'deepseek-v5-preview' });
 
-  assert.deepEqual(flash.pricing, {
+  assert.deepEqual(current.pricing, {
     currency: 'cny',
-    promptTokenCostPer1M: 1.5,
-    completionTokenCostPer1M: 4.5,
-    cacheHitTokenCostPer1M: 0.05,
+    promptTokenCostPer1M: 1,
+    completionTokenCostPer1M: 4,
+    cacheHitTokenCostPer1M: 0.02,
     promptTokensIncludeCacheHits: true,
     peakMultiplier: 2,
     cnyPerUsd: 6.8,
-    asOf: '2026-08-17',
+    asOf: '2026-09-10',
   });
+  // 旧名兼容路由到 V4.1-Flash，必须与现行名同价
+  assert.deepEqual(flash.pricing, current.pricing);
   assert.deepEqual(pro.pricing, {
     currency: 'cny',
     promptTokenCostPer1M: 4.5,
@@ -252,7 +257,9 @@ test('DeepSeek pricing resolves by effective model', () => {
     cnyPerUsd: 6.8,
     asOf: '2026-08-17',
   });
-  assert.equal(unknown.pricing, undefined);
+  // 未登记的模型名回退到 provider 基本价，**不得 undefined**：
+  // undefined ⇒ estimateCost 返回 null ⇒ 成本静默归零（2026-10 flash 改名事故同型故障）。
+  assert.deepEqual(unknown.pricing, current.pricing);
 });
 
 test('billingPeriodAt follows Beijing peak hours and weekend flat rate', () => {
@@ -268,6 +275,11 @@ test('billingPeriodAt follows Beijing peak hours and weekend flat rate', () => {
   // Weekends are all off-peak regardless of the clock (since 2026-08-23).
   assert.equal(billingPeriodAt(at('2026-08-22T02:00:00Z')), 'off-peak'); // Sat 10:00
   assert.equal(billingPeriodAt(at('2026-08-23T02:00:00Z')), 'off-peak'); // Sun 10:00
+  // 中国法定节假日全天空闲（2026-10-09 计费审计补齐）：这些时刻本是工作日高峰。
+  assert.equal(billingPeriodAt(at('2026-10-01T02:00:00Z')), 'off-peak'); // 国庆 周四 10:00
+  assert.equal(billingPeriodAt(at('2026-09-25T02:00:00Z')), 'off-peak'); // 中秋 周五 10:00
+  // 对照组：非节假日的同一钟点仍是高峰（防止「一律空闲」式误修）
+  assert.equal(billingPeriodAt(at('2026-10-08T02:00:00Z')), 'peak'); // 周四 10:00 非节假日
 });
 
 test('calculateCost applies the peak multiplier inside peak hours only', () => {
