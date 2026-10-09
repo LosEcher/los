@@ -14,6 +14,7 @@ import { markStaleServiceInstancesOffline } from '@los/agent/service-instances';
 import { resolveCoordinationBackend } from '@los/agent/coordination';
 import { processDueFeedAnalysisCallbacks, pruneExpiredFeedAnalysisMaterial } from '@los/agent';
 import { publishExecutionOutboxBatch } from '@los/agent/execution-outbox';
+import { publishDshEventsBatch } from '@los/agent/dsh-event-outbox';
 import { reapExpiredExecutionLeases, recoverStaleRunningRunSpecs } from './execution-lease-reaper.js';
 import { sweepSymbolCache } from './chat-cbm-symbol-cache.js';
 import { registerDailyAgentQualityMaintenance } from './daily-agent-quality-maintenance.js';
@@ -407,16 +408,29 @@ export function registerServerMaintenance(
   });
 
   // ── Execution outbox publisher (1s) ────────────────────────
+  // 同一循环也驱动 DSH 事件转发（entity_type='dsh_event'，见 dsh-event-outbox.ts）。
+  // 会话事件发布器**必须**排除 dsh_event：那些行没有 session_event_id，
+  // 被它认领会当"缺字段"的行重试到死（2026-10-09 P1-a）。
   let outboxPublishing = false;
   registerImmediateIntervalTask(app, 1_000, async () => {
     if (outboxPublishing) return;
     outboxPublishing = true;
     try {
-      const result = await publishExecutionOutboxBatch({ ownerId: service.serviceId });
+      const result = await publishExecutionOutboxBatch({
+        ownerId: service.serviceId,
+        excludeEntityTypes: ['dsh_event'],
+      });
       if (result.claimed > 0) {
         log.info(
           `Execution outbox: claimed=${result.claimed}, published=${result.published}, retried=${result.retried}`,
         );
+      }
+      const dshUrl = process.env.DSH_EVENTS_WEBHOOK_URL?.trim();
+      if (dshUrl) {
+        const dsh = await publishDshEventsBatch({ ownerId: service.serviceId, url: dshUrl });
+        if (dsh.claimed > 0) {
+          log.info(`DSH events: claimed=${dsh.claimed}, published=${dsh.published}, retried=${dsh.retried}`);
+        }
       }
     } catch (error) {
       log.warn(`Execution outbox publisher failed: ${error instanceof Error ? error.message : String(error)}`);

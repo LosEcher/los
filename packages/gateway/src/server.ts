@@ -78,6 +78,7 @@ import { ensureRuleStore, upsertRule, loadRulesFromDir } from '@los/agent/rules'
 import { appendSessionEvent } from '@los/agent/session-events';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { readExecutionOutboxHealth } from '@los/agent/execution-outbox';
+import { readDshEventOutboxHealth } from '@los/agent/dsh-event-outbox';
 import { startOtelBridge } from '@los/agent/runtime-adapter';
 import { MessageRouter, createBuiltinHandlers } from '@los/agent/message-router';
 import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo-dispatch';
@@ -171,9 +172,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
 
   // ── Health ───────────────────────────────────────────
   app.get('/health', async () => {
-    const [current, outbox] = await Promise.all([
+    const [current, outbox, dshEventOutbox] = await Promise.all([
       loadServiceInstance(service.serviceId).catch(() => null),
       readExecutionOutboxHealth().catch(() => null),
+      readDshEventOutboxHealth().catch(() => null),
     ]);
     return {
       status: 'ok',
@@ -183,6 +185,8 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
       ready: current?.readiness.ready ?? false,
       blockers: current?.readiness.blockers ?? ['service:not_registered'],
       outbox,
+      // los → DSH 事件投递积压（P1-a）：pending/claimed>0 或 failed>0 即为异常信号。
+      dshEventOutbox,
       cbmSymbolCache: getSymbolCacheMetrics(),
       // V3 observability: stdout/stderr write-queue depth. Persistent high
       // values mean the daemonized log channel is not being consumed (e.g. the
