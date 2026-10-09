@@ -12,6 +12,21 @@
  *
  * 校验项：
  *   W1 被扫描文档里的**路径式引用必须可解析**（`~/…`、`$HOME/…`、`../…` 相对、`/Users/…` 绝对）
+ *   W1b **裸相对路径**中的**文件名式**引用（`a/b.md`、`x/y.jsonl`、`p/q.tsx`…）：
+ *       默认记为**提示**（不阻塞）；`--strict-relative` 时记为**问题**（exit 1）。
+ *       为什么只收"文件名式"而不收所有裸相对路径（2026-10-09 实测，12 篇扫描集）：
+ *         · 所有裸相对路径 token：候选 181 → **75 个解析不到**，几乎全是**散文斜杠**
+ *           （`TypeScript/pnpm`、`los/infra`、`provider/harness`、`ADR/source/contract`）、
+ *           日期区间（`2026-08-05/08-08`）、JS 语法（`import/export`）⇒ 全量收会变成噪音门禁。
+ *         · 只收带**文件扩展名**且带**右边界**的：候选 67（md）+ 8（json）+ 5（ts）… →
+ *           md 解析不到 **0 个**；json/ts 那 6 个**全部是正则假象**（文件里写的是
+ *           `.jsonl` / `.tsv` / `.tsx`，被没有右边界的写法截成 `.json` / `.ts`）；
+ *           补上 `(?![\w])` 后**归零**。⇒ 本规则在扫描集上**零发现、零误报**。
+ *       价值是**预防性**的：它抓的是"写成裸相对路径的 `.md` 却解析不到"这一类 ——
+ *       2026-10-09 修掉的 `dsfolder/AGENTS.md` 那 5 处死链正是此类（当时 J4 对裸相对路径
+ *       全盲，所以它们能长期存活）。
+ *       为什么默认不阻塞：它今天在扫描集上零发现，但**其它仓的文档随时会新增**裸相对
+ *       文件名引用；按本项目纪律（门禁要么可达、要么先只告警），先只提示，稳定后再翻默认。
  *   W2 `WORKSPACE.md` 里形如 `projects/<name>` 的目录名**必须真实存在**（或显式标为已归档）
  *   W3 工作区内的仓必须能在 `.workspace/projects.json` 找到（J9 的文档侧，反向由 registry 校验器负责）
  *
@@ -21,7 +36,7 @@
  *   · 明确标 `历史`/`legacy`/`已归档`/`不存在` 的行
  *
  * 用法：
- *   node tools/check-workspace-docs.mjs [--list] [--self-test]
+ *   node tools/check-workspace-docs.mjs [--list] [--self-test] [--strict-relative]
  *   （需可读 `~/.dsh` 之外的工作区；运行在 los 仓内）
  */
 import { readFileSync, existsSync, statSync } from 'node:fs';
@@ -107,6 +122,22 @@ export function extractPathRefs(line, deps) {
     else abs = join(home, raw.replace(/^~\/|^\$HOME\//, ''));
     refs.push({ raw, abs, kind: hit.kind });
   }
+
+  // pass 2：裸相对路径里的**文件名式**引用（`a/b.md`、`x/y.jsonl`）——理由见文件头 W1b 的实测。
+  // 右边界 `(?![A-Za-z0-9_])` 是必须的：没有它 `runs.jsonl` 会被截成 `runs.json`（实测 2 例假阳性）。
+  // 前置排除 `(?<![\w./~$:-])` 保证不与 pass 1 的四种前缀重叠（也不吃 URL 的 `//` 之后）。
+  const REL_FILE = /(?<![\w./~$:-])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.(?:jsonl|json|toml|ya?ml|tsv|tsx|ts|mjs|cjs|js|sh|bash|rs|csv|txt|log|lock|md))(?![A-Za-z0-9_])/g;
+  let rf;
+  while ((rf = REL_FILE.exec(line)) !== null) {
+    const raw = rf[1];
+    // `../` / `./` 开头的由 pass 1（或不该校验）负责。行首时前置 lookbehind 挡不住 `../`，
+    // 实测它会让 `../../AGENTS.md` 被 pass 1 与 pass 2 各抓一次（自检 `relative ref resolved
+    // from FILE dir` 与 `pass 2 does not double-catch prefixed refs` 就是这么红的）。
+    if (raw.startsWith('../') || raw.startsWith('./')) continue;
+    if (/<|>|…|\$(?!HOME\b)[A-Z_]+|[*?\[\]{}]/.test(raw)) continue;
+    if (/(node_modules|\.git\/)/.test(raw)) continue;
+    refs.push({ raw, abs: resolve(baseDir, raw), kind: 'relative-file' });
+  }
   return refs;
 }
 
@@ -160,10 +191,18 @@ export function claimedProjects(text, { workspace, existsFn }) {
 
 function selfTest() {
   let fail = 0;
+  let total = 0;
   const eq = (label, got, want) => {
+    total++;
     if (JSON.stringify(got) !== JSON.stringify(want)) {
       console.error(`self-test FAILED: ${label}\n  got  ${JSON.stringify(got)}\n  want ${JSON.stringify(want)}`); fail++;
     }
+  };
+  const done = () => {
+    if (fail) { console.error(`\nself-test: ${fail} of ${total} assertion(s) failed`); process.exit(1); }
+    // 计数是**动态**的：此前这里写死过 "… = 15 assertions"，加断言后它就变成了假信息
+    // （实测 2026-10-09：实际 25 个断言，那行仍写着 15）。别再写死。
+    console.log(`self-test OK: ${String(total)} assertion(s) passed`);
   };
   const deps = { home: '/H', workspace: '/W/los-workspace', projectRoot: '/W' };
 
@@ -188,6 +227,24 @@ function selfTest() {
   eq('skips glob prefix', extractPathRefs('`~/Library/Logs/CanKey/diag-`', deps), []);
   eq('skips bracketed glob', extractPathRefs('`~/x/[a-z]*`', deps), []);
 
+  // W1b：裸相对路径里的**文件名式**引用（2026-10-09 加；实测精度见文件头）
+  eq('bare relative file ref detected', extractPathRefs('见 `docs/adr/0047-x.md`', deps).map(r => r.kind), ['relative-file']);
+  eq('bare relative file ref resolves from FILE dir',
+     extractPathRefs('读 `docs/adr/0047-x.md`', { ...deps, baseDir: '/W/los-workspace/projects/los' }).map(r => r.abs),
+     ['/W/los-workspace/projects/los/docs/adr/0047-x.md']);
+  eq('right boundary keeps .jsonl intact',
+     extractPathRefs('`dsfolder/.fmtguard/runs.jsonl`', deps).map(r => r.raw), ['dsfolder/.fmtguard/runs.jsonl']);
+  eq('bare relative tsx ref detected', extractPathRefs('`frontend/src/main.tsx`', deps).map(r => r.kind), ['relative-file']);
+  // 负向：散文斜杠（这是"全量收裸相对路径"会炸的地方，必须一条都不收）
+  eq('skips prose slashes (lang/pkg)', extractPathRefs('| los | TypeScript/pnpm | 平台 |', deps), []);
+  eq('skips prose slashes (or-words)', extractPathRefs('ADR/source/contract reconciliation', deps), []);
+  eq('skips prose slashes (date range)', extractPathRefs('`in_progress` rows (2026-08-05/08-08 case).', deps), []);
+  // 负向：无文件名的裸路径（目录）不属本规则
+  eq('skips dir-only bare path', extractPathRefs('见 `docs/adr/`', deps), []);
+  // 负向：四种前缀由 pass 1 负责，pass 2 不得重复捕获
+  eq('pass 2 does not double-catch prefixed refs',
+     extractPathRefs('读 `../x.md`', { ...deps, baseDir: '/W/los-workspace/projects/los' }).map(r => r.kind), ['relative']);
+
   // claimedProjects
   const existsFn = p => ['/W/los-workspace/projects/los', '/W/los-workspace/projects/weclaw'].includes(p);
   // ① 明写路径 + ② 目录树（名字后有填充空格）+ ③ 表格行
@@ -204,13 +261,14 @@ function selfTest() {
   const r2 = claimedProjects('│   ├── gone/   # 历史参考源 · **不在磁盘**', { workspace: '/W/los-workspace', existsFn });
   eq('clarified historical NOT flagged', r2.missingButHistorical, []);
 
-  if (fail) { console.error(`\nself-test: ${fail} failure(s)`); process.exit(1); }
-  console.log('self-test OK: 9 extract + 1 fence + 1 baseDir + 4 claimed = 15 assertions');
+  done();
   process.exit(0);
 }
 
 const argv = process.argv.slice(2);
 if (argv.includes('--self-test')) selfTest();
+/** W1b（裸相对的文件名式引用）是否阻塞。默认只提示 —— 见文件头"为什么默认不阻塞"。 */
+const STRICT_RELATIVE = argv.includes('--strict-relative');
 
 const deps = { home: HOME, workspace: WORKSPACE, projectRoot: PROJECT_ROOT };
 const problems = [];
@@ -223,8 +281,13 @@ for (const abs of targets()) {
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     for (const ref of extractPathRefs(lines[i], { ...deps, baseDir: dirname(abs) })) {
-      if (!existsSync(ref.abs)) {
-        problems.push({ file: relative(PROJECT_ROOT, abs), line: i + 1, kind: 'W1-unresolvable-path', ref: ref.raw, resolved: ref.abs });
+      if (existsSync(ref.abs)) continue;
+      const entry = { file: relative(PROJECT_ROOT, abs), line: i + 1, ref: ref.raw, resolved: ref.abs };
+      // 裸相对的文件名式引用（W1b）：默认只提示，`--strict-relative` 才阻塞 —— 理由见文件头。
+      if (ref.kind === 'relative-file' && !STRICT_RELATIVE) {
+        warnings.push({ ...entry, kind: 'W1b-relative-file-unresolved' });
+      } else {
+        problems.push({ ...entry, kind: ref.kind === 'relative-file' ? 'W1b-relative-file-unresolved' : 'W1-unresolvable-path' });
       }
     }
   }
@@ -241,17 +304,26 @@ for (const abs of targets()) {
   }
 }
 
+/** 每类提示的处置建议（`--list` 与汇总都用它，避免把 W1b 说成 W2 的话）。 */
+const WARN_HINT = {
+  'W2-historical-listed-as-present': '（文档声明它在，但盘上已无 —— 应移出目录结构表或标为"不在磁盘"）',
+  'W1b-relative-file-unresolved': '（裸相对路径解析不到：修正文件名，或写成 `../<工作区相对路径>` 让它可被校验；加 `--strict-relative` 可让它阻塞）',
+};
+
 if (argv.includes('--list')) {
   console.log(`扫描 ${scanned.length} 个文档：`);
   for (const s of scanned) console.log(`  · ${s}`);
   console.log(`\n发现 ${problems.length} 条问题、${warnings.length} 条提示：`);
   for (const p of problems) console.log(`  [ERR ] [${p.kind}] ${p.file}${p.line ? ':' + p.line : ''}  ${p.ref}\n      → ${p.resolved}`);
-  for (const w of warnings) console.log(`  [WARN] [${w.kind}] ${w.file}  ${w.ref}（文档声明它在，但盘上已无 —— 应移出目录结构表或标为"不在磁盘"）`);
+  for (const w of warnings) console.log(`  [WARN] [${w.kind}] ${w.file}${w.line ? ':' + w.line : ''}  ${w.ref}${WARN_HINT[w.kind] ?? ''}`);
 }
 
 if (warnings.length) {
   console.log(`\nnote: ${warnings.length} 条文档漂移提示（不阻塞，但应修）：`);
-  for (const w of warnings) console.log(`  · [${w.kind}] ${w.file}  ${w.ref}`);
+  for (const w of warnings) console.log(`  · [${w.kind}] ${w.file}${w.line ? ':' + w.line : ''}  ${w.ref}`);
+  if (warnings.some(w => w.kind === 'W1b-relative-file-unresolved')) {
+    console.log('  提示：W1b 类可用 `--strict-relative` 升级为阻塞（扫描集上当前零发现，稳定后可翻默认）。');
+  }
 }
 if (problems.length) {
   console.error(`check-workspace-docs FAILED: ${problems.length} problem(s)`);
