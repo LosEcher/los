@@ -1,0 +1,78 @@
+# memory-canonical.yaml — 记忆三层的 canonical 归属（ADR 0047 第 3 节）
+#
+# 目的：让"某条记忆在哪"可机械回答，并防止三层之间**互相写入对方的存储**
+# （ADR 0047 第 3 节：三层 canonical，**禁止互相复制正文**，只在需要时引用 id）。
+#
+# 由 tools/check-memory-canonical.mjs 校验：
+#   M1 三层齐备，每层有 canonical_for / storage / writer
+#   M2 storage 的路径/对象与扫描面一致（路径存在或在受控列表内）
+#   M3 **各层代码不得写别层的存储**（按 forbidden 面的路径/表名 grep）
+#
+# 维护纪律：新增记忆面 → 先改本文件 → 再改代码；不许只加实现不加归属。
+version: 1
+
+layers:
+  - id: personal-longterm
+    owner_layer: session
+    canonical_for: "跨项目、可检索的稳定事实（个人长期记忆）"
+    canonical_object: los-memory
+    storage:
+      kind: sqlite+remote
+      paths:
+        - ~/.codex_memory
+        - ~/.claude_memory
+        - ~/.local/share/llm-memory
+        - ~/.local/share/los-memory-shadow
+      note: "profile 各自独立；Nowledge 为 primary，shadow 为只读镜像（README:7,68-73）"
+    writer: los-memory
+    code_roots:
+      - /Users/echerlos/syncfolder/project/los-memory
+    # 这一层**不得**写下面这些（别层的存储）
+    forbidden:
+      - ~/.dsh/memories
+      - packages/memory
+
+  - id: execution
+    owner_layer: execution
+    canonical_for: "绑 run_spec 的 session / compaction / procedural（执行记忆）"
+    canonical_object: los packages/memory (Postgres)
+    storage:
+      kind: postgres
+      tables:
+        - observations
+        - memory_compactions
+        - procedural_candidates
+        - memory_fts
+      note: "**刻意不落文件系统** —— 执行记忆必须与 run_spec 同库同事务可见"
+    writer: los memory module
+    code_roots:
+      - packages/memory
+    forbidden:
+      - ~/.dsh/memories
+      - ~/.codex_memory
+      - ~/.claude_memory
+      - ~/.local/share/llm-memory
+
+  - id: session-working
+    owner_layer: session
+    canonical_for: "每日日志 / MEMORY.md / 项目 KEY（会话工作记忆）"
+    canonical_object: "~/.dsh/memories（由第三方插件 dsh-memory-evolve 供给）"
+    storage:
+      kind: filesystem
+      paths:
+        - ~/.dsh/memories
+      note: "**外部依赖**：由 dsh-memory-evolve v0.1.0 拥有（lib/index.js:402-404 设定 memoryDir）；插件被禁用/替换即该层消失"
+    writer: dsh-memory-evolve
+    code_roots:
+      - ~/.dsh/memories
+    forbidden:
+      - packages/memory
+      - ~/.codex_memory
+      - ~/.claude_memory
+      - ~/.local/share/llm-memory
+
+# 跨层引用规则（不是"合并"，是"可 join"）
+cross_layer_rules:
+  - "三层**不得互相复制正文**；需要跨层时只引用 id（session id / run spec id / memory record id）"
+  - "execution 层是唯一与 run_spec 同事务的记忆面；个人长期与会话工作记忆都**不得**声称拥有 run 证据"
+  - "session-working 层由第三方插件供给 ⇒ 不得被任何 los 代码路径写入；los 侧只读"

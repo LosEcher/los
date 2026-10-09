@@ -1,0 +1,30 @@
+# check-doc-status-anchors baseline — 存量无锚/坏锚行（棘轮：只减不增）
+# 格式 <file>:<line>；修好一行就删一行。新增行必须带锚，否则门禁红。
+docs/architecture/2026-07-03-project-status-and-roadmap.md:38
+docs/architecture/2026-07-03-project-status-and-roadmap.md:39
+docs/architecture/2026-07-03-project-status-and-roadmap.md:94
+docs/architecture/2026-10-06-architecture-boundaries-and-gaps.md:113
+docs/architecture/2026-10-06-architecture-boundaries-and-gaps.md:117
+docs/architecture/2026-10-06-architecture-boundaries-and-gaps.md:119
+docs/architecture/2026-10-08-phased-development-plan.md:13
+docs/architecture/2026-10-08-phased-development-plan.md:14
+docs/architecture/2026-10-08-phased-development-plan.md:23
+docs/governance/2026-08-07-adversarial-review-total.md:14
+docs/governance/2026-08-07-adversarial-review-total.md:15
+docs/governance/2026-08-07-adversarial-review-total.md:16
+docs/governance/2026-08-07-adversarial-review-total.md:18
+docs/governance/2026-08-07-adversarial-review-total.md:19
+docs/governance/2026-08-07-adversarial-review-total.md:24
+docs/governance/2026-08-07-adversarial-review-total.md:25
+docs/governance/2026-08-07-adversarial-review-total.md:27
+docs/governance/2026-08-07-adversarial-review-total.md:28
+docs/governance/2026-08-07-adversarial-review-total.md:29
+docs/governance/2026-08-07-adversarial-review-total.md:34
+docs/governance/2026-08-07-adversarial-review-total.md:35
+docs/governance/2026-08-07-adversarial-review-total.md:37
+docs/governance/2026-08-07-adversarial-review-total.md:45
+docs/governance/2026-08-07-adversarial-review-total.md:46
+docs/governance/2026-08-07-adversarial-review-total.md:47
+docs/operations/2026-08-05-runtime-inventory.md:11
+docs/operations/2026-08-05-runtime-inventory.md:12
+docs/operations/2026-08-05-runtime-inventory.md:13

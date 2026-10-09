@@ -95,6 +95,26 @@ and makes the checklist machine-checked:
   existing hash family once (one cold typecheck on the runner), then the cache
   is stable and strictly more correct.
 
+## Correction (2026-10-07): the `globalEnv` trim also broke the GitHub test lane
+
+The trim above was right about hashing and wrong about delivery. Turbo 2.x runs
+in strict env mode and **deletes** from the task process every variable not
+declared in `globalEnv`/`globalPassThroughEnv`. Dropping
+`DATABASE_URL`/`TEST_DATABASE_URL` therefore did not just stop hashing them — it
+removed them from the `test` task, so `pnpm test` (tools/run-tests.sh ->
+`turbo test`) failed closed in `packages/infra/src/db.ts` with
+`Refusing to run tests against non-test database "los" (TEST_DATABASE_URL is
+unset)`: 123 "new" failures on every `main` push from 2026-08-20 to 2026-10-07.
+
+Every PR stayed green because all GitHub PR heads are `mirror/*` and skip the
+heavy lane, and Forgejo stayed green because it calls `pnpm --filter @los/* test`
+directly (no turbo). Local runs stayed green because `loadEnvFile` finds the
+repo-root `.env` and copies its keys into `process.env`.
+
+Fix and guard: `globalPassThroughEnv` in `turbo.json`, plus
+`tools/check-turbo-env-passthrough.mjs` in an always-on `ci-gate.sh` phase.
+Full write-up: `docs/governance/github-branch-gates.md`.
+
 ## Verification
 
 - `bash tools/ci-status-report.sh --trend 30` — works from recorded JSONL.

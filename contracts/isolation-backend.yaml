@@ -1,0 +1,119 @@
+contract: los.isolation-backend
+version: 0.1.0
+status: draft
+owner: packages/agent
+description: >
+  Contract for pluggable isolation backends. ADR 0047 §5.1 splits isolation
+  into two layers: **los owns the identity and lifecycle** of an isolation
+  resource (its ledger: status, ownership, backup, release, events), while the
+  **mechanism** is supplied by a registered `IsolationBackend`. `sandbox-run`
+  is one such backend (the only one covering docker); it is not the owner.
+  Three interface disciplines are part of THIS contract and may not be relaxed:
+  (1) a backend returns **raw results only** (`exitCode` / stdout / stderr /
+  durationMs) and **must never return PASS/FAIL** -- judgement and tri-state
+  classification belong to the gate layer, because collapsing "could not judge"
+  into "failed" is exactly the 2026-10-08 false-red incident;
+  (2) a backend **must not write the los ledger** (single-writer rule R1);
+  (3) `probe()` must be able to answer **why** a backend is unavailable, so an
+  explicitly requested backend that cannot run fails closed *with a reason*
+  instead of silently falling back.
+type: object
+sourceOfTruth:
+  - managed_workspaces
+  - managed_workspace_events
+routes:
+  - method: GET
+    path: /managed-workspaces
+    response:
+      generatedAt: date-time
+      workspaces: ManagedWorkspaceRecord[]
+  - method: POST
+    path: /managed-workspaces
+    auth: operator
+    request: CreateManagedWorkspaceRequest
+    response:
+      workspace: ManagedWorkspaceRecord
+schemas:
+  CreateManagedWorkspaceRequest:
+    required: [projectId, taskId]
+    fields:
+      projectId: string
+      taskId: string
+      graphId: string
+      label: string
+      backend: IsolationBackendId
+      backendConfig: object
+  ManagedWorkspaceRecord:
+    required: [workspaceId, projectId, taskId, backend, status]
+    fields:
+      workspaceId: string
+      projectId: string
+      taskId: string
+      graphId: string
+      sourceRoot: string
+      workspaceRoot: string
+      workspaceName: string
+      backend: IsolationBackendId
+      backendConfig: object
+      baseRevision: string
+      status: ManagedWorkspaceStatus
+      backupArtifactId: string
+      createdBy: string
+      lastError: string
+  IsolationBackendId:
+    enum: [jj-workspace, git-worktree, docker]
+    description: >
+      `jj-workspace` and `git-worktree` are built into los (pure command
+      orchestration) and **must remain usable with no external binary beyond
+      the VCS itself**. `docker` is delegated to `sandbox-run --backend docker`
+      (container orchestration belongs to the tool layer, not to los).
+  ManagedWorkspaceStatus:
+    enum: [creating, active, backup_ready, released, failed]
+    description: Owned by the los ledger. A backend never sets this.
+  IsolationProbeResult:
+    required: [available]
+    fields:
+      available: boolean
+      reason: string
+      detail: object
+      description: >
+        `reason` is mandatory when `available` is false. A probe that cannot
+        explain its own unavailability is not a conforming probe.
+  IsolationBackend:
+    required: [id, probe, create, run, release]
+    fields:
+      id: IsolationBackendId
+      probe: '(input: { repository: string }) => Promise<IsolationProbeResult>'
+      create: '(input: CreateInput) => Promise<{ path: string; backendState: object }>'
+      run: '(input: RunInput) => Promise<RawExecutionResult>'
+      detectPollution: '(input: { path: string; repository: string }) => Promise<{ polluted: boolean; detail?: string } | null>'
+      release: '(input: { path: string; backendState: object }) => Promise<void>'
+  RawExecutionResult:
+    required: [exitCode, stdout, stderr, durationMs]
+    fields:
+      exitCode: integer
+      stdout: string
+      stderr: string
+      durationMs: integer
+    description: >
+      Deliberately contains no verdict field. A backend that wants to express
+      "this looked broken" must put it in `stderr` as data; deciding whether
+      that means FAIL or an environment fault is the gate layer's job.
+operatorControl:
+  authentication:
+    header: x-los-operator-token
+    behaviorWhenAuthDisabled: local_operator
+  requiredPrincipal: operator
+  routes:
+    - POST /managed-workspaces
+backendSelection:
+  configKey: isolation.backend
+  values: [auto, jj-workspace, git-worktree, docker]
+  autoResolution:
+    - if the repository is a jj repo: jj-workspace
+    - else if the repository is a git repo: git-worktree
+    - else: fail closed with a reason (never guess)
+  failureBehavior: >
+    An explicitly requested backend that is unavailable must fail closed and
+    report the probe reason. Silent fallback to a different backend is a
+    contract violation, because it makes the recorded `backend` field a lie.

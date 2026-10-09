@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { getDb } from '@los/infra/db';
+import { ConfigSchema, getConfig as loadConfigSync, setConfig } from '@los/infra/config';
 import { createAgentTask, ensureAgentTaskGraphStore, listAgentTasksForGraph } from './agent-task-graph.js';
 import { ensureArtifactStore, readArtifactContent } from './artifacts.js';
 import {
@@ -94,6 +95,179 @@ test('managed jj workspace assigns a task, backs up its diff, and releases with 
     if (createdRoot) {
       await execFileAsync('jj', ['-R', sourceRoot, 'workspace', 'forget', `los-${workspaceId}`]).catch(() => undefined);
     }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// C1（ADR 0047 §5.1）：`vcs_kind` → `backend`
+//
+// 背景：`vcs_kind: 'jj'` 把"哪个 VCS"与"怎么隔离"混为一谈。C1 把它改为可扩展的
+// backend id，内建 jj 后端名为 `jj-workspace`。这些断言固定住迁移后的行为，
+// 尤其是**负向控制**：CHECK 约束必须真的挡住非法 backend，否则"枚举"只是文档。
+// ─────────────────────────────────────────────────────────────
+test('C1: managed workspace records the isolation backend (default jj-workspace)', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const graphId = `backend-graph-${suffix}`;
+  const taskId = `backend-task-${suffix}`;
+  const workspaceId = `backend-ws-${suffix}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-backend-'));
+  const sourceRoot = join(root, 'source');
+  await execFileAsync('jj', ['git', 'init', sourceRoot]);
+
+  await ensureAgentTaskGraphStore();
+  await ensureManagedWorkspaceStore();
+  await createAgentTask({
+    id: taskId, graphId, role: 'executor', title: 'backend field',
+    metadata: { editableSurfaces: ['src/x.ts'] },
+  });
+
+  try {
+    const ws = await createManagedWorkspace({
+      workspaceId, graphId, taskId, projectId: 'los', sourceRoot, createdBy: 'test',
+    });
+    assert.equal(ws.backend, 'jj-workspace', '缺省 backend 必须是内建 jj 后端的新名字');
+    // 旧字段名不得复现
+    assert.equal((ws as unknown as Record<string, unknown>).vcsKind, undefined);
+
+    // 从 DB 重新读出来也要是新的列
+    const rows = await getDb().query<{ backend: string }>(
+      'SELECT backend FROM managed_workspaces WHERE workspace_id = $1', [workspaceId]);
+    assert.equal(rows.rows[0]?.backend, 'jj-workspace');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('C1 NEGATIVE: an undeclared backend id is rejected by the CHECK constraint', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const workspaceId = `backend-bad-${suffix}`;
+  await ensureManagedWorkspaceStore();
+  // 绕过 TS 类型直接写库：约束必须在**数据库层**挡住，而不只是类型层。
+  // （类型只在编译期生效；这一条是运行时防线。）
+  await assert.rejects(
+    () => getDb().query(
+      `INSERT INTO managed_workspaces (
+         workspace_id, graph_id, task_id, project_id, source_root, workspace_root,
+         workspace_name, backend, base_revision, status, created_by, metadata_json
+       ) VALUES ($1,'g','t','los','/s','/w','n',$2,'rev','creating','test','{}'::jsonb)`,
+      [workspaceId, 'not-a-declared-backend'],
+    ),
+    /managed_workspaces_backend_chk|violates check constraint/i,
+    '非法 backend 必须被 CHECK 拒绝，否则枚举形同虚设',
+  );
+});
+
+// ─────────────────────────────────────────────────────────────
+// C4：`isolation.backend` 配置面接线（ADR 0047 §5.1）
+//
+// 契约要点：显式指定而不可用 ⇒ **fail closed 带原因**；**静默回落到另一个后端
+// 是契约违规**（会让账本里的 backend 字段变成谎话）。且解析/探测必须在**任何
+// 副作用之前** —— 否则账本里会留下一条从未真实存在的记录。
+// ─────────────────────────────────────────────────────────────
+test('C4 NEGATIVE: an explicit unavailable backend refuses BEFORE writing any ledger row', async () => {
+  const previous = loadConfigSync();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const workspaceId = `c4-refuse-${suffix}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c4-'));
+  // 既非 jj 也非 git 的目录 ⇒ auto 无法解析；显式指定 docker 也必然不可用
+  const sourceRoot = join(root, 'plain');
+  await mkdir(sourceRoot, { recursive: true });
+  await ensureManagedWorkspaceStore();
+  try {
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'docker' } }));
+    await assert.rejects(
+      () => createManagedWorkspace({
+        workspaceId, graphId: `g-${suffix}`, taskId: `t-${suffix}`,
+        projectId: 'los', sourceRoot, createdBy: 'test',
+      }),
+      /isolation backend "docker" is unavailable/,
+      '显式请求不可用的后端必须 fail-closed 并带 probe 原因',
+    );
+    // **核心**：拒绝必须"干净" —— 账本里不得留下任何痕迹
+    const rows = await getDb().query(
+      'SELECT workspace_id FROM managed_workspaces WHERE workspace_id = $1', [workspaceId]);
+    assert.equal(rows.rows.length, 0, 'fail-closed 时不得写入 managed_workspaces 行');
+  } finally {
+    setConfig(previous);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('C4 NEGATIVE: auto on a non-VCS directory refuses to guess', async () => {
+  const previous = loadConfigSync();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c4-auto-'));
+  const sourceRoot = join(root, 'plain');
+  await mkdir(sourceRoot, { recursive: true });
+  try {
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'auto' } }));
+    await assert.rejects(
+      () => createManagedWorkspace({
+        workspaceId: `c4-auto-${suffix}`, graphId: `g-${suffix}`, taskId: `t-${suffix}`,
+        projectId: 'los', sourceRoot, createdBy: 'test',
+      }),
+      /refusing to guess/,
+      'auto 在既非 jj 也非 git 的仓上必须拒绝，而不是猜一个后端',
+    );
+  } finally {
+    setConfig(previous);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('C2: the git-worktree backend actually creates and releases an isolated worktree', async () => {
+  const previous = loadConfigSync();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const workspaceId = `c2-git-${suffix}`;
+  const graphId = `g-${suffix}`;
+  const taskId = `t-${suffix}`;
+  const root = await mkdtemp(join(tmpdir(), 'los-c2-git-'));
+  const sourceRoot = join(root, 'gitrepo');
+  await execFileAsync('git', ['init', '-q', sourceRoot]);
+  await execFileAsync('git', ['-C', sourceRoot, 'config', 'user.email', 'test@example.com']);
+  await execFileAsync('git', ['-C', sourceRoot, 'config', 'user.name', 'test']);
+  await writeFile(join(sourceRoot, 'a.txt'), 'hello\n', 'utf8');
+  await execFileAsync('git', ['-C', sourceRoot, 'add', 'a.txt']);
+  await execFileAsync('git', ['-C', sourceRoot, 'commit', '-q', '-m', 'init']);
+
+  await ensureAgentTaskGraphStore();
+  await ensureManagedWorkspaceStore();
+  await createAgentTask({
+    id: taskId, graphId, role: 'executor', title: 'git worktree backend',
+    metadata: { editableSurfaces: ['a.txt'] },
+  });
+  try {
+    // auto 在 git 仓上应解析为 git-worktree（而不是回落 jj）
+    setConfig(ConfigSchema.parse({ ...previous, isolation: { backend: 'auto' } }));
+    let ws;
+    try {
+      ws = await createManagedWorkspace({
+        workspaceId, graphId, taskId, projectId: 'los', sourceRoot, createdBy: 'test',
+      });
+    } catch (e) {
+      console.error('PROBE create threw:', String(e).slice(0, 400));
+      throw e;
+    }
+    console.error('PROBE created:', ws.backend, ws.status, ws.workspaceRoot);
+    assert.equal(ws.backend, 'git-worktree', 'auto 在 git 仓上必须解析为 git-worktree');
+    assert.equal(ws.status, 'active');
+    // 隔离工作树真的存在，且是**独立**于原仓的检出
+    console.error('PROBE before stat, root exists?', await stat(ws.workspaceRoot).then(()=>'yes').catch(e=>'no: '+String(e).slice(0,80)));
+    assert.equal((await stat(ws.workspaceRoot)).isDirectory(), true, 'git worktree 目录必须被创建');
+    const inWorktree = await readFile(join(ws.workspaceRoot, 'a.txt'), 'utf8');
+    assert.equal(inWorktree, 'hello\n', 'worktree 应含基线提交的内容');
+
+    // release 应经**账本里记录的那个后端**撤除（不是当前配置值）
+    console.error('PROBE before release');
+    const released = await releaseManagedWorkspace(workspaceId, 'test', { artifactStorageRoot: join(root, 'artifacts') });
+    console.error('PROBE after release', released.status);
+    assert.equal(released.status, 'released');
+    // 释放后工作树目录应已移除（`stat` 必须抛错；`assert.rejects` 的第二参需为正则/函数，
+    // 传字符串表示"预期错误消息包含它"，故这里只断言"抛错"）
+    await assert.rejects(async () => { await stat(ws.workspaceRoot); });
+  } finally {
+    setConfig(previous);
     await rm(root, { recursive: true, force: true });
   }
 });

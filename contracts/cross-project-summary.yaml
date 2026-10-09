@@ -1,0 +1,82 @@
+contract: los.cross-project-summary
+version: 0.1.0
+status: implemented
+owner: packages/agent
+description: >
+  Read-only cross-project view over the DSH session projection (P1 L1-2).
+  Aggregates the three los-side projection tables only:
+  `dsh_session_catalog` / `dsh_session_pain` / `dsh_context_injection`.
+  It never touches DSH's SQLite store at request time — that store is read
+  only by the offline projector (`pnpm project:dsh-sessions`), so a request
+  here cannot block on or mutate the canonical session log.
+type: object
+routes:
+  - method: GET
+    path: /cross-project/summary
+    purpose: Return the cross-project fact sheet — session path-resolution
+      states, per-project activity, repeated pain patterns and context
+      injection volume — each with its own `asOf` so a stale projection is
+      visible instead of silently presented as current.
+    query:
+      painLimit: optional integer 1..50; how many pain patterns to return,
+        ordered by distinct sessions descending; default 10
+      injectionDays: optional integer 1..90; how many trailing days of
+        injection data to include; default 14
+    response: CrossProjectSummary
+schemas:
+  CrossProjectSummary:
+    required: [evidenceClass, asOf, catalog, pain, injection, degraded]
+    evidenceClass:
+      enum: [los_projection]
+    asOf:
+      description: >
+        Upper bound of the projection timestamps actually read. `null` when
+        no projection has been written yet — which is NOT the same as
+        "nothing to report" (see `degraded`).
+      type: string?
+    degraded:
+      required: [isDegraded, reasons]
+      description: >
+        Explicit degradation channel. A projection that has never run, or a
+        table that is empty, must be reported here rather than rendered as
+        zero/empty facts. Mirrors the projector's `degraded` verdict.
+      isDegraded:
+        type: boolean
+      reasons:
+        type: list
+        items: string
+    catalog:
+      required: [sessions, byState, projects, lastEventAt]
+      sessions:
+        type: integer
+      byState:
+        description: current | resolved | unknown — unknown is preserved, never
+          dropped (see the path-split contract in tools/lib/session-path-resolver).
+        fields: [current, resolved, unknown]
+      projects:
+        description: Per-project session rollup, most recent first.
+        itemFields: [projectKey, sessions, toolCalls, interruptedTurns, lastEventAt]
+      lastEventAt:
+        type: string?
+    pain:
+      required: [patternVersion, totalSessions, patterns]
+      patternVersion:
+        description: Rule version of the mechanical pain pattern family; counts
+          are only comparable within one version.
+        type: string
+      totalSessions:
+        type: integer
+      patterns:
+        itemFields: [patternKey, sessions, occurrences, firstSeen, lastSeen]
+    injection:
+      required: [markerVersion, days, runtimeContextInjections, skillCatalogInjections, daily]
+      markerVersion:
+        type: string
+      days:
+        type: integer
+      runtimeContextInjections:
+        type: integer
+      skillCatalogInjections:
+        type: integer
+      daily:
+        itemFields: [day, runtimeContextInjections, skillCatalogInjections, avgAssistantChars, maxAssistantChars]

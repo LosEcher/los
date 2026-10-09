@@ -545,6 +545,8 @@ function config(): Config {
     review: { enabled: false, roles: {} },
     providers: {},
     providerFallbacks: {},
+    providerRouteConflicts: [],
+    isolation: { backend: 'auto' },
     memory: {
       ftsEnabled: true,
       maxObservations: 10000,

@@ -14,6 +14,7 @@
 #   coupling next     → circular deps, forbidden imports, dep-cruiser
 #   structure next   → catches file-size / flat-dir / route placement
 #   ci-workflow-policy → job needs/concurrency invariants for both CI platforms
+#   turbo-env        → turbo strict env mode must still deliver the DB/test env
 #   test-isolation   → fixed /tmp + Date.now()-only temp races under LOS_TEST_GROUP
 #   state-machine    → prevents direct status-update bypass
 #   contracts        → bidirectional event ↔ route coverage
@@ -233,7 +234,22 @@ else
 fi
 PHASES_RUN=$((PHASES_RUN + 1))
 
-# ── Phase 3c: test isolation ───────────────────────────────
+# ── Phase 3c: turbo test-env passthrough ───────────────────
+# Turbo 2.x strict env mode deletes undeclared variables from task processes.
+# When that stripped TEST_DATABASE_URL, the turbo test lane (used by GitHub
+# gate-test, not by Forgejo's direct pnpm calls) failed with 123 "new"
+# failures on every main push for ~7 weeks while PRs stayed green.
+# See tools/check-turbo-env-passthrough.mjs.
+
+phase_start "Turbo test-env passthrough (strict env mode delivers DB/test vars)"
+if ./tools/check-turbo-env-passthrough.sh; then
+  phase_ok "turbo-env"
+else
+  phase_fail "turbo-env"
+fi
+PHASES_RUN=$((PHASES_RUN + 1))
+
+# ── Phase 3d: test isolation ───────────────────────────────
 
 phase_start "Test isolation (parallel LOS_TEST_GROUP filesystem races)"
 if ./tools/check-test-isolation.sh; then

@@ -19,7 +19,13 @@ LOG="$LOG_DIR/launchd-wrapper.log"
 INTERVAL_SECONDS="${LOS_LAUNCHD_INTERVAL:-30}"
 
 # launchd 环境 PATH 不含用户 shell 的 fnm/pnpm 路径,手动补齐(curl 亦需要)。
-export PATH="$HOME/Library/pnpm:$HOME/Library/Application Support/fnm/aliases/default/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+#
+# $HOME/.cargo/bin 是必需的,不是可选:本 wrapper 启动的 gateway 会把 PATH 继承给
+# 它 spawn 的 verification/requiredChecks 子进程。缺这一项时任何 `cargo …` 门禁都会
+# 以 exit 127 (`cargo: command not found`) 失败,并被上层记成"真实漂移"
+# (2026-10-08 实测:dsfolder 每日 rust 门禁 6 仓 11 check 全 FAIL)。
+# 对照:packages/gateway/src/unirun-capabilities.ts 同样显式补了 ~/.cargo/bin。
+export PATH="$HOME/.cargo/bin:$HOME/Library/pnpm:$HOME/Library/Application Support/fnm/aliases/default/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 mkdir -p "$LOG_DIR"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }

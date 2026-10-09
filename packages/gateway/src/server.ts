@@ -20,6 +20,7 @@ import { getLogger } from '@los/infra/logger';
 import { migrateDir } from '@los/infra/migrate';
 import { getMigrateDir } from '@los/infra/config';
 import { printOnboardingReport } from '@los/infra/discovery';
+import { registerCrossProjectRoutes } from './routes/data/cross-project-routes.js';
 import { registerLogRoutes } from './routes/infrastructure/log-routes.js';
 import { registerArtifactRoutes } from './routes/tools/artifact-routes.js';
 import { registerNodeCommandRoutes } from './routes/orchestration/node-command-routes.js';
@@ -197,6 +198,7 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   // ── Logs & extracted routes ─────────────────────────
   registerSettingsRoutes(app);
   registerLogRoutes(app, { runtimeLogDir: RUNTIME_LOG_DIR, runtimeLogPath: RUNTIME_LOG_PATH });
+  registerCrossProjectRoutes(app);
   registerArtifactRoutes(app, { storageRoot: ARTIFACT_STORAGE_ROOT, executorAgentKey: config.executor.agentKey });
   registerNodeCommandRoutes(app, { executorAgentKey: config.executor.agentKey });
   registerTodoRoutes(app);

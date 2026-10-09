@@ -128,10 +128,7 @@ pending.
 Mirror PRs (head refs starting with `mirror/`, e.g. `mirror/forgejo-main-sync`)
 carry Forgejo-validated content: the tree already passed Forgejo required CI
 before the merge that the mirror syncs. A second full GitHub test run adds no
-merge evidence but re-exposes the intermittent "test processes lost
-DATABASE_URL" runner-env class (2026-06-13 `56321f52`; 2026-08-20 PR `#256`,
-pg SCRAM "client password must be a string" across every DB-backed package)
-that blocks mirror sync.
+merge evidence.
 
 `.github/workflows/ci.yml` therefore skips the heavy `gate-test` steps
 (`Test root workspace` and `Enforce critical module coverage`) at step level
@@ -142,6 +139,39 @@ stays green (skipped steps do not fail a job), while `gate-fast` and
 Non-mirror PRs and `main` pushes keep the full suite. The policy is locked by
 `tools/ci-workflow-policy.test.mjs` (case "GitHub gate-test heavy steps skip on
 mirror/* heads").
+
+#### Accepted cost: the turbo test path is only exercised on `main`
+
+This lane is why every PR stays green while `main` fails. Because every GitHub
+PR head is `mirror/*`, the heavy lane runs for the first time on the push to
+`main`. Forgejo validates the same tree through `pnpm --filter @los/* test`
+(direct pnpm, no turbo), so Forgejo cannot observe defects in the turbo path
+that only GitHub uses: `pnpm test` -> `tools/run-tests.sh` -> `turbo test`.
+
+The 2026-08-18 to 2026-10-07 incident is exactly that shape (corrected
+2026-10-07; the earlier "intermittent runner-env" reading was wrong):
+
+- `3130de14` trimmed `turbo.json` `globalEnv` to `[NODE_ENV]` for cache-key
+  stability, dropping `DATABASE_URL`/`TEST_DATABASE_URL`.
+- Turbo 2.x runs in strict env mode (`envMode: strict`, the v2 default) and
+  deletes every undeclared variable from the task process. The job step still
+  showed `TEST_DATABASE_URL=set(...los_test)`; the test process saw it unset.
+- The fail-closed guard in `packages/infra/src/db.ts` (`0baa7921`, same day)
+  then produced `Refusing to run tests against non-test database "los"
+  (TEST_DATABASE_URL is unset)` for every DB-backed package, surfacing as 123
+  "new" failures in the known-failure gate on 9 consecutive `main` pushes.
+- Local runs never reproduced it: `loadEnvFile` in
+  `packages/infra/src/config-sources.ts` does `findUp(cwd, '.env')` and writes
+  the file's keys into `process.env`, so the untracked repo-root `.env` masked
+  the stripped variables. CI has no `.env`.
+
+Fix: `globalPassThroughEnv` in `turbo.json` (delivers the value, excluded from
+the task hash, so the cache-key stability `3130de14` wanted is preserved).
+Guard: `tools/check-turbo-env-passthrough.mjs` runs as an always-on `ci-gate.sh`
+phase, so it executes on mirror PRs too and this class cannot hide on `main`
+again. It asserts both halves against the real `turbo.json` by running turbo in
+a throwaway workspace: the variables reach the task process, and the task hash
+does not move when their values change.
 
 Current primary policy and required checks are documented in
 `docs/governance/forgejo-branch-gates.md`.

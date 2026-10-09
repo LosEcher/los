@@ -162,6 +162,19 @@ export const ConfigSchema = z.object({
     })).default({}),
   }).default({}),
 
+  /**
+   * 隔离后端（ADR 0047 §5.1 / contracts/isolation-backend.yaml）。
+   *
+   * `auto` 按仓的 VCS 解析（jj 仓 → jj-workspace，git 仓 → git-worktree）；
+   * **既非 jj 也非 git 时 fail-closed 报因，绝不猜**。
+   *
+   * `backend` 显式指定而该后端不可用时**必须 fail closed 并给出 probe 原因**；
+   * **静默回落到另一个后端是契约违规** —— 那会让账本里记录的 backend 字段变成谎话。
+   */
+  isolation: z.object({
+    backend: z.enum(['auto', 'jj-workspace', 'git-worktree', 'docker']).default('auto'),
+  }).default({}),
+
   // Providers (auto-discovered, can be overridden)
   providers: z.record(z.string(), z.object({
     apiKey: z.string().optional(),
@@ -182,6 +195,24 @@ export const ConfigSchema = z.object({
   // runtime, so entries here must NOT include the key provider. A provider
   // with no entry keeps today's fail-hard behavior.
   providerFallbacks: z.record(z.string(), z.array(z.string())).default({}),
+
+  /**
+   * provider 路由冲突记录（ADR 0047 第 2 节 (c)：禁止静默覆盖）。
+   *
+   * 由 `mergeDiscoveredProviders` 写入：当 cc-switch 的 `is_current`（prefer）
+   * 覆盖了 config 里已有的 baseUrl/model/apiShape/apiKey 时，每次**值不同**的覆盖
+   * 记一条。**apiKey 一律记 `<redacted>`**。
+   * 空数组 = 已检测且无冲突；缺省 = 本次启动未走到该检测（解析手写 config 时）。
+   */
+  providerRouteConflicts: z.array(z.object({
+    provider: z.string(),
+    field: z.enum(['apiKey', 'baseUrl', 'model', 'apiShape']),
+    previous: z.string(),
+    next: z.string(),
+    winnerSource: z.string(),
+    loserSource: z.string().nullable(),
+    ownerLayer: z.enum(['cc-switch-desktop', 'discovery', 'config']),
+  })).default([]),
 
   // Memory
   memory: z.object({

@@ -256,6 +256,112 @@ else
 fi
 echo
 
+# ── 8. 跨项目事实（DSH session 只读投射，P1 L1-2）────────────
+# 数据源是 DSH 的 session-index.db，由 `pnpm project:dsh-sessions` 投影进 los。
+# 这里只**读**投影表；投射本身不在此触发（避免日报里跑重活）。
+echo "## 8. 跨项目（DSH session 只读投射）"
+CROSS_DB="${DATABASE_URL:-}"
+if [[ -n "$CROSS_DB" ]]; then
+  X_ASOF=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT max(as_of) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+  if [[ -n "$X_ASOF" ]]; then
+    X_STATES=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(path_state || '=' || n, ' ') FROM (SELECT path_state, count(*) n FROM dsh_session_catalog GROUP BY path_state ORDER BY 1) t;" 2>/dev/null)
+    X_PROJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(DISTINCT project_key) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+    X_OLD=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(*) FROM dsh_session_catalog WHERE cwd LIKE '%syncthing/project%' AND path_state='resolved';" 2>/dev/null | tr -d ' ')
+    X_UNKNOWN=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(*) FROM dsh_session_catalog WHERE path_state='unknown';" 2>/dev/null | tr -d ' ')
+    echo "- as_of: ${X_ASOF}"
+    echo "- 三态: ${X_STATES:-?}"
+    echo "- 活跃项目（project_key 去重）: ${X_PROJ:-0}"
+    echo "- **旧路径会话已归属**: ${X_OLD:-0} 条（B3.3 出口判据 = 214）"
+    echo "- unknown（无法归属，**保留不丢弃**）: ${X_UNKNOWN:-0} 条"
+    # 跨项目重复痛点 top3（按 sessions 去重 —— 用 sessions 而非 occurrences，
+    # 因为"多少会话踩了这个坑"比"踩了多少次"更能代表影响面）
+    X_PAIN=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(pattern_key || ' ' || ses || ' sessions', ' / ') FROM (SELECT pattern_key, sum(sessions)::int ses FROM dsh_session_pain GROUP BY pattern_key ORDER BY ses DESC LIMIT 3) t;" 2>/dev/null)
+    echo "- 跨项目重复痛点 top3: ${X_PAIN:-（空 — 跑 \`pnpm project:dsh-sessions\`）}"
+    # 上下文注入开销（P1 §1.4 的"无度量"问题，此处变得可度量）
+    X_INJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT 'runtime_context ' || COALESCE(sum(runtime_context_injections),0) || ' 次 / skill_catalog ' || COALESCE(sum(skill_catalog_injections),0) || ' 次（14d）' FROM dsh_context_injection;" 2>/dev/null)
+    echo "- 上下文注入: ${X_INJ:-（空）}"
+
+    # 新鲜度：投射落后 >6h 说明 session-index 小时任务或投射没跑
+    AGE_S=$(python3 -c "
+import datetime,sys
+try:
+    t=datetime.datetime.fromisoformat('$X_ASOF'.replace('Z','+00:00'))
+    print(int((datetime.datetime.now(datetime.timezone.utc)-t).total_seconds()))
+except Exception: print(-1)")
+    if [[ "$AGE_S" -ge 0 ]] && [[ "$AGE_S" -gt 21600 ]]; then
+      echo "- **[STALE]** 投射已 $((AGE_S/3600))h 未更新（>6h）⇒ 检查 session-index 小时任务与 `pnpm project:dsh-sessions`"
+    fi
+  else
+    echo "- 投影表为空 ⇒ 跑 \`pnpm project:dsh-sessions\`（这不是"没有会话"）"
+  fi
+else
+  echo "- SKIP: DATABASE_URL 未设置"
+fi
+echo
+
+# ── 9. 边界审计（ADR 0047 判据 J1–J10 的本机证据面）────────────
+# 为什么放进日报：这四条检具读**本机**状态（cc-switch GUI、DSH profile、
+# session-index、工作区文档），不适合进 CI，但必须有人每天看。
+#
+# **注意**：本脚本是 `set -euo pipefail`，而检具在发现 ERROR 时**故意**非零退出。
+# 因此这里必须显式吞掉退出码 —— 日报的职责是**呈现**发现，不是因发现而自杀
+# （否则有 ERROR 时整份日报发不出去，恰好丢掉最该看的内容）。
+# 需要退出码的门禁语义请直接跑 `pnpm audit:boundary` / `pnpm audit:model-route:check`。
+echo "## 9. 边界审计（ADR 0047）"
+BOUNDARY_SUMMARY="SKIP"
+if [[ -x "$ROOT/tools/boundary-audit.sh" ]]; then
+  BOUNDARY_OUT="$(bash "$ROOT/tools/boundary-audit.sh" --quiet 2>&1 || true)"
+  BOUNDARY_SUMMARY="$(printf '%s\n' "$BOUNDARY_OUT" | grep -m1 '^汇总:' | sed 's/^汇总: //' || true)"
+  BOUNDARY_SUMMARY="${BOUNDARY_SUMMARY:-SKIP}"
+  # 只列 ERROR/WARN 明细，避免日报被 OK 行淹没
+  # sed 先去掉前导空格与检具前缀，再统一加 "- "，避免 "-   WARN ..." 这种双空格
+  DETAIL="$(printf '%s\n' "$BOUNDARY_OUT" | grep -E 'ERR|WARN' | head -8 | sed -E 's/^[[:space:]]+//' || true)"
+  if [[ -n "$DETAIL" ]]; then printf '%s\n' "$DETAIL" | sed 's/^/- /'; else echo "- 无 ERROR / WARN"; fi
+else
+  echo "- SKIP: tools/boundary-audit.sh 不可执行"
+fi
+echo
+
+# 路由一致性（J8）：只在有冲突时列明细
+ROUTE_STATE="OK"
+ROUTE_CONFLICTS="$(pnpm -s audit:model-route 2>/dev/null | grep -E 'verdict   : conflict' || true)"
+if [[ -n "$ROUTE_CONFLICTS" ]]; then
+  ROUTE_STATE="CONFLICT"
+  printf '%s\n' "$ROUTE_CONFLICTS" | sed 's/^/- /'
+fi
+echo "- 路由一致性（J8）: ${ROUTE_STATE}"
+echo
+
+# rust 体积预算依据（B2.1 D8）：台账是实测唯一真源，预算是自证依据的策略值。
+# 同样**吞掉退出码**（有缺口时非零），日报只呈现。
+BUDGET_STATE="SKIP"
+BUDGET_CHECK="$HOME/syncfolder/project/dsfolder/scripts/rust-budget-check.mjs"
+if [[ -f "$BUDGET_CHECK" ]]; then
+  BUDGET_OUT="$(node "$BUDGET_CHECK" 2>&1 || true)"
+  # 取检具自己的汇总行（成功与失败措辞不同，故直接截取而不是正则提数字）
+  BUDGET_STATE="$(printf '%s\n' "$BUDGET_OUT" | grep -E '^rust-budget-check (OK|FAILED):' | head -1 | sed 's/^rust-budget-check //' || true)"
+  BUDGET_STATE="${BUDGET_STATE:-parse-failed}"
+  BUDGET_BAD="$(printf '%s\n' "$BUDGET_OUT" | grep -E '^  - ' | head -5 || true)"
+  if [[ -n "$BUDGET_BAD" ]]; then printf '%s\n' "$BUDGET_BAD" | sed 's/^  /- /'; fi
+fi
+echo "- rust 体积预算依据（D8）: ${BUDGET_STATE}"
+echo
+
+# 工具链新鲜度：本机二进制 vs 源码仓版本。
+# 为什么必须每天看：跑的是旧二进制时，**源码里所有修复在本机都不生效**，
+# 而任何"工具行为"结论都基于旧二进制（2026-10-08 实测 verify-gate 0.1.0 vs 0.2.0）。
+FRESH_STATE="SKIP"
+FRESH_CHECK="$HOME/syncfolder/project/dsfolder/scripts/check-toolchain-freshness.mjs"
+if [[ -f "$FRESH_CHECK" ]]; then
+  FRESH_OUT="$(node "$FRESH_CHECK" 2>&1 || true)"
+  FRESH_STATE="$(printf '%s\n' "$FRESH_OUT" | grep -E '^check-toolchain-freshness (OK|FAILED):' | head -1 | sed 's/^check-toolchain-freshness //' || true)"
+  FRESH_STATE="${FRESH_STATE:-parse-failed}"
+  FRESH_BAD="$(printf '%s\n' "$FRESH_OUT" | grep -E '^  - ' | head -5 || true)"
+  if [[ -n "$FRESH_BAD" ]]; then printf '%s\n' "$FRESH_BAD" | sed 's/^  /- /'; fi
+fi
+echo "- 工具链新鲜度: ${FRESH_STATE}"
+echo
+
 # retired 是有意下线、operator 暂停是人工意图，都不算异常；
 # 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
@@ -263,4 +369,4 @@ APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'await
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE} 体积预算=${BUDGET_STATE} 工具链=${FRESH_STATE}"
