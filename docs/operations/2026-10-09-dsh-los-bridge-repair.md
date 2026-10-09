@@ -180,3 +180,45 @@
 
 - 归档未做：`#324/#325`（需 `write:issue` token）。
 - §8 早期版本（runner 离线时的记录）保留在 git 历史里，可追溯"当时以为阻塞"的事实。
+
+---
+
+## 9. P1-a / P1-b：把 los → DSH 的通路接上（2026-10-09 晚）
+
+### 9.1 P1-a：los → DSH 事件投递（补上真实发送端）
+
+- **机制**：复用 `execution_outbox` 的持久重试语义（`attempts` / `next_attempt_at` / `last_error` /
+  `published_at`），用哨兵 `entity_type='dsh_event'` 与会话事件发布器隔离：
+  会话侧 `excludeEntityTypes: ['dsh_event']`（否则这些没有 `session_event_id` 的行会被重试到死），
+  DSH 转发器 `entityTypes: ['dsh_event']`。幂等靠迁移 `064_dsh_event_outbox.sql` 的部分唯一索引
+  `idx_execution_outbox_dsh_event_id`（同一 `eventId` 只入队一次）。
+- **唯一 emit 点**：`emitGovernanceOperatorNotify()`（治理升级 / self-bootstrap findings / 扫尾摘要 / 进度）——
+  不为每个 emitter 重复埋点；入队失败不影响通知本身（best-effort，与会话事件同语义）。
+- **投递判据**（对齐接收端 `dsh-los-ops/lib/events.mjs` 契约）：2xx + `handled=true` ⇒ 已投递；
+  2xx + `handled=false` ⇒ 接收端明确拒收（不重试，原因写台账）；其它（非 2xx / 网络错 / 非 JSON）⇒ 抛出走退避重试。
+  驱动：gateway 的 1s outbox 循环（同一循环顺带转发）；观测：`GET /health` 新增 `dshEventOutbox`
+  （pending / claimed / published / failed / oldestPendingAgeMs / lastError）。
+- **验证**（真库 + 真接收端）：死 URL（:3939 无监听）→ `attempts=1 / published_at=NULL /
+  last_error='fetch failed'`；真 URL（DSH web 宿主 `/los-events`）→ `published_at` 落地（`attempts=2`）；
+  接收端审计台账 `~/.dsh/storages/dsh-los-ops/events.jsonl` 出现该 `eventId`；
+  **生产出口**（直接调 `emitGovernanceOperatorNotify`）入队后由网关循环投递成功（`attempts=1`, published）；
+  同一 `eventId` 二次入队 `enqueued=false`。
+- **残留**：接收端所在 **web 宿主**没有注册 weixin 通道 ⇒ 目前只落审计并返回 `handled=true`，
+  不做 IM 播报（日志：`weixin push failed: weixin channel not registered`）。要在 DSH 侧播报需先注册通道。
+
+### 9.2 P1-b：los-mcp 接进 DSH（DSH 侧零代码）
+
+- **壳脚本** `tools/los-mcp-serve.sh`：宿主 spawn 环境 PATH 不含 fnm/pnpm，故显式补 PATH + 解析 tsx，
+  按 `tools/los.sh` 同一套 blessed 调用跑 `packages/cli/src/index.ts mcp serve`；宿主没给 token 时
+  **只**从本仓 `.env` 取 `LOS_AUTH_TOKEN` / `LOS_OPERATOR_TOKEN`（不整份 source）。
+- **宿主接线**：web 与 desktop 两个 profile 各加一条 `mcp-los`
+  （`@deepseek-ai/dsh-mcp-client`，`serverName=los`，stdio → 上面的壳脚本）；
+  备份 `cordis.patch.yml.bak-20261009-mcp-los`。
+- **工具面**：`los_run`（**可显式指定 `projectId` + `workspaceRoot`** —— 这才是"跨仓派任务"的正式入口）、
+  `los_run_state` / `los_run_replay`（结构化读执行真相）、`los_operator_control`（operator 转向）。
+- **验证**：本会话工具面出现 `mcp__los__*`（4 个）；真机调用 `los_run_state`
+  → 网关返回 404（`run-does-not-exist…`）⇒ 通路成立；web 宿主重启后插件树
+  `222 项 / active=191 / failed=0` 且 `include:mcp-los` active；los 侧
+  `tools/boundary-audit.sh` 的孤儿入口检查由「已接线: codex」变为「**已接线: codex dsh**」。
+- **注**：此前 DSH 会话只能用 `dsh-los-ops` 的 HTTP 工具，而 `los_chat` 只发
+  `{model, messages}`（无 target repo 参数）⇒ 只能在 los 自身 scope 里跑；`los_run` 补的正是这个缺口。

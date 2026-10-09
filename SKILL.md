@@ -125,6 +125,19 @@ gateway". Full incident write-up: `docs/operations/2026-10-09-dsh-los-bridge-rep
   "no requests", not "no accounting".
 - **Scheduled result todos are archived on create** (P1-2): only failures and
   approval waits stay in the todo inbox; `archive_reason='schedule-run-result'`.
+- **los → DSH event push is live** (P1-a, 2026-10-09): governance notifications
+  (`emitGovernanceOperatorNotify`) enqueue a row with `entity_type='dsh_event'` in
+  `execution_outbox`, and the gateway's 1s loop POSTs it to `DSH_EVENTS_WEBHOOK_URL`
+  (`/los-events`). Delivery contract: 2xx + `handled:true` = delivered;
+  `handled:false` = receiver declined (no retry, reason recorded in `last_error`);
+  anything else retries with backoff. Watch it via `GET /health` → `dshEventOutbox`.
+  The session-event publisher must always pass `excludeEntityTypes: ['dsh_event']`.
+- **los-mcp is wired into DSH** (P1-b, 2026-10-09): both profiles carry an `mcp-los`
+  entry running `tools/los-mcp-serve.sh`; the agent gets `los_run` /
+  `los_run_state` / `los_run_replay` / `los_operator_control`. `los_run` takes an
+  explicit `projectId` **and** `workspaceRoot` — so this (not
+  `dsh-los-ops.los_chat`, which sends only `{model, messages}` and therefore runs in
+  los's own scope) is the surface for dispatching a run into another repo.
 
 Stop when process truth, DB/API truth, and the user-facing claim agree, or when
 the remaining mismatch is named with a confidence marker as residual risk.
