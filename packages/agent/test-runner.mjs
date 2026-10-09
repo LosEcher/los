@@ -201,6 +201,7 @@ const isolatedGroupC = [
   'src/session-events-effective.test.ts',
   'src/session-subagents.test.ts',
   'src/dsh-session-catalog.test.ts',
+  'src/dsh-event-outbox.test.ts',
 ];
 
 const allIsolatedDatabaseTestFiles = [

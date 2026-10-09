@@ -41,6 +41,14 @@ export interface PublishExecutionOutboxOptions {
   baseDelayMs?: number;
   maxDelayMs?: number;
   publish?: (record: ExecutionOutboxRecord) => Promise<void>;
+  /** 白名单：只认领这些 entity_type（如 DSH 事件转发器只认 'dsh_event'）。 */
+  entityTypes?: string[];
+  /** 黑名单：排除这些 entity_type（会话事件发布器要排除 'dsh_event'，否则会把
+   *  DSH 事件行当成"缺 session_event_id"的行重试到死）。 */
+  excludeEntityTypes?: string[];
+  /** 是否要求 session_event_id 存在。缺省 = 用默认会话事件发布器时才要求；
+   *  自定义 publish（如 DSH webhook）显式传 false。 */
+  requiresSessionEventId?: boolean;
 }
 
 type ExecutionOutboxRow = {
@@ -72,13 +80,20 @@ export async function publishExecutionOutboxBatch(
   const baseDelayMs = clampInteger(options.baseDelayMs, 100, 60_000, 1_000);
   const maxDelayMs = clampInteger(options.maxDelayMs, baseDelayMs, 60 * 60_000, 60_000);
   const publish = options.publish ?? publishSessionEventNotification;
-  const claimed = await claimExecutionOutbox(ownerId, batchSize, claimMs);
+  const requiresSessionEventId = options.requiresSessionEventId ?? options.publish === undefined;
+  const claimed = await claimExecutionOutbox({
+    ownerId,
+    batchSize,
+    claimMs,
+    entityTypes: options.entityTypes,
+    excludeEntityTypes: options.excludeEntityTypes,
+  });
   let published = 0;
   let retried = 0;
 
   for (const record of claimed) {
     try {
-      if (record.sessionEventId === undefined) {
+      if (requiresSessionEventId && record.sessionEventId === undefined) {
         throw new Error(`execution outbox ${record.id} is missing session_event_id`);
       }
       await publish(record);
@@ -126,11 +141,17 @@ export async function readExecutionOutboxHealth(): Promise<ExecutionOutboxHealth
   };
 }
 
-async function claimExecutionOutbox(
-  ownerId: string,
-  batchSize: number,
-  claimMs: number,
-): Promise<ExecutionOutboxRecord[]> {
+async function claimExecutionOutbox(input: {
+  ownerId: string;
+  batchSize: number;
+  claimMs: number;
+  entityTypes?: string[];
+  excludeEntityTypes?: string[];
+}): Promise<ExecutionOutboxRecord[]> {
+  const { ownerId, batchSize, claimMs } = input;
+  // 两维过滤都用"未传即不过滤"的语义（NULL 参数短路），保证既有调用方行为逐位不变。
+  const includeTypes = input.entityTypes && input.entityTypes.length > 0 ? input.entityTypes : null;
+  const excludeTypes = input.excludeEntityTypes && input.excludeEntityTypes.length > 0 ? input.excludeEntityTypes : null;
   return withDbClient(async client => {
     await client.query('BEGIN');
     try {
@@ -141,6 +162,8 @@ async function claimExecutionOutbox(
           WHERE published_at IS NULL
             AND legacy = FALSE
             AND next_attempt_at <= now()
+            AND ($4::text[] IS NULL OR entity_type = ANY($4::text[]))
+            AND ($5::text[] IS NULL OR NOT (entity_type = ANY($5::text[])))
             AND (claimed_at IS NULL OR claimed_at <= now() - ($3::text || ' milliseconds')::interval)
           ORDER BY next_attempt_at ASC, id ASC
           FOR UPDATE SKIP LOCKED
@@ -153,7 +176,7 @@ async function claimExecutionOutbox(
         FROM ready
         WHERE outbox.id = ready.id
         RETURNING outbox.*
-      `, [ownerId, batchSize, claimMs]);
+      `, [ownerId, batchSize, claimMs, includeTypes, excludeTypes]);
       await client.query('COMMIT');
       return rows.rows.map(rowToExecutionOutbox);
     } catch (error) {
