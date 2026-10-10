@@ -55,6 +55,15 @@ const SESSION_EVENT_TYPE_GROUPS = {
     'agent_task.failed',
     'agent_task.requeued',
   ],
+  /**
+   * Execution state-machine audit. `execution.transition_rejected` is written
+   * after the rejected transition's transaction has rolled back, so the refusal
+   * leaves a durable record instead of only an exception
+   * (docs/architecture/2026-10-10-control-plane-truth-remediation.md §8).
+   */
+  execution: [
+    'execution.transition_rejected',
+  ],
   run: [
     'run.created',
     'run.plan_approved',
