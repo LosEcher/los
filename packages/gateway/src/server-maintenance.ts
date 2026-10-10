@@ -421,15 +421,18 @@ export function registerServerMaintenance(
         excludeEntityTypes: ['dsh_event'],
       });
       if (result.claimed > 0) {
+        // `deadLettered` is the attempt cap (N=8) firing: those rows left the
+        // retry loop for dead_letter_events. Logged here, not decided here —
+        // the cap lives in publishExecutionOutboxBatch.
         log.info(
-          `Execution outbox: claimed=${result.claimed}, published=${result.published}, retried=${result.retried}`,
+          `Execution outbox: claimed=${result.claimed}, published=${result.published}, retried=${result.retried}, deadLettered=${result.deadLettered}`,
         );
       }
       const dshUrl = process.env.DSH_EVENTS_WEBHOOK_URL?.trim();
       if (dshUrl) {
         const dsh = await publishDshEventsBatch({ ownerId: service.serviceId, url: dshUrl });
         if (dsh.claimed > 0) {
-          log.info(`DSH events: claimed=${dsh.claimed}, published=${dsh.published}, retried=${dsh.retried}`);
+          log.info(`DSH events: claimed=${dsh.claimed}, published=${dsh.published}, retried=${dsh.retried}, deadLettered=${dsh.deadLettered}`);
         }
       }
     } catch (error) {

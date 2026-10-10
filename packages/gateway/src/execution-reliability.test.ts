@@ -77,7 +77,7 @@ test('two gateways preserve long work and recover crash, notify, and lease failu
       baseDelayMs: 100,
       publish: async () => { throw new Error('notify unavailable'); },
     });
-    assert.deepEqual(notifyFailure, { claimed: 1, published: 0, retried: 1 });
+    assert.deepEqual(notifyFailure, { claimed: 1, published: 0, retried: 1, deadLettered: 0 });
     await getDb().query(
       "UPDATE execution_outbox SET next_attempt_at = now() - interval '1 day' WHERE id = $1",
       [running.outboxId],
@@ -102,9 +102,9 @@ test('two gateways preserve long work and recover crash, notify, and lease failu
       claimMs: 1_000,
       publish: async () => undefined,
     });
-    assert.deepEqual(competingGateway, { claimed: 0, published: 0, retried: 0 });
+    assert.deepEqual(competingGateway, { claimed: 0, published: 0, retried: 0, deadLettered: 0 });
     releasePublish();
-    assert.deepEqual(await retryingGateway, { claimed: 1, published: 1, retried: 0 });
+    assert.deepEqual(await retryingGateway, { claimed: 1, published: 1, retried: 0, deadLettered: 0 });
 
     for (let index = 0; index < 5; index++) {
       await delay(300);

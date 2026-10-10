@@ -939,6 +939,13 @@ N=8、探针 24 小时、池的四个取值、phase 不进入枚举、飞书在 
 - 依赖：无。与 PR 1 无语义依赖。
 - 说明：N=8。认领 SQL 只追加 `dead_lettered_at IS NULL`，保留 `next_attempt_at <= now()`（`execution-outbox.ts:164`）和 `claimed_at` 租约（167 行）。`claimedCount` 保留 `claimed_at IS NOT NULL` 再排除已死信。`pendingCount` 不要求 `claimed_at`，也不要求 `next_attempt_at`。两条部分索引（persistence 43–46 行，迁移 035 的 17 行与 21–23 行）只追加 `dead_lettered_at IS NULL`，不抄 `now()`。认领事务已经 COMMIT。失败且 attempts≥8 时新开一笔事务：先写 `dead_lettered_at` 并清 `claimed_at`/`claimed_by`，然后 `SAVEPOINT`，可选 client 只包住 `writeDeadLetterEvent` 的先查再插。INSERT 失败则 `ROLLBACK TO SAVEPOINT` 后仍 COMMIT 封顶。`appendSessionEvent` 在 COMMIT 之后，不接收这笔 client。外键列只在目标行存在时填写。不重放。不碰 feed-analysis 出箱表。不在死信之后再写 `next_attempt_at`。
 - 要跑：毒药 publish 的负向测试（第 1 次失败后、`next_attempt_at` 到来前 `claimed=0`；第 9 次 fake publish 停在 8；INSERT 强制失败时封顶仍提交、死信行可以为零；含 `dsh_event` 与 summary total）、`check:migration-drift`。故意不跑：生产重放、真实 webhook。残留：旧进程在重启前仍无限重试；旧二进制回滚会重新认领已死信行。
+- **状态：已完成（2026-10-10）**，bookmark `fix/outbox-dead-letter-cap`，8 个文件（含迁移 `065_execution_outbox_dead_letter.sql`）。实测：`execution-outbox.test.ts` 8/8、`execution-reliability.test.ts` 2/2、`pnpm check` exit 0、`pnpm check:migration-drift` exit 0（0 drift）。新增的 6 条测试（`execution-outbox.test.ts` 共 8 条）覆盖：第 8 次失败后行上有 `dead_lettered_at` 且清空占用、第 9 次 `claimed=0` 且 fake publish 停在 8、不写新的 `next_attempt_at`、`pendingCount`/`claimedCount` 不含已死信而行被计入 `deadLetteredCount`、恰好一行 `reason=outbox_exhausted` 且 summary 的 `total` 含它、`dsh_event` 同路径、悬空 `run_spec_id` 落 NULL 但留在 payload、以及两条负向控制（死信写入失败仍封顶；未到上限时退避与租约仍生效）。
+- **实现中发现并修掉的两个坑**（供后续 PR 参考）：
+  1. 封顶 UPDATE 最初写成 `last_error = $3` 却只传两个参数（`$2` 未使用），Postgres 报 `could not determine data type of parameter $2`，整笔事务在 SAVEPOINT 之前就中止——**症状**是"publish 成功但连接上的事务中毒"。现在 WHERE 里带上 `claimed_by = $2` 占位，参数编号与数组一致。
+  2. `writeDeadLetterEvent` 内部调用 `ensureDeadLetterStore()`，而它可能跑 DDL。DDL 若发生在这笔封顶事务里，会在 SAVEPOINT **之外**失败并中止事务。因此封顶前先在**自己的连接**上 `ensureDeadLetterStore()`（失败非致命），之后才开事务。
+  3. 接线门禁不接受只为测试而导出的常量：`EXECUTION_OUTBOX_MAX_ATTEMPTS` 保持**文件内私有**，测试用字面量 `7`/`8` 并把这条策略钉在测试注释里。改上限会让测试红，而不是静默挪动边界。
+- **与设计的偏差（已记录）**：`PublishExecutionOutboxOptions` 增加一个仅测试用的 `writeDeadLetter` 注入点。设计没写这个 seam，但没有它就无法在 SAVEPOINT 内制造一次**真实**的服务端失败（`node:test` 在本仓 Node 24 上没有 `mock.module`，而表锁注入不可靠）。生产路径默认值仍是 `writeDeadLetterEvent`；保留 seam 的理由是：去掉 SAVEPOINT 会让 INSERT 失败连封顶一起回滚，毒药行重回可认领——这正是该负向控制要防的事。
+- **未做**：真实 DSH webhook 与生产库回放；网关未为新代码重启（本 PR 的封顶只在新进程的 1 秒循环里生效；测试已用真实库端到端跑过同一批 SQL）。
 
 ### PR 4 — 探针超过 24 小时不再是 candidate
 

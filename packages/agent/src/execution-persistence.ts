@@ -38,12 +38,14 @@ ALTER TABLE execution_outbox
   ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS legacy BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE execution_outbox ALTER COLUMN legacy SET DEFAULT FALSE;
+ALTER TABLE execution_outbox ADD COLUMN IF NOT EXISTS dead_lettered_at TIMESTAMPTZ;
 
 DROP INDEX IF EXISTS idx_execution_outbox_unpublished;
 CREATE INDEX idx_execution_outbox_unpublished ON execution_outbox(next_attempt_at, id)
-  WHERE published_at IS NULL AND legacy = FALSE;
-CREATE INDEX IF NOT EXISTS idx_execution_outbox_claim ON execution_outbox(claimed_at, id)
-  WHERE published_at IS NULL AND legacy = FALSE;
+  WHERE published_at IS NULL AND legacy = FALSE AND dead_lettered_at IS NULL;
+DROP INDEX IF EXISTS idx_execution_outbox_claim;
+CREATE INDEX idx_execution_outbox_claim ON execution_outbox(claimed_at, id)
+  WHERE published_at IS NULL AND legacy = FALSE AND dead_lettered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_session ON execution_outbox(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_run_spec ON execution_outbox(run_spec_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_entity ON execution_outbox(entity_type, entity_id, id);
