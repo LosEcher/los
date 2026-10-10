@@ -6,7 +6,11 @@ export interface ProviderDefaults {
 }
 
 const PROVIDER_DEFAULTS = {
-  deepseek: { baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-v4-flash', apiKeyEnv: 'DEEPSEEK_API_KEY' },
+  // Canonical Flash name since the 2026-09-10 rename. The site still accepts the
+  // legacy `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` aliases and bills
+  // them as V4.1-Flash, but new sessions should record the name the site documents.
+  // See https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ footnote 1.
+  deepseek: { baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-flash', apiKeyEnv: 'DEEPSEEK_API_KEY' },
   kimi: { baseUrl: 'https://api.kimi.com/coding/v1', defaultModel: 'kimi-k3', apiKeyEnv: 'KIMI_API_KEY' },
   openai: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.5', apiKeyEnv: 'OPENAI_API_KEY' },
   // The legacy www.packyapi.com host is not usable: it resolves to a poisoned

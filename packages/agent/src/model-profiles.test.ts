@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { requireProviderDefaults } from '@los/infra/provider-defaults';
 
 import {
@@ -17,7 +18,7 @@ test('resolveModelProfile keeps deepseek defaults and overrides', () => {
   const profile = resolveModelProfile('deepseek');
   assert.equal(profile.protocol, 'openai');
   assert.equal(profile.baseUrl, 'https://api.deepseek.com/v1');
-  assert.equal(profile.model, 'deepseek-v4-flash');
+  assert.equal(profile.model, 'deepseek-flash');
   assert.equal(profile.toolCallRepair, 'json-loose');
   assert.equal(profile.cachePolicy, 'prompt-cache-read');
 
@@ -108,8 +109,9 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
 
 test('resolveModelCapabilityProfile normalizes model aliases and scheduling-relevant capability flags', () => {
   const deepseek = resolveModelCapabilityProfile(resolveModelProfile('deepseek'));
-  // 2026-09-10 起站点现行模型名为 deepseek-flash，别名表随之扩展
-  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-flash', 'deepseek-v4-pro']);
+  // 2026-09-10 起站点现行模型名为 deepseek-flash，别名表随之扩展；
+  // 派生顺序是 [当前默认名, ...profile.modelAliases]（见 resolveModelCapabilityProfile）。
+  assert.deepEqual(deepseek.modelAliases, ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro']);
   assert.ok(!deepseek.modelAliases.includes('deepseek-chat'));
   assert.ok(!deepseek.modelAliases.includes('deepseek-reasoner'));
   assert.equal(deepseek.tools.parallelCalls, false);
@@ -280,6 +282,37 @@ test('billingPeriodAt follows Beijing peak hours and weekend flat rate', () => {
   assert.equal(billingPeriodAt(at('2026-09-25T02:00:00Z')), 'off-peak'); // 中秋 周五 10:00
   // 对照组：非节假日的同一钟点仍是高峰（防止「一律空闲」式误修）
   assert.equal(billingPeriodAt(at('2026-10-08T02:00:00Z')), 'peak'); // 周四 10:00 非节假日
+});
+
+/**
+ * 年度维护守卫：CHINA_PUBLIC_HOLIDAYS 是手抄的国务院年度安排，属于会过期的数据。
+ * 表里缺少「当前北京年份」时本测试失败，把「该更新了」从口头纪律变成 gate 上的红灯
+ * （缺表的后果是节假日被按高峰 ×2 多计，属静默多计，不会自曝）。
+ *
+ * 这里直接读源码里的日期字面量，而不是新增导出：`./model-profiles.ts` 属于生产模块，
+ * 为测试新增导出会被 `tools/check-wiring-topology.ts` 记为 test-only 未接线导出。
+ */
+test('China public holiday table covers the current Beijing year (annual maintenance guard)', () => {
+  const source = readFileSync(new URL('./model-profiles.ts', import.meta.url), 'utf8');
+  const body = source.match(/const CHINA_PUBLIC_HOLIDAYS = new Set<string>\(\[([\s\S]*?)\]\);/)?.[1];
+  assert.ok(body, 'CHINA_PUBLIC_HOLIDAYS block not found in model-profiles.ts — 若表被改名/移位，请同步本守卫');
+
+  const dates = [...body.matchAll(/'(\d{4}-\d{2}-\d{2})'/g)].map(m => m[1]!);
+  assert.ok(dates.length > 0, 'CHINA_PUBLIC_HOLIDAYS 至少要有一个日期');
+
+  const years = [...new Set(dates.map(d => d.slice(0, 4)))].sort();
+  // 年份必须连续（2026、2027……），避免补新年时漏掉中间年份。
+  for (let y = Number(years[0]); y <= Number(years.at(-1)); y += 1) {
+    assert.ok(years.includes(String(y)), `CHINA_PUBLIC_HOLIDAYS 年份不连续：缺 ${y}`);
+  }
+
+  const beijingYear = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date());
+  assert.ok(
+    years.includes(beijingYear),
+    `CHINA_PUBLIC_HOLIDAYS 没有 ${beijingYear} 年条目：国务院公布当年/次年放假安排后需更新该表，`
+      + `否则 ${beijingYear} 年节假日会被按高峰 ×2 多计。已覆盖年份：${years.join(', ')}。`
+      + '真源：国务院办公厅关于部分节假日安排的通知（gov.cn 公报，2026 年版为国办发明电〔2025〕7 号）。',
+  );
 });
 
 test('calculateCost applies the peak multiplier inside peak hours only', () => {
