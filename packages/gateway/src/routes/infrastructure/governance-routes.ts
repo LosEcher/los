@@ -136,7 +136,8 @@ export function registerGovernanceRoutes(
   app: FastifyInstance,
   deps: GovernanceRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/governance/jobs', async (_req, reply) => {
+  app.get('/governance/jobs', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     try {
       await deps.ensureGovernanceJobStore();
       await deps.seedGovernanceJobs();
@@ -158,6 +159,7 @@ export function registerGovernanceRoutes(
   });
 
   app.get('/governance/jobs/:jobType', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { jobType } = req.params as Record<string, string>;
     if (!isKnownJobType(jobType)) {
       return reply.status(400).send({

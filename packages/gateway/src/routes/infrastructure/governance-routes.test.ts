@@ -112,7 +112,7 @@ test('governance routes list self_bootstrap, reject non-operator writes, and pau
     const auth = { 'x-los-auth-token': 'access-token' };
     const operator = { ...auth, 'x-los-operator-token': 'operator-token' };
 
-    const list = await app.inject({ method: 'GET', url: '/governance/jobs', headers: auth });
+    const list = await app.inject({ method: 'GET', url: '/governance/jobs', headers: operator });
     assert.equal(list.statusCode, 200);
     const body = list.json();
     assert.equal(body.count, 1);
@@ -120,6 +120,11 @@ test('governance routes list self_bootstrap, reject non-operator writes, and pau
     assert.equal(body.jobs[0].findingCount, 2);
     assert.ok(body.knownJobTypes.includes('self_bootstrap'));
     assert.ok(body.knownJobTypes.includes('adversarial_review'));
+
+    // ADR 0048 B2B-2: governance job state is an ops observability read, so a plain
+    // authenticated user must not read it either (previously only writes were gated).
+    const listDenied = await app.inject({ method: 'GET', url: '/governance/jobs', headers: auth });
+    assert.equal(listDenied.statusCode, 403);
 
     const denied = await app.inject({
       method: 'POST',
@@ -148,10 +153,12 @@ test('governance routes list self_bootstrap, reject non-operator writes, and pau
     assert.equal(pause.statusCode, 200);
     assert.equal(pause.json().jobs[0].status, 'paused');
 
+    // Validation of the job-type parameter is asserted with an authorized caller;
+    // the non-operator refusal is covered by `listDenied` above (ADR 0048 B2B-2).
     const unknown = await app.inject({
       method: 'GET',
       url: '/governance/jobs/not_a_job',
-      headers: auth,
+      headers: operator,
     });
     assert.equal(unknown.statusCode, 400);
   } finally {

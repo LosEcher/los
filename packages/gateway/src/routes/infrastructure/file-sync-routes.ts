@@ -4,7 +4,8 @@ import { requireOperator } from '../../request-context.js';
 export function registerFileSyncRoutes(app: FastifyInstance, opts: { executorAgentKey?: string }): void {
   const agentKey = opts.executorAgentKey;
 
-  app.get('/file-sync/status', async () => {
+  app.get('/file-sync/status', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { listExecutorNodes } = await import('@los/agent/executor-nodes');
     const nodes = await listExecutorNodes();
     const results: Array<{ nodeId: string; folders?: unknown; error?: string }> = [];
@@ -34,7 +35,8 @@ export function registerFileSyncRoutes(app: FastifyInstance, opts: { executorAge
     return { ok: true, nodes: results };
   });
 
-  app.get('/file-sync/events', async (req: FastifyRequest) => {
+  app.get('/file-sync/events', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = (req.query ?? {}) as Record<string, string>;
     const limit = Math.min(Number(query.limit) || 50, 500);
     const { listExecutorNodes } = await import('@los/agent/executor-nodes');

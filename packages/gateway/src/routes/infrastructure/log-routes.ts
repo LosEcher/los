@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { requireOperator } from '../../request-context.js';
 
 type LogRoutesOptions = {
   runtimeLogDir: string;
@@ -16,11 +17,13 @@ type LogEntry = {
 };
 
 export function registerLogRoutes(app: FastifyInstance, options: LogRoutesOptions) {
-  app.get('/logs/files', async () => {
+  app.get('/logs/files', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     return listLogFiles(options.runtimeLogDir);
   });
 
-  app.get('/logs', async (req) => {
+  app.get('/logs', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { file, level, q, lines } = req.query as { file?: string; level?: string; q?: string; lines?: string };
     const fileInfo = resolveLogFile(file, options);
     const limit = normalizePositiveInteger(lines) ?? 120;

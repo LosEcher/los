@@ -85,9 +85,17 @@ test('dead-letter routes require an audited operator resolution and gate retry',
   const event = seedDeadLetter(`dlq-${nextEventId++}`);
 
   try {
-    const summary = await app.inject({ method: 'GET', url: '/tasks/dead-letter/summary' });
+    const summary = await app.inject({
+      method: 'GET', url: '/tasks/dead-letter/summary',
+      headers: { 'x-los-operator-token': 'dlq-operator-token' },
+    });
     assert.equal(summary.statusCode, 200);
     assert.equal(summary.json().byReason.unrecoverable_error.total >= 1, true);
+
+    // ADR 0048 B2B-2: dead-letter health is an ops observability read, so it needs
+    // the operator token just like the resolution writes do.
+    const summaryDenied = await app.inject({ method: 'GET', url: '/tasks/dead-letter/summary' });
+    assert.equal(summaryDenied.statusCode, 403);
 
     const forbidden = await app.inject({ method: 'POST', url: `/tasks/dead-letter/${event.id}/retry` });
     assert.equal(forbidden.statusCode, 403);

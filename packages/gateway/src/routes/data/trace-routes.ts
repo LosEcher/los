@@ -5,6 +5,7 @@ import { projectSessionTrace, type TraceToolCallCard, type TraceTurnProjection }
 import { listVerificationRecordsForSession, type Message, type TurnSummary } from '@los/agent';
 import { projectExecutionObservability } from '@los/agent/execution-observability';
 import { asObject, truncate } from '../../trace-utils.js';
+import { requireOperator } from '../../request-context.js';
 
 type TraceRouteDependencies = {
   loadSession: typeof loadSession;
@@ -213,7 +214,8 @@ export function registerTraceRoutes(
   app: FastifyInstance,
   deps: TraceRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/sessions/:id/execution-observability', async (req) => {
+  app.get('/sessions/:id/execution-observability', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     await deps.ensureSessionEventStore();
     const [events, verificationRecords] = await Promise.all([
@@ -224,6 +226,7 @@ export function registerTraceRoutes(
   });
 
   app.get('/sessions/:id/trace', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
 
     await deps.ensureSessionStore();
@@ -264,6 +267,7 @@ export function registerTraceRoutes(
 
   // Incremental trace endpoint for live update polling
   app.get('/sessions/:id/trace/since', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const { id } = req.params as { id: string };
     const since = Math.max(0, Number((req.query as { since?: string }).since ?? 0));
 
