@@ -37,6 +37,7 @@ const sharedProcessTestFiles = [
   'src/run-evals-pairwise-routes.test.ts',
   'src/rate-limit.test.ts',
   'src/request-context.test.ts',
+  'src/route-admission-guard.test.ts',
   'src/routes/orchestration/grok-runtime-routes.test.ts',
   'src/routes/orchestration/codex-runtime-routes.test.ts',
   'src/routes/orchestration/operator-write-routes.test.ts',

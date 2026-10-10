@@ -85,6 +85,7 @@ import { dispatchTodo as dispatchTodoCore, DispatchError } from '@los/agent/todo
 import { getDefaultProjectId, getProject } from './project-store.js';
 import { getSymbolCacheMetrics } from './chat-cbm-symbol-cache.js';
 import { recoverApprovedRunDispatches } from './run-resume-recovery.js';
+import { registerRouteAdmissionGuard } from './route-admission-guard.js';
 
 const log = getLogger('gateway');
 const SERVICE_HEARTBEAT_MS = 10_000;
@@ -143,6 +144,10 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
   app.addHook('onClose', async () => {
     clearInterval(chatLimiter.cleanupInterval);
   });
+
+  // Startup reconciliation of the real route table against the generated inventory
+  // (ADR 0048 decision 2, warn-only). Must be registered before any route module.
+  registerRouteAdmissionGuard(app);
 
   // ── Static HTML ──────────────────────────────────────
 
