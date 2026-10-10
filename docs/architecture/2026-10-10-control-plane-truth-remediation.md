@@ -921,6 +921,8 @@ N=8、探针 24 小时、池的四个取值、phase 不进入枚举、飞书在 
 - 依赖：阶段 0 已完成（路由准入那一批已落盘并重启，`T0`/`pid`/授权探针结论已记录）。不依赖那个 change 的代码。
 - 说明：状态脚本健康失败时不得用工作树哈希填 `process:`。进程内不重算工作树。不写 `target_version`，不滚动节点。**不改 `build-version` 子命令的输出形状**（`file:tools/los.sh:643`），它是滚动目标输入。合入前 `rg -n 'version:' tools/ | grep -v build-version` 确认没有别的脚本解析 `status` 的旧行。
 - 要跑：gateway/infra/executor 的聚焦测试；`bash tools/los-fleet-consistency.sh`（对网关读 `identity.processVersion`）；`pnpm check:doc-anchors`。故意不跑：`pnpm run gate`、舰队 deploy、滚动。残留：旧进程直到重启才出现 `identity`；本 PR 的 done 判据含一次新重启的观测窗。
+- **状态：已完成（2026-10-10）**，bookmark `fix/process-content-identity`，9 个文件。外部证据：重启后 `T0=2026-10-10T15:59:53Z`、`new_pid=57869`，`/health.identity = {"processVersion":"0.1.0+be53205d6cf43","versionSource":"env","startedAt":"2026-10-10T16:00:01.061Z","pid":57869}`；`pnpm run status` 的 `worktree:` 与 `process:` 两行同时出现且值分开；授权探针 exit 0（静态 token 仍 403）。本地：`pnpm check` exit 0（接线门禁要求把纯测试用导出改名 `_buildProcessIdentityForTests` 后才 0 新孤儿）、`pnpm test` 18/18、`@los/gateway check` 与 `@los/executor check` 通过。`packages/gateway/src/process-identity.ts` 是身份单源；`versionSource` 走已有的 `capabilities` JSON，不新增列，因此本 PR 无迁移。
+- **未做（留给后续 PR）**：日报第 7 节的 unpinned 计数留在 PR 4/7（`tools/los-governance-daily.sh` 属那两批的 diff 面）。`los-fleet-consistency.sh --snapshot` 的 `versionSource` 字段已落地，旧二进制报 `unknown` 而不是发明 `env`。
 
 ### PR 2 — 授权收紧的外部探针（阶段 0 执行，不单开 change）
 

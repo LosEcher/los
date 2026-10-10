@@ -46,6 +46,7 @@ import { ensureAllStores } from './bootstrap.js';
 import { registerChatRoute } from './chat-route.js';
 import { registerOpenAICompatibleRoute } from './openai-compat-route.js';
 import { getRequestContext, registerRequestContext } from './request-context.js';
+import { getProcessIdentity } from './process-identity.js';
 import authMiddleware from './auth-middleware.js';
 import { registerSecurityHeaders } from './security-headers.js';
 import { createRateLimiter } from './rate-limit.js';
@@ -185,6 +186,13 @@ export async function createServer(service: GatewayServiceIdentity = resolveGate
     return {
       status: 'ok',
       uptime: process.uptime(),
+      // Content identity of *this* process (read once, never recomputed).
+      // The worktree digest deliberately does not appear here: see
+      // docs/architecture/2026-10-10-control-plane-truth-remediation.md §1.
+      identity: getProcessIdentity({
+        envVersion: config.server.version,
+        packageVersion: gatewayPackage.version,
+      }),
       serviceId: service.serviceId,
       serviceKind: 'gateway',
       ready: current?.readiness.ready ?? false,

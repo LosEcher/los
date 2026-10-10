@@ -25,6 +25,7 @@ const sharedProcessTestFiles = [
   'src/operator-gate.test.ts',
   'src/outbox-diagnostics.test.ts',
   'src/pairwise-sample-gate-routes.test.ts',
+  'src/process-identity.test.ts',
   'src/project-routes.test.ts',
   'src/project-store.test.ts',
   'src/programmatic-interface-boundary.test.ts',

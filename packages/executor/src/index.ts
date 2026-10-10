@@ -24,7 +24,7 @@ import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
 import { _renewTaskLease } from './lease-fencing.js';
-import { heartbeatNode } from './executor-heartbeat.js';
+import { heartbeatNode, resolveNodeVersion } from './executor-heartbeat.js';
 import { createHeartbeatReporter } from './executor-heartbeat-reporter.js';
 import { ExecutorRuntimeLifecycle, shutdownExecutor } from './runtime-lifecycle.js';
 import {
@@ -64,7 +64,14 @@ export async function startExecutor() {
   const host = config.executor.host;
   const port = config.executor.port;
   const gatewayUrl = config.executor.gatewayUrl;
-  const version = config.executor.version ?? config.server.version ?? executorPackage.version;
+  // Content identity of this node, resolved once. `versionSource` rides along so
+  // the gateway can count unpinned nodes without a new column
+  // (docs/architecture/2026-10-10-control-plane-truth-remediation.md §1).
+  const { version, versionSource } = resolveNodeVersion({
+    executorVersion: config.executor.version,
+    serverVersion: config.server.version,
+    packageVersion: executorPackage.version,
+  });
   const heartbeatViaApi = !!gatewayUrl;
   const shutdownGraceMs = config.executor.shutdownGraceMs;
   const lifecycle = new ExecutorRuntimeLifecycle();
@@ -132,7 +139,7 @@ export async function startExecutor() {
 
   const reportHeartbeat = createHeartbeatReporter(async () => {
     const folders = await resolveFileSyncFolders();
-    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential);
+    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential, versionSource);
   }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
 
   // Self-scheduling heartbeat: fires immediately, then waits
@@ -156,6 +163,7 @@ export async function startExecutor() {
           nodeId,
           publicUrl,
           version,
+          versionSource,
           nodeKind,
           connectModes,
           lifecycle: lifecycle.status,
@@ -233,6 +241,7 @@ export async function startExecutor() {
       await resolveFileSyncFolders(),
       agentKey,
       nodeCredential,
+      versionSource,
     ),
   });
 

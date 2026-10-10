@@ -14,6 +14,39 @@ function detectSandboxBackend(): string {
   return backend === 'native' ? 'tool_policy' : backend;
 }
 
+/** Where a node's reported version came from — same vocabulary as the gateway. */
+export type NodeVersionSource = 'env' | 'package_json' | 'unversioned';
+
+export type NodeVersionIdentity = { version: string; versionSource: NodeVersionSource };
+
+function normalizeVersion(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Resolve the node's content identity once, at start-up.
+ *
+ * `config.executor.version` and `config.server.version` both come from
+ * `LOS_VERSION`/`EXECUTOR_VERSION` in the launcher, so either one counts as
+ * `env`. Falling back to the package version is **not** a content hash and is
+ * labelled `package_json` so the daily report can count `unpinned` nodes
+ * instead of mislabelling them as drift
+ * (docs/architecture/2026-10-10-control-plane-truth-remediation.md §1).
+ */
+export function resolveNodeVersion(inputs: {
+  executorVersion?: string;
+  serverVersion?: string;
+  packageVersion?: string;
+}): NodeVersionIdentity {
+  const envVersion = normalizeVersion(inputs.executorVersion) ?? normalizeVersion(inputs.serverVersion);
+  if (envVersion) return { version: envVersion, versionSource: 'env' };
+  const packageVersion = normalizeVersion(inputs.packageVersion);
+  if (packageVersion) return { version: packageVersion, versionSource: 'package_json' };
+  return { version: 'unknown', versionSource: 'unversioned' };
+}
+
 export async function heartbeatNode(
   nodeId: string,
   baseUrl: string,
@@ -32,6 +65,12 @@ export async function heartbeatNode(
    * accepts heartbeats without it.
    */
   nodeCredential?: string,
+  /**
+   * Provenance of `version`. Registered in the existing `capabilities` JSON —
+   * deliberately **not** a new column, so the node row needs no migration and
+   * "no `+b`" can be counted as `unpinned` rather than as drift.
+   */
+  versionSource: NodeVersionSource = 'unversioned',
 ): Promise<void> {
   const capabilities: Record<string, unknown> = {
     run_agent: lifecycle.acceptingTasks,
@@ -44,6 +83,9 @@ export async function heartbeatNode(
     file_sync_scan: true,
     file_sync_deep_verify: true,
     shell: true,
+    // Provenance of the `version` field above. `package_json` means this node is
+    // running an unpinned build, not that it drifts from its declared target.
+    versionSource,
     // Report the real OS isolation backend when one exists. `tool_policy` (the
     // legacy default) and `native` intentionally do NOT satisfy a sandbox
     // requirement — only a concrete backend (linux-bwrap / macos-sandbox-exec)
