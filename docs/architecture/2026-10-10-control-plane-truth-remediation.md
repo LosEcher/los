@@ -566,6 +566,15 @@ phaseExemptReason?:
 - `MCPClient`（`file:packages/agent/src/tools/external/mcp-client.ts:102`）整类不要搬进 memory：它依赖 agent 内部的分发策略与 cantool 适配器（同文件 11–23 行）。抽出 CBM 实际用到的 stdio `connect` / `callTool` / `close` 到一个叶子包（不要放进 `@los/infra`，`AGENTS.md` 禁止未批准往 infra 加文件）。agent 的 `MCPClient` 改为委托该叶子。memory 与 agent 都依赖叶子，wiring 门禁才看得到调用方。
 
 不与授权 PR 绑在一起。不顺手清 417 条接线豁免。负向控制：在 `cbm-client.ts` 加回 `@los/agent` import，扫描门禁失败。
+- **状态：已完成（2026-10-10）**，bookmark `refactor/mcp-stdio-leaf`。**叶子包名定稿：`@los/mcp-stdio`**（`packages/mcp-stdio/`，依赖只有 `@los/infra`）。它持有 stdio 传输与最小客户端（`MCPStdioClient`：`connect/getTools/getServerIdentity/callTool/close`，含 initialize 握手、60s 请求超时、abort 取消）；`@los/agent` 的 `MCPClient` 改为它的**子类**，只保留 agent 专属部分（SSE / streamable-HTTP 远端传输、`toolPolicy` / `adapterConfig`、policy 感知的 `callTool`）。
+- **三刀全部落地**：
+  1. `cbm-client.ts` 改用 `MCPStdioClient`，memory 的生产依赖变成 `@los/contracts`、`@los/infra`、`@los/mcp-stdio`——**`@los/agent` 降为 devDependency**（`test-setup.ts` 仍需要它）。
+  2. `CHECKPOINT_VERSION` 移到 `packages/contracts/src/session-recovery.ts`（经 `@los/contracts/session-recovery` 导出，绑定 `contracts/session-recovery.yaml` 的 `checkpoint.version`）；`agent/src/session-recovery.ts` 改为 import + re-export，memory 从 contracts 读。**没有在 memory 里复制数字 `1`。**
+  3. `compaction.ts` 的动态 `import('@los/agent/session-events')` 换成注入式 sink：新增 `packages/memory/src/core/session-event-sink.ts`（`registerSessionEventSink` / `emitMemorySessionEvent`，未注册时 **warn 并报告丢弃**，不让压缩失败），由 `packages/gateway/src/bootstrap.ts` 的 `ensureAllStores()` 用 `@los/agent/session-events` 的 `appendSessionEvent` 接线。gateway 是唯一同时依赖两侧的包，接线放这里。
+- **出口判据（实测）**：`grep -rnE "from '@los/agent|import\('@los/agent|require\('@los/agent" packages/memory/src`（排除测试与 `test-setup.ts`）**零命中**；`pnpm check` exit 0（接线门禁 0 新孤儿；另有 2 条 baseline 条目因文件删除而失效，**故意不 shrink**——那属于另一个意图）；`pnpm test` **20/20 tasks**（新增的 `@los/mcp-stdio` 被 turbo 自动纳管）。
+- **新增测试（6 条，全在叶子包）**：用内联 `node -e` 假 MCP 服务器（不落 fixture 文件、不依赖 agent）覆盖握手身份、工具列表、`callTool` 文本拼接、`isError` 抛错、未 connect 拒绝、`command` 缺失拒绝、abort 取消。其中两条是负向控制：`isError` 结果必须抛而不是返回文本；`callTool` 前未 connect 必须拒绝。
+- **与设计的一处偏差（已记录）**：`MCPDiscoveredTool` 的 `annotations` 增加 `[key: string]: unknown;` 索引签名。原因是 agent 的 `MCPToolDef` 要能作为叶子 `MCPToolDef` 的子类型（`getTools()` 需要收窄返回类型），而叶子的索引签名要求对象类型同样带索引签名；否则只能靠 `as unknown as` 抹掉类型。运行时形状不变。
+- **未做**：不顺手清 417 条接线豁免；`@los/agent` 留在 memory 的 devDependency 里（测试与 `test-setup.ts` 使用，属预期）。
 
 ### 10. `/v1` toolMode 可显式提升
 

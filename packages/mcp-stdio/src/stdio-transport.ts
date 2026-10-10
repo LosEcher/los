@@ -1,8 +1,17 @@
+/**
+ * @los/mcp-stdio/stdio-transport — stdio transport for MCP servers.
+ *
+ * Moved verbatim from `@los/agent/tools/external/mcp-stdio-transport.ts` so that
+ * `@los/memory` can speak stdio MCP without depending on `@los/agent` (which in
+ * turn depends on memory for the read model). Leaf package: depends only on
+ * `@los/infra/logger` and Node built-ins.
+ */
+
 import { spawn, type ChildProcess } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 
-const log = getLogger('agent');
+const log = getLogger('mcp-stdio');
 const STARTUP_GRACE_MS = 300;
 
 export interface JSONRPCMessage {

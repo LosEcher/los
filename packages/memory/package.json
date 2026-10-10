@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./session-event-sink": "./src/core/session-event-sink.ts"
   },
   "scripts": {
     "build": "tsc",
@@ -14,10 +15,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@los/agent": "workspace:*",
-    "@los/infra": "workspace:*"
+    "@los/contracts": "workspace:*",
+    "@los/infra": "workspace:*",
+    "@los/mcp-stdio": "workspace:*"
   },
   "devDependencies": {
+    "@los/agent": "workspace:*",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0"
   }

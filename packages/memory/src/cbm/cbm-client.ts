@@ -1,17 +1,18 @@
 /**
  * @los/memory/cbm/cbm-client — Codebase-memory-mcp (CBM) client wrapper.
  *
- * Reuses @los/agent's MCPClient for stdio transport. Provides a
- * narrow, typed interface over the CBM knowledge graph. All methods
- * are best-effort: CBM unavailability returns empty results, never
- * throws to the caller.
+ * Speaks stdio MCP through the leaf package `@los/mcp-stdio`, **not** through
+ * `@los/agent`: the agent depends on memory for the read model, so importing the
+ * agent from here was a layering inversion (docs/architecture/2026-10-10-control-plane-truth-remediation.md
+ * §9). Provides a narrow, typed interface over the CBM knowledge graph. All
+ * methods are best-effort: CBM unavailability returns empty results, never throws
+ * to the caller.
  *
- * Measurement: every operation records latency and success/failure
- * in an internal CBMMetrics bag. Call `getMetrics()` to read it.
+ * Measurement: every operation records latency and success/failure in an internal
+ * CBMMetrics bag. Call `getMetrics()` to read it.
  */
 
-import { MCPClient } from '@los/agent';
-import type { MCPServerConfig } from '@los/agent';
+import { MCPStdioClient, type MCPServerConfig } from '@los/mcp-stdio';
 import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('cbm-client');
@@ -89,7 +90,7 @@ export interface CBMMetrics {
 // ── Client ────────────────────────────────────────────────
 
 export class CBMClient {
-  private client: MCPClient | null = null;
+  private client: MCPStdioClient | null = null;
   private initialized = false;
   private metrics: CBMMetrics = {
     queries: 0, successes: 0, failures: 0, avgLatencyMs: 0, totalBytesReturned: 0, byOperation: {},
@@ -114,7 +115,7 @@ export class CBMClient {
 
   async connect(): Promise<void> {
     try {
-      this.client = new MCPClient(this.config);
+      this.client = new MCPStdioClient(this.config);
       await this.client.connect();
       this.initialized = true;
       log.info('CBM connected');

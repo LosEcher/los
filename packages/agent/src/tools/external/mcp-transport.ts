@@ -10,7 +10,13 @@
  * MCPClient is transport-agnostic beyond construction.
  */
 
-import type { JSONRPCMessage } from './mcp-stdio-transport.js';
+/**
+ * The JSON-RPC envelope is defined by the leaf stdio package so both sides of the
+ * extraction describe the protocol identically.
+ */
+import type { JSONRPCMessage } from '@los/mcp-stdio';
+
+export type { JSONRPCMessage };
 
 export interface MCPTransport {
   /** Start the transport connection. */
