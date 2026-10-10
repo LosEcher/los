@@ -43,6 +43,9 @@ test('run specs persist normalized run contract metadata', async () => {
       prompt: 'inspect run contract metadata',
       workspaceRoot: '/tmp/workspace',
       toolMode: 'project-write',
+      // No phase on purpose: this fixture exercises the normalized metadata shape,
+      // so it declares its exemption explicitly rather than relying on the gate.
+      phaseExemptReason: 'work_item_draft',
       runContract: {
         mode: 'execution',
         goal: 'persist run spec contract',
@@ -63,6 +66,9 @@ test('run specs persist normalized run contract metadata', async () => {
     assert.deepEqual(created.runContract, {
       mode: 'execution',
       goal: 'persist run spec contract',
+      // Declared above; the gate must record the declaration, not invent one.
+      phaseTracking: 'exempt',
+      phaseExemptReason: 'work_item_draft',
       editableSurfaces: ['packages/agent/src/run-specs.ts'],
       requiredChecks: ['pnpm --filter @los/agent test'],
       allowedSkippedChecks: [],
@@ -766,5 +772,151 @@ test('updateRunSpecResult rejects contract-violating results before persistence'
     );
   } finally {
     await closeDb().catch(() => undefined);
+  }
+});
+
+// ── Phase tracking gate (truth remediation §6) ─────────────────────────────
+
+async function createWithContract(
+  id: string,
+  runContract: Record<string, unknown> | undefined,
+  phaseExemptReason?: Parameters<typeof createRunSpec>[0]['phaseExemptReason'],
+) {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  await ensureRunSpecStore();
+  return createRunSpec({
+    id,
+    sessionId: `${id}-session`,
+    prompt: 'phase gate fixture',
+    workspaceRoot: '/tmp/workspace',
+    toolMode: 'project-write',
+    runContract,
+    phaseExemptReason,
+  });
+}
+
+test('type 1: no phase and no marker is recorded as writer_omitted, not rejected', async () => {
+  const id = `phase-none-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const created = await createWithContract(id, { mode: 'execution' });
+    assert.equal(created.runContract?.phaseTracking, 'exempt');
+    assert.equal(created.runContract?.phaseExemptReason, 'writer_omitted');
+    assert.equal(created.runContract?.phase, undefined);
+    // The marker must actually reach the column, not just the returned object.
+    const raw = await getDb().query<{ run_contract_json: Record<string, unknown> }>(
+      'SELECT run_contract_json FROM run_specs WHERE id = $1', [id],
+    );
+    assert.equal(raw.rows[0]!.run_contract_json.phaseTracking, 'exempt');
+    assert.equal(raw.rows[0]!.run_contract_json.phaseExemptReason, 'writer_omitted');
+    assert.equal('phase' in raw.rows[0]!.run_contract_json, false, 'no NULL marker is inserted');
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
+  }
+});
+
+test('type 2: a legal phase is recorded as tracked with no exempt reason', async () => {
+  const id = `phase-legal-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const created = await createWithContract(id, { mode: 'execution', phase: 'executing' });
+    assert.equal(created.runContract?.phase, 'executing');
+    assert.equal(created.runContract?.phaseTracking, 'tracked');
+    assert.equal(created.runContract?.phaseExemptReason, undefined);
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
+  }
+});
+
+test('type 3: an illegal phase fails contract validation and never reaches the table', async () => {
+  const id = `phase-illegal-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await assert.rejects(
+    () => createWithContract(id, { mode: 'execution', phase: 'not_applicable' }),
+    /\/runContract\/phase must be (one of the RunPhase values|equal to one of the allowed values)/,
+  );
+  await assert.rejects(
+    () => createWithContract(id, { mode: 'execution', phase: 'completed' }),
+    /\/runContract\/phase must be (one of the RunPhase values|equal to one of the allowed values)/,
+  );
+  const rows = await getDb().query('SELECT 1 FROM run_specs WHERE id = $1', [id]);
+  assert.equal(rows.rows.length, 0, 'an illegal phase must not leave a row behind');
+});
+
+test('NEGATIVE CONTROL: a declared reason is kept and an unknown one throws', async () => {
+  const id = `phase-exempt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const created = await createWithContract(id, { mode: 'audit' }, 'openai_compat');
+    assert.equal(created.runContract?.phaseTracking, 'exempt');
+    assert.equal(created.runContract?.phaseExemptReason, 'openai_compat');
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
+  }
+
+  // In-contract typo: the generated contract enum rejects it first.
+  const badId = `phase-bad-reason-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await assert.rejects(
+    () => createWithContract(badId, { mode: 'audit', phaseTracking: 'exempt', phaseExemptReason: 'typo_reason' }),
+    /phaseExemptReason must be equal to one of the allowed values|Unknown phaseExemptReason/,
+  );
+  const rows = await getDb().query('SELECT 1 FROM run_specs WHERE id = $1', [badId]);
+  assert.equal(rows.rows.length, 0);
+
+  // Typo in the *argument* (which the contract never sees, because it serializes
+  // only `runContract`): this is the path that must not be collected into
+  // writer_omitted, so the gate itself has to reject it.
+  const badArgId = `phase-bad-arg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await assert.rejects(
+    () => createWithContract(
+      badArgId,
+      { mode: 'audit' },
+      'typo_from_code' as unknown as Parameters<typeof createRunSpec>[0]['phaseExemptReason'],
+    ),
+    /Unknown phaseExemptReason/,
+  );
+  const argRows = await getDb().query('SELECT 1 FROM run_specs WHERE id = $1', [badArgId]);
+  assert.equal(argRows.rows.length, 0);
+});
+
+test('NEGATIVE CONTROL: a marker-only contract is persisted, not collapsed to {}', async () => {
+  const id = `phase-marker-only-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await createWithContract(id, { phaseTracking: 'exempt', phaseExemptReason: 'openai_compat' });
+    const raw = await getDb().query<{ run_contract_json: Record<string, unknown> }>(
+      'SELECT run_contract_json FROM run_specs WHERE id = $1', [id],
+    );
+    const stored = raw.rows[0]!.run_contract_json;
+    assert.equal(stored.phaseTracking, 'exempt');
+    assert.equal(stored.phaseExemptReason, 'openai_compat');
+    assert.ok(Object.keys(stored).length > 0, 'hasRunContractValue must treat the marker as a value');
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
+  }
+});
+
+test('NEGATIVE CONTROL: a write with NO contract at all is still classified, not stored as {}', async () => {
+  // Regression guard: the first version of the gate returned early when
+  // `runContract` was undefined, which left `run_contract_json = {}` — the exact
+  // "no phase and no marker" row the gate exists to eliminate. The `/v1`
+  // compatibility route writes exactly this shape.
+  const id = `phase-no-contract-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await createWithContract(id, undefined, 'openai_compat');
+    const raw = await getDb().query<{ run_contract_json: Record<string, unknown> }>(
+      'SELECT run_contract_json FROM run_specs WHERE id = $1', [id],
+    );
+    const stored = raw.rows[0]!.run_contract_json;
+    assert.equal(stored.phaseTracking, 'exempt');
+    assert.equal(stored.phaseExemptReason, 'openai_compat');
+    assert.ok(Object.keys(stored).length > 0, 'must not be an empty object');
+
+    // And without a declared reason it is the counted defect, not a silent gap.
+    const id2 = `phase-no-contract-2-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await createWithContract(id2, undefined);
+    const raw2 = await getDb().query<{ run_contract_json: Record<string, unknown> }>(
+      'SELECT run_contract_json FROM run_specs WHERE id = $1', [id2],
+    );
+    assert.equal(raw2.rows[0]!.run_contract_json.phaseExemptReason, 'writer_omitted');
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id2]).catch(() => undefined);
+  } finally {
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [id]).catch(() => undefined);
   }
 });

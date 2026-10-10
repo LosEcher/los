@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-
 import {
   canMarkSucceeded,
+  classifyPhaseLedger,
   mergeRunContractMetadata,
   normalizeRunContractMetadata,
+  parsePhaseExemptReason,
   readRunContractMetadata,
 } from './run-contract.js';
 import { normalizePlanForPersistence, validatePlanForApproval } from './run-plan-validation.js';
@@ -227,3 +228,86 @@ test('E22 — recoveryPolicy normalizes to automatic or explicit_only only', () 
   const invalid = normalizeRunContractMetadata({ recoveryPolicy: 'always' });
   assert.equal(invalid?.recoveryPolicy, undefined);
 });
+
+// ── Phase ledger classification (truth remediation §6) ──────────────────────
+
+test('NEGATIVE CONTROL: a NULL phase is legacy history, never real drift', () => {
+  // The audit's false negative was exactly this row: `phase NOT IN (...)` drops
+  // NULL, so the instrument reported zero drift while 402 rows had no phase.
+  const row = { mode: 'execution' };
+  assert.equal(classifyPhaseLedger(row, 'succeeded').bucket, 'legacy_untracked');
+  assert.equal(classifyPhaseLedger(row, 'failed').bucket, 'legacy_untracked');
+  assert.equal(classifyPhaseLedger({ phase: null }, 'cancelled').bucket, 'legacy_untracked');
+  assert.equal(classifyPhaseLedger({}, undefined).bucket, 'legacy_untracked');
+});
+
+test('an illegal non-empty phase is its own bucket, not legacy', () => {
+  // `completed` is not a phase. Normalization would drop it; the classifier must
+  // see it before that happens, otherwise the caller's bug reads as history.
+  const completed = classifyPhaseLedger({ phase: 'completed' }, 'succeeded');
+  assert.equal(completed.bucket, 'illegal_phase');
+  assert.equal(completed.illegalPhase, 'completed');
+  assert.equal(classifyPhaseLedger({ phase: 'not_applicable' }, 'running').bucket, 'illegal_phase');
+  assert.equal(classifyPhaseLedger({ phase: ' EXECUTING ' }, 'running').bucket, 'illegal_phase');
+  // Normalization really does hide it — this is why raw JSON is the input.
+  assert.equal(normalizeRunContractMetadata({ phase: 'completed' })?.phase, undefined);
+});
+
+test('legal phases use the shared drift predicates', () => {
+  assert.equal(classifyPhaseLedger({ phase: 'planning' }, 'succeeded').bucket, 'real_drift');
+  assert.equal(classifyPhaseLedger({ phase: 'succeeded' }, 'running').bucket, 'real_drift');
+  assert.equal(classifyPhaseLedger({ phase: 'planning' }, 'running').bucket, 'real_drift');
+  // blocked is checked by the drift script but not by validatePhaseStatusConsistency;
+  // sharing this classifier is what keeps the two from disagreeing.
+  assert.equal(classifyPhaseLedger({ phase: 'executing' }, 'blocked').bucket, 'real_drift');
+  assert.equal(classifyPhaseLedger({ phase: 'blocked' }, 'blocked').bucket, 'consistent');
+  assert.equal(classifyPhaseLedger({ phase: 'executing' }, 'running').bucket, 'consistent');
+  assert.equal(classifyPhaseLedger({ phase: 'succeeded' }, 'succeeded').bucket, 'consistent');
+});
+
+test('an explicit exemption is separated from an unspecified one', () => {
+  assert.equal(
+    classifyPhaseLedger({ phaseTracking: 'exempt', phaseExemptReason: 'openai_compat' }, 'running').bucket,
+    'exempt',
+  );
+  assert.equal(
+    classifyPhaseLedger({ phaseTracking: 'exempt', phaseExemptReason: 'writer_omitted' }, 'running').bucket,
+    'exempt_unspecified',
+  );
+  // A marker without a reason is still a write-side defect, not an exemption.
+  assert.equal(classifyPhaseLedger({ phaseTracking: 'exempt' }, 'running').bucket, 'exempt_unspecified');
+  // Unknown reasons must not be silently promoted to a legitimate exemption.
+  assert.equal(classifyPhaseLedger({ phaseTracking: 'exempt', phaseExemptReason: 'typo' }, 'running').bucket, 'exempt_unspecified');
+});
+
+test('a tracked contract with a missing phase is still legacy history', () => {
+  assert.equal(classifyPhaseLedger({ phaseTracking: 'tracked' }, 'succeeded').bucket, 'legacy_untracked');
+});
+
+// ── Normalization of the new fields ────────────────────────────────────────
+
+test('the phase marker survives the closed-set copy', () => {
+  const exempt = normalizeRunContractMetadata({
+    phaseTracking: 'exempt',
+    phaseExemptReason: 'feed_analysis_ingress',
+  });
+  assert.equal(exempt?.phaseTracking, 'exempt');
+  assert.equal(exempt?.phaseExemptReason, 'feed_analysis_ingress');
+
+  const tracked = normalizeRunContractMetadata({ phase: 'executing' });
+  assert.equal(tracked?.phase, 'executing');
+});
+
+test('an unknown phaseExemptReason throws instead of being collected as writer_omitted', () => {
+  assert.throws(
+    () => normalizeRunContractMetadata({ phaseTracking: 'exempt', phaseExemptReason: 'not_a_reason' }),
+    /Unknown phaseExemptReason/,
+  );
+  assert.equal(parsePhaseExemptReason('writer_omitted'), 'writer_omitted');
+  assert.equal(parsePhaseExemptReason(undefined), undefined);
+});
+
+// "A marker-only contract is not an empty contract" is asserted end to end in
+// run-specs.test.ts (against createRunSpec), because `hasRunContractValue` is
+// file-local by design: exporting it just for a unit test would add a wired-but-
+// unused export for the wiring gate to flag.

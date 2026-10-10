@@ -42,6 +42,10 @@ export {
   type PlanningTransport,
 } from './planning-output.js';
 export { canMarkSucceeded, canStartExecution, mergeRunContractMetadata, normalizeRunContractMetadata, readRunContractMetadata, validatePhaseTransition, type PlanRevisionSnapshot, type PlanStep, type RunContractMetadata, type RunContractMetadataInput, type RunContractMode, type RunPhase, type VerificationRequirement } from './run-contract.js';
+// Phase-ledger classification: the single predicate shared by the governance
+// report and tools/audit-run-state-drift.ts, so the two instruments cannot drift
+// apart (control-plane truth remediation §6).
+export { classifyPhaseLedger, type PhaseExemptReason, type PhaseLedgerBucket, type PhaseLedgerClassification, type PhaseTracking } from './run-contract.js';
 export { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 export { loadSpecsForFiles, loadAllSpecs, resolveSpecLayer, trimSpecForReview, type LoadedSpec, type LoadSpecsOptions, type SpecLayer } from './spec-loader.js';
 export {

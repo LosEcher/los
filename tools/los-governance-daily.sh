@@ -249,6 +249,24 @@ if [[ -n "$STALE_NODES" ]]; then
 fi
 echo
 
+# ── 7a. phase 账本分桶（控制面事实修复 §6）──────────────────
+# 与 packages/agent/src/run-contract.ts 的 classifyPhaseLedger 是**同一个判据**的
+# 两个投影：这个只读 SQL 给日报看，那个给 audit 脚本与单测看。改一处必须同时改另一处，
+# 否则两台仪器会给出相反结论（2026-10-10 审计里 "succeeded 且 phase 不是 succeeded/completed"
+# 查出 0 行，而实际有 402 行 phase 为空——`NOT IN` 把 NULL 丢掉了）。
+#
+# 关键点：只读**原始** run_contract_json。归一化会把 "completed" 这类非法字符串丢掉，
+# 之后就会把调用方的写入缺陷伪装成历史缺口。
+echo "## 7a. phase 账本分桶（原始 run_contract_json）"
+PHASE_ILLEGAL=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json ? 'phase' AND COALESCE(run_contract_json->>'phase','') <> '' AND run_contract_json->>'phase' NOT IN ('created','discovering','discovery_ready','planning','plan_approved','executing','verifying','succeeded','blocked','failed','cancelled');")
+PHASE_REAL_DRIFT=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json->>'phase' IN ('created','discovering','discovery_ready','planning','plan_approved','executing','verifying','succeeded','blocked','failed','cancelled') AND ((status IN ('succeeded','failed','cancelled') AND run_contract_json->>'phase' IS DISTINCT FROM status) OR (run_contract_json->>'phase' IN ('succeeded','failed','cancelled') AND status IS DISTINCT FROM run_contract_json->>'phase') OR (status='running' AND run_contract_json->>'phase' IN ('created','discovering','discovery_ready','planning')) OR (status='blocked' AND run_contract_json->>'phase' IS DISTINCT FROM 'blocked'));")
+PHASE_LEGACY=$(q "SELECT count(*) FROM run_specs WHERE (NOT (run_contract_json ? 'phase') OR run_contract_json->>'phase' IS NULL) AND COALESCE(run_contract_json->>'phaseTracking','') <> 'exempt';")
+PHASE_EXEMPT=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json->>'phaseTracking' = 'exempt' AND COALESCE(run_contract_json->>'phaseExemptReason','') <> 'writer_omitted';")
+PHASE_OMITTED=$(q "SELECT count(*) FROM run_specs WHERE run_contract_json->>'phaseExemptReason' = 'writer_omitted';")
+echo "- illegal_phase=${PHASE_ILLEGAL:-0}  real_drift=${PHASE_REAL_DRIFT:-0}  legacy_untracked=${PHASE_LEGACY:-0}  exempt=${PHASE_EXEMPT:-0}  exempt_unspecified=${PHASE_OMITTED:-0}"
+echo "  （legacy_untracked 是历史缺口，不改写；只有 real_drift 进 audit 脚本的修复候选）"
+echo
+
 # ── 7b. 声明目标一致性 → todo（P0-6）─────────────────────────
 # `target_version` 在此之前**没有任何消费点**，于是"节点没落在声明目标上"这件事只能靠人
 # 肉看版本分布发现。这里把它变成可执行的 todo，并且**自动关闭**：只有"漂移存在"才留 todo，

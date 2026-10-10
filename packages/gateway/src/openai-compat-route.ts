@@ -231,6 +231,7 @@ export function registerOpenAICompatibleRoute(
       actorSubject: principal.subject,
       requestId: context.requestId,
       runContract: undefined,
+      phaseExemptReason: 'openai_compat', // no phase lifecycle here (remediation §6)
       intakeResolution,
       requestedProjectId,
       requestedWorkspaceRoot: undefined,

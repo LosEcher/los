@@ -159,6 +159,7 @@ export async function dispatchFeedAnalysisJob(
       }),
       selfCheckEnabled: false,
     },
+    phaseExemptReason: 'feed_analysis_ingress',
     modelSettings: {},
   });
 

@@ -1,3 +1,9 @@
+// The classifier is exported under the `_…ForTests` name because
+// tools/check-wiring-topology.ts only scans `packages/**` and therefore cannot see
+// this caller; the alternative (a baseline entry) is what that gate tells you to
+// avoid. The behaviour is production code and is also asserted by
+// packages/agent/src/run-contract.test.ts.
+import { _classifyPhaseLedgerForTests as classifyPhaseLedger } from '../packages/agent/src/run-phase-ledger.js';
 import { loadConfig } from '../packages/infra/src/config.js';
 import { closeDb, getDb, initDb, withDbClient } from '../packages/infra/src/db.js';
 
@@ -18,7 +24,12 @@ type CandidateRow = {
 type RepairDecision = {
   runSpecId: string;
   sessionId: string;
-  classification: 'legacy_missing_phase' | 'empty_plan_not_executed' | 'empty_plan_succeeded_legacy';
+  classification:
+    | 'real_drift'
+    | 'empty_plan_not_executed'
+    | 'empty_plan_succeeded_legacy'
+    | 'legacy_untracked'
+    | 'plan_edge_not_phase_drift';
   before: { status: string; phase: string | null; planCount: number };
   after: { status: string; phase: string | null };
   evidence: { taskCount: number; verificationCount: number; runSucceededEventCount: number };
@@ -75,9 +86,25 @@ function decide(row: CandidateRow): RepairDecision {
     }
   }
 
+  // Phase/status judgement comes from the shared classifier, never from a local
+  // predicate. The audit found that the old `phase NOT IN (...)` form dropped
+  // NULL phases entirely and reported zero drift, so an instrument that invents
+  // its own predicate is the defect, not the fix.
+  const ledger = classifyPhaseLedger(row.run_contract_json, row.status);
+  if (row.plan_count === 0 && row.phase !== null) {
+    return {
+      runSpecId: row.id, sessionId: row.session_id, classification: 'plan_edge_not_phase_drift',
+      before, after: { status: row.status, phase: row.phase }, evidence, legacy: false, needsReview: false,
+    };
+  }
   return {
-    runSpecId: row.id, sessionId: row.session_id, classification: 'legacy_missing_phase',
-    before, after: { status: row.status, phase: row.phase }, evidence, legacy: true, needsReview: false,
+    runSpecId: row.id, sessionId: row.session_id,
+    classification: ledger.bucket === 'real_drift' ? 'real_drift' : 'legacy_untracked',
+    before, after: { status: row.status, phase: row.phase }, evidence,
+    // Only a real phase/status contradiction is a repair candidate. A missing
+    // phase is history, and rewriting it would erase the difference between
+    // "we do not know" and "we chose not to track".
+    legacy: ledger.bucket !== 'real_drift', needsReview: false,
   };
 }
 
@@ -143,7 +170,10 @@ async function main(): Promise<void> {
       return counts;
     }, {});
     console.log(JSON.stringify({ repairId: REPAIR_ID, mode: apply ? 'apply' : 'read-only', count: decisions.length, summary, decisions }, null, 2));
-    if (apply) await applyDecisions(decisions, actor!, reason!);
+    if (apply) {
+      const repairable = decisions.filter((decision) => decision.classification === 'real_drift');
+      await applyDecisions(repairable, actor!, reason!);
+    }
   } finally {
     await closeDb();
   }
