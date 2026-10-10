@@ -7,7 +7,7 @@ import {
 } from './provider-defaults.js';
 
 test('provider defaults resolve known providers without an unknown fallback', () => {
-  assert.equal(resolveProviderDefaults('deepseek')?.defaultModel, 'deepseek-v4-flash');
+  assert.equal(resolveProviderDefaults('deepseek')?.defaultModel, 'deepseek-flash');
   assert.equal(resolveProviderDefaults('xai')?.baseUrl, 'https://api.x.ai/v1');
   assert.equal(resolveProviderDefaults('xai')?.defaultModel, 'grok-4.6');
   assert.equal(resolveProviderDefaults('kimi')?.baseUrl, 'https://api.kimi.com/coding/v1');
