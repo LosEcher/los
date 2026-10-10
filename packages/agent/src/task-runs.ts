@@ -330,9 +330,28 @@ export async function findActiveTaskRunByDedupeKey(dedupeKey: string): Promise<T
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
 }
 
-export async function listTaskRuns(limit = 50): Promise<TaskRunRecord[]> {
+/**
+ * List task runs, newest first.
+ *
+ * `scope.tenantId` (optional) restricts the projection to one tenant. The HTTP
+ * boundary passes it for authenticated non-operator principals
+ * (`resolveReadScope` in the gateway); internal callers (scheduler, governance,
+ * fleet) omit it and keep their cross-tenant view. Tenant-only on purpose: the
+ * task projection is cross-project by design.
+ */
+export async function listTaskRuns(
+  limit = 50,
+  scope?: { tenantId?: string },
+): Promise<TaskRunRecord[]> {
   await ensureTaskRunStore();
   const db = getDb();
+  if (scope?.tenantId) {
+    const scoped = await db.query<TaskRunRow>(
+      'SELECT * FROM task_runs WHERE tenant_id = $2 ORDER BY updated_at DESC LIMIT $1',
+      [limit, scope.tenantId],
+    );
+    return scoped.rows.map(rowToTaskRun);
+  }
   const rows = await db.query<TaskRunRow>(
     'SELECT * FROM task_runs ORDER BY updated_at DESC LIMIT $1',
     [limit],

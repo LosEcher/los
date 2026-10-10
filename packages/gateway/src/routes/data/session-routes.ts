@@ -18,7 +18,7 @@ import { claimRunSpec } from '@los/agent/run-specs';
 import { getSessionSubagents } from '@los/agent/session-subagents';
 import { listVerificationRecordsForSession } from '@los/agent';
 import { findRecoverableSessions } from '../../chat-session-helpers.js';
-import { getOperatorPrincipal, getRequestContext, requireOperator } from '../../request-context.js';
+import { getOperatorPrincipal, getRequestContext, requireOperator, resolveReadScope } from '../../request-context.js';
 import { runIdempotentJson } from '../../idempotency.js';
 import { getConfig } from '@los/infra/config';
 import { resolveGatewayServiceIdentity } from '../../server.js';
@@ -68,9 +68,10 @@ export function registerSessionRoutes(
   app: FastifyInstance,
   deps: SessionRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/sessions', async () => {
+  app.get('/sessions', async (req) => {
     await deps.ensureSessionStore();
-    const sessions = await deps.listSessions();
+    const scope = resolveReadScope(req);
+    const sessions = await deps.listSessions(20, scope ? { tenantId: scope } : undefined);
     // Effective-model projection: metadata.model is the REQUESTED model (null
     // when unspecified); the event ledger holds the model each model.response
     // actually ran on. UIs show requested ?? effective.
@@ -121,6 +122,10 @@ export function registerSessionRoutes(
     await deps.ensureSessionStore();
     const session = await deps.loadSession(id);
     if (!session) return { error: 'Not found' };
+    // Read scope: a non-operator principal must not reach another tenant's session
+    // by guessing its id. Same shape as a missing row (no existence oracle).
+    const scope = resolveReadScope(req);
+    if (scope && session.tenantId !== scope) return { error: 'Not found' };
     const effective = await deps.latestEffectiveModels([id]);
     return { ...session, effectiveModel: effective.get(id) ?? null };
   });

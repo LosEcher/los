@@ -329,3 +329,54 @@ test('startup recovery advisory lock skips duplicate recovery owners', async () 
     await closeDb().catch(() => undefined);
   }
 });
+
+test('scoped task-run listing isolates tenants and leaves the unscoped view unchanged', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const stamp = Date.now();
+  const tenantA = `scope-a-${stamp}`;
+  const tenantB = `scope-b-${stamp}`;
+  const makeRun = (suffix: string, tenantId?: string) =>
+    createTaskRun({
+      id: `task-scope-${stamp}-${suffix}`,
+      sessionId: `session-scope-${stamp}`,
+      traceId: `trace-scope-${stamp}-${suffix}`,
+      dedupeKey: `dedupe-scope-${stamp}-${suffix}`,
+      tenantId,
+      projectId: `project-scope-${stamp}`,
+      userId: 'user-scope',
+      nodeId: 'node-scope',
+      requestId: `req-scope-${stamp}-${suffix}`,
+      workspaceRoot: '/tmp/workspace',
+      toolMode: 'project-write',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      promptPreview: 'scope isolation test',
+    });
+  try {
+    await ensureTaskRunStore();
+    const inA = await makeRun('a', tenantA);
+    const inB = await makeRun('b', tenantB);
+    const legacy = await makeRun('legacy');
+
+    const scopedA = await listTaskRuns(5000, { tenantId: tenantA });
+    const idsA = scopedA.map(run => run.id);
+    assert.ok(idsA.includes(inA.id));
+    assert.ok(!idsA.includes(inB.id), 'another tenant row must not leak into the scoped projection');
+    assert.ok(
+      !idsA.includes(legacy.id),
+      'a NULL-tenant legacy row is fail-closed for a scoped (non-operator) reader',
+    );
+
+    const scopedB = await listTaskRuns(5000, { tenantId: tenantB });
+    assert.ok(scopedB.some(run => run.id === inB.id));
+    assert.ok(!scopedB.some(run => run.id === inA.id));
+
+    const unscoped = await listTaskRuns(5000);
+    const allIds = new Set(unscoped.map(run => run.id));
+    assert.ok(allIds.has(inA.id) && allIds.has(inB.id) && allIds.has(legacy.id),
+      'the unscoped projection (operator / local mode) must stay unchanged');
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});

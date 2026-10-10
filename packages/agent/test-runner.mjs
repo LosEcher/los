@@ -146,6 +146,7 @@ const isolatedGroupA = [
 const isolatedGroupB = [
   'src/operator-control-consumer.test.ts',
   'src/operator-control.test.ts',
+  'src/operator-event-stream-cursor.test.ts',
   'src/pi-kernel-envelope.test.ts',
   'src/pi-kernel-input.test.ts',
   'src/pre-action-evidence.test.ts',
@@ -183,6 +184,7 @@ const isolatedGroupC = [
   'src/scheduler/task-heartbeat.test.ts',
   'src/self-check.test.ts',
   'src/service-instances.test.ts',
+  'src/session.integration.test.ts',
   'src/skill-distribution.test.ts',
   'src/stream-checkpoints.test.ts',
   'src/stream-lease.test.ts',

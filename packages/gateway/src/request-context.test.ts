@@ -7,6 +7,7 @@ import {
   _requiresActorContext,
   getRequestContext,
   registerRequestContext,
+  resolveReadScope,
   resolveTenantScope,
   resolveProjectScope,
 } from './request-context.js';
@@ -145,6 +146,48 @@ test('auth-disabled requests keep caller-supplied tenant/project override', asyn
     });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), { tenant: 'tenant-a', project: 'project-a' });
+  } finally {
+    setConfig(previousConfig);
+    await app.close();
+  }
+});
+
+// ── read scope resolution (ADR 0048 decision 3) ──────────────────
+
+async function readScopeFor(headers: Record<string, string>): Promise<string | undefined> {
+  const previousConfig = await loadConfig();
+  setConfig(scopeConfig(true));
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, scopeConfig(true));
+  app.get('/read-scope', async (req) => ({ scope: resolveReadScope(req) ?? null }));
+  try {
+    const response = await app.inject({ method: 'GET', url: '/read-scope', headers });
+    assert.equal(response.statusCode, 200);
+    return response.json().scope ?? undefined;
+  } finally {
+    setConfig(previousConfig);
+    await app.close();
+  }
+}
+
+test('non-operator read scope is pinned to its own tenant', async () => {
+  assert.equal(await readScopeFor({ 'x-los-auth-token': 'access-token' }), 'local');
+});
+
+test('operator read scope is unrestricted (cross-tenant visible)', async () => {
+  assert.equal(await readScopeFor({ 'x-los-operator-token': 'operator-token' }), undefined);
+});
+
+test('read scope collapses to unrestricted when auth is disabled (local single-user mode)', async () => {
+  const previousConfig = await loadConfig();
+  setConfig(scopeConfig(false));
+  const app = Fastify({ logger: false });
+  registerRequestContext(app, scopeConfig(false));
+  app.get('/read-scope', async (req) => ({ scope: resolveReadScope(req) ?? null }));
+  try {
+    const response = await app.inject({ method: 'GET', url: '/read-scope' });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().scope, null);
   } finally {
     setConfig(previousConfig);
     await app.close();
