@@ -17,7 +17,7 @@ test('resolveModelProfile keeps deepseek defaults and overrides', () => {
   const profile = resolveModelProfile('deepseek');
   assert.equal(profile.protocol, 'openai');
   assert.equal(profile.baseUrl, 'https://api.deepseek.com/v1');
-  assert.equal(profile.model, 'deepseek-v4-flash');
+  assert.equal(profile.model, 'deepseek-flash');
   assert.equal(profile.toolCallRepair, 'json-loose');
   assert.equal(profile.cachePolicy, 'prompt-cache-read');
 
@@ -108,8 +108,9 @@ test('summarizeModelProfile exposes runtime-relevant model capabilities', () => 
 
 test('resolveModelCapabilityProfile normalizes model aliases and scheduling-relevant capability flags', () => {
   const deepseek = resolveModelCapabilityProfile(resolveModelProfile('deepseek'));
-  // 2026-09-10 起站点现行模型名为 deepseek-flash，别名表随之扩展
-  assert.deepEqual(deepseek.modelAliases, ['deepseek-v4-flash', 'deepseek-flash', 'deepseek-v4-pro']);
+  // 2026-09-10 起站点现行模型名为 deepseek-flash，别名表随之扩展；
+  // 派生顺序是 [当前默认名, ...profile.modelAliases]（见 resolveModelCapabilityProfile）。
+  assert.deepEqual(deepseek.modelAliases, ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro']);
   assert.ok(!deepseek.modelAliases.includes('deepseek-chat'));
   assert.ok(!deepseek.modelAliases.includes('deepseek-reasoner'));
   assert.equal(deepseek.tools.parallelCalls, false);
