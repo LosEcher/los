@@ -6,6 +6,11 @@ import Fastify from 'fastify';
 
 import { registerNodeRoutes } from './routes/infrastructure/node-routes.js';
 import type { NodeRouteDependencies } from './routes/infrastructure/node-routes.js';
+import {
+  ensureNodeEnrollmentStore,
+  issueNodeEnrollmentToken,
+  redeemNodeEnrollmentToken,
+} from '@los/agent/node-enrollment';
 
 // ── Stub deps: in-memory executor node store, no DB ──
 
@@ -197,6 +202,60 @@ test('node probe parses socks5 endpoints as tcp socket targets', async () => {
   } finally {
     stubNodes.delete(nodeId);
     await closeServer(socketServer);
+    await app.close();
+  }
+});
+
+test('node heartbeat validates the per-node credential when present (ADR 0048 B3)', async () => {
+  await ensureNodeEnrollmentStore();
+  const stamp = Date.now();
+  const nodeId = `test-cred-${stamp}`;
+  const otherNodeId = `test-cred-other-${stamp}`;
+  const token = await issueNodeEnrollmentToken(nodeId);
+  const issued = await redeemNodeEnrollmentToken(token.token, nodeId);
+  assert.ok(issued, 'enrollment token must redeem into a node credential');
+
+  const app = Fastify({ logger: false });
+  registerNodeRoutes(app, stubDeps);
+  try {
+    // Valid credential for this node ⇒ accepted, and the row is stored.
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { 'x-los-node-credential': issued!.credential },
+      payload: { nodeId },
+    });
+    assert.equal(ok.statusCode, 200);
+    assert.ok(stubNodes.get(nodeId));
+
+    // A credential belonging to a different node must not attribute this heartbeat.
+    const mismatched = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { 'x-los-node-credential': issued!.credential },
+      payload: { nodeId: otherNodeId },
+    });
+    assert.equal(mismatched.statusCode, 401);
+    assert.equal(stubNodes.has(otherNodeId), false, 'a rejected heartbeat must not create a row');
+
+    // An unknown credential is refused rather than silently ignored.
+    const bogus = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      headers: { 'x-los-node-credential': 'not-a-real-credential' },
+      payload: { nodeId },
+    });
+    assert.equal(bogus.statusCode, 401);
+
+    // Transition leniency: a node that has not enrolled yet still heartbeats, so the
+    // fleet is not cut over until every node can send a credential.
+    const lenient = await app.inject({
+      method: 'POST',
+      url: '/nodes/heartbeat',
+      payload: { nodeId },
+    });
+    assert.equal(lenient.statusCode, 200);
+  } finally {
     await app.close();
   }
 });

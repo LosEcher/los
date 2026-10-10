@@ -24,6 +24,14 @@ export async function heartbeatNode(
   gatewayUrl?: string,
   fileSyncFolders?: Array<{ name: string; localPath: string; mode?: string }>,
   agentKey?: string,
+  /**
+   * Per-node credential from `POST /nodes/enroll`, sent as
+   * `x-los-node-credential` so the gateway can attribute this heartbeat to a
+   * specific node instead of the shared `agentKey` (ADR 0048 B3, send side first).
+   * Optional during the transition: the gateway verifies it when present and still
+   * accepts heartbeats without it.
+   */
+  nodeCredential?: string,
 ): Promise<void> {
   const capabilities: Record<string, unknown> = {
     run_agent: lifecycle.acceptingTasks,
@@ -86,6 +94,7 @@ export async function heartbeatNode(
       headers: {
         'content-type': 'application/json',
         ...(agentKey ? { authorization: `Bearer ${agentKey}` } : {}),
+        ...(nodeCredential ? { 'x-los-node-credential': nodeCredential } : {}),
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10_000),

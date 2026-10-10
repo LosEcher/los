@@ -106,6 +106,9 @@ export async function startExecutor() {
     return generated;
   })();
   const artifactStorageRoot = executorArtifactStorageRoot(nodeId, config.executor.artifactRoot);
+  // Per-node credential (ADR 0048 B3). Absent until the node is enrolled; the gateway
+  // verifies it when present and still accepts heartbeats without it.
+  const nodeCredential = config.executor.nodeCredential;
   const nodeCommandRuntime = createExecutorNodeCommandRuntime();
   const fileSyncStore = createFileSyncStore();
 
@@ -129,7 +132,7 @@ export async function startExecutor() {
 
   const reportHeartbeat = createHeartbeatReporter(async () => {
     const folders = await resolveFileSyncFolders();
-    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey);
+    await heartbeatNode(nodeId, publicUrl, version, nodeKind, connectModes, lifecycle, gatewayUrl, folders, agentKey, nodeCredential);
   }, log, { baseIntervalMs: 10_000, backoffFactor: 3, maxBackoffMs: 900_000 });
 
   // Self-scheduling heartbeat: fires immediately, then waits
@@ -229,6 +232,7 @@ export async function startExecutor() {
       gatewayUrl,
       await resolveFileSyncFolders(),
       agentKey,
+      nodeCredential,
     ),
   });
 

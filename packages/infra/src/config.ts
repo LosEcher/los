@@ -253,6 +253,14 @@ export const ConfigSchema = z.object({
     enabled: z.coerce.boolean().default(false),
     version: z.string().trim().min(1).optional(),
     agentKey: z.string().optional(),
+    /**
+     * Per-node credential issued by `POST /nodes/enroll` (redeemed from a one-time
+     * enrollment token). Sent as `x-los-node-credential` on the node heartbeat so the
+     * gateway can attribute the row to this node instead of relying on the shared
+     * `agentKey`. Optional: nodes that do not have one yet keep heartbeating, and the
+     * gateway keeps accepting them (ADR 0048 B3 transition).
+     */
+    nodeCredential: z.string().optional(),
     nodeId: z.string().optional(),
     nodeUrl: z.string().optional(),
     nodeKind: z.string().optional(),
