@@ -170,7 +170,7 @@ export const zhAssets: AssetsKeys = {
   'assets.skills.title': '技能',
   'assets.skills.subtitle': '可复用的 Agent 指令包。定义一次，可从 Chat 手动附加，或开启自动注入。',
   'assets.skills.runtimeTitle': '运行时',
-  'assets.skills.runtimeBody': 'Chat 与定时任务都会调用 selectSkillsForRun。手动：Chat 芯片或 /skill 名称。自动注入默认关闭（LOS_SKILLS_AUTO）。真实运行附加技能后会更新使用次数与最近使用时间。',
+  'assets.skills.runtimeBody': '**只有结构化调度路径**（scheduled-task-runner）会调用 selectSkillsForRun；交互式 Chat 与 OpenAI 兼容路由**不做**技能选择（2026-10-08 核实，此前文案声称 Chat 也会，与实现不符）。手动：Chat 芯片或 /skill 名称。自动注入默认关闭（LOS_SKILLS_AUTO）。真实运行附加技能后会更新使用次数与最近使用时间 —— 本机 usage_count 全为 0，因为该路径尚未被实际使用。',
   'assets.skills.runtimeWired': '已接入 Chat 与定时任务',
   'assets.skills.runtimeAutoOff': '自动注入：关闭（默认）',
   'assets.skills.allScopes': '全部作用域',

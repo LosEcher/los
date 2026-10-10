@@ -1,0 +1,318 @@
+# capability-ownership.yaml — 能力归属的唯一真源
+#
+# 目的（ADR 0047 第 8 节）：回答两个问题
+#   1. 这个**状态/能力**的权威副本落在哪一层、由谁写（R1 单写者）？
+#   2. 它有哪些消费者，若有多份实现，为什么不能合并？
+#
+# 规则（由 tools/check-capability-ownership.mjs 机械校验）：
+#   - id 全局唯一；owner_layer 必须属于下方枚举
+#   - implementations 长度 > 1 时，必须提供 why_not_merge
+#   - canonical 必须非空（"权威副本在哪"答不出来 = 边界没想清楚）
+#   - forbidden 必须非空（只说"谁写"不说"谁不能写" = 规则不完整）
+#
+# 维护纪律：新增/改变能力归属 → 改本文件 → 跑门禁；不许只改代码不改这里。
+version: 1
+
+owner_layers:
+  - global      # ~/.codex/AGENTS.md + rules/ + ~/.claude/rules/
+  - workspace   # los-workspace/{AGENTS.md,WORKSPACE.md,.workspace/projects.json}
+  - project     # <repo>/AGENTS.md | SKILL.md | TODO.md | docs/
+  - tool        # ~/.cargo/bin/* 单一可执行能力
+  - execution   # los：run_specs / task_runs / verification_records / session_events
+  - session     # DSH（及 Codex/Claude/Grok 作为入口）：会话/技能/调度/IM 渠道
+  - provider    # 协议 / 凭证 / 配额 / 健康 / 路由
+
+capabilities:
+
+  # ── provider 面（ADR 0047 第 2 节：保留三个决策中心，los 只做冲突判定）──
+  - id: model-routing
+    owner_layer: provider
+    canonical: "三中心并存：cc-switch.db（桌面工具） + ~/.dsh/profiles/*/cordis.patch.yml 的 agent-default-model（会话宿主） + ~/.los/config.yaml|config.overrides.yaml（agent/headless/治理）"
+    writers:
+      - "cc-switch GUI（桌面工具，无 API）"
+      - "DSH profile 配置（会话宿主）"
+      - "los provider CRUD / settings（agent/headless）"
+    readers: [los/discovery, codex, claude, grok, dsh]
+    adjudicator: los          # 三方冲突时由 los 发现并显式报冲突
+    forbidden: "任何一方代改另一方的 active provider；los 不得代改 DSH 的 agent-default-model 与 fallbacks root chain"
+    evidence: "docs/architecture/2026-10-08-tool-and-project-boundary-analysis.md §2.2"
+
+  - id: provider-credential-refresh
+    owner_layer: provider
+    canonical: "按 provider scope 分属各自实现（见 implementations）"
+    implementations:
+      - { path: "packages/agent/src/auth/kimi-code.ts", scope: "kimi", cadence: "per-request, <=60s 续期", why_not_merge: "订阅型 OAuth，凭证文件由 Kimi Code CLI 拥有" }
+      - { path: "packages/agent/src/auth/xai-oauth.ts", scope: "xai", cadence: "async + generation 栅栏 + 跨进程锁", why_not_merge: "单次性 refresh_token，需要跨进程互斥" }
+      - { path: "~/.local/bin/packycode-token-keychain", scope: "codex", cadence: "300000ms（config.toml:17）", why_not_merge: "第三方中转凭证在 macOS Keychain，由 Codex 侧脚本持有" }
+      - { path: "~/.cc-switch/cc-switch.db", scope: "claude/gemini/grokbuild", cadence: "app-managed", why_not_merge: "由无 API 的 GUI app 管理" }
+    forbidden: "把 scope 之外的 provider 交给这些实现；los 侧新增第 5 份凭证刷新实现（除非同时登记为何不能复用）"
+    evidence: "2026-10-08 实测：仅 2/20+ provider 自动刷新"
+
+  - id: provider-health-and-circuit
+    owner_layer: provider
+    canonical: "los：provider-probe.ts 的进程内 health score + provider-probe-circuit.ts 的熔断闩锁"
+    writers: ["los provider-probe（60s/300s）"]
+    readers: [los/scheduler-provider-selection, los/provider-fallback, /providers/health]
+    forbidden: "把 provider 归属当全局事实；从通用 listener 或单个 /health 推断 provider 健康"
+
+  - id: provider-promotion-decision
+    owner_layer: provider
+    canonical: "los provider_promotion_decisions 表（决策先落 proposed）"
+    writers: ["operator enforce（ADR 0017）"]
+    forbidden: "自动晋升 provider（advisory → required 必须 operator 单独 enforce）"
+
+  # ── 执行与证据面 ──
+  - id: run-lifecycle-state
+    owner_layer: execution
+    canonical: "los run_specs + task_runs；唯一迁移入口 transitionExecutionState()"
+    writers: ["los（经 transitionExecutionState / 正规端点 / CLI los run recover）"]
+    readers: [los/gateway, los/cli, dsh-los-ops, dsfolder 门禁, 看板]
+    forbidden: "直接 UPDATE run_specs/task_runs.status（AP1）；用会话状态或 UI 状态代替账本"
+    evidence: "AGENTS.md AP1；2026-10-08 回滚 16 条走 los run recover --apply --intent cancel"
+
+  - id: verification-evidence
+    owner_layer: execution
+    canonical: "los verification_records（含独立性字段）"
+    writers: ["los verification-runner / /runs/:id/verify"]
+    readers: [los/gateway, dsfolder 门禁]
+    forbidden: "把 verify-gate 的 manifest 逻辑复制进 los；把外部产物（runs.jsonl）当运行时证据"
+
+  - id: gate-verdict-classification
+    owner_layer: tool
+    canonical: "各门禁执行器自身的退出码语义（PASS / FAIL / 判不了=exit2）"
+    implementations:
+      - { path: "packages/agent/src/execution-transitions.ts", scope: "los verification-record 状态机", why_not_merge: "los 侧是账本状态机" }
+      - { path: "dsfolder/scripts/rust-repo-gate-run.mjs", scope: "rust 仓门禁三态分类", why_not_merge: "仓侧采集器，不写 los 账本" }
+      - { path: "dsfolder/verify-gate", scope: "通用声明式 manifest 执行器", why_not_merge: "独立可发布工具，跨语言" }
+    forbidden: "把环境故障（exit 127 / command not found / timeout / permission denied）记成 FAIL（真实漂移）"
+    evidence: "ADR 0047 第 6 节；2026-10-08 事故（11 check 假红）"
+
+  # ── 工具二进制层 ──
+  - id: rust-formatting
+    owner_layer: tool
+    tool: fmtguard
+    canonical: "fmtguard 的 scoped+gated 输出（调用方决定范围）"
+    consumers: [dsh/dsh-fmtguard]
+    forbidden: "仓内直接用裸 cargo fmt 作为门禁；los 接过 fmtguard（其输入是交互面信息，E3 拿不到）"
+    evidence: "ADR 0047 第 5 节"
+
+  - id: isolation-resource-lifecycle
+    owner_layer: execution
+    canonical: "los managed_workspaces 账本（状态机 creating|active|backup_ready|released|failed + 归属 + 事件流 + artifact）"
+    writers: ["los（唯一）"]
+    readers: [los/gateway, los/web, 门禁]
+    forbidden: "把隔离资源的身份/生命周期下放给某个后端组件；后端写 los 账本"
+    evidence: "ADR 0047 第 5.1 节（2026-10-08 仲裁：不是单 owner，是执行面/治理面分层）"
+
+  - id: verification-three-way-division
+    owner_layer: execution
+    canonical: >
+      **三方各有其位，不合并**（V4）：
+      ① **`verify-gate`（L3 工具）** = 执行**声明式 manifest**（file/cmd/http/git/json 断言），
+         产出带三态（pass/fail/na）的报告与退出码 0/1/2；
+      ② **各仓 `test/gates.sh` 之类的仓内脚本** = 该仓**特定不变量**
+         （crate 自己的约束，外部工具无从知晓）；
+      ③ **los `verification_records`（L4）** = **执行账本**，记录"哪次 run 用了哪些 requiredChecks、
+         结果与证据哈希"。
+    writers: ["verify-gate（①）", "各仓自己（②）", "los（③，唯一）"]
+    readers: [los 门禁编排, 各仓 CI, 治理日报]
+    forbidden: >
+      **不得一刀切合并**。具体禁止：
+      · 把 verify-gate 的 manifest 执行逻辑复制进 los（已在 `verification-evidence` 声明）；
+      · 让仓内 `gates.sh` 直接写 los 账本（违反 R1 单写者：账本只由 los 写）；
+      · 把"仓特定不变量"上提到 verify-gate 的通用 manifest —— 那会把仓的知识塞进工具层
+        （违反 R2 引用方向：工具层不得知道项目）；
+      · 把 los 的 `verification_records` 当作**可执行**门禁（它只记账，不判定）。
+    evidence: >
+      ADR 0047 判据 J6（计划/实现/证据三态分离）。实测支撑：verify-gate 的
+      per-check `result` 是三态 `pass|fail|na`、顶层 `exitCode` 三态 `0/1/2`，
+      且"全 na ⇒ inconclusive + exit 2"（2026-10-08 收紧，见 `gate-verdict-classification`）；
+      各 rust 仓的仓内门禁（`cargo build --locked && bash test/gates.sh`）已作为
+      `gates.json` 的 `documented` check 被 los **编排**（不是复制）。
+    why_not_merge: >
+      "怎么执行断言"、"这个仓的独有约束是什么"、"哪次执行发生了什么" 是**三个不同问题**，
+      各有其权威面。合并任两者都会丢掉一个：合并 ①② 会让通用工具携带项目知识；
+      合并 ②③ 会让执行方给自己写证据（自证）；合并 ①③ 会让账本获得判定权。
+
+  - id: agent-skills-execution-surfaces
+    owner_layer: session
+    canonical: >
+      **两个各自独立的技能注册表，按执行面分工，不存在"投影"关系**：
+      ① 交互式会话的技能 = DSH `~/.agents/skills`（**72 条**，动态发现）；
+      ② 结构化调度/执行器路径的技能 = los `skills` 表（**35 条**，含 version_hash 用于变更检测）。
+    writers: ["DSH（①）", "los skills CRUD 路由（②）"]
+    readers: ["DSH 交互会话（①）", "los scheduled-task-runner（②）"]
+    forbidden: >
+      不得把 los `skills` 表当成 DSH `~/.agents/skills` 的**投影**（或反之）：实测两者
+      名称**只有 11/35 重叠**，且 los 侧的 `source_path` **为空**（无来源指针，不是动态投影；
+      是导入快照）。两套注册表服务**不同执行面**，合并会丢掉其中一个的独立演进。
+      也不得声称"交互式 Chat 会做技能选择" —— 2026-10-08 核实：`selectSkillsForRun` 的
+      **唯一调用方**是 `scheduler/scheduled-task-runner.ts`，los 的 Chat 路由与
+      OpenAI 兼容路由**都不做技能选择**（web i18n 文案曾如此声称，已修正）。
+    evidence: >
+      2026-10-08 实测：DSH 72 条 vs los 35 条，名称交集 11；los `skills.source_path` 全空；
+      `usage_count > 0` 的行数 = **0**（该调度路径在本机尚未被实际使用 —— 这是
+      **休眠**，不是"投影所以不消费"）。grep `selectSkillsForRun` 仅命中
+      scheduled-task-runner 与 barrel 导出。
+    why_not_merge: >
+      DSH 的技能服务于**交互式**会话（人在环、提示驱动）；los 的技能服务于**结构化调度**
+      （无人在环、预算受限、AP11 要求放在 user-turn 而非 system prompt 以保 cache）。
+      预算语义、选择时机、缓存约束都不同，强行统一会把交互面的动态发现能力与执行面的
+      预算控制能力互相掣肘。
+
+  - id: rust-format-cleanliness-vs-scoped-formatting
+    owner_layer: tool
+    canonical: "两个**不同问题**，各有唯一 owner：① 整仓 rustfmt 干净性 = `cargo fmt --all --check`（每仓 gates.json 的 `fmt` check，CI 亦跑）；② agent 改动范围内的增量格式化 = `fmtguard`（读 VCS diff 决定范围）"
+    writers: ["各 rust 仓（①）", "fmtguard（②）"]
+    readers: [各 rust 仓 CI, rust-repo-gate-run.mjs, agent 编辑流程]
+    forbidden: >
+      **两者不可互换**（2026-10-08 取证）。曾计划"各仓格式检查统一走 fmtguard、删除裸
+      cargo fmt --check" —— 该表述**不可实现**：`fmtguard` 在干净树下
+      `files_scanned = 0`（stderr: "nothing to do (no scoped .rs files)"），它格式化
+      "本次改动涉及的范围"，**答不了"整仓是否干净"**。把它当 CI 的整仓门禁使用会得到
+      **假绿**（verdict: ok 而实际一个文件都没检查）—— 与 verify-gate 的
+      "empty gate = false confidence"、"全 na 算 pass" 属**同一族**："空即通过"。
+      反方向亦不可：`cargo fmt` 会重排整个 workspace，在脏树上改写无关文件。
+    evidence: >
+      2026-10-08 实测：sandbox-run 干净树下 `fmtguard --scope-from-git` →
+      `{"verdict":"ok","files_scanned":0}` + stderr "nothing to do (no scoped .rs files)"，
+      而 `cargo fmt --check` 在同树返回 0 且确实检查了整仓；六个 rust 仓**都不是
+      workspace** ⇒ `--check` 与 `--all --check` 功能等价（统一为后者仅为前瞻）。
+      覆盖缺口已补：5 个 enabled 仓的 gates.json 均含 `fmt` check
+      （含**无法拥有 CI** 的 session-index —— 它连 .github/ 都没有）。
+    why_not_merge: >
+      "整仓干净"与"我的改动是否合规"是**不同问题**，合并会丢掉其中一个：合并到
+      cargo fmt 会重排无关文件；合并到 fmtguard 会让 CI 失去整仓保证。
+  - id: isolation-backend-registry
+    owner_layer: execution
+    canonical: "contracts/isolation-backend.yaml（IsolationBackend 接口，含三条接口纪律）+ isolation.backend 配置（auto|jj-workspace|git-worktree|docker）"
+    writers: ["los"]
+    implementations:
+      - { path: "packages/agent/src/managed-workspaces.ts", scope: "jj-workspace / git-worktree 两个内建后端（纯命令编排）", why_not_merge: "内建后端必须在无外部二进制依赖时也可用" }
+      - { path: "dsfolder/sandbox-run", scope: "docker 后端（sandbox-run --backend docker）", why_not_merge: "容器编排属 L3 工具领域，不在 los 重写；它已是独立可发布组件且已有 Backend 枚举" }
+    readers: [los/managed-workspaces]
+    forbidden: "后端返回 PASS/FAIL（判定属门禁层）；显式指定后端不可用时静默回落到另一个后端（必须 fail-closed 报因）；把 vcsKind 硬编码为 'jj'"
+    evidence: "ADR 0047 第 5.1 节；C1 已落地（contracts/isolation-backend.yaml + 迁移 062 把 vcs_kind 改名 backend 并加 CHECK）；sandbox-run src/main.rs:94-116（Backend::{Auto,Worktree,Docker}）"
+
+  - id: remote-command-normalization
+    owner_layer: tool
+    tool: unirun
+    canonical: "unirun capabilities --json 的能力集 + 归一化执行结果"
+    consumers: [los/gateway-ssh-runner, los/deploy-to-remote]
+    forbidden: "从 unirun 版本号推断其特性（必须问 capabilities）"
+    evidence: "packages/gateway/src/unirun-capabilities.ts:1-14 记录的 0.3.0 事故"
+
+  - id: rust-binary-size-budget
+    owner_layer: tool
+    tool: rustopt
+    canonical: "预算以各仓内 manifest 为准；dsfolder/.rust-los-gov/gates.json 只是**带 hash 的快照**"
+    consumers: [dsfolder/rust-repo-gate-run]
+    forbidden: "在 gates.json 与仓内 manifest 各写一份预算（已发生 1.44 MB 口径差）"
+
+  - id: run-event-diff
+    owner_layer: tool
+    tool: run-diff
+    status: deprecated
+    canonical: "无（二进制与 ~/.cargo/bin/run-diff 都不存在；2026-10-08 归档退役）"
+    consumers: []
+    forbidden: "在无消费者、无排期、无 VCS 的情况下继续当作已接受设计"
+    evidence: "ADR 0047 第 5 节；仲裁文档 2026-10-08-arbitration-isolation-owner-and-run-diff.md §4（归档不删代码；复活需先纳入 VCS 并作为 DSH 评测面组件）"
+
+  # ── 会话与投影 ──
+  - id: cross-session-search
+    owner_layer: session
+    canonical: "~/.dsh/sessions/**（JSONL/zstd，canonical）+ ~/.dsh/storages/session-index.db（可丢弃的 EAV 投影）"
+    writers: ["DSH session log（唯一写入方）", "session-index launchd hourly（只读摄取 → 投影）"]
+    readers: [dsh/session-index 插件, los 只读投射（P1 L1-2，待建）]
+    forbidden: "写 DSH canonical；把投影当权威；在投影落后的情况下断言'没有这段历史'"
+    evidence: "session-index README: the projection is disposable, the session log stays canonical"
+
+  - id: execution-session-ledger
+    owner_layer: execution
+    canonical: "los sessions + session_events（语义账本，11 态状态机）"
+    writers: ["los gateway"]
+    readers: [los/web SessionInspector, los/cli sessions]
+    forbidden: "与 DSH session log 混为一谈（词法投影 ≠ 语义账本）；两者必须能按 session_id/trace 关联"
+
+  # ── 记忆（ADR 0047 第 3 节：三层 canonical，禁止互相复制正文）──
+  - id: memory-personal-longterm
+    owner_layer: session
+    canonical: "los-memory（SQLite ledger）"
+    writers: ["los-memory"]
+    forbidden: "写 ~/.dsh/memories 或 los packages/memory 的存储"
+
+  - id: memory-execution
+    owner_layer: execution
+    canonical: "los packages/memory（Postgres：compaction / procedural candidates）"
+    writers: ["los memory 模块"]
+    forbidden: "跨层复制正文；把与 run_spec 无关的个人记忆写进来"
+
+  - id: memory-session-working
+    owner_layer: session
+    canonical: "~/.dsh/memories（MEMORY.md / daily / projects/<hash>）"
+    writers: ["第三方插件 dsh-memory-evolve v0.1.0（lib/index.js:402-404 设定 memoryDir）"]
+    readers: [dsh-memory-evolve 工具, mem-sync-evolve.py]
+    forbidden: "把它当 DSH 核心能力（插件禁用/替换即该层消失）；跨层复制正文"
+    evidence: "ADR 0047 第 3 节附注"
+
+  # ── 技能与工具面 ──
+  - id: skills-execution-surface
+    owner_layer: session
+    canonical: "~/.agents/skills（DSH 技能 provider 的读面，rank: project 100/200 > custom 300 > user 400/500）"
+    writers: ["agent 手工/技能安装器", "dsh-memory-evolve（skillDir 默认指向同一目录）"]
+    readers: [dsh skill provider, codex, claude, grok]
+    forbidden: "把 skills 的正文复制到各工具各一份（~/.agents ∩ ~/.claude = 11 个同名，其中 6 个是独立实体副本）"
+
+  - id: skills-registry-projection
+    owner_layer: execution
+    canonical: "los skills 表（投影/登记，供治理与检索）"
+    writers: ["los 同步路径"]
+    forbidden: "把 los skills 表当执行面（它不执行技能；执行面是 ~/.agents/skills）"
+
+  - id: mcp-tool-surface
+    owner_layer: execution
+    canonical: "los los-mcp-server（ADR 0031：MCP 是唯一程序化接口）"
+    writers: ["los gateway"]
+    readers: []
+    forbidden: "在零消费者的情况下继续扩面；把 dsh-los-ops 的 HTTP 能力与 MCP 适配器混为一谈（两者能力不重叠）"
+    evidence: "ADR 0031；2026-10-08 实测 4 工具 0 次调用"
+
+  # ── 工作区与项目层 ──
+  - id: workspace-project-registry
+    owner_layer: workspace
+    canonical: "los-workspace/.workspace/projects.json"
+    writers: ["工作区维护者"]
+    readers: [los related-project-scanner, dsfolder 工具, P1 跨项目读模型]
+    forbidden: "用叙述性文档（WORKSPACE.md）当登记真源；登记里出现磁盘上不存在的仓"
+    evidence: "WORKSPACE.md 声称 7-8 个项目，实测 projects/ 只有 los 与 weclaw"
+
+  - id: umbrella-repo-structure
+    owner_layer: workspace
+    canonical: "dsfolder 的父 AGENTS.md + .gitignore（母仓只提交非仓内容）"
+    writers: ["dsfolder 维护者"]
+    forbidden: "把内嵌独立仓当普通目录提交；在父目录 git add -A"
+    evidence: "ADR 0047 第 4 节；run-diff/session-index 与门禁脚本均无 VCS"
+
+  - id: keystroke-ownership
+    owner_layer: project
+    canonical: "cankey（cankey-core/-protocol/-config/-lexicon）：OS 击键所有权与投递协议"
+    writers: ["cankey"]
+    readers: [cantool, canpad]
+    forbidden: "cantool 复制或绕过 cankey 的投递协议；cantool 向 cankey-core 反向引入平台依赖；把 cankey-sidecar 变成 cankey 的必需（它是可选扩展点）"
+    evidence: "ADR 0047 第 7 节；实测 cankey 全仓仅 1 处 cantool 提及（注释掉的示例 socket），cankey-sidecar 自述 'Not used in Engine::step'"
+
+  - id: shared-capability-abstraction
+    owner_layer: project
+    canonical: "独立可发布单元（crate/package，有自己的写权与发布节奏）—— 由两个应用各自选用"
+    writers: ["该独立单元的 owner"]
+    readers: [cantool, cankey, canpad]
+    forbidden: "让 A 应用从 B 应用的内部 crate 引用共性能力（等于建立不需要的耦合）；在只有单一消费者时提前抽象；把共享能力落进任一应用的 core"
+    evidence: "ADR 0047 第 7 节 A1–A4（operator 口径：有共性能力可抽象共用，但不强耦合、各自独立可用）"
+
+  - id: canpad-to-cantool-capability-consumption
+    owner_layer: project
+    canonical: "cantool 的已发布端点（`GET /v1/capabilities`）"
+    writers: ["cantool"]
+    readers: [canpad]
+    forbidden: "canpad 定义新端点；canpad 把令牌落盘；把 401 当成功；手改 canpad-core 的生成物"
+    evidence: "ADR 0047 第 7 节 R4/R5；canpad/TODO.md:14,58"

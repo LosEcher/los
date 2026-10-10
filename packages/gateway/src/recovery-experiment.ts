@@ -266,6 +266,8 @@ async function drillDbUnavailable(suffix?: string): Promise<RecoveryExperimentRe
   const published: string[] = [];
   const result = await publishExecutionOutboxBatch({
     ownerId: `drill-owner-${s}`,
+    // 演练用 stub 发布器：绝不能顺手认领 DSH 事件行（那会把没投递的事件标记成已投递）。
+    excludeEntityTypes: ['dsh_event'],
     publish: async (record) => {
       published.push(String(record.sessionEventId));
     },

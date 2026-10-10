@@ -1,6 +1,13 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": ["NODE_ENV"],
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "TEST_DATABASE_URL",
+    "LOS_ALLOW_LIVE_TEST_DB",
+    "LOS_TEST_RUN_ID",
+    "LOS_FORCE_AUTH_IN_TEST"
+  ],
   "globalDependencies": ["tsconfig.base.json"],
   "tasks": {
     "build": {

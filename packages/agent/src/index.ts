@@ -213,3 +213,24 @@ export {
   type DailyAgentQualityBaseline, type DailyAgentQualityEvidenceWindow,
   type DailyAgentQualitySnapshot,
 } from './daily-agent-quality/index.js';
+export {
+  ensureDshSessionCatalogStore,
+  projectSessionCatalog,
+  matchPainPattern,
+  PAIN_PATTERNS,
+  PAIN_PATTERN_VERSION,
+  DSH_SESSION_INDEX_DB,
+  querySqlite,
+  type CatalogProjectionResult,
+} from './dsh-session-catalog.js';
+export {
+  projectSessionPain,
+  projectContextInjection,
+  RUNTIME_CONTEXT_MARKER,
+  SKILL_CATALOG_MARKER,
+  INJECTION_MARKER_VERSION,
+} from './dsh-session-injection.js';
+export {
+  getCrossProjectSummary,
+  type CrossProjectSummary,
+} from './dsh-session-summary.js';

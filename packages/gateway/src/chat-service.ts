@@ -105,6 +105,9 @@ export async function runChat(params: {
   branchAtTurn: number | undefined;
   traceId: string;
   dedupeKey: string | undefined;
+  /** 调用方标识（x-los-client / User-Agent 归一化，见 client-label.ts）。只落
+   *  会话 metadata 的 `client` 字段：回答"谁在用 los 网关"，不做鉴权、不转发。 */
+  clientLabel?: string | null;
   /** Usage feature attribution (roadmap R6); defaults to 'chat'. */
   feature?: string;
   signal?: AbortSignal;
@@ -396,6 +399,7 @@ export async function runChat(params: {
         traceId: scheduled.taskRun.traceId,
         requestId, tenantId, projectId, userId,
         nodeId: scheduled.taskRun.nodeId ?? null,
+        client: params.clientLabel ?? null,
         dedupeKey: scheduled.taskRun.dedupeKey ?? null,
         resumed: Boolean(resumedSession),
         resumeMessageCount: resumedSession?.messages.length ?? 0,

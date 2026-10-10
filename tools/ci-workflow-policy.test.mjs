@@ -73,10 +73,16 @@ test('Forgejo heavy jobs skip via path-gate output, not step exit 0', async () =
 test('GitHub gate-test heavy steps skip on mirror/* heads (mirror-PR lane)', async () => {
   // Mirror PRs (head mirror/*, e.g. mirror/forgejo-main-sync) carry Forgejo-
   // validated content; re-running the full test suite on GitHub adds no merge
-  // evidence but re-exposes the intermittent "test processes lost DATABASE_URL"
-  // runner env class (2026-06-13 56321f52; 2026-08-20 PR #256) that blocks
-  // mirror sync. Heavy steps skip at step level so the required gate-test
-  // check stays green. Non-mirror PRs and main pushes keep the full suite.
+  // evidence. Heavy steps skip at step level so the required gate-test check
+  // stays green. Non-mirror PRs and main pushes keep the full suite.
+  //
+  // ACCEPTED COST (2026-10-07): this skip means the turbo test path
+  // (`pnpm test` -> tools/run-tests.sh -> `turbo test`) is first exercised on
+  // the push to main, and Forgejo's direct `pnpm --filter @los/* test` calls
+  // cannot detect turbo-path defects. That is exactly how a turbo.json
+  // regression (3130de14) kept every PR green while 9 consecutive main pushes
+  // failed. The skip stays, but the turbo -> task env contract is now asserted
+  // by tools/check-turbo-env-passthrough.mjs in an always-on gate phase.
   const github = await loadWorkflow('../.github/workflows/ci.yml');
   const mirrorSkip = "${{ !startsWith(github.head_ref, 'mirror/') }}";
 

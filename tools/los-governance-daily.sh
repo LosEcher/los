@@ -85,6 +85,23 @@ if [[ "${OP_PAUSED:-0}" -gt 0 ]]; then
 fi
 echo
 
+# ── 1b. 定时任务 circuit open（被调度排除）──────────────────
+# 口径缺口（2026-10-09 前）：circuit open 的 schedule 只出现在第 5 节「启用任务」表里，
+# 读者会以为它照常每 6h 在跑；实际它被调度 SQL 排除（`circuit_state IN ('closed','half_open')`），
+# next_run_at 会停在过去。恢复窗口 = CIRCUIT_RECOVERY_WINDOW_MS = 24h
+# （packages/agent/src/scheduled-work/policy.ts），到期后只放**一次** half_open 探测；
+# 探测失败则重新计时。这里把冷却剩余算出来，避免读成「永久冻结」。
+echo "### 1b. 定时任务 circuit open（被调度排除，24h 冷却后放一次探测）"
+CIRCUIT_ROWS=$(q "SELECT title || ' | opened=' || to_char(circuit_opened_at, 'MM-DD HH24:MI') || ' | fail=' || consecutive_failures || ' | next=' || to_char(next_run_at, 'MM-DD HH24:MI') || '（已过期 ' || round(EXTRACT(EPOCH FROM (now() - next_run_at)) / 3600) || 'h） | 冷却至=' || to_char(circuit_opened_at + interval '24 hours', 'MM-DD HH24:MI') FROM scheduled_work_items WHERE status = 'enabled' AND circuit_state <> 'closed' ORDER BY circuit_opened_at;")
+if [[ -n "$CIRCUIT_ROWS" ]]; then
+  readarray -t CIRCUIT_LINES <<< "$CIRCUIT_ROWS"
+  table "task | opened | failures | next | cooldown" "${CIRCUIT_LINES[@]}"
+  echo "- 恢复动作：冷却到期自动转 half_open 并放一次探测；如需立即恢复，人工置回 closed（会立刻按 next_run_at 到期重跑）。"
+else
+  echo "- 无（全部 closed）"
+fi
+echo
+
 # ── 2. 定时任务待审批 ───────────────────────────────────────
 echo "## 2. 定时任务待审批（awaiting_approval）"
 ROWS=$(q "SELECT r.id || ' | ' || s.title || ' | for=' || to_char(r.scheduled_for, 'MM-DD HH24:MI') || ' | policy=' || s.approval_policy || ' | timeout=' || (s.approval_timeout_ms / 60000) || 'min' FROM scheduled_work_item_runs r JOIN scheduled_work_items s ON s.id = r.schedule_id WHERE r.status = 'awaiting_approval' ORDER BY r.scheduled_for;")
@@ -221,6 +238,15 @@ if [[ -n "$FLEET_ROWS" ]]; then
 else
   echo "- 无在线 executor 记录"
 fi
+# 账本新鲜度（2026-10-09 新增）：只有一个在线计数会掩盖"从未被探测过"的孤儿行
+# ——27 个 ssh_target 是 2026-08-19 从 ~/.ssh/config 一次性导入的，没有心跳源，
+# 心跳因此集体冻在那一天；把它们的年龄显式报出来，"8/8 executor online" 才不会被误读。
+STALE_NODES=$(q "SELECT node_kind || ' | ' || count(*) || ' | ' || to_char(min(last_heartbeat_at), 'MM-DD HH24:MI') || ' → ' || to_char(max(last_heartbeat_at), 'MM-DD HH24:MI') || ' | ' || count(*) FILTER (WHERE COALESCE(last_probe_error, '') <> '') || ' 行有原因标记' FROM executor_nodes WHERE last_heartbeat_at < now() - interval '7 days' GROUP BY node_kind ORDER BY 1;")
+if [[ -n "$STALE_NODES" ]]; then
+  readarray -t STALE_LINES <<< "$STALE_NODES"
+  echo "- **账本陈旧行（心跳 >7d）**："
+  table "node_kind | 行数 | 心跳区间 | 原因" "${STALE_LINES[@]}"
+fi
 echo
 
 # ── 7b. 声明目标一致性 → todo（P0-6）─────────────────────────
@@ -256,6 +282,118 @@ else
 fi
 echo
 
+# ── 8. 跨项目事实（DSH session 只读投射，P1 L1-2）────────────
+# 数据源是 DSH 的 session-index.db，由 `pnpm project:dsh-sessions` 投影进 los。
+# 这里只**读**投影表；投射本身不在此触发（避免日报里跑重活）。
+echo "## 8. 跨项目（DSH session 只读投射）"
+# 连接串复用脚本头部解析出的 $DB_URL（env → .env）。2026-10-09 前这里读
+# `${DATABASE_URL:-}`：正常调用（未导出 env、靠 .env 回退）时恒为空 ⇒ 本节
+# 整节 SKIP，跨项目事实面在日报里长期不可见。
+CROSS_DB="$DB_URL"
+if [[ -n "$CROSS_DB" ]]; then
+  X_ASOF=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT to_char(max(as_of), 'YYYY-MM-DD HH24:MI') FROM dsh_session_catalog;" 2>/dev/null)
+  if [[ -n "$X_ASOF" ]]; then
+    X_STATES=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(path_state || '=' || n, ' ') FROM (SELECT path_state, count(*) n FROM dsh_session_catalog GROUP BY path_state ORDER BY 1) t;" 2>/dev/null)
+    X_PROJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(DISTINCT project_key) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+    X_OLD=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(*) FROM dsh_session_catalog WHERE cwd LIKE '%syncthing/project%' AND path_state='resolved';" 2>/dev/null | tr -d ' ')
+    X_UNKNOWN=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT count(*) FROM dsh_session_catalog WHERE path_state='unknown';" 2>/dev/null | tr -d ' ')
+    echo "- as_of: ${X_ASOF}"
+    echo "- 三态: ${X_STATES:-?}"
+    echo "- 活跃项目（project_key 去重）: ${X_PROJ:-0}"
+    echo "- **旧路径会话已归属**: ${X_OLD:-0} 条（B3.3 出口判据 = 214）"
+    echo "- unknown（无法归属，**保留不丢弃**）: ${X_UNKNOWN:-0} 条"
+    # 跨项目重复痛点 top3（按 sessions 去重 —— 用 sessions 而非 occurrences，
+    # 因为"多少会话踩了这个坑"比"踩了多少次"更能代表影响面）
+    X_PAIN=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT string_agg(pattern_key || ' ' || ses || ' sessions', ' / ') FROM (SELECT pattern_key, sum(sessions)::int ses FROM dsh_session_pain GROUP BY pattern_key ORDER BY ses DESC LIMIT 3) t;" 2>/dev/null)
+    echo "- 跨项目重复痛点 top3: ${X_PAIN:-（空 — 跑 \`pnpm project:dsh-sessions\`）}"
+    # 上下文注入开销（P1 §1.4 的"无度量"问题，此处变得可度量）
+    X_INJ=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT 'runtime_context ' || COALESCE(sum(runtime_context_injections),0) || ' 次 / skill_catalog ' || COALESCE(sum(skill_catalog_injections),0) || ' 次（14d）' FROM dsh_context_injection;" 2>/dev/null)
+    echo "- 上下文注入: ${X_INJ:-（空）}"
+
+    # 新鲜度：投射落后 >6h 说明 session-index 小时任务或投射没跑。
+    # 年龄在 **SQL 里**算（epoch 秒），不经 shell/python 解析时间戳：2026-10-09 前的
+    # 实现先 `tr -d ' '` 把 "2026-10-08 17:47:44+08" 打成 "2026-10-0817:47:44+08"，
+    # python fromisoformat 抛错返回 -1 ⇒ [STALE] 永不触发（O3/T2「空即通过」）。
+    # 阈值可用 LOS_DSH_PROJECTION_STALE_S 覆盖（自测负向控制用）。
+    AGE_S=$("$PSQL_BIN" "$CROSS_DB" -tAc "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - max(as_of)))::bigint, -1) FROM dsh_session_catalog;" 2>/dev/null | tr -d ' ')
+    STALE_S="${LOS_DSH_PROJECTION_STALE_S:-21600}"
+    [[ "$STALE_S" =~ ^[0-9]+$ ]] || STALE_S=21600
+    if [[ "${AGE_S:--1}" -lt 0 ]]; then
+      echo "- **[STALE?]** 无法计算投射年龄（AGE_S=${AGE_S:--1}）—— 按「未知」处理，不得当作「新鲜」"
+    elif [[ "$AGE_S" -gt "$STALE_S" ]]; then
+      echo "- **[STALE]** 投射已 $((AGE_S/3600))h 未更新（阈值 $((STALE_S/3600))h）⇒ 检查 session-index 小时任务与 \`pnpm project:dsh-sessions\`"
+    fi
+  else
+    echo "- 投影表为空 ⇒ 跑 \`pnpm project:dsh-sessions\`（这不是"没有会话"）"
+  fi
+else
+  echo "- SKIP: 无法解析数据库连接（DB_URL 为空）"
+fi
+echo
+
+# ── 9. 边界审计（ADR 0047 判据 J1–J10 的本机证据面）────────────
+# 为什么放进日报：这四条检具读**本机**状态（cc-switch GUI、DSH profile、
+# session-index、工作区文档），不适合进 CI，但必须有人每天看。
+#
+# **注意**：本脚本是 `set -euo pipefail`，而检具在发现 ERROR 时**故意**非零退出。
+# 因此这里必须显式吞掉退出码 —— 日报的职责是**呈现**发现，不是因发现而自杀
+# （否则有 ERROR 时整份日报发不出去，恰好丢掉最该看的内容）。
+# 需要退出码的门禁语义请直接跑 `pnpm audit:boundary` / `pnpm audit:model-route:check`。
+echo "## 9. 边界审计（ADR 0047）"
+BOUNDARY_SUMMARY="SKIP"
+if [[ -x "$ROOT/tools/boundary-audit.sh" ]]; then
+  BOUNDARY_OUT="$(bash "$ROOT/tools/boundary-audit.sh" --quiet 2>&1 || true)"
+  BOUNDARY_SUMMARY="$(printf '%s\n' "$BOUNDARY_OUT" | grep -m1 '^汇总:' | sed 's/^汇总: //' || true)"
+  BOUNDARY_SUMMARY="${BOUNDARY_SUMMARY:-SKIP}"
+  # 只列 ERROR/WARN 明细，避免日报被 OK 行淹没
+  # sed 先去掉前导空格与检具前缀，再统一加 "- "，避免 "-   WARN ..." 这种双空格
+  DETAIL="$(printf '%s\n' "$BOUNDARY_OUT" | grep -E 'ERR|WARN' | head -8 | sed -E 's/^[[:space:]]+//' || true)"
+  if [[ -n "$DETAIL" ]]; then printf '%s\n' "$DETAIL" | sed 's/^/- /'; else echo "- 无 ERROR / WARN"; fi
+else
+  echo "- SKIP: tools/boundary-audit.sh 不可执行"
+fi
+echo
+
+# 路由一致性（J8）：只在有冲突时列明细
+ROUTE_STATE="OK"
+ROUTE_CONFLICTS="$(pnpm -s audit:model-route 2>/dev/null | grep -E 'verdict   : conflict' || true)"
+if [[ -n "$ROUTE_CONFLICTS" ]]; then
+  ROUTE_STATE="CONFLICT"
+  printf '%s\n' "$ROUTE_CONFLICTS" | sed 's/^/- /'
+fi
+echo "- 路由一致性（J8）: ${ROUTE_STATE}"
+echo
+
+# rust 体积预算依据（B2.1 D8）：台账是实测唯一真源，预算是自证依据的策略值。
+# 同样**吞掉退出码**（有缺口时非零），日报只呈现。
+BUDGET_STATE="SKIP"
+BUDGET_CHECK="$HOME/syncfolder/project/dsfolder/scripts/rust-budget-check.mjs"
+if [[ -f "$BUDGET_CHECK" ]]; then
+  BUDGET_OUT="$(node "$BUDGET_CHECK" 2>&1 || true)"
+  # 取检具自己的汇总行（成功与失败措辞不同，故直接截取而不是正则提数字）
+  BUDGET_STATE="$(printf '%s\n' "$BUDGET_OUT" | grep -E '^rust-budget-check (OK|FAILED):' | head -1 | sed 's/^rust-budget-check //' || true)"
+  BUDGET_STATE="${BUDGET_STATE:-parse-failed}"
+  BUDGET_BAD="$(printf '%s\n' "$BUDGET_OUT" | grep -E '^  - ' | head -5 || true)"
+  if [[ -n "$BUDGET_BAD" ]]; then printf '%s\n' "$BUDGET_BAD" | sed 's/^  /- /'; fi
+fi
+echo "- rust 体积预算依据（D8）: ${BUDGET_STATE}"
+echo
+
+# 工具链新鲜度：本机二进制 vs 源码仓版本。
+# 为什么必须每天看：跑的是旧二进制时，**源码里所有修复在本机都不生效**，
+# 而任何"工具行为"结论都基于旧二进制（2026-10-08 实测 verify-gate 0.1.0 vs 0.2.0）。
+FRESH_STATE="SKIP"
+FRESH_CHECK="$HOME/syncfolder/project/dsfolder/scripts/check-toolchain-freshness.mjs"
+if [[ -f "$FRESH_CHECK" ]]; then
+  FRESH_OUT="$(node "$FRESH_CHECK" 2>&1 || true)"
+  FRESH_STATE="$(printf '%s\n' "$FRESH_OUT" | grep -E '^check-toolchain-freshness (OK|FAILED):' | head -1 | sed 's/^check-toolchain-freshness //' || true)"
+  FRESH_STATE="${FRESH_STATE:-parse-failed}"
+  FRESH_BAD="$(printf '%s\n' "$FRESH_OUT" | grep -E '^  - ' | head -5 || true)"
+  if [[ -n "$FRESH_BAD" ]]; then printf '%s\n' "$FRESH_BAD" | sed 's/^  /- /'; fi
+fi
+echo "- 工具链新鲜度: ${FRESH_STATE}"
+echo
+
 # retired 是有意下线、operator 暂停是人工意图，都不算异常；
 # 只有系统自暂停（throttle/circuit/遗留 NULL）/ circuit 非 closed / 连续失败才算。
 GOV_CNT=$(q "SELECT count(*) FROM governance_jobs WHERE (status = 'paused' AND COALESCE(pause_source, '') <> 'operator') OR circuit_state <> 'closed' OR consecutive_failures > 0;")
@@ -263,4 +401,4 @@ APP_CNT=$(q "SELECT count(*) FROM scheduled_work_item_runs WHERE status = 'await
 DL_CNT=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL;")
 TODO_CNT=$(q "SELECT count(*) FROM todos WHERE archived_at IS NULL AND status NOT IN ('done', 'cancelled') AND (source = 'ga_loop' OR title LIKE 'GA Loop%' OR title LIKE 'GA 升级%') AND priority IN ('P0', 'P1', 'P2');")
 echo "---"
-echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE}"
+echo "汇总: 治理异常=${GOV_CNT:-0} 待审批=${APP_CNT:-0} 死信=${DL_CNT:-0} 治理todo=${TODO_CNT:-0} fleet漂移=${DRIFT_NODES:-0}(todo ${DRIFT_OPEN:-0}) 网络=${NW_VERDICT:-?} surge=${SG_VERDICT:-?} 桥接=${BRIDGE_STATE} 边界=${BOUNDARY_SUMMARY:-SKIP} 路由=${ROUTE_STATE} 体积预算=${BUDGET_STATE} 工具链=${FRESH_STATE}"

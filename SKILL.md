@@ -91,6 +91,54 @@ Evidence to report:
 - `[U]` = unverified. Treat as hypothesis, not fact. Must be upgraded to `[E]`
   or `[I]` before a closeout or publish decision.
 
+## Workflow: DSH Bridge Surfaces (digest, projection, gateway clients)
+
+Trigger when the question involves DSH↔los cooperation, the 08:30 governance
+digest, the cross-project read model, or "is anyone actually using the los
+gateway". Full incident write-up: `docs/operations/2026-10-09-dsh-los-bridge-repair.md`.
+
+- **Digest job lives on the DSH side**: `job-67166722-f58` (cron 30 8 * * *),
+  managed at `127.0.0.1:3080/scheduler/jobs` (same-origin, no auth on loopback);
+  `GET /scheduler/jobs/:id/runs?limit=1` returns the last run. When it fails,
+  read `outputHead` in `~/.dsh/storages/dsh-scheduler/runs.jsonl` first:
+  `dsh: TRANSPORT: … transport failed` means a **local egress outage**, not a los
+  fault (2026-10-09 08:20–08:44 was a 24-minute DIRECT egress/DNS outage: Surge
+  window had 14,538 `connect_failure`, `api.deepseek.com` and `open.feishu.cn`
+  both timing out). The failure alert uses the same egress, so it self-blinds;
+  the digest prompt's step 0 「补报检查」 is what makes a silent loss visible the
+  next day, and since 2026-10-09 the scheduler advances its `alertedFailures`
+  watermark **only when `feishu-push.sh` exits 0** (`alertWatermarkAfterPush`),
+  so an alert lost to an outage is retried on the next failed run instead of
+  being silently marked as sent.
+- **The DSH projection has a scheduler**: launchd
+  `com.echerlos.los.dsh-session-projection` (hourly) runs
+  `tools/los-dsh-session-projection.sh`, which projects
+  `~/.dsh/storages/session-index.db` into `dsh_session_catalog` /
+  `dsh_session_pain` / `dsh_context_injection`. Status:
+  `bash tools/install-los-dsh-session-projection.sh --status`. The digest's
+  section-8 `[STALE]` judge computes age **in SQL**
+  (`LOS_DSH_PROJECTION_STALE_S` overrides the 6h threshold) — do not parse
+  timestamps in shell/python (`tr -d ' '` used to break it silently).
+- **Who is calling `/v1`**: `sessions.metadata_json->>'client'`
+  (`x-los-client` → `User-Agent`, normalized by `packages/gateway/src/client-label.ts`).
+  Remember `/v1` **does** record `provider_call_telemetry`, so "no rows" means
+  "no requests", not "no accounting".
+- **Scheduled result todos are archived on create** (P1-2): only failures and
+  approval waits stay in the todo inbox; `archive_reason='schedule-run-result'`.
+- **los → DSH event push is live** (P1-a, 2026-10-09): governance notifications
+  (`emitGovernanceOperatorNotify`) enqueue a row with `entity_type='dsh_event'` in
+  `execution_outbox`, and the gateway's 1s loop POSTs it to `DSH_EVENTS_WEBHOOK_URL`
+  (`/los-events`). Delivery contract: 2xx + `handled:true` = delivered;
+  `handled:false` = receiver declined (no retry, reason recorded in `last_error`);
+  anything else retries with backoff. Watch it via `GET /health` → `dshEventOutbox`.
+  The session-event publisher must always pass `excludeEntityTypes: ['dsh_event']`.
+- **los-mcp is wired into DSH** (P1-b, 2026-10-09): both profiles carry an `mcp-los`
+  entry running `tools/los-mcp-serve.sh`; the agent gets `los_run` /
+  `los_run_state` / `los_run_replay` / `los_operator_control`. `los_run` takes an
+  explicit `projectId` **and** `workspaceRoot` — so this (not
+  `dsh-los-ops.los_chat`, which sends only `{model, messages}` and therefore runs in
+  los's own scope) is the surface for dispatching a run into another repo.
+
 Stop when process truth, DB/API truth, and the user-facing claim agree, or when
 the remaining mismatch is named with a confidence marker as residual risk.
 

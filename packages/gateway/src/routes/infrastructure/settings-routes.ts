@@ -44,6 +44,10 @@ export function _buildSettingsResponse(
       selfReflectionEnabled: config.memory.selfReflectionEnabled,
     },
     executor: { enabled: config.executor.enabled },
+    // ADR 0047 第 2 节 (c)：provider 路由冲突必须**可见**（禁止静默覆盖）。
+    // 只在 operator 路径（includeSensitive）返回：它包含"谁覆盖了谁"的来源信息，
+    // 属于运维诊断面，不放公开 /settings。apiKey 类字段已在写入时脱敏为 <redacted>。
+    ...(includeSensitive ? { providerRouteConflicts: config.providerRouteConflicts ?? [] } : {}),
     providers: Object.entries(config.providers).map(([name, provider]) => ({
       name,
       enabled: provider.enabled ?? false,

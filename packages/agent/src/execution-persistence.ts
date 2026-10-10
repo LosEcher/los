@@ -47,6 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_execution_outbox_claim ON execution_outbox(claime
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_session ON execution_outbox(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_run_spec ON execution_outbox(run_spec_id, id);
 CREATE INDEX IF NOT EXISTS idx_execution_outbox_entity ON execution_outbox(entity_type, entity_id, id);
+-- DSH 事件投递的幂等键（迁移 064 同款 DDL）：同一 eventId 只入队一次；
+-- 放在 ensure 里是为了让测试库/新库也拿到它（ON CONFLICT 推断依赖这个部分唯一索引）。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_outbox_dsh_event_id ON execution_outbox(entity_id)
+  WHERE entity_type = 'dsh_event';
 `;
 
 let executionOutboxInitialized = false;

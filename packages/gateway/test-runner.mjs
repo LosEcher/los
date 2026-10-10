@@ -45,6 +45,7 @@ const sharedProcessTestFiles = [
   'src/routes/server-helpers.test.ts',
   'src/service-routes.test.ts',
   'src/settings-routes.test.ts',
+  'src/routes/infrastructure/settings-routes.test.ts',
   'src/ssh-config-import.test.ts',
   'src/ssh-command-runner.test.ts',
   'src/task-dead-letter-routes.test.ts',
