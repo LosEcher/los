@@ -107,7 +107,13 @@ export function formatDailyDigestMessage(digest: DailyDigest): string {
     `启用任务 ${digest.schedule.enabledCount} 个 · 共执行 ${t.runCount} 次`,
     `成功 ${t.succeeded} · 失败 ${t.failed} · 取消 ${t.cancelled}`
       + (t.awaitingApproval > 0 ? ` · 待审批 ${t.awaitingApproval}` : '')
+      // `跳过` keeps the fused meaning (skipped + no_op) for continuity; the split
+      // and the actionable rate are stated on their own line so a schedule that
+      // ran and found nothing to do is not read as a failure (truth remediation §7).
       + (t.skipped > 0 ? ` · 跳过 ${t.skipped}` : ''),
+    `可执行成功率 ${t.actionableSuccessRate == null ? 'n/a（无可执行运行）' : `${(t.actionableSuccessRate * 100).toFixed(0)}%`}`
+      + ` · no_op ${t.noOp}${t.noOpRatio == null ? '' : `（占比 ${(t.noOpRatio * 100).toFixed(0)}%）`}`
+      + ' · 分母不含 no_op 与待审批',
   ];
 
   const usage = digest.usage.totals;

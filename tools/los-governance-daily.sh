@@ -122,6 +122,21 @@ if [[ -n "$ROWS" ]]; then
 else
   echo "- 无"
 fi
+
+# 超龄未确认死信（控制面事实修复 §7）：只计数与分项，**不重放**。
+# 按 reason 拆开是刻意的：把 outbox_exhausted 和 lease_expired/max_attempts/
+# unrecoverable_error 加成一个总数之后，就再也看不出是哪条投递链在烂。
+# `outbox_exhausted` 由出箱第 8 次失败产生（迁移 065 / execution-outbox.ts）。
+DL_OLD_TOTAL=$(q "SELECT count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL AND resolution IS NULL AND created_at < now() - interval '7 days';")
+DL_OLD_OLDEST=$(q "SELECT COALESCE(to_char(min(created_at), 'YYYY-MM-DD HH24:MI'), '-') FROM dead_letter_events WHERE acknowledged_at IS NULL AND resolution IS NULL AND created_at < now() - interval '7 days';")
+if [[ "${DL_OLD_TOTAL:-0}" -gt 0 ]]; then
+  echo "- **超龄未确认死信（>7 天，未处置）**：${DL_OLD_TOTAL} 条，最老 ${DL_OLD_OLDEST}"
+  DL_OLD_BY_REASON=$(q "SELECT reason || ' | ' || count(*) FROM dead_letter_events WHERE acknowledged_at IS NULL AND resolution IS NULL AND created_at < now() - interval '7 days' GROUP BY reason ORDER BY count(*) DESC;")
+  table "reason | 条数" "$DL_OLD_BY_REASON"
+  echo "  （只报告；重放仍走操作者 API，本脚本不 requeue）"
+else
+  echo "- 超龄未确认死信（>7 天）：0"
+fi
 echo
 
 # ── 4. GA 升级 / 治理 todo ──────────────────────────────────
