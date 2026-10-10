@@ -260,6 +260,7 @@ export const zhOps: OpsKeys = {
   'ops.nodes.filterAll': '全部 ({count})',
   'ops.nodes.newButton': '新建',
   'ops.nodes.empty': '尚无执行节点上报心跳。',
+  'ops.nodes.loadFailed': '节点注册表不可用，请刷新重试。',
   'ops.nodes.memBadge': '内存 {pct}%',
   'ops.nodes.diskBadge': '磁盘 {freeGb}G',
   'ops.nodes.modeUnknown': '模式?',

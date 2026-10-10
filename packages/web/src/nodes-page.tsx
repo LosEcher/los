@@ -119,6 +119,7 @@ export function NodesPage() {
         </div>
         <DataTable
           loading={nodes.isLoading}
+          error={nodes.isError ? t('ops.nodes.loadFailed') : undefined}
           empty={t('ops.nodes.empty')}
           rows={visibleNodes}
           renderRow={node => {

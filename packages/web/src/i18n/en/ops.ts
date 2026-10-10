@@ -256,6 +256,7 @@ export const enOps = {
   'ops.nodes.filterAll': 'all ({count})',
   'ops.nodes.newButton': 'new',
   'ops.nodes.empty': 'No executor nodes have heartbeated yet.',
+  'ops.nodes.loadFailed': 'Node registry unavailable. Refresh to retry.',
   'ops.nodes.memBadge': 'mem {pct}%',
   'ops.nodes.diskBadge': 'disk {freeGb}G',
   'ops.nodes.modeUnknown': 'mode?',

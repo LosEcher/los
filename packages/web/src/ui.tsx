@@ -45,9 +45,13 @@ export function Definition({ term, text }: { term: string; text: string }) {
 
 // ── DataTable ───────────────────────────────────────────
 
-export function DataTable<T>({ loading, empty, rows, renderRow }: { loading: boolean; empty: string; rows: T[]; renderRow: (row: T, index: number) => ReactNode }) {
+export function DataTable<T>({ loading, error, empty, rows, renderRow }: { loading: boolean; error?: string; empty: string; rows: T[]; renderRow: (row: T, index: number) => ReactNode }) {
   const { t } = useI18n();
   if (loading) return <EmptyText text={t('common.loading')} />;
+  // A failed fetch must not be reported as "no rows": that is the same false claim
+  // as rendering unknown liveness as offline (ADR 0048 / audit item D1). Stale rows,
+  // when present, stay visible — the refresh control is the recovery path.
+  if (error && rows.length === 0) return <EmptyText text={error} />;
   if (rows.length === 0) return <EmptyText text={empty} />;
   return <div className="record-list">{rows.map(renderRow)}</div>;
 }
