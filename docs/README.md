@@ -77,8 +77,9 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   preference and fallback policy.
 - `0044-acp-endpoint.md` - ACP (Agent Client Protocol) endpoint.
 - `0045-provider-tool-hot-reload.md` - provider/tool hot reload boundaries.
-- `0046-executor-sandbox-multi-backend.md` - executor sandbox multi-backend
-  abstraction (worktree/docker).
+- `0046-executor-sandbox-multi-backend.md` - **Superseded by 0047** (2026-10-10);
+  the proposed `SandboxBackend` interface was never implemented. Isolation
+  backends are owned by 0047 §5 and `config.isolation.backend`.
 - `0047-tool-project-and-provider-boundary-ownership.md` - tool/project/provider
   boundary ownership: layer model, single-writer rule, provider conflict
   adjudication, memory canonical split, `dsfolder` structure, gate tri-state.

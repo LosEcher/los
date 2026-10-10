@@ -1054,3 +1054,7 @@ N=8、探针 24 小时、池的四个取值、phase 不进入枚举、飞书在 
 - 依赖：PR 13 已合并则本 PR 只剩注释上下文；否则避开 PR 13 正在改的函数体。
 - 说明：不改 0044/0045 的 Proposed。不实现沙箱接口。不改 `computeHealthScore` 的权重，只让文件头与现有加权一致。
 - 要跑：`rg` 负向（冲突段消失、0042 无 diff、README 不再把 0046 写成现行抽象）。故意不跑：测试与构建。残留：0044 与 G14 的矛盾仍在，那是 P4 文档里的另一项，不是本审计的运行面修复。
+- **状态：已完成（2026-10-10）**，bookmark 为 `docs/0046-superseded`，共 7 个文件（4 个 ADR 加 README 索引，再加 3 个 provider 文件头）。0042 的 diff 为空。
+- 实测负向：`rg "Numbering conflict" docs/adr/0043 docs/adr/0044 docs/adr/0045 docs/adr/0046` **零命中**；`0042` diff 行数 **0**；README 的 0046 行改为「**Superseded by 0047**（2026-10-10）」并写明隔离后端归 0047 §5 与 `config.isolation.backend`。
+- 顺带修正（同一意图：文件头与现行决策一致）：`provider-health.ts` 的 `ADR 0031` → `ADR 0043`（含 `Weights per` 与 14–15 行那段「无数据默认 0.5」——实测冷启动是**分量** 0.5/1.0/0.5、复合 **0.7 → degraded**），并把同一误引的 `provider-probe.ts`（4 处）与 `provider-fallback.ts`（1 处）一并改为 0043；`provider-health-route.ts` 文件头同样改 0043。
+- **未做**：不实现 `SandboxBackend`、不做 docker 后端；不改 0044/0045 的 Proposed；`computeHealthScore` 的权重一行未动（只改注释）。

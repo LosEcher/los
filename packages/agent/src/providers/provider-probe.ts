@@ -2,10 +2,10 @@
  * @los/agent/providers/provider-probe — Lightweight provider health check with RTT measurement.
  *
  * Design: fire-and-forget, non-blocking. Probe results are cached and
- * surface into health-aware routing (ADR 0031). A failed probe does NOT block
+ * surface into health-aware routing (ADR 0043). A failed probe does NOT block
  * provider usage — it only affects preference ranking and fallback skips.
  *
- * Cadence (ADR 0031): 60s while scheduling is active, 300s when idle.
+ * Cadence (ADR 0043): 60s while scheduling is active, 300s when idle.
  * RTT is exponentially smoothed (α=0.3) so scores do not thrash.
  *
  * Unreachable providers (timeout / ECONNREFUSED / aborted fetch) are not
@@ -34,7 +34,7 @@ import {
 
 const log = getLogger('provider-probe');
 
-/** ADR 0031 exponential smoothing factor for RTT. */
+/** ADR 0043 exponential smoothing factor for RTT. */
 const RTT_SMOOTH_ALPHA = 0.3;
 const ACTIVE_PROBE_MS = 60_000;
 const IDLE_PROBE_MS = 300_000;
@@ -271,7 +271,7 @@ export async function probeProviders(
 }
 
 /**
- * Start the periodic provider probe loop (ADR 0031 cadence).
+ * Start the periodic provider probe loop (ADR 0043 cadence).
  * Safe to call multiple times — only one loop is active.
  * Returns a stop function for gateway onClose hooks.
  */
