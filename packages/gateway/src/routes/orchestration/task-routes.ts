@@ -89,7 +89,12 @@ export function registerTaskRoutes(
   app.get('/tasks', async (req) => {
     await deps.ensureTaskRunStore();
     const scope = resolveReadScope(req);
-    return await deps.listTaskRuns(50, scope ? { tenantId: scope } : undefined);
+    const query = req.query as { status?: string; projectId?: string };
+    return await deps.listTaskRuns(50, {
+      ...(scope ? { tenantId: scope } : {}),
+      status: normalizeOptionalString(query.status),
+      projectId: normalizeOptionalString(query.projectId),
+    });
   });
 
   app.get('/tasks/orphans', async (req, reply) => {
