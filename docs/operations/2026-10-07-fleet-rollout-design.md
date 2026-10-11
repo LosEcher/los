@@ -91,3 +91,23 @@ tools/deploy-drivers/windows-service
 编排器本身属于**执行面**（要访问节点、要跑 ssh），因此放在 los 仓库里随摘要下发；
 **触发与看板属于管理面**（DSH：发起一波、看 JSON 报告、决定是否继续下一批）。
 换句话说：`--plan` 由人/DSH 看，滚动由工具做，结论回落到 los 的账本（target_version + 日报）。
+
+---
+
+## 7. 2026-10-11 实测增补：两处发布器缺陷
+
+滚动 22 个 change 到 8 台节点时实测到两条，都会让"节点看起来在线、实际不可用"：
+
+1. **Windows 驱动没有 install 步骤。** `tools/deploy-drivers/windows-service.sh` 只做 sync/activate/verify，
+   不跑 `pnpm install`；`deploy-to-remote.sh`（Linux）有 `install` 子命令。任何**新增/删除 workspace 包**
+   的改动推到 Windows 节点后，node 进程会 `ERR_MODULE_NOT_FOUND` 并在看门狗下反复重启（本轮实测
+   `Cannot find package '@los/mcp-stdio'`）。⇒ 驱动需要 install 步骤，或编排器在"依赖图有变化"时
+   对 Windows 节点**拒绝发布**并说明原因（fail-loud 优于半死节点）。
+2. **收敛判据不含 `target_version`。** 协调器把"已收敛"判为 digest+registry+online，于是
+   `target_version` 未写的节点会被判为 already converged（本轮 tencent 就是如此，事后手工补写）。
+   既然 §"P0-6: target_version 必须是 rollouts 的产物"，判据里应显式包含它，否则该声明会被绕过。
+
+另记：macOS 节点（M3）的同步连续三次 `sync aborted mid-way (exit 1)` 且**同步日志为空**，
+远端 digest 每次不同（半同步）。脚本的自我保护和"do NOT restart it"是对的（M3 保持旧版 online），
+但根因未定位（疑似别名 scp/传输路径），需按 `docs/operations/node-deployment-runbook.md` 复查。
+

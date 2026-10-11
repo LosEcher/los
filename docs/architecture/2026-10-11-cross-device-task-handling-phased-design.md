@@ -224,6 +224,38 @@ cantool（M3 编译 → M1/M3 更新）、lot2extension（M1/M3/Win 协同）、
 
 **测试**：`@los/cli` 36/36（新增 `los_placed_run` 两次 POST + operator 头 + 请求体断言、以及拒绝路径用例）。
 
+## 13. 机队部署记录（2026-10-11）：把新能力推到设备上
+
+**为什么必须做**：`run-check` 只在节点上执行才有意义；不部署 = 远端检查仍无法产出真实结果。
+
+**路径**：改动经 **PR #336** 合并进 main（main 是受保护分支，直推被 Forgejo 拒绝——这是对的）。
+CI 四道门禁全绿后合并；随后用本仓既定的 **`tools/los-fleet-rollout.sh`**（canary → 其余）滚动发布。
+部署走**内容同步**（`deploy-to-remote.sh`，sha256 双侧校验），不依赖 git push。
+
+**结果：8 台中 6 台已收敛到 `0.1.0+bf48c196bd57b`** `[E]`
+
+| 节点 | 状态 |
+| --- | --- |
+| vultr / tencent-sin / oracle / node34 | ✅ 收敛（digest + registry online + target 已写） |
+| desktop-r45553o（Windows） | ✅ 收敛（**从坏状态修复**，见下） |
+| mbp-executor-1（M1 本机） | ✅ 收敛 |
+| m3pro-executor-1（M3） | ❌ 同步反复中断（远端 digest 每次不同 ⇒ 半同步），已自动回退并在**旧版 online**；脚本明确"do NOT restart it" |
+| desktop-srsbe20（Windows） | ❌ 离线：缺 pnpm/corepack 工具链，无法为新 workspace 包建链接 |
+
+**真机验收（① 的远端半边闭合）** `[E]`
+- `run-check` on `node34-executor-1` → `succeeded`，stdout **`Linux\nz-Standard-PC-Q35-ICH9-2009`**（Linux 指纹 ⇒ 确在节点执行，非 macOS 网关）
+- `run-check` on `desktop-r45553o`（Windows）→ `succeeded`，stdout **`DESKTOP-R45553O`**
+- 完整闭环：一次放置式运行（`nodeId=node34`、要求 `heavy_task_safe`+`artifact_transfer`）在
+  `verification_records` 留下 `required_check_1 \| **succeeded** \| Linux`
+
+**过程中发现并修掉的两类问题**
+1. **Windows 驱动缺 install 步骤**（见 `operations/2026-10-07-fleet-rollout-design.md` 的增补）：
+   `windows-service.sh` 只同步代码、不跑 `pnpm install`，而本批改动**新增了 workspace 包 `@los/mcp-stdio`**
+   ⇒ win-los 的 node 进程 `ERR_MODULE_NOT_FOUND` 反复退出。手工 `pnpm install`（+1 包）并重启服务后恢复。
+2. **`run-check` 在真实路径被默认拒绝**：`executeNodeCommand` 对无显式分支的命令一律 `denied`，
+   而我只加了 executor 侧 runtime 处理器、测试又直接调它 ⇒ 测试全绿、真机 `denied`。
+   已补显式分支 + **路径级测试**（驱动 `executeNodeCommand` 本身），并登记进 agent 测试分类清单（CI `gate-test` 会拦未登记文件）。
+
 ## 11. 证据边界
 
 - **CONFIRMED**：§1 节点矩阵与两条执行路径；`GET /nodes` 已存在且 operator 门禁；`listRunSpecs` 无过滤（需扩展）；`file_sync`/`artifact_transfer` 契约与能力键存在。
