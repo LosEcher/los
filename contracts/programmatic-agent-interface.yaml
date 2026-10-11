@@ -19,7 +19,7 @@ tools:
   - name: los_run
     purpose: submit a run through POST /chat and project the terminal SSE result
     requiredInput: [prompt, projectId]
-    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope, detach]
+    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope, detach, idempotencyKey]
     defaultToolMode: read-only
     writeRule: project-write requires an operator credential in the adapter process
     detachRule: >
@@ -89,7 +89,7 @@ tools:
   - name: los_run_verify
     purpose: run the persisted required checks of a run through POST /runs/{runSpecId}/verify
     requiredInput: [runSpecId, projectId]
-    optionalInput: [cwd, timeoutMs, outputLimit, includeFailed]
+    optionalInput: [cwd, timeoutMs, outputLimit, includeFailed, idempotencyKey]
     operatorCredentialRequired: true
     output: [runSpecId, decision, ranRecordIds, records, recovery]
     projection: >
@@ -101,7 +101,7 @@ tools:
   - name: los_run_approve
     purpose: approve the plan phase of a run through POST /runs/{runSpecId}/approve
     requiredInput: [runSpecId, projectId]
-    optionalInput: [reason, planRevision, contractHash]
+    optionalInput: [reason, planRevision, contractHash, idempotencyKey]
     operatorCredentialRequired: true
     capabilityRule: >
       planRevision and contractHash must be supplied together; the gateway rejects a
@@ -114,7 +114,7 @@ tools:
       apply=true with intent=cancel transitions stale tool calls and may cancel the
       live task run.
     requiredInput: [runSpecId, projectId]
-    optionalInput: [intent, staleMs, apply, reason]
+    optionalInput: [intent, staleMs, apply, reason, idempotencyKey]
     operatorCredentialRequired: true
     output:
       - applied
@@ -146,7 +146,7 @@ tools:
   - name: los_run_revise_plan
     purpose: replace the persisted plan of a run through POST /runs/{runSpecId}/revise-plan
     requiredInput: [runSpecId, projectId, plan]
-    optionalInput: [reason]
+    optionalInput: [reason, idempotencyKey]
     operatorCredentialRequired: true
     planRule: >
       plan must be a non-empty array of plan steps; the adapter rejects an empty or
@@ -158,7 +158,7 @@ tools:
       not the run, because the gateway has no run-level cancel route; obtain the id
       from los_run_state's activeTaskRunIds.
     requiredInput: [taskRunId, projectId]
-    optionalInput: [reason]
+    optionalInput: [reason, idempotencyKey]
     operatorCredentialRequired: true
     authorizationNote: >
       The gateway route itself is ungated (it is a review-listed mutating route), so
@@ -189,6 +189,11 @@ identityAndScope:
     - projectId and workspaceRoot take effect only for operator-scoped calls (los_run operatorScope=true, or los_operator_control).
     - The adapter forwards the operator header only for operator-controlled writes and explicitly operator-scoped runs.
     - The adapter never derives an operator actor from tool arguments.
+    - >
+      Callers may pass idempotencyKey on any state-changing tool (los_run also accepts
+      dedupeKey as a fallback); it becomes x-idempotency-key, so a retry after a
+      transport failure replays the original response instead of creating a second
+      run. Without a key no idempotency header is sent, so a retry can duplicate work.
     - Gateway request context and persisted run/session/task evidence remain authoritative.
 safety:
   - Raw credentials are read from process environment or CLI flags and never returned in MCP content.

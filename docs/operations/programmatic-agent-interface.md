@@ -90,6 +90,18 @@ with the run then succeeding on its own. Read it back with `los_run_state`,
 `los_run_replay`, or `los_runs_list`. The project-scope guard still runs before a
 detached result is reported, so `detach` cannot hide a mis-scoped run.
 
+## Retries and Idempotency
+
+Every state-changing tool accepts `idempotencyKey` (on `los_run`, `dedupeKey`
+falls back to it). The value becomes the request's `x-idempotency-key`, so a
+retry after a transport failure replays the original response instead of
+creating a second run. Measured: two identical `los_run` calls with the same key
+returned the same `runSpecId`/`sessionId`/`taskRunId`, and the ledger kept a
+single run spec.
+
+Without a key no idempotency header is sent — a retry can duplicate work, which
+matters most for handoff retries.
+
 ## Run Lifecycle Control
 
 `los_run_verify` runs the run's persisted required checks and returns a bounded

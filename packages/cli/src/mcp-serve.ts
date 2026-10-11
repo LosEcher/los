@@ -64,7 +64,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
 
   async function request(
     path: string,
-    requestOptions: { method?: string; body?: JsonRecord; projectId: string; operator?: boolean; idempotent?: boolean; signal?: AbortSignal },
+    requestOptions: { method?: string; body?: JsonRecord; projectId: string; operator?: boolean; idempotencyKey?: string; signal?: AbortSignal },
   ): Promise<Response> {
     if (requestOptions.operator && !operatorToken) {
       throw new Error('LOS_OPERATOR_TOKEN is required for operator-controlled MCP tools');
@@ -76,7 +76,9 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
     });
     if (authToken) headers.set('x-los-auth-token', authToken);
     if (requestOptions.operator && operatorToken) headers.set('x-los-operator-token', operatorToken);
-    if (requestOptions.idempotent) headers.set('x-idempotency-key', `mcp-${randomUUID()}`);
+    // 幂等键由调用方给（回退 dedupeKey）；没给才用随机键——随机键对重试无保护，
+    // 所以"交接重试"必须显式给键，否则会重复建 run。
+    if (requestOptions.idempotencyKey) headers.set('x-idempotency-key', requestOptions.idempotencyKey);
     if (requestOptions.body) headers.set('content-type', 'application/json');
     return await fetchImpl(`${gatewayUrl}${path}`, {
       method: requestOptions.method ?? 'GET',
@@ -86,7 +88,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
     });
   }
 
-  async function requestJson(path: string, input: { projectId: string; method?: string; body?: JsonRecord; operator?: boolean; idempotent?: boolean }): Promise<unknown> {
+  async function requestJson(path: string, input: { projectId: string; method?: string; body?: JsonRecord; operator?: boolean; idempotencyKey?: string }): Promise<unknown> {
     const response = await request(path, input);
     const text = await response.text();
     if (!response.ok) throw new Error(redact(`LOS gateway ${response.status}: ${text.slice(0, _MAX_ERROR_TEXT)}`, authToken, operatorToken));
@@ -94,6 +96,9 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
   }
 
   async function callTool(name: string, args: JsonRecord): Promise<unknown> {
+    // 所有会改状态的工具共用同一口径：显式 idempotencyKey 优先，其次 los_run 的 dedupeKey。
+    // 两者都缺 ⇒ 不发该头（由 request() 决定），调用方需自担重试重复风险。
+    const idempotencyKey = optionalString(args.idempotencyKey) ?? optionalString(args.dedupeKey);
     if (name === 'los_run') {
       const prompt = requiredString(args.prompt, 'prompt');
       const projectId = requiredString(args.projectId, 'projectId');
@@ -118,7 +123,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       });
       const controller = new AbortController();
       const response = await request('/chat', {
-        method: 'POST', body, projectId, operator: operatorScope, idempotent: true, signal: controller.signal,
+        method: 'POST', body, projectId, operator: operatorScope, idempotencyKey, signal: controller.signal,
       });
       if (!response.ok) {
         const raw = await response.text();
@@ -194,7 +199,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         projectId,
         method: 'POST',
         operator: true,
-        idempotent: true,
+        idempotencyKey,
         body: compact({
           cwd: optionalString(args.cwd),
           timeoutMs: optionalInteger(args.timeoutMs, 0, Number.MAX_SAFE_INTEGER),
@@ -218,7 +223,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         projectId,
         method: 'POST',
         operator: true,
-        idempotent: true,
+        idempotencyKey,
         body: compact({ reason: optionalString(args.reason), planRevision, contractHash }),
       });
     }
@@ -233,7 +238,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         projectId,
         method: 'POST',
         operator: true,
-        idempotent: true,
+        idempotencyKey,
         // apply 缺省不发 ⇒ 网关走只读预览分支（不做任何状态迁移）
         body: compact({
           apply: apply ? true : undefined,
@@ -255,7 +260,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         projectId,
         method: 'POST',
         operator: true,
-        idempotent: true,
+        idempotencyKey,
         body: compact({ plan, reason: optionalString(args.reason) }),
       });
     }
@@ -269,7 +274,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         projectId,
         method: 'POST',
         operator: true,
-        idempotent: true,
+        idempotencyKey,
         body: compact({ reason: optionalString(args.reason) }),
       });
     }
@@ -290,7 +295,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         drainMode: optionalString(args.drainMode),
       });
       return await requestJson(`/sessions/${encodeURIComponent(sessionId)}/operator-events`, {
-        method: 'POST', body, projectId, operator: true, idempotent: true,
+        method: 'POST', body, projectId, operator: true, idempotencyKey,
       });
     }
 

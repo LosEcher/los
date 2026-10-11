@@ -50,7 +50,8 @@ test('los_run forwards scoped access context without operator credentials and pr
   assert.equal(requests[0]?.headers.get('x-tenant-id'), 'tenant-a');
   assert.equal(requests[0]?.headers.get('x-project-id'), 'project-a');
   assert.equal(requests[0]?.headers.get('x-user-id'), 'external-editor');
-  assert.match(requests[0]?.headers.get('x-idempotency-key') ?? '', /^mcp-/);
+  // 缺省不再发随机幂等键（随机键对重试无保护，只会造假象）；调用方显式给键才发
+  assert.equal(requests[0]?.headers.get('x-idempotency-key'), null);
   assert.deepEqual(await requests[0]?.json(), {
     prompt: 'inspect the project',
     projectId: 'project-a',
@@ -661,6 +662,50 @@ test('los_run_revise_plan rejects an empty plan locally and forwards a real one'
   assert.deepEqual(await requests[0]?.json(), { plan, reason: 'scope narrowed' });
   assert.equal(result.planRevision, 2);
   assert.equal(result.previousRevision, 1);
+});
+
+test('a caller-supplied idempotency key becomes the retry-safe request key', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    fetchImpl: captureFetch(requests, () => new Response(sse(
+      intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los', runSpecId: 'run-a' }),
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 })),
+  });
+
+  await callTool(adapter, 'los_run', { prompt: 'x', projectId: 'los', idempotencyKey: 'handoff-42' });
+  assert.equal(requests[0]?.headers.get('x-idempotency-key'), 'handoff-42');
+});
+
+test('dedupeKey doubles as the idempotency key when no explicit key is given', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    fetchImpl: captureFetch(requests, () => new Response(sse(
+      intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los', runSpecId: 'run-a' }),
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 })),
+  });
+
+  await callTool(adapter, 'los_run', { prompt: 'x', projectId: 'los', dedupeKey: 'nightly-gate' });
+  assert.equal(requests[0]?.headers.get('x-idempotency-key'), 'nightly-gate');
+  assert.equal(await requests[0]?.json().then(body => (body as { dedupeKey: string }).dedupeKey), 'nightly-gate');
+});
+
+test('operator-scoped lifecycle calls also honour the caller idempotency key', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({ runSpecId: 'run-a', decision: { status: 'succeeded' } })),
+  });
+
+  await callTool(adapter, 'los_run_verify', { runSpecId: 'run-a', projectId: 'los', idempotencyKey: 'verify-7' });
+  assert.equal(requests[0]?.headers.get('x-idempotency-key'), 'verify-7');
 });
 
 test('unknown tools fail without touching the gateway', async () => {
