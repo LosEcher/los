@@ -67,7 +67,7 @@ cantool（M3 编译 → M1/M3 更新）、lot2extension（M1/M3/Win 协同）、
 
 ### P1 放置可表达（placement-aware dispatch）
 - **目标**：任务能声明"我要什么设备/能力"，并**经 scheduler 路径**落到合格节点。
-- **交付**：远端路径 smoke 复验（先证可用）→ 暴露"带放置需求"的派发（如 `los_scheduled_execution` 带 `executor.nodeId` / `requiredCapabilities`）→ `GET /runs/summary?groupBy=project|node|status`（含 `asOf`）。
+- **交付**：~~远端路径 smoke 复验（先证可用）~~ **已完成（见 §10）** → 暴露"带放置需求"的派发（如 `los_scheduled_execution` 带 `executor.nodeId` / `requiredCapabilities`）→ `GET /runs/summary?groupBy=project|node|status`（含 `asOf`）。
 - **验收**：`task_runs.node_id` = 目标节点且事件面完整；能力不满足时**拒绝并说明**；汇总与逐项目求和机械对账。
 - **不做**：不把远端派发接进 `/chat`（ADR 级，见 node-selection 文档）。
 
@@ -149,7 +149,10 @@ cantool（M3 编译 → M1/M3 更新）、lot2extension（M1/M3/Win 协同）、
   `ops.runSpecs.filterAllProjects` / `按项目筛选`，即**正在服务的 UI 就是改动后的**。
 
 **残留**：`packages/agent/src/run-specs.ts` 现 **699 行**（硬上限 700）——下一个改动必须先抽取模块再动它；
-另 `/tasks` 仍**没有项目维度**（`task_runs` 无 `project_id` 列，要 join `run_specs`），已列入下一批。
+另 `/tasks` 的项目维度**已补**：初稿我写"`task_runs` 无 `project_id`、需要 join `run_specs`"，
+核 `\d task_runs` 与 `createTaskRun` 的 INSERT 后发现**该列存在**（测试里也一直在传 `projectId`）——
+**这是本会话第 5 次同类纠错**（都是没核列/没核消费点就下结论）。现在 `listTaskRuns` 直接按列过滤，
+`/tasks?projectId=` 生效，Tasks 页也在同一位加了下拉（缓存键 `['tasks', statusFilter, projectFilter]`）。
 
 ## 9. 项目适配性（哪些项目适合跨设备，按技能/实测拓扑）
 
@@ -160,7 +163,37 @@ cantool（M3 编译 → M1/M3 更新）、lot2extension（M1/M3/Win 协同）、
 | **存储** | 数据端 NAS（极空间 Z4Pro，WebDAV/SMB）+ 本地 vault；**不是执行节点** | **P3** | 无 `run_agent` ⇒ 只能作为数据端点被节点访问；按 §5 立工作流 + 能力约束 |
 | 其余仓 | 单机（M1）为主 | 暂不需要 | 无跨设备结构 |
 
-## 10. 证据边界
+## 10. P1 前置探针：远端 executor smoke 实测（2026-10-11）
+
+**目的**：在暴露"放置需求"之前，先证明 scheduler 的远端路径**今天仍可用**（历史远端 agent run 仅 3 条、最近 2026-08-16）。
+**做法**：`POST /scheduled-work-items`（`templateId=scheduled_execution`、`trigger=once@2099`）+ `POST …/:id/trigger`，
+目标 `executor.nodeId=node34-executor-1`；跑完 `PATCH status=retired` 回收。
+
+**结果：远端路径可用** `[E]`
+
+| 判据 | 实测 |
+| --- | --- |
+| 落点 | `task_runs.node_id = node34-executor-1`，`succeeded` |
+| 真在远端跑 | 会话 `workspaceRoot = /opt/los/los-workspace`（**节点本地路径**，M1 上不存在） |
+| 真的执行了 prompt | agent 回答 = `LOS_REMOTE_EXECUTOR_SMOKE_1791692070`（与请求串一致） |
+
+**同时测出四处必须处理的问题** `[E]`
+
+1. **凭据必须由调用方给**：不带 `agentKey` 时远端调用直接 `error: "unauthorized"`（277ms 内 fail-loud，**没有静默挂起** ✅）。
+   ⇒ 若把节点选择暴露给 MCP/DSH，**不能让每个调用方各自持有 agent 密钥**；网关应回退到自身配置的 `EXECUTOR_AGENT_KEY`。
+2. **生效策略与声明不一致**（安全相关）：模板声明 `toolMode=read-only` + `sandboxMode=sandbox`，但远端会话是
+   `toolMode=project-write`、`toolPolicy={maxRiskLevel: L1, allowWrites: true, sandboxAvailable: false}`。
+   ⇒ 远端路径上"声明≠生效"，暴露前必须查清是谁覆盖了策略（或至少在契约里写明调度路径的策略来源）。
+3. **声明的 `requiredChecks` 没有执行**：该次运行**没有 `run_spec_id`**，也没有写入任何 `verification_records`
+   （近 10 分钟 0 条）⇒ 调度路径的"检查门禁"与 chat 路径不是同一套；跨设备任务若依赖检查门禁，需要另行接通。
+4. **平台已自带强前置校验（好的一面，共 5 条 fail-loud）**：远端执行必须显式给 `sandboxMode`、
+   `workspaceRoot` 必须是**节点本地路径**、必须有 `editableSurfaces` 与至少一条 `requiredChecks`、
+   approval 策略必须是 `preapproved_scope`。⇒ P1 的工作主要是**暴露一条已被守卫的路径**，而不是新建管道。
+
+**P1 的修订后的开工条件**：① 网关自动注入 agent 凭据；② 查清远端策略覆盖来源；
+③ 决定跨设备任务是否要求 `verification_records`（要就接通调度路径的检查面）。
+
+## 11. 证据边界
 
 - **CONFIRMED**：§1 节点矩阵与两条执行路径；`GET /nodes` 已存在且 operator 门禁；`listRunSpecs` 无过滤（需扩展）；`file_sync`/`artifact_transfer` 契约与能力键存在。
 - **INFERRED**：P1 的"放置可表达"成本（复用 executor-client，估为中等）；P2 的父子编排可复用 `agent-task-graph`（未读该契约实现细节）。
