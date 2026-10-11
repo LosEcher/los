@@ -274,6 +274,18 @@ export const ConfigSchema = z.object({
     artifactRoot: z.string().optional(),
     connectModes: z.array(z.string()).default([]),
     meshNodes: z.array(z.string()).default([]),
+    /**
+     * 放置策略（S7，2026-10-11）。见 `packages/agent/src/scheduler/placement.ts`：
+     * - `verified-rotate`（默认）：派发前在候选节点上**核实工作区是否在它本地存在**，
+     *   再在通过核实的候选里按"最近被选次数最少"轮转；全都核实不过则回退既有健康序。
+     * - `health`：保持 2026-10-11 之前的行为（只补 capacity 快照供事后复核）。
+     */
+    placementPolicy: z.enum(['health', 'verified-rotate']).default('verified-rotate'),
+    /**
+     * 工作区策略（S7）：`verify`（默认）= 工作区必须**在节点本地存在**才算候选；
+     * `portable` = 调用方显式声明"本任务不依赖工作区文件"，此时只要节点**可达**即可。
+     */
+    workspacePolicy: z.enum(['verify', 'portable']).default('verify'),
   }),
 
   // Active profile name

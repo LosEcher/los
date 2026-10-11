@@ -86,6 +86,9 @@ const sharedProcessTestFiles = [
   'src/runtime-task.test.ts',
   'src/scenario-economics-runner.test.ts',
   'src/scheduler/node-check-runner.test.ts',
+  // placement 只用一个假节点 HTTP server，不写库（`recentSelectionCounts` 读不到库时按空处理），
+  // 因此不需要 isolated 组；未分类会被 runner 报 "unclassified test" 并跳过。
+  'src/scheduler/placement.test.ts',
   'src/scheduler/ssh-client.test.ts',
   'src/security-gate.test.ts',
   'src/semantic-eviction.test.ts',

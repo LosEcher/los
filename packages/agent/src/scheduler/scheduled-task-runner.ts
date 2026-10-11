@@ -201,7 +201,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
       input.executor && !input.executor.agentKey
         ? { ...input.executor, agentKey: getConfig().executor.agentKey }
         : input.executor,
-      { toolMode, sandboxMode },
+      {
+        toolMode,
+        sandboxMode,
+        // S7：工作区进候选资格。任务自己声明 workspacePolicy，否则全局默认 verify。
+        workspaceRoot,
+        workspacePolicy: input.executor?.workspacePolicy,
+        placementPolicy: input.executor?.placementPolicy,
+      },
     );
   } catch (error) {
     if (error instanceof _ExecutorSelectionError) {
@@ -268,6 +275,9 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
         executorUrl: executor.url,
         placementTier: executor.decision.placementTier,
         requiredCapabilities: executor.decision.requiredCapabilities,
+        // S7：把"为什么是它"一起落库（探测结果 + capacity 快照 + 轮转计数 + basis）。
+        // 只存引用与决定元数据，不存任务输出。
+        ...(executor.decision.selection ? { selection: executor.decision.selection } : {}),
       },
     });
   }

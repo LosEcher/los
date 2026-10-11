@@ -260,6 +260,7 @@ function configWithProvider(): Config {
       shutdownGraceMs: 120_000,
       connectModes: [],
       meshNodes: [],
+      placementPolicy: 'verified-rotate', workspacePolicy: 'verify',
     },
     profile: 'test',
     defaultProjectId: 'los',

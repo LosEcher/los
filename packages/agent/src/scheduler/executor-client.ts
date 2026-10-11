@@ -1,6 +1,8 @@
+import { getConfig } from '@los/infra/config';
 import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } from '../executor-nodes.js';
 import { resolveExecutorEndpoint } from '../executor-node-utils.js';
 import { isNodeInMaintenance, loadNodeMaintenancePoliciesBatch } from '../node-maintenance-policy.js';
+import { choosePlacement } from './placement.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
@@ -25,6 +27,12 @@ export type ExecutorSelectionDecision = {
   candidateIds: string[];
   selectedId?: string;
   skipped: Array<{ id: string; reason: string; details?: Record<string, unknown> }>;
+  /**
+   * S7：选中的**依据**（探测结果 + capacity 快照 + 轮转计数 + basis）。
+   * 由调用方写进 `scheduler_decisions.metadata` —— NEXT-STEPS §4.2 要求"关键任务的路由
+   * 依据要能被事后复核"，改前决策记录里没有任何 capacity 数据，复核做不到。
+   */
+  selection?: Record<string, unknown>;
 };
 
 export class _ExecutorSelectionError extends Error {
@@ -121,6 +129,10 @@ export async function resolveExecutor(
       });
     }
   }
+  // 通过硬门槛（URL 可用 / 资源 / 能力）的候选**先收集再决定**（S7，2026-10-11）。
+  // 改前这里是"第一个通过的立刻 return"——于是排序函数的末段键（capacity 字段个数）
+  // 实际就是路由策略，且没有任何一步问过"这个节点上有没有这个工作区"。
+  const eligible: Array<{ node: ExecutorNodeRecord; url: string }> = [];
   for (const node of ordered) {
     const url = resolveExecutorNodeUrl(node);
     if (!url) {
@@ -146,17 +158,39 @@ export async function resolveExecutor(
       });
       continue;
     }
+    eligible.push({ node, url });
+  }
+
+  if (eligible.length > 0) {
+    const agentKey = normalizeOptionalString(config.agentKey)
+      ?? normalizeOptionalString(getConfig().executor.agentKey);
+    const choice = await choosePlacement({
+      ordered: eligible.map(item => item.node),
+      workspaceRoot: intent.workspaceRoot,
+      workspacePolicy: intent.workspacePolicy,
+      placementPolicy: intent.placementPolicy,
+      agentKey,
+    });
+    const picked = choice
+      ? eligible.find(item => item.node.nodeId === choice.node.nodeId) ?? eligible[0]!
+      : eligible[0]!;
     return {
-      url,
-      nodeId: node.nodeId,
+      url: picked.url,
+      nodeId: picked.node.nodeId,
       agentKey: normalizeOptionalString(config.agentKey),
       decision: {
         source: 'executor_registry',
         placementTier: 'warm',
         requiredCapabilities,
         candidateIds: ordered.map(item => item.nodeId),
-        selectedId: node.nodeId,
+        selectedId: picked.node.nodeId,
         skipped,
+        selection: choice?.evidence ?? {
+          policy: 'health',
+          basis: 'health_order',
+          ranked: eligible.map(item => item.node.nodeId),
+          chosen: picked.node.nodeId,
+        },
       },
     };
   }

@@ -363,12 +363,20 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
   const requiredCapabilities = requestedCapabilities as ExecutorCapabilityRequirement[];
   const nodeId = normalizeString(input.nodeId);
   const agentKey = normalizeString(input.agentKey);
+  // S7：放置策略与工作区策略同样 fail-loud（理由同 requiredCapabilities）——
+  // 拼错的策略名不该静默退化成默认值，否则调用方以为约束生效而实际没有。
+  const workspacePolicy = optionalEnum(input.workspacePolicy, ['verify', 'portable'] as const);
+  const placementPolicy = optionalEnum(
+    input.placementPolicy, ['health', 'verified-rotate'] as const,
+  );
   return {
     ...(input.enabled === undefined ? {} : { enabled: Boolean(input.enabled) }),
     ...(nodeId ? { nodeId } : {}),
     ...(nodeUrls.length > 0 ? { nodeUrls } : {}),
     ...(agentKey ? { agentKey } : {}),
     ...(requiredCapabilities.length > 0 ? { requiredCapabilities } : {}),
+    ...(workspacePolicy ? { workspacePolicy } : {}),
+    ...(placementPolicy ? { placementPolicy } : {}),
     ...(input.requiresBuild === undefined ? {} : { requiresBuild: Boolean(input.requiresBuild) }),
     ...(input.requiresDeploy === undefined ? {} : { requiresDeploy: Boolean(input.requiresDeploy) }),
     ...(normalizeNumber(input.leaseMs) ? { leaseMs: normalizeNumber(input.leaseMs) } : {}),

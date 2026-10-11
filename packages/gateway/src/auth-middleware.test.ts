@@ -318,6 +318,7 @@ function configForAuth(enabled: boolean): Config {
       nodeKind: 'executor',
       connectModes: [],
       meshNodes: [],
+      placementPolicy: 'verified-rotate', workspacePolicy: 'verify',
     },
     profile: 'test',
     defaultProjectId: 'los',
