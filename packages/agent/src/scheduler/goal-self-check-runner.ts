@@ -4,6 +4,7 @@ import { runPostExecutionSelfCheck, shouldRunSelfCheck, summarizeAgentContext, C
 import { runMultiRoleReview, type ReviewRoleConfig } from '../review-runner.js';
 import { reflectOnFailure, formatReflectionSummary } from '../reflection.js';
 import { normalizeRunContractMetadata } from '../run-contract.js';
+import { normalizeOptionalString } from './helpers.js';
 import { readCurrentRunContract } from './contract-reader.js';
 import { transitionExecutionState } from '../execution-store.js';
 import { updateTaskRunFields, type TaskRunRecord } from '../task-runs.js';
@@ -235,6 +236,106 @@ export async function runGoalSelfCheck(
   await emitTaskEvent(sessionId, 'task.self_check_completed', running as any, {
     selfCheckResult,
   });
+
+  // 留证（2026-10-11 D4/D3）：自检结论此前只进 session 事件，没有可机械核对的记录；
+  // 声明的 requiredChecks 在调度路径**从不执行**，于是一条记录都没有——"没检查"必须可见。
+  try {
+    const { createVerificationRecord } = await import('../verification-records.js');
+    const runSpecId = normalizeOptionalString(input.runSpecId);
+    await createVerificationRecord({
+      id: `verification-${taskRunId}-selfcheck`,
+      sessionId,
+      runSpecId,
+      taskRunId,
+      checkName: 'goal_self_check',
+      // kind 只允许 command | assertion | operator_review（run-plan-types.ts:26），语义由 checkName 承载
+      kind: 'assertion',
+      assertion: selfCheckContract.goal ?? undefined,
+      reviewer: 'self-check-judge',
+      independence: 'separate_model',
+      status: selfCheckResult.skipped ? 'skipped' : (selfCheckResult.selfCheckPassed ? 'succeeded' : 'failed'),
+      required: false,
+      skipReason: selfCheckResult.skipReason,
+      outputSummary: selfCheckResult.summaryOfEvidence
+        ? selfCheckResult.summaryOfEvidence.slice(0, 500)
+        : undefined,
+      error: selfCheckResult.selfCheckPassed
+        ? undefined
+        : selfCheckResult.gaps.map(gap => `[${gap.condition}] ${gap.detail}`).join('; '),
+    });
+    // 声明式 requiredChecks 的**执行与留证**（2026-10-11）：
+    // 本地 run 在本机执行；远端 run 经节点命令通道在该节点执行（`run-check`）。
+    // 判定语义**不变**：结果只留证，不改变 run 终态（改成"检查失败即拦"会影响 13 条存量
+    // scheduled_execution，属策略决定，见 docs/architecture/2026-10-11-remote-execution-policy-divergence-analysis.md）。
+    const declaredChecks = selfCheckContract.requiredChecks ?? [];
+    if (declaredChecks.length > 0) {
+      const { runScheduledDeclaredChecks } = await import('./declared-checks.js');
+      await runScheduledDeclaredChecks({
+        sessionId,
+        taskRunId,
+        runSpecId,
+        checks: declaredChecks,
+        workspaceRoot: normalizeOptionalString(input.workspaceRoot),
+        nodeId: normalizeOptionalString(running.nodeId),
+      });
+    }
+  } catch {
+    // 留证失败不得改变判定结果
+  }
+
+  // ② 自检**没跑成**（输出为空/过短）≠ 目标没达成：判官根本没评过。
+  // 2026-10-11 之前这种情况走"Goal self-check failed"硬拦，文案还谎称"没有产出"
+  // （实测一个 16 字符的正确回答 `SMOKE2_…` 即被如此拦下）。
+  // 现在走 operator attention（本仓范式：blocked + 独立 reason + review todo，同 confidence_gate），
+  // 关键约束：**不自动放行** —— 不置 succeeded，仍需人看一眼。
+  if (selfCheckResult.skipped) {
+    const attentionReason = `Self-check did not run (${selfCheckResult.skipReason ?? 'unknown'}): `
+      + 'the judge never evaluated the output, so the goal is neither confirmed nor refuted — needs a human look';
+
+    await transitionExecutionState({
+      entityType: 'task_run',
+      entityId: taskRunId,
+      to: 'blocked',
+      sessionId,
+      reason: 'self_check_skipped_needs_operator_attention',
+      nodeId: running.nodeId,
+      leaseVersion: running.leaseVersion,
+    });
+
+    await updateTaskRunFields(taskRunId, {
+      metadata: {
+        ...running.metadata,
+        selfCheckResult,
+        blockReason: attentionReason,
+        loopCount: result.loopCount,
+        totalTokens: result.totalTokens,
+      },
+    });
+
+    await emitTaskEvent(sessionId, 'task.blocked', running as any);
+    await input.onTaskEvent?.({ type: 'task.blocked', taskRun: running as any });
+
+    try {
+      const { createTodo } = await import('../todos.js');
+      await createTodo({
+        title: `Review: self-check skipped for task ${taskRunId.slice(0, 8)} (${selfCheckResult.skipReason ?? 'unknown'})`,
+        description: `${attentionReason}\n\nGoal: ${selfCheckContract.goal}\nAgent output: ${result.text.slice(0, 500)}`,
+        kind: 'task',
+        status: 'backlog',
+        priority: 'P1',
+        source: 'self_check_skipped',
+        metadata: { sessionId, taskRunId, skipReason: selfCheckResult.skipReason },
+      });
+    } catch { /* Todo creation is best-effort */ }
+
+    return {
+      status: 'blocked',
+      sessionId,
+      taskRun: { ...(running as any), status: 'blocked' },
+      result,
+      reason: attentionReason,
+    };
+  }
 
   if (!selfCheckResult.selfCheckPassed) {
     const denialSummary = summarizeToolDenials(sessionEvents);
