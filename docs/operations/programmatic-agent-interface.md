@@ -90,6 +90,26 @@ with the run then succeeding on its own. Read it back with `los_run_state`,
 `los_run_replay`, or `los_runs_list`. The project-scope guard still runs before a
 detached result is reported, so `detach` cannot hide a mis-scoped run.
 
+## Execution Policy
+
+`los_run` forwards `sandboxMode` (`readonly` | `workspace-write` | `sandbox`) and
+`allowedTools`; both require `operatorScope: true`, matching the gateway gate.
+Measured tool policy per mode:
+
+| sandboxMode | maxRiskLevel | allowWrites | sandboxAvailable |
+| --- | --- | --- | --- |
+| `readonly` | L0 | false | false |
+| `workspace-write` | L1 | true | false |
+| `sandbox` | **L2** | true | **true** (OS sandbox detected) |
+
+`allowedTools` narrows the catalog and is persisted in
+`run_specs.allowed_tools_json`.
+
+Node selection is deliberately **not** exposed: `/chat` does not consume the
+run-spec request's `executor` field (only the scheduled-work and experiment routes
+do), so MCP-dispatched runs land on the gateway's configured executor node. A node
+parameter here would be a second source of truth the chat path ignores.
+
 ## Retries and Idempotency
 
 Every state-changing tool accepts `idempotencyKey` (on `los_run`, `dedupeKey`

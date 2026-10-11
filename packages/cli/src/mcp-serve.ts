@@ -19,6 +19,7 @@ import {
   projectVerificationResult,
   readUntilEvent,
   runIdentity,
+  stringArray,
   type JsonRecord,
 } from './mcp-projections.js';
 
@@ -53,6 +54,8 @@ export interface LosMCPAdapter {
 
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
+/** `/chat` 接受的沙箱模式（`normalizeSandboxMode` 同口径）；与 allowedTools 一样需 operator。 */
+const _SANDBOX_MODES = new Set(['readonly', 'workspace-write', 'sandbox']);
 
 export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCPAdapter {
   const gatewayUrl = (options.gatewayUrl ?? process.env.LOS_GATEWAY_URL ?? DEFAULT_GATEWAY).replace(/\/+$/, '');
@@ -105,6 +108,19 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       const toolMode = optionalString(args.toolMode) ?? 'read-only';
       const operatorScope = optionalBoolean(args.operatorScope, 'operatorScope') ?? false;
       const detach = optionalBoolean(args.detach, 'detach') ?? false;
+      // 网关对 sandboxMode/allowedTools 走 requireOperator 闸门（chat-route 顶部），
+      // 这里先本地拦：不带 operatorScope 直接拒，省一次注定 403 的往返。
+      const sandboxMode = optionalString(args.sandboxMode);
+      if (sandboxMode && !_SANDBOX_MODES.has(sandboxMode)) {
+        throw new Error(`sandboxMode must be one of ${[..._SANDBOX_MODES].join(', ')}`);
+      }
+      if (args.allowedTools !== undefined && !Array.isArray(args.allowedTools)) {
+        throw new Error('allowedTools must be an array of tool names');
+      }
+      const allowedTools = stringArray(args.allowedTools);
+      if ((sandboxMode || allowedTools) && !operatorScope) {
+        throw new Error('sandboxMode and allowedTools require operatorScope=true (the gateway gates them behind the operator credential)');
+      }
       if (toolMode !== 'read-only' && toolMode !== 'project-write') throw new Error('toolMode must be read-only or project-write');
       if (toolMode === 'project-write' && !operatorToken) throw new Error('LOS_OPERATOR_TOKEN is required for project-write MCP runs');
       if (operatorScope && !operatorToken) throw new Error('LOS_OPERATOR_TOKEN is required for operator-scoped MCP runs');
@@ -120,6 +136,8 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         traceId: optionalString(args.traceId),
         dedupeKey: optionalString(args.dedupeKey),
         runContract: optionalRecord(args.runContract),
+        sandboxMode,
+        allowedTools,
       });
       const controller = new AbortController();
       const response = await request('/chat', {

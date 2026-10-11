@@ -19,9 +19,22 @@ tools:
   - name: los_run
     purpose: submit a run through POST /chat and project the terminal SSE result
     requiredInput: [prompt, projectId]
-    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope, detach, idempotencyKey]
+    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope, detach, sandboxMode, allowedTools, idempotencyKey]
     defaultToolMode: read-only
     writeRule: project-write requires an operator credential in the adapter process
+    executionPolicyRule: >
+      sandboxMode (readonly | workspace-write | sandbox) and allowedTools are
+      forwarded to POST /chat and both require operatorScope=true, matching the
+      gateway gate. Measured tool policy: readonly -> L0/no writes/no sandbox;
+      workspace-write -> L1 writes, no sandboxed shell; sandbox -> L2 with
+      sandboxAvailable=true when an OS sandbox is detected. allowedTools narrows the
+      catalog and is persisted in run_specs.allowed_tools_json.
+    nodeSelectionRule: >
+      Node selection is deliberately absent: /chat does not consume the run-spec
+      request's executor field at all (only the scheduled-work and experiment routes
+      do), so an MCP-dispatched run lands on the gateway's configured executor node.
+      Exposing a node parameter here would be a second source of truth that the chat
+      path ignores.
     detachRule: >
       detach=true returns as soon as the run identity is complete (runSpecId from the
       intake event plus sessionId and taskRunId) and aborts the SSE stream instead of

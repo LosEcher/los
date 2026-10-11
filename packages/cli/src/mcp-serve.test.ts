@@ -708,6 +708,83 @@ test('operator-scoped lifecycle calls also honour the caller idempotency key', a
   assert.equal(requests[0]?.headers.get('x-idempotency-key'), 'verify-7');
 });
 
+test('every state-changing tool advertises its parameters inside properties', async () => {
+  const adapter = _createLosMCPAdapter({ fetchImpl: unreachableFetch });
+  const listed = asRecord((await adapter.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))?.result);
+  const tools = listed.tools as Array<{ name: string; inputSchema: { properties?: Record<string, unknown> } }>;
+
+  const writeTools = ['los_run', 'los_run_verify', 'los_run_approve', 'los_run_recover', 'los_run_revise_plan', 'los_task_cancel', 'los_operator_control'];
+  for (const name of writeTools) {
+    const tool = tools.find(item => item.name === name);
+    assert.ok(tool, `${name} missing`);
+    assert.ok(tool.inputSchema.properties?.idempotencyKey, `${name}: idempotencyKey must live inside properties`);
+  }
+
+  // 反面控制：schema 顶层只允许 type/properties/required —— 自造键（曾经把 idempotencyKey
+  // 插到 properties 之外）会让参数对严格客户端不可见
+  for (const tool of tools) {
+    for (const key of Object.keys(tool.inputSchema)) {
+      assert.ok(['type', 'properties', 'required'].includes(key), `${tool.name}: unexpected schema key ${key}`);
+    }
+  }
+
+  const run = tools.find(item => item.name === 'los_run');
+  assert.ok(run);
+  const runProps = Object.keys(run.inputSchema.properties ?? {});
+  for (const key of ['sandboxMode', 'allowedTools', 'operatorScope', 'detach']) {
+    assert.ok(runProps.includes(key), `los_run: ${key} must be advertised`);
+  }
+});
+
+test('sandboxMode and allowedTools pass through only with operator scope', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => new Response(sse(
+      intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los', runSpecId: 'run-a' }),
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 })),
+  });
+
+  await callTool(adapter, 'los_run', {
+    prompt: 'x', projectId: 'los', operatorScope: true, sandboxMode: 'readonly', allowedTools: ['read_file', 'glob'],
+  });
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  const body = await requests[0]?.json() as Record<string, unknown>;
+  assert.equal(body.sandboxMode, 'readonly');
+  assert.deepEqual(body.allowedTools, ['read_file', 'glob']);
+});
+
+test('sandboxMode and allowedTools are refused locally without operator scope', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: 'operator-secret',
+    fetchImpl: async () => { called = true; return new Response('{}'); },
+  });
+
+  const noScope = asRecord((await callTool(adapter, 'los_run', {
+    prompt: 'x', projectId: 'los', sandboxMode: 'readonly',
+  })).result);
+  assert.equal(noScope.isError, true);
+  assert.match(String((noScope.content as Array<{ text: string }>)[0]?.text), /require operatorScope=true/);
+
+  const badMode = asRecord((await callTool(adapter, 'los_run', {
+    prompt: 'x', projectId: 'los', operatorScope: true, sandboxMode: 'yolo',
+  })).result);
+  assert.equal(badMode.isError, true);
+  assert.match(String((badMode.content as Array<{ text: string }>)[0]?.text), /sandboxMode must be one of/);
+
+  const badTools = asRecord((await callTool(adapter, 'los_run', {
+    prompt: 'x', projectId: 'los', operatorScope: true, allowedTools: 'read_file',
+  })).result);
+  assert.equal(badTools.isError, true);
+  assert.match(String((badTools.content as Array<{ text: string }>)[0]?.text), /allowedTools must be an array/);
+
+  assert.equal(called, false);
+});
+
 test('unknown tools fail without touching the gateway', async () => {
   const adapter = _createLosMCPAdapter({ fetchImpl: unreachableFetch });
   const response = await callTool(adapter, 'los_unknown', {});
