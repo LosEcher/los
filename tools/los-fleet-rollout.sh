@@ -40,6 +40,10 @@ done
 
 # 节点表：node_id|platform|ssh_alias|remote_home|privilege
 # platform=local 表示网关主机自身（不经过 ssh）。
+# macOS 节点（本机与 M3）用**同一棵钉树、同一个标签**；钉树路径是它们的身份来源。
+MACOS_HOME="${LOS_MACOS_HOME:-/Users/echerlos/.local/share/los}"
+MACOS_LABEL="${LOS_MACOS_LABEL:-com.echerlos.los-executor}"
+
 NODES=(
   "vultr-executor|linux|vultr-r-t|/opt/los|none"
   "tencent-sin-executor|linux|tencent-sin-t|/opt/los|none"
@@ -48,7 +52,7 @@ NODES=(
   "m3pro-executor-1|macos|m3-t|/Users/echerlos/.local/share/los|none"
   "desktop-r45553o|windows|win-los|C:/los|none"
   "desktop-srsbe20|windows|desktop-srsbe20|C:/los|none"
-  "mbp-executor-1|local|||"
+  "mbp-executor-1|local||$MACOS_HOME|none"
 )
 SSHO=(-o BatchMode=yes -o ConnectTimeout=20 -o ControlPath=none -o ControlMaster=no)
 PSQL="$(command -v psql || echo /opt/homebrew/opt/postgresql@17/bin/psql)"
@@ -194,17 +198,18 @@ health_version() { # base_url | ip:port
   curl -s -m 8 "${target%/}/health" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1
 }
 
-# 等 /health 报出目标版本。macOS 节点没有 systemd，`verify` 在那里用不了；这条是它唯一
-# "新进程真的起来了"的判据（注册表 version 是心跳带来的，会滞后，不能单独当证据）。
-wait_health_version() { # node_id budget_seconds
-  local nid="$1" budget="${2:-60}" base elapsed=0
-  base="$(reg_base_url "$nid")"
-  [ -n "$base" ] || return 1
-  while [ "$elapsed" -lt "$budget" ]; do
-    [ "$(health_version "$base")" = "$TARGET" ] && return 0
-    sleep 5; elapsed=$((elapsed+5))
-  done
-  return 1
+
+# 平台驱动：在**节点上**执行（macOS 用的是同一份脚本，本机与 M3 配置完全一致）
+#   · local：直接跑网关这份（本机）
+#   · 远端：把网关这份经 stdin 送到节点执行 —— 而不是用节点上那份，因为 drivers 在摘要排除面内，
+#     节点上的副本可能过期（它的新鲜度不参与身份判定）。
+run_driver() { # <node_id> <alias|-> <driver> <args...>
+  local nid="$1" alias_="$2" driver="$3"; shift 3
+  if [[ "$alias_" == "-" ]]; then
+    bash "$ROOT/tools/deploy-drivers/$driver" "$@"
+  else
+    ssh "${SSHO[@]}" "$alias_" "bash -s -- $(printf '%q ' "$@")" < "$ROOT/tools/deploy-drivers/$driver"
+  fi
 }
 
 # 远端摘要 = 节点自查（与 deploy-to-remote.sh digest 同一判据）
@@ -220,7 +225,9 @@ remote_digest() { # alias home privilege
 
 tool() { # alias home priv subcmd [extra...] — 统一调用仓库工具
   local a="$1" home="$2" priv="$3"; shift 3
-  LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET="$a" LOS_REMOTE_HOME="$home" \
+  # 传输默认 ssh，但**调用方可以覆盖**（local 平台用 LOS_SSH_TRANSPORT=local 在本机目录上跑
+  # 同一套步骤）。硬编码 ssh 会让 local 分支静默走到 ssh 路径上去。
+  LOS_SSH_TRANSPORT="${LOS_SSH_TRANSPORT:-ssh}" LOS_SSH_TARGET="$a" LOS_REMOTE_HOME="$home" \
   LOS_REMOTE_PRIVILEGE="$priv" LOS_SSH_OPTS='-o ControlPath=none -o ControlMaster=no' \
     bash tools/deploy-to-remote.sh "$NODE_NAME" "$@"
 }
@@ -235,7 +242,9 @@ roll_one() { # node_id platform alias home privilege
   local v st dg
   v="$(reg_version "$nid")"; st="$(reg_status "$nid")"
   case "$plat" in
-    local) dg="$(bash tools/los.sh build-version | tail -1)" ;;
+    # local 节点现在跑的是**钉树**，所以探针也必须读钉树 —— 以前读的是 checkout 的工作树，
+    # 于是 checkout 一脏（比如另一个会话在改代码）这台就恒显示 off-target（幽灵节点）。
+    local) dg="$(node "$MACOS_HOME/tools/deployable-content.mjs" --digest 2>/dev/null | tail -1)" ;;
     # Windows：走驱动自己的 digest（内部调用 tools/deployable-content.mjs —— 与 bash 侧**同一份**
     # 实现）。以前这里跑 `bash tools/los.sh build-version`，而 Windows 没有 bash，于是 digest
     # 永远是空的；现在 Windows 与 Linux/macOS 用同一个判据，收敛后可以跳过。
@@ -291,22 +300,15 @@ roll_one() { # node_id platform alias home privilege
       fi
       ;;
     macos)
+      # 节点侧全部交给驱动（它生成/维护 launchd plist、只重启执行器、双断言校验）。
+      # 编排器不再内联 launchd 细节 —— 见 docs/architecture/...cross-platform-content-identity-design.md
       LOS_REMOTE_NODE_ID="$nid" tool "$alias_" "$home" "$priv" sync || rc=1
-      # install 必须在这里跑。macOS 节点没有 `los` 用户，但 do_install 现在自己判别身份；
-      # 少了这一步，任何**新增/删除 workspace 包**的发布都会让节点在 KeepAlive 下崩溃循环
-      # （2026-10-11：packages/agent 新 import `@los/mcp-stdio`，而
-      #  packages/agent/node_modules/@los 里没有它的链接 ⇒ ERR_MODULE_NOT_FOUND）。
+      # install 必须在这里跑：tar 只搬源码，workspace 包链接归 pnpm 管；少了它，
+      # 新增/删除 workspace 包的发布会让节点在 KeepAlive 下 ERR_MODULE_NOT_FOUND 崩溃循环。
       [[ "$rc" -eq 0 ]] && { tool "$alias_" "$home" "$priv" install >/dev/null 2>&1 || rc=1; }
-      if [[ "$rc" -eq 0 ]]; then
-        ssh "${SSHO[@]}" "$alias_" "sed -i '' 's|^LOS_VERSION=.*|LOS_VERSION=$TARGET|; s|^EXECUTOR_VERSION=.*|EXECUTOR_VERSION=$TARGET|' '$home/.env'" >/dev/null 2>&1
-        ssh "${SSHO[@]}" "$alias_" 'launchctl kickstart -k gui/$(id -u)/com.echerlos.los-executor' >/dev/null 2>&1 || rc=1
-        # 内容摘要由 sync 的收敛守卫断言；这里断言**进程**：/health 必须报出目标版本。
-        # 原先只 promote + 看注册表 status，一个"重启失败但服务还活着"的节点能混过去。
-        wait_health_version "$nid" 60 || {
-          warn "  $nid: /health did not report $TARGET within 60s (got '$(health_version "$(reg_base_url "$nid")")')"
-          rc=1
-        }
-      fi
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "$alias_" macos-launchd.sh install-plist "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "$alias_" macos-launchd.sh activate "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "$alias_" macos-launchd.sh verify "$home" "$MACOS_LABEL" "$TARGET" || rc=1; }
       [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       ;;
     windows)
@@ -328,8 +330,30 @@ roll_one() { # node_id platform alias home privilege
       fi
       ;;
     local)
-      bash tools/los.sh restart >/dev/null 2>&1 || rc=1
-      sleep 25
+      # 本机节点与 M3 **配置完全一致**：同一棵钉树、同一个 launchd 标签、同一套驱动。
+      # 关键差别是传输走 `local`（本机目录）而不是 ssh，而且**只重启执行器** ——
+      # 以前这里是 `los.sh restart`，会连网关一起弹（两者共用 checkout）。
+      # 历史背景：mbp-executor-1 曾直接从**可编辑的 checkout** 运行 ⇒ 身份是"编辑器此刻的样子"，
+      # 且 tsx 按需加载意味着未提交改动可以不重启就进入执行路径（2026-10-11）。
+      local la="${LOS_LOCAL_ALIAS:--}"
+      # 配置漂移护栏：钉树有**自己的一份 .env**（每个节点一份配置是机队的既有约定）。
+      # 本机节点与网关同机，所以"改了 checkout 的 .env 却忘了钉树那份"是个真实的静默陷阱
+      # （密钥轮换只改一处 ⇒ 节点仍用旧 key，且没有任何信号）。这里只**比对并告警**，
+      # 不覆盖 —— 钉树的端口/身份等本来就是可以与该机网关不同的。
+      local drift
+      drift="$(
+        diff <(grep -avE '^(LOS_VERSION|EXECUTOR_VERSION)=' "$ROOT/.env" 2>/dev/null | LC_ALL=C sort) \
+             <(grep -avE '^(LOS_VERSION|EXECUTOR_VERSION)=' "$home/.env" 2>/dev/null | LC_ALL=C sort) \
+          | grep -c '^[<>]' || true
+      )"
+      [ "${drift:-0}" -eq 0 ] \
+        || warn "  $nid: pinned .env differs from $ROOT/.env in $drift line(s) (version keys excluded) — a secret/config change applied to only one of them is a silent drift"
+      LOS_SSH_TRANSPORT=local LOS_REMOTE_HOME="$home" LOS_REMOTE_PRIVILEGE=none \
+      LOS_REMOTE_NODE_ID="$nid" tool "$la" "$home" "none" sync || rc=1
+      [[ "$rc" -eq 0 ]] && { LOS_SSH_TRANSPORT=local LOS_REMOTE_HOME="$home" LOS_REMOTE_PRIVILEGE=none tool "$la" "$home" "none" install >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "-" macos-launchd.sh install-plist "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "-" macos-launchd.sh activate "$home" "$MACOS_LABEL" >/dev/null 2>&1 || rc=1; }
+      [[ "$rc" -eq 0 ]] && { run_driver "$nid" "-" macos-launchd.sh verify "$home" "$MACOS_LABEL" "$TARGET" || rc=1; }
       [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       ;;
   esac

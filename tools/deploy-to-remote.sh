@@ -161,8 +161,8 @@ esac
 [ "$VERIFY_GRACE_SECONDS" -gt 0 ] || die "LOS_DEPLOY_VERIFY_GRACE_SECONDS must be greater than zero"
 
 case "$SSH_TRANSPORT" in
-  tailscale|ssh) ;;
-  *) die "unsupported LOS_SSH_TRANSPORT '$SSH_TRANSPORT' (expected tailscale or ssh)" ;;
+  tailscale|ssh|local) ;;
+  *) die "unsupported LOS_SSH_TRANSPORT '$SSH_TRANSPORT' (expected tailscale, ssh or local)" ;;
 esac
 
 case "$REMOTE_PRIVILEGE" in
@@ -174,7 +174,14 @@ esac
 remote_exec() {
   local remote_command
   printf -v remote_command '%q ' "$@"
-  if [ "$SSH_TRANSPORT" = "ssh" ]; then
+  if [ "$SSH_TRANSPORT" = "local" ]; then
+    # ── local：目标就是本机的一棵**钉树**（2026-10-11，mbp-executor-1）──
+    # 为什么不另写一套"本地同步"：那会给"把内容放进一棵树"造出第二份实现，而两份必然漂移
+    # （本仓已被这句话打中多次）。这里让同一套 tar／剪枝／盖章／收敛守卫作用在本机目录上，
+    # 于是钉树与 M3、与远端节点走的是**同一条路径**。
+    # 不经过登录 shell：与 SSH 上 `sh -c` 的语义一致（PATH 由调用方给）。
+    bash -c "$remote_command"
+  elif [ "$SSH_TRANSPORT" = "ssh" ]; then
     # $SSH_OPTS is intentionally unquoted so operators can pass several flags.
     # shellcheck disable=SC2086
     ssh $SSH_OPTS "$SSH_TARGET" "$remote_command"
@@ -395,7 +402,14 @@ do_sync() {
       # resolve_ts_host 会把别名解析成裸 Tailscale IP，从而丢掉 ssh config 里的
       # Port/User/IdentityFile —— 实测表现为 "Connection closed by <ip> port 22"，
       # 而手动用别名 scp 则成功。
-      if ! scp $LOS_SCP_OPTS "$tmp_tar" "$SSH_TARGET:$remote_tar" >> "$log_file" 2>&1; then
+      if [ "$SSH_TRANSPORT" = "local" ]; then
+        # local 传输没有 scp：同一台机器上就是一次 cp（路径语义与远端 /tmp 一致）
+        if ! cp "$tmp_tar" "$remote_tar" >> "$log_file" 2>&1; then
+          log_warn "  upload attempt $attempt failed (cp)"
+          sleep 3
+          continue
+        fi
+      elif ! scp $LOS_SCP_OPTS "$tmp_tar" "$SSH_TARGET:$remote_tar" >> "$log_file" 2>&1; then
         log_warn "  upload attempt $attempt failed (scp)"
         sleep 3
         continue

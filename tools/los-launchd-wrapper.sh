@@ -37,6 +37,16 @@ is_executor_enabled() {
   [ "${val:-true}" != "false" ]
 }
 
+# 执行器是否由**独立 launchd 任务**托管(2026-10-11:mbp-executor-1 改为从钉树
+# ~/.local/share/los 运行,标签 com.echerlos.los-executor,由 deploy-drivers/macos-launchd.sh 安装)。
+#
+# 为什么这个开关是必需的,而不是"顺手加一下":本 wrapper 的职责是"不健康就 los.sh start",
+# 而 los.sh start **也会拉起执行器** —— 于是钉树执行器一起,两者就抢 8090:先起来的那个活,
+# 另一个反复 bind 失败,节点表现成随机重启。所以本 wrapper 在外部托管时必须:
+#   ① 不检查 8090(它的健康由那个 launchd 任务负责);
+#   ② 只用 los.sh start-gateway,绝不用 los.sh start。
+executor_is_external() { [ "${LOS_EXECUTOR_EXTERNAL:-0}" = "1" ]; }
+
 http_ok() {
   local url="$1"
   [ "$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)" = "200" ]
@@ -47,16 +57,25 @@ log "wrapper started (pid $$, interval=${INTERVAL_SECONDS}s)"
 while true; do
   gw_ok=false
   ex_ok=false
+  external=false
+  executor_is_external && external=true
   http_ok "http://127.0.0.1:8080/health" && gw_ok=true
-  if is_executor_enabled; then
+  if [ "$external" = true ]; then
+    ex_ok=true   # 由独立 launchd 任务负责,本 wrapper 不看也不拉
+  elif is_executor_enabled; then
     http_ok "http://127.0.0.1:8090/health" && ex_ok=true
   else
     ex_ok=true
   fi
 
   if [ "$gw_ok" = false ] || [ "$ex_ok" = false ]; then
-    log "unhealthy gateway=$gw_ok executor=$ex_ok — running los.sh start"
-    ( cd "$ROOT" && ./tools/los.sh start ) >> "$LOG" 2>&1
+    if [ "$external" = true ]; then
+      log "unhealthy gateway=$gw_ok (executor is externally supervised) — running los.sh start-gateway"
+      ( cd "$ROOT" && ./tools/los.sh start-gateway ) >> "$LOG" 2>&1
+    else
+      log "unhealthy gateway=$gw_ok executor=$ex_ok — running los.sh start"
+      ( cd "$ROOT" && ./tools/los.sh start ) >> "$LOG" 2>&1
+    fi
     log "start finished rc=$?"
   fi
   sleep "$INTERVAL_SECONDS"
