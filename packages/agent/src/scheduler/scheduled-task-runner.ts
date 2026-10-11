@@ -195,10 +195,14 @@ export async function runScheduledAgentTask(input: ScheduledAgentTaskInput): Pro
 
   let executor: ResolvedExecutor | null;
   try {
-    executor = await resolveExecutor(input.executor, {
-      toolMode,
-      sandboxMode,
-    });
+    // 凭据回退（2026-10-11）：远端 smoke 实测"模板不带 agentKey ⇒ unauthorized"。
+    // 不应要求每个调用方各自持有 agent 密钥，网关用自身 EXECUTOR_AGENT_KEY 兜底。
+    executor = await resolveExecutor(
+      input.executor && !input.executor.agentKey
+        ? { ...input.executor, agentKey: getConfig().executor.agentKey }
+        : input.executor,
+      { toolMode, sandboxMode },
+    );
   } catch (error) {
     if (error instanceof _ExecutorSelectionError) {
       const metadata = readObject(input.metadata);

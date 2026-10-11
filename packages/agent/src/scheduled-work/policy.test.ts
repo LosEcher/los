@@ -50,6 +50,20 @@ test('maxLoops bounds are enforced', () => {
   assert.doesNotThrow(() => validateScheduledExecutionRunTemplate({ ...remoteExecutionTemplate, maxLoops: 200 }));
 });
 
+test('sandboxMode sandbox requires toolMode all, because project-write short-circuits the sandbox branch', () => {
+  // 2026-10-11 远端 smoke：project-write + sandboxMode=sandbox 被接受，实际拿到 L1 + sandboxAvailable=false
+  assert.throws(
+    () => validateScheduledExecutionRunTemplate({ ...remoteExecutionTemplate, toolMode: 'project-write' }),
+    /requires toolMode "all"/,
+  );
+  // 负向控制：workspace-write 与 project-write 是有效组合（L1 真实生效），不得被新规则误伤
+  assert.doesNotThrow(() => validateScheduledExecutionRunTemplate({
+    ...remoteExecutionTemplate,
+    toolMode: 'project-write',
+    sandboxMode: 'workspace-write',
+  }));
+});
+
 test('toolMode must be project-write or all for execution', () => {
   assert.throws(
     () => validateScheduledExecutionRunTemplate({ ...remoteExecutionTemplate, toolMode: 'read-only' }),

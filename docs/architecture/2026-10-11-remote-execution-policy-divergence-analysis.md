@@ -122,8 +122,50 @@ method:
 建议：self-check 的"有无产出"判据应基于**已记录的输出/事件**而不是另算一遍；并把判负依据写进 `verification_records`
 （与 D3 同源：调度路径的门禁缺乏可核对的记录）。
 
-**仍未修**：D3（调度路径 `requiredChecks` 不执行也不留证，本次实测仍为 **0 条 `verification_records`**）、
-凭据注入（调用方仍需自带 `agentKey`）、D4。
+### 第二批：D3 步 1 + D4 + 凭据回退（同日实施，真机验证）
+
+- **凭据回退**：`scheduled-task-runner.ts` 在模板未给 `agentKey` 时回退到网关自身的 `config.executor.agentKey`
+  ⇒ 调用方不再需要各自持有 agent 密钥。**实测**：模板 `executor` 无 `agentKey`（创建响应确认 `present = False`）
+  仍触发 **succeeded** 且落点 `node34-executor-1`（修复前同一情况是 `unauthorized`）。
+- **D4（自检结论留证 + 文案准确）**：`goal-self-check-runner.ts` 在 `task.self_check_completed` 之后
+  写入 `verification_records`（`check_name=goal_self_check`，`kind=assertion`，`reviewer=self-check-judge`，
+  `independence=separate_model`，状态按 skipped/passed/failed 落库）；
+  `self-check.ts` 的判负文案由"produced no meaningful output"改为**准确描述**
+  （`agent output too short to judge (N < 20 chars)`）。
+  **实测**：同一次运行查询到 `goal_self_check | assertion | succeeded`。
+- **D3 步 1（让"没检查"可见）**：声明了 `requiredChecks` 但调度路径从不执行它们（源码层零引用），
+  现在**逐条写入 `skipped` + 原因** `scheduled_path_does_not_execute_required_checks`。
+  **实测**：`required_check_1 | command | skipped | scheduled_path_does_not_execute_required_checks`。
+
+### 第三批：D3 步 2 的**本地半边**已完成（真机对照验证）
+
+- **执行器接缝**（`verification-runner.ts`）：`runVerificationRecord` 增加可注入的 `commandRunner`
+  （默认仍是本机 spawn）；新增 `runDeclaredChecksForTaskRun()`——按 **task run** 工作
+  （`runVerificationRecordsForRunSpec` 是按 run spec 工作的，而调度 run 没有 run spec，这正是 D3 的结构性原因）。
+- **调度路径接线**（`goal-self-check-runner.ts`）：本地 run ⇒ **真的执行**声明式检查并把结果落证；
+  远端 run ⇒ 记 `skipped` + 原因 `remote_run_required_checks_need_node_execution`
+  （**绝不在网关本地代跑节点路径的检查**）。
+- **真机对照（同一 `uname -s` 检查）** `[E]`：
+
+  | run | 落点 | 检查记录 |
+  | --- | --- | --- |
+  | 本地（无 executor） | `gateway-local` | `required_check_1 \| **succeeded** \| out=Darwin` |
+  | 远端（`node34-executor-1`） | `node34-executor-1` | `required_check_1 \| **skipped** \| skip=remote_run_required_checks_need_node_execution \| out=(空)` |
+
+  ⇒ 本地真执行（Darwin 即网关主机），远端不代跑（输出为空）——两条都是刻意验证的安全属性。
+- **测试**：新增 `verification-runner.test.ts` 2/2，其中一条负向断言**执行器不得被调用**（防"远端检查在本地跑"回归）。
+
+**仍未修 / 待决策**
+- **D3 步 2 的远端半边**（第 2 轮，落点已定）：
+  ① executor 侧 `/v1/nodes/:id/commands` 处理器（`packages/executor/src/index.ts:182`）增加一条**受治理的检查命令**（cwd/timeout/输出上限）；
+  ② 网关 `node-command-routes.ts:108` 的 `normalizeCommand` 枚举放行该命令；
+  ③ 调度接线把该命令包成 `commandRunner` 注入（与 chat 路径注入 `remoteCommandRunner` 同款）。
+  ⚠️ 不能复用现有节点命令通道：其枚举被限定为 `status/probe/drain/promote/restart/upgrade/rollback`。
+- **检查结果是否参与判定**（待决策）：本轮**刻意只留证、不改变 run 终态**——改成"检查失败即拦"会影响
+  13 条存量 `scheduled_execution`（含每 6h 运行的 `schedule-fleet-consistency-001`），属策略决定。
+- **D4 的判定语义**：输出 < 20 字符仍会被**硬拦**（`MIN_OUTPUT_CHARS`，`self-check.ts:57`）。
+  本次只把文案改准，**没有**放宽拦截——"短回答该不该拦"是策略决定，需要你定：
+  可选项 ① 保持硬拦；② skipped 时改为 `operator_attention`（人看一眼）而非 blocked；③ 允许按契约声明豁免下限。
 
 ## 6. 不做 / 拒绝清单
 

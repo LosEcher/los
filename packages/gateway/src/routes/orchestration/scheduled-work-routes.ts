@@ -19,6 +19,9 @@ import {
 } from '@los/agent/scheduled-work';
 
 import { runIdempotentJson } from '../../idempotency.js';
+// 共享归一化：`read-only` 必须原样透传到 validateScheduledExecutionRunTemplate（由它 fail-loud 拒绝），
+// 不能像 2026-10-11 之前那样在本文件里静默改写成 project-write（= 静默提升写权限）。
+import { normalizeToolMode } from '../../chat-normalizers.js';
 import { getRequestContext, requireOperator } from '../../request-context.js';
 
 export type ScheduledWorkRouteDeps = {
@@ -319,10 +322,6 @@ function normalizeMaxLoops(value: unknown): number | undefined {
     throw new Error(`maxLoops must be an integer in [1,200], got: ${String(value)}`);
   }
   return Math.floor(parsed);
-}
-
-function normalizeToolMode(value: unknown): 'all' | 'project-write' {
-  return value === 'all' ? 'all' : 'project-write';
 }
 
 function normalizeSandboxMode(value: unknown): 'readonly' | 'workspace-write' | 'sandbox' | undefined {
