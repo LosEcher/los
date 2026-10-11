@@ -77,6 +77,27 @@ tools:
   - name: los_run_replay
     purpose: read bounded persisted replay through GET /runs/{runSpecId}/stream
     requiredInput: [runSpecId, projectId]
+  - name: los_run_verify
+    purpose: run the persisted required checks of a run through POST /runs/{runSpecId}/verify
+    requiredInput: [runSpecId, projectId]
+    optionalInput: [cwd, timeoutMs, outputLimit, includeFailed]
+    operatorCredentialRequired: true
+    output: [runSpecId, decision, ranRecordIds, records, recovery]
+    projection: >
+      Verification records are projected to id/checkName/kind/status/required plus a
+      truncated outputSummary, so a run with many checks stays a bounded result.
+    sideEffect: >
+      The gateway creates a work-item revision when the decision is blocked and may
+      dispatch planning for it; that is gateway policy, not adapter behaviour.
+  - name: los_run_approve
+    purpose: approve the plan phase of a run through POST /runs/{runSpecId}/approve
+    requiredInput: [runSpecId, projectId]
+    optionalInput: [reason, planRevision, contractHash]
+    operatorCredentialRequired: true
+    capabilityRule: >
+      planRevision and contractHash must be supplied together; the gateway rejects a
+      mismatched or forged pair. Omitting both performs a plain phase approval.
+    output: [runSpecId, phase, previousPhase, phaseChangedAt, dispatch]
   - name: los_operator_control
     purpose: persist steering or follow-up through POST /sessions/{sessionId}/operator-events
     requiredInput: [sessionId, projectId, type]

@@ -81,6 +81,37 @@ export const _TOOLS = [
     },
   },
   {
+    name: 'los_run_verify',
+    description: 'Run the persisted required checks of a LOS run (POST /runs/:id/verify). Requires LOS_OPERATOR_TOKEN.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        runSpecId: { type: 'string' },
+        projectId: { type: 'string' },
+        cwd: { type: 'string' },
+        timeoutMs: { type: 'integer', minimum: 0 },
+        outputLimit: { type: 'integer', minimum: 0 },
+        includeFailed: { type: 'boolean' },
+      },
+      required: ['runSpecId', 'projectId'],
+    },
+  },
+  {
+    name: 'los_run_approve',
+    description: 'Approve the plan phase of a LOS run (POST /runs/:id/approve). Requires LOS_OPERATOR_TOKEN.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        runSpecId: { type: 'string' },
+        projectId: { type: 'string' },
+        reason: { type: 'string' },
+        planRevision: { type: 'integer', minimum: 1 },
+        contractHash: { type: 'string' },
+      },
+      required: ['runSpecId', 'projectId'],
+    },
+  },
+  {
     name: 'los_operator_control',
     description: 'Persist operator steering or follow-up for a LOS session. Requires LOS_OPERATOR_TOKEN.',
     inputSchema: {

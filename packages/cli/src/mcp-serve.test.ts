@@ -10,7 +10,10 @@ test('MCP adapter initializes and exposes only the contracted tools', async () =
 
   const listed = asRecord((await adapter.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))?.result);
   const names = (listed.tools as Array<{ name: string }>).map(tool => tool.name);
-  assert.deepEqual(names, ['los_run', 'los_runs_list', 'los_run_state', 'los_run_replay', 'los_operator_control']);
+  assert.deepEqual(names, [
+    'los_run', 'los_runs_list', 'los_run_state', 'los_run_replay',
+    'los_run_verify', 'los_run_approve', 'los_operator_control',
+  ]);
 });
 
 test('los_run forwards scoped access context without operator credentials and projects SSE evidence', async () => {
@@ -175,6 +178,102 @@ test('operator control forwards the operator credential for steering', async () 
     runSpecId: 'run-a',
     reason: 'operator correction',
   });
+});
+
+test('los_run_verify runs the persisted checks with operator auth and bounds record output', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({
+      runSpecId: 'run/a',
+      ranRecordIds: ['verification-run-a-r1-1'],
+      records: [
+        {
+          id: 'verification-run-a-r1-1', checkName: 'noop', kind: 'command', status: 'succeeded',
+          required: true, outputSummary: 'x'.repeat(500),
+        },
+        { id: 'verification-run-a-r1-2', checkName: 'noop-2', kind: 'command', status: 'required', required: true },
+      ],
+      decision: {
+        status: 'succeeded', blockedVerificationRecordIds: [], failedVerificationRecordIds: [],
+        pendingVerificationRecordIds: [],
+      },
+    })),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run_verify', {
+    runSpecId: 'run/a', projectId: 'project-a', cwd: '/work/project-a', timeoutMs: 60_000,
+  }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/runs/run%2Fa/verify');
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.deepEqual(await requests[0]?.json(), { cwd: '/work/project-a', timeoutMs: 60_000 });
+  const records = result.records as Array<{ id: string; outputSummary?: string; status: string }>;
+  assert.equal(result.runSpecId, 'run/a');
+  assert.equal((result.decision as { status: string }).status, 'succeeded');
+  assert.equal(records.length, 2);
+  assert.equal(records[0]?.outputSummary?.length, 300);
+  assert.equal(records[1]?.outputSummary, undefined);
+  assert.equal(result.recovery, undefined);
+});
+
+test('los_run_approve forwards the operator credential and the capability pair', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({ runSpecId: 'run-a', phase: 'plan_approved', dispatch: { status: 'scheduled' } })),
+  });
+
+  const hash = `sha256:${'a'.repeat(64)}`;
+  const result = toolContent(await callTool(adapter, 'los_run_approve', {
+    runSpecId: 'run-a', projectId: 'project-a', reason: 'plan reviewed', planRevision: 2, contractHash: hash,
+  }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/runs/run-a/approve');
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.deepEqual(await requests[0]?.json(), { reason: 'plan reviewed', planRevision: 2, contractHash: hash });
+  assert.equal(result.phase, 'plan_approved');
+});
+
+test('operator-gated run tools refuse before HTTP without the operator credential', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: '',
+    fetchImpl: async () => {
+      called = true;
+      return new Response('{}');
+    },
+  });
+
+  const verifyResponse = asRecord((await callTool(adapter, 'los_run_verify', { runSpecId: 'run-a', projectId: 'project-a' })).result);
+  assert.equal(verifyResponse.isError, true);
+  assert.match(String((verifyResponse.content as Array<{ text: string }>)[0]?.text), /LOS_OPERATOR_TOKEN is required/);
+
+  const approveResponse = asRecord((await callTool(adapter, 'los_run_approve', { runSpecId: 'run-a', projectId: 'project-a' })).result);
+  assert.equal(approveResponse.isError, true);
+  assert.equal(called, false);
+});
+
+test('approve rejects a half-supplied capability pair before HTTP', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: 'operator-secret',
+    fetchImpl: async () => {
+      called = true;
+      return new Response('{}');
+    },
+  });
+
+  const response = asRecord((await callTool(adapter, 'los_run_approve', {
+    runSpecId: 'run-a', projectId: 'project-a', planRevision: 2,
+  })).result);
+  assert.equal(response.isError, true);
+  assert.match(String((response.content as Array<{ text: string }>)[0]?.text), /must be provided together/);
+  assert.equal(called, false);
 });
 
 test('state and replay use encoded run ids, bounded cursors, and ordinary auth', async () => {

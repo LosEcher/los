@@ -77,7 +77,7 @@ DSH 能调 los 做分析与开发、能读回执行证据；但 `los_run` 的 `p
 | --- | --- | --- |
 | P0-1 | 跨项目**静默落错仓**（不是报错，是"以为在 A 仓其实改了 B 仓"） | 已在 §6 修（operatorScope + fail-loud） |
 | P0-2 | 长任务被上层截断且丢 `runSpecId`：适配器 `await response.text()` 缓冲整条 SSE，DSH 侧 `toolCallTimeoutMs=180000` | 部分缓解：`los_runs_list` 可按 `traceId` 找回 id（§9.1）；`detach` 已证明可在适配器侧实现（§9.2），未实现 |
-| P0-3 | 契约跑不完：standard/heavyweight 会 park，而 MCP 无 `verify`/`approve`/`cancel`/`recover`/runs 列表（路由见 `file:packages/gateway/src/route-admission-inventory.ts:237`） | 部分缓解：runs 列表已交付（§9.1）；`verify`/`approve`/`cancel` 仍缺（S2/S3，P4 仍是活例且 blocked 终态丢 `runSpecId`） |
+| P0-3 | 契约跑不完：standard/heavyweight 会 park，而 MCP 无 `verify`/`approve`/`cancel`/`recover`/runs 列表（路由见 `file:packages/gateway/src/route-admission-inventory.ts:237`） | 大部已交付：runs 列表（§9.1）、`verify`/`approve`（§9.4）；`cancel` 仍缺（S3）。另：blocked 终态不带 `runSpecId` 的投影问题仍在 |
 | P1-1 | 无 run 发现/取消入口（`run_specs` 已有 500+ 行） | 发现已交付（`los_runs_list`，§9.1）；取消仍缺（S3：只有 task 级 `POST /tasks/:id/cancel`） |
 | P1-2 | 幂等假象：每次随机 `x-idempotency-key: mcp-<uuid>`，重试会重复建 run | 未修：`dedupeKey` 是另一字段，不解决重试 |
 | P1-3 | 项目登记面缺口无门禁：10 个 binding 覆盖不全，且与母仓 `workspace-registry.snapshot.json` 互不校验 | 未修：需一条"要派活的仓 ⊆ binding"机械 check |
@@ -161,7 +161,7 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 3. 审计与验收期间的探针 run 留在台账（`los` 3 条 + `dsfolder-fmtguard` 3 条 succeeded，
    另有 1 条 P4 停在 `phase=created`；均无 `todoId`、无文件副作用）。
 
-## 9. 后续工作：S1 / S4 已交付，S2 / S3 未开工
+## 9. 后续工作：S1 / S2 / S4 已交付，S3 未开工
 
 目标：补"派活 → 盯活 → 收活"闭环，先解决 P0-2 的**超时丢 id**（这是长开发任务的实际痛点）。
 
@@ -223,13 +223,42 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
   修法：抽出 `runIdentity()` 作为唯一取 id 口径，并按"三个 id 齐全"作为停条件——
   与 §6.1 是同一类错误的第三次出现（信封 vs 扁平），已用测试锁住真实形状。
 
-### 9.4 交付顺序（更新）
+### 9.4 S2 `los_run_verify` / `los_run_approve`（2026-10-11 交付）
+
+工具面 `file:packages/cli/src/mcp-tools.ts:84`（verify）/ `:100`（approve）；handler
+`file:packages/cli/src/mcp-serve.ts:172`（verify）/ `:191`（approve）；验证结果投影
+`file:packages/cli/src/mcp-projections.ts:233`；契约 `file:contracts/programmatic-agent-interface.yaml:80`（verify）/ `:92`（approve）；
+测试 `file:packages/cli/src/mcp-serve.test.ts:183` 起四条（含无凭据拒绝与半对 capability 本地拒绝）。
+
+- 两者都走"网关路由 requireOperator ⇒ 适配器 `operator: true`"：没有 operator 凭据时**先抛错、不发 HTTP**。
+- verify 的返回做了有界投影（每条记录 `outputSummary` 截 300 字符）——原始返回带完整
+  `VerificationRecord[]`，多检查的 run 足以撑爆 MCP 结果。
+
+**验收（真机）**：
+
+| 靶子 | 观测 | 判定 |
+| --- | --- | --- |
+| §2 P4 那条停在 `phase=created` 的 run | `los_run_verify` 真跑了 2 条记录：`r1-2` `succeeded`（`true` → `ok`），`r1-1` **failed** 且 stderr 如实回传（`/bin/sh: noop: command not found`）；state 由 `created` 推进到 `phase=blocked` | 通过（死胡同解除） |
+| 新建 `runContract.phase='planning'` 的 run | `los_run_approve` → `phase=plan_approved`、`previousPhase=planning`、`dispatch={status:scheduled}` | 通过（正面路径） |
+
+**两条如实记录的观测（都不是适配器缺陷）**：
+
+1. **`requiredChecks` 是命令，不是检查名**：我在 P4 探针里写 `requiredChecks: ['noop']`，
+   网关据此派生的检查命令就是 `noop` ⇒ 必然失败。参考实现
+   `/Users/echerlos/syncfolder/project/dsfolder/scripts/rust-repo-gate-run.mjs:290` 的写法才是对的
+   （`requiredChecks: checks.map(c => c.command)`）。所以 §2 P4 的"死胡同"里，**工具缺口是真的**
+   （已修），**契约内容是我写坏的**（探针作者的问题）。
+2. **两个"phase"不是同一个源**：approve 迁移读 `runContract.phase`（故报 `previousPhase=planning`），
+   而 `los_run_state` 按 run/task 状态分类、对同一个 run 报 `phase=created`。
+   生命周期以 `los_run_state` 为准，审批迁移以上面的 approve 返回为准。
+
+### 9.5 交付顺序（更新）
 
 - **S1 `los_runs_list`** — 已交付，见 §9.1（bookmark `feat/mcp-runs-list`）。
-- **S2 `los_run_verify` / `los_run_approve`**：薄包装 `POST /runs/:id/verify|approve`（operator 门禁）。
-  验收：§2 P4 那条停在 `phase=created` 的 standard 契约 run 能被推进（目前是死胡同）。**未开工**。
-- **S3 `los_run_cancel`**：以 `taskRunId` 为入参包装 `POST /tasks/:id/cancel`（必须先确认该路由的
-  权限门与语义：取消的是 task run 还是整个 run spec）。**未开工**。
+- **S2 `los_run_verify` / `los_run_approve`** — 已交付，见 §9.4。
+- **S3 `los_run_cancel`**：以 `taskRunId` 为入参包装 `POST /tasks/:id/cancel`。**未开工**。
+  已核实：该路由**没有 operator 门禁**（`file:packages/gateway/src/routes/orchestration/task-routes.ts:119`，
+  故它在 route-admission 的 review 列表里）——适配器侧要**比网关更严**（要求 operator 凭据）。
 - **S4 `los_run(detach)`** — 已交付，见 §9.3。
 
 残留：`mcp-serve.ts` 现为 487 行，距 `check-structure.sh` 的 500 行门禁只剩 13 行；

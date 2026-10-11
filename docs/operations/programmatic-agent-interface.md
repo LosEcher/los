@@ -49,6 +49,8 @@ Use the host's secret/environment mechanism.
 | `los_runs_list` | `projectId` | `GET /runs` | access token |
 | `los_run_state` | `runSpecId`, `projectId` | `GET /runs/:id/state` | access token |
 | `los_run_replay` | `runSpecId`, `projectId` | `GET /runs/:id/stream` | access token |
+| `los_run_verify` | `runSpecId`, `projectId` | `POST /runs/:id/verify` | access and operator tokens |
+| `los_run_approve` | `runSpecId`, `projectId` | `POST /runs/:id/approve` | access and operator tokens |
 | `los_operator_control` | `sessionId`, `projectId`, `type` | `POST /sessions/:id/operator-events` | access and operator tokens |
 
 `los_runs_list` exists because an MCP host can cut a long `los_run` at its tool
@@ -78,6 +80,25 @@ and its task both reached `succeeded`, and a detached dispatch returned in ~100 
 with the run then succeeding on its own. Read it back with `los_run_state`,
 `los_run_replay`, or `los_runs_list`. The project-scope guard still runs before a
 detached result is reported, so `detach` cannot hide a mis-scoped run.
+
+## Run Lifecycle Control
+
+`los_run_verify` runs the run's persisted required checks and returns a bounded
+projection: the completion decision, the record ids that ran, and per-record
+`id` / `checkName` / `kind` / `status` / `required` plus an `outputSummary`
+truncated to 300 characters. The gateway's own side effects (a work-item
+revision on a blocked decision) still happen and are not adapter behaviour.
+
+`los_run_approve` performs the plan-phase approval. Pass `planRevision` and
+`contractHash` together or omit both; the adapter rejects a half-supplied pair
+before calling the gateway. Both tools require the operator credential, matching
+the gateway routes they wrap.
+
+Note the two phase notions this touches: the approval transition reads
+`runContract.phase` (so an approved run reports `previousPhase: "planning"`),
+while `los_run_state` classifies the run from run/task status and can report
+`phase: "created"` for the same run. Read `los_run_state` for lifecycle
+grounding and the approve result for the approval transition itself.
 
 For steering, pass `type=steering` and `instruction`. For queued continuation,
 pass `type=followup` and `prompt`. The gateway derives the operator actor from
@@ -132,6 +153,6 @@ pnpm check
 
 A deterministic stdio probe should start `los-mcp`, then send `initialize`,
 `notifications/initialized`, and `tools/list` to the built CLI and assert that
-the five contracted tools are present. A live run probe additionally requires
+the seven contracted tools are present. A live run probe additionally requires
 a current provider compatibility decision and may consume provider quota; it
 is not implied by the protocol smoke.

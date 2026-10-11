@@ -2,8 +2,24 @@ import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
 import { _DEFAULT_RUN_LIST, _MAX_RUN_LIST, _TOOLS } from './mcp-tools.js';
+import {
+  _MAX_ERROR_TEXT,
+  _MAX_RESULT_TEXT,
+  _TERMINAL_EVENTS,
+  assertResolvedProjectScope,
+  compact,
+  optionalRecord,
+  optionalString,
+  parseSSE,
+  projectIntakeScope,
+  projectRunEvents,
+  projectRunList,
+  projectVerificationResult,
+  readUntilEvent,
+  runIdentity,
+  type JsonRecord,
+} from './mcp-projections.js';
 
-type JsonRecord = Record<string, unknown>;
 type RequestId = string | number;
 
 interface JSONRPCRequest {
@@ -35,11 +51,6 @@ export interface LosMCPAdapter {
 
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
-const MAX_ERROR_TEXT = 500;
-const MAX_RESULT_TEXT = 20_000;
-const MAX_PROMPT_PREVIEW = 120;
-/** 终态事件：出现即表示这次运行已经收口（无需继续持连接）。 */
-const TERMINAL_EVENTS = new Set(['done', 'blocked', 'cancelled', 'error']);
 
 export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCPAdapter {
   const gatewayUrl = (options.gatewayUrl ?? process.env.LOS_GATEWAY_URL ?? DEFAULT_GATEWAY).replace(/\/+$/, '');
@@ -76,7 +87,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
   async function requestJson(path: string, input: { projectId: string; method?: string; body?: JsonRecord; operator?: boolean; idempotent?: boolean }): Promise<unknown> {
     const response = await request(path, input);
     const text = await response.text();
-    if (!response.ok) throw new Error(redact(`LOS gateway ${response.status}: ${text.slice(0, MAX_ERROR_TEXT)}`, authToken, operatorToken));
+    if (!response.ok) throw new Error(redact(`LOS gateway ${response.status}: ${text.slice(0, _MAX_ERROR_TEXT)}`, authToken, operatorToken));
     return text ? JSON.parse(text) as unknown : {};
   }
 
@@ -109,11 +120,11 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       });
       if (!response.ok) {
         const raw = await response.text();
-        throw new Error(redact(`LOS gateway ${response.status}: ${raw.slice(0, MAX_ERROR_TEXT)}`, authToken, operatorToken));
+        throw new Error(redact(`LOS gateway ${response.status}: ${raw.slice(0, _MAX_ERROR_TEXT)}`, authToken, operatorToken));
       }
       const events = detach
         ? await readUntilEvent(response, controller, seen => {
-          if (seen.some(item => TERMINAL_EVENTS.has(item.event))) return true;
+          if (seen.some(item => _TERMINAL_EVENTS.has(item.event))) return true;
           const ids = runIdentity(seen);
           return Boolean(ids.sessionId && ids.runSpecId && ids.taskRunId);
         })
@@ -121,7 +132,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       const scope = projectIntakeScope(events);
       const projection = projectRunEvents(events);
       assertResolvedProjectScope({ requestedProjectId: projectId, operatorScope, scope, projection });
-      const terminal = events.some(item => TERMINAL_EVENTS.has(item.event));
+      const terminal = events.some(item => _TERMINAL_EVENTS.has(item.event));
       return compact({
         ...projection,
         status: detach && !terminal ? 'detached' : projection.status,
@@ -156,6 +167,43 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         limit: String(optionalInteger(args.limit, 1, 500) ?? 100),
       });
       return await requestJson(`/runs/${encodeURIComponent(runSpecId)}/stream?${query}`, { projectId });
+    }
+
+    if (name === 'los_run_verify') {
+      const runSpecId = requiredString(args.runSpecId, 'runSpecId');
+      const projectId = requiredString(args.projectId, 'projectId');
+      // 网关该路由 requireOperator ⇒ operator: true（无凭据时 request() 会先抛错，不发 HTTP）
+      const result = await requestJson(`/runs/${encodeURIComponent(runSpecId)}/verify`, {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotent: true,
+        body: compact({
+          cwd: optionalString(args.cwd),
+          timeoutMs: optionalInteger(args.timeoutMs, 0, Number.MAX_SAFE_INTEGER),
+          outputLimit: optionalInteger(args.outputLimit, 0, Number.MAX_SAFE_INTEGER),
+          includeFailed: typeof args.includeFailed === 'boolean' ? args.includeFailed : undefined,
+        }),
+      });
+      return projectVerificationResult(result);
+    }
+
+    if (name === 'los_run_approve') {
+      const runSpecId = requiredString(args.runSpecId, 'runSpecId');
+      const projectId = requiredString(args.projectId, 'projectId');
+      const planRevision = optionalInteger(args.planRevision, 1, Number.MAX_SAFE_INTEGER);
+      const contractHash = optionalString(args.contractHash);
+      // 网关口径：两者必须成对出现（只给一个会被 409 拒）；这里先本地拒绝，省一次往返
+      if ((planRevision === undefined) !== (contractHash === undefined)) {
+        throw new Error('planRevision and contractHash must be provided together');
+      }
+      return await requestJson(`/runs/${encodeURIComponent(runSpecId)}/approve`, {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotent: true,
+        body: compact({ reason: optionalString(args.reason), planRevision, contractHash }),
+      });
     }
 
     if (name === 'los_operator_control') {
@@ -202,7 +250,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         return rpcResult(message.id, { content: [{ type: 'text', text: JSON.stringify(value) }] });
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
-        return rpcResult(message.id, { content: [{ type: 'text', text: messageText.slice(0, MAX_RESULT_TEXT) }], isError: true });
+        return rpcResult(message.id, { content: [{ type: 'text', text: messageText.slice(0, _MAX_RESULT_TEXT) }], isError: true });
       }
     },
   };
@@ -233,193 +281,6 @@ export async function mcpServeCommand(globalArgs: string[], argv: string[]): Pro
   }
 }
 
-function parseSSE(raw: string): Array<{ event: string; data: JsonRecord }> {
-  const events: Array<{ event: string; data: JsonRecord }> = [];
-  for (const block of raw.split(/\r?\n\r?\n/)) {
-    let event = 'message';
-    const dataLines: string[] = [];
-    for (const line of block.split(/\r?\n/)) {
-      if (line.startsWith('event:')) event = line.slice(6).trim();
-      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-    }
-    if (dataLines.length === 0) continue;
-    try {
-      const value = JSON.parse(dataLines.join('\n')) as unknown;
-      events.push({ event, data: optionalRecord(value) ?? {} });
-    } catch {
-      events.push({ event, data: { raw: dataLines.join('\n').slice(0, MAX_ERROR_TEXT) } });
-    }
-  }
-  return events;
-}
-
-/**
- * 流式读 SSE，直到 `stopWhen` 命中（或流结束），随后**主动断开**连接。
- *
- * 这是 `los_run(detach)` 的机制：宿主可以在工具超时前拿到 id 就撤，不必等整条流。
- * 安全性有实测依据（2026-10-11）：读到 `session` 事件后 abort，运行照常
- * `run_specs.status=succeeded` / `task_runs.status=succeeded` —— **执行不依赖 SSE 消费者**。
- * 证据与探针见 `docs/operations/2026-10-11-dsh-los-cross-project-dispatch-audit.md` §9.2。
- */
-async function readUntilEvent(
-  response: Response,
-  controller: AbortController,
-  stopWhen: (events: Array<{ event: string; data: JsonRecord }>) => boolean,
-): Promise<Array<{ event: string; data: JsonRecord }>> {
-  const reader = response.body?.getReader();
-  if (!reader) return parseSSE(await response.text());
-  const decoder = new TextDecoder();
-  let raw = '';
-  for (;;) {
-    let chunk: ReadableStreamReadResult<Uint8Array>;
-    try {
-      chunk = await reader.read();
-    } catch {
-      break; // abort 之后读取会抛；此时已有足够事件
-    }
-    if (chunk.done) break;
-    raw += decoder.decode(chunk.value, { stream: true });
-    if (stopWhen(parseSSE(raw))) break;
-  }
-  controller.abort();
-  return parseSSE(raw);
-}
-
-/**
- * 分派身份（三个 id）——**这是 detach 与投影的唯一取 id 口径**。
- *
- * 为什么必须跨事件取（2026-10-11 实测形状）：
- *   · `runSpecId` 只在 `coordinator.intake_resolved` 的 `payload.runSpecId` 里，早于终态出现；
- *   · `session` 事件只有 `{sessionId, taskRunId, …}`，**没有 runSpecId**；
- *   · 终态 `done` 事件是扁平的，三个 id 齐全。
- * 先前的实现只读终态 + `session`，于是 detach（停在 `session`）拿不到 runSpecId —— 探针首跑即暴露。
- */
-function runIdentity(events: Array<{ event: string; data: JsonRecord }>): { sessionId?: string; runSpecId?: string; taskRunId?: string } {
-  const terminal = [...events].reverse().find(item => TERMINAL_EVENTS.has(item.event))?.data ?? {};
-  const session = events.find(item => item.event === 'session')?.data ?? {};
-  const task = events.find(item => item.event === 'task')?.data ?? {};
-  const intake = events.find(item => item.event === 'coordinator.intake_resolved')?.data ?? {};
-  const intakePayload = optionalRecord(intake.payload) ?? {};
-  return {
-    sessionId: optionalString(terminal.sessionId) ?? optionalString(session.sessionId) ?? optionalString(intake.sessionId),
-    runSpecId: optionalString(terminal.runSpecId) ?? optionalString(intakePayload.runSpecId) ?? optionalString(intake.runSpecId),
-    taskRunId: optionalString(terminal.taskRunId) ?? optionalString(session.taskRunId) ?? optionalString(task.taskRunId),
-  };
-}
-
-function projectRunEvents(events: Array<{ event: string; data: JsonRecord }>): JsonRecord {
-  const terminal = [...events].reverse().find(item => TERMINAL_EVENTS.has(item.event));
-  const data = terminal?.data ?? {};
-  const identity = runIdentity(events);
-  return compact({
-    status: terminal?.event ?? 'unknown',
-    sessionId: identity.sessionId,
-    runSpecId: identity.runSpecId,
-    taskRunId: identity.taskRunId,
-    traceId: optionalString(data.traceId),
-    requestId: optionalString(data.requestId),
-    runSpecStatus: optionalString(data.runSpecStatus),
-    text: optionalString(data.text)?.slice(0, MAX_RESULT_TEXT),
-    message: optionalString(data.message)?.slice(0, MAX_ERROR_TEXT),
-    blockedVerificationRecordIds: Array.isArray(data.blockedVerificationRecordIds) ? data.blockedVerificationRecordIds : undefined,
-    eventTypes: [...new Set(events.map(item => item.event))],
-  });
-}
-
-interface RunListFilter {
-  projectId: string;
-  traceId?: string;
-  status?: string;
-  limit: number;
-}
-
-/**
- * `los_runs_list` 的投影：过滤 → 按 `createdAt` 倒序 → 取前 `limit` 条 → 逐条裁剪。
- *
- * 为什么在适配器侧做：`GET /runs` 的 handler 不收任何过滤参数、直接返回 store 的默认上限
- * （实测 50 行，`file:packages/gateway/src/routes/orchestration/run-routes.ts:95`），
- * 且每行带**完整 prompt**——不裁剪就会把大段提示词灌进 MCP 结果。
- */
-function projectRunList(rows: unknown[], filter: RunListFilter): JsonRecord {
-  const matched = rows
-    .map(row => optionalRecord(row) ?? {})
-    .filter(row => optionalString(row.projectId) === filter.projectId)
-    .filter(row => !filter.traceId || optionalString(row.traceId) === filter.traceId)
-    .filter(row => !filter.status || optionalString(row.status) === filter.status)
-    .sort((left, right) => String(optionalString(right.createdAt) ?? '')
-      .localeCompare(String(optionalString(left.createdAt) ?? '')));
-  const items = matched.slice(0, filter.limit).map(row => compact({
-    runSpecId: optionalString(row.id),
-    sessionId: optionalString(row.sessionId),
-    projectId: optionalString(row.projectId),
-    status: optionalString(row.status),
-    toolMode: optionalString(row.toolMode),
-    traceId: optionalString(row.traceId),
-    createdAt: optionalString(row.createdAt),
-    updatedAt: optionalString(row.updatedAt),
-    promptPreview: optionalString(row.prompt)?.slice(0, MAX_PROMPT_PREVIEW),
-  }));
-  return { matched: matched.length, returned: items.length, items };
-}
-
-interface IntakeScope {
-  ownerRepo?: string;
-  requestedProjectId?: string;
-  workspaceRoot?: string;
-  reason?: string;
-  blocker?: string;
-}
-
-/**
- * 读取网关的**项目归属判定**（首个 `coordinator.intake_resolved` 事件）。
- *
- * 为什么必须有这一步：`auth.enabled` 时，网关对**非 operator** 调用方固定使用配置的默认项目，
- * 调用方给的 `projectId` 只当路由提示被丢弃（`packages/gateway/src/request-context.ts` 的
- * `onRequest` 与 `resolveProjectScope`）。没有这道读取，`los_run(projectId=X)` 会**静默**
- * 跑在默认项目上，返回的却是"成功"。
- *
- * 形状（2026-10-11 实测 `/tmp/sse-dump.txt`）：会话事件流以**信封**下发，
- * 归属字段在 `data.payload` 里（`data.payload.ownerRepo`），信封自身另有网关标注的
- * `data.projectId`；两种都读，避免信封形态变化就静默失效。
- */
-function projectIntakeScope(events: Array<{ event: string; data: JsonRecord }>): IntakeScope {
-  const intake = events.find(item => item.event === 'coordinator.intake_resolved');
-  const data = intake?.data ?? {};
-  const payload = optionalRecord(data.payload) ?? {};
-  return {
-    ownerRepo: optionalString(payload.ownerRepo) ?? optionalString(data.ownerRepo) ?? optionalString(data.projectId),
-    requestedProjectId: optionalString(payload.requestedProjectId) ?? optionalString(data.requestedProjectId),
-    workspaceRoot: optionalString(payload.workspaceRoot) ?? optionalString(data.workspaceRoot),
-    reason: optionalString(payload.reason) ?? optionalString(data.reason),
-    blocker: optionalString(payload.blocker) ?? optionalString(data.blocker),
-  };
-}
-
-/**
- * fail-loud：网关解析出的项目 ≠ 请求的项目 ⇒ 抛错，并**把 id 带在错误里**。
- *
- * 为什么不直接丢弃结果：调用方拿不到 `runSpecId` 就无法复盘/接管这次运行
- * （blocked 终态本来就可能不带 runSpecId）。只在网关确实给了 `ownerRepo` 时判定，
- * 避免把"没读到"误判成"不一致"。
- */
-function assertResolvedProjectScope(input: {
-  requestedProjectId: string;
-  operatorScope: boolean;
-  scope: IntakeScope;
-  projection: JsonRecord;
-}): void {
-  const { requestedProjectId, operatorScope, scope, projection } = input;
-  if (!scope.ownerRepo || scope.ownerRepo === requestedProjectId) return;
-  const guidance = operatorScope
-    ? `the operator-scoped call was still resolved elsewhere; bind '${requestedProjectId}' in the gateway project registry or pass a workspaceRoot inside it`
-    : `a non-operator call is pinned to the gateway default project; pass operatorScope=true (requires the adapter operator credential) to target '${requestedProjectId}'`;
-  throw new Error([
-    `project scope mismatch: requested projectId='${requestedProjectId}' but the gateway resolved ownerRepo='${scope.ownerRepo}'`,
-    `(reason=${scope.reason ?? 'unknown'}, blocker=${scope.blocker ?? 'none'}).`,
-    `${guidance}.`,
-    `runSpecId=${optionalString(projection.runSpecId) ?? 'none'} sessionId=${optionalString(projection.sessionId) ?? 'none'}`,
-  ].join(' '));
-}
 
 function parseFlags(argv: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
@@ -442,23 +303,11 @@ function requiredString(value: unknown, name: string): string {
   return result;
 }
 
-function optionalString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function optionalRecord(value: unknown): JsonRecord | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : undefined;
-}
-
 function optionalInteger(value: unknown, min: number, max: number): number | undefined {
   if (value === undefined) return undefined;
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw new Error(`Expected integer between ${min} and ${max}`);
   return number;
-}
-
-function compact(value: JsonRecord): JsonRecord {
-  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
 /** 布尔参数：接受真布尔与 `'true'`/`'false'`（模型常发字符串），其余值显式报错而非静默取假。 */
