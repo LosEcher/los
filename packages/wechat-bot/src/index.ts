@@ -78,6 +78,11 @@ import {
   shouldDeliverToBoundSession,
 } from '@los/agent/operator-companion-events';
 import { clearBoundSession, loadBoundSession, saveBoundSession } from './session-bind.js';
+import {
+  flushWechatStreamCursor,
+  flushWechatStreamCursorIfDue,
+  resumeWechatStreamCursor,
+} from './stream-cursor-adapter.js';
 
 const runtimeConfig = await loadConfig();
 
@@ -260,15 +265,19 @@ let sseAbort: AbortController | null = null;
 let sseLive = false;
 let lastSseEventId = 0;
 
+
 async function connectSSE(): Promise<void> {
   if (sseAbort) sseAbort.abort();
   sseAbort = new AbortController();
   sseLive = false;
 
   try {
-    const cursor = lastSseEventId > 0 ? `since=${lastSseEventId}` : 'tail=1';
-    const url = `${LOS_GATEWAY_URL}/operator/events/live?${cursor}`;
-    console.log(`[events] SSE connecting: ${url}`);
+    // Resume from the durable cursor so a process restart does not lose events
+    // (D11). The in-memory position wins while it is ahead: it is always fresher
+    // than the last flushed row.
+    const resume = await resumeWechatStreamCursor(lastSseEventId);
+    const url = `${LOS_GATEWAY_URL}/operator/events/live?${resume.query}`;
+    console.log(`[events] SSE connecting: ${url} (${resume.mode}: ${resume.reason})`);
 
     const res = await fetch(url, {
       headers: losHeaders({ 'Accept': 'text/event-stream' }),
@@ -308,6 +317,7 @@ async function connectSSE(): Promise<void> {
             const ready = JSON.parse(currentData) as { lastEventId?: unknown };
             const readyId = Number(ready.lastEventId);
             if (Number.isSafeInteger(readyId) && readyId > lastSseEventId) lastSseEventId = readyId;
+            await flushWechatStreamCursorIfDue(lastSseEventId);
             sseLive = true;
             console.log('[events] SSE live — listening for new operator attention');
           } else if (sseLive) {
@@ -316,6 +326,7 @@ async function connectSSE(): Promise<void> {
             if (Number.isSafeInteger(deliveredId) && deliveredId > lastSseEventId) {
               lastSseEventId = deliveredId;
             }
+            await flushWechatStreamCursorIfDue(lastSseEventId);
           }
           currentId = '';
           currentEvent = '';
@@ -327,6 +338,7 @@ async function connectSSE(): Promise<void> {
     if (err.name === 'AbortError') return;
     console.error(`[events] SSE error: ${err.message}`);
   }
+  await flushWechatStreamCursor(lastSseEventId);
 
   setTimeout(connectSSE, SSE_RECONNECT_MS);
 }

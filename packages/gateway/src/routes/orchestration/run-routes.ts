@@ -92,9 +92,16 @@ type StreamReplayItem =
   | { kind: 'stream'; id: number; eventType: string; turn: number; payload: Record<string, unknown>; createdAt: string }
   | { kind: 'event'; id: number; type: string; turn: number; payload: Record<string, unknown>; createdAt: string };
 
-async function handleListRuns(_req: FastifyRequest, _reply: FastifyReply, deps: RunRoutesDependencies) {
+async function handleListRuns(req: FastifyRequest, _reply: FastifyReply, deps: RunRoutesDependencies) {
   await deps.ensureRunSpecStore();
-  return await deps.listRunSpecs();
+  // 服务端过滤：projectId / status / limit / since（旧行为 = 无参数取默认上限）
+  const query = req.query as { projectId?: string; status?: string; limit?: string; since?: string };
+  return await deps.listRunSpecs({
+    projectId: normalizeOptionalString(query.projectId),
+    status: normalizeOptionalString(query.status),
+    limit: normalizeBoundedInteger(query.limit, 50, 1, 10000),
+    since: normalizeOptionalString(query.since),
+  });
 }
 
 async function handleListEvents(req: FastifyRequest, reply: FastifyReply, deps: RunRoutesDependencies) {

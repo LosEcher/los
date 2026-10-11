@@ -9,6 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { getCrossProjectSummary, type CrossProjectSummary } from '@los/agent';
+import { requireOperator } from '../../request-context.js';
 
 export type CrossProjectRoutesDependencies = {
   getCrossProjectSummary: typeof getCrossProjectSummary;
@@ -21,6 +22,7 @@ export function registerCrossProjectRoutes(
   deps: CrossProjectRoutesDependencies = defaultDependencies,
 ): void {
   app.get('/cross-project/summary', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const q = (req.query ?? {}) as { painLimit?: string; injectionDays?: string };
     const parse = (v: string | undefined, lo: number, hi: number, dflt: number): number => {
       const n = v === undefined ? NaN : Number(v);

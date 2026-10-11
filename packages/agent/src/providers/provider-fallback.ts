@@ -122,7 +122,7 @@ export function createProviderFallbackRouter(input: {
   traceId?: string;
   onEvent: (event: ProviderFallbackEvent) => void | Promise<void>;
   /**
-   * Optional ADR 0031 health gate: skip unhealthy fallback targets when
+   * Optional ADR 0043 health gate: skip unhealthy fallback targets when
    * healthier alternatives remain in the chain.
    */
   shouldSkipTarget?: (target: PreparedProviderFallbackTarget) => boolean;

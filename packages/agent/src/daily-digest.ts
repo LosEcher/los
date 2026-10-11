@@ -42,7 +42,16 @@ export interface DigestScheduleRow {
   succeeded: number;
   failed: number;
   cancelled: number;
+  /**
+   * Retained meaning: `skippedOnly + noOp`. Existing consumers read this, so it
+   * is neither renamed nor re-counted; the success-rate formula must use
+   * `skippedOnly` instead.
+   */
   skipped: number;
+  /** `status = 'skipped'` only — the value the success-rate denominator uses. */
+  skippedOnly: number;
+  /** `status = 'no_op'`: the schedule ran and decided there was nothing to do. */
+  noOp: number;
   awaitingApproval: number;
   other: number;
   lastStatus?: string;
@@ -79,9 +88,22 @@ export interface DailyDigest {
       succeeded: number;
       failed: number;
       cancelled: number;
+      /** See DigestScheduleRow.skipped: kept as `skippedOnly + noOp`. */
       skipped: number;
+      skippedOnly: number;
+      noOp: number;
       awaitingApproval: number;
       other: number;
+      /**
+       * `succeeded / (succeeded + failed + skippedOnly + cancelled)`.
+       * `no_op` and `awaiting_approval` are excluded: a schedule that ran and
+       * found nothing to do is not a failed schedule (930 of 1145 runs in the
+       * audit window were `no_op`; counting them dropped the rate to ~16%).
+       * Null when the denominator is zero — "no actionable runs" is not 0%.
+       */
+      actionableSuccessRate: number | null;
+      /** `noOp / runCount`, null when there were no runs. */
+      noOpRatio: number | null;
     };
     bySchedule: DigestScheduleRow[];
   };
@@ -109,6 +131,8 @@ interface ScheduleAggRow {
   failed: string;
   cancelled: string;
   skipped: string;
+  skipped_only: string;
+  no_op: string;
   awaiting_approval: string;
   other: string;
   last_status: string | null;
@@ -289,10 +313,15 @@ function buildHighlights(
   recs: DigestCadenceRecommendation[],
 ): string[] {
   const lines: string[] = [];
+  const rate = schedule.runTotals.actionableSuccessRate;
   lines.push(
     `Schedules: ${schedule.enabledCount} enabled, ${schedule.runTotals.runCount} runs `
     + `(ok=${schedule.runTotals.succeeded} fail=${schedule.runTotals.failed} `
-    + `cancel=${schedule.runTotals.cancelled}).`,
+    + `cancel=${schedule.runTotals.cancelled} no_op=${schedule.runTotals.noOp}).`,
+  );
+  lines.push(
+    `Actionable success rate: ${rate == null ? 'n/a (no actionable runs)' : `${(rate * 100).toFixed(1)}%`} `
+    + `(denominator excludes no_op and awaiting_approval).`,
   );
   lines.push(
     `Usage: ${usage.totals.modelResponseCount} model responses, `
@@ -353,6 +382,8 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
        COUNT(*) FILTER (WHERE r.status = 'failed')::text AS failed,
        COUNT(*) FILTER (WHERE r.status = 'cancelled')::text AS cancelled,
        COUNT(*) FILTER (WHERE r.status IN ('skipped', 'no_op'))::text AS skipped,
+       COUNT(*) FILTER (WHERE r.status = 'skipped')::text AS skipped_only,
+       COUNT(*) FILTER (WHERE r.status = 'no_op')::text AS no_op,
        COUNT(*) FILTER (WHERE r.status = 'awaiting_approval')::text AS awaiting_approval,
        COUNT(*) FILTER (WHERE r.status IS NOT NULL AND r.status NOT IN (
          'succeeded','failed','cancelled','skipped','no_op','awaiting_approval'
@@ -390,6 +421,8 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
     failed: num(row.failed),
     cancelled: num(row.cancelled),
     skipped: num(row.skipped),
+    skippedOnly: num(row.skipped_only),
+    noOp: num(row.no_op),
     awaitingApproval: num(row.awaiting_approval),
     other: num(row.other),
     lastStatus: row.last_status ?? undefined,
@@ -403,19 +436,34 @@ export async function getDailyDigest(query: DailyDigestQuery = {}): Promise<Dail
     attentionSessionId: summarySessionId(row.attention_summary) ?? summarySessionId(row.last_summary),
   }));
 
-  const runTotals = bySchedule.reduce(
+  const runTotals = bySchedule.reduce<DailyDigest['schedule']['runTotals']>(
     (acc, row) => {
       acc.runCount += row.runCount;
       acc.succeeded += row.succeeded;
       acc.failed += row.failed;
       acc.cancelled += row.cancelled;
       acc.skipped += row.skipped;
+      acc.skippedOnly += row.skippedOnly;
+      acc.noOp += row.noOp;
       acc.awaitingApproval += row.awaitingApproval;
       acc.other += row.other;
       return acc;
     },
-    { runCount: 0, succeeded: 0, failed: 0, cancelled: 0, skipped: 0, awaitingApproval: 0, other: 0 },
+    {
+      runCount: 0, succeeded: 0, failed: 0, cancelled: 0, skipped: 0,
+      skippedOnly: 0, noOp: 0, awaitingApproval: 0, other: 0,
+      actionableSuccessRate: null, noOpRatio: null,
+    },
   );
+
+  // Derived after summation, so the fused `skipped` and the split counters can
+  // never disagree about what happened.
+  const actionableDenominator =
+    runTotals.succeeded + runTotals.failed + runTotals.skippedOnly + runTotals.cancelled;
+  runTotals.actionableSuccessRate = actionableDenominator > 0
+    ? runTotals.succeeded / actionableDenominator
+    : null;
+  runTotals.noOpRatio = runTotals.runCount > 0 ? runTotals.noOp / runTotals.runCount : null;
 
   const enabledCount = bySchedule.filter(row => row.status === 'enabled').length;
   const usage = await getUsageSummary({ from: window.from, to: window.to });
@@ -518,4 +566,8 @@ export async function publishDailyDigest(
     );
     return { digest, message, eventEmitted: false };
   }
+  // `skipped` keeps its legacy fused meaning (`skippedOnly + noOp`); `skipped_only`
+  // and `no_op` are the split counters the success-rate formula consumes. Both are
+  // computed from the same row set, so the fused field and the split fields cannot
+  // disagree about what happened.
 }

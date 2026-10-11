@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { NodeCommandRuntimeContext } from '@los/agent/node-commands';
+import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 
 test('executor node command runtime refuses maintenance without helper script', async () => {
   const originalCwd = process.cwd();
@@ -29,3 +30,29 @@ test('executor node command runtime refuses maintenance without helper script', 
     rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('run-check executes on the node and reports exit code plus output', async () => {
+  const runtime = createExecutorNodeCommandRuntime();
+  const run = (args: Record<string, unknown>) =>
+    runtime['run-check']?.({
+      commandId: 'node-command-check',
+      input: { nodeId: 'node-test', command: 'run-check', args },
+      node: {},
+    } as NodeCommandRuntimeContext);
+
+  const ok = await run({ command: 'echo node34-check-ok', cwd: '/tmp' });
+  assert.equal(ok?.status, 'succeeded');
+  assert.equal((ok?.output as Record<string, unknown>).stdout, 'node34-check-ok');
+  assert.equal((ok?.output as Record<string, unknown>).exitCode, 0);
+
+  const failed = await run({ command: 'exit 7', cwd: '/tmp' });
+  assert.equal(failed?.status, 'failed');
+  assert.equal((failed?.output as Record<string, unknown>).exitCode, 7);
+  assert.match(String(failed?.error), /exit 7/);
+
+  // 没有命令 ⇒ 明确失败，不得静默成功
+  const missing = await run({});
+  assert.equal(missing?.status, 'failed');
+  assert.match(String(missing?.error), /requires args.command/);
+});
+

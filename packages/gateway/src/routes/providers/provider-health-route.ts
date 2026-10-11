@@ -1,7 +1,7 @@
 /**
  * Provider health projection — read-only snapshot of the in-memory health
  * scores computed by the provider probe loop (provider-probe + provider-health,
- * ADR 0031). Consumed by dashboards and by DSH-style clients that want to
+ * ADR 0043). Consumed by dashboards and by DSH-style clients that want to
  * fail-fast before calling an unhealthy provider instead of discovering the
  * failure mid-request.
  *

@@ -14,6 +14,7 @@ import {
   createProceduralCandidate,
   promoteProceduralCandidate,
 } from '../procedures/procedural-candidates.js';
+import { emitMemorySessionEvent } from './session-event-sink.js';
 import { buildTranscriptBrief, type TranscriptBrief } from '../transcript/transcript-brief.js';
 import { collectSymbolSummary, serializeSymbolSummary } from './compaction-symbol-summary.js';
 import { computeCompactionMetrics } from './compaction-metrics.js';
@@ -546,14 +547,12 @@ export async function promoteCandidate(
     );
   }
 
-  // Emit rule_approval session event
+  // Emit rule_approval session event through the injected sink. Memory cannot
+  // import the agent's session-events module (see session-event-sink.ts); the
+  // gateway registers the writer at start-up.
   if (oldCandidate) {
     try {
-      const { appendSessionEvent, ensureSessionEventStore } = await import(
-        '@los/agent/session-events'
-      );
-      await ensureSessionEventStore();
-      await appendSessionEvent({
+      await emitMemorySessionEvent({
         sessionId: compaction.sessionId,
         type: 'rule_approval',
         source: 'los',

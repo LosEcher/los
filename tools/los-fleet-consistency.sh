@@ -33,6 +33,47 @@ if [[ -z "$DB_URL" || -z "$PSQL" ]]; then
   exit 2
 fi
 
+# Parse the node's `/health` body (read from stdin) with a real JSON parser.
+#
+# This used to be `sed -n 's/.*"version":"\([^"]*\)".*/\1/p'`, which is greedy
+# and takes the *last* `"version"` key in the body. That happened to work while
+# `version` was the only such key, but the gateway's `/health` now carries
+# `identity.processVersion` — a key-order change would have silently made this
+# report the wrong value. Parsing is not optional here: this script is the
+# external check for "does the process match the ledger"
+# (docs/architecture/2026-10-10-control-plane-truth-remediation.md §1).
+#
+# Prints nothing when the body has no version (old binary or non-JSON reply);
+# the caller renders the existing NO_RESPONSE sentinel.
+health_field() {
+  python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+v = d.get("version")
+if isinstance(v, str) and v.strip():
+    print(v.strip())
+' 2>/dev/null
+}
+
+# Provenance of that version, when the node reports it (capabilities.versionSource).
+# Missing means the node predates the field; report `unknown` rather than inventing
+# `env` — an unpinned node must not be counted as pinned.
+health_version_source() {
+  python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("unknown"); sys.exit(0)
+caps = d.get("capabilities") or {}
+src = d.get("versionSource") or caps.get("versionSource")
+print(src if isinstance(src, str) and src.strip() else "unknown")
+' 2>/dev/null
+}
+
 TARGET="$(bash "$ROOT/tools/los.sh" build-version 2>/dev/null | tail -1)"
 ROWS="$("$PSQL" "$DB_URL" -A -F '|' -t -c \
   "select node_id, base_url, status, coalesce(version,''), coalesce(target_version,'')
@@ -45,8 +86,7 @@ while IFS='|' read -r node url status ver target; do
   [[ -z "$node" ]] && continue
   checked=$((checked + 1))
   # /health 版本（端口从 base_url 取，oracle 是 8091）
-  health="$(curl -s -m 8 "${url%/}/health" 2>/dev/null \
-    | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)"
+  health="$(curl -s -m 8 "${url%/}/health" 2>/dev/null | health_field)"
   [[ -z "$health" ]] && health="NO_RESPONSE"
   problems=()
   # 失败判据只针对"节点自身与它的声明目标"
@@ -70,11 +110,14 @@ if [[ "$SNAPSHOT" -eq 1 ]]; then
     first=1
     while IFS='|' read -r node url status ver target; do
       [[ -z "$node" ]] && continue
-      health="$(curl -s -m 8 "${url%/}/health" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)"
+      body="$(curl -s -m 8 "${url%/}/health" 2>/dev/null)"
+      health="$(printf '%s' "$body" | health_field)"
       [[ -z "$health" ]] && health="NO_RESPONSE"
+      src="$(printf '%s' "$body" | health_version_source)"
       [[ "$first" -eq 1 ]] || printf ','
       first=0
-      printf '{"node":"%s","health":"%s","registry":"%s","targetVersion":"%s"}' "$node" "$health" "$ver" "$target"
+      printf '{"node":"%s","health":"%s","versionSource":"%s","registry":"%s","targetVersion":"%s"}' \
+        "$node" "$health" "$src" "$ver" "$target"
     done <<< "$ROWS"
     printf ']}\n'
   } > "$OUT_DIR/fleet-versions.json"

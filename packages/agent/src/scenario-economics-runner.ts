@@ -291,6 +291,7 @@ async function ensureCollectionRunSpec(runSpecId: string): Promise<void> {
     prompt: 'Collect live provider evidence for the versioned daily-agent scenario corpus.',
     workspaceRoot: process.cwd(),
     toolMode: 'read-only',
+    phaseExemptReason: 'scenario_runner',
   });
 }
 

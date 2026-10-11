@@ -16,6 +16,7 @@ import { renderPrometheus, summarizeCacheTokens, type MetricSample } from '@los/
 import { ensureTaskRunStore } from '@los/agent/task-runs';
 import { ensureRunEvalStore } from '@los/agent/run-evals';
 import { ensureProviderCallTelemetryStore } from '@los/agent/providers/telemetry';
+import { requireOperator } from '../../request-context.js';
 
 type MetricsRouteDependencies = {
   ensureRunEvalStore: typeof ensureRunEvalStore;
@@ -177,7 +178,8 @@ export function registerMetricsRoutes(
   overrides: Partial<MetricsRouteDependencies> = {},
 ): void {
   const dependencies = { ...defaultDependencies, ...overrides };
-  app.get('/metrics', async () => {
+  app.get('/metrics', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const samples = await collectPrometheusSamples(dependencies);
     return renderPrometheus(samples);
   });

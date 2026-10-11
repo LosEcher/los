@@ -74,11 +74,19 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showRunSpecs, setShowRunSpecs] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => getJson<{ projects: Array<{ projectId?: string; id?: string }> }>('/projects'),
+    staleTime: 300_000,
+  });
   const tasks = useQuery({
-    queryKey: ['tasks', statusFilter],
+    // 缓存键必须带过滤条件，否则切换项目/状态会命中旧缓存
+    queryKey: ['tasks', statusFilter, projectFilter],
     queryFn: () => {
       const params = new URLSearchParams();
       if (statusFilter) params.set('status', statusFilter);
+      if (projectFilter) params.set('projectId', projectFilter);
       return getJson<TaskRun[]>(`/tasks?${params.toString()}`);
     },
     refetchInterval: 8_000,
@@ -104,6 +112,18 @@ export function TasksPage({ onSelectSession }: { onSelectSession: (id: string) =
             <p>{t('ops.tasks.subtitle')}</p>
           </div>
           <div className="toolbar">
+            <select
+              className="filter-select"
+              aria-label={t('ops.tasks.filterProject')}
+              value={projectFilter}
+              onChange={event => setProjectFilter(event.target.value)}
+            >
+              <option value="">{t('ops.tasks.filterAllProjects')}</option>
+              {(projects.data?.projects ?? []).map(project => {
+                const id = project.projectId ?? project.id ?? '';
+                return id ? <option key={id} value={id}>{id}</option> : null;
+              })}
+            </select>
             <select className="filter-select" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
               <option value="">{t('ops.tasks.filterAllStatus')}</option>
               <option value="queued">{t('ops.tasks.statusQueued')}</option>

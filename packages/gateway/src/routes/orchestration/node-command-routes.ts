@@ -6,6 +6,7 @@ import {
   loadNodeCommand,
   type NodeCommandName,
 } from '@los/agent/node-commands';
+import { isNodeCommandName, listNodeCommandNames } from '@los/agent';
 import { loadExecutorNode } from '@los/agent/executor-nodes';
 import { getRequestContext, requireOperator } from '../../request-context.js';
 
@@ -58,7 +59,12 @@ export function registerNodeCommandRoutes(app: FastifyInstance, options: NodeCom
     const nodeId = normalizeOptionalString(id);
     const command = normalizeCommand(body?.command);
     if (!nodeId) return reply.status(400).send({ error: 'node id is required' });
-    if (!command) return reply.status(422).send({ error: 'command is required' });
+    if (!command) {
+      // 自描述错误：把允许的命令列出来（清单来自 @los/agent 的单一真源）
+      return reply.status(422).send({
+        error: `command is required and must be one of: ${listNodeCommandNames().join(', ')}`,
+      });
+    }
 
     const context = getRequestContext(req);
     const commandInput = {
@@ -106,10 +112,8 @@ async function proxyNodeCommand(
 }
 
 function normalizeCommand(value: unknown): NodeCommandName | undefined {
-  if (value === 'status' || value === 'probe' || value === 'drain' || value === 'promote' || value === 'restart' || value === 'upgrade' || value === 'rollback') {
-    return value;
-  }
-  return undefined;
+  // 单一清单在 @los/agent/node-commands（2026-10-11 收敛，避免加命令时三处不同步）
+  return isNodeCommandName(value) ? value : undefined;
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> | undefined {

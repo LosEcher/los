@@ -79,6 +79,15 @@ export function validateScheduledExecutionRunTemplate(runTemplate: ScheduledWork
   if (runTemplate.toolMode !== 'project-write' && runTemplate.toolMode !== 'all') {
     throw new Error('scheduled_execution requires project-write (or all with sandboxMode=sandbox) tool mode');
   }
+  // sandboxMode='sandbox' 只在 toolMode='all' 时可能生效：resolveToolPolicy 的 project-write 分支
+  // 排在 sandbox 分支之前（packages/agent/src/loop/tool-resolver.ts:78 vs :90）。接受这个组合
+  // 等于接受"设了但不会生效"的沙箱——2026-10-11 远端 smoke 实测为 L1 + sandboxAvailable=false。
+  if (runTemplate.sandboxMode === 'sandbox' && runTemplate.toolMode !== 'all') {
+    throw new Error(
+      'sandboxMode "sandbox" requires toolMode "all": with project-write the tool policy resolves to L1 '
+      + 'and the sandbox never activates',
+    );
+  }
   if (runTemplate.editableSurfaces.length === 0) {
     throw new Error('scheduled_execution requires at least one editable surface');
   }

@@ -417,10 +417,49 @@ executor_status() {
 
 # ── Unified commands ─────────────────────────────────────
 
+# Read the *process* content identity from the running gateway (control-plane
+# truth remediation §1). Deliberately separate from the worktree digest:
+# `LOS_VERSION` above is recomputed from the working tree on every invocation,
+# while this is what the process actually started with.
+#
+# Reads the public `GET /health` with no credentials and never recomputes the
+# worktree digest here — `find` + `shasum` does not belong on a status hot path,
+# and merging the two identities is the exact failure this separates. Prints
+# nothing and returns non-zero when the gateway is unreachable or the field is
+# absent (old binary); callers must say "unavailable" and must **not** fall back
+# to the worktree value.
+gw_process_identity() {
+  command -v curl >/dev/null 2>&1 || return 1
+  local body
+  body="$(curl -s -m 3 "$(gw_url)/health" 2>/dev/null)" || return 1
+  [ -n "$body" ] || return 1
+  printf '%s' "$body" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+i = d.get("identity") or {}
+if not i.get("processVersion"):
+    sys.exit(1)
+print("processVersion=%s pid=%s startedAt=%s source=%s ready=%s" % (
+    i.get("processVersion"), i.get("pid"), i.get("startedAt"),
+    i.get("versionSource"), d.get("ready")))
+' 2>/dev/null
+}
+
 unified_status() {
   local channel_status_code=0
   echo "los status"
-  echo "  version: $LOS_VERSION"
+  # Two lines on purpose: `worktree:` is this checkout, `process:` is the running
+  # gateway. They are allowed to differ between an edit and a restart.
+  echo "  worktree: $LOS_VERSION"
+  local identity
+  if identity="$(gw_process_identity)" && [ -n "$identity" ]; then
+    echo "  process:  $identity"
+  else
+    echo "  process:  unavailable (gateway unreachable, or it predates /health.identity)"
+  fi
   if is_executor_enabled; then
     echo "  executor: enabled=true"
   else

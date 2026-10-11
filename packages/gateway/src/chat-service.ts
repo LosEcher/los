@@ -3,7 +3,7 @@ import { normalizeUsageFeature } from '@los/agent/usage-feature';
 import type { Config } from '@los/infra/config';
 import type { Logger } from '@los/infra/logger';
 import { ensureSessionStore, loadSession, saveSession } from '@los/agent/session';
-import type { Message, CheckpointState, RunContractMetadataInput, IdentityLevel, ProviderFallbackPolicy } from '@los/agent';
+import type { Message, CheckpointState, PhaseExemptReason, RunContractMetadataInput, IdentityLevel, ProviderFallbackPolicy } from '@los/agent';
 import { updateBoundTodoFromRun, loadBranchSource } from './chat-session-helpers.js';
 import { ensureRunSpecStore, createRunSpec } from '@los/agent/run-specs';
 import { recordSessionBranchCreated } from '@los/agent/operator-control';
@@ -118,6 +118,13 @@ export async function runChat(params: {
   actorSubject: string;
   requestId: string;
   runContract: RunContractMetadataInput | undefined;
+  /**
+   * Phase-exemption marker for callers that knowingly have no phase lifecycle
+   * (e.g. the OpenAI-compatible route). Omitted means "nobody declared one", which
+   * the write gate records as `writer_omitted` — a counted defect, not an
+   * exemption (docs/architecture/2026-10-10-control-plane-truth-remediation.md §6).
+   */
+  phaseExemptReason?: PhaseExemptReason;
   intakeResolution: import('@los/agent/task-intake').ProjectOwnerResolution;
   requestedProjectId: string | undefined;
   requestedWorkspaceRoot: string | undefined;
@@ -134,7 +141,7 @@ export async function runChat(params: {
     workspaceRoot, toolMode, allowedTools, manualSkillIds, maxLoops, timeoutMs, toolRetry,
     mcpServers, persistMemory, boundTodoId, branchFrom, branchAtTurn,
     traceId, dedupeKey, signal, sid, tenantId, projectId, userId, actorSubject, requestId,
-    runContract, intakeResolution, requestedProjectId, requestedWorkspaceRoot,
+    runContract, phaseExemptReason, intakeResolution, requestedProjectId, requestedWorkspaceRoot,
     config, gatewayServiceId, identityName, identityLevel, log, ctx, send,
   } = params;
   const preparedDisposition = prepareChatPlanningDisposition({ boundTodoId, runContract });
@@ -181,6 +188,10 @@ export async function runChat(params: {
     timeoutMs,
     mcpServers,
     runContract: effectiveRunContract,
+    // A real phase wins inside the gate; otherwise the exemption is recorded with
+    // the caller's own reason rather than the `writer_omitted` safety net.
+    // Caller's reason wins; chat's default fills the gap only when there is no phase.
+    ...(effectiveRunContract?.phase ? {} : { phaseExemptReason: phaseExemptReason ?? ('chat_without_phase' as const) }),
     gatewayId: gatewayServiceId,
   });
   if (boundTodoId) {

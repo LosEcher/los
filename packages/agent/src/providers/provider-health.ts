@@ -1,7 +1,7 @@
 /**
  * @los/agent/providers/provider-health — Health-aware provider scoring.
  *
- * ADR 0031: Computes a composite health score from three weighted signals:
+ * ADR 0043: Computes a composite health score from three weighted signals:
  *   - RTT (40%): Latest probe RTT from provider-probe.ts, linearly normalized
  *   - Success rate (40%): succeeded/total ratio from scheduler-decision-ledger (24h)
  *   - Availability (20%): Whether the provider is reachable (probe healthy flag)
@@ -11,8 +11,11 @@
  *   0.5-0.8 → degraded — usable but prefer alternatives
  *   < 0.5 → unhealthy — skip if alternatives exist, log alert
  *
- * When no data is available (no probe, no outcomes), the score defaults to
- * 0.5 (degraded, neutral — doesn't penalize unprobed providers).
+ * Cold start is a composition, not a 0.5 default: with no probe the RTT component
+ * is 0.5 (weight 0.4), with no outcomes the success component is 1.0 (weight 0.4),
+ * and with no probe the availability component is 0.5 (weight 0.2) — a composite of
+ * 0.7, which `classifyTier` maps to `degraded`. Read the components, not a single
+ * "default 0.5".
  */
 
 import type { ProbeResult } from './provider-probe.js';
@@ -91,7 +94,7 @@ export function _resetHealthScoreCacheForTests(): void {
 /** RTT values at or above this are scored 0.0 */
 const RTT_MAX_MS = 5000;
 
-/** Weights per ADR 0031 */
+/** Weights per ADR 0043 */
 const WEIGHT_RTT = 0.4;
 const WEIGHT_SUCCESS = 0.4;
 const WEIGHT_AVAILABILITY = 0.2;

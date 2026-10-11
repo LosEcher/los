@@ -85,7 +85,32 @@ export type ExecutorCapabilityRequirement =
   | 'sandbox'
   | 'network_egress'
   | 'heavy_task_safe'
-  | 'deploy_safe';
+  | 'deploy_safe'
+  // 2026-10-11：机队本就在上报、且跨设备工作流真正需要的能力，此前**既不可要求、又被静默丢弃**
+  // （cantool 的 M3→M1 产物搬运需要 artifact_transfer；远端派发需要 run_agent）。
+  | 'run_agent'
+  | 'artifact_transfer'
+  | 'node_command_runner'
+  | 'file_sync_scan'
+  | 'file_sync_deep_verify';
+
+/**
+ * 可要求能力的**运行时单一清单**（与上面的类型同源）。`satisfiesCapability` 的判定是
+ * "节点上报值为 true"（sandbox 例外：需要具体后端字符串），因此这里只列可布尔判定的键。
+ */
+const EXECUTOR_CAPABILITY_REQUIREMENTS: readonly ExecutorCapabilityRequirement[] = [
+  'workspace_read', 'workspace_write', 'shell', 'sandbox', 'network_egress',
+  'heavy_task_safe', 'deploy_safe',
+  'run_agent', 'artifact_transfer', 'node_command_runner', 'file_sync_scan', 'file_sync_deep_verify',
+];
+
+export function listExecutorCapabilityRequirements(): ExecutorCapabilityRequirement[] {
+  return [...EXECUTOR_CAPABILITY_REQUIREMENTS];
+}
+
+export function isExecutorCapabilityRequirement(value: unknown): value is ExecutorCapabilityRequirement {
+  return typeof value === 'string' && (EXECUTOR_CAPABILITY_REQUIREMENTS as readonly string[]).includes(value);
+}
 
 export interface ExecutorPlacementIntent {
   toolMode?: 'all' | 'project-write' | 'read-only';

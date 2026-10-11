@@ -1,12 +1,13 @@
 import { getDb, withDbClient } from '@los/infra/db';
 import {
   assertExecutionTransition,
+  evaluateExecutionTransition,
   executionTransitionEventType,
   type ExecutionEntityType,
   type ExecutionStateByEntity,
 } from './execution-transitions.js';
 import { ensureRunSpecStore } from './run-specs.js';
-import { ensureSessionEventStore, type SessionEventRecord } from './session-events.js';
+import { appendSessionEvent, ensureSessionEventStore, type SessionEventRecord } from './session-events.js';
 import { ensureTaskRunStore } from './task-runs.js';
 import { ensureToolCallStateStore } from './tool-call-states.js';
 import { ensureVerificationRecordStore } from './verification-records.js';
@@ -97,18 +98,97 @@ export async function ensureExecutionStore(): Promise<void> {
   _initialized = true;
 }
 
+/**
+ * Write the audit record for a transition the state machine refused.
+ *
+ * Runs on its **own** connection, after the refused transition's transaction has
+ * rolled back. Failures here are logged and swallowed: they must never replace or
+ * hide the original `ExecutionTransitionError`, and they must never re-open the
+ * rolled-back work.
+ *
+ * Deliberately does **not** insert an `execution_outbox` row. The outbox delivers
+ * successful state changes; routing refusals through it would couple this audit to
+ * the delivery cap and turn a rejected transition into a second retry queue.
+ */
+async function recordRejectedTransition(input: {
+  entityType: ExecutionEntityType;
+  entityId: string;
+  from: string;
+  to: string;
+  reason: string;
+  sessionId?: string;
+  actor?: string;
+}): Promise<void> {
+  if (!input.sessionId) {
+    // No session means the entity could not be loaded (or the entity type has no
+    // session). Synthesising a `dlq-*` session belongs to writeDeadLetterEvent, not
+    // here; a refusal with nowhere to land is logged and counted instead.
+    log.warn(
+      `Rejected transition without session: ${input.entityType}:${input.entityId} ${input.from}->${input.to} (${input.reason})`,
+    );
+    return;
+  }
+  try {
+    await appendSessionEvent({
+      sessionId: input.sessionId,
+      type: 'execution.transition_rejected',
+      source: 'los.execution-state',
+      payload: {
+        entityType: input.entityType,
+        entityId: input.entityId,
+        from: input.from,
+        to: input.to,
+        reason: input.reason,
+        actor: input.actor ?? null,
+      },
+    });
+  } catch (error) {
+    log.warn(
+      `Failed to persist rejected transition for ${input.entityType}:${input.entityId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export async function transitionExecutionState<T extends ExecutionEntityType>(
   input: TransitionExecutionStateInput<T>,
 ): Promise<TransitionExecutionStateResult<T>> {
   await ensureExecutionStore();
-  const result = await withDbClient(async (client) => {
-    await client.query('BEGIN');
+  // Filled inside the transaction and consumed after it rolls back: the refusal
+  // must be durable, but it must not be written on the transaction that is about
+  // to be discarded (truth remediation §8).
+  let rejected: { from: string; to: string; reason: string; sessionId?: string } | undefined;
+  type TransitionOutcome = {
+    entity: Awaited<ReturnType<typeof loadExecutionEntity>>;
+    event: SessionEventRecord;
+    outboxId: number;
+    from: ExecutionStateByEntity[T];
+  };
+  let result: TransitionOutcome;
+  try {
+    result = await withDbClient(async (client) => {
+      await client.query('BEGIN');
     try {
       const entity = await loadExecutionEntity(client, {
         entityType: input.entityType,
         entityId: input.entityId,
         sessionId: input.sessionId,
       });
+      // Evaluate before asserting so the reason string is available for the audit
+      // event. Same loaded-and-locked state, same predicates — the assertion below
+      // still throws the original error type.
+      const evaluation = evaluateExecutionTransition({
+        entityType: input.entityType,
+        from: entity.state as ExecutionStateByEntity[T],
+        to: input.to,
+      });
+      if (!evaluation.allowed) {
+        rejected = {
+          from: String(entity.state),
+          to: String(input.to),
+          reason: evaluation.reason,
+          sessionId: entity.sessionId,
+        };
+      }
       assertExecutionTransition({
         entityType: input.entityType,
         from: entity.state as ExecutionStateByEntity[T],
@@ -236,7 +316,22 @@ export async function transitionExecutionState<T extends ExecutionEntityType>(
       await client.query('ROLLBACK').catch(() => undefined);
       throw err;
     }
-  });
+    });
+  } catch (error) {
+    if (rejected) {
+      // The refusal is durable; the thrown error is unchanged.
+      await recordRejectedTransition({
+        entityType: input.entityType,
+        entityId: input.entityId,
+        from: rejected.from,
+        to: rejected.to,
+        reason: rejected.reason,
+        sessionId: rejected.sessionId,
+        actor: input.source,
+      });
+    }
+    throw error;
+  }
 
   await notifySessionEvent(result.entity.sessionId, result.event.id, result.event.type);
 

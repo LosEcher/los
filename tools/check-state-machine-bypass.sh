@@ -57,6 +57,37 @@ for api in "${BYPASS_APIS[@]}"; do
   done < <(grep -rl "import.*$api\|from.*$api" "$ROOT/packages/agent/src/" --include='*.ts' 2>/dev/null | grep -v '/dist/' | grep -v '.test.ts' | tr '\n' '\0' || true)
 done
 
+# The scheduled-work ledger keeps its OWN transition table (`LEGAL_TRANSITIONS` in
+# scheduled-work/store.ts: queued/running/no_op/skipped/awaiting_approval have no
+# equivalent in the execution state machine). Sharing `transitionExecutionState`
+# between them would silently be a third state machine, not a cleanup — so the two
+# must not be merged by accident (control-plane truth remediation §8).
+#
+# The negative control for this rule is the rule itself: `--self-test` writes a
+# temporary file that imports the symbol and asserts the scan reports it.
+FUSION_TARGET="packages/agent/src/scheduled-work/store.ts"
+if grep -qE "transitionExecutionState" "$ROOT/$FUSION_TARGET" 2>/dev/null; then
+  echo "[FUSION] $FUSION_TARGET references transitionExecutionState — the scheduled-work"
+  echo "         transition table stays separate on purpose (see §8 of the truth remediation doc)"
+  FAILURES=$((FAILURES + 1))
+fi
+
+if [ "${1:-}" = "--self-test" ]; then
+  # Negative control for the fusion rule: append a violating import to the real
+  # target, confirm the *same* scan the gate runs reports it, then restore. A gate
+  # whose self-test runs a different check than the gate itself proves nothing.
+  FUSION_FILE="$ROOT/$FUSION_TARGET"
+  cp "$FUSION_FILE" "$FUSION_FILE.selftest-backup"
+  printf "\nimport { transitionExecutionState as _selftestImport } from '../execution-store.js';\n" >> "$FUSION_FILE"
+  if grep -qE "transitionExecutionState" "$FUSION_FILE"; then
+    echo "  ok   self-test: the fusion scan reports a violating import in $FUSION_TARGET"
+  else
+    echo "  FAIL self-test: the fusion scan did not report its own injected violation"
+    FAILURES=$((FAILURES + 1))
+  fi
+  mv "$FUSION_FILE.selftest-backup" "$FUSION_FILE"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
   echo ""
   echo "$FAILURES state-machine bypass violation(s) found"

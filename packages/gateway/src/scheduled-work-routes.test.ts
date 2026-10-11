@@ -89,6 +89,23 @@ test("scheduled work routes preview, enforce operator writes, and expose history
       assert.equal(created.json().schedule.id, schedule.id);
       assert.equal(createdInput?.runTemplate.templateId, "morning_inbox_digest");
 
+      // 回归（2026-10-11 D1）：路由**不得**把 read-only 静默改写成 project-write。
+      // 原样透传后由 validateScheduledExecutionRunTemplate 拒绝（policy 测试 + 真机 E2E 各覆盖一层）。
+      await app.inject({
+        method: "POST", url: "/scheduled-work-items",
+        headers: { "x-los-operator-token": "operator-token" },
+        payload: {
+          title: "Read-only execution must not be upgraded", trigger: schedule.trigger,
+          templateId: "scheduled_execution", projectId: "los", goalTemplate: "noop",
+          toolMode: "read-only", sandboxMode: "sandbox",
+          workspaceRoot: "/opt/los/los-workspace",
+          editableSurfaces: ["/opt/los/los-workspace/.smoke"],
+          requiredChecks: ["uname -s"],
+          executor: { enabled: true, nodeId: "node34-executor-1" },
+        },
+      });
+      assert.equal(createdInput?.runTemplate.toolMode, "read-only");
+
       const feedCreated = await app.inject({
         method: "POST", url: "/scheduled-work-items",
         headers: { "x-los-operator-token": "operator-token" },

@@ -7,7 +7,7 @@ import { requestCancellation } from '@los/agent';
 import { normalizeOptionalString } from '../server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
 import { listDeadLetterEvents, acknowledgeDeadLetterEvent, summarizeDeadLetterEvents, requeueDeadLetterEvent } from '@los/agent';
-import { getOperatorPrincipal, requireOperator } from '../../request-context.js';
+import { getOperatorPrincipal, requireOperator, resolveReadScope } from '../../request-context.js';
 
 export type TaskRouteDependencies = {
   acknowledgeDeadLetterEvent: typeof acknowledgeDeadLetterEvent;
@@ -86,12 +86,19 @@ export function registerTaskRoutes(
   app: FastifyInstance,
   deps: TaskRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/tasks', async () => {
+  app.get('/tasks', async (req) => {
     await deps.ensureTaskRunStore();
-    return await deps.listTaskRuns();
+    const scope = resolveReadScope(req);
+    const query = req.query as { status?: string; projectId?: string };
+    return await deps.listTaskRuns(50, {
+      ...(scope ? { tenantId: scope } : {}),
+      status: normalizeOptionalString(query.status),
+      projectId: normalizeOptionalString(query.projectId),
+    });
   });
 
-  app.get('/tasks/orphans', async () => {
+  app.get('/tasks/orphans', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     return await classifyOrphans(deps);
   });
 
@@ -106,6 +113,11 @@ export function registerTaskRoutes(
     await deps.ensureTaskRunStore();
     const taskRun = await deps.loadTaskRun(id);
     if (!taskRun) return { error: 'Not found' };
+    // Read scope: a non-operator principal must not reach another tenant's run by
+    // guessing its id. Same "Not found" shape as a missing row so the response
+    // cannot be used to probe for existence.
+    const scope = resolveReadScope(req);
+    if (scope && taskRun.tenantId !== scope) return { error: 'Not found' };
     return taskRun;
   });
 
@@ -186,7 +198,8 @@ export function registerTaskRoutes(
 
   // ── Dead Letter Queue ─────────────────────────────────
 
-  app.get('/tasks/dead-letter', async (req) => {
+  app.get('/tasks/dead-letter', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const query = req.query as { acknowledged?: string; reason?: string; limit?: string };
     const acknowledged = query.acknowledged === 'true' ? true : query.acknowledged === 'false' ? false : undefined;
     const reason = normalizeOptionalString(query.reason);
@@ -194,7 +207,8 @@ export function registerTaskRoutes(
     return await deps.listDeadLetterEvents({ acknowledged, reason: reason as any, limit });
   });
 
-  app.get('/tasks/dead-letter/summary', async () => {
+  app.get('/tasks/dead-letter/summary', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     return await deps.summarizeDeadLetterEvents();
   });
 

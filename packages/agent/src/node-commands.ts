@@ -7,7 +7,27 @@ import {
   type ExecutorNodeRecord,
 } from './executor-nodes.js';
 
-export type NodeCommandName = 'status' | 'probe' | 'drain' | 'promote' | 'restart' | 'upgrade' | 'rollback';
+export type NodeCommandName =
+  | 'status' | 'probe' | 'drain' | 'promote' | 'restart' | 'upgrade' | 'rollback'
+  /** 受治理的检查命令：在**节点本地**执行一条声明式 requiredCheck（远端 run 的检查必须跑在工作区所在机器）。 */
+  | 'run-check';
+
+/**
+ * 命令名的**唯一清单**。此前同样的列表散在三处（本文件、executor-helpers、网关路由），
+ * 加命令时极易只改一处 ⇒ 一边接受一边抛错。新增命令只改这里。
+ */
+const NODE_COMMAND_NAMES: readonly NodeCommandName[] = [
+  'status', 'probe', 'drain', 'promote', 'restart', 'upgrade', 'rollback', 'run-check',
+];
+
+/** 供 API 自描述（错误信息、帮助文本）使用：返回命令名的单一真源副本。 */
+export function listNodeCommandNames(): NodeCommandName[] {
+  return [...NODE_COMMAND_NAMES];
+}
+
+export function isNodeCommandName(value: unknown): value is NodeCommandName {
+  return typeof value === 'string' && (NODE_COMMAND_NAMES as readonly string[]).includes(value);
+}
 export type NodeCommandStatus = 'accepted' | 'running' | 'succeeded' | 'failed' | 'denied' | 'rejected';
 
 export interface NodeCommandRecord {
@@ -61,6 +81,8 @@ export interface NodeCommandRuntimeResult {
 }
 
 export interface NodeCommandRuntime {
+  /** 在节点本地执行检查命令（args: {command, cwd?, timeoutMs?}）。 */
+  'run-check'?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
   restart?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
   upgrade?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
   rollback?: (context: NodeCommandRuntimeContext) => Promise<NodeCommandRuntimeResult>;
@@ -504,9 +526,7 @@ function rowToNodeCommand(row: NodeCommandRow): NodeCommandRecord {
 }
 
 function normalizeCommand(value: unknown): NodeCommandName {
-  if (value === 'status' || value === 'probe' || value === 'drain' || value === 'promote' || value === 'restart' || value === 'upgrade' || value === 'rollback') {
-    return value;
-  }
+  if (isNodeCommandName(value)) return value;
   throw new Error(`unsupported node command: ${String(value)}`);
 }
 

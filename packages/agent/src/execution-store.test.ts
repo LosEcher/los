@@ -122,13 +122,23 @@ test('execution store rejects invalid transitions without writing event or outbo
 
     const taskRun = await loadTaskRun(taskRunId);
     assert.equal(taskRun?.status, 'queued');
-    assert.deepEqual(await listSessionEvents(sessionId), []);
+
+    // The refusal is now durable: the state change and the outbox delivery are
+    // still absent, but an audit event must exist (truth remediation §8).
+    const events = await listSessionEvents(sessionId);
+    const rejection = events.filter(e => e.type === 'execution.transition_rejected');
+    assert.equal(rejection.length, 1, 'exactly one refusal event');
+    assert.equal(rejection[0]!.payload.entityType, 'task_run');
+    assert.equal(rejection[0]!.payload.entityId, taskRunId);
+    assert.equal(rejection[0]!.payload.from, 'queued');
+    assert.equal(rejection[0]!.payload.to, 'succeeded');
+    assert.match(String(rejection[0]!.payload.reason), /invalid_transition:/);
 
     const outbox = await getDb().query<{ count: string }>(
       'SELECT count(*)::text AS count FROM execution_outbox WHERE session_id = $1',
       [sessionId],
     );
-    assert.equal(outbox.rows[0]?.count, '0');
+    assert.equal(outbox.rows[0]?.count, '0', 'a refusal must not enter the delivery outbox');
   } finally {
     await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
@@ -378,6 +388,97 @@ test('run spec cancellation synchronizes the cancelled contract phase', async ()
     assert.equal(cancelled?.status, 'cancelled');
     assert.equal(cancelled?.runContract?.phase, 'cancelled');
     assert.equal(cancelled?.runContract?.previousPhase, 'executing');
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+// ── Rejected transitions are durable (truth remediation §8) ────────────────
+
+test('NEGATIVE CONTROL: verification-gate and lease rejections do NOT write the refusal event', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-gate-reject-${suffix}`;
+  const sessionId = `session-gate-reject-${suffix}`;
+  try {
+    await ensureExecutionStore();
+    // No `phase` in the contract: a phase would pull in the separate phase gate and
+    // make this test about the wrong refusal. The required check is what the
+    // verification gate will refuse on.
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'verification gate rejection',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+      runContract: { mode: 'execution', requiredChecks: ['never-satisfied-check'] },
+    });
+
+    // `created -> running -> succeeded` is legal in the state machine; the refusal
+    // must come from the success gate, not from `evaluateExecutionTransition`.
+    await transitionExecutionState({ entityType: 'run_spec', entityId: runSpecId, to: 'running', reason: 'start' });
+    await assert.rejects(
+      () => transitionExecutionState({
+        entityType: 'run_spec',
+        entityId: runSpecId,
+        to: 'succeeded',
+        reason: 'verification_gate',
+        sessionId,
+      }),
+      /Cannot mark run spec .* succeeded|verification/i,
+    );
+
+    const events = await listSessionEvents(sessionId);
+    assert.equal(
+      events.filter(e => e.type === 'execution.transition_rejected').length,
+      0,
+      'the gate refusal is a different failure class and must not be recorded as a state-machine refusal',
+    );
+    const still = await loadRunSpec(runSpecId);
+    assert.equal(still?.status, 'running', 'the gate refusal left the run running');
+  } finally {
+    await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);
+    await getDb().query('DELETE FROM run_specs WHERE id = $1', [runSpecId]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('NEGATIVE CONTROL: an illegal phase transition writes the same event type', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const runSpecId = `run-phase-reject-${suffix}`;
+  const sessionId = `session-phase-reject-${suffix}`;
+  try {
+    await ensureExecutionStore();
+    await createRunSpec({
+      id: runSpecId,
+      sessionId,
+      prompt: 'illegal phase transition',
+      workspaceRoot: process.cwd(),
+      toolMode: 'project-write',
+      maxLoops: 1,
+      runContract: { mode: 'execution', phase: 'planning' },
+    });
+
+    // planning -> executing is not in PHASE_TRANSITIONS (plan_approved must come
+    // first), so this is refused by validatePhaseTransition.
+    await assert.rejects(
+      () => ensureRunSpecVerificationPhase(runSpecId, 'skip_ahead', 'test'),
+    );
+
+    const events = await listSessionEvents(sessionId);
+    const rejection = events.filter(e => e.type === 'execution.transition_rejected');
+    assert.equal(rejection.length, 1, 'the phase path shares the event type, not a second one');
+    assert.equal(rejection[0]!.payload.entityType, 'run_spec_phase');
+    assert.equal(rejection[0]!.payload.from, 'planning');
+    assert.equal(rejection[0]!.payload.to, 'verifying');
   } finally {
     await getDb().query('DELETE FROM execution_outbox WHERE session_id = $1', [sessionId]).catch(() => undefined);
     await getDb().query('DELETE FROM session_events WHERE session_id = $1', [sessionId]).catch(() => undefined);

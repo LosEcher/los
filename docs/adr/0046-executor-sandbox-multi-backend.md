@@ -2,11 +2,15 @@
 
 ## Status
 
-> Numbering conflict: `docs/adr/0034-user-scheduled-work-state-and-claim-policy.md` shares this number and is the
-> canonical entry referenced by docs/README.md. Revisit numbering on the
-> next archive pass.
+**Superseded by ADR 0047** (2026-10-10).
 
-Proposed.
+This ADR proposed a `SandboxBackend` interface (process / docker / firecracker).
+It was never implemented and is **not** to be started: isolation backends are owned
+by `docs/adr/0047-tool-project-and-provider-boundary-ownership.md` §5 and the
+`config.isolation.backend` enum (`auto | jj-workspace | git-worktree | docker`).
+The `SandboxBackend` interface described below is retained for history only; the
+docker backend, if ever built, is a `sandbox-run` delegation under 0047, not a
+second interface here.
 
 ## Context
 

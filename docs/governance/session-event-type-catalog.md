@@ -29,6 +29,12 @@
 
 ## 完整类型列表
 
+### Execution 域 (`execution.*`)
+
+| 类型 | 说明 | 发射点 |
+| --- | --- | --- |
+| `execution.transition_rejected` | 执行状态机或相位转移表**拒绝**了一次转移。在回滚**之后**、用独立连接写入；验证门拒绝、租约丢失、实体不存在**不写**这条 | `execution-store.ts`、`run-phase-transitions.ts` |
+
 ### Run 域 (`run.*`)
 | 类型 | 描述 | 来源 |
 |------|------|------|

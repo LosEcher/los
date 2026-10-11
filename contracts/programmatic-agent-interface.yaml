@@ -19,8 +19,48 @@ tools:
   - name: los_run
     purpose: submit a run through POST /chat and project the terminal SSE result
     requiredInput: [prompt, projectId]
+    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope, detach, sandboxMode, allowedTools, idempotencyKey]
     defaultToolMode: read-only
     writeRule: project-write requires an operator credential in the adapter process
+    executionPolicyRule: >
+      sandboxMode (readonly | workspace-write | sandbox) and allowedTools are
+      forwarded to POST /chat and both require operatorScope=true, matching the
+      gateway gate. Measured tool policy: readonly -> L0/no writes/no sandbox;
+      workspace-write -> L1 writes, no sandboxed shell; sandbox -> L2 with
+      sandboxAvailable=true when an OS sandbox is detected. allowedTools narrows the
+      catalog and is persisted in run_specs.allowed_tools_json.
+    nodeSelectionRule: >
+      Node selection is deliberately absent: /chat does not consume the run-spec
+      request's executor field at all (only the scheduled-work and experiment routes
+      do), so an MCP-dispatched run lands on the gateway's configured executor node.
+      Exposing a node parameter here would be a second source of truth that the chat
+      path ignores.
+    detachRule: >
+      detach=true returns as soon as the run identity is complete (runSpecId from the
+      intake event plus sessionId and taskRunId) and aborts the SSE stream instead of
+      holding it to the terminal event. The run keeps executing: measured behaviour is
+      run_specs.status=succeeded / task_runs.status=succeeded after an aborted stream,
+      so execution does not depend on the SSE consumer. The project-scope guard still
+      runs before a detached result is reported, and the run is read back through
+      los_run_state / los_run_replay / los_runs_list.
+    scopeRule: >
+      The gateway pins a non-operator caller to its configured default project and
+      discards the requested projectId (see request-context.ts). projectId and
+      workspaceRoot therefore take effect only when operatorScope=true, which
+      requires the adapter operator credential and forwards the operator header to
+      POST /chat. workspaceRoot additionally requires operator scope at the gateway.
+    nextActionRule: >
+      When the terminal event is blocked or error, the adapter also reads
+      GET /runs/{runSpecId}/state and returns its action / summary / blockers as
+      nextAction, so a caller learns which tool to call next (for example
+      run_verification) instead of only that the run stopped. The extra read uses
+      ordinary access auth, is skipped for success terminals, and its failure is
+      reported as nextActionError without discarding the run result.
+    failLoud: >
+      The adapter reads coordinator.intake_resolved from the run stream and returns
+      an MCP error when the resolved ownerRepo differs from the requested projectId,
+      including the requested project, the resolved project, the resolution reason,
+      and the run identifiers. A mis-scoped run is never reported as success.
     output:
       - sessionId
       - runSpecId
@@ -31,12 +71,161 @@ tools:
       - runSpecStatus
       - text
       - eventTypes
+      - ownerRepo
+      - requestedProjectId
+      - workspaceRoot
+      - detached
+      - nextAction
+      - nextActionError
+  - name: los_runs_list
+    purpose: >
+      discover run specs through GET /runs so a caller can recover a runSpecId it
+      lost to a client timeout. The gateway list route takes no filters and is
+      capped server-side, so the adapter filters by projectId/traceId/status and
+      bounds the result itself.
+    requiredInput: [projectId]
+    optionalInput: [traceId, status, limit, since]
+    serverFilterNote: >
+      projectId / status / limit / since are applied by GET /runs itself. Filtering a
+      capped client-side list was the original behaviour and made counts disagree
+      with the source of truth; only traceId is still filtered in the adapter.
+    output:
+      - matched
+      - returned
+      - items
+    projection: >
+      Each item carries runSpecId, sessionId, projectId, status, toolMode, traceId,
+      createdAt, updatedAt and a truncated promptPreview. Raw prompts are never
+      returned in full and the list is bounded by limit (default 10, maximum 50).
+  - name: los_placed_run
+    purpose: >
+      create and trigger a one-shot scheduled execution bound to a placement, so a task
+      can be sent to a named device or to any device satisfying declared capabilities
+      (the cantool build-on-M3 flow is exactly this shape).
+    requiredInput: [projectId, goalTemplate]
+    optionalInput: [title, nodeId, requiredCapabilities, workspaceRoot, editableSurfaces, requiredChecks, toolMode, sandboxMode, maxLoops, trigger, idempotencyKey]
+    operatorCredentialRequired: true
+    output: [scheduleId, status, projectId, nodeId, requiredCapabilities, scheduleRunId, runStatus, error]
+    placementRule: >
+      nodeId is a preference, requiredCapabilities is a filter. Semantics come from the
+      scheduler: a requirement is satisfied when the node reports the key as true, except
+      sandbox which needs a concrete backend (linux-bwrap / macos-sandbox-exec), never
+      native/tool_policy. Placement is fail-loud in both directions: an unknown capability
+      name is refused at creation with the allowed list, and a placement no node can
+      satisfy fails the run with no_executor_match recorded in the scheduler decision
+      ledger together with the candidate ids and the required capabilities. A run is never
+      quietly executed on the gateway host when the caller asked for another device.
+    note: >
+      The remote-execution preconditions the gateway already enforces apply here too
+      (sandboxMode, node-local workspaceRoot, editableSurfaces, at least one required
+      check, preapproved_scope), and their refusals are surfaced verbatim.
+  - name: los_nodes_list
+    purpose: >
+      read the execution-node registry through GET /nodes so placement decisions can
+      name real devices and their capabilities instead of assuming the local node.
+    requiredInput: [projectId]
+    optionalInput: [status, limit]
+    operatorCredentialRequired: true
+    scopeNote: >
+      projectId scopes the request context only; the node registry is global. The
+      gateway route itself is operator-gated, so the adapter refuses before any HTTP
+      call without the operator credential.
+    output: [total, online, matched, returned, items]
+    projection: >
+      Items carry nodeId / nodeKind / hostLabel / status / resourceClass / version /
+      queueDepth / activeTaskCount / capabilities / lastHeartbeatAt. The capability
+      keys (run_agent, deploy_safe, heavy_task_safe, artifact_transfer, file_sync_*)
+      are what placement decisions must read.
   - name: los_run_state
     purpose: read the recovery-grade state projection through GET /runs/{runSpecId}/state
     requiredInput: [runSpecId, projectId]
   - name: los_run_replay
     purpose: read bounded persisted replay through GET /runs/{runSpecId}/stream
     requiredInput: [runSpecId, projectId]
+  - name: los_run_verify
+    purpose: run the persisted required checks of a run through POST /runs/{runSpecId}/verify
+    requiredInput: [runSpecId, projectId]
+    optionalInput: [cwd, timeoutMs, outputLimit, includeFailed, idempotencyKey]
+    operatorCredentialRequired: true
+    output: [runSpecId, decision, ranRecordIds, records, recovery]
+    projection: >
+      Verification records are projected to id/checkName/kind/status/required plus a
+      truncated outputSummary, so a run with many checks stays a bounded result.
+    sideEffect: >
+      The gateway creates a work-item revision when the decision is blocked and may
+      dispatch planning for it; that is gateway policy, not adapter behaviour.
+  - name: los_run_approve
+    purpose: approve the plan phase of a run through POST /runs/{runSpecId}/approve
+    requiredInput: [runSpecId, projectId]
+    optionalInput: [reason, planRevision, contractHash, idempotencyKey]
+    operatorCredentialRequired: true
+    capabilityRule: >
+      planRevision and contractHash must be supplied together; the gateway rejects a
+      mismatched or forged pair. Omitting both performs a plain phase approval.
+    output: [runSpecId, phase, previousPhase, phaseChangedAt, dispatch]
+  - name: los_run_recover
+    purpose: >
+      read or apply the tool-call recovery decision of a run through
+      POST /runs/{runSpecId}/recover. apply=false (default) is a read-only preview;
+      apply=true with intent=cancel transitions stale tool calls and may cancel the
+      live task run.
+    requiredInput: [runSpecId, projectId]
+    optionalInput: [intent, staleMs, apply, reason, idempotencyKey]
+    operatorCredentialRequired: true
+    output:
+      - applied
+      - runSpecId
+      - sessionId
+      - action
+      - runSpecStatus
+      - eventType
+      - status
+      - recommendation
+      - reasons
+      - retryToolCallIds
+      - resumeToolCallIds
+      - cancelToolCallIds
+      - operatorAttentionToolCallIds
+      - terminalFailedToolCallIds
+      - activeToolCallIds
+      - transitionedToolCallIds
+      - transitionedTaskRunIds
+      - liveCancelledTaskRunIds
+    projection: >
+      Both gateway shapes are projected into one bounded result: the preview shape
+      (a bare recovery decision) and the applied shape (transition + nested
+      decision). Every id list is capped at 20 entries with an explicit truncated
+      flag, and reasons are capped at 10.
+    safety: >
+      apply is explicit and defaults to false, so a recover call is read-only unless
+      the caller asks for the transition.
+  - name: los_run_revise_plan
+    purpose: replace the persisted plan of a run through POST /runs/{runSpecId}/revise-plan
+    requiredInput: [runSpecId, projectId, plan]
+    optionalInput: [reason, idempotencyKey]
+    operatorCredentialRequired: true
+    planRule: >
+      plan must be a non-empty array of plan steps; the adapter rejects an empty or
+      missing plan before calling the gateway instead of silently bumping the revision.
+    output: [runSpecId, planRevision, previousRevision, phase, previousPhase]
+  - name: los_task_cancel
+    purpose: >
+      cancel a task run through POST /tasks/{taskRunId}/cancel. Named for the task,
+      not the run, because the gateway has no run-level cancel route; obtain the id
+      from los_run_state's activeTaskRunIds.
+    requiredInput: [taskRunId, projectId]
+    optionalInput: [reason, idempotencyKey]
+    operatorCredentialRequired: true
+    authorizationNote: >
+      The gateway route itself is ungated (it is a review-listed mutating route), so
+      the adapter is deliberately stricter: it requires the operator credential and
+      refuses before any HTTP call without it.
+    output: [ok, live, taskRun, taskRunId, status, reason]
+    responseShapes: >
+      live=true returns {ok, live, taskRunId, status: cancelled, reason}; live=false
+      returns {ok, live, taskRun} for a task that was not running on this gateway
+      (a remote executor gets a cancellation request instead). Measured 2026-10-11:
+      cancellation still transitions a queued/running task run to cancelled.
   - name: los_operator_control
     purpose: persist steering or follow-up through POST /sessions/{sessionId}/operator-events
     requiredInput: [sessionId, projectId, type]
@@ -53,12 +242,20 @@ identityAndScope:
     userId: mcp-client
   rules:
     - projectId is explicit on every tool call.
-    - The adapter forwards the operator header only for operator-controlled writes.
+    - projectId and workspaceRoot take effect only for operator-scoped calls (los_run operatorScope=true, or los_operator_control).
+    - The adapter forwards the operator header only for operator-controlled writes and explicitly operator-scoped runs.
     - The adapter never derives an operator actor from tool arguments.
+    - >
+      Callers may pass idempotencyKey on any state-changing tool (los_run also accepts
+      dedupeKey as a fallback); it becomes x-idempotency-key, so a retry after a
+      transport failure replays the original response instead of creating a second
+      run. Without a key no idempotency header is sent, so a retry can duplicate work.
     - Gateway request context and persisted run/session/task evidence remain authoritative.
 safety:
   - Raw credentials are read from process environment or CLI flags and never returned in MCP content.
   - los_run rejects project-write when the adapter has no operator credential.
+  - los_run rejects operatorScope when the adapter has no operator credential.
+  - A run whose resolved ownerRepo differs from the requested projectId returns an MCP error instead of a success projection.
   - all tool mode is not exposed by the MCP adapter.
   - Tool output is bounded and does not return raw credentials or request headers.
   - Unknown tools and invalid arguments return MCP errors without calling the gateway.

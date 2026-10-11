@@ -330,13 +330,34 @@ export async function findActiveTaskRunByDedupeKey(dedupeKey: string): Promise<T
   return rows.rows[0] ? rowToTaskRun(rows.rows[0]) : null;
 }
 
-export async function listTaskRuns(limit = 50): Promise<TaskRunRecord[]> {
+/**
+ * List task runs, newest first.
+ *
+ * `scope.tenantId` (optional) restricts the projection to one tenant. The HTTP
+ * boundary passes it for authenticated non-operator principals
+ * (`resolveReadScope` in the gateway); internal callers (scheduler, governance,
+ * fleet) omit it and keep their cross-tenant view. Tenant-only on purpose: the
+ * task projection is cross-project by design.
+ */
+/**
+ * 列出 task runs；`scope.status` 走服务端过滤。
+ * 为什么必须有：Web 的 Tasks 页一直在发 `/tasks?status=`，而路由过去**不读**该参数
+ * ⇒ 下拉框看起来可用、实际不生效（2026-10-11 实测）。过滤在服务端做才与真源一致。
+ */
+export async function listTaskRuns(
+  limit = 50,
+  scope?: { tenantId?: string; status?: string; projectId?: string },
+): Promise<TaskRunRecord[]> {
   await ensureTaskRunStore();
-  const db = getDb();
-  const rows = await db.query<TaskRunRow>(
-    'SELECT * FROM task_runs ORDER BY updated_at DESC LIMIT $1',
-    [limit],
-  );
+  const params: unknown[] = []; const where: string[] = [];
+  const add = (value: unknown, sql: string) => { params.push(value); where.push(sql.replace('$', `$${params.length}`)); };
+  if (scope?.tenantId) add(scope.tenantId, 'tenant_id = $');
+  if (scope?.status) add(scope.status, 'status = $');
+  // task_runs 自带 project_id 列（`\d task_runs` 实测）⇒ 普通列过滤，无需 join run_specs
+  if (scope?.projectId) add(scope.projectId, 'project_id = $');
+  params.push(limit);
+  const sql = `SELECT * FROM task_runs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY updated_at DESC LIMIT $${params.length}`;
+  const rows = await getDb().query<TaskRunRow>(sql, params);
   return rows.rows.map(rowToTaskRun);
 }
 

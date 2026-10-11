@@ -486,6 +486,9 @@ export function createSpawnAgentRunner(options: SpawnAgentRunnerOptions): SpawnA
         allowedTools: [...childAllowedTools(childToolMode)],
         maxLoops: childMaxLoops,
         runContract: childRunContractMetadata,
+        // Inherited contracts keep their phase when they have one; otherwise the
+        // exemption names the inheritance instead of blaming the writer.
+        phaseExemptReason: 'subagent_inherited',
       });
       childRunSpecId = specId;
     } catch (error) {

@@ -77,11 +77,17 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   preference and fallback policy.
 - `0044-acp-endpoint.md` - ACP (Agent Client Protocol) endpoint.
 - `0045-provider-tool-hot-reload.md` - provider/tool hot reload boundaries.
-- `0046-executor-sandbox-multi-backend.md` - executor sandbox multi-backend
-  abstraction (worktree/docker).
+- `0046-executor-sandbox-multi-backend.md` - **Superseded by 0047** (2026-10-10);
+  the proposed `SandboxBackend` interface was never implemented. Isolation
+  backends are owned by 0047 §5 and `config.isolation.backend`.
 - `0047-tool-project-and-provider-boundary-ownership.md` - tool/project/provider
   boundary ownership: layer model, single-writer rule, provider conflict
   adjudication, memory canonical split, `dsfolder` structure, gate tri-state.
+- `0048-route-admission-and-read-scope.md` - HTTP route admission
+  classification and read scope.
+- `0049-declared-versus-consumed-reconciliation.md` - declared-versus-consumed
+  reconciliation for config surfaces, retention judgement for monotonic storage,
+  and single-source rules for cost projections.
 
 > Numbering de-duplicated 2026-08-26: the five non-canonical co-numbered files
 > (`0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
@@ -116,6 +122,31 @@ and GitHub `gh` authentication.
 Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
+
+Use `architecture/2026-10-11-remote-execution-policy-divergence-analysis.md` for why a
+remote run declared read-only and sandboxed actually executed write-capable without a
+sandbox, and for the three concrete fixes (silent toolMode coercion, the inert
+sandboxMode pairing, and declared checks that neither run nor get recorded).
+
+Use `architecture/2026-10-11-cross-device-task-handling-phased-design.md` for the phased
+design (P0 observability → P1 placement → P2 multi-device fan-out → P3 storage → P4
+governance) of cross-device and cross-project task handling on the M1/M3/Win fleet.
+
+Use `architecture/2026-10-11-cross-project-and-cross-device-task-model-review.md` for the
+three-layer review of cross-project and cross-device task handling: what holds today
+(dispatch per project, aggregate reads), what does not (per-project run views, remote
+execution), and the prioritized gap list with acceptance criteria.
+
+Use `architecture/2026-10-11-execution-node-selection-and-remote-runs.md` for why
+node selection cannot be a simple `/chat` passthrough: chat runs execute in the
+gateway process, remote dispatch lives in the scheduler path, and the ledger shows
+no remote agent run in the last seven days.
+
+Use `operations/2026-10-11-dsh-los-cross-project-dispatch-audit.md` for the
+DSH→los cross-project dispatch audit (why a non-operator `los_run` was pinned to
+the default project regardless of `projectId`), the `operatorScope` opt-in and
+fail-loud guard that replaced the silent mis-scoping, and the remaining
+`verify`/`approve`/`cancel`/async gaps.
 
 Use `operations/otel-bridge.md` for the local OTLP/HTTP bridge port, protocol,
 health/status endpoints, external collector boundary, and failure checks.

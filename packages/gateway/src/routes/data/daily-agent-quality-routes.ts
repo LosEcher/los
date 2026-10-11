@@ -21,7 +21,8 @@ export function registerDailyAgentQualityRoutes(
   app: FastifyInstance,
   dependencies: DailyAgentQualityRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/daily-agent-quality/baseline', async (req) => {
+  app.get('/daily-agent-quality/baseline', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
     const context = getRequestContext(req);
     const query = req.query as { days?: string };
     return await dependencies.getDailyAgentQualityBaseline({

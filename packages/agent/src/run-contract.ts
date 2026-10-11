@@ -39,18 +39,25 @@ export const HEAVYWEIGHT_CONFIDENCE_THRESHOLD = 0.9;
  * Iteration = create a new plan revision or task attempt with links to the
  * failed verification evidence. Never silently loop inside one opaque agent call.
  */
-export type RunPhase =
-  | 'created'
-  | 'discovering'
-  | 'discovery_ready'
-  | 'planning'
-  | 'plan_approved'
-  | 'executing'
-  | 'verifying'
-  | 'succeeded'
-  | 'blocked'
-  | 'failed'
-  | 'cancelled';
+export type { RunPhase } from './run-phase-values.js';
+export {
+  normalizePhaseTracking,
+  parsePhaseExemptReason,
+  _classifyPhaseLedgerForTests as classifyPhaseLedger,
+  type PhaseExemptReason,
+  type PhaseLedgerBucket,
+  type PhaseLedgerClassification,
+  type PhaseTracking,
+} from './run-phase-ledger.js';
+import type { RunPhase } from './run-phase-values.js';
+import { normalizeRunPhase } from './run-phase-values.js';
+import {
+  normalizePhaseTracking,
+  parsePhaseExemptReason,
+  type PhaseExemptReason,
+  type PhaseTracking,
+} from './run-phase-ledger.js';
+
 
 /** Terminal phases — no further transitions allowed. */
 const TERMINAL_PHASES: ReadonlySet<RunPhase> = new Set(['succeeded', 'failed', 'cancelled']);
@@ -112,6 +119,19 @@ export interface RunContractMetadata {
   previousPhase?: RunPhase;
   /** Timestamp of the last phase transition (ISO-8601). */
   phaseChangedAt?: string;
+  /**
+   * Whether `phase` is lifecycle truth for this contract.
+   *
+   * `exempt` marks a writing path that deliberately does not participate in the
+   * phase lifecycle. This is a **sidecar** field, never a phase value:
+   * `not_applicable` is absent from `RunPhase` on purpose, because
+   * `normalizeRunPhase` drops unknown strings and any non-RunPhase value would
+   * make terminal rows look permanently drifted (see
+   * docs/architecture/2026-10-10-control-plane-truth-remediation.md §6).
+   */
+  phaseTracking?: PhaseTracking;
+  /** Why `phaseTracking` is `exempt`. `writer_omitted` means nobody declared one. */
+  phaseExemptReason?: PhaseExemptReason;
   /** Structured plan steps. Distinct from verification requirements. */
   plan?: PlanStep[];
   /** Verification requirements mapped from plan steps that are executable. */
@@ -309,6 +329,8 @@ export type RunContractMetadataInput = Partial<{
   phase: unknown;
   previousPhase: unknown;
   phaseChangedAt: unknown;
+  phaseTracking: unknown;
+  phaseExemptReason: unknown;
   plan: unknown;
   verifications: unknown;
   planRevision: unknown;
@@ -373,6 +395,13 @@ export function normalizeRunContractMetadata(input: unknown): RunContractMetadat
   if (previousPhase) out.previousPhase = previousPhase;
 
   setString(out, 'phaseChangedAt' as any, raw.phaseChangedAt);
+
+  // Closed-set copy: a key that is not copied here is dropped on write, which is
+  // exactly how the phase marker would silently disappear.
+  const phaseTracking = normalizePhaseTracking(raw.phaseTracking);
+  if (phaseTracking) out.phaseTracking = phaseTracking;
+  const phaseExemptReason = parsePhaseExemptReason(raw.phaseExemptReason);
+  if (phaseExemptReason) out.phaseExemptReason = phaseExemptReason;
   setNumber(out, 'planRevision', raw.planRevision, 1);
   setNumber(out, 'planParentRevision', raw.planParentRevision, 1);
   setString(out, 'planParentRunSpecId' as any, raw.planParentRunSpecId);
@@ -488,6 +517,11 @@ function normalizeStringArray(value: unknown): string[] {
 function hasRunContractValue(contract: RunContractMetadata): boolean {
   if (contract.mode || contract.executionMode || contract.goal || contract.ownerLayer || contract.workspaceRoot || contract.provider || contract.model || contract.toolMode || contract.commitBoundary) return true;
   if (contract.phase) return true;
+  // A contract that carries only the exemption marker is NOT empty. Without this
+  // line `createRunSpec` would store `{}` and read back as "untracked history",
+  // turning a deliberate exemption into an apparent gap.
+  if (contract.phaseTracking) return true;
+  if (contract.phaseExemptReason) return true;
   if (contract.plan && contract.plan.length > 0) return true;
   if (contract.verifications && contract.verifications.length > 0) return true;
   if (contract.planHistory && contract.planHistory.length > 0) return true;
@@ -499,11 +533,6 @@ function hasRunContractValue(contract: RunContractMetadata): boolean {
   return ARRAY_FIELDS.some((field) => contract[field].length > 0);
 }
 
-function normalizeRunPhase(value: unknown): RunPhase | undefined {
-  if (typeof value !== 'string') return undefined;
-  const phases: RunPhase[] = ['created', 'discovering', 'discovery_ready', 'planning', 'plan_approved', 'executing', 'verifying', 'succeeded', 'blocked', 'failed', 'cancelled'];
-  return phases.includes(value as RunPhase) ? (value as RunPhase) : undefined;
-}
 
 function normalizePlanSteps(value: unknown): PlanStep[] | undefined {
   if (!Array.isArray(value)) return undefined;

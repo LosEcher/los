@@ -2,10 +2,6 @@
 
 ## Status
 
-> Numbering conflict: `docs/adr/0032-managed-jj-workspace-operations.md` shares this number and is the
-> canonical entry referenced by docs/README.md. Revisit numbering on the
-> next archive pass.
-
 Proposed.
 
 ## Context
