@@ -79,22 +79,96 @@ if [[ "$PLAN" -eq 0 ]]; then
   trap 'rm -rf "$LOCK"' EXIT
 fi
 
-# ── 目标来源警告：摘要取自网关**工作树** ─────────────────────
-# 部署走内容同步、不依赖 git push，所以"目标"是工作树的快照 —— 于是**未提交的改动会移动目标**。
-# 2026-10-11 实测：另一个会话在本 checkout 里改了两个 packages/agent 源文件，摘要在两次探测之间
-# 就变了，plan 自相矛盾（表头的 target 与 local 节点的 digest 不等）；更危险的是可能把别人的
-# 未完成改动滚到全机队。这里显式报出来 —— 只警告不阻断：操作者可能正是有意滚一个未提交的修复。
+# ── 目标来源：两条必须成立的不变量 ──────────────────────────
+# 部署走内容同步、不依赖 git push，所以"目标"是网关**工作树**的摘要快照。因此：
+#   ① 被摘要覆盖的文件必须是**已提交**状态 —— 否则会把别人（或自己）未完成的改动推给全机队；
+#   ② 目标在整个滚动期间**不得变化** —— 否则先后节点会停在不同的内容上（混合机队）。
+# 两条都在 2026-10-11 被真实打破过：另一个会话在同一 checkout 里改 packages/agent 源文件，
+# 摘要在一次 `--plan` 运行内就变了（表头 target 与 local 节点 digest 自相矛盾）。
+# 默认硬拦；确实要有意滚未提交内容时，显式设 LOS_ROLLOUT_ALLOW_DIRTY=1。
+ALLOW_DIRTY="${LOS_ROLLOUT_ALLOW_DIRTY:-0}"
+
 dirty_covered_files() {
   local paths='tools deploy packages contracts package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json'
   git -C "$ROOT" status --porcelain -- $paths 2>/dev/null | cut -c4- | LC_ALL=C sort \
     | comm -12 - <(node "$ROOT/tools/deployable-content.mjs" --files | LC_ALL=C sort)
 }
-DIRTY_COVERED="$(dirty_covered_files | wc -l | tr -d ' ')"
-if [ "${DIRTY_COVERED:-0}" -gt 0 ]; then
-  warn "the gateway working tree has $DIRTY_COVERED changed file(s) inside the digest's scope:"
-  dirty_covered_files | sed 's/^/  [rollout]   /' >&2
-  warn "target '$TARGET' is a snapshot of a dirty tree — it moves if those files change, and the fleet would then run uncommitted work"
+
+head_revision() { # 工作副本当前基于哪个修订（jj 优先，退回 git）
+  jj -R "$ROOT" log -r '@-' --no-graph -T 'commit_id' 2>/dev/null \
+    || git -C "$ROOT" rev-parse HEAD 2>/dev/null || true
+}
+merged_revision() { # 已合并修订
+  jj -R "$ROOT" log -r 'main@origin' --no-graph -T 'commit_id' 2>/dev/null \
+    || git -C "$ROOT" rev-parse origin/main 2>/dev/null || true
+}
+
+assert_target_source() {
+  local dirty head merged
+  dirty="$(dirty_covered_files | wc -l | tr -d ' ')"
+  if [ "${dirty:-0}" -gt 0 ]; then
+    dirty_covered_files | sed 's/^/  [rollout]   /' >&2
+    if [ "$ALLOW_DIRTY" = "1" ]; then
+      warn "rolling a DIRTY tree on purpose (LOS_ROLLOUT_ALLOW_DIRTY=1): $dirty uncommitted file(s) in scope; target '$TARGET' is a snapshot of them"
+    else
+      die "refusing to roll: $dirty uncommitted file(s) inside the digest's scope (listed above). The target would be a snapshot of a dirty tree, so the fleet would run work in progress. Commit them, or set LOS_ROLLOUT_ALLOW_DIRTY=1 if that is deliberate."
+    fi
+  fi
+  head="$(head_revision)"; merged="$(merged_revision)"
+  if [ -n "$head" ] && [ -n "$merged" ] && [ "$head" != "$merged" ]; then
+    warn "rolling content from revision ${head:0:12}, which is NOT the merged main@origin ${merged:0:12} — the fleet would run content that is not what is merged"
+  fi
+}
+
+target_now() { bash tools/los.sh build-version | tail -1; }
+
+# ── 冻结载荷：一次打包、全轮共用，并**由它定义目标** ──────────────
+# 为什么不是"检测漂移后中止"：内容同步是从**工作树**现场打包的，于是
+#   ① 每台节点都在"轮到它的那一刻"各自打包 ⇒ 一轮里前后节点可能拿到不同内容；
+#   ② 目标在开头算、载荷之后才打 ⇒ 两者可能不对应（节点摘要与目标不符才暴露）；
+#   ③ 滚到一半有写者 ⇒ 前几台停在一个修订、后几台停在另一个；而"检测到就中止"只能减少损害，
+#      已经滚过的节点不会回退（混合机队已经形成）。
+# 开头打一次包、解到快照目录、用**快照**算目标，这三条一起消失：整轮下发同一份字节，
+# 目标与载荷按构造一一对应。它与前面两道"该不该滚这份内容"的闸门正交：闸门管来源，冻结管一致性。
+PAYLOAD_TAR="$OUT_DIR/payload-latest.tar.gz"
+PAYLOAD_TREE="$OUT_DIR/payload-latest-tree"
+
+freeze_payload() {
+  rm -rf "$PAYLOAD_TREE" "$PAYLOAD_TAR" "$PAYLOAD_TAR.list"
+  bash "$ROOT/tools/deploy-to-remote.sh" tarball "$PAYLOAD_TAR" >/dev/null \
+    || die "cannot build the payload tarball"
+  mkdir -p "$PAYLOAD_TREE"
+  tar xzf "$PAYLOAD_TAR" -C "$PAYLOAD_TREE" || die "cannot extract the payload snapshot"
+  LOS_DEPLOY_TARBALL="$PAYLOAD_TAR"; export LOS_DEPLOY_TARBALL
+  local frozen live
+  frozen="$(node "$ROOT/tools/deployable-content.mjs" --root "$PAYLOAD_TREE" --digest)"
+  [ -n "$frozen" ] || die "the frozen payload has no digest — refusing to roll an unidentifiable payload"
+  if [ -n "${LOS_ROLLOUT_TARGET:-}" ] && [ "$LOS_ROLLOUT_TARGET" != "$frozen" ]; then
+    die "LOS_ROLLOUT_TARGET='$LOS_ROLLOUT_TARGET' does not match the frozen payload's digest '$frozen'; a rollout must ship the content it claims to ship"
+  fi
+  TARGET="$frozen"
+  live="$(target_now)"
+  [ "$live" = "$frozen" ] \
+    || warn "the working tree changed while the payload was being frozen (live '$live' != frozen '$frozen'): this rollout ships the frozen snapshot, not what is on disk now"
+  LOS_DEPLOY_VERSION="$TARGET"; export LOS_DEPLOY_VERSION
+  log "payload frozen: $TARGET ($(du -h "$PAYLOAD_TAR" | cut -f1 | tr -d ' '), $(wc -l < "$PAYLOAD_TAR.list" | tr -d ' ') entries)"
+}
+
+if [[ "$PLAN" -eq 1 ]]; then
+  # plan 是只读诊断：脏树也要能看计划，但必须把事实说清楚
+  DIRTY_COVERED="$(dirty_covered_files | wc -l | tr -d ' ')"
+  if [ "${DIRTY_COVERED:-0}" -gt 0 ]; then
+    warn "gateway working tree has $DIRTY_COVERED changed file(s) inside the digest's scope:"
+    dirty_covered_files | sed 's/^/  [rollout]   /' >&2
+    warn "the target below is a snapshot of that dirty tree; a real rollout would refuse it (LOS_ROLLOUT_ALLOW_DIRTY=1 overrides)"
+  fi
+else
+  assert_target_source
 fi
+
+# 冻结载荷（plan 也冻）：让 plan 与真滚看到**同一个目标**，否则 plan 报的是"活树现在是什么"、
+# 真滚发的是"快照是什么"，两者在有写者时不一致。
+freeze_payload
 
 # ── preflight：控制面不健康就不要开跑（它既 verify 不了也 promote 不了）──
 preflight() {
@@ -287,6 +361,7 @@ processed=0
 for row in "${NODES[@]}"; do
   IFS='|' read -r nid plat alias_ home priv <<< "$row"
   [[ -n "$ONLY" && "$nid" != "$ONLY" ]] && continue
+  # 目标在轮内不会漂移：整轮下发的是 freeze_payload 冻结的那一份字节（见其注释）
   roll_one "$nid" "$plat" "$alias_" "$home" "$priv" || failed=$((failed+1))
   processed=$((processed+1))
   # canary：第一台成功后停下，等人确认再跑其余

@@ -68,15 +68,49 @@ identical digests on the same explicit list — and the fleet was then rolled on
 because the module itself is covered content. See
 `architecture/2026-10-11-cross-platform-content-identity-design.md`.
 
+**Covered means repository content, not "whatever is on disk".** The module also
+excludes the generated state that the repository's own `.gitignore` calls non-content
+(`*.db`/`*.db-shm`/`*.db-wal`, `packages/<pkg>/test-results/`). Without that, running
+a test suite or writing a local SQLite WAL silently **moved the fleet target**, and
+428 KB of that state was shipped to every node. Generated state belongs in
+`.los-runtime/` (excluded); if something new starts writing inside a covered tree,
+move the producer rather than extending the list — the list exists as a backstop, and
+a covered-but-not-shipped file makes convergence impossible (loudly, not silently).
+
+**A rollout freezes its payload once.** `tools/los-fleet-rollout.sh` builds the ship
+tarball at the start, extracts it to `.los-runtime/rollouts/payload-latest-tree`, and
+defines the target as *that snapshot's* digest; every node then receives the same
+bytes (`LOS_DEPLOY_TARBALL`). This is what makes mid-rollout edits harmless instead
+of merely detectable: without it, each node packed its own tarball at its own turn
+and the target was computed before any of them.
+
 **The target is a snapshot of the gateway's working tree**, not of a commit:
 `tools/los-fleet-rollout.sh` computes it with `bash tools/los.sh build-version` in
-the checkout it runs from. Two consequences worth knowing before you start a roll:
+the checkout it runs from. Two invariants therefore have to hold, and the
+orchestrator enforces both:
 
-- uncommitted changes inside the digest's scope **move the target**, and rolling
-  them ships somebody's work in progress to the whole fleet. The orchestrator now
-  lists those files and warns; treat the warning as a gate, not decoration.
+1. **The covered files must be committed.** An uncommitted edit inside the digest's
+   scope makes the target a snapshot of work in progress, so a rollout would ship
+   that work to the whole fleet. The orchestrator lists the offending files and
+   **refuses to roll**; `LOS_ROLLOUT_ALLOW_DIRTY=1` overrides when rolling
+   uncommitted content is deliberate. It also warns when the content comes from
+   something other than the merged `main@origin`.
+2. **The target must not change while the rollout runs.** The gate above only
+   describes the start; the orchestrator re-computes the digest before every node
+   and aborts if it moved — otherwise the early nodes would get one revision and the
+   later ones another. Such an abort touches nothing further and names the report.
+
+`--plan` stays read-only: it prints the dirty-file warning and the plan so you can
+see the situation, and does not refuse.
+
+Two consequences worth knowing before you start a roll:
+
 - `mbp-executor-1` runs from that same checkout, so it is by construction "at the
-  working tree" and will read as off-target whenever the tree has such changes.
+  working tree" and reads as off-target whenever the tree has such changes.
+- an executor that runs from an editable tree is a task-correctness risk, not just a
+  bookkeeping one: `tsx` reads a module from disk the first time it is required, so a
+  half-finished edit can enter the execution path without any restart. Keep
+  `mbp-executor-1` on content you are willing to have run.
 
 For the same reason, compare a node against the *fleet target* rather than against
 your current checkout when a concurrent editor is active.

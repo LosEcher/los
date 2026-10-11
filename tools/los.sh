@@ -28,11 +28,15 @@ _load_dotenv() {
 # 而这个数的失败形态是"全机队永不收敛"，与"内容真的不同"长得一模一样。
 resolve_local_runtime_version() {
   local out
-  if out="$(node "$ROOT/tools/deployable-content.mjs" --digest 2>/dev/null)" && [ -n "$out" ]; then
+  if out="$(node "$ROOT/tools/deployable-content.mjs" --digest 2>/dev/null)" \
+    && printf '%s' "$out" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
     printf '%s' "$out"
   else
-    # node 不可用时的兜底与旧实现一致（base=0.1.0、无 revision）：
-    # 给出 base 形状，**不**伪装成"内容一致"。
+    # 兜底：node 缺失，或模块**没有打出任何东西**。后者曾经静默发生（模块的入口判据
+    # 在符号链接路径下不成立 ⇒ 空输出 + 退出码 0，2026-10-11 实测），而静默的 '0.1.0'
+    # 看起来像个正常版本号。这里必须吵：它意味着本机的摘要算不出来，收敛判据不会成立。
+    printf 'los.sh: WARNING: cannot compute the deployable-content digest (node missing, or %s printed nothing) — reporting a base version that will NOT match the fleet target\n' \
+      "tools/deployable-content.mjs" >&2
     printf '0.1.0'
   fi
 }

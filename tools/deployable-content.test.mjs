@@ -19,9 +19,11 @@
  * 顺手重构 —— 那会让全机队的收敛声明在无人察觉时失效。
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { describe, digestOf, listFiles } from './deployable-content.mjs';
@@ -56,6 +58,12 @@ function fixture() {
   write('tools/los-fleet-rollout.sh', '#!/bin/bash\n# gateway only\n');
   write('tools/deploy-drivers/windows-service.sh', '#!/bin/bash\n# gateway only\n');
   write('tools/los-governance-daily.sh', '#!/bin/bash\n# gateway only\n');
+  // 生成态（仓库 .gitignore 已声明非内容）：不得进摘要，也不得把"跑过一次测试/写过一次 WAL"
+  // 变成目标摘要的漂移（2026-10-11 实测这 6 个文件真的一次性地推动了机队目标）
+  write('packages/gateway/data/los.db', 'sqlite\n');
+  write('packages/gateway/data/los.db-wal', 'wal\n');
+  write('packages/web/test-results/.last-run.json', '{}\n');
+  write('packages/web/test-results/run-1/shot.png', 'png\n');
   write('tools/fleet-maintenance.mts', '// gateway only\n');
   return root;
 }
@@ -86,6 +94,10 @@ const NEVER_COVERED = [
   'tools/los-governance-daily.sh',
   'tools/node_modules/junk.js',
   'tools/skip.tsbuildinfo',
+  'packages/gateway/data/los.db',
+  'packages/gateway/data/los.db-wal',
+  'packages/web/test-results/.last-run.json',
+  'packages/web/test-results/run-1/shot.png',
 ];
 
 test('文件清单就是摘要覆盖的那一份，且剪枝/排除逐条生效', () => {
@@ -143,6 +155,20 @@ test('剪枝目录与排除项怎么动都不影响摘要', () => {
   }
 });
 
+test('生成态（本地库 / 测试产物）既不进摘要、改动也不影响摘要', () => {
+  const root = fixture();
+  try {
+    const before = digestOf(root);
+    writeFileSync(join(root, 'packages/gateway/data/los.db-wal'), 'more wal bytes\n');
+    mkdirSync(join(root, 'packages/web/test-results/new-run'), { recursive: true });
+    writeFileSync(join(root, 'packages/web/test-results/new-run/shot.png'), 'png\n');
+    rmSync(join(root, 'packages/web/test-results/.last-run.json'));
+    assert.equal(digestOf(root), before, '跑一次测试不该移动机队目标');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('符号链接不跟随（与 find -type f 对齐）', () => {
   const root = fixture();
   try {
@@ -151,6 +177,29 @@ test('符号链接不跟随（与 find -type f 对齐）', () => {
     assert.equal(digestOf(root), before, '符号链接既不进清单也不进摘要');
     assert.ok(!listFiles(root).includes('tools/link.sh'));
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('经符号链接路径调用仍能算出摘要', () => {
+  // 反例（2026-10-11 实测）：入口判据只比字符串时，脚本路径经过符号链接（macOS 的 /tmp、
+  // 或节点根目录是链接）就不成立 ⇒ **空输出 + 退出码 0**，而 tools/los.sh 的兜底会把它
+  // 显示成 '0.1.0'（看着像版本号，其实是"没算出来"）。
+  const root = fixture();
+  const linkParent = mkdtempSync(join(tmpdir(), 'los-digest-link-'));
+  try {
+    // 符号链接指向**模块所在目录**，再经链接路径调用**模块本身**（不是本测试文件）
+    const modulePath = join(dirname(fileURLToPath(import.meta.url)), 'deployable-content.mjs');
+    const linked = join(linkParent, 'linked');
+    symlinkSync(dirname(modulePath), linked);
+    const out = execFileSync(process.execPath, [join(linked, basename(modulePath)), '--root', root, '--digest'], {
+      encoding: 'utf8',
+      timeout: 20000,
+    }).trim();
+    assert.equal(out, describe(root).version);
+    assert.notEqual(out, '');
+  } finally {
+    rmSync(linkParent, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

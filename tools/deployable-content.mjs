@@ -26,7 +26,7 @@
  * 退出码：0 正常 / 1 用法或读取错误。
  */
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,6 +44,28 @@ const EXCLUDED_FILE_PATTERNS = [
   (name) => name === '.DS_Store',
   (name) => name.startsWith('._'), // bsdtar 的 AppleDouble sidecar
 ];
+
+/**
+ * 仓库自己声明为"非内容"、却会落在被覆盖树里的**生成态**。
+ *
+ * 依据不是拍脑袋，而是仓库的 `.gitignore`（`*.db` / `*.db-shm` / `*.db-wal` 与
+ * `packages/<pkg>/test-results/`）—— 仓库早已声明它们不是内容，只是摘要此前没有照做。
+ * 2026-10-11 实测：被覆盖树里未跟踪/被忽略的文件共 15505 个，其中**只有这 6 个**漏进了摘要
+ * （其余都落在 node_modules/dist/.turbo 等已剪枝目录内）：
+ *
+ *   packages/gateway/data/los.db{,-shm,-wal}   ← 本地 SQLite 运行态
+ *   packages/web/test-results/**               ← Playwright 产物
+ *
+ * 代价不是"多几个字节"：网关跑一次测试、或本地库写一次 WAL，**目标摘要就会自己移动**
+ * （与代码无关的漂移），同时这 428 KB 会被下发到每一台节点。同类问题今天已出现两次
+ * （`tools/nssm.exe` 留在树内、`.los-runtime` 曾参与摘要），结论一致：
+ * **生成态不该放在被部署的树里**；这里同时排除，作为兜底护栏。
+ *
+ * 覆盖集必须是**下发集**的子集：若摘要算了某个不随包下发的文件，节点永远收敛不了
+ * （fail-loud，不会静默）—— 所以 `deploy-to-remote.sh` 的打包排除清单里有同名条目。
+ */
+const EXCLUDED_FILE_SUFFIXES = ['.db', '.db-shm', '.db-wal'];
+const EXCLUDED_DIR_NAMES = new Set(['test-results']);
 
 /**
  * 只在网关主机上跑、因此**不进摘要**的路径（与旧实现逐条一致）。
@@ -116,12 +138,14 @@ function walk(root, relDir, out) {
     const rel = `${relDir}/${entry.name}`;
     if (entry.isDirectory()) {
       if (PRUNED_DIRS.has(entry.name)) continue;
+      if (EXCLUDED_DIR_NAMES.has(entry.name)) continue; // 生成态目录（见 EXCLUDED_FILE_SUFFIXES 注释）
       walk(root, rel, out);
       continue;
     }
     if (entry.isSymbolicLink()) continue; // find -type f 不收符号链接
     if (!entry.isFile()) continue;
     if (EXCLUDED_FILE_PATTERNS.some((match) => match(entry.name))) continue;
+    if (EXCLUDED_FILE_SUFFIXES.some((suffix) => entry.name.endsWith(suffix))) continue;
     if (isExcludedPath(rel)) continue;
     out.push(rel);
   }
@@ -205,7 +229,26 @@ function main(argv) {
   return 0;
 }
 
-// 只在被直接执行时跑 main（被 import 时只导出函数，便于测试与复用）
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+/**
+ * 是否被**直接执行**（被 import 时只导出函数，不跑 main）。
+ *
+ * 必须按 realpath 比较，不能只比字符串：脚本路径只要经过符号链接（macOS 的 /tmp 就是
+ * 指向 /private/tmp 的符号链接；节点根目录也可能是链接），`resolve(argv[1])` 与
+ * `fileURLToPath(import.meta.url)` 就不相等 —— 判据不成立 ⇒ **什么都不打印、退出码还是 0**。
+ * 2026-10-11 实测：把一份载荷解到 /tmp 下调用它，`--digest` 静默输出空，
+ * 而 `tools/los.sh` 的兜底会把它变成 '0.1.0'（看起来像个版本号，实质是"没算出来"）。
+ * 这类"静默空值"正是今天一直在清的东西，所以在源头堵掉。
+ */
+function isDirectExecution() {
+  if (!process.argv[1]) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(self);
+  } catch {
+    return resolve(process.argv[1]) === resolve(self);
+  }
+}
+
+if (isDirectExecution()) {
   process.exit(main(process.argv.slice(2)));
 }
