@@ -11,11 +11,12 @@
 # 用法（由编排器调用）：
 #   windows-service.sh sync     <ssh_alias> <remote_home> <target_version> [node_id]
 #   windows-service.sh install  <ssh_alias> <remote_home> <target_version> [node_id]
+#   windows-service.sh digest   <ssh_alias> <remote_home> [ignored] [node_id]
 #   windows-service.sh activate <ssh_alias> <remote_home> <target_version> [node_id]
 #   windows-service.sh verify   <ssh_alias> <remote_home> <target_version> [node_id]
 set -uo pipefail
 
-SUB="${1:?subcommand required (sync|install|activate|verify)}"
+SUB="${1:?subcommand required (sync|install|digest|activate|verify)}"
 ALIAS="${2:?ssh alias required}"
 HOME_DIR="${3:-C:/los}"
 TARGET="${4:-}"
@@ -149,6 +150,27 @@ POWERSHELL
     grep -q '^install_exit=0$' "$INSTALL_OUT" \
       || die "pnpm install did not succeed on the node (see $INSTALL_OUT)"
     log "install ok ($(grep -m1 '^pnpm_path=' "$INSTALL_OUT" | cut -d= -f2- || echo 'pnpm=?'), frozen-lockfile)"
+    ;;
+  digest)
+    # 内容摘要：调用**同一个** Node 模块（`tools/deployable-content.mjs`，随 tar 一起下发）。
+    # 这是 Windows 第一次有内容标识 —— 在此之前协调器只能看到 <no-response>，于是
+    # (a) 每轮滚动都重跑驱动，(b) "这台到底是不是目标内容"没有判据，
+    # 一台崩溃循环的节点长期被记成"已安全回退到旧版"（2026-10-11 srsbe20 现场）。
+    # 设计依据：docs/architecture/2026-10-11-cross-platform-content-identity-design.md
+    ps_script digest "$WIN_HOME" <<'POWERSHELL' | LC_ALL=C tr -d '\r' | grep -E '^digest='
+param([string]$WinHome)
+$ErrorActionPreference='Continue'
+$ProgressPreference='SilentlyContinue'
+# 与 install 同样的 PATH 补齐：非交互会话可能看不见 node
+$env:Path = $env:Path + ';C:\Program Files\nodejs;' + $env:APPDATA + '\npm'
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) { Write-Output "digest=node-missing"; exit 1 }
+$module = Join-Path $WinHome 'tools\deployable-content.mjs'
+if (-not (Test-Path $module)) { Write-Output "digest=module-missing"; exit 1 }
+Set-Location $WinHome
+$out = & $node $module --digest 2>&1
+Write-Output ("digest=" + ($out | Select-Object -Last 1))
+POWERSHELL
     ;;
   activate)
     ps_script activate <<'POWERSHELL' | LC_ALL=C tr -d '\r' | grep -E "^svc=" || die "restart failed"

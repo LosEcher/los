@@ -20,60 +20,28 @@ _load_dotenv() {
   fi
 }
 
+# ── 可部署内容摘要 ────────────────────────────────────────
+# 唯一实现在 tools/deployable-content.mjs：文件选择、逐文件摘要、汇总摘要都在那里，
+# 因为 bash 与 PowerShell 都要算同一个数（设计依据见
+# docs/architecture/2026-10-11-cross-platform-content-identity-design.md）。
+# 这里只保留一层壳，不再自己实现 find/排序/格式 —— 两份实现必然漂移，
+# 而这个数的失败形态是"全机队永不收敛"，与"内容真的不同"长得一模一样。
 resolve_local_runtime_version() {
-  local base revision
-  base="$(node -p "require('$ROOT/packages/executor/package.json').version" 2>/dev/null || printf '0.1.0')"
-  revision="$(
-    cd "$ROOT"
-    {
-      # The prune list must match what deploy-to-remote.sh actually ships, or
-      # the version can never converge across the fleet: `.los-runtime` is local
-      # runtime state that is never synced, and counting it made every node
-      # report a different hash than the gateway (observed 2026-10-06).
-      #
-      # 摘要只应覆盖**节点实际执行/加载的内容**。以下脚本只在网关主机上跑（部署、
-      # 治理日报、launchd 守护、调度 CLI、维护窗口 CLI），把它们算进去会让"改一个网关侧
-      # 工具"也令全集群的收敛声明失效、逼出无谓滚动 —— 2026-10-07 实测：vultr 与其余 7 台
-      # 的唯一差异就是 tools/deploy-to-remote.sh，而那东西根本不需要下发到节点。
-      #
-      # 这里刻意用**排除清单**而不是包含清单，因为两个方向的失败代价不对称：
-      # 新增网关脚本若忘记排除 → 多一次无谓滚动（吵，但安全）；
-      # 包含清单若漏掉节点侧脚本 → 节点静默停在旧内容（安静，但危险）。
-      # 因此只排除"已确认与节点运行时无关"的路径，暂不扩大范围：
-      # CI/check-*/observe-*/node-probes 等模糊面故意保留在摘要内，等有"节点到底执行了什么"
-      # 的审计结论后再收。
-      find tools deploy packages contracts \
-        -type d \( -name node_modules -o -name dist -o -name .turbo -o -name .los -o -name .los-runtime \) -prune -o \
-        -type f ! -name '*.tsbuildinfo' ! -name '.DS_Store' ! -name '._*' \
-        ! -path 'tools/deploy-to-remote.sh' \
-        ! -path 'tools/los-fleet-rollout.sh' \
-        ! -path 'tools/deploy-drivers/*' \
-        ! -path 'tools/los-governance-daily.sh' \
-        ! -path 'tools/los-fleet-consistency.sh' \
-        ! -path 'tools/los-schedule-ctl.sh' \
-        ! -path 'tools/install-los-fleet-snapshot.sh' \
-        ! -path 'tools/install-network-observe-bridge.sh' \
-        ! -path 'tools/los-fleet-snapshot.plist' \
-        ! -path 'tools/network-observe-bridge.plist' \
-        ! -path 'tools/sync-network-observe.sh' \
-        ! -path 'tools/los-launchd.plist' \
-        ! -path 'tools/los-launchd-wrapper.sh' \
-        ! -path 'tools/los-wechat-bot-launchd.sh' \
-        ! -path 'tools/fleet-maintenance.mts' \
-        ! -path 'tools/fleet-maintenance-window.mjs' \
-        ! -path 'tools/fleet-maintenance-window.test.mjs' \
-        -print
-      printf '%s\n' package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json
-    } | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-12
-  )"
-  if [ -n "$revision" ]; then
-    printf '%s+b%s' "$base" "$revision"
+  local out
+  if out="$(node "$ROOT/tools/deployable-content.mjs" --digest 2>/dev/null)" && [ -n "$out" ]; then
+    printf '%s' "$out"
   else
-    printf '%s' "$base"
+    # node 不可用时的兜底与旧实现一致（base=0.1.0、无 revision）：
+    # 给出 base 形状，**不**伪装成"内容一致"。
+    printf '0.1.0'
   fi
 }
 
 if [ "${1:-}" = "build-version" ]; then
+  if [ "${2:-}" = "--files" ]; then
+    node "$ROOT/tools/deployable-content.mjs" --files
+    exit $?
+  fi
   resolve_local_runtime_version
   printf '\n'
   exit 0
