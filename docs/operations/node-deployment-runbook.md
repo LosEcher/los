@@ -442,10 +442,29 @@ subsequent starts then fail until it is killed.
 
 ## macOS Nodes
 
-`mbp-executor-1` runs from the gateway's own checkout: restart it and the
-version follows the working tree. `m3pro-executor-1` runs from
-`~/.local/share/los` (a tar snapshot, no VCS) under launchd
-`com.echerlos.los-executor`.
+**Both macOS nodes now have the same configuration**: the executor runs from
+`~/.local/share/los` (a content-synced tree, no VCS) under its own launchd label
+`com.echerlos.los-executor`, driven by `tools/deploy-drivers/macos-launchd.sh`.
+They differ only in transport:
+
+| node | transport | how the orchestrator drives it |
+| --- | --- | --- |
+| `m3pro-executor-1` | ssh alias `m3-t` | `LOS_SSH_TRANSPORT=ssh` |
+| `mbp-executor-1` (this machine, the gateway host) | local | `LOS_SSH_TRANSPORT=local`, and the driver runs in place |
+
+Until 2026-10-11 `mbp-executor-1` ran from the **gateway's editable checkout**.
+That is why it was the fleet's most confusing node: its identity was "whatever the
+editor had on disk", `tsx` loads a module from disk the first time it is required,
+so an uncommitted edit could enter the execution path **without a restart**, and
+rolling it ran `los.sh restart` — bouncing the gateway too. Pinning it removed all
+three, and it is now the busiest node's normal configuration rather than a special
+case.
+
+**Only the executor restarts.** The gateway keeps running from the checkout; the
+launchd wrapper `com.los.daemon` is told `LOS_EXECUTOR_EXTERNAL=1` so it checks and
+starts **only** the gateway (`los.sh start-gateway`). Without that flag the wrapper
+would see 8090 as unhealthy and call `los.sh start`, resurrecting the old executor
+from the checkout to fight the pinned one for the port.
 
 `tools/deploy-to-remote.sh` **is** usable on macOS for `sync`, `install`,
 `digest` and `cmd`; `verify` and `restart` are not (they drive systemd). Drive it
@@ -457,8 +476,8 @@ LOS_REMOTE_HOME=/Users/echerlos/.local/share/los LOS_REMOTE_PRIVILEGE=none \
   ./tools/deploy-to-remote.sh m3pro-executor-1 sync
 ```
 
-`tools/los-fleet-rollout.sh --node m3pro-executor-1` runs the whole sequence
-(sync → install → stamp → launchd restart → `/health` version assertion →
+`tools/los-fleet-rollout.sh --node <macos-node>` runs the whole sequence
+(sync → install → plist → launchd restart → content+`/health` assertion →
 promote) and is the preferred path; only hand-roll it when the orchestrator is
 unavailable.
 
@@ -478,17 +497,36 @@ unavailable.
 4. Restart through launchd (KeepAlive brings it straight back):
 
    ```bash
-   ssh <alias> 'launchctl kickstart -k gui/$(id -u)/com.echerlos.los-executor'
+   tools/deploy-drivers/macos-launchd.sh install-plist <home> com.echerlos.los-executor
+   tools/deploy-drivers/macos-launchd.sh activate      <home> com.echerlos.los-executor
    ```
+
+   `activate` unloads, **waits for the unload to finish**, then loads. `launchctl
+   bootout` is asynchronous, and bootstrapping straight after it fails with a
+   "still loaded / in progress" error — which is exactly how two rolls were lost on
+   2026-10-11 before the wait was added. Do not swallow launchctl's stderr while
+   debugging this: the driver prints all three errors when it gives up.
 
 5. Verify all three: the content digest, `/health.version`, and the registry row
    plus `target_version`. `/health` is the evidence that the **new process** is
-   up; the registry heartbeat lags. `verify` cannot be used here, so assert
-   `/health` directly:
+   up; the registry heartbeat lags. `verify` cannot be used here (it drives
+   systemd), so the driver asserts the digest *and* `/health` itself:
 
    ```bash
-   curl -s "http://100.82.176.56:8090/health" | grep -F '"version":"<target>"'
+   tools/deploy-drivers/macos-launchd.sh verify <home> com.echerlos.los-executor <target>
    ```
+
+**The pinned tree keeps its own `.env`** (mode 600), like every other node — and
+that is a trap on the gateway host, where a secret rotation applied only to the
+checkout's `.env` leaves the pinned executor on the old value with no signal. The
+orchestrator compares the two files (version keys excluded) before each local roll
+and warns when they differ; it does not overwrite, because the node's port and
+identity are legitimately allowed to differ.
+
+**Rollback** (if the pinned executor misbehaves): `launchctl bootout
+gui/$(id -u)/com.echerlos.los-executor`, remove `LOS_EXECUTOR_EXTERNAL` from
+`~/Library/LaunchAgents/com.los.daemon.plist`, reload that plist, then
+`./tools/los.sh start-executor` — the node is back on the checkout.
 
 **`.env` mode is the node's own policy, and `sync` no longer rewrites it.** It
 holds `DATABASE_URL` and `EXECUTOR_AGENT_KEY`. M3 runs the executor as its owner
