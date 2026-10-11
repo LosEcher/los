@@ -276,7 +276,7 @@ export const _MAX_REASONS = 10;
 export const _MAX_BLOCKER_TEXT = 200;
 
 /** 截断 id 列表并如实报告是否截断（不静默丢信息）。 */
-export function capIds(value: unknown, limit = _MAX_ID_LIST): { ids: string[]; truncated: boolean } | undefined {
+export function _capIds(value: unknown, limit = _MAX_ID_LIST): { ids: string[]; truncated: boolean } | undefined {
   const ids = stringArray(value);
   if (!ids) return undefined;
   return { ids: ids.slice(0, limit), truncated: ids.length > limit };
@@ -300,10 +300,42 @@ export function projectNextAction(state: unknown): JsonRecord {
       return compact({
         kind: optionalString(blocker.kind),
         message: optionalString(blocker.message)?.slice(0, _MAX_BLOCKER_TEXT),
-        ids: capIds(blocker.ids),
+        ids: _capIds(blocker.ids),
       });
     }),
     reasons: stringArray(optionalRecord(value.recovery)?.reasons)?.slice(0, _MAX_REASONS),
+  });
+}
+
+/**
+ * `los_run_recover` 的有界投影——把网关的**两种形状**收敛成一个结果：
+ *   · 预览（apply=false）：返回体就是 recovery decision 本身
+ *   · 已应用（apply=true）：返回 transition + 嵌套 `decision`
+ * 每个 id 列表截到 `_MAX_ID_LIST` 并带 `truncated` 标记，`reasons` 截到 `_MAX_REASONS`。
+ */
+export function projectRecoveryResult(result: unknown, applied: boolean): JsonRecord {
+  const value = optionalRecord(result) ?? {};
+  const decision = applied ? (optionalRecord(value.decision) ?? {}) : value;
+  return compact({
+    applied,
+    runSpecId: optionalString(value.runSpecId),
+    sessionId: optionalString(value.sessionId),
+    action: optionalString(value.action),
+    runSpecStatus: optionalString(value.runSpecStatus),
+    eventType: optionalString(value.eventType),
+    reason: optionalString(value.reason),
+    status: optionalString(decision.status),
+    recommendation: optionalString(decision.recommendation),
+    reasons: stringArray(decision.reasons)?.slice(0, _MAX_REASONS),
+    retryToolCallIds: _capIds(decision.retryToolCallIds),
+    resumeToolCallIds: _capIds(decision.resumeToolCallIds),
+    cancelToolCallIds: _capIds(decision.cancelToolCallIds),
+    operatorAttentionToolCallIds: _capIds(decision.operatorAttentionToolCallIds),
+    terminalFailedToolCallIds: _capIds(decision.terminalFailedToolCallIds),
+    activeToolCallIds: _capIds(decision.activeToolCallIds),
+    transitionedToolCallIds: _capIds(value.transitionedToolCallIds),
+    transitionedTaskRunIds: _capIds(value.transitionedTaskRunIds),
+    liveCancelledTaskRunIds: _capIds(value.liveCancelledTaskRunIds),
   });
 }
 

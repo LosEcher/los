@@ -51,6 +51,8 @@ Use the host's secret/environment mechanism.
 | `los_run_replay` | `runSpecId`, `projectId` | `GET /runs/:id/stream` | access token |
 | `los_run_verify` | `runSpecId`, `projectId` | `POST /runs/:id/verify` | access and operator tokens |
 | `los_run_approve` | `runSpecId`, `projectId` | `POST /runs/:id/approve` | access and operator tokens |
+| `los_run_recover` | `runSpecId`, `projectId` | `POST /runs/:id/recover` | access and operator tokens |
+| `los_run_revise_plan` | `runSpecId`, `projectId`, `plan` | `POST /runs/:id/revise-plan` | access and operator tokens |
 | `los_task_cancel` | `taskRunId`, `projectId` | `POST /tasks/:id/cancel` | access and operator tokens (the adapter is stricter than the route) |
 | `los_operator_control` | `sessionId`, `projectId`, `type` | `POST /sessions/:id/operator-events` | access and operator tokens |
 
@@ -106,6 +108,23 @@ Note the two phase notions this touches: the approval transition reads
 while `los_run_state` classifies the run from run/task status and can report
 `phase: "created"` for the same run. Read `los_run_state` for lifecycle
 grounding and the approve result for the approval transition itself.
+
+## Recovery and Plan Revision
+
+`los_run_recover` reads the tool-call recovery decision and only applies it when
+`apply: true` is passed, so the default call is read-only. `intent: "cancel"` with
+`apply: true` is **the run-level termination path**: it transitions the run spec to
+`cancelled` (verified: `runSpecStatus: "cancelled"`, `eventType:
+"run.recovery_cancelled"`, and `los_run_state` then reports `phase: cancelled`).
+`los_task_cancel` remains the task-level stop for a live task run.
+
+Both gateway response shapes (preview decision, applied transition) are projected
+into one bounded result: every id list is capped at 20 entries with a `truncated`
+flag and `reasons` at 10.
+
+`los_run_revise_plan` replaces the persisted plan and returns the new revision
+(`planRevision` / `previousRevision` / `phase`). A missing or empty `plan` is
+rejected locally instead of silently bumping the revision.
 
 ## Cancelling
 

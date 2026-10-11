@@ -107,6 +107,51 @@ tools:
       planRevision and contractHash must be supplied together; the gateway rejects a
       mismatched or forged pair. Omitting both performs a plain phase approval.
     output: [runSpecId, phase, previousPhase, phaseChangedAt, dispatch]
+  - name: los_run_recover
+    purpose: >
+      read or apply the tool-call recovery decision of a run through
+      POST /runs/{runSpecId}/recover. apply=false (default) is a read-only preview;
+      apply=true with intent=cancel transitions stale tool calls and may cancel the
+      live task run.
+    requiredInput: [runSpecId, projectId]
+    optionalInput: [intent, staleMs, apply, reason]
+    operatorCredentialRequired: true
+    output:
+      - applied
+      - runSpecId
+      - sessionId
+      - action
+      - runSpecStatus
+      - eventType
+      - status
+      - recommendation
+      - reasons
+      - retryToolCallIds
+      - resumeToolCallIds
+      - cancelToolCallIds
+      - operatorAttentionToolCallIds
+      - terminalFailedToolCallIds
+      - activeToolCallIds
+      - transitionedToolCallIds
+      - transitionedTaskRunIds
+      - liveCancelledTaskRunIds
+    projection: >
+      Both gateway shapes are projected into one bounded result: the preview shape
+      (a bare recovery decision) and the applied shape (transition + nested
+      decision). Every id list is capped at 20 entries with an explicit truncated
+      flag, and reasons are capped at 10.
+    safety: >
+      apply is explicit and defaults to false, so a recover call is read-only unless
+      the caller asks for the transition.
+  - name: los_run_revise_plan
+    purpose: replace the persisted plan of a run through POST /runs/{runSpecId}/revise-plan
+    requiredInput: [runSpecId, projectId, plan]
+    optionalInput: [reason]
+    operatorCredentialRequired: true
+    planRule: >
+      plan must be a non-empty array of plan steps; the adapter rejects an empty or
+      missing plan before calling the gateway instead of silently bumping the revision.
+    output: [runSpecId, planRevision, previousRevision, phase, previousPhase]
   - name: los_task_cancel
     purpose: >
       cancel a task run through POST /tasks/{taskRunId}/cancel. Named for the task,

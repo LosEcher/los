@@ -13,6 +13,7 @@ import {
   parseSSE,
   projectIntakeScope,
   projectNextAction,
+  projectRecoveryResult,
   projectRunEvents,
   projectRunList,
   projectVerificationResult,
@@ -219,6 +220,43 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         operator: true,
         idempotent: true,
         body: compact({ reason: optionalString(args.reason), planRevision, contractHash }),
+      });
+    }
+
+    if (name === 'los_run_recover') {
+      const runSpecId = requiredString(args.runSpecId, 'runSpecId');
+      const projectId = requiredString(args.projectId, 'projectId');
+      const apply = optionalBoolean(args.apply, 'apply') ?? false;
+      const intent = optionalString(args.intent);
+      if (intent && intent !== 'recover' && intent !== 'cancel') throw new Error('intent must be recover or cancel');
+      const result = await requestJson(`/runs/${encodeURIComponent(runSpecId)}/recover`, {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotent: true,
+        // apply 缺省不发 ⇒ 网关走只读预览分支（不做任何状态迁移）
+        body: compact({
+          apply: apply ? true : undefined,
+          intent,
+          staleMs: optionalInteger(args.staleMs, 0, Number.MAX_SAFE_INTEGER),
+          reason: optionalString(args.reason),
+        }),
+      });
+      return projectRecoveryResult(result, apply);
+    }
+
+    if (name === 'los_run_revise_plan') {
+      const runSpecId = requiredString(args.runSpecId, 'runSpecId');
+      const projectId = requiredString(args.projectId, 'projectId');
+      const plan = Array.isArray(args.plan) ? args.plan : undefined;
+      // 网关允许 plan 缺省（只递增 revision），但那对调用方几乎总是笔误 ⇒ 本地先拒
+      if (!plan || plan.length === 0) throw new Error('plan must be a non-empty array of plan steps');
+      return await requestJson(`/runs/${encodeURIComponent(runSpecId)}/revise-plan`, {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotent: true,
+        body: compact({ plan, reason: optionalString(args.reason) }),
       });
     }
 

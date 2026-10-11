@@ -268,9 +268,10 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 `{ok:true, live:false, taskRun:{…}}`；4s 后 `los_run_state` 的
 `counts.taskRuns={total:1, cancelled:1, running:0}` ⇒ **任务确实被取消**；重复取消 `live=false`。
 
-**残留（产品侧，不是适配器）**：task 级取消**不动 run spec** —— 同一个 run 的 state 仍是
-`phase=created` / `action=wait_for_task` / `blockers=0` / `activeTaskRunIds=[]`。
-即"任务已取消、run 仍停在 created"，因为网关没有 run 级取消入口。
+**当时的残留**：task 级取消**不动 run spec** —— 同一个 run 的 state 仍是
+`phase=created` / `action=wait_for_task` / `activeTaskRunIds=[]`，因为网关没有 `/runs/:id/cancel`。
+**该残留已在 §9.8 找到 run 级路径**：`los_run_recover(apply=true, intent=cancel)` 会把 run spec
+迁到 `cancelled`（实测）。task 级取消仍是"只停任务"的语义，两者互补而非重复。
 
 ### 9.6 交付顺序（全部完成）
 
@@ -288,10 +289,34 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 | 项 | 状态 | 落点 / 说明 |
 | --- | --- | --- |
 | blocked/error 终态附带回传**下一步 action** | 已交付 | 投影 `file:packages/cli/src/mcp-projections.ts:291`、富化 `file:packages/cli/src/mcp-serve.ts:144`、契约 `file:contracts/programmatic-agent-interface.yaml:39`、测试 `file:packages/cli/src/mcp-serve.test.ts:476` 起三条（含"成功终态不多花一次 state 调用"的负向控制）。真机：error 终态回传 `nextAction.action="run_verification"` + 结构化 blockers（ids 带上限与 `truncated` 标记） |
-| `recover` / `revise-plan` 暴露为工具 | 见 §9.8 | 同批交付 |
+| `recover` / `revise-plan` 暴露为工具 | 已交付 | 见 §9.8 |
 | 桌面板 web 重启插件的 host-smoke | 未做 | 插件 `dsplugins/dsh-web-host-restart` 的 `apply()` 用例仍是**显式 skip**（`@deepseek-ai/dsh-tools` 由宿主 boot 时提供，不是 profile 依赖）；本仓规范的补法是 `dsh-fmtguard/test/host-smoke.test.mjs` 那种"定位运行中宿主库再加载"的门禁 |
-| run 级取消 / state 识别 task-cancelled | 未做（产品侧） | 见 §9.5 残留；需网关加路由或让 state 把"全任务已取消"识别成终态，属 ADR 级决策 |
+| run 级取消 / state 识别 task-cancelled | 已找到路径（见 §9.8） | `los_run_recover(apply=true, intent=cancel)` 把 run spec 迁到 `cancelled`；无需新增网关路由 |
 | wiring baseline 2 条 fixable | 未动 | 属 `packages/agent` 的漂移（`--update-baseline` 会把 telegram/wechat 的手写注释一起降级），不并入本批 |
 
 残留：`mcp-serve.ts` 现为 487 行，距 `check-structure.sh` 的 500 行门禁只剩 13 行；
 下一次再往该文件加逻辑应先把投影/事件读取拆成独立模块（`mcp-tools.ts` 是同一手法的先例）。
+
+### 9.8 `los_run_recover` / `los_run_revise_plan`（2026-10-11 交付）
+
+工具面 `file:packages/cli/src/mcp-tools.ts:115`（recover）/ `:131`（revise-plan）；handler
+`file:packages/cli/src/mcp-serve.ts:226` / `:248`；恢复投影 `file:packages/cli/src/mcp-projections.ts:316`；
+契约 `file:contracts/programmatic-agent-interface.yaml:110`（recover）/ `:146`（revise-plan）；
+测试 `file:packages/cli/src/mcp-serve.test.ts:557` 起四条。
+
+- **`apply` 缺省 false ⇒ 只读预览**（网关的只读分支），要迁移必须显式 `apply: true`。
+- 两种返回形状（预览 decision / 已应用 transition+嵌套 decision）收敛成一个有界投影：
+  每个 id 列表截 20 条并带 `truncated`，`reasons` 截 10 条。
+- `revise-plan` 的 `plan` 本地要求非空数组（网关允许缺省，但那对调用方基本是笔误）。
+
+**验收（真机，`/tmp/los-recover-plan-probe.mjs`）**：
+
+| 调用 | 观测 | 判定 |
+| --- | --- | --- |
+| `los_run_recover`（预览） | `applied=false`、`status="clean"`、`recommendation="none"` | 通过 |
+| `los_run_revise_plan`（新 plan） | `planRevision 1 → 2`、`previousRevision=1`、`phase=planning` | 通过 |
+| `los_run_recover(apply=true, intent=cancel)` | `action="cancel"`、`runSpecStatus="cancelled"`、`eventType="run.recovery_cancelled"` | 通过 |
+| `los_run_state`（之后） | `phase="cancelled"` | 通过（**run 级终止成立**） |
+
+⇒ 由此修正 §9.5 的残留结论：**run 级终止路径存在**，是 `recover(apply=true, intent=cancel)`，
+而不是缺失的 `/runs/:id/cancel` 路由。

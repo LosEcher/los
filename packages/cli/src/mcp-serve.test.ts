@@ -12,7 +12,8 @@ test('MCP adapter initializes and exposes only the contracted tools', async () =
   const names = (listed.tools as Array<{ name: string }>).map(tool => tool.name);
   assert.deepEqual(names, [
     'los_run', 'los_runs_list', 'los_run_state', 'los_run_replay',
-    'los_run_verify', 'los_run_approve', 'los_task_cancel', 'los_operator_control',
+    'los_run_verify', 'los_run_approve', 'los_run_recover', 'los_run_revise_plan',
+    'los_task_cancel', 'los_operator_control',
   ]);
 });
 
@@ -551,6 +552,115 @@ test('a failed next-action lookup is reported without discarding the run result'
   assert.equal(result.message, 'boom');
   assert.equal(result.nextAction, undefined);
   assert.match(String(result.nextActionError), /LOS gateway 500/);
+});
+
+test('los_run_recover previews by default and projects the recovery decision', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({
+      status: 'action_required',
+      recommendation: 'resume',
+      resumeToolCallIds: ['tool-1'],
+      retryToolCallIds: [],
+      cancelToolCallIds: [],
+      operatorAttentionToolCallIds: [],
+      terminalFailedToolCallIds: [],
+      activeToolCallIds: ['tool-2'],
+      reasons: ['stale active tool call'],
+    })),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run_recover', { runSpecId: 'run/a', projectId: 'project-a' }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/runs/run%2Fa/recover');
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.deepEqual(await requests[0]?.json(), {});
+  assert.equal(result.applied, false);
+  assert.equal(result.status, 'action_required');
+  assert.equal(result.recommendation, 'resume');
+  assert.deepEqual(result.resumeToolCallIds, { ids: ['tool-1'], truncated: false });
+});
+
+test('los_run_recover apply=true sends the transition and caps id lists', async () => {
+  const requests: Request[] = [];
+  const manyIds = Array.from({ length: 25 }, (_, index) => `tool-${index}`);
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({
+      runSpecId: 'run-a',
+      sessionId: 'session-a',
+      action: 'cancel',
+      runSpecStatus: 'cancelled',
+      eventType: 'run.recovery_cancelled',
+      reason: 'operator stop',
+      decision: { status: 'action_required', recommendation: 'cancel', cancelToolCallIds: manyIds, reasons: ['stale'] },
+      transitionedToolCallIds: manyIds,
+      transitionedTaskRunIds: ['task-a'],
+      liveCancelledTaskRunIds: [],
+    })),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run_recover', {
+    runSpecId: 'run-a', projectId: 'project-a', apply: true, intent: 'cancel', reason: 'operator stop', staleMs: 60_000,
+  }));
+
+  assert.deepEqual(await requests[0]?.json(), { apply: true, intent: 'cancel', staleMs: 60_000, reason: 'operator stop' });
+  assert.equal(result.applied, true);
+  assert.equal(result.action, 'cancel');
+  assert.equal(result.runSpecStatus, 'cancelled');
+  const capped = result.transitionedToolCallIds as { ids: string[]; truncated: boolean };
+  assert.equal(capped.ids.length, 20);
+  assert.equal(capped.truncated, true);
+  assert.equal((result.cancelToolCallIds as { ids: string[] }).ids.length, 20);
+});
+
+test('recover and revise-plan refuse before HTTP without the operator credential', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: '',
+    fetchImpl: async () => {
+      called = true;
+      return new Response('{}');
+    },
+  });
+
+  const recover = asRecord((await callTool(adapter, 'los_run_recover', { runSpecId: 'run-a', projectId: 'project-a' })).result);
+  assert.equal(recover.isError, true);
+  const revise = asRecord((await callTool(adapter, 'los_run_revise_plan', {
+    runSpecId: 'run-a', projectId: 'project-a', plan: [{ id: 'p1' }],
+  })).result);
+  assert.equal(revise.isError, true);
+  assert.equal(called, false);
+});
+
+test('los_run_revise_plan rejects an empty plan locally and forwards a real one', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({ runSpecId: 'run-a', planRevision: 2, previousRevision: 1, phase: 'plan_approved' })),
+  });
+
+  const empty = asRecord((await callTool(adapter, 'los_run_revise_plan', { runSpecId: 'run-a', projectId: 'project-a', plan: [] })).result);
+  assert.equal(empty.isError, true);
+  assert.match(String((empty.content as Array<{ text: string }>)[0]?.text), /non-empty array/);
+  assert.equal(requests.length, 0);
+
+  const plan = [{ id: 'p1', title: 'revised', description: 'd', dependsOnIds: [], editableSurfaces: [], completionCriteria: 'c' }];
+  const result = toolContent(await callTool(adapter, 'los_run_revise_plan', {
+    runSpecId: 'run-a', projectId: 'project-a', plan, reason: 'scope narrowed',
+  }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/runs/run-a/revise-plan');
+  assert.deepEqual(await requests[0]?.json(), { plan, reason: 'scope narrowed' });
+  assert.equal(result.planRevision, 2);
+  assert.equal(result.previousRevision, 1);
 });
 
 test('unknown tools fail without touching the gateway', async () => {

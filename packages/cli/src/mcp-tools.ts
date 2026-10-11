@@ -112,6 +112,36 @@ export const _TOOLS = [
     },
   },
   {
+    name: 'los_run_recover',
+    description: 'Read (apply=false, default) or apply the tool-call recovery decision of a run (POST /runs/:id/recover). Requires LOS_OPERATOR_TOKEN.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        runSpecId: { type: 'string' },
+        projectId: { type: 'string' },
+        intent: { type: 'string', enum: ['recover', 'cancel'] },
+        staleMs: { type: 'integer', minimum: 0 },
+        apply: { type: 'boolean', default: false },
+        reason: { type: 'string' },
+      },
+      required: ['runSpecId', 'projectId'],
+    },
+  },
+  {
+    name: 'los_run_revise_plan',
+    description: 'Replace the persisted plan of a run (POST /runs/:id/revise-plan). Requires LOS_OPERATOR_TOKEN and a non-empty plan.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        runSpecId: { type: 'string' },
+        projectId: { type: 'string' },
+        plan: { type: 'array', items: { type: 'object' } },
+        reason: { type: 'string' },
+      },
+      required: ['runSpecId', 'projectId', 'plan'],
+    },
+  },
+  {
     name: 'los_task_cancel',
     description: 'Cancel a LOS task run (POST /tasks/:id/cancel). Requires LOS_OPERATOR_TOKEN. Take taskRunId from los_run_state activeTaskRunIds.',
     inputSchema: {
