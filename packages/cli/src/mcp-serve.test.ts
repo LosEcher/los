@@ -86,7 +86,68 @@ test('los_run rejects project-write before HTTP when no operator credential exis
   assert.equal(called, false);
 });
 
-test('operator control is the only tool that forwards the operator credential', async () => {
+test('los_run rejects operatorScope before HTTP when no operator credential exists', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: '',
+    fetchImpl: async () => {
+      called = true;
+      return new Response('{}');
+    },
+  });
+
+  const response = await callTool(adapter, 'los_run', {
+    prompt: 'inspect another project',
+    projectId: 'project-a',
+    operatorScope: true,
+  });
+  const result = asRecord(response.result);
+  assert.equal(result.isError, true);
+  assert.match(String((result.content as Array<{ text: string }>)[0]?.text), /LOS_OPERATOR_TOKEN is required for operator-scoped/);
+  assert.equal(called, false);
+});
+
+test('operator-scoped los_run forwards the operator credential and projects the resolved project', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    tenantId: 'tenant-a',
+    fetchImpl: captureFetch(requests, () => new Response(sse(
+      intakeEnvelope({
+        reason: 'explicit_project',
+        ownerRepo: 'dsfolder-fmtguard',
+        requestedProjectId: 'dsfolder-fmtguard',
+        workspaceRoot: '/work/dsfolder/fmtguard',
+      }),
+      ['session', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a' }],
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 })),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run', {
+    prompt: 'inspect fmtguard',
+    projectId: 'dsfolder-fmtguard',
+    workspaceRoot: '/work/dsfolder/fmtguard',
+    operatorScope: true,
+  }));
+
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.equal(requests[0]?.headers.get('x-project-id'), 'dsfolder-fmtguard');
+  assert.deepEqual(await requests[0]?.json(), {
+    prompt: 'inspect fmtguard',
+    projectId: 'dsfolder-fmtguard',
+    workspaceRoot: '/work/dsfolder/fmtguard',
+    toolMode: 'read-only',
+  });
+  assert.equal(result.status, 'done');
+  assert.equal(result.ownerRepo, 'dsfolder-fmtguard');
+  assert.equal(result.requestedProjectId, 'dsfolder-fmtguard');
+  assert.equal(result.workspaceRoot, '/work/dsfolder/fmtguard');
+});
+
+test('operator control forwards the operator credential for steering', async () => {
   const requests: Request[] = [];
   const adapter = _createLosMCPAdapter({
     gatewayUrl: 'http://gateway.test',
@@ -135,6 +196,59 @@ test('state and replay use encoded run ids, bounded cursors, and ordinary auth',
   assert.equal(requests[1]?.headers.get('x-los-operator-token'), null);
 });
 
+test('los_run fails loudly when the gateway resolves a different project than requested', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => new Response(sse(
+      intakeEnvelope({
+        reason: 'explicit_project',
+        ownerRepo: 'los',
+        requestedProjectId: 'los',
+        workspaceRoot: '/work/los',
+      }),
+      ['session', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a' }],
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 })),
+  });
+
+  const response = await callTool(adapter, 'los_run', {
+    prompt: 'inspect fmtguard',
+    projectId: 'dsfolder-fmtguard',
+  });
+  const result = asRecord(response.result);
+  assert.equal(result.isError, true);
+  const text = String((result.content as Array<{ text: string }>)[0]?.text);
+  assert.match(text, /project scope mismatch/);
+  assert.match(text, /requested projectId='dsfolder-fmtguard'/);
+  assert.match(text, /ownerRepo='los'/);
+  assert.match(text, /pass operatorScope=true/);
+  assert.match(text, /runSpecId=run-a/);
+  assert.match(text, /sessionId=session-a/);
+  assert.equal(requests.length, 1);
+});
+
+test('los_run keeps the ordinary projection when the resolved project matches the request', async () => {
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: async () => new Response(sse(
+      // 扁平形态（非信封）：验证读取对两种形状都成立
+      ['coordinator.intake_resolved', { reason: 'configured_default', ownerRepo: 'los', requestedProjectId: 'los', workspaceRoot: '/work/los' }],
+      ['session', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a' }],
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 }),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run', { prompt: 'inspect', projectId: 'los' }));
+  assert.equal(result.isError, undefined);
+  assert.equal(result.ownerRepo, 'los');
+  assert.equal(result.runSpecId, 'run-a');
+});
+
 test('unknown tools fail without touching the gateway', async () => {
   const adapter = _createLosMCPAdapter({ fetchImpl: unreachableFetch });
   const response = await callTool(adapter, 'los_unknown', {});
@@ -168,6 +282,25 @@ function captureFetch(requests: Request[], respond: (request: Request) => Respon
     requests.push(request);
     return respond(request);
   };
+}
+
+/** 拼一段网关风格的 SSE：每个事件一个块，块间空行（与 `parseSSE` 的分块判据一致）。 */
+function sse(...events: Array<[string, Record<string, unknown>]>): string {
+  return events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n`).join('\n');
+}
+
+/**
+ * `coordinator.intake_resolved` 在真实流里是**信封**形状（归属字段在 `payload` 内，
+ * 信封自身另有网关标注的 `projectId`）——2026-10-11 实测 `/tmp/sse-dump.txt`。
+ */
+function intakeEnvelope(payload: Record<string, unknown>): [string, Record<string, unknown>] {
+  return ['coordinator.intake_resolved', {
+    id: 1,
+    sessionId: 'session-a',
+    projectId: payload.ownerRepo,
+    source: 'coordinator',
+    payload,
+  }];
 }
 
 async function unreachableFetch(): Promise<Response> {

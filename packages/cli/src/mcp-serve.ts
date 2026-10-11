@@ -39,7 +39,9 @@ const MAX_RESULT_TEXT = 20_000;
 const TOOLS = [
   {
     name: 'los_run',
-    description: 'Run LOS through its gateway and return persisted run identifiers plus the terminal result.',
+    description: 'Run LOS through its gateway and return persisted run identifiers plus the terminal result. '
+      + 'projectId/workspaceRoot take effect only with operatorScope=true (requires an operator credential); '
+      + 'without it the gateway pins the run to its default project and this tool fails loudly rather than reporting success.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -54,6 +56,7 @@ const TOOLS = [
         traceId: { type: 'string' },
         dedupeKey: { type: 'string' },
         runContract: { type: 'object' },
+        operatorScope: { type: 'boolean', default: false },
       },
       required: ['prompt', 'projectId'],
     },
@@ -147,8 +150,10 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       const prompt = requiredString(args.prompt, 'prompt');
       const projectId = requiredString(args.projectId, 'projectId');
       const toolMode = optionalString(args.toolMode) ?? 'read-only';
+      const operatorScope = optionalBoolean(args.operatorScope, 'operatorScope') ?? false;
       if (toolMode !== 'read-only' && toolMode !== 'project-write') throw new Error('toolMode must be read-only or project-write');
       if (toolMode === 'project-write' && !operatorToken) throw new Error('LOS_OPERATOR_TOKEN is required for project-write MCP runs');
+      if (operatorScope && !operatorToken) throw new Error('LOS_OPERATOR_TOKEN is required for operator-scoped MCP runs');
       const body = compact({
         prompt,
         projectId,
@@ -162,10 +167,19 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         dedupeKey: optionalString(args.dedupeKey),
         runContract: optionalRecord(args.runContract),
       });
-      const response = await request('/chat', { method: 'POST', body, projectId, idempotent: true });
+      const response = await request('/chat', { method: 'POST', body, projectId, operator: operatorScope, idempotent: true });
       const raw = await response.text();
       if (!response.ok) throw new Error(redact(`LOS gateway ${response.status}: ${raw.slice(0, MAX_ERROR_TEXT)}`, authToken, operatorToken));
-      return projectRunEvents(parseSSE(raw));
+      const events = parseSSE(raw);
+      const scope = projectIntakeScope(events);
+      const projection = projectRunEvents(events);
+      assertResolvedProjectScope({ requestedProjectId: projectId, operatorScope, scope, projection });
+      return compact({
+        ...projection,
+        ownerRepo: scope.ownerRepo,
+        requestedProjectId: scope.requestedProjectId,
+        workspaceRoot: scope.workspaceRoot,
+      });
     }
 
     if (name === 'los_run_state') {
@@ -299,6 +313,65 @@ function projectRunEvents(events: Array<{ event: string; data: JsonRecord }>): J
   });
 }
 
+interface IntakeScope {
+  ownerRepo?: string;
+  requestedProjectId?: string;
+  workspaceRoot?: string;
+  reason?: string;
+  blocker?: string;
+}
+
+/**
+ * 读取网关的**项目归属判定**（首个 `coordinator.intake_resolved` 事件）。
+ *
+ * 为什么必须有这一步：`auth.enabled` 时，网关对**非 operator** 调用方固定使用配置的默认项目，
+ * 调用方给的 `projectId` 只当路由提示被丢弃（`packages/gateway/src/request-context.ts` 的
+ * `onRequest` 与 `resolveProjectScope`）。没有这道读取，`los_run(projectId=X)` 会**静默**
+ * 跑在默认项目上，返回的却是"成功"。
+ *
+ * 形状（2026-10-11 实测 `/tmp/sse-dump.txt`）：会话事件流以**信封**下发，
+ * 归属字段在 `data.payload` 里（`data.payload.ownerRepo`），信封自身另有网关标注的
+ * `data.projectId`；两种都读，避免信封形态变化就静默失效。
+ */
+function projectIntakeScope(events: Array<{ event: string; data: JsonRecord }>): IntakeScope {
+  const intake = events.find(item => item.event === 'coordinator.intake_resolved');
+  const data = intake?.data ?? {};
+  const payload = optionalRecord(data.payload) ?? {};
+  return {
+    ownerRepo: optionalString(payload.ownerRepo) ?? optionalString(data.ownerRepo) ?? optionalString(data.projectId),
+    requestedProjectId: optionalString(payload.requestedProjectId) ?? optionalString(data.requestedProjectId),
+    workspaceRoot: optionalString(payload.workspaceRoot) ?? optionalString(data.workspaceRoot),
+    reason: optionalString(payload.reason) ?? optionalString(data.reason),
+    blocker: optionalString(payload.blocker) ?? optionalString(data.blocker),
+  };
+}
+
+/**
+ * fail-loud：网关解析出的项目 ≠ 请求的项目 ⇒ 抛错，并**把 id 带在错误里**。
+ *
+ * 为什么不直接丢弃结果：调用方拿不到 `runSpecId` 就无法复盘/接管这次运行
+ * （blocked 终态本来就可能不带 runSpecId）。只在网关确实给了 `ownerRepo` 时判定，
+ * 避免把"没读到"误判成"不一致"。
+ */
+function assertResolvedProjectScope(input: {
+  requestedProjectId: string;
+  operatorScope: boolean;
+  scope: IntakeScope;
+  projection: JsonRecord;
+}): void {
+  const { requestedProjectId, operatorScope, scope, projection } = input;
+  if (!scope.ownerRepo || scope.ownerRepo === requestedProjectId) return;
+  const guidance = operatorScope
+    ? `the operator-scoped call was still resolved elsewhere; bind '${requestedProjectId}' in the gateway project registry or pass a workspaceRoot inside it`
+    : `a non-operator call is pinned to the gateway default project; pass operatorScope=true (requires the adapter operator credential) to target '${requestedProjectId}'`;
+  throw new Error([
+    `project scope mismatch: requested projectId='${requestedProjectId}' but the gateway resolved ownerRepo='${scope.ownerRepo}'`,
+    `(reason=${scope.reason ?? 'unknown'}, blocker=${scope.blocker ?? 'none'}).`,
+    `${guidance}.`,
+    `runSpecId=${optionalString(projection.runSpecId) ?? 'none'} sessionId=${optionalString(projection.sessionId) ?? 'none'}`,
+  ].join(' '));
+}
+
 function parseFlags(argv: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
   for (let i = 0; i < argv.length; i += 1) {
@@ -337,6 +410,15 @@ function optionalInteger(value: unknown, min: number, max: number): number | und
 
 function compact(value: JsonRecord): JsonRecord {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+/** 布尔参数：接受真布尔与 `'true'`/`'false'`（模型常发字符串），其余值显式报错而非静默取假。 */
+function optionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${name} must be a boolean`);
 }
 
 function redact(value: string, ...secrets: Array<string | undefined>): string {

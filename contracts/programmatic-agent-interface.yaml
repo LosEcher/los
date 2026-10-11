@@ -19,8 +19,20 @@ tools:
   - name: los_run
     purpose: submit a run through POST /chat and project the terminal SSE result
     requiredInput: [prompt, projectId]
+    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope]
     defaultToolMode: read-only
     writeRule: project-write requires an operator credential in the adapter process
+    scopeRule: >
+      The gateway pins a non-operator caller to its configured default project and
+      discards the requested projectId (see request-context.ts). projectId and
+      workspaceRoot therefore take effect only when operatorScope=true, which
+      requires the adapter operator credential and forwards the operator header to
+      POST /chat. workspaceRoot additionally requires operator scope at the gateway.
+    failLoud: >
+      The adapter reads coordinator.intake_resolved from the run stream and returns
+      an MCP error when the resolved ownerRepo differs from the requested projectId,
+      including the requested project, the resolved project, the resolution reason,
+      and the run identifiers. A mis-scoped run is never reported as success.
     output:
       - sessionId
       - runSpecId
@@ -31,6 +43,9 @@ tools:
       - runSpecStatus
       - text
       - eventTypes
+      - ownerRepo
+      - requestedProjectId
+      - workspaceRoot
   - name: los_run_state
     purpose: read the recovery-grade state projection through GET /runs/{runSpecId}/state
     requiredInput: [runSpecId, projectId]
@@ -53,12 +68,15 @@ identityAndScope:
     userId: mcp-client
   rules:
     - projectId is explicit on every tool call.
-    - The adapter forwards the operator header only for operator-controlled writes.
+    - projectId and workspaceRoot take effect only for operator-scoped calls (los_run operatorScope=true, or los_operator_control).
+    - The adapter forwards the operator header only for operator-controlled writes and explicitly operator-scoped runs.
     - The adapter never derives an operator actor from tool arguments.
     - Gateway request context and persisted run/session/task evidence remain authoritative.
 safety:
   - Raw credentials are read from process environment or CLI flags and never returned in MCP content.
   - los_run rejects project-write when the adapter has no operator credential.
+  - los_run rejects operatorScope when the adapter has no operator credential.
+  - A run whose resolved ownerRepo differs from the requested projectId returns an MCP error instead of a success projection.
   - all tool mode is not exposed by the MCP adapter.
   - Tool output is bounded and does not return raw credentials or request headers.
   - Unknown tools and invalid arguments return MCP errors without calling the gateway.

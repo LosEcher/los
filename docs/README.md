@@ -83,6 +83,11 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
 - `0047-tool-project-and-provider-boundary-ownership.md` - tool/project/provider
   boundary ownership: layer model, single-writer rule, provider conflict
   adjudication, memory canonical split, `dsfolder` structure, gate tri-state.
+- `0048-route-admission-and-read-scope.md` - HTTP route admission
+  classification and read scope.
+- `0049-declared-versus-consumed-reconciliation.md` - declared-versus-consumed
+  reconciliation for config surfaces, retention judgement for monotonic storage,
+  and single-source rules for cost projections.
 
 > Numbering de-duplicated 2026-08-26: the five non-canonical co-numbered files
 > (`0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
@@ -117,6 +122,12 @@ and GitHub `gh` authentication.
 Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
+
+Use `operations/2026-10-11-dsh-los-cross-project-dispatch-audit.md` for the
+DSH→los cross-project dispatch audit (why a non-operator `los_run` was pinned to
+the default project regardless of `projectId`), the `operatorScope` opt-in and
+fail-loud guard that replaced the silent mis-scoping, and the remaining
+`verify`/`approve`/`cancel`/async gaps.
 
 Use `operations/otel-bridge.md` for the local OTLP/HTTP bridge port, protocol,
 health/status endpoints, external collector boundary, and failure checks.
