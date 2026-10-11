@@ -11,7 +11,7 @@ test('MCP adapter initializes and exposes only the contracted tools', async () =
   const listed = asRecord((await adapter.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))?.result);
   const names = (listed.tools as Array<{ name: string }>).map(tool => tool.name);
   assert.deepEqual(names, [
-    'los_run', 'los_runs_list', 'los_nodes_list', 'los_run_state', 'los_run_replay',
+    'los_run', 'los_runs_list', 'los_placed_run', 'los_nodes_list', 'los_run_state', 'los_run_replay',
     'los_run_verify', 'los_run_approve', 'los_run_recover', 'los_run_revise_plan',
     'los_task_cancel', 'los_operator_control',
   ]);
@@ -839,6 +839,92 @@ test('los_nodes_list refuses before HTTP without the operator credential', async
   assert.equal(response.isError, true);
   assert.match(String((response.content as Array<{ text: string }>)[0]?.text), /LOS_OPERATOR_TOKEN is required/);
   assert.equal(called, false);
+});
+
+test('los_placed_run creates a placed schedule then triggers it, with operator auth', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({
+      schedule: {
+        id: 'schedule-placed-1',
+        status: 'enabled',
+        projectId: 'cantool',
+        runTemplate: {
+          templateId: 'scheduled_execution',
+          executor: { enabled: true, nodeId: 'm3pro-executor-1', requiredCapabilities: ['heavy_task_safe', 'artifact_transfer'] },
+        },
+      },
+    }, { status: 201 })),
+  });
+
+  // 触发调用返回调度运行记录：用请求序号区分两个响应
+  const sequenced = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: (async (url: string | URL, init?: RequestInit) => {
+      requests.push(new Request(String(url), init as RequestInit));
+      if (String(url).includes('/trigger')) {
+        return Response.json({ id: 'schedule-run-placed-1', status: 'succeeded', attemptCount: 1 });
+      }
+      return Response.json({
+        schedule: {
+          id: 'schedule-placed-1', status: 'enabled', projectId: 'cantool',
+          runTemplate: { templateId: 'scheduled_execution', executor: { enabled: true, nodeId: 'm3pro-executor-1', requiredCapabilities: ['heavy_task_safe', 'artifact_transfer'] } },
+        },
+      }, { status: 201 });
+    }) as typeof fetch,
+  });
+
+  const result = toolContent(await callTool(sequenced, 'los_placed_run', {
+    projectId: 'cantool',
+    goalTemplate: 'build cantool on M3',
+    nodeId: 'm3pro-executor-1',
+    requiredCapabilities: ['heavy_task_safe', 'artifact_transfer'],
+    workspaceRoot: '/Users/echerlos/projects/cantool',
+    editableSurfaces: ['/Users/echerlos/projects/cantool'],
+    requiredChecks: ['test -d src-tauri'],
+    toolMode: 'project-write',
+  }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/scheduled-work-items');
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  const body = await requests[0]?.json() as Record<string, any>;
+  assert.equal(body.templateId, 'scheduled_execution');
+  assert.equal(body.approvalPolicy, 'preapproved_scope');
+  assert.equal(body.trigger.kind, 'once');
+  assert.deepEqual(body.executor, { enabled: true, nodeId: 'm3pro-executor-1', requiredCapabilities: ['heavy_task_safe', 'artifact_transfer'] });
+
+  assert.equal(new URL(requests[1]!.url).pathname, '/scheduled-work-items/schedule-placed-1/trigger');
+  assert.equal(requests[1]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.equal(result.scheduleId, 'schedule-placed-1');
+  assert.equal(result.scheduleRunId, 'schedule-run-placed-1');
+  assert.equal(result.runStatus, 'succeeded');
+  assert.equal(result.nodeId, 'm3pro-executor-1');
+  assert.ok(adapter); // 第一份适配器仅用于断言类型/构造不抛错
+});
+
+test('los_placed_run surfaces a capability refusal instead of hinting success', async () => {
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: (async () => new Response(
+      JSON.stringify({ error: 'unknown executor capability: heavy_task_safe_typo; allowed: workspace_read, ...' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )) as typeof fetch,
+  });
+
+  const response = asRecord((await callTool(adapter, 'los_placed_run', {
+    projectId: 'cantool',
+    goalTemplate: 'build',
+    requiredCapabilities: ['heavy_task_safe_typo'],
+  })).result);
+  assert.equal(response.isError, true);
+  assert.match(String((response.content as Array<{ text: string }>)[0]?.text), /unknown executor capability/);
 });
 
 test('unknown tools fail without touching the gateway', async () => {

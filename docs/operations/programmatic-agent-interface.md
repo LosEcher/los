@@ -48,6 +48,7 @@ Use the host's secret/environment mechanism.
 | `los_run` | `prompt`, `projectId` | `POST /chat` | access token; `operatorScope` and `project-write` also require the operator credential |
 | `los_runs_list` | `projectId` | `GET /runs` | access token |
 | `los_nodes_list` | `projectId` | `GET /nodes` | access **and** operator tokens (the route is operator-gated) |
+| `los_placed_run` | `projectId`, `goalTemplate` | `POST /scheduled-work-items` + `POST …/:id/trigger` | access **and** operator tokens |
 | `los_run_state` | `runSpecId`, `projectId` | `GET /runs/:id/state` | access token |
 | `los_run_replay` | `runSpecId`, `projectId` | `GET /runs/:id/stream` | access token |
 | `los_run_verify` | `runSpecId`, `projectId` | `POST /runs/:id/verify` | access and operator tokens |
@@ -120,6 +121,26 @@ Node selection is deliberately **not** exposed: `/chat` does not consume the
 run-spec request's `executor` field (only the scheduled-work and experiment routes
 do), so MCP-dispatched runs land on the gateway's configured executor node. A node
 parameter here would be a second source of truth the chat path ignores.
+
+## Placement
+
+`los_placed_run` sends a one-shot execution to a chosen device (`nodeId`) or to any
+device that satisfies declared capabilities (`requiredCapabilities`). Requirement
+semantics come from the scheduler: a key is satisfied when the node reports it as
+`true`, except `sandbox`, which requires a concrete backend (`linux-bwrap`,
+`macos-sandbox-exec`) — `native` and `tool_policy` do not satisfy it.
+
+Placement fails loud in both directions:
+
+- an unknown capability name is refused at creation, and the error lists what is
+  allowed (it used to be filtered out silently, which made a typo look like a satisfied
+  constraint — `artifact_transfer`, needed by the M3→M1 artifact flow, was not even in
+  the old list);
+- a placement no node can satisfy fails the run and records `no_executor_match` with
+  the candidate ids and required capabilities in the scheduler decision ledger.
+
+A run is never quietly executed on the gateway host when the caller asked for another
+device: the local fallback only applies when no executor was requested at all.
 
 ## Retries and Idempotency
 

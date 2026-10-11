@@ -15,6 +15,7 @@ import {
   _MAX_NODE_LIST,
   projectIntakeScope,
   projectNextAction,
+  projectPlacedRun,
   projectNodeList,
   projectRecoveryResult,
   projectRunEvents,
@@ -199,6 +200,49 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       if (status) query.set('status', status);
       const rows = await requestJson(`/runs?${query}`, { projectId });
       return projectRunList(Array.isArray(rows) ? rows : [], { projectId, traceId, status, limit });
+    }
+
+    if (name === 'los_placed_run') {
+      const projectId = requiredString(args.projectId, 'projectId');
+      const goalTemplate = requiredString(args.goalTemplate, 'goalTemplate');
+      const requiredCapabilities = stringArray(args.requiredCapabilities);
+      if (args.requiredCapabilities !== undefined && !Array.isArray(args.requiredCapabilities)) {
+        throw new Error('requiredCapabilities must be an array of capability names');
+      }
+      const nodeId = optionalString(args.nodeId);
+      const created = await requestJson('/scheduled-work-items', {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotencyKey,
+        body: compact({
+          title: optionalString(args.title) ?? `placed-run-${projectId}`,
+          projectId,
+          templateId: 'scheduled_execution',
+          goalTemplate,
+          toolMode: optionalString(args.toolMode) ?? 'read-only',
+          sandboxMode: optionalString(args.sandboxMode),
+          workspaceRoot: optionalString(args.workspaceRoot),
+          editableSurfaces: stringArray(args.editableSurfaces),
+          requiredChecks: stringArray(args.requiredChecks),
+          maxLoops: optionalInteger(args.maxLoops, 1, 200),
+          approvalPolicy: 'preapproved_scope',
+          executor: compact({ enabled: true, nodeId, requiredCapabilities }),
+          trigger: { kind: 'once', timezone: 'Asia/Shanghai', expression: '2099-01-01T00:00:00.000Z' },
+        }),
+      });
+      const scheduleId = optionalString(optionalRecord(optionalRecord(created)?.schedule)?.id)
+        ?? optionalString(optionalRecord(created)?.id);
+      if (!scheduleId) throw new Error('scheduled work item was created without an id');
+      if (args.trigger === false) return projectPlacedRun(created, undefined);
+      const triggered = await requestJson(`/scheduled-work-items/${scheduleId}/trigger`, {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotencyKey,
+        body: {},
+      });
+      return projectPlacedRun(created, triggered);
     }
 
     if (name === 'los_nodes_list') {

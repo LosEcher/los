@@ -169,6 +169,25 @@ export function projectNodeList(rows: unknown[], filter: { status?: string; limi
   };
 }
 
+/** `los_placed_run` 的投影：创建（+触发）后的落点与结果。 */
+export function projectPlacedRun(created: unknown, triggered: unknown): JsonRecord {
+  const schedule = optionalRecord(optionalRecord(created)?.schedule) ?? optionalRecord(created) ?? {};
+  const run = optionalRecord(triggered) ?? {};
+  const template = optionalRecord(schedule.runTemplate) ?? {};
+  const executor = optionalRecord(template.executor) ?? {};
+  return compact({
+    scheduleId: optionalString(schedule.id),
+    status: optionalString(schedule.status),
+    projectId: optionalString(schedule.projectId),
+    nodeId: optionalString(executor.nodeId),
+    requiredCapabilities: stringArray(executor.requiredCapabilities),
+    scheduleRunId: optionalString(run.id),
+    runStatus: optionalString(run.status),
+    error: optionalString(run.error),
+    attemptCount: typeof run.attemptCount === 'number' ? run.attemptCount : undefined,
+  });
+}
+
 export function projectRunList(rows: unknown[], filter: RunListFilter): JsonRecord {
   const matched = rows
     .map(row => optionalRecord(row) ?? {})

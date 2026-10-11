@@ -60,6 +60,29 @@ export const _TOOLS = [
     },
   },
   {
+    name: 'los_placed_run',
+    description: 'Create and trigger a one-shot scheduled execution bound to a placement (executor.nodeId and/or requiredCapabilities) via the scheduler path. Requires LOS_OPERATOR_TOKEN. Placement is fail-loud: the gateway refuses unknown capabilities and the run reports no_executor_match instead of silently running locally.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+        title: { type: 'string' },
+        goalTemplate: { type: 'string' },
+        nodeId: { type: 'string' },
+        requiredCapabilities: { type: 'array', items: { type: 'string' } },
+        workspaceRoot: { type: 'string' },
+        editableSurfaces: { type: 'array', items: { type: 'string' } },
+        requiredChecks: { type: 'array', items: { type: 'string' } },
+        toolMode: { type: 'string', enum: ['read-only', 'project-write', 'all'] },
+        sandboxMode: { type: 'string', enum: ['readonly', 'workspace-write', 'sandbox'] },
+        maxLoops: { type: 'integer', minimum: 1, maximum: 200 },
+        trigger: { type: 'boolean', default: true },
+        idempotencyKey: { type: 'string' },
+      },
+      required: ['projectId', 'goalTemplate'],
+    },
+  },
+  {
     name: 'los_nodes_list',
     description: 'List LOS execution nodes with the capabilities placement decisions depend on (GET /nodes). Requires LOS_OPERATOR_TOKEN. projectId scopes the request context only; the node registry is global.',
     inputSchema: {

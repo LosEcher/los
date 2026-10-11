@@ -97,6 +97,28 @@ tools:
       Each item carries runSpecId, sessionId, projectId, status, toolMode, traceId,
       createdAt, updatedAt and a truncated promptPreview. Raw prompts are never
       returned in full and the list is bounded by limit (default 10, maximum 50).
+  - name: los_placed_run
+    purpose: >
+      create and trigger a one-shot scheduled execution bound to a placement, so a task
+      can be sent to a named device or to any device satisfying declared capabilities
+      (the cantool build-on-M3 flow is exactly this shape).
+    requiredInput: [projectId, goalTemplate]
+    optionalInput: [title, nodeId, requiredCapabilities, workspaceRoot, editableSurfaces, requiredChecks, toolMode, sandboxMode, maxLoops, trigger, idempotencyKey]
+    operatorCredentialRequired: true
+    output: [scheduleId, status, projectId, nodeId, requiredCapabilities, scheduleRunId, runStatus, error]
+    placementRule: >
+      nodeId is a preference, requiredCapabilities is a filter. Semantics come from the
+      scheduler: a requirement is satisfied when the node reports the key as true, except
+      sandbox which needs a concrete backend (linux-bwrap / macos-sandbox-exec), never
+      native/tool_policy. Placement is fail-loud in both directions: an unknown capability
+      name is refused at creation with the allowed list, and a placement no node can
+      satisfy fails the run with no_executor_match recorded in the scheduler decision
+      ledger together with the candidate ids and the required capabilities. A run is never
+      quietly executed on the gateway host when the caller asked for another device.
+    note: >
+      The remote-execution preconditions the gateway already enforces apply here too
+      (sandboxMode, node-local workspaceRoot, editableSurfaces, at least one required
+      check, preapproved_scope), and their refusals are surfaced verbatim.
   - name: los_nodes_list
     purpose: >
       read the execution-node registry through GET /nodes so placement decisions can

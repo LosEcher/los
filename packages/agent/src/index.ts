@@ -17,6 +17,7 @@ export { runAgent, type AgentConfig, type AgentModelDelta, type AgentResult, typ
 export { getDefaultSystemPrompt } from './loop/message-builder.js';
 export { cancelScheduledTask, runAgentTaskGraphSerial, runScheduledAgentTask, type AgentTaskGraphStageOutput, type RunAgentTaskGraphSerialInput, type RunAgentTaskGraphSerialResult, type ScheduledAgentTaskInput, type ScheduledAgentTaskResult, type ScheduledExecutorConfig, type ScheduledTaskEvent, type ScheduledTaskEventType } from './scheduler.js';
 export { resumeAnsweredAsksForRunSpec } from './scheduler/resume-tasks.js';
+export { listExecutorCapabilityRequirements, isExecutorCapabilityRequirement } from './scheduler/types.js';
 export { createProvider, createDeepSeekProvider, createOpenAIProvider, type ChatOptions, type Provider, type ProviderDelta, type Message, type ToolCall, type ProviderResponse, type CreateProviderOptions, type ProviderModelInfo } from './providers/index.js';
 export { normalizeModelSettings, type ModelSettings } from './model-settings.js';
 export { billingPeriodAt, calculateCost, DEFAULT_CNY_PER_USD, estimateCost, MODEL_PROFILES, resolveModelCapabilityProfile, resolveModelProfile, summarizeModelProfile, type ApiShape, type BillingPeriod, type CachePolicy, type CostEstimate, type ModelCapabilityProfile, type ModelExecutionSummary, type ModelPricing, type ModelProfile, type ProviderProtocol, type ResolveModelProfileOptions, type SessionAffinity, type ToolCallRepairMode, type TransportHint, type VisionCapabilityMode } from './model-profiles.js';
@@ -126,7 +127,7 @@ export {
   type ScheduledWorkRunTemplate, type CreateScheduledWorkItemInput, type UpdateScheduledWorkItemInput,
 } from './scheduled-work/index.js';
 export { deleteArtifact, ensureArtifactStore, listArtifacts, loadArtifact, putArtifact, readArtifactContent, type ArtifactOperation, type ArtifactPathPolicy, type ArtifactRecord, type ListArtifactsOptions, type PutArtifactInput } from './artifacts.js';
-export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
+export { ensureNodeCommandStore, executeNodeCommand, listNodeCommands, loadNodeCommand, listNodeCommandNames, isNodeCommandName, type ExecuteNodeCommandInput, type ListNodeCommandsOptions, type NodeCommandName, type NodeCommandRecord, type NodeCommandRuntime, type NodeCommandRuntimeContext, type NodeCommandRuntimeResult, type NodeCommandStatus } from './node-commands.js';
 export { ensureFleetRepairConfigStore } from './fleet-repair-config.js';
 export { ensureFleetAlertConfigStore } from './fleet-alert-config.js';
 export { ensureNodeRecoveryPolicyStore } from './node-recovery-policy.js';

@@ -19,6 +19,7 @@ import {
 } from '@los/agent/scheduled-work';
 
 import { runIdempotentJson } from '../../idempotency.js';
+import { isExecutorCapabilityRequirement, listExecutorCapabilityRequirements } from '@los/agent';
 // 共享归一化：`read-only` 必须原样透传到 validateScheduledExecutionRunTemplate（由它 fail-loud 拒绝），
 // 不能像 2026-10-11 之前那样在本文件里静默改写成 project-write（= 静默提升写权限）。
 import { normalizeToolMode } from '../../chat-normalizers.js';
@@ -350,8 +351,16 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
     throw new Error('executor must be an object');
   }
   const nodeUrls = normalizeStringArray(input.nodeUrls);
-  const requiredCapabilities = normalizeStringArray(input.requiredCapabilities)
-    .filter((c): c is ExecutorCapabilityRequirement => EXECUTOR_CAPABILITIES.includes(c as ExecutorCapabilityRequirement));
+  // fail-loud（2026-10-11）：此前把不认识的能力名**静默过滤掉** ⇒ 调用方以为约束生效、
+  // 任务却可能落到不满足要求的节点上（连 artifact_transfer 这种跨设备必需能力也不在旧清单里）。
+  const requestedCapabilities = normalizeStringArray(input.requiredCapabilities);
+  const unknownCapabilities = requestedCapabilities.filter(name => !isExecutorCapabilityRequirement(name));
+  if (unknownCapabilities.length > 0) {
+    throw new Error(
+      `unknown executor capability: ${unknownCapabilities.join(', ')}; allowed: ${listExecutorCapabilityRequirements().join(', ')}`,
+    );
+  }
+  const requiredCapabilities = requestedCapabilities as ExecutorCapabilityRequirement[];
   const nodeId = normalizeString(input.nodeId);
   const agentKey = normalizeString(input.agentKey);
   return {
@@ -366,11 +375,6 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
     ...(normalizeNumber(input.heartbeatMs) ? { heartbeatMs: normalizeNumber(input.heartbeatMs) } : {}),
   };
 }
-
-const EXECUTOR_CAPABILITIES: readonly string[] = [
-  'workspace_read', 'workspace_write', 'shell', 'sandbox', 'network_egress',
-  'heavy_task_safe', 'deploy_safe',
-];
 
 function normalizeFeedAnalysisRequest(value: unknown): ScheduledWorkRunTemplate['feedAnalysisRequest'] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

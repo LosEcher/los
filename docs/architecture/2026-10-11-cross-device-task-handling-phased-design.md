@@ -67,7 +67,7 @@ cantool（M3 编译 → M1/M3 更新）、lot2extension（M1/M3/Win 协同）、
 
 ### P1 放置可表达（placement-aware dispatch）
 - **目标**：任务能声明"我要什么设备/能力"，并**经 scheduler 路径**落到合格节点。
-- **交付**：~~远端路径 smoke 复验（先证可用）~~ **已完成（见 §10）** → 暴露"带放置需求"的派发（如 `los_scheduled_execution` 带 `executor.nodeId` / `requiredCapabilities`）→ `GET /runs/summary?groupBy=project|node|status`（含 `asOf`）。
+- **交付**：~~远端路径 smoke 复验~~ **已完成（见 §10）** → ~~暴露"带放置需求"的派发~~ **已完成（见 §12）** → `GET /runs/summary?groupBy=project|node|status`（含 `asOf`）**待做**。
 - **验收**：`task_runs.node_id` = 目标节点且事件面完整；能力不满足时**拒绝并说明**；汇总与逐项目求和机械对账。
 - **不做**：不把远端派发接进 `/chat`（ADR 级，见 node-selection 文档）。
 
@@ -192,6 +192,37 @@ cantool（M3 编译 → M1/M3 更新）、lot2extension（M1/M3/Win 协同）、
 
 **P1 的修订后的开工条件**：① 网关自动注入 agent 凭据；② 查清远端策略覆盖来源；
 ③ 决定跨设备任务是否要求 `verification_records`（要就接通调度路径的检查面）。
+
+## 12. P1 落地记录：放置需求可表达（2026-10-11）
+
+**HTTP 层**
+- `normalizeExecutorConfig` **不再静默丢弃**不认识的能力名：此前 `.filter(...)` 把拼错的名字悄悄过滤掉，
+  调用方以为约束生效、任务却可能落到不满足要求的节点上；现在 **400 + 允许清单**。
+- **可要求能力集合从 7 个扩到 12 个**：`run_agent` / `artifact_transfer` / `node_command_runner` /
+  `file_sync_scan` / `file_sync_deep_verify` 此前**既不可要求、又被静默丢弃**——而 cantool 的 M3→M1
+  产物搬运正需要 `artifact_transfer`。单一真源与判定函数落在 `scheduler/types.ts`，
+  网关改为委托（另删掉它自己那份 7 项清单）。判定语义照 `satisfiesCapability`：
+  上报值为 `true` 即满足；`sandbox` 例外，需要具体后端（`linux-bwrap` / `macos-sandbox-exec`），
+  `native` 与 `tool_policy` 不算。
+
+**MCP 层**
+- 新增第 12 个工具 **`los_placed_run`**（operator 门禁）：一次调用完成
+  `POST /scheduled-work-items`（`scheduled_execution` + `preapproved_scope` + `once@2099` + 放置块）→
+  `POST /…/:id/trigger`，回传 `{scheduleId, nodeId, requiredCapabilities, scheduleRunId, runStatus, error}`。
+  远端执行的前置校验（sandboxMode / 节点本地 workspaceRoot / editableSurfaces / ≥1 requiredChecks）原样透传且**原样报错**。
+
+**真机验收** `[E]`
+
+| 判据 | 结果 |
+| --- | --- |
+| 未知能力（HTTP） | **400** `unknown executor capability: heavy_task_safe_typo; allowed: …`（此前：静默丢弃） |
+| 新扩展能力被接受 | `artifact_transfer` 进入模板并被台账记录 |
+| **能力真的参与选点** | 调度决策台账：`executor_selection \| executor_registry \| required=["artifact_transfer","heavy_task_safe","sandbox","shell","workspace_write"]` |
+| **指定设备真的生效** | `los_placed_run(nodeId='m3pro-executor-1', projectId='cantool')` ⇒ `task_runs = succeeded \| **m3pro-executor-1** \| project **cantool**` |
+| 未知能力（MCP） | `isError=true`，原文转达 400 与允许清单 |
+| 能力不满足时 | 选点失败**已是 fail-loud**（`file:packages/agent/src/scheduler/scheduled-task-runner.ts` 记录 `no_executor_match` + 候选/能力后 **rethrow**）；只有"未请求 executor"才落 `gateway-local` |
+
+**测试**：`@los/cli` 36/36（新增 `los_placed_run` 两次 POST + operator 头 + 请求体断言、以及拒绝路径用例）。
 
 ## 11. 证据边界
 
