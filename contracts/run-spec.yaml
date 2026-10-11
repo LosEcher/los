@@ -128,6 +128,12 @@ properties:
     description: Attempt number for a fresh task_run created from retry or recovery.
   executor:
     type: object
+    description: >
+      Executor dispatch options. Consumed by the scheduled-work and
+      execution-experiment routes only; the /chat route does not read this field at
+      all, so an MCP-dispatched chat run executes in the gateway process and is
+      labelled with config.executor.nodeId. See
+      docs/architecture/2026-10-11-execution-node-selection-and-remote-runs.md.
     properties:
       enabled:
         type: boolean
