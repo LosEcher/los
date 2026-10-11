@@ -51,6 +51,7 @@ Use the host's secret/environment mechanism.
 | `los_run_replay` | `runSpecId`, `projectId` | `GET /runs/:id/stream` | access token |
 | `los_run_verify` | `runSpecId`, `projectId` | `POST /runs/:id/verify` | access and operator tokens |
 | `los_run_approve` | `runSpecId`, `projectId` | `POST /runs/:id/approve` | access and operator tokens |
+| `los_task_cancel` | `taskRunId`, `projectId` | `POST /tasks/:id/cancel` | access and operator tokens (the adapter is stricter than the route) |
 | `los_operator_control` | `sessionId`, `projectId`, `type` | `POST /sessions/:id/operator-events` | access and operator tokens |
 
 `los_runs_list` exists because an MCP host can cut a long `los_run` at its tool
@@ -99,6 +100,20 @@ Note the two phase notions this touches: the approval transition reads
 while `los_run_state` classifies the run from run/task status and can report
 `phase: "created"` for the same run. Read `los_run_state` for lifecycle
 grounding and the approve result for the approval transition itself.
+
+## Cancelling
+
+`los_task_cancel` wraps the task-level route because the gateway has no
+run-level cancel. Get the id from `los_run_state`'s `activeTaskRunIds`. The
+gateway route is ungated, so the adapter is deliberately stricter and requires
+the operator credential before it calls it.
+
+The gateway returns `live: true` with `status: "cancelled"` when it cancelled a
+task scheduled on this process, and `live: false` with the task run when a remote
+executor holds it (a cancellation request is recorded for that executor). Either
+way a queued or running task run transitions to `cancelled`. Note the residual:
+cancelling the task does not move the run spec, so `los_run_state` can still
+report `phase: "created"` with zero active tasks after a successful cancel.
 
 For steering, pass `type=steering` and `instruction`. For queued continuation,
 pass `type=followup` and `prompt`. The gateway derives the operator actor from

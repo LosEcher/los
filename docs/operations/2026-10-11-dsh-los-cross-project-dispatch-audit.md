@@ -76,9 +76,9 @@ DSH 能调 los 做分析与开发、能读回执行证据；但 `los_run` 的 `p
 | 级别 | 缺口 | 判据/修法 |
 | --- | --- | --- |
 | P0-1 | 跨项目**静默落错仓**（不是报错，是"以为在 A 仓其实改了 B 仓"） | 已在 §6 修（operatorScope + fail-loud） |
-| P0-2 | 长任务被上层截断且丢 `runSpecId`：适配器 `await response.text()` 缓冲整条 SSE，DSH 侧 `toolCallTimeoutMs=180000` | 部分缓解：`los_runs_list` 可按 `traceId` 找回 id（§9.1）；`detach` 已证明可在适配器侧实现（§9.2），未实现 |
-| P0-3 | 契约跑不完：standard/heavyweight 会 park，而 MCP 无 `verify`/`approve`/`cancel`/`recover`/runs 列表（路由见 `file:packages/gateway/src/route-admission-inventory.ts:237`） | 大部已交付：runs 列表（§9.1）、`verify`/`approve`（§9.4）；`cancel` 仍缺（S3）。另：blocked 终态不带 `runSpecId` 的投影问题仍在 |
-| P1-1 | 无 run 发现/取消入口（`run_specs` 已有 500+ 行） | 发现已交付（`los_runs_list`，§9.1）；取消仍缺（S3：只有 task 级 `POST /tasks/:id/cancel`） |
+| P0-2 | 长任务被上层截断且丢 `runSpecId` | **已修**：`los_run(detach)` 在 id 齐全时即返回（§9.3，实测 101ms），`los_runs_list` 可按 `traceId` 事后找回（§9.1） |
+| P0-3 | 契约跑不完 | **已修**：`verify`/`approve` 已交付（§9.4，approve 正面路径实测 `plan_approved`+`scheduled`）；`recover`/`revise-plan` 仍未暴露；blocked 终态不带 `runSpecId` 的投影问题仍在 |
+| P1-1 | 无 run 发现/取消入口 | 发现（§9.1）与取消（§9.5）均已交付；残留：取消只到 task 级，run spec 不进 `cancelled`（§9.5 残留） |
 | P1-2 | 幂等假象：每次随机 `x-idempotency-key: mcp-<uuid>`，重试会重复建 run | 未修：`dedupeKey` 是另一字段，不解决重试 |
 | P1-3 | 项目登记面缺口无门禁：10 个 binding 覆盖不全，且与母仓 `workspace-registry.snapshot.json` 互不校验 | 未修：需一条"要派活的仓 ⊆ binding"机械 check |
 | P1-4 | 写入无隔离、节点不可选：`sandboxMode`/`allowedTools`/`node` 都不在 MCP 契约里 | 未修；fleet 8 个在线 executor，探针全落 `mbp-executor-1` |
@@ -161,7 +161,7 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 3. 审计与验收期间的探针 run 留在台账（`los` 3 条 + `dsfolder-fmtguard` 3 条 succeeded，
    另有 1 条 P4 停在 `phase=created`；均无 `todoId`、无文件副作用）。
 
-## 9. 后续工作：S1 / S2 / S4 已交付，S3 未开工
+## 9. 后续工作：S1 / S2 / S3 / S4 全部交付（本轮收口）
 
 目标：补"派活 → 盯活 → 收活"闭环，先解决 P0-2 的**超时丢 id**（这是长开发任务的实际痛点）。
 
@@ -252,14 +252,36 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
    而 `los_run_state` 按 run/task 状态分类、对同一个 run 报 `phase=created`。
    生命周期以 `los_run_state` 为准，审批迁移以上面的 approve 返回为准。
 
-### 9.5 交付顺序（更新）
+### 9.5 S3 `los_task_cancel`（2026-10-11 交付）
 
-- **S1 `los_runs_list`** — 已交付，见 §9.1（bookmark `feat/mcp-runs-list`）。
-- **S2 `los_run_verify` / `los_run_approve`** — 已交付，见 §9.4。
-- **S3 `los_run_cancel`**：以 `taskRunId` 为入参包装 `POST /tasks/:id/cancel`。**未开工**。
-  已核实：该路由**没有 operator 门禁**（`file:packages/gateway/src/routes/orchestration/task-routes.ts:119`，
-  故它在 route-admission 的 review 列表里）——适配器侧要**比网关更严**（要求 operator 凭据）。
-- **S4 `los_run(detach)`** — 已交付，见 §9.3。
+工具面 `file:packages/cli/src/mcp-tools.ts:115`；handler `file:packages/cli/src/mcp-serve.ts:209`；
+契约 `file:contracts/programmatic-agent-interface.yaml:101`；测试 `file:packages/cli/src/mcp-serve.test.ts:440` 起两条。
+
+- **命名按事实取 `los_task_cancel`（不是计划里的 `los_run_cancel`）**：网关只有 task 级取消
+  （`file:packages/gateway/src/routes/orchestration/task-routes.ts:119`），没有 run 级取消路由。
+  取 id 的路径：`los_run_state` → `ids.activeTaskRunIds`。
+- **适配器比网关更严**：该路由**没有** operator 门禁（所以在 route-admission 的 review 列表里），
+  适配器仍要求 operator 凭据并转发该头——无凭据时先抛错、不发 HTTP。
+
+**验收（真机，`/tmp/los-cancel-probe.mjs`）**：detach 派发一个要读文件的 run
+（`run-session-1791686026513-1791686026521`，`task-0cdb7ff1…`）后立刻取消 → 返回
+`{ok:true, live:false, taskRun:{…}}`；4s 后 `los_run_state` 的
+`counts.taskRuns={total:1, cancelled:1, running:0}` ⇒ **任务确实被取消**；重复取消 `live=false`。
+
+**残留（产品侧，不是适配器）**：task 级取消**不动 run spec** —— 同一个 run 的 state 仍是
+`phase=created` / `action=wait_for_task` / `blockers=0` / `activeTaskRunIds=[]`。
+即"任务已取消、run 仍停在 created"，因为网关没有 run 级取消入口。
+
+### 9.6 交付顺序（全部完成）
+
+| 步 | 内容 | 交付物 |
+| --- | --- | --- |
+| S1 | `los_runs_list` | §9.1，bookmark `feat/mcp-runs-list` |
+| S2 | `los_run_verify` / `los_run_approve` | §9.4，bookmark `feat/mcp-run-verify-approve` |
+| S3 | `los_task_cancel` | §9.5 |
+| S4 | `los_run(detach)` | §9.3，bookmark `feat/mcp-run-detach` |
+
+§5 缺口表的 P0-2 / P0-3 / P1-1 三行随之更新；**P0-1 已在 §6 修复**。
 
 残留：`mcp-serve.ts` 现为 487 行，距 `check-structure.sh` 的 500 行门禁只剩 13 行；
 下一次再往该文件加逻辑应先把投影/事件读取拆成独立模块（`mcp-tools.ts` 是同一手法的先例）。

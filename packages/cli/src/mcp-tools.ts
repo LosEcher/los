@@ -112,6 +112,19 @@ export const _TOOLS = [
     },
   },
   {
+    name: 'los_task_cancel',
+    description: 'Cancel a LOS task run (POST /tasks/:id/cancel). Requires LOS_OPERATOR_TOKEN. Take taskRunId from los_run_state activeTaskRunIds.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskRunId: { type: 'string' },
+        projectId: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      required: ['taskRunId', 'projectId'],
+    },
+  },
+  {
     name: 'los_operator_control',
     description: 'Persist operator steering or follow-up for a LOS session. Requires LOS_OPERATOR_TOKEN.',
     inputSchema: {

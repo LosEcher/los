@@ -98,6 +98,24 @@ tools:
       planRevision and contractHash must be supplied together; the gateway rejects a
       mismatched or forged pair. Omitting both performs a plain phase approval.
     output: [runSpecId, phase, previousPhase, phaseChangedAt, dispatch]
+  - name: los_task_cancel
+    purpose: >
+      cancel a task run through POST /tasks/{taskRunId}/cancel. Named for the task,
+      not the run, because the gateway has no run-level cancel route; obtain the id
+      from los_run_state's activeTaskRunIds.
+    requiredInput: [taskRunId, projectId]
+    optionalInput: [reason]
+    operatorCredentialRequired: true
+    authorizationNote: >
+      The gateway route itself is ungated (it is a review-listed mutating route), so
+      the adapter is deliberately stricter: it requires the operator credential and
+      refuses before any HTTP call without it.
+    output: [ok, live, taskRun, taskRunId, status, reason]
+    responseShapes: >
+      live=true returns {ok, live, taskRunId, status: cancelled, reason}; live=false
+      returns {ok, live, taskRun} for a task that was not running on this gateway
+      (a remote executor gets a cancellation request instead). Measured 2026-10-11:
+      cancellation still transitions a queued/running task run to cancelled.
   - name: los_operator_control
     purpose: persist steering or follow-up through POST /sessions/{sessionId}/operator-events
     requiredInput: [sessionId, projectId, type]

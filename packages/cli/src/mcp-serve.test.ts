@@ -12,7 +12,7 @@ test('MCP adapter initializes and exposes only the contracted tools', async () =
   const names = (listed.tools as Array<{ name: string }>).map(tool => tool.name);
   assert.deepEqual(names, [
     'los_run', 'los_runs_list', 'los_run_state', 'los_run_replay',
-    'los_run_verify', 'los_run_approve', 'los_operator_control',
+    'los_run_verify', 'los_run_approve', 'los_task_cancel', 'los_operator_control',
   ]);
 });
 
@@ -435,6 +435,42 @@ test('los_runs_list filters, bounds, and trims the gateway run list with ordinar
   assert.equal(filtered.matched, 1);
   assert.equal(filtered.returned, 1);
   assert.equal((filtered.items as Array<{ runSpecId: string }>)[0]?.runSpecId, 'run-new');
+});
+
+test('los_task_cancel requires the operator credential even though the gateway route is ungated', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json({ ok: true, live: true, taskRunId: 'task/a', status: 'cancelled', reason: 'operator stop' })),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_task_cancel', {
+    taskRunId: 'task/a', projectId: 'project-a', reason: 'operator stop',
+  }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/tasks/task%2Fa/cancel');
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.deepEqual(await requests[0]?.json(), { reason: 'operator stop' });
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.live, true);
+});
+
+test('los_task_cancel refuses before HTTP when the adapter has no operator credential', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: '',
+    fetchImpl: async () => {
+      called = true;
+      return new Response('{}');
+    },
+  });
+
+  const response = asRecord((await callTool(adapter, 'los_task_cancel', { taskRunId: 'task-a', projectId: 'project-a' })).result);
+  assert.equal(response.isError, true);
+  assert.match(String((response.content as Array<{ text: string }>)[0]?.text), /LOS_OPERATOR_TOKEN is required/);
+  assert.equal(called, false);
 });
 
 test('unknown tools fail without touching the gateway', async () => {

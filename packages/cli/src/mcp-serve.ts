@@ -206,6 +206,20 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       });
     }
 
+    if (name === 'los_task_cancel') {
+      const taskRunId = requiredString(args.taskRunId, 'taskRunId');
+      const projectId = requiredString(args.projectId, 'projectId');
+      // 网关该路由**没有** operator 门禁（在 route-admission 的 review 列表里）⇒ 适配器比网关更严：
+      // operator: true 让无凭据时先抛错、不发 HTTP。
+      return await requestJson(`/tasks/${encodeURIComponent(taskRunId)}/cancel`, {
+        projectId,
+        method: 'POST',
+        operator: true,
+        idempotent: true,
+        body: compact({ reason: optionalString(args.reason) }),
+      });
+    }
+
     if (name === 'los_operator_control') {
       const sessionId = requiredString(args.sessionId, 'sessionId');
       const projectId = requiredString(args.projectId, 'projectId');
