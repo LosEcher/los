@@ -123,6 +123,11 @@ Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
 
+Use `architecture/2026-10-11-remote-execution-policy-divergence-analysis.md` for why a
+remote run declared read-only and sandboxed actually executed write-capable without a
+sandbox, and for the three concrete fixes (silent toolMode coercion, the inert
+sandboxMode pairing, and declared checks that neither run nor get recorded).
+
 Use `architecture/2026-10-11-cross-device-task-handling-phased-design.md` for the phased
 design (P0 observability → P1 placement → P2 multi-device fan-out → P3 storage → P4
 governance) of cross-device and cross-project task handling on the M1/M3/Win fleet.
