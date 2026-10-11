@@ -145,12 +145,11 @@ roll_one() { # node_id platform alias home privilege
   v="$(reg_version "$nid")"; st="$(reg_status "$nid")"
   case "$plat" in
     local) dg="$(bash tools/los.sh build-version | tail -1)" ;;
-    # Windows 上没有 bash，`cd C:/los && bash tools/los.sh build-version` 只会回空 —— 那是
-    # **探针不可用**，不是"节点没响应"。以前两者都渲染成 <no-response>，读起来像故障。
-    # 后果是 Windows 节点永远不满足 digest 判据、每轮都重跑驱动（保守但安全），
-    # 所以这里显式写明，并让 plan 的动作标签说真话（驱动早已自动化，"NO DRIVER — manual" 是
-    # 驱动写出来之前的旧文案）。
-    windows) dg="$(remote_digest "$alias_" "$home" "$priv")"; dg="${dg:-n/a (no bash)}" ;;
+    # Windows：走驱动自己的 digest（内部调用 tools/deployable-content.mjs —— 与 bash 侧**同一份**
+    # 实现）。以前这里跑 `bash tools/los.sh build-version`，而 Windows 没有 bash，于是 digest
+    # 永远是空的；现在 Windows 与 Linux/macOS 用同一个判据，收敛后可以跳过。
+    # 模块还没下发时驱动明确回 `module-missing`（而不是空），照旧会触发一次滚动。
+    windows) dg="$(bash "$ROOT/tools/deploy-drivers/windows-service.sh" digest "$alias_" "$home" "" "$nid" 2>/dev/null | sed -n 's/^digest=//p' | tail -1)" ;;
     *)     dg="$(remote_digest "$alias_" "$home" "$priv")" ;;
   esac
   dg="${dg:-<no-response>}"
@@ -164,7 +163,7 @@ roll_one() { # node_id platform alias home privilege
   if [[ "$PLAN" -eq 1 ]]; then
     local action
     case "$plat" in
-      windows) action='driver: sync+install+activate+verify+promote (Windows has no content digest, so it is never skipped)' ;;
+      windows) action="$([[ "$dg" = "$TARGET" ]] && echo 'activate+verify+promote' || echo 'sync+install+activate+verify+promote') driver" ;;
       local)   action="$([[ "$dg" = "$TARGET" ]] && echo 'restart+promote' || echo 'restart+promote (tree is the source)')" ;;
       *)       action="$([[ "$dg" = "$TARGET" ]] && echo 'restart/verify+promote' || echo 'sync+install+restart+verify+promote')" ;;
     esac

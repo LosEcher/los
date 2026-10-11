@@ -30,10 +30,44 @@ Maintain these facts for every active node without storing credentials:
 
 Verify `build identity` from **two independent sources**: the `.env`-stamped
 version that `/health` reports, and the node's own content digest
-(`cd <root> && bash tools/los.sh build-version`) where the platform can compute
-it. The stamp alone does not prove which code is on disk — on 2026-10-06
-`desktop-srsbe20` reported the target version while still running the previous
-tree, because the upload had failed and only the `.env` was rewritten.
+(`cd <root> && bash tools/los.sh build-version`, or
+`node tools/deployable-content.mjs --digest` where there is no bash). The stamp
+alone does not prove which code is on disk — on 2026-10-06 `desktop-srsbe20`
+reported the target version while still running the previous tree, because the
+upload had failed and only the `.env` was rewritten.
+
+## Content Identity
+
+The deployed version is a deterministic digest of the content a node executes:
+`<base>+b<12hex>`, where `<base>` is `packages/executor/package.json`'s version
+and the 12 hex characters are a SHA-256 over every covered file's SHA-256.
+
+**It has exactly one implementation: `tools/deployable-content.mjs`.** bash
+(`tools/los.sh build-version`) and PowerShell (the Windows driver's `digest`
+step) are both callers, because a digest that only one platform can compute is
+not a criterion — it is a slogan. What is covered, and what is deliberately
+excluded (gateway-only scripts, `node_modules`, `dist`, `.turbo`, `.los`,
+`.los-runtime`, `*.tsbuildinfo`, `.DS_Store`, `._*`), is defined there and pinned
+by `tools/deployable-content.test.mjs` (`pnpm check:deployable-content`).
+
+```bash
+bash tools/los.sh build-version             # the version string
+bash tools/los.sh build-version --files     # the exact files the digest covers
+node tools/deployable-content.mjs --json    # version + base + revision + files
+```
+
+Use `--files` to diagnose a mismatch instead of guessing: run it on the gateway
+and on the node, diff the two lists, and you will see whether the node is
+**missing** files (a genuinely half-synced tree) or holding **extra** ones (a
+stale file the prune did not remove). A whole-tree digest alone can only say
+"different" — that ambiguity is what cost hours on 2026-10-11.
+
+The digest moved to this module on 2026-10-11 (it used to be an inline bash
+pipeline). Equivalence was proven before the switch — identical file lists and
+identical digests on the same explicit list — and the fleet was then rolled once,
+because the module itself is covered content. See
+`architecture/2026-10-11-cross-platform-content-identity-design.md`.
+
 
 Current dated evidence belongs in a rollout smoke such as
 `2026-07-12-node-version-rollout.md`, not in this reusable procedure.
@@ -430,13 +464,11 @@ Open items:
   (the split the rollout design calls for), so it cannot be reviewed or tested in
   isolation. The macOS branch does now assert the content digest (via `sync`) and
   `/health.version` (via the registry `base_url`), which it previously did not.
-- **No content digest for Windows.** The driver now installs, and `verify` asserts
-  the node's own `/health` version (2026-10-11), so a crash-looping node can no
-  longer be reported as converged — but there is still no filesystem digest, so
-  Windows nodes never satisfy the reconciler's `digest == target` skip condition
-  and are redeployed on every rollout. A PowerShell digest would have to reproduce
-  the file list that `tools/los.sh` defines; prefer exporting that list from one
-  place over writing a second one.
+- ~~**No content digest for Windows.**~~ **Resolved 2026-10-11**: the driver has a
+  `digest` step that runs `tools/deployable-content.mjs` on the node, so the
+  reconciler reads a real digest for Windows and skips converged nodes like any
+  other platform. Windows still has no `bash`, which is now irrelevant: the digest
+  is computed by Node, not by `shasum`, and Node is already a hard requirement.
 - **`.env` mode has no gate.** `sync` no longer resets it (fixed 2026-10-11), but
   nothing checks it either, so the fleet legitimately holds both `600` (macOS,
   owner-run) and `root:root 644` (Linux, so the `los` service user can read it).

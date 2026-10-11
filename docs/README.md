@@ -114,6 +114,12 @@ prune, why the empty sync log pointed the investigation at the transport instead
 the macOS `install` gap that would have crash-looped the executor on the next
 restart, and the replay/negative-control evidence for each.
 
+Use `architecture/2026-10-11-cross-platform-content-identity-design.md` for why the
+deployable-content digest is a single Node implementation that bash and PowerShell
+both call (rather than a bash pipeline plus a PowerShell copy), what it covers and
+deliberately excludes, how equivalence to the old pipeline was proven before the
+switch, and the designed phase 2 where nodes report their digest in the heartbeat.
+
 Use `operations/2026-10-11-windows-node-recovery-and-driver-hardening.md` for the
 Windows side of the same defect family: why `desktop-srsbe20` was mis-recorded as
 "missing pnpm" (a non-interactive PATH that hides a working toolchain), the
