@@ -49,12 +49,18 @@ Current dated evidence belongs in a rollout smoke such as
    ./tools/deploy-to-remote.sh <node> preflight
    ```
 
-4. Confirm `.env` exists with mode 600 and contains, without printing values:
-   `DATABASE_URL`, `EXECUTOR_AGENT_KEY`, `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`,
-   and `GATEWAY_URL`.
+4. Confirm `.env` contains, without printing values: `DATABASE_URL`,
+   `EXECUTOR_AGENT_KEY`, `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`, and `GATEWAY_URL`.
    It must also be **readable by the deploy identity**: a `600`/`los:los` file
    plus a non-root login (`oracle` uses `ubuntu` + sudo) makes both the version
    stamp and `verify` fail without `LOS_REMOTE_PRIVILEGE=sudo`.
+   Mode is **not** uniformly `600` across the fleet, and the right shape follows
+   from who reads the file: macOS runs the executor as the owner, so `600`; a
+   Linux node whose `.env` is `root:root` and whose service user is `los` needs
+   `644` (a root-owned `600` file is unreadable to `los`). Do not "harden" that
+   second shape. `sync` now preserves whatever mode it finds — before
+   2026-10-11 the stamp rewrote `.env` with `awk`+`mv`, which recreated it with
+   umask permissions and silently turned `600` back into `644` on every rollout.
    The systemd unit must not override `EXECUTOR_HOST` or `EXECUTOR_PORT`; the
    node `.env` is the endpoint configuration source used by both runtime and
    deployment verification.
@@ -98,6 +104,17 @@ procedure.
   digest match the fleet target;
 - bsdtar AppleDouble `._*` sidecars are suppressed and historical ones cleaned.
 
+The prune is what reconciles deleted or renamed sources, and it has to work on
+both GNU and BSD userlands: until 2026-10-11 it deleted the stale list with
+`xargs -a FILE -d '\n'`, which macOS's `xargs` rejects outright
+(`xargs: invalid option -- a`). On `m3pro-executor-1` that left exactly one
+renamed-away source file in place, so the node's digest could never equal the
+fleet target even though every byte of the transfer was correct — three
+consecutive rollouts restored it to the old revision. A stale path the prune
+cannot remove now fails the sync out loud, and the prune's output goes into the
+sync log instead of nowhere
+(`2026-10-11-macos-m3-sync-nonconvergence.md`).
+
 The default transport is Tailscale SSH as `root`. When a node instead uses an
 OpenSSH config alias or a non-root login with passwordless sudo, set transport
 details in the invoking environment rather than committing host credentials:
@@ -120,24 +137,35 @@ mid-transfer makes `sync` abort under `set -e` with the log ending mid-step: on
 sync on `tencent-sin`. Because the steps are idempotent, retrying the node is
 the recovery.
 
-**`sync` does not verify that the node converged — check the digest yourself.**
-The tar is streamed through a single SSH pipe (`cat tar | ssh … 'tar xzf -'`),
-so a dropped connection leaves a *partially extracted tree*, and each retry then
-produces a different `build-version` digest. On 2026-10-06 that left
-`tencent-sin` with a half-synced tree whose executor crash-looped until systemd
-gave up (`Start request repeated too quickly`). Always confirm after `sync`:
+**`sync` asserts convergence on exit — read the guard's message before acting.**
+On exit the sync re-reads the node's own content digest and refuses to report
+success unless it equals the target. A mismatch has two very different causes,
+and the sync log now distinguishes them:
+
+| sync log says | meaning | action |
+| --- | --- | --- |
+| `prune: N stale file(s)` … `removed N stale file(s)`, digest matches | normal repair | none |
+| `prune: FAILED — could not remove stale path: …` | extra source files survive (BSD/GNU `rm` flag, permissions, `uchg`) | clear the obstacle and re-run; the tree itself is intact |
+| no `prune:` complaint, digest != target | source files are **missing** on the node | treat as half-synced: do NOT restart it; re-run the sync |
+
+That distinction matters because the transfer is otherwise silent: a successful
+`scp` plus a silent `tar xzf` used to leave a **0-byte sync log**, which reads
+exactly like "it died before transferring anything" and sends you after the
+transport instead of the prune (2026-10-11, M3, several hours).
+
+Always confirm after `sync` with the node's own digest:
 
 ```bash
 ssh <alias> 'cd <REMOTE_HOME> && bash tools/los.sh build-version'   # must equal the local target
 ```
 
-If it does not (or keeps changing between attempts), stop retrying the pipe and
-use **upload-then-extract** instead: `scp` the archive to `/tmp` on the node,
-compare `shasum -a 256` on both sides, then extract locally on the node. That
-path is resilient because a dropped control connection cannot truncate an
-already-complete file. Never leave a node in a half-synced state: a partially
-written `packages/` tree is worse than the previous revision, which at least
-started.
+If files really are missing (or the digest keeps changing between attempts),
+stop retrying and use **upload-then-extract** instead: `scp` the archive to
+`/tmp` on the node, compare `shasum -a 256` on both sides, then extract locally
+on the node. That path is resilient because a dropped control connection cannot
+truncate an already-complete file. Never leave a node in a half-synced state: a
+partially written `packages/` tree is worse than the previous revision, which at
+least started.
 
 The deployed version is a deterministic digest of deployable runtime content.
 Do not override `LOS_DEPLOY_VERSION` unless reproducing an explicitly recorded
@@ -239,19 +267,58 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
 `mbp-executor-1` runs from the gateway's own checkout: restart it and the
 version follows the working tree. `m3pro-executor-1` runs from
 `~/.local/share/los` (a tar snapshot, no VCS) under launchd
-`com.echerlos.los-executor`; `tools/deploy-to-remote.sh` is not usable (it
-assumes systemd and a `los` user).
+`com.echerlos.los-executor`.
 
-1. Ship the same include list by tar pipe and extract into the node root.
-2. Normalize modes and stamp `.env` exactly as on Linux — both platforms get
-   their version from `LOS_VERSION`/`EXECUTOR_VERSION` in that file.
-3. Restart through launchd (KeepAlive brings it straight back):
+`tools/deploy-to-remote.sh` **is** usable on macOS for `sync`, `install`,
+`digest` and `cmd`; `verify` and `restart` are not (they drive systemd). Drive it
+with the SSH transport and the node's own home:
+
+```bash
+LOS_SSH_TRANSPORT=ssh LOS_SSH_TARGET=m3-t \
+LOS_REMOTE_HOME=/Users/echerlos/.local/share/los LOS_REMOTE_PRIVILEGE=none \
+  ./tools/deploy-to-remote.sh m3pro-executor-1 sync
+```
+
+`tools/los-fleet-rollout.sh --node m3pro-executor-1` runs the whole sequence
+(sync → install → stamp → launchd restart → `/health` version assertion →
+promote) and is the preferred path; only hand-roll it when the orchestrator is
+unavailable.
+
+1. `sync` — upload-then-extract, stale-file prune, and the version stamp.
+2. `install` — **do not skip this.** The executor resolves workspace packages
+   through `packages/*/node_modules/@los`, so any release that adds or removes a
+   workspace package needs `pnpm install` before the restart. On 2026-10-11 the
+   new `@los/mcp-stdio` package had no link on M3 and restarting there would have
+   crash-looped the executor on `ERR_MODULE_NOT_FOUND` — the same defect the
+   Windows driver hit. `install` now probes whether it can really become user
+   `los` (`su - los -c true`) and otherwise runs `pnpm` directly as the login
+   user. Never probe that user by name: on M3 `id -u los` **succeeds** (the
+   directory service resolves the unknown name to the current user, uid 501)
+   even though no `los` account exists.
+3. Stamp `.env` (`LOS_VERSION`/`EXECUTOR_VERSION`) — `sync` already does this,
+   so the orchestrator's extra `sed -i ''` is only a belt-and-braces repeat.
+4. Restart through launchd (KeepAlive brings it straight back):
 
    ```bash
    ssh <alias> 'launchctl kickstart -k gui/$(id -u)/com.echerlos.los-executor'
    ```
 
-4. Verify the content digest, `/health`, and the registry row.
+5. Verify all three: the content digest, `/health.version`, and the registry row
+   plus `target_version`. `/health` is the evidence that the **new process** is
+   up; the registry heartbeat lags. `verify` cannot be used here, so assert
+   `/health` directly:
+
+   ```bash
+   curl -s "http://100.82.176.56:8090/health" | grep -F '"version":"<target>"'
+   ```
+
+**`.env` mode is the node's own policy, and `sync` no longer rewrites it.** It
+holds `DATABASE_URL` and `EXECUTOR_AGENT_KEY`. M3 runs the executor as its owner
+and uses `600`; a Linux node whose `.env` is `root:root` keeps `644` so the `los`
+service user can read it. Until 2026-10-11 the stamp recreated the file through
+`awk`+`mv` and reset it to `0644` on every rollout, so tightening it by hand did
+not survive the next sync. The macOS node root belongs to the login user, so
+`chmod`, `launchctl` and the stamp need no sudo.
 
 ## Rollback
 
@@ -307,9 +374,24 @@ Open items:
   a successful verify. A rollout that forgets it leaves verified nodes idle.
 - **`promote` does not check the reported version**, so it can mark a stale node
   online from a lagging registry value.
-- **No content probe for Windows/macOS**, and no automated path at all for those
-  platforms. Windows upgrades depend on a hand-built archive plus a file
-  existence check.
+- **No macOS driver file.** The macOS sequence still lives as an inline branch in
+  `tools/los-fleet-rollout.sh` instead of `tools/deploy-drivers/macos-launchd`
+  (the split the rollout design calls for), so it cannot be reviewed or tested in
+  isolation. The macOS branch does now assert the content digest (via `sync`) and
+  `/health.version` (via the registry `base_url`), which it previously did not.
+- **No content probe for Windows**, and no automated path at all for that
+  platform: Windows upgrades depend on a hand-built archive plus a file existence
+  check. `tools/deploy-drivers/windows-service.sh` also has no `install` step, so
+  a release that changes the workspace dependency graph can leave a Windows node
+  crash-looping on `ERR_MODULE_NOT_FOUND`.
+- **`.env` mode has no gate.** `sync` no longer resets it (fixed 2026-10-11), but
+  nothing checks it either, so the fleet legitimately holds both `600` (macOS,
+  owner-run) and `root:root 644` (Linux, so the `los` service user can read it).
+  A consistency check would have to encode that rule rather than demand `600`.
+- **macOS `unirun` install always warns.** `install` still calls
+  `tools/install-unirun.sh --dest /usr/local/bin`, which needs root; macOS nodes
+  therefore keep dispatching via native ssh. Skipping it on Darwin would make the
+  deploy log honest instead of permanently noisy.
 - **Maintenance windows do not gate scheduling.** `isNodeInMaintenance` is only
   consulted by fleet alerting, watch-state advancement, and host-check repair;
   the executor candidate filter never reads it. To actually stop work landing on

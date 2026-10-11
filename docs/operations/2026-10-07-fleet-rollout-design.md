@@ -94,9 +94,9 @@ tools/deploy-drivers/windows-service
 
 ---
 
-## 7. 2026-10-11 实测增补：两处发布器缺陷
+## 7. 2026-10-11 实测增补：三处发布器缺陷
 
-滚动 22 个 change 到 8 台节点时实测到两条，都会让"节点看起来在线、实际不可用"：
+滚动 22 个 change 到 8 台节点时实测到三条，都会让"节点看起来在线、实际不可用"：
 
 1. **Windows 驱动没有 install 步骤。** `tools/deploy-drivers/windows-service.sh` 只做 sync/activate/verify，
    不跑 `pnpm install`；`deploy-to-remote.sh`（Linux）有 `install` 子命令。任何**新增/删除 workspace 包**
@@ -106,8 +106,29 @@ tools/deploy-drivers/windows-service
 2. **收敛判据不含 `target_version`。** 协调器把"已收敛"判为 digest+registry+online，于是
    `target_version` 未写的节点会被判为 already converged（本轮 tencent 就是如此，事后手工补写）。
    既然 §"P0-6: target_version 必须是 rollouts 的产物"，判据里应显式包含它，否则该声明会被绕过。
+3. **macOS 分支同样没有 install 步骤**（与第 1 条同源，只是没在那次暴露出来）。M3 的
+   `packages/agent/node_modules/@los` 在发布后仍缺少 `@los/mcp-stdio` 链接；重启就会
+   `ERR_MODULE_NOT_FOUND` 崩溃循环。已修：`do_install` 改为**按能力**判别身份
+   （`su - los -c true` 而不是 `id -u los`——M3 的目录服务把不存在的名字解析成当前用户，
+   存在性判据在那里是假阳性），macOS 分支补上 `install`，并新增 `/health` 版本断言。
 
-另记：macOS 节点（M3）的同步连续三次 `sync aborted mid-way (exit 1)` 且**同步日志为空**，
-远端 digest 每次不同（半同步）。脚本的自我保护和"do NOT restart it"是对的（M3 保持旧版 online），
-但根因未定位（疑似别名 scp/传输路径），需按 `docs/operations/node-deployment-runbook.md` 复查。
+### 根因已定位（2026-10-11 晚，取代本节原先的"根因未定位"）
+
+上一版这里写着：M3 同步连续三次 `sync aborted mid-way (exit 1)`、**同步日志为空**、
+远端 digest 每次不同（半同步）、**疑似别名 scp/传输路径**。复查结论：**传输路径没有问题**。
+
+- `scp` 上传 + 双侧 `sha256` + 节点本地解包每一步都成功；"日志为空"只是因为**成功时
+  scp/tar 本来就不输出**，而 prune 那一步的输出没有重定向进日志（唯一那条
+  `export LANG=C >> "$log_file"` 只重定向了 `export` 内建命令）。
+- 真正的失败点是**剪枝**：它用 GNU 专有的 `xargs -a FILE -d '\n' rm -f --`，macOS 的 BSD xargs
+  两个选项都不认。于是**恰好一个**被上游重命名删除的源文件（`mcp-stdio-transport.ts`）
+ 留在节点上；内容摘要覆盖每个源文件 ⇒ digest 永远不等于机队目标。
+  去掉该文件后远端 digest 立刻等于目标（`0.1.0+bf48c196bd57b`），可复现地证明因果。
+- "每次 digest 都不同"是**目标在动**（14:33 目标是 `b1843b8…`，14:40 是 `bf48c19…`），
+  不是树在变：把该文件放回 M3 后 digest 精确回到当初报告的 `0.1.0+b580057c47487`。
+- 收敛守卫那句 `the node may be half-synced; do NOT restart it` 是**误报**，把排查引向了传输。
+  已改为按日志区分两种成因（陈旧文件没剪掉 vs 文件真的缺失），并让 prune 失败显式吵。
+
+机制、复现与验收证据见 `2026-10-11-macos-m3-sync-nonconvergence.md`；可复用的处置写进了
+`node-deployment-runbook.md`（sync 收敛表 + macOS 段）。
 
