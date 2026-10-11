@@ -94,23 +94,25 @@ tools/deploy-drivers/windows-service
 
 ---
 
-## 7. 2026-10-11 实测增补：三处发布器缺陷
+## 7. 2026-10-11 实测增补：四处发布器缺陷
 
-滚动 22 个 change 到 8 台节点时实测到三条，都会让"节点看起来在线、实际不可用"：
+滚动 22 个 change 到 8 台节点时实测到四条，都会让"节点看起来在线、实际不可用"：
 
-1. **Windows 驱动没有 install 步骤。** `tools/deploy-drivers/windows-service.sh` 只做 sync/activate/verify，
-   不跑 `pnpm install`；`deploy-to-remote.sh`（Linux）有 `install` 子命令。任何**新增/删除 workspace 包**
-   的改动推到 Windows 节点后，node 进程会 `ERR_MODULE_NOT_FOUND` 并在看门狗下反复重启（本轮实测
-   `Cannot find package '@los/mcp-stdio'`）。⇒ 驱动需要 install 步骤，或编排器在"依赖图有变化"时
-   对 Windows 节点**拒绝发布**并说明原因（fail-loud 优于半死节点）。
+1. ~~**Windows 驱动没有 install 步骤。**~~ **已修（2026-10-11 晚）**：驱动补 `install`
+   子命令（pnpm 缺失时按 `package.json` 的 `packageManager` 经 npm 装上，失败即吵），
+   编排器的 windows 分支在 activate 之前调用它。当时的现象：`tar` 只搬源码、workspace 包链接
+   归 pnpm 管，新增 `@los/mcp-stdio` 后 win-los 需要补装；srsbe20 则**在旧版离线**。
 2. **收敛判据不含 `target_version`。** 协调器把"已收敛"判为 digest+registry+online，于是
    `target_version` 未写的节点会被判为 already converged（本轮 tencent 就是如此，事后手工补写）。
    既然 §"P0-6: target_version 必须是 rollouts 的产物"，判据里应显式包含它，否则该声明会被绕过。
-3. **macOS 分支同样没有 install 步骤**（与第 1 条同源，只是没在那次暴露出来）。M3 的
-   `packages/agent/node_modules/@los` 在发布后仍缺少 `@los/mcp-stdio` 链接；重启就会
-   `ERR_MODULE_NOT_FOUND` 崩溃循环。已修：`do_install` 改为**按能力**判别身份
-   （`su - los -c true` 而不是 `id -u los`——M3 的目录服务把不存在的名字解析成当前用户，
-   存在性判据在那里是假阳性），macOS 分支补上 `install`，并新增 `/health` 版本断言。
+3. ~~**macOS 分支同样没有 install 步骤**~~ **已修（2026-10-11 晚）**（与第 1 条同源）。
+   见下节"根因已定位"。
+4. **Windows 的 `verify` 会为崩溃循环的节点背书。** 它只断言"服务 Running + `.env` 已盖章 +
+   源码探针文件在"，而 nssm 下这三条对**反复重启、不再心跳**的进程全部成立 ——
+   `desktop-srsbe20` 就是这样被记成"已安全回退到旧版"，而它磁盘上的 `.env` 早就是新版本。
+   已补第四条断言：节点**自己的 `/health` 版本必须等于目标**。负向控制见
+   `2026-10-11-windows-node-recovery-and-driver-hardening.md`（把 `.env` 的端口改成没人监听的
+   8099 后，前三条全过、第四条拦下）。
 
 ### 根因已定位（2026-10-11 晚，取代本节原先的"根因未定位"）
 
