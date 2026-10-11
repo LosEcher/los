@@ -65,6 +65,20 @@ text, the observed SSE event types, and the resolved `ownerRepo` /
 recovery-grade decision and `los_run_replay` for persisted evidence rather
 than treating the MCP result text as the task source of truth.
 
+## Detached Dispatch
+
+`los_run` holds the SSE stream until the run reaches a terminal event, which
+loses the `runSpecId` when a host cuts the call at its tool timeout. Pass
+`detach: true` for long work: the adapter returns as soon as the run identity is
+complete (`runSpecId` from the intake event plus `sessionId` and `taskRunId`),
+aborts the stream, and reports `status: "detached"` with `detached: true`.
+
+The run keeps executing — measured on 2026-10-11: after an aborted stream the run
+and its task both reached `succeeded`, and a detached dispatch returned in ~100 ms
+with the run then succeeding on its own. Read it back with `los_run_state`,
+`los_run_replay`, or `los_runs_list`. The project-scope guard still runs before a
+detached result is reported, so `detach` cannot hide a mis-scoped run.
+
 For steering, pass `type=steering` and `instruction`. For queued continuation,
 pass `type=followup` and `prompt`. The gateway derives the operator actor from
 the validated operator token; the adapter does not accept an actor override.

@@ -249,6 +249,51 @@ test('los_run keeps the ordinary projection when the resolved project matches th
   assert.equal(result.runSpecId, 'run-a');
 });
 
+test('los_run detach returns as soon as the run is registered and leaves the stream unread', async () => {
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: async () => sseStream(
+      // 第一段：归属判定 + session。真实形状里 runSpecId 只在 intake 的 payload 内、session 只有 taskRunId
+      sse(
+        intakeEnvelope({
+          reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los',
+          workspaceRoot: '/work/los', runSpecId: 'run-a',
+        }),
+        ['session', { sessionId: 'session-a', taskRunId: 'task-a' }],
+      ),
+      // 第二段：只有"没在 id 齐全处停下"的实现才会读到它
+      sse(['done', { sessionId: 'session-a', runSpecId: 'run-a', text: 'SHOULD-NOT-BE-READ', runSpecStatus: 'succeeded' }]),
+    ),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run', { prompt: 'long task', projectId: 'los', detach: true }));
+  assert.equal(result.status, 'detached');
+  assert.equal(result.detached, true);
+  assert.equal(result.runSpecId, 'run-a');
+  assert.equal(result.taskRunId, 'task-a');
+  assert.equal(result.ownerRepo, 'los');
+  assert.equal(result.text, undefined);
+});
+
+test('detached los_run still fails loudly when the resolved project differs', async () => {
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: async () => sseStream(sse(
+      intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los' }),
+      ['session', { sessionId: 'session-a', runSpecId: 'run-a' }],
+    )),
+  });
+
+  const response = await callTool(adapter, 'los_run', { prompt: 'x', projectId: 'project-a', detach: true });
+  const result = asRecord(response.result);
+  assert.equal(result.isError, true);
+  assert.match(String((result.content as Array<{ text: string }>)[0]?.text), /project scope mismatch/);
+});
+
 test('los_runs_list filters, bounds, and trims the gateway run list with ordinary auth', async () => {
   const requests: Request[] = [];
   const rows = [
@@ -345,6 +390,17 @@ function intakeEnvelope(payload: Record<string, unknown>): [string, Record<strin
     source: 'coordinator',
     payload,
   }];
+}
+
+/** 分多次下发的 SSE 响应体：用来验证"读到某事件就停"（detach）而不是一次读完。 */
+function sseStream(...chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
 async function unreachableFetch(): Promise<Response> {

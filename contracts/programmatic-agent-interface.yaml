@@ -19,9 +19,17 @@ tools:
   - name: los_run
     purpose: submit a run through POST /chat and project the terminal SSE result
     requiredInput: [prompt, projectId]
-    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope]
+    optionalInput: [workspaceRoot, sessionId, provider, model, toolMode, maxLoops, traceId, dedupeKey, runContract, operatorScope, detach]
     defaultToolMode: read-only
     writeRule: project-write requires an operator credential in the adapter process
+    detachRule: >
+      detach=true returns as soon as the run identity is complete (runSpecId from the
+      intake event plus sessionId and taskRunId) and aborts the SSE stream instead of
+      holding it to the terminal event. The run keeps executing: measured behaviour is
+      run_specs.status=succeeded / task_runs.status=succeeded after an aborted stream,
+      so execution does not depend on the SSE consumer. The project-scope guard still
+      runs before a detached result is reported, and the run is read back through
+      los_run_state / los_run_replay / los_runs_list.
     scopeRule: >
       The gateway pins a non-operator caller to its configured default project and
       discards the requested projectId (see request-context.ts). projectId and
@@ -46,6 +54,7 @@ tools:
       - ownerRepo
       - requestedProjectId
       - workspaceRoot
+      - detached
   - name: los_runs_list
     purpose: >
       discover run specs through GET /runs so a caller can recover a runSpecId it

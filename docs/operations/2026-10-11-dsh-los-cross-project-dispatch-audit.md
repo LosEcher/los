@@ -91,17 +91,17 @@ DSH 能调 los 做分析与开发、能读回执行证据；但 `los_run` 的 `p
 （非 operator 仍被钉在默认项目；不再让"被钉住"静默通过）。
 
 1. `los_run` 新增 `operatorScope`（布尔，缺省 `false`）。为 `true` 时：适配器**要求** operator 凭据
-   （`file:packages/cli/src/mcp-serve.ts:88`），并把 `x-los-operator-token` 一并发给 `POST /chat`
-   （`file:packages/cli/src/mcp-serve.ts:102`）⇒ 网关 `isOperator=true`，
+   （`file:packages/cli/src/mcp-serve.ts:92`），并把 `x-los-operator-token` 一并发给 `POST /chat`
+   （`file:packages/cli/src/mcp-serve.ts:107`）⇒ 网关 `isOperator=true`，
    `projectId`/`workspaceRoot` 才真正生效（P5 的通路，从"绕行"变为"契约内"）。
-2. **fail-loud**：读 SSE 首个 `coordinator.intake_resolved`（`file:packages/cli/src/mcp-serve.ts:313`），
+2. **fail-loud**：读 SSE 首个 `coordinator.intake_resolved`（`file:packages/cli/src/mcp-serve.ts:385`），
    若 `ownerRepo` ≠ 调用方给的 `projectId`，返回 MCP 错误并在文本里带
    `requestedProjectId` / `ownerRepo` / `reason` / `runSpecId` / `sessionId`
-   （`file:packages/cli/src/mcp-serve.ts:333`）——把"静默落错仓"变成"响亮的错误且不丢 id"。
+   （`file:packages/cli/src/mcp-serve.ts:405`）——把"静默落错仓"变成"响亮的错误且不丢 id"。
    投影同时新增 `ownerRepo` / `requestedProjectId` / `workspaceRoot`
-   （调用点 `file:packages/cli/src/mcp-serve.ts:106`、`file:packages/cli/src/mcp-serve.ts:108`）。
-3. 契约与文档同步：`file:contracts/programmatic-agent-interface.yaml:25`（`scopeRule`）、
-   `:31`（`failLoud`）、`file:docs/operations/programmatic-agent-interface.md:64`（Cross-Project Scoping 一节）；
+   （调用点 `file:packages/cli/src/mcp-serve.ts:121`、`file:packages/cli/src/mcp-serve.ts:123`）。
+3. 契约与文档同步：`file:contracts/programmatic-agent-interface.yaml:33`（`scopeRule`）、
+   `:39`（`failLoud`）、`file:docs/operations/programmatic-agent-interface.md:86`（Cross-Project Scoping 一节）；
    测试 `file:packages/cli/src/mcp-serve.test.ts:89`（无凭据时拒绝）、`:199`（不一致时 fail-loud）。
 
 ### 6.1 一个当场抓到的形状坑（值得单独记）
@@ -161,15 +161,15 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 3. 审计与验收期间的探针 run 留在台账（`los` 3 条 + `dsfolder-fmtguard` 3 条 succeeded，
    另有 1 条 P4 停在 `phase=created`；均无 `todoId`、无文件副作用）。
 
-## 9. 后续工作：S1 已交付，S2–S4 未开工
+## 9. 后续工作：S1 / S4 已交付，S2 / S3 未开工
 
 目标：补"派活 → 盯活 → 收活"闭环，先解决 P0-2 的**超时丢 id**（这是长开发任务的实际痛点）。
 
 ### 9.1 S1 `los_runs_list`（2026-10-11 交付）
 
-`file:packages/cli/src/mcp-tools.ts:40`（工具面）、`file:packages/cli/src/mcp-serve.ts:117`（handler）、
-投影函数见 `file:packages/cli/src/mcp-serve.ts:271`；契约 `file:contracts/programmatic-agent-interface.yaml:49`；
-测试 `file:packages/cli/src/mcp-serve.test.ts:252`。
+`file:packages/cli/src/mcp-tools.ts:46`（工具面）、`file:packages/cli/src/mcp-serve.ts:135`（handler）、
+投影函数见 `file:packages/cli/src/mcp-serve.ts:343`；契约 `file:contracts/programmatic-agent-interface.yaml:58`；
+测试 `file:packages/cli/src/mcp-serve.test.ts:297`。
 工具面常量因此拆到 `file:packages/cli/src/mcp-tools.ts:1`（`mcp-serve.ts` 当时涨到 501 行，
 撞上 `tools/check-structure.sh` 的"新文件 >500 行"门禁；拆分后 415 行）。
 
@@ -202,12 +202,35 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 | 验证 / 审批 / 恢复 | `POST /runs/:id/verify`、`/approve`、`/recover`、`/revise-plan`、`/answer` 均已存在 | `file:packages/gateway/src/routes/orchestration/run-routes.ts:420` |
 | 取消 | **没有** `/runs/:id/cancel`；只有 task 级 `POST /tasks/:id/cancel` | `file:packages/gateway/src/route-admission-inventory.ts:260` |
 
-交付顺序（每步独立可验收）：
+### 9.3 S4 `los_run(detach)`（2026-10-11 交付）
 
-- **S1 `los_runs_list`** — 已交付，见 §9.1。
+`file:packages/cli/src/mcp-serve.ts:89`（读参）、`file:packages/cli/src/mcp-tools.ts:40`（工具面）、
+`file:packages/cli/src/mcp-serve.ts:264`（`readUntilEvent`：读到条件即 abort）、
+`file:packages/cli/src/mcp-serve.ts:297`（`runIdentity`）、停条件 `file:packages/cli/src/mcp-serve.ts:118`；
+契约 `file:contracts/programmatic-agent-interface.yaml:25`（`detachRule`）；
+测试 `file:packages/cli/src/mcp-serve.test.ts:252`（含负向控制：不该读到的 `done` 事件绝不被读）、
+`:280`（detach 下守卫照旧）。
+
+- 语义：`detach=true` 时读够**完整分派身份**（`runSpecId` + `sessionId` + `taskRunId`）即 abort 连接，
+  返回 `status="detached"` / `detached=true`；运行继续（§9.2 实测）。
+- **验收（真机）**：`/tmp/los-detach-probe.mjs` —— 派发耗时 **101ms**，返回
+  `runSpecId=run-session-1791684961210-1791684961219`、`ownerRepo=dsfolder-fmtguard`、
+  `workspaceRoot=…/dsfolder/fmtguard`、`text=undefined`（没等运行结束）；
+  随后 `los_run_state` 轮询到 `phase=succeeded` ⇒ **P0-2 的"超时丢 id"从根上消失**（不再依赖 S1 的事后找回）。
+- **又一次同型形状坑（第三次）**：首跑返回 `status=detached` 但 `runSpecId=undefined`。原因是
+  真实流里 `runSpecId` **只在 `coordinator.intake_resolved` 的 `payload.runSpecId` 内**，
+  而 `session` 事件只有 `{sessionId, taskRunId}`（`done` 才是扁平且 id 齐全）。
+  修法：抽出 `runIdentity()` 作为唯一取 id 口径，并按"三个 id 齐全"作为停条件——
+  与 §6.1 是同一类错误的第三次出现（信封 vs 扁平），已用测试锁住真实形状。
+
+### 9.4 交付顺序（更新）
+
+- **S1 `los_runs_list`** — 已交付，见 §9.1（bookmark `feat/mcp-runs-list`）。
 - **S2 `los_run_verify` / `los_run_approve`**：薄包装 `POST /runs/:id/verify|approve`（operator 门禁）。
-  验收：§2 P4 那条停在 `phase=created` 的 standard 契约 run 能被推进（目前是死胡同）。
+  验收：§2 P4 那条停在 `phase=created` 的 standard 契约 run 能被推进（目前是死胡同）。**未开工**。
 - **S3 `los_run_cancel`**：以 `taskRunId` 为入参包装 `POST /tasks/:id/cancel`（必须先确认该路由的
-  权限门与语义：取消的是 task run 还是整个 run spec）。
-- **S4 `los_run(detach)`**：按 §9.2 的结论，在适配器侧读完 `session` 事件即断开并立即返回 ids。
-  验收：派发后立刻拿到 `runSpecId`、且该 run 事后仍 `succeeded`；`los_run_state` 全程可读。
+  权限门与语义：取消的是 task run 还是整个 run spec）。**未开工**。
+- **S4 `los_run(detach)`** — 已交付，见 §9.3。
+
+残留：`mcp-serve.ts` 现为 487 行，距 `check-structure.sh` 的 500 行门禁只剩 13 行；
+下一次再往该文件加逻辑应先把投影/事件读取拆成独立模块（`mcp-tools.ts` 是同一手法的先例）。

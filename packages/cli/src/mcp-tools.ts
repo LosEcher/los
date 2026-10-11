@@ -20,7 +20,8 @@ export const _TOOLS = [
     name: 'los_run',
     description: 'Run LOS through its gateway and return persisted run identifiers plus the terminal result. '
       + 'projectId/workspaceRoot take effect only with operatorScope=true (requires an operator credential); '
-      + 'without it the gateway pins the run to its default project and this tool fails loudly rather than reporting success.',
+      + 'without it the gateway pins the run to its default project and this tool fails loudly rather than reporting success. '
+      + 'detach=true returns as soon as the run is registered (no long-held stream) and leaves the run executing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -36,6 +37,7 @@ export const _TOOLS = [
         dedupeKey: { type: 'string' },
         runContract: { type: 'object' },
         operatorScope: { type: 'boolean', default: false },
+        detach: { type: 'boolean', default: false },
       },
       required: ['prompt', 'projectId'],
     },

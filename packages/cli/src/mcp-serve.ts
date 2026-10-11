@@ -38,6 +38,8 @@ const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
 const MAX_ERROR_TEXT = 500;
 const MAX_RESULT_TEXT = 20_000;
 const MAX_PROMPT_PREVIEW = 120;
+/** 终态事件：出现即表示这次运行已经收口（无需继续持连接）。 */
+const TERMINAL_EVENTS = new Set(['done', 'blocked', 'cancelled', 'error']);
 
 export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCPAdapter {
   const gatewayUrl = (options.gatewayUrl ?? process.env.LOS_GATEWAY_URL ?? DEFAULT_GATEWAY).replace(/\/+$/, '');
@@ -49,7 +51,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
 
   async function request(
     path: string,
-    requestOptions: { method?: string; body?: JsonRecord; projectId: string; operator?: boolean; idempotent?: boolean },
+    requestOptions: { method?: string; body?: JsonRecord; projectId: string; operator?: boolean; idempotent?: boolean; signal?: AbortSignal },
   ): Promise<Response> {
     if (requestOptions.operator && !operatorToken) {
       throw new Error('LOS_OPERATOR_TOKEN is required for operator-controlled MCP tools');
@@ -67,6 +69,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       method: requestOptions.method ?? 'GET',
       headers,
       body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined,
+      signal: requestOptions.signal,
     });
   }
 
@@ -83,6 +86,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       const projectId = requiredString(args.projectId, 'projectId');
       const toolMode = optionalString(args.toolMode) ?? 'read-only';
       const operatorScope = optionalBoolean(args.operatorScope, 'operatorScope') ?? false;
+      const detach = optionalBoolean(args.detach, 'detach') ?? false;
       if (toolMode !== 'read-only' && toolMode !== 'project-write') throw new Error('toolMode must be read-only or project-write');
       if (toolMode === 'project-write' && !operatorToken) throw new Error('LOS_OPERATOR_TOKEN is required for project-write MCP runs');
       if (operatorScope && !operatorToken) throw new Error('LOS_OPERATOR_TOKEN is required for operator-scoped MCP runs');
@@ -99,15 +103,29 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
         dedupeKey: optionalString(args.dedupeKey),
         runContract: optionalRecord(args.runContract),
       });
-      const response = await request('/chat', { method: 'POST', body, projectId, operator: operatorScope, idempotent: true });
-      const raw = await response.text();
-      if (!response.ok) throw new Error(redact(`LOS gateway ${response.status}: ${raw.slice(0, MAX_ERROR_TEXT)}`, authToken, operatorToken));
-      const events = parseSSE(raw);
+      const controller = new AbortController();
+      const response = await request('/chat', {
+        method: 'POST', body, projectId, operator: operatorScope, idempotent: true, signal: controller.signal,
+      });
+      if (!response.ok) {
+        const raw = await response.text();
+        throw new Error(redact(`LOS gateway ${response.status}: ${raw.slice(0, MAX_ERROR_TEXT)}`, authToken, operatorToken));
+      }
+      const events = detach
+        ? await readUntilEvent(response, controller, seen => {
+          if (seen.some(item => TERMINAL_EVENTS.has(item.event))) return true;
+          const ids = runIdentity(seen);
+          return Boolean(ids.sessionId && ids.runSpecId && ids.taskRunId);
+        })
+        : parseSSE(await response.text());
       const scope = projectIntakeScope(events);
       const projection = projectRunEvents(events);
       assertResolvedProjectScope({ requestedProjectId: projectId, operatorScope, scope, projection });
+      const terminal = events.some(item => TERMINAL_EVENTS.has(item.event));
       return compact({
         ...projection,
+        status: detach && !terminal ? 'detached' : projection.status,
+        detached: detach ? !terminal : undefined,
         ownerRepo: scope.ownerRepo,
         requestedProjectId: scope.requestedProjectId,
         workspaceRoot: scope.workspaceRoot,
@@ -235,15 +253,69 @@ function parseSSE(raw: string): Array<{ event: string; data: JsonRecord }> {
   return events;
 }
 
+/**
+ * 流式读 SSE，直到 `stopWhen` 命中（或流结束），随后**主动断开**连接。
+ *
+ * 这是 `los_run(detach)` 的机制：宿主可以在工具超时前拿到 id 就撤，不必等整条流。
+ * 安全性有实测依据（2026-10-11）：读到 `session` 事件后 abort，运行照常
+ * `run_specs.status=succeeded` / `task_runs.status=succeeded` —— **执行不依赖 SSE 消费者**。
+ * 证据与探针见 `docs/operations/2026-10-11-dsh-los-cross-project-dispatch-audit.md` §9.2。
+ */
+async function readUntilEvent(
+  response: Response,
+  controller: AbortController,
+  stopWhen: (events: Array<{ event: string; data: JsonRecord }>) => boolean,
+): Promise<Array<{ event: string; data: JsonRecord }>> {
+  const reader = response.body?.getReader();
+  if (!reader) return parseSSE(await response.text());
+  const decoder = new TextDecoder();
+  let raw = '';
+  for (;;) {
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch {
+      break; // abort 之后读取会抛；此时已有足够事件
+    }
+    if (chunk.done) break;
+    raw += decoder.decode(chunk.value, { stream: true });
+    if (stopWhen(parseSSE(raw))) break;
+  }
+  controller.abort();
+  return parseSSE(raw);
+}
+
+/**
+ * 分派身份（三个 id）——**这是 detach 与投影的唯一取 id 口径**。
+ *
+ * 为什么必须跨事件取（2026-10-11 实测形状）：
+ *   · `runSpecId` 只在 `coordinator.intake_resolved` 的 `payload.runSpecId` 里，早于终态出现；
+ *   · `session` 事件只有 `{sessionId, taskRunId, …}`，**没有 runSpecId**；
+ *   · 终态 `done` 事件是扁平的，三个 id 齐全。
+ * 先前的实现只读终态 + `session`，于是 detach（停在 `session`）拿不到 runSpecId —— 探针首跑即暴露。
+ */
+function runIdentity(events: Array<{ event: string; data: JsonRecord }>): { sessionId?: string; runSpecId?: string; taskRunId?: string } {
+  const terminal = [...events].reverse().find(item => TERMINAL_EVENTS.has(item.event))?.data ?? {};
+  const session = events.find(item => item.event === 'session')?.data ?? {};
+  const task = events.find(item => item.event === 'task')?.data ?? {};
+  const intake = events.find(item => item.event === 'coordinator.intake_resolved')?.data ?? {};
+  const intakePayload = optionalRecord(intake.payload) ?? {};
+  return {
+    sessionId: optionalString(terminal.sessionId) ?? optionalString(session.sessionId) ?? optionalString(intake.sessionId),
+    runSpecId: optionalString(terminal.runSpecId) ?? optionalString(intakePayload.runSpecId) ?? optionalString(intake.runSpecId),
+    taskRunId: optionalString(terminal.taskRunId) ?? optionalString(session.taskRunId) ?? optionalString(task.taskRunId),
+  };
+}
+
 function projectRunEvents(events: Array<{ event: string; data: JsonRecord }>): JsonRecord {
-  const terminal = [...events].reverse().find(item => ['done', 'blocked', 'cancelled', 'error'].includes(item.event));
-  const session = events.find(item => item.event === 'session');
+  const terminal = [...events].reverse().find(item => TERMINAL_EVENTS.has(item.event));
   const data = terminal?.data ?? {};
+  const identity = runIdentity(events);
   return compact({
     status: terminal?.event ?? 'unknown',
-    sessionId: optionalString(data.sessionId) ?? optionalString(session?.data.sessionId),
-    runSpecId: optionalString(data.runSpecId) ?? optionalString(session?.data.runSpecId),
-    taskRunId: optionalString(data.taskRunId) ?? optionalString(session?.data.taskRunId),
+    sessionId: identity.sessionId,
+    runSpecId: identity.runSpecId,
+    taskRunId: identity.taskRunId,
     traceId: optionalString(data.traceId),
     requestId: optionalString(data.requestId),
     runSpecStatus: optionalString(data.runSpecStatus),
