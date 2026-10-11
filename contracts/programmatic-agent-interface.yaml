@@ -36,6 +36,13 @@ tools:
       workspaceRoot therefore take effect only when operatorScope=true, which
       requires the adapter operator credential and forwards the operator header to
       POST /chat. workspaceRoot additionally requires operator scope at the gateway.
+    nextActionRule: >
+      When the terminal event is blocked or error, the adapter also reads
+      GET /runs/{runSpecId}/state and returns its action / summary / blockers as
+      nextAction, so a caller learns which tool to call next (for example
+      run_verification) instead of only that the run stopped. The extra read uses
+      ordinary access auth, is skipped for success terminals, and its failure is
+      reported as nextActionError without discarding the run result.
     failLoud: >
       The adapter reads coordinator.intake_resolved from the run stream and returns
       an MCP error when the resolved ownerRepo differs from the requested projectId,
@@ -55,6 +62,8 @@ tools:
       - requestedProjectId
       - workspaceRoot
       - detached
+      - nextAction
+      - nextActionError
   - name: los_runs_list
     purpose: >
       discover run specs through GET /runs so a caller can recover a runSpecId it

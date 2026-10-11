@@ -54,6 +54,12 @@ Use the host's secret/environment mechanism.
 | `los_task_cancel` | `taskRunId`, `projectId` | `POST /tasks/:id/cancel` | access and operator tokens (the adapter is stricter than the route) |
 | `los_operator_control` | `sessionId`, `projectId`, `type` | `POST /sessions/:id/operator-events` | access and operator tokens |
 
+When a run ends `blocked` or `error`, `los_run` also reads the run state and
+returns `nextAction` (`action`, `summary`, bounded `blockers`) so the caller knows
+which tool to call next — for example `action: "run_verification"` — instead of
+only learning that the run stopped. Success terminals skip that extra read, and a
+failed read is reported as `nextActionError` rather than swallowing the result.
+
 `los_runs_list` exists because an MCP host can cut a long `los_run` at its tool
 timeout, which loses the `runSpecId`. Pass the `traceId` the run was started
 with (plus `projectId`) to recover it; `status` and `limit` (default 10, maximum

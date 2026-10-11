@@ -12,6 +12,7 @@ import {
   optionalString,
   parseSSE,
   projectIntakeScope,
+  projectNextAction,
   projectRunEvents,
   projectRunList,
   projectVerificationResult,
@@ -133,13 +134,28 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       const projection = projectRunEvents(events);
       assertResolvedProjectScope({ requestedProjectId: projectId, operatorScope, scope, projection });
       const terminal = events.some(item => _TERMINAL_EVENTS.has(item.event));
+      // blocked/error 终态只给"卡住了"是不够的：把 state 的 action/summary/blockers 一起带上，
+      // 调用方才知道下一步该调哪个工具（例如 run_verification）。
+      const status = detach && !terminal ? 'detached' : projection.status;
+      let nextAction: JsonRecord | undefined;
+      let nextActionError: string | undefined;
+      if ((status === 'blocked' || status === 'error') && projection.runSpecId) {
+        try {
+          nextAction = projectNextAction(await requestJson(`/runs/${encodeURIComponent(String(projection.runSpecId))}/state`, { projectId }));
+        } catch (error) {
+          // 富化失败不能吞掉已经拿到的运行结果；如实带上原因
+          nextActionError = (error instanceof Error ? error.message : String(error)).slice(0, _MAX_ERROR_TEXT);
+        }
+      }
       return compact({
         ...projection,
-        status: detach && !terminal ? 'detached' : projection.status,
+        status,
         detached: detach ? !terminal : undefined,
         ownerRepo: scope.ownerRepo,
         requestedProjectId: scope.requestedProjectId,
         workspaceRoot: scope.workspaceRoot,
+        nextAction,
+        nextActionError,
       });
     }
 

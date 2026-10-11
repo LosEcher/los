@@ -283,5 +283,15 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 
 §5 缺口表的 P0-2 / P0-3 / P1-1 三行随之更新；**P0-1 已在 §6 修复**。
 
+### 9.7 收尾小项（2026-10-11）
+
+| 项 | 状态 | 落点 / 说明 |
+| --- | --- | --- |
+| blocked/error 终态附带回传**下一步 action** | 已交付 | 投影 `file:packages/cli/src/mcp-projections.ts:291`、富化 `file:packages/cli/src/mcp-serve.ts:144`、契约 `file:contracts/programmatic-agent-interface.yaml:39`、测试 `file:packages/cli/src/mcp-serve.test.ts:476` 起三条（含"成功终态不多花一次 state 调用"的负向控制）。真机：error 终态回传 `nextAction.action="run_verification"` + 结构化 blockers（ids 带上限与 `truncated` 标记） |
+| `recover` / `revise-plan` 暴露为工具 | 见 §9.8 | 同批交付 |
+| 桌面板 web 重启插件的 host-smoke | 未做 | 插件 `dsplugins/dsh-web-host-restart` 的 `apply()` 用例仍是**显式 skip**（`@deepseek-ai/dsh-tools` 由宿主 boot 时提供，不是 profile 依赖）；本仓规范的补法是 `dsh-fmtguard/test/host-smoke.test.mjs` 那种"定位运行中宿主库再加载"的门禁 |
+| run 级取消 / state 识别 task-cancelled | 未做（产品侧） | 见 §9.5 残留；需网关加路由或让 state 把"全任务已取消"识别成终态，属 ADR 级决策 |
+| wiring baseline 2 条 fixable | 未动 | 属 `packages/agent` 的漂移（`--update-baseline` 会把 telegram/wechat 的手写注释一起降级），不并入本批 |
+
 残留：`mcp-serve.ts` 现为 487 行，距 `check-structure.sh` 的 500 行门禁只剩 13 行；
 下一次再往该文件加逻辑应先把投影/事件读取拆成独立模块（`mcp-tools.ts` 是同一手法的先例）。

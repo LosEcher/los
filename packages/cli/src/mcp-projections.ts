@@ -269,3 +269,41 @@ export function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.filter((item): item is string => typeof item === 'string');
 }
+
+/** id 列表上限：blocked/error 结果里回传的 id 列表只用于定位，不需要全量。 */
+export const _MAX_ID_LIST = 20;
+export const _MAX_REASONS = 10;
+export const _MAX_BLOCKER_TEXT = 200;
+
+/** 截断 id 列表并如实报告是否截断（不静默丢信息）。 */
+export function capIds(value: unknown, limit = _MAX_ID_LIST): { ids: string[]; truncated: boolean } | undefined {
+  const ids = stringArray(value);
+  if (!ids) return undefined;
+  return { ids: ids.slice(0, limit), truncated: ids.length > limit };
+}
+
+/**
+ * `los_run_state` 返回里的"下一步"部分——`los_run` 在 blocked/error 终态时附带回传。
+ *
+ * 为什么需要：终态只给 `blockedVerificationRecordIds` 时，调用方知道"卡住了"却不知道
+ * **下一步该调哪个工具**；`action`（如 `run_verification`）才是可执行的指令。
+ */
+export function projectNextAction(state: unknown): JsonRecord {
+  const value = optionalRecord(state) ?? {};
+  const blockers = Array.isArray(value.blockers) ? value.blockers : [];
+  return compact({
+    phase: optionalString(value.phase),
+    action: optionalString(value.action),
+    summary: optionalString(value.summary),
+    blockers: blockers.map(row => {
+      const blocker = optionalRecord(row) ?? {};
+      return compact({
+        kind: optionalString(blocker.kind),
+        message: optionalString(blocker.message)?.slice(0, _MAX_BLOCKER_TEXT),
+        ids: capIds(blocker.ids),
+      });
+    }),
+    reasons: stringArray(optionalRecord(value.recovery)?.reasons)?.slice(0, _MAX_REASONS),
+  });
+}
+

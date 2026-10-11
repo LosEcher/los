@@ -473,6 +473,86 @@ test('los_task_cancel refuses before HTTP when the adapter has no operator crede
   assert.equal(called, false);
 });
 
+test('a blocked los_run carries the next action from the state projection', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    fetchImpl: captureFetch(requests, request => {
+      if (new URL(request.url).pathname === '/chat') {
+        return new Response(sse(
+          intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los', runSpecId: 'run-a' }),
+          ['session', { sessionId: 'session-a', taskRunId: 'task-a' }],
+          ['blocked', {
+            sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a', runSpecStatus: 'blocked',
+            blockedVerificationRecordIds: ['verification-a'],
+          }],
+        ), { status: 200 });
+      }
+      return Response.json({
+        phase: 'created',
+        action: 'run_verification',
+        summary: 'run is created; next action run_verification; blockers=1',
+        blockers: [{ kind: 'verification', message: 'required verification records are not satisfied', ids: ['verification-a'] }],
+        recovery: { reasons: [] },
+      });
+    }),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run', { prompt: 'x', projectId: 'los' }));
+
+  assert.equal(result.status, 'blocked');
+  assert.equal(requests.length, 2);
+  assert.equal(new URL(requests[1]!.url).pathname, '/runs/run-a/state');
+  assert.equal(requests[1]?.headers.get('x-los-operator-token'), null);
+  const nextAction = asRecord(result.nextAction);
+  assert.equal(nextAction.action, 'run_verification');
+  assert.equal((nextAction.blockers as Array<{ kind: string }>)[0]?.kind, 'verification');
+  assert.equal(result.nextActionError, undefined);
+});
+
+test('a completed los_run does not spend an extra state call', async () => {
+  const requests: Request[] = [];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    fetchImpl: captureFetch(requests, () => new Response(sse(
+      intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los', runSpecId: 'run-a' }),
+      ['session', { sessionId: 'session-a', taskRunId: 'task-a' }],
+      ['done', { sessionId: 'session-a', runSpecId: 'run-a', taskRunId: 'task-a', runSpecStatus: 'succeeded', text: 'ok' }],
+    ), { status: 200 })),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run', { prompt: 'x', projectId: 'los' }));
+  assert.equal(result.status, 'done');
+  assert.equal(result.nextAction, undefined);
+  assert.equal(requests.length, 1);
+});
+
+test('a failed next-action lookup is reported without discarding the run result', async () => {
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    // 注意：适配器以 fetchImpl(url, init) 调用（不是 Request 对象）⇒ 用 captureFetch 包一层
+    fetchImpl: captureFetch([], request => {
+      if (new URL(request.url).pathname === '/chat') {
+        return new Response(sse(
+          intakeEnvelope({ reason: 'explicit_project', ownerRepo: 'los', requestedProjectId: 'los', runSpecId: 'run-a' }),
+          ['session', { sessionId: 'session-a', taskRunId: 'task-a' }],
+          ['error', { sessionId: 'session-a', runSpecId: 'run-a', message: 'boom' }],
+        ), { status: 200 });
+      }
+      return new Response('state down', { status: 500 });
+    }),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_run', { prompt: 'x', projectId: 'los' }));
+  assert.equal(result.status, 'error');
+  assert.equal(result.message, 'boom');
+  assert.equal(result.nextAction, undefined);
+  assert.match(String(result.nextActionError), /LOS gateway 500/);
+});
+
 test('unknown tools fail without touching the gateway', async () => {
   const adapter = _createLosMCPAdapter({ fetchImpl: unreachableFetch });
   const response = await callTool(adapter, 'los_unknown', {});
