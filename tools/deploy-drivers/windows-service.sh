@@ -105,6 +105,58 @@ POWERSHELL
     grep -q '^stamped$' "$SYNC_OUT" || die "version stamp failed (see $SYNC_OUT)"
     grep -q '^probe=True$' "$SYNC_OUT" || die "content probe missing: $PROBE did not land (see $SYNC_OUT)"
     log "sync ok (extracted, stamped=$TARGET, probe present)"
+
+    # 剪枝：删掉"节点上有、这次清单里没有"的源文件。
+    #
+    # 为什么必须有：tar 只添加/覆盖，**从不删除**。Linux 侧一直有这一步，Windows 侧没有，
+    # 于是两台 Windows 节点各自积了不同批次的陈旧文件（被上游删除的源文件，外加有人手工解开的
+    # nssm 源码树 —— 实测 win-los 45 个）。后果不是"多占几 MB"：内容摘要覆盖每个源文件，
+    # 所以节点的内容**永远不等于**目标。以前 Windows 没有摘要，这件事完全不可见；
+    # 2026-10-11 摘要落地后，两台节点立刻报出各自不同、且都不等于目标的 digest。
+    # 清单来自 tar 自己（`deploy-to-remote.sh tarball` 落下的 `*.list`），不可能与包内容漂移。
+    scp "${SSHO[@]}" "$TAR_PATH.list" "$ALIAS:$WIN_TMP/los-shipped.list" >/dev/null 2>&1 \
+      || die "cannot upload the shipped manifest"
+    ps_script prune "$WIN_HOME" 'C:\Windows\Temp\los-shipped.list' <<'POWERSHELL' | LC_ALL=C tr -d '\r' | tee "/tmp/win-prune-$NODE_ID.txt"
+param([string]$WinHome, [string]$ListPath)
+$ErrorActionPreference='Continue'
+$ProgressPreference='SilentlyContinue'
+$shipped = @(Get-Content $ListPath | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+Write-Output ("shipped=" + $shipped.Count)
+if ($shipped.Count -eq 0) { Write-Output "prune=SKIP (empty manifest, deleting nothing)"; exit 0 }
+$keep = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+foreach ($s in $shipped) { [void]$keep.Add($s) }
+# 与 Linux 侧剪枝的 find 保持同一套剪枝目录与排除项
+$prunedDirs = @('node_modules','dist','.turbo','.los','.los-runtime')
+$present = New-Object 'System.Collections.Generic.List[string]'
+foreach ($tree in @('tools','deploy','packages','contracts')) {
+  $base = Join-Path $WinHome $tree
+  if (-not (Test-Path $base)) { continue }
+  foreach ($f in (Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+    $parts = $f.FullName.Substring($WinHome.Length + 1) -split '[\\/]'
+    $skip = $false
+    foreach ($p in $parts) { if ($prunedDirs -contains $p) { $skip = $true; break } }
+    if ($skip) { continue }
+    if ($f.Name.EndsWith('.tsbuildinfo')) { continue }
+    $present.Add(($parts -join '/'))
+  }
+}
+Write-Output ("present=" + $present.Count)
+$stale = @($present | Where-Object { -not $keep.Contains($_) })
+Write-Output ("prune=" + $stale.Count + " stale file(s) not in the shipped manifest")
+if ($stale.Count -gt 500) { Write-Output "prune=ABORT (stale count exceeds 500)"; exit 1 }
+# 安全轨：绝不删除已安装依赖、版本库或配置（与 Linux 侧同一条）
+$unsafe = @($stale | Where-Object { $_ -match '(^|/)(node_modules|\.git|\.env)(/|$)' })
+if ($unsafe.Count -gt 0) { Write-Output ("prune=ABORT unsafe path: " + $unsafe[0]); exit 1 }
+$removed = 0
+foreach ($rel in $stale) {
+  try { Remove-Item -LiteralPath (Join-Path $WinHome ($rel -replace '/','\')) -Force -ErrorAction Stop; $removed++ }
+  catch { Write-Output ("prune_keep=" + $rel) }
+}
+Write-Output ("prune_removed=" + $removed)
+POWERSHELL
+    grep -q '^prune=ABORT' "/tmp/win-prune-$NODE_ID.txt" \
+      && die "stale-file prune aborted (see /tmp/win-prune-$NODE_ID.txt)"
+    log "prune ok ($(grep -m1 '^prune=' "/tmp/win-prune-$NODE_ID.txt" | cut -d= -f2-), removed $(grep -m1 '^prune_removed=' "/tmp/win-prune-$NODE_ID.txt" | cut -d= -f2-))"
     ;;
   install)
     # 依赖安装。Windows 上没有 workspace 链接的自动修复：pnpm 把 workspace 包链接进

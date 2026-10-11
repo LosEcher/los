@@ -79,6 +79,23 @@ if [[ "$PLAN" -eq 0 ]]; then
   trap 'rm -rf "$LOCK"' EXIT
 fi
 
+# ── 目标来源警告：摘要取自网关**工作树** ─────────────────────
+# 部署走内容同步、不依赖 git push，所以"目标"是工作树的快照 —— 于是**未提交的改动会移动目标**。
+# 2026-10-11 实测：另一个会话在本 checkout 里改了两个 packages/agent 源文件，摘要在两次探测之间
+# 就变了，plan 自相矛盾（表头的 target 与 local 节点的 digest 不等）；更危险的是可能把别人的
+# 未完成改动滚到全机队。这里显式报出来 —— 只警告不阻断：操作者可能正是有意滚一个未提交的修复。
+dirty_covered_files() {
+  local paths='tools deploy packages contracts package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json'
+  git -C "$ROOT" status --porcelain -- $paths 2>/dev/null | cut -c4- | LC_ALL=C sort \
+    | comm -12 - <(node "$ROOT/tools/deployable-content.mjs" --files | LC_ALL=C sort)
+}
+DIRTY_COVERED="$(dirty_covered_files | wc -l | tr -d ' ')"
+if [ "${DIRTY_COVERED:-0}" -gt 0 ]; then
+  warn "the gateway working tree has $DIRTY_COVERED changed file(s) inside the digest's scope:"
+  dirty_covered_files | sed 's/^/  [rollout]   /' >&2
+  warn "target '$TARGET' is a snapshot of a dirty tree — it moves if those files change, and the fleet would then run uncommitted work"
+fi
+
 # ── preflight：控制面不健康就不要开跑（它既 verify 不了也 promote 不了）──
 preflight() {
   local h
