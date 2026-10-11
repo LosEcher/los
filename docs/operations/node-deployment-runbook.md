@@ -77,12 +77,28 @@ a test suite or writing a local SQLite WAL silently **moved the fleet target**, 
 move the producer rather than extending the list — the list exists as a backstop, and
 a covered-but-not-shipped file makes convergence impossible (loudly, not silently).
 
-**A rollout freezes its payload once.** `tools/los-fleet-rollout.sh` builds the ship
-tarball at the start, extracts it to `.los-runtime/rollouts/payload-latest-tree`, and
-defines the target as *that snapshot's* digest; every node then receives the same
-bytes (`LOS_DEPLOY_TARBALL`). This is what makes mid-rollout edits harmless instead
-of merely detectable: without it, each node packed its own tarball at its own turn
-and the target was computed before any of them.
+**A rollout freezes its payload once, from a revision.** `tools/los-fleet-rollout.sh`
+builds the ship tarball at the start by archiving **`main@origin`** (`git archive`, so
+only tracked content can enter), extracts it to
+`.los-runtime/rollouts/payload-latest-tree`, and defines the target as *that
+snapshot's* digest; every node then receives the same bytes (`LOS_DEPLOY_TARBALL`).
+
+Two properties come from this, and they are the point:
+
+- **the working tree is not the content.** A dirty, branchy or stale checkout no
+  longer decides what the fleet runs — the named revision does. "The fleet runs what
+  is merged" stops being a property you approximate by checking whether a tree is
+  dirty, and becomes the default behaviour. (The tree still decides *which rollout
+  code* runs, so run rolls from a tree that is near `main`.)
+- **mid-rollout edits cannot split the fleet.** Each node used to pack its own tarball
+  at its own turn, with the target computed before any of them; now the bytes are
+  fixed before the first node, so a writer active during a rollout cannot leave the
+  early nodes on one revision and the later ones on another.
+
+`LOS_ROLLOUT_SOURCE=worktree` opts into the old behaviour (ship what is on disk) for a
+deliberate hotfix roll; that mode keeps the dirty-tree gate and the "not
+`main@origin`" warning. `LOS_ROLLOUT_REVISION=<rev>` picks a different revision.
+
 
 **The target is a snapshot of the gateway's working tree**, not of a commit:
 `tools/los-fleet-rollout.sh` computes it with `bash tools/los.sh build-version` in
