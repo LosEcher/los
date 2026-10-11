@@ -77,11 +77,11 @@ DSH 能调 los 做分析与开发、能读回执行证据；但 `los_run` 的 `p
 | --- | --- | --- |
 | P0-1 | 跨项目**静默落错仓**（不是报错，是"以为在 A 仓其实改了 B 仓"） | 已在 §6 修（operatorScope + fail-loud） |
 | P0-2 | 长任务被上层截断且丢 `runSpecId` | **已修**：`los_run(detach)` 在 id 齐全时即返回（§9.3，实测 101ms），`los_runs_list` 可按 `traceId` 事后找回（§9.1） |
-| P0-3 | 契约跑不完 | **已修**：`verify`/`approve` 已交付（§9.4，approve 正面路径实测 `plan_approved`+`scheduled`）；`recover`/`revise-plan` 仍未暴露；blocked 终态不带 `runSpecId` 的投影问题仍在 |
-| P1-1 | 无 run 发现/取消入口 | 发现（§9.1）与取消（§9.5）均已交付；残留：取消只到 task 级，run spec 不进 `cancelled`（§9.5 残留） |
-| P1-2 | 幂等假象：每次随机 `x-idempotency-key: mcp-<uuid>`，重试会重复建 run | 未修：`dedupeKey` 是另一字段，不解决重试 |
-| P1-3 | 项目登记面缺口无门禁：10 个 binding 覆盖不全，且与母仓 `workspace-registry.snapshot.json` 互不校验 | 未修：需一条"要派活的仓 ⊆ binding"机械 check |
-| P1-4 | 写入无隔离、节点不可选：`sandboxMode`/`allowedTools`/`node` 都不在 MCP 契约里 | 未修；fleet 8 个在线 executor，探针全落 `mbp-executor-1` |
+| P0-3 | 契约跑不完 | **已修**：`verify`/`approve`（§9.4）、`recover`/`revise-plan`（§9.8）、blocked/error 终态带 `runSpecId`+`nextAction`（§9.7/§9.3）均交付 |
+| P1-1 | 无 run 发现/取消入口 | 已交付：发现（§9.1）、task 级取消（§9.5）、**run 级终止**（`recover(apply=true,intent=cancel)`，§9.8 实测 `phase=cancelled`） |
+| P1-2 | 幂等假象：随机幂等键对重试无保护 | **已修**：写工具接受调用方 `idempotencyKey`（`los_run` 回退 `dedupeKey`）并作为 `x-idempotency-key`；实测同键同体两次调用返回同一个 run（库里 1 条 run spec）。缺省不再发随机键（不造假象） |
+| P1-3 | 项目登记面缺口无门禁 | **已修**：`tools/check-los-project-bindings.mjs` + 接入 `pnpm check`；硬判据=近 30 天台账出现**未绑定且非归档**项目（归档仓历史残留按登记豁免），提示=登记仓无 binding 覆盖（实测 9 个） |
+| P1-4 | 写入无隔离、节点不可选 | **一半已修**：`sandboxMode`/`allowedTools` 已透传（实测 `workspace-write` → L1/`sandboxAvailable:false`；`sandbox` → **L2 + `sandboxAvailable:true`**（检测到 OS 沙箱）；`allowedTools` 落 `run_specs.allowed_tools_json`）。**node 仍不可选**（已按设计门禁记录：见 `architecture/2026-10-11-execution-node-selection-and-remote-runs.md`——远端派发只在 scheduler 路径，且近 7 天零 agent run，故不暴露 node 参数）**：：`/chat` 完全不消费 `body.executor`（只有 scheduled-work / experiment 路由消费）⇒ 派发仍落在配置的 executor 节点（实测 `mbp-executor-1`）；适配器**有意不暴露** node 参数，避免造出 chat 路径会忽略的第二真源 |
 | P2-1 | 归因缺失：client label 只接在 `/v1`（`file:packages/gateway/src/openai-compat-route.ts:204`），MCP 走 `/chat` | 未修：只能归因到 `authenticated:shared-token` |
 | P2-2 | 声明强于事实：DSH profile 注释与 `operations/programmatic-agent-interface.md` 旧文声称 `los_run` 可直接指定 `projectId`+`workspaceRoot` | 已在 §6 同步 |
 
@@ -290,7 +290,7 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 | --- | --- | --- |
 | blocked/error 终态附带回传**下一步 action** | 已交付 | 投影 `file:packages/cli/src/mcp-projections.ts:291`、富化 `file:packages/cli/src/mcp-serve.ts:144`、契约 `file:contracts/programmatic-agent-interface.yaml:39`、测试 `file:packages/cli/src/mcp-serve.test.ts:476` 起三条（含"成功终态不多花一次 state 调用"的负向控制）。真机：error 终态回传 `nextAction.action="run_verification"` + 结构化 blockers（ids 带上限与 `truncated` 标记） |
 | `recover` / `revise-plan` 暴露为工具 | 已交付 | 见 §9.8 |
-| 桌面板 web 重启插件的 host-smoke | 未做 | 插件 `dsplugins/dsh-web-host-restart` 的 `apply()` 用例仍是**显式 skip**（`@deepseek-ai/dsh-tools` 由宿主 boot 时提供，不是 profile 依赖）；本仓规范的补法是 `dsh-fmtguard/test/host-smoke.test.mjs` 那种"定位运行中宿主库再加载"的门禁 |
+| 桌面板 web 重启插件的 host-smoke | 已交付 | `dsplugins/dsh-web-host-restart/test/host-smoke.test.mjs`：用运行中 profile 的宿主库（`~/.dsh/profiles/node_modules`）真加载 `index.mjs`、真 `defineTool` 编译、真执行只读工具 `web_host_status`（7/7、0 skip）。顺带记下两个硬要求：`defineTool` 必须有 `output.render`（否则注册期报 `reading 'render'`）；编译后 `parameters` 是 Schema 对象 |
 | run 级取消 / state 识别 task-cancelled | 已找到路径（见 §9.8） | `los_run_recover(apply=true, intent=cancel)` 把 run spec 迁到 `cancelled`；无需新增网关路由 |
 | wiring baseline 2 条 fixable | 未动 | 属 `packages/agent` 的漂移（`--update-baseline` 会把 telegram/wechat 的手写注释一起降级），不并入本批 |
 
@@ -320,3 +320,95 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 
 ⇒ 由此修正 §9.5 的残留结论：**run 级终止路径存在**，是 `recover(apply=true, intent=cancel)`，
 而不是缺失的 `/runs/:id/cancel` 路由。
+
+## 10. 任务交接与跨项目：能力与边界复核（2026-10-11）
+
+除标注 `[U]` 外均为当场实测 `[E]`。
+
+### 10.1 交接面（谁把活交给谁）
+
+| 方向 | 机制 | 状态 |
+| --- | --- | --- |
+| DSH → los | MCP 10 工具：派发 / `detach` / 续接（`sessionId`）/ 生命周期（verify·approve·recover·revise-plan）/ 取消 / 证据（state·replay·list） | 可用（本文 §6–§9.8） |
+| los 内部 | `sessionId` 续接、`session-subagents` 子代理谱系（`parent_run_spec_id` + Web 树）、Work Item/Inbox（todo→run）、plan 审批与验证门禁、`recover`/`revise-plan` | 可用（契约 `session-subagents`/`work-item` 均 `implemented` 且有消费点） |
+| los → DSH | **只到通知**：`execution_outbox` 哨兵 `dsh_event` → DSH `/los-events`（`/health` 曾见 `published=4`） | 可用，但**没有"把活交回 DSH 执行"**的通路 |
+| DSH 内部 | `subagent` / `subagent_fork`（上下文继承）+ 会话 resume；los 侧用 `dsh_session_catalog` **只读**看 DSH 会话（`cross-project-summary`，`implemented`） | 可用 |
+
+### 10.2 续接（交接原语）的边界——实测
+
+- 同一 session 累积 run：`session-1791687701996` 现有 **4 条 run spec**（首个 + 三次续接）`[E]`。
+- 每次续接都会算 **resume plan**：`coordinator.resume_plan_selected` 的 `selectionReason` 两次都是
+  **`no_recoverable_run`**（前序分别是 `cancelled` 与 `succeeded`）`[E]`。
+- 可恢复状态集合 = `{created, running, blocked, failed}`（`file:packages/gateway/src/chat-resume-plan.ts:13`）
+  ⇒ `succeeded` / `cancelled` **不在其中**，所以"上一条成功"并不构成 resume 候选 `[E]`。
+- **上下文注入规则（已定位）**：装配点是
+  `initialMessages: branchSourceMessages ?? resumedSession?.messages`
+  （`file:packages/gateway/src/chat-service.ts:320`）；只有会话**没有**消息时才回退到
+  `reconstructRecoveryContext`（`:323`）。而会话消息**只累积正常收口的 run**：
+  实测 `session-1791687701996` 的 `messages_json` 有 7 条，正好等于三条成功 run 各留
+  (user, assistant)（3+2+2）；那条 **error 终态** run 的 prompt（`BLOCK-ID`）**完全不在**里面 `[E]`。
+- 因此：前序 run 以 `error`（或中途夭折）收口 ⇒ 续接首轮 `messageCount=2`（等于全新会话）；
+  前序正常成功 ⇒ `messageCount=4`（带上一轮一问一答）`[E]`。
+- **交接配方（可操作结论）**：想"带上下文交接"，就续接一个**前序正常成功**的会话；
+  若前序是 error/中途取消，续接**不带上下文** ⇒ 必须把关键上下文写进 prompt，
+  或先用 `los_run_state` / `los_run_replay` 把证据取出来交给新会话。
+  不要用 resume plan 预测是否带上下文（`succeeded`/`cancelled` 都不在候选集里）。
+- 交接安全闸（`coordinator-resume-guard`）**已 live 验证**（2026-10-11，第二次尝试）`[E]`：
+  在**已有完成过 run 的会话** `session-1791687701996` 上先派一个重任务（8 轮多文件读取，detach），
+  趁其仍在跑时立刻用同一 sessionId 再派一次 ⇒ 第二次的流里直接出现
+  `coordinator.resume_plan_selected` → `run.resume_dispatch_suppressed` → `session.blocked`，
+  **没有 `task` 事件**；台账：plan `reason=latest_recoverable_run`、`selected=<在跑的那个 run>`、
+  `active=["task-b69a4920…"]`，抑制事件 `reason=active_task_present`，第二个 run=**blocked** 且
+  `task_runs` 计数 **0** ⇒ 重复派发被拦在任务创建之前。
+- **该闸门的可达性边界（实测）**：它只在会话**已被落盘**时才可能触发——`loadSession(sid)` 对
+  "首个 run 尚在飞的会话"返回 null（会话行在该会话第一个 run 收口时才写入），于是**根本不会走 resume 路径**。
+  实测两例：新会话首派仍在跑时续接 → 无 `resume_plan_selected`、不抑制（第二个 run 照常 `succeeded`）；
+  同一会话并发两次（同一新 sid）→ 同样无 plan 事件。⇒ "首个 run 的并发续接"不受该闸门保护 `[E]`。
+- **教训（记一笔）**：第一次竞态我读到"两个 run 都 succeeded"就准备下结论"闸门不生效"；
+  查时间戳后发现前序 run 已在续接前 0.65 s 收口，`candidates=[]` 本就正确——**差点报了个假发现**。
+
+### 10.3 跨项目边界——能到哪、到不了哪
+
+- **可派活 = 10 个 binding**（`~/.los/projects.json`）；工作区登记 **30 个仓** ⇒
+  **27 个登记仓 los 够不到** `[E]`。其中 `dsfolder` 的子仓可借 `projectId=dsfolder` + operator
+  `workspaceRoot` 变通，但归属会记成 `dsfolder`（粒度变粗，台账不再按子仓分开）。
+- 未登记仓（`cankey` / `canpad` / `lot2extension` / `wechatdp` / `deepseek-harness` / `los-memory` …）
+  **完全够不到**：显式 `projectId` 必须已绑定；只给 `workspaceRoot` 时必须在某 binding 之内 `[E]`。
+- 读：跨项目可用（`GET /runs` 全量；`state`/`replay` 跨项目）`[E]`。
+- 写：跨项目需 `operatorScope`（`projectId`/`workspaceRoot` 才生效）`[E]`；生命周期工具走
+  operator + `projectId`，跨项目可用（本轮在 `dsfolder-fmtguard` 上实测 `runs_list`/`recover`）`[E]`。
+- 登记面**已有机械门禁**（2026-10-11）：`tools/check-los-project-bindings.mjs` 对照 `~/.los/projects.json` 与工作区登记，硬失败只认"近 30 天台账里出现未绑定且**非归档**项目"；实测 10 binding / 30 登记仓 / **9 个够不到**；`run-diff` 的 43 条历史 run 按 `kind: archived` 豁免 `[E]`。
+
+### 10.4 交接面的两个实际缺口
+
+1. `dsh-los-ops` 的 `los_chat` **没有 target repo 参数**（固定 los）`[E]`——DSH 侧"顺手的 HTTP 工具"仍不能跨项目，
+   跨项目只能走 MCP 工具或 bash+operator 凭据。
+2. ~~幂等假象~~ **已在 2026-10-11 修复**：写工具接受调用方 `idempotencyKey`（`los_run` 回退 `dedupeKey`），
+   实测同键同体两次调用返回同一 run 且台账只有 1 条 `run_spec`；缺省不发随机键。
+
+## 11. 试点验证：cantool 只读审计（2026-10-11）
+
+**选题**：`cantool`（Tauri 应用：`src-tauri/` + `frontend/`）——本机常用、已绑定、工作树干净。
+
+**契约**：`mode=audit` / `executionMode=lightweight` / 1 步计划 /
+`requiredChecks=["git rev-parse --short HEAD", "test -d src-tauri"]`（命令即门禁，符合参考实现的写法）。
+
+**全链路（全部走本会话的 MCP 工具面）**：
+
+1. `los_run(projectId=cantool, operatorScope=true, detach=true, runContract=…)` —— **立刻返回**
+   `run-session-1791689336538-1791689336558`，且 `ownerRepo="cantool"`、`workspaceRoot=…/cantool`
+   ⇒ 跨项目 + 非阻塞两条同时成立。
+2. `los_run_state` —— 运行中 `action="run_verification"`，两个 blocker：verification 未满足 + `active_task`。
+3. `los_run_verify` —— 两条 required check **真执行**：`git rev-parse --short HEAD` → `21aedac42`；
+   `test -d src-tauri` → `ok`；`decision.status="succeeded"`，无 pending/failed。
+4. 台账 —— `run_specs.status=succeeded`、`task_runs.status=succeeded`（node `mbp-executor-1`）。
+
+**结论的独立核对（不看 agent 自述）**：crate 名 `cantool` ✅、前端依赖 13+29=42 ✅、
+`scripts.build="vite build"` ✅、`tauri="2"` ✅ —— 四项全部与仓库实际一致。
+
+**只读性自证**：试点前后 `git status --porcelain` 均为 **0 项**，HEAD 未变（`21aedac42`）。
+
+**这次试点覆盖到的东西**：跨项目 operatorScope 派发、`detach` 非阻塞、`runContract` 派生命令门禁、
+"派活 → 盯活 → 收活"的证据面（state / verify / 台账）。**没覆盖**：写路径（`project-write`）、
+sandbox 隔离、非默认节点——它们仍是 §5 的 P1-4 缺口。
+
