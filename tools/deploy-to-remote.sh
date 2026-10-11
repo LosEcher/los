@@ -41,6 +41,13 @@ if [ "$NODE" = "tarball" ]; then
     tools/ deploy/ packages/ contracts/ \
     package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
     || { echo "tarball build failed" >&2; exit 1; }
+  # 同时落一份**清单**（`$_out.list`）：它是"这次到底下发了哪些文件"的唯一真源，
+  # 由 tar 自己枚举，所以不可能与包内容漂移。Linux 侧的剪枝在远程重新枚举一次；
+  # Windows 驱动没有 bash，需要把这份清单传上节点才能做同样的剪枝
+  # （2026-10-11：Windows 一直没有剪枝，节点上积了 45 个陈旧文件，内容摘要与目标不符
+  #  却看不出来 —— 那时 Windows 还没有摘要）。
+  COPYFILE_DISABLE=1 tar tzf "$_out" | grep -v '/$' | LC_ALL=C sort > "$_out.list" \
+    || { echo "tarball manifest build failed" >&2; exit 1; }
   printf '%s %s\n' "$_out" "$(shasum -a 256 "$_out" | cut -d' ' -f1)"
   exit 0
 fi

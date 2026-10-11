@@ -68,6 +68,19 @@ identical digests on the same explicit list — and the fleet was then rolled on
 because the module itself is covered content. See
 `architecture/2026-10-11-cross-platform-content-identity-design.md`.
 
+**The target is a snapshot of the gateway's working tree**, not of a commit:
+`tools/los-fleet-rollout.sh` computes it with `bash tools/los.sh build-version` in
+the checkout it runs from. Two consequences worth knowing before you start a roll:
+
+- uncommitted changes inside the digest's scope **move the target**, and rolling
+  them ships somebody's work in progress to the whole fleet. The orchestrator now
+  lists those files and warns; treat the warning as a gate, not decoration.
+- `mbp-executor-1` runs from that same checkout, so it is by construction "at the
+  working tree" and will read as off-target whenever the tree has such changes.
+
+For the same reason, compare a node against the *fleet target* rather than against
+your current checkout when a concurrent editor is active.
+
 
 Current dated evidence belongs in a rollout smoke such as
 `2026-07-12-node-version-rollout.md`, not in this reusable procedure.
@@ -307,7 +320,17 @@ below is the fallback for when the driver cannot reach the node.
    ssh <alias> 'powershell -NoProfile -Command "& C:\Windows\system32\tar.exe -xzf C:\los\los-sync-<version>.tar.gz -C C:\los"'
    ```
 
-5. Stamp the version by **appending**; `run-executor-task.ps1` applies the file
+5. **Prune.** `tar` only adds and overwrites, so any source file the repository has
+   deleted since the last rollout stays on the node forever — and because the
+   content digest covers every source file, the node then *never* equals the fleet
+   target. Until 2026-10-11 the driver had no prune at all and both Windows nodes
+   had drifted (45 and 14 stale files, including an unzipped nssm source tree and
+   `packages/*/pkg.tar`). The driver now derives the manifest from the tarball
+   itself (`deploy-to-remote.sh tarball` writes `<tarball>.list`), uploads it, and
+   deletes what the node has but the manifest does not — never `node_modules`,
+   `.git` or `.env`, and never more than 500 paths at once.
+
+6. Stamp the version by **appending**; `run-executor-task.ps1` applies the file
    line by line with last-wins semantics, so appending avoids rewriting the
    non-ASCII header:
 
@@ -317,7 +340,7 @@ below is the fallback for when the driver cannot reach the node.
    Restart-Service los-executor -Force
    ```
 
-6. Verify **four** things, not three. The stamp, the service state and a source
+7. Verify **four** things, not three. The stamp, the service state and a source
    probe are all satisfiable by a node whose executor is crash-looping under
    nssm — that is exactly how `desktop-srsbe20` sat "Running", stamped with the
    new version, probe present, and never heartbeating again. Add the node's own
@@ -346,6 +369,42 @@ with `-File` (see the header of `windows-service.sh` for why `-Command -` and
   and `LC_ALL=C` matters because CLIXML error text can be in a local code page);
 - do not suppress the CLIXML error stream; it is where PowerShell reports why a
   command failed.
+
+### Node-local infrastructure stays OUT of the deployed tree
+
+The nssm wrapper is node-local (the repository does not carry the binary), so it must
+live **outside** `C:\los`:
+
+```text
+C:\los-node\nssm.exe          the service wrapper (BINARY_PATH_NAME)
+C:\los\                       the deployed tree — exactly what the tar ships
+```
+
+Keep it that way. The stale-file prune deletes everything under the covered trees
+that the shipped manifest does not list, and it cannot tell infrastructure from a
+leftover: when `tools\nssm.exe` lived inside the tree it was flagged stale on every
+sync and survived only because a running executable is locked — a sync that happened
+while the service was stopped would have deleted the wrapper and left a node that
+cannot start.
+
+To relocate a node that still has the legacy layout (2026-10-11, both Windows nodes):
+
+```powershell
+Copy-Item C:\los\tools\nssm.exe C:\los-node\nssm.exe -Force   # verify: certutil -hashfile … SHA256 on both
+sc.exe stop los-executor
+reg add HKLM\SYSTEM\CurrentControlSet\Services\los-executor /v ImagePath /t REG_EXPAND_SZ /d "C:\los-node\nssm.exe" /f
+# verify BEFORE starting: value must be exactly C:\los-node\nssm.exe (length 20, no stray characters)
+sc.exe start los-executor
+```
+
+**Do not do this with `sc config … binPath=` through a nested quoting layer** (bash →
+`cmd.exe` → PowerShell → `sc.exe`): it silently wrote a **leading space** into
+`ImagePath` (`" C:\los\tools\nssm.exe"`), which made every subsequent start fail with
+`[SC] StartService 失败 87: 参数错误` — a 15-minute outage on `desktop-r45553o` whose
+cause was invisible in `sc qc` (which only showed one extra blank). Use `reg add`, and
+assert the exact string before starting. If a start does fail, look for an **orphaned
+wrapper process** (`tasklist | findstr nssm`) — a failed start can leave one behind, and
+subsequent starts then fail until it is killed.
 
 ## macOS Nodes
 
