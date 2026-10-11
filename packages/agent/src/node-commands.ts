@@ -267,6 +267,24 @@ export async function executeNodeCommand(input: ExecuteNodeCommandInput, runtime
       });
     }
 
+    // run-check（2026-10-11）：受治理的声明式检查，在节点本地执行。
+    // 必须显式在此分支处理——否则会落到函数末尾的默认拒绝
+    // （`${command} requires an executor-side command runner`）。2026-10-11 实测就是如此：
+    // 节点侧 runtime 处理器存在、测试也直接调它通过了，但**真实路径**被默认拒绝挡下。
+    if (command === 'run-check') {
+      if (!runtime['run-check']) {
+        return await completeNodeCommand(created.commandId, {
+          status: 'denied',
+          error: 'run-check requires an executor-side command runner',
+        });
+      }
+      const runtimeResult = await runtime['run-check']({ commandId: created.commandId, input, node });
+      return await completeRuntimeNodeCommand(created.commandId, runtimeResult, {
+        node: summarizeNode(node),
+        nextAction: 'declared check executed on the owning node',
+      });
+    }
+
     return await completeNodeCommand(created.commandId, {
       status: 'denied',
       error: `${command} requires an executor-side command runner`,
