@@ -226,10 +226,36 @@ Windows nodes have no systemd, no `bash`, and no `shasum`; they run
 their SSH default shell is `cmd.exe`. `tools/deploy-to-remote.sh` is not usable
 there — on a host with WSL it silently targets WSL's filesystem instead.
 
-1. Confirm `pnpm-lock.yaml` has the same SHA-256 as the gateway host. If it
-   differs you must run a package install on the node before restarting, which
-   currently needs a manual step.
-2. Create a rollback point first (source trees only, never `node_modules`):
+The automated path is the driver, and the orchestrator runs it:
+
+```bash
+tools/los-fleet-rollout.sh --node desktop-srsbe20       # sync → install → activate → verify → promote
+```
+
+`tools/deploy-drivers/windows-service.sh <sync|install|activate|verify> <alias> C:/los <target> [node_id]`
+runs the individual steps when you need to do one by hand. The manual procedure
+below is the fallback for when the driver cannot reach the node.
+
+1. **Install the dependency graph (`install`).** `tar` ships sources only —
+   `node_modules` is never in the manifest — while the executor resolves
+   workspace packages through `packages\<pkg>\node_modules\@los\`. Any release
+   that adds or removes a workspace package therefore needs a package install
+   *before* the restart, or the node crash-loops under nssm on
+   `ERR_MODULE_NOT_FOUND` (2026-10-11: the new `@los/mcp-stdio` left both Windows
+   nodes without that link).
+   Two traps that made this look like "the machine has no toolchain":
+   - **PATH**: a non-interactive SSH session may not have `C:\Program Files\nodejs`
+     on `PATH` even though `node.exe`, `npm.cmd` and `pnpm.cmd` are installed
+     (`desktop-srsbe20` was mis-recorded for a day as "missing pnpm/corepack"
+     because of exactly this). Probe with `Test-Path`, not `where.exe`, and extend
+     `$env:Path` with `C:\Program Files\nodejs` and `%APPDATA%\npm`.
+   - **execution policy**: call the **`.cmd`** shim, not the bare name.
+     `Get-Command pnpm` prefers `pnpm.ps1`, and a non-interactive session's
+     default execution policy refuses scripts — the symptom is "pnpm is installed
+     but nothing runs".
+2. Confirm `pnpm-lock.yaml` has the same SHA-256 as the gateway host, then
+   `pnpm install --frozen-lockfile` in `C:\los`.
+3. Create a rollback point first (source trees only, never `node_modules`):
 
    ```powershell
    & C:\Windows\system32\tar.exe -czf C:\los\rollback-src-<ts>.tar.gz `
@@ -238,7 +264,7 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
      pnpm-workspace.yaml tsconfig.base.json turbo.json
    ```
 
-3. Ship and extract the same archive the Linux path builds. **Use the SSH
+4. Ship and extract the same archive the Linux path builds. **Use the SSH
    config alias, not an explicit `user@ip`** — an explicit target drops the
    alias's `IdentityFile` and the upload fails with `Permission denied`:
 
@@ -247,7 +273,7 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
    ssh <alias> 'powershell -NoProfile -Command "& C:\Windows\system32\tar.exe -xzf C:\los\los-sync-<version>.tar.gz -C C:\los"'
    ```
 
-4. Stamp the version by **appending**; `run-executor-task.ps1` applies the file
+5. Stamp the version by **appending**; `run-executor-task.ps1` applies the file
    line by line with last-wins semantics, so appending avoids rewriting the
    non-ASCII header:
 
@@ -257,10 +283,35 @@ there — on a host with WSL it silently targets WSL's filesystem instead.
    Restart-Service los-executor -Force
    ```
 
-5. Verify **by content**, because the version stamp cannot: assert a file that
-   the target revision introduced actually exists (e.g.
-   `Test-Path C:\los\packages\agent\src\governance-seed-dedupe.test.ts`), then
-   check `/health` and the registry.
+6. Verify **four** things, not three. The stamp, the service state and a source
+   probe are all satisfiable by a node whose executor is crash-looping under
+   nssm — that is exactly how `desktop-srsbe20` sat "Running", stamped with the
+   new version, probe present, and never heartbeating again. Add the node's own
+   `/health` version:
+
+   ```powershell
+   (Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 8).version
+   ```
+
+   `svc=Running` + `stamped=<target>` + `probe=True` + `health=<target>`, then the
+   registry row. Without the last one the rollout can report a dead node as
+   "safely restored to the old revision".
+
+### Writing PowerShell for these nodes
+
+The driver uploads each script to `C:\Windows\Temp\los-<step>.ps1` and runs it
+with `-File` (see the header of `windows-service.sh` for why `-Command -` and
+`-EncodedCommand` both failed). If you add scripts, keep these four constraints:
+
+- the `.ps1` must start with a **UTF-8 BOM** — Windows PowerShell 5.1 otherwise
+  decodes it with the system ANSI code page and non-ASCII comments corrupt the
+  parse (a `}` reported as an unexpected token);
+- arguments must be quoted with **double** quotes — `cmd.exe` does not treat
+  single quotes as quoting, so the value arrives with literal quotes attached;
+- strip `\r` from captured output before anchored matching (`LC_ALL=C tr -d '\r'`,
+  and `LC_ALL=C` matters because CLIXML error text can be in a local code page);
+- do not suppress the CLIXML error stream; it is where PowerShell reports why a
+  command failed.
 
 ## macOS Nodes
 
@@ -379,11 +430,13 @@ Open items:
   (the split the rollout design calls for), so it cannot be reviewed or tested in
   isolation. The macOS branch does now assert the content digest (via `sync`) and
   `/health.version` (via the registry `base_url`), which it previously did not.
-- **No content probe for Windows**, and no automated path at all for that
-  platform: Windows upgrades depend on a hand-built archive plus a file existence
-  check. `tools/deploy-drivers/windows-service.sh` also has no `install` step, so
-  a release that changes the workspace dependency graph can leave a Windows node
-  crash-looping on `ERR_MODULE_NOT_FOUND`.
+- **No content digest for Windows.** The driver now installs, and `verify` asserts
+  the node's own `/health` version (2026-10-11), so a crash-looping node can no
+  longer be reported as converged — but there is still no filesystem digest, so
+  Windows nodes never satisfy the reconciler's `digest == target` skip condition
+  and are redeployed on every rollout. A PowerShell digest would have to reproduce
+  the file list that `tools/los.sh` defines; prefer exporting that list from one
+  place over writing a second one.
 - **`.env` mode has no gate.** `sync` no longer resets it (fixed 2026-10-11), but
   nothing checks it either, so the fleet legitimately holds both `600` (macOS,
   owner-run) and `root:root 644` (Linux, so the `los` service user can read it).

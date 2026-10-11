@@ -114,6 +114,13 @@ prune, why the empty sync log pointed the investigation at the transport instead
 the macOS `install` gap that would have crash-looped the executor on the next
 restart, and the replay/negative-control evidence for each.
 
+Use `operations/2026-10-11-windows-node-recovery-and-driver-hardening.md` for the
+Windows side of the same defect family: why `desktop-srsbe20` was mis-recorded as
+"missing pnpm" (a non-interactive PATH that hides a working toolchain), the
+`install` step and per-marker `sync` assertions the driver gained, the `/health`
+assertion that stops `verify` from vouching for an nssm crash loop, and the four
+PowerShell-over-SSH traps hit while writing it.
+
 Use `operations/database-migrations.md` for migration ownership, startup
 application behavior, drift validation, and failure handling. Use
 `operations/github-mirror-recovery.md` when the secondary GitHub `main` has

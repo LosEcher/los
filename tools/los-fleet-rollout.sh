@@ -145,6 +145,12 @@ roll_one() { # node_id platform alias home privilege
   v="$(reg_version "$nid")"; st="$(reg_status "$nid")"
   case "$plat" in
     local) dg="$(bash tools/los.sh build-version | tail -1)" ;;
+    # Windows 上没有 bash，`cd C:/los && bash tools/los.sh build-version` 只会回空 —— 那是
+    # **探针不可用**，不是"节点没响应"。以前两者都渲染成 <no-response>，读起来像故障。
+    # 后果是 Windows 节点永远不满足 digest 判据、每轮都重跑驱动（保守但安全），
+    # 所以这里显式写明，并让 plan 的动作标签说真话（驱动早已自动化，"NO DRIVER — manual" 是
+    # 驱动写出来之前的旧文案）。
+    windows) dg="$(remote_digest "$alias_" "$home" "$priv")"; dg="${dg:-n/a (no bash)}" ;;
     *)     dg="$(remote_digest "$alias_" "$home" "$priv")" ;;
   esac
   dg="${dg:-<no-response>}"
@@ -158,7 +164,7 @@ roll_one() { # node_id platform alias home privilege
   if [[ "$PLAN" -eq 1 ]]; then
     local action
     case "$plat" in
-      windows) action='NO DRIVER — manual (runbook: Windows Nodes)' ;;
+      windows) action='driver: sync+install+activate+verify+promote (Windows has no content digest, so it is never skipped)' ;;
       local)   action="$([[ "$dg" = "$TARGET" ]] && echo 'restart+promote' || echo 'restart+promote (tree is the source)')" ;;
       *)       action="$([[ "$dg" = "$TARGET" ]] && echo 'restart/verify+promote' || echo 'sync+install+restart+verify+promote')" ;;
     esac
@@ -221,8 +227,12 @@ roll_one() { # node_id platform alias home privilege
         warn "  $nid: Windows driver missing ($driver)"
       else
         bash "$driver" sync     "$alias_" "$home" "$TARGET" "$nid" || rc=1
+        # install 必须在 activate 之前：tar 只搬源码，workspace 包的链接归 pnpm 管，
+        # 少了这一步新增/删除 workspace 包的发布会让节点在 nssm 下 ERR_MODULE_NOT_FOUND 崩溃循环
+        # （2026-10-11：本轮新增 @los/mcp-stdio，win-los 手工补装才恢复）。
+        [[ "$rc" -eq 0 ]] && { bash "$driver" install  "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
         [[ "$rc" -eq 0 ]] && { bash "$driver" activate "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
-        sleep 12
+        # verify 自己会等 /health 报出目标版本（内部最多 60s），这里不再睡固定时长。
         [[ "$rc" -eq 0 ]] && { bash "$driver" verify   "$alias_" "$home" "$TARGET" "$nid" || rc=1; }
         [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       fi
