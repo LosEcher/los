@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
+import { _DEFAULT_RUN_LIST, _MAX_RUN_LIST, _TOOLS } from './mcp-tools.js';
+
 type JsonRecord = Record<string, unknown>;
 type RequestId = string | number;
 
@@ -35,77 +37,7 @@ const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_GATEWAY = 'http://127.0.0.1:8080';
 const MAX_ERROR_TEXT = 500;
 const MAX_RESULT_TEXT = 20_000;
-
-const TOOLS = [
-  {
-    name: 'los_run',
-    description: 'Run LOS through its gateway and return persisted run identifiers plus the terminal result. '
-      + 'projectId/workspaceRoot take effect only with operatorScope=true (requires an operator credential); '
-      + 'without it the gateway pins the run to its default project and this tool fails loudly rather than reporting success.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        prompt: { type: 'string' },
-        projectId: { type: 'string' },
-        workspaceRoot: { type: 'string' },
-        sessionId: { type: 'string' },
-        provider: { type: 'string' },
-        model: { type: 'string' },
-        toolMode: { type: 'string', enum: ['read-only', 'project-write'], default: 'read-only' },
-        maxLoops: { type: 'integer', minimum: 1 },
-        traceId: { type: 'string' },
-        dedupeKey: { type: 'string' },
-        runContract: { type: 'object' },
-        operatorScope: { type: 'boolean', default: false },
-      },
-      required: ['prompt', 'projectId'],
-    },
-  },
-  {
-    name: 'los_run_state',
-    description: 'Read the persisted recovery-grade state projection for a LOS run.',
-    inputSchema: {
-      type: 'object',
-      properties: { runSpecId: { type: 'string' }, projectId: { type: 'string' } },
-      required: ['runSpecId', 'projectId'],
-    },
-  },
-  {
-    name: 'los_run_replay',
-    description: 'Read bounded persisted stream checkpoints and session events for a LOS run.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        runSpecId: { type: 'string' },
-        projectId: { type: 'string' },
-        since: { type: 'integer', minimum: 0 },
-        streamSince: { type: 'integer', minimum: 0 },
-        limit: { type: 'integer', minimum: 1, maximum: 500 },
-      },
-      required: ['runSpecId', 'projectId'],
-    },
-  },
-  {
-    name: 'los_operator_control',
-    description: 'Persist operator steering or follow-up for a LOS session. Requires LOS_OPERATOR_TOKEN.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionId: { type: 'string' },
-        projectId: { type: 'string' },
-        type: { type: 'string', enum: ['steering', 'followup'] },
-        instruction: { type: 'string' },
-        prompt: { type: 'string' },
-        runSpecId: { type: 'string' },
-        taskRunId: { type: 'string' },
-        reason: { type: 'string' },
-        turnBoundary: { type: 'string', enum: ['next_turn', 'immediate'] },
-        drainMode: { type: 'string', enum: ['none', 'finish_current_tool', 'finish_current_turn'] },
-      },
-      required: ['sessionId', 'projectId', 'type'],
-    },
-  },
-] as const;
+const MAX_PROMPT_PREVIEW = 120;
 
 export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCPAdapter {
   const gatewayUrl = (options.gatewayUrl ?? process.env.LOS_GATEWAY_URL ?? DEFAULT_GATEWAY).replace(/\/+$/, '');
@@ -182,6 +114,15 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       });
     }
 
+    if (name === 'los_runs_list') {
+      const projectId = requiredString(args.projectId, 'projectId');
+      const traceId = optionalString(args.traceId);
+      const status = optionalString(args.status);
+      const limit = optionalInteger(args.limit, 1, _MAX_RUN_LIST) ?? _DEFAULT_RUN_LIST;
+      const rows = await requestJson('/runs', { projectId });
+      return projectRunList(Array.isArray(rows) ? rows : [], { projectId, traceId, status, limit });
+    }
+
     if (name === 'los_run_state') {
       const runSpecId = requiredString(args.runSpecId, 'runSpecId');
       const projectId = requiredString(args.projectId, 'projectId');
@@ -232,7 +173,7 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
           serverInfo: { name: 'los-programmatic-interface', version: '0.1.0' },
         });
       }
-      if (message.method === 'tools/list') return rpcResult(message.id, { tools: TOOLS });
+      if (message.method === 'tools/list') return rpcResult(message.id, { tools: _TOOLS });
       if (message.method !== 'tools/call') return rpcError(message.id, -32601, `Method not found: ${message.method ?? '<missing>'}`);
 
       const name = optionalString(message.params?.name);
@@ -311,6 +252,42 @@ function projectRunEvents(events: Array<{ event: string; data: JsonRecord }>): J
     blockedVerificationRecordIds: Array.isArray(data.blockedVerificationRecordIds) ? data.blockedVerificationRecordIds : undefined,
     eventTypes: [...new Set(events.map(item => item.event))],
   });
+}
+
+interface RunListFilter {
+  projectId: string;
+  traceId?: string;
+  status?: string;
+  limit: number;
+}
+
+/**
+ * `los_runs_list` 的投影：过滤 → 按 `createdAt` 倒序 → 取前 `limit` 条 → 逐条裁剪。
+ *
+ * 为什么在适配器侧做：`GET /runs` 的 handler 不收任何过滤参数、直接返回 store 的默认上限
+ * （实测 50 行，`file:packages/gateway/src/routes/orchestration/run-routes.ts:95`），
+ * 且每行带**完整 prompt**——不裁剪就会把大段提示词灌进 MCP 结果。
+ */
+function projectRunList(rows: unknown[], filter: RunListFilter): JsonRecord {
+  const matched = rows
+    .map(row => optionalRecord(row) ?? {})
+    .filter(row => optionalString(row.projectId) === filter.projectId)
+    .filter(row => !filter.traceId || optionalString(row.traceId) === filter.traceId)
+    .filter(row => !filter.status || optionalString(row.status) === filter.status)
+    .sort((left, right) => String(optionalString(right.createdAt) ?? '')
+      .localeCompare(String(optionalString(left.createdAt) ?? '')));
+  const items = matched.slice(0, filter.limit).map(row => compact({
+    runSpecId: optionalString(row.id),
+    sessionId: optionalString(row.sessionId),
+    projectId: optionalString(row.projectId),
+    status: optionalString(row.status),
+    toolMode: optionalString(row.toolMode),
+    traceId: optionalString(row.traceId),
+    createdAt: optionalString(row.createdAt),
+    updatedAt: optionalString(row.updatedAt),
+    promptPreview: optionalString(row.prompt)?.slice(0, MAX_PROMPT_PREVIEW),
+  }));
+  return { matched: matched.length, returned: items.length, items };
 }
 
 interface IntakeScope {

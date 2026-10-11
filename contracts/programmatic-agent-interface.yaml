@@ -46,6 +46,22 @@ tools:
       - ownerRepo
       - requestedProjectId
       - workspaceRoot
+  - name: los_runs_list
+    purpose: >
+      discover run specs through GET /runs so a caller can recover a runSpecId it
+      lost to a client timeout. The gateway list route takes no filters and is
+      capped server-side, so the adapter filters by projectId/traceId/status and
+      bounds the result itself.
+    requiredInput: [projectId]
+    optionalInput: [traceId, status, limit]
+    output:
+      - matched
+      - returned
+      - items
+    projection: >
+      Each item carries runSpecId, sessionId, projectId, status, toolMode, traceId,
+      createdAt, updatedAt and a truncated promptPreview. Raw prompts are never
+      returned in full and the list is bounded by limit (default 10, maximum 50).
   - name: los_run_state
     purpose: read the recovery-grade state projection through GET /runs/{runSpecId}/state
     requiredInput: [runSpecId, projectId]

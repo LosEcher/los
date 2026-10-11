@@ -10,7 +10,7 @@ test('MCP adapter initializes and exposes only the contracted tools', async () =
 
   const listed = asRecord((await adapter.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))?.result);
   const names = (listed.tools as Array<{ name: string }>).map(tool => tool.name);
-  assert.deepEqual(names, ['los_run', 'los_run_state', 'los_run_replay', 'los_operator_control']);
+  assert.deepEqual(names, ['los_run', 'los_runs_list', 'los_run_state', 'los_run_replay', 'los_operator_control']);
 });
 
 test('los_run forwards scoped access context without operator credentials and projects SSE evidence', async () => {
@@ -247,6 +247,50 @@ test('los_run keeps the ordinary projection when the resolved project matches th
   assert.equal(result.isError, undefined);
   assert.equal(result.ownerRepo, 'los');
   assert.equal(result.runSpecId, 'run-a');
+});
+
+test('los_runs_list filters, bounds, and trims the gateway run list with ordinary auth', async () => {
+  const requests: Request[] = [];
+  const rows = [
+    {
+      id: 'run-old', sessionId: 's-1', projectId: 'project-a', status: 'succeeded', toolMode: 'read-only',
+      traceId: 'trace-x', prompt: 'p'.repeat(400), createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:01:00.000Z',
+    },
+    {
+      id: 'run-new', sessionId: 's-2', projectId: 'project-a', status: 'blocked', toolMode: 'read-only',
+      traceId: 'trace-x', prompt: 'newest', createdAt: '2026-02-01T00:00:00.000Z',
+    },
+    {
+      id: 'run-other-project', sessionId: 's-3', projectId: 'project-b', status: 'succeeded',
+      traceId: 'trace-x', prompt: 'other project', createdAt: '2026-03-01T00:00:00.000Z',
+    },
+    {
+      id: 'run-other-trace', sessionId: 's-4', projectId: 'project-a', status: 'succeeded',
+      traceId: 'trace-y', prompt: 'other trace', createdAt: '2026-02-02T00:00:00.000Z',
+    },
+  ];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json(rows)),
+  });
+
+  const all = toolContent(await callTool(adapter, 'los_runs_list', { projectId: 'project-a' }));
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), null);
+  assert.equal(new URL(requests[0]!.url).pathname, '/runs');
+  assert.equal(all.matched, 3);
+  assert.equal(all.returned, 3);
+  const items = all.items as Array<{ runSpecId: string; promptPreview: string }>;
+  assert.deepEqual(items.map(item => item.runSpecId), ['run-other-trace', 'run-new', 'run-old']);
+  assert.equal(items[2]?.promptPreview.length, 120);
+
+  const filtered = toolContent(await callTool(adapter, 'los_runs_list', {
+    projectId: 'project-a', traceId: 'trace-x', status: 'blocked', limit: 1,
+  }));
+  assert.equal(filtered.matched, 1);
+  assert.equal(filtered.returned, 1);
+  assert.equal((filtered.items as Array<{ runSpecId: string }>)[0]?.runSpecId, 'run-new');
 });
 
 test('unknown tools fail without touching the gateway', async () => {

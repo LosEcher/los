@@ -46,9 +46,17 @@ Use the host's secret/environment mechanism.
 | Tool | Required input | Gateway surface | Authorization |
 | --- | --- | --- | --- |
 | `los_run` | `prompt`, `projectId` | `POST /chat` | access token; `operatorScope` and `project-write` also require the operator credential |
+| `los_runs_list` | `projectId` | `GET /runs` | access token |
 | `los_run_state` | `runSpecId`, `projectId` | `GET /runs/:id/state` | access token |
 | `los_run_replay` | `runSpecId`, `projectId` | `GET /runs/:id/stream` | access token |
 | `los_operator_control` | `sessionId`, `projectId`, `type` | `POST /sessions/:id/operator-events` | access and operator tokens |
+
+`los_runs_list` exists because an MCP host can cut a long `los_run` at its tool
+timeout, which loses the `runSpecId`. Pass the `traceId` the run was started
+with (plus `projectId`) to recover it; `status` and `limit` (default 10, maximum
+50) narrow the list. `GET /runs` takes no filters and returns full prompts, so
+the adapter filters, sorts newest-first, truncates each prompt to a preview, and
+bounds the result itself.
 
 `los_run` returns a bounded terminal projection containing `sessionId`,
 `runSpecId`, `taskRunId`, trace/request ids when present, run status, terminal
@@ -110,6 +118,6 @@ pnpm check
 
 A deterministic stdio probe should start `los-mcp`, then send `initialize`,
 `notifications/initialized`, and `tools/list` to the built CLI and assert that
-the four contracted tools are present. A live run probe additionally requires
+the five contracted tools are present. A live run probe additionally requires
 a current provider compatibility decision and may consume provider quota; it
 is not implied by the protocol smoke.

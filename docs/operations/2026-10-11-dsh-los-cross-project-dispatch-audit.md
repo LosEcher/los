@@ -76,9 +76,9 @@ DSH 能调 los 做分析与开发、能读回执行证据；但 `los_run` 的 `p
 | 级别 | 缺口 | 判据/修法 |
 | --- | --- | --- |
 | P0-1 | 跨项目**静默落错仓**（不是报错，是"以为在 A 仓其实改了 B 仓"） | 已在 §6 修（operatorScope + fail-loud） |
-| P0-2 | 长任务被上层截断且丢 `runSpecId`：适配器 `await response.text()` 缓冲整条 SSE，DSH 侧 `toolCallTimeoutMs=180000` | 未修：需 async/detach 派发或流式进度；`[I]`（机制为源码推断，未见超时实录） |
-| P0-3 | 契约跑不完：standard/heavyweight 会 park，而 MCP 无 `verify`/`approve`/`cancel`/`recover`/runs 列表（路由见 `file:packages/gateway/src/route-admission-inventory.ts:237`） | 未修：P4 即活例，blocked 终态还丢 `runSpecId` |
-| P1-1 | 无 run 发现/取消入口（`run_specs` 已有 500+ 行） | 未修：`cancellation_requests` 有表有路由，MCP 无工具 |
+| P0-2 | 长任务被上层截断且丢 `runSpecId`：适配器 `await response.text()` 缓冲整条 SSE，DSH 侧 `toolCallTimeoutMs=180000` | 部分缓解：`los_runs_list` 可按 `traceId` 找回 id（§9.1）；`detach` 已证明可在适配器侧实现（§9.2），未实现 |
+| P0-3 | 契约跑不完：standard/heavyweight 会 park，而 MCP 无 `verify`/`approve`/`cancel`/`recover`/runs 列表（路由见 `file:packages/gateway/src/route-admission-inventory.ts:237`） | 部分缓解：runs 列表已交付（§9.1）；`verify`/`approve`/`cancel` 仍缺（S2/S3，P4 仍是活例且 blocked 终态丢 `runSpecId`） |
+| P1-1 | 无 run 发现/取消入口（`run_specs` 已有 500+ 行） | 发现已交付（`los_runs_list`，§9.1）；取消仍缺（S3：只有 task 级 `POST /tasks/:id/cancel`） |
 | P1-2 | 幂等假象：每次随机 `x-idempotency-key: mcp-<uuid>`，重试会重复建 run | 未修：`dedupeKey` 是另一字段，不解决重试 |
 | P1-3 | 项目登记面缺口无门禁：10 个 binding 覆盖不全，且与母仓 `workspace-registry.snapshot.json` 互不校验 | 未修：需一条"要派活的仓 ⊆ binding"机械 check |
 | P1-4 | 写入无隔离、节点不可选：`sandboxMode`/`allowedTools`/`node` 都不在 MCP 契约里 | 未修；fleet 8 个在线 executor，探针全落 `mbp-executor-1` |
@@ -91,15 +91,15 @@ DSH 能调 los 做分析与开发、能读回执行证据；但 `los_run` 的 `p
 （非 operator 仍被钉在默认项目；不再让"被钉住"静默通过）。
 
 1. `los_run` 新增 `operatorScope`（布尔，缺省 `false`）。为 `true` 时：适配器**要求** operator 凭据
-   （`file:packages/cli/src/mcp-serve.ts:156`），并把 `x-los-operator-token` 一并发给 `POST /chat`
-   （`file:packages/cli/src/mcp-serve.ts:170`）⇒ 网关 `isOperator=true`，
+   （`file:packages/cli/src/mcp-serve.ts:88`），并把 `x-los-operator-token` 一并发给 `POST /chat`
+   （`file:packages/cli/src/mcp-serve.ts:102`）⇒ 网关 `isOperator=true`，
    `projectId`/`workspaceRoot` 才真正生效（P5 的通路，从"绕行"变为"契约内"）。
-2. **fail-loud**：读 SSE 首个 `coordinator.intake_resolved`（`file:packages/cli/src/mcp-serve.ts:336`），
+2. **fail-loud**：读 SSE 首个 `coordinator.intake_resolved`（`file:packages/cli/src/mcp-serve.ts:313`），
    若 `ownerRepo` ≠ 调用方给的 `projectId`，返回 MCP 错误并在文本里带
    `requestedProjectId` / `ownerRepo` / `reason` / `runSpecId` / `sessionId`
-   （`file:packages/cli/src/mcp-serve.ts:356`）——把"静默落错仓"变成"响亮的错误且不丢 id"。
+   （`file:packages/cli/src/mcp-serve.ts:333`）——把"静默落错仓"变成"响亮的错误且不丢 id"。
    投影同时新增 `ownerRepo` / `requestedProjectId` / `workspaceRoot`
-   （调用点 `file:packages/cli/src/mcp-serve.ts:174`、`file:packages/cli/src/mcp-serve.ts:176`）。
+   （调用点 `file:packages/cli/src/mcp-serve.ts:106`、`file:packages/cli/src/mcp-serve.ts:108`）。
 3. 契约与文档同步：`file:contracts/programmatic-agent-interface.yaml:25`（`scopeRule`）、
    `:31`（`failLoud`）、`file:docs/operations/programmatic-agent-interface.md:64`（Cross-Project Scoping 一节）；
    测试 `file:packages/cli/src/mcp-serve.test.ts:89`（无凭据时拒绝）、`:199`（不一致时 fail-loud）。
@@ -161,30 +161,53 @@ operator-scoped 运行会采用适配器配置的 `x-user-id`（缺省 `mcp-clie
 3. 审计与验收期间的探针 run 留在台账（`los` 3 条 + `dsfolder-fmtguard` 3 条 succeeded，
    另有 1 条 P4 停在 `phase=created`；均无 `todoId`、无文件副作用）。
 
-## 9. 下一步（未开工，已核过的网关面）
+## 9. 后续工作：S1 已交付，S2–S4 未开工
 
 目标：补"派活 → 盯活 → 收活"闭环，先解决 P0-2 的**超时丢 id**（这是长开发任务的实际痛点）。
 
-已核实的网关面（本轮只读确认，未改）：
+### 9.1 S1 `los_runs_list`（2026-10-11 交付）
+
+`file:packages/cli/src/mcp-tools.ts:40`（工具面）、`file:packages/cli/src/mcp-serve.ts:117`（handler）、
+投影函数见 `file:packages/cli/src/mcp-serve.ts:271`；契约 `file:contracts/programmatic-agent-interface.yaml:49`；
+测试 `file:packages/cli/src/mcp-serve.test.ts:252`。
+工具面常量因此拆到 `file:packages/cli/src/mcp-tools.ts:1`（`mcp-serve.ts` 当时涨到 501 行，
+撞上 `tools/check-structure.sh` 的"新文件 >500 行"门禁；拆分后 415 行）。
+
+- 入参 `projectId`（必填）+ `traceId` / `status` / `limit`（缺省 10，上限 50）。
+- 适配器侧过滤、按 `createdAt` 倒序、裁剪 `promptPreview` 到 120 字符：因为 `GET /runs` 的 handler
+  不收过滤参数且每行带**完整 prompt**。
+- **验收（真机，超时丢 id → 找回）**：`/tmp/los-recovery-probe.mjs`
+  ①直接 `POST /chat`（带 `traceId=s1-recovery-1791684054796`）且**不消费响应**（等价于客户端丢 id）；
+  ②用真适配器 `los_runs_list(projectId=los, traceId=…)` → `matched=1`、拿到
+  `run-session-1791684054805-1791684805`；③用找回的 id 读 `los_run_state` 成功（闭环）。
+  台账侧独立复核：该 run `succeeded`、`task_runs` 在 `mbp-executor-1` `succeeded`。
+- 适配器工具面变为 5 个：`los_run, los_runs_list, los_run_state, los_run_replay, los_operator_control`。
+
+### 9.2 S4 的未决问题已答：**提前断连不会取消运行**（`[E]`）
+
+`/tmp/los-abort-probe.mjs`：读到 `session` 事件（2426 B）后**主动 `controller.abort()`**，
+等待 12s 后查库 —— `run-session-1791684075571-1791684075572` 的 `run_specs.status=succeeded`、
+`task_runs.status=succeeded`（`mbp-executor-1`）。
+另一次"从不消费响应体"的同型观测也得到 `succeeded`（§9.1 验收 ① 的那条）。
+
+⇒ **执行不依赖 SSE 消费者**，因此 `los_run(detach)` 可以在**适配器侧**实现
+（读够拿到 `sessionId/runSpecId/taskRunId` 就断开），**不需要网关标志位或 `run-stream` 契约改动**
+——比本节原先的估计乐观。未验证项：网关侧是否留下断连噪音日志（`[U]`，本机找不到 gateway stdout 落盘位置）。
+
+已核实的网关面（只读确认，未改）：
 
 | 能力 | 现状 | 依据 |
 | --- | --- | --- |
 | run 列表 | `GET /runs` 存在；handler 只认 `since`/`limit`，内部 `listRunSpecs()` 全量 | `file:packages/gateway/src/routes/orchestration/run-routes.ts:415` |
 | 验证 / 审批 / 恢复 | `POST /runs/:id/verify`、`/approve`、`/recover`、`/revise-plan`、`/answer` 均已存在 | `file:packages/gateway/src/routes/orchestration/run-routes.ts:420` |
 | 取消 | **没有** `/runs/:id/cancel`；只有 task 级 `POST /tasks/:id/cancel` | `file:packages/gateway/src/route-admission-inventory.ts:260` |
-| MCP 侧 | 无 list / cancel / verify / approve 工具；`los_run` 阻塞缓冲整条 SSE | `file:packages/cli/src/mcp-serve.ts:148` |
 
 交付顺序（每步独立可验收）：
 
-- **S1 `los_runs_list`**（入参 `traceId` / `projectId` / `status` / `limit`）：`GET /runs` 无过滤参数
-  ⇒ 在适配器侧过滤即可，**不需要网关改动**。
-  验收：`los_run(traceId=T)` 被宿主超时截断后，`los_runs_list(traceId=T)` 能找回 `runSpecId`
-  （这条把 P0-2 从"不可恢复"降级为"可恢复"）。
+- **S1 `los_runs_list`** — 已交付，见 §9.1。
 - **S2 `los_run_verify` / `los_run_approve`**：薄包装 `POST /runs/:id/verify|approve`（operator 门禁）。
   验收：§2 P4 那条停在 `phase=created` 的 standard 契约 run 能被推进（目前是死胡同）。
 - **S3 `los_run_cancel`**：以 `taskRunId` 为入参包装 `POST /tasks/:id/cancel`（必须先确认该路由的
   权限门与语义：取消的是 task run 还是整个 run spec）。
-- **S4 P0-2 真 async/detach**：让 `POST /chat` 立即返回 ids、不持有 SSE，适配器据此提供非阻塞派发。
-  触及 `run-stream` 契约，需先设计。
-  **未决问题（S4 动工前必须回答）**：客户端提前关闭 `/chat` 连接是否会触发运行取消？
-  若会，detach 不能靠"客户端先断开"实现，必须走网关显式标志位。
+- **S4 `los_run(detach)`**：按 §9.2 的结论，在适配器侧读完 `session` 事件即断开并立即返回 ids。
+  验收：派发后立刻拿到 `runSpecId`、且该 run 事后仍 `succeeded`；`los_run_state` 全程可读。
