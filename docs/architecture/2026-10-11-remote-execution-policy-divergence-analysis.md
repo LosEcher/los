@@ -179,6 +179,32 @@ method:
 **刻意未改**：调度运行级状态仍是失败（`runner.ts:463` 注释写明"blocked/cancelled/failed → surface as run failure for circuit breaker"）。
 把"需要人看"变成不计入熔断的新状态会改变 13 条存量 schedule 的重试行为，属策略决定；**当前人可见的落点是 P1 todo 与 blockReason**。
 
+### 第五批：远端检查通道（① 的远端半边，代码完成；验收受**部署**限制）
+
+**新增受治理的节点命令 `run-check`**（在节点本地执行一条声明式检查），并把命令名清单**收敛成一份**：
+
+| 落点 | 改动 |
+| --- | --- |
+| `packages/agent/src/node-commands.ts` | `NodeCommandName` += `run-check`；新增 `NODE_COMMAND_NAMES` / `isNodeCommandName` 作为**唯一清单**；`NodeCommandRuntime` 增加 `'run-check'` 槽位 |
+| `packages/executor/src/node-command-runner.ts` | 实现处理器：`spawn(command, {shell:true, cwd, timeout})` → 返回 `{status, output:{exitCode,stdout,stderr,timedOut,cwd,command}}`（mac/linux 与 win 两支都注册） |
+| `packages/executor/src/executor-helpers.ts`、`packages/gateway/src/routes/orchestration/node-command-routes.ts` | 原先各自维护一份枚举（**三处重复**）⇒ 改为委托 `isNodeCommandName`（加命令时不会再"一边接受一边抛错"） |
+| `packages/agent/src/scheduler/node-check-runner.ts`（新） | 网关/agent 侧的客户端：解析节点 `agent_http.commandUrl`，以 agent key 发送 `run-check`，把节点响应映射成 `VerificationCommandResult` |
+| `packages/agent/src/scheduler/declared-checks.ts`（新） | 决定**在哪台机器执行**：本地 run 本机跑；远端 run 走节点通道；**没有通道时记 skipped + 原因，绝不本地代跑** |
+
+**真机验收（node34）** `[E]`
+
+| 场景 | 检查记录 | 说明 |
+| --- | --- | --- |
+| 远端（`node34-executor-1`） | `required_check_1 \| **failed** \| err=node command failed: 422 {"error":"command is required"}` | **不再 skipped**；错误里引用的是**节点自己的响应** ⇒ 通道确实送达节点；输出为空 ⇒ **没有本地代跑** |
+| 本地（负向控制） | `required_check_1 \| **succeeded** \| out=Darwin` | 路由重构后本地路径无回归 |
+
+**测试**：executor `node-command-runner.test.ts` 2/2（含"没有命令 ⇒ 明确失败"）；agent `node-check-runner.test.ts` 3/3
+（含"节点拒绝不得假装成功"与"没有端点时报错、**不本地代跑**"两条负向断言）。
+
+**⚠️ 剩余的是部署而不是代码**：node34 的 executor 仍是旧码（所以回 422），要让远端检查真正跑出结果，
+需要把本批代码**推送到远端并升级节点**（节点已有受治理的 `upgrade` 命令：`git pull` + 重启）。
+本批改动都在本地 jj 里、尚未推送，因此这一半的"跑出真实结果"验收**卡在发布动作**上，不是卡在实现。
+
 **仍未修 / 待决策**
 - **D3 步 2 的远端半边**（第 2 轮，落点已定）：
   ① executor 侧 `/v1/nodes/:id/commands` 处理器（`packages/executor/src/index.ts:182`）增加一条**受治理的检查命令**（cwd/timeout/输出上限）；
