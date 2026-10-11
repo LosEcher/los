@@ -83,6 +83,27 @@ if [[ "$PLAN" -eq 0 ]]; then
   trap 'rm -rf "$LOCK"' EXIT
 fi
 
+# ── git 访问：在 **jj 工作区**里也能用 ──────────────────────
+# jj 的工作区目录里没有自己的 .git（VCS 存储由各工作区共享），于是 `git -C $ROOT …` 会报
+# "not a git repository"。而"从一个独立工作区当滚动源"是有意支持的用法（发布器不该只能从
+# 开发 checkout 跑），所以这里统一解析 git 目录：优先 $ROOT/.git，否则取 default 工作区的 .git。
+GIT_DIR_FOR_REPO=""
+git_dir() {
+  if [ -n "$GIT_DIR_FOR_REPO" ]; then printf '%s' "$GIT_DIR_FOR_REPO"; return; fi
+  if [ -d "$ROOT/.git" ]; then
+    GIT_DIR_FOR_REPO="$ROOT/.git"
+  else
+    local def
+    def="$(jj -R "$ROOT" workspace root --name default 2>/dev/null || true)"
+    [ -n "$def" ] && [ -d "$def/.git" ] && GIT_DIR_FOR_REPO="$def/.git"
+  fi
+  printf '%s' "$GIT_DIR_FOR_REPO"
+}
+gitr() { # git，但经共享 git 目录（工作区场景）
+  local gd; gd="$(git_dir)"
+  if [ -n "$gd" ]; then git --git-dir="$gd" "$@"; else git -C "$ROOT" "$@"; fi
+}
+
 # ── 目标来源：两条必须成立的不变量 ──────────────────────────
 # 部署走内容同步、不依赖 git push，所以"目标"是网关**工作树**的摘要快照。因此：
 #   ① 被摘要覆盖的文件必须是**已提交**状态 —— 否则会把别人（或自己）未完成的改动推给全机队；
@@ -94,17 +115,17 @@ ALLOW_DIRTY="${LOS_ROLLOUT_ALLOW_DIRTY:-0}"
 
 dirty_covered_files() {
   local paths='tools deploy packages contracts package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json'
-  git -C "$ROOT" status --porcelain -- $paths 2>/dev/null | cut -c4- | LC_ALL=C sort \
+  gitr status --porcelain -- $paths 2>/dev/null | cut -c4- | LC_ALL=C sort \
     | comm -12 - <(node "$ROOT/tools/deployable-content.mjs" --files | LC_ALL=C sort)
 }
 
 head_revision() { # 工作副本当前基于哪个修订（jj 优先，退回 git）
   jj -R "$ROOT" log -r '@-' --no-graph -T 'commit_id' 2>/dev/null \
-    || git -C "$ROOT" rev-parse HEAD 2>/dev/null || true
+    || gitr rev-parse HEAD 2>/dev/null || true
 }
 merged_revision() { # 已合并修订
   jj -R "$ROOT" log -r 'main@origin' --no-graph -T 'commit_id' 2>/dev/null \
-    || git -C "$ROOT" rev-parse origin/main 2>/dev/null || true
+    || gitr rev-parse origin/main 2>/dev/null || true
 }
 
 assert_target_source() {
@@ -137,37 +158,83 @@ target_now() { bash tools/los.sh build-version | tail -1; }
 PAYLOAD_TAR="$OUT_DIR/payload-latest.tar.gz"
 PAYLOAD_TREE="$OUT_DIR/payload-latest-tree"
 
+# 载荷从哪来：`revision`（默认，已合并修订）或 `worktree`（显式 opt-in，热修用）。
+# 为什么默认取修订而不是工作树：工作树是**可变的**，"机队跑的是合并过的内容"若靠"看工作树脏不脏"
+# 去逼近，就只能得到一个近似（脏检查只看被覆盖文件，且随时可能被人改回去）。直接从修订取内容之后，
+# 期望态与载荷都来自一个**不可变的命名修订** —— 这也正是设计文档第二阶段想要的形态（见 §5.2/§6），
+# 只是先落在发布器上、还没动执行器。worktree 模式保留给"有意滚未提交热修"的场景。
+ROLL_SOURCE="${LOS_ROLLOUT_SOURCE:-revision}"
+ROLL_REVISION="${LOS_ROLLOUT_REVISION:-main@origin}"
+
+resolve_revision() { # <rev-name> → commit id（jj 优先，退回 git）
+  jj -R "$ROOT" log -r "$ROLL_REVISION" --no-graph -T 'commit_id' 2>/dev/null \
+    || gitr rev-parse "$ROLL_REVISION" 2>/dev/null \
+    || true
+}
+
 freeze_payload() {
   rm -rf "$PAYLOAD_TREE" "$PAYLOAD_TAR" "$PAYLOAD_TAR.list"
-  bash "$ROOT/tools/deploy-to-remote.sh" tarball "$PAYLOAD_TAR" >/dev/null \
-    || die "cannot build the payload tarball"
+  case "$ROLL_SOURCE" in
+    worktree)
+      bash "$ROOT/tools/deploy-to-remote.sh" tarball "$PAYLOAD_TAR" >/dev/null \
+        || die "cannot build the payload tarball from the worktree"
+      ;;
+    revision)
+      local rev
+      rev="$(resolve_revision)"
+      [ -n "$rev" ] || die "cannot resolve the rollout revision '$ROLL_REVISION' (fetch it, or set LOS_ROLLOUT_REVISION)"
+      # git archive 只含**被跟踪**内容 ⇒ 生成态（本地库/测试产物）天然进不来，与摘要覆盖规则一致。
+      gitr archive --format=tar "$rev" -- \
+        tools deploy packages contracts \
+        package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
+        | gzip > "$PAYLOAD_TAR" || die "cannot archive $ROLL_REVISION"
+      # 清单仍由 tar 自己派生（Windows 剪枝用），与 worktree 模式同一条规则。
+      # **必须**把 LOS_DEPLOY_TARBALL 指过去：否则工具的 tarball 子命令会从工作树重新打包、
+      # 覆盖掉刚做出来的修订包（2026-10-11 实测踩过：目标摘要变成了脏树的值）。
+      LOS_DEPLOY_TARBALL="$PAYLOAD_TAR" \
+        bash "$ROOT/tools/deploy-to-remote.sh" tarball "$PAYLOAD_TAR" >/dev/null \
+        || die "cannot derive the shipped manifest"
+      ;;
+    *) die "unsupported LOS_ROLLOUT_SOURCE '$ROLL_SOURCE' (expected revision or worktree)" ;;
+  esac
   mkdir -p "$PAYLOAD_TREE"
   tar xzf "$PAYLOAD_TAR" -C "$PAYLOAD_TREE" || die "cannot extract the payload snapshot"
   LOS_DEPLOY_TARBALL="$PAYLOAD_TAR"; export LOS_DEPLOY_TARBALL
-  local frozen live
+  local frozen
   frozen="$(node "$ROOT/tools/deployable-content.mjs" --root "$PAYLOAD_TREE" --digest)"
   [ -n "$frozen" ] || die "the frozen payload has no digest — refusing to roll an unidentifiable payload"
   if [ -n "${LOS_ROLLOUT_TARGET:-}" ] && [ "$LOS_ROLLOUT_TARGET" != "$frozen" ]; then
     die "LOS_ROLLOUT_TARGET='$LOS_ROLLOUT_TARGET' does not match the frozen payload's digest '$frozen'; a rollout must ship the content it claims to ship"
   fi
   TARGET="$frozen"
-  live="$(target_now)"
-  [ "$live" = "$frozen" ] \
-    || warn "the working tree changed while the payload was being frozen (live '$live' != frozen '$frozen'): this rollout ships the frozen snapshot, not what is on disk now"
+  if [ "$ROLL_SOURCE" = "revision" ]; then
+    log "payload frozen from revision ${rev:0:12} ($ROLL_REVISION)"
+  else
+    # worktree 模式：说清这一轮滚的是快照，而不是"你现在看到的工作树"
+    local live; live="$(target_now)"
+    [ "$live" = "$frozen" ] \
+      || warn "the working tree changed while the payload was being frozen (live '$live' != frozen '$frozen'): this rollout ships the frozen snapshot, not what is on disk now"
+  fi
   LOS_DEPLOY_VERSION="$TARGET"; export LOS_DEPLOY_VERSION
   log "payload frozen: $TARGET ($(du -h "$PAYLOAD_TAR" | cut -f1 | tr -d ' '), $(wc -l < "$PAYLOAD_TAR.list" | tr -d ' ') entries)"
 }
 
-if [[ "$PLAN" -eq 1 ]]; then
-  # plan 是只读诊断：脏树也要能看计划，但必须把事实说清楚
-  DIRTY_COVERED="$(dirty_covered_files | wc -l | tr -d ' ')"
-  if [ "${DIRTY_COVERED:-0}" -gt 0 ]; then
-    warn "gateway working tree has $DIRTY_COVERED changed file(s) inside the digest's scope:"
-    dirty_covered_files | sed 's/^/  [rollout]   /' >&2
-    warn "the target below is a snapshot of that dirty tree; a real rollout would refuse it (LOS_ROLLOUT_ALLOW_DIRTY=1 overrides)"
+if [ "$ROLL_SOURCE" = "worktree" ]; then
+  # worktree 模式才需要"已提交"这道闸门（内容直接来自工作树）
+  if [[ "$PLAN" -eq 1 ]]; then
+    DIRTY_COVERED="$(dirty_covered_files | wc -l | tr -d ' ')"
+    if [ "${DIRTY_COVERED:-0}" -gt 0 ]; then
+      warn "LOS_ROLLOUT_SOURCE=worktree and the tree has $DIRTY_COVERED changed file(s) inside the digest's scope:"
+      dirty_covered_files | sed 's/^/  [rollout]   /' >&2
+      warn "a real rollout would refuse this (LOS_ROLLOUT_ALLOW_DIRTY=1 overrides)"
+    fi
+  else
+    assert_target_source
   fi
 else
-  assert_target_source
+  # revision 模式：内容来自命名修订，工作树脏不脏、是不是 main 都不影响这一轮滚什么。
+  # 唯一要提醒的是"你在这棵树里跑的是哪一版的发布器"。
+  log "source=revision $ROLL_REVISION (the working tree is not used as content)"
 fi
 
 # 冻结载荷（plan 也冻）：让 plan 与真滚看到**同一个目标**，否则 plan 报的是"活树现在是什么"、
