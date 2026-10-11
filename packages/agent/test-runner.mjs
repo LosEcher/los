@@ -128,9 +128,9 @@ const isolatedGroupA = [
   'src/external-tool-summary.test.ts',
   'src/feed-analysis-integration.test.ts',
   'src/governance-adversarial-review.test.ts',
-  'src/governance-language-audit.test.ts',
   'src/governance-drift-sweeper.test.ts',
   'src/governance-jobs.test.ts',
+  'src/governance-language-audit.test.ts',
   'src/governance-sweep-todos.test.ts',
   'src/governance-sweeper.test.ts',
   'src/governance-wake.test.ts',
@@ -138,10 +138,11 @@ const isolatedGroupA = [
   'src/managed-workspaces.test.ts',
   'src/mcp-credential-resolver.test.ts',
   'src/mcp-distribution.test.ts',
+  'src/message-router/handlers-run-contract.test.ts',
   'src/metrics-activity.test.ts',
   'src/metrics-trends.test.ts',
+  'src/node-commands-execute.test.ts',
   'src/slo-report.test.ts',
-  'src/message-router/handlers-run-contract.test.ts',
 ];
 
 const isolatedGroupB = [
