@@ -2,8 +2,12 @@ import { getConfig } from '@los/infra/config';
 import { getDb } from '@los/infra/db';
 import { loadExecutorNode, type ExecutorNodeRecord } from '../executor-nodes.js';
 import { resolveExecutorCommandUrl } from '../executor-node-utils.js';
-import { _buildBwrapArgs } from '../tools/external/shell-sandbox.js';
 import { createNodeCheckRunner } from './node-check-runner.js';
+// 探测命令的**平台分派**已拆到独立模块（仓内 500 行硬限 + 职责分离）；
+// 这里只做**再导出**，让既有的 `import { _buildWorkspaceProbeCommand } from './placement.js'`
+// （单测与 runbooks）保持有效——单一来源仍在 placement-probe-command.ts。
+export { _buildWorkspaceProbeCommand, _buildWindowsWorkspaceProbeCommand, _nodePlatform } from './placement-probe-command.js';
+import { _buildWorkspaceProbeCommand, _nodePlatform } from './placement-probe-command.js';
 import { normalizeOptionalString, normalizePositiveInteger, readObject } from './helpers.js';
 
 /**
@@ -109,63 +113,6 @@ export function _clearWorkspaceProbeCache(): void {
   _cache.clear();
 }
 
-/**
- * 只读探测命令：**一条**，同时回答 存在/不存在、revision，以及**声明的沙箱到底能不能跑**。
- *
- * 为什么不用 `test -d` + 单独取 revision：两次往返 = 两倍的瞬时失败面，而这里每一次探测
- * 都在派发路径上。命令对不支持 POSIX 的节点（实测 Win 节点 `cmd.exe` ENOENT）会失败，
- * 那是**正确的**——它确实跑不了 POSIX 工作区的任务。
- *
- * ⚠️ 2026-10-11 实测（本模块第一次上线就被自己的证据面抓到）：这里少写一个 `;`，
- * 整条命令在**所有**节点上都以 `Syntax error: "then" unexpected` 立刻失败，
- * 而当时的 `reachable` 只看"有没有退出码" ⇒ 每个节点都被当成"已核实"。
- * 现在有两条防线：① 本函数由单测用 `sh -n` 做**语法**校验；② `reachable` 要求
- * **退出码 0 且输出可解析**。教训：判据必须能区分"跑通了"与"跑过了"。
- *
- * ⚠️⚠️ 同一天的第二个实例（vultr）：节点上报 `capabilities.sandbox = linux-bwrap`（二进制在），
- * 但因为宿主策略，**以服务用户身份**跑 bwrap 会 `bwrap: loopback: Failed RTM_NEWADDR:
- * Operation not permitted` —— 声明的能力**实际不可用**，任务跑到一半才炸（agent 侧
- * `run_shell` 全失败，最后由 self-check 兜住并 blocked）。
- * ⇒ 探测必须**在任务的真实上下文里演练那条沙箱**，而不是只问"有没有这个二进制"。
- * 现在：节点上有 bwrap 就**通过 bwrap 跑探测**，bwrap 起不来就回 `SANDBOX_FAILED rc=… <stderr>`，
- * 于是"沙箱跑不动"在**派发之前**就变成不可核实，而不是运行中的失败。
- */
-export function _buildWorkspaceProbeCommand(
-  workspaceRoot: string,
-  options: { bwrapPath?: string } = {},
-): string {
-  const quoted = shQuote(workspaceRoot);
-  const inner = [
-    `d=${quoted};`,
-    `if [ -d "$d" ]; then printf PRESENT;`,
-    `r=$(git -C "$d" rev-parse --short HEAD 2>/dev/null);`,
-    `[ -n "$r" ] && printf ' %s' "$r";`,
-    `else printf ABSENT; fi;`,
-    `true`,
-  ].join(' ');
-  const bwrapPath = options.bwrapPath ?? '/usr/bin/bwrap';
-  // 与 agent 真正执行 shell 时**同一套**参数（单一来源：_buildBwrapArgs），避免"探测用的沙箱"
-  // 与"任务用的沙箱"漂移——那正是这个探测要防的事。
-  // ⚠️ `_buildBwrapArgs` 只返回 **argv**；可执行文件由调用方拼（真实现见 shell-sandbox.ts 的
-  // `runWithLinuxBwrap`）。漏掉这个前缀会让探测以 `--ro-bind` 当命令名执行，于是**每个有 bwrap
-  // 的节点都假红**（单测里那条"假 bwrap"用例就是抓这个的）。
-  const wrapped = [
-    shQuote(bwrapPath),
-    ..._buildBwrapArgs(bwrapPath, workspaceRoot, inner, 'readonly', 'isolated').map(shQuote),
-  ].join(' ');
-  return [
-    `if [ -x ${shQuote(bwrapPath)} ]; then`,
-    `out=$(${wrapped} 2>&1); rc=$?;`,
-    `if [ "$rc" -eq 0 ]; then printf '%s' "$out";`,
-    `else printf 'SANDBOX_FAILED rc=%s %s' "$rc" "$out"; fi;`,
-    `else ${inner}; fi`,
-  ].join(' ');
-}
-
-function shQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 function parseProbeOutput(stdout: string): { responded: boolean; present: boolean; revision?: string } {
   const text = stdout.trim();
   if (text.startsWith('ABSENT')) return { responded: true, present: false };
@@ -186,8 +133,16 @@ export async function _probeNodeWorkspace(input: {
   timeoutMs?: number;
   /** 绕过缓存（自检/验收时用来拿"此刻"的真值）。 */
   force?: boolean;
+  /**
+   * 节点平台（`capacity.platform`：`darwin` / `linux` / `win32`）。
+   * 不给时查一次注册表——**必须**判目标节点的平台，不能判网关自己的 `process.platform`。
+   */
+  platform?: string;
 }): Promise<WorkspaceProbeOutcome> {
-  const key = `${input.nodeId}::${input.workspaceRoot}`;
+  const platform = input.platform ?? await _resolvePlatformFor(input.nodeId);
+  // 平台进缓存键：探测**命令本身**随平台而变，所以缓存的是"判据的输入"而不只是参数
+  // （换命令后旧缓存不许继续生效）。
+  const key = `${input.nodeId}::${platform ?? 'unknown'}::${input.workspaceRoot}`;
   const hit = _cache.get(key);
   if (hit && !input.force) {
     const ttl = hit.outcome.reachable && hit.outcome.present ? PROBE_TTL_MS() : PROBE_NEGATIVE_TTL_MS();
@@ -212,7 +167,11 @@ export async function _probeNodeWorkspace(input: {
     commandUrl,
     defaultTimeoutMs: timeoutMs,
   });
-  const result = await runner(_buildWorkspaceProbeCommand(input.workspaceRoot), {
+  const result = await runner(_buildWorkspaceProbeCommand(input.workspaceRoot, { platform }), {
+    // ⚠️ `/tmp` 在 Windows 上不存在，而 `spawn(..., {cwd})` 在 cwd 不存在时抛 ENOENT
+    // （报出来却像"找不到 cmd.exe"）——节点侧已把它规范化成 `C:/Windows/Temp` 并在
+    // 输出里留痕（`node-command-runner.ts` 的 `_normalizeWindowsCwd`）。这里保持 `/tmp`
+    // 是为了不改 POSIX 行为（一次改一处，回归面最小）。
     cwd: '/tmp',
     timeoutMs,
   });
@@ -244,6 +203,18 @@ async function resolveCommandUrlFor(nodeId: string): Promise<string | undefined>
   const node = await loadExecutorNode(nodeId).catch(() => null);
   if (!node) return undefined;
   return resolveExecutorCommandUrl(node.connectConfig);
+}
+
+/**
+ * 目标节点的平台（`capacity.platform`，心跳自报，实测三值：`darwin`/`linux`/`win32`）。
+ *
+ * 为什么不能直接用 `process.platform`：放置决策跑在**网关**里，要判的是**节点**。
+ * 查不到时返回 `undefined` ⇒ 探测命令退回 POSIX 分支（**保持既有行为**，不拿"未知"
+ * 去猜一个更宽松的分支）。
+ */
+export async function _resolvePlatformFor(nodeId: string): Promise<string | undefined> {
+  const node = await loadExecutorNode(nodeId).catch(() => null);
+  return node ? _nodePlatform(node) : undefined;
 }
 
 /**
@@ -294,6 +265,17 @@ const NODE_LEVEL_FAILURE_PATTERNS: Array<{ id: string; re: RegExp }> = [
   { id: 'auth', re: /unauthorized|\b401\b|invalid api key/i },
   { id: 'draining', re: /executor_draining|draining/i },
   { id: 'no_shell', re: /cmd\.exe.*ENOENT|command not found|no such file or directory: .*cmd\.exe/i },
+  // 2026-10-11 晚（S8 实测新增）：Windows 执行器的**沙箱前置**失败。`windows-acl` 的
+  // `CreateRestrictedToken` 要求调用方令牌里有 logon SID，而两个节点的服务账户是
+  // `LocalSystem`（没有 logon SID）⇒ `run_shell` fail-closed。
+  //
+  // 为什么算**节点级**而不是任务级：任务内容完全正常（同一台节点上 requiredChecks 成功通过），
+  // 坏的是"**这个服务身份**能不能用这条沙箱"。探测查不出这一点（探测走的是命令通道，
+  // 不经过 restricting-SID），只有失败台账查得出——与 provider 凭据那一条同理。
+  {
+    id: 'windows_acl_token_prerequisite',
+    re: /CreateRestrictedToken prerequisite failed|no logon SID found|windows-acl sandbox unavailable/i,
+  },
 ];
 
 export function _classifyNodeFailure(message: string | null | undefined): string | undefined {
@@ -395,6 +377,8 @@ export async function choosePlacement(input: {
     agentKey: input.agentKey,
     // 候选记录里就带着端点 ⇒ 不必再查一次注册表（探测在派发路径上，省一次往返）。
     commandUrl: resolveExecutorCommandUrl(node.connectConfig),
+    // 同理：平台也在候选记录里（`capacity.platform`）⇒ 探头分派不需要额外查询。
+    platform: _nodePlatform(node),
   })));
 
   const byNode = new Map(probes.map(probe => [probe.nodeId, probe]));
@@ -419,6 +403,7 @@ export async function choosePlacement(input: {
     workspaceRoot: workspaceRoot ?? null,
     probes: probes.map(probe => ({
       nodeId: probe.nodeId,
+      platform: _nodePlatform(ordered.find(node => node.nodeId === probe.nodeId)) ?? null,
       reachable: probe.reachable,
       present: probe.present,
       revision: probe.revision ?? null,

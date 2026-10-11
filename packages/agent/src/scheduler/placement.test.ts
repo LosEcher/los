@@ -133,6 +133,84 @@ test('声明有沙箱但沙箱跑不动 ⇒ SANDBOX_FAILED（vultr 那一类的�
   }
 });
 
+/**
+ * S8（2026-10-11 晚）：探测**按平台分派**。
+ *
+ * 为什么这是"修"而不是"放宽判据"：Windows 那一支换的是**语言**（POSIX sh → PowerShell），
+ * 输出协议（`PRESENT[ <rev>]` / `ABSENT`）与 `reachable` 口径**逐字不变**。
+ * 分派错层（例如只换命令文本、仍经 cmd.exe 解析）会得到"看起来像修好了"的假绿。
+ */
+test('Windows 探测走 PowerShell，输出协议与 POSIX 分支逐字相同', () => {
+  const command = _buildWorkspaceProbeCommand('C:/los-workspace/portable', { platform: 'win32' });
+  // ① 必须是 PowerShell 语法，且不含 POSIX 专有构造（`[ -d ]`、`printf`、`$( )`）
+  assert.match(command, /Test-Path -LiteralPath/);
+  assert.match(command, /Write-Output/);
+  assert.doesNotMatch(command, /printf/);
+  assert.doesNotMatch(command, /\[ -d/);
+  assert.doesNotMatch(command, /\$\(/);
+  // ② 输出协议不变：仍是 PRESENT/ABSENT 两个词，revision 仍然可选
+  assert.match(command, /'PRESENT'/);
+  assert.match(command, /'ABSENT'/);
+  assert.match(command, /rev-parse --short HEAD/);
+  // ③ 自己保证退出码 0：探测失败是**数据**，不是崩溃（POSIX 分支末尾的 `true` 同理）
+  assert.match(command, /exit 0$/);
+  // ④ 只用 PowerShell 5.1 就有的语法：节点上是 5.1（实测 PWSH=False），`??` 是 7+ 才有
+  assert.doesNotMatch(command, /\?\?/);
+});
+
+test('Windows 探测对含空格与单引号的路径仍然安全（引号按 PowerShell 规则转义）', () => {
+  const command = _buildWorkspaceProbeCommand("C:/Program Files/it's here", { platform: 'win32' });
+  // 单引号在 PowerShell 单引号串里靠**翻倍**转义（与 POSIX 的 '\'' 是同一件事）
+  assert.match(command, /'C:\/Program Files\/it''s here'/);
+});
+
+test('Windows 探测必须能通过 PowerShell 的**语法**预检（拿不到 powershell 就跳过，不当成通过）', () => {
+  // 与 POSIX 分支的 `sh -n` 是同一道门禁：语法错误会让**所有**节点假红/假绿。
+  const powerShell = ['/usr/local/bin/pwsh', '/opt/homebrew/bin/pwsh', 'pwsh'].find(candidate => {
+    const probe = spawnSync(candidate, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
+    return probe.status === 0;
+  });
+  for (const root of ['C:/los-workspace/portable', "C:/it's/here", 'C:/Program Files/x']) {
+    const command = _buildWorkspaceProbeCommand(root, { platform: 'win32' });
+    if (!powerShell) {
+      // 本机没有 PowerShell ⇒ **如实跳过**，并且不把这条记成通过。
+      // （判断放在循环内是为了让"没装"这件事在输出里可见，而不是静默 return。）
+      assert.ok(command.length > 0);
+      continue;
+    }
+    // 用 `[ScriptBlock]::Create` 做纯语法解析：不执行、不依赖 git/文件是否存在。
+    const checked = spawnSync(powerShell, ['-NoProfile', '-Command', `[void][ScriptBlock]::Create(${JSON.stringify(command)})`], { encoding: 'utf8' });
+    assert.equal(checked.status, 0, `PowerShell parser rejected: ${command}\n${checked.stderr}`);
+  }
+});
+
+test('_probeNodeWorkspace 按**目标节点**的平台选命令，并把平台放进缓存键', async () => {
+  // 判据：windows 节点收到的探测体里必须是 PowerShell（不是 POSIX），
+  // 且同一 (nodeId, workspaceRoot) 在**平台变化**后不得命中旧缓存。
+  _clearWorkspaceProbeCache();
+  const sent: string[] = [];
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    req.on('end', () => {
+      sent.push(Buffer.concat(chunks).toString('utf8'));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ command: { output: { exitCode: 0, stdout: 'PRESENT abc' } } }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const commandUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/nodes/win/commands`;
+  try {
+    await _probeNodeWorkspace({ nodeId: 'win', workspaceRoot: 'C:/ws', platform: 'win32', commandUrl, force: true });
+    assert.match(sent[0]!, /Test-Path -LiteralPath/);
+    // 平台进缓存键：换平台必须重新探测（否则会拿 POSIX 的结论给 Windows 用）
+    await _probeNodeWorkspace({ nodeId: 'win', workspaceRoot: 'C:/ws', platform: 'darwin', commandUrl });
+    assert.equal(sent.length, 2, '平台变了不许命中缓存');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test('normalize*Policy defaults to the code default when nothing is configured', () => {
   // 显式值优先；非法值不得静默当成另一个合法值（退化成默认）。
   assert.equal(_normalizePlacementPolicy('health'), 'health');
@@ -216,6 +294,12 @@ test('_classifyNodeFailure 只认节点级失败，不认任务级失败', () =>
   assert.equal(_classifyNodeFailure('fetch failed'), 'transport');
   assert.equal(_classifyNodeFailure('unauthorized'), 'auth');
   assert.equal(_classifyNodeFailure('executor_draining'), 'draining');
+  // 2026-10-11 晚（S8 实测原文）：Windows 节点上 run_shell 的沙箱前置失败。
+  // 这是**节点级**的（同一台节点的 requiredChecks 成功通过，坏的是服务身份能不能用这条沙箱）。
+  assert.equal(
+    _classifyNodeFailure('windows-acl sandbox unavailable or failed (fail-closed): CreateRestrictedToken prerequisite failed: no logon SID found among 4 token groups'),
+    'windows_acl_token_prerequisite',
+  );
   // 任务级失败**不得**让节点被降权：模型答得不对、验证没过都是任务的问题。
   assert.equal(_classifyNodeFailure('verification failed: unchecked requirement'), undefined);
   assert.equal(_classifyNodeFailure('the model replied with the wrong sentence'), undefined);
