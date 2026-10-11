@@ -155,6 +155,30 @@ method:
   ⇒ 本地真执行（Darwin 即网关主机），远端不代跑（输出为空）——两条都是刻意验证的安全属性。
 - **测试**：新增 `verification-runner.test.ts` 2/2，其中一条负向断言**执行器不得被调用**（防"远端检查在本地跑"回归）。
 
+### 第四批：self-check 跳过语义改为 operator attention（② 已定稿实施）
+
+**问题**：判官**根本没评过**（输出为空/过短）却被当作"目标未达成"硬拦，文案还谎称"没有产出"
+——实测一个 16 字符的**正确**回答 `SMOKE2_1791694145` 即被如此拦下（根因：`self-check.ts:57` 的 `MIN_OUTPUT_CHARS = 20`）。
+
+**改法**（照本仓既有 operator-attention 范式，即 confidence gate 的写法）：
+`goal-self-check-runner.ts` 在 `selfCheckResult.skipped` 时走独立分支——
+`transitionExecutionState(to:'blocked', reason:'self_check_skipped_needs_operator_attention')`
++ `blockReason` 写明"判官未评、目标既未证实也未否定、需人看一眼"
++ **创建 P1 review todo**（`source='self_check_skipped'`，这是"交给谁看"的落点）
++ **跳过**失败反思/DLQ 那条路（判官没评过，反思无意义）。
+
+**硬约束（已守住）**：**不自动放行**——`succeeded` 不会被置上；"判官判过且没过"仍走原来的 `goal_self_check_failed` 路径。
+
+**真机对照** `[E]`：
+
+| 场景 | 调度运行 | task | 留证 | operator todo |
+| --- | --- | --- | --- | --- |
+| 短输出（`Reply exactly: OK`） | failed（**电路熔断语义未改**） | `blocked` + `blockReason=Self-check did not run (output_too_short)…` | `goal_self_check \| skipped \| output_too_short`；`required_check_1 \| succeeded` | **P1 / source=`self_check_skipped`** |
+| 长输出（负向控制） | **succeeded** | succeeded | — | 无 |
+
+**刻意未改**：调度运行级状态仍是失败（`runner.ts:463` 注释写明"blocked/cancelled/failed → surface as run failure for circuit breaker"）。
+把"需要人看"变成不计入熔断的新状态会改变 13 条存量 schedule 的重试行为，属策略决定；**当前人可见的落点是 P1 todo 与 blockReason**。
+
 **仍未修 / 待决策**
 - **D3 步 2 的远端半边**（第 2 轮，落点已定）：
   ① executor 侧 `/v1/nodes/:id/commands` 处理器（`packages/executor/src/index.ts:182`）增加一条**受治理的检查命令**（cwd/timeout/输出上限）；
@@ -163,9 +187,7 @@ method:
   ⚠️ 不能复用现有节点命令通道：其枚举被限定为 `status/probe/drain/promote/restart/upgrade/rollback`。
 - **检查结果是否参与判定**（待决策）：本轮**刻意只留证、不改变 run 终态**——改成"检查失败即拦"会影响
   13 条存量 `scheduled_execution`（含每 6h 运行的 `schedule-fleet-consistency-001`），属策略决定。
-- **D4 的判定语义**：输出 < 20 字符仍会被**硬拦**（`MIN_OUTPUT_CHARS`，`self-check.ts:57`）。
-  本次只把文案改准，**没有**放宽拦截——"短回答该不该拦"是策略决定，需要你定：
-  可选项 ① 保持硬拦；② skipped 时改为 `operator_attention`（人看一眼）而非 blocked；③ 允许按契约声明豁免下限。
+- ~~**D4 的判定语义**~~：**已定稿并实施**（见第四批）——跳过走 operator attention（todo + 独立 reason），不自动放行。
 
 ## 6. 不做 / 拒绝清单
 

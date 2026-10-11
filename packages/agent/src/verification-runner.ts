@@ -4,6 +4,7 @@ import { transitionExecutionState } from './execution-store.js';
 import { ensureRunSpecVerificationPhase } from './run-phase-transitions.js';
 import { listTaskRunsForRunSpec, updateTaskRunFields, type TaskRunRecord } from './task-runs.js';
 import {
+  createVerificationRecord,
   listVerificationRecordsForRunSpec,
   loadVerificationRecord,
   updateVerificationRecordDetails,
@@ -27,12 +28,23 @@ export interface VerificationCommandResult {
   error?: string;
 }
 
+/**
+ * 检查命令的执行器。默认在本机 spawn；远端 run 的检查必须在**节点上**执行
+ * （工作区是节点本地的），届时由网关侧注入一个走节点通道的执行器。
+ */
+export type VerificationCommandRunner = (
+  command: string,
+  input: { cwd: string; timeoutMs?: number; outputLimit?: number; env?: Record<string, string | undefined> },
+) => Promise<VerificationCommandResult>;
+
 export interface RunVerificationRecordOptions {
   cwd?: string;
   timeoutMs?: number;
   outputLimit?: number;
   env?: Record<string, string | undefined>;
   updateRunSpecStatus?: boolean;
+  /** 覆盖本机执行（见 VerificationCommandRunner） */
+  commandRunner?: VerificationCommandRunner;
 }
 
 export interface RunVerificationRecordResult {
@@ -101,7 +113,7 @@ export async function runVerificationRecord(
     outputSummary: `running: ${command}`,
   });
 
-  const commandResult = await runVerificationCommand(command, {
+  const commandResult = await (options.commandRunner ?? runVerificationCommand)(command, {
     cwd,
     timeoutMs: options.timeoutMs,
     outputLimit: options.outputLimit,
@@ -319,4 +331,78 @@ function normalizePositiveInteger(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const rounded = Math.floor(value);
   return rounded > 0 ? rounded : undefined;
+}
+
+export interface RunDeclaredChecksInput {
+  sessionId: string;
+  taskRunId: string;
+  /** 调度 run 通常没有 run spec——留证靠 taskRunId（该列可空且已有索引）。 */
+  runSpecId?: string;
+  checks: string[];
+  /** 执行目录：本地 run 用网关路径，远端 run 用节点本地路径。 */
+  cwd?: string;
+  timeoutMs?: number;
+  outputLimit?: number;
+  commandRunner?: VerificationCommandRunner;
+  /**
+   * 给出即表示"这些检查本轮不执行"，逐条记 skipped 并写明原因（例如远端 run 尚无节点侧执行通道）。
+   * 宁可留下带原因的 skipped，也不要产出零记录——2026-10-11 的现场就是零记录。
+   */
+  skipReason?: string;
+}
+
+/**
+ * 执行一次 task run 声明式 requiredChecks（把结果落成 verification_records）。
+ *
+ * 与 `runVerificationRecordsForRunSpec` 的分工：那条按 run spec 工作（chat 路径 + 图任务校验节点），
+ * 这条按 task run 工作，覆盖"没有 run spec 的调度 run"。
+ */
+export async function runDeclaredChecksForTaskRun(input: RunDeclaredChecksInput): Promise<VerificationRecord[]> {
+  const records: VerificationRecord[] = [];
+  for (const [index, command] of input.checks.entries()) {
+    const id = `verification-${input.taskRunId}-check-${index + 1}`;
+    try {
+      const created = await createVerificationRecord({
+        id,
+        sessionId: input.sessionId,
+        runSpecId: input.runSpecId,
+        taskRunId: input.taskRunId,
+        checkName: `required_check_${index + 1}`,
+        kind: 'command',
+        command,
+        status: input.skipReason ? 'skipped' : 'required',
+        required: true,
+        skipReason: input.skipReason,
+      });
+      if (input.skipReason) {
+        records.push(created);
+        continue;
+      }
+      const result = await runVerificationRecord(id, {
+        cwd: input.cwd,
+        timeoutMs: input.timeoutMs,
+        outputLimit: input.outputLimit,
+        commandRunner: input.commandRunner,
+      });
+      records.push(result.record);
+    } catch (error) {
+      // 单条检查的失败（含重复 id）不得中断整个 run；无法留证时只跳过该条。
+      records.push(await markCheckFailed(id, input, command, error).catch(() => undefined) as VerificationRecord);
+    }
+  }
+  return records.filter(Boolean);
+}
+
+async function markCheckFailed(
+  id: string,
+  input: RunDeclaredChecksInput,
+  command: string,
+  error: unknown,
+): Promise<VerificationRecord | undefined> {
+  const existing = await loadVerificationRecord(id).catch(() => null);
+  if (!existing) return undefined;
+  return await updateVerificationRecordDetails(id, {
+    error: error instanceof Error ? error.message : String(error),
+    outputSummary: `attempted: ${command}`,
+  }) ?? undefined;
 }
