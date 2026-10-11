@@ -2,6 +2,7 @@ import { getConfig } from '@los/infra/config';
 import { getDb } from '@los/infra/db';
 import { loadExecutorNode, type ExecutorNodeRecord } from '../executor-nodes.js';
 import { resolveExecutorCommandUrl } from '../executor-node-utils.js';
+import { _buildBwrapArgs } from '../tools/external/shell-sandbox.js';
 import { createNodeCheckRunner } from './node-check-runner.js';
 import { normalizeOptionalString, normalizePositiveInteger, readObject } from './helpers.js';
 
@@ -109,7 +110,7 @@ export function _clearWorkspaceProbeCache(): void {
 }
 
 /**
- * 只读探测命令：**一条**，同时回答 存在/不存在 与 revision。
+ * 只读探测命令：**一条**，同时回答 存在/不存在、revision，以及**声明的沙箱到底能不能跑**。
  *
  * 为什么不用 `test -d` + 单独取 revision：两次往返 = 两倍的瞬时失败面，而这里每一次探测
  * 都在派发路径上。命令对不支持 POSIX 的节点（实测 Win 节点 `cmd.exe` ENOENT）会失败，
@@ -120,10 +121,21 @@ export function _clearWorkspaceProbeCache(): void {
  * 而当时的 `reachable` 只看"有没有退出码" ⇒ 每个节点都被当成"已核实"。
  * 现在有两条防线：① 本函数由单测用 `sh -n` 做**语法**校验；② `reachable` 要求
  * **退出码 0 且输出可解析**。教训：判据必须能区分"跑通了"与"跑过了"。
+ *
+ * ⚠️⚠️ 同一天的第二个实例（vultr）：节点上报 `capabilities.sandbox = linux-bwrap`（二进制在），
+ * 但因为宿主策略，**以服务用户身份**跑 bwrap 会 `bwrap: loopback: Failed RTM_NEWADDR:
+ * Operation not permitted` —— 声明的能力**实际不可用**，任务跑到一半才炸（agent 侧
+ * `run_shell` 全失败，最后由 self-check 兜住并 blocked）。
+ * ⇒ 探测必须**在任务的真实上下文里演练那条沙箱**，而不是只问"有没有这个二进制"。
+ * 现在：节点上有 bwrap 就**通过 bwrap 跑探测**，bwrap 起不来就回 `SANDBOX_FAILED rc=… <stderr>`，
+ * 于是"沙箱跑不动"在**派发之前**就变成不可核实，而不是运行中的失败。
  */
-export function _buildWorkspaceProbeCommand(workspaceRoot: string): string {
-  const quoted = `'${workspaceRoot.replace(/'/g, `'\\''`)}'`;
-  return [
+export function _buildWorkspaceProbeCommand(
+  workspaceRoot: string,
+  options: { bwrapPath?: string } = {},
+): string {
+  const quoted = shQuote(workspaceRoot);
+  const inner = [
     `d=${quoted};`,
     `if [ -d "$d" ]; then printf PRESENT;`,
     `r=$(git -C "$d" rev-parse --short HEAD 2>/dev/null);`,
@@ -131,6 +143,27 @@ export function _buildWorkspaceProbeCommand(workspaceRoot: string): string {
     `else printf ABSENT; fi;`,
     `true`,
   ].join(' ');
+  const bwrapPath = options.bwrapPath ?? '/usr/bin/bwrap';
+  // 与 agent 真正执行 shell 时**同一套**参数（单一来源：_buildBwrapArgs），避免"探测用的沙箱"
+  // 与"任务用的沙箱"漂移——那正是这个探测要防的事。
+  // ⚠️ `_buildBwrapArgs` 只返回 **argv**；可执行文件由调用方拼（真实现见 shell-sandbox.ts 的
+  // `runWithLinuxBwrap`）。漏掉这个前缀会让探测以 `--ro-bind` 当命令名执行，于是**每个有 bwrap
+  // 的节点都假红**（单测里那条"假 bwrap"用例就是抓这个的）。
+  const wrapped = [
+    shQuote(bwrapPath),
+    ..._buildBwrapArgs(bwrapPath, workspaceRoot, inner, 'readonly', 'isolated').map(shQuote),
+  ].join(' ');
+  return [
+    `if [ -x ${shQuote(bwrapPath)} ]; then`,
+    `out=$(${wrapped} 2>&1); rc=$?;`,
+    `if [ "$rc" -eq 0 ]; then printf '%s' "$out";`,
+    `else printf 'SANDBOX_FAILED rc=%s %s' "$rc" "$out"; fi;`,
+    `else ${inner}; fi`,
+  ].join(' ');
+}
+
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function parseProbeOutput(stdout: string): { responded: boolean; present: boolean; revision?: string } {

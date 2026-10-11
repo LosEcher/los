@@ -63,6 +63,29 @@ test('provider target uses the configured model and /v1 join', () => {
   assert.equal(target.apiKey, 'test-key');
 });
 
+test('provider target resolves a *model id* as well as a provider name', () => {
+  // 为什么需要这一支：远端执行器把 provider 指向本网关后，发上来的是**模型名**
+  // （节点的 modelProfile.model，实测 `deepseek-flash`），不是 provider 名。
+  // 只认 provider 名 ⇒ 节点必须把模型名改成 provider 名，那会连带改掉它的模型档位。
+  setConfig(configWithProvider());
+
+  const byName = resolveToolForwardTarget('deepseek');
+  assert.equal(byName.model, 'deepseek-chat');
+
+  // 模型 id：命中 provider，并**原样转发请求里的模型名**
+  const byDeclaredModel = resolveToolForwardTarget('deepseek-chat');
+  assert.equal(byDeclaredModel.model, 'deepseek-chat');
+  assert.equal(byDeclaredModel.url, byName.url);
+
+  // 厂商默认模型（provider-defaults）也算命中
+  const byDefaultModel = resolveToolForwardTarget('deepseek-flash');
+  assert.equal(byDefaultModel.model, 'deepseek-flash');
+  assert.equal(byDefaultModel.url, byName.url);
+
+  // 谁都不认识 ⇒ 400（不猜、不回落到默认 provider）
+  assert.throws(() => resolveToolForwardTarget('no-such-model-xyz'), /is not configured/);
+});
+
 test('upstream errors do not keep a bearer token', () => {
   assert.equal(
     safeUpstreamMessage('denied Bearer sk-secret-value'),

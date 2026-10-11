@@ -316,6 +316,27 @@ function normalizeStringArray(value: unknown): string[] {
   return [...new Set(value.map(v => typeof v === 'string' ? v.trim() : '').filter(Boolean))];
 }
 
+/**
+ * 数组字段的 **fail-loud** 版本（2026-10-11 实测踩到）。
+ *
+ * 为什么必须严格：`normalizeStringArray` 对"传了字符串而不是数组"**静默返回空数组**，
+ * 于是 `executor.nodeUrls`（唯一的**硬钉**机制）会被悄悄丢掉，任务退回软偏好——
+ * 调用方以为"只许派到某节点"已经生效，实际没有。这与本文件上面那条注释
+ * （不认识的能力名曾被静默过滤）是**同一个失效模式**：约束没生效，但没人被告知。
+ * 硬钉是安全边界，宁可 400 也不要静默降级。
+ */
+function normalizeStringArrayStrict(value: unknown, field: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array of strings`);
+  }
+  const invalid = value.filter(item => typeof item !== 'string' || !item.trim());
+  if (invalid.length > 0) {
+    throw new Error(`${field} must contain non-empty strings`);
+  }
+  return [...new Set((value as string[]).map(item => item.trim()))];
+}
+
 function normalizeMaxLoops(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   const parsed = Number(value);
@@ -350,7 +371,7 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('executor must be an object');
   }
-  const nodeUrls = normalizeStringArray(input.nodeUrls);
+  const nodeUrls = normalizeStringArrayStrict(input.nodeUrls, 'executor.nodeUrls');
   // fail-loud（2026-10-11）：此前把不认识的能力名**静默过滤掉** ⇒ 调用方以为约束生效、
   // 任务却可能落到不满足要求的节点上（连 artifact_transfer 这种跨设备必需能力也不在旧清单里）。
   const requestedCapabilities = normalizeStringArray(input.requiredCapabilities);

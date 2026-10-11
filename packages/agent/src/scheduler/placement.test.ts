@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { spawnSync } from 'node:child_process';
+import { chmodSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 
 import type { ExecutorNodeRecord } from '../executor-nodes.js';
@@ -95,6 +98,38 @@ test('_buildWorkspaceProbeCommand 产出的命令必须是**语法合法**的 sh
     const command = _buildWorkspaceProbeCommand(root);
     const result = spawnSync('/bin/sh', ['-n', '-c', command], { encoding: 'utf8' });
     assert.equal(result.status, 0, `sh -n rejected: ${command}\n${result.stderr}`);
+  }
+});
+
+test('_buildWorkspaceProbeCommand 的探测**真在本地跑得通**（有/无工作区两种答案）', () => {
+  // 不只是语法：真的执行一次。这条会在 macOS/Linux 上用"节点上没有 bwrap"的回退分支，
+  // 因此是探针里"沙箱不可用也要能回答工作区问题"这一支的机械守护。
+  const existing = spawnSync('/bin/sh', ['-c', _buildWorkspaceProbeCommand('/tmp')], { encoding: 'utf8' });
+  assert.equal(existing.status, 0);
+  assert.match(existing.stdout.trim(), /^PRESENT/);
+
+  const missing = spawnSync('/bin/sh', ['-c', _buildWorkspaceProbeCommand('/definitely/not/here-xyz')], { encoding: 'utf8' });
+  assert.equal(missing.status, 0);
+  assert.equal(missing.stdout.trim(), 'ABSENT');
+});
+
+test('声明有沙箱但沙箱跑不动 ⇒ SANDBOX_FAILED（vultr 那一类的机械复现）', () => {
+  // 实测事故（2026-10-11，vultr）：`capabilities.sandbox = linux-bwrap`，二进制在，
+  // 但以服务用户身份跑会 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`，
+  // 于是 agent 的 run_shell 全失败、任务跑到一半才炸。
+  // 用假 bwrap（退出码 5 + 一条 stderr）复现该形态：探测必须给出可识别的失败，
+  // 而不是冒充 PRESENT/ABSENT。
+  const fake = join(tmpdir(), `fake-bwrap-${process.pid}-${Date.now()}.sh`);
+  writeFileSync(fake, '#!/bin/sh\necho "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted" >&2\nexit 5\n');
+  chmodSync(fake, 0o755);
+  try {
+    const command = _buildWorkspaceProbeCommand('/tmp', { bwrapPath: fake });
+    const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
+    assert.equal(result.status, 0, '包装层自己必须成功退出（失败是**数据**，不是崩溃）');
+    assert.match(result.stdout, /^SANDBOX_FAILED rc=5/);
+    assert.match(result.stdout, /Failed RTM_NEWADDR/);
+  } finally {
+    rmSync(fake, { force: true });
   }
 });
 
