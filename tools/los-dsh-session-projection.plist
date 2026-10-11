@@ -8,8 +8,13 @@
   放进 agent 调度只会把"出网/模型故障"混成"投影失败"。
 
   安装：bash tools/install-los-dsh-session-projection.sh
-  状态：bash tools/install-los-dsh-session-projection.sh --status
-  卸载：bash tools/install-los-dsh-session-projection.sh --uninstall
+  状态/卸载：同一脚本的子命令（见其 -h 输出）。
+
+  ⚠️ 这两个子命令的字面形式**故意不写在这里**：XML 注释里不允许出现连续两个连字符，
+  而 `plutil -lint` 与 launchd 都会宽松放行，只有严格解析器（plistlib / lxml / 仓内
+  scripts/check-launchd-plists.sh）拒绝 —— 于是"文档写了 CLI 用法"就变成一件
+  **谁都不会立刻发现、但全仓门禁常年红灯**的事（2026-10-11 实测：这条注释让
+  check-launchd-plists 报 2 个自有坏件）。别把它补回来。
 
   RunAtLoad=false：安装脚本会同步跑一次做验收，避免 bootstrap 时并发。
 -->
