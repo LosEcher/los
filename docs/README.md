@@ -123,6 +123,20 @@ Use `operations/programmatic-agent-interface.md` for external agent access and
 `operations/managed-workspaces.md` for operator-gated jj workspace allocation,
 backup evidence, and release.
 
+Use `architecture/2026-10-11-cross-device-task-handling-phased-design.md` for the phased
+design (P0 observability → P1 placement → P2 multi-device fan-out → P3 storage → P4
+governance) of cross-device and cross-project task handling on the M1/M3/Win fleet.
+
+Use `architecture/2026-10-11-cross-project-and-cross-device-task-model-review.md` for the
+three-layer review of cross-project and cross-device task handling: what holds today
+(dispatch per project, aggregate reads), what does not (per-project run views, remote
+execution), and the prioritized gap list with acceptance criteria.
+
+Use `architecture/2026-10-11-execution-node-selection-and-remote-runs.md` for why
+node selection cannot be a simple `/chat` passthrough: chat runs execute in the
+gateway process, remote dispatch lives in the scheduler path, and the ledger shows
+no remote agent run in the last seven days.
+
 Use `operations/2026-10-11-dsh-los-cross-project-dispatch-audit.md` for the
 DSH→los cross-project dispatch audit (why a non-operator `los_run` was pinned to
 the default project regardless of `projectId`), the `operatorScope` opt-in and

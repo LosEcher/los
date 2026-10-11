@@ -47,6 +47,7 @@ Use the host's secret/environment mechanism.
 | --- | --- | --- | --- |
 | `los_run` | `prompt`, `projectId` | `POST /chat` | access token; `operatorScope` and `project-write` also require the operator credential |
 | `los_runs_list` | `projectId` | `GET /runs` | access token |
+| `los_nodes_list` | `projectId` | `GET /nodes` | access **and** operator tokens (the route is operator-gated) |
 | `los_run_state` | `runSpecId`, `projectId` | `GET /runs/:id/state` | access token |
 | `los_run_replay` | `runSpecId`, `projectId` | `GET /runs/:id/stream` | access token |
 | `los_run_verify` | `runSpecId`, `projectId` | `POST /runs/:id/verify` | access and operator tokens |
@@ -61,6 +62,16 @@ returns `nextAction` (`action`, `summary`, bounded `blockers`) so the caller kno
 which tool to call next — for example `action: "run_verification"` — instead of
 only learning that the run stopped. Success terminals skip that extra read, and a
 failed read is reported as `nextActionError` rather than swallowing the result.
+
+`los_nodes_list` returns the fleet from the gateway's own node registry: node id,
+label, status, `resourceClass`, version, queue depth, active tasks, heartbeat and
+the capability keys (`run_agent`, `deploy_safe`, `heavy_task_safe`,
+`artifact_transfer`, `file_sync_*`). Placement decisions must read those keys
+instead of assuming the local node — see
+`architecture/2026-10-11-cross-device-task-handling-phased-design.md`.
+
+`los_runs_list` filters server-side (`projectId` / `status` / `limit` / `since` are
+forwarded to `GET /runs`); only `traceId` is still matched in the adapter.
 
 `los_runs_list` exists because an MCP host can cut a long `los_run` at its tool
 timeout, which loses the `runSpecId`. Pass the `traceId` the run was started

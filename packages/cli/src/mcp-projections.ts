@@ -127,6 +127,48 @@ interface RunListFilter {
  * （实测 50 行，`file:packages/gateway/src/routes/orchestration/run-routes.ts:95`），
  * 且每行带**完整 prompt**——不裁剪就会把大段提示词灌进 MCP 结果。
  */
+/** 节点清单上限（/nodes 返回全部节点，适配器只回传有界片段）。 */
+export const _MAX_NODE_LIST = 40;
+export const _DEFAULT_NODE_LIST = 20;
+
+/**
+ * `los_nodes_list` 的投影：把 `/nodes` 的记录裁成"放置决策需要的字段"。
+ *
+ * 为什么需要它：跨设备派发要先回答"谁在线、能干什么"——`capabilities` 里
+ * `deploy_safe` / `heavy_task_safe` / `run_agent` / `artifact_transfer` 这些键
+ * 正是选点依据（见 docs/architecture/2026-10-11-cross-device-task-handling-phased-design.md §1）。
+ */
+export function projectNodeList(rows: unknown[], filter: { status?: string; limit: number }): JsonRecord {
+  const all = rows.map(row => optionalRecord(row) ?? {});
+  const matched = all.filter(row => !filter.status || optionalString(row.status) === filter.status);
+  const items = matched
+    .sort((left, right) => String(optionalString(left.nodeId) ?? '').localeCompare(String(optionalString(right.nodeId) ?? '')))
+    .slice(0, filter.limit)
+    .map(row => compact({
+      nodeId: optionalString(row.nodeId),
+      nodeKind: optionalString(row.nodeKind),
+      hostLabel: optionalString(row.hostLabel),
+      status: optionalString(row.status),
+      resourceClass: optionalString(row.resourceClass),
+      version: optionalString(row.version),
+      queueDepth: typeof row.queueDepth === 'number' ? row.queueDepth : undefined,
+      activeTaskCount: typeof row.activeTaskCount === 'number' ? row.activeTaskCount : undefined,
+      capabilities: Object.entries(optionalRecord(row.capabilities) ?? {})
+        .filter(([, value]) => value === true)
+        .map(([key]) => key)
+        .sort(),
+      sandbox: optionalString(optionalRecord(row.capabilities)?.sandbox),
+      lastHeartbeatAt: optionalString(row.lastHeartbeatAt),
+    }));
+  return {
+    total: all.length,
+    online: all.filter(row => optionalString(row.status) === 'online').length,
+    matched: matched.length,
+    returned: items.length,
+    items,
+  };
+}
+
 export function projectRunList(rows: unknown[], filter: RunListFilter): JsonRecord {
   const matched = rows
     .map(row => optionalRecord(row) ?? {})

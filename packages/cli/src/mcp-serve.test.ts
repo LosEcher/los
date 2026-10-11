@@ -11,7 +11,7 @@ test('MCP adapter initializes and exposes only the contracted tools', async () =
   const listed = asRecord((await adapter.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))?.result);
   const names = (listed.tools as Array<{ name: string }>).map(tool => tool.name);
   assert.deepEqual(names, [
-    'los_run', 'los_runs_list', 'los_run_state', 'los_run_replay',
+    'los_run', 'los_runs_list', 'los_nodes_list', 'los_run_state', 'los_run_replay',
     'los_run_verify', 'los_run_approve', 'los_run_recover', 'los_run_revise_plan',
     'los_task_cancel', 'los_operator_control',
   ]);
@@ -425,6 +425,8 @@ test('los_runs_list filters, bounds, and trims the gateway run list with ordinar
   const all = toolContent(await callTool(adapter, 'los_runs_list', { projectId: 'project-a' }));
   assert.equal(requests[0]?.headers.get('x-los-operator-token'), null);
   assert.equal(new URL(requests[0]!.url).pathname, '/runs');
+  // 服务端过滤：projectId/limit 必须进 query（不再"取前 N 条再由客户端过滤"）
+  assert.equal(new URL(requests[0]!.url).search, '?projectId=project-a&limit=10');
   assert.equal(all.matched, 3);
   assert.equal(all.returned, 3);
   const items = all.items as Array<{ runSpecId: string; promptPreview: string }>;
@@ -434,6 +436,8 @@ test('los_runs_list filters, bounds, and trims the gateway run list with ordinar
   const filtered = toolContent(await callTool(adapter, 'los_runs_list', {
     projectId: 'project-a', traceId: 'trace-x', status: 'blocked', limit: 1,
   }));
+  // 第二次调用才带 status ⇒ 断言放在它之后（服务端过滤参数齐全）
+  assert.equal(new URL(requests[1]!.url).search, '?projectId=project-a&limit=1&status=blocked');
   assert.equal(filtered.matched, 1);
   assert.equal(filtered.returned, 1);
   assert.equal((filtered.items as Array<{ runSpecId: string }>)[0]?.runSpecId, 'run-new');
@@ -782,6 +786,58 @@ test('sandboxMode and allowedTools are refused locally without operator scope', 
   assert.equal(badTools.isError, true);
   assert.match(String((badTools.content as Array<{ text: string }>)[0]?.text), /allowedTools must be an array/);
 
+  assert.equal(called, false);
+});
+
+test('los_nodes_list projects the fleet with operator auth and capability keys', async () => {
+  const requests: Request[] = [];
+  const rows = [
+    {
+      nodeId: 'm3pro-executor-1', nodeKind: 'executor', hostLabel: 'losdeMacBook-Pro.local', status: 'online',
+      resourceClass: 'standard_executor', version: '0.1.0+b47a933', queueDepth: 0, activeTaskCount: 1,
+      // 真实形状：/nodes 的 capabilities 是对象（键→true/字符串/数组），不是数组
+      capabilities: { run_agent: true, deploy_safe: true, heavy_task_safe: true, artifact_transfer: true, sandbox: 'macos-sandbox-exec', workspace_read: false },
+      lastHeartbeatAt: '2026-10-11T03:55:10.950Z',
+    },
+    {
+      nodeId: 'vultr-executor', nodeKind: 'executor', hostLabel: 'vultr', status: 'online',
+      resourceClass: 'constrained_executor', queueDepth: 3, activeTaskCount: 0,
+      capabilities: { run_agent: true, deploy_safe: true, heavy_task_safe: false, sandbox: 'tool_policy' }, lastHeartbeatAt: '2026-10-11T03:55:09.000Z',
+    },
+    { nodeId: 'old-node', nodeKind: 'executor', hostLabel: 'gone', status: 'offline', capabilities: {}, queueDepth: 0, activeTaskCount: 0 },
+  ];
+  const adapter = _createLosMCPAdapter({
+    gatewayUrl: 'http://gateway.test',
+    authToken: 'access-secret',
+    operatorToken: 'operator-secret',
+    fetchImpl: captureFetch(requests, () => Response.json(rows)),
+  });
+
+  const result = toolContent(await callTool(adapter, 'los_nodes_list', { projectId: 'los', status: 'online' }));
+
+  assert.equal(new URL(requests[0]!.url).pathname, '/nodes');
+  assert.equal(requests[0]?.headers.get('x-los-operator-token'), 'operator-secret');
+  assert.equal(result.total, 3);
+  assert.equal(result.online, 2);
+  assert.equal(result.matched, 2);
+  const items = result.items as Array<{ nodeId: string; capabilities: string[]; sandbox?: string }>;
+  assert.deepEqual(items.map(item => item.nodeId), ['m3pro-executor-1', 'vultr-executor']);
+  // 只有值为 true 的键算能力（负向控制：workspace_read:false 不得出现）
+  assert.deepEqual(items[0]?.capabilities, ['artifact_transfer', 'deploy_safe', 'heavy_task_safe', 'run_agent']);
+  assert.equal(items[0]?.sandbox, 'macos-sandbox-exec');
+  assert.deepEqual(items[1]?.capabilities, ['deploy_safe', 'run_agent']);
+});
+
+test('los_nodes_list refuses before HTTP without the operator credential', async () => {
+  let called = false;
+  const adapter = _createLosMCPAdapter({
+    operatorToken: '',
+    fetchImpl: async () => { called = true; return new Response('[]'); },
+  });
+
+  const response = asRecord((await callTool(adapter, 'los_nodes_list', { projectId: 'los' })).result);
+  assert.equal(response.isError, true);
+  assert.match(String((response.content as Array<{ text: string }>)[0]?.text), /LOS_OPERATOR_TOKEN is required/);
   assert.equal(called, false);
 });
 

@@ -251,13 +251,20 @@ export async function loadRunSpec(id: string): Promise<RunSpecRecord | null> {
   return rows.rows[0] ? rowToRecord(rows.rows[0]) : null;
 }
 
-export async function listRunSpecs(limit = 50): Promise<RunSpecRecord[]> {
+/** run specs 列表；服务端过滤 projectId/status/since，数字入参等价 `{limit}`（2026-10-11 审计 §2 P0）。 */
+export async function listRunSpecs(
+  options: number | { limit?: number; projectId?: string; status?: string; since?: string } = {},
+): Promise<RunSpecRecord[]> {
   await ensureRunSpecStore();
-  const db = getDb();
-  const rows = await db.query<RunSpecRow>(
-    'SELECT * FROM run_specs ORDER BY updated_at DESC LIMIT $1',
-    [limit],
-  );
+  const opts = typeof options === 'number' ? { limit: options } : options;
+  const params: unknown[] = []; const where: string[] = [];
+  const add = (value: unknown, sql: string) => { params.push(value); where.push(sql.replace('$', `$${params.length}`)); };
+  if (opts.projectId) add(opts.projectId, 'project_id = $');
+  if (opts.status) add(opts.status, 'status = $');
+  if (opts.since) add(opts.since, 'created_at > $');
+  params.push(opts.limit ?? 50);
+  const sql = `SELECT * FROM run_specs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY updated_at DESC LIMIT $${params.length}`;
+  const rows = await getDb().query<RunSpecRow>(sql, params);
   return rows.rows.map(rowToRecord);
 }
 

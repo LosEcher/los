@@ -60,6 +60,19 @@ export const _TOOLS = [
     },
   },
   {
+    name: 'los_nodes_list',
+    description: 'List LOS execution nodes with the capabilities placement decisions depend on (GET /nodes). Requires LOS_OPERATOR_TOKEN. projectId scopes the request context only; the node registry is global.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+        status: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 40, default: 20 },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
     name: 'los_run_state',
     description: 'Read the persisted recovery-grade state projection for a LOS run.',
     inputSchema: {

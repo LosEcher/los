@@ -11,8 +11,11 @@ import {
   optionalRecord,
   optionalString,
   parseSSE,
+  _DEFAULT_NODE_LIST,
+  _MAX_NODE_LIST,
   projectIntakeScope,
   projectNextAction,
+  projectNodeList,
   projectRecoveryResult,
   projectRunEvents,
   projectRunList,
@@ -188,8 +191,23 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
       const traceId = optionalString(args.traceId);
       const status = optionalString(args.status);
       const limit = optionalInteger(args.limit, 1, _MAX_RUN_LIST) ?? _DEFAULT_RUN_LIST;
-      const rows = await requestJson('/runs', { projectId });
+      // 服务端过滤（projectId/status/limit）——避免"先取前 N 条再由客户端过滤"导致计数失真；
+      // traceId 无服务端参数，仍由投影在客户端过滤。
+      const query = new URLSearchParams();
+      query.set('projectId', projectId);
+      query.set('limit', String(limit));
+      if (status) query.set('status', status);
+      const rows = await requestJson(`/runs?${query}`, { projectId });
       return projectRunList(Array.isArray(rows) ? rows : [], { projectId, traceId, status, limit });
+    }
+
+    if (name === 'los_nodes_list') {
+      const projectId = requiredString(args.projectId, 'projectId');
+      const status = optionalString(args.status);
+      const limit = optionalInteger(args.limit, 1, _MAX_NODE_LIST) ?? _DEFAULT_NODE_LIST;
+      // /nodes 是 operator 门禁（node-routes.ts:93）⇒ 与 verify/approve 同款：无凭据先抛错。
+      const rows = await requestJson('/nodes', { projectId, operator: true });
+      return projectNodeList(Array.isArray(rows) ? rows : [], { status, limit });
     }
 
     if (name === 'los_run_state') {

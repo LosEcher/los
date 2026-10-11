@@ -84,7 +84,11 @@ tools:
       capped server-side, so the adapter filters by projectId/traceId/status and
       bounds the result itself.
     requiredInput: [projectId]
-    optionalInput: [traceId, status, limit]
+    optionalInput: [traceId, status, limit, since]
+    serverFilterNote: >
+      projectId / status / limit / since are applied by GET /runs itself. Filtering a
+      capped client-side list was the original behaviour and made counts disagree
+      with the source of truth; only traceId is still filtered in the adapter.
     output:
       - matched
       - returned
@@ -93,6 +97,23 @@ tools:
       Each item carries runSpecId, sessionId, projectId, status, toolMode, traceId,
       createdAt, updatedAt and a truncated promptPreview. Raw prompts are never
       returned in full and the list is bounded by limit (default 10, maximum 50).
+  - name: los_nodes_list
+    purpose: >
+      read the execution-node registry through GET /nodes so placement decisions can
+      name real devices and their capabilities instead of assuming the local node.
+    requiredInput: [projectId]
+    optionalInput: [status, limit]
+    operatorCredentialRequired: true
+    scopeNote: >
+      projectId scopes the request context only; the node registry is global. The
+      gateway route itself is operator-gated, so the adapter refuses before any HTTP
+      call without the operator credential.
+    output: [total, online, matched, returned, items]
+    projection: >
+      Items carry nodeId / nodeKind / hostLabel / status / resourceClass / version /
+      queueDepth / activeTaskCount / capabilities / lastHeartbeatAt. The capability
+      keys (run_agent, deploy_safe, heavy_task_safe, artifact_transfer, file_sync_*)
+      are what placement decisions must read.
   - name: los_run_state
     purpose: read the recovery-grade state projection through GET /runs/{runSpecId}/state
     requiredInput: [runSpecId, projectId]
