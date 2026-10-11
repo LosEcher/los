@@ -34,20 +34,31 @@ CMD="${2:-help}"
 # 下发内容），因此必须在按 NODE 做连通性检查**之前**处理。
 if [ "$NODE" = "tarball" ]; then
   _out="${2:-/tmp/los-ship.tar.gz}"
-  COPYFILE_DISABLE=1 tar czf "$_out" -C "$(cd "$(dirname "$0")/.." && pwd)" \
-    --exclude='node_modules' --exclude='.git' --exclude='.jj' --exclude='.DS_Store' \
-    --exclude='._*' --exclude='packages/*/.los' --exclude='packages/*/.los/*' \
-    --exclude='.los-runtime' --exclude='tmp' --exclude='dist' --exclude='.tsbuildinfo' \
-    tools/ deploy/ packages/ contracts/ \
-    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
-    || { echo "tarball build failed" >&2; exit 1; }
+  # LOS_DEPLOY_TARBALL：复用一份**已冻结**的包（编排器在滚动开始时打一次，所有节点共用）。
+  # 好处是结构性的：一次滚动里所有节点拿到的字节完全相同，滚到一半有人改工作树也影响不到这一轮
+  # ——"目标漂移"从"要检测的故障"变成"不可能发生"。见 los-fleet-rollout.sh 的 freeze_payload。
+  if [ -n "${LOS_DEPLOY_TARBALL:-}" ]; then
+    [ -f "$LOS_DEPLOY_TARBALL" ] || { echo "LOS_DEPLOY_TARBALL not found: $LOS_DEPLOY_TARBALL" >&2; exit 1; }
+    _out="$LOS_DEPLOY_TARBALL"
+  else
+    COPYFILE_DISABLE=1 tar czf "$_out" -C "$(cd "$(dirname "$0")/.." && pwd)" \
+      --exclude='node_modules' --exclude='.git' --exclude='.jj' --exclude='.DS_Store' \
+      --exclude='._*' --exclude='packages/*/.los' --exclude='packages/*/.los/*' \
+      --exclude='.los-runtime' --exclude='tmp' --exclude='dist' --exclude='.tsbuildinfo' \
+      --exclude='*.db' --exclude='*.db-shm' --exclude='*.db-wal' --exclude='test-results' \
+      tools/ deploy/ packages/ contracts/ \
+      package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json \
+      || { echo "tarball build failed" >&2; exit 1; }
+  fi
   # 同时落一份**清单**（`$_out.list`）：它是"这次到底下发了哪些文件"的唯一真源，
   # 由 tar 自己枚举，所以不可能与包内容漂移。Linux 侧的剪枝在远程重新枚举一次；
   # Windows 驱动没有 bash，需要把这份清单传上节点才能做同样的剪枝
   # （2026-10-11：Windows 一直没有剪枝，节点上积了 45 个陈旧文件，内容摘要与目标不符
-  #  却看不出来 —— 那时 Windows 还没有摘要）。
-  COPYFILE_DISABLE=1 tar tzf "$_out" | grep -v '/$' | LC_ALL=C sort > "$_out.list" \
-    || { echo "tarball manifest build failed" >&2; exit 1; }
+  #  却看不出来 —— 那时 Windows 还没有摘要）。复用冻结包时清单可能不存在，就地从包里重算。
+  if [ ! -f "$_out.list" ]; then
+    COPYFILE_DISABLE=1 tar tzf "$_out" | grep -v '/$' | LC_ALL=C sort > "$_out.list" \
+      || { echo "tarball manifest build failed" >&2; exit 1; }
+  fi
   printf '%s %s\n' "$_out" "$(shasum -a 256 "$_out" | cut -d' ' -f1)"
   exit 0
 fi
@@ -317,12 +328,21 @@ do_sync() {
   # manifests as the lockfile. Omitting runtime dependencies left stale source;
   # omitting unrelated manifests also makes pnpm reject the workspace.
   local tmp_tar="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.tar.gz"
+  # 冻结包复用：编排器在滚动开始时打一次包，这一轮所有节点共用同一份字节。
+  # 结构性地消除"滚到一半源变了"（否则只能事后检测 + 中止，而中止时前面的节点已经滚过了）。
+  local frozen_tar=""
+  if [ -n "${LOS_DEPLOY_TARBALL:-}" ]; then
+    [ -f "$LOS_DEPLOY_TARBALL" ] || die "LOS_DEPLOY_TARBALL not found: $LOS_DEPLOY_TARBALL"
+    frozen_tar="$LOS_DEPLOY_TARBALL"
+    tmp_tar="$frozen_tar"
+    log_info "  payload: frozen by the orchestrator ($(basename "$frozen_tar"))"
+  fi
 
   # Create tar from local repo — only ship what the executor needs.
   # COPYFILE_DISABLE stops bsdtar from emitting AppleDouble `._*` sidecar
   # entries, which otherwise land on the node as junk that pollutes its
   # content-hash version.
-  COPYFILE_DISABLE=1 tar czf "$tmp_tar" -C "$LOCAL_REPO" \
+  [ -n "$frozen_tar" ] || COPYFILE_DISABLE=1 tar czf "$tmp_tar" -C "$LOCAL_REPO" \
     --exclude='node_modules' \
     --exclude='.git' \
     --exclude='.jj' \
@@ -334,6 +354,10 @@ do_sync() {
     --exclude='tmp' \
     --exclude='dist' \
     --exclude='.tsbuildinfo' \
+    --exclude='*.db' \
+    --exclude='*.db-shm' \
+    --exclude='*.db-wal' \
+    --exclude='test-results' \
     tools/ \
     deploy/ \
     packages/ \
@@ -539,7 +563,8 @@ STAMP_VERSION
       >> "$log_file" 2>&1 || log_warn "could not copy systemd unit (may need root)"
   fi
 
-  rm -f "$tmp_tar"
+  # 冻结包**不删**：同一轮里后面的节点还要用（编排器负责清理/覆盖）
+  [ -n "$frozen_tar" ] || rm -f "$tmp_tar"
   log_info "sync complete — see $log_file"
 }
 
