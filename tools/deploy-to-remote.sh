@@ -177,6 +177,24 @@ remote_su_sh() {
   remote_sh su - los -c "$*"
 }
 
+# pnpm 必须以**节点的服务身份**运行，否则 node_modules 的链接归错人。
+# Linux 节点的服务用户是 `los`，但 macOS 节点没有这个用户（launchd 以登录用户跑执行器），
+# `su - los` 在那里必然失败。2026-10-11 实测：新增 workspace 包 `@los/mcp-stdio` 后，
+# M3 的 packages/agent/node_modules/@los 缺链接，重启即 ERR_MODULE_NOT_FOUND 崩溃循环
+# —— 与 Windows 那次是同一个失效模式（"发布器没有 install 步骤"）。
+#
+# 判据必须是"能不能真的 su 过去"，不能是"这个名字存不存在"：M3 的目录服务把**不存在的名字**
+# `los` 解析成了当前用户（`id -u los` → 501、exit 0，而 `dscl . -list /Users` 里没有 los），
+# 用它做判据会选错分支。`su - los -c true` 在 M3 上立刻 "su: Sorry"（无 TTY，不会挂住），
+# 在 Linux 节点上成功。
+remote_pnpm_sh() {
+  if remote_sh su - los -c true </dev/null >/dev/null 2>&1; then
+    remote_su_sh "$1"
+  else
+    remote_sh sh -c "$1"
+  fi
+}
+
 check_conn() {
   log_info "checking $SSH_TRANSPORT connectivity to $SSH_TARGET..."
   if ! remote_exec echo "ok" >/dev/null 2>&1; then
@@ -281,6 +299,9 @@ build_ship_tar() {
 do_sync() {
   local log_file="$LOG_BASE/${NODE}-sync-${TIMESTAMP}.log"
   SYNC_EXTRACTED=0   # 供 EXIT trap 区分「还没动过节点」与「解包到一半」
+  # 收敛守卫由 EXIT trap 调用，看不到 do_sync 的 local，所以路径要放到全局，
+  # 否则守卫的诊断信息会以 "log_file: unbound variable" 半路夭折。
+  SYNC_LOG_FILE="$log_file"
   log_info "syncing code to $TS_HOST via tar pipe (log: $log_file)"
   # 收敛判定（含"中途失败"这条路径）在退出时统一执行。
   trap 'sync_convergence_guard' EXIT
@@ -403,13 +424,18 @@ do_sync() {
     log_warn "  shipped manifest upload failed ($got_lines/$want_lines) — skipping the stale-file prune"
     remote_sh sh -c 'rm -f /tmp/los-shipped.list' >> "$log_file" 2>&1 || true
   fi
-  remote_sh bash -s "$REMOTE_HOME" <<'PRUNE_STALE'
+  # 这一步的输出必须**落进 sync 日志**：2026-10-11 M3 的排查卡了很久，正是因为 prune
+  # 的输出既不在日志里（日志 0 字节，看起来像"传输前就断了"），失败也不出声
+  # （下一行无条件打印 "prune: done"）。现在输出统一进日志，摘要回显到编排器的 stdout，
+  # 失败显式 return 1（由 EXIT trap 的收敛守卫接手）。
+  local prune_out=""
+  if ! prune_out="$(remote_sh bash -s "$REMOTE_HOME" <<'PRUNE_STALE' 2>&1
 # 全脚本强制 C locale：两个列表用 `LC_ALL=C sort` 生成，但 comm **自身**会按环境 locale
 # 校验"是否有序"。vultr 的 LANG=en_US.UTF-8 下，comm 把 C 排序的清单判成无序 → 乱序双指针
 # 产出 1235 个假"陈旧"项（2026-10-06 实测），而 locale 为 C 的节点一切正常 —— 这正是
 # "只在部分节点发作"的原因。破坏性路径上不允许任何 locale 依赖。
 export LC_ALL=C
-export LANG=C >> "$log_file" 2>&1
+export LANG=C
 set -euo pipefail
 los_home="$1"
 cd "$los_home"
@@ -433,11 +459,32 @@ if [ "$stale_count" -gt 0 ]; then
     echo "prune: ABORT — stale count $stale_count exceeds 500"; exit 1
   fi
   head -20 /tmp/los-stale.list
-  xargs -a /tmp/los-stale.list -d '\n' rm -f --
+  # `xargs -a FILE -d '\n'` 是 **GNU 专有**写法，macOS 的 BSD xargs 两个选项都不认
+  # （`xargs: invalid option -- a`）⇒ 删除静默失败、陈旧文件留在节点上，而节点的内容摘要
+  # 覆盖每一个源文件，于是 digest 永远不等于机队目标。2026-10-11 M3 的"同步反复中断"就是这一条：
+  # 传输、校验、解包全部成功，只有一个被上游重命名删除的文件（mcp-stdio-transport.ts）没被清掉。
+  # 用可移植的 read 循环，两个平台行为一致；失败立即非零退出（set -e），不再"删不掉也算完"。
+  while IFS= read -r stale_path; do
+    rm -f -- "$stale_path"
+  done < /tmp/los-stale.list
+  # 复核：删不掉的陈旧文件必须吵，否则收敛守卫会把"清理失败"误报成"半同步"。
+  while IFS= read -r stale_path; do
+    if [ -e "$stale_path" ]; then
+      echo "prune: FAILED — could not remove stale path: $stale_path"
+      exit 1
+    fi
+  done < /tmp/los-stale.list
   echo "prune: removed $stale_count stale file(s)"
 fi
 PRUNE_STALE
-  log_info "  prune: done (see log)"
+  )"; then
+    printf '%s\n' "$prune_out" | tee -a "$log_file" >&2
+    log_warn "  prune FAILED — see $log_file"
+    log_warn "  a stale source file that survives the prune keeps this node's content digest away from the fleet target"
+    return 1
+  fi
+  printf '%s\n' "$prune_out" | tee -a "$log_file" >/dev/null
+  log_info "  $(printf '%s\n' "$prune_out" | grep '^prune:' | tail -1 || printf 'prune: done')"
 
   remote_sh bash -s "$REMOTE_HOME" "$BUILD_VERSION" <<'STAMP_VERSION' >> "$log_file" 2>&1
 set -euo pipefail
@@ -451,6 +498,13 @@ fi
 # 用 awk + mv 而不是 `sed -i`：BSD sed(macOS) 要求 `-i ''`，GNU 形式会在 macOS 上直接
 # 失败（2026-10-07 m3pro 实测：`sed: invalid command code e`），而这一步失败会让整个 sync
 # 中止 —— 明明内容已经解包成功。可移植性在这里比简洁更重要。
+#
+# 但 `mv` 会用**新文件**（umask 派生）的权限位替换旧文件，于是每次 sync 都把 `.env` 的
+# 0600 悄悄变成 0644 —— runbook 明确要求 600，而手工收紧会在下一次滚动时被打回
+# （2026-10-11 实测：M3 收到 600 后跑一次 sync 即回到 644）。所以先记住原权限、写完恢复：
+# 节点各自的策略（M3 是 600，Linux 上是 root:root 644 以便服务用户 `los` 能读）都保持不变。
+# 这里刻意**不**硬编码 600：把 root 属主的 `.env` 强行改成 600 会让 `los` 读不到而弄坏执行器。
+env_mode="$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file" 2>/dev/null || true)"
 for key in LOS_VERSION EXECUTOR_VERSION; do
   awk -v k="$key" -v v="$build_version" '
     BEGIN { done = 0 }
@@ -459,14 +513,20 @@ for key in LOS_VERSION EXECUTOR_VERSION; do
     END { if (!done) print k "=" v }
   ' "$env_file" > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
 done
-echo "version=$build_version"
+[ -n "$env_mode" ] && chmod "$env_mode" "$env_file"
+echo "version=$build_version (mode ${env_mode:-unchanged})"
 STAMP_VERSION
   log_info "  version: $BUILD_VERSION"
 
   log_info "  sync steps finished (convergence is asserted on exit)"
 
   # Sync systemd unit to /etc
-  if remote_sh test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
+  # 只在**真的有 systemd** 的节点上同步 unit。判据不能是"仓库里有这个文件"——那在每台
+  # 节点上都成立，于是 macOS 节点每次 sync 都要尝试一次注定失败的 cp 并打一条
+  # "could not copy systemd unit (may need root)" 的假警告。macOS 路径既然受支持，
+  # 就不该每次都给运维一条看起来像故障的 WARN。
+  if remote_sh test -d /etc/systemd/system 2>/dev/null &&
+    remote_sh test -f "$REMOTE_HOME/deploy/systemd/los-executor.service" 2>/dev/null; then
     remote_sh sh -c \
       "cp '$REMOTE_HOME/deploy/systemd/los-executor.service' /etc/systemd/system/los-executor.service && chmod 644 /etc/systemd/system/los-executor.service" \
       >> "$log_file" 2>&1 || log_warn "could not copy systemd unit (may need root)"
@@ -494,7 +554,7 @@ do_install() {
 
   if $low_resource; then
     # Keep platform optional dependencies: tsx needs esbuild's native binary.
-    remote_su_sh "cd $REMOTE_HOME && CI=true NODE_OPTIONS='--max-old-space-size=128' pnpm install --frozen-lockfile --network-concurrency=1 --child-concurrency=1" \
+    remote_pnpm_sh "cd $REMOTE_HOME && CI=true NODE_OPTIONS='--max-old-space-size=128' pnpm install --frozen-lockfile --network-concurrency=1 --child-concurrency=1" \
       >> "$log_file" 2>&1 || {
       log_warn "pnpm install failed — see $log_file"
       log_warn "Diagnose: $0 $NODE cmd 'journalctl -u los-executor -n 20'"
@@ -502,7 +562,7 @@ do_install() {
       return 1
     }
   else
-    remote_su_sh "cd $REMOTE_HOME && CI=true pnpm install --frozen-lockfile" \
+    remote_pnpm_sh "cd $REMOTE_HOME && CI=true pnpm install --frozen-lockfile" \
       >> "$log_file" 2>&1 || {
       log_warn "pnpm install failed — see $log_file"
       log_warn "Try low-resource mode: $0 $NODE install --low-resource"
@@ -872,8 +932,12 @@ sync_convergence_guard() {
       log_warn "  sync aborted BEFORE extraction (exit $st) — the node is untouched and still on '${got:-<no output>}'"
       exit "$st"
     else
-      log_warn "  sync aborted mid-way (exit $st) — checking whether the node is half-synced"
-      die "sync did not converge after extraction: remote digest '${got:-<no output>}' != target '$BUILD_VERSION' — the node may be half-synced; do NOT restart it. Re-run with upload-then-extract (scp + shasum on both sides + extract on the node); see docs/operations/node-deployment-runbook.md"
+      # 走到这里只说明"解包之后 digest 仍不等于目标"，**不等于半截树**。2026-10-11 M3 的
+      # "同步反复中断"就是这样被误判成传输问题的：解包完全成功，只有一个被上游删除的源文件
+      # 没被 prune 清掉（BSD xargs 不认 GNU 的 -a/-d），于是摘要永远差一截 —— 而这条 die
+      # 断言"may be half-synced; do NOT restart it"，把排查方向指到了传输路径上。
+      log_warn "  sync aborted after extraction (exit $st) — remote content differs from the target"
+      die "sync did not converge after extraction: remote digest '${got:-<no output>}' != target '$BUILD_VERSION'. Two distinguishable causes — read '${SYNC_LOG_FILE:-<sync log>}' before acting: (a) the log says 'prune: FAILED'/'prune: SKIPPED'/'stale file(s)': the node still holds source files the manifest no longer ships, and because the digest covers every source file it can never converge — fix the prune, the tree itself is fine; (b) the log shows no prune complaint: then files really are missing on the node and it may be half-synced — do NOT restart it in that case. See docs/operations/node-deployment-runbook.md"
     fi
   fi
   [ "$st" -eq 0 ] && log_info "  digest verified: $got"

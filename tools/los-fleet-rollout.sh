@@ -94,10 +94,26 @@ reg_version()  { q "select coalesce(version,'') from executor_nodes where node_i
 reg_status()   { q "select coalesce(status,'') from executor_nodes where node_id='$1'"; }
 reg_active()   { q "select coalesce(active_task_count,0) from executor_nodes where node_id='$1'"; }
 reg_target()   { q "select coalesce(target_version,'') from executor_nodes where node_id='$1'"; }
+reg_base_url() { q "select coalesce(base_url,'') from executor_nodes where node_id='$1'"; }
 set_target()   { "$PSQL" "$DB_URL" -c "update executor_nodes set target_version='$TARGET', updated_at=now() where node_id='$1'" >/dev/null 2>&1; }
 promote_node() { ./bin/los nodes command "$1" promote -t "$AUTH" ${OP:+--operator-token "$OP"} --reason "fleet rollout $TARGET" >/dev/null 2>&1; }
-health_version() { # ip:port
-  curl -s -m 8 "http://$1/health" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1
+health_version() { # base_url | ip:port
+  local target="$1"
+  case "$target" in http*) : ;; *) target="http://$target" ;; esac
+  curl -s -m 8 "${target%/}/health" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1
+}
+
+# 等 /health 报出目标版本。macOS 节点没有 systemd，`verify` 在那里用不了；这条是它唯一
+# "新进程真的起来了"的判据（注册表 version 是心跳带来的，会滞后，不能单独当证据）。
+wait_health_version() { # node_id budget_seconds
+  local nid="$1" budget="${2:-60}" base elapsed=0
+  base="$(reg_base_url "$nid")"
+  [ -n "$base" ] || return 1
+  while [ "$elapsed" -lt "$budget" ]; do
+    [ "$(health_version "$base")" = "$TARGET" ] && return 0
+    sleep 5; elapsed=$((elapsed+5))
+  done
+  return 1
 }
 
 # 远端摘要 = 节点自查（与 deploy-to-remote.sh digest 同一判据）
@@ -180,10 +196,20 @@ roll_one() { # node_id platform alias home privilege
       ;;
     macos)
       LOS_REMOTE_NODE_ID="$nid" tool "$alias_" "$home" "$priv" sync || rc=1
+      # install 必须在这里跑。macOS 节点没有 `los` 用户，但 do_install 现在自己判别身份；
+      # 少了这一步，任何**新增/删除 workspace 包**的发布都会让节点在 KeepAlive 下崩溃循环
+      # （2026-10-11：packages/agent 新 import `@los/mcp-stdio`，而
+      #  packages/agent/node_modules/@los 里没有它的链接 ⇒ ERR_MODULE_NOT_FOUND）。
+      [[ "$rc" -eq 0 ]] && { tool "$alias_" "$home" "$priv" install >/dev/null 2>&1 || rc=1; }
       if [[ "$rc" -eq 0 ]]; then
         ssh "${SSHO[@]}" "$alias_" "sed -i '' 's|^LOS_VERSION=.*|LOS_VERSION=$TARGET|; s|^EXECUTOR_VERSION=.*|EXECUTOR_VERSION=$TARGET|' '$home/.env'" >/dev/null 2>&1
         ssh "${SSHO[@]}" "$alias_" 'launchctl kickstart -k gui/$(id -u)/com.echerlos.los-executor' >/dev/null 2>&1 || rc=1
-        sleep 20
+        # 内容摘要由 sync 的收敛守卫断言；这里断言**进程**：/health 必须报出目标版本。
+        # 原先只 promote + 看注册表 status，一个"重启失败但服务还活着"的节点能混过去。
+        wait_health_version "$nid" 60 || {
+          warn "  $nid: /health did not report $TARGET within 60s (got '$(health_version "$(reg_base_url "$nid")")')"
+          rc=1
+        }
       fi
       [[ "$rc" -eq 0 ]] && { promote_node "$nid"; sleep 8; [[ "$(reg_status "$nid")" = "online" ]] || rc=1; }
       ;;

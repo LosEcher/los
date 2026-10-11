@@ -108,6 +108,12 @@ Use `operations/node-deployment-runbook.md` for executor bootstrap, rollout,
 rollback, and offline-node reactivation. Keep dated node evidence in a separate
 operation smoke.
 
+Use `operations/2026-10-11-macos-m3-sync-nonconvergence.md` for the macOS node
+whose content sync never converged: a GNU-only `xargs` flag in the stale-file
+prune, why the empty sync log pointed the investigation at the transport instead,
+the macOS `install` gap that would have crash-looped the executor on the next
+restart, and the replay/negative-control evidence for each.
+
 Use `operations/database-migrations.md` for migration ownership, startup
 application behavior, drift validation, and failure handling. Use
 `operations/github-mirror-recovery.md` when the secondary GitHub `main` has
