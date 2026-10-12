@@ -412,7 +412,24 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
   }
   const requiredCapabilities = requestedCapabilities as ExecutorCapabilityRequirement[];
   const nodeId = normalizeString(input.nodeId);
-  const agentKey = normalizeString(input.agentKey);
+  // 2026-10-12：`executor.agentKey` **拒绝**，不再静默保存。
+  //
+  // 它是**执行器认证密钥**（`auth-middleware.ts` 用 `config.executor.agentKey` 校验
+  // 心跳与执行器模型路径），而派发时本来就从**网关配置**注入
+  // （`runner.ts` 的 `withExecutorKeyFromConfig`）⇒ 存进排程模板只是把一把活密钥
+  // 写进 `scheduled_work_items.run_template_json`（实测 9/82 行曾带明文，
+  // 且与当前机队 key 逐字相同）。
+  //
+  // 为什么不静默丢弃：那正是"声明 ≠ 生效"（调用方以为密钥生效、实际来自别处）。
+  // 全仓无任何调用方发送这个字段（runbooks/ tools/ scripts/ 均为 0 命中），
+  // 所以 fail-loud 不会打到既有自动化。
+  if (input.agentKey !== undefined) {
+    throw new Error(
+      'executor.agentKey is not accepted: the executor key is taken from gateway config '
+      + '(config.executor.agentKey) at dispatch time; persisting it would store a live '
+      + 'credential in scheduled_work_items.run_template_json',
+    );
+  }
   // S7：放置策略与工作区策略同样 fail-loud（理由同 requiredCapabilities）——
   // 拼错的策略名不该静默退化成默认值，否则调用方以为约束生效而实际没有。
   const workspacePolicy = optionalEnum(input.workspacePolicy, ['verify', 'portable'] as const);
@@ -423,7 +440,6 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
     ...(input.enabled === undefined ? {} : { enabled: Boolean(input.enabled) }),
     ...(nodeId ? { nodeId } : {}),
     ...(nodeUrls.length > 0 ? { nodeUrls } : {}),
-    ...(agentKey ? { agentKey } : {}),
     ...(requiredCapabilities.length > 0 ? { requiredCapabilities } : {}),
     ...(workspacePolicy ? { workspacePolicy } : {}),
     ...(placementPolicy ? { placementPolicy } : {}),
