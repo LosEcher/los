@@ -113,6 +113,7 @@ test('Grok existing-login adoption stays explicit, redacted, and runtime-gated',
   assert.equal(EN['chat.grokExisting'], 'Grok (existing login)');
   assert.match(apiTypes, /export type RuntimeKind = 'claude-code' \| 'codex' \| 'grok'/);
   assert.match(viteConfig, /'\/runtimes': 'http:\/\/127\.0\.0\.1:8080'/);
+  assert.match(viteConfig, /'\/topology': 'http:\/\/127\.0\.0\.1:8080'/);
 });
 
 test('providers page renders readiness instead of raw discovery booleans', () => {

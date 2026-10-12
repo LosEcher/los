@@ -4,6 +4,7 @@ import { Network, Plus, Upload, AlertTriangle } from 'lucide-react';
 import { getJson, postJson, type SshConfigImportResponse } from './api';
 import { Badge, DataTable, EmptyText, Fact, Field, formatDate, RefreshQueryButton, StatusPill } from './ui';
 import { FleetCard } from './fleet-card.js';
+import { FleetTopologyPanel } from './pages/fleet-topology-panel.js';
 import { NodeEditor, NodeInspector, errorMessage, fmtMb } from './node-editor.js';
 import { useI18n } from './i18n';
 import { DEFAULT_NODE_REGISTRY_FILTER, countRegistryFilters, filterRegistryNodes, type NodeRegistryFilter } from './nodes-registry-filter.js';
@@ -77,6 +78,7 @@ export function NodesPage() {
           </div>
         </div>
         <FleetCard />
+        <FleetTopologyPanel />
         <NodeEditor
           node={selectedNode as any}
           onChangeSelected={setSelectedNodeId}
