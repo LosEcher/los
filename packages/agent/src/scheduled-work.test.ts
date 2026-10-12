@@ -353,8 +353,10 @@ test('operator circuit reset restores eligibility without manufacturing a run', 
     // `optionalIso` 把 NULL 映射成 undefined（不是 null）——断言按实际契约写。
     assert.equal(reset.schedule.circuitOpenedAt, undefined);
     assert.notEqual(reset.schedule.circuitState, 'open');
-    // 关键不变量：重置只恢复"可以再跑"的资格，**不动 next_run_at**
-    // ⇒ 它不会替操作者制造一次执行。要立刻跑必须另外显式 trigger。
+    // 重置**不改写槽位**。注意这**不等于**"重置不会导致执行"：若该排程的槽位已过期，
+    // `claimDueScheduledWorkItems`（`circuit_state IN ('closed','half_open') AND
+    // next_run_at <= now()`）会在下一个 tick 认领它 —— 那是期望行为。本用例的槽位在未来，
+    // 所以这里断言的是"槽位没被改写"这条更窄、且无条件成立的性质。
     assert.equal(new Date(reset.schedule.nextRunAt!).getTime(), nextRunBefore);
 
     // 幂等：已 closed 时 changed=false，且不写库。
