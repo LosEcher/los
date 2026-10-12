@@ -15,6 +15,7 @@ import { GitBranch, Network } from 'lucide-react';
 import { getJson } from '../api/index.js';
 import { EmptyText } from '../ui.js';
 import { useI18n } from '../i18n';
+import { foldEvidenceGraph, type FoldStats } from './topology-fold.mjs';
 
 export interface RuntimeEvidenceNode {
   id: string;
@@ -106,10 +107,22 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
     refetchInterval: 30_000,
   });
 
-  const layout = useMemo<{ nodes: LayoutNode[]; visibleIds: Set<string>; width: number; height: number } | null>(() => {
+  const layout = useMemo<{
+    nodes: LayoutNode[];
+    visibleIds: Set<string>;
+    edges: RuntimeEvidenceEdge[];
+    foldStats: FoldStats;
+    width: number;
+    height: number;
+  } | null>(() => {
     if (!query.data) return null;
-    const nodes = query.data.nodes ?? [];
-    const visible = nodes.filter(node => layerIndex(node.kind) <= 3);
+    // 折叠 = 归组 + **重写触及成员的边**（旧实现是删节点 + 丢边：实测 519 节点/670 边
+    // 渲染后只剩 2 节点 1 边）。规则与不变量见 pages/topology-fold.mjs 与其测试。
+    const folded = foldEvidenceGraph({
+      nodes: query.data.nodes ?? [],
+      edges: query.data.edges ?? [],
+    });
+    const visible = folded.nodes;
     const visibleIds = new Set(visible.map(node => node.id));
     const byLayer = new Map<number, LayoutNode[]>();
     for (const node of visible) {
@@ -131,13 +144,15 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
       placed.push(...list);
       maxWidth = Math.max(maxWidth, width);
     }
-    const height = 4 * ROW_Y + 60;
-    return { nodes: placed, visibleIds, width: maxWidth, height };
+    // 折叠桶落在第 5 层（layerIndex 的 default 分支就是 4）
+    const height = 5 * ROW_Y + 60;
+    return { nodes: placed, visibleIds, edges: folded.edges, foldStats: folded.stats, width: maxWidth, height };
   }, [query.data]);
 
+  // 折叠桶是**合成**节点（不在 query.data.nodes 里），所以按渲染集查而不是按响应查。
   const selectedNode = selectedId === null
     ? null
-    : query.data?.nodes.find(node => node.id === selectedId) ?? null;
+    : layout?.nodes.find(node => node.id === selectedId) ?? null;
 
   const counts = query.data?.counts ?? {};
   const collapsedCount = (counts.session_event ?? 0) + (counts.tool_call_state ?? 0)
@@ -151,8 +166,10 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
         {query.data ? (
           <span className="topology-stats">
             {t('assets.topology.stats', {
-              nodes: String((query.data.nodes ?? []).length),
-              edges: String((query.data.edges ?? []).length),
+              // 统计的是**画出来的**图（含折叠桶、含重写后的边），不是响应里的原始条数：
+              // 旧实现显示 519/670 而画面上只有 2 个盒子。
+              nodes: String(layout?.nodes.length ?? 0),
+              edges: String(layout?.edges.length ?? 0),
             })}
           </span>
         ) : null}
@@ -180,8 +197,7 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
                   <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
                 </marker>
               </defs>
-              {(query.data.edges ?? [])
-                .filter(edge => layout.visibleIds.has(edge.from) && layout.visibleIds.has(edge.to))
+              {layout.edges
                 .map((edge, index) => {
                   const from = layout.nodes.find(node => node.id === edge.from);
                   const to = layout.nodes.find(node => node.id === edge.to);
@@ -239,10 +255,17 @@ export function TopologyPanel({ runSpecId }: { runSpecId: string | null }) {
             </svg>
           </div>
 
-          {collapsedCount > 0 ? (
+          {collapsedCount > 0 && layout ? (
             <div className="topology-collapsed">
               <GitBranch size={12} />
               <span>{t('assets.topology.collapsed', { count: String(collapsedCount) })}</span>
+              <span className="topology-fold-stats">
+                {t('assets.topology.foldedGroups', {
+                  groups: String(layout.foldStats.groups),
+                  rewritten: String(layout.foldStats.rewrittenEdges),
+                  internal: String(layout.foldStats.internalEdgesDropped),
+                })}
+              </span>
             </div>
           ) : null}
 

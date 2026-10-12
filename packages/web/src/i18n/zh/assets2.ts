@@ -207,5 +207,6 @@ export const zhAssets2: Assets2Keys = {
   'assets.topology.unavailable': '该 run 尚无证据图。',
   'assets.topology.svgAria': '执行证据图',
   'assets.topology.collapsed': '另有 {count} 个事件/工具状态/验证记录（已折叠）',
+  'assets.topology.foldedGroups': '折叠为 {groups} 组 · 重写 {rewritten} 条边（桶内 {internal} 条合并）',
   'assets.topology.hint': '点击节点查看其记录。',
 } satisfies Assets2Keys;
