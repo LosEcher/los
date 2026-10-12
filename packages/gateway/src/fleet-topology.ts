@@ -284,19 +284,35 @@ export async function readFleetTopology(
 }
 
 /**
- * 按运行时字段读 capacity。用显式白名单而不是展开整个对象：读模型只暴露它**声称**提供的字段，
- * 免得内部字段随着 `capacity_json` 的演化悄悄泄漏到 API 上。
+ * 按**声明的**字段读 capacity。
+ *
+ * 2026-10-12 更新：`ExecutorNodeCapacity` 已按实测补齐（此前类型比运行时窄，
+ * 这里不得不绕过类型取字段——那是一个"契约陈旧"逼出来的 cast）。现在直接读类型字段，
+ * 仍然保留**显式白名单**：读模型只暴露它声称提供的字段，免得 `capacity_json` 的演化
+ * 悄悄把内部字段泄漏到 API 上。
+ *
+ * ⚠️ 白名单必须与 `/nodes`（同一个 operator 面）**不冲突**：实测发现这里曾漏掉
+ * `pid`/`swapUsedMb`/`kernelVersion`，而它们在库里都有值、且 `/nodes` 本来就原样返回
+ * ⇒ 新端点比旧端点少给信息是没道理的不对称（真实库对账抓到的）。
  */
 function readCapacity(capacity: ExecutorNodeRecord['capacity']): Record<string, unknown> {
-  const raw = capacity as unknown as Record<string, unknown>;
   return {
-    platform: raw.platform ?? null,
-    arch: raw.arch ?? null,
-    cpuCores: raw.cpuCores ?? null,
-    memoryTotalMb: raw.memoryTotalMb ?? null,
-    memoryAvailableMb: raw.memoryAvailableMb ?? null,
-    cpuLoad1m: raw.cpuLoad1m ?? null,
-    sampledAt: raw.sampledAt ?? null,
+    platform: capacity.platform ?? null,
+    arch: capacity.arch ?? null,
+    cpuCores: capacity.cpuCores ?? null,
+    cpuModel: capacity.cpuModel ?? null,
+    cpuLoad1m: capacity.cpuLoad1m ?? null,
+    memoryTotalMb: capacity.memoryTotalMb ?? null,
+    memoryAvailableMb: capacity.memoryAvailableMb ?? null,
+    swapTotalMb: capacity.swapTotalMb ?? null,
+    swapUsedMb: capacity.swapUsedMb ?? null,
+    kernelVersion: capacity.kernelVersion ?? null,
+    pid: capacity.pid ?? null,
+    psiIoFull: capacity.psiIoFull ?? null,
+    psiMemoryFull: capacity.psiMemoryFull ?? null,
+    sampledAt: capacity.sampledAt ?? null,
+    // 明确保留为 null 的旧字段：读模型**不**假装它知道磁盘空闲（实测无人采集）
+    diskFreeGb: capacity.diskFreeGb ?? null,
   };
 }
 

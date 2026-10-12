@@ -37,6 +37,13 @@ function executorInput(nodeId: string) {
     rolloutState: 'idle' as const,
     connectModes: ['agent_http' as const],
     connectConfig: {},
+    // capacity 按**实测字段**给（camelCase）：读模型的白名单必须与 `/nodes` 对齐、不得丢库里的键
+    capacity: {
+      pid: 1234, platform: 'darwin', arch: 'arm64', cpuCores: 10, cpuModel: 'Apple M1 Pro',
+      cpuLoad1m: 1.25, kernelVersion: 'Darwin 25.5.0', sampledAt: '2026-10-12T00:00:00.000Z',
+      memoryTotalMb: 32768, memoryAvailableMb: 20644, swapTotalMb: 2048, swapUsedMb: 128,
+      psiIoFull: 0, psiMemoryFull: 0,
+    },
     capabilities: { sandbox: 'macos-sandbox-exec', run_agent: true, resourceClass: 'standard_executor' },
     queueDepth: 0,
     activeTaskCount: 0,
@@ -135,6 +142,15 @@ test('fleet topology: 声明与观测分开、落点分类带原因、截断进 
 
     // counts 自洽
     assert.equal(Object.values(graph.counts).reduce((a, b) => a + b, 0), graph.nodes.length);
+
+    // capacity 白名单必须与 `/nodes` 对齐：库里给什么键，读模型就得给出什么键（不得静默少给）
+    const capacity = (usedNode.record as { capacity?: Record<string, unknown> }).capacity ?? {};
+    for (const key of ['pid', 'platform', 'arch', 'cpuCores', 'cpuModel', 'cpuLoad1m', 'kernelVersion',
+      'sampledAt', 'memoryTotalMb', 'memoryAvailableMb', 'swapTotalMb', 'swapUsedMb', 'psiIoFull', 'psiMemoryFull']) {
+      assert.equal(capacity[key] !== null && capacity[key] !== undefined, true, `capacity.${key} 不得缺失（与 /nodes 对齐）`);
+    }
+    // 实测从未采集的键：读模型**不假装**有值（null，而不是编一个数）
+    assert.equal(capacity.diskFreeGb, null, 'diskFreeGb 无人采集 ⇒ 必须如实为 null');
 
     // 注册表里两类节点必须分开（实测教训：混为一谈会让图声称"36 个执行器"而真正能接活的只有 9 个）
     assert.equal(byId.get(sshOnly)?.kind, 'ssh_target', 'ssh_target 不得被标成 executor');
