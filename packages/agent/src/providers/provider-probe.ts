@@ -313,9 +313,22 @@ export function startProviderProbeLoop(options: {
         // 用**真实调用结果**一起评分（窗口与选择侧一致：24h）。此前只传 probe
         // ⇒ 成功率恒为 1.0（"no outcome data → benefit of the doubt"），
         // 于是「探针能连、真实调用 401/410」的 provider 会被评成 healthy
-        // （2026-10-12 实测 nvidia-nim / opencode-zen）。取不到数据时返回 undefined，
-        // 评分器保持对未测 provider 宽恕的原语义。
-        const outcomes = await getRecentProviderOutcomes(probe.provider, 24).catch(() => undefined);
+        // （2026-10-12 实测 nvidia-nim / opencode-zen）。
+        //
+        // ⚠️ **查询失败 ≠ 窗口内无数据**：两者都会让评分器走"宽恕"分支，
+        // 但前者意味着这次要修的假绿会**原样复现且不留痕**（2026-10-12 独立 review 指出）。
+        // 所以这里必须把异常记下来，而不是 `.catch(() => undefined)` 静默吞掉。
+        let outcomes: Awaited<ReturnType<typeof getRecentProviderOutcomes>>;
+        try {
+          outcomes = await getRecentProviderOutcomes(probe.provider, 24);
+        } catch (error) {
+          log.warn(
+            `Provider outcome lookup failed for ${probe.provider} (health falls back to probe-only, `
+            + `i.e. successRate=1.0 — NOT the same as "no recent calls"): `
+            + `${error instanceof Error ? error.message : String(error)}`,
+          );
+          outcomes = undefined;
+        }
         const score = computeHealthScore(probe.provider, probe, outcomes);
         cacheHealthScore(score);
         await emitTierChangeIfNeeded(score, options.onHealthChanged);
