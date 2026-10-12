@@ -223,6 +223,62 @@ test('cc-switch rows import executable Claude-compatible DeepSeek and MiniMax pr
   assert.equal(minimax?.source, 'cc-switch/claude/MiniMax');
 });
 
+// 2026-10-12：cc-switch 的 claude 账户把 Claude Code 的方括号后缀写进了 model 值
+// （实测 `ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-5.5[1M]`）。
+// 那是**客户端内部命名**，当 API model id 用会 **404 invalid_model**
+// （同一天实测：`anthropic/claude-opus-5.5` → 200，带 `[1M]` → 404）。
+//
+// ⚠️ 可达性：`ccSwitchProviderFromRow` 只把 **deepseek / minimax** 形状的 claude 行
+// 映射成 provider（其余返回 null，例如 `zenmuxcc-*`）⇒ 今天那条 `[1M]` 值**进不了 los**。
+// 所以这是个**防御性**修复：它保护"将来某条 deepseek/minimax 行带上 `[1M]`"的情况。
+// 同理，`-free` 这类**真**后缀必须原样保留。
+test('cc-switch Claude rows strip the Claude Code [1M] suffix from the model id', () => {
+  const minimaxSuffixed = ccSwitchProviderFromRow({
+    app_type: 'claude',
+    name: 'MiniMax',
+    is_current: 0,
+    settings_config: JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'minimax-key',
+        ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+        ANTHROPIC_MODEL: 'MiniMax-M3[1M]',
+      },
+    }),
+  });
+  assert.equal(minimaxSuffixed?.name, 'minimax');
+  assert.equal(minimaxSuffixed?.defaultModel, 'MiniMax-M3');
+
+  // `ANTHROPIC_MODEL` 缺席时回落到 SONNET 那两个变量，同样要剥。
+  const deepseekViaSonnet = ccSwitchProviderFromRow({
+    app_type: 'claude',
+    name: 'DeepSeek',
+    is_current: 1,
+    settings_config: JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'deepseek-key',
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro[1M]',
+      },
+    }),
+  });
+  assert.equal(deepseekViaSonnet?.defaultModel, 'deepseek-v4-pro');
+
+  // 反例：`-free` 是真后缀，不能被剥；不含方括号的值原样保留。
+  const realSuffix = ccSwitchProviderFromRow({
+    app_type: 'claude',
+    name: 'MiniMax',
+    is_current: 0,
+    settings_config: JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'minimax-key',
+        ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+        ANTHROPIC_MODEL: 'MiniMax-M3-free',
+      },
+    }),
+  });
+  assert.equal(realSuffix?.defaultModel, 'MiniMax-M3-free');
+});
+
 test('cc-switch Codex rows import PackyCode auth without exposing Claude OAuth as Anthropic', () => {
   const provider = ccSwitchProviderFromRow({
     app_type: 'codex',

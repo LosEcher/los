@@ -119,6 +119,22 @@ function isPackyHost(value: string | undefined, accountName: string): boolean {
   return hay.includes('packy') || hay.includes('api.fan') || hay.includes('packyapi');
 }
 
+/**
+ * 剥掉 Claude Code 的方括号后缀（如 `[1M]`），它是**客户端内部命名**，不是 API 的 model id。
+ *
+ * 2026-10-12 实测：cc-switch 的 claude 账户里
+ * `ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-5.5[1M]`，
+ * 用它当 model id 打 `POST https://zenmux.ai/api/anthropic/v1/messages` 得到
+ * **404 `invalid_model`**；`anthropic/claude-opus-5.5` 才是 **200**。
+ *
+ * 只剥**结尾**的 `[...]`，且要求里面的内容不含斜杠/空格（避免误伤
+ * 形如 `some/model[beta-2]` 这种**真**后缀；同类的 `-free` 是**真**后缀，不剥）。
+ */
+function stripClaudeCodeModelSuffix(model: string | undefined): string | undefined {
+  if (!model) return model;
+  return model.replace(/\[[A-Za-z0-9._-]+\]$/, '');
+}
+
 export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredProvider | null {
   const config = parseJsonObject(row.settings_config) ?? {};
   const env = parseJsonObject(config.env) ?? {};
@@ -203,10 +219,12 @@ export function ccSwitchProviderFromRow(row: Record<string, any>): DiscoveredPro
       name: providerName,
       apiKey,
       baseUrl,
-      defaultModel: readString(env.ANTHROPIC_MODEL)
+      defaultModel: stripClaudeCodeModelSuffix(
+        readString(env.ANTHROPIC_MODEL)
         ?? readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME)
         ?? readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL)
         ?? readString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL),
+      ),
       available: true,
       source: `cc-switch/claude/${accountName}`,
       sourceTool: 'cc-switch',
