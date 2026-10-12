@@ -202,26 +202,39 @@ export async function getRecentProviderOutcomes(
   provider: string; model: string; totalTasks: number; succeeded: number; failed: number;
   avgDurationMs: number; avgTokens: number; lastOutcomeAt: string;
 } | undefined> {
+  // `make_interval(hours => $2)` 只接受 integer；传 0.5 会抛错，而调用方把异常
+  // 当成"无数据"处理 ⇒ 静默退回宽恕。在入口挡住（2026-10-12 独立 review 指出）。
+  if (!Number.isInteger(windowHours) || windowHours <= 0) {
+    throw new Error(`getRecentProviderOutcomes: windowHours must be a positive integer, got ${windowHours}`);
+  }
   await ensureProviderCallTelemetryStore();
   const rows = await getDb().query<{
-    model: string; total: number; succeeded: number; avg_ms: number; avg_tokens: number; last_at: Date | string;
+    model: string | null; total: number; succeeded: number; avg_ms: number; avg_tokens: number; last_at: Date | string;
   }>(
-    `SELECT model,
+    // **按 provider 全量聚合，不按 model 分组取最热的那条。**
+    // 原实现 `GROUP BY model … ORDER BY total DESC LIMIT 1` 有两个真缺陷
+    // （2026-10-12 独立 review 指出）：
+    //   1. 其余 model 的失败被整条丢掉 —— A 有 100 次 200、B 有 50 次 401 仍算 healthy，
+    //      而这是**provider 级**的健康信号；
+    //   2. 各 model 调用量接近时 `ORDER BY total DESC` 没有次级排序 ⇒ 两次探测之间
+    //      可能换一条 ⇒ **tier 抖动**。
+    // `model` 现在只作展示用，用 `model ASC` 做确定性 tiebreak。
+    `WITH window_rows AS (
+       SELECT * FROM provider_call_telemetry
+        WHERE provider = $1 AND created_at > now() - make_interval(hours => $2)
+     )
+     SELECT (SELECT model FROM window_rows GROUP BY model ORDER BY count(*) DESC, model ASC LIMIT 1) AS model,
             count(*)::int AS total,
             count(*) FILTER (WHERE status >= 200 AND status < 300)::int AS succeeded,
             coalesce(avg(duration_ms), 0)::int AS avg_ms,
             coalesce(avg((usage_json->>'totalTokens')::numeric)
                      FILTER (WHERE usage_json->>'totalTokens' ~ '^[0-9]+$'), 0)::int AS avg_tokens,
             max(created_at) AS last_at
-       FROM provider_call_telemetry
-      WHERE provider = $1 AND created_at > now() - make_interval(hours => $2)
-      GROUP BY model
-      ORDER BY total DESC
-      LIMIT 1`,
+       FROM window_rows`,
     [provider, windowHours],
   );
   const row = rows.rows[0];
-  if (!row || row.total === 0) return undefined;
+  if (!row || row.total === 0 || !row.model) return undefined;
   return {
     provider,
     model: row.model,
