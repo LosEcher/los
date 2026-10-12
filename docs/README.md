@@ -114,6 +114,13 @@ prune, why the empty sync log pointed the investigation at the transport instead
 the macOS `install` gap that would have crash-looped the executor on the next
 restart, and the replay/negative-control evidence for each.
 
+Use `operations/2026-10-12-provider-health-probe-and-fleet-convergence.md` for the
+provider health surface: why a probe that only issues `GET {baseUrl}/models` structurally
+pins every `anthropic-messages` provider to `unhealthy`, the per-wire dispatch that
+replaced it, the real-call outcomes wired into scoring, the executor's two competing
+managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
+the credential single-source convergence, and the falsified premises kept as evidence.
+
 Use `architecture/2026-10-11-cross-platform-content-identity-design.md` for why the
 deployable-content digest is a single Node implementation that bash and PowerShell
 both call (rather than a bash pipeline plus a PowerShell copy), what it covers and
