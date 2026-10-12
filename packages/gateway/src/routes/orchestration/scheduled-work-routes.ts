@@ -9,6 +9,7 @@ import {
   listScheduledWorkItems,
   loadScheduledWorkItem,
   previewScheduledOccurrences,
+  resetScheduledWorkCircuit,
   retryScheduledWorkRun,
   triggerScheduledWorkItem,
   updateScheduledWorkItem,
@@ -34,6 +35,7 @@ export type ScheduledWorkRouteDeps = {
   preview: typeof previewScheduledOccurrences;
   trigger: typeof triggerScheduledWorkItem;
   retry: typeof retryScheduledWorkRun;
+  resetCircuit: typeof resetScheduledWorkCircuit;
   approve: typeof approveScheduledWorkRun;
   deny: typeof denyScheduledWorkRun;
   execute: typeof executeScheduledWorkRun;
@@ -43,7 +45,8 @@ const defaultDeps: ScheduledWorkRouteDeps = {
   create: createScheduledWorkItem, list: listScheduledWorkItems, load: loadScheduledWorkItem,
   update: updateScheduledWorkItem, listRuns: listScheduledWorkItemRuns,
   preview: previewScheduledOccurrences, trigger: triggerScheduledWorkItem,
-  retry: retryScheduledWorkRun, approve: approveScheduledWorkRun, deny: denyScheduledWorkRun, execute: executeScheduledWorkRun,
+  retry: retryScheduledWorkRun, resetCircuit: resetScheduledWorkCircuit,
+  approve: approveScheduledWorkRun, deny: denyScheduledWorkRun, execute: executeScheduledWorkRun,
 };
 
 export function registerScheduledWorkRoutes(
@@ -117,6 +120,32 @@ export function registerScheduledWorkRoutes(
         return schedule;
       } catch (error) {
         return reply.status(400).send({ error: errorMessage(error) });
+      }
+    });
+  });
+
+  /**
+   * 手动重置断路。存在的理由见 `resetScheduledWorkCircuit` 的注释：24h 自动恢复窗口
+   * 与"原因已修好"之间没有合规的手动手段，实测触发会被 `409 schedule circuit is open` 挡下。
+   *
+   * 只重置**资格**（circuit_state / consecutive_failures / circuit_opened_at），
+   * **不动 next_run_at** ⇒ 不会替操作者制造一次执行。要立刻跑就再调 `/trigger`。
+   * 幂等：已 closed 返回 `changed:false`。
+   */
+  app.post('/scheduled-work-items/:id/reset-circuit', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const context = getRequestContext(req);
+    return runIdempotentJson(req, reply, {
+      route: `/scheduled-work-items/${id}/reset-circuit`, method: 'POST', body, context,
+    }, async () => {
+      try {
+        const result = await deps.resetCircuit({ scheduleId: id });
+        return { scheduleId: id, changed: result.changed, circuitState: result.schedule.circuitState,
+          consecutiveFailures: result.schedule.consecutiveFailures, nextRunAt: result.schedule.nextRunAt };
+      } catch (error) {
+        return reply.status(errorMessage(error).includes('not found') ? 404 : 409).send({ error: errorMessage(error) });
       }
     });
   });

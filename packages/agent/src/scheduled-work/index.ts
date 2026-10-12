@@ -17,6 +17,7 @@ export {
   findLastGoodScheduledRun,
   transitionScheduledWorkRun, recordScheduledRunOutcome,
   attachScheduledRunWorkItem, attachScheduleRecoveryWorkItem, recoverOpenScheduledWorkCircuits,
+  resetScheduledWorkCircuit,
 } from './store.js';
 export {
   runScheduledWorkTick, triggerScheduledWorkItem, executeScheduledWorkRun,

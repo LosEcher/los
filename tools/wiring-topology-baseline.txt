@@ -198,6 +198,7 @@ agent|packages/agent/src/scheduled-work/runner.ts|triggerScheduledWorkItem  # ze
 agent|packages/agent/src/scheduled-work/store.ts|createScheduledWorkItem  # test-only caller (no production caller)
 agent|packages/agent/src/scheduled-work/store.ts|listScheduledWorkItemRuns  # zero callers (orphan)
 agent|packages/agent/src/scheduled-work/store.ts|listScheduledWorkItems  # zero callers (orphan)
+agent|packages/agent/src/scheduled-work/store.ts|resetScheduledWorkCircuit  # test-only caller (no production caller)
 agent|packages/agent/src/scheduled-work/store.ts|retryScheduledWorkRun  # zero callers (orphan)
 agent|packages/agent/src/scheduled-work/store.ts|updateScheduledWorkItem  # zero callers (orphan)
 agent|packages/agent/src/scheduler-decision-ledger.ts|listSchedulerDecisions  # test-only caller (no production caller)
