@@ -360,3 +360,33 @@ test('anthropic-based profiles have pricing data', () => {
   assert.ok(resolveModelProfile('claude').pricing);
   assert.ok(resolveModelProfile('anthropic').pricing);
 });
+
+// 2026-10-12：`apiShape` 覆盖必须同时驱动 `protocol`。
+// 两者都在描述"走哪条线"，而 `registry.ts` 是按 **`protocol`** 分派传输的：
+// 只覆盖 `apiShape` 会让一个自定义名字的 provider 配了 anthropic-messages
+// 却仍走 OpenAI 兼容传输 ⇒ 请求被打到 `{baseUrl}/chat/completions`。
+// 实测：`zenmux-claude` 指向 zenmux 的 Anthropic 端点时遥测记
+// `endpoint=/chat/completions status=500`（上游回 HTML 错误页）；
+// 修好后同一个 provider 记 `/v1/messages status=200`。
+test('apiShape override also drives protocol (custom name on the Anthropic wire)', () => {
+  const p = resolveModelProfile('zenmux-claude', {
+    baseUrl: 'https://zenmux.ai/api/anthropic',
+    model: 'anthropic/claude-opus-5.5',
+    apiShape: 'anthropic-messages',
+  });
+  assert.equal(p.apiShape, 'anthropic-messages');
+  assert.equal(p.protocol, 'anthropic');
+  assert.equal(p.baseUrl, 'https://zenmux.ai/api/anthropic');
+});
+
+test('without an apiShape override the protocol still follows the base profile', () => {
+  // 回归保护：修复不得让"名字命中 MODEL_PROFILES 的 anthropic 系"反向漂移。
+  assert.equal(resolveModelProfile('anthropic').protocol, 'anthropic');
+  assert.equal(resolveModelProfile('deepseek-anthropic').protocol, 'anthropic');
+  // openai 兼容系不受影响。
+  assert.equal(resolveModelProfile('deepseek').protocol, 'openai');
+  assert.equal(
+    resolveModelProfile('some-openai-name', { baseUrl: 'https://x/v1', model: 'm' }).protocol,
+    'openai',
+  );
+});
