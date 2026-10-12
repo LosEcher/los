@@ -23,6 +23,7 @@ import {
   type HealthScore,
   type HealthTier,
 } from './provider-health.js';
+import { getRecentProviderOutcomes } from './telemetry.js';
 import {
   getProviderProbeCircuit,
   isProviderProbeCircuitOpen,
@@ -309,7 +310,13 @@ export function startProviderProbeLoop(options: {
       if (targets.length === 0) return false;
       const probes = await probeProviders(targets);
       for (const probe of probes) {
-        const score = computeHealthScore(probe.provider, probe);
+        // 用**真实调用结果**一起评分（窗口与选择侧一致：24h）。此前只传 probe
+        // ⇒ 成功率恒为 1.0（"no outcome data → benefit of the doubt"），
+        // 于是「探针能连、真实调用 401/410」的 provider 会被评成 healthy
+        // （2026-10-12 实测 nvidia-nim / opencode-zen）。取不到数据时返回 undefined，
+        // 评分器保持对未测 provider 宽恕的原语义。
+        const outcomes = await getRecentProviderOutcomes(probe.provider, 24).catch(() => undefined);
+        const score = computeHealthScore(probe.provider, probe, outcomes);
         cacheHealthScore(score);
         await emitTierChangeIfNeeded(score, options.onHealthChanged);
       }
