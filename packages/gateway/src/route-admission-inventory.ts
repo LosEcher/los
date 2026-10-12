@@ -146,6 +146,7 @@ export function admissionRouteKeys(): readonly string[] {
     'GET /tenants/:tenantId/projects/:projectId/todos',
     'GET /tenants/:tenantId/projects/:projectId/todos/reconcile',
     'GET /todos',
+    'GET /topology/fleet',
     'GET /usage/summary',
     'GET /v1/models',
     'GET /work-items',

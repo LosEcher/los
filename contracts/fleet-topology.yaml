@@ -1,0 +1,83 @@
+contract: los.fleet-topology
+version: 0.1.0
+status: implemented
+owner: packages/gateway
+description: >
+  机队拓扑只读面：把"谁在跑、跑在哪、跑不跑得了、最近为什么派给它"投影成一张可渲染的图。
+  数据来自三个**已存在**的存储面（节点注册表 / 任务落点 / 调度决策台账），本契约不引入新的真源。
+  形状与 `RuntimeEvidenceGraph`（run 证据图）保持一致（nodes/edges/counts/warnings），另加两个
+  可观测元数据 `asOf` 与 `sources`，使"这张图基于哪次取数、来自哪些面"可追溯。
+  **不做什么**：不做几何（不返回 x/y/颜色，布局属于渲染层）；不重算节点健康（`/nodes/health` 是权威面）；
+  不把"没有数据"渲染成"没有关系"——三类已知为空的面（工作区、provider 凭据、节点间 mesh）
+  不在本图里凭空生成节点或边。
+type: object
+
+routes:
+  - method: GET
+    path: /topology/fleet
+    purpose: >
+      返回当前机队拓扑快照。节点 = 注册表声明（executor）+ 只出现在观测里的落点
+      （gateway 进程内执行 / 未登记 / URL 污染 / 无 node_id）；边 = 观测到的派发关系。
+      采用 operator 门禁（与 `GET /nodes` 同档）：图上含节点地址、阻塞原因与派发计数，属运维面。
+    auth: operator
+    query:
+      sinceHours: optional integer 1..720; 落点观测与决策窗口长度（小时）; default 168
+      nodeLimit: optional integer 1..500; 注册表读取上限; default 200
+      placementLimit: optional integer 1..500; 落点分组上限; default 100
+      decisionLimit: optional integer 1..500; 决策窗口取行上限; default 200
+    response: FleetTopology
+
+schemas:
+  FleetTopology:
+    required: [nodes, edges, counts, warnings, degraded, asOf, sources]
+    fields: [nodes, edges, counts, warnings, degraded, asOf, sources]
+    asOf:
+      type: string
+      description: >
+        读模型整体的取数时刻（ISO 8601）。调用方据此判断"这张图是不是现在"。
+        本面是按需读取，故 asOf 恒等于本次请求的处理时刻；它与图上每个源自身的 `asOf` 可能不同
+        （源是存储里的数据，其新鲜度由 `sources[].asOf` 与节点自身的 `lastHeartbeatAt` 表达）。
+    degraded:
+      type: object
+      description: >
+        降级通道（本仓惯例，同 `/cross-project/summary`）。`isDegraded = true` 表示这张图**不完整或
+        有部分不可解释**，但它仍是 200 的可用结果——缺数据走降级，不走 5xx。
+        判据：出现任一截断（节点列表触上限 / 落点分组被截 / 决策窗口被截）或窗口内出现类型外的
+        决策 kind。`reasons` 是 `warnings` 中属于这一类的子集（今天是全部）。
+    warnings:
+      type: list
+      items: string
+      description: 全部可读信号（含降级原因）。截断必须出现在这里，不允许静默少给数据。
+    counts:
+      type: object
+      description: 按节点类别计数：gateway / executor / ssh_target / placement_only。
+    sources:
+      type: list
+      itemFields: [id, kind, asOf, detail]
+      description: >
+        取数出处（本面是新惯例：此前网关响应里没有顶层 sources）。每个源写明它是什么面
+        （`executor_nodes` = 声明面；`task_runs` = 观测面；`scheduler_decisions` = 放置层留证）
+        以及本次读取用的窗口/上限。
+    nodes:
+      type: list
+      itemFields: [id, kind, label, recordId, record]
+      description: >
+        节点三类：
+        · `gateway` —— 网关自身（它也是合法落点：未解析出 executor 时任务在网关进程内执行，
+          `node_id='gateway-local'`；这类落点**不在注册表里**，只能由观测面提供）；
+        · `executor` —— 注册表里**能接活**的节点（`nodeKind='executor'`；声明面），`record` 含
+          status/baseUrl/version/capabilities/capacity/execution.blockers/placement/decision；
+          ⚠️ `executor` 与 `ssh_target` **必须分开统计**：`executor_nodes` 表里同时住着两者
+          （实测 9 执行器 + 27 SSH 运维库存），混为一谈会让图声称"36 个执行器"；
+        · `ssh_target` —— 注册表里的 **SSH 运维库存**（`nodeKind='ssh_target'`，声明面）：
+          它们是运维入口而不是执行面（实测全部 offline、无 baseUrl），因此**不会有 `dispatch` 边**；
+        · `placement_only` —— 只出现在观测里的落点，`record.reason` ∈
+          {gateway-local, unregistered, url-like, missing-node-id}。
+          ⚠️ `url-like` 是**数据质量症状**（URL 硬钉路径污染了 node_id 字段），
+          不是一种"节点类型"；归一是渲染语义，存储层不擅自合并。
+    edges:
+      type: list
+      itemFields: [from, to, kind, label]
+      description: >
+        边一类：`dispatch`（gateway → 落点），语义是**观测**（窗口内该落点真的承接了任务），
+        不是"注册了所以连着"。没有落点观测的节点**不画边**。

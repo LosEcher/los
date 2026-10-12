@@ -3,6 +3,30 @@ import { normalizeOptionalString } from './scheduler/helpers.js';
 
 export type SchedulerDecisionKind = 'claim' | 'provider_selection' | 'executor_selection' | 'task_outcome';
 
+/**
+ * 已知 kind 的**运行时**清单（单一真源）。
+ * 为什么要有运行时值：读路径要能判断"这一行的 kind 是不是闭集之内"，
+ * 而 type union 在运行时不存在。硬编码第二份清单必然漂移——
+ * 实测教训：读模型里按单一 kind 比较，把合法的 `task_outcome` 报成了"非预期 kind"，
+ * 于是告警通道在真实数据上永久误报（假警报会把通道训练成噪音）。
+ */
+const KNOWN_KINDS: readonly SchedulerDecisionKind[] = [
+  'claim',
+  'provider_selection',
+  'executor_selection',
+  'task_outcome',
+];
+
+/**
+ * 判断一个原始 kind 是否落在闭集内。
+ * 为什么导出**谓词**而不是导出清单常量：清单常量在别的模块里只会被成员判断消费
+ * （不构成"调用"），而接线门禁的判据是"导出符号必须在别处被调用" ⇒
+ * 导出清单会被机械判成孤儿导出。谓词既满足门禁，也正是消费方真正需要的能力。
+ */
+export function isSchedulerDecisionKind(value: unknown): value is SchedulerDecisionKind {
+  return typeof value === 'string' && (KNOWN_KINDS as readonly string[]).includes(value);
+}
+
 export interface SchedulerDecisionRecord {
   id: string;
   graphId: string;
@@ -305,7 +329,7 @@ export async function getProviderRecentOutcomes(
   }));
 }
 
-type SchedulerDecisionRow = {
+export type SchedulerDecisionRow = {
   id: string;
   graph_id: string;
   task_id: string | null;
@@ -324,7 +348,7 @@ type SchedulerDecisionRow = {
   created_at: Date | string;
 };
 
-function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
+export function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
   return {
     id: row.id,
     graphId: row.graph_id,
@@ -346,15 +370,13 @@ function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
   };
 }
 
-function isKnownKind(value: unknown): value is SchedulerDecisionKind {
-  return value === 'claim' || value === 'provider_selection' || value === 'executor_selection' || value === 'task_outcome';
-}
+
 
 /**
  * 写路径：类型外的值一律拒绝（fail closed，守卫只能收紧）。
  */
 function normalizeKind(value: unknown): SchedulerDecisionKind {
-  if (isKnownKind(value)) return value;
+  if (isSchedulerDecisionKind(value)) return value;
   throw new Error('scheduler decision kind is invalid');
 }
 
@@ -363,7 +385,7 @@ function normalizeKind(value: unknown): SchedulerDecisionKind {
  * 读路径与写路径**必须分开**：写路径拒绝坏数据，读路径不能因为一行历史坏数据就整段查不出来。
  */
 function readKind(value: unknown): SchedulerDecisionKind | null {
-  return isKnownKind(value) ? value : null;
+  return isSchedulerDecisionKind(value) ? value : null;
 }
 
 function normalizeSkipped(

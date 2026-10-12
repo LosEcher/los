@@ -43,6 +43,7 @@ GET /slo/report
 GET /tasks/dead-letter
 GET /tasks/dead-letter/summary
 GET /tasks/orphans
+GET /topology/fleet
 GET /usage/summary
 PATCH /nodes/:id
 PATCH /providers/:name
@@ -89,6 +90,7 @@ POST /scheduled-work-item-runs/:id/approve
 POST /scheduled-work-item-runs/:id/deny
 POST /scheduled-work-item-runs/:id/retry
 POST /scheduled-work-items
+POST /scheduled-work-items/:id/reset-circuit
 POST /scheduled-work-items/:id/trigger
 POST /services/:id/drain
 POST /services/:id/promote

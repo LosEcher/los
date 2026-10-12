@@ -3,6 +3,7 @@
 import { runPackageTests } from '../../tools/package-test-runner.mjs';
 
 const sharedProcessTestFiles = [
+  'src/routes/infrastructure/topology-routes.test.ts',
   'src/auth-middleware.test.ts',
   'src/chat-cbm-symbol-cache.test.ts',
   'src/chat-planning-disposition.test.ts',
@@ -60,6 +61,7 @@ const sharedProcessTestFiles = [
 const dbBackedTestFiles = [];
 
 const isolatedDatabaseTestFiles = [
+  'src/fleet-topology.test.ts',
   'src/active-session-failover.test.ts',
   'src/agent-task-graph-routes.test.ts',
   'src/artifact-routes.test.ts',
