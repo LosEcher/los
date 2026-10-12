@@ -100,3 +100,60 @@ test('HTTP 503 does not open the transport circuit', async () => {
   );
   assert.equal(fetches, 2);
 });
+
+// 2026-10-12：探针**按协议分派**。
+//
+// 起因：探针原先一律打 `GET {baseUrl}/models`（OpenAI 兼容的形状）。Anthropic 协议的端点上
+// 它是 **404**（实测 zenmux `{base}/models` → 404），而 404 不在原健康判据（ok|401|403）里
+// ⇒ 判 `unhealthy` ⇒ `computeHealthScore` 把 probe=false 同时算成 rttScore=0 与
+// availabilityScore=0 ⇒ 即使真实调用 100% 成功也只得 0.40 ⇒ **整个协议族被误路由**。
+//
+// 修法：Anthropic 线改探协议自己的 `{base}/v1/messages`，判据放宽为**任何 <500 = 边缘可达**
+// （探针量可用性，权重 0.2；正确性由真实调用结果承担，权重 0.4）；OpenAI 线判据不变
+// —— 那里 `/models` 真的存在，放宽会让填错的 baseUrl 看起来健康。
+test('anthropic-wire probes use /v1/messages and treat any <500 as reachable', async () => {
+  _resetProviderProbeStateForTests();
+  const seen: string[] = [];
+  const fakeFetch = async (input: unknown, init?: { method?: string }) => {
+    seen.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return { ok: false, status: 404 } as unknown as Response;
+  };
+  const results = await probeProviders(
+    [{ provider: 'zenmux-anthropic-probe-test', baseUrl: 'https://zenmux.ai/api/anthropic', wire: 'anthropic' }],
+    50,
+    { fetch: fakeFetch },
+  );
+  // 探的是协议正典路径，不是 /models
+  assert.equal(seen[0], 'GET https://zenmux.ai/api/anthropic/v1/messages');
+  // 404 在 Anthropic 线上算"边缘可达"
+  assert.equal(results[0]?.healthy, true);
+  assert.equal(results[0]?.statusCode, 404);
+});
+
+test('anthropic-wire probes still treat 5xx as unhealthy', async () => {
+  _resetProviderProbeStateForTests();
+  const fakeFetch = async () => ({ ok: false, status: 503 }) as unknown as Response;
+  const results = await probeProviders(
+    [{ provider: 'zenmux-anthropic-503-test', baseUrl: 'https://zenmux.ai/api/anthropic', wire: 'anthropic' }],
+    50,
+    { fetch: fakeFetch },
+  );
+  assert.equal(results[0]?.healthy, false);
+});
+
+test('openai-wire probes keep the stricter predicate (404 is NOT reachable)', async () => {
+  _resetProviderProbeStateForTests();
+  const seen: string[] = [];
+  const fakeFetch = async (input: unknown) => {
+    seen.push(String(input));
+    return { ok: false, status: 404 } as unknown as Response;
+  };
+  const results = await probeProviders(
+    [{ provider: 'openai-wire-404-test', baseUrl: 'https://example.test/v1' }],
+    50,
+    { fetch: fakeFetch },
+  );
+  // 不给 wire ⇒ 默认 openai 兼容，路径仍是 /models
+  assert.equal(seen[0], 'https://example.test/v1/models');
+  assert.equal(results[0]?.healthy, false);
+});

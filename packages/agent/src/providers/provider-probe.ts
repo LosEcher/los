@@ -95,6 +95,8 @@ export interface ProbeTarget {
   provider: string;
   baseUrl: string;
   apiKey?: string;
+  /** 走哪条线 —— 决定**探哪个 URL、用哪套健康判据**（见 `probeProvider`）。 */
+  wire: 'openai' | 'anthropic';
 }
 
 /**
@@ -111,73 +113,48 @@ function isAnthropicWireProvider(provider: string, entry: { apiShape?: unknown }
 /**
  * Resolve probe targets from the runtime config (enabled providers with a base URL).
  *
- * ⚠️ **`anthropic-messages` 的 provider 不在靶内** —— 判据是「**探不了 ≠ 坏**」。
+ * **按协议分派**：两个协议探不同的路径、用不同的健康判据。
  *
- * 探针只打 `GET {baseUrl}/models`，那是 **OpenAI 兼容**协议的形状；Anthropic 协议的
- * 端点上没有这个路径 ⇒ 探针**必然**失败。而 `computeHealthScore` 把
- * `probe.healthy === false` 同时算成 `rttScore = 0` 与 `availabilityScore = 0`
- * ⇒ 即使真实调用 100% 成功，score 也只有 `0.4×0 + 0.4×1 + 0.2×0 = 0.40` < 0.5
- * ⇒ **`unhealthy`**，而 ADR 0031 的选择逻辑会跳过 unhealthy
- * ⇒ **整个协议族被系统性误路由**（不是个别噪声）。
+ * 起因（2026-10-12 实测）：探针原先一律打 `GET {baseUrl}/models` —— 那是 **OpenAI 兼容**
+ * 协议的形状。Anthropic 协议的端点上它是 **404**（zenmux：`{base}/models` → 404），
+ * 而 `404` 不在"ok | 401 | 403"这个健康判据里 ⇒ 判 `unhealthy`。
+ * 而 `computeHealthScore` 把 `probe.healthy === false` 同时算成 `rttScore = 0`
+ * 与 `availabilityScore = 0` ⇒ 即使真实调用 100% 成功，score 也只有
+ * `0.4×0 + 0.4×1 + 0.2×0 = 0.40` < 0.5 ⇒ **`unhealthy`**，而 ADR 0031 会跳过 unhealthy
+ * ⇒ **整个协议族被系统性误路由**（实测 `anthropic` 0.40、`deepseek-anthropic` 0.33，
+ * 而它们真实调用都是 200）。
  *
- * 2026-10-12 实测：`deepseek-anthropic` 探针 `unhealthy`(0.27~0.4) 而真实调用 **200**；
- * 新接入的 `anthropic` 同样 0.4。
+ * 分派规则（**由实测给出，不是猜的**）：
  *
- * 排除之后评分器走 no-probe 的中性分支（rttScore 0.5 / availability 0.5）
- * ⇒ 真实成功率 1 时 score = `0.2 + 0.4 + 0.1 = 0.70` = **`degraded`**（不再被跳过）。
- * 真正的修（**按协议分派探针**：Anthropic 打 `/v1/messages`）另做 —— 那时才有真
- * `rttMs`，这类 provider 才能上到 `healthy`。
+ * | 路径 | zenmux | deepseek |
+ * |---|---|---|
+ * | `{base}/models` | **404** | **401** |
+ * | `{base}/v1/messages` | 404 | 401 |
+ * | `{base}/v1/models` | 200 | — |
+ *
+ * ⇒ Anthropic 协议改用**协议自己的路径** `{base}/v1/messages`，判据放宽为
+ * **任何 `< 500` 的 HTTP 应答 = 边缘可达**（探针在这里量的是**可用性**，权重 0.2；
+ * **正确性**由真实调用结果承担，权重 0.4 —— 职责分开）；OpenAI 协议保持原判据不动。
  */
 export function resolveConfiguredProbeTargets(): ProbeTarget[] {
-  return partitionProbeCandidates().probeable;
-}
-
-/**
- * 与 `resolveConfiguredProbeTargets` **互补**：仍在用、但**不可探**的 provider。
- *
- * 为什么不直接把它们从健康面里剔除：那样 `/providers/health` 会**整条不见**
- * （健康条目由探针循环填缓存）⇒ 等于拿"误判成 unhealthy"换"看不见"，
- * 而看不见会让真实在坏的 provider 也无从发现（2026-10-12 实测：剔除后
- * anthropic / deepseek-anthropic / minimax / zenmux-claude 四家从列表里消失）。
- *
- * 正确做法：**照样算分，只是不给它 probe** ⇒ `computeHealthScore(provider, undefined, outcomes)`
- * 走 no-probe 的中性分支，条目仍在、`hasProbe:false` 如实可见、分数由真实调用决定。
- */
-function resolveUnprobableProviders(): Array<{ provider: string }> {
-  return partitionProbeCandidates().unprobable.map(x => ({ provider: x.provider }));
-}
-
-function partitionProbeCandidates(): {
-  probeable: ProbeTarget[];
-  unprobable: ProbeTarget[];
-} {
   const config = getConfig();
-  const probeable: ProbeTarget[] = [];
-  const unprobable: ProbeTarget[] = [];
+  const targets: ProbeTarget[] = [];
   for (const [provider, entry] of Object.entries(config.providers ?? {})) {
     if (!entry || entry.enabled === false) continue;
     const baseUrl = typeof entry.baseUrl === 'string' ? entry.baseUrl.trim() : '';
     if (!baseUrl) continue;
-    const ref: ProbeTarget = {
+    targets.push({
       provider,
       baseUrl,
       apiKey: typeof entry.apiKey === 'string' ? entry.apiKey : undefined,
-    };
-    if (isAnthropicWireProvider(provider, entry)) unprobable.push(ref);
-    else probeable.push(ref);
+      wire: isAnthropicWireProvider(provider, entry) ? 'anthropic' : 'openai',
+    });
   }
-  if (unprobable.length > 0) {
-    // 说清楚"为什么没有 probe"——否则 `hasProbe:false` 看起来像探针漏了这几家。
-    log.debug(
-      `Not probed (GET /models does not exist on the anthropic-messages wire; `
-      + `health is computed from real-call outcomes instead): ${unprobable.map(x => x.provider).join(', ')}`,
-    );
-  }
-  return { probeable, unprobable };
+  return targets;
 }
 
 /**
- * Probe a provider's base URL with a lightweight GET /models.
+ * Probe a provider's base URL — **按协议选路径与判据**。
  * Transport failures open the per-provider circuit; no HEAD fallback.
  *
  * Not exported: production and tests go through probeProviders().
@@ -188,6 +165,7 @@ async function probeProvider(
   apiKey?: string,
   timeoutMs = 5000,
   deps: ProbeDeps = {},
+  wire: ProbeTarget['wire'] = 'openai',
 ): Promise<ProbeResult> {
   const started = (deps.now ?? Date.now)();
   const doFetch = deps.fetch ?? fetch;
@@ -198,11 +176,24 @@ async function probeProvider(
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  const modelsUrl = `${baseUrl.replace(/\/+$/, '')}/models`;
+  const root = baseUrl.replace(/\/+$/, '');
+  // 两个协议探不同的路径：OpenAI 兼容用 `/models`；Anthropic 用**协议自己的**
+  // `/v1/messages`（实测 zenmux 的 `/models` 是 404、`/v1/messages` 是 404/401，
+  // 两者都证明边缘可达；而 `/v1/messages` 是协议正典路径，不依赖厂商是否顺手实现了 `/models`）。
+  const probeUrl = wire === 'anthropic' ? `${root}/v1/messages` : `${root}/models`;
+  // 健康判据也按协议分开：Anthropic 这边量的是**可用性**（权重 0.2），
+  // 所以任何 `< 500` 的 HTTP 应答都算"边缘可达"；正确性由真实调用结果承担（权重 0.4）。
+  // OpenAI 兼容保持原判据（ok | 401 | 403），不放宽 —— 那里 `/models` 是真的存在，
+  // 放宽会让填错的 baseUrl 看起来健康。
+  const isHealthy = (status: number): boolean =>
+    wire === 'anthropic'
+      ? status < 500
+      : (status >= 200 && status < 300) || status === 401 || status === 403;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await doFetch(modelsUrl, {
+    const response = await doFetch(probeUrl, {
       method: 'GET',
       headers,
       signal: controller.signal,
@@ -210,8 +201,8 @@ async function probeProvider(
 
     const rttMs = Math.max(0, (deps.now ?? Date.now)() - started);
 
-    if (response.ok || response.status === 401 || response.status === 403) {
-      log.debug(`${provider} probe: ${rttMs}ms HTTP ${response.status}`);
+    if (isHealthy(response.status)) {
+      log.debug(`${provider} probe (${wire}): ${rttMs}ms HTTP ${response.status}`);
       return {
         provider,
         baseUrl,
@@ -222,7 +213,7 @@ async function probeProvider(
       };
     }
 
-    log.debug(`${provider} probe: ${rttMs}ms HTTP ${response.status} (unhealthy)`);
+    log.debug(`${provider} probe (${wire}): ${rttMs}ms HTTP ${response.status} (unhealthy)`);
     return {
       provider,
       baseUrl,
@@ -274,7 +265,9 @@ function circuitSkipResult(
  * Open circuits and in-flight probes are skipped (no second TCP SYN).
  */
 export async function probeProviders(
-  targets: Array<{ provider: string; baseUrl: string; apiKey?: string }>,
+  // `wire` 可选：外部（测试/一次性探测）可以只给 provider+baseUrl，默认按 openai 兼容处理，
+  // 与历史调用形状兼容。
+  targets: Array<{ provider: string; baseUrl: string; apiKey?: string; wire?: ProbeTarget['wire'] }>,
   timeoutMs?: number,
   deps: ProbeDeps = {},
 ): Promise<ProbeResult[]> {
@@ -282,7 +275,9 @@ export async function probeProviders(
   const pending: ProbeTarget[] = [];
   const skipped: ProbeResult[] = [];
 
-  for (const target of targets) {
+  for (const raw of targets) {
+    // 归一化：调用方不给 `wire` 时按 openai 兼容处理（与历史调用形状兼容）。
+    const target: ProbeTarget = { ...raw, wire: raw.wire ?? 'openai' };
     if (probeInFlight.has(target.provider)) {
       skipped.push(circuitSkipResult(target, now, 'probe_in_flight'));
       continue;
@@ -298,7 +293,7 @@ export async function probeProviders(
     pending.map(async (t) => {
       probeInFlight.add(t.provider);
       try {
-        const result = await probeProvider(t.provider, t.baseUrl, t.apiKey, timeoutMs, deps);
+        const result = await probeProvider(t.provider, t.baseUrl, t.apiKey, timeoutMs, deps, t.wire);
         const observed = (deps.now ?? Date.now)();
         if (result.healthy) {
           noteProviderProbeSuccess(t.provider, observed);
@@ -390,21 +385,8 @@ export function startProviderProbeLoop(options: {
           return undefined;
         }
       };
-      const scored = new Set<string>();
       for (const probe of probes) {
-        scored.add(probe.provider);
         const score = computeHealthScore(probe.provider, probe, await outcomesFor(probe.provider));
-        cacheHealthScore(score);
-        await emitTierChangeIfNeeded(score, options.onHealthChanged);
-      }
-      // **不可探**的 provider（anthropic-messages 那几家）照样算分，只是不给 probe。
-      // 不这么做它们会从 `/providers/health` **整条消失**（条目由本循环填缓存）——
-      // 那是拿"误判成 unhealthy"换"看不见"，而看不见会让真实在坏的也无从发现。
-      // 走 no-probe 的中性分支 ⇒ 分数只由真实调用决定：成功率 1 ⇒ 0.70 = `degraded`
-      // ⇒ 不再被 ADR 0031 的"跳过 unhealthy"命中。
-      for (const { provider } of resolveUnprobableProviders()) {
-        if (scored.has(provider)) continue;
-        const score = computeHealthScore(provider, undefined, await outcomesFor(provider));
         cacheHealthScore(score);
         await emitTierChangeIfNeeded(score, options.onHealthChanged);
       }
