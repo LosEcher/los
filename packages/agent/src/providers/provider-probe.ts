@@ -23,6 +23,7 @@ import {
   type HealthScore,
   type HealthTier,
 } from './provider-health.js';
+import { MODEL_PROFILES } from '../model-profiles.js';
 import { getRecentProviderOutcomes } from './telemetry.js';
 import {
   getProviderProbeCircuit,
@@ -97,22 +98,82 @@ export interface ProbeTarget {
 }
 
 /**
+ * 这个 provider 走的是 Anthropic 的 `anthropic-messages` 线吗？
+ *
+ * 名字命中 `MODEL_PROFILES` 的（anthropic / claude / deepseek-anthropic / minimax）
+ * 靠**名字**定线；自定义名字靠 config 里的 `apiShape` 覆盖。两者都要看。
+ */
+function isAnthropicWireProvider(provider: string, entry: { apiShape?: unknown }): boolean {
+  if (entry.apiShape === 'anthropic-messages') return true;
+  return MODEL_PROFILES[provider]?.protocol === 'anthropic';
+}
+
+/**
  * Resolve probe targets from the runtime config (enabled providers with a base URL).
+ *
+ * ⚠️ **`anthropic-messages` 的 provider 不在靶内** —— 判据是「**探不了 ≠ 坏**」。
+ *
+ * 探针只打 `GET {baseUrl}/models`，那是 **OpenAI 兼容**协议的形状；Anthropic 协议的
+ * 端点上没有这个路径 ⇒ 探针**必然**失败。而 `computeHealthScore` 把
+ * `probe.healthy === false` 同时算成 `rttScore = 0` 与 `availabilityScore = 0`
+ * ⇒ 即使真实调用 100% 成功，score 也只有 `0.4×0 + 0.4×1 + 0.2×0 = 0.40` < 0.5
+ * ⇒ **`unhealthy`**，而 ADR 0031 的选择逻辑会跳过 unhealthy
+ * ⇒ **整个协议族被系统性误路由**（不是个别噪声）。
+ *
+ * 2026-10-12 实测：`deepseek-anthropic` 探针 `unhealthy`(0.27~0.4) 而真实调用 **200**；
+ * 新接入的 `anthropic` 同样 0.4。
+ *
+ * 排除之后评分器走 no-probe 的中性分支（rttScore 0.5 / availability 0.5）
+ * ⇒ 真实成功率 1 时 score = `0.2 + 0.4 + 0.1 = 0.70` = **`degraded`**（不再被跳过）。
+ * 真正的修（**按协议分派探针**：Anthropic 打 `/v1/messages`）另做 —— 那时才有真
+ * `rttMs`，这类 provider 才能上到 `healthy`。
  */
 export function resolveConfiguredProbeTargets(): ProbeTarget[] {
+  return partitionProbeCandidates().probeable;
+}
+
+/**
+ * 与 `resolveConfiguredProbeTargets` **互补**：仍在用、但**不可探**的 provider。
+ *
+ * 为什么不直接把它们从健康面里剔除：那样 `/providers/health` 会**整条不见**
+ * （健康条目由探针循环填缓存）⇒ 等于拿"误判成 unhealthy"换"看不见"，
+ * 而看不见会让真实在坏的 provider 也无从发现（2026-10-12 实测：剔除后
+ * anthropic / deepseek-anthropic / minimax / zenmux-claude 四家从列表里消失）。
+ *
+ * 正确做法：**照样算分，只是不给它 probe** ⇒ `computeHealthScore(provider, undefined, outcomes)`
+ * 走 no-probe 的中性分支，条目仍在、`hasProbe:false` 如实可见、分数由真实调用决定。
+ */
+function resolveUnprobableProviders(): Array<{ provider: string }> {
+  return partitionProbeCandidates().unprobable.map(x => ({ provider: x.provider }));
+}
+
+function partitionProbeCandidates(): {
+  probeable: ProbeTarget[];
+  unprobable: ProbeTarget[];
+} {
   const config = getConfig();
-  const targets: ProbeTarget[] = [];
+  const probeable: ProbeTarget[] = [];
+  const unprobable: ProbeTarget[] = [];
   for (const [provider, entry] of Object.entries(config.providers ?? {})) {
     if (!entry || entry.enabled === false) continue;
     const baseUrl = typeof entry.baseUrl === 'string' ? entry.baseUrl.trim() : '';
     if (!baseUrl) continue;
-    targets.push({
+    const ref: ProbeTarget = {
       provider,
       baseUrl,
       apiKey: typeof entry.apiKey === 'string' ? entry.apiKey : undefined,
-    });
+    };
+    if (isAnthropicWireProvider(provider, entry)) unprobable.push(ref);
+    else probeable.push(ref);
   }
-  return targets;
+  if (unprobable.length > 0) {
+    // 说清楚"为什么没有 probe"——否则 `hasProbe:false` 看起来像探针漏了这几家。
+    log.debug(
+      `Not probed (GET /models does not exist on the anthropic-messages wire; `
+      + `health is computed from real-call outcomes instead): ${unprobable.map(x => x.provider).join(', ')}`,
+    );
+  }
+  return { probeable, unprobable };
 }
 
 /**
@@ -309,27 +370,41 @@ export function startProviderProbeLoop(options: {
       const targets = await resolveTargets();
       if (targets.length === 0) return false;
       const probes = await probeProviders(targets);
-      for (const probe of probes) {
-        // 用**真实调用结果**一起评分（窗口与选择侧一致：24h）。此前只传 probe
-        // ⇒ 成功率恒为 1.0（"no outcome data → benefit of the doubt"），
-        // 于是「探针能连、真实调用 401/410」的 provider 会被评成 healthy
-        // （2026-10-12 实测 nvidia-nim / opencode-zen）。
-        //
-        // ⚠️ **查询失败 ≠ 窗口内无数据**：两者都会让评分器走"宽恕"分支，
-        // 但前者意味着这次要修的假绿会**原样复现且不留痕**（2026-10-12 独立 review 指出）。
-        // 所以这里必须把异常记下来，而不是 `.catch(() => undefined)` 静默吞掉。
-        let outcomes: Awaited<ReturnType<typeof getRecentProviderOutcomes>>;
+      // 用**真实调用结果**一起评分（窗口与选择侧一致：24h）。此前只传 probe
+      // ⇒ 成功率恒为 1.0（"no outcome data → benefit of the doubt"），
+      // 于是「探针能连、真实调用 401/410」的 provider 会被评成 healthy
+      // （2026-10-12 实测 nvidia-nim / opencode-zen）。
+      //
+      // ⚠️ **查询失败 ≠ 窗口内无数据**：两者都会让评分器走"宽恕"分支，
+      // 但前者意味着这次要修的假绿会**原样复现且不留痕**（2026-10-12 独立 review 指出）。
+      // 所以这里必须把异常记下来，而不是 `.catch(() => undefined)` 静默吞掉。
+      const outcomesFor = async (provider: string) => {
         try {
-          outcomes = await getRecentProviderOutcomes(probe.provider, 24);
+          return await getRecentProviderOutcomes(provider, 24);
         } catch (error) {
           log.warn(
-            `Provider outcome lookup failed for ${probe.provider} (health falls back to probe-only, `
+            `Provider outcome lookup failed for ${provider} (health falls back to probe-only, `
             + `i.e. successRate=1.0 — NOT the same as "no recent calls"): `
             + `${error instanceof Error ? error.message : String(error)}`,
           );
-          outcomes = undefined;
+          return undefined;
         }
-        const score = computeHealthScore(probe.provider, probe, outcomes);
+      };
+      const scored = new Set<string>();
+      for (const probe of probes) {
+        scored.add(probe.provider);
+        const score = computeHealthScore(probe.provider, probe, await outcomesFor(probe.provider));
+        cacheHealthScore(score);
+        await emitTierChangeIfNeeded(score, options.onHealthChanged);
+      }
+      // **不可探**的 provider（anthropic-messages 那几家）照样算分，只是不给 probe。
+      // 不这么做它们会从 `/providers/health` **整条消失**（条目由本循环填缓存）——
+      // 那是拿"误判成 unhealthy"换"看不见"，而看不见会让真实在坏的也无从发现。
+      // 走 no-probe 的中性分支 ⇒ 分数只由真实调用决定：成功率 1 ⇒ 0.70 = `degraded`
+      // ⇒ 不再被 ADR 0031 的"跳过 unhealthy"命中。
+      for (const { provider } of resolveUnprobableProviders()) {
+        if (scored.has(provider)) continue;
+        const score = computeHealthScore(provider, undefined, await outcomesFor(provider));
         cacheHealthScore(score);
         await emitTierChangeIfNeeded(score, options.onHealthChanged);
       }

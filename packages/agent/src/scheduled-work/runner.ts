@@ -2,7 +2,9 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getLogger } from '@los/infra/logger';
 import { getDb } from '@los/infra/db';
+import { getConfig } from '@los/infra/config';
 import { listManagedWorkspaces } from '../managed-workspace-store.js';
+import type { ScheduledExecutorConfig } from '../scheduler/types.js';
 
 import type { FeedAnalysisDispatchRequest } from '../integration/feed-analysis-types.js';
 import {
@@ -46,6 +48,29 @@ import type { ScheduledWorkItem, ScheduledWorkItemRun, ScheduledWorkRunOutcome }
 
 const log = getLogger('scheduled-work');
 const TERMINAL_SCHEDULED_RUN = new Set(['succeeded', 'no_op', 'failed', 'cancelled', 'skipped']);
+
+/**
+ * 排程模板里的 `executor` **不带**执行器认证密钥 —— 这里以**网关配置**为准。
+ *
+ * 2026-10-12：实测 9/82 个排程的 `run_template_json.executor.agentKey` 存着**明文活密钥**
+ * （与当时机队 key 逐字相同）。那份是**冗余**的：派发侧本来就能从
+ * `config.executor.agentKey` 拿到（`run-resume-dispatch.ts` 的 `options.executor ?? {…}`），
+ * 而且写入侧现在**拒绝**持久化它（`scheduled-work-routes.ts` 的 `normalizeExecutorConfig`）。
+ *
+ * 以 config 为准还顺带修掉一个静默陷阱：**轮换只改一处**（网关配置）即全机队生效，
+ * 不必再去追每个排程模板里冻结的旧 key。
+ *
+ * 模板里没有 `executor` 时保持 `undefined` —— 让派发侧走它自己的 config 兜底，
+ * 不在这里凭空虚造一个 `{agentKey}`（那会改变 `policy.ts` 的 `executor?.enabled` 判定）。
+ */
+function withExecutorKeyFromConfig(
+  executor: ScheduledExecutorConfig | undefined,
+): ScheduledExecutorConfig | undefined {
+  if (!executor) return undefined;
+  const { agentKey: _discardedLegacyKey, ...rest } = executor;
+  const fromConfig = getConfig().executor?.agentKey;
+  return fromConfig ? { ...rest, agentKey: fromConfig } : rest;
+}
 
 async function resolveWorkspaceRoot(projectId: string): Promise<string> {
   try {
@@ -391,7 +416,7 @@ async function executeTemplate(
       disposition,
       dedupeKey,
       runSpecId: run.runSpecId,
-      executor: schedule.runTemplate.executor,
+      executor: withExecutorKeyFromConfig(schedule.runTemplate.executor),
       maxLoops: schedule.runTemplate.maxLoops,
       metadata: {
         scheduledWork: {
