@@ -12,7 +12,18 @@ export interface SchedulerDecisionRecord {
   runSpecId?: string;
   sessionId?: string;
   nodeId?: string;
-  kind: SchedulerDecisionKind;
+  /**
+   * 已知 kind；`null` 表示这一行是**类型外的历史值**（见 `kindRaw`）。
+   *
+   * 为什么读路径不抛错：库里实测存在 `kind='placement_decision'`（2026-06-21，2 行）。
+   * 旧实现让读路径的 `normalizeKind` 抛错 ⇒ **任何不带 kind 过滤的批量读整段失败**，
+   * 这类行于是永久不可见——错误被吞成"查不出来"，而不是"有一行不认识"。
+   * 现在它是可检测状态：调用方可以计数/告警/按需忽略（"错误即数据"）。
+   * 写路径仍然严格（`normalizeKind`），不接受类型外的值写入。
+   */
+  kind: SchedulerDecisionKind | null;
+  /** 数据库里的原始 kind 文本，永远保留（可追溯：图上/报告里能显示它到底是什么）。 */
+  kindRaw: string;
   selectedIds: string[];
   skipped: Array<{ id: string; reason: string; details?: Record<string, unknown> }>;
   reason: string;
@@ -47,6 +58,7 @@ export interface ListSchedulerDecisionsOptions {
   limit?: number;
 }
 
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS scheduler_decisions (
   id TEXT PRIMARY KEY,
@@ -71,6 +83,9 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_graph ON scheduler_decisions(
 CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_task ON scheduler_decisions(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_kind ON scheduler_decisions(kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_session ON scheduler_decisions(session_id, created_at DESC);
+-- 时间窗倒序读（listSchedulerDecisionWindow）只按 created_at 过滤：上面四个复合索引都以
+-- 别的列打头，用不上它 ⇒ 没有这个索引时窗口查询退化成全表扫（现在表小，随决策增长会变成热点）。
+CREATE INDEX IF NOT EXISTS idx_scheduler_decisions_created ON scheduler_decisions(created_at DESC);
 `;
 
 let _initialized = false;
@@ -319,7 +334,8 @@ function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
     runSpecId: row.run_spec_id ?? undefined,
     sessionId: row.session_id ?? undefined,
     nodeId: row.node_id ?? undefined,
-    kind: normalizeKind(row.kind),
+    kind: readKind(row.kind),
+    kindRaw: row.kind,
     selectedIds: normalizeStringArray(row.selected_ids_json),
     skipped: normalizeSkippedFromJson(row.skipped_json),
     reason: row.reason,
@@ -330,9 +346,24 @@ function rowToRecord(row: SchedulerDecisionRow): SchedulerDecisionRecord {
   };
 }
 
+function isKnownKind(value: unknown): value is SchedulerDecisionKind {
+  return value === 'claim' || value === 'provider_selection' || value === 'executor_selection' || value === 'task_outcome';
+}
+
+/**
+ * 写路径：类型外的值一律拒绝（fail closed，守卫只能收紧）。
+ */
 function normalizeKind(value: unknown): SchedulerDecisionKind {
-  if (value === 'claim' || value === 'provider_selection' || value === 'executor_selection' || value === 'task_outcome') return value;
+  if (isKnownKind(value)) return value;
   throw new Error('scheduler decision kind is invalid');
+}
+
+/**
+ * 读路径：类型外 = `null`（可检测状态），不抛错。原值由 `kindRaw` 保留。
+ * 读路径与写路径**必须分开**：写路径拒绝坏数据，读路径不能因为一行历史坏数据就整段查不出来。
+ */
+function readKind(value: unknown): SchedulerDecisionKind | null {
+  return isKnownKind(value) ? value : null;
 }
 
 function normalizeSkipped(

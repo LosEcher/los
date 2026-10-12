@@ -121,6 +121,7 @@ const sharedProcessTestFiles = [
 // `pnpm --filter @los/agent test` and CI group lanes share one inventory.
 const isolatedGroupA = [
   'src/agent-task-graph.test.ts',
+  'src/scheduler-decision-ledger.test.ts',
   'src/daily-agent-quality.test.ts',
   'src/dead-letter.test.ts',
   'src/eval-probes.test.ts',
