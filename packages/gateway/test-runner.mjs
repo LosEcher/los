@@ -61,6 +61,7 @@ const sharedProcessTestFiles = [
 const dbBackedTestFiles = [];
 
 const isolatedDatabaseTestFiles = [
+  'src/routes/bounded-limit-params.test.ts',
   'src/fleet-topology.test.ts',
   'src/active-session-failover.test.ts',
   'src/agent-task-graph-routes.test.ts',

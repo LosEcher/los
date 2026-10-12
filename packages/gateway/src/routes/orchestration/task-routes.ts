@@ -4,7 +4,7 @@ import { transitionExecutionState } from '@los/agent/execution-store';
 import { appendSessionEvent } from '@los/agent/session-events';
 import { cancelScheduledTask } from '@los/agent/scheduler';
 import { requestCancellation } from '@los/agent';
-import { normalizeOptionalString } from '../server-helpers.js';
+import { normalizeOptionalString, parseBoundedIntegerParam } from '../server-helpers.js';
 import { listServiceInstances } from '@los/agent/service-instances';
 import { listDeadLetterEvents, acknowledgeDeadLetterEvent, summarizeDeadLetterEvents, requeueDeadLetterEvent } from '@los/agent';
 import { getOperatorPrincipal, requireOperator, resolveReadScope } from '../../request-context.js';
@@ -86,11 +86,17 @@ export function registerTaskRoutes(
   app: FastifyInstance,
   deps: TaskRouteDependencies = defaultDependencies,
 ): void {
-  app.get('/tasks', async (req) => {
+  app.get('/tasks', async (req, reply) => {
+    const query = req.query as { status?: string; projectId?: string; limit?: string };
+    // limit 可选；缺省仍是 50（保持既有调用方行为），但不再固定死（同 `/nodes`）。
+    const limit = parseBoundedIntegerParam(query.limit, 'limit', 1, 500);
+    if (!limit.ok) {
+      reply.code(400);
+      return { error: limit.message };
+    }
     await deps.ensureTaskRunStore();
     const scope = resolveReadScope(req);
-    const query = req.query as { status?: string; projectId?: string };
-    return await deps.listTaskRuns(50, {
+    return await deps.listTaskRuns(limit.value ?? 50, {
       ...(scope ? { tenantId: scope } : {}),
       status: normalizeOptionalString(query.status),
       projectId: normalizeOptionalString(query.projectId),

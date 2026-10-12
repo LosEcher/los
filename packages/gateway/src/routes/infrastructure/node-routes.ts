@@ -34,6 +34,7 @@ import {
   evaluateNodeProbeRules,
 } from '../../node-probe-rules.js';
 import { requireOperator } from '../../request-context.js';
+import { parseBoundedIntegerParam } from '../server-helpers.js';
 import { ensureNodeEnrollmentStore, issueNodeEnrollmentToken, redeemNodeEnrollmentToken, verifyNodeCredential } from '@los/agent/node-enrollment';
 
 export type NodeRouteDependencies = {
@@ -92,8 +93,15 @@ export function registerNodeRoutes(
 ): void {
   app.get('/nodes', async (req, reply) => {
     if (!(await deps.requireOperator(req, reply))) return;
+    // limit 可选；缺省仍是 50（保持既有调用方行为），但**不再固定死**——
+    // 机队超过 50 台时旧实现会静默少给，且响应形状是裸数组、没有地方报"被截断"。
+    const limit = parseBoundedIntegerParam((req.query as { limit?: string } | undefined)?.limit, 'limit', 1, 500);
+    if (!limit.ok) {
+      reply.code(400);
+      return { error: limit.message };
+    }
     await deps.ensureExecutorNodeStore();
-    return await deps.listExecutorNodes();
+    return await deps.listExecutorNodes(limit.value ?? 50);
   });
 
   app.post('/nodes/enrollment-tokens', async (req, reply) => {

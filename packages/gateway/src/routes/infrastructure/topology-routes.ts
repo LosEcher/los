@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { readFleetTopology } from '../../fleet-topology.js';
 import { requireOperator } from '../../request-context.js';
+import { parseBoundedIntegerParam } from '../server-helpers.js';
 
 /**
  * 机队拓扑只读端点。
@@ -34,20 +35,6 @@ const LIMITS = {
 
 type NumericParam = keyof typeof LIMITS;
 
-function readNumericParam(
-  request: FastifyRequest,
-  name: NumericParam,
-): { ok: true; value: number | undefined } | { ok: false; message: string } {
-  const raw = (request.query as Record<string, unknown> | undefined)?.[name];
-  if (raw === undefined || raw === '') return { ok: true, value: undefined };
-  const parsed = typeof raw === 'number' ? raw : Number(String(raw));
-  const { min, max } = LIMITS[name];
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < min || parsed > max) {
-    return { ok: false, message: `${name} must be an integer between ${min} and ${max}` };
-  }
-  return { ok: true, value: parsed };
-}
-
 export function registerTopologyRoutes(
   app: FastifyInstance,
   deps: TopologyRouteDependencies = defaultDependencies,
@@ -57,7 +44,8 @@ export function registerTopologyRoutes(
 
     const options: Parameters<typeof readFleetTopology>[0] = {};
     for (const name of Object.keys(LIMITS) as NumericParam[]) {
-      const read = readNumericParam(request, name);
+      const { min, max } = LIMITS[name];
+      const read = parseBoundedIntegerParam((request.query as Record<string, unknown> | undefined)?.[name], name, min, max);
       if (!read.ok) {
         reply.code(400);
         return { error: read.message };
