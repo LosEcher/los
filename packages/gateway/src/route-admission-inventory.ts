@@ -245,6 +245,7 @@ export function admissionRouteKeys(): readonly string[] {
     'POST /scheduled-work-item-runs/:id/deny',
     'POST /scheduled-work-item-runs/:id/retry',
     'POST /scheduled-work-items',
+    'POST /scheduled-work-items/:id/reset-circuit',
     'POST /scheduled-work-items/:id/trigger',
     'POST /services/:id/drain',
     'POST /services/:id/promote',

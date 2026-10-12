@@ -486,6 +486,48 @@ export async function recoverOpenScheduledWorkCircuits(input: {
   return rows.rows.map(scheduleFromRow);
 }
 
+/**
+ * 操作者手动重置断路（open/half_open → closed）。
+ *
+ * ## 为什么需要它
+ *
+ * `recoverOpenScheduledWorkCircuits` 只在 **`CIRCUIT_RECOVERY_WINDOW_MS`（24h）** 之后把
+ * `open` 变成 `half_open`，而 `PATCH /scheduled-work-items/:id` 不接受 `circuitState`
+ * ⇒ **"原因已修好"与"作业能再跑"之间有最多 24 小时的静默空窗，且没有合规的手动手段**。
+ * 2026-10-12 实测：NAS34 巡检的病因（节点本地解析不出 provider）已修，但
+ * `POST /scheduled-work-items/:id/trigger` 仍被 `409 schedule circuit is open` 挡下。
+ *
+ * ## 语义（有意保守）
+ *
+ * - **只对 `open`/`half_open` 生效**；已 `closed` 时返回 `changed:false` 且不写库
+ *   （幂等，也不会去重置一个健康计数的东西）。
+ * - 归零 `consecutive_failures`、清 `circuit_opened_at` ⇒ 下一次失败要**重新累计到
+ *   `failure_threshold`** 才再断路，而不是"一次失败立刻又开"。
+ * - **不动 `next_run_at`**：重置只恢复"可以再跑"的资格；何时跑仍由操作者显式 trigger
+ *   或正常 due 扫描决定。⇒ 重置本身**不会偷偷制造一次执行**（这是它与"改 status 再改
+ *   回来"的关键区别）。
+ * - 并发沿用 `recordScheduledRunOutcome` 的乐观并发：`WHERE circuit_state=$2` 携带读到的
+ *   状态，另一个写者会被检测到而不是被覆盖。
+ */
+export async function resetScheduledWorkCircuit(input: {
+  scheduleId: string;
+}): Promise<{ schedule: ScheduledWorkItem; changed: boolean }> {
+  await ensureScheduledWorkStore();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await loadScheduledWorkItem(input.scheduleId);
+    if (!current) throw new Error('schedule not found');
+    if (current.circuitState === 'closed') return { schedule: current, changed: false };
+    const rows = await getDb().query<ScheduledWorkRow>(
+      `UPDATE scheduled_work_items
+         SET circuit_state='closed',consecutive_failures=0,circuit_opened_at=NULL,updated_at=now()
+       WHERE id=$1 AND circuit_state=$2 RETURNING *`,
+      [input.scheduleId, current.circuitState],
+    );
+    if (rows.rows[0]) return { schedule: scheduleFromRow(rows.rows[0]!), changed: true };
+  }
+  throw new Error('scheduled work circuit changed concurrently');
+}
+
 export async function recordScheduledRunOutcome(input: {
   scheduleId: string; status: 'succeeded' | 'no_op' | 'failed'; recoveryWorkItemId?: string;
 }): Promise<{ schedule: ScheduledWorkItem; circuitOpened: boolean }> {
