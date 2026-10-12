@@ -44,14 +44,17 @@ export async function projectSessionPain(opts: {
   await ensureDshSessionCatalogStore();
   const asOf = (opts.now ?? new Date()).toISOString();
 
-  // 一次扫描：只取有 text 的事件（44k/598k），带 session_id 以便归项目
+  // 一次扫描：只取有 text 的事件（51k/700k），带 session_id 以便归项目。
+  // `maxBuffer` 必须放大：这条查询的输出实测 **67.8 MiB**（2026-10-11），
+  // 默认 64 MiB 会让 `execFileAsync` 抛 ERR_CHILD_PROCESS_STDIO_MAXBUFFER，
+  // 于是 pain 被永久判成 degraded 并谎报"库不可读"。给到 256 MiB 留增长余量。
   const events = await querySqlite<{ session_id: string; ts: number; text: string }>(`
     SELECT session_id, ts, text FROM events WHERE text IS NOT NULL AND text <> '';
-  `);
+  `, { maxBuffer: 256 * 1024 * 1024 });
   if (events === null) {
     return {
       status: 'degraded', rows: 0, asOf, durationMs: Date.now() - started,
-      detail: 'session-index.db unavailable or unreadable — pain projection NOT refreshed (this is not "no pain patterns")',
+      detail: 'session-index.db unavailable or unreadable — pain projection NOT refreshed (this is not "no pain patterns"); 真实错误见 stderr 的 [querySqlite] 行',
     };
   }
   const sessions = await querySqlite<{ id: string; cwd: string }>('SELECT id, cwd FROM sessions;') ?? [];

@@ -44,6 +44,7 @@ function config(): Config {
     executor: {
       enabled: false, host: '127.0.0.1', port: 8090, nodeKind: 'executor',
       shutdownGraceMs: 120_000, connectModes: [], meshNodes: [],
+      placementPolicy: 'verified-rotate', workspacePolicy: 'verify',
     },
     profile: 'test',
     defaultProjectId: 'los',

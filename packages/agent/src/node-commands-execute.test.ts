@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { loadConfig } from '@los/infra/config';
-import { closeDb, initDb } from '@los/infra/db';
+import { closeDb, getDb, initDb } from '@los/infra/db';
 
 import { ensureExecutorNodeStore, upsertExecutorNode } from './executor-nodes.js';
 import { ensureNodeCommandStore, executeNodeCommand } from './node-commands.js';
@@ -15,10 +15,10 @@ import { ensureNodeCommandStore, executeNodeCommand } from './node-commands.js';
 test('executeNodeCommand routes run-check to the node runtime, not the default deny', async () => {
   const config = await loadConfig();
   await initDb(config.databaseUrl);
+  const nodeId = `node-run-check-${Date.now()}`;
   try {
     await ensureNodeCommandStore();
     await ensureExecutorNodeStore();
-    const nodeId = `node-run-check-${Date.now()}`;
     await upsertExecutorNode({ nodeId, nodeKind: 'executor', status: 'online' });
 
     const seen: Array<{ command?: unknown; cwd?: unknown }> = [];
@@ -51,6 +51,12 @@ test('executeNodeCommand routes run-check to the node runtime, not the default d
     assert.equal(denied.status, 'denied');
     assert.match(String(denied.error), /run-check requires an executor-side command runner/);
   } finally {
+    // 必须清掉本用例造的那一行：`executor_nodes` 是**共享**的测试库表，
+    // 残留行会以"最新的心跳"排到 `listExecutorNodes` 队首，进而改变别的用例里
+    // `skipped[0]` 的内容（实测：一次 14:38 的残留让 `executor-client.test.ts`
+    // 的 `skipped[0]` 从 `capability:sandbox_missing` 变成 `status:offline`）。
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = $1', [nodeId]).catch(() => undefined);
+    await getDb().query('DELETE FROM node_commands WHERE node_id = $1', [nodeId]).catch(() => undefined);
     await closeDb().catch(() => undefined);
   }
 });

@@ -8,6 +8,7 @@
  */
 
 import { getConfig } from '@los/infra/config';
+import { listProviderDefaults } from '@los/infra/provider-defaults';
 
 export class ToolForwardError extends Error {
   constructor(
@@ -38,23 +39,64 @@ export function openAICompatChatUrl(baseUrl: string): string {
   return `${cleanBase}/v1/chat/completions`;
 }
 
-export function resolveToolForwardTarget(providerName: string): ToolForwardTarget {
-  const provider = getConfig().providers[providerName];
-  if (!provider || provider.enabled === false) {
-    throw new ToolForwardError(400, `Provider '${providerName}' is not configured.`);
+/**
+ * 解析工具转发的上游目标。
+ *
+ * 入参可以是 **provider 名**（OpenAI 兼容面的既有约定：`/v1/models` 列的就是 provider 名），
+ * 也可以是**模型 id**（2026-10-11 新增）。
+ *
+ * 为什么需要"模型 id"这一支：远端执行器把自己的 provider 指向本网关后，它发上来的是
+ * **模型名**（节点的 provider 是"厂商 + 默认模型"，`modelProfile.model` 是 `deepseek-flash`），
+ * 而不是 provider 名。只认 provider 名 ⇒ 节点侧必须把模型名改成 provider 名，那会让节点的
+ * 模型档位/能力画像跟着变（等于为了走代理而改语义）。这一支把"认得模型 id"这件事放在网关侧，
+ * 节点配置保持与直连时**逐字相同**，只换 baseUrl。
+ *
+ * 匹配规则（确定性，不猜）：`provider.model` 显式相等，或 `provider-defaults` 里该 provider 的
+ * `defaultModel` 相等；多个 provider 命中时按名字排序取第一个，**并把歧义写进错误信息之外**——
+ * 目前调用方只有"一个模型名对一个 provider"的场景。
+ */
+export function resolveToolForwardTarget(providerNameOrModel: string): ToolForwardTarget {
+  const config = getConfig();
+  const direct = config.providers[providerNameOrModel];
+  if (direct && direct.enabled !== false) {
+    return buildTarget(providerNameOrModel, direct, direct.model?.trim() || providerNameOrModel);
   }
+  const byModel = findProviderByModel(providerNameOrModel);
+  if (byModel) {
+    // 按模型 id 命中时，**原样转发请求里的模型名**（节点要什么就给它什么）。
+    return buildTarget(byModel.name, byModel.provider, providerNameOrModel);
+  }
+  throw new ToolForwardError(400, `Provider '${providerNameOrModel}' is not configured.`);
+}
+
+function buildTarget(
+  name: string,
+  provider: { baseUrl?: string; apiKey?: string },
+  model: string,
+): ToolForwardTarget {
   if (!provider.baseUrl || !provider.apiKey) {
     throw new ToolForwardError(
       400,
-      `Provider '${providerName}' has no API credential for client tool forwarding.`,
+      `Provider '${name}' has no API credential for client tool forwarding.`,
     );
   }
-  const model = provider.model?.trim() || providerName;
   return {
     url: openAICompatChatUrl(provider.baseUrl),
     apiKey: provider.apiKey,
     model,
   };
+}
+
+function findProviderByModel(model: string): { name: string; provider: NonNullable<ReturnType<typeof getConfig>['providers'][string]> } | undefined {
+  const providers = getConfig().providers ?? {};
+  const defaults = new Map(listProviderDefaults().map(item => [item.name as string, item.defaults.defaultModel]));
+  const matches = Object.entries(providers)
+    .filter(([, provider]) => provider && provider.enabled !== false)
+    .filter(([name, provider]) =>
+      provider.model?.trim() === model || defaults.get(name) === model)
+    .sort(([a], [b]) => a.localeCompare(b));
+  const first = matches[0];
+  return first ? { name: first[0], provider: first[1]! } : undefined;
 }
 
 export function buildToolForwardBody(input: {

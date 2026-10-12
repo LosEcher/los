@@ -76,6 +76,14 @@ export interface ScheduledExecutorConfig {
   requiresBuild?: boolean;
   requiresDeploy?: boolean;
   requiredCapabilities?: readonly ExecutorCapabilityRequirement[];
+  /**
+   * S7：`portable` 表示**本任务不依赖工作区文件**（如只读的舰队/节点巡检、纯计算任务），
+   * 于是"节点上有没有这个工作区"不再是门槛，只要节点可达就可参与轮转。
+   * 不写 = `verify`：必须证明工作区在节点本地存在。
+   */
+  workspacePolicy?: 'verify' | 'portable';
+  /** S7：见 ConfigSchema `executor.placementPolicy`（不写则取全局配置）。 */
+  placementPolicy?: 'health' | 'verified-rotate';
 }
 
 export type ExecutorCapabilityRequirement =
@@ -115,6 +123,16 @@ export function isExecutorCapabilityRequirement(value: unknown): value is Execut
 export interface ExecutorPlacementIntent {
   toolMode?: 'all' | 'project-write' | 'read-only';
   sandboxMode?: 'readonly' | 'workspace-write' | 'sandbox';
+  /**
+   * 本任务的工作区（节点本地路径）。S7 起它是**候选资格的一部分**：默认策略下，
+   * 只有"这个路径确实在节点本地存在"的节点才算候选——在此之前路由完全不看工作区，
+   * 选出来的节点可能根本读不到文件。
+   */
+  workspaceRoot?: string;
+  /** 见 ConfigSchema `executor.workspacePolicy`。 */
+  workspacePolicy?: 'verify' | 'portable';
+  /** 见 ConfigSchema `executor.placementPolicy`。 */
+  placementPolicy?: 'health' | 'verified-rotate';
 }
 
 export interface RunAgentTaskGraphSerialInput extends Omit<ScheduledAgentTaskInput, 'prompt' | 'promptPreview' | 'taskRunId' | 'dedupeKey'> {

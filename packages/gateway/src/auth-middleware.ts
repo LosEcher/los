@@ -41,6 +41,29 @@ export default async function authMiddleware(
       return reply.code(401).send({ error: 'executor heartbeat authentication required' });
     }
 
+    // Executor model route (2026-10-11): an executor may reach the OpenAI-compatible
+    // surface with the key it **already has** for the dispatch channel, so a remote
+    // node needs no provider credential of its own — the gateway holds them and
+    // forwards the completion upstream with its own credentials.
+    //
+    // 与 heartbeat 分支的两处刻意不同：
+    //  - **不匹配时不 401，而是继续走正常鉴权链**：同一条路径上还有浏览器/DSH 用
+    //    `LOS_AUTH_TOKEN` 的调用方，把这条分支写成"唯一凭据"会把它们全部打断。
+    //  - **作用域只有 `/v1/`**：实测 `/v1` 下只有 `GET /v1/models` 与
+    //    `POST /v1/chat/completions`（见 route-admission-inventory），因此这把密钥
+    //    不会因为本改动而多解锁任何别的路径。负向控制由 auth-middleware.test.ts 守。
+    if (_isExecutorModelPath(req.url) && config.executor.agentKey) {
+      const bearer = extractBearerToken(req);
+      if (bearer && bearer === config.executor.agentKey) {
+        const nodeId = req.headers['x-los-node-id'];
+        req.log?.info?.({
+          nodeId: Array.isArray(nodeId) ? nodeId[0] : nodeId,
+          path: req.url,
+        }, 'executor model route authorized');
+        return;
+      }
+    }
+
     if (!config.auth.enabled) return;
 
     if (isPublicPath(req.url, req.method)) return;
@@ -118,4 +141,17 @@ function isPublicPath(url: string | undefined, method: string): boolean {
 function isExecutorHeartbeatPath(url: string | undefined, method: string): boolean {
   if (method !== 'POST' || !url) return false;
   return (url.split('?')[0] || url) === '/nodes/heartbeat';
+}
+
+/**
+ * Executor-reachable model surface: exactly the OpenAI-compatible routes.
+ *
+ * 收窄到这两条而不是整个 `/v1/` 前缀：路由面是会长的，前缀匹配会在**将来**某个
+ * 新 `/v1/...` 路由出现时静默扩大这把密钥的作用域。负向控制（这把密钥打不开
+ * `/runs`、`/sessions`、`/chat`）写在 `auth-middleware.test.ts`。
+ */
+export function _isExecutorModelPath(url: string | undefined): boolean {
+  if (!url) return false;
+  const path = url.split('?')[0] || url;
+  return path === '/v1/models' || path === '/v1/chat/completions';
 }

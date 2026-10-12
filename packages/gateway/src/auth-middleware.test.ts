@@ -232,6 +232,58 @@ test('auth middleware accepts operator token without auth token when operatorTok
   }
 });
 
+/**
+ * 执行器的模型路由（2026-10-11）：节点用**它已经有的**那把密钥（派发通道同一把）
+ * 调 OpenAI 兼容面，这样远端节点不再需要自己的 provider 凭据。
+ *
+ * 两条判据合起来才成立：① 该允许的允许；② **该不许的不许**——否则这就不是"收窄的
+ * 一条通路"，而是"把这把共享密钥升级成网关万能钥匙"。
+ */
+test('executor key opens the OpenAI-compatible surface and nothing else', async () => {
+  const app = Fastify({ logger: false });
+  const cfg = configForAuth(true);
+  cfg.executor.agentKey = 'executor-shared-key';
+  await authMiddleware(app, { config: cfg });
+  app.get('/v1/models', async () => ({ object: 'list', data: [] }));
+  app.post('/v1/chat/completions', async () => ({ ok: true }));
+  app.get('/runs', async () => ({ runs: [] }));
+  app.get('/sessions/:id', async () => ({ ok: true }));
+  app.post('/chat', async () => ({ ok: true }));
+
+  const asExecutor = { authorization: 'Bearer executor-shared-key' };
+  try {
+    // ① 允许：只有这两条
+    assert.equal((await app.inject({ method: 'GET', url: '/v1/models', headers: asExecutor })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'POST', url: '/v1/chat/completions', headers: asExecutor, payload: {} })).statusCode, 200);
+
+    // ② 负向控制：同一把密钥打不开别的任何路径
+    for (const [method, url] of [
+      ['GET', '/runs'],
+      ['GET', '/sessions/abc'],
+      ['POST', '/chat'],
+    ] as const) {
+      const response = await app.inject({ method, url, headers: asExecutor, payload: method === 'POST' ? {} : undefined });
+      assert.equal(response.statusCode, 401, `${method} ${url} must stay closed to the executor key`);
+    }
+
+    // ③ 别的凭据打同一路径仍然可用（本改动不得把浏览器/DSH 挤掉）
+    const withAuthToken = await app.inject({
+      method: 'POST', url: '/v1/chat/completions',
+      headers: { 'x-los-auth-token': 'test-token' }, payload: {},
+    });
+    assert.equal(withAuthToken.statusCode, 200);
+
+    // ④ 错密钥不得被当成"没匹配"而静默放行
+    const wrong = await app.inject({
+      method: 'POST', url: '/v1/chat/completions',
+      headers: { authorization: 'Bearer not-the-executor-key' }, payload: {},
+    });
+    assert.equal(wrong.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
 test('security headers do not emit CSP unless explicitly configured', async () => {
   const app = Fastify({ logger: false });
   registerSecurityHeaders(app);
@@ -318,6 +370,7 @@ function configForAuth(enabled: boolean): Config {
       nodeKind: 'executor',
       connectModes: [],
       meshNodes: [],
+      placementPolicy: 'verified-rotate', workspacePolicy: 'verify',
     },
     profile: 'test',
     defaultProjectId: 'los',

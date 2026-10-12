@@ -50,6 +50,8 @@ const ENV_MAP: [string, string][] = [
   ['EXECUTOR_PORT', 'executor.port'], ['EXECUTOR_SHUTDOWN_GRACE_MS', 'executor.shutdownGraceMs'],
   ['GATEWAY_URL', 'executor.gatewayUrl'], ['EXECUTOR_ARTIFACT_ROOT', 'executor.artifactRoot'],
   ['EXECUTOR_CONNECT_MODES', 'executor.connectModes'], ['EXECUTOR_MESH_NODES', 'executor.meshNodes'],
+  ['EXECUTOR_PLACEMENT_POLICY', 'executor.placementPolicy'],
+  ['EXECUTOR_WORKSPACE_POLICY', 'executor.workspacePolicy'],
   ['LOS_PROFILE', 'profile'], ['LOS_DEFAULT_PROJECT_ID', 'defaultProjectId'],
 ];
 
