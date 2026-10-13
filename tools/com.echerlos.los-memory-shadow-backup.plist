@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.echerlos.los-memory-shadow-backup</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/python3</string>
+		<string>__HOME__/syncfolder/project/los-memory/scripts/shadow_backup.py</string>
+		<string>backup</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/.local/share/los-memory-shadow/backup.err.log</string>
+	<key>StandardOutPath</key>
+	<string>__HOME__/.local/share/los-memory-shadow/backup.out.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>4</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>WorkingDirectory</key>
+	<string>__HOME__/syncfolder/project/los-memory</string>
+</dict>
+</plist>

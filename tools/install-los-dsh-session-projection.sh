@@ -47,7 +47,16 @@ fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/.los-runtime"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-sed "s|__LOS_ROOT__|$ROOT|g" "$TEMPLATE" > "$TARGET"
+# 2026-10-13：模板新增 `__HOME__` 占位符（WatchPaths 要指向 ~/.dsh 下的上游心跳）。
+# 两个占位符都必须替换：漏掉一个会让 plist 里留下字面 `__HOME__`，launchd 会照常加载、
+# 但 WatchPaths 永远不命中 —— 正是本仓反复说的"装了 ≠ 在起作用"，所以这里同时做
+# **渲染后断言**：结果里不得残留任何 `__` 占位符。
+sed -e "s|__LOS_ROOT__|$ROOT|g" -e "s|__HOME__|$HOME|g" "$TEMPLATE" > "$TARGET"
+if grep -q '__[A-Z_]*__' "$TARGET"; then
+  echo "install: 渲染后仍有未替换的占位符，拒绝 bootstrap：" >&2
+  grep -n '__[A-Z_]*__' "$TARGET" >&2
+  exit 2
+fi
 launchctl bootstrap "$DOMAIN" "$TARGET"
 
 echo "── 验收：同步跑一次投影（RunAtLoad=false，故由安装脚本触发）──"
