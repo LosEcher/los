@@ -10,14 +10,27 @@ RUNTIME_DIR="${LOS_RUNTIME_DIR:-$ROOT/.los-runtime}"
 . "$ROOT/tools/los-common.sh"
 
 # ── Load .env into current shell before spawning daemons ──
+# ⚠️ **已存在的进程环境优先**（dotenv 的标准语义 / 12-factor）。原实现无条件 source，
+# 于是任何「从 Keychain 注入进程环境」的凭据都会被 `.env` 里的旧副本**静默覆盖**。
+# 2026-10-15 实测：wrapper 按 Keychain 注入新 token 后，本函数又把 `.env` 的旧值写回，
+# 表现为「新 token 401 / 旧 token 200」——看起来像生成错了密钥，实际是优先级反了。
+# 逐行解析而非 `. "$env_file"`：只有"当前未设置"的键才赋值。
 _load_dotenv() {
-  local env_file="$ROOT/.env"
-  if [ -f "$env_file" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-  fi
+  local env_file="$ROOT/.env" line key val
+  [ -f "$env_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key="${line%%=*}"
+    case "$key" in *[!A-Za-z0-9_]*|'') continue ;; esac
+    [ -n "${!key+x}" ] && continue          # 进程环境已有该键 ⇒ 不覆盖（注入优先）
+    val="${line#*=}"
+    val="${val%$'\r'}"
+    case "$val" in
+      \"*\") val="${val#\"}"; val="${val%\"}" ;;
+      \'*\') val="${val#\'}"; val="${val%\'}" ;;
+    esac
+    export "$key=$val"
+  done < "$env_file"
 }
 
 # ── 可部署内容摘要 ────────────────────────────────────────
