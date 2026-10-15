@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Config } from '@los/infra/config';
 import { verifyJwt, getJwtSecret } from './auth-store.js';
@@ -7,6 +8,18 @@ import { getLogger } from '@los/infra/logger';
 // 为什么不用 app.log / req.log：2026-10-15 实测那两条路径的告警**没有落进日志文件**，
 // 而「窗口开着」必须可被日志证明 —— 否则轮换窗口就成了不可审计的状态。
 const log = getLogger('auth');
+
+/**
+ * 「这条请求是靠轮换窗口的上一把值通过的」标记。
+ *
+ * 为什么需要它（2026-10-15 实测踩到）：诊断"到底哪台节点还在用旧 key"时，
+ * 我最初把 WARN 打在 `onRequest` 里 —— 那个阶段**body 还没解析**，于是心跳的
+ * `nodeId` 拿不到，日志只能写「有人用旧值」，指认不了是谁，只能逐台做故障注入。
+ * 现在 `onRequest` 只打标记，真正的 WARN 由 `preHandler`（body 已解析）发出。
+ * 用 WeakMap 而不是挂在 `req` 上：不动 Fastify 的类型，且请求结束即可回收。
+ */
+interface RotationMark { label: string; credentialFingerprint?: string }
+const rotationMarks = new WeakMap<FastifyRequest, RotationMark>();
 
 /**
  * Paths that never require auth.
@@ -58,10 +71,29 @@ export default async function authMiddleware(
   ): boolean => {
     if (!_tokenAccepted(candidate, current, prev)) return false;
     if (prev && candidate === prev) {
-      log.warn(`${label} accepted on ${req.url} (rotation window open)`);
+      // 只打标记，真正的告警留给 preHandler（那时 body 已解析，能拿到 nodeId）。
+      // 实测：心跳不带 x-los-node-id，nodeId 只在 body 里，而 onRequest 早于 body 解析。
+      rotationMarks.set(req, {
+        label,
+        credentialFingerprint: fingerprintNodeCredential(req),
+      });
     }
     return true;
   };
+
+  // 轮换窗口的**可指认**告警：此时 body 已解析，能写出是哪台节点。
+  app.addHook('preHandler', async (req: FastifyRequest) => {
+    const mark = rotationMarks.get(req);
+    if (!mark) return;
+    rotationMarks.delete(req);
+    const body = req.body as Record<string, unknown> | undefined;
+    const nodeId = body?.nodeId ?? body?.node_id ?? body?.id;
+    const who = [
+      nodeId ? `node=${String(nodeId)}` : undefined,
+      mark.credentialFingerprint ? `credential_fp=${mark.credentialFingerprint}` : undefined,
+    ].filter(Boolean).join(' ');
+    log.warn(`${mark.label} accepted on ${req.url}${who ? ` (${who})` : ''} (rotation window open)`);
+  });
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     // Executor heartbeats are a control-plane write, even when user auth is
@@ -136,6 +168,18 @@ export function _tokenAccepted(
   if (!candidate || !current) return false;
   if (candidate === current) return true;
   return Boolean(previous) && candidate === previous;
+}
+
+/**
+ * `x-los-node-credential` 的指纹（sha256 前 8 位十六进制）。
+ * **只打指纹不打值**：它是每台节点一份的凭据，写进日志就等于又造一处明文面。
+ * 用途只有一个 —— 当 body 里没有 nodeId 时，仍能把"是谁"缩小到一台。
+ */
+function fingerprintNodeCredential(req: FastifyRequest): string | undefined {
+  const raw = req.headers['x-los-node-credential'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return createHash('sha256').update(value.trim()).digest('hex').slice(0, 8);
 }
 
 /** 轮换窗口用的上一把值（只从环境读；不设即无窗口）。 */
