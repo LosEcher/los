@@ -1,6 +1,12 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Config } from '@los/infra/config';
 import { verifyJwt, getJwtSecret } from './auth-store.js';
+import { getLogger } from '@los/infra/logger';
+
+// 与本仓其它网关模块同一约定（`[tag]` 前缀才会落进 .los-runtime/gateway.log）。
+// 为什么不用 app.log / req.log：2026-10-15 实测那两条路径的告警**没有落进日志文件**，
+// 而「窗口开着」必须可被日志证明 —— 否则轮换窗口就成了不可审计的状态。
+const log = getLogger('auth');
 
 /**
  * Paths that never require auth.
@@ -31,13 +37,39 @@ export default async function authMiddleware(
 ): Promise<void> {
   const { config } = opts;
 
+  // 凭据轮换窗口（2026-10-15）：接受"当前值 **或** 上一把"，使轮换零停机。
+  // 契约与用法见 runbooks/credential-rotation-3-secrets-2026-10-15.md §2；
+  // 窗口的**唯一**开关是这三个环境变量，不设即无窗口。
+  // ⚠️ 三条纪律（负向控制见 auth-middleware.test.ts）：
+  //   ① PREVIOUS **不能单独授权** —— 主键缺失时一律 401（否则它就变成第二把永久后门）；
+  //   ② 每次走到 PREVIOUS 都告警，窗口开着这件事必须可被日志证明；
+  //   ③ 启动时若有窗口，WARN 一次，让人知道"现在有两把有效"。
+  const previous = rotationPreviousTokens();
+  const openWindows = Object.entries(previous).filter(([, v]) => v).map(([k]) => k);
+  if (openWindows.length) {
+    log.warn(`credential rotation window OPEN — accepted previous tokens: ${openWindows.join(', ')}; unset to close`);
+  }
+  const accept = (
+    req: FastifyRequest,
+    candidate: string | undefined,
+    current: string | undefined,
+    prev: string | undefined,
+    label: string,
+  ): boolean => {
+    if (!_tokenAccepted(candidate, current, prev)) return false;
+    if (prev && candidate === prev) {
+      log.warn(`${label} accepted on ${req.url} (rotation window open)`);
+    }
+    return true;
+  };
+
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     // Executor heartbeats are a control-plane write, even when user auth is
     // disabled for local development. When a shared executor key is configured
     // it is the only credential accepted for this route.
     if (isExecutorHeartbeatPath(req.url, req.method) && config.executor.agentKey) {
       const bearer = extractBearerToken(req);
-      if (bearer && bearer === config.executor.agentKey) return;
+      if (accept(req, bearer, config.executor.agentKey, previous.executor, 'EXECUTOR_AGENT_KEY_PREVIOUS')) return;
       return reply.code(401).send({ error: 'executor heartbeat authentication required' });
     }
 
@@ -54,7 +86,7 @@ export default async function authMiddleware(
     //    不会因为本改动而多解锁任何别的路径。负向控制由 auth-middleware.test.ts 守。
     if (_isExecutorModelPath(req.url) && config.executor.agentKey) {
       const bearer = extractBearerToken(req);
-      if (bearer && bearer === config.executor.agentKey) {
+      if (accept(req, bearer, config.executor.agentKey, previous.executor, 'EXECUTOR_AGENT_KEY_PREVIOUS')) {
         const nodeId = req.headers['x-los-node-id'];
         req.log?.info?.({
           nodeId: Array.isArray(nodeId) ? nodeId[0] : nodeId,
@@ -71,7 +103,7 @@ export default async function authMiddleware(
     // 1. Operator token (strongest auth path): header or query (browser WS/SSE)
     if (config.auth.operatorToken) {
       const opToken = extractOperatorToken(req);
-      if (opToken === config.auth.operatorToken) return;
+      if (accept(req, opToken, config.auth.operatorToken, previous.operator, 'LOS_OPERATOR_TOKEN_PREVIOUS')) return;
     }
 
     // 2. JWT Bearer token (user login) — header only (avoid putting JWT in query logs)
@@ -83,10 +115,40 @@ export default async function authMiddleware(
 
     // 3. Static auth token (legacy): header, Bearer non-JWT, or query for WS/SSE
     const staticToken = extractAuthToken(req);
-    if (config.auth.token && staticToken === config.auth.token) return;
+    if (accept(req, staticToken, config.auth.token, previous.auth, 'LOS_AUTH_TOKEN_PREVIOUS')) return;
 
     return reply.code(401).send({ error: 'unauthorized' });
   });
+}
+
+/**
+ * 轮换窗口的判定：候选值等于**当前值**，或在窗口内等于**上一把**。
+ *
+ * ⚠️ `current` 缺失（未配置）时一律 false —— PREVIOUS **不能单独授权**。
+ * 这条不是风格：若允许"只给 PREVIOUS"，这个机制就从"轮换窗口"退化成"第二把永久后门"，
+ * 而后者在审计上等价于把密钥长期翻倍。负向控制写在 auth-middleware.test.ts。
+ */
+export function _tokenAccepted(
+  candidate: string | undefined,
+  current: string | undefined,
+  previous: string | undefined,
+): boolean {
+  if (!candidate || !current) return false;
+  if (candidate === current) return true;
+  return Boolean(previous) && candidate === previous;
+}
+
+/** 轮换窗口用的上一把值（只从环境读；不设即无窗口）。 */
+function rotationPreviousTokens(): { auth?: string; operator?: string; executor?: string } {
+  const pick = (key: string): string | undefined => {
+    const value = process.env[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  };
+  return {
+    auth: pick('LOS_AUTH_TOKEN_PREVIOUS'),
+    operator: pick('LOS_OPERATOR_TOKEN_PREVIOUS'),
+    executor: pick('EXECUTOR_AGENT_KEY_PREVIOUS'),
+  };
 }
 
 /** Extract Bearer token from Authorization header (JWT). */
