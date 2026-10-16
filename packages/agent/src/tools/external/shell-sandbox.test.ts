@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 import {
   resolveSandboxBackend,
@@ -162,6 +164,32 @@ test('buildMacSandboxProfile readonly mode denies writes entirely', () => {
   assert.ok(!profile.includes('file-write'), 'readonly profile must not allow any writes');
   assert.match(profile, /\(allow file-read\*\)/);
   assert.match(profile, /\(deny network\*\)/);
+});
+
+// 2026-10-16：`/dev/null` 必须放行，否则沙箱内**每条 git 命令 rc=128**
+// （git 会打开 /dev/null；`(deny default)` 把它一起拒了）⇒ 依赖 git 证据的验收全部判不了。
+// 证据：docs/operations/2026-10-16-sandbox-profile-devnull-blocks-git.md（含 sandbox-exec 实测）。
+test('buildMacSandboxProfile allows writing /dev/null in shell-capable modes', () => {
+  for (const mode of ['workspace-write', 'sandbox'] as const) {
+    const profile = _buildMacSandboxProfile('/ws/proj', mode);
+    assert.match(profile, /\(allow file-write-data \(literal "\/dev\/null"\)\)/,
+      `${mode} must allow /dev/null writes`);
+  }
+});
+
+test('buildMacSandboxProfile readonly does not grant /dev/null writes', () => {
+  // readonly 是 L0、根本不跑 shell（run_shell 是 L2）⇒ 给它加会与 "no write permission at all" 矛盾。
+  const profile = _buildMacSandboxProfile('/ws/proj', 'readonly');
+  assert.ok(!profile.includes('/dev/null'), 'readonly must stay write-free');
+});
+
+test('buildMacSandboxProfile output actually works under sandbox-exec (macOS only)', () => {
+  if (process.platform !== 'darwin' || !existsSync('/usr/bin/sandbox-exec')) return; // 非 macOS 跳过
+  const profile = _buildMacSandboxProfile('/ws/proj', 'sandbox');
+  const r = spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/bash', '-c', 'echo x > /dev/null'], {
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, `sandbox-exec with the built profile must allow /dev/null writes: ${r.stderr}`);
 });
 
 test('buildMacSandboxProfile sandbox mode matches workspace-write enforcement', () => {

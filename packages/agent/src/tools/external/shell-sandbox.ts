@@ -235,9 +235,20 @@ export async function runSandboxedShell(
  * real endpoints (read-only diagnostics); default 'isolated' keeps it.
  */
 export function _buildMacSandboxProfile(cwd: string, sandboxMode: SandboxMode = 'workspace-write', networkMode: 'isolated' | 'host' = 'isolated'): string {
+  // ⚠️ `/dev/null` 必须**显式放行**（2026-10-16 实测缺陷；证据：
+  //    docs/operations/2026-10-16-sandbox-profile-devnull-blocks-git.md）。
+  //    本 profile 的**意图**是"写只落在工作区内"，但 `(deny default)` 把 `/dev/null`
+  //    也一起拒了 —— 而 `git` 会打开 `/dev/null` ⇒ 沙箱内**每条 git 命令 rc=128**，
+  //    于是"跑门禁 + 读 git 证据"的验收**全部判不了**（表面症状看起来像 agent 的毛病）。
+  //    写 `/dev/null` 是**丢弃数据**，从来不是数据落点 ⇒ 放行它不扩大数据面。
+  //    只在非 readonly 分支加：readonly 是 **L0**、根本不跑 shell（`run_shell` 是 L2），
+  //    给它加反而与它"no write permission at all"的语义矛盾。
   const writeClause = sandboxMode === 'readonly'
     ? []
-    : [`(allow file-write* (subpath "${escapeSandboxString(cwd)}"))`];
+    : [
+        `(allow file-write* (subpath "${escapeSandboxString(cwd)}"))`,
+        '(allow file-write-data (literal "/dev/null"))',
+      ];
   const networkClause = networkMode === 'host'
     ? []
     : ['(deny network*)'];
