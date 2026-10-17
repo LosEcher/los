@@ -1,3 +1,4 @@
+import { decimals } from '../components/format';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCcw, Search } from 'lucide-react';
@@ -139,7 +140,7 @@ export function FileSyncPage() {
                   {f.totalFiles !== undefined ? <span> · {t('ops.fileSync.filesLabel', { count: f.totalFiles })}</span> : null}
                   {f.inSyncFiles !== undefined ? <span> · {t('ops.fileSync.inSyncLabel', { count: f.inSyncFiles })}</span> : null}
                   {f.lastScanAt ? <span> · {t('ops.fileSync.lastScanPrefix', { date: new Date(f.lastScanAt).toLocaleString() })}</span> : null}
-                  {f.lastScanDurationMs ? <span> · {(f.lastScanDurationMs / 1000).toFixed(1)}s</span> : null}
+                  {f.lastScanDurationMs ? <span> · {decimals(f.lastScanDurationMs / 1000, 1)}s</span> : null}
                 </div>
               </div>
             </div>

@@ -16,6 +16,7 @@ import {
   tokens,
   usd,
   bytes,
+  decimals,
   pct,
   fraction,
   diskLow,
@@ -134,6 +135,15 @@ test('冻结基线 num：千分位', () => {
   assert.equal(num(0), '0');
   assert.equal(num(1234), '1,234');
   assert.equal(num(1_234_567), '1,234,567');
+});
+
+test('decimals：等价 toFixed，缺值 ⇒ —（B2a 的替换原语）', () => {
+  assert.equal(decimals(1.2345, 2), '1.23');
+  assert.equal(decimals(1, 0), '1');
+  assert.equal(decimals(0, 2), '0.00');
+  assert.equal(decimals(null, 2), '—');
+  assert.equal(decimals(undefined, 2), '—');
+  assert.equal(decimals(1.5, Number.NaN), '2', '非法位数兜底为 0 位');
 });
 
 test('bytes：1024 进制，两位有效', () => {

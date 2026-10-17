@@ -25,6 +25,7 @@ export function uptime(secs: number | null | undefined): string;
 export function num(value: number | null | undefined): string;
 export function tokens(value: number | null | undefined): string;
 export function usd(value: number | null | undefined): string;
+export function decimals(value: number | null | undefined, digits: number): string;
 export function bytes(n: number | null | undefined): string;
 export function pct(fraction: number | null | undefined): string;
 export function fraction(used: number | null | undefined, total: number | null | undefined): number | null;

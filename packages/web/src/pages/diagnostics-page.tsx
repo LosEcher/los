@@ -1,3 +1,4 @@
+import { decimals } from '../components/format';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getJson } from '../api/index.js';
@@ -306,10 +307,10 @@ export function DiagnosticsPage() {
                   <td>{h.totalCalls}</td>
                   <td>
                     <span style={{ color: h.successRate >= 95 ? 'var(--green)' : h.successRate >= 80 ? 'var(--yellow)' : 'var(--red)' }}>
-                      {h.successRate.toFixed(1)}%
+                      {decimals(h.successRate, 1)}%
                     </span>
                   </td>
-                  <td>{h.avgLatencyMs.toFixed(0)}ms</td>
+                  <td>{decimals(h.avgLatencyMs, 0)}ms</td>
                   <td>{h.repairCount > 0 ? <span className="status-pill live">{h.repairCount}</span> : '—'}</td>
                 </tr>
               ))}

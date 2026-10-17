@@ -1,3 +1,4 @@
+import { decimals } from './components/format';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, FileText, Trash2 } from 'lucide-react';
@@ -103,6 +104,6 @@ export function ArtifactsPage() {
 function formatBytes(bytes: number, t: T): string {
   if (!Number.isFinite(bytes)) return t('assets.artifact.bytesZero');
   if (bytes < 1024) return t('assets.artifact.bytes', { bytes });
-  if (bytes < 1024 * 1024) return t('assets.artifact.kilobytes', { bytes: (bytes / 1024).toFixed(1) });
-  return t('assets.artifact.megabytes', { bytes: (bytes / (1024 * 1024)).toFixed(1) });
+  if (bytes < 1024 * 1024) return t('assets.artifact.kilobytes', { bytes: decimals(bytes / 1024, 1) });
+  return t('assets.artifact.megabytes', { bytes: decimals(bytes / (1024 * 1024), 1) });
 }

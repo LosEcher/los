@@ -16,6 +16,7 @@ export {
   usd,
   usd as formatUsd,
   bytes,
+  decimals,
   pct,
   fraction,
   diskLow,

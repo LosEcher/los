@@ -126,6 +126,18 @@ export function usd(value) {
   return `$${value.toFixed(digits)}`;
 }
 
+/**
+ * 定点小数（N 位）。null ⇒ '—'。
+ *
+ * **不改变任何既有显示**（等价 `x.toFixed(n)`），只是把"保留几位"收进单一实现点，
+ * 并获得 V2 的缺值语义。真正该用语义函数（bytes/pct/usd/tokens）的地方不要用它。
+ */
+export function decimals(value, digits) {
+  if (value == null || Number.isNaN(value)) return DASH;
+  const d = Math.max(0, Math.min(10, Math.trunc(digits)));
+  return Number(value).toFixed(d);
+}
+
 /** 字节。null ⇒ '—'；0 ⇒ '0 B'（真 0 不是缺值）。 */
 export function bytes(n) {
   if (n == null || Number.isNaN(n)) return DASH;

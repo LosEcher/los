@@ -28,7 +28,12 @@
 //   1 = 有"可归零档"上涨
 //   2 = 判不了（src 不存在 / 基线坏了）
 //
-// ## ⚠️ 扫描面只含 `.ts` / `.tsx`（**不含 `.mjs`**）
+// ## ⚠️ 排除 `src/components/format.ts` 自身
+//
+// 本脚本判的是"**组件绕过 format 自己格式化**"。format.ts 现在只是再导出层（0 处），
+// 仍显式排除，避免有人把实现挪回来时把它算进违规。
+//
+// ## ⚠️ 扫描面只含 `.ts` / `.tsx`
 //
 // 格式化自己的实现住在 `components/format.mjs`，它内部当然会用 `toFixed`。
 // 不扫 `.mjs` 是有意的：本脚本判的是"**组件绕过 format 自己格式化**"，
@@ -67,24 +72,54 @@ function walk(dir, out = []) {
 
 const count = (text, pat) => text.split(pat).length - 1
 
+const EXCLUDE = new Set([join(SRC, 'components', 'format.ts')])
+
+/**
+ * **登记式豁免 —— 必须是「文件 × 模式」粒度，不能是文件级。**
+ *
+ * 为什么：第一版按文件豁免，结果 `FilePolicyTab.tsx` 里 3 处 `toFixed`（1000 进制字节，
+ * 确该豁免）**顺带**把同文件的 7 处 `toLocaleString` + 2 处 `toLocaleDateString` 也豁免掉了，
+ * 于是报表显示"24→17、7→5"的**假下降**。粒度错会把豁免变成掩盖。
+ *
+ * 豁免里的命中不计入棘轮，但**照样打印**；豁免已经没有命中时会提示"可以移除"。
+ */
+const ALLOW = {
+  'src/pages/sparkline.tsx': {
+    'toFixed(':
+      '生成 SVG 路径坐标（几何运算），不是给人看的数字 —— 换算成展示格式化是语义错误',
+  },
+}
+
 function scan() {
   if (!existsSync(SRC) || !statSync(SRC).isDirectory()) return null
-  const files = walk(SRC)
+  const files = walk(SRC).filter((f) => !EXCLUDE.has(f))
   const totals = Object.fromEntries([...ZERO_PATTERNS, ...INFO_PATTERNS].map((p) => [p, 0]))
+  const allowedTotals = Object.fromEntries(ZERO_PATTERNS.map((p) => [p, 0]))
+  const allowedFiles = {}
   const perFile = {}
   for (const f of files) {
     const text = readFileSync(f, 'utf8')
     const rel = relative(WEB, f)
+    const allowForFile = ALLOW[rel] ?? {}
     for (const pat of Object.keys(totals)) {
       const n = count(text, pat)
-      if (n > 0) {
-        totals[pat] += n
-        perFile[rel] ??= {}
-        perFile[rel][pat] = n
+      if (n <= 0) continue
+      if (ZERO_PATTERNS.includes(pat) && Object.prototype.hasOwnProperty.call(allowForFile, pat)) {
+        allowedTotals[pat] += n
+        ;(allowedFiles[rel] ??= {})[pat] = n
+        continue
       }
+      totals[pat] += n
+      perFile[rel] ??= {}
+      perFile[rel][pat] = n
     }
   }
-  return { files: files.length, totals, perFile }
+  // 豁免已经没有命中 ⇒ 提示可以摘掉（棘轮卫生）
+  const staleAllow = Object.entries(ALLOW).flatMap(([rel, pats]) =>
+    Object.keys(pats)
+      .filter((pat) => !allowedFiles[rel]?.[pat])
+      .map((pat) => `${rel} :: ${pat}`))
+  return { files: files.length, totals, perFile, allowedTotals, allowedFiles, staleAllow }
 }
 
 const argv = process.argv.slice(2)
@@ -139,6 +174,9 @@ const payload = {
   zero: Object.fromEntries(ZERO_PATTERNS.map((p) => [p, r.totals[p]])),
   info: Object.fromEntries(INFO_PATTERNS.map((p) => [p, r.totals[p]])),
   baseline: baseline?.zeroPatterns ?? null,
+  allowed: r.allowedTotals,
+  allowedFiles: r.allowedFiles,
+  staleAllow: r.staleAllow,
   grown,
   tightened,
   verdict: grown.length ? 'fail' : 'ok',
@@ -153,6 +191,17 @@ if (asJson) {
     const delta = typeof base === 'number' ? r.totals[p] - base : null
     const mark = delta == null ? ' ' : delta > 0 ? '✗' : delta < 0 ? '↓' : ' '
     console.log(`  ${mark} ${p.padEnd(22)} ${String(r.totals[p]).padStart(4)}${typeof base === 'number' ? `  (基线 ${base})` : ''}`)
+  }
+  const allowedTotal = Object.values(r.allowedTotals).reduce((a, b) => a + b, 0)
+  if (allowedTotal > 0) {
+    console.log(`--- 登记豁免（不计入棘轮，共 ${allowedTotal} 处）`)
+    for (const [rel, pats] of Object.entries(r.allowedFiles)) {
+      console.log(`    ${rel}: ${Object.entries(pats).map(([k, v]) => `${k}×${v}`).join(' ')}`)
+      for (const [pat, n] of Object.entries(pats)) console.log(`      理由（${pat}×${n}）：${ALLOW[rel][pat]}`)
+    }
+  }
+  if (r.staleAllow.length) {
+    console.log(`  ⚠ 可移除的豁免（文件已无命中）：${r.staleAllow.join(' · ')}`)
   }
   console.log('--- 仅记录（不参与判定）')
   for (const p of INFO_PATTERNS) console.log(`    ${p.padEnd(22)} ${String(r.totals[p]).padStart(4)}`)
