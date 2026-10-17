@@ -8,6 +8,8 @@ import { Server } from 'lucide-react';
 import { getJson } from './api/index.js';
 import { Badge, formatDate, RefreshQueryButton, StatusPill } from './ui.js';
 import { EmptyState } from './components/empty-state.js';
+import { buildSummaryParts, capAttention } from './fleet-overview.mjs';
+import { pct as formatPct } from './components/format';
 import { useI18n } from './i18n';
 
 export type RuntimeHealthFleetResponse = {
@@ -38,11 +40,6 @@ export type RuntimeHealthFleetResponse = {
     }>;
   };
 };
-
-function pct(ratio: number | undefined): string {
-  if (ratio === undefined || !Number.isFinite(ratio)) return '—';
-  return `${Math.round(ratio * 100)}%`;
-}
 
 function memTone(ratio: number | undefined): 'ok' | 'warn' | 'err' {
   if (ratio === undefined || !Number.isFinite(ratio)) return 'ok';
@@ -112,11 +109,10 @@ export function FleetCard({ compact = false }: { compact?: boolean }) {
           <div>
             <strong>{t('ops.fleet.cardTitle')}</strong>
             <p className="usage-note">
-              {t('ops.fleet.summary', {
-                healthy: data.fleet.healthy,
-                named: data.fleet.namedIds.length,
-                overall: data.overall,
-              })}
+              {buildSummaryParts(
+                { total: nodes.length, healthy: data.fleet.healthy, attention: attention.length },
+                t,
+              ).join(' · ') || t('ops.fleet.summaryTotal', { n: 0 })}
             </p>
           </div>
         </div>
@@ -127,11 +123,16 @@ export function FleetCard({ compact = false }: { compact?: boolean }) {
         </div>
       </div>
 
-      {attention.length > 0 ? (
-        <p className="fleet-card-attention">
-          {t('ops.fleet.attention', { nodes: attention.join(', ') })}
-        </p>
-      ) : null}
+      {attention.length > 0 ? (() => {
+        // 固定 3 条 + 显式溢出（D4）：不静默丢，也不让一行无限长。
+        const { shown, overflow } = capAttention(attention);
+        return (
+          <p className="fleet-card-attention">
+            {t('ops.fleet.attention', { nodes: shown.join(', ') })}
+            {overflow > 0 ? ` · ${t('ops.fleet.attentionMore', { n: overflow })}` : ''}
+          </p>
+        );
+      })() : null}
 
       {resourceWarnings.length > 0 && !compact ? (
         <ul className="fleet-card-warnings usage-note">
@@ -181,7 +182,7 @@ export function FleetCard({ compact = false }: { compact?: boolean }) {
                     <dt>{t('ops.fleet.colMem')}</dt>
                     <dd>
                       <Badge tone={memTone(node.memoryAvailableRatio)}>
-                        {pct(node.memoryAvailableRatio)}
+                        {formatPct(node.memoryAvailableRatio)}
                       </Badge>
                     </dd>
                   </div>
@@ -189,7 +190,7 @@ export function FleetCard({ compact = false }: { compact?: boolean }) {
                     <dt>{t('ops.fleet.colSwap')}</dt>
                     <dd>
                       <Badge tone={swapTone(node.swapUsedRatio)}>
-                        {pct(node.swapUsedRatio)}
+                        {formatPct(node.swapUsedRatio)}
                       </Badge>
                     </dd>
                   </div>
@@ -207,6 +208,9 @@ export function FleetCard({ compact = false }: { compact?: boolean }) {
                 {findingCodes.length > 0 ? (
                   <p className="fleet-card-findings">
                     {findingCodes.slice(0, 3).join(', ')}
+                    {findingCodes.length > 3
+                      ? ` · ${t('ops.fleet.findingMore', { n: findingCodes.length - 3 })}`
+                      : ''}
                   </p>
                 ) : null}
               </article>
