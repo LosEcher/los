@@ -97,7 +97,7 @@ export function NodesPage() {
             await nodes.refetch();
           }}
         />
-        <div className="panel-head compact">
+        <div className="panel-head compact" id="nodes-registry-anchor">
           <div>
             <h2>{t('ops.nodes.registryTitle')}</h2>
             <p>{actionMessage}</p>

@@ -7,6 +7,7 @@ import { Server } from 'lucide-react';
 
 import { getJson } from './api/index.js';
 import { Badge, formatDate, RefreshQueryButton, StatusPill } from './ui.js';
+import { EmptyState } from './components/empty-state.js';
 import { useI18n } from './i18n';
 
 export type RuntimeHealthFleetResponse = {
@@ -141,7 +142,13 @@ export function FleetCard({ compact = false }: { compact?: boolean }) {
       ) : null}
 
       {nodes.length === 0 ? (
-        <p className="usage-note">{t('ops.fleet.empty')}</p>
+        <EmptyState
+          compact
+          icon={<Server size={18} />}
+          title={t('ops.fleet.emptyTitle')}
+          description={t('ops.fleet.emptyHint')}
+          action={<button type="button" className="ghost-btn" onClick={() => document.getElementById('nodes-registry-anchor')?.scrollIntoView({ behavior: 'smooth' })}>{t('ops.nodes.topology.goAdd')}</button>}
+        />
       ) : (
         <div className="fleet-card-grid">
           {nodes.map((node) => {

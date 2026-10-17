@@ -5,6 +5,7 @@ import { AlertTriangle, Network, Server, Waypoints } from 'lucide-react';
 import { getJson } from '../api/index.js';
 import { errorMessage } from '../node-editor.js';
 import { EmptyText, formatDate } from '../ui.js';
+import { EmptyState } from '../components/empty-state.js';
 import { useI18n } from '../i18n';
 import { buildFleetTopologyLayout, type FleetTopologyLayout } from './fleet-topology-layout.mjs';
 
@@ -53,12 +54,28 @@ export function FleetTopologyPanel() {
   );
   const selected = selectedId === null ? null : layout?.nodes.find(node => node.id === selectedId) ?? null;
 
+  // 三态必须分开（V3）：加载中是**暂时**的、失败是**故障**、空是**还没配**。
+  // 改造前 error 与 empty 都用裸 EmptyText，用户看不出"坏了"还是"本来就没有"。
   if (query.isLoading) return <EmptyText text={t('ops.nodes.topology.loading')} />;
   if (query.isError) {
-    return <EmptyText text={t('ops.nodes.topology.loadFailed', { error: errorMessage(query.error) })} />;
+    return (
+      <EmptyState
+        icon={<AlertTriangle size={20} />}
+        title={t('ops.nodes.topology.errorTitle')}
+        description={`${t('ops.nodes.topology.errorHint')}（${errorMessage(query.error)}）`}
+        action={<button type="button" className="ghost-btn" onClick={() => void query.refetch()}>{t('ops.nodes.topology.retry')}</button>}
+      />
+    );
   }
   if (!layout || layout.nodes.length === 0) {
-    return <EmptyText text={t('ops.nodes.topology.empty')} />;
+    return (
+      <EmptyState
+        icon={<Network size={20} />}
+        title={t('ops.nodes.topology.emptyTitle')}
+        description={t('ops.nodes.topology.emptyHint')}
+        action={<button type="button" className="ghost-btn" onClick={() => document.getElementById('nodes-registry-anchor')?.scrollIntoView({ behavior: 'smooth' })}>{t('ops.nodes.topology.goAdd')}</button>}
+      />
+    );
   }
   const graph = query.data as FleetTopologyGraph;
 
