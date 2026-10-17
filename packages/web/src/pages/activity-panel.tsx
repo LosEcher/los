@@ -5,7 +5,8 @@
  *
  * Data: GET /metrics/activity (L1 session_events evidence only).
  */
-import { decimals } from '../components/format';
+import { formatClock, formatTimestamp } from '../ui';
+import { decimals, num } from '../components/format';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Activity as ActivityIcon, Layers } from 'lucide-react';
@@ -102,7 +103,7 @@ export function ActivityPanel() {
               {data.totals.peakBucket ? <em>{shortTime(data.totals.peakBucket)}</em> : null}
             </span>
             <span className="activity-total">
-              {t('ops.activity.agentMinutes')} <strong>{data.totals.totalAgentMinutes.toLocaleString()}</strong>
+              {t('ops.activity.agentMinutes')} <strong>{num(data.totals.totalAgentMinutes)}</strong>
             </span>
             <span className="activity-total">
               {t('ops.activity.cost')} <strong>${decimals(data.totals.totalCostUsd, 4)}</strong>
@@ -175,10 +176,10 @@ function selectSession(sessionId: string) {
 
 function formatBucketTime(bucket: string): string {
   const date = new Date(bucket);
-  return Number.isNaN(date.getTime()) ? bucket : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? bucket : formatTimestamp(date);
 }
 
 function shortTime(iso: string): string {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return Number.isNaN(date.getTime()) ? iso : formatClock(date);
 }

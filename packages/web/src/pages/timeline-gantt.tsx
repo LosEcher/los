@@ -9,6 +9,7 @@
  * Design reference: DSH ui-trajectory Overview (real start/duration projection)
  * and Honeycomb agent timeline lanes.
  */
+import { formatTime } from '../ui';
 import { useMemo } from 'react';
 import type { SessionEvent } from '../api';
 
@@ -118,8 +119,8 @@ export function TimelineGantt({
   return (
     <div className="timeline-gantt">
       <div className="timeline-gantt-scale">
-        <span>{new Date(minStartMs()).toLocaleTimeString()}</span>
-        <span>{new Date(minStartMs() + spanMs).toLocaleTimeString()}</span>
+        <span>{formatTime(minStartMs())}</span>
+        <span>{formatTime(minStartMs() + spanMs)}</span>
       </div>
       <div className="timeline-gantt-body">
         {turns.map(turn => (

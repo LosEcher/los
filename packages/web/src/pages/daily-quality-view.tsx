@@ -1,4 +1,4 @@
-import { decimals } from '../components/format';
+import { decimals, num } from '../components/format';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, RefreshCw } from 'lucide-react';
 
@@ -205,7 +205,7 @@ function SnapshotHistory({ snapshots }: { snapshots: DailyAgentQualitySnapshot[]
 }
 
 function count(value: number): string {
-  return value.toLocaleString();
+  return num(value);
 }
 
 function percent(value: number): string {

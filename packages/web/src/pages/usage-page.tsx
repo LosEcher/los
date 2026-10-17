@@ -5,7 +5,7 @@ import { getJson } from '../api/index.js';
 import { FleetCard } from '../fleet-card.js';
 import { Button } from '../ui.js';
 import { SkeletonCard } from '../components/skeleton';
-import { decimals, formatNumber, formatTokenCount } from '../components/format';
+import { decimals, formatNumber, formatTokenCount, num } from '../components/format';
 import { useI18n } from '../i18n';
 import { Sparkline } from './sparkline.js';
 import { ActivityPanel } from './activity-panel.js';
@@ -350,7 +350,7 @@ function MetricGroup({ title, metrics }: { title: string; metrics: Array<[string
 }
 
 function count(n: number): string {
-  return Number.isFinite(n) ? n.toLocaleString() : '0';
+  return Number.isFinite(n) ? num(n) : '0';
 }
 
 function money(n: number): string {

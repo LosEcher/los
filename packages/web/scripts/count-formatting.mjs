@@ -88,6 +88,11 @@ const ALLOW = {
     'toFixed(':
       '生成 SVG 路径坐标（几何运算），不是给人看的数字 —— 换算成展示格式化是语义错误',
   },
+  'src/ui.tsx': {
+    'toLocaleString': '日期的实现归属：formatTimestamp/formatDate 在这里调用 toLocaleString(locale())',
+    'toLocaleTimeString': '同上（formatTime/formatClock）',
+    'toLocaleDateString': '同上（formatDay）',
+  },
 }
 
 function scan() {

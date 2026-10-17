@@ -3,6 +3,7 @@
  * Status is shown inline on tool chips in the timeline; this module provides
  * compact footer summary and the sticky OperatorSteeringBar (HITL option card).
  */
+import { num } from './components/format';
 import { useMemo, useState } from 'react';
 import { Check, X, AlertTriangle, Clock, ChevronDown } from 'lucide-react';
 import { postOperatorSteering } from './api/index.js';
@@ -229,7 +230,7 @@ export function ContextNotification({ event, data }: {
     ? t('chat.ctx.full', { percent: fillPercent })
     : t('chat.ctx.compressed');
   const tokens = usedTokens !== null && contextWindowTokens !== null
-    ? ` ${t('chat.ctx.tokens', { used: usedTokens.toLocaleString(), total: contextWindowTokens.toLocaleString() })}`
+    ? ` ${t('chat.ctx.tokens', { used: num(usedTokens), total: num(contextWindowTokens) })}`
     : '';
 
   return (

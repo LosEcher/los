@@ -1,3 +1,4 @@
+import { formatTimestamp } from '../ui';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, X } from 'lucide-react';
@@ -94,8 +95,8 @@ export function DeadLetterPage() {
                 <div className="record-meta">
                   {e.taskRunId ? <span>{t('ops.deadLetter.taskShort', { id: e.taskRunId.slice(0, 12) })}</span> : null}
                   {e.runSpecId ? <span> · {t('ops.deadLetter.runShort', { id: e.runSpecId.slice(0, 12) })}</span> : null}
-                  <span> · {new Date(e.createdAt).toLocaleString()}</span>
-                  {e.acknowledgedAt ? <span> · {t('ops.deadLetter.ackedPrefix', { date: new Date(e.acknowledgedAt).toLocaleString() })}</span> : null}
+                  <span> · {formatTimestamp(e.createdAt)}</span>
+                  {e.acknowledgedAt ? <span> · {t('ops.deadLetter.ackedPrefix', { date: formatTimestamp(e.acknowledgedAt) })}</span> : null}
                 </div>
                 {e.originalError ? (
                   <div className="record-detail">

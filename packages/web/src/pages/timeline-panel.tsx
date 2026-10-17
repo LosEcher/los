@@ -4,6 +4,7 @@
  * absolute-time visual (gantt) and per-event detail (timing / usage / parent
  * chain), following the DSH ui-trajectory Overview + inspector pattern.
  */
+import { formatTime } from '../ui';
 import { useState } from 'react';
 import { Clock, GitBranch } from 'lucide-react';
 import type { SessionEvent } from '../api';
@@ -72,7 +73,7 @@ function EventInspector({
         <dt>{t('assets.label.turns')}</dt><dd>#{event.turn}</dd>
         {event.model ? <><dt>{t('assets.label.model')}</dt><dd>{event.model}</dd></> : null}
         {event.toolName ? <><dt>{t('assets.timeline.tool')}</dt><dd>{event.toolName}</dd></> : null}
-        <dt>{t('assets.timeline.time')}</dt><dd>{new Date(event.createdAt).toLocaleTimeString()}</dd>
+        <dt>{t('assets.timeline.time')}</dt><dd>{formatTime(event.createdAt)}</dd>
         {durationMs !== undefined ? (
           <><dt>{t('assets.timeline.duration')}</dt><dd>{formatDurationCompact(durationMs)}</dd></>
         ) : null}

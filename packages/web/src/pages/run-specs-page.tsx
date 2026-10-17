@@ -1,3 +1,4 @@
+import { formatTimestamp } from '../ui';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Play, ShieldCheck } from 'lucide-react';
@@ -170,7 +171,7 @@ export function RunSpecsPage({ selectedRunSpecId }: { selectedRunSpecId?: string
                 <div className="record-meta">
                   {r.provider ? <span>{r.provider}/{r.model}</span> : null}
                   {r.sessionId ? <span>{t('ops.runSpecs.sessionShort', { sessionId: r.sessionId.slice(0, 12) })}</span> : null}
-                  <span>{new Date(r.createdAt).toLocaleString()}</span>
+                  <span>{formatTimestamp(r.createdAt)}</span>
                 </div>
                 {r.prompt ? (
                   <div className="record-detail">

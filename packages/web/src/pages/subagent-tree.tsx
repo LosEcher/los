@@ -7,7 +7,7 @@
  * duration. Click a node to jump to its child session. Design reference: DSH
  * ui-subagent catalog tree pattern.
  */
-import { decimals } from '../components/format';
+import { decimals, num } from '../components/format';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
@@ -139,7 +139,7 @@ function TreeNode({
         {node.model ? <span className="subagent-model">{node.provider}/{node.model}</span> : null}
         <span className="subagent-meta">
           {node.durationMs !== null ? formatMs(node.durationMs) : '—'}
-          {node.usage.totalTokens > 0 ? ` · ${node.usage.totalTokens.toLocaleString()} tok` : ''}
+          {node.usage.totalTokens > 0 ? ` · ${num(node.usage.totalTokens)} tok` : ''}
           {node.estimatedCostUsd > 0 ? ` · $${decimals(node.estimatedCostUsd, 4)}` : ''}
         </span>
       </div>

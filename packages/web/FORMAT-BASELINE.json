@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "note": "可归零档的棘轮基线：只许下降。新增/上涨 ⇒ count-formatting.mjs exit 1。 INFO_PATTERNS 不参与判定（多为非展示运算，正则会误判）。",
-  "writtenAt": "2026-10-17T05:03:02.386Z",
+  "writtenAt": "2026-10-17T05:06:56.016Z",
   "zeroPatterns": {
     "toFixed(": 0,
-    "toLocaleString": 14,
-    "toLocaleTimeString": 8,
-    "toLocaleDateString": 1
+    "toLocaleString": 0,
+    "toLocaleTimeString": 0,
+    "toLocaleDateString": 0
   },
   "infoPatterns": {
-    "new Date(": 25
+    "new Date(": 12
   }
 }
