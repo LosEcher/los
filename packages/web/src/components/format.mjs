@@ -232,3 +232,13 @@ function toMs(v) {
   const t = Date.parse(v);
   return Number.isNaN(t) ? null : t;
 }
+
+// ── 兼容别名（必须放在 .mjs 里，不能只放在 format.ts）─────────────────
+// ⚠️ 2026-10-17 实测的坑：`format.ts` 与 `format.mjs` **同名**，而 Vite/rollup 解析
+// 无扩展名的 `'../components/format'` 时 **`.mjs` 在 `.ts` 之前**被选中。
+// 于是只把别名写在 `format.ts` 里时：**tsc 过、vite build 失败**
+// （`"formatNumber" is not exported by "format.mjs"`）。
+// 现在两个文件都能提供完整表面，扩展名解析顺序不再影响结果。
+export const formatNumber = num;
+export const formatTokenCount = tokens;
+export const formatUsd = usd;
