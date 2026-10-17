@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "check": "tsc --noEmit -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json && node scripts/count-formatting.mjs",
     "test": "node --test --experimental-test-coverage '--test-coverage-include=src/**/*.mjs' 'src/**/*.test.mjs'",
     "test:e2e": "playwright test",
     "preview": "vite preview --host 127.0.0.1 --port 5173",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "check:formatting": "node scripts/count-formatting.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
