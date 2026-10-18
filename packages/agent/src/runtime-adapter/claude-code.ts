@@ -13,6 +13,7 @@ import { spawn, type ChildProcess, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import { redactExternalSummaryText } from '../external-tool-summary.js';
+import { runtimeChildEnv } from '../runtime-env.js';
 import type { RuntimeAdapterConfig, RuntimeHandle } from './types.js';
 import { resolveRuntimeCommand } from './command.js';
 
@@ -139,9 +140,8 @@ export function spawnClaudeCode(input: ClaudeCodeSpawnInput): ClaudeCodeRuntimeH
   const proc: ChildProcess = spawn(resolveRuntimeCommand(claudePath), args, {
     cwd: workspaceRoot,
     env: {
-      ...process.env,
+      ...runtimeChildEnv(extraEnv),
       ...otelEnv,
-      ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,

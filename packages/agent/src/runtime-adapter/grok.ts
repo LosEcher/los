@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '@los/infra/logger';
 import { redactExternalSummaryText } from '../external-tool-summary.js';
+import { runtimeChildEnv } from '../runtime-env.js';
 import type { RuntimeHandle } from './types.js';
 import { resolveRuntimeCommand } from './command.js';
 
@@ -45,7 +46,7 @@ export function spawnGrok(input: GrokSpawnInput): GrokRuntimeHandle {
   const grokPath = input.grokPath ?? 'grok';
   const proc: ChildProcess = spawn(resolveRuntimeCommand(grokPath), _buildGrokArgs(input.prompt), {
     cwd: input.workspaceRoot,
-    env: process.env,
+    env: runtimeChildEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
   });
