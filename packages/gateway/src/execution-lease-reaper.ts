@@ -2,6 +2,7 @@ import { recoverExpiredTaskRunsWithAdvisoryLock } from '@los/agent/task-runs';
 import { listAgentTaskAttempts, recoverExpiredAgentTasksWithAdvisoryLock } from '@los/agent/agent-task-graph';
 import { writeDeadLetterEvent, writeDeadLetterForExpiredTasks } from '@los/agent/dead-letter';
 import { appendSessionEvent } from '@los/agent/session-events';
+import { loadScheduledWorkItemRun, transitionScheduledWorkRun } from '@los/agent';
 import { transitionExecutionState } from '@los/agent/execution-store';
 import { getDb } from '@los/infra/db';
 import { getLogger } from '@los/infra/logger';
@@ -17,6 +18,18 @@ export async function reapExpiredExecutionLeases(reason: string): Promise<{
   if (taskRunRecovery.lockAcquired && taskRunRecovery.recovered.length > 0) {
     await writeDeadLetterForExpiredTasks(taskRunRecovery.recovered, 'lease_expired');
     for (const task of taskRunRecovery.recovered) {
+      const scheduledRunId = (task.metadata as { scheduledWork?: { runId?: unknown } } | undefined)
+        ?.scheduledWork?.runId;
+      if (typeof scheduledRunId === 'string' && scheduledRunId) {
+        const scheduledRun = await loadScheduledWorkItemRun(scheduledRunId).catch(() => null);
+        if (scheduledRun && (scheduledRun.status === 'running' || scheduledRun.status === 'claimed')) {
+          await transitionScheduledWorkRun(scheduledRunId, 'failed', {
+            error: `task_run ${task.id} lease expired: ${reason}`,
+          }).catch((error) => {
+            log.warn(`Scheduled run ${scheduledRunId} convergence failed: ${String(error)}`);
+          });
+        }
+      }
       if (!task.runSpecId) continue;
       await transitionExecutionState({
         entityType: 'run_spec',
