@@ -28,21 +28,44 @@ Date: 2026-10-18
    and artifact checksums are the evidence; direct executor DB writes bypass the
    gateway audit boundary.
 
-## Current state (2026-10-18)
+## Current state (2026-10-18, after P4)
 
 - `EXECUTOR_DB_MODE=none` is implemented; node34 runs with `db=none`, no
   `DATABASE_URL`, no 55432 connections.
 - Task lease and agent-task lease use HTTP; artifacts use a file-backed local
   store and gateway relay.
-- Session-event writes still warn and are not forwarded; file-sync is disabled.
-- node34 is a **canary**. Roll back by restoring `/opt/los/.env.p3-backup` and
-  restarting `los-executor`.
+- Session events use a gateway endpoint, `client_event_id` idempotency, disk
+  spool, startup replay with node credential, per-task spool cap, and health
+  `eventBacklog`/`spoolBacklog`.
+- Explicit `POST /tasks/:id/complete` converges task and scheduled runs; the
+  reaper and an orphan sweep provide the failure-path backstop.
+- No-DB nodes report `file_sync_scan/deep_verify/enabled=false`; placement
+  rejects file-sync work.
+- node34 is still a **canary**, not the remote default. Roll back by restoring
+  `/opt/los/.env.p3-backup` and restarting `los-executor`.
+
+## P4 close decision
+
+P4 closed under the **fail-closed** branch of its acceptance:
+
+- normal scheduled no-DB task: succeeded, node34, events delivered,
+  `eventBacklog=0`, `spoolBacklog=0`;
+- gateway restart during a long task: the task was reaped as failed and the
+  linked scheduled run was converged to failed; running scheduled runs = 0;
+- headless approval without a channel is fail-closed (`tool.approval_required`),
+  not silently executed.
+
+Not proven: a task **succeeding across** a gateway restart. Gateway startup has
+been observed at tens of seconds to minutes, so the 300s scheduled lease is a
+budget, not a guarantee. `none` is therefore **not promoted** to the remote
+default.
 
 ## Next required work
 
-1. Gateway event-sink endpoint with client event ids, idempotency, and ack.
-2. Executor outbound buffer with backlog/health + drain before task completion.
-3. File-sync policy: gateway-managed or `none`-only nodes explicitly unsupported.
-4. Fault injection: gateway restart during task, duplicate event retries, buffer
-   overflow, event gap detection.
-5. Only then promote `none` from canary to the remote default.
+1. Either prove restart-survival with a controlled restart budget, or explicitly
+   ratify fail-closed as the final P4 semantics.
+2. Headless approval usability: blocked vs failed policy, or forbid
+   approval-required tools on stateless scheduled runs.
+3. Provider authority decision (cc-switch / DSH / los / optional Magpie edge).
+4. Artifact GC/quota, Postgres + artifact + losvault backup/restore drills.
+5. Global event sequence/gap detection and provider cost/quota observability.
