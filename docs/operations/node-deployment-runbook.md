@@ -24,7 +24,8 @@ Maintain these facts for every active node without storing credentials:
 | Runtime endpoint | `EXECUTOR_HOST`, `EXECUTOR_PORT`, `/health` response |
 | Build identity | `/health.version` and registry `version` |
 | Service owner | systemd/launchd label, service user, main PID |
-| Database | instance owner and port; never infer it from a generic 5432 listener |
+| Execution mode | `EXECUTOR_DB_MODE`; `/health` `db` / `taskTokenMode` / `leaseTransport` |
+| Database | instance owner and port; never infer it from a generic 5432 listener; `none` nodes must have no `DATABASE_URL` |
 | Resource class | RAM, swap, free disk, `heavy_task_safe`, `deploy_safe` |
 | Configuration owner | path and permissions of `.env`; never record secret values |
 
@@ -135,6 +136,49 @@ your current checkout when a concurrent editor is active.
 Current dated evidence belongs in a rollout smoke such as
 `2026-07-12-node-version-rollout.md`, not in this reusable procedure.
 
+## Executor DB Modes
+
+Every executor declares one mode. The mode is a deployment contract, not a
+runtime guess: having `DATABASE_URL` does not make a node DB-backed, and a
+failed task-token heartbeat never falls back to the DB.
+
+| Mode | Startup | Required configuration | `/health` evidence |
+| --- | --- | --- | --- |
+| `required` (control plane, default) | `initDb` + migrations + agent stores + file-sync | `DATABASE_URL` | `db=postgres` |
+| `none` (stateless canary) | skips DB bootstrap, agent stores, and file-sync endpoints | `GATEWAY_URL`, `EXECUTOR_TASK_TOKEN_MODE=required`; **no** `DATABASE_URL` | `db=none`, `taskTokenMode=required`, `leaseTransport=http-when-token` |
+| undeclared (legacy) | current DB path | `DATABASE_URL` (this runbook's existing requirement), `GATEWAY_URL` recommended | `mode` warns; no mode is invented |
+
+**`none` is a canary and must not be described as the remote default.** P4
+closed **fail-closed**: a normal no-DB task completed with `eventBacklog=0` /
+`spoolBacklog=0`, but a gateway restart during a long task reaped that task as
+failed and converged its scheduled run to failed. A task succeeding *across* a
+gateway restart has not been proven, so `none` is not promoted.
+
+A stateless node owns only local working state. It is owned by the **executor
+service user**, not the gateway, and is excluded from the deployed content
+digest and ship tarball:
+
+| Path (under the executor's cwd) | Owner / mode | Meaning |
+| --- | --- | --- |
+| `.los-runtime/executor-events/<nodeId>/` | service user | session-event spool, one subdirectory per task; replayed with the node credential |
+| `.los-runtime/executor-artifacts/<nodeId>/` | service user | local artifact CAS |
+| `.los-runtime/executor/node-credential-<nodeId>.json` | service user, file `0600` (parent dir created `0700`; pre-existing dirs are not re-tightened) | rotated per-node credential; takes precedence over `.env` on restart |
+
+Do not delete the spool to "clean up" a node: it holds events the gateway has
+not acknowledged. A non-zero `eventBacklog`/`spoolBacklog` is a sink lag, not a
+deploy failure; `LOS_DEPLOY_REQUIRE_ZERO_BACKLOG=1` turns it into a hard
+failure when a zero-backlog rollout is the acceptance condition.
+
+Verification has one implementation: `tools/deploy-to-remote.sh`'s
+`validate_mode_env`. It runs in `preflight` (env only), `verify` (env +
+`/health`), the read-only `mode` command, and the local `mode-check` fixture
+entry point. Do not restate the rules in a second script.
+
+`tools/setup-node.sh` still writes a DB-mode `.env` (it requires
+`DATABASE_URL`). For a first-time no-DB bootstrap, write the mode keys by hand
+per the table above and do not let the bootstrap add `DATABASE_URL`; otherwise
+`preflight` will correctly block the node as `none` + `DATABASE_URL`.
+
 ## Preflight
 
 1. Reload applicable specs and read ADR 0010.
@@ -146,11 +190,19 @@ Current dated evidence belongs in a rollout smoke such as
    ./tools/deploy-to-remote.sh <node> preflight
    ```
 
-4. Confirm `.env` contains, without printing values: `DATABASE_URL`,
-   `EXECUTOR_AGENT_KEY`, `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`, and `GATEWAY_URL`.
-   It must also be **readable by the deploy identity**: a `600`/`los:los` file
-   plus a non-root login (`oracle` uses `ubuntu` + sudo) makes both the version
-   stamp and `verify` fail without `LOS_REMOTE_PRIVILEGE=sudo`.
+4. Confirm `.env` declares a mode and contains the keys that mode requires,
+   without printing values:
+   - `EXECUTOR_DB_MODE=required`: `DATABASE_URL`, `EXECUTOR_AGENT_KEY`,
+     `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`, `GATEWAY_URL`.
+   - `EXECUTOR_DB_MODE=none`: `GATEWAY_URL`,
+     `EXECUTOR_TASK_TOKEN_MODE=required`, `EXECUTOR_AGENT_KEY`,
+     `EXECUTOR_NODE_ID`, `EXECUTOR_PORT`; `DATABASE_URL` **must be absent**.
+   - The mode must be explicit on a no-DB node. An undeclared mode is legacy
+     DB mode; preflight warns, it does not infer `none`.
+
+   The env must also be **readable by the deploy identity**: a `600`/`los:los`
+   file plus a non-root login (`oracle` uses `ubuntu` + sudo) makes both the
+   version stamp and `verify` fail without `LOS_REMOTE_PRIVILEGE=sudo`.
    Mode is **not** uniformly `600` across the fleet, and the right shape follows
    from who reads the file: macOS runs the executor as the owner, so `600`; a
    Linux node whose `.env` is `root:root` and whose service user is `los` needs
@@ -161,10 +213,18 @@ Current dated evidence belongs in a rollout smoke such as
    The systemd unit must not override `EXECUTOR_HOST` or `EXECUTOR_PORT`; the
    node `.env` is the endpoint configuration source used by both runtime and
    deployment verification.
-5. Identify the database listener owner with `ss -tlnp` or `lsof`. Test an
-   actual query using the configured URL. A reachable port is insufficient.
-6. Confirm Node 22+, pnpm, Tailscale, `/opt/los` ownership, and free disk.
-7. On nodes below 2 GiB RAM, require swap and use `--low-resource`.
+5. Run `./tools/deploy-to-remote.sh <node> mode` (read-only) on an **existing**
+   node to validate the `.env` + `/health` mode contract before deploying.
+   `preflight` runs the same env gate and blocks on a violation. On a first
+   bootstrap there is no `/health` yet, so `mode` will fail its health half by
+   design; the env gate still applies and `verify` covers health after start.
+6. **Only for `EXECUTOR_DB_MODE=required`:** identify the database listener
+   owner with `ss -tlnp` or `lsof`. Test an actual query using the configured
+   URL. A reachable port is insufficient. For `none`, confirm the executor has
+   no connection to the DB port; the mode gate already proves `DATABASE_URL`
+   is absent.
+7. Confirm Node 22+, pnpm, Tailscale, `/opt/los` ownership, and free disk.
+8. On nodes below 2 GiB RAM, require swap and use `--low-resource`.
 
 Stop before cutover if configuration truth, process ownership, database
 identity, task load, or expected port is ambiguous.
@@ -286,11 +346,17 @@ artifact. The sync must include all workspace manifests covered by
    ```text
    systemd: active, enabled, User=los, NRestarts=0
    health: status=ok and expected version
+   mode: `deploy-to-remote.sh <node> mode` reports mode-check: ok
+         required -> health.db=postgres
+         none     -> health.db=none, taskTokenMode=required,
+                     leaseTransport=http-when-token, gateway reachable
    content: `bash tools/los.sh build-version` equals the local target digest
    registry: online, fresh heartbeat, same version, activeTaskCount=0
    process: no replaced unmanaged executor remains
    unirun: ok (<pinned version>) — else ssh dispatch stays on native ssh
    logs: no restart loop, DB auth failure, heartbeat failure, or missing path
+   no-DB only: eventBacklog=0, spoolBacklog=0, and no executor connection to
+               the database port (e.g. lsof/ss on 55432/5432)
    ```
 
 6. **Promote the node.** A restart always leaves the registry row
@@ -571,6 +637,30 @@ If verification fails:
 5. Record the failed target version, restored version, failure phase, and logs.
 
 Do not revive an abandoned shell-session process as the normal rollback path.
+
+### Rolling a no-DB node back to the DB
+
+`EXECUTOR_DB_MODE` is read at boot. Editing `.env` without restarting leaves
+the process on the old mode; there is no runtime auto-fallback in either
+direction. The recorded P3 rollback for node34 is `/opt/los/.env.p3-backup`.
+
+1. Stop `los-executor` through systemd and confirm the process is gone.
+2. Restore the prior `.env` (for node34: `cp /opt/los/.env.p3-backup
+   /opt/los/.env`). Confirm it contains `DATABASE_URL` and either
+   `EXECUTOR_DB_MODE=required` or no mode at all; remove
+   `EXECUTOR_DB_MODE=none` if the backup predates the key.
+3. Keep the node's `.los-runtime/executor-events/` and
+   `.los-runtime/executor/` state. Do not delete the spool during a rollback:
+   unacknowledged events are the only evidence of what the node saw.
+4. Start `los-executor` and run
+   `./tools/deploy-to-remote.sh <node> mode`. It must report `db=required`
+   (or `legacy`), `database=set`, and `health.db=postgres`.
+5. Re-check the registry row and promote only after `/health` and the mode gate
+   both pass.
+
+A rollback that restores DB mode while the gateway still expects the node's
+node credential is acceptable: the credential is additive and the gateway keeps
+accepting heartbeats without it.
 
 ## Offline Nodes
 
