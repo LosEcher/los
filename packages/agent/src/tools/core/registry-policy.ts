@@ -102,6 +102,8 @@ export interface BuiltinToolOptions {
   }>;
   mcpServers?: MCPServerConfig[];
   mcpRegistryRecords?: MCPServerRegistryRecord[];
+  /** Static inventory/CLI use: register built-ins only, never connect MCP servers. */
+  skipMcp?: boolean;
   /** Task run ID for the current execution. Threaded from AgentConfig so worker
    *  tools (ask_coordinator/escalate) can emit worker_messages + transition the
    *  correct task_run to blocked. Undefined when runAgent is called outside a

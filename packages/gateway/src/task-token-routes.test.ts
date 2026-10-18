@@ -128,6 +128,32 @@ test('mint issues a token bound to the task row; heartbeat renews with the DB no
   }
 });
 
+test('heartbeat refreshes a token that is inside the renewal window', async () => {
+  const { app } = await buildHarness();
+  const nearExpiry = mintTaskToken({
+    taskRunId: 'task-a',
+    leaseVersion: 3,
+    secret: SECRET,
+    ttlSeconds: 60,
+  });
+
+  try {
+    const beat = await app.inject({
+      method: 'POST',
+      url: '/tasks/task-a/heartbeat',
+      headers: { 'x-los-task-token': nearExpiry.token },
+      payload: {},
+    });
+    assert.equal(beat.statusCode, 200);
+    const body = beat.json();
+    assert.equal(typeof body.taskToken, 'string');
+    assert.notEqual(body.taskToken, nearExpiry.token);
+    assert.equal(new Date(body.taskTokenExpiresAt).getTime() > Date.now(), true);
+  } finally {
+    await app.close();
+  }
+});
+
 test('expired token ⇒ 401 even when a valid operator credential is also present (no fallback)', async () => {
   const { app, calls } = await buildHarness({ authEnabled: true });
   const expired = mintTaskToken({

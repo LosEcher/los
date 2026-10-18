@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 
-import { mintTaskToken, verifyTaskToken } from './task-token.js';
+import { mintTaskToken, verifyTaskToken, verifyTaskTokenWithRotation } from './task-token.js';
 
 const TASK_TOKEN_DEFAULT_TTL_SECONDS = 3_600;
 const TASK_TOKEN_MIN_TTL_SECONDS = 60;
@@ -110,4 +110,31 @@ test('mint rejects invalid inputs instead of issuing a half-valid token', () => 
   assert.throws(() => mintTaskToken({ taskRunId: 't', leaseVersion: -1, secret: SECRET }), /leaseVersion/);
   assert.throws(() => mintTaskToken({ taskRunId: 't', leaseVersion: 1.5, secret: SECRET }), /leaseVersion/);
   assert.throws(() => mintTaskToken({ taskRunId: 't', leaseVersion: 0, secret: '' }), /secret/);
+});
+
+test('rotation accepts previous-secret tokens until their own expiry', () => {
+  const previous = mintTaskToken({
+    taskRunId: 'task-rotation',
+    leaseVersion: 2,
+    secret: OTHER_SECRET,
+    now: NOW,
+  });
+
+  const accepted = verifyTaskTokenWithRotation(previous.token, [SECRET, OTHER_SECRET], { now: NOW + 10 });
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.claims.taskRunId, 'task-rotation');
+
+  const expired = verifyTaskTokenWithRotation(previous.token, [SECRET, OTHER_SECRET], {
+    now: previous.claims.expiresAt,
+  });
+  assert.deepEqual(expired, { ok: false, reason: 'expired' });
+
+  assert.deepEqual(verifyTaskTokenWithRotation(previous.token, [SECRET], { now: NOW + 10 }), {
+    ok: false,
+    reason: 'bad_signature',
+  });
+  assert.deepEqual(verifyTaskTokenWithRotation(previous.token, [], { now: NOW + 10 }), {
+    ok: false,
+    reason: 'not_configured',
+  });
 });

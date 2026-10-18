@@ -3,6 +3,7 @@ import { listExecutorNodes, sortExecutorCandidates, type ExecutorNodeRecord } fr
 import { resolveExecutorEndpoint } from '../executor-node-utils.js';
 import { isNodeInMaintenance, loadNodeMaintenancePoliciesBatch } from '../node-maintenance-policy.js';
 import { choosePlacement } from './placement.js';
+import { _resolveDispatchTaskToken } from './task-token-dispatch.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
@@ -260,6 +261,12 @@ export async function runAgentOnExecutor(
     leaseMs: number;
     executionKernelKind: string;
     prompt: string;
+    /**
+     * Optional override. Normally the dispatcher mints a short-lived token from
+     * `LOS_TASK_TOKEN_SECRET`; tests can pass an explicit token to assert the
+     * envelope without configuring a secret.
+     */
+    taskToken?: string;
     config: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onCheckpoint'>;
     signal?: AbortSignal;
     onSessionEvent?: AgentConfig['onSessionEvent'];
@@ -269,6 +276,8 @@ export async function runAgentOnExecutor(
     onKernelEvent?: (event: KernelEvent) => void | Promise<void>;
   },
 ): Promise<AgentResult> {
+  const taskToken = _resolveDispatchTaskToken(input);
+
   // SSH-backed executors use a different transport (ssh CLI + ndjson stream).
   if (executor.url.startsWith('ssh://')) {
     const sshExecutor = resolveSSHExecutor({
@@ -278,7 +287,10 @@ export async function runAgentOnExecutor(
       connectConfig: sshExecutorUrlToConnectConfig(executor.url),
     } as ExecutorNodeRecord);
     if (!sshExecutor) throw new Error(`SSH executor URL ${executor.url} missing valid SSH config`);
-    return await runAgentOnSSHExecutor(sshExecutor, input);
+    return await runAgentOnSSHExecutor(sshExecutor, {
+      ...input,
+      ...(taskToken ? { taskToken } : {}),
+    });
   }
 
   const res = await fetch(`${executor.url}/v1/tasks/run-agent`, {
@@ -296,6 +308,7 @@ export async function runAgentOnExecutor(
       leaseMs: input.leaseMs,
       executionKernelKind: input.executionKernelKind,
       prompt: input.prompt,
+      ...(taskToken ? { taskToken } : {}),
       config: input.config,
     }),
     signal: input.signal,

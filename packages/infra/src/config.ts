@@ -262,6 +262,22 @@ export const ConfigSchema = z.object({
      */
     taskTokenSecret: z.string().optional(),
     /**
+     * Previous task-token secret kept during a rotation window. Verification
+     * accepts current or previous; minting uses current only. Remove it after
+     * every token signed with it has expired (max 1h).
+     */
+    taskTokenSecretPrevious: z.string().optional(),
+    /**
+     * Task-token heartbeat transport policy.
+     *
+     * - `auto` (default): mint a token when a secret is configured; the executor
+     *   uses HTTP when the dispatch carries one, otherwise keeps the direct-DB path.
+     * - `required`: the gateway must have a secret and every dispatch must carry a
+     *   token; remote executors must have `GATEWAY_URL`. Refuse DB fallback.
+     * - `off`: do not mint; retain the legacy direct-DB path (transition only).
+     */
+    taskTokenMode: z.enum(['auto', 'required', 'off']).optional(),
+    /**
      * Per-node credential issued by `POST /nodes/enroll` (redeemed from a one-time
      * enrollment token). Sent as `x-los-node-credential` on the node heartbeat so the
      * gateway can attribute the row to this node instead of relying on the shared

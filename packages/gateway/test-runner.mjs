@@ -53,7 +53,6 @@ const sharedProcessTestFiles = [
   'src/ssh-command-runner.test.ts',
   'src/task-dead-letter-routes.test.ts',
   'src/task-token-routes.test.ts',
-  'src/task-token.test.ts',
   'src/tool-call-upsert.test.ts',
   'src/tool-gate-routes.test.ts',
   'src/unirun-capabilities.test.ts',

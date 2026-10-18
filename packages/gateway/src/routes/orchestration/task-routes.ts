@@ -13,6 +13,7 @@ import {
   mintTaskToken,
   taskTokenExpiresAtIso,
   verifyTaskToken,
+  verifyTaskTokenWithRotation,
 } from '../../task-token.js';
 
 export type TaskRouteDependencies = {
@@ -29,6 +30,8 @@ export type TaskRouteDependencies = {
   requeueDeadLetterEvent: typeof requeueDeadLetterEvent;
   summarizeDeadLetterEvents: typeof summarizeDeadLetterEvents;
   taskTokenSecret: () => string | undefined;
+  /** Current + previous secret during a rotation window; falls back to `taskTokenSecret`. */
+  taskTokenSecrets?: () => string[];
   transitionExecutionState: typeof transitionExecutionState;
   updateTaskRunFields: typeof updateTaskRunFields;
   ensureTaskRunStore: typeof ensureTaskRunStore;
@@ -48,6 +51,11 @@ const defaultDependencies: TaskRouteDependencies = {
   requeueDeadLetterEvent,
   summarizeDeadLetterEvents,
   taskTokenSecret: () => getConfig().executor.taskTokenSecret,
+  taskTokenSecrets: () => {
+    const executor = getConfig().executor;
+    return [executor.taskTokenSecret, executor.taskTokenSecretPrevious]
+      .filter((secret): secret is string => Boolean(secret));
+  },
   transitionExecutionState,
   updateTaskRunFields,
   ensureTaskRunStore,
@@ -192,13 +200,16 @@ export function registerTaskRoutes(
    */
   app.post('/tasks/:id/heartbeat', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const secret = deps.taskTokenSecret();
-    if (!secret) {
+    const currentSecret = deps.taskTokenSecret();
+    const secrets = deps.taskTokenSecrets?.() ?? (currentSecret ? [currentSecret] : []);
+    if (secrets.length === 0) {
       return reply.status(503).send({ error: 'task_token_secret_not_configured' });
     }
     const rawToken = req.headers['x-los-task-token'];
     const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
-    const verified = verifyTaskToken(token, secret);
+    const verified = secrets.length === 1
+      ? verifyTaskToken(token, secrets[0])
+      : verifyTaskTokenWithRotation(token, secrets);
     if (!verified.ok) {
       return reply.status(401).send({ error: 'invalid_task_token', reason: verified.reason });
     }
@@ -229,12 +240,31 @@ export function registerTaskRoutes(
       // 不在这里重试、不刷新令牌——换代后旧令牌就是应当失效。
       return reply.status(409).send({ error: 'lease_lost_or_expired', taskRunId: id });
     }
+    // Long tasks outlive the 1h token cap. Rotate the token from the same
+    // authenticated heartbeat when it enters the refresh window; the old token
+    // remains valid until its own exp, so a lost response is recoverable.
+    const refreshWindowSeconds = 15 * 60;
+    const remainingSeconds = verified.claims.expiresAt - Math.floor(Date.now() / 1000);
+    const refreshed = currentSecret && remainingSeconds <= refreshWindowSeconds
+      ? mintTaskToken({
+          taskRunId: id,
+          leaseVersion: renewed.leaseVersion,
+          secret: currentSecret,
+        })
+      : undefined;
+
     return {
       ok: true,
       taskRunId: renewed.id,
       leaseVersion: renewed.leaseVersion,
       heartbeatAt: renewed.heartbeatAt ?? null,
       leaseExpiresAt: renewed.leaseExpiresAt ?? null,
+      ...(refreshed
+        ? {
+            taskToken: refreshed.token,
+            taskTokenExpiresAt: taskTokenExpiresAtIso(refreshed.claims.expiresAt),
+          }
+        : {}),
     };
   });
 

@@ -45,6 +45,8 @@ const ENV_MAP: [string, string][] = [
   ['LOS_CBM_COMMAND', 'memory.codeGraph.cbmCommand'], ['EXECUTOR_ENABLED', 'executor.enabled'],
   ['EXECUTOR_VERSION', 'executor.version'], ['EXECUTOR_AGENT_KEY', 'executor.agentKey'],
   ['LOS_TASK_TOKEN_SECRET', 'executor.taskTokenSecret'],
+  ['LOS_TASK_TOKEN_SECRET_PREVIOUS', 'executor.taskTokenSecretPrevious'],
+  ['EXECUTOR_TASK_TOKEN_MODE', 'executor.taskTokenMode'],
   ['EXECUTOR_NODE_CREDENTIAL', 'executor.nodeCredential'],
   ['EXECUTOR_NODE_CREDENTIAL_TTL_DAYS', 'executor.nodeCredentialTtlDays'],
   ['EXECUTOR_NODE_ID', 'executor.nodeId'], ['EXECUTOR_NODE_URL', 'executor.nodeUrl'],

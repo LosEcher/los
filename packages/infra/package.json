@@ -13,7 +13,8 @@
     "./metrics": "./src/metrics.ts",
     "./provider-defaults": "./src/provider-defaults.ts",
     "./provider-accounts": "./src/provider-accounts.ts",
-    "./zod": "./src/zod.ts"
+    "./zod": "./src/zod.ts",
+    "./task-token": "./src/task-token.ts"
   },
   "scripts": {
     "build": "tsc",

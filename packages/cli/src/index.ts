@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { artifactsCommand } from './artifacts.js';
+import { toolsCommand } from './tools.js';
 import { authCommand } from './auth.js';
 import { compatCommand } from './compat.js';
 import { deadLetterCommand } from './dead-letter.js';
@@ -77,6 +78,10 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'artifacts') {
     await artifactsCommand(globalArgs, commandArgs);
+    return;
+  }
+  if (command === 'tools') {
+    await toolsCommand(globalArgs, commandArgs);
     return;
   }
   if (command === 'auth') {

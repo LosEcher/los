@@ -538,6 +538,8 @@ export async function registerBuiltinTools(
   });
 
   // ── MCP external tools ───────────────────────────────
+  if (options.skipMcp) return async () => {};
+
   let mcpCleanup: (() => Promise<void>) | undefined;
 
   // Build tool → server ID map for event metadata

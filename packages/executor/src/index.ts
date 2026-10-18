@@ -8,7 +8,6 @@ import { migrateDir } from '@los/infra/migrate';
 import { getLogger } from '@los/infra/logger';
 import {
   heartbeatAgentTask,
-  heartbeatTaskRun,
   resolveIdentityLevelForExecutionPath,
   type AgentConfig,
   type AgentModelDelta,
@@ -23,7 +22,11 @@ import { startPeriodicSync, createFileSyncStore } from './file-sync/index.js';
 import { createExecutorNodeCommandRuntime } from './node-command-runner.js';
 import { handleFileSyncRoute } from './file-sync-routes.js';
 import { handleArtifactRoute, handleNodeCommandRoute } from './executor-routes.js';
-import { _renewTaskLease } from './lease-fencing.js';
+import {
+  _renewTaskLease,
+  _renewTaskRunLease,
+  type TaskLeaseHttpTransport,
+} from './lease-fencing.js';
 import { heartbeatNode, resolveNodeVersion, type HeartbeatResponse } from './executor-heartbeat.js';
 import { loadNodeCredential, rotateNodeCredentialViaGateway, saveNodeCredential } from './node-credential.js';
 import { createHeartbeatReporter } from './executor-heartbeat-reporter.js';
@@ -49,6 +52,8 @@ interface RunAgentRequest {
   leaseMs?: number;
   executionKernelKind?: string;
   prompt: string;
+  /** Short-lived task token minted by the gateway. Never stored or logged. */
+  taskToken?: string;
   config?: Omit<AgentConfig, 'signal' | 'onSessionEvent' | 'onProviderFallback' | 'onTurn' | 'onToolCall' | 'onToolCallState' | 'onModelDelta' | 'onCheckpoint'>;
 }
 
@@ -65,6 +70,10 @@ export async function startExecutor() {
   const host = config.executor.host;
   const port = config.executor.port;
   const gatewayUrl = config.executor.gatewayUrl;
+  const taskTokenMode = config.executor.taskTokenMode ?? 'auto';
+  if (taskTokenMode === 'required' && !gatewayUrl) {
+    throw new Error('EXECUTOR_TASK_TOKEN_MODE=required requires GATEWAY_URL for HTTP heartbeat');
+  }
   // Content identity of this node, resolved once. `versionSource` rides along so
   // the gateway can count unpinned nodes without a new column
   // (docs/architecture/2026-10-10-control-plane-truth-remediation.md §1).
@@ -215,6 +224,8 @@ export async function startExecutor() {
           lifecycle: lifecycle.status,
           acceptingTasks: lifecycle.acceptingTasks,
           activeTaskCount: lifecycle.activeTaskCount,
+          taskTokenMode,
+          leaseTransport: gatewayUrl ? 'http-when-token' : 'db',
         });
         return;
       }
@@ -241,10 +252,10 @@ export async function startExecutor() {
         try {
           const body = await readJson<RunAgentRequest>(req);
           if (acceptsNdjson(req)) {
-            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller);
+            await streamAssignedAgentTask(res, body, nodeId, activeTask.controller, gatewayUrl, taskTokenMode);
             return;
           }
-          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller);
+          const result = await runAssignedAgentTask(body, nodeId, undefined, activeTask.controller, gatewayUrl, taskTokenMode);
           sendJson(res, 200, result);
           return;
         } finally {
@@ -301,6 +312,8 @@ async function streamAssignedAgentTask(
   body: RunAgentRequest,
   nodeId: string,
   controller: AbortController,
+  gatewayUrl?: string,
+  taskTokenMode: 'auto' | 'required' | 'off' = 'auto',
 ): Promise<void> {
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson',
@@ -314,7 +327,7 @@ async function streamAssignedAgentTask(
   };
 
   try {
-    await runAssignedAgentTask(body, nodeId, emit, controller);
+    await runAssignedAgentTask(body, nodeId, emit, controller, gatewayUrl, taskTokenMode);
   } catch (err: any) {
     emit({ type: 'error', error: err?.message ?? String(err) });
   } finally {
@@ -327,6 +340,8 @@ async function runAssignedAgentTask(
   defaultNodeId: string,
   emit?: (chunk: ExecutorStreamChunk) => void,
   controller = new AbortController(),
+  gatewayUrl?: string,
+  taskTokenMode: 'auto' | 'required' | 'off' = 'auto',
 ) {
   const taskRunId = normalizeRequiredString(body.taskRunId, 'taskRunId');
   const prompt = normalizeRequiredString(body.prompt, 'prompt');
@@ -341,25 +356,45 @@ async function runAssignedAgentTask(
   const toolCallStates: ToolCallStateTransition[] = [];
   const kernelEvents: unknown[] = [];
 
+  if (taskTokenMode === 'required' && !body.taskToken) {
+    throw new Error('task token is required but the dispatch did not carry one');
+  }
+  if (taskTokenMode === 'required' && !gatewayUrl) {
+    throw new Error('task token mode is required but GATEWAY_URL is not configured');
+  }
+  if (taskTokenMode === 'auto' && body.taskToken && !gatewayUrl) {
+    // Transitional local executors (launchd) still point at the DB and may not
+    // have GATEWAY_URL. Do not break them merely because the gateway minted a
+    // token. Remote nodes must set EXECUTOR_TASK_TOKEN_MODE=required to turn
+    // this into a hard failure.
+    log.warn('task token received without GATEWAY_URL; using direct DB lease (auto mode)');
+  }
+  const leaseHttp: TaskLeaseHttpTransport | undefined =
+    taskTokenMode !== 'off' && body.taskToken && gatewayUrl
+      ? { gatewayUrl, taskToken: body.taskToken }
+      : undefined;
+
   const heartbeat = setInterval(() => {
-    _renewTaskLease(taskRunId, nodeId, leaseVersion, body.agentTaskLease, leaseMs, controller).catch((err) => {
+    _renewTaskLease(taskRunId, nodeId, leaseVersion, body.agentTaskLease, leaseMs, controller, leaseHttp).catch((err) => {
       log.warn(`task lease heartbeat failed: ${err.message ?? String(err)}`);
     });
   }, Math.max(1_000, Math.floor(leaseMs / 3)));
 
   try {
-    const [initialTaskRunLease, initialAgentTaskLease] = await Promise.all([
-      heartbeatTaskRun(taskRunId, { nodeId, leaseVersion, leaseMs }),
-      body.agentTaskLease
-        ? heartbeatAgentTask(body.agentTaskLease.taskId, {
-            nodeId,
-            leaseVersion: body.agentTaskLease.leaseVersion,
-            leaseMs,
-          })
-        : Promise.resolve(true),
-    ]);
-    if (!initialTaskRunLease || !initialAgentTaskLease) {
-      throw new Error(`execution lease lost before executor start for task run ${taskRunId}`);
+    const initialTaskRunLease = await _renewTaskRunLease(taskRunId, nodeId, leaseVersion, leaseMs, leaseHttp);
+    if (initialTaskRunLease.ok && initialTaskRunLease.taskToken && leaseHttp) {
+      leaseHttp.taskToken = initialTaskRunLease.taskToken;
+    }
+    const initialAgentTaskLease = body.agentTaskLease
+      ? await heartbeatAgentTask(body.agentTaskLease.taskId, {
+          nodeId,
+          leaseVersion: body.agentTaskLease.leaseVersion,
+          leaseMs,
+        })
+      : true;
+    if (!initialTaskRunLease.ok || !initialAgentTaskLease) {
+      const reason = initialTaskRunLease.ok ? 'agent_task_lease_lost' : initialTaskRunLease.reason;
+      throw new Error(`execution lease lost before executor start for task run ${taskRunId} (${reason})`);
     }
     const executionKernel = resolveExecutionKernel(body.executionKernelKind);
     const result = await executionKernel.run(prompt, {
