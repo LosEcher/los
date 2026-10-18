@@ -9,6 +9,38 @@ import { getLogger } from '@los/infra/logger';
 
 const log = getLogger('gateway');
 
+/**
+ * Converge scheduled runs whose task already reached a terminal failure but
+ * whose run row is still running/claimed. This is a second, independent safety
+ * net: the reaper may run on a different gateway instance or the task may have
+ * failed before the convergence code was deployed.
+ */
+export async function _convergeOrphanedScheduledRuns(reason = 'orphaned_task_terminal'): Promise<number> {
+  const db = getDb();
+  const rows = await db.query<{ run_id: string; task_id: string; status: string; task_status: string }>(
+    `SELECT r.id AS run_id, t.id AS task_id, r.status, t.status AS task_status
+       FROM scheduled_work_item_runs r
+       JOIN task_runs t
+         ON t.metadata_json->'scheduledWork'->>'runId' = r.id
+      WHERE r.status IN ('running','claimed')
+        AND t.status IN ('failed','cancelled','blocked')
+      LIMIT 50`,
+  );
+  let converged = 0;
+  for (const row of rows.rows) {
+    try {
+      await transitionScheduledWorkRun(row.run_id, 'failed', {
+        error: `task_run ${row.task_id} is ${row.task_status} without scheduled convergence`,
+      });
+      converged++;
+    } catch (error) {
+      log.warn(`Orphan scheduled run ${row.run_id} convergence failed: ${String(error)}`);
+    }
+  }
+  if (converged > 0) log.info(`Converged ${converged} orphaned scheduled run(s) (${reason})`);
+  return converged;
+}
+
 export async function reapExpiredExecutionLeases(reason: string): Promise<{
   taskRuns: number;
   agentTasks: number;
@@ -40,6 +72,10 @@ export async function reapExpiredExecutionLeases(reason: string): Promise<{
       }).catch(() => undefined);
     }
   }
+
+  await _convergeOrphanedScheduledRuns(reason).catch((error) => {
+    log.warn(`Orphan scheduled run sweep failed: ${String(error)}`);
+  });
 
   const agentTaskRecovery = await recoverExpiredAgentTasksWithAdvisoryLock(reason);
   const recoveredAgentTasks = agentTaskRecovery.lockAcquired ? agentTaskRecovery.recovered : [];
