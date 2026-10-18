@@ -164,6 +164,10 @@ plan: why the next step is one end-to-end handoff/recovery spike, the four stora
 boundaries (git / worktree / artifact / losvault), the five mechanical lease
 failures, and the revised batch plan.
 
+Use `architecture/2026-10-18-executor-db-mode-and-state-ownership.md` for the explicit
+`required`/`none` decision, why runtime DB auto-fallback is rejected, the current
+no-DB canary status, and the event-sink work required before promoting it.
+
 Use `architecture/2026-10-18-task-token-heartbeat-and-stateless-executor.md` for the
 task-token delivery gap (mint exists, dispatch consumes nothing), the HTTP-heartbeat
 phase A contract and failure semantics, why "remove DATABASE_URL" is a four-stage

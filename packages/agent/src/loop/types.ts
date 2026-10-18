@@ -27,6 +27,8 @@ export interface AgentConfig {
    *  message + blocked transition to this task_run. Undefined for direct runAgent
    *  calls outside a scheduled task (worker tools will refuse to block in that case). */
   taskRunId?: string;
+  /** `callback` skips DB writes and lets the caller persist/forward events. */
+  eventPersistence?: 'db' | 'callback';
   /** Dispatch ID (= agent_task_attempts.id) for the current graph-path execution.
    *  Used as the worker_messages.dispatch_id so the coordinator can scope messages
    *  to a specific dispatch. Undefined for non-graph (direct scheduled) tasks. */

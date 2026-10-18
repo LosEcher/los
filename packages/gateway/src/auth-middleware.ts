@@ -264,7 +264,7 @@ function isExecutorHeartbeatPath(url: string | undefined, method: string): boole
  */
 export function _isTaskHeartbeatPath(url: string | undefined, method: string): boolean {
   if (method !== 'POST' || !url) return false;
-  return /^\/tasks\/[^/]+\/(?:agent-tasks\/[^/]+\/)?heartbeat$/.test(url.split('?')[0] || url);
+  return /^\/tasks\/[^/]+\/(?:heartbeat|events|agent-tasks\/[^/]+\/heartbeat)$/.test(url.split('?')[0] || url);
 }
 
 /**
