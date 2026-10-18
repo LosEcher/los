@@ -61,14 +61,14 @@ export const _TOOLS = [
   },
   {
     name: 'los_placed_run',
-    description: 'Create and trigger a one-shot scheduled execution bound to a placement (executor.nodeId and/or requiredCapabilities) via the scheduler path. Requires LOS_OPERATOR_TOKEN. Placement is fail-loud: the gateway refuses unknown capabilities and the run reports no_executor_match instead of silently running locally.',
+    description: 'Create and trigger a one-shot scheduled execution bound to a placement (required nodeId and/or requiredCapabilities) via the scheduler path. Requires LOS_OPERATOR_TOKEN. nodeId is a hard pin: a missing/offline/non-candidate node fails instead of falling through to another executor. The gateway also refuses unknown capabilities.',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
         title: { type: 'string' },
         goalTemplate: { type: 'string' },
-        nodeId: { type: 'string' },
+        nodeId: { type: 'string', description: 'Required executor node id (hard pin); not a preference.' },
         requiredCapabilities: { type: 'array', items: { type: 'string' } },
         workspaceRoot: { type: 'string' },
         editableSurfaces: { type: 'array', items: { type: 'string' } },

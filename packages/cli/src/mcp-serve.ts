@@ -227,7 +227,10 @@ export function _createLosMCPAdapter(options: LosMCPAdapterOptions = {}): LosMCP
           requiredChecks: stringArray(args.requiredChecks),
           maxLoops: optionalInteger(args.maxLoops, 1, 200),
           approvalPolicy: 'preapproved_scope',
-          executor: compact({ enabled: true, nodeId, requiredCapabilities }),
+          // `nodeId` remains the soft preference; `requiredNodeId` is the hard
+          // pin. Both are sent so the schedule stays readable and the scheduler
+          // fails loud instead of falling through to another executor.
+          executor: compact({ enabled: true, nodeId, requiredNodeId: nodeId, requiredCapabilities }),
           trigger: { kind: 'once', timezone: 'Asia/Shanghai', expression: '2099-01-01T00:00:00.000Z' },
         }),
       });

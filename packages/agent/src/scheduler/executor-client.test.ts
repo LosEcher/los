@@ -298,3 +298,50 @@ test('resolveExecutor refuses to place work on a node inside an active maintenan
     await closeDb().catch(() => undefined);
   }
 });
+
+test('requiredNodeId hard-pins the selected executor instead of falling through', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const nodeId = `required-node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const otherId = `other-node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    for (const [id, port] of [[nodeId, 18096], [otherId, 18097]] as const) {
+      await upsertExecutorNode({
+        nodeId: id,
+        nodeKind: 'executor',
+        status: 'online',
+        baseUrl: `http://127.0.0.1:${port}`,
+        connectModes: ['agent_http'],
+        capabilities: { run_agent: true, workspace_read: true, workspace_write: true, shell: true, sandbox: 'linux-bwrap' },
+        verified: { agent_http: { ok: true, checked_at: new Date().toISOString() } },
+      });
+    }
+
+    const resolved = await resolveExecutor(
+      { enabled: true, requiredNodeId: nodeId, workspacePolicy: 'portable' },
+      { toolMode: 'read-only' },
+    );
+    assert.equal(resolved?.nodeId, nodeId);
+  } finally {
+    await getDb().query('DELETE FROM executor_nodes WHERE node_id = ANY($1)', [[nodeId, otherId]]).catch(() => undefined);
+    await closeDb().catch(() => undefined);
+  }
+});
+
+test('requiredNodeId fails loud when the node is not registered or not eligible', async () => {
+  const config = await loadConfig();
+  await initDb(config.databaseUrl);
+  const missing = `missing-required-${Date.now()}`;
+  try {
+    await assert.rejects(
+      () => resolveExecutor({ enabled: true, requiredNodeId: missing, workspacePolicy: 'portable' }, { toolMode: 'read-only' }),
+      (error: unknown) => {
+        assert.ok(error instanceof _ExecutorSelectionError);
+        assert.match(String((error as Error).message), /required executor node .* is not eligible: required_node_not_registered/);
+        return true;
+      },
+    );
+  } finally {
+    await closeDb().catch(() => undefined);
+  }
+});

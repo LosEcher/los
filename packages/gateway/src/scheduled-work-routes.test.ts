@@ -253,7 +253,7 @@ test("scheduled work routes reject invalid templateId and nested runTemplate (fa
           workspaceRoot: "/opt/los/los-workspace",
           toolMode: "all",
           sandboxMode: "sandbox",
-          executor: { enabled: true, nodeId: "node34-executor-1", nodeUrls: ["http://100.68.106.96:8090"] },
+          executor: { enabled: true, nodeId: "node34-executor-1", requiredNodeId: "node34-executor-1", nodeUrls: ["http://100.68.106.96:8090"] },
           trigger: { kind: "interval", expression: "6h", timezone: "Asia/Shanghai" },
         },
       });
@@ -264,6 +264,7 @@ test("scheduled work routes reject invalid templateId and nested runTemplate (fa
       assert.equal(created.runTemplate.toolMode, "all");
       assert.equal(created.runTemplate.sandboxMode, "sandbox");
       assert.equal(created.runTemplate.executor.nodeId, "node34-executor-1");
+      assert.equal(created.runTemplate.executor.requiredNodeId, "node34-executor-1");
       assert.deepEqual(created.runTemplate.executor.nodeUrls, ["http://100.68.106.96:8090"]);
 
       const badSandbox = await app.inject({
