@@ -70,7 +70,15 @@ export interface ScheduledExecutorConfig {
   enabled?: boolean;
   nodeUrls?: readonly string[];
   agentKey?: string;
+  /** Soft preference: influences candidate ordering, but may fall through. */
   nodeId?: string;
+  /**
+   * Hard pin: the selected executor must be this node. Missing/offline/
+   * non-candidate nodes fail the dispatch instead of falling through to another
+   * executor. Use this for operator-placed runs; `nodeId` alone is only a
+   * preference and must not be documented as a guarantee.
+   */
+  requiredNodeId?: string;
   leaseMs?: number;
   heartbeatMs?: number;
   requiresBuild?: boolean;

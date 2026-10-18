@@ -4,6 +4,7 @@ import { resolveExecutorEndpoint } from '../executor-node-utils.js';
 import { isNodeInMaintenance, loadNodeMaintenancePoliciesBatch } from '../node-maintenance-policy.js';
 import { choosePlacement } from './placement.js';
 import { _resolveDispatchTaskToken } from './task-token-dispatch.js';
+import { _requiredNodeBlockReason } from './required-node.js';
 import type { AgentConfig, AgentResult, ToolCallStateTransition } from '../loop.js';
 import type { KernelEvent } from '../execution-kernel.js';
 import { normalizeOptionalString, readObject, readString } from './helpers.js';
@@ -61,14 +62,25 @@ export async function resolveExecutor(
     // depth → active tasks → capacity → heartbeat). Falls back to the first
     // configured URL when no DB record matches (deterministic, not random).
     const nodes = await listExecutorNodes(100);
-    const ordered = sortExecutorCandidates(nodes, normalizeOptionalString(config.nodeId));
+    const requiredNodeId = normalizeOptionalString(config.requiredNodeId);
+    const requiredTarget = requiredNodeId ? nodes.find(node => node.nodeId === requiredNodeId) : undefined;
+    const requiredUrl = requiredTarget
+      ? normalizeExecutorUrl(resolveExecutorEndpoint(requiredTarget.connectConfig, 'agent_http') ?? '')
+      : undefined;
+    if (requiredNodeId
+      && (!requiredTarget || requiredTarget.status !== 'online' || !requiredUrl || !normalizedUrls.includes(requiredUrl))) {
+      throw new Error(
+        `required executor node ${requiredNodeId} is not an online node whose agent_http URL is in executor.nodeUrls`,
+      );
+    }
+    const ordered = sortExecutorCandidates(nodes, requiredNodeId ?? normalizeOptionalString(config.nodeId));
     const healthy = ordered.find(node =>
       normalizedUrls.includes(normalizeExecutorUrl(resolveExecutorEndpoint(node.connectConfig, 'agent_http') ?? ''))
       && node.status === 'online');
-    const selectedUrl = healthy
+    const selectedUrl = requiredUrl ?? (healthy
       ? normalizeExecutorUrl(resolveExecutorEndpoint(healthy.connectConfig, 'agent_http')!)!
-      : normalizedUrls[0]!;
-    const nodeId = normalizeOptionalString(config.nodeId) ?? (healthy ? healthy.nodeId : selectedUrl);
+      : normalizedUrls[0]!);
+    const nodeId = requiredNodeId ?? normalizeOptionalString(config.nodeId) ?? (healthy ? healthy.nodeId : selectedUrl);
     const skipped = normalizedUrls
       .filter(url => url !== selectedUrl)
       .map(url => ({ id: url, reason: 'load_distribution' as const }));
@@ -88,6 +100,7 @@ export async function resolveExecutor(
   }
 
   const nodes = await listExecutorNodes(100);
+  const requiredNodeId = normalizeOptionalString(config.requiredNodeId);
 
   // Maintenance windows are evaluated HERE, at selection time, not in
   // `evaluateExecutorNode`: that function's result is computed at upsert and
@@ -105,8 +118,19 @@ export async function resolveExecutor(
       .map(node => node.nodeId),
   );
 
-  const candidates = nodes.filter(node => node.execution.candidate && !maintenanceBlocked.has(node.nodeId));
-  const preferredNodeId = normalizeOptionalString(config.nodeId);
+  const candidates = nodes.filter(node =>
+    node.execution.candidate
+    && !maintenanceBlocked.has(node.nodeId)
+    && (!requiredNodeId || node.nodeId === requiredNodeId),
+  );
+  if (requiredNodeId && candidates.length === 0) {
+    const reason = _requiredNodeBlockReason(requiredNodeId, nodes, maintenanceBlocked);
+    throw new _ExecutorSelectionError(
+      `required executor node ${requiredNodeId} is not eligible: ${reason}`,
+      { source: 'executor_registry', requiredCapabilities, candidateIds: [], skipped: [{ id: requiredNodeId, reason }] },
+    );
+  }
+  const preferredNodeId = requiredNodeId ?? normalizeOptionalString(config.nodeId);
   const ordered = sortExecutorCandidates(candidates, preferredNodeId);
 
   const skipped: ExecutorSelectionDecision['skipped'] = nodes

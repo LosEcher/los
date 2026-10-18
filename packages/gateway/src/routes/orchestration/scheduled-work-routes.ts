@@ -412,6 +412,10 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
   }
   const requiredCapabilities = requestedCapabilities as ExecutorCapabilityRequirement[];
   const nodeId = normalizeString(input.nodeId);
+  const requiredNodeId = normalizeString(input.requiredNodeId);
+  if (input.requiredNodeId !== undefined && !requiredNodeId) {
+    throw new Error('executor.requiredNodeId must be a non-empty string');
+  }
   // 2026-10-12：`executor.agentKey` **拒绝**，不再静默保存。
   //
   // 它是**执行器认证密钥**（`auth-middleware.ts` 用 `config.executor.agentKey` 校验
@@ -439,6 +443,7 @@ function normalizeExecutorConfig(value: unknown): ScheduledWorkRunTemplate['exec
   return {
     ...(input.enabled === undefined ? {} : { enabled: Boolean(input.enabled) }),
     ...(nodeId ? { nodeId } : {}),
+    ...(requiredNodeId ? { requiredNodeId } : {}),
     ...(nodeUrls.length > 0 ? { nodeUrls } : {}),
     ...(requiredCapabilities.length > 0 ? { requiredCapabilities } : {}),
     ...(workspacePolicy ? { workspacePolicy } : {}),

@@ -896,7 +896,12 @@ test('los_placed_run creates a placed schedule then triggers it, with operator a
   assert.equal(body.templateId, 'scheduled_execution');
   assert.equal(body.approvalPolicy, 'preapproved_scope');
   assert.equal(body.trigger.kind, 'once');
-  assert.deepEqual(body.executor, { enabled: true, nodeId: 'm3pro-executor-1', requiredCapabilities: ['heavy_task_safe', 'artifact_transfer'] });
+  assert.deepEqual(body.executor, {
+    enabled: true,
+    nodeId: 'm3pro-executor-1',
+    requiredNodeId: 'm3pro-executor-1',
+    requiredCapabilities: ['heavy_task_safe', 'artifact_transfer'],
+  });
 
   assert.equal(new URL(requests[1]!.url).pathname, '/scheduled-work-items/schedule-placed-1/trigger');
   assert.equal(requests[1]?.headers.get('x-los-operator-token'), 'operator-secret');
