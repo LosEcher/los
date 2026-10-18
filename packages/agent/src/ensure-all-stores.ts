@@ -53,6 +53,7 @@ export async function ensureAllAgentStores(): Promise<void> {
   const ensureFns = [
     'ensureAgentTaskGraphStore',
     'ensureArtifactStore',
+    'ensureArtifactRelayIndexStore',
     'ensureCancellationStore',
     'ensureExecutionStore',
     'ensureExecutionExperimentStore',
@@ -92,6 +93,11 @@ export async function ensureAllAgentStores(): Promise<void> {
     const fn = mod[ensureFns[i]];
     if (typeof fn === 'function') await fn();
   }
+
+  // Explicit wiring for check-wiring-topology (AP10): the relay index is an
+  // agent-owned store created through this bootstrap surface.
+  const relayIndex = await import('./artifacts/remote-index.js');
+  await relayIndex.ensureArtifactRelayIndexStore();
 
   // Explicit wiring for check-wiring-topology (AP10): the operator event stream
   // cursor is an agent-owned store; the direct call keeps the wiring visible to

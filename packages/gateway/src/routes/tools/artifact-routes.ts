@@ -6,6 +6,10 @@ import {
   listArtifacts,
   loadArtifact,
   putArtifact,
+  loadRemoteArtifactIndex,
+  putRemoteArtifactIndex,
+  deleteRemoteArtifactIndex,
+  type RemoteArtifactIndexRecord,
   readArtifactContent,
   updateArtifactStatus,
   type ArtifactRecord,
@@ -13,7 +17,7 @@ import {
   type ArtifactStatus,
 } from '@los/agent/artifacts';
 import { loadExecutorNode } from '@los/agent/executor-nodes';
-import { getRequestContext } from '../../request-context.js';
+import { getRequestContext, requireOperator } from '../../request-context.js';
 
 type ArtifactRoutesOptions = {
   storageRoot: string;
@@ -85,16 +89,81 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
     return reply.status(201).send({ ok: true, artifact });
   });
 
+  /**
+   * Push an existing gateway-held artifact to an executor and index the remote
+   * copy in the gateway. The target executor already owns POST /v1/artifacts;
+   * this route is the missing gateway→owner direction (read/delete already
+   * existed). The returned record lets GET /artifacts/:id/content fetch the
+   * remote bytes through the existing owner path.
+   */
+  app.post('/artifacts/:id/relay', async (req, reply) => {
+    if (!(await requireOperator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const body = req.body as { nodeId?: unknown } | undefined;
+    const targetNodeId = normalizeOptionalString(body?.nodeId);
+    if (!targetNodeId) return reply.status(422).send({ error: 'nodeId is required' });
+
+    const source = await loadArtifact(id);
+    if (!source) return reply.status(404).send({ error: 'artifact not found' });
+    const artifactsUrl = await artifactOwnerUrl(targetNodeId);
+    if (!artifactsUrl) return reply.status(404).send({ error: 'target executor not found' });
+
+    const content = await readArtifactContentFromOwner(source, options.executorAgentKey);
+    // Owner and gateway share the artifacts table; a distinct owner-side id
+    // prevents the two index rows from overwriting each other.
+    const remoteArtifactId = `${source.artifactId}-relay-${targetNodeId}`;
+    const response = await fetch(artifactsUrl, {
+      method: 'POST',
+      headers: ownerHeaders(options.executorAgentKey),
+      body: JSON.stringify({
+        artifactId: remoteArtifactId,
+        nodeId: targetNodeId,
+        content: content.content.toString('base64'),
+        encoding: 'base64',
+        contentType: source.contentType,
+        path: source.originalPath,
+        pathPolicy: source.pathPolicy,
+        metadata: { ...source.metadata, relayedFrom: source.nodeId },
+      }),
+    });
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) as { artifact?: ArtifactRecord; error?: string } : {};
+    if (!response.ok) {
+      return reply.status(502).send({ error: `executor artifact relay failed: ${response.status} ${payload.error ?? text}` });
+    }
+    const remote = payload.artifact;
+    if (!remote) return reply.status(502).send({ error: 'executor artifact relay returned no artifact' });
+    if (remote.checksum !== content.checksum) {
+      return reply.status(502).send({ error: `executor artifact checksum mismatch: ${remote.checksum}` });
+    }
+    const indexed = await putRemoteArtifactIndex({
+      artifactId: source.artifactId,
+      remoteArtifactId: remote.artifactId,
+      nodeId: targetNodeId,
+      sizeBytes: remote.sizeBytes,
+      checksum: remote.checksum,
+      contentType: remote.contentType,
+      originalPath: remote.originalPath,
+      pathPolicy: remote.pathPolicy,
+      sessionId: source.sessionId,
+      taskRunId: source.taskRunId,
+      traceId: source.traceId,
+      requestId: source.requestId,
+      metadata: { ...source.metadata, relayedFrom: source.nodeId },
+    });
+    return reply.status(201).send({ ok: true, artifact: remoteIndexToArtifact(indexed), remote });
+  });
+
   app.get('/artifacts/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const artifact = await loadArtifact(id);
+    const artifact = await loadArtifact(id) ?? await loadRemoteArtifactAsRecord(id);
     if (!artifact) return reply.status(404).send({ error: 'artifact not found' });
     return artifact;
   });
 
   app.get('/artifacts/:id/content', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const record = await loadArtifact(id);
+    const record = await loadArtifact(id) ?? await loadRemoteArtifactAsRecord(id);
     if (!record) return reply.status(404).send({ error: 'artifact not found' });
     const artifact = await readArtifactContentFromOwner(record, options.executorAgentKey);
     return reply
@@ -108,7 +177,13 @@ export function registerArtifactRoutes(app: FastifyInstance, options: ArtifactRo
     const { id } = req.params as { id: string };
     const body = req.body as { reason?: string } | undefined;
     const existing = await loadArtifact(id);
-    if (!existing) return reply.status(404).send({ error: 'artifact not found' });
+    if (!existing) {
+      const relayed = await loadRemoteArtifactAsRecord(id);
+      if (!relayed) return reply.status(404).send({ error: 'artifact not found' });
+      await deleteArtifactFromOwner(relayed, normalizeOptionalString(body?.reason), options.executorAgentKey);
+      await deleteRemoteArtifactIndex(id);
+      return { ok: true, artifact: { ...relayed, deletedAt: new Date().toISOString() } };
+    }
     const remote = await deleteArtifactFromOwner(existing, normalizeOptionalString(body?.reason), options.executorAgentKey);
     if (remote) return remote;
     const artifact = await deleteArtifact(id, normalizeOptionalString(body?.reason));
@@ -177,8 +252,9 @@ async function deleteArtifactFromOwner(
 ): Promise<unknown | null> {
   const artifactsUrl = await artifactOwnerUrl(record.nodeId);
   if (!artifactsUrl) return null;
+  const ownerArtifactId = ownerArtifactIdFor(record);
 
-  const response = await fetch(`${artifactsUrl}/${encodeURIComponent(record.artifactId)}`, {
+  const response = await fetch(`${artifactsUrl}/${encodeURIComponent(ownerArtifactId)}`, {
     method: 'DELETE',
     headers: ownerHeaders(executorAgentKey),
     body: JSON.stringify({ reason }),
@@ -197,7 +273,8 @@ async function fetchOwnerArtifactContent(
   record: ArtifactRecord,
   executorAgentKey: string | undefined,
 ): Promise<{ content: Buffer; contentType: string; checksum: string }> {
-  const response = await fetch(`${artifactsUrl}/${encodeURIComponent(record.artifactId)}/content`, {
+  const ownerArtifactId = ownerArtifactIdFor(record);
+  const response = await fetch(`${artifactsUrl}/${encodeURIComponent(ownerArtifactId)}/content`, {
     headers: ownerHeaders(executorAgentKey),
   });
   if (!response.ok) {
@@ -215,6 +292,35 @@ async function fetchOwnerArtifactContent(
   };
 }
 
+
+async function loadRemoteArtifactAsRecord(artifactId: string): Promise<ArtifactRecord | null> {
+  const remote = await loadRemoteArtifactIndex(artifactId);
+  return remote ? remoteIndexToArtifact(remote) : null;
+}
+
+function remoteIndexToArtifact(remote: RemoteArtifactIndexRecord): ArtifactRecord {
+  return {
+    artifactId: remote.artifactId,
+    nodeId: remote.nodeId,
+    sessionId: remote.sessionId,
+    taskRunId: remote.taskRunId,
+    traceId: remote.traceId,
+    requestId: remote.requestId,
+    originalPath: remote.originalPath,
+    pathPolicy: remote.pathPolicy,
+    storagePath: `executor://${remote.nodeId}/${remote.remoteArtifactId}`,
+    sizeBytes: remote.sizeBytes,
+    checksum: remote.checksum,
+    checksumAlgorithm: 'sha256',
+    contentType: remote.contentType,
+    status: 'draft',
+    confidence: 0.5,
+    metadata: { ...remote.metadata, remoteArtifactId: remote.remoteArtifactId },
+    createdAt: remote.createdAt,
+    updatedAt: remote.updatedAt,
+  };
+}
+
 async function artifactOwnerUrl(nodeId: string): Promise<string | null> {
   const node = await loadExecutorNode(nodeId);
   const agentHttp = normalizeJsonObject(node?.connectConfig?.agent_http);
@@ -222,6 +328,11 @@ async function artifactOwnerUrl(nodeId: string): Promise<string | null> {
   if (configured) return configured.replace(/\/+$/, '');
   const baseUrl = normalizeOptionalString(node?.baseUrl);
   return baseUrl ? `${baseUrl.replace(/\/+$/, '')}/v1/artifacts` : null;
+}
+
+function ownerArtifactIdFor(record: ArtifactRecord): string {
+  const remote = record.metadata?.remoteArtifactId;
+  return typeof remote === 'string' && remote ? remote : record.artifactId;
 }
 
 function ownerHeaders(executorAgentKey: string | undefined): Record<string, string> {
