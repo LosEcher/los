@@ -85,9 +85,14 @@ Use `docs/adr/` for durable decisions. Important current ADRs:
   adjudication, memory canonical split, `dsfolder` structure, gate tri-state.
 - `0048-route-admission-and-read-scope.md` - HTTP route admission
   classification and read scope.
-- `0049-declared-versus-consumed-reconciliation.md` - declared-versus-consumed
-  reconciliation for config surfaces, retention judgement for monotonic storage,
-  and single-source rules for cost projections.
+- `0050-p4-stateless-executor-fail-closed-semantics.md` - P4 final semantics:
+  fail-closed (lease/restart) is accepted, `EXECUTOR_DB_MODE=none` stays a
+  canary, and the six gates required before promotion.
+
+> `0049` is **retired / do not reuse**: it was declared-versus-consumed
+> reconciliation but never merged, and references to "ADR 0049" in older
+> architecture notes are historical. `0050` is the ADR in this list; the next
+> free number is `0051`.
 
 > Numbering de-duplicated 2026-08-26: the five non-canonical co-numbered files
 > (`0030-declarative-flow-dsl`, `0031-provider-health-aware-routing`,
@@ -120,6 +125,12 @@ pins every `anthropic-messages` provider to `unhealthy`, the per-wire dispatch t
 replaced it, the real-call outcomes wired into scoring, the executor's two competing
 managers (launchd vs `tools/los.sh`), the plaintext `agentKey` in schedule templates,
 the credential single-source convergence, and the falsified premises kept as evidence.
+
+Use `operations/2026-10-18-p4-fail-closed-evidence.md` for the P4 decision
+evidence: the acceptance criteria, node34 health and backlog, the zero
+running/claimed scheduled-run count, and the reaper/orphan convergence rows
+(labelled manual/backfill — they do not prove the automatic sweep) that make
+fail-closed observable.
 
 Use `operations/2026-10-18-executor-db-mode-deployment-contract.md` for the
 `EXECUTOR_DB_MODE` deployment contract: the acceptance criteria written before

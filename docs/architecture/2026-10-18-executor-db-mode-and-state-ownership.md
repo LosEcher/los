@@ -46,14 +46,18 @@ Date: 2026-10-18
 
 ## P4 close decision
 
-P4 closed under the **fail-closed** branch of its acceptance:
+P4 closed under the **fail-closed** branch of its acceptance (scope: lease/restart; approval remains a gap, see below):
 
 - normal scheduled no-DB task: succeeded, node34, events delivered,
   `eventBacklog=0`, `spoolBacklog=0`;
 - gateway restart during a long task: the task was reaped as failed and the
-  linked scheduled run was converged to failed; running scheduled runs = 0;
-- headless approval without a channel is fail-closed (`tool.approval_required`),
-  not silently executed.
+  linked scheduled run was converged to failed; running scheduled runs = 0
+  (the convergence evidence is manual/backfill; see evidence §3.3);
+- headless approval without a channel is **warn by default**:
+  `tool.approval_required` is emitted and the handler still runs; only
+  `LOS_TOOL_APPROVAL_ENFORCEMENT=block` denies it. The fleet does not set
+  `block`, so this remains an open gap, not a fail-closed path (see ADR 0050
+  §3 gate 6 and "Next required work" 2).
 
 Not proven: a task **succeeding across** a gateway restart. Gateway startup has
 been observed at tens of seconds to minutes, so the 300s scheduled lease is a
@@ -62,8 +66,12 @@ default.
 
 ## Next required work
 
-1. Either prove restart-survival with a controlled restart budget, or explicitly
-   ratify fail-closed as the final P4 semantics.
+1. ~~Either prove restart-survival with a controlled restart budget, or
+   explicitly ratify fail-closed as the final P4 semantics.~~ **Resolved
+   2026-10-18**: fail-closed is ratified as the final P4 semantics in
+   `docs/adr/0050-p4-stateless-executor-fail-closed-semantics.md`; `none` stays
+   a canary. Promotion requires the six gates in that ADR, not a wording
+   change.
 2. Headless approval usability: blocked vs failed policy, or forbid
    approval-required tools on stateless scheduled runs.
 3. Provider authority decision (cc-switch / DSH / los / optional Magpie edge).

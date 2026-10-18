@@ -36,7 +36,7 @@ method:
 DB 里当前 **8 online / 28 offline** 节点 `[E]`。⇒ 远端派发**不依赖 meshNodes 也能选点**，
 但要真有节点被评成 candidate、且其 `agent_http` 可达。
 
-## 2. `executor.nodeId`：声明与消费不一致（ADR 0049 同型）
+## 2. `executor.nodeId`：声明与消费不一致（ADR 0049 同型；0049 未合并/编号已退役，见 `docs/README.md`）
 
 - `contracts/run-spec.yaml` 顶层有 `executor{enabled,nodeId,leaseMs,heartbeatMs,requiredCapabilities}` `[E]`。
 - **消费点只有**：scheduled-work 路由（`file:packages/gateway/src/routes/orchestration/scheduled-work-routes.ts:224`
@@ -81,4 +81,4 @@ DB 里当前 **8 online / 28 offline** 节点 `[E]`。⇒ 远端派发**不依�
    是 fleet 主机自检，不是 agent run。**判据修正：agent run 必须 `coalesce(run_spec_id,'') <> ''`**。
 2. （同批 §10.2 已记）resume-guard 那条"闸门不生效"——实为前序 run 已在续接前 0.65s 收口。
 
-两条都是"聚合口径不对 ⇒ 貌似有证据"，与本仓 J6/ADR 0049 的主题同型。
+两条都是"聚合口径不对 ⇒ 貌似有证据"，与本仓 J6/ADR 0049 的主题同型（0049 未合并/编号已退役，见 `docs/README.md`）。

@@ -151,8 +151,11 @@ failed task-token heartbeat never falls back to the DB.
 **`none` is a canary and must not be described as the remote default.** P4
 closed **fail-closed**: a normal no-DB task completed with `eventBacklog=0` /
 `spoolBacklog=0`, but a gateway restart during a long task reaped that task as
-failed and converged its scheduled run to failed. A task succeeding *across* a
-gateway restart has not been proven, so `none` is not promoted.
+failed and converged its scheduled run to failed (the convergence evidence is
+manual/backfill; see the evidence doc §3.3). A task succeeding *across* a
+gateway restart has not been proven, and fail-closed is now the **final** P4
+semantics (`docs/adr/0050-p4-stateless-executor-fail-closed-semantics.md`);
+`none` is not promoted.
 
 A stateless node owns only local working state. It is owned by the **executor
 service user**, not the gateway, and is excluded from the deployed content
