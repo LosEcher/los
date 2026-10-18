@@ -53,7 +53,6 @@ export async function ensureAllAgentStores(): Promise<void> {
   const ensureFns = [
     'ensureAgentTaskGraphStore',
     'ensureArtifactStore',
-    'ensureArtifactRelayIndexStore',
     'ensureCancellationStore',
     'ensureExecutionStore',
     'ensureExecutionExperimentStore',
